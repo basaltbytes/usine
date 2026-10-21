@@ -25,6 +25,7 @@ import { layer as localExecutorLayer } from "@usine/executor/local";
 import { ConfigProvider, Effect, Exit, FileSystem, Layer, Option, Redacted } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import {
+  aloneOnItem,
   LIVE_TEST_TIMEOUT,
   TOKEN,
   harnessReady,
@@ -134,6 +135,7 @@ describe("local worker Loop permissions", () => {
                     append: () => Effect.void,
                     salvage: () => Effect.void,
                     comments: () => Effect.void,
+                    windows: aloneOnItem(request(permissions).attemptId),
                   }),
                 );
                 assert(Exit.isFailure(exit));

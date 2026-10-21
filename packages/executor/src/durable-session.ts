@@ -2,8 +2,8 @@ import type { ChildHost } from "@usine/agents/child-host";
 import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentFailure, type AttemptFailure, RunawayFailure } from "@usine/core/attempt/failure";
-import type { AttemptRecovery } from "@usine/core/attempt/salvage";
-import type { HarvestSpec } from "@usine/core/step/harvest";
+import type { AttemptRecovery, RecoverySink } from "@usine/core/attempt/salvage";
+import type { AttemptWindowsRead, HarvestSpec } from "@usine/core/step/harvest";
 import type { Comment, StepResult, StepResultFact } from "@usine/core/step/result";
 import {
   type AttemptReport,
@@ -49,21 +49,36 @@ export interface DurableCheckout {
   readonly host: ChildHost;
   /** The only environment the parent's children and the harvesting commands see (ADR 0011). */
   readonly environment: Record<string, string>;
-  /** Collects the commits and pull requests the checkout holds and the comments the Attempt posted on its Item. */
-  readonly harvest: Effect.Effect<ReadonlyArray<StepResultFact>, AttemptFailure>;
-  /** Collects only the comments the Attempt posted on its Item, for an Attempt that ended without success; none when GitHub fails. */
-  readonly harvestComments: Effect.Effect<ReadonlyArray<Comment>>;
+  /**
+   * Collects the commits and pull requests the checkout holds and the comments
+   * the Attempt posted on its Item inside its own window and in none of its
+   * Agent's other Attempts' windows there, which `windows` reads once GitHub
+   * has listed the comments. Fails when the windows cannot be read.
+   */
+  readonly harvest: (
+    windows: AttemptWindowsRead<AttemptFailure>,
+  ) => Effect.Effect<ReadonlyArray<StepResultFact>, AttemptFailure>;
+  /**
+   * Collects only the comments, as `harvest` does, for an Attempt that ended
+   * without success; none when GitHub fails or the windows cannot be read.
+   */
+  readonly harvestComments: (
+    windows: AttemptWindowsRead<AttemptFailure>,
+  ) => Effect.Effect<ReadonlyArray<Comment>>;
   /** Preserves the checkout when a restart needs to reattach the parent or repeat an unrecorded harvest. */
   readonly keepForReattach: Effect.Effect<void>;
 }
 
 /**
  * Collects the comments the Attempt that `spec` describes posted on its Item,
- * in its checkout with a credential it acquires for the purpose. It fails only
- * when that credential cannot be acquired.
+ * in its checkout with a credential it acquires for the purpose, keeping
+ * those posted inside the Attempt's own window and in none of the others
+ * `windows` reads, as `DurableCheckout` does. It fails only when that
+ * credential cannot be acquired.
  */
-export type PostedCommentsHarvest = (
+export type PostedCommentsHarvest = <W>(
   spec: HarvestSpec,
+  windows: AttemptWindowsRead<W>,
 ) => Effect.Effect<ReadonlyArray<Comment>, ExecutorError>;
 
 export interface DurableSessionOptions {
@@ -161,8 +176,14 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
 
   /**
    * Records the comments and reviews an Attempt that ended without success
-   * posted on its Run's Item, once its parent task has stopped. A failure to
-   * record them is logged and never changes how the Attempt ended.
+   * posted on its Run's Item, once its parent task has stopped. The harvest
+   * reads the Attempt's own window and those of its Agent's other Attempts on
+   * the Item through `io.windows` once GitHub has listed the comments. A
+   * canceled Attempt's window ended when the orchestrator closed it, before
+   * its parent task stopped, so a comment posted after that is not its own.
+   * The harvest records none when the windows cannot be read, since its
+   * comments cannot be told from theirs. A failure is logged and never
+   * changes how the Attempt ended.
    */
   const recordPostedComments = Effect.fn("DurableSession.recordPostedComments")(function* (
     attemptId: AttemptId,
@@ -170,7 +191,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
     io: AttemptChannel.Sink,
   ) {
     yield* Effect.annotateCurrentSpan({ attemptId });
-    yield* recordComments(attemptId, yield* checkout.harvestComments, io.comments);
+    yield* recordComments(attemptId, yield* checkout.harvestComments(io.windows), io.comments);
   });
 
   const launch = Effect.fn("DurableSession.launch")(function* (
@@ -222,7 +243,14 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
       )
         return yield* new AgentFailure({ message: "The Attempt's parent task was canceled" });
       const report = yield* executed;
-      const facts = yield* checkout.harvest;
+      // The harvest reads the windows once GitHub has listed the comments, not
+      // at preparation or before it starts: an Attempt of the Agent that
+      // starts on the Item later, even while the harvest runs, overlaps this
+      // one too, and a cancel can close this one's window first (#429).
+      // Without them the harvest cannot tell this Attempt's comments from
+      // another's, so a read that fails fails the Attempt, as an invalid git
+      // result does.
+      const facts = yield* checkout.harvest(io.windows);
       const harvested = harvestedResult(report, facts);
       if (Result.isFailure(harvested)) {
         yield* Effect.logWarning(
@@ -536,13 +564,16 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
    * Attempt posted on its Run's Item when durable storage holds its parent's
    * failure. The Run closes such an Attempt from that failure without
    * launching it again, so no launch recorded them. `harvest` collects them
-   * from the Attempt's checkout, and is none when the checkout is gone. Any
-   * other Attempt records nothing, and every failure is logged, never raised.
+   * from the Attempt's checkout, and is none when the checkout is gone; it
+   * keeps those posted inside the Attempt's own window and in none of the
+   * others `record.windows` reads once GitHub has listed them, as a launch
+   * does, and records none when they cannot be read. Any other Attempt
+   * records nothing, and every failure is logged, never raised.
    */
   const recoverPostedComments = Effect.fn("DurableSession.recoverPostedComments")(function* <E>(
     attempt: AttemptRecovery,
     harvest: Option.Option<PostedCommentsHarvest>,
-    record: (comments: ReadonlyArray<Comment>) => Effect.Effect<void, E>,
+    record: Pick<RecoverySink<E>, "comments" | "windows">,
   ) {
     if (!attempt.open) return;
     const { attemptId, worker } = attempt;
@@ -592,7 +623,9 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
       "The open Attempt's parent task failed before this process recorded it; harvesting the comments it posted from its checkout",
       { attemptId, worker },
     );
-    const comments = yield* harvest.value(stored.success.value.spec).pipe(Effect.result);
+    const comments = yield* harvest
+      .value(stored.success.value.spec, record.windows)
+      .pipe(Effect.result);
     if (Result.isFailure(comments)) {
       yield* Effect.logWarning(
         "Could not acquire a credential to harvest the open Attempt's comments; the comments it posted are not recorded",
@@ -600,7 +633,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
       );
       return;
     }
-    yield* recordComments(attemptId, comments.success, record);
+    yield* recordComments(attemptId, comments.success, record.comments);
   });
 
   /** The request a reattached Attempt's parent task was created with; a missing one fails the reattachment. */

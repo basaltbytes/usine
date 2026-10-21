@@ -2,7 +2,7 @@ import { CHILD_KILL_SCRIPT } from "@usine/agents/child-host";
 import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget } from "@usine/core/agent/session";
-import { AttemptTask, AttemptId } from "@usine/core/attempt";
+import { AttemptTask, AttemptId, AttemptWindow, AttemptWindows } from "@usine/core/attempt";
 import { InfraFailure } from "@usine/core/attempt/failure";
 import { SalvageRef } from "@usine/core/attempt/salvage";
 import { LoopName, type LoopPermissions } from "@usine/core/loop";
@@ -48,6 +48,21 @@ import {
 } from "../../src/ssh/ssh.ts";
 
 const ATTEMPT_ID = AttemptId.make("remote-run/execute/1");
+
+/**
+ * Reads the windows of `attemptId` running alone on its Run's Item: its own,
+ * open since before any time a test clock or GitHub fixture gives, and no
+ * other Attempt of its Agent there, so the harvest keeps every signed comment.
+ */
+export const aloneOnItem = (attemptId: AttemptId = ATTEMPT_ID) =>
+  Effect.succeed(
+    new AttemptWindows({
+      own: Option.some(
+        new AttemptWindow({ attemptId, startedAt: DateTime.makeUnsafe(0), endedAt: Option.none() }),
+      ),
+      overlapping: [],
+    }),
+  );
 export const WORKER = WorkerName.make("eu-one");
 export const DESTINATION = SshDestination.make("usine@203.0.113.7");
 const REPOSITORY = RepositoryName.make("acme/demo");

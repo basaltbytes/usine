@@ -1,4 +1,4 @@
-import { Attempt, AttemptId } from "@usine/core/attempt";
+import { Attempt, AttemptId, type AttemptWindows } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
 import type { AttemptRecovery, AttemptSalvage } from "@usine/core/attempt/salvage";
@@ -41,6 +41,7 @@ import {
 import { plainRetry, type RetryRequest } from "../engine/retry.ts";
 import { StepExecution } from "../step-executor.ts";
 import { TranscriptEntry, TranscriptQuery } from "../transcript.ts";
+import { attemptWindowQueries } from "./attempt-windows.ts";
 import { persistence, submissionFromRow } from "./codec.ts";
 import { queriesFor, type QueuedEvents } from "./queries.ts";
 import {
@@ -541,6 +542,21 @@ const makeRunStore = Effect.gen(function* () {
     );
   }, persistence("record attempt comments"));
 
+  const attemptWindows = Effect.fn("RunStore.attemptWindows")(function* (attemptId: AttemptId) {
+    yield* Effect.annotateCurrentSpan({ attemptId });
+    const windows = yield* attemptWindowQueries(database).attemptWindows(attemptId);
+    yield* Effect.logDebug(
+      "Read the Attempt's window and the Attempts of the same Agent that overlap it on its Item",
+      {
+        attemptId,
+        recorded: Option.isSome(windows.own),
+        ended: Option.exists(windows.own, ({ endedAt }) => Option.isSome(endedAt)),
+        overlapping: windows.overlapping.map((window) => window.attemptId),
+      },
+    );
+    return windows;
+  }, persistence("read Attempt windows"));
+
   const discardLeftovers = Effect.fn("RunStore.discardLeftovers")(function* (worker: WorkerName) {
     yield* Effect.annotateCurrentSpan({ worker });
     const discardedAt = yield* DateTime.now;
@@ -915,6 +931,7 @@ const makeRunStore = Effect.gen(function* () {
     salvageCandidates: queries.salvageCandidates().pipe(persistence("list salvage candidates")),
     recordSalvage,
     recordComments,
+    attemptWindows,
     discardLeftovers,
     submission: (runId: RunId) =>
       queries.eventRouteByRun(runId).pipe(
@@ -1020,6 +1037,14 @@ export class RunStore extends Context.Service<
       attemptId: AttemptId,
       comments: ReadonlyArray<Comment>,
     ) => Effect.Effect<void, RunStoreError>;
+    /**
+     * `attemptId`'s window as its record holds it when read, none when it
+     * ended before end times were recorded, and the windows of the other
+     * Attempts of its Agent on its Run's Item that overlap it, oldest first.
+     * The Attempt's harvest keeps only a comment posted inside its own window
+     * and in none of the others (ADR 0006, #429).
+     */
+    readonly attemptWindows: (attemptId: AttemptId) => Effect.Effect<AttemptWindows, RunStoreError>;
     /** Every persisted Attempt startup reconciliation visits: all of them except those whose leftovers were discarded. */
     readonly salvageCandidates: Effect.Effect<ReadonlyArray<AttemptRecovery>, RunStoreError>;
     /** Marks every Attempt recorded on `worker` whose leftovers are not discarded yet, so reconciliation skips them; returns how many it marked. */

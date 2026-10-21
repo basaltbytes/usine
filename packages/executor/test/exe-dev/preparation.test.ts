@@ -12,6 +12,7 @@ import { TestClock } from "effect/testing";
 import { Cause, Deferred, Effect, Exit, Fiber, Logger, Option, Scope } from "effect";
 
 import {
+  aloneOnItem,
   ATTEMPT_ID,
   WORKER,
   SALVAGE_COMMIT,
@@ -38,6 +39,7 @@ describe("exe.dev preparation", () => {
           .launch({
             append: () => Effect.void,
             comments: () => Effect.void,
+            windows: aloneOnItem(),
             salvage: (value) =>
               Effect.sync(() => {
                 assert(
@@ -122,6 +124,7 @@ describe("exe.dev preparation", () => {
         prepared.launch({
           append: () => Effect.void,
           comments: () => Effect.void,
+          windows: aloneOnItem(),
           salvage: () => Effect.fail(recordFailure),
         }),
       );
@@ -179,6 +182,7 @@ describe("exe.dev preparation", () => {
           .launch({
             append: () => Effect.void,
             comments: () => Effect.void,
+            windows: aloneOnItem(),
             salvage: (value) =>
               Effect.sync(() => {
                 recorded.push(value);
@@ -207,6 +211,7 @@ describe("exe.dev preparation", () => {
         append: () => Effect.void,
         salvage: () => Effect.void,
         comments: () => Effect.void,
+        windows: aloneOnItem(),
       });
       const released = ssh.state.commands.length;
       yield* TestClock.adjust("2 hours");
@@ -266,6 +271,7 @@ describe("exe.dev preparation", () => {
                 );
               }),
             comments: () => Effect.die("A closed Attempt records no comment at recovery"),
+            windows: aloneOnItem(),
           },
         );
         const lines = ssh.state.commands.map(remoteLine);
@@ -288,6 +294,7 @@ describe("exe.dev preparation", () => {
           append: () => Effect.void,
           salvage: () => Effect.void,
           comments: () => Effect.void,
+          windows: aloneOnItem(),
         })
         .pipe(Effect.forkChild);
       yield* Deferred.await(started);
@@ -302,7 +309,11 @@ describe("exe.dev preparation", () => {
           succeeded: false,
           open: true,
         },
-        { salvage: () => Effect.void, comments: () => Effect.void },
+        {
+          salvage: () => Effect.void,
+          comments: () => Effect.void,
+          windows: aloneOnItem(),
+        },
       );
       assert.strictEqual(ssh.state.commands.length, before);
     }).pipe(
@@ -330,6 +341,7 @@ describe("exe.dev preparation", () => {
           append: () => Effect.void,
           salvage: () => Effect.void,
           comments: () => Effect.void,
+          windows: aloneOnItem(),
         });
         assert.strictEqual(result.message, `Completed: ${request.task}`);
         yield* Scope.close(owner, Exit.void);
@@ -349,6 +361,7 @@ describe("exe.dev preparation", () => {
           {
             salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
             comments: () => Effect.void,
+            windows: aloneOnItem(),
           },
         );
         const remote = ssh.state.commands.slice(reconciled).map(remoteLine);
@@ -383,6 +396,7 @@ describe("exe.dev preparation", () => {
           {
             salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
             comments: () => Effect.void,
+            windows: aloneOnItem(),
           },
         );
       }
@@ -417,7 +431,11 @@ describe("exe.dev preparation", () => {
               succeeded: index !== 2,
               open: false,
             },
-            { salvage: () => Effect.void, comments: () => Effect.void },
+            {
+              salvage: () => Effect.void,
+              comments: () => Effect.void,
+              windows: aloneOnItem(),
+            },
           )
           .pipe(Effect.exit);
         assert(Exit.isFailure(exit));
@@ -496,6 +514,7 @@ describe("exe.dev preparation", () => {
         append: () => Effect.void,
         salvage: () => Effect.void,
         comments: () => Effect.void,
+        windows: aloneOnItem(),
       });
       assert.strictEqual(result.message, `Completed: ${request.task}`);
       assert(JSON.stringify(errors).includes("worktree-directory"));
@@ -537,6 +556,7 @@ describe("exe.dev preparation", () => {
           append: () => Effect.void,
           salvage: () => Effect.void,
           comments: () => Effect.void,
+          windows: aloneOnItem(),
         });
         assert.strictEqual(result.message, `Completed: ${request.task}`);
         const issued = ssh.state.commands.slice(beforeLaunch);
@@ -619,6 +639,7 @@ describe("exe.dev preparation", () => {
           append: () => Effect.void,
           salvage: () => Effect.void,
           comments: () => Effect.void,
+          windows: aloneOnItem(),
         })
         .pipe(Effect.flip);
       assert.strictEqual(error._tag, "InfraFailure");
@@ -642,6 +663,7 @@ describe("exe.dev preparation", () => {
           append: () => Effect.void,
           salvage: () => Effect.void,
           comments: () => Effect.void,
+          windows: aloneOnItem(),
         });
       }).pipe(Effect.scoped);
       // The grant detaches last, so its count at the owner's exit shows whether

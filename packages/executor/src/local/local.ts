@@ -5,10 +5,14 @@ import { ClaudeLoginLock } from "@usine/agents/runtime";
 import type { AttemptRecovery, RecoverySink } from "@usine/core/attempt/salvage";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { InfraFailure } from "@usine/core/attempt/failure";
+import { type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
 import { RepositoryName, safeSegment } from "@usine/core/repository";
 import { InstanceDirectory } from "@usine/core/instance";
-import { harvestFacts, harvestPostedComments } from "@usine/core/step/harvest";
+import {
+  type AttemptWindowsRead,
+  harvestFacts,
+  harvestPostedComments,
+} from "@usine/core/step/harvest";
 import type { AttemptRuntime } from "@usine/durable/attempt-runtime";
 import {
   Effect,
@@ -261,7 +265,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       yield* session.recoverPostedComments(
         attempt,
         present
-          ? Option.some<PostedCommentsHarvest>((spec) =>
+          ? Option.some<PostedCommentsHarvest>((spec, windows) =>
               Effect.scoped(
                 Effect.gen(function* () {
                   const credential = yield* credentials(
@@ -273,12 +277,13 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
                   return yield* harvestPostedComments(
                     spec,
                     harvestCommand("cleanup", worktree, credential, credential.environment),
+                    windows,
                   );
                 }),
               ),
             )
           : Option.none(),
-        record.comments,
+        record,
       );
       if (!present) return;
       const cache = path.join(root, "repos", cacheDirectoryName(attempt.repository));
@@ -365,15 +370,17 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       workspace: AttemptWorkspace,
       credential: Effect.Success<ReturnType<typeof credentials>>,
       environment: Record<string, string>,
+      windows: AttemptWindowsRead<AttemptFailure>,
     ) =>
       harvestFacts(
         workspace.spec,
         harvestCommand("launch", workspace.worktree, credential, environment),
+        windows,
       ).pipe(
         Effect.mapError(
           (error) =>
             new InfraFailure({
-              message: `Could not collect the Attempt's commits: ${error.message}`,
+              message: `Could not harvest the Attempt's checkout: ${error.message}`,
               cause: error,
             }),
         ),
@@ -490,11 +497,13 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
           session.launch(prepared.workspace, io, {
             host: new LocalProcess(),
             environment,
-            harvest: harvest(prepared.workspace, credential, environment),
-            harvestComments: harvestPostedComments(
-              prepared.workspace.spec,
-              harvestCommand("launch", prepared.workspace.worktree, credential, environment),
-            ),
+            harvest: (windows) => harvest(prepared.workspace, credential, environment, windows),
+            harvestComments: (windows) =>
+              harvestPostedComments(
+                prepared.workspace.spec,
+                harvestCommand("launch", prepared.workspace.worktree, credential, environment),
+                windows,
+              ),
             keepForReattach: prepared.keepForReattach,
           }),
         salvaged: prepared.salvaged,

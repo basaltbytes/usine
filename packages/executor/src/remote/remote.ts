@@ -4,7 +4,11 @@ import { type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
 import type { AttemptRecovery, AttemptSalvage, RecoverySink } from "@usine/core/attempt/salvage";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
 import { RepositoryName, safeSegment } from "@usine/core/repository";
-import { harvestFacts, harvestPostedComments } from "@usine/core/step/harvest";
+import {
+  type AttemptWindowsRead,
+  harvestFacts,
+  harvestPostedComments,
+} from "@usine/core/step/harvest";
 import { AttemptRuntime } from "@usine/durable/attempt-runtime";
 import { Deferred, Effect, Exit, Option, Schema, Scope } from "effect";
 import { durableSessionFor, type PostedCommentsHarvest } from "../durable-session.ts";
@@ -142,7 +146,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       yield* session.recoverPostedComments(
         attempt,
         present
-          ? Option.some<PostedCommentsHarvest>((spec) =>
+          ? Option.some<PostedCommentsHarvest>((spec, windows) =>
               Effect.scoped(
                 Effect.gen(function* () {
                   const grant = yield* worker.grantFor(attempt.repository);
@@ -156,12 +160,13 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
                   return yield* harvestPostedComments(
                     spec,
                     harvestCommand("cleanup", worktree, access),
+                    windows,
                   );
                 }),
               ),
             )
           : Option.none(),
-        record.comments,
+        record,
       );
       if (!present) return;
       const reconcile = (
@@ -198,12 +203,20 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       );
     });
 
-    const harvest = (workspace: AttemptWorkspace, access: RemoteAccess) =>
-      harvestFacts(workspace.spec, harvestCommand("launch", workspace.worktree, access)).pipe(
+    const harvest = (
+      workspace: AttemptWorkspace,
+      access: RemoteAccess,
+      windows: AttemptWindowsRead<AttemptFailure>,
+    ) =>
+      harvestFacts(
+        workspace.spec,
+        harvestCommand("launch", workspace.worktree, access),
+        windows,
+      ).pipe(
         Effect.mapError(
           (error) =>
             new InfraFailure({
-              message: `Could not collect the Attempt's commits: ${error.message}`,
+              message: `Could not harvest the Attempt's checkout: ${error.message}`,
               cause: error,
             }),
         ),
@@ -461,11 +474,13 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
               return yield* session.launch(prepared, io, {
                 host: access.shell,
                 environment: withGitHooks(access.environment, provisioned.gitHooks),
-                harvest: harvest(prepared, access),
-                harvestComments: harvestPostedComments(
-                  prepared.spec,
-                  harvestCommand("launch", prepared.worktree, access),
-                ),
+                harvest: (windows) => harvest(prepared, access, windows),
+                harvestComments: (windows) =>
+                  harvestPostedComments(
+                    prepared.spec,
+                    harvestCommand("launch", prepared.worktree, access),
+                    windows,
+                  ),
                 keepForReattach: provisioned.keepForReattach,
               });
             }),

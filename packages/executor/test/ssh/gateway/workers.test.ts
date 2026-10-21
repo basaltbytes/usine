@@ -3,7 +3,14 @@ import { SshDestination, WorkerName } from "@usine/core/worker";
 import { Effect } from "effect";
 import { Executor } from "../../../src/executor.ts";
 import { SshWorkers } from "../../../src/ssh/ssh.ts";
-import { WORKER, capturedLogs, fakeMachine, mintingProvider, request } from "../support.ts";
+import {
+  aloneOnItem,
+  WORKER,
+  capturedLogs,
+  fakeMachine,
+  mintingProvider,
+  request,
+} from "../support.ts";
 import {
   attachmentsInForce,
   eventually,
@@ -12,7 +19,12 @@ import {
   gatewayRuntime,
 } from "./support.ts";
 
-const sink = { append: () => Effect.void, salvage: () => Effect.void, comments: () => Effect.void };
+const sink = {
+  append: () => Effect.void,
+  salvage: () => Effect.void,
+  comments: () => Effect.void,
+  windows: aloneOnItem(),
+};
 const SECOND = WorkerName.make("eu-two");
 const THIRD = WorkerName.make("eu-three");
 const OTHER_GATEWAY = SshDestination.make("usine-gateway-2");

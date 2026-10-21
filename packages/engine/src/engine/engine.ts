@@ -262,6 +262,7 @@ const makeRunEngine = Effect.gen(function* () {
           .recover(attempt, {
             salvage: (salvage) => store.recordSalvage(attempt.attemptId, salvage),
             comments: (comments) => store.recordComments(attempt.attemptId, comments),
+            windows: store.attemptWindows(attempt.attemptId),
           })
           .pipe(
             Effect.tapError((error) =>

@@ -1,7 +1,13 @@
 import { describe, expect, it } from "@effect/vitest";
-import { DateTime, Schema } from "effect";
+import { DateTime, Option, Schema } from "effect";
 import { ChildSessionBudget, ChildSessionCount } from "../src/agent/session.ts";
-import { AttemptNumber, shouldAutoRetry } from "../src/attempt/attempt.ts";
+import {
+  AttemptId,
+  AttemptNumber,
+  AttemptWindow,
+  shouldAutoRetry,
+  windowsOverlap,
+} from "../src/attempt/attempt.ts";
 import {
   AgentFailure,
   ChildSessionBudgetFailure,
@@ -77,5 +83,22 @@ describe("construction is the only door", () => {
         receivedAt: DateTime.makeUnsafe("2026-08-24T12:00:00Z"),
       }),
     ).toThrow();
+  });
+});
+
+describe("Attempt windows", () => {
+  const window = (id: string, startedAt: string, endedAt: string | null) =>
+    new AttemptWindow({
+      attemptId: AttemptId.make(id),
+      startedAt: DateTime.makeUnsafe(startedAt),
+      endedAt: endedAt === null ? Option.none() : Option.some(DateTime.makeUnsafe(endedAt)),
+    });
+
+  // GitHub dates a comment posted at 12:00:00.600 as 12:00:00, which both windows hold.
+  it("overlap when one ends in the second the other starts, and never once it ended a second before", () => {
+    const ended = window("review/1", "2026-10-21T11:00:00.000Z", "2026-10-21T12:00:00.400Z");
+    expect(windowsOverlap(ended, window("fix/1", "2026-10-21T12:00:00.700Z", null))).toBe(true);
+    expect(windowsOverlap(window("fix/1", "2026-10-21T12:00:00.700Z", null), ended)).toBe(true);
+    expect(windowsOverlap(ended, window("fix/1", "2026-10-21T12:00:01.000Z", null))).toBe(false);
   });
 });

@@ -21,6 +21,7 @@ import { fixedConfigLayer } from "../support/current-instance.ts";
 import { testAppLayer } from "../support/github-app.ts";
 import { alwaysHoldsLayer } from "../support/polling.ts";
 import {
+  aloneOnItem,
   LIVE_TEST_TIMEOUT,
   config,
   credentialLayer,
@@ -152,6 +153,7 @@ describe("local worker runaway guard", () => {
               append: () => Effect.void,
               salvage: () => Effect.void,
               comments: () => Effect.void,
+              windows: aloneOnItem(attemptId),
             })
             .pipe(Effect.forkChild);
           yield* Deferred.await(started);

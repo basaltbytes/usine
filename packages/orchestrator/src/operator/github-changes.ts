@@ -1,6 +1,6 @@
 import { LaneName } from "@usine/config/board";
 import { canonicalLabelName, GitHubLabelName } from "@usine/config/label";
-import { type Attempt, AttemptId } from "@usine/core/attempt";
+import { type Attempt, AttemptId, AttemptWindow, windowHolds, windowOf } from "@usine/core/attempt";
 import type { RunId } from "@usine/core/run";
 import { type BoardMoveRecord, BoardMoves } from "@usine/engine/board-moves";
 import type { RunStoreError } from "@usine/engine/engine";
@@ -86,29 +86,16 @@ const CLOCK_SKEW_MILLIS = 1_000;
 /** A Board move's label writes all reach GitHub within this long after the move is recorded. */
 const MOVE_SPAN_MILLIS = 10_000;
 
-/** When an Attempt was at work on its Item; `end` is none while it runs. */
-interface AttemptWindow {
-  readonly attemptId: AttemptId;
-  readonly start: number;
-  readonly end: Option.Option<number>;
-}
-
 /**
- * Gives each change to the one Attempt whose window holds it. GitHub records times to
- * the second, so a window opens at the second its Attempt started. Every Agent writes
- * as the same App, so a change that two Attempts on the Item could each have made
- * belongs to neither.
+ * Gives each change to the one Attempt whose window holds it (`windowHolds`). Every
+ * Agent writes as the same App, so a change that two Attempts on the Item could each
+ * have made belongs to neither.
  */
 const attribute = (windows: ReadonlyArray<AttemptWindow>, changes: ReadonlyArray<ItemChange>) => {
   const attributed = new Map<AttemptId, Array<ItemChange>>();
   const ambiguous: Array<ItemChange> = [];
   for (const change of changes) {
-    const at = DateTime.toEpochMillis(change.at);
-    const holders = windows.filter(
-      ({ start, end }) =>
-        start - (start % 1_000) <= at &&
-        Option.match(end, { onNone: () => true, onSome: (last) => at <= last }),
-    );
+    const holders = windows.filter((window) => windowHolds(window, change.at));
     const [holder, ...others] = holders;
     if (holder === undefined) continue;
     if (others.length > 0) {
@@ -192,13 +179,9 @@ const makeRunGitHubChanges = Effect.gen(function* () {
   const cache = yield* Ref.make(new Map<AttemptId, ReadonlyArray<GitHubChangeView>>());
 
   // Attempts that ended before end times were recorded end at their last transcript row.
-  const windowOf = Effect.fn("RunGitHubChanges.windowOf")(function* (attempt: Attempt) {
-    const start = DateTime.toEpochMillis(attempt.startedAt);
-    const known = (end: Option.Option<number>): Option.Option<AttemptWindow> =>
-      Option.some({ attemptId: attempt.id, start, end });
-    if (Option.isNone(attempt.outcome)) return known(Option.none());
-    if (Option.isSome(attempt.endedAt))
-      return known(Option.some(DateTime.toEpochMillis(attempt.endedAt.value)));
+  const windowFor = Effect.fn("RunGitHubChanges.windowFor")(function* (attempt: Attempt) {
+    const recorded = windowOf(attempt);
+    if (Option.isSome(recorded)) return recorded;
     const [last] = yield* reader.transcript(
       new TranscriptPageQuery({ attemptId: attempt.id, before: Option.none(), limit: 1 }),
     );
@@ -209,7 +192,13 @@ const makeRunGitHubChanges = Effect.gen(function* () {
       );
       return Option.none<AttemptWindow>();
     }
-    return known(Option.some(DateTime.toEpochMillis(last.receivedAt)));
+    return Option.some(
+      new AttemptWindow({
+        attemptId: attempt.id,
+        startedAt: attempt.startedAt,
+        endedAt: Option.some(last.receivedAt),
+      }),
+    );
   });
 
   const read = Effect.fn("RunGitHubChanges.read")(function* (runId: RunId) {
@@ -247,7 +236,9 @@ const makeRunGitHubChanges = Effect.gen(function* () {
         attempt,
       ]),
     );
-    const windows = (yield* Effect.forEach([...onItem.values()], windowOf)).flatMap(Option.toArray);
+    const windows = (yield* Effect.forEach([...onItem.values()], windowFor)).flatMap(
+      Option.toArray,
+    );
     const now = yield* Clock.currentTimeMillis;
     const fresh = new Map<AttemptId, ReadonlyArray<GitHubChangeView>>();
     const settled: Array<AttemptId> = [];
@@ -259,7 +250,9 @@ const makeRunGitHubChanges = Effect.gen(function* () {
       return [];
     });
     if (placeable.length > 0) {
-      const earliest = Math.min(...placeable.map(({ start }) => start));
+      const earliest = Math.min(
+        ...placeable.map(({ startedAt }) => DateTime.toEpochMillis(startedAt)),
+      );
       const since = DateTime.makeUnsafe(earliest - (earliest % 1_000));
       // A move recorded shortly before the earliest window can still land in it.
       const [changes, recorded] = yield* Effect.all(
@@ -294,8 +287,11 @@ const makeRunGitHubChanges = Effect.gen(function* () {
           ...moves.flatMap((move) => {
             const at = DateTime.toEpochMillis(move.at);
             const during =
-              window.start <= at &&
-              Option.match(window.end, { onNone: () => true, onSome: (last) => at <= last });
+              DateTime.toEpochMillis(window.startedAt) <= at &&
+              Option.match(window.endedAt, {
+                onNone: () => true,
+                onSome: (last) => at <= DateTime.toEpochMillis(last),
+              });
             return during ? [{ at, view: moveView(move) }] : [];
           }),
         ];
@@ -303,7 +299,10 @@ const makeRunGitHubChanges = Effect.gen(function* () {
           window.attemptId,
           own.sort((left, right) => left.at - right.at).map(({ view }) => view),
         );
-        if (Option.isSome(window.end) && now - window.end.value >= SETTLE_MILLIS)
+        if (
+          Option.isSome(window.endedAt) &&
+          now - DateTime.toEpochMillis(window.endedAt.value) >= SETTLE_MILLIS
+        )
           settled.push(window.attemptId);
       }
       yield* Effect.logInfo("Read the App's GitHub changes on a Run's Item", {

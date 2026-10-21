@@ -2,16 +2,18 @@ import { assert, describe, it } from "@effect/vitest";
 import { CHILD_KILL_SCRIPT, RemoteShell } from "@usine/agents/child-host";
 import { githubSignature } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { AttemptId, AttemptWindow, AttemptWindows } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { InfraFailure } from "@usine/core/attempt/failure";
 import type { AttemptRecovery } from "@usine/core/attempt/salvage";
 import { BotLogin } from "@usine/core/worker";
 import { type AttemptRequest, AttemptRuntime, ParentFailed } from "@usine/durable/attempt-runtime";
 import { completes, type StubParent, StubStorage } from "@usine/durable/testing";
-import { Deferred, Effect, Fiber, Layer, Logger, Option, Result } from "effect";
+import { DateTime, Deferred, Effect, Fiber, Layer, Logger, Option, Result } from "effect";
 import { TestClock } from "effect/testing";
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
 import {
+  aloneOnItem,
   ATTEMPT_ID,
   SSH_ENVIRONMENT_ALLOWLIST,
   TEST_AGENT,
@@ -31,6 +33,7 @@ const recording = () => {
   const sink: AttemptChannel.Sink = {
     salvage: () => Effect.void,
     comments: () => Effect.void,
+    windows: aloneOnItem(),
     append: (direction, envelope) =>
       Effect.sync(() => {
         transcript.push([direction, envelope]);
@@ -64,6 +67,15 @@ const stopMidAttempt = (
   });
 
 const COMMENT = "https://github.com/acme/demo/issues/42#issuecomment-7";
+/** Posted at 10:07, while another Attempt of the same Agent was open on issue 42. */
+const SHARED = "https://github.com/acme/demo/issues/42#issuecomment-8";
+
+/** Another Loop's Attempt of the same Agent, open on issue 42 since 10:05. */
+const OTHER_ATTEMPT = new AttemptWindow({
+  attemptId: AttemptId.make("docs-run/implement/1"),
+  startedAt: DateTime.makeUnsafe("2026-10-20T10:05:00Z"),
+  endedAt: Option.none(),
+});
 
 /** The Attempt on issue 42, writing as the bot login the fake `gh` lists comments for. */
 const onItem = new CheckoutRequest({
@@ -72,18 +84,17 @@ const onItem = new CheckoutRequest({
   botLogin: Option.some(BotLogin.make("usine-test[bot]")),
 });
 
-/** Has the fake `gh` list `COMMENT` on issue 42, signed by the Attempt's Agent. */
+/** Has the fake `gh` list `COMMENT` and `SHARED` on issue 42, both signed by the Attempt's Agent. */
 const postSignedComment = (ssh: ReturnType<typeof fakeSsh>) => {
+  const signed = (url: string, at: string) => ({
+    html_url: url,
+    body: `Fixed.\n\n${githubSignature(TEST_AGENT.name)}`,
+    user: { login: "usine-test[bot]" },
+    created_at: at,
+    updated_at: at,
+  });
   ssh.state.issueComments = JSON.stringify([
-    [
-      {
-        html_url: COMMENT,
-        body: `Fixed.\n\n${githubSignature(TEST_AGENT.name)}`,
-        user: { login: "usine-test[bot]" },
-        created_at: "2026-10-20T10:00:00Z",
-        updated_at: "2026-10-20T10:00:00Z",
-      },
-    ],
+    [signed(COMMENT, "2026-10-20T10:00:00Z"), signed(SHARED, "2026-10-20T10:07:00Z")],
   ]);
 };
 
@@ -294,17 +305,25 @@ describe("exe.dev launch", () => {
     "records the comments an Attempt posted on its Item when it fails, not when it succeeds",
     () => {
       const recorded: Array<ReadonlyArray<string>> = [];
-      const sink: AttemptChannel.Sink = {
-        append: () => Effect.void,
-        salvage: () => Effect.void,
-        comments: (comments) =>
-          Effect.sync(
-            () => void recorded.push(comments.map(({ kind, url }) => kind + " " + url.href)),
-          ),
-      };
       const attempt = (parent: StubParent) => {
         const ssh = fakeSsh();
         postSignedComment(ssh);
+        const opened: Array<AttemptWindow> = [];
+        const sink: AttemptChannel.Sink = {
+          append: () => Effect.void,
+          salvage: () => Effect.void,
+          comments: (comments) =>
+            Effect.sync(
+              () => void recorded.push(comments.map(({ kind, url }) => kind + " " + url.href)),
+            ),
+          windows: aloneOnItem().pipe(
+            Effect.map(({ own }) => new AttemptWindows({ own, overlapping: [...opened] })),
+          ),
+        };
+        // The other Attempt opens on the Item while the harvest lists its
+        // comments, so only a harvest that reads the windows after GitHub
+        // answered leaves `SHARED` out.
+        ssh.state.onIssueComments = () => void opened.push(OTHER_ATTEMPT);
         return Effect.gen(function* () {
           const executor = yield* Executor;
           const prepared = yield* executor.prepare(onItem);
@@ -330,6 +349,50 @@ describe("exe.dev launch", () => {
     },
   );
 
+  it.effect(
+    "records only the comments a canceled Attempt posted before the orchestrator ended its window",
+    () => {
+      const ssh = fakeSsh();
+      postSignedComment(ssh);
+      const started = Deferred.makeUnsafe<void>();
+      const recorded: Array<string> = [];
+      // The orchestrator ends the Attempt's window at 10:05 when the operator
+      // cancels it, then stops its executor, which harvests the comments.
+      // `SHARED`, posted at 10:07, could be an Attempt's of the same Agent
+      // that started after the cancel, so no window overlaps this one.
+      const sink: AttemptChannel.Sink = {
+        append: () => Effect.void,
+        salvage: () => Effect.void,
+        comments: (comments) =>
+          Effect.sync(
+            () => void recorded.push(...comments.map(({ kind, url }) => `${kind} ${url.href}`)),
+          ),
+        windows: Effect.succeed(
+          new AttemptWindows({
+            own: Option.some(
+              new AttemptWindow({
+                attemptId: ATTEMPT_ID,
+                startedAt: DateTime.makeUnsafe(0),
+                endedAt: Option.some(DateTime.makeUnsafe("2026-10-20T10:05:00Z")),
+              }),
+            ),
+            overlapping: [],
+          }),
+        ),
+      };
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const prepared = yield* executor.prepare(onItem);
+        const launch = yield* prepared.launch(sink).pipe(Effect.forkChild);
+        yield* Deferred.await(started);
+        yield* executor.cancel(ATTEMPT_ID);
+        const failure = yield* Fiber.join(launch).pipe(Effect.flip);
+        assert.strictEqual(failure._tag, "AgentFailure");
+        assert.deepStrictEqual(recorded, [`issue-comment ${COMMENT}`]);
+      }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, working(started))));
+    },
+  );
+
   it.effect("concurrent cancellation waits for salvage and preserves the launch failure", () => {
     const ssh = fakeSsh();
     ssh.state.salvage = "dirty";
@@ -343,6 +406,7 @@ describe("exe.dev launch", () => {
         .launch({
           ...recording().sink,
           comments: () => Effect.void,
+          windows: aloneOnItem(),
           salvage: () =>
             Deferred.succeed(recordingSalvage, undefined).pipe(
               Effect.andThen(Deferred.await(finishSalvage)),
@@ -580,6 +644,9 @@ describe("exe.dev launch", () => {
         const restart = ssh.state.commands.length;
         const recorded: Array<string> = [];
         const salvaged: Array<string> = [];
+        // The other Attempt opens on the Item while the recovery lists its comments.
+        const opened: Array<AttemptWindow> = [];
+        ssh.state.onIssueComments = () => void opened.push(OTHER_ATTEMPT);
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
           yield* executor.recover(openAttempt, {
@@ -588,6 +655,9 @@ describe("exe.dev launch", () => {
               Effect.sync(
                 () => void recorded.push(...comments.map(({ kind, url }) => `${kind} ${url.href}`)),
               ),
+            windows: aloneOnItem().pipe(
+              Effect.map(({ own }) => new AttemptWindows({ own, overlapping: [...opened] })),
+            ),
           });
           // The Run closes the Attempt from the stored failure without launching it again.
           const outcome = yield* executor.outcome(ATTEMPT_ID);
@@ -631,6 +701,7 @@ describe("exe.dev launch", () => {
           yield* executor.recover(openAttempt, {
             salvage: () => Effect.die("A checkout that is gone has no salvage"),
             comments: (comments) => Effect.sync(() => void recorded.push(...comments)),
+            windows: aloneOnItem(),
           });
         }).pipe(
           Effect.scoped,

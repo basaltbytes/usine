@@ -4,7 +4,7 @@ import { CommitSha, safeSegment, type RepositoryName } from "../repository.ts";
 import type { RunId } from "../run/run.ts";
 import type { Comment } from "../step/result.ts";
 import type { WorkerName } from "../worker.ts";
-import type { AttemptId, AttemptNumber } from "./attempt.ts";
+import type { AttemptId, AttemptNumber, AttemptWindows } from "./attempt.ts";
 
 /** The remote branch name that holds one Attempt's unfinished work, `usine/salvage/<run>/<attempt>`. */
 export const SalvageRef = Schema.NonEmptyString.pipe(Schema.brand("SalvageRef"));
@@ -56,8 +56,13 @@ export interface AttemptRecovery {
  * `salvage` records what the executor preserved of its checkout, and
  * `comments` the comments and reviews it posted on its Run's Item when its
  * parent task failed and the orchestrator stopped before recording them.
+ * `windows` reads its own window on that Item and those of the other Attempts
+ * of its Agent that overlap it there: the harvest of those comments reads
+ * them once GitHub has listed the comments, and keeps only one posted inside
+ * the own window and in none of the others.
  */
 export interface RecoverySink<E> {
   readonly salvage: (salvage: AttemptSalvage) => Effect.Effect<void, E>;
   readonly comments: (comments: ReadonlyArray<Comment>) => Effect.Effect<void, E>;
+  readonly windows: Effect.Effect<AttemptWindows, E>;
 }

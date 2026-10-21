@@ -14,6 +14,7 @@ import { layer as localExecutorLayer } from "@usine/executor/local";
 import { Cause, Effect, Exit, FileSystem, Layer, Option, Path } from "effect";
 import { stubAttemptRuntime, StubStorage, worksFor } from "@usine/durable/testing";
 import {
+  aloneOnItem,
   LIVE_TEST_TIMEOUT,
   STATE_POLL_ATTEMPTS,
   TOKEN,
@@ -170,6 +171,7 @@ describe("local worker salvage", () => {
                       new InfraFailure({ message: "channel unavailable", cause: "outage" }),
                     ),
                   comments: () => Effect.void,
+                  windows: aloneOnItem(failedRecordRequest.attemptId),
                   salvage: () =>
                     Effect.gen(function* () {
                       assert(yield* fileSystem.exists(worktree).pipe(Effect.orDie));
@@ -205,6 +207,7 @@ describe("local worker salvage", () => {
                   recorded.push(salvage);
                 }),
               comments: () => Effect.void,
+              windows: aloneOnItem(failedRecordRequest.attemptId),
             },
           );
           const recovered = recorded[0];

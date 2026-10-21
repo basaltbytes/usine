@@ -1,5 +1,6 @@
 import { DateTime, Effect, Option, Schema } from "effect";
 import { githubSignature } from "../agent/agent.ts";
+import { type AttemptWindow, AttemptWindows, windowHolds } from "../attempt/attempt.ts";
 import type { RunSpec } from "../attempt/channel.ts";
 import { ItemNumber } from "../item.ts";
 import { CommitSha, RepositoryRevision } from "../repository.ts";
@@ -23,6 +24,17 @@ export type HarvestSpec = Pick<
 >;
 
 /**
+ * Reads, from the orchestrator's records, the harvested Attempt's own window
+ * on its Run's Item and the windows of the other Attempts of its Agent that
+ * overlap it there. The harvest runs it once GitHub has listed the Attempt's
+ * comments, so it reads every Attempt that could have posted one of them,
+ * including one that started while the harvest ran, and the end the
+ * orchestrator recorded for this Attempt when it closed it before the
+ * harvest, as a cancel does.
+ */
+export type AttemptWindowsRead<W> = Effect.Effect<AttemptWindows, W>;
+
+/**
  * Runs one read-only `git` or `gh` command in the Attempt's checkout and returns
  * its stdout lines. A non-zero exit is the runner's own failure.
  */
@@ -31,11 +43,17 @@ export type HarvestCommand<E> = (
   args: ReadonlyArray<string>,
 ) => Effect.Effect<ReadonlyArray<string>, E>;
 
-/** git or GitHub answered a harvesting command with output that is not a valid result. */
+/**
+ * The harvest could not use what it read: git or GitHub answered a harvesting
+ * command with output that is not a valid result (`git`, `github`), or the
+ * Attempt's own window and those of its Agent's other Attempts on the Item
+ * could not be read (`windows`), so the Attempt's comments cannot be told
+ * from theirs.
+ */
 export class HarvestError extends Schema.TaggedError<HarvestError>("@usine/core/HarvestError")(
   "HarvestError",
   {
-    stage: Schema.Literals(["git", "github"]),
+    stage: Schema.Literals(["git", "github", "windows"]),
     message: Schema.NonEmptyString,
     cause: Schema.Defect(),
   },
@@ -257,15 +275,39 @@ const credentialLogin = Effect.fn("StepResult.credentialLogin")(function* <E>(
   return { login: data.viewer.login, source: "viewer" } satisfies Author;
 });
 
+/** A signed comment or review the Attempt's bot login posted, and the time GitHub records it was posted. */
+interface Posted {
+  readonly fact: Comment;
+  readonly at: DateTime.Utc;
+}
+
 /**
- * The comments and reviews the Attempt posted on its Run's Item: the Item's
- * conversation comments and, on a pull request, its submitted reviews and
- * their diff comments, written by the RunSpec's bot login, or else by the
- * login GitHub reports for the Attempt's credential, created or updated since
- * the Worker prepared the checkout, and ending with the Attempt's Agent's
- * signature.
+ * What GitHub lists on a Run's Item for the Attempt's bot login, before the
+ * Attempt windows on the Item are read: `signed`, the comments and
+ * reviews the login posted since the Worker prepared the checkout and ended
+ * with the Agent's signature; `unsigned`, how many it posted then without that
+ * signature; and `edited`, how many comments it posted before then and edited
+ * since.
  */
-const harvestComments = Effect.fn("StepResult.harvestComments")(function* <E>(
+interface Listing {
+  readonly item: ItemNumber;
+  readonly author: Author;
+  readonly since: string;
+  readonly signed: ReadonlyArray<Posted>;
+  readonly unsigned: number;
+  readonly edited: number;
+}
+
+/**
+ * Lists what the Attempt posted on its Run's Item: the Item's conversation
+ * comments and, on a pull request, its submitted reviews and their diff
+ * comments, written by the RunSpec's bot login, or else by the login GitHub
+ * reports for the Attempt's credential, posted since the Worker prepared the
+ * checkout, and ending with the Attempt's Agent's signature. A comment is
+ * posted when it is created, even when it is edited later, and a review when
+ * it is submitted. None for a Run without an Item or a preparation time.
+ */
+const listComments = Effect.fn("StepResult.listComments")(function* <E>(
   spec: HarvestSpec,
   run: HarvestCommand<E>,
 ) {
@@ -275,7 +317,7 @@ const harvestComments = Effect.fn("StepResult.harvestComments")(function* <E>(
     yield* Effect.logDebug("The Run has no GitHub Item, so no comment is collected", {
       attemptId: spec.attemptId,
     });
-    return [];
+    return Option.none<Listing>();
   }
   const { number, url } = item.value;
   if (Option.isNone(spec.preparedAt)) {
@@ -283,7 +325,7 @@ const harvestComments = Effect.fn("StepResult.harvestComments")(function* <E>(
       "The Attempt was prepared before preparation times were recorded, so no comment is collected",
       { attemptId: spec.attemptId, repository: spec.repository, item: number },
     );
-    return [];
+    return Option.none<Listing>();
   }
   // GitHub records times to the second, and `since` takes YYYY-MM-DDTHH:MM:SSZ.
   const prepared = DateTime.toEpochMillis(spec.preparedAt.value);
@@ -334,70 +376,198 @@ const harvestComments = Effect.fn("StepResult.harvestComments")(function* <E>(
     ],
     { concurrency: "unbounded" },
   );
-  const written = (user: typeof Author.Type, at: DateTime.Utc) =>
-    user !== null && user.login === login && DateTime.toEpochMillis(at) >= since;
+  const byLogin = (user: typeof Author.Type) => user !== null && user.login === login;
+  const sincePrepared = (at: DateTime.Utc) => DateTime.toEpochMillis(at) >= since;
   // A pending review and its comments are a draft only their author sees.
   const pending = new Set(
     reviews.flat().flatMap(({ id, state }) => (state === "PENDING" ? [id] : [])),
   );
-  // What the login wrote since preparation, each with its body.
-  const candidates = [
-    ...conversation.flat().flatMap(({ url, user, body, createdAt, updatedAt }) =>
-      written(user, updatedAt)
+  // What GitHub lists that the login wrote, each with its body and the time
+  // it was posted: a comment's creation, even when edited later, or a
+  // review's submission. GitHub lists every review, so only those submitted
+  // since preparation are kept.
+  const written = [
+    ...conversation.flat().flatMap(({ url, user, body, createdAt }) =>
+      byLogin(user)
         ? [
             {
               body,
+              at: createdAt,
               fact: new Comment({ url, kind: "issue-comment", at: Option.some(createdAt) }),
             },
           ]
         : [],
     ),
-    ...reviews
-      .flat()
-      .flatMap(({ url, user, body, state, submittedAt }) =>
-        state !== "PENDING" &&
-        submittedAt !== undefined &&
-        submittedAt !== null &&
-        written(user, submittedAt)
-          ? [{ body, fact: new Comment({ url, kind: "review", at: Option.some(submittedAt) }) }]
-          : [],
-      ),
-    ...diffComments.flat().flatMap(({ url, user, body, createdAt, updatedAt, reviewId }) =>
-      (reviewId === null || !pending.has(reviewId)) && written(user, updatedAt)
+    ...reviews.flat().flatMap(({ url, user, body, state, submittedAt }) =>
+      state !== "PENDING" &&
+      submittedAt !== undefined &&
+      submittedAt !== null &&
+      byLogin(user) &&
+      sincePrepared(submittedAt)
         ? [
             {
               body,
+              at: submittedAt,
+              fact: new Comment({ url, kind: "review", at: Option.some(submittedAt) }),
+            },
+          ]
+        : [],
+    ),
+    ...diffComments.flat().flatMap(({ url, user, body, createdAt, reviewId }) =>
+      (reviewId === null || !pending.has(reviewId)) && byLogin(user)
+        ? [
+            {
+              body,
+              at: createdAt,
               fact: new Comment({ url, kind: "review-comment", at: Option.some(createdAt) }),
             },
           ]
         : [],
     ),
   ];
+  // `since` lists the comments updated since preparation, so it also lists
+  // one the login posted before then and edited since. Only what the login
+  // posted inside the Attempt's own window can be the Attempt's (#429): that
+  // comment was posted before the window opened, and the edit could be any
+  // Attempt's, so no Attempt records it.
+  const posted = written.filter(({ at }) => sincePrepared(at));
   // All Attempts that write as one bot login share it, such as two Loops' Runs
   // on one pull request, so the login alone does not tell their comments apart.
   // The Attempt prompt asks the Agent to end each comment and review with its
   // signature, and only those that do are the Attempt's (ADR 0006, #394).
-  // Two concurrent Attempts of one Agent on one Item still sign alike (#429).
   // A body often ends with a newline, so trailing whitespace is ignored.
   const signature = githubSignature(spec.agent.name);
-  const posted = candidates.flatMap(({ body, fact }) =>
-    body !== undefined && body.trimEnd().endsWith(signature) ? [fact] : [],
+  const signed = posted.filter(
+    ({ body }) => body !== undefined && body.trimEnd().endsWith(signature),
+  );
+  return Option.some<Listing>({
+    item: number,
+    author,
+    since: sinceParameter,
+    signed,
+    unsigned: posted.length - signed.length,
+    edited: written.length - posted.length,
+  });
+});
+
+/**
+ * `window` for a log line: its start and end as an ISO interval, ending
+ * `open` while its Attempt runs, or `unrecorded` for an Attempt that ended
+ * before end times were recorded.
+ */
+const describeWindow = (window: Option.Option<AttemptWindow>) =>
+  Option.match(window, {
+    onNone: () => "unrecorded",
+    onSome: ({ startedAt, endedAt }) => {
+      const end = Option.match(endedAt, { onNone: () => "open", onSome: DateTime.formatIso });
+      return `${DateTime.formatIso(startedAt)}/${end}`;
+    },
+  });
+
+/**
+ * The comments and reviews in `listing` that are the Attempt's: those whose
+ * time the Attempt's own window holds and none of the windows of its Agent's
+ * other Attempts on the Item does, both read through `windows` (#429). The
+ * listing starts at preparation, but the orchestrator can close the Attempt
+ * before the harvest, as a cancel does before its executor stops, and a
+ * comment posted after that end is not the Attempt's. An Attempt of the Agent
+ * that started after that end does not overlap this one, so only the own
+ * window leaves its comments out. Two Attempts of one Agent open on one Item
+ * at once sign alike, so a comment posted while another of them was open
+ * could be either's and is neither's, the rule the Run reader applies to the
+ * App's changes. The windows are read only once GitHub has listed the
+ * comments, and not at all when none is signed. A read that fails is a
+ * `HarvestError` at the `windows` stage.
+ */
+const attributeComments = Effect.fn("StepResult.attributeComments")(function* <W>(
+  spec: HarvestSpec,
+  listing: Listing,
+  windows: AttemptWindowsRead<W>,
+) {
+  yield* Effect.annotateCurrentSpan({
+    attemptId: spec.attemptId,
+    repository: spec.repository,
+    item: listing.item,
+  });
+  // An Attempt that posted a listed comment had started before GitHub listed
+  // it, so a read made now has its window, even when it started while this
+  // harvest ran, and so does the end the orchestrator recorded for this
+  // Attempt before the harvest. A read made before the listing could miss them.
+  const { own, overlapping } =
+    listing.signed.length === 0
+      ? new AttemptWindows({ own: Option.none(), overlapping: [] })
+      : yield* windows.pipe(
+          Effect.mapError(
+            (cause) =>
+              new HarvestError({
+                stage: "windows",
+                message:
+                  "Could not read the Attempt's window and those of the Agent's other Attempts on the Item",
+                cause,
+              }),
+          ),
+        );
+  const placed = listing.signed.map(({ at, fact }) => ({
+    at,
+    fact,
+    inside: Option.exists(own, (window) => windowHolds(window, at)),
+    others: overlapping.filter((window) => windowHolds(window, at)),
+  }));
+  const outside = placed.filter(({ inside }) => !inside);
+  const ambiguous = placed.filter(({ inside, others }) => inside && others.length > 0);
+  const posted = placed.flatMap(({ inside, others, fact }) =>
+    inside && others.length === 0 ? [fact] : [],
+  );
+  yield* Effect.forEach(
+    outside,
+    ({ at, fact }) =>
+      Effect.logInfo("Left out a comment posted outside the Attempt's own window on the Item", {
+        attemptId: spec.attemptId,
+        window: describeWindow(own),
+        postedAt: DateTime.formatIso(at),
+        comment: fact.url.href,
+        kind: fact.kind,
+      }),
+    { discard: true },
+  );
+  yield* Effect.forEach(
+    ambiguous,
+    ({ fact, others }) =>
+      Effect.logInfo(
+        "Left out a comment that another open Attempt of the Agent on the Item could have posted",
+        {
+          attemptId: spec.attemptId,
+          overlapping: others.map(({ attemptId }) => attemptId),
+          comment: fact.url.href,
+          kind: fact.kind,
+        },
+      ),
+    { discard: true },
   );
   const counted = (kind: CommentKind) => posted.filter((comment) => comment.kind === kind).length;
   yield* Effect.logInfo("Collected the comments and reviews the Attempt posted on its Item", {
     attemptId: spec.attemptId,
     repository: spec.repository,
-    item: number,
-    author: login,
-    authorSource: author.source,
+    item: listing.item,
+    author: listing.author.login,
+    authorSource: listing.author.source,
     agent: spec.agent.name,
-    since: sinceParameter,
+    since: listing.since,
     issueComments: counted("issue-comment"),
     reviews: counted("review"),
     reviewComments: counted("review-comment"),
     // Written by the login since preparation without the Agent's signature:
     // another Agent's, or one this Agent left unsigned.
-    unsigned: candidates.length - posted.length,
+    unsigned: listing.unsigned,
+    // Posted by the login before preparation and edited since: not posted by this Attempt.
+    edited: listing.edited,
+    // Signed, but posted outside the Attempt's own window: after a cancel
+    // ended it, such as by an Attempt of the Agent that started since.
+    outside: outside.length,
+    // Signed, but posted while another Attempt of the Agent was open on the Item.
+    ambiguous: ambiguous.length,
+    // The windows read, none when no listed comment was signed.
+    overlapping: overlapping.map(({ attemptId }) => attemptId),
   });
   return posted;
 });
@@ -405,12 +575,14 @@ const harvestComments = Effect.fn("StepResult.harvestComments")(function* <E>(
 /**
  * GitHub discovery is read-only enrichment of a finished Attempt: a failure or
  * a ten-second stall records nothing it looked for and keeps the other facts.
- * `retaining` says what the Attempt keeps, for the warning.
+ * `nothing` is what the discovery then gives, and `retaining` says what the
+ * Attempt keeps, for the warning.
  */
 const enrichment = <A, E extends { readonly _tag: string; readonly message: string }>(
   spec: HarvestSpec,
   subject: "Pull request" | "Comment",
-  discovery: Effect.Effect<ReadonlyArray<A>, E>,
+  discovery: Effect.Effect<A, E>,
+  nothing: A,
   retaining = "retaining the completed agent result",
 ) =>
   discovery.pipe(
@@ -426,8 +598,42 @@ const enrichment = <A, E extends { readonly _tag: string; readonly message: stri
           errorTag: error._tag,
           message: error.message,
         },
-      ).pipe(Effect.as<ReadonlyArray<A>>([])),
+      ).pipe(Effect.as(nothing)),
     ),
+  );
+
+/**
+ * The comments and reviews the Attempt posted on its Run's Item
+ * (`listComments`) inside its own window, which no other Attempt of its Agent
+ * open on the Item could have posted (`attributeComments`). Listing them is
+ * GitHub discovery (`enrichment`), and the `HarvestError` this fails with is
+ * a failure to read the windows. `retaining` says what the Attempt keeps when
+ * the discovery fails.
+ */
+const harvestComments = <E extends { readonly _tag: string; readonly message: string }, W>(
+  spec: HarvestSpec,
+  run: HarvestCommand<E>,
+  windows: AttemptWindowsRead<W>,
+  retaining?: string,
+) =>
+  enrichment(spec, "Comment", listComments(spec, run), Option.none<Listing>(), retaining).pipe(
+    Effect.flatMap(
+      Option.match({
+        onNone: () => Effect.succeed<ReadonlyArray<Comment>>([]),
+        onSome: (listing) => attributeComments(spec, listing, windows),
+      }),
+    ),
+  );
+
+/** Warns that the Attempt windows on the Item could not be read, and what the harvest does without them. */
+const windowsUnread = (spec: HarvestSpec, outcome: string) => (error: HarvestError) =>
+  Effect.logWarning(
+    `Could not read the Attempt's window and those of the Agent's other Attempts on the Item, so the Attempt's comments cannot be told from theirs; ${outcome}`,
+    {
+      attemptId: spec.attemptId,
+      repository: spec.repository,
+      cause: String(error.cause),
+    },
   );
 
 /**
@@ -437,19 +643,27 @@ const enrichment = <A, E extends { readonly _tag: string; readonly message: stri
  * remote branch or pull request ref points at was never pushed, so it has no
  * pull request and GitHub is not asked. Comments are those GitHub lists for
  * the bot login the Attempt writes as, the factory's App or a Worker's GitHub
- * integration, since the Worker prepared the checkout, that end with the
- * signature of the Attempt's Agent (`githubSignature`). Both GitHub discoveries
- * are read-only enrichment, so a GitHub failure or a ten-second stall keeps
- * the commits and records none of what it looked for rather than failing
- * completed work.
+ * integration, posted since the Worker prepared the checkout, that end with
+ * the signature of the Attempt's Agent (`githubSignature`). Of those it keeps
+ * the ones posted inside the Attempt's own window that `windows` reads, and
+ * in none of the windows of the Agent's other Attempts on the Item it reads
+ * with it, since those could be another Attempt's of that Agent. Both GitHub
+ * discoveries are read-only enrichment, so a GitHub failure or a ten-second
+ * stall keeps the commits and records none of what it looked for rather than
+ * failing completed work. Windows that cannot be read
+ * fail the harvest, as an invalid git result does, since its comments cannot
+ * be told from the other Attempts'.
  */
 export const harvestFacts = Effect.fn("StepResult.harvest")(function* <
   E extends { readonly _tag: string; readonly message: string },
->(spec: HarvestSpec, run: HarvestCommand<E>) {
+  W,
+>(spec: HarvestSpec, run: HarvestCommand<E>, windows: AttemptWindowsRead<W>) {
   yield* Effect.annotateCurrentSpan({ attemptId: spec.attemptId, repository: spec.repository });
   const commits = yield* harvestCommits(spec, run);
-  const pullRequests = yield* enrichment(spec, "Pull request", harvestPullRequests(spec, run));
-  const comments = yield* enrichment(spec, "Comment", harvestComments(spec, run));
+  const pullRequests = yield* enrichment(spec, "Pull request", harvestPullRequests(spec, run), []);
+  const comments = yield* harvestComments(spec, run, windows).pipe(
+    Effect.tapError(windowsUnread(spec, "the harvest fails")),
+  );
   const facts: ReadonlyArray<StepResultFact> = [...commits, ...pullRequests, ...comments];
   return facts;
 });
@@ -457,18 +671,20 @@ export const harvestFacts = Effect.fn("StepResult.harvest")(function* <
 /**
  * The comments and reviews an Attempt that ended without success posted on its
  * Run's Item, found as `harvestFacts` finds them. Its commits and pull requests
- * are not collected, since the Attempt delivered no result. A GitHub failure or
- * a ten-second stall records none and never fails.
+ * are not collected, since the Attempt delivered no result. A GitHub failure, a
+ * ten-second stall, or windows that `windows` cannot read records none and
+ * never fails.
  */
 export const harvestPostedComments = Effect.fn("StepResult.harvestPostedComments")(function* <
   E extends { readonly _tag: string; readonly message: string },
->(spec: HarvestSpec, run: HarvestCommand<E>) {
+  W,
+>(spec: HarvestSpec, run: HarvestCommand<E>, windows: AttemptWindowsRead<W>) {
   yield* Effect.annotateCurrentSpan({ attemptId: spec.attemptId, repository: spec.repository });
-  const comments: ReadonlyArray<Comment> = yield* enrichment(
-    spec,
-    "Comment",
-    harvestComments(spec, run),
-    "the Attempt that ended without success records no comment",
+  const outcome = "the Attempt that ended without success records no comment";
+  const comments: ReadonlyArray<Comment> = yield* harvestComments(spec, run, windows, outcome).pipe(
+    Effect.catch((error) =>
+      windowsUnread(spec, outcome)(error).pipe(Effect.as<ReadonlyArray<Comment>>([])),
+    ),
   );
   return comments;
 });

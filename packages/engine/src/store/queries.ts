@@ -136,7 +136,7 @@ const runSelection = {
   againRequestedBy: runAgainEvents.requestedBy,
 } as const;
 
-const attemptSelection = {
+export const attemptSelection = {
   attemptId: attempts.attemptId,
   runId: attempts.runId,
   stepName: attempts.stepName,
