@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
-import { Effect, Schema } from "effect";
+import { Effect, Result, Schema } from "effect";
 import { ExpressionEngine, Source } from "../src/expression-engine.ts";
 import { MarcbachmannCelLayer } from "../src/marcbachmann-cel.ts";
 import {
@@ -147,6 +147,60 @@ describe("ExpressionEngine", () => {
       });
 
       expect(matches).toBe(true);
+    }).pipe(Effect.provide(MarcbachmannCelLayer)),
+  );
+
+  it.effect("evaluates the same expression again on each new context", () =>
+    Effect.gen(function* () {
+      const engine = yield* ExpressionEngine;
+      const expression = source(
+        'item.labels.totalCount > 0 && item.labels.nodes.exists(label, label.name == "ready")',
+      );
+      const labelled = (names: ReadonlyArray<string>) => ({
+        item: {
+          state: "OPEN",
+          labels: { totalCount: names.length, nodes: names.map((name) => ({ name })) },
+        },
+      });
+
+      const matches = yield* Effect.forEach(
+        [["ready"], [], ["bug", "ready"], ["bug"], ["ready"]],
+        (names) => engine.evaluateBoolean(expression, issueEnvironment, labelled(names)),
+      );
+
+      expect(matches).toEqual([true, false, true, false, true]);
+    }).pipe(Effect.provide(MarcbachmannCelLayer)),
+  );
+
+  it.effect("evaluates one condition on each context and keeps each failure to its context", () =>
+    Effect.gen(function* () {
+      const engine = yield* ExpressionEngine;
+      const results = yield* engine.evaluateBooleanEach(
+        source('item.milestone.title == "v1"'),
+        nullableEnvironment,
+        [withValues, withNulls, { item: { ...withValues.item, milestone: { title: "v2" } } }],
+      );
+
+      expect(
+        results.map((result) => (Result.isSuccess(result) ? result.success : "failed")),
+      ).toEqual([true, "failed", false]);
+      const failure = results[1];
+      expect(failure !== undefined && Result.isFailure(failure) ? failure.failure._tag : null).toBe(
+        "ExpressionEvaluationError",
+      );
+    }).pipe(Effect.provide(MarcbachmannCelLayer)),
+  );
+
+  it.effect("fails the whole evaluation of each context when the condition does not check", () =>
+    Effect.gen(function* () {
+      const engine = yield* ExpressionEngine;
+      const failure = yield* engine
+        .evaluateBooleanEach(source("item.state"), issueEnvironment, [
+          { item: { state: "OPEN", labels: { totalCount: 0, nodes: [] } } },
+        ])
+        .pipe(Effect.flip);
+
+      expect(failure.code).toBe("unexpected_result_type");
     }).pipe(Effect.provide(MarcbachmannCelLayer)),
   );
 

@@ -1,5 +1,4 @@
-import { NodeServices } from "@effect/platform-node";
-import { assert, describe, it } from "@effect/vitest";
+import { NodeHttpServer, NodeServices } from "@effect/platform-node";
 import { AgentFile } from "@usine/config/agent";
 import { UsineConfig } from "@usine/config/factory";
 import { LoadedInstance } from "@usine/config/instance";
@@ -27,17 +26,26 @@ import { StepExecutor } from "@usine/engine/step-executor";
 import { TriggerCondition } from "@usine/engine/trigger-condition";
 import { Source } from "@usine/expression/expression-engine";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
+import { idleTriggersLayer } from "@usine/orchestrator/idle-triggers";
+import {
+  DeskView,
+  FactoryOverview,
+  Operator,
+  OperatorConfiguration,
+  OperatorObservation,
+} from "@usine/orchestrator/operator";
+import { GitHubItemKey } from "@usine/orchestrator/polling-triggers";
+import { WorkerStatus } from "@usine/orchestrator/worker-status";
 import { Clock, DateTime, Deferred, Effect, FileSystem, Layer, Option, Schema } from "effect";
-import { idleTriggersLayer } from "../src/idle-triggers.ts";
-import { OperatorObservation } from "../src/operator/operator.ts";
-import { gitHubItemKey } from "../src/polling/repository-sync.ts";
-import { WorkerStatus } from "../src/worker-status.ts";
+import { HttpClient, HttpRouter } from "effect/unstable/http";
+import { assert, describe, it } from "vitest";
+import { liveBackendLayer } from "../src/backend.ts";
+import { apiRoutes } from "../src/http.ts";
 
 // The dogfood instance has five Loops and about 500 Items on its Board; the
-// operator's overview and desk each evaluate every Loop's trigger on every Item.
-// Half that Board already takes each read past the budget when every CEL
-// evaluation builds its own cel-js environment.
-const BOARD_ITEMS = 250;
+// overview and the desk each evaluate every Loop's trigger on every Item, and
+// the web UI polls both at once.
+const BOARD_ITEMS = 500;
 const LABELS = [
   "ready-for-agent",
   "agent-in-progress",
@@ -50,6 +58,8 @@ const READ_BUDGET_MILLIS = 500;
 const READS = 3;
 
 const repository = RepositoryName.make("basaltbytes/usine");
+const itemKey = (number: number) =>
+  Schema.encodeSync(GitHubItemKey)(["github", repository, ItemNumber.make(number)]);
 const brain = new BrainSpec({
   harness: "codex",
   model: ModelId.make("gpt-6-astra"),
@@ -64,6 +74,7 @@ const developer = new AgentFile({
   parentEffort: Option.none(),
   persona: AgentPersona.make("Implement the issue."),
 });
+const firstLoop = LoopName.make("loop-0");
 const loops = LABELS.map(
   (label, index) =>
     new LoopFile({
@@ -95,9 +106,12 @@ const instance = new LoadedInstance({
 });
 
 // One Item in ten carries a Loop's label, as on a Board where most work is done.
+const labelOf = (number: number) =>
+  number % 10 === 0 ? (LABELS[(number / 10) % LABELS.length] ?? "bug") : "bug";
+
 const issue = (number: number) =>
   new ItemProjection({
-    itemKey: gitHubItemKey(repository, number),
+    itemKey: itemKey(number),
     repository,
     source: ItemProjectionSource.make("issue"),
     number: ItemNumber.make(number),
@@ -115,10 +129,7 @@ const issue = (number: number) =>
       author: { login: "PhilDL" },
       issueType: null,
       milestone: null,
-      labels: {
-        totalCount: 1,
-        nodes: [{ name: number % 10 === 0 ? LABELS[(number / 10) % LABELS.length]! : "bug" }],
-      },
+      labels: { totalCount: 1, nodes: [{ name: labelOf(number) }] },
       assignees: { totalCount: 0, nodes: [] },
       comments: {
         totalCount: 2,
@@ -138,12 +149,12 @@ const started = (number: number) =>
   new Submission({
     event: new Event({
       id: EventId.make(`event-${number}`),
-      dedupKey: DedupKey.make(`loop-0/${number}`),
+      dedupKey: DedupKey.make(`${firstLoop}/${number}`),
       payload: { number },
       receivedAt: DateTime.makeUnsafe("2026-10-21T16:48:00Z"),
     }),
-    itemKey: gitHubItemKey(repository, number),
-    loop: loops[0]!.name,
+    itemKey: itemKey(number),
+    loop: firstLoop,
     step: StepName.make("run"),
     approval: "none",
     repository,
@@ -167,40 +178,67 @@ const timed = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     return { millis: (yield* Clock.currentTimeMillis) - before, value } as const;
   });
 
-describe("Operator read latency", () => {
-  it.live(
-    `answers the overview and the desk in under ${READ_BUDGET_MILLIS} ms while an Attempt starts on a Board of ${BOARD_ITEMS} Items and five Loops`,
-    () =>
-      Effect.gen(function* () {
-        const fileSystem = yield* FileSystem.FileSystem;
-        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-read-latency-" });
-        const preparing = yield* Deferred.make<void>();
-        // A Worker whose preparation, such as an SSH preflight, lasts until the test ends.
-        const slowWorker = Layer.succeed(StepExecutor)({
-          workers: Effect.succeed([WorkerName.make("worker")]),
-          isLive: () => Effect.succeed(false),
-          outcome: () => Effect.succeed(Option.none()),
-          recover: () => Effect.void,
-          intervene: () => Effect.void,
-          interrupt: () => Effect.void,
-          reserve: () =>
-            Effect.succeed({ worker: WorkerName.make("worker"), release: Effect.void }),
-          execute: () => Deferred.succeed(preparing, undefined).pipe(Effect.andThen(Effect.never)),
-        });
-        const engine = engineLayer(InstanceDirectory.make(root)).pipe(
-          Layer.provide(slowWorker),
-          Layer.provide(
-            Layer.succeed(TriggerCondition)({ recheck: () => Effect.succeed("matches") }),
-          ),
+const decodeOverview = Schema.decodeUnknownSync(Schema.fromJsonString(FactoryOverview));
+const decodeDesk = Schema.decodeUnknownSync(Schema.fromJsonString(DeskView));
+
+describe("operator read latency", () => {
+  it(`answers /api/overview and /api/desk, requested together, in under ${READ_BUDGET_MILLIS} ms while an Attempt starts on a Board of ${BOARD_ITEMS} Items and five Loops`, async () => {
+    const program = Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-read-latency-" });
+      const preparing = yield* Deferred.make<void>();
+      // A Worker whose preparation, such as an SSH preflight, lasts until the test ends.
+      const slowWorker = Layer.succeed(StepExecutor)({
+        workers: Effect.succeed([WorkerName.make("worker")]),
+        isLive: () => Effect.succeed(false),
+        outcome: () => Effect.succeed(Option.none()),
+        recover: () => Effect.void,
+        intervene: () => Effect.void,
+        interrupt: () => Effect.void,
+        reserve: () => Effect.succeed({ worker: WorkerName.make("worker"), release: Effect.void }),
+        execute: () => Deferred.succeed(preparing, undefined).pipe(Effect.andThen(Effect.never)),
+      });
+      const engine = engineLayer(InstanceDirectory.make(root)).pipe(
+        Layer.provide(slowWorker),
+        Layer.provide(
+          Layer.succeed(TriggerCondition)({ recheck: () => Effect.succeed("matches") }),
+        ),
+      );
+      const observation = OperatorObservation.layer.pipe(
+        Layer.provide(Layer.mergeAll(idleTriggersLayer, MarcbachmannCelLayer, WorkerStatus.idle)),
+        Layer.provideMerge(engine),
+      );
+      yield* Effect.gen(function* () {
+        const items = yield* ItemProjectionWriter;
+        const runs = yield* RunEngine;
+        const reads = yield* OperatorObservation;
+        // The running factory's backend; the reads it serves are the Operator's observation.
+        const operator = yield* Effect.provide(
+          Effect.gen(function* () {
+            return yield* Operator;
+          }),
+          Layer.mock(Operator)({ overview: reads.overview, desk: reads.desk }),
         );
-        const observation = OperatorObservation.layer.pipe(
-          Layer.provide(Layer.mergeAll(idleTriggersLayer, MarcbachmannCelLayer, WorkerStatus.idle)),
-          Layer.provideMerge(engine),
+        const configuration = yield* Effect.provide(
+          Effect.gen(function* () {
+            return yield* OperatorConfiguration;
+          }),
+          Layer.mock(OperatorConfiguration)({}),
         );
+        const backend = liveBackendLayer(
+          { get: Effect.succeed(instance), reload: Effect.die("unused") },
+          operator,
+          configuration,
+        );
+        const server = HttpRouter.serve(apiRoutes.pipe(HttpRouter.provideRequest(backend)), {
+          disableLogger: true,
+        }).pipe(Layer.provideMerge(NodeHttpServer.layerTest));
+
         yield* Effect.gen(function* () {
-          const items = yield* ItemProjectionWriter;
-          const runs = yield* RunEngine;
-          const operator = yield* OperatorObservation;
+          const client = yield* HttpClient.HttpClient;
+          // Until the response body has arrived, as the web UI waits for it.
+          const read = (path: string) =>
+            timed(client.get(path).pipe(Effect.flatMap((response) => response.text)));
           for (let number = 1; number <= BOARD_ITEMS; number += 1)
             yield* items.upsert(issue(number));
           yield* runs.submit(started(10));
@@ -208,9 +246,10 @@ describe("Operator read latency", () => {
 
           // While an Attempt starts, its Agent relabels Items and the engine records the
           // Attempt, so the projection revision keeps changing and each overview read
-          // projects again. The fastest of a few reads measures what a read costs, not how
-          // busy the machine running the tests is; a read that waited on the parked Attempt
-          // would wait in every round.
+          // projects again. The web UI polls the overview and the desk together, and both
+          // run on one event loop, so each round requests them at once. The fastest of a
+          // few rounds measures what a read costs, not how busy the machine running the
+          // tests is; a read that waited on the parked Attempt would wait in every round.
           const rounds = [];
           for (let round = 1; round <= READS; round += 1) {
             yield* items.upsert(
@@ -219,27 +258,36 @@ describe("Operator read latency", () => {
                 contentHash: ItemContentHash.make(`issue-1-change-${round}`),
               }),
             );
-            const overview = yield* timed(operator.overview(instance));
-            const desk = yield* timed(operator.desk(instance));
+            const [overview, desk] = yield* Effect.all([read("/api/overview"), read("/api/desk")], {
+              concurrency: "unbounded",
+            });
             rounds.push({ overview, desk });
           }
 
-          assert.deepStrictEqual(
-            rounds.map(({ desk }) => desk.value.running.map(({ item }) => item?.number)),
-            Array.from({ length: READS }, () => [ItemNumber.make(10)]),
-          );
+          for (const { overview, desk } of rounds) {
+            assert.strictEqual(decodeOverview(overview.value)._tag, "Ready");
+            assert.deepStrictEqual(
+              decodeDesk(desk.value).running.map(({ item }) => item?.number),
+              [ItemNumber.make(10)],
+            );
+          }
           const fastest = (millis: ReadonlyArray<number>) => Math.min(...millis);
+          const timings = JSON.stringify(
+            rounds.map(({ overview, desk }) => ({ overview: overview.millis, desk: desk.millis })),
+          );
           assert.isBelow(
             fastest(rounds.map(({ overview }) => overview.millis)),
             READ_BUDGET_MILLIS,
-            "fastest overview read, in milliseconds",
+            `fastest /api/overview response, in milliseconds, of ${timings}`,
           );
           assert.isBelow(
             fastest(rounds.map(({ desk }) => desk.millis)),
             READ_BUDGET_MILLIS,
-            "fastest desk read, in milliseconds",
+            `fastest /api/desk response, in milliseconds, of ${timings}`,
           );
-        }).pipe(Effect.provide(observation));
-      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  );
+        }).pipe(Effect.provide(server));
+      }).pipe(Effect.provide(observation));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
+    await Effect.runPromise(program);
+  }, 60_000);
 });

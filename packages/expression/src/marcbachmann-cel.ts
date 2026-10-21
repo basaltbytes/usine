@@ -2,11 +2,13 @@ import {
   type ASTNode,
   Environment as CelEnvironment,
   ParseError as CelParseError,
+  type ParseResult,
   TypeError as CelTypeError,
+  type TypeCheckResult,
   parse,
 } from "@marcbachmann/cel-js";
-import { Effect, Layer, Option, Predicate, Schema } from "effect";
-import { type Environment, type ObjectType, TypeReference } from "./environment.ts";
+import { Effect, Layer, Option, Predicate, Result, Schema } from "effect";
+import { type Environment, TypeReference } from "./environment.ts";
 import {
   ExpressionEngine,
   ExpressionCheckError,
@@ -284,81 +286,199 @@ const makeEnvironment = (descriptor: Environment, purpose: EnvironmentPurpose): 
  */
 const isJsonObject = (value: Schema.Json): value is Schema.JsonObject => Predicate.isObject(value);
 
-const normalizeValue = (
-  value: Schema.Json,
-  type: TypeReference,
-  objectTypes: ReadonlyMap<string, ObjectType>,
-): RuntimeValue => {
-  if ((type === "int" || type === "uint") && Predicate.isNumber(value) && Number.isInteger(value)) {
-    return BigInt(value);
+/** Turns a JSON value of one declared type into the value cel-js evaluates. */
+type Normalize = (value: Schema.Json) => RuntimeValue;
+
+/** A type that needs no normalization: a string, a `map<K,V>`, or an object type with no `int` and no nullable field below it. */
+const unchanged: Normalize = (value) => value;
+
+/** A copy of a JSON object whose fields normalization rewrites in place before cel-js reads it. */
+interface NormalizedObject {
+  [key: string]: RuntimeValue;
+}
+
+/** Sets `name` on a copied object as an own field, even when it is `__proto__`. */
+const setField = (target: NormalizedObject, name: string, value: RuntimeValue) => {
+  if (name === "__proto__") {
+    Object.defineProperty(target, name, {
+      value,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  } else {
+    target[name] = value;
   }
-  if (type.startsWith("list<") && type.endsWith(">") && Array.isArray(value)) {
-    const itemType = decodeTypeReference(type.slice(5, -1));
-    return value.map((item) => normalizeValue(item, itemType, objectTypes));
+};
+
+/**
+ * Compiles how a descriptor's evaluation context is normalized, as the layer's
+ * documentation describes: `int` and `uint` numbers become `bigint`, `list<T>`
+ * normalizes each item as `T`, and an object type normalizes each declared
+ * field and reads an absent nullable field as `null`. Each type reference is
+ * compiled once. A value whose type needs nothing is returned as it is, and an
+ * object is copied with only its fields that change rewritten, so normalizing
+ * an Item's payload leaves its strings and undeclared fields untouched.
+ */
+const contextNormalizer = (
+  descriptor: Environment,
+): ((context: Schema.JsonObject) => RuntimeObject) => {
+  const objectTypes = new Map(descriptor.types.map((type) => [type.name, type]));
+  const compiled = new Map<TypeReference, Normalize>();
+  // A type comes before the types whose fields reference it, so compiling a
+  // field's type never comes back to the type being compiled.
+  const normalizerOf = (type: TypeReference): Normalize => {
+    const existing = compiled.get(type);
+    if (existing !== undefined) return existing;
+    const normalize = compile(type);
+    compiled.set(type, normalize);
+    return normalize;
+  };
+  const compile = (type: TypeReference): Normalize => {
+    if (type === "int" || type === "uint") {
+      return (value) =>
+        Predicate.isNumber(value) && Number.isInteger(value) ? BigInt(value) : value;
+    }
+    if (type.startsWith("list<") && type.endsWith(">")) {
+      const normalizeItem = normalizerOf(decodeTypeReference(type.slice(5, -1)));
+      if (normalizeItem === unchanged) return unchanged;
+      return (value) => (Array.isArray(value) ? value.map(normalizeItem) : value);
+    }
+    const objectType = objectTypes.get(type);
+    if (objectType === undefined) return unchanged;
+    const fields = objectType.fields.flatMap(({ name, type: fieldType }) => {
+      const normalize = normalizerOf(fieldType);
+      return normalize === unchanged ? [] : [[name, normalize] as const];
+    });
+    const nullable = objectType.fields.filter((field) => field.nullable).map(({ name }) => name);
+    if (fields.length === 0 && nullable.length === 0) return unchanged;
+    return (value) => {
+      if (!isJsonObject(value)) return value;
+      const normalized: NormalizedObject = { ...value };
+      for (const [name, normalize] of fields) {
+        const fieldValue = value[name];
+        if (fieldValue !== undefined && Object.hasOwn(value, name)) {
+          setField(normalized, name, normalize(fieldValue));
+        }
+      }
+      for (const name of nullable) {
+        if (!Object.hasOwn(value, name)) setField(normalized, name, null);
+      }
+      return normalized;
+    };
+  };
+  const variables = new Map(
+    descriptor.variables.map((variable) => [variable.name, normalizerOf(variable.type)]),
+  );
+  return (context) => {
+    const normalized: NormalizedObject = { ...context };
+    for (const [name, normalize] of variables) {
+      const value = context[name];
+      if (value !== undefined && Object.hasOwn(context, name)) {
+        setField(normalized, name, normalize(value));
+      }
+    }
+    return normalized;
+  };
+};
+
+/** How many expressions each environment keeps checked or parsed; past that the oldest is dropped. */
+const KEPT_EXPRESSIONS = 256;
+
+/** `value` kept under `key` in `kept`, dropping the oldest entry when `kept` is full. */
+const keep = <A>(kept: Map<Source, A>, key: Source, value: A): A => {
+  if (kept.size >= KEPT_EXPRESSIONS) {
+    const oldest = kept.keys().next();
+    if (oldest.done !== true) kept.delete(oldest.value);
   }
-  const objectType = objectTypes.get(type);
-  if (objectType !== undefined && isJsonObject(value)) {
-    const absentNullable = objectType.fields
-      .filter((field) => field.nullable && !Object.hasOwn(value, field.name))
-      .map((field) => [field.name, null] as const);
-    return Object.fromEntries([
-      ...Object.entries(value).map(([key, fieldValue]) => {
-        const field = objectType.fields.find(({ name }) => name === key);
-        return [
-          key,
-          field === undefined ? fieldValue : normalizeValue(fieldValue, field.type, objectTypes),
-        ] as const;
-      }),
-      ...absentNullable,
-    ]);
-  }
+  kept.set(key, value);
   return value;
 };
 
-const normalizeContext = (context: Schema.JsonObject, descriptor: Environment): RuntimeObject => {
-  const objectTypes = new Map(descriptor.types.map((type) => [type.name, type]));
-  return Object.fromEntries(
-    Object.entries(context).map(([key, value]) => {
-      const variable = descriptor.variables.find(({ name }) => name === key);
-      return [
-        key,
-        variable === undefined ? value : normalizeValue(value, variable.type, objectTypes),
-      ];
-    }),
-  );
-};
+/** One descriptor's cel-js environments, built on first use, and what they keep between calls. */
+interface DescriptorRuntime {
+  readonly normalize: (context: Schema.JsonObject) => RuntimeObject;
+  check: Option.Option<CelEnvironment>;
+  evaluate: Option.Option<CelEnvironment>;
+  readonly checked: Map<Source, TypeCheckResult>;
+  readonly parsed: Map<Source, ParseResult>;
+}
 
-/** Returns the cel-js environment built from a descriptor for one purpose, building it the first time it is asked for. */
-type CelEnvironments = (descriptor: Environment, purpose: EnvironmentPurpose) => CelEnvironment;
+/** Checks and evaluates expressions against descriptors; each call throws what cel-js throws. */
+interface CelRuntimes {
+  readonly check: (descriptor: Environment, source: Source) => TypeCheckResult;
+  readonly evaluate: (
+    descriptor: Environment,
+    source: Source,
+    context: Schema.JsonObject,
+  ) => RuntimeValue;
+}
 
 /**
- * Builds each descriptor's cel-js environment once per purpose. Building one
- * clones cel-js's whole function registry and registers every payload type,
- * which costs far more than checking or evaluating an expression, and the
- * operator's overview and desk evaluate every Loop's trigger on every Board
- * Item each time they are read (#464). A built environment keeps nothing from
- * one check or evaluation to the next beyond the overload lookups its
- * registry memoizes, so one serves every later call. A build that throws is
- * not kept, and the next call tries again. Descriptors are
- * immutable, and the trigger environments are module constants, so they are
- * the keys; a descriptor no caller keeps is released with its environments.
+ * Builds each descriptor's cel-js environment once per purpose (check or
+ * evaluate), and checks and parses each expression once per environment. Building an
+ * environment clones cel-js's whole function registry and registers every
+ * payload type, and parsing and checking an expression costs more than
+ * evaluating it, while the operator's overview and desk evaluate every Loop's
+ * trigger on every Board Item each time they are read (#464).
+ *
+ * A check result depends only on the environment and the expression, so it is
+ * kept as it is. A parsed expression is cel-js's `Environment.parse` result,
+ * which cel-js evaluates again on each new context; between two evaluations
+ * its comprehensions only hold the previous context until the next evaluation
+ * replaces it. A build or parse that throws is not kept, and the next call
+ * tries again. Each environment keeps its {@link KEPT_EXPRESSIONS} newest expressions.
+ * Descriptors are immutable, and the trigger environments are module
+ * constants, so they are the keys; a descriptor no caller keeps is released
+ * with its environments.
  */
-const celEnvironments = (): CelEnvironments => {
-  const built = {
-    check: new WeakMap<Environment, CelEnvironment>(),
-    evaluate: new WeakMap<Environment, CelEnvironment>(),
-  };
-  return (descriptor, purpose) => {
-    const existing = built[purpose].get(descriptor);
+const celRuntimes = (): CelRuntimes => {
+  const runtimes = new WeakMap<Environment, DescriptorRuntime>();
+  const runtimeOf = (descriptor: Environment): DescriptorRuntime => {
+    const existing = runtimes.get(descriptor);
     if (existing !== undefined) return existing;
-    const environment = makeEnvironment(descriptor, purpose);
-    built[purpose].set(descriptor, environment);
-    return environment;
+    const runtime: DescriptorRuntime = {
+      normalize: contextNormalizer(descriptor),
+      check: Option.none(),
+      evaluate: Option.none(),
+      checked: new Map(),
+      parsed: new Map(),
+    };
+    runtimes.set(descriptor, runtime);
+    return runtime;
+  };
+  const environmentOf = (
+    runtime: DescriptorRuntime,
+    descriptor: Environment,
+    purpose: EnvironmentPurpose,
+  ): CelEnvironment =>
+    Option.getOrElse(runtime[purpose], () => {
+      const environment = makeEnvironment(descriptor, purpose);
+      runtime[purpose] = Option.some(environment);
+      return environment;
+    });
+  return {
+    check: (descriptor, source) => {
+      const runtime = runtimeOf(descriptor);
+      return (
+        runtime.checked.get(source) ??
+        keep(runtime.checked, source, environmentOf(runtime, descriptor, "check").check(source))
+      );
+    },
+    evaluate: (descriptor, source, context) => {
+      const runtime = runtimeOf(descriptor);
+      const parsed =
+        runtime.parsed.get(source) ??
+        keep(runtime.parsed, source, environmentOf(runtime, descriptor, "evaluate").parse(source));
+      // SAFETY: CEL evaluates to the same value vocabulary the context is built
+      // from, and every caller decodes the expected result type before use.
+      return parsed(runtime.normalize(context)) as RuntimeValue;
+    },
   };
 };
 
 const checkExpected = (
-  environments: CelEnvironments,
+  runtimes: CelRuntimes,
   source: Source,
   environment: Environment,
   accepts: (resultType: string) => boolean,
@@ -366,7 +486,7 @@ const checkExpected = (
 ): Effect.Effect<void, ExpressionCheckError> =>
   Effect.gen(function* () {
     const result = yield* Effect.try({
-      try: () => environments(environment, "check").check(source),
+      try: () => runtimes.check(environment, source),
       catch: (cause) =>
         new ExpressionCheckError({
           source,
@@ -387,20 +507,14 @@ const checkExpected = (
     }
   });
 
-const evaluateRaw = (
-  environments: CelEnvironments,
+const evaluated = (
+  runtimes: CelRuntimes,
   source: Source,
   environment: Environment,
   context: Schema.JsonObject,
-): Effect.Effect<RuntimeValue, ExpressionEvaluationError> =>
-  Effect.try({
-    try: () =>
-      // SAFETY: CEL evaluates to the same value vocabulary the context is built
-      // from, and every caller decodes the expected result type before use.
-      environments(environment, "evaluate").evaluate(
-        source,
-        normalizeContext(context, environment),
-      ) as RuntimeValue,
+): Result.Result<RuntimeValue, ExpressionEvaluationError> =>
+  Result.try({
+    try: () => runtimes.evaluate(environment, source, context),
     catch: (cause) =>
       new ExpressionEvaluationError({
         source,
@@ -414,27 +528,21 @@ const unexpectedResult = (source: Source, expected: string) => () =>
     message: `CEL evaluation returned a value that is not ${expected}`,
   });
 
-const decodeBoolean = Schema.decodeUnknownEffect(Schema.Boolean);
+const isBooleanType = (resultType: string): boolean => resultType === "bool";
 const decodeScalar = Schema.decodeUnknownEffect(Scalar);
 
 const makeExpressionEngine = Effect.sync(() => {
-  const environments = celEnvironments();
+  const runtimes = celRuntimes();
 
   const checkBoolean = Effect.fn("ExpressionEngine.checkBoolean")(
     (source: Source, environment: Environment): Effect.Effect<void, ExpressionCheckError> =>
-      checkExpected(
-        environments,
-        source,
-        environment,
-        (resultType) => resultType === "bool",
-        "bool",
-      ),
+      checkExpected(runtimes, source, environment, isBooleanType, "bool"),
   );
 
   const checkScalar = Effect.fn("ExpressionEngine.checkScalar")(
     (source: Source, environment: Environment): Effect.Effect<void, ExpressionCheckError> =>
       checkExpected(
-        environments,
+        runtimes,
         source,
         environment,
         (resultType) => acceptedScalarTypes.has(resultType),
@@ -442,14 +550,38 @@ const makeExpressionEngine = Effect.sync(() => {
       ),
   );
 
+  /** The value of an already checked condition on `context`, or why it has none. */
+  const booleanOn = (
+    source: Source,
+    environment: Environment,
+    context: Schema.JsonObject,
+  ): Result.Result<boolean, ExpressionEvaluationError> =>
+    Result.flatMap(evaluated(runtimes, source, environment, context), (value) =>
+      Predicate.isBoolean(value)
+        ? Result.succeed(value)
+        : Result.fail(unexpectedResult(source, "a boolean")()),
+    );
+
   const evaluateBoolean = Effect.fn("ExpressionEngine.evaluateBoolean")(function* (
     source: Source,
     environment: Environment,
     context: Schema.JsonObject,
   ) {
     yield* checkBoolean(source, environment);
-    const value = yield* evaluateRaw(environments, source, environment, context);
-    return yield* decodeBoolean(value).pipe(Effect.mapError(unexpectedResult(source, "a boolean")));
+    return yield* Effect.fromResult(booleanOn(source, environment, context));
+  });
+
+  // One span and one check for every context: evaluating each context in its own
+  // Effect costs several times the evaluation itself, and Loop matching evaluates
+  // every Loop's trigger on every Board Item on each operator read (#464).
+  const evaluateBooleanEach = Effect.fn("ExpressionEngine.evaluateBooleanEach")(function* (
+    source: Source,
+    environment: Environment,
+    contexts: ReadonlyArray<Schema.JsonObject>,
+  ) {
+    yield* Effect.annotateCurrentSpan({ contexts: contexts.length });
+    yield* checkExpected(runtimes, source, environment, isBooleanType, "bool");
+    return contexts.map((context) => booleanOn(source, environment, context));
   });
 
   const evaluateScalar = Effect.fn("ExpressionEngine.evaluateScalar")(function* (
@@ -458,7 +590,7 @@ const makeExpressionEngine = Effect.sync(() => {
     context: Schema.JsonObject,
   ) {
     yield* checkScalar(source, environment);
-    const value = yield* evaluateRaw(environments, source, environment, context);
+    const value = yield* Effect.fromResult(evaluated(runtimes, source, environment, context));
     return yield* decodeScalar(value).pipe(
       Effect.mapError(unexpectedResult(source, "a scalar value")),
     );
@@ -469,6 +601,7 @@ const makeExpressionEngine = Effect.sync(() => {
     checkBoolean,
     checkScalar,
     evaluateBoolean,
+    evaluateBooleanEach,
     evaluateScalar,
   });
 });
@@ -480,7 +613,9 @@ const makeExpressionEngine = Effect.sync(() => {
  * The layer has no requirements. Each built layer sets up the cel-js
  * environment of an {@link Environment} once for checking and once for
  * evaluation, the first time an expression needs it, and reuses it for every
- * later call with the same descriptor. Before evaluation it converts JSON integers to
+ * later call with the same descriptor. It also keeps each expression's check
+ * result and parsed form per environment, so checking or evaluating the same
+ * expression again, on any context, does not parse it again. Before evaluation it converts JSON integers to
  * `bigint` where the {@link Environment} declares `int`: on a variable, on a
  * field of a declared object type, or as the item type of a `list<T>`, at any
  * depth. It also reads absent nullable fields of declared object types as

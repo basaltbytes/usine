@@ -1,8 +1,11 @@
 ---
-"@usine/expression": patch
+"@usine/expression": minor
+"@usine/orchestrator": patch
 "@usine/server": patch
 ---
 
-`MarcbachmannCelLayer` builds the cel-js environment of each `Environment` once for checking and once for evaluation, then reuses it for later expressions with the same descriptor, instead of building a new environment for every check and every evaluation. A built environment clones cel-js's whole function registry, which cost more than the expression itself.
+The operator API's `/api/overview` and `/api/desk` answer in under 200 ms when the web UI polls them together, on a Board of 500 Items and five Loops while an Attempt starts. They used to take over 700 ms each, and seconds on the dogfood instance. Both evaluate every Loop's trigger on every Board Item on the same event loop, and almost all of that time was spent around the CEL evaluations rather than in them.
 
-The operator API's `/api/overview` and `/api/desk` evaluate every Loop's trigger on every Board Item, so they answer about four times faster: on a Board of 250 Items and five Loops, a read takes about 200 ms instead of 750 ms. They no longer take seconds while an Attempt starts and the Board changes under them.
+`MarcbachmannCelLayer` builds the cel-js environment of each `Environment` once for checking and once for evaluation, instead of on every call. It also keeps each expression's check result and parsed form, so the same expression is no longer parsed twice per evaluation. Normalizing a context is compiled once per descriptor and copies an object rewriting only the fields that change.
+
+`ExpressionEngine` gains `evaluateBooleanEach`: it checks a condition once and evaluates it on many contexts in one call, each context's evaluation failure kept to that context. An implementation of `ExpressionEngineService` must now provide it. `LoopMatches`, behind the overview and the desk, evaluates each Loop's trigger on all of a repository's Items with it.
