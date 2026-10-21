@@ -55,14 +55,24 @@ const pullRequestLink =
 
 // The columns follow the table's own width, since the sidebar beside a mid-size window leaves
 // less room than a phone held sideways. Time always shows. Tokens and Cost need 56rem and Runs and
-// Pull request 64rem, so the title keeps room: on phones all four drop, and beside the sidebar on
-// a mid-size window Runs and Pull request do. Status and Last run keep a minimum width that grows
-// with the table, from 28rem, and wrap past it; from 36rem Last run stays on one line. On a phone
-// both wrap, so the table never scrolls sideways.
+// Pull request 64rem.
 const WIDE_COLUMN = "hidden @5xl:table-cell";
 const USAGE_COLUMN = "hidden @4xl:table-cell";
-const STATUS_COLUMN = "whitespace-normal @md:min-w-40 @xl:min-w-52";
-const LAST_RUN_COLUMN = "whitespace-normal @md:min-w-28 @xl:whitespace-nowrap";
+
+// The title cell is `w-full max-w-0`: it takes the width the other columns leave, and they keep
+// their narrowest width. Status, Runs, and Last run, the columns that can wrap or truncate, take
+// their own width up to `--side` and wrap past it, or truncate for Runs, so a short status takes
+// only its words and they give way before the title does. `--side` is an equal share, between 7rem
+// and 13rem, of the table less 26rem for the title, the width of a long issue title, and less
+// `--rest`: the figure columns showing at their usual width and the side columns' padding. On a
+// phone Status and Last run wrap to their longest word instead, so the table never scrolls
+// sideways.
+const SIDE_SHARE = [
+  "@md:[--side:clamp(7rem,calc((100cqw-26rem-var(--rest))/var(--sides)),13rem)]",
+  "[--rest:8rem] [--sides:2] @4xl:[--rest:19rem] @5xl:[--rest:25rem] @5xl:[--sides:3]",
+].join(" ");
+const SIDE_COLUMN = "py-3 align-top whitespace-normal";
+const SIDE_CONTENT = "@md:w-max @md:max-w-(--side)";
 const TOTAL_COLUMN = "py-3 text-right align-top font-mono text-xs/5 whitespace-nowrap tabular-nums";
 
 const usageTrigger =
@@ -107,10 +117,13 @@ const statusLine = (
  * the words wrap. */
 const Status = ({ row, now }: { readonly row: TaskRow; readonly now: number }) => {
   const { state, words } = statusLine(row, now);
+  // A word wider than `--side`, such as the Loop `dependency_updates`, breaks inside the column:
+  // `min-w-0` lets the words shrink below that word, and `wrap-break-word` breaks it only then, so
+  // on a phone, where the column is as wide as its longest word, the words still wrap between words.
   return (
-    <span className="flex items-start gap-1.5 text-xs/5 font-medium">
+    <span className={cn("flex items-start gap-1.5 text-xs/5 font-medium", SIDE_CONTENT)}>
       <StateMark state={state} className="mt-1.75" />
-      {words}
+      <span className="min-w-0 wrap-break-word">{words}</span>
     </span>
   );
 };
@@ -120,7 +133,7 @@ const Status = ({ row, now }: { readonly row: TaskRow; readonly now: number }) =
 const Runs = ({ task }: { readonly task: BoardTaskView }) => {
   const loops = taskLoops(task);
   return (
-    <span className="flex min-w-0 items-baseline gap-2">
+    <span className={cn("flex items-baseline gap-2", SIDE_CONTENT)}>
       <span className="truncate" title={loops.map(({ loop }) => loop).join(" · ")}>
         {loops.map(({ loop, state }, index) => (
           <Fragment key={loop}>
@@ -142,7 +155,7 @@ const Runs = ({ task }: { readonly task: BoardTaskView }) => {
 const LastRun = ({ run, now }: { readonly run: RunView; readonly now: number }) => {
   const at = runActivityAt(run);
   return (
-    <span className="flex min-w-0 flex-wrap items-center gap-x-2 @xl:flex-nowrap">
+    <span className={cn("flex flex-wrap items-center gap-x-2", SIDE_CONTENT)}>
       <span className="truncate">{run.loop}</span>
       <StatusBadge state={run.state} />
       <time
@@ -253,13 +266,13 @@ const TaskListRow = ({
         <ItemTitle item={taskOrigin(row.task)} />
       </Link>
     </TableCell>
-    <TableCell className={cn("py-3 align-top", STATUS_COLUMN)}>
+    <TableCell className={SIDE_COLUMN}>
       <Status row={row} now={now} />
     </TableCell>
-    <TableCell className={cn("max-w-56 py-3 align-top", WIDE_COLUMN)}>
+    <TableCell className={cn("py-3 align-top", WIDE_COLUMN)}>
       <Runs task={row.task} />
     </TableCell>
-    <TableCell className={cn("py-3 align-top", LAST_RUN_COLUMN)}>
+    <TableCell className={SIDE_COLUMN}>
       <LastRun run={row.last} now={now} />
     </TableCell>
     <TableCell className={cn("py-3 text-right align-top", WIDE_COLUMN)}>
@@ -326,7 +339,7 @@ export const TaskList = ({
             {totalsLine(taskTotals(rows, now))}
           </p>
           <div className="@container -mx-2">
-            <Table aria-label={`${project.repository} tasks`}>
+            <Table aria-label={`${project.repository} tasks`} className={SIDE_SHARE}>
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
                   <TableHead>Task</TableHead>

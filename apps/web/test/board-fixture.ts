@@ -421,6 +421,53 @@ export const boardOverviewUnpriced = () =>
         }),
   );
 
+/** The package each Task that ran documents in `boardOverviewDocumented`, by originating Item. */
+const documentedPackages = new Map([
+  [9, "core"],
+  [7, "agents"],
+  [44, "engine"],
+  [28, "orchestrator"],
+  [18, "github"],
+  [5, "config"],
+]);
+
+/**
+ * The Board with each Task that ran titled after one of the TSDoc issues, such as `Document the
+ * public API of @usine/orchestrator in TSDoc`: titles that read alike up to the package near
+ * their end.
+ */
+export const boardOverviewDocumented = () =>
+  changeTasks(boardOverview(), (task) => {
+    const [origin, ...others] = task.items;
+    const name = origin === undefined ? undefined : documentedPackages.get(origin.number);
+    if (origin === undefined || name === undefined) return task;
+    const title = `Document the public API of @usine/${name} in TSDoc`;
+    return new BoardTaskView({
+      ...task,
+      title,
+      items: [new BoardItemLink({ ...origin, title }), ...others],
+    });
+  });
+
+/**
+ * `boardOverviewDocumented` with #9's running Run on the `dependency_updates` Loop, so its status,
+ * `Running dependency_updates`, holds one word wider than the Status column's share of the table.
+ */
+export const boardOverviewDocumentedLongLoop = () =>
+  changeTasks(boardOverviewDocumented(), (task) => {
+    if (task.itemKey !== redesignPr.itemKey) return task;
+    const runs = task.runs.map((run) =>
+      run.state === "Running"
+        ? new RunView({ ...run, loop: LoopName.make("dependency_updates") })
+        : run,
+    );
+    return new BoardTaskView({
+      ...task,
+      runs,
+      run: runs.find(({ id }) => id === task.run?.id) ?? null,
+    });
+  });
+
 const stalled = (loopName: string, item: BoardItemLink, reason: StalledItemView["reason"]) =>
   new StalledItemView({
     repository: boardRepository,
