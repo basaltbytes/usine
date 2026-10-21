@@ -152,6 +152,7 @@ describe("local worker runaway guard", () => {
               append: () => Effect.void,
               salvage: () => Effect.void,
               comments: () => Effect.void,
+              overlapping: Effect.succeed([]),
             })
             .pipe(Effect.forkChild);
           yield* Deferred.await(started);

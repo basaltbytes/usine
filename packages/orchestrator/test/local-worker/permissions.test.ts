@@ -134,6 +134,7 @@ describe("local worker Loop permissions", () => {
                     append: () => Effect.void,
                     salvage: () => Effect.void,
                     comments: () => Effect.void,
+                    overlapping: Effect.succeed([]),
                   }),
                 );
                 assert(Exit.isFailure(exit));

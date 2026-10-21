@@ -12,7 +12,12 @@ import {
   gatewayRuntime,
 } from "./support.ts";
 
-const sink = { append: () => Effect.void, salvage: () => Effect.void, comments: () => Effect.void };
+const sink = {
+  append: () => Effect.void,
+  salvage: () => Effect.void,
+  comments: () => Effect.void,
+  overlapping: Effect.succeed([]),
+};
 const SECOND = WorkerName.make("eu-two");
 const THIRD = WorkerName.make("eu-three");
 const OTHER_GATEWAY = SshDestination.make("usine-gateway-2");

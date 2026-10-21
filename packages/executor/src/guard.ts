@@ -192,6 +192,7 @@ export const attemptGuard = (
       }),
       salvage: io.salvage,
       comments: io.comments,
+      overlapping: io.overlapping,
     };
     return {
       sink,

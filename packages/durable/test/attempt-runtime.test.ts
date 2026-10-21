@@ -388,6 +388,7 @@ describe("durable AttemptRuntime", () => {
             }),
           salvage: () => Effect.void,
           comments: () => Effect.void,
+          overlapping: Effect.succeed([]),
         };
         const stopped = yield* runtime.execute(request, sink).pipe(Effect.flip);
         assert.strictEqual(stopped._tag, "InfraFailure");
@@ -983,6 +984,7 @@ describe("durable AttemptRuntime", () => {
               : Effect.void,
           salvage: () => Effect.void,
           comments: () => Effect.void,
+          overlapping: Effect.succeed([]),
         };
         const failure = yield* runtime.execute(request, sink).pipe(Effect.flip);
         assert.strictEqual(failure._tag, "RunawayFailure");

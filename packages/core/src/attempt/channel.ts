@@ -2,7 +2,7 @@ import { Effect, Option, Result, Schema } from "effect";
 import { Agent } from "../agent/agent.ts";
 import { Effort, ModelId } from "../agent/brain.ts";
 import { AgentSessionEvent, AgentSessionId, ChildSessionBudget } from "../agent/session.ts";
-import { AttemptId, AttemptTask } from "./attempt.ts";
+import { AttemptId, AttemptTask, type AttemptWindow } from "./attempt.ts";
 import { RepositoryName, CommitSha, RepositoryRevision } from "../repository.ts";
 import { type Comment, StepResult } from "../step/result.ts";
 import { BotLogin, WorkerName } from "../worker.ts";
@@ -269,7 +269,11 @@ export class InboundEnvelope extends Schema.TaggedClass<InboundEnvelope>(
 export const Envelope = Schema.Union([OutboundEnvelope, InboundEnvelope]);
 export type Envelope = typeof Envelope.Type;
 
-/** Where a channel consumer persists envelopes and the executor's records of an Attempt that ended without success. */
+/**
+ * The orchestrator's side of one Attempt for its executor: where it persists
+ * envelopes and the records of an Attempt that ended without success, and
+ * what the harvest reads from its records.
+ */
 export interface Sink {
   readonly append: (
     direction: Direction,
@@ -279,6 +283,12 @@ export interface Sink {
   readonly salvage: (salvage: AttemptSalvage) => Effect.Effect<void, AttemptFailure>;
   /** Records the comments and reviews the Attempt posted on its Run's Item before it ended without success. */
   readonly comments: (comments: ReadonlyArray<Comment>) => Effect.Effect<void, AttemptFailure>;
+  /**
+   * The windows of the other Attempts of the Attempt's Agent that overlap its
+   * own on its Run's Item, read when the harvest runs, so they include Attempts
+   * that started after it. The harvest leaves out a comment posted in one.
+   */
+  readonly overlapping: Effect.Effect<ReadonlyArray<AttemptWindow>, AttemptFailure>;
 }
 
 /** How far one outbound channel has legally progressed. */

@@ -82,6 +82,7 @@ export const recordingSink = () => {
       }),
     salvage: () => Effect.void,
     comments: () => Effect.void,
+    overlapping: Effect.succeed([]),
   };
   const outbound = () =>
     recorded.flatMap(({ direction, envelope }) =>

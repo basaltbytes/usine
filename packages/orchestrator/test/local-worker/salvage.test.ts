@@ -170,6 +170,7 @@ describe("local worker salvage", () => {
                       new InfraFailure({ message: "channel unavailable", cause: "outage" }),
                     ),
                   comments: () => Effect.void,
+                  overlapping: Effect.succeed([]),
                   salvage: () =>
                     Effect.gen(function* () {
                       assert(yield* fileSystem.exists(worktree).pipe(Effect.orDie));
@@ -205,6 +206,7 @@ describe("local worker salvage", () => {
                   recorded.push(salvage);
                 }),
               comments: () => Effect.void,
+              overlapping: Effect.succeed([]),
             },
           );
           const recovered = recorded[0];

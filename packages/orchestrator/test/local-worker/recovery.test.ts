@@ -20,7 +20,11 @@ const attempt = (worker: string, number: number) => ({
   open: false,
 });
 
-const ignored = { salvage: () => Effect.void, comments: () => Effect.void };
+const ignored = {
+  salvage: () => Effect.void,
+  comments: () => Effect.void,
+  overlapping: Effect.succeed([]),
+};
 
 const credentials = Layer.succeed(CredentialProvider)({
   issue: () => Effect.die("Absent checkouts must not acquire credentials"),
@@ -66,6 +70,7 @@ describe("local checkout reconciliation", () => {
             executor.recover(attempt("local", index), {
               salvage: () => Effect.die("Unexpected salvage"),
               comments: () => Effect.die("Unexpected comments"),
+              overlapping: Effect.succeed([]),
             }),
           { concurrency: 8, discard: true },
         );

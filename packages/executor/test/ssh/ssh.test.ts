@@ -85,6 +85,7 @@ const workingAttempts = (attemptIds: ReadonlyArray<AttemptId>) =>
           }),
         salvage: () => Effect.void,
         comments: () => Effect.void,
+        overlapping: Effect.succeed([]),
       }),
       noticesOf: (attemptId: AttemptId) => (outbound.get(attemptId) ?? []).filter(isWorkerNotice),
     };
@@ -114,6 +115,7 @@ describe("SSH Worker", () => {
           append: () => Effect.void,
           salvage: () => Effect.void,
           comments: () => Effect.void,
+          overlapping: Effect.succeed([]),
         });
 
         assert(given !== undefined && given.host instanceof RemoteShell);
@@ -192,6 +194,7 @@ describe("SSH Worker", () => {
         append: () => Effect.void,
         salvage: () => Effect.void,
         comments: () => Effect.void,
+        overlapping: Effect.succeed([]),
       });
       const released = machine.state.calls.length;
       yield* TestClock.adjust("2 hours");
@@ -230,6 +233,7 @@ describe("SSH Worker", () => {
         .launch({
           append: () => Effect.void,
           comments: () => Effect.void,
+          overlapping: Effect.succeed([]),
           salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
         })
         .pipe(Effect.flip);
@@ -267,6 +271,7 @@ describe("SSH Worker", () => {
           .launch({
             append: () => Effect.void,
             comments: () => Effect.void,
+            overlapping: Effect.succeed([]),
             salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
           })
           .pipe(Effect.flip);
@@ -312,6 +317,7 @@ describe("SSH Worker", () => {
         {
           salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
           comments: () => Effect.void,
+          overlapping: Effect.succeed([]),
         },
       );
       const lines = machine.state.calls.map(({ line }) => line);
@@ -347,6 +353,7 @@ describe("SSH Worker", () => {
           {
             salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
             comments: () => Effect.void,
+            overlapping: Effect.succeed([]),
           },
         );
         assert.strictEqual(recorded[0]?._tag, "Pushed");
@@ -375,6 +382,7 @@ describe("SSH Worker", () => {
         append: () => Effect.void,
         salvage: () => Effect.void,
         comments: () => Effect.void,
+        overlapping: Effect.succeed([]),
       };
       return Effect.gen(function* () {
         const started = yield* Deferred.make<void>();
@@ -431,6 +439,7 @@ describe("SSH Worker", () => {
           }),
         salvage: () => Effect.void,
         comments: () => Effect.void,
+        overlapping: Effect.succeed([]),
       };
       const notices = () =>
         outbound.filter(

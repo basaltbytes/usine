@@ -474,6 +474,7 @@ describe("local worker", () => {
               append: () => Effect.void,
               salvage: () => Effect.void,
               comments: () => Effect.void,
+              overlapping: Effect.succeed([]),
             })
             .pipe(Effect.forkChild);
           yield* Deferred.await(cleanupStarted);
@@ -690,6 +691,7 @@ describe("local worker", () => {
               append: () => Effect.void,
               salvage: () => Effect.void,
               comments: () => Effect.void,
+              overlapping: Effect.succeed([]),
             })
             .pipe(Effect.flip);
           assert.strictEqual(reused._tag, "InfraFailure");
@@ -966,6 +968,7 @@ describe("local worker", () => {
                   append: () => Effect.void,
                   salvage: () => Effect.void,
                   comments: () => Effect.void,
+                  overlapping: Effect.succeed([]),
                 },
               )
               .pipe(Effect.flip);

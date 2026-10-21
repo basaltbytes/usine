@@ -38,6 +38,7 @@ describe("exe.dev preparation", () => {
           .launch({
             append: () => Effect.void,
             comments: () => Effect.void,
+            overlapping: Effect.succeed([]),
             salvage: (value) =>
               Effect.sync(() => {
                 assert(
@@ -122,6 +123,7 @@ describe("exe.dev preparation", () => {
         prepared.launch({
           append: () => Effect.void,
           comments: () => Effect.void,
+          overlapping: Effect.succeed([]),
           salvage: () => Effect.fail(recordFailure),
         }),
       );
@@ -179,6 +181,7 @@ describe("exe.dev preparation", () => {
           .launch({
             append: () => Effect.void,
             comments: () => Effect.void,
+            overlapping: Effect.succeed([]),
             salvage: (value) =>
               Effect.sync(() => {
                 recorded.push(value);
@@ -207,6 +210,7 @@ describe("exe.dev preparation", () => {
         append: () => Effect.void,
         salvage: () => Effect.void,
         comments: () => Effect.void,
+        overlapping: Effect.succeed([]),
       });
       const released = ssh.state.commands.length;
       yield* TestClock.adjust("2 hours");
@@ -266,6 +270,7 @@ describe("exe.dev preparation", () => {
                 );
               }),
             comments: () => Effect.die("A closed Attempt records no comment at recovery"),
+            overlapping: Effect.succeed([]),
           },
         );
         const lines = ssh.state.commands.map(remoteLine);
@@ -288,6 +293,7 @@ describe("exe.dev preparation", () => {
           append: () => Effect.void,
           salvage: () => Effect.void,
           comments: () => Effect.void,
+          overlapping: Effect.succeed([]),
         })
         .pipe(Effect.forkChild);
       yield* Deferred.await(started);
@@ -302,7 +308,11 @@ describe("exe.dev preparation", () => {
           succeeded: false,
           open: true,
         },
-        { salvage: () => Effect.void, comments: () => Effect.void },
+        {
+          salvage: () => Effect.void,
+          comments: () => Effect.void,
+          overlapping: Effect.succeed([]),
+        },
       );
       assert.strictEqual(ssh.state.commands.length, before);
     }).pipe(
@@ -330,6 +340,7 @@ describe("exe.dev preparation", () => {
           append: () => Effect.void,
           salvage: () => Effect.void,
           comments: () => Effect.void,
+          overlapping: Effect.succeed([]),
         });
         assert.strictEqual(result.message, `Completed: ${request.task}`);
         yield* Scope.close(owner, Exit.void);
@@ -349,6 +360,7 @@ describe("exe.dev preparation", () => {
           {
             salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
             comments: () => Effect.void,
+            overlapping: Effect.succeed([]),
           },
         );
         const remote = ssh.state.commands.slice(reconciled).map(remoteLine);
@@ -383,6 +395,7 @@ describe("exe.dev preparation", () => {
           {
             salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
             comments: () => Effect.void,
+            overlapping: Effect.succeed([]),
           },
         );
       }
@@ -417,7 +430,11 @@ describe("exe.dev preparation", () => {
               succeeded: index !== 2,
               open: false,
             },
-            { salvage: () => Effect.void, comments: () => Effect.void },
+            {
+              salvage: () => Effect.void,
+              comments: () => Effect.void,
+              overlapping: Effect.succeed([]),
+            },
           )
           .pipe(Effect.exit);
         assert(Exit.isFailure(exit));
@@ -496,6 +513,7 @@ describe("exe.dev preparation", () => {
         append: () => Effect.void,
         salvage: () => Effect.void,
         comments: () => Effect.void,
+        overlapping: Effect.succeed([]),
       });
       assert.strictEqual(result.message, `Completed: ${request.task}`);
       assert(JSON.stringify(errors).includes("worktree-directory"));
@@ -537,6 +555,7 @@ describe("exe.dev preparation", () => {
           append: () => Effect.void,
           salvage: () => Effect.void,
           comments: () => Effect.void,
+          overlapping: Effect.succeed([]),
         });
         assert.strictEqual(result.message, `Completed: ${request.task}`);
         const issued = ssh.state.commands.slice(beforeLaunch);
@@ -619,6 +638,7 @@ describe("exe.dev preparation", () => {
           append: () => Effect.void,
           salvage: () => Effect.void,
           comments: () => Effect.void,
+          overlapping: Effect.succeed([]),
         })
         .pipe(Effect.flip);
       assert.strictEqual(error._tag, "InfraFailure");
@@ -642,6 +662,7 @@ describe("exe.dev preparation", () => {
           append: () => Effect.void,
           salvage: () => Effect.void,
           comments: () => Effect.void,
+          overlapping: Effect.succeed([]),
         });
       }).pipe(Effect.scoped);
       // The grant detaches last, so its count at the owner's exit shows whether

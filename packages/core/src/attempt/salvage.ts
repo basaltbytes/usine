@@ -4,7 +4,7 @@ import { CommitSha, safeSegment, type RepositoryName } from "../repository.ts";
 import type { RunId } from "../run/run.ts";
 import type { Comment } from "../step/result.ts";
 import type { WorkerName } from "../worker.ts";
-import type { AttemptId, AttemptNumber } from "./attempt.ts";
+import type { AttemptId, AttemptNumber, AttemptWindow } from "./attempt.ts";
 
 /** The remote branch name that holds one Attempt's unfinished work, `usine/salvage/<run>/<attempt>`. */
 export const SalvageRef = Schema.NonEmptyString.pipe(Schema.brand("SalvageRef"));
@@ -56,8 +56,12 @@ export interface AttemptRecovery {
  * `salvage` records what the executor preserved of its checkout, and
  * `comments` the comments and reviews it posted on its Run's Item when its
  * parent task failed and the orchestrator stopped before recording them.
+ * `overlapping` reads the windows of the other Attempts of its Agent that
+ * overlap its own on that Item: the harvest of those comments leaves out one
+ * posted in such a window.
  */
 export interface RecoverySink<E> {
   readonly salvage: (salvage: AttemptSalvage) => Effect.Effect<void, E>;
   readonly comments: (comments: ReadonlyArray<Comment>) => Effect.Effect<void, E>;
+  readonly overlapping: Effect.Effect<ReadonlyArray<AttemptWindow>, E>;
 }

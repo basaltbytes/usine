@@ -31,6 +31,7 @@ const recording = () => {
   const sink: AttemptChannel.Sink = {
     salvage: () => Effect.void,
     comments: () => Effect.void,
+    overlapping: Effect.succeed([]),
     append: (direction, envelope) =>
       Effect.sync(() => {
         transcript.push([direction, envelope]);
@@ -301,6 +302,7 @@ describe("exe.dev launch", () => {
           Effect.sync(
             () => void recorded.push(comments.map(({ kind, url }) => kind + " " + url.href)),
           ),
+        overlapping: Effect.succeed([]),
       };
       const attempt = (parent: StubParent) => {
         const ssh = fakeSsh();
@@ -343,6 +345,7 @@ describe("exe.dev launch", () => {
         .launch({
           ...recording().sink,
           comments: () => Effect.void,
+          overlapping: Effect.succeed([]),
           salvage: () =>
             Deferred.succeed(recordingSalvage, undefined).pipe(
               Effect.andThen(Deferred.await(finishSalvage)),
@@ -588,6 +591,7 @@ describe("exe.dev launch", () => {
               Effect.sync(
                 () => void recorded.push(...comments.map(({ kind, url }) => `${kind} ${url.href}`)),
               ),
+            overlapping: Effect.succeed([]),
           });
           // The Run closes the Attempt from the stored failure without launching it again.
           const outcome = yield* executor.outcome(ATTEMPT_ID);
@@ -631,6 +635,7 @@ describe("exe.dev launch", () => {
           yield* executor.recover(openAttempt, {
             salvage: () => Effect.die("A checkout that is gone has no salvage"),
             comments: (comments) => Effect.sync(() => void recorded.push(...comments)),
+            overlapping: Effect.succeed([]),
           });
         }).pipe(
           Effect.scoped,
