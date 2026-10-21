@@ -1,8 +1,12 @@
 import { LoopName } from "@usine/core/loop";
 import {
+  AwaitingPollView,
   BoardTaskView,
   ClosedUnchangedView,
+  HeldForOperatorView,
+  LoopPausedView,
   QueuedForWorkerView,
+  RunFailedView,
   RunView,
   StalledItemView,
 } from "@usine/orchestrator/operator";
@@ -72,52 +76,22 @@ describe("Tasks list model", () => {
   const order = (rows: ReadonlyArray<TaskRow>) =>
     rows.map(({ task, status }) => [task.number, status._tag]);
   const withoutPinned = boardStalled().filter(({ item }) => item.number !== 28);
-
-  it("lists only the Tasks with Runs, in flight first: running, waiting, then pending, queued, and stalled, each by when its Run opened", () => {
-    const rows = taskRows(lanes(), boardStalled());
-    // #31 opened 12m ago and runs; #7 opened 3m ago and waits; #44 queued 2m ago, #28 failed 95m
-    // ago and #18 was canceled a day ago; #6 is merged. #12, #15, #40, and #50 never had a Run.
-    assert.deepStrictEqual(order(rows), [
-      [31, "Running"],
-      [7, "AwaitingApproval"],
-      [44, "Queued"],
-      [28, "Stalled"],
-      [18, "Stalled"],
-      [6, "Done"],
-    ]);
-    assert.strictEqual(taskCounts(rows), "5 in flight, 1 done");
-    assert.deepStrictEqual(rows[0] && taskLoops(rows[0].task), [
-      { loop: LoopName.make("plan"), state: "Succeeded" },
-      { loop: LoopName.make("implement"), state: "Running" },
-    ]);
-  });
-
-  it("puts every Task in flight before the others, then orders the others by when the last Run ended", () => {
-    // Without the desk's stall, #28's failed review needs the operator; it ended 80m ago, after
-    // #18's canceled Run opened, and still follows it.
-    const attention = taskRows(lanes(), withoutPinned);
-    assert.deepStrictEqual(order(attention).slice(3), [
-      [18, "Stalled"],
-      [28, "NeedsAttention"],
-      [6, "Done"],
-    ]);
-    assert.strictEqual(taskCounts(attention), "4 in flight, 1 needs attention, 1 done");
-
-    // Once the failure is resolved and nothing is stalled, the last Run's outcome stands.
-    const ended = taskRows(lanes(boardOverviewResolved()), []);
-    assert.deepStrictEqual(order(ended).slice(3), [
-      [28, "Ended"],
-      [18, "Ended"],
-      [6, "Done"],
-    ]);
-    const failed = ended[3]?.status;
-    assert.strictEqual(failed?._tag === "Ended" && failed.run.state, "Failed");
-    assert.strictEqual(taskCounts(ended), "3 in flight, 1 done");
-  });
-
-  it("orders a Task whose waiting Run was canceled just now by the cancel, not by when the Run opened", () => {
-    // #18's Run waited three days and was canceled a minute ago, before any Attempt began.
-    const canceled = changeTasks(boardOverviewResolved(), (task) =>
+  const lastRunOf = (task: BoardTaskView) => {
+    const run = task.runs.at(-1);
+    assert(run !== undefined);
+    return run;
+  };
+  /** The desk's stall of the Loop of the Task's last Run on its first Item, for `reason`. */
+  const stallOf = (task: BoardTaskView, reason: StalledItemView["reason"]) => {
+    const [item] = task.items;
+    const { repository, loop } = lastRunOf(task);
+    assert(item !== undefined);
+    return new StalledItemView({ repository, loop, item, reason });
+  };
+  /** `overview` with #18's Run, which waited three days, canceled a minute ago before any Attempt
+   * began. */
+  const canceledJustNow = (overview: ReturnType<typeof boardOverview>) =>
+    changeTasks(overview, (task) =>
       task.number === 18
         ? new BoardTaskView({
             ...task,
@@ -133,12 +107,110 @@ describe("Tasks list model", () => {
           })
         : task,
     );
+
+  it("lists only the Tasks with Runs, in flight first: running, waiting, then pending, queued, and stalled, each by when its Run opened", () => {
+    const rows = taskRows(lanes(), boardStalled());
+    // #31 opened 12m ago and runs; #7 opened 3m ago and waits; #44 queued 2m ago, and #28 failed
+    // 95m ago and waits on the operator. #18 was canceled a day ago and is unchanged since, so it
+    // is not in flight and goes before #6, merged two days ago. #12, #15, #40, and #50 never had a
+    // Run.
+    assert.deepStrictEqual(order(rows), [
+      [31, "Running"],
+      [7, "AwaitingApproval"],
+      [44, "Queued"],
+      [28, "Stalled"],
+      [18, "Idle"],
+      [6, "Done"],
+    ]);
+    assert.strictEqual(taskCounts(rows), "4 in flight, 1 done");
+    assert.deepStrictEqual(rows[0] && taskLoops(rows[0].task), [
+      { loop: LoopName.make("plan"), state: "Succeeded" },
+      { loop: LoopName.make("implement"), state: "Running" },
+    ]);
+  });
+
+  it("puts every Task in flight before the others, then orders the others by when the last Run ended", () => {
+    // #18's Run was canceled a minute ago and the Item is unchanged since, after #28's failed
+    // review opened 95m ago; that failure still waits on the operator, so #28 comes first.
+    const canceled = canceledJustNow(boardOverview());
+    const dropped = taskOf(18, canceled);
+    const stalled = boardStalled().map((stall) =>
+      stall.item.number === 18
+        ? stallOf(dropped, new ClosedUnchangedView({ run: lastRunOf(dropped) }))
+        : stall,
+    );
+    assert.deepStrictEqual(order(taskRows(lanes(canceled), stalled)).slice(3), [
+      [28, "Stalled"],
+      [18, "Idle"],
+      [6, "Done"],
+    ]);
+
+    // Without the desk's stall, #28's failed review needs the operator; it ended 80m ago, after
+    // #18's Run was canceled a day ago.
+    const attention = taskRows(lanes(), withoutPinned);
+    assert.deepStrictEqual(order(attention).slice(3), [
+      [28, "NeedsAttention"],
+      [18, "Idle"],
+      [6, "Done"],
+    ]);
+    assert.strictEqual(taskCounts(attention), "3 in flight, 1 needs attention, 1 done");
+
+    // Once the failure is resolved and nothing is stalled, the last Run's outcome stands.
+    const ended = taskRows(lanes(boardOverviewResolved()), []);
+    assert.deepStrictEqual(order(ended).slice(3), [
+      [28, "Ended"],
+      [18, "Ended"],
+      [6, "Done"],
+    ]);
+    const failed = ended[3]?.status;
+    assert.strictEqual(failed?._tag === "Ended" && failed.run.state, "Failed");
+    assert.strictEqual(taskCounts(ended), "3 in flight, 1 done");
+  });
+
+  it("orders a Task whose waiting Run was canceled just now by the cancel, not by when the Run opened", () => {
+    const canceled = canceledJustNow(boardOverviewResolved());
     // #28's review ended 80m ago, earlier than the cancel.
     assert.deepStrictEqual(order(taskRows(lanes(canceled), [])).slice(3), [
       [18, "Ended"],
       [28, "Ended"],
       [6, "Done"],
     ]);
+  });
+
+  it("keeps a Task in flight only while its stall waits on the operator, and counts an idle one as needing attention only while the operator is needed", () => {
+    const statusOf = (
+      number: number,
+      reason: StalledItemView["reason"],
+      overview = boardOverview(),
+    ) =>
+      taskRows(lanes(overview), [stallOf(taskOf(number, overview), reason)]).find(
+        ({ task }) => task.number === number,
+      )?.status._tag;
+    // #18's Run was canceled on the Item's state, which is unchanged since; or the next poll acts on
+    // the Item; or the Loop is paused. Nothing is in flight.
+    assert.strictEqual(
+      statusOf(18, new ClosedUnchangedView({ run: lastRunOf(taskOf(18)) })),
+      "Idle",
+    );
+    assert.strictEqual(statusOf(18, new AwaitingPollView()), "Idle");
+    assert.strictEqual(statusOf(18, new LoopPausedView()), "Idle");
+    // #28's failed review, or the Agent's question it ended on, holds the Loop on the operator
+    // until the operator resolves it.
+    const pinned = lastRunOf(taskOf(28));
+    assert.strictEqual(statusOf(28, new RunFailedView({ run: pinned })), "Stalled");
+    assert.strictEqual(statusOf(28, new HeldForOperatorView({ run: pinned })), "Stalled");
+    const resolved = boardOverviewResolved();
+    const failure = new RunFailedView({ run: lastRunOf(taskOf(28, resolved)) });
+    assert.strictEqual(statusOf(28, failure, resolved), "Idle");
+
+    // An earlier failure on #18 waits on the operator, so the heading counts it as needing
+    // attention; its status stays the stall's.
+    const attention = changeTasks(boardOverview(), (task) =>
+      task.number === 18 ? new BoardTaskView({ ...task, needsYou: true }) : task,
+    );
+    const rows = taskRows(lanes(attention), boardStalled());
+    assert.strictEqual(rows.find(({ task }) => task.number === 18)?.status._tag, "Idle");
+    assert.strictEqual(taskCounts(rows), "4 in flight, 1 needs attention, 1 done");
   });
 
   it("explains a queued Run with the stall that names it, not an older stall on another Item", () => {

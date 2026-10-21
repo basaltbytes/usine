@@ -11,7 +11,7 @@ import type {
   TaskItemView,
   TaskUsageView,
 } from "@usine/orchestrator/operator";
-import { Option } from "effect";
+import { Match, Option } from "effect";
 
 /**
  * How long a Run's Attempts ran, added up: each ended Attempt from its start to its end, and a
@@ -102,11 +102,17 @@ type TaskStatus =
   /** `run` is pending or queued, and the desk has not said why yet. */
   | { readonly _tag: "Queued"; readonly run: RunView }
   /**
-   * A Loop's trigger matches one of the Task's Items with no Attempt running on it, for `stall`'s
-   * reason; `run` is the Run that reason names, the pending or queued one when one is open, else
-   * the last Run.
+   * A Loop's trigger matches one of the Task's Items with no Attempt running on it, and `stall`'s
+   * reason keeps the work open (see `keepsInFlight`); `run` is the Run that reason names, the
+   * pending or queued one when one is open, else the last Run.
    */
   | { readonly _tag: "Stalled"; readonly stall: StalledItemView; readonly run: RunView }
+  /**
+   * A Loop's trigger matches one of the Task's Items, but no Run is open and `stall`'s reason holds
+   * nothing on the operator: the last Run closed on the Item's unchanged state, the next poll acts
+   * on it, the Loop is paused, or the failure is resolved.
+   */
+  | { readonly _tag: "Idle"; readonly stall: StalledItemView }
   /** Nothing is open or stalled, and a failed Run or a hold on one of the Items waits on the
    * operator, as the Board card's Needs attention says. */
   | { readonly _tag: "NeedsAttention" }
@@ -123,6 +129,24 @@ export interface TaskRow {
   readonly status: TaskStatus;
 }
 
+/**
+ * Whether `stall` keeps its Task in flight: its reason names an open Run, or holds the Loop on the
+ * operator, as an Agent's question or blocker, a used-up cycle budget, and a failure not yet
+ * resolved do. A paused Loop keeps a Task in flight only beside an open Run, which `taskStatus`
+ * reads before any stall.
+ */
+const keepsInFlight = ({ reason }: StalledItemView): boolean =>
+  Match.valueTags(reason, {
+    AwaitingApproval: () => true,
+    QueuedForWorker: () => true,
+    HeldForOperator: () => true,
+    CycleBudgetUsedUp: () => true,
+    RunFailed: ({ run }) => run.canResolveFailure,
+    ClosedUnchanged: () => false,
+    LoopPaused: () => false,
+    AwaitingPoll: () => false,
+  });
+
 /** The first Run, newest first, whose state is one of `states`. */
 const newestIn = (
   runs: ReadonlyArray<RunView>,
@@ -132,7 +156,8 @@ const newestIn = (
 /**
  * A Task's status, the first that applies: a Run at work, a Run waiting for approval, a pending or
  * queued Run with the desk's reason for that Run, Done for a merged or closed current Item, the
- * desk's stall, Needs attention, and last the outcome of `last`. `stalled` is the desk's list.
+ * desk's stall, in flight or idle, Needs attention, and last the outcome of `last`. `stalled` is
+ * the desk's list.
  */
 const taskStatus = (
   task: BoardTaskView,
@@ -154,7 +179,11 @@ const taskStatus = (
   }
   if (isSettledItemState(task.state)) return { _tag: "Done" };
   const stall = taskStall(stalled, task);
-  if (stall !== null) return { _tag: "Stalled", stall, run: stallRun(stall) ?? last };
+  if (stall !== null) {
+    return keepsInFlight(stall)
+      ? { _tag: "Stalled", stall, run: stallRun(stall) ?? last }
+      : { _tag: "Idle", stall };
+  }
   if (task.needsYou) return { _tag: "NeedsAttention" };
   return { _tag: "Ended", run: last };
 };
@@ -162,8 +191,8 @@ const taskStatus = (
 /**
  * A row's place in the list: its group, then the time that orders it within the group, newest
  * first. In flight comes first, running, then waiting for approval, then pending, queued, and
- * stalled, each by when its Run opened; every other Task follows, by when its last Run closed,
- * which for a Run canceled before any Attempt is the cancel, not its opening.
+ * stalled, each by when its Run opened; every other Task follows, idle ones included, by when its
+ * last Run closed, which for a Run canceled before any Attempt is the cancel, not its opening.
  */
 const rowPlace = ({ status, last }: TaskRow): readonly [group: number, at: number] => {
   switch (status._tag) {
@@ -174,6 +203,7 @@ const rowPlace = ({ status, last }: TaskRow): readonly [group: number, at: numbe
     case "Queued":
     case "Stalled":
       return [2, Date.parse(status.run.openedAt)];
+    case "Idle":
     case "NeedsAttention":
     case "Done":
     case "Ended":
@@ -205,14 +235,19 @@ export const taskRows = (
 
 const HEADING_COUNTS = ["in flight", "needs attention", "done"] as const;
 
-/** The heading count a row adds to; null for a Task that shows its last Run's outcome. */
-const countedAs = ({ status }: TaskRow): (typeof HEADING_COUNTS)[number] | null => {
+/**
+ * The heading count a row adds to; null for a Task that shows its last Run's outcome, and for an
+ * idle one unless a failed Run or a hold on one of its Items waits on the operator.
+ */
+const countedAs = ({ task, status }: TaskRow): (typeof HEADING_COUNTS)[number] | null => {
   switch (status._tag) {
     case "Running":
     case "AwaitingApproval":
     case "Queued":
     case "Stalled":
       return "in flight";
+    case "Idle":
+      return task.needsYou ? "needs attention" : null;
     case "NeedsAttention":
       return "needs attention";
     case "Done":
