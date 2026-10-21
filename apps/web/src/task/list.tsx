@@ -4,14 +4,13 @@ import type {
   BoardPullRequestView,
   BoardTaskView,
   ProjectView,
-  RunView,
   StalledItemView,
   TaskUsageView,
 } from "@usine/orchestrator/operator";
 import { Match } from "effect";
 import { Fragment, type ReactNode } from "react";
 import { Page, PageHeading } from "@/components/page";
-import { StateMark, StatusBadge } from "@/components/status-badge";
+import { StateMark } from "@/components/status-badge";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import {
   Table,
@@ -47,6 +46,9 @@ import {
   taskOrigin,
   taskRows,
   taskTotals,
+  totalsFigures,
+  unpricedNote,
+  untimedNote,
 } from "./model.ts";
 import { linkedRow, rowLink } from "./section.tsx";
 
@@ -54,22 +56,21 @@ const pullRequestLink =
   "relative z-10 rounded-sm font-mono text-xs text-primary underline-offset-4 outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring/70 focus-visible:outline-solid";
 
 // The columns follow the table's own width, since the sidebar beside a mid-size window leaves
-// less room than a phone held sideways. Time always shows. Tokens and Cost need 56rem and Runs and
-// Pull request 64rem.
+// less room than a phone held sideways. Elapsed time always shows. Tokens and Estimated cost need
+// 56rem and Runs and Pull request 64rem.
 const WIDE_COLUMN = "hidden @5xl:table-cell";
 const USAGE_COLUMN = "hidden @4xl:table-cell";
 
 // The title cell is `w-full max-w-0`: it takes the width the other columns leave, and they keep
-// their narrowest width. Status, Runs, and Last run, the columns that can wrap or truncate, take
-// their own width up to `--side` and wrap past it, or truncate for Runs, so a short status takes
-// only its words and they give way before the title does. `--side` is an equal share, between 7rem
-// and 13rem, of the table less 26rem for the title, the width of a long issue title, and less
-// `--rest`: the figure columns showing at their usual width and the side columns' padding. On a
-// phone Status and Last run wrap to their longest word instead, so the table never scrolls
-// sideways.
+// their narrowest width. Status and Runs, the columns that can wrap or truncate, take their own
+// width up to `--side` and wrap past it, or truncate for Runs, so a short status takes only its
+// words and they give way before the title does. `--side` is an equal share, between 7rem and
+// 13rem, of the table less 26rem for the title, the width of a long issue title, and less
+// `--rest`: the figure columns showing, which their headers set, and the side columns' padding.
+// On a phone Status wraps to its longest word instead, so the table never scrolls sideways.
 const SIDE_SHARE = [
   "@md:[--side:clamp(7rem,calc((100cqw-26rem-var(--rest))/var(--sides)),13rem)]",
-  "[--rest:8rem] [--sides:2] @4xl:[--rest:19rem] @5xl:[--rest:25rem] @5xl:[--sides:3]",
+  "[--rest:7rem] [--sides:1] @4xl:[--rest:16.5rem] @5xl:[--rest:23rem] @5xl:[--sides:2]",
 ].join(" ");
 const SIDE_COLUMN = "py-3 align-top whitespace-normal";
 const SIDE_CONTENT = "@md:w-max @md:max-w-(--side)";
@@ -91,39 +92,57 @@ const stallTone = ({ reason }: StalledItemView): string =>
     AwaitingPoll: () => "Pending",
   });
 
-/** A Task's status: the state that gives its mark's tone, and its words. A stall's Loop goes
- * first when neither the fragment nor the last Run names it. */
+/**
+ * A Task's status: the state that gives its mark's tone, its words, and when the last Run was last
+ * at work. A stall's words say their own time, so `at` is null for them, and the stall's Loop goes
+ * first when neither the fragment nor the last Run names it.
+ */
 const statusLine = (
   { task, last, status }: TaskRow,
   now: number,
-): { readonly state: string; readonly words: string } => {
+): { readonly state: string; readonly words: string; readonly at: string | null } => {
+  const at = runActivityAt(last);
   const stallLine = (stall: StalledItemView) => ({
     state: stallTone(stall),
     words: `${last.loop !== stall.loop && !stallNamesLoop(stall) ? `${stall.loop} ` : ""}${stallSentence(stall, now)}`,
+    at: null,
   });
   return Match.valueTags(status, {
-    Running: ({ run }) => ({ state: "Running", words: `Running ${run.loop}` }),
-    AwaitingApproval: () => ({ state: "Waiting", words: "Waiting for approval" }),
-    Queued: ({ run }) => ({ state: run.state, words: run.state }),
+    Running: ({ run }) => ({ state: "Running", words: `Running ${run.loop}`, at }),
+    AwaitingApproval: () => ({ state: "Waiting", words: "Waiting for approval", at }),
+    Queued: ({ run }) => ({ state: run.state, words: run.state, at }),
     Stalled: ({ stall }) => stallLine(stall),
     Idle: ({ stall }) => stallLine(stall),
-    NeedsAttention: () => ({ state: "needs-you", words: "Needs attention" }),
-    Done: () => ({ state: itemStateLabel(task.state), words: "Done" }),
-    Ended: ({ run }) => ({ state: run.state, words: run.state }),
+    NeedsAttention: () => ({ state: "needs-you", words: "Needs attention", at }),
+    Done: () => ({ state: itemStateLabel(task.state), words: "Done", at }),
+    Ended: ({ run }) => ({ state: run.state, words: run.state, at }),
   });
 };
 
-/** The status's mark and words on the row's 20px line; the mark stays on the first line when
- * the words wrap. */
+/** The status's mark and words on the row's 20px line, then ` · ` and the time, such as
+ * `Done · 28m ago`; the mark stays on the first line when the words wrap. */
 const Status = ({ row, now }: { readonly row: TaskRow; readonly now: number }) => {
-  const { state, words } = statusLine(row, now);
+  const { state, words, at } = statusLine(row, now);
   // A word wider than `--side`, such as the Loop `dependency_updates`, breaks inside the column:
   // `min-w-0` lets the words shrink below that word, and `wrap-break-word` breaks it only then, so
   // on a phone, where the column is as wide as its longest word, the words still wrap between words.
   return (
     <span className={cn("flex items-start gap-1.5 text-xs/5 font-medium", SIDE_CONTENT)}>
       <StateMark state={state} className="mt-1.75" />
-      <span className="min-w-0 wrap-break-word">{words}</span>
+      <span className="min-w-0 wrap-break-word">
+        {words}
+        {at !== null && (
+          <>
+            {" "}
+            <span className="font-normal whitespace-nowrap text-muted-foreground">
+              ·{" "}
+              <time dateTime={at} title={timestampLabel(at)} className="font-mono tabular-nums">
+                {agoLabel(at, now)}
+              </time>
+            </span>
+          </>
+        )}
+      </span>
     </span>
   );
 };
@@ -151,70 +170,34 @@ const Runs = ({ task }: { readonly task: BoardTaskView }) => {
   );
 };
 
-/** The last Run's Loop, its state, and when it was last at work, such as `12m ago`. */
-const LastRun = ({ run, now }: { readonly run: RunView; readonly now: number }) => {
-  const at = runActivityAt(run);
-  return (
-    <span className={cn("flex flex-wrap items-center gap-x-2", SIDE_CONTENT)}>
-      <span className="truncate">{run.loop}</span>
-      <StatusBadge state={run.state} />
-      <time
-        dateTime={at}
-        title={timestampLabel(at)}
-        className="shrink-0 font-mono text-xs text-muted-foreground tabular-nums"
-      >
-        {agoLabel(at, now)}
-      </time>
-    </span>
-  );
-};
+/** The `*` after a figure lower than the real one, hung past the figure's end so the figures of a
+ * column stay aligned. Its parent is positioned. */
+const LowerBoundMark = () => <span className="absolute left-full text-muted-foreground">*</span>;
 
 /** A Task's Attempt time, counting on while an Attempt runs; nothing before any Attempt began. */
 const TaskTime = ({ task, now }: { readonly task: BoardTaskView; readonly now: number }) => {
   const { usage } = task;
   if (task.runs.every(({ attempts }) => attempts.length === 0)) return null;
+  const untimed = usage.unmeasured > 0;
   return (
-    <span
-      title={
-        usage.unmeasured === 0
-          ? "Total attempt time"
-          : `${usage.unmeasured} ${usage.unmeasured === 1 ? "attempt" : "attempts"} not counted, ended before end times were recorded`
-      }
-    >
-      {usage.unmeasured > 0 && "at least "}
+    <span className="relative" title={untimed ? untimedNote : "Total attempt time"}>
       {durationLabel(taskDuration(usage, now))}
+      {untimed && <LowerBoundMark />}
     </span>
   );
 };
 
-/** Dollars, then `estimate` in muted text when the Claude plan's figure is among them, after
- * `at least` when part of the usage has no price yet. */
-const CostLabel = ({
-  cost,
-  unpriced,
-}: {
-  readonly cost: NonNullable<TaskTotals["cost"]>;
-  readonly unpriced: boolean;
-}) => (
-  <>
-    {unpriced && <span className="font-sans text-muted-foreground">at least </span>}
-    {usdLabel(cost.usd)}
-    {cost.estimate && <span className="font-sans text-muted-foreground"> estimate</span>}
-  </>
-);
-
-/** A cost as one phrase, such as `at least $2.00 estimate`. */
-const costWords = (cost: NonNullable<TaskTotals["cost"]>, unpriced: boolean): string =>
-  `${unpriced ? "at least " : ""}${usdLabel(cost.usd)}${cost.estimate ? " estimate" : ""}`;
-
-/** `children` opening, on hover or focus, the Task's tokens per billing pool. */
+/** `children` opening, on hover or focus, the Task's tokens per billing pool, after `note` when it
+ * is not null. */
 const PoolHover = ({
   usage,
   label,
+  note,
   children,
 }: {
   readonly usage: TaskUsageView;
   readonly label: string;
+  readonly note: string | null;
   readonly children: ReactNode;
 }) => (
   <HoverCard>
@@ -229,10 +212,29 @@ const PoolHover = ({
       align="end"
       className="w-[26rem] max-w-[calc(100vw-2rem)] p-3 font-sans text-xs shadow-raised"
     >
+      {note !== null && <p className="pb-2 text-muted-foreground">{note}.</p>}
       <PoolBreakdown pools={usage.pools} />
     </HoverCardContent>
   </HoverCard>
 );
+
+/** A Task's priced dollars, marked `*` while part of its usage has no price yet; nothing when no
+ * usage has a price. */
+const TaskCost = ({ usage }: { readonly usage: TaskUsageView }) => {
+  if (usage.cost === null) return null;
+  const unpriced = costUnpriced(usage);
+  const usd = usdLabel(usage.cost.usd);
+  return (
+    <PoolHover
+      usage={usage}
+      label={`Estimated cost: ${unpriced ? "at least " : ""}${usd}. Show it per pool`}
+      note={unpriced ? unpricedNote : null}
+    >
+      {usd}
+      {unpriced && <LowerBoundMark />}
+    </PoolHover>
+  );
+};
 
 /** The pull request's number as a link, then whether it is open or merged. */
 const PullRequest = ({ pullRequest }: { readonly pullRequest: BoardPullRequestView }) => (
@@ -272,9 +274,6 @@ const TaskListRow = ({
     <TableCell className={cn("py-3 align-top", WIDE_COLUMN)}>
       <Runs task={row.task} />
     </TableCell>
-    <TableCell className={SIDE_COLUMN}>
-      <LastRun run={row.last} now={now} />
-    </TableCell>
     <TableCell className={cn("py-3 text-right align-top", WIDE_COLUMN)}>
       {row.task.pullRequest !== null && <PullRequest pullRequest={row.task.pullRequest} />}
     </TableCell>
@@ -286,33 +285,30 @@ const TaskListRow = ({
         <PoolHover
           usage={row.task.usage}
           label={`Tokens: ${tokensLabel(row.task.usage.tokens)}. Show them per pool`}
+          note={null}
         >
           {tokensLabel(row.task.usage.tokens)}
         </PoolHover>
       )}
     </TableCell>
     <TableCell className={cn(TOTAL_COLUMN, USAGE_COLUMN)}>
-      {row.task.usage.cost !== null && (
-        <PoolHover
-          usage={row.task.usage}
-          label={`Cost: ${costWords(row.task.usage.cost, costUnpriced(row.task.usage))}. Show it per pool`}
-        >
-          <CostLabel cost={row.task.usage.cost} unpriced={costUnpriced(row.task.usage)} />
-        </PoolHover>
-      )}
+      <TaskCost usage={row.task.usage} />
     </TableCell>
   </TableRow>
 );
 
-/** The totals of every listed Task, such as `9 runs, 6 h 12 min, 4.8M tokens, $14.20 estimate`;
- * the cost is left out when no Task has a price. */
-const totalsLine = (totals: TaskTotals): string =>
-  [
-    `${totals.runs} ${totals.runs === 1 ? "run" : "runs"}`,
-    `${totals.unmeasured > 0 ? "at least " : ""}${durationLabel(totals.durationMillis)}`,
-    `${tokensLabel(totals.tokens)} tokens`,
-    ...(totals.cost === null ? [] : [costWords(totals.cost, totals.unpriced)]),
-  ].join(", ");
+/** The totals of every listed Task, such as `9 runs, 6 h 12 min elapsed, 4.8M tokens, $14.20
+ * estimated`, each lower bound marked `*` with the reason in its title. */
+const TotalsLine = ({ totals }: { readonly totals: TaskTotals }) => (
+  <p className="-mt-2 text-sm text-muted-foreground tabular-nums">
+    {totalsFigures(totals).map(({ figure, words, lowerBound }, index) => (
+      <Fragment key={words}>
+        {index > 0 && ", "}
+        {lowerBound === null ? figure : <span title={lowerBound}>{`${figure}*`}</span>} {words}
+      </Fragment>
+    ))}
+  </p>
+);
 
 /**
  * The Tasks of a Project that usine ran at least once, as rows: those in flight first, then the
@@ -335,9 +331,7 @@ export const TaskList = ({
         <EmptyLine>No runs yet</EmptyLine>
       ) : (
         <>
-          <p className="-mt-2 text-sm text-muted-foreground tabular-nums">
-            {totalsLine(taskTotals(rows, now))}
-          </p>
+          <TotalsLine totals={taskTotals(rows, now)} />
           <div className="@container -mx-2">
             <Table aria-label={`${project.repository} tasks`} className={SIDE_SHARE}>
               <TableHeader>
@@ -345,11 +339,10 @@ export const TaskList = ({
                   <TableHead>Task</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className={WIDE_COLUMN}>Runs</TableHead>
-                  <TableHead>Last run</TableHead>
                   <TableHead className={cn("text-right", WIDE_COLUMN)}>Pull request</TableHead>
-                  <TableHead className="text-right">Time</TableHead>
+                  <TableHead className="text-right">Elapsed time</TableHead>
                   <TableHead className={cn("text-right", USAGE_COLUMN)}>Tokens</TableHead>
-                  <TableHead className={cn("text-right", USAGE_COLUMN)}>Cost</TableHead>
+                  <TableHead className={cn("text-right", USAGE_COLUMN)}>Estimated cost</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

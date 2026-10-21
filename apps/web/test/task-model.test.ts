@@ -22,11 +22,13 @@ import {
   taskLoops,
   taskRows,
   taskTotals,
+  totalsFigures,
 } from "../src/task/model.ts";
 import {
   boardOverview,
   boardOverviewResolved,
   boardOverviewUnpriced,
+  boardOverviewUntimed,
   boardStalled,
   changeTasks,
 } from "./board-fixture.ts";
@@ -323,6 +325,12 @@ describe("Tasks list model", () => {
     ]);
   });
 
+  /** The line under the Tasks list's heading for `overview`, a `*` after each lower bound. */
+  const totalsLine = (overview: ReturnType<typeof boardOverview>) =>
+    totalsFigures(taskTotals(taskRows(lanes(overview), boardStalled()), Date.now()))
+      .map(({ figure, words, lowerBound }) => `${figure}${lowerBound === null ? "" : "*"} ${words}`)
+      .join(", ");
+
   it("adds up the listed Tasks' runs, time, tokens, and priced dollars", () => {
     const now = Date.now();
     const redesign = taskOf(31);
@@ -334,18 +342,32 @@ describe("Tasks list model", () => {
     assert.strictEqual(Math.round(totals.durationMillis / 60_000), 96);
     assert.strictEqual(totals.unmeasured, 0);
     assert.strictEqual(totals.tokens, 27_300 + 12_000 + 48_000);
-    assert(totals.cost !== null);
-    assert.closeTo(totals.cost.usd, 5.5, 1e-9);
-    assert.isTrue(totals.cost.estimate);
+    assert(totals.usd !== null);
+    assert.closeTo(totals.usd, 5.5, 1e-9);
     assert.isFalse(totals.unpriced);
+    assert.strictEqual(
+      totalsLine(boardOverview()),
+      "7 runs, 1 h 36 min elapsed, 87.3K tokens, $5.50 estimated",
+    );
   });
 
-  it("keeps the priced dollars and marks the totals a lower bound while a Run has no price yet", () => {
+  it("keeps the priced dollars and marks only the cost a lower bound while a Run has no price yet", () => {
     const totals = taskTotals(taskRows(lanes(boardOverviewUnpriced()), boardStalled()), Date.now());
     assert.strictEqual(totals.tokens, 27_500 + 12_000 + 48_000);
-    assert(totals.cost !== null);
-    assert.closeTo(totals.cost.usd, 5.5, 1e-9);
-    assert.isTrue(totals.cost.estimate);
+    assert(totals.usd !== null);
+    assert.closeTo(totals.usd, 13.45, 1e-9);
     assert.isTrue(totals.unpriced);
+    assert.strictEqual(
+      totalsLine(boardOverviewUnpriced()),
+      "7 runs, 1 h 36 min elapsed, 87.5K tokens, $13.45* estimated",
+    );
+  });
+
+  it("leaves out an Attempt with no recorded end and marks only the time a lower bound", () => {
+    // #18's 10 min are unknown.
+    assert.strictEqual(
+      totalsLine(boardOverviewUntimed()),
+      "7 runs, 1 h 26 min* elapsed, 87.3K tokens, $5.50 estimated",
+    );
   });
 });
