@@ -2,13 +2,14 @@ import { assert, describe, it } from "@effect/vitest";
 import { CHILD_KILL_SCRIPT, RemoteShell } from "@usine/agents/child-host";
 import { githubSignature } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { AttemptId, AttemptWindow } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { InfraFailure } from "@usine/core/attempt/failure";
 import type { AttemptRecovery } from "@usine/core/attempt/salvage";
 import { BotLogin } from "@usine/core/worker";
 import { type AttemptRequest, AttemptRuntime, ParentFailed } from "@usine/durable/attempt-runtime";
 import { completes, type StubParent, StubStorage } from "@usine/durable/testing";
-import { Deferred, Effect, Fiber, Layer, Logger, Option, Result } from "effect";
+import { DateTime, Deferred, Effect, Fiber, Layer, Logger, Option, Result } from "effect";
 import { TestClock } from "effect/testing";
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
 import {
@@ -65,6 +66,15 @@ const stopMidAttempt = (
   });
 
 const COMMENT = "https://github.com/acme/demo/issues/42#issuecomment-7";
+/** Posted at 10:07, while another Attempt of the same Agent was open on issue 42. */
+const SHARED = "https://github.com/acme/demo/issues/42#issuecomment-8";
+
+/** Another Loop's Attempt of the same Agent, open on issue 42 since 10:05. */
+const OTHER_ATTEMPT = new AttemptWindow({
+  attemptId: AttemptId.make("docs-run/implement/1"),
+  startedAt: DateTime.makeUnsafe("2026-10-20T10:05:00Z"),
+  endedAt: Option.none(),
+});
 
 /** The Attempt on issue 42, writing as the bot login the fake `gh` lists comments for. */
 const onItem = new CheckoutRequest({
@@ -73,18 +83,17 @@ const onItem = new CheckoutRequest({
   botLogin: Option.some(BotLogin.make("usine-test[bot]")),
 });
 
-/** Has the fake `gh` list `COMMENT` on issue 42, signed by the Attempt's Agent. */
+/** Has the fake `gh` list `COMMENT` and `SHARED` on issue 42, both signed by the Attempt's Agent. */
 const postSignedComment = (ssh: ReturnType<typeof fakeSsh>) => {
+  const signed = (url: string, at: string) => ({
+    html_url: url,
+    body: `Fixed.\n\n${githubSignature(TEST_AGENT.name)}`,
+    user: { login: "usine-test[bot]" },
+    created_at: at,
+    updated_at: at,
+  });
   ssh.state.issueComments = JSON.stringify([
-    [
-      {
-        html_url: COMMENT,
-        body: `Fixed.\n\n${githubSignature(TEST_AGENT.name)}`,
-        user: { login: "usine-test[bot]" },
-        created_at: "2026-10-20T10:00:00Z",
-        updated_at: "2026-10-20T10:00:00Z",
-      },
-    ],
+    [signed(COMMENT, "2026-10-20T10:00:00Z"), signed(SHARED, "2026-10-20T10:07:00Z")],
   ]);
 };
 
@@ -295,23 +304,28 @@ describe("exe.dev launch", () => {
     "records the comments an Attempt posted on its Item when it fails, not when it succeeds",
     () => {
       const recorded: Array<ReadonlyArray<string>> = [];
-      const sink: AttemptChannel.Sink = {
-        append: () => Effect.void,
-        salvage: () => Effect.void,
-        comments: (comments) =>
-          Effect.sync(
-            () => void recorded.push(comments.map(({ kind, url }) => kind + " " + url.href)),
-          ),
-        overlapping: Effect.succeed([]),
-      };
       const attempt = (parent: StubParent) => {
         const ssh = fakeSsh();
         postSignedComment(ssh);
+        const opened: Array<AttemptWindow> = [];
+        const sink: AttemptChannel.Sink = {
+          append: () => Effect.void,
+          salvage: () => Effect.void,
+          comments: (comments) =>
+            Effect.sync(
+              () => void recorded.push(comments.map(({ kind, url }) => kind + " " + url.href)),
+            ),
+          overlapping: Effect.sync(() => opened),
+        };
+        // The other Attempt opens on the Item while this one works, so only a
+        // harvest that reads the windows after the parent finished leaves `SHARED` out.
+        const joined: StubParent = (context) =>
+          Effect.sync(() => void opened.push(OTHER_ATTEMPT)).pipe(Effect.andThen(parent(context)));
         return Effect.gen(function* () {
           const executor = yield* Executor;
           const prepared = yield* executor.prepare(onItem);
           return yield* prepared.launch(sink).pipe(Effect.result);
-        }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, parent)));
+        }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, joined)));
       };
       return Effect.gen(function* () {
         const failed = yield* attempt(fails);
@@ -591,7 +605,7 @@ describe("exe.dev launch", () => {
               Effect.sync(
                 () => void recorded.push(...comments.map(({ kind, url }) => `${kind} ${url.href}`)),
               ),
-            overlapping: Effect.succeed([]),
+            overlapping: Effect.succeed([OTHER_ATTEMPT]),
           });
           // The Run closes the Attempt from the stored failure without launching it again.
           const outcome = yield* executor.outcome(ATTEMPT_ID);

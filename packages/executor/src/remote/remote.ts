@@ -1,5 +1,6 @@
 import { CHILD_KILL_SCRIPT } from "@usine/agents/child-host";
 import { ClaudeLoginLock } from "@usine/agents/runtime";
+import type { AttemptWindow } from "@usine/core/attempt";
 import { type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
 import type { AttemptRecovery, AttemptSalvage, RecoverySink } from "@usine/core/attempt/salvage";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
@@ -161,7 +162,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
               ),
             )
           : Option.none(),
-        record.comments,
+        record,
       );
       if (!present) return;
       const reconcile = (
@@ -198,8 +199,15 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       );
     });
 
-    const harvest = (workspace: AttemptWorkspace, access: RemoteAccess) =>
-      harvestFacts(workspace.spec, harvestCommand("launch", workspace.worktree, access)).pipe(
+    const harvest = (
+      workspace: AttemptWorkspace,
+      access: RemoteAccess,
+      overlapping: ReadonlyArray<AttemptWindow>,
+    ) =>
+      harvestFacts(
+        { ...workspace.spec, overlapping },
+        harvestCommand("launch", workspace.worktree, access),
+      ).pipe(
         Effect.mapError(
           (error) =>
             new InfraFailure({
@@ -461,11 +469,12 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
               return yield* session.launch(prepared, io, {
                 host: access.shell,
                 environment: withGitHooks(access.environment, provisioned.gitHooks),
-                harvest: harvest(prepared, access),
-                harvestComments: harvestPostedComments(
-                  prepared.spec,
-                  harvestCommand("launch", prepared.worktree, access),
-                ),
+                harvest: (overlapping) => harvest(prepared, access, overlapping),
+                harvestComments: (overlapping) =>
+                  harvestPostedComments(
+                    { ...prepared.spec, overlapping },
+                    harvestCommand("launch", prepared.worktree, access),
+                  ),
                 keepForReattach: provisioned.keepForReattach,
               });
             }),

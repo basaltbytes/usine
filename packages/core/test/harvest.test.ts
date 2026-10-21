@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { Data, DateTime, Effect, Logger, Option } from "effect";
 import { Agent, AgentName, AgentPersona } from "../src/agent/agent.ts";
 import { BrainSpec, ModelId } from "../src/agent/brain.ts";
-import { AttemptId } from "../src/attempt/attempt.ts";
+import { AttemptId, AttemptWindow } from "../src/attempt/attempt.ts";
 import { CommitSha, RepositoryName, RepositoryRevision } from "../src/repository.ts";
 import { type HarvestSpec, harvestFacts } from "../src/step/harvest.ts";
 import type { StepResultFact } from "../src/step/result.ts";
@@ -31,6 +31,7 @@ const spec: HarvestSpec = {
     parentEffort: Option.none(),
     persona: AgentPersona.make("Implement the issue."),
   }),
+  overlapping: [],
 };
 
 class CommandFailed extends Data.TaggedError("CommandFailed")<{ readonly message: string }> {}
@@ -43,8 +44,8 @@ const PULL_REQUESTS = `gh api repos/acme/demo/commits/${HEAD}/pulls?per_page=100
  * Harvests a checkout whose agent committed `HEAD` on top of the base, with
  * `remoteRefs` as the remote's branch and pull request refs, `pullRequests`
  * as GitHub's answer for the final commit, and `github` answering the other
- * GitHub commands for `harvested`. Returns the facts, the commands run, and
- * the log lines at warning level or above.
+ * GitHub commands for `harvested`. Returns the facts, the commands run, the
+ * log lines at warning level or above, and the info log messages.
  */
 const harvest = (
   remoteRefs: ReadonlyArray<string>,
@@ -54,6 +55,7 @@ const harvest = (
 ) => {
   const commands: Array<string> = [];
   const warnings: Array<string> = [];
+  const infos: Array<unknown> = [];
   const answers = new Map<string, Answer>([
     [`git log --reverse --format=%H %s ${BASE}..HEAD`, Effect.succeed([`${HEAD} Fix the issue`])],
     ["git rev-parse HEAD", Effect.succeed([HEAD])],
@@ -67,11 +69,12 @@ const harvest = (
     commands.push(line);
     return answers.get(line) ?? Effect.die(`unexpected command ${line}`);
   }).pipe(
-    Effect.map((facts) => ({ facts, commands, warnings })),
+    Effect.map((facts) => ({ facts, commands, warnings, infos })),
     Effect.provide(
       Logger.layer([
         Logger.make(({ logLevel, message }) => {
           if (logLevel === "Warn" || logLevel === "Error") warnings.push(JSON.stringify(message));
+          if (logLevel === "Info") infos.push(message);
         }),
       ]),
     ),
@@ -358,6 +361,87 @@ describe("harvesting an Attempt's facts", () => {
           ["issue-comment", url("issuecomment-11")],
           ["review", url("pullrequestreview-21")],
           ["review-comment", url("discussion_r31")],
+        ]);
+      }),
+  );
+
+  it.effect(
+    "leaves out what the Agent's other Attempt on the Item could have posted while both were open",
+    () =>
+      Effect.gen(function* () {
+        // Two Loops' Runs give the developer Agent pull request 71 at once: the
+        // fix Attempt from 12:00 to 12:10, the docs Attempt from 12:05 on.
+        const fix = AttemptId.make("fix/implement/1");
+        const docs = AttemptId.make("docs/implement/1");
+        const window = (attemptId: AttemptId, startedAt: string, endedAt: string | null) =>
+          new AttemptWindow({
+            attemptId,
+            startedAt: DateTime.makeUnsafe(startedAt),
+            endedAt: Option.fromNullOr(endedAt).pipe(Option.map(DateTime.makeUnsafe)),
+          });
+        const url = (anchor: string) => `https://github.com/acme/demo/pull/71#${anchor}`;
+        const posted = (anchor: string, at: string) => ({
+          html_url: url(anchor),
+          body: signed("Done."),
+          user: { login: BOT },
+          created_at: at,
+          updated_at: at,
+        });
+        const conversation = pages(
+          posted("issuecomment-1", "2026-10-19T12:01:00Z"),
+          posted("issuecomment-2", "2026-10-19T12:07:00Z"),
+          posted("issuecomment-3", "2026-10-19T12:15:00Z"),
+        );
+        const reviews: readonly [string, Answer] = [
+          "gh api repos/acme/demo/pulls/71/reviews?per_page=100 --paginate --slurp",
+          pages(),
+        ];
+        const listed = (since: string): ReadonlyArray<readonly [string, Answer]> => [
+          [
+            `gh api repos/acme/demo/issues/71/comments?since=${since}&per_page=100 --paginate --slurp`,
+            conversation,
+          ],
+          reviews,
+          [
+            `gh api repos/acme/demo/pulls/71/comments?since=${since}&per_page=100 --paginate --slurp`,
+            pages(),
+          ],
+        ];
+
+        const fixed = yield* harvest([], NEVER_ASKED, listed(SINCE), {
+          ...itemRun("pull/71"),
+          attemptId: fix,
+          overlapping: [window(docs, "2026-10-19T12:05:00.700Z", null)],
+        });
+        const documented = yield* harvest([], NEVER_ASKED, listed("2026-10-19T12:05:01Z"), {
+          ...itemRun("pull/71"),
+          attemptId: docs,
+          preparedAt: Option.some(DateTime.makeUnsafe("2026-10-19T12:05:01.250Z")),
+          overlapping: [window(fix, "2026-10-19T12:00:00.100Z", "2026-10-19T12:10:00.000Z")],
+        });
+
+        // The 12:07 comment falls in both windows, so neither Attempt records it.
+        assert.deepStrictEqual(comments(fixed.facts), [["issue-comment", url("issuecomment-1")]]);
+        assert.deepStrictEqual(comments(documented.facts), [
+          ["issue-comment", url("issuecomment-3")],
+        ]);
+        assert.deepInclude(fixed.infos, [
+          "Left out a comment that another open Attempt of the Agent on the Item could have posted",
+          {
+            attemptId: fix,
+            overlapping: [docs],
+            comment: url("issuecomment-2"),
+            kind: "issue-comment",
+          },
+        ]);
+        assert.deepInclude(documented.infos, [
+          "Left out a comment that another open Attempt of the Agent on the Item could have posted",
+          {
+            attemptId: docs,
+            overlapping: [fix],
+            comment: url("issuecomment-2"),
+            kind: "issue-comment",
+          },
         ]);
       }),
   );

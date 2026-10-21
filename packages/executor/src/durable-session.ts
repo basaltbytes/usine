@@ -1,8 +1,8 @@
 import type { ChildHost } from "@usine/agents/child-host";
-import type { AttemptId } from "@usine/core/attempt";
+import type { AttemptId, AttemptWindow } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentFailure, type AttemptFailure, RunawayFailure } from "@usine/core/attempt/failure";
-import type { AttemptRecovery } from "@usine/core/attempt/salvage";
+import type { AttemptRecovery, RecoverySink } from "@usine/core/attempt/salvage";
 import type { HarvestSpec } from "@usine/core/step/harvest";
 import type { Comment, StepResult, StepResultFact } from "@usine/core/step/result";
 import {
@@ -49,10 +49,21 @@ export interface DurableCheckout {
   readonly host: ChildHost;
   /** The only environment the parent's children and the harvesting commands see (ADR 0011). */
   readonly environment: Record<string, string>;
-  /** Collects the commits and pull requests the checkout holds and the comments the Attempt posted on its Item. */
-  readonly harvest: Effect.Effect<ReadonlyArray<StepResultFact>, AttemptFailure>;
-  /** Collects only the comments the Attempt posted on its Item, for an Attempt that ended without success; none when GitHub fails. */
-  readonly harvestComments: Effect.Effect<ReadonlyArray<Comment>>;
+  /**
+   * Collects the commits and pull requests the checkout holds and the comments
+   * the Attempt posted on its Item outside the `overlapping` windows of its
+   * Agent's other Attempts there.
+   */
+  readonly harvest: (
+    overlapping: ReadonlyArray<AttemptWindow>,
+  ) => Effect.Effect<ReadonlyArray<StepResultFact>, AttemptFailure>;
+  /**
+   * Collects only the comments, as `harvest` does, for an Attempt that ended
+   * without success; none when GitHub fails.
+   */
+  readonly harvestComments: (
+    overlapping: ReadonlyArray<AttemptWindow>,
+  ) => Effect.Effect<ReadonlyArray<Comment>>;
   /** Preserves the checkout when a restart needs to reattach the parent or repeat an unrecorded harvest. */
   readonly keepForReattach: Effect.Effect<void>;
 }
@@ -161,8 +172,10 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
 
   /**
    * Records the comments and reviews an Attempt that ended without success
-   * posted on its Run's Item, once its parent task has stopped. A failure to
-   * record them is logged and never changes how the Attempt ended.
+   * posted on its Run's Item, once its parent task has stopped. When the
+   * windows of its Agent's other Attempts on the Item cannot be read, its
+   * comments cannot be told from theirs and none is recorded. A failure is
+   * logged and never changes how the Attempt ended.
    */
   const recordPostedComments = Effect.fn("DurableSession.recordPostedComments")(function* (
     attemptId: AttemptId,
@@ -170,7 +183,19 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
     io: AttemptChannel.Sink,
   ) {
     yield* Effect.annotateCurrentSpan({ attemptId });
-    yield* recordComments(attemptId, yield* checkout.harvestComments, io.comments);
+    const overlapping = yield* io.overlapping.pipe(Effect.result);
+    if (Result.isFailure(overlapping)) {
+      yield* Effect.logWarning(
+        "Could not read the windows of the Agent's other Attempts on the Item; the comments the Attempt posted are not recorded",
+        { attemptId, errorTag: overlapping.failure._tag, message: overlapping.failure.message },
+      );
+      return;
+    }
+    yield* recordComments(
+      attemptId,
+      yield* checkout.harvestComments(overlapping.success),
+      io.comments,
+    );
   });
 
   const launch = Effect.fn("DurableSession.launch")(function* (
@@ -222,7 +247,11 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
       )
         return yield* new AgentFailure({ message: "The Attempt's parent task was canceled" });
       const report = yield* executed;
-      const facts = yield* checkout.harvest;
+      // Read now, not at preparation: an Attempt of the Agent that started on
+      // the Item after this one overlaps it too (#429). Without them the
+      // harvest cannot tell this Attempt's comments from that one's, so a read
+      // that fails fails the Attempt, as a failing harvest command does.
+      const facts = yield* checkout.harvest(yield* io.overlapping);
       const harvested = harvestedResult(report, facts);
       if (Result.isFailure(harvested)) {
         yield* Effect.logWarning(
@@ -536,13 +565,15 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
    * Attempt posted on its Run's Item when durable storage holds its parent's
    * failure. The Run closes such an Attempt from that failure without
    * launching it again, so no launch recorded them. `harvest` collects them
-   * from the Attempt's checkout, and is none when the checkout is gone. Any
-   * other Attempt records nothing, and every failure is logged, never raised.
+   * from the Attempt's checkout, and is none when the checkout is gone; it
+   * leaves out those posted in the windows `record.overlapping` reads, as a
+   * launch does. Any other Attempt records nothing, and every failure is
+   * logged, never raised.
    */
   const recoverPostedComments = Effect.fn("DurableSession.recoverPostedComments")(function* <E>(
     attempt: AttemptRecovery,
     harvest: Option.Option<PostedCommentsHarvest>,
-    record: (comments: ReadonlyArray<Comment>) => Effect.Effect<void, E>,
+    record: Pick<RecoverySink<E>, "comments" | "overlapping">,
   ) {
     if (!attempt.open) return;
     const { attemptId, worker } = attempt;
@@ -588,11 +619,21 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
       );
       return;
     }
+    const overlapping = yield* record.overlapping.pipe(Effect.result);
+    if (Result.isFailure(overlapping)) {
+      yield* Effect.logWarning(
+        "The open Attempt's parent task failed and the windows of its Agent's other Attempts on the Item cannot be read; the comments it posted are not recorded",
+        { attemptId, worker, message: String(overlapping.failure) },
+      );
+      return;
+    }
     yield* Effect.logInfo(
       "The open Attempt's parent task failed before this process recorded it; harvesting the comments it posted from its checkout",
-      { attemptId, worker },
+      { attemptId, worker, overlapping: overlapping.success.map((window) => window.attemptId) },
     );
-    const comments = yield* harvest.value(stored.success.value.spec).pipe(Effect.result);
+    const comments = yield* harvest
+      .value({ ...stored.success.value.spec, overlapping: overlapping.success })
+      .pipe(Effect.result);
     if (Result.isFailure(comments)) {
       yield* Effect.logWarning(
         "Could not acquire a credential to harvest the open Attempt's comments; the comments it posted are not recorded",
@@ -600,7 +641,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
       );
       return;
     }
-    yield* recordComments(attemptId, comments.success, record);
+    yield* recordComments(attemptId, comments.success, record.comments);
   });
 
   /** The request a reattached Attempt's parent task was created with; a missing one fails the reattachment. */

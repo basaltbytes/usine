@@ -2,6 +2,7 @@ import { workerLeftoversFor } from "./leftovers.ts";
 import { localCredentialsFor } from "./credentials.ts";
 import { LocalProcess } from "@usine/agents/child-host";
 import { ClaudeLoginLock } from "@usine/agents/runtime";
+import type { AttemptWindow } from "@usine/core/attempt";
 import type { AttemptRecovery, RecoverySink } from "@usine/core/attempt/salvage";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import * as AttemptChannel from "@usine/core/attempt/channel";
@@ -278,7 +279,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
               ),
             )
           : Option.none(),
-        record.comments,
+        record,
       );
       if (!present) return;
       const cache = path.join(root, "repos", cacheDirectoryName(attempt.repository));
@@ -365,9 +366,10 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       workspace: AttemptWorkspace,
       credential: Effect.Success<ReturnType<typeof credentials>>,
       environment: Record<string, string>,
+      overlapping: ReadonlyArray<AttemptWindow>,
     ) =>
       harvestFacts(
-        workspace.spec,
+        { ...workspace.spec, overlapping },
         harvestCommand("launch", workspace.worktree, credential, environment),
       ).pipe(
         Effect.mapError(
@@ -490,11 +492,13 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
           session.launch(prepared.workspace, io, {
             host: new LocalProcess(),
             environment,
-            harvest: harvest(prepared.workspace, credential, environment),
-            harvestComments: harvestPostedComments(
-              prepared.workspace.spec,
-              harvestCommand("launch", prepared.workspace.worktree, credential, environment),
-            ),
+            harvest: (overlapping) =>
+              harvest(prepared.workspace, credential, environment, overlapping),
+            harvestComments: (overlapping) =>
+              harvestPostedComments(
+                { ...prepared.workspace.spec, overlapping },
+                harvestCommand("launch", prepared.workspace.worktree, credential, environment),
+              ),
             keepForReattach: prepared.keepForReattach,
           }),
         salvaged: prepared.salvaged,
