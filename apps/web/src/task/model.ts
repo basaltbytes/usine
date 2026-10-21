@@ -11,7 +11,7 @@ import type {
   TaskItemView,
   TaskUsageView,
 } from "@usine/orchestrator/operator";
-import { Option } from "effect";
+import { Match, Option } from "effect";
 
 /**
  * How long a Run's Attempts ran, added up: each ended Attempt from its start to its end, and a
@@ -65,15 +65,22 @@ export const runActivityAt = (run: Pick<RunView, "attempts" | "openedAt" | "clos
   return run.closedAt ?? last?.endedAt ?? last?.startedAt ?? run.openedAt;
 };
 
+/** The entries of the desk's stalled list that are about one of the Task's Items, in the desk's
+ * order: one per Loop and Item. */
+const taskStalls = (
+  stalled: ReadonlyArray<StalledItemView>,
+  task: Pick<BoardTaskView, "items">,
+): ReadonlyArray<StalledItemView> => {
+  const keys = new Set(task.items.map(({ itemKey }) => itemKey));
+  return stalled.filter(({ item }) => keys.has(item.itemKey));
+};
+
 /** The stall of a Task: the first entry of the desk's stalled list that is about one of the
  * Task's Items, or null when none is. */
 export const taskStall = (
   stalled: ReadonlyArray<StalledItemView>,
   task: Pick<BoardTaskView, "items">,
-): StalledItemView | null => {
-  const keys = new Set(task.items.map(({ itemKey }) => itemKey));
-  return stalled.find(({ item }) => keys.has(item.itemKey)) ?? null;
-};
+): StalledItemView | null => taskStalls(stalled, task)[0] ?? null;
 
 /** The Run a stall reason names, or null when the reason is about the Loop or the Item alone, as
  * a paused Loop, a used-up cycle budget, or a coming poll are. */
@@ -92,7 +99,7 @@ export const taskNumber = (task: BoardTaskView): string => String(taskOrigin(tas
 /**
  * Where usine's work on a Task stands, as the Tasks list's Status column says it. Running,
  * AwaitingApproval, Queued, and Stalled are in flight, each with the Run whose opening orders it
- * in the list.
+ * in the list (see `rowPlace` and `countedAs`).
  */
 type TaskStatus =
   /** `run` has an Attempt at work. */
@@ -102,11 +109,19 @@ type TaskStatus =
   /** `run` is pending or queued, and the desk has not said why yet. */
   | { readonly _tag: "Queued"; readonly run: RunView }
   /**
-   * A Loop's trigger matches one of the Task's Items with no Attempt running on it, for `stall`'s
-   * reason; `run` is the Run that reason names, the pending or queued one when one is open, else
-   * the last Run.
+   * A Loop's trigger matches one of the Task's Items with no Attempt running on it, and `stall`'s
+   * reason keeps the work open (see `keepsInFlight`): the first such stall of the Task's, in the
+   * desk's order. `run` is the Run that reason names, the pending or queued one when one is open,
+   * else the last Run.
    */
   | { readonly _tag: "Stalled"; readonly stall: StalledItemView; readonly run: RunView }
+  /**
+   * A Loop's trigger matches one of the Task's Items, but no Run is open and none of the Task's
+   * stalls holds anything on the operator: the last Run closed on the Item's unchanged state, the
+   * next poll acts on it, the Loop is paused, or the failure is resolved. `stall` is the first of
+   * them in the desk's order.
+   */
+  | { readonly _tag: "Idle"; readonly stall: StalledItemView }
   /** Nothing is open or stalled, and a failed Run or a hold on one of the Items waits on the
    * operator, as the Board card's Needs attention says. */
   | { readonly _tag: "NeedsAttention" }
@@ -123,11 +138,23 @@ export interface TaskRow {
   readonly status: TaskStatus;
 }
 
-const isInFlight = (status: TaskStatus): boolean =>
-  status._tag === "Running" ||
-  status._tag === "AwaitingApproval" ||
-  status._tag === "Queued" ||
-  status._tag === "Stalled";
+/**
+ * Whether `stall` keeps its Task in flight: its reason names an open Run, or holds the Loop on the
+ * operator, as an Agent's question or blocker, a used-up cycle budget, and a failure not yet
+ * resolved do. A paused Loop keeps a Task in flight only beside an open Run, which `taskStatus`
+ * reads before any stall.
+ */
+const keepsInFlight = ({ reason }: StalledItemView): boolean =>
+  Match.valueTags(reason, {
+    AwaitingApproval: () => true,
+    QueuedForWorker: () => true,
+    HeldForOperator: () => true,
+    CycleBudgetUsedUp: () => true,
+    RunFailed: ({ run }) => run.canResolveFailure,
+    ClosedUnchanged: () => false,
+    LoopPaused: () => false,
+    AwaitingPoll: () => false,
+  });
 
 /** The first Run, newest first, whose state is one of `states`. */
 const newestIn = (
@@ -137,8 +164,9 @@ const newestIn = (
 
 /**
  * A Task's status, the first that applies: a Run at work, a Run waiting for approval, a pending or
- * queued Run with the desk's reason for that Run, Done for a merged or closed current Item, the
- * desk's stall, Needs attention, and last the outcome of `last`. `stalled` is the desk's list.
+ * queued Run with the desk's reason for that Run, Done for a merged or closed current Item, a
+ * stall of the Task's that keeps the work open, any other stall of the Task's as idle, Needs
+ * attention, and last the outcome of `last`. `stalled` is the desk's list.
  */
 const taskStatus = (
   task: BoardTaskView,
@@ -159,8 +187,14 @@ const taskStatus = (
       : { _tag: "Stalled", stall: own, run: queued };
   }
   if (isSettledItemState(task.state)) return { _tag: "Done" };
-  const stall = taskStall(stalled, task);
-  if (stall !== null) return { _tag: "Stalled", stall, run: stallRun(stall) ?? last };
+  // The desk orders its failures by Item and Loop, not by whether they are resolved, so a resolved
+  // one can come before another Loop's failure that still waits on the operator. Any stall that
+  // keeps the work open outranks the first.
+  const stalls = taskStalls(stalled, task);
+  const open = stalls.find(keepsInFlight);
+  if (open !== undefined) return { _tag: "Stalled", stall: open, run: stallRun(open) ?? last };
+  const [idle] = stalls;
+  if (idle !== undefined) return { _tag: "Idle", stall: idle };
   if (task.needsYou) return { _tag: "NeedsAttention" };
   return { _tag: "Ended", run: last };
 };
@@ -168,8 +202,8 @@ const taskStatus = (
 /**
  * A row's place in the list: its group, then the time that orders it within the group, newest
  * first. In flight comes first, running, then waiting for approval, then pending, queued, and
- * stalled, each by when its Run opened; every other Task follows, by when its last Run closed,
- * which for a Run canceled before any Attempt is the cancel, not its opening.
+ * stalled, each by when its Run opened; every other Task follows, idle ones included, by when its
+ * last Run closed, which for a Run canceled before any Attempt is the cancel, not its opening.
  */
 const rowPlace = ({ status, last }: TaskRow): readonly [group: number, at: number] => {
   switch (status._tag) {
@@ -180,6 +214,7 @@ const rowPlace = ({ status, last }: TaskRow): readonly [group: number, at: numbe
     case "Queued":
     case "Stalled":
       return [2, Date.parse(status.run.openedAt)];
+    case "Idle":
     case "NeedsAttention":
     case "Done":
     case "Ended":
@@ -209,20 +244,40 @@ export const taskRows = (
     )
     .map(({ row }) => row);
 
+const HEADING_COUNTS = ["in flight", "needs attention", "done"] as const;
+
+/**
+ * The heading count a row adds to; null for a Task that shows its last Run's outcome, and for an
+ * idle one unless a failed Run or a hold on one of its Items waits on the operator.
+ */
+const countedAs = ({ task, status }: TaskRow): (typeof HEADING_COUNTS)[number] | null => {
+  switch (status._tag) {
+    case "Running":
+    case "AwaitingApproval":
+    case "Queued":
+    case "Stalled":
+      return "in flight";
+    case "Idle":
+      return task.needsYou ? "needs attention" : null;
+    case "NeedsAttention":
+      return "needs attention";
+    case "Done":
+      return "done";
+    case "Ended":
+      return null;
+  }
+};
+
 /**
  * The Tasks list's heading counts, such as `2 in flight, 1 needs attention, 2 done`, leaving out a
  * zero count; undefined when all three are zero.
  */
 export const taskCounts = (rows: ReadonlyArray<TaskRow>): string | undefined => {
-  const counts = [
-    [rows.filter(({ status }) => isInFlight(status)).length, "in flight"],
-    [rows.filter(({ status }) => status._tag === "NeedsAttention").length, "needs attention"],
-    [rows.filter(({ status }) => status._tag === "Done").length, "done"],
-  ] as const;
-  const shown = counts.filter(([count]) => count > 0);
-  return shown.length === 0
-    ? undefined
-    : shown.map(([count, what]) => `${count} ${what}`).join(", ");
+  const shown = HEADING_COUNTS.flatMap((what) => {
+    const count = rows.filter((row) => countedAs(row) === what).length;
+    return count === 0 ? [] : [`${count} ${what}`];
+  });
+  return shown.length === 0 ? undefined : shown.join(", ");
 };
 
 /**

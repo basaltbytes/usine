@@ -86,19 +86,22 @@ const stallTone = ({ reason }: StalledItemView): string =>
 const statusLine = (
   { task, last, status }: TaskRow,
   now: number,
-): { readonly state: string; readonly words: string } =>
-  Match.valueTags(status, {
+): { readonly state: string; readonly words: string } => {
+  const stallLine = (stall: StalledItemView) => ({
+    state: stallTone(stall),
+    words: `${last.loop !== stall.loop && !stallNamesLoop(stall) ? `${stall.loop} ` : ""}${stallSentence(stall, now)}`,
+  });
+  return Match.valueTags(status, {
     Running: ({ run }) => ({ state: "Running", words: `Running ${run.loop}` }),
     AwaitingApproval: () => ({ state: "Waiting", words: "Waiting for approval" }),
     Queued: ({ run }) => ({ state: run.state, words: run.state }),
-    Stalled: ({ stall }) => ({
-      state: stallTone(stall),
-      words: `${last.loop !== stall.loop && !stallNamesLoop(stall) ? `${stall.loop} ` : ""}${stallSentence(stall, now)}`,
-    }),
+    Stalled: ({ stall }) => stallLine(stall),
+    Idle: ({ stall }) => stallLine(stall),
     NeedsAttention: () => ({ state: "needs-you", words: "Needs attention" }),
     Done: () => ({ state: itemStateLabel(task.state), words: "Done" }),
     Ended: ({ run }) => ({ state: run.state, words: run.state }),
   });
+};
 
 /** The status's mark and words on the row's 20px line; the mark stays on the first line when
  * the words wrap. */
