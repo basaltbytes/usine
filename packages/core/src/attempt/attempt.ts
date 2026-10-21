@@ -1,4 +1,4 @@
-import { Effect, Option, Schema } from "effect";
+import { DateTime, Effect, Option, Schema } from "effect";
 import { Agent, AgentName } from "../agent/agent.ts";
 import { BrainSpec, ModelId } from "../agent/brain.ts";
 import { RunId } from "../run/run.ts";
@@ -72,6 +72,62 @@ export class Attempt extends Schema.Class<Attempt>("Attempt")({
   ),
   comments: Schema.Array(Comment).pipe(Schema.withConstructorDefault(Effect.succeed([]))),
 }) {}
+
+/**
+ * When an Attempt was at work on its Run's Item, from its record: from
+ * `startedAt` through `endedAt`, which is none while the Attempt is open.
+ * Every Attempt on a local or SSH Worker writes to GitHub as the same App, so
+ * only these windows tell their writes apart.
+ */
+export class AttemptWindow extends Schema.Class<AttemptWindow>("AttemptWindow")({
+  attemptId: AttemptId,
+  startedAt: Schema.DateTimeUtc,
+  endedAt: Schema.Option(Schema.DateTimeUtc),
+}) {}
+
+/**
+ * The window `attempt`'s record gives it. None for an Attempt that ended
+ * before end times were recorded: its end is unknown.
+ */
+export const windowOf = (attempt: Attempt): Option.Option<AttemptWindow> =>
+  Option.isSome(attempt.outcome) && Option.isNone(attempt.endedAt)
+    ? Option.none()
+    : Option.some(
+        new AttemptWindow({
+          attemptId: attempt.id,
+          startedAt: attempt.startedAt,
+          endedAt: attempt.endedAt,
+        }),
+      );
+
+/**
+ * The first moment GitHub records as inside `window`. GitHub records times to
+ * the second, so a window opens at the second its Attempt started.
+ */
+const opening = (window: AttemptWindow) => {
+  const start = DateTime.toEpochMillis(window.startedAt);
+  return start - (start % 1_000);
+};
+
+/** Whether `window` is still open at `millis`, or ended at it or later. */
+const reaches = (window: AttemptWindow, millis: number) =>
+  Option.match(window.endedAt, {
+    onNone: () => true,
+    onSome: (end) => millis <= DateTime.toEpochMillis(end),
+  });
+
+/** Whether GitHub's time `at`, recorded to the second, falls in `window`. */
+export const windowHolds = (window: AttemptWindow, at: DateTime.Utc): boolean => {
+  const time = DateTime.toEpochMillis(at);
+  return opening(window) <= time && reaches(window, time);
+};
+
+/**
+ * Whether GitHub can record a time that both windows hold, so that a write
+ * their Attempts could each have made at that time belongs to neither.
+ */
+export const windowsOverlap = (left: AttemptWindow, right: AttemptWindow): boolean =>
+  reaches(left, opening(right)) && reaches(right, opening(left));
 
 /**
  * The auto-retry law: only an infra failure retries, and only while the attempt

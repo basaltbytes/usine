@@ -10,7 +10,7 @@ Import each domain concept from its owning subpath. Identities, records, and ope
 | `@usine/core/run`, `@usine/core/run/state` | `Run`, `RunId`; the run state machine as a tagged union with typestate transitions (`RunState.start`, `RunState.supersede`, ...) |
 | `@usine/core/step`, `@usine/core/step/result` | `Step`, `StepName`; `StepResult` and its facts (`Commit`, `PullRequest`, `Comment`) |
 | `@usine/core/step/harvest` | `harvestFacts`, `harvestPostedComments`, `HarvestError`: the commits and pull requests an Attempt's checkout holds once its agent finished, and the comments and reviews the Attempt posted on its Run's Item (written by its bot login and ending with its Agent's signature), read through a caller-supplied `git`/`gh` runner |
-| `@usine/core/attempt` | `Attempt`, `AttemptId`, `AttemptNumber`, `AttemptTask`, `shouldAutoRetry` |
+| `@usine/core/attempt` | `Attempt`, `AttemptId`, `AttemptNumber`, `AttemptTask`, `shouldAutoRetry`, and when an Attempt was at work on its Item: `AttemptWindow`, `windowOf`, `windowHolds`, `windowsOverlap` |
 | `@usine/core/attempt/outcome` | `AttemptSucceeded`, `AttemptFailed`, `AttemptCanceled`, `AttemptOutcome` |
 | `@usine/core/attempt/failure` | `InfraFailure`, `DefectFailure`, `AgentFailure`, `RunawayFailure`, `ChildSessionBudgetFailure`, `AttemptFailure`, `isAutoRetryableFailure` |
 | `@usine/core/attempt/salvage` | `SalvageRef`, `salvageRefFor`, `SalvagePushed`, `SalvageRetained`, `AttemptSalvage`, `AttemptRecovery`, `RecoverySink` |
@@ -38,6 +38,8 @@ Import `CycleLimit`, `CycleGeneration`, `CycleCount`, `LoopCycleCount`, and `Cyc
 `DefectFailure` records a programmer defect captured at a boundary that needs a serializable Attempt outcome. It retains the original cause and never qualifies for automatic retry.
 
 An `Attempt` records why it began (`start`, none for a later Attempt begun before usine recorded it) and when a restart last reattached it (`reattachedAt`).
+
+`AttemptWindow` is when an Attempt was at work on its Run's Item, from its record: `startedAt` through `endedAt`, none while it is open. `windowOf(attempt)` reads it from an `Attempt`, and is none for an Attempt that ended before end times were recorded. GitHub records times to the second, so `windowHolds(window, at)` opens a window at the second its Attempt started, and `windowsOverlap` says whether GitHub can record a time two windows both hold. Every Attempt on a local or SSH Worker writes as the same App, so a write in two Attempts' windows belongs to neither. The Run reader applies this rule.
 
 `SessionTokensUpdated` carries a session's cumulative `TokenCount` and, as `costUsd`, the `UsdAmount` its harness priced that usage at: Pi from its model catalog, Claude Code from the Agent SDK's prices. Codex prices nothing, and transcripts recorded before prices were decode to `Option.none()`. `brainPool(brain)` names the billing pool a started session draws from (ADR 0021).
 
