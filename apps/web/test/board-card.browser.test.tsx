@@ -367,6 +367,30 @@ it("runs a Task's canceled Run again from the card menu, says so on the card, an
   await expect.element(card.getByText(runAgainProgress, { exact: true })).not.toBeInTheDocument();
 });
 
+it("keeps a card's Run again through a move to another lane and opens the new Run", async () => {
+  await runDroppedAgain();
+  await actions(18).click();
+  await page.getByRole("menuitem", { name: "Move to" }).click();
+  await page.getByRole("menuitem", { name: "In progress", exact: true }).click();
+  await expect.element(page.getByRole("menu")).not.toBeInTheDocument();
+  // The card remounts in its new lane, still waiting for the answer.
+  await expect.element(lane("In progress").getByText(/^Cache the label catalog/u)).toBeVisible();
+  const moved = page.elementLocator(cardOf(/^Cache the label catalog/u));
+  await expect.element(moved.getByText(runAgainProgress, { exact: true })).toBeVisible();
+  // Nor does the remounted card offer Run again a second time before the answer arrives.
+  await actions(18).click();
+  expect((await menuContents()).items).not.toContain("Run againimplement");
+  await userEvent.keyboard("{Escape}");
+  await commands.releaseRunAgain(
+    200,
+    runAgainBody(
+      new Claimed({ eventId: EventId.make("run-again-event"), runId: RunId.make("run-again") }),
+    ),
+  );
+  await expect.poll(() => opened).toEqual(["run-again"]);
+  await expect.element(moved.getByText(runAgainProgress, { exact: true })).not.toBeInTheDocument();
+});
+
 it("says on the card why Run again opened no Run: a refusal, then a used-up cycle budget", async () => {
   const card = page.elementLocator(cardOf(/^Cache the label catalog/u));
   const refusal =

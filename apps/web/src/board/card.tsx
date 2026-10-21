@@ -31,17 +31,13 @@ import {
   runLineTimeTitle,
 } from "../operator-copy.ts";
 import { projectParams } from "../overview.ts";
-import {
-  type RunActions,
-  type RunAgainActions,
-  useRunAction,
-  useRunAgain,
-} from "../run-actions.ts";
+import { type RunActions, useRunAction } from "../run-actions.ts";
 import { StallAction } from "../stall/action.tsx";
 import { stallNamesLoop, stallSentence } from "../stall/copy.ts";
 import { stallRun, taskNumber } from "../task/model.ts";
 import { type CardMoves, CardMenu } from "./card-menu.tsx";
 import type { BoardMoveProgress } from "./moves.ts";
+import { type CardRunAgain, useCardRunAgain } from "./run-again.ts";
 
 /** Repository labels by name, for GitHub colors and descriptions. */
 export type LabelCatalog = ReadonlyMap<string, LabelView>;
@@ -160,7 +156,7 @@ const RunLine = ({ run }: { readonly run: RunView }) => {
 /** What a card says while a Run action, a Run again, or a move is in flight, if anything is. */
 const progressMessage = (
   action: RunActions,
-  again: RunAgainActions,
+  again: CardRunAgain,
   phase: BoardMoveProgress["phase"] | undefined,
 ): string | null => {
   if (action.isPending && action.variables !== undefined)
@@ -271,7 +267,7 @@ const CardFace = ({
   /** The card's Run actions, or null on the copy that follows a drag. */
   readonly action: RunActions | null;
   /** The card's Run again requests, or null on the copy that follows a drag. */
-  readonly again: RunAgainActions | null;
+  readonly again: CardRunAgain | null;
   readonly progress: string | null;
 }) => {
   const failure = failedRun(item);
@@ -384,7 +380,7 @@ export const BoardCard = ({
   readonly openRun: (runId: RunId) => void;
 }) => {
   const action = useRunAction();
-  const again = useRunAgain();
+  const again = useCardRunAgain(item.itemKey, openRun);
   const {
     attributes,
     listeners,

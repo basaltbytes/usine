@@ -28,7 +28,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { elapsedLabel, itemKindLabel, openedTitle, runActionLabel } from "../operator-copy.ts";
-import { type RunActions, type RunAgainActions, unchangedRunAgain } from "../run-actions.ts";
+import type { RunActions } from "../run-actions.ts";
+import type { CardRunAgain } from "./run-again.ts";
 
 /** Where a card can move: the other writable lanes, unavailable while a move is saving. */
 export interface CardMoves {
@@ -84,10 +85,11 @@ export const CardMenu = ({
   /** The Run the card shows, or null when it shows none. */
   readonly run: RunView | null;
   readonly moves: CardMoves;
-  /** Opens a Run's drawer, including the Run that Run again opened. */
+  /** Opens a Run's drawer. */
   readonly openRun: (runId: RunId) => void;
   readonly action: RunActions;
-  readonly again: RunAgainActions;
+  /** Run again for the card's Task, which opens the new Run's drawer itself. */
+  readonly again: CardRunAgain;
   readonly className?: string;
 }) => {
   const [confirmingCancel, setConfirmingCancel] = useState(false);
@@ -148,15 +150,7 @@ export const CardMenu = ({
             </DropdownMenuItem>
           )}
           {ended !== null && (
-            <DropdownMenuItem
-              onClick={() =>
-                again.mutate(unchangedRunAgain(ended), {
-                  onSuccess: (result) => {
-                    if (result._tag === "Claimed") openRun(result.runId);
-                  },
-                })
-              }
-            >
+            <DropdownMenuItem onClick={() => again.send(ended)}>
               {runActionLabel.runAgain}
               <span className="ml-auto truncate pl-4 text-xs text-muted-foreground">
                 {ended.loop}

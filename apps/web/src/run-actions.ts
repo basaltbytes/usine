@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { type MutationKey, useMutation, useQueryClient } from "@tanstack/react-query";
 import { type AttemptId, AttemptTask } from "@usine/core/attempt";
 import type { RunId } from "@usine/core/run";
 import { EditAndRetry, type RunView } from "@usine/orchestrator/operator";
@@ -52,10 +52,22 @@ export const unchangedRunAgain = (run: RunView) => ({
  * Opens a new Run for the Item state of a succeeded or canceled Run, from any screen, with the
  * task and roster Agent `amendment` names. Success refreshes the overview, the desk, and that
  * Run's detail; the result names the new Run, or the cycle-budget Ask that blocked it.
+ *
+ * `mutationKey` files the requests in the mutation cache, so a component that remounts while one
+ * is in flight can read it back with `useMutationState`. `onClaimed` receives the new Run's id
+ * after the refresh, even when the component that sent the request has unmounted since; a
+ * callback passed to `mutate` is dropped then.
  */
-export const useRunAgain = () => {
+export const useRunAgain = ({
+  mutationKey = ["run-again"],
+  onClaimed,
+}: {
+  readonly mutationKey?: MutationKey;
+  readonly onClaimed?: (runId: RunId) => void;
+} = {}) => {
   const refresh = useRefreshRun();
   return useMutation({
+    mutationKey,
     mutationFn: ({
       runId,
       amendment,
@@ -63,9 +75,9 @@ export const useRunAgain = () => {
       readonly runId: RunId;
       readonly amendment: EditAndRetry;
     }) => api((client) => client.runAgain({ params: { runId }, payload: amendment })),
-    onSuccess: (_, { runId }) => refresh(runId),
+    onSuccess: async (result, { runId }) => {
+      await refresh(runId);
+      if (result._tag === "Claimed") onClaimed?.(result.runId);
+    },
   });
 };
-
-/** The pending state, answer, and last error of a screen's Run again requests. */
-export type RunAgainActions = ReturnType<typeof useRunAgain>;
