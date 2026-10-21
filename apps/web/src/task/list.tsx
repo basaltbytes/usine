@@ -114,10 +114,13 @@ const statusLine = (
  * the words wrap. */
 const Status = ({ row, now }: { readonly row: TaskRow; readonly now: number }) => {
   const { state, words } = statusLine(row, now);
+  // A word wider than `--side`, such as the Loop `dependency_updates`, breaks inside the column:
+  // `min-w-0` lets the words shrink below that word, and `wrap-break-word` breaks it only then, so
+  // on a phone, where the column is as wide as its longest word, the words still wrap between words.
   return (
     <span className={cn("flex items-start gap-1.5 text-xs/5 font-medium", SIDE_CONTENT)}>
       <StateMark state={state} className="mt-1.75" />
-      {words}
+      <span className="min-w-0 wrap-break-word">{words}</span>
     </span>
   );
 };

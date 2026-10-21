@@ -9,6 +9,7 @@ import { routeTree } from "../src/route-tree.gen.ts";
 import {
   boardOverview,
   boardOverviewDocumented,
+  boardOverviewDocumentedLongLoop,
   boardOverviewResolved,
   boardOverviewUnpriced,
   boardStalled,
@@ -286,6 +287,23 @@ it("keeps every title on one line beside all the columns, the long statuses wrap
   expect(status?.getBoundingClientRect().height).toBeGreaterThanOrEqual(40);
   const container = table().element().parentElement;
   expect(container?.scrollWidth).toBeLessThanOrEqual(container?.clientWidth ?? 0);
+});
+
+it("breaks a status word wider than the Status column inside it, beside the whole title", async () => {
+  queryClient.setQueryData(["overview"], boardOverviewDocumentedLongLoop());
+  await mount(list);
+  expect(columns()).toHaveLength(8);
+  const row = rowOf(/@usine\/core/u);
+  await expect.element(row).toHaveTextContent("Running dependency_updates");
+  const [status, runs] = row.getByRole("cell").elements().slice(1, 3);
+  const words = status?.firstElementChild;
+  // `dependency_updates` breaks across lines instead of running into Runs.
+  expect(words?.scrollWidth).toBeLessThanOrEqual(words?.clientWidth ?? 0);
+  expect(words?.getBoundingClientRect().right).toBeLessThanOrEqual(
+    runs?.getBoundingClientRect().left ?? 0,
+  );
+  const title = row.getByTitle("Document the public API of @usine/core in TSDoc").element();
+  expect(title.scrollWidth).toBeLessThanOrEqual(title.clientWidth);
 });
 
 it("drops Runs and Pull request beside the sidebar on a mid-size window", async () => {

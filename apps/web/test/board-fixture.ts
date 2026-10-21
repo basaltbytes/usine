@@ -449,6 +449,25 @@ export const boardOverviewDocumented = () =>
     });
   });
 
+/**
+ * `boardOverviewDocumented` with #9's running Run on the `dependency_updates` Loop, so its status,
+ * `Running dependency_updates`, holds one word wider than the Status column's share of the table.
+ */
+export const boardOverviewDocumentedLongLoop = () =>
+  changeTasks(boardOverviewDocumented(), (task) => {
+    if (task.itemKey !== redesignPr.itemKey) return task;
+    const runs = task.runs.map((run) =>
+      run.state === "Running"
+        ? new RunView({ ...run, loop: LoopName.make("dependency_updates") })
+        : run,
+    );
+    return new BoardTaskView({
+      ...task,
+      runs,
+      run: runs.find(({ id }) => id === task.run?.id) ?? null,
+    });
+  });
+
 const stalled = (loopName: string, item: BoardItemLink, reason: StalledItemView["reason"]) =>
   new StalledItemView({
     repository: boardRepository,
