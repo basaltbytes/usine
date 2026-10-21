@@ -7,7 +7,12 @@ import { DedupKey } from "@usine/core/event";
 import { CommitSha, RepositoryRevision, canonicalRepositoryName } from "@usine/core/repository";
 import { RunEngine, type SubmissionResult } from "@usine/engine/engine";
 import { gitHubItemKey, type ObservedItem } from "./repository-sync.ts";
-import { ExpressionEngine, type ExpressionError } from "@usine/expression/expression-engine";
+import {
+  type ExpressionCheckError,
+  ExpressionEngine,
+  type ExpressionError,
+  type ExpressionEvaluationError,
+} from "@usine/expression/expression-engine";
 import { InvalidGitHubResponseError } from "@usine/github/github-app";
 import { DateTime, Effect, Option, Result, Schema } from "effect";
 import {
@@ -44,9 +49,10 @@ const eventKey = (
 
 /**
  * Whether `loop`'s trigger `if:` holds for one Item of `repository`, given the
- * Item's payload slice. The poll and `LoopMatches` decide a match this way.
+ * Item's payload slice. The poll decides a match this way, and `LoopMatches`
+ * the same way on many Items with {@link evaluateTriggerOnEach}.
  */
-export const evaluateTrigger = (
+const evaluateTrigger = (
   loop: LoopFile,
   repository: ManagedRepo,
   payload: Schema.JsonObject,
@@ -57,6 +63,31 @@ export const evaluateTrigger = (
       repo: repositoryContext(repository),
       item: payload,
     });
+  });
+
+/**
+ * Whether `loop`'s trigger `if:` holds for each of `payloads`, Items of
+ * `repository`, as {@link evaluateTrigger} decides it for one; the expression
+ * is checked once. The results follow the order of `payloads`, each with its
+ * Item's evaluation failure; a check failure fails the whole call.
+ */
+export const evaluateTriggerOnEach = (
+  loop: LoopFile,
+  repository: ManagedRepo,
+  payloads: ReadonlyArray<Schema.JsonObject>,
+): Effect.Effect<
+  ReadonlyArray<Result.Result<boolean, ExpressionEvaluationError>>,
+  ExpressionCheckError,
+  ExpressionEngine
+> =>
+  Effect.gen(function* () {
+    const expressions = yield* ExpressionEngine;
+    const repo = repositoryContext(repository);
+    return yield* expressions.evaluateBooleanEach(
+      loop.trigger.if,
+      environmentFor(loop.trigger.on),
+      payloads.map((item) => ({ repo, item })),
+    );
   });
 
 /**

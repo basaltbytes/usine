@@ -1,4 +1,4 @@
-import { Context, type Effect, Schema } from "effect";
+import { Context, type Effect, type Result, Schema } from "effect";
 import type { Environment } from "./environment.ts";
 
 /**
@@ -130,6 +130,22 @@ export interface ExpressionEngineService {
     environment: Environment,
     context: Schema.JsonObject,
   ) => Effect.Effect<boolean, ExpressionError>;
+  /**
+   * Checks a selection condition once, then evaluates it on each of `contexts`,
+   * as `evaluateBoolean` evaluates one. The results follow the order of
+   * `contexts`, and each holds that context's value or its evaluation failure,
+   * so one context that fails leaves the others' results. A check failure fails
+   * the whole call. Use it to evaluate one condition on many Items, such as a
+   * Loop's trigger on every Board Item.
+   */
+  readonly evaluateBooleanEach: (
+    source: Source,
+    environment: Environment,
+    contexts: ReadonlyArray<Schema.JsonObject>,
+  ) => Effect.Effect<
+    ReadonlyArray<Result.Result<boolean, ExpressionEvaluationError>>,
+    ExpressionCheckError
+  >;
   /** Checks and evaluates a prompt interpolation; `context` supplies values for the environment's root variables. */
   readonly evaluateScalar: (
     source: Source,
