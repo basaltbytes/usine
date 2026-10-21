@@ -1,4 +1,4 @@
-import type { Attempt } from "@usine/core/attempt";
+import type { Attempt, AttemptId } from "@usine/core/attempt";
 import { type AttemptFailure, DefectFailure, InfraFailure } from "@usine/core/attempt/failure";
 import type { RunId } from "@usine/core/run";
 import type { StepResult } from "@usine/core/step/result";
@@ -79,14 +79,19 @@ const retryingStore =
       }),
     );
 
-/** What a Run's open Attempt left when this process started driving the Run. */
+/**
+ * What a Run's open Attempt left when this process started driving the Run: a
+ * parent task to reattach, a result its parent task stored, or nothing the
+ * Run can use, so the next Attempt replaces it.
+ */
 type OpenAttempt =
   | { readonly _tag: "Live"; readonly attempt: Attempt }
   | {
       readonly _tag: "Finished";
       readonly attempt: Attempt;
       readonly result: Result.Result<StepResult, AttemptFailure>;
-    };
+    }
+  | { readonly _tag: "Interrupted"; readonly attempt: Attempt };
 
 /**
  * Drives open Runs in this process, one fiber per Run, with usine's run
@@ -98,7 +103,9 @@ type OpenAttempt =
  * care of the queued Events instead. A fiber that ends without closing its Run
  * (approval, operator retry, this process stopping, a store failure that
  * outlasted its retries) leaves the Run for `resume` or `reconcile`. The
- * driver also reconciles the checkouts earlier processes left.
+ * driver also reconciles the checkouts earlier processes left, and keeps the
+ * checkout of an open Attempt whose parent task is live until its Run
+ * reattaches the Attempt or closes it.
  */
 export class RunDriver extends Context.Service<
   RunDriver,
@@ -125,9 +132,21 @@ export class RunDriver extends Context.Service<
     /**
      * Reconciles at startup, through `StepExecutor.recover`, the checkout of
      * every persisted Attempt on a Worker the executor runs, recording its
-     * salvage before any Run admits its next Attempt.
+     * salvage before any Run admits its next Attempt. An open Attempt whose
+     * parent task is live, or whose liveness cannot be read, keeps its
+     * checkout for its Run: the Run reattaches the Attempt, or reconciles the
+     * checkout when it closes the Attempt without reattaching it, before its
+     * next Attempt starts.
      */
     readonly recoverWorkspaces: () => Effect.Effect<void, RunStoreError>;
+    /**
+     * Reconciles the checkout `recoverWorkspaces` kept for `attemptId`, an
+     * Attempt that closes without a reattachment, as when the operator cancels
+     * its Run, and records its salvage. Does nothing for an Attempt whose
+     * checkout startup did not keep, or that its Run reattached. A failure is
+     * logged, and the checkout stays on its Worker for the next startup.
+     */
+    readonly reconcileCheckout: (attemptId: AttemptId) => Effect.Effect<void>;
   }
 >()("@usine/engine/internal/RunDriver") {
   static readonly layer = Layer.effect(
@@ -140,7 +159,7 @@ export class RunDriver extends Context.Service<
       const items = yield* ItemProjectionWriter;
       const crypto = yield* Crypto.Crypto;
       const fibers = yield* FiberMap.make<RunId>();
-      const checkouts = checkoutRecoveryFor(store, executor);
+      const checkouts = yield* checkoutRecoveryFor(store, executor);
 
       // Annotated because a fiber's continuation calls launch again, which TypeScript cannot infer.
       const launch: RunDriver["Service"]["launch"] = Effect.fn("RunDriver.launch")(function* (
@@ -270,10 +289,10 @@ export class RunDriver extends Context.Service<
 
       /**
        * What the Run's open Attempt left when this process started driving it:
-       * a parent task to reattach, or a result its parent task stored that the
-       * Run never recorded. A read that fails is logged and treated as finding
-       * nothing, so the Run moves on to a new Attempt as it did before
-       * reattachment existed.
+       * a parent task to reattach, a result its parent task stored that the
+       * Run never recorded, or neither. A read that fails is logged and treated
+       * as finding neither, so the Run moves on to a new Attempt as it did
+       * before reattachment existed.
        */
       const openAttempt = Effect.fn("RunDriver.openAttempt")(function* (runId: RunId) {
         yield* Effect.annotateCurrentSpan({ runId });
@@ -293,7 +312,7 @@ export class RunDriver extends Context.Service<
             "Could not read whether the open Attempt is live; opening the next one",
             { ...fields, errorTag: live.failure._tag, message: live.failure.message },
           );
-          return Option.none<OpenAttempt>();
+          return Option.some<OpenAttempt>({ _tag: "Interrupted", attempt: open });
         }
         if (live.success) {
           yield* Effect.logInfo("The open Attempt's parent task is live; reattaching it", fields);
@@ -305,14 +324,14 @@ export class RunDriver extends Context.Service<
             "Could not read the open Attempt's stored outcome; opening the next one",
             { ...fields, errorTag: stored.failure._tag, message: stored.failure.message },
           );
-          return Option.none<OpenAttempt>();
+          return Option.some<OpenAttempt>({ _tag: "Interrupted", attempt: open });
         }
         if (Option.isNone(stored.success)) {
           yield* Effect.logInfo(
             "The open Attempt's parent task is gone; opening the next Attempt",
             fields,
           );
-          return Option.none<OpenAttempt>();
+          return Option.some<OpenAttempt>({ _tag: "Interrupted", attempt: open });
         }
         const result = stored.success.value;
         yield* Effect.logInfo(
@@ -335,6 +354,11 @@ export class RunDriver extends Context.Service<
       ) {
         yield* Effect.annotateCurrentSpan({ runId, worker });
         const open = yield* openAttempt(runId);
+        if (Option.isSome(open) && open.value._tag !== "Live") {
+          // Reconciled while the Attempt is still open, as startup reconciles
+          // one, so the next Attempt resumes from its salvage.
+          yield* checkouts.reconcile(open.value.attempt.id);
+        }
         if (Option.isSome(open) && open.value._tag === "Finished") {
           const finished = yield* store
             .finishAttempt(open.value.attempt, open.value.result)
@@ -349,6 +373,7 @@ export class RunDriver extends Context.Service<
           .pipe(retryingStore(runId, "begin the Attempt"));
         if (started._tag === "AttemptRecoveryFailed") return "RunFailed";
         if (started._tag === "RunClosed") return "Unchanged";
+        if (started.execution.reattach) yield* checkouts.reattached(started.execution.attempt.id);
 
         // Preserve an executor defect as a terminal Attempt outcome without
         // turning a programming bug into an automatic retry (ADR 0003).
@@ -470,6 +495,7 @@ export class RunDriver extends Context.Service<
         continueWithNewest,
         reconcile,
         recoverWorkspaces: checkouts.atStartup,
+        reconcileCheckout: checkouts.reconcile,
       };
     }),
   );

@@ -929,6 +929,8 @@ const makeRunStore = Effect.gen(function* () {
     runIdsToDrive: queries.runIdsToDrive().pipe(persistence("list the Runs to drive")),
     recordAndClaim,
     salvageCandidates: queries.salvageCandidates().pipe(persistence("list salvage candidates")),
+    salvageCandidate: (attemptId: AttemptId) =>
+      queries.salvageCandidate(attemptId).pipe(persistence("read a salvage candidate")),
     recordSalvage,
     recordComments,
     attemptWindows,
@@ -1047,6 +1049,10 @@ export class RunStore extends Context.Service<
     readonly attemptWindows: (attemptId: AttemptId) => Effect.Effect<AttemptWindows, RunStoreError>;
     /** Every persisted Attempt startup reconciliation visits: all of them except those whose leftovers were discarded. */
     readonly salvageCandidates: Effect.Effect<ReadonlyArray<AttemptRecovery>, RunStoreError>;
+    /** `attemptId` as `salvageCandidates` lists it now; none once its leftovers were discarded. */
+    readonly salvageCandidate: (
+      attemptId: AttemptId,
+    ) => Effect.Effect<Option.Option<AttemptRecovery>, RunStoreError>;
     /** Marks every Attempt recorded on `worker` whose leftovers are not discarded yet, so reconciliation skips them; returns how many it marked. */
     readonly discardLeftovers: (worker: WorkerName) => Effect.Effect<number, RunStoreError>;
     /**

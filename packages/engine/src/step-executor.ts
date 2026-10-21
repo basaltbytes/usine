@@ -46,11 +46,11 @@ export class StepExecutor extends Context.Service<
   {
     /**
      * The Workers this executor runs Attempts on now: the configured ones, and
-     * a Worker a reload removed until its last Attempt ends. Startup
-     * reconciliation does not call `recover` for an Attempt recorded on any
-     * other Worker: its checkout stays where it is until that Worker is
-     * configured again or the operator discards its leftovers, which the
-     * engine refuses for a Worker in this list.
+     * a Worker a reload removed until its last Attempt ends. The engine does
+     * not call `recover` for an Attempt recorded on any other Worker: its
+     * checkout stays where it is until that Worker is configured again or the
+     * operator discards its leftovers, which the engine refuses for a Worker
+     * in this list.
      */
     readonly workers: Effect.Effect<ReadonlyArray<WorkerName>>;
     /**
@@ -69,9 +69,12 @@ export class StepExecutor extends Context.Service<
     ) => Effect.Effect<Option.Option<Result.Result<StepResult, AttemptFailure>>, AttemptFailure>;
     /**
      * Reconciles an old checkout before new Attempts start; records its salvage before releasing
-     * any work. For an open Attempt whose parent task failed before the orchestrator stopped, it
-     * also records the comments the Attempt posted on its Run's Item if its checkout is still on
-     * the Worker.
+     * any work. It leaves the checkout of an open Attempt whose parent task `isLive` reports live
+     * for its reattachment. For an open Attempt whose parent task failed with no launch to record
+     * it, it also records the comments the Attempt posted on its Run's Item if its checkout is
+     * still on the Worker. The engine calls it at startup for every persisted Attempt except an
+     * open one whose parent task is live, and for that one when its Run closes the Attempt
+     * without reattaching it.
      */
     readonly recover: <E>(
       attempt: AttemptRecovery,

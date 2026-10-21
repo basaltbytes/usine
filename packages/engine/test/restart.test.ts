@@ -1,8 +1,10 @@
 import { assert, describe, it } from "@effect/vitest";
-import type { AttemptId } from "@usine/core/attempt";
-import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
+import type { Attempt, AttemptId } from "@usine/core/attempt";
+import { AgentFailure, type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
+import { type AttemptRecovery, SalvagePushed } from "@usine/core/attempt/salvage";
 import type { InstanceDirectory } from "@usine/core/instance";
-import { Comment } from "@usine/core/step/result";
+import { CommitSha } from "@usine/core/repository";
+import { Comment, type StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
 import {
   Context,
@@ -19,7 +21,7 @@ import {
   Scope,
 } from "effect";
 import { RunEngine, RunEngineShutdown } from "../src/engine/engine.ts";
-import { runIdFor } from "../src/engine/submission.ts";
+import { runIdFor, type Submission } from "../src/engine/submission.ts";
 import { RunReader } from "../src/run-reader/run-reader.ts";
 import { StepExecutor } from "../src/step-executor.ts";
 import {
@@ -74,6 +76,86 @@ const recordingExecutor = (
     reserve: () => Effect.never,
     execute: () => Effect.die("no Attempt starts after the restart"),
   });
+
+/** Starts the first Attempt of each submission, then stops the runtime while their parent tasks run. */
+const stopDuringAttempts = (directory: InstanceDirectory, submissions: ReadonlyArray<Submission>) =>
+  Effect.gen(function* () {
+    const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>(submissions.map(() => Effect.never));
+    const scope = yield* Scope.make();
+    const engine = Context.get(
+      yield* Scope.provide(Layer.build(engineLayer(directory, executorLayer(plans))), scope),
+      RunEngine,
+    );
+    const running = yield* Effect.forEach(submissions, (pending) =>
+      Effect.gen(function* () {
+        const accepted = yield* engine.submit(pending);
+        assert(accepted._tag === "Claimed");
+        const started = yield* waitFor(
+          engine,
+          accepted.runId,
+          ({ attempts }) => attempts.length === 1,
+        );
+        return started.attempts;
+      }),
+    );
+    yield* Scope.close(scope, Exit.void);
+    return running.flat();
+  });
+
+/**
+ * The executor of the restarted runtime, whose parent tasks `live` holds. As
+ * the real one does, `recover` leaves the checkout of an open Attempt whose
+ * parent task is live for its reattachment, and `interrupt` stops a parent
+ * task. Every checkout it reconciles becomes a pushed salvage, and an open
+ * Attempt whose parent failed records the comment it posted. Runs wait for a
+ * Worker until `slot` opens; an Attempt then records what it resumes from.
+ */
+const restartedExecutor = Effect.fn("test.restartedExecutor")(function* (
+  live: ReadonlyArray<Attempt>,
+) {
+  const state = {
+    live: yield* Ref.make<ReadonlySet<AttemptId>>(new Set(live.map(({ id }) => id))),
+    stored: yield* Ref.make<ReadonlyMap<AttemptId, Result.Result<StepResult, AttemptFailure>>>(
+      new Map(),
+    ),
+    reconciled: yield* Ref.make<ReadonlyArray<AttemptRecovery>>([]),
+    resumed: yield* Ref.make<ReadonlyArray<Option.Option<SalvagePushed>>>([]),
+    slot: yield* Deferred.make<void>(),
+  };
+  const executor = Layer.succeed(StepExecutor)({
+    workers: Effect.succeed([WorkerName.make("local")]),
+    isLive: (attemptId) => Ref.get(state.live).pipe(Effect.map((ids) => ids.has(attemptId))),
+    outcome: (attemptId) =>
+      Ref.get(state.stored).pipe(
+        Effect.map((results) => Option.fromUndefinedOr(results.get(attemptId))),
+      ),
+    recover: (attempt, record) =>
+      Effect.gen(function* () {
+        if (attempt.open && (yield* Ref.get(state.live)).has(attempt.attemptId)) return;
+        yield* Ref.update(state.reconciled, (seen) => [...seen, attempt]);
+        const stored = (yield* Ref.get(state.stored)).get(attempt.attemptId);
+        if (attempt.open && stored !== undefined && Result.isFailure(stored))
+          yield* record.comments([
+            new Comment({ url: new URL(POSTED_COMMENT), kind: "issue-comment", at: Option.none() }),
+          ]);
+        yield* record.salvage(
+          new SalvagePushed({ ref: attempt.ref, commit: CommitSha.make("a".repeat(40)) }),
+        );
+      }),
+    intervene: () => Effect.void,
+    interrupt: (attemptId) =>
+      Ref.update(state.live, (ids) => new Set([...ids].filter((id) => id !== attemptId))),
+    reserve: () =>
+      Deferred.await(state.slot).pipe(
+        Effect.as({ worker: WorkerName.make("local"), release: Effect.void }),
+      ),
+    execute: (execution) =>
+      Ref.update(state.resumed, (seen) => [...seen, execution.resume]).pipe(
+        Effect.as(stepResult("resumed from the salvage")),
+      ),
+  });
+  return { ...state, executor };
+});
 
 describe("engine restart", () => {
   it.live("keeps an approval wait parked when the runtime restarts", () =>
@@ -333,6 +415,98 @@ describe("engine restart", () => {
           assert.deepStrictEqual(success.attempts[0]?.comments, []);
           assert.strictEqual(yield* Ref.get(executions), 2);
           yield* Scope.close(secondScope, Exit.void);
+        }),
+      ),
+  );
+
+  it.live(
+    "reconciles the checkout a restart kept for an Attempt its Run does not reattach, before the next Attempt starts",
+    () =>
+      withInstance((directory) =>
+        Effect.gen(function* () {
+          const [gone, failed] = yield* stopDuringAttempts(directory, [
+            submission({ number: 20, item: "kept-then-gone" }),
+            submission({ number: 21, item: "kept-then-failed" }),
+          ]);
+          assert(gone !== undefined && failed !== undefined);
+          const worker = yield* restartedExecutor([gone, failed]);
+          const scope = yield* Scope.make();
+          const engine = Context.get(
+            yield* Scope.provide(Layer.build(engineLayer(directory, worker.executor)), scope),
+            RunEngine,
+          );
+          assert.deepStrictEqual(yield* Ref.get(worker.reconciled), []);
+
+          // Before either Run gets a Worker, one parent task is gone and the other failed.
+          yield* Ref.set(worker.live, new Set());
+          yield* Ref.set(
+            worker.stored,
+            new Map([[failed.id, Result.fail(new AgentFailure({ message: "failed unattached" }))]]),
+          );
+          yield* Deferred.succeed(worker.slot, undefined);
+
+          const resumed = yield* waitFor(
+            engine,
+            gone.runId,
+            ({ run }) => run.state._tag === "Succeeded",
+          );
+          const [interrupted] = resumed.attempts;
+          assert(interrupted !== undefined && Option.isSome(interrupted.salvage));
+          assert(interrupted.salvage.value._tag === "Pushed");
+          assert.deepStrictEqual(yield* Ref.get(worker.resumed), [
+            Option.some(interrupted.salvage.value),
+          ]);
+          const stopped = yield* waitFor(
+            engine,
+            failed.runId,
+            ({ run }) => run.state._tag === "Failed",
+          );
+          assert.deepStrictEqual(
+            stopped.attempts.map(({ salvage }) => Option.map(salvage, ({ _tag }) => _tag)),
+            [Option.some("Pushed")],
+          );
+          assert.deepStrictEqual(
+            stopped.attempts[0]?.comments.map(({ url }) => url.href),
+            [POSTED_COMMENT],
+          );
+          yield* Scope.close(scope, Exit.void);
+        }),
+      ),
+  );
+
+  it.live(
+    "reconciles the checkout a restart kept for an Attempt whose Run is canceled before its reattach",
+    () =>
+      withInstance((directory) =>
+        Effect.gen(function* () {
+          const [waiting] = yield* stopDuringAttempts(directory, [
+            submission({ number: 22, item: "kept-then-canceled" }),
+          ]);
+          assert(waiting !== undefined);
+          // The restarted Run never gets a Worker, so its Attempt still awaits its reattachment.
+          const worker = yield* restartedExecutor([waiting]);
+          const scope = yield* Scope.make();
+          const engine = Context.get(
+            yield* Scope.provide(Layer.build(engineLayer(directory, worker.executor)), scope),
+            RunEngine,
+          );
+          assert.deepStrictEqual(yield* Ref.get(worker.reconciled), []);
+
+          yield* engine.cancel(waiting.runId);
+          const canceled = yield* engine.inspect(waiting.runId);
+          assert.strictEqual(canceled.run.state._tag, "Canceled");
+          assert.deepStrictEqual(
+            canceled.attempts.map(({ outcome, salvage }) => [
+              Option.map(outcome, ({ _tag }) => _tag),
+              Option.map(salvage, ({ _tag }) => _tag),
+            ]),
+            [[Option.some("Canceled"), Option.some("Pushed")]],
+          );
+          assert.deepStrictEqual(
+            (yield* Ref.get(worker.reconciled)).map(({ attemptId }) => attemptId),
+            [waiting.id],
+          );
+          yield* Scope.close(scope, Exit.void);
         }),
       ),
   );

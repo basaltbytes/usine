@@ -26,6 +26,7 @@ import {
   ne,
   notInArray,
   sql,
+  type SQL,
   type SQLWrapper,
 } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
@@ -205,41 +206,54 @@ export const queriesFor = (database: RunDatabaseClient) => {
     return yield* decodeRunRows(rows);
   });
 
+  /** The Attempts whose leftovers were not discarded that `filters` select, as startup reconciliation visits them. */
+  const recoveries = (...filters: ReadonlyArray<SQL>) =>
+    Effect.gen(function* () {
+      const rows = yield* database
+        .select({
+          attemptId: attempts.attemptId,
+          worker: attempts.workerName,
+          repository: runs.repository,
+          runId: attempts.runId,
+          number: attempts.attemptNumber,
+          permissions: triggerEvents.permissions,
+          outcome: sql<string>`coalesce(json_extract(${attempts.outcomeJson}, '$._tag'), '')`,
+        })
+        .from(attempts)
+        .innerJoin(runs, eq(runs.runId, attempts.runId))
+        .innerJoin(triggerEvents, eq(triggerEvents.eventId, runs.eventId))
+        .where(and(isNull(attempts.leftoversDiscardedAt), ...filters))
+        .execute();
+      const decoded = yield* Schema.decodeUnknownEffect(
+        Schema.Array(
+          Schema.Struct({
+            attemptId: AttemptId,
+            worker: WorkerName,
+            repository: RepositoryName,
+            runId: RunId,
+            number: AttemptNumber,
+            permissions: LoopPermissions,
+            outcome: Schema.String,
+          }),
+        ),
+      )(rows);
+      return decoded.map(({ runId, number, outcome, ...attempt }) => ({
+        ...attempt,
+        ref: salvageRefFor(runId, number),
+        succeeded: outcome === "Succeeded",
+        open: outcome === "",
+      }));
+    });
+
   const salvageCandidates = Effect.fn("RunStoreQueries.salvageCandidates")(function* () {
-    const rows = yield* database
-      .select({
-        attemptId: attempts.attemptId,
-        worker: attempts.workerName,
-        repository: runs.repository,
-        runId: attempts.runId,
-        number: attempts.attemptNumber,
-        permissions: triggerEvents.permissions,
-        outcome: sql<string>`coalesce(json_extract(${attempts.outcomeJson}, '$._tag'), '')`,
-      })
-      .from(attempts)
-      .innerJoin(runs, eq(runs.runId, attempts.runId))
-      .innerJoin(triggerEvents, eq(triggerEvents.eventId, runs.eventId))
-      .where(isNull(attempts.leftoversDiscardedAt))
-      .execute();
-    const decoded = yield* Schema.decodeUnknownEffect(
-      Schema.Array(
-        Schema.Struct({
-          attemptId: AttemptId,
-          worker: WorkerName,
-          repository: RepositoryName,
-          runId: RunId,
-          number: AttemptNumber,
-          permissions: LoopPermissions,
-          outcome: Schema.String,
-        }),
-      ),
-    )(rows);
-    return decoded.map(({ runId, number, outcome, ...attempt }) => ({
-      ...attempt,
-      ref: salvageRefFor(runId, number),
-      succeeded: outcome === "Succeeded",
-      open: outcome === "",
-    }));
+    return yield* recoveries();
+  });
+
+  const salvageCandidate = Effect.fn("RunStoreQueries.salvageCandidate")(function* (
+    attemptId: AttemptId,
+  ) {
+    yield* Effect.annotateCurrentSpan({ attemptId });
+    return EffectArray.head(yield* recoveries(eq(attempts.attemptId, attemptId)));
   });
 
   const attemptCountsByWorker = Effect.fn("RunStoreQueries.attemptCountsByWorker")(function* () {
@@ -939,6 +953,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
 
   return {
     salvageCandidates,
+    salvageCandidate,
     attemptCountsByWorker,
     discardLeftovers,
     cycles: cycleQueries(database),
