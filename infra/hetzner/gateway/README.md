@@ -241,13 +241,13 @@ On the gateway, as root (`ssh root@<gateway>`):
 
 A Worker rebuilt from `worker-user-data` gets the time server without these steps, but loses the harness logins. On a running Worker the `usine` user has no sudo and root cannot log in over SSH, so the steps run as root through `su` in an SSH session as `usine`:
 
-1. Give root a password with `hcloud server reset-password <worker>`, which prints it. Connect to the Worker through the gateway and switch to root with that password:
+1. Give root a password with `hcloud server reset-password <worker>`, which prints it. Connect to the worker through the gateway and switch to root with that password:
 
    ```sh
    ssh -t <worker> 'su -'
    ```
 
-   Here `<worker>` is the Worker's `Host` entry in the orchestrator user's SSH configuration, which jumps through the gateway (see [Add the Worker to `usine.yaml`](#add-the-worker-to-usineyaml)). When SSH to the Worker does not work, open the server's console in the Hetzner Cloud Console and log in there as root with the same password.
+   Here `<worker>` is the worker's `Host` entry in the orchestrator user's SSH configuration, which jumps through the gateway (see [Add the Worker to `usine.yaml`](#add-the-worker-to-usineyaml)). When SSH to the worker does not work, open the server's console in the Hetzner Cloud Console and log in there as root with the same password.
 
 2. Point timesyncd at the gateway.
 
