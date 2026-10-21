@@ -151,7 +151,10 @@ export const persistence =
       isRunStoreError(error) ? error : new EnginePersistenceError({ operation, cause: error }),
     );
 
-export const eventFromRow = (row: EventRouteRow): Event =>
+/** The Event columns of a row; a route row and a Run's Event row both carry them. */
+type EventColumns = Pick<EventRouteRow, "eventId" | "dedupKey" | "payload" | "receivedAt">;
+
+export const eventFromRow = (row: EventColumns): Event =>
   new Event({
     id: row.eventId,
     dedupKey: row.dedupKey,
@@ -160,15 +163,7 @@ export const eventFromRow = (row: EventRouteRow): Event =>
   });
 
 export const runEventFromRow = (row: typeof RunEventRow.Type): RunEvent =>
-  new RunEvent({
-    runId: row.runId,
-    event: new Event({
-      id: row.eventId,
-      dedupKey: row.dedupKey,
-      payload: row.payload,
-      receivedAt: row.receivedAt,
-    }),
-  });
+  new RunEvent({ runId: row.runId, event: eventFromRow(row) });
 
 export const submissionFromRow = (row: EventRouteRow): Submission =>
   new Submission({
