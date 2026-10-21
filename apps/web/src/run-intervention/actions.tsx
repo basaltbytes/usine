@@ -1,12 +1,16 @@
-import { AttemptTask } from "@usine/core/attempt";
 import type { RunId } from "@usine/core/run";
-import { EditAndRetry as Amendment, type RunView } from "@usine/orchestrator/operator";
+import type { RunView } from "@usine/orchestrator/operator";
 import { useState } from "react";
 import { ErrorAlert } from "@/components/error-alert";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { runActionLabel, runAgainBlocked } from "../operator-copy.ts";
-import { type RunActionRequest, useRunAction, useRunAgain } from "../run-actions.ts";
+import {
+  type RunActionRequest,
+  unchangedRunAgain,
+  useRunAction,
+  useRunAgain,
+} from "../run-actions.ts";
 import type { EditIntent } from "./edit-and-retry.tsx";
 
 /**
@@ -28,13 +32,13 @@ export const RunActions = ({
   readonly className?: string;
 }) => {
   const mutation = useRunAction();
-  const again = useRunAgain(run.id);
+  const again = useRunAgain();
   const [confirmCancel, setConfirmCancel] = useState(false);
   const busy = mutation.isPending || again.isPending;
   const act = (request: RunActionRequest) =>
     mutation.mutate({ runId: run.id, request }, { onSuccess: () => setConfirmCancel(false) });
   const runAgain = () =>
-    again.mutate(new Amendment({ task: AttemptTask.make(run.task), agent: run.agent }), {
+    again.mutate(unchangedRunAgain(run), {
       onSuccess: (result) => {
         if (result._tag === "Claimed") openRun(result.runId);
       },

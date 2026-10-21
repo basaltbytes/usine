@@ -76,18 +76,21 @@ export const EditAndRetry = ({
     queryFn: () => api((client) => client.agents()),
   });
   const retry = useRetryWith(run, close);
-  const again = useRunAgain(run.id);
+  const again = useRunAgain();
   const mutation = intent === "retry" ? retry : again;
   const valid = task.trim().length > 0 && roster.data?.some((name) => name === agent) === true;
   const submit = () => {
     const amendment = new Amendment({ task: AttemptTask.make(task), agent: AgentName.make(agent) });
     if (intent === "retry") retry.mutate(amendment);
     else
-      again.mutate(amendment, {
-        onSuccess: (result) => {
-          if (result._tag === "Claimed") openRun(result.runId);
+      again.mutate(
+        { runId: run.id, amendment },
+        {
+          onSuccess: (result) => {
+            if (result._tag === "Claimed") openRun(result.runId);
+          },
         },
-      });
+      );
   };
   return (
     <form
