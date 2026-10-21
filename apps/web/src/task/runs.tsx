@@ -41,6 +41,7 @@ import {
   runActionLabel,
   runActionProgress,
   runAgainBlocked,
+  runAgainProgress,
   timestampLabel,
 } from "../operator-copy.ts";
 import { projectParams } from "../overview.ts";
@@ -159,7 +160,7 @@ const RowActions = ({
   if (again.isPending)
     return (
       <span role="status" className="text-xs text-muted-foreground">
-        Opening a run…
+        {runAgainProgress}
       </span>
     );
   const act = (request: RunActionRequest) =>

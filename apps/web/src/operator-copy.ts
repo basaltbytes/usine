@@ -38,6 +38,9 @@ export const runActionLabel = {
   keepRunning: "Keep running",
 } as const;
 
+/** What a screen says while a Run again request is sent. */
+export const runAgainProgress = "Opening a run…";
+
 /** Why running a Run again opened no Run, and what the operator does next. */
 export const runAgainBlocked = "No run opened: cycle budget used up. Reset it in Needs attention";
 

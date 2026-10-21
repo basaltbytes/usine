@@ -26,10 +26,17 @@ import {
   moveProgressMessage,
   runActionLabel,
   runActionProgress,
+  runAgainBlocked,
+  runAgainProgress,
   runLineTimeTitle,
 } from "../operator-copy.ts";
 import { projectParams } from "../overview.ts";
-import { type RunActions, useRunAction } from "../run-actions.ts";
+import {
+  type RunActions,
+  type RunAgainActions,
+  useRunAction,
+  useRunAgain,
+} from "../run-actions.ts";
 import { StallAction } from "../stall/action.tsx";
 import { stallNamesLoop, stallSentence } from "../stall/copy.ts";
 import { stallRun, taskNumber } from "../task/model.ts";
@@ -150,13 +157,15 @@ const RunLine = ({ run }: { readonly run: RunView }) => {
   );
 };
 
-/** What a card says while a Run action or a move is in flight, if anything is. */
+/** What a card says while a Run action, a Run again, or a move is in flight, if anything is. */
 const progressMessage = (
   action: RunActions,
+  again: RunAgainActions,
   phase: BoardMoveProgress["phase"] | undefined,
 ): string | null => {
   if (action.isPending && action.variables !== undefined)
     return runActionProgress[action.variables.request.action];
+  if (again.isPending) return runAgainProgress;
   return phase === undefined ? null : moveProgressMessage(phase);
 };
 
@@ -250,6 +259,7 @@ const CardFace = ({
   stall,
   readOnly,
   action,
+  again,
   progress,
 }: {
   readonly item: BoardTaskView;
@@ -260,11 +270,14 @@ const CardFace = ({
   readonly readOnly: boolean;
   /** The card's Run actions, or null on the copy that follows a drag. */
   readonly action: RunActions | null;
+  /** The card's Run again requests, or null on the copy that follows a drag. */
+  readonly again: RunAgainActions | null;
   readonly progress: string | null;
 }) => {
   const failure = failedRun(item);
   const run = currentRun(item);
   const actionError = action?.error?.message ?? null;
+  const runAgainError = again?.error?.message ?? null;
   // The failure note already shows a failed or held Run, and a held one takes the stall's action.
   const onFailure =
     stall !== null &&
@@ -321,8 +334,16 @@ const CardFace = ({
           {stallAction}
         </StallNote>
       )}
+      {again?.data?._tag === "CycleBlocked" && (
+        <p role="status" className="text-xs text-needs-you">
+          {runAgainBlocked}
+        </p>
+      )}
       {actionError !== null && (
         <p className="text-xs text-destructive wrap-anywhere">{actionError}</p>
+      )}
+      {runAgainError !== null && (
+        <p className="text-xs text-destructive wrap-anywhere">{runAgainError}</p>
       )}
       {item.conflicting && <p className="text-xs text-destructive">Conflicts with base</p>}
       {unexplained && <p className="text-xs text-needs-you">Needs attention</p>}
@@ -363,6 +384,7 @@ export const BoardCard = ({
   readonly openRun: (runId: RunId) => void;
 }) => {
   const action = useRunAction();
+  const again = useRunAgain();
   const {
     attributes,
     listeners,
@@ -400,7 +422,8 @@ export const BoardCard = ({
           stall={stall}
           readOnly={readOnly}
           action={action}
-          progress={progressMessage(action, phase)}
+          again={again}
+          progress={progressMessage(action, again, phase)}
         />
       </Card>
       <CardMenu
@@ -409,6 +432,7 @@ export const BoardCard = ({
         moves={moves}
         openRun={openRun}
         action={action}
+        again={again}
         className="absolute top-1.5 right-1.5 transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/task:opacity-100 [@media(hover:hover)]:group-focus-within/task:opacity-100 [@media(hover:hover)]:aria-expanded:opacity-100"
       />
     </div>
@@ -438,6 +462,7 @@ export const DraggedCard = ({
       stall={stall}
       readOnly
       action={null}
+      again={null}
       progress={null}
     />
   </Card>

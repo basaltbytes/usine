@@ -6,6 +6,7 @@ import vite from "./vite.config.ts";
 // Set on Workers built by infra/hetzner/cloud-init.yaml, which have Debian's Chromium instead of Playwright's.
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
 const delayedMoves = new WeakMap<Page, Promise<Route>>();
+const delayedRunAgains = new WeakMap<Page, Promise<Route>>();
 const interventionRequests = new WeakMap<Page, Array<{ url: string; body: unknown }>>();
 
 export default mergeConfig(
@@ -175,6 +176,29 @@ export default mergeConfig(
                   const route = await request;
                   await route.fulfill({ contentType: "application/json", body: '{"ok":true}' });
                   delayedMoves.delete(page);
+                },
+                // Holds the next Run again request of any Run until `releaseRunAgain` answers it.
+                delayRunAgain: async ({ page }) => {
+                  let receive: (route: Route) => void;
+                  const request = new Promise<Route>((resolve) => {
+                    receive = resolve;
+                  });
+                  delayedRunAgains.set(page, request);
+                  await page.unroute("**/api/runs/*/run-again");
+                  await page.route("**/api/runs/*/run-again", (route) => receive(route));
+                },
+                // Answers the held request with `status` and `body`, and returns the path and payload it carried.
+                releaseRunAgain: async ({ page }, status: 200 | 409, body: string) => {
+                  const request = delayedRunAgains.get(page);
+                  if (request === undefined) throw new Error("No delayed Run again");
+                  const route = await request;
+                  await route.fulfill({ status, contentType: "application/json", body });
+                  delayedRunAgains.delete(page);
+                  await page.unroute("**/api/runs/*/run-again");
+                  return {
+                    path: new URL(route.request().url()).pathname,
+                    body: route.request().postDataJSON(),
+                  };
                 },
                 boardResponses: async ({ page }, overview: string, moveStatus: 200 | 503) => {
                   await page.unroute("**/api/overview");

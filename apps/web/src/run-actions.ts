@@ -66,3 +66,6 @@ export const useRunAgain = () => {
     onSuccess: (_, { runId }) => refresh(runId),
   });
 };
+
+/** The pending state, answer, and last error of a screen's Run again requests. */
+export type RunAgainActions = ReturnType<typeof useRunAgain>;

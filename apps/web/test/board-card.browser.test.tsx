@@ -1,5 +1,14 @@
 import { QueryClient, QueryClientProvider, useSuspenseQuery } from "@tanstack/react-query";
-import type { RunId } from "@usine/core/run";
+import {
+  CycleBudgetAsk,
+  CycleBudgetAskId,
+  CycleCount,
+  CycleLimit,
+  LoopCycleCount,
+} from "@usine/core/cycle-budget";
+import { EventId } from "@usine/core/event";
+import { RunId } from "@usine/core/run";
+import { Claimed, CycleBlocked, RunAgainResult } from "@usine/engine/engine";
 import { FactoryOverview, type ReadyOverview, type RunView } from "@usine/orchestrator/operator";
 import { Schema } from "effect";
 import { flushSync } from "react-dom";
@@ -8,7 +17,7 @@ import { afterEach, beforeEach, expect, it } from "vitest";
 import { commands, page, userEvent } from "vitest/browser";
 import { RouterProvider } from "@tanstack/react-router";
 import { ProjectBoard } from "../src/board/board.tsx";
-import { timestampLabel } from "../src/operator-copy.ts";
+import { runAgainBlocked, runAgainProgress, timestampLabel } from "../src/operator-copy.ts";
 import { overviewQuery } from "../src/overview.ts";
 import { boardOverview, boardStalled } from "./board-fixture.ts";
 import { memoryRouter } from "./memory-router.tsx";
@@ -17,6 +26,11 @@ import "../src/index.css";
 declare module "vitest/browser" {
   interface BrowserCommands {
     boardResponses: (overview: string, moveStatus: 200 | 503) => Promise<void>;
+    delayRunAgain: () => Promise<void>;
+    releaseRunAgain: (
+      status: 200 | 409,
+      body: string,
+    ) => Promise<{ readonly path: string; readonly body: unknown }>;
   }
 }
 
@@ -314,11 +328,83 @@ it("lists only the actions that apply to a card without a Run", async () => {
   await userEvent.keyboard("{Escape}");
   await expect.element(page.getByRole("menu")).not.toBeInTheDocument();
 
+  // A canceled latest Run leaves no Run line, so Run again names its Loop.
   await actions(18).click();
   expect(await menuContents()).toEqual({
-    items: ["Open #18 on GitHub", "Run history", "Move to"],
-    separators: 2,
+    items: ["Open #18 on GitHub", "Run history", "Run againimplement", "Move to"],
+    separators: 3,
   });
+});
+
+const runAgainBody = (result: RunAgainResult) =>
+  JSON.stringify(Schema.encodeSync(RunAgainResult)(result));
+
+const runDroppedAgain = async () => {
+  await commands.delayRunAgain();
+  await actions(18).click();
+  await page.getByRole("menuitem", { name: "Run again" }).click();
+};
+
+it("runs a Task's canceled Run again from the card menu, says so on the card, and opens the new Run", async () => {
+  const card = page.elementLocator(cardOf(/^Cache the label catalog/u));
+  await runDroppedAgain();
+  await expect.element(card.getByText(runAgainProgress, { exact: true })).toBeVisible();
+  // While the request is out, the menu offers no action that a second click could send.
+  await actions(18).click();
+  expect((await menuContents()).items).toEqual(["Open #18 on GitHub", "Run history", "Move to"]);
+  await userEvent.keyboard("{Escape}");
+  const sent = await commands.releaseRunAgain(
+    200,
+    runAgainBody(
+      new Claimed({ eventId: EventId.make("run-again-event"), runId: RunId.make("run-again") }),
+    ),
+  );
+  expect(sent).toEqual({
+    path: "/api/runs/run-dropped/run-again",
+    body: { task: "Work on #18.", agent: "developer" },
+  });
+  await expect.poll(() => opened).toEqual(["run-again"]);
+  await expect.element(card.getByText(runAgainProgress, { exact: true })).not.toBeInTheDocument();
+});
+
+it("says on the card why Run again opened no Run: a refusal, then a used-up cycle budget", async () => {
+  const card = page.elementLocator(cardOf(/^Cache the label catalog/u));
+  const refusal =
+    "Cannot run Run run-dropped again: Run run-newer of Loop implement is open on the same Item. Run it again after that Run closes, or cancel it first.";
+  await runDroppedAgain();
+  await commands.releaseRunAgain(
+    409,
+    JSON.stringify({ error: "RunRetryBlockedError", message: refusal }),
+  );
+  await expect.element(card.getByText(refusal, { exact: true })).toBeVisible();
+
+  const dropped = runOf("run-dropped");
+  await runDroppedAgain();
+  await commands.releaseRunAgain(
+    200,
+    runAgainBody(
+      new CycleBlocked({
+        eventId: EventId.make("run-again-event"),
+        ask: new CycleBudgetAsk({
+          id: CycleBudgetAskId.make("exhausted"),
+          itemKey: dropped.itemKey,
+          repository: dropped.repository,
+          loop: dropped.loop,
+          limit: CycleLimit.make(1),
+          counts: [
+            new LoopCycleCount({
+              loop: dropped.loop,
+              admitted: CycleCount.make(1),
+              completed: CycleCount.make(1),
+            }),
+          ],
+        }),
+      }),
+    ),
+  );
+  await expect.element(card.getByText(runAgainBlocked, { exact: true })).toBeVisible();
+  await expect.element(card.getByText(refusal, { exact: true })).not.toBeInTheDocument();
+  expect(opened).toEqual([]);
 });
 
 it("lists the current Run's applicable actions and moves the card through Move to", async () => {
