@@ -93,6 +93,8 @@ usine checks every harness before it uses it, and doesn't install anything.
 | `codex`  | `codex --version` prints `codex-cli 0.144.0` or `codex-cli 0.153.4`, and the Codex app server reports a ChatGPT account. Otherwise the error says `Codex children require a ChatGPT login; run codex login on the Worker`. |
 | `pi`     | The Worker is local, and a Pi session starts with the model and an API key.                                                                                                                                                  |
 
+Every Claude process on a Worker shares the Worker's Claude login, so usine runs one Claude check at a time on a Worker, and none while a Claude child starts there. If a Claude child still fails with `Failed to refresh OAuth token: another Claude Code process ...`, usine starts it again after 15 seconds, then 30, then 60. The parent sees the error only when the last start fails too.
+
 Each check times out after 60 seconds. Preflight also checks Git on every Worker, and the connection and Gateway of an SSH Worker ([Add a Worker](/guides/add-a-worker/#preflight)). The model of a Claude Code or Codex child isn't checked until the child starts.
 
 ## Log in to the harnesses

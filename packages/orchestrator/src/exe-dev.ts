@@ -14,7 +14,8 @@ import { stepExecutorLayer } from "./scheduler.ts";
  * exe.dev's integration bot as their login, not the App's), the
  * `TriggerCondition` that re-checks queued Events, the
  * `AttemptRuntime` that runs each Attempt's Pi parent in this process, built
- * before the engine so durable storage is resumed before Run recovery, and the
+ * before the engine so durable storage is resumed before Run recovery, the
+ * `ClaudeLoginLock` its Claude children share with preflight, and the
  * `CurrentInstance` whose settings each Attempt reads. It also provides the
  * `WorkerStatus` of its Workers.
  */

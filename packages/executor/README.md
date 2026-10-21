@@ -86,6 +86,8 @@ Every adapter runs the `@usine/agents/preflight` checks where the Worker runs ch
 
 `prepare` repeats the assigned brain’s probe before acquiring credentials or creating a checkout. This checks roster changes and logouts after startup. A reported capability gap returns `WorkerCapabilityError` and requires operator action. Transport failures, including an SSH client that cannot reach the VM, and probe timeouts remain infrastructure failures eligible for retry.
 
+A Claude check holds the Worker's `ClaudeLoginLock` (`@usine/agents/runtime`) until it returns, so two Attempts that prepare on one Worker, or an Attempt that prepares while a Claude child starts there, never refresh the Worker's Claude login at the same time. The local, exe.dev, and SSH layers require that service. Build `claudeLoginLockLayer` from the package root once and provide it to the executor and to the Attempt runtime that launches the Claude children.
+
 This replaces exe.dev’s `HarnessLoginCheck` and `harnessLoginChecks` options. Pass the roster to `preflight` so readiness follows the agents the instance actually uses.
 
 ## Local Worker

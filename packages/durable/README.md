@@ -13,7 +13,8 @@ Runs an Attempt's Pi parent inside the orchestrator on [`@earendil-works/pi-dura
 ```ts
 import { layer as durableLayer } from "@usine/durable/live";
 
-// Provides AttemptRuntime and DurableHarness; requires ChildProcessSpawner.
+// Provides AttemptRuntime and DurableHarness; requires ChildProcessSpawner and ClaudeLoginLock,
+// the per-Worker lock the executor's preflight shares (claudeLoginLockLayer from @usine/executor).
 const attempts = durableLayer(instanceDirectory);
 ```
 
@@ -27,7 +28,7 @@ After the terminal envelope, `finished(attemptId)` still reads what the parent l
 
 Everything reaches `io` as attempt channel envelopes: `Started` with the resolved parent model, `SessionEvent`s for the parent's committed entries and the children's events in the order they happened, `InterventionApplied` or `InterventionRejected` for operator input, and exactly one `Final`, `Failed`, or `Interrupted`. The next sequence is stored with the Attempt, so a reattached `execute` continues the numbering. Progress is committed once per parent entry, after all of its envelopes are appended, and once per other envelope: a crash before the commit relays the same envelopes again with the same sequences, which the transcript keeps once.
 
-`AttemptRequest.host` (`@usine/agents/child-host`) says where the Worker runs the parent's children, and the `subagent` tool passes it to every child: `LocalProcess` on this machine, or `RemoteShell` over SSH. `AttemptRequest.environment` is the complete environment of every local child and every command it runs; on a `RemoteShell` host it is exported on top of the remote machine's own environment. Neither the child host nor the environment is written to storage, since both describe the process that runs the Attempt: the task stores the RunSpec, Worker, and worktree as a `StoredRequest`, which `request(attemptId)` reads back so a reattachment knows the RunSpec, base commit, and worktree the Attempt started with. After a restart, the parent waits for the next `execute` call to supply the child host and environment before it launches another child.
+`AttemptRequest.host` (`@usine/agents/child-host`) says where the Worker runs the parent's children, and the `subagent` tool passes it and the Worker's name to every child, whose logs it annotates with the Attempt id: `LocalProcess` on this machine, or `RemoteShell` over SSH. `AttemptRequest.environment` is the complete environment of every local child and every command it runs; on a `RemoteShell` host it is exported on top of the remote machine's own environment. Neither the child host nor the environment is written to storage, since both describe the process that runs the Attempt: the task stores the RunSpec, Worker, and worktree as a `StoredRequest`, which `request(attemptId)` reads back so a reattachment knows the RunSpec, base commit, and worktree the Attempt started with. After a restart, the parent waits for the next `execute` call to supply the child host and environment before it launches another child.
 
 A child is not resumed after a restart. Its tool call settles as interrupted with the output committed so far, and the parent model decides what to do next.
 
