@@ -8,6 +8,7 @@ import {
   ParentSession,
 } from "@usine/core/agent/session";
 import { AgentName } from "@usine/core/agent";
+import { WorkerName } from "@usine/core/worker";
 import { Option, Schema } from "effect";
 import { RemoteShell } from "../src/child-host/child-host.ts";
 import {
@@ -36,6 +37,7 @@ describe("agent runtime contract", () => {
       }),
     });
     const request = new ChildRequest({
+      worker: WorkerName.make("worker-1"),
       environment: { HOME: "/home/worker", PATH: "/usr/bin:/bin" },
       session: new ChildSession({
         id: AgentSessionId.make("child-1"),

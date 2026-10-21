@@ -122,8 +122,9 @@ export const sshStepExecutorLayer = (config: UsineConfig, brains: ReadonlyArray<
  * login each Attempt records, the `TriggerCondition` that
  * re-checks queued Events, the `AttemptRuntime` that runs each Attempt's Pi
  * parent in this process, built before the engine so durable storage is
- * resumed before Run recovery, and the `CurrentInstance` whose settings each
- * Attempt reads. Gateway admin APIs are called with `fetch`. A reload can
+ * resumed before Run recovery, the `ClaudeLoginLock` its Claude children share
+ * with preflight, and the `CurrentInstance` whose settings each Attempt reads.
+ * Gateway admin APIs are called with `fetch`. A reload can
  * resize, add, and remove SSH Workers (`sshStepExecutorLayer`). It also
  * provides the `WorkerStatus` of its Workers.
  */

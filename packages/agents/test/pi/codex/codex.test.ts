@@ -21,6 +21,7 @@ import {
   OperatorMessage,
   Release,
 } from "@usine/core/attempt/channel";
+import { WorkerName } from "@usine/core/worker";
 import { TestClock } from "effect/testing";
 import { type ChildHost, LocalProcess, RemoteShell } from "../../../src/child-host/child-host.ts";
 import {
@@ -52,6 +53,7 @@ const request = (
   host: ChildHost = new LocalProcess(),
 ) =>
   new ChildRequest({
+    worker: WorkerName.make("worker-1"),
     environment: { HOME: "/home/worker", PATH: "/usr/bin:/bin" },
     host,
     session: new ChildSession({

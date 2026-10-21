@@ -13,14 +13,17 @@ import {
   Queue,
   Schema,
   Scope,
+  Semaphore,
   Stream,
 } from "effect";
+import { TestClock } from "effect/testing";
 import {
   Interrupt,
   type InterventionState,
   OperatorMessage,
   Release,
 } from "@usine/core/attempt/channel";
+import { WorkerName } from "@usine/core/worker";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -30,6 +33,7 @@ import {
   AgentResultError,
   ChildBackend,
   ChildRequest,
+  ClaudeLoginLock,
   type OnDelivery,
   SessionOperationError,
   UnknownModelError,
@@ -43,6 +47,20 @@ import {
   type ClaudeUserMessage,
 } from "../../src/pi/claude.ts";
 
+/** One login lock for every Worker: each test launches its children on one Worker. */
+const loginLock = Layer.effect(
+  ClaudeLoginLock,
+  Effect.map(Semaphore.make(1), (mutex) =>
+    ClaudeLoginLock.of({ withLock: () => (effect) => mutex.withPermit(effect) }),
+  ),
+);
+
+/** The Claude backend with a login lock the test can also take. */
+const claudeChild = claudeChildLayer.pipe(Layer.provideMerge(loginLock));
+
+/** Shows that Claude's first API request went out with a working login. */
+const rateLimitEvent = { type: "rate_limit_event", rate_limit_info: { status: "allowed" } };
+
 /** Ignores whether a queued operator message is read; the test does not observe it. */
 const noDelivery: OnDelivery = () => Effect.void;
 
@@ -54,6 +72,7 @@ const request = (
   host: ChildHost = new LocalProcess(),
 ) =>
   new ChildRequest({
+    worker: WorkerName.make("worker-1"),
     environment: { HOME: "/home/worker", PATH: "/usr/bin:/bin" },
     host,
     session: new ChildSession({
@@ -76,17 +95,220 @@ const scripted = (
   models: ReadonlyArray<{ readonly value: string; readonly resolvedModel?: string }> = [
     { value: "sonnet", resolvedModel: "claude-sonnet-4-6" },
   ],
+  sessionId = "claude-session-1",
 ): ClaudeQuery => ({
   close: () => undefined,
   interrupt: () => Promise.resolve(),
   supportedModels: () => Promise.resolve(models),
   async *[Symbol.asyncIterator]() {
-    yield { type: "system", subtype: "init", session_id: "claude-session-1" };
+    yield { type: "system", subtype: "init", session_id: sessionId };
     for (const message of messages) yield message;
   },
 });
 
+const LOGIN_ERROR =
+  "Failed to refresh OAuth token: another Claude Code process is refreshing it or exited mid-refresh. This is usually transient; retry in a minute, and if it persists close other Claude Code processes or sign in again";
+
+/** What Claude Code prints when another process holds its login's refresh lock: an error answer and a result, no tokens spent. */
+const loginContended: ReadonlyArray<Schema.Json> = [
+  {
+    type: "assistant",
+    error: "authentication_failed",
+    message: {
+      id: "login-error",
+      usage: { input_tokens: 0, output_tokens: 0 },
+      content: [{ type: "text", text: LOGIN_ERROR }],
+    },
+  },
+  { type: "result", subtype: "success", is_error: true, result: LOGIN_ERROR, modelUsage: {} },
+];
+
+/**
+ * A Claude SDK whose first `contended` launches lose the login refresh lock and whose later ones
+ * finish the task. Like Claude Code's streaming-input sessions, a launch that lost the lock waits
+ * for its next user message, so its output stays open until the launch is closed.
+ */
+const loginRace = (contended: number) => {
+  const launches: Array<{ closed: boolean }> = [];
+  const sdk = Layer.succeed(ClaudeSdk)({
+    open: () => {
+      const launch = { closed: false };
+      launches.push(launch);
+      const lostLock = launches.length <= contended;
+      let endOutput = () => {};
+      const outputEnded = new Promise<void>((resolve) => {
+        endOutput = resolve;
+      });
+      const query = scripted(
+        lostLock
+          ? loginContended
+          : [
+              {
+                type: "assistant",
+                message: { content: [{ type: "text", text: "Child completed the edit." }] },
+              },
+              { type: "result", subtype: "success", result: "Child completed the edit." },
+            ],
+        undefined,
+        `claude-session-${launches.length}`,
+      );
+      return {
+        ...query,
+        close: () => {
+          launch.closed = true;
+          endOutput();
+        },
+        // An async generator, like the live SDK's, cannot return while it waits for a message.
+        async *[Symbol.asyncIterator]() {
+          yield* query;
+          if (lostLock) await outputEnded;
+        },
+      };
+    },
+  });
+  return { launches, sdk };
+};
+
+/** Collects the info lines logged where its `layer` is provided. */
+const infoLines = () => {
+  const lines: Array<string> = [];
+  const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+    if (logLevel === "Info") lines.push(JSON.stringify(message));
+  });
+  return { lines, layer: Logger.layer([logger]) };
+};
+
+/** Advances the test clock until `fiber` ends, so the launch's retry delays pass. */
+const joinAdvancingClock = Effect.fn(function* <A, E>(fiber: Fiber.Fiber<A, E>) {
+  while (fiber.pollUnsafe() === undefined) yield* TestClock.adjust("5 seconds");
+  return yield* Fiber.join(fiber);
+});
+
 describe("Claude child backend", () => {
+  it.effect("launches again after Claude loses its login refresh lock and keeps that session", () =>
+    Effect.gen(function* () {
+      const { launches, sdk } = loginRace(1);
+      const logs = infoLines();
+      yield* Effect.gen(function* () {
+        const launching = yield* Effect.forkChild((yield* ChildBackend).launch(request()));
+        const session = yield* joinAdvancingClock(launching);
+        const [events, result] = yield* Effect.all([
+          Stream.runCollect(session.events),
+          session.result,
+        ]);
+        assert.strictEqual(result.message, "Child completed the edit.");
+        assert.deepStrictEqual(
+          events.map((event) => event._tag),
+          ["SessionStarted", "TextOutput", "SessionFinished"],
+          "the failed launch leaves nothing in the transcript",
+        );
+        const started = events[0];
+        assert(started?._tag === "SessionStarted" && Option.isSome(started.harnessSession));
+        assert.strictEqual(started.harnessSession.value.id, "claude-session-2");
+        assert.deepStrictEqual(
+          launches.map(({ closed }) => closed),
+          [true, false],
+        );
+        const retries = logs.lines.filter((line) => line.includes("launching it again"));
+        assert.lengthOf(retries, 1);
+        assert.include(retries[0], '"delay":"15s"');
+      }).pipe(
+        Effect.provide(claudeChild),
+        Effect.provide(sdk),
+        Effect.provide(logs.layer),
+        Effect.scoped,
+      );
+    }),
+  );
+
+  it.effect("returns Claude's login error to the parent once every launch lost the lock", () =>
+    Effect.gen(function* () {
+      const { launches, sdk } = loginRace(Number.POSITIVE_INFINITY);
+      const logs = infoLines();
+      yield* Effect.gen(function* () {
+        const launching = yield* Effect.forkChild((yield* ChildBackend).launch(request()));
+        const session = yield* joinAdvancingClock(launching);
+        assert.strictEqual((yield* session.result).message, LOGIN_ERROR);
+        assert.lengthOf(launches, 4, "one launch and three retries");
+        assert.deepStrictEqual(
+          logs.lines
+            .filter((line) => line.includes("launching it again"))
+            .map((line) => /"delay":"([^"]+)"/u.exec(line)?.[1]),
+          ["15s", "30s", "1m"],
+        );
+      }).pipe(
+        Effect.provide(claudeChild),
+        Effect.provide(sdk),
+        Effect.provide(logs.layer),
+        Effect.scoped,
+      );
+    }),
+  );
+
+  it.effect("opens no other Claude process once a launch waiting to retry is interrupted", () =>
+    Effect.gen(function* () {
+      const { launches, sdk } = loginRace(Number.POSITIVE_INFINITY);
+      yield* Effect.gen(function* () {
+        const launching = yield* Effect.forkChild((yield* ChildBackend).launch(request()));
+        while (launches[0]?.closed !== true) yield* Effect.yieldNow;
+        yield* Fiber.interrupt(launching);
+        yield* TestClock.adjust("2 minutes");
+        assert.lengthOf(launches, 1, "the canceled child starts no retry");
+      }).pipe(Effect.provide(claudeChild), Effect.provide(sdk), Effect.scoped);
+    }),
+  );
+
+  it.effect(
+    "holds the Worker's Claude login lock until Claude shows its login worked, for a minute at most",
+    () =>
+      Effect.gen(function* () {
+        const outputs: Array<Queue.Queue<Schema.Json, Cause.Done>> = [];
+        const context = yield* Effect.context<never>();
+        const sdk = Layer.succeed(ClaudeSdk)({
+          open: () => {
+            const messages = Effect.runSyncWith(context)(Queue.make<Schema.Json, Cause.Done>());
+            outputs.push(messages);
+            const output = Stream.toAsyncIterableWith(Stream.fromQueue(messages), context);
+            return {
+              close: () => {
+                Effect.runForkWith(context)(Queue.end(messages));
+              },
+              interrupt: () => Promise.resolve(),
+              supportedModels: () => Promise.resolve([{ value: "claude-sonnet-4-6" }]),
+              [Symbol.asyncIterator]: () => output[Symbol.asyncIterator](),
+            };
+          },
+        });
+        yield* Effect.gen(function* () {
+          const backend = yield* ChildBackend;
+          const logins = yield* ClaudeLoginLock;
+          const worker = request().worker;
+          const preflight = () => logins.withLock(worker)(Effect.void);
+
+          const answering = yield* Effect.forkChild(backend.launch(request()));
+          while (outputs.length < 1) yield* Effect.yieldNow;
+          const waitingForAnswer = yield* Effect.forkChild(preflight());
+          yield* Effect.yieldNow;
+          assert.isUndefined(
+            waitingForAnswer.pollUnsafe(),
+            "a preflight waits while the child has shown nothing",
+          );
+          yield* Queue.offer(outputs[0]!, rateLimitEvent);
+          yield* Fiber.join(waitingForAnswer);
+          yield* Fiber.join(answering);
+
+          const silent = yield* Effect.forkChild(backend.launch(request()));
+          while (outputs.length < 2) yield* Effect.yieldNow;
+          const waitingForSilence = yield* Effect.forkChild(preflight());
+          yield* Effect.yieldNow;
+          assert.isUndefined(waitingForSilence.pollUnsafe());
+          yield* TestClock.adjust("1 minute");
+          yield* Fiber.join(waitingForSilence);
+          yield* Fiber.join(silent);
+        }).pipe(Effect.provide(claudeChild), Effect.provide(sdk), Effect.scoped);
+      }),
+  );
+
   it.effect(
     "rejects malformed background snapshots instead of treating them as no pending work",
     () => {
@@ -104,7 +326,7 @@ describe("Claude child backend", () => {
           assert(error instanceof SessionOperationError);
           assert.strictEqual(error.operation, "stream");
           assert.match(error.message, /invalid completion update/u);
-        }).pipe(Effect.provide(claudeChildLayer), Effect.provide(sdk)),
+        }).pipe(Effect.provide(claudeChild), Effect.provide(sdk)),
       );
     },
   );
@@ -130,7 +352,7 @@ describe("Claude child backend", () => {
       Effect.gen(function* () {
         const session = yield* (yield* ChildBackend).launch(request());
         assert.strictEqual((yield* session.result).message, "Updated answer");
-      }).pipe(Effect.provide(claudeChildLayer), Effect.provide(sdk)),
+      }).pipe(Effect.provide(claudeChild), Effect.provide(sdk)),
     );
   });
 
@@ -183,7 +405,7 @@ describe("Claude child backend", () => {
             events.map((event) => event._tag),
             ["SessionStarted", "TextOutput", "SessionFinished"],
           );
-        }).pipe(Effect.provide(claudeChildLayer), Effect.provide(sdk)),
+        }).pipe(Effect.provide(claudeChild), Effect.provide(sdk)),
       );
     },
   );
@@ -217,7 +439,7 @@ describe("Claude child backend", () => {
           const error = yield* Effect.flip(session.result);
           assert(error instanceof SessionOperationError);
           assert.strictEqual(error.operation, "stream");
-        }).pipe(Effect.provide(claudeChildLayer), Effect.provide(sdk)),
+        }).pipe(Effect.provide(claudeChild), Effect.provide(sdk)),
       );
     },
   );
@@ -225,6 +447,8 @@ describe("Claude child backend", () => {
   it.effect("reports a message sent during a turn read once no queued turn holds it", () =>
     Effect.gen(function* () {
       const messages = yield* Queue.make<Schema.Json, Cause.Done>();
+      // A launch returns once Claude shows that its login worked.
+      yield* Queue.offer(messages, rateLimitEvent);
       const context = yield* Effect.context<never>();
       const output = Stream.toAsyncIterableWith(Stream.fromQueue(messages), context);
       const sdk = Layer.succeed(ClaudeSdk)({
@@ -268,13 +492,15 @@ describe("Claude child backend", () => {
         const [read] = reads;
         assert(read !== undefined && Option.isSome(read));
         assert.deepStrictEqual([read.value.held, read.value.queued], [true, false]);
-      }).pipe(Effect.provide(claudeChildLayer), Effect.provide(sdk));
+      }).pipe(Effect.provide(claudeChild), Effect.provide(sdk));
     }).pipe(Effect.scoped),
   );
 
   it.effect("keeps a held Claude conversation open until release and records one launch", () =>
     Effect.gen(function* () {
       const messages = yield* Queue.make<Schema.Json, Cause.Done>();
+      // A launch returns once Claude shows that its login worked.
+      yield* Queue.offer(messages, rateLimitEvent);
       const idle = yield* Queue.make<void>();
       const context = yield* Effect.context<never>();
       const output = Stream.toAsyncIterableWith(Stream.fromQueue(messages), context);
@@ -364,12 +590,14 @@ describe("Claude child backend", () => {
           seen.filter((tag) => tag === "SessionStarted"),
           ["SessionStarted"],
         );
-      }).pipe(Effect.provide(claudeChildLayer), Effect.provide(sdk));
+      }).pipe(Effect.provide(claudeChild), Effect.provide(sdk));
     }).pipe(Effect.scoped),
   );
   it.effect("closes a paused tool hook with its child scope even without a vendor abort", () =>
     Effect.gen(function* () {
       const messages = yield* Queue.make<Schema.Json, Cause.Done>();
+      // A launch returns once Claude shows that its login worked.
+      yield* Queue.offer(messages, rateLimitEvent);
       const context = yield* Effect.context<never>();
       const output = Stream.toAsyncIterableWith(Stream.fromQueue(messages), context);
       let options: ClaudeQueryOptions | undefined;
@@ -390,7 +618,7 @@ describe("Claude child backend", () => {
       yield* Effect.addFinalizer(() => Scope.close(owner, Exit.void));
       const running = yield* Effect.gen(function* () {
         return yield* (yield* ChildBackend).launch(request());
-      }).pipe(Scope.provide(owner), Effect.provide(claudeChildLayer), Effect.provide(sdk));
+      }).pipe(Scope.provide(owner), Effect.provide(claudeChild), Effect.provide(sdk));
       yield* running.intervene(new Interrupt(), noDelivery);
       const hook = options?.hooks?.PreToolUse?.[0]?.hooks[0];
       assert(hook !== undefined);
@@ -469,7 +697,7 @@ describe("Claude child backend", () => {
         assert.strictEqual(options?.spawnClaudeCodeProcess, undefined);
         const first = yield* Effect.promise(() => input![Symbol.asyncIterator]().next());
         assert.strictEqual(first.value?.message.content, "Implement the focused task.");
-      }).pipe(Effect.provide(claudeChildLayer), Effect.provide(sdk)),
+      }).pipe(Effect.provide(claudeChild), Effect.provide(sdk)),
     );
   });
 
@@ -531,7 +759,7 @@ describe("Claude child backend", () => {
         const retries = warnings.filter((line) => line.includes("cannot reach its provider"));
         assert.lengthOf(retries, 2, "one warning per API retry");
       }).pipe(
-        Effect.provide(claudeChildLayer),
+        Effect.provide(claudeChild),
         Effect.provide(sdk),
         Effect.provide(Logger.layer([logger])),
       ),
@@ -588,7 +816,7 @@ describe("Claude child backend", () => {
         ]);
         assert.strictEqual(spawned.env.RECORD_TO, record);
         assert.strictEqual(spawned.env.HOME, undefined, "the SSH client inherits nothing");
-      }).pipe(Effect.provide(claudeChildLayer), Effect.provide(sdk)),
+      }).pipe(Effect.provide(claudeChild), Effect.provide(sdk)),
     );
   });
 
@@ -610,7 +838,7 @@ describe("Claude child backend", () => {
           const error = yield* Effect.flip(backend.launch(request("claude-never-existed")));
           assert(error instanceof UnknownModelError);
           assert.strictEqual(error.model, "claude-never-existed");
-        }).pipe(Effect.provide(claudeChildLayer), Effect.provide(sdk)),
+        }).pipe(Effect.provide(claudeChild), Effect.provide(sdk)),
       );
       assert.strictEqual(closed, true);
     });
@@ -633,7 +861,7 @@ describe("Claude child backend", () => {
         assert.strictEqual(captured[0] !== undefined && "effort" in captured[0], false);
         assert.deepStrictEqual(captured[1]?.thinking, { type: "adaptive" });
         assert.strictEqual(captured[1]?.effort, "low");
-      }).pipe(Effect.provide(claudeChildLayer), Effect.provide(sdk)),
+      }).pipe(Effect.provide(claudeChild), Effect.provide(sdk)),
     );
   });
 
@@ -657,7 +885,7 @@ describe("Claude child backend", () => {
         const error = yield* Effect.flip(session.result);
         assert(error instanceof AgentResultError);
         assert.strictEqual(error.message, "ran out of turns");
-      }).pipe(Effect.provide(claudeChildLayer), Effect.provide(sdk)),
+      }).pipe(Effect.provide(claudeChild), Effect.provide(sdk)),
     );
   });
 
@@ -673,7 +901,7 @@ describe("Claude child backend", () => {
         assert(error instanceof SessionOperationError);
         assert.strictEqual(error.operation, "stream");
         assert.match(error.message, /closed without a result/u);
-      }).pipe(Effect.provide(claudeChildLayer), Effect.provide(sdk)),
+      }).pipe(Effect.provide(claudeChild), Effect.provide(sdk)),
     );
   });
 });

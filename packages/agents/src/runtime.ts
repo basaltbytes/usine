@@ -9,6 +9,7 @@ import {
   ChildSessionCount,
 } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
+import { WorkerName } from "@usine/core/worker";
 import {
   AgentFailure,
   AttemptFailure,
@@ -40,6 +41,8 @@ export class ChildRequest extends Schema.Class<ChildRequest>("@usine/agents/Chil
   environment: Schema.Record(Schema.String, Schema.String),
   /** Where the child's process runs. */
   host: ChildHost,
+  /** The Worker whose machine `host` reaches. Claude children on one Worker share its Claude login. */
+  worker: WorkerName,
 }) {}
 
 /** The final message a parent or child session returns. */
@@ -277,6 +280,22 @@ export interface ChildBackendService {
 export class ChildBackend extends Context.Service<ChildBackend, ChildBackendService>()(
   "@usine/agents/ChildBackend",
 ) {}
+
+/**
+ * The lock, one per Worker, that the Claude commands able to refresh a Worker's Claude login take:
+ * the preflight's login check and the start of a Claude child. Every Claude process on a Worker
+ * shares one login, and Claude Code ends a process that finds another one refreshing it (#453).
+ * Provide one instance to both the executor and the Attempt runtime, so they take the same lock.
+ */
+export class ClaudeLoginLock extends Context.Service<
+  ClaudeLoginLock,
+  {
+    /** Runs `effect` once no other holder of `worker`'s lock runs, and holds the lock until `effect` ends. */
+    readonly withLock: (
+      worker: WorkerName,
+    ) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
+  }
+>()("@usine/agents/ClaudeLoginLock") {}
 
 /** Runs delegated coding work with Claude Code. */
 export class ClaudeChildBackend extends Context.Service<ClaudeChildBackend, ChildBackendService>()(

@@ -1,3 +1,4 @@
+import { ClaudeLoginLock } from "@usine/agents/runtime";
 import type { RepositoryName } from "@usine/core/repository";
 import type { WorkerName } from "@usine/core/worker";
 import type { AttemptRuntime } from "@usine/durable/attempt-runtime";
@@ -20,6 +21,7 @@ import { sshMachinesFor, SshWorkers } from "./workers.ts";
 const makeSshExecutor = (options: SshExecutorOptions) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const logins = yield* ClaudeLoginLock;
     const commands = yield* remoteCommandsFor;
     const base = options.ssh ?? DEFAULT_SSH;
     if (new Set(options.workers.map(({ name }) => name)).size !== options.workers.length)
@@ -78,7 +80,7 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
       label: "SSH",
       commands,
       machineFor,
-      preflight: sshPreflightFor(commands, machineFor, harnessProbe),
+      preflight: sshPreflightFor(commands, machineFor, harnessProbe, logins),
       harnessProbe,
       repositoryUrl: (machine, repository) =>
         Option.match(machine.gateway, {
@@ -116,6 +118,7 @@ export const layer = (
   Executor | SshWorkers,
   never,
   | AttemptRuntime
+  | ClaudeLoginLock
   | CredentialProvider
   | ChildProcessSpawner.ChildProcessSpawner
   | HttpClient.HttpClient

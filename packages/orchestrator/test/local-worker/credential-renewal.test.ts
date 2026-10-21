@@ -7,7 +7,13 @@ import { InstanceDirectory } from "@usine/core/instance";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
-import { CheckoutRequest, CredentialProvider, Executor, WorkerCredential } from "@usine/executor";
+import {
+  claudeLoginLockLayer,
+  CheckoutRequest,
+  CredentialProvider,
+  Executor,
+  WorkerCredential,
+} from "@usine/executor";
 import { layer as localExecutorLayer } from "@usine/executor/local";
 import {
   Clock,
@@ -83,6 +89,7 @@ it.effect(
       }).pipe(
         Layer.provide(credentials),
         Layer.provide(stubAttemptRuntime(new StubStorage())),
+        Layer.provide(claudeLoginLockLayer),
         Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, capturing)),
       );
       yield* Effect.gen(function* () {

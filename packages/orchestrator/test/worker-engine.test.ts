@@ -9,6 +9,7 @@ import { credentialLayer } from "./local-worker/support.ts";
 import { fixedConfigLayer } from "./support/current-instance.ts";
 import { testAppLayer } from "./support/github-app.ts";
 import { alwaysHoldsLayer } from "./support/polling.ts";
+import { claudeLoginLockLayer } from "@usine/executor";
 
 // Nothing listens on port 1, so the SSH executor's preflight fails at once.
 const unreachable = {
@@ -29,6 +30,7 @@ const startupFailure = (workers: (typeof UsineConfig.Encoded)["workers"]) =>
       workerEngineLayer(directory, config, []).pipe(
         Layer.provide(credentialLayer),
         Layer.provide(stubAttemptRuntime(new StubStorage())),
+        Layer.provide(claudeLoginLockLayer),
         Layer.provide(alwaysHoldsLayer),
         Layer.provide(fixedConfigLayer(config)),
         Layer.provide(testAppLayer),

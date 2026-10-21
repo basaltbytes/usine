@@ -9,7 +9,7 @@ import { LoopName } from "@usine/core/loop";
 import { CommitSha, RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
 import { RunEngine } from "@usine/engine/engine";
-import { CheckoutRequest, Executor } from "@usine/executor";
+import { claudeLoginLockLayer, CheckoutRequest, Executor } from "@usine/executor";
 import { layer as localExecutorLayer } from "@usine/executor/local";
 import { Cause, Effect, Exit, FileSystem, Layer, Option, Path } from "effect";
 import { stubAttemptRuntime, StubStorage, worksFor } from "@usine/durable/testing";
@@ -115,6 +115,7 @@ describe("local worker salvage", () => {
         }).pipe(
           Layer.provide(credentialLayer),
           Layer.provide(stubAttemptRuntime(new StubStorage())),
+          Layer.provide(claudeLoginLockLayer),
         );
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
@@ -296,6 +297,7 @@ describe("local worker salvage", () => {
         }).pipe(
           Layer.provide(credentialLayer),
           Layer.provide(stubAttemptRuntime(new StubStorage())),
+          Layer.provide(claudeLoginLockLayer),
         );
         const request = (number: number, resume: SalvagePushed) =>
           new CheckoutRequest({

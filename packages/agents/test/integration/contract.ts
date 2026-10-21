@@ -2,6 +2,7 @@ import { assert } from "@effect/vitest";
 import { AgentName } from "@usine/core/agent";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession, type AgentSessionEvent } from "@usine/core/agent/session";
+import { WorkerName } from "@usine/core/worker";
 import {
   Effect,
   Exit,
@@ -113,6 +114,7 @@ const controlledChild = <A, E, R>(
       const running = yield* backend
         .launch(
           new ChildRequest({
+            worker: WorkerName.make("worker-1"),
             cwd: WorkingDirectory.make(cwd),
             environment: child.environment,
             host: child.host,

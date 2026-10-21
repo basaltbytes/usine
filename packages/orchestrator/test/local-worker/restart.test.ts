@@ -6,7 +6,7 @@ import { backup as backupDurableStorage } from "@usine/durable/backup";
 import { RunEngine } from "@usine/engine/engine";
 import { backup as backupRuntimeStore } from "@usine/engine/local-sqlite";
 import { TranscriptAllQuery } from "@usine/engine/transcript";
-import { CredentialProvider, WorkerCredential } from "@usine/executor";
+import { claudeLoginLockLayer, CredentialProvider, WorkerCredential } from "@usine/executor";
 import {
   Clock,
   Context,
@@ -60,6 +60,7 @@ const durableRuntime = (
   }).pipe(
     Layer.provide(credentials),
     Layer.provideMerge(durableTestingLayer({ database, parent: steps })),
+    Layer.provide(claudeLoginLockLayer),
     Layer.provide(alwaysHoldsLayer),
     Layer.provide(fixedConfigLayer(config)),
     Layer.provide(testAppLayer),

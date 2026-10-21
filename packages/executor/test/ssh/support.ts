@@ -35,7 +35,12 @@ import {
 import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import type { StandardCommand } from "effect/unstable/process/ChildProcess";
-import { CheckoutRequest, CredentialProvider, WorkerCredential } from "../../src/executor.ts";
+import {
+  CheckoutRequest,
+  claudeLoginLockLayer,
+  CredentialProvider,
+  WorkerCredential,
+} from "../../src/executor.ts";
 import {
   layer as sshLayer,
   type SshExecutorOptions,
@@ -480,6 +485,7 @@ export const executorLayer = (
     Layer.provide(machine.layer),
     Layer.provide(credentials.layer),
     Layer.provide(stubAttemptRuntime(storage, parent)),
+    Layer.provide(claudeLoginLockLayer),
   );
 
 /**

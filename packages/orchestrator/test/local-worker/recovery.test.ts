@@ -6,7 +6,7 @@ import { InstanceDirectory } from "@usine/core/instance";
 import { RepositoryName } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
 import { Effect, FileSystem, Layer, Result } from "effect";
-import { CredentialProvider, Executor } from "@usine/executor";
+import { claudeLoginLockLayer, CredentialProvider, Executor } from "@usine/executor";
 import { layer } from "@usine/executor/local";
 import { stubAttemptRuntime, StubStorage } from "@usine/durable/testing";
 
@@ -30,6 +30,7 @@ const executorLayer = (root: string, fileSystem: FileSystem.FileSystem) =>
   layer({ instanceDirectory: InstanceDirectory.make(root) }).pipe(
     Layer.provide(credentials),
     Layer.provide(stubAttemptRuntime(new StubStorage())),
+    Layer.provide(claudeLoginLockLayer),
     Layer.provide(Layer.succeed(FileSystem.FileSystem)(fileSystem)),
   );
 

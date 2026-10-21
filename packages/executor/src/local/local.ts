@@ -1,6 +1,7 @@
 import { workerLeftoversFor } from "./leftovers.ts";
 import { localCredentialsFor } from "./credentials.ts";
 import { LocalProcess } from "@usine/agents/child-host";
+import { ClaudeLoginLock } from "@usine/agents/runtime";
 import type { AttemptRecovery, RecoverySink } from "@usine/core/attempt/salvage";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import * as AttemptChannel from "@usine/core/attempt/channel";
@@ -100,6 +101,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
     const path = yield* Path.Path;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const fetches = yield* keyedLockFor<RepositoryName>();
+    const logins = yield* ClaudeLoginLock;
     const baseEnvironment = yield* allowlistedEnvironment(HOST_ENVIRONMENT_ALLOWLIST);
     const harnessReadiness =
       options.harnessReadiness ?? agentsHarnessProbe(spawner, new LocalProcess(), baseEnvironment);
@@ -336,7 +338,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
             maxConcurrentAttempts,
             executeCommand("preflight", "cat", ["/proc/meminfo"]),
           );
-      yield* verifyHarnessReadiness(worker, brains, harnessReadiness);
+      yield* verifyHarnessReadiness(worker, brains, harnessReadiness, logins);
       yield* Effect.logInfo("Worker preflight verified", {
         worker,
         host: "local",
@@ -387,7 +389,12 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         permissions: request.permissions,
         reattach: request.reattach,
       });
-      yield* verifyHarnessReadiness(request.worker, [request.agent.brain], harnessReadiness);
+      yield* verifyHarnessReadiness(
+        request.worker,
+        [request.agent.brain],
+        harnessReadiness,
+        logins,
+      );
       const credential = yield* credentials(
         request.repository,
         request.attemptId,
@@ -524,6 +531,7 @@ export const layer = (
   Executor,
   never,
   | AttemptRuntime
+  | ClaudeLoginLock
   | CredentialProvider
   | FileSystem.FileSystem
   | Path.Path
