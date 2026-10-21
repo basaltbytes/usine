@@ -71,6 +71,8 @@ const setup = (
   ceilings: Pick<AttemptGuardLimits, "maxAttemptMinutes" | "maxAttemptTokens">,
   options: {
     readonly warnFails?: boolean;
+    /** Completes each warning's delivery, as the parent's input routing does once it is free. */
+    readonly delivered?: Effect.Effect<void>;
     readonly attempt?: ReturnType<typeof durableAttempt>;
   } = {},
 ) =>
@@ -103,6 +105,7 @@ const setup = (
                 payload: new AttemptChannel.Steer({ message }),
               }),
             );
+            if (options.delivered !== undefined) yield* options.delivered;
             if (options.warnFails === true) {
               return yield* new AgentFailure({ message: "no live channel" });
             }
@@ -229,6 +232,33 @@ describe("Attempt guard", () => {
       }),
   );
 
+  it.effect("stops the wall clock at a Hold placed while its warning is being delivered", () =>
+    Effect.gen(function* () {
+      const routing = yield* Deferred.make<void>();
+      const { result, hold, warnings } = yield* setup(
+        { maxAttemptMinutes: Option.some(1), maxAttemptTokens: Option.none() },
+        { delivered: Deferred.await(routing) },
+      );
+      yield* TestClock.adjust("48 seconds");
+      assert.strictEqual(warnings.length, 1);
+      // The operator holds the parent while the warning waits for the parent's input routing.
+      yield* TestClock.adjust("2 seconds");
+      yield* hold("parent", true);
+      yield* TestClock.adjust("15 seconds");
+      yield* Deferred.succeed(routing, undefined);
+      yield* TestClock.adjust("2 hours");
+      assert.strictEqual(result.pollUnsafe(), undefined, "a held Attempt does not trip");
+      yield* hold("parent", false);
+      // 50 of the 60 unsupervised seconds were spent when the Hold was placed.
+      yield* TestClock.adjust("9 seconds");
+      assert.strictEqual(result.pollUnsafe(), undefined);
+      yield* TestClock.adjust("1 second");
+      const outcome = yield* Fiber.join(result);
+      assert(Result.isFailure(outcome) && outcome.failure._tag === "RunawayFailure");
+      assert.strictEqual(outcome.failure.ceiling, "wall-clock");
+    }),
+  );
+
   it.effect(
     "keeps the aggregate token ceiling armed during a Hold, warns once at 80%, and survives an undeliverable warning",
     () =>
@@ -329,6 +359,37 @@ describe("Attempt guard", () => {
       assert(Result.isFailure(rejected) && rejected.failure._tag === "RunawayFailure");
       assert.strictEqual(rejected.failure.ceiling, "tokens");
     }),
+  );
+
+  it.effect(
+    "warns and trips a reattached Attempt on its restored token total with no further report",
+    () =>
+      Effect.gen(function* () {
+        const tokens = (limit: number) => ({
+          maxAttemptMinutes: Option.none(),
+          maxAttemptTokens: Option.some(limit),
+        });
+        const before = yield* setup(tokens(200));
+        yield* before.started;
+        yield* before.usage(first, 120);
+        assert.deepStrictEqual(before.warnings, []);
+        yield* before.stop;
+        // The operator lowers the ceiling before each restart; the parent reports no more usage.
+        const lowered = yield* setup(tokens(140), { attempt: before.attempt });
+        yield* TestClock.adjust("1 second");
+        assert.deepStrictEqual(lowered.warnings, [
+          "120 of 140 tokens used by this Attempt; commit and push your work now.",
+        ]);
+        assert.strictEqual(lowered.result.pollUnsafe(), undefined);
+        yield* lowered.stop;
+        const spent = yield* setup(tokens(100), { attempt: before.attempt });
+        yield* TestClock.adjust("1 second");
+        assert.notStrictEqual(spent.result.pollUnsafe(), undefined, "the guard tripped at once");
+        const outcome = yield* Fiber.join(spent.result);
+        assert(Result.isFailure(outcome) && outcome.failure._tag === "RunawayFailure");
+        assert.strictEqual(outcome.failure.ceiling, "tokens");
+        assert.deepStrictEqual(spent.warnings, []);
+      }),
   );
 
   it.effect("sends each ceiling's warning once across a restart", () =>

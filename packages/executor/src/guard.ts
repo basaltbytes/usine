@@ -171,42 +171,63 @@ export const guardSeed = (
   return { tokens, unsupervised, parentHeld: holds.has("parent"), warned };
 };
 
-/** Sums the highest reported count per session, the seed's included; tokens keep accumulating through Holds. */
+/**
+ * Sums the highest reported count per session, the seed's included; tokens
+ * keep accumulating through Holds. `observe` checks the total at each report,
+ * and `resume` checks it as it stands: a total restored from the seed warns
+ * or trips without waiting for another report, which a quiet parent may never
+ * send (#178).
+ */
 const tokenWatcher = (
   attemptId: AttemptId,
   tokens: Ceiling,
   warn: Warn,
   seed: AttemptGuardSeed,
-): Observer => {
+) => {
   const reported = new Map(seed.tokens);
   let warned = seed.warned.has("tokens");
-  return (envelope) =>
-    Effect.gen(function* () {
-      if (!recordTokens(reported, envelope)) return;
-      const consumed = [...reported.values()].reduce((sum, value) => sum + value, 0);
-      if (consumed >= tokens.limit) {
-        yield* Effect.logWarning("Attempt reached its token limit", {
-          attemptId,
-          consumed,
-          maxAttemptTokens: tokens.limit,
-        });
-        return yield* new RunawayFailure({ ceiling: "tokens" });
-      }
-      if (!warned && consumed >= tokens.warnAt) {
-        warned = true;
-        yield* warn("tokens", warning("tokens", consumed, tokens.limit));
-      }
+  /** Trips at the limit, else warns once past the warning point; returns the total. */
+  const check = Effect.gen(function* () {
+    const consumed = [...reported.values()].reduce((sum, value) => sum + value, 0);
+    if (consumed >= tokens.limit) {
+      yield* Effect.logWarning("Attempt reached its token limit", {
+        attemptId,
+        consumed,
+        maxAttemptTokens: tokens.limit,
+      });
+      return yield* new RunawayFailure({ ceiling: "tokens" });
+    }
+    if (!warned && consumed >= tokens.warnAt) {
+      warned = true;
+      yield* warn("tokens", warning("tokens", consumed, tokens.limit));
+    }
+    return consumed;
+  });
+  const observe: Observer = (envelope) =>
+    recordTokens(reported, envelope) ? Effect.asVoid(check) : Effect.void;
+  const resume = Effect.gen(function* () {
+    yield* Effect.annotateCurrentSpan({ attemptId });
+    const consumed = yield* check;
+    yield* Effect.logDebug("Attempt token total is under its limit as its guard starts", {
+      attemptId,
+      consumed,
+      maxAttemptTokens: tokens.limit,
+      warned,
     });
+  }).pipe(Effect.withSpan("AttemptGuard.resumeTokens"));
+  return { observe, resume };
 };
 
 /**
  * Counts unsupervised milliseconds on top of the seed's: `observe` tracks
- * which sessions are held, the parent included, and `watch` warns at the
- * ceiling's warning point unless the seed's transcript holds that warning
- * already, then trips at its limit. A held Attempt counts nothing and does
- * not trip until it is released. While `watch` runs, it records the time it
- * counted every `RECORD_INTERVAL` when that time grew, and once more when it
- * is interrupted, as when this process stops, so the guard of a reattachment
+ * which sessions are held, the parent included, and stops or resumes the
+ * count as each Hold receipt arrives, and `watch` warns at the ceiling's
+ * warning point unless the seed's transcript holds that warning already, then
+ * trips at its limit. A held Attempt counts nothing and does not trip until
+ * it is released, also when the Hold arrived while `watch` was delivering its
+ * warning. While `watch` runs, it records the time it counted every
+ * `RECORD_INTERVAL` when that time grew, and once more when it is
+ * interrupted, as when this process stops, so the guard of a reattachment
  * goes on from it (#178).
  */
 const wallClockWatcher = Effect.fn("AttemptGuard.wallClockWatcher")(function* (
@@ -218,9 +239,10 @@ const wallClockWatcher = Effect.fn("AttemptGuard.wallClockWatcher")(function* (
 ) {
   const ended = new Set<string>();
   const holds = new Set<string>(seed.parentHeld ? ["parent"] : []);
-  const changes = yield* Queue.make<boolean>();
-  // Shared by both waits, so the second one starts held when the first ended on a Hold.
-  let paused = holds.size > 0;
+  /** Wakes a wait of `watch` when supervision changes; one pending wake is enough for it to look again. */
+  const changed = yield* Queue.sliding<void>(1);
+  /** Whether `watch` has started: nothing counts before the launch registered the session. */
+  let watching = false;
   /** The unsupervised milliseconds of the stretches that ended, the seed's included. */
   let counted = Duration.toMillis(seed.unsupervised);
   /** When the unsupervised stretch being counted began; none while held, and before `watch` runs. */
@@ -229,35 +251,46 @@ const wallClockWatcher = Effect.fn("AttemptGuard.wallClockWatcher")(function* (
   let recorded = counted;
   const usedAt = (now: number) =>
     counted + Option.match(since, { onNone: () => 0, onSome: (began) => now - began });
+  /**
+   * Applies the current Holds to the count at `now`: a Hold ends the stretch
+   * being counted, and a release while `watch` runs begins one. Both happen
+   * as the receipt arrives, so a wait busy elsewhere, as on delivering the
+   * warning, finds the count already stopped when it compares it to a limit.
+   */
+  const supervise = (now: number) => {
+    if (holds.size > 0) {
+      counted = usedAt(now);
+      since = Option.none();
+    } else if (watching && Option.isNone(since)) {
+      since = Option.some(now);
+    }
+  };
   const observe: Observer = (envelope) =>
     Effect.gen(function* () {
       const wasHeld = holds.size > 0;
       recordHolds(holds, ended, envelope);
       const isHeld = holds.size > 0;
-      if (wasHeld !== isHeld) {
-        yield* Effect.logInfo("Attempt wall-clock supervision changed", {
-          attemptId,
-          heldSessions: holds.size,
-          parentHeld: holds.has("parent"),
-        });
-        yield* Queue.offer(changes, isHeld);
-      }
+      if (wasHeld === isHeld) return;
+      supervise(yield* Clock.currentTimeMillis);
+      yield* Effect.logInfo("Attempt wall-clock supervision changed", {
+        attemptId,
+        heldSessions: holds.size,
+        parentHeld: holds.has("parent"),
+        unsupervisedMillis: counted,
+      });
+      yield* Queue.offer(changed, undefined);
     });
   /** Waits until `until` unsupervised milliseconds are counted, and returns the count; never ends while held. */
   const unsupervised = Effect.fn("AttemptGuard.unsupervised")(function* (until: number) {
+    yield* Effect.annotateCurrentSpan({ attemptId, untilMillis: until });
     for (;;) {
-      const now = yield* Clock.currentTimeMillis;
-      if (paused) {
-        counted = usedAt(now);
-        since = Option.none();
-        paused = yield* Queue.take(changes);
+      if (holds.size > 0) {
+        yield* Queue.take(changed);
         continue;
       }
-      if (Option.isNone(since)) since = Option.some(now);
-      const used = usedAt(now);
+      const used = usedAt(yield* Clock.currentTimeMillis);
       if (used >= until) return used;
-      const changed = yield* Queue.take(changes).pipe(Effect.timeoutOption(until - used));
-      if (Option.isSome(changed)) paused = changed.value;
+      yield* Queue.take(changed).pipe(Effect.timeoutOption(until - used));
     }
   });
   /** Records the unsupervised time counted so far if it grew since the last record; a failure is logged. */
@@ -304,6 +337,8 @@ const wallClockWatcher = Effect.fn("AttemptGuard.wallClockWatcher")(function* (
   );
   const watch = Effect.gen(function* () {
     yield* Effect.annotateCurrentSpan({ attemptId });
+    watching = true;
+    supervise(yield* Clock.currentTimeMillis);
     if (!seed.warned.has("wall-clock")) {
       const used = yield* unsupervised(wallClock.warnAt);
       yield* warn(
@@ -332,10 +367,12 @@ export interface AttemptGuard {
   /** Appends through to the Attempt's sink; the append that reaches the token ceiling fails with `RunawayFailure`. */
   readonly sink: AttemptChannel.Sink;
   /**
-   * Counts the unsupervised time from when it is run, and fails with
-   * `RunawayFailure` when the wall-clock ceiling trips; never ends while that
-   * ceiling is unarmed. Interrupting it records the time it counted, within
-   * a short grace.
+   * Checks the token total, the seed's included, and counts the unsupervised
+   * time from when it is run, and fails with `RunawayFailure` when the
+   * restored token total or the wall-clock ceiling trips; never ends
+   * otherwise. A token report that reaches the limit later fails its `append`
+   * instead. Interrupting it records the time it counted, within a short
+   * grace.
    */
   readonly tripped: Effect.Effect<never, RunawayFailure>;
 }
@@ -347,9 +384,10 @@ export interface AttemptGuard {
  * The ceilings count on from `seed`, what the Attempt's earlier guards
  * counted, so a reattached Attempt trips at the same totals as if the
  * orchestrator had not restarted, and a warning its transcript holds is not
- * sent again. The wall clock records the time it counted through
- * `limits.recordUnsupervised` for the next seed. With no ceiling armed the
- * Attempt runs on the channel untouched.
+ * sent again. `tripped` checks the restored token total as it starts, since
+ * a quiet parent may report no more usage. The wall clock records the time it
+ * counted through `limits.recordUnsupervised` for the next seed. With no
+ * ceiling armed the Attempt runs on the channel untouched.
  */
 export const attemptGuard = (
   limits: AttemptGuardLimits,
@@ -377,7 +415,7 @@ export const attemptGuard = (
         ),
         Effect.ignore,
       );
-    const observeTokens = Option.map(tokens, (tokens) =>
+    const meter = Option.map(tokens, (tokens) =>
       tokenWatcher(limits.attemptId, tokens, warn, seed),
     );
     const clock = yield* Effect.transposeOption(
@@ -389,7 +427,7 @@ export const attemptGuard = (
       append: Effect.fn("AttemptGuard.append")(function* (direction, envelope) {
         yield* Effect.annotateCurrentSpan({ attemptId: limits.attemptId });
         yield* io.append(direction, envelope);
-        if (Option.isSome(observeTokens)) yield* observeTokens.value(envelope);
+        if (Option.isSome(meter)) yield* meter.value.observe(envelope);
         if (Option.isSome(clock)) yield* clock.value.observe(envelope);
       }),
       salvage: io.salvage,
@@ -397,9 +435,16 @@ export const attemptGuard = (
       windows: io.windows,
       transcript: io.transcript,
     };
-    return {
-      sink,
-      tripped: Option.match(clock, { onNone: () => Effect.never, onSome: ({ watch }) => watch }),
-    };
+    // The restored token total is checked beside the wall clock, so delivering
+    // its warning does not hold back the clock's start.
+    const restoredTokens = Option.match(meter, {
+      onNone: () => Effect.never,
+      onSome: ({ resume }) => Effect.andThen(resume, Effect.never),
+    });
+    const wallClockTrip = Option.match(clock, {
+      onNone: () => Effect.never,
+      onSome: ({ watch }) => watch,
+    });
+    return { sink, tripped: Effect.raceFirst(restoredTokens, wallClockTrip) };
   });
 };
