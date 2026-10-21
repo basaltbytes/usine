@@ -1,13 +1,27 @@
 import { type MutationKey, useMutation, useQueryClient } from "@tanstack/react-query";
 import { type AttemptId, AttemptTask } from "@usine/core/attempt";
 import type { RunId } from "@usine/core/run";
-import { EditAndRetry, type RunView } from "@usine/orchestrator/operator";
+import {
+  EditAndRetry,
+  type FactoryOverview,
+  NeedsSetupOverview,
+  ReadyOverview,
+  type RunView,
+} from "@usine/orchestrator/operator";
 import { api } from "./api.ts";
 
 /** An operator decision on one Run; resolving a failure names the failed Attempt it answers. */
 export type RunActionRequest =
   | { readonly action: "approve" | "retry" | "cancel" }
   | { readonly action: "resolveFailure"; readonly attemptId: AttemptId };
+
+/** `overview` without its Needs you entries about `runId`, which an action on that Run answered. */
+const withoutRunNeeds = (overview: FactoryOverview, runId: RunId): FactoryOverview => {
+  const needsYou = overview.needsYou.filter((need) => !("runId" in need) || need.runId !== runId);
+  return overview._tag === "Ready"
+    ? new ReadyOverview({ ...overview, needsYou })
+    : new NeedsSetupOverview({ ...overview, needsYou });
+};
 
 const useRefreshRun = () => {
   const queryClient = useQueryClient();
@@ -19,8 +33,12 @@ const useRefreshRun = () => {
     ]);
 };
 
-/** Sends Run actions from any screen; success refreshes the overview, the desk, and that Run's detail. */
+/**
+ * Sends Run actions from any screen. Success drops the Run's Needs you entries from the cached
+ * overview at once, then refreshes the overview, the desk, and that Run's detail.
+ */
 export const useRunAction = () => {
+  const queryClient = useQueryClient();
   const refresh = useRefreshRun();
   return useMutation({
     mutationFn: ({
@@ -35,7 +53,15 @@ export const useRunAction = () => {
           ? client.resolveFailure({ params: { runId }, payload: { attemptId: request.attemptId } })
           : client[request.action]({ params: { runId } }),
       ),
-    onSuccess: (_, { runId }) => refresh(runId),
+    onSuccess: (_, { runId }) => {
+      // The overview can take seconds to answer the refresh; until then Needs you would still
+      // offer the action the server has just taken. The refresh cancels any overview request in
+      // flight, so an answer sent before this action cannot bring the entries back.
+      queryClient.setQueryData<FactoryOverview>(["overview"], (overview) =>
+        overview === undefined ? overview : withoutRunNeeds(overview, runId),
+      );
+      return refresh(runId);
+    },
   });
 };
 

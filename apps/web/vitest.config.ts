@@ -9,6 +9,18 @@ const delayedMoves = new WeakMap<Page, Promise<Route>>();
 const delayedRunAgains = new WeakMap<Page, Promise<Route>>();
 const interventionRequests = new WeakMap<Page, Array<{ url: string; body: unknown }>>();
 
+/** The approve request of `approvalResponses`, held until `answerApproval`, and what followed it. */
+interface ApprovalExchange {
+  readonly request: Promise<Route>;
+  /** Set once the approve request is answered: from then on the stubs serve the state after it. */
+  answered: boolean;
+  /** How many overview requests arrived after the approve request was answered. */
+  lateOverviews: number;
+}
+const approvals = new WeakMap<Page, ApprovalExchange>();
+// How long an overview request takes once the Run is approved, as on a busy instance (#463).
+const SLOW_OVERVIEW_MS = 5_000;
+
 export default mergeConfig(
   vite,
   defineConfig({
@@ -153,6 +165,59 @@ export default mergeConfig(
                   });
                 },
                 recordedInterventions: async ({ page }) => interventionRequests.get(page) ?? [],
+                // Serves Run `approval-run`, waiting for approval: the overview is `before` and its
+                // detail `detailBefore` until `answerApproval` answers the held approve request.
+                // From then on the detail is `detailAfter` and the overview `after`, sent 5 s late.
+                approvalResponses: async (
+                  { page },
+                  before: string,
+                  after: string,
+                  detailBefore: string,
+                  detailAfter: string,
+                ) => {
+                  let receive: (route: Route) => void;
+                  const exchange: ApprovalExchange = {
+                    request: new Promise<Route>((resolve) => {
+                      receive = resolve;
+                    }),
+                    answered: false,
+                    lateOverviews: 0,
+                  };
+                  approvals.set(page, exchange);
+                  await page.unroute("**/api/desk");
+                  await page.unroute("**/api/overview");
+                  await page.unroute("**/api/runs/approval-run");
+                  await page.unroute("**/api/runs/approval-run/approve");
+                  await page.route("**/api/desk", (route) =>
+                    route.fulfill({
+                      contentType: "application/json",
+                      body: '{"running":[],"notMoving":[],"lastOutcomes":[],"workers":[],"polls":[]}',
+                    }),
+                  );
+                  await page.route("**/api/overview", async (route) => {
+                    if (!exchange.answered)
+                      return route.fulfill({ contentType: "application/json", body: before });
+                    exchange.lateOverviews += 1;
+                    await new Promise((resolve) => setTimeout(resolve, SLOW_OVERVIEW_MS));
+                    return route.fulfill({ contentType: "application/json", body: after });
+                  });
+                  await page.route("**/api/runs/approval-run", (route) =>
+                    route.fulfill({
+                      contentType: "application/json",
+                      body: exchange.answered ? detailAfter : detailBefore,
+                    }),
+                  );
+                  await page.route("**/api/runs/approval-run/approve", (route) => receive(route));
+                },
+                // Answers the held approve request with `status` and `body`.
+                answerApproval: async ({ page }, status: 200 | 409, body: string) => {
+                  const exchange = approvals.get(page);
+                  if (exchange === undefined) throw new Error("No approval stubbed");
+                  const route = await exchange.request;
+                  exchange.answered = true;
+                  await route.fulfill({ status, contentType: "application/json", body });
+                },
+                lateOverviewRequests: async ({ page }) => approvals.get(page)?.lateOverviews ?? 0,
                 githubChangesResponse: async ({ page }, body: string) => {
                   await page.unroute("**/api/runs/*/github-changes");
                   await page.route("**/api/runs/*/github-changes", (route) =>
