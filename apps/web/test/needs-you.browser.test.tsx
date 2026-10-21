@@ -77,7 +77,7 @@ const approvalOf = (id: RunId, number: number, title: string) =>
       url: `https://github.com/approval/project/issues/${number}`,
     }),
   });
-const approval = approvalOf(runId, 367, "Approve from the drawer");
+const approval = approvalOf(runId, 367, "Keep Needs attention current");
 const unrelated = approvalOf(RunId.make("other-run"), 12, "Wait for the operator");
 // The Project lists no Runs, so the overview refreshes on its idle interval and only the
 // requests a test sends reach the slow stub.
@@ -153,7 +153,7 @@ const entry = (title: string) =>
   needs.getByRole("listitem", { includeHidden: true }).filter({ hasText: title });
 
 it("holds the Run's approval in Needs attention while the drawer approves it, and drops it when the approve returns, before the slow overview refresh", async () => {
-  const held = entry("#367 Approve from the drawer");
+  const held = entry("#367 Keep Needs attention current");
   await needs
     .getByRole("button", { name: /start-dev: approval needed.*#367/, includeHidden: true })
     .click();
@@ -184,4 +184,35 @@ it("holds the Run's approval in Needs attention while the drawer approves it, an
   expect(await commands.lateOverviewRequests()).toBe(1);
   await expect.element(held).not.toBeInTheDocument();
   await expect.element(entry("#12 Wait for the operator")).toBeInTheDocument();
+});
+
+// The server's answer when the Run was approved elsewhere first.
+const rejection = JSON.stringify({
+  error: "RunOperationRejectedError",
+  message: "Cannot approve Run approval-run while it is Running.",
+});
+
+it("shows no error on a Needs attention approval refused because the Run was approved elsewhere, and drops it with the refresh", async () => {
+  const held = entry("#367 Keep Needs attention current");
+  await held.getByRole("button", { name: "Approve", exact: true }).click();
+  await commands.answerApproval(409, rejection);
+  // The refusal sends a refresh, and the entry waits for it with its buttons disabled.
+  await expect.poll(() => commands.lateOverviewRequests()).toBe(1);
+  await expect.element(held.getByRole("button", { name: "Approving…" })).toBeDisabled();
+  await expect.element(held.getByText("Cannot approve", { exact: false })).not.toBeInTheDocument();
+  await expect.element(held, { timeout: 10_000 }).not.toBeInTheDocument();
+  await expect.element(page.getByText("Cannot approve", { exact: false })).not.toBeInTheDocument();
+  await expect.element(entry("#12 Wait for the operator")).toBeInTheDocument();
+});
+
+it("explains in the drawer an approve refused because the Run was approved elsewhere", async () => {
+  await needs.getByRole("button", { name: /start-dev: approval needed.*#367/ }).click();
+  const drawer = page.getByRole("dialog");
+  await drawer.getByRole("button", { name: "Approve", exact: true }).click();
+  await commands.answerApproval(409, rejection);
+  await expect
+    .element(drawer.getByText("Cannot approve Run approval-run while it is Running."), {
+      timeout: 10_000,
+    })
+    .toBeVisible();
 });

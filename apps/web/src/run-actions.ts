@@ -14,6 +14,7 @@ import {
   ReadyOverview,
   type RunView,
 } from "@usine/orchestrator/operator";
+import { OperatorHttpError } from "@usine/orchestrator/operator/http";
 import { api } from "./api.ts";
 
 /** An operator decision on one Run; resolving a failure names the failed Attempt it answers. */
@@ -38,6 +39,13 @@ const withoutRunNeeds = (overview: FactoryOverview, runId: RunId): FactoryOvervi
     : new NeedsSetupOverview({ ...overview, needsYou });
 };
 
+/**
+ * Whether `error` is the server refusing a Run action because the Run's state no longer allows it,
+ * such as approving a Run another screen has approved: the screen that sent it showed the Run stale.
+ */
+export const isRunOperationRejected = (error: Error): boolean =>
+  error instanceof OperatorHttpError && error.error === "RunOperationRejectedError";
+
 const useRefreshRun = () => {
   const queryClient = useQueryClient();
   return (runId: RunId) =>
@@ -51,7 +59,8 @@ const useRefreshRun = () => {
 /**
  * Sends Run actions from any screen. Success drops the Run's Needs you entries from the cached
  * overview at once, then refreshes the overview, the desk, and that Run's detail; the request
- * stays pending until that refresh lands, for `usePendingRunAction` too.
+ * stays pending until that refresh lands, for `usePendingRunAction` too. A refusal that
+ * `isRunOperationRejected` recognizes refreshes them the same way before the request fails.
  */
 export const useRunAction = () => {
   const queryClient = useQueryClient();
@@ -73,6 +82,7 @@ export const useRunAction = () => {
       );
       return refresh(runId);
     },
+    onError: (error, { runId }) => (isRunOperationRejected(error) ? refresh(runId) : undefined),
   });
 };
 
