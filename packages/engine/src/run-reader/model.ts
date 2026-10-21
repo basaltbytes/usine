@@ -84,10 +84,18 @@ export class RunSummary extends Schema.Class<RunSummary>("@usine/engine/RunSumma
  * visits: every Attempt of that Worker whose leftovers the operator has not
  * discarded.
  */
-export class WorkerAttempts extends Schema.Class<WorkerAttempts>("@usine/engine/WorkerAttempts")({
-  worker: WorkerName,
-  attempts: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
-}) {}
+export class WorkerAttempts extends Schema.Class<WorkerAttempts>("@usine/engine/WorkerAttempts")(
+  Schema.Struct({
+    worker: WorkerName,
+    attempts: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+    /** How many of `attempts` are still open: no outcome is recorded for them yet. */
+    running: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  }).check(
+    Schema.makeFilter(({ attempts, running }) => running <= attempts, {
+      message: "Expected no more open Attempts than Attempts",
+    }),
+  ),
+) {}
 
 /**
  * What one Loop last saw of an Item and what became of it: the Event the

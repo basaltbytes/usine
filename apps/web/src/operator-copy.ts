@@ -290,9 +290,12 @@ export const needCopy = (need: NeedView): NeedCopy =>
       repository: null,
       runId: null,
     }),
-    UnconfiguredWorkerNeed: ({ worker, attempts }) => ({
+    UnconfiguredWorkerNeed: ({ worker, attempts, running }) => ({
       title: "Worker not configured",
-      detail: `${worker} is not in usine.yaml. Startup does not reconcile the ${attempts} recorded ${attempts === 1 ? "attempt" : "attempts"} on it. Declare the worker again and restart usine up, or discard the leftovers`,
+      detail:
+        running > 0
+          ? `${worker} is not in usine.yaml. ${running} ${running === 1 ? "attempt still runs" : "attempts still run"} on it; discard its leftovers once they end`
+          : `${worker} is not in usine.yaml. Startup does not reconcile the ${attempts} recorded ${attempts === 1 ? "attempt" : "attempts"} on it. Declare the worker again and restart usine up, or discard the leftovers`,
       repository: null,
       runId: null,
     }),

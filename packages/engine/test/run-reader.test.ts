@@ -20,7 +20,7 @@ import { DateTime, Effect, FileSystem, Layer, Option, Path, Queue, Ref } from "e
 import { RunDatabase } from "../src/database/database.ts";
 import { layer } from "../src/database/local-sqlite.ts";
 import { RunEngine, Submission } from "../src/engine/engine.ts";
-import { RunReader } from "../src/run-reader/run-reader.ts";
+import { RunReader, WorkerAttempts } from "../src/run-reader/run-reader.ts";
 import { StepExecutor } from "../src/step-executor.ts";
 import { TriggerCondition } from "../src/trigger-condition.ts";
 import {
@@ -256,4 +256,14 @@ describe("Run Events", () => {
       }),
     ),
   );
+});
+
+describe("Attempts by Worker", () => {
+  it("counts a Worker whose every Attempt still runs, and refuses more open Attempts than Attempts", () => {
+    // The first state of a Worker a reload removed: its only Attempt still runs. A count the
+    // schema refused would fail every overview until that Attempt ends.
+    const local = WorkerName.make("local");
+    assert.doesNotThrow(() => new WorkerAttempts({ worker: local, attempts: 1, running: 1 }));
+    assert.throws(() => new WorkerAttempts({ worker: local, attempts: 1, running: 2 }));
+  });
 });
