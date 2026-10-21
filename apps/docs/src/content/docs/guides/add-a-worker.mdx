@@ -37,9 +37,9 @@ The Worker's Attempts share two caches: the Turborepo cache in `turbo/`, which t
 
 ### What a local Attempt can reach
 
-Each Attempt gets its own GitHub token: git's credential helpers are reset so that git reads the Attempt's token file, and gh reads the token from the Attempt's own `GH_CONFIG_DIR`. The children still run as your Unix user, with your home directory as `HOME`, so they can read every file you can. An Agent that looks for your own credentials there can find them, such as gh's login in `~/.config/gh/hosts.yml`, `~/.git-credentials`, or a key in `~/.ssh`, and use them, for example with `GH_CONFIG_DIR=~/.config/gh gh` or a push to a `git@github.com:` URL.
+Each attempt gets its own GitHub token: git's credential helpers are reset so that git reads the attempt's token file, and gh reads the token from the attempt's own `GH_CONFIG_DIR`. The children still run as your Unix user, with your home directory as `HOME`, so they can read every file you can. An agent that looks for your own credentials there can find them, such as gh's login in `~/.config/gh/hosts.yml`, `~/.git-credentials`, or a key in `~/.ssh`, and use them, for example with `GH_CONFIG_DIR=~/.config/gh gh` or a push to a `git@github.com:` URL.
 
-The local Worker is for Agents you trust with your own access. A Loop's [`permissions: read`](/reference/configuration/loop-files/#permissions) holds against the Agent's tools, which use the Attempt's token, but not against your credentials in your home directory. For Loops you don't trust that far, use [SSH Workers](#ssh-workers), which have no GitHub credential of yours, or [SSH Workers behind a Gateway](#ssh-workers-behind-a-gateway), which have no GitHub token on disk.
+The local worker is for agents you trust with your own access. A loop's [`permissions: read`](/reference/configuration/loop-files/#permissions) holds against the agent's tools, which use the attempt's token, but not against your credentials in your home directory. For loops you don't trust that far, use [SSH workers](#ssh-workers), which have no GitHub credential of yours, or [SSH workers behind a gateway](#ssh-workers-behind-a-gateway), which have no GitHub token on disk.
 
 ## Preflight
 
