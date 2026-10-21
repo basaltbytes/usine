@@ -298,8 +298,9 @@ export class RunDriver extends Context.Service<
        * What the Run's open Attempt left when this process started driving it:
        * a parent task to reattach, a result its parent task stored that the
        * Run never recorded, or neither. A read that fails is logged and treated
-       * as finding neither, so the Run moves on to a new Attempt as it did
-       * before reattachment existed.
+       * as finding neither. The Run closes an Attempt it does not reattach
+       * once the checkout a restart kept for it is reconciled, and the next
+       * Attempt resumes from that salvage.
        */
       const openAttempt = Effect.fn("RunDriver.openAttempt")(function* (runId: RunId) {
         yield* Effect.annotateCurrentSpan({ runId });
@@ -316,7 +317,7 @@ export class RunDriver extends Context.Service<
         const live = yield* executor.isLive(open.id).pipe(Effect.result);
         if (Result.isFailure(live)) {
           yield* Effect.logWarning(
-            "Could not read whether the open Attempt is live; opening the next one",
+            "Could not read whether the open Attempt is live; the Run does not reattach it",
             { ...fields, errorTag: live.failure._tag, message: live.failure.message },
           );
           return Option.some<OpenAttempt>({ _tag: "Interrupted", attempt: open });
@@ -328,14 +329,14 @@ export class RunDriver extends Context.Service<
         const stored = yield* executor.outcome(open.id).pipe(Effect.result);
         if (Result.isFailure(stored)) {
           yield* Effect.logWarning(
-            "Could not read the open Attempt's stored outcome; opening the next one",
+            "Could not read the open Attempt's stored outcome; the Run does not reattach it",
             { ...fields, errorTag: stored.failure._tag, message: stored.failure.message },
           );
           return Option.some<OpenAttempt>({ _tag: "Interrupted", attempt: open });
         }
         if (Option.isNone(stored.success)) {
           yield* Effect.logInfo(
-            "The open Attempt's parent task is gone; opening the next Attempt",
+            "The open Attempt's parent task is gone; the Run does not reattach it",
             fields,
           );
           return Option.some<OpenAttempt>({ _tag: "Interrupted", attempt: open });
