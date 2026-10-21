@@ -92,7 +92,7 @@ export const taskNumber = (task: BoardTaskView): string => String(taskOrigin(tas
 /**
  * Where usine's work on a Task stands, as the Tasks list's Status column says it. Running,
  * AwaitingApproval, Queued, and Stalled are in flight, each with the Run whose opening orders it
- * in the list.
+ * in the list (see `rowPlace` and `countedAs`).
  */
 type TaskStatus =
   /** `run` has an Attempt at work. */
@@ -122,12 +122,6 @@ export interface TaskRow {
   readonly last: RunView;
   readonly status: TaskStatus;
 }
-
-const isInFlight = (status: TaskStatus): boolean =>
-  status._tag === "Running" ||
-  status._tag === "AwaitingApproval" ||
-  status._tag === "Queued" ||
-  status._tag === "Stalled";
 
 /** The first Run, newest first, whose state is one of `states`. */
 const newestIn = (
@@ -209,20 +203,35 @@ export const taskRows = (
     )
     .map(({ row }) => row);
 
+const HEADING_COUNTS = ["in flight", "needs attention", "done"] as const;
+
+/** The heading count a row adds to; null for a Task that shows its last Run's outcome. */
+const countedAs = ({ status }: TaskRow): (typeof HEADING_COUNTS)[number] | null => {
+  switch (status._tag) {
+    case "Running":
+    case "AwaitingApproval":
+    case "Queued":
+    case "Stalled":
+      return "in flight";
+    case "NeedsAttention":
+      return "needs attention";
+    case "Done":
+      return "done";
+    case "Ended":
+      return null;
+  }
+};
+
 /**
  * The Tasks list's heading counts, such as `2 in flight, 1 needs attention, 2 done`, leaving out a
  * zero count; undefined when all three are zero.
  */
 export const taskCounts = (rows: ReadonlyArray<TaskRow>): string | undefined => {
-  const counts = [
-    [rows.filter(({ status }) => isInFlight(status)).length, "in flight"],
-    [rows.filter(({ status }) => status._tag === "NeedsAttention").length, "needs attention"],
-    [rows.filter(({ status }) => status._tag === "Done").length, "done"],
-  ] as const;
-  const shown = counts.filter(([count]) => count > 0);
-  return shown.length === 0
-    ? undefined
-    : shown.map(([count, what]) => `${count} ${what}`).join(", ");
+  const shown = HEADING_COUNTS.flatMap((what) => {
+    const count = rows.filter((row) => countedAs(row) === what).length;
+    return count === 0 ? [] : [`${count} ${what}`];
+  });
+  return shown.length === 0 ? undefined : shown.join(", ");
 };
 
 /**
