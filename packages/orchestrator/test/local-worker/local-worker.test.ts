@@ -476,6 +476,7 @@ describe("local worker", () => {
               salvage: () => Effect.void,
               comments: () => Effect.void,
               windows: aloneOnItem(AttemptId.make("cleanup-budget-run/execute/1")),
+              checkoutAcquired: Effect.void,
             })
             .pipe(Effect.forkChild);
           yield* Deferred.await(cleanupStarted);
@@ -881,7 +882,7 @@ describe("local worker", () => {
   );
 
   it.effect(
-    "gives an exe.dev Attempt exe.dev's integration bot, and an Attempt no bot login when the App cannot be read",
+    "gives an exe.dev Attempt exe.dev's integration bot, and an Attempt no bot login when the App cannot be read, and acquires no checkout when preparation fails",
     () =>
       Effect.gen(function* () {
         const unreadableApp = Layer.succeed(GitHubApp)({
@@ -902,6 +903,7 @@ describe("local worker", () => {
         ] as const;
         for (const [kind, app, expected] of cases) {
           const requested: Array<CheckoutRequest> = [];
+          const acquired: Array<AttemptId> = [];
           const executor = Layer.succeed(Executor)({
             kind,
             recover: () => Effect.die("unused"),
@@ -970,6 +972,9 @@ describe("local worker", () => {
                   salvage: () => Effect.void,
                   comments: () => Effect.void,
                   windows: aloneOnItem(AttemptId.make(`bot-login-${kind}/execute/1`)),
+                  checkoutAcquired: Effect.sync(() => {
+                    acquired.push(AttemptId.make(`bot-login-${kind}/execute/1`));
+                  }),
                 },
               )
               .pipe(Effect.flip);
@@ -988,6 +993,9 @@ describe("local worker", () => {
             ),
             [expected],
           );
+          // The engine keeps reconciling a checkout a restart kept for a
+          // reattachment until preparation holds it (#180).
+          assert.deepStrictEqual(acquired, []);
         }
       }),
   );

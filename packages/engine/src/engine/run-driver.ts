@@ -105,8 +105,8 @@ type OpenAttempt =
  * outlasted its retries, an open Attempt's parent task it could not confirm
  * stopped) leaves the Run for `resume` or `reconcile`. The driver also
  * reconciles the checkouts earlier processes left, and keeps the checkout of
- * an open Attempt whose parent task is live until its Run reattaches the
- * Attempt or closes it.
+ * an open Attempt whose parent task is live until an execution that
+ * reattaches the Attempt acquires it, or the Run closes the Attempt first.
  */
 export class RunDriver extends Context.Service<
   RunDriver,
@@ -135,20 +135,23 @@ export class RunDriver extends Context.Service<
      * every persisted Attempt on a Worker the executor runs, recording its
      * salvage before any Run admits its next Attempt. An open Attempt whose
      * parent task is live, or whose liveness cannot be read, keeps its
-     * checkout for its Run: the Run reattaches the Attempt, or reconciles the
-     * checkout when it closes the Attempt without reattaching it, before its
-     * next Attempt starts. When that Attempt's parent task cannot be confirmed
-     * stopped, the Run's fiber stops before its next Attempt, and the next
-     * reconcile drives the Run again.
+     * checkout for its Run: the Run reattaches the Attempt, whose execution
+     * acquires the checkout, or reconciles the checkout before its next
+     * Attempt starts when it closes the Attempt without reattaching it or
+     * the reattachment fails before acquiring it. When that Attempt's parent
+     * task cannot be confirmed stopped, the Run's fiber stops before its next
+     * Attempt, and the next reconcile drives the Run again.
      */
     readonly recoverWorkspaces: () => Effect.Effect<void, RunStoreError>;
     /**
      * Reconciles the checkout `recoverWorkspaces` kept for `attemptId`, an
-     * Attempt that closes without a reattachment, as when the operator cancels
-     * its Run, and records its salvage. Does nothing for an Attempt whose
-     * checkout startup did not keep, or that its Run reattached. A failure,
-     * including a parent task that cannot be confirmed stopped, is logged, and
-     * the checkout stays on its Worker for the next startup.
+     * Attempt that closes before an execution acquired that checkout, as when
+     * the operator cancels its Run while it waits for a Worker or while its
+     * reattachment prepares, and records its salvage. Does nothing for an
+     * Attempt whose checkout startup did not keep, or whose execution
+     * acquired it. A failure, including a parent task that cannot be
+     * confirmed stopped, is logged, and the checkout stays on its Worker for
+     * the next startup.
      */
     readonly reconcileCheckout: (attemptId: AttemptId) => Effect.Effect<void>;
   }
@@ -380,7 +383,6 @@ export class RunDriver extends Context.Service<
           .pipe(retryingStore(runId, "begin the Attempt"));
         if (started._tag === "AttemptRecoveryFailed") return "RunFailed";
         if (started._tag === "RunClosed") return "Unchanged";
-        if (started.execution.reattach) yield* checkouts.reattached(started.execution.attempt.id);
 
         // Preserve an executor defect as a terminal Attempt outcome without
         // turning a programming bug into an automatic retry (ADR 0003).
@@ -395,6 +397,9 @@ export class RunDriver extends Context.Service<
             windows: store
               .attemptWindows(started.execution.attempt.id)
               .pipe(retryingStore(runId, "read the Attempt windows"), asAttemptFailure),
+            // A checkout startup kept stays this driver's to reconcile until
+            // here: a cancel before it reconciles the checkout (#180).
+            checkoutAcquired: checkouts.acquired(started.execution.attempt.id),
           })
           .pipe(
             Effect.catchDefect((defect) =>
@@ -413,6 +418,15 @@ export class RunDriver extends Context.Service<
             ),
             Effect.result,
           );
+        if (started.execution.reattach && Result.isFailure(result)) {
+          // A reattachment that failed before its execution acquired the
+          // checkout startup kept, such as one whose credential could not be
+          // issued, is reconciled while the Attempt is still open, so the next
+          // Attempt resumes from its salvage. `reconcile` does nothing once the
+          // checkout was acquired, and stops this fiber, as for an Attempt the
+          // Run does not reattach, while the parent task's stop is unconfirmed.
+          yield* checkouts.reconcile(started.execution.attempt.id);
+        }
         const finished = yield* store
           .finishAttempt(started.execution.attempt, result)
           .pipe(retryingStore(runId, "finish the Attempt"));

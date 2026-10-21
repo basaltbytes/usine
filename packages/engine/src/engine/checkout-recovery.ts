@@ -27,18 +27,20 @@ const without = (ids: ReadonlySet<AttemptId>, attemptId: AttemptId): ReadonlySet
  * Reconciles the checkouts that earlier processes left on the Workers through
  * `StepExecutor.recover`, recording what each one preserved in the run tables.
  * The checkout of an open Attempt whose parent task is live stays on its
- * Worker for its Run: `reattached` hands it to the Run's execution, and
- * `reconcile` reconciles it once the Run closes the Attempt without
- * reattaching it and its parent task is confirmed stopped (#180).
- * `RunDriver` exposes both steps to the engine.
+ * Worker for its Run, which still owns its recovery until an execution that
+ * reattaches the Attempt has acquired it: `acquired` hands it to that
+ * execution's executor. `reconcile` reconciles it, once its parent task is
+ * confirmed stopped, when the Run closes the Attempt before that hand-off:
+ * without reattaching it, after a reattachment that failed first, or on a
+ * cancel (#180). `RunDriver` exposes both steps to the engine.
  */
 export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
   store: RunStore["Service"],
   executor: StepExecutor["Service"],
 ) {
   // The open Attempts whose checkout startup left on their Worker for a
-  // reattachment. Each stays until its Run reattaches the Attempt or
-  // reconciles the checkout.
+  // reattachment. Each stays until an execution of its Run acquires the
+  // checkout or the Run reconciles it.
   const kept = yield* Ref.make<ReadonlySet<AttemptId>>(new Set());
 
   /** Reconciles `attempt`'s checkout; a failure is logged and the checkout stays on its Worker. */
@@ -108,13 +110,27 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
     );
   });
 
-  /** The Run reattached `attemptId`: its execution takes over the checkout startup kept. */
-  const reattached = (attemptId: AttemptId) => Ref.update(kept, (ids) => without(ids, attemptId));
+  /**
+   * The execution of `attemptId` acquired its checkout: its executor salvages
+   * and releases a checkout startup kept from here. Does nothing for any other.
+   */
+  const acquired = Effect.fn("CheckoutRecovery.acquired")(function* (attemptId: AttemptId) {
+    const handedOver = yield* Ref.modify(kept, (ids) => [
+      ids.has(attemptId),
+      without(ids, attemptId),
+    ]);
+    if (handedOver)
+      yield* Effect.logInfo(
+        "The reattached Attempt's execution acquired the checkout startup kept; its executor releases it from here",
+        { attemptId },
+      );
+  });
 
   /**
-   * Reconciles the kept checkout of `attemptId`, whose Run closes it without
-   * reattaching it, once its parent task is confirmed stopped. Fails with
-   * `ParentStopUnconfirmedError`, leaving the checkout, when it is not.
+   * Reconciles the kept checkout of `attemptId`, whose Run closes it before
+   * an execution acquired that checkout, once its parent task is confirmed
+   * stopped. Fails with `ParentStopUnconfirmedError`, leaving the checkout,
+   * when it is not.
    */
   const recoverKept = Effect.fn("CheckoutRecovery.recoverKept")(function* (attemptId: AttemptId) {
     // Neither the reconcile nor the Run's next Attempt may start while the
@@ -167,7 +183,7 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
   const reconcile = Effect.fn("CheckoutRecovery.reconcile")(function* (attemptId: AttemptId) {
     yield* Effect.annotateCurrentSpan({ attemptId });
     if (!(yield* Ref.get(kept)).has(attemptId)) {
-      yield* Effect.logDebug("Startup kept no checkout for the Attempt; nothing to reconcile", {
+      yield* Effect.logDebug("No checkout startup kept for the Attempt awaits reconciliation", {
         attemptId,
       });
       return;
@@ -179,5 +195,5 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
     yield* Ref.update(kept, (ids) => without(ids, attemptId));
   });
 
-  return { atStartup, reattached, reconcile } as const;
+  return { atStartup, acquired, reconcile } as const;
 });

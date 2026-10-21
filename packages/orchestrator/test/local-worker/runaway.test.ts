@@ -154,6 +154,7 @@ describe("local worker runaway guard", () => {
               salvage: () => Effect.void,
               comments: () => Effect.void,
               windows: aloneOnItem(attemptId),
+              checkoutAcquired: Effect.void,
             })
             .pipe(Effect.forkChild);
           yield* Deferred.await(started);

@@ -132,7 +132,8 @@ const makeRunEngine = Effect.gen(function* () {
       ? yield* stepExecutor.interrupt(outcome.openAttempt.value).pipe(Effect.result)
       : Result.succeed(undefined);
     yield* driver.stop(runId);
-    // A restart may have kept the Attempt's checkout for a reattachment that will not come now.
+    // A restart may have kept the Attempt's checkout for a reattachment whose
+    // execution had not acquired it; no execution will now.
     if (Option.isSome(outcome.openAttempt))
       yield* driver.reconcileCheckout(outcome.openAttempt.value);
     yield* driver.continueWithNewest(runId);

@@ -582,6 +582,9 @@ export const stepExecutorLayer = (
               ),
               Effect.mapError(asAttemptFailure),
             );
+          // The engine reconciles a checkout a restart kept for a reattachment
+          // until preparation holds it; the executor releases it from here.
+          yield* io.checkoutAcquired;
           return yield* prepared.launch(io);
         },
         Effect.scoped,
