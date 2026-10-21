@@ -65,15 +65,22 @@ export const runActivityAt = (run: Pick<RunView, "attempts" | "openedAt" | "clos
   return run.closedAt ?? last?.endedAt ?? last?.startedAt ?? run.openedAt;
 };
 
+/** The entries of the desk's stalled list that are about one of the Task's Items, in the desk's
+ * order: one per Loop and Item. */
+const taskStalls = (
+  stalled: ReadonlyArray<StalledItemView>,
+  task: Pick<BoardTaskView, "items">,
+): ReadonlyArray<StalledItemView> => {
+  const keys = new Set(task.items.map(({ itemKey }) => itemKey));
+  return stalled.filter(({ item }) => keys.has(item.itemKey));
+};
+
 /** The stall of a Task: the first entry of the desk's stalled list that is about one of the
  * Task's Items, or null when none is. */
 export const taskStall = (
   stalled: ReadonlyArray<StalledItemView>,
   task: Pick<BoardTaskView, "items">,
-): StalledItemView | null => {
-  const keys = new Set(task.items.map(({ itemKey }) => itemKey));
-  return stalled.find(({ item }) => keys.has(item.itemKey)) ?? null;
-};
+): StalledItemView | null => taskStalls(stalled, task)[0] ?? null;
 
 /** The Run a stall reason names, or null when the reason is about the Loop or the Item alone, as
  * a paused Loop, a used-up cycle budget, or a coming poll are. */
@@ -103,14 +110,16 @@ type TaskStatus =
   | { readonly _tag: "Queued"; readonly run: RunView }
   /**
    * A Loop's trigger matches one of the Task's Items with no Attempt running on it, and `stall`'s
-   * reason keeps the work open (see `keepsInFlight`); `run` is the Run that reason names, the
-   * pending or queued one when one is open, else the last Run.
+   * reason keeps the work open (see `keepsInFlight`): the first such stall of the Task's, in the
+   * desk's order. `run` is the Run that reason names, the pending or queued one when one is open,
+   * else the last Run.
    */
   | { readonly _tag: "Stalled"; readonly stall: StalledItemView; readonly run: RunView }
   /**
-   * A Loop's trigger matches one of the Task's Items, but no Run is open and `stall`'s reason holds
-   * nothing on the operator: the last Run closed on the Item's unchanged state, the next poll acts
-   * on it, the Loop is paused, or the failure is resolved.
+   * A Loop's trigger matches one of the Task's Items, but no Run is open and none of the Task's
+   * stalls holds anything on the operator: the last Run closed on the Item's unchanged state, the
+   * next poll acts on it, the Loop is paused, or the failure is resolved. `stall` is the first of
+   * them in the desk's order.
    */
   | { readonly _tag: "Idle"; readonly stall: StalledItemView }
   /** Nothing is open or stalled, and a failed Run or a hold on one of the Items waits on the
@@ -155,9 +164,9 @@ const newestIn = (
 
 /**
  * A Task's status, the first that applies: a Run at work, a Run waiting for approval, a pending or
- * queued Run with the desk's reason for that Run, Done for a merged or closed current Item, the
- * desk's stall, in flight or idle, Needs attention, and last the outcome of `last`. `stalled` is
- * the desk's list.
+ * queued Run with the desk's reason for that Run, Done for a merged or closed current Item, a
+ * stall of the Task's that keeps the work open, any other stall of the Task's as idle, Needs
+ * attention, and last the outcome of `last`. `stalled` is the desk's list.
  */
 const taskStatus = (
   task: BoardTaskView,
@@ -178,12 +187,14 @@ const taskStatus = (
       : { _tag: "Stalled", stall: own, run: queued };
   }
   if (isSettledItemState(task.state)) return { _tag: "Done" };
-  const stall = taskStall(stalled, task);
-  if (stall !== null) {
-    return keepsInFlight(stall)
-      ? { _tag: "Stalled", stall, run: stallRun(stall) ?? last }
-      : { _tag: "Idle", stall };
-  }
+  // The desk orders its failures by Item and Loop, not by whether they are resolved, so a resolved
+  // one can come before another Loop's failure that still waits on the operator. Any stall that
+  // keeps the work open outranks the first.
+  const stalls = taskStalls(stalled, task);
+  const open = stalls.find(keepsInFlight);
+  if (open !== undefined) return { _tag: "Stalled", stall: open, run: stallRun(open) ?? last };
+  const [idle] = stalls;
+  if (idle !== undefined) return { _tag: "Idle", stall: idle };
   if (task.needsYou) return { _tag: "NeedsAttention" };
   return { _tag: "Ended", run: last };
 };

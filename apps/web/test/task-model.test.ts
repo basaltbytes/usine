@@ -1,4 +1,5 @@
 import { LoopName } from "@usine/core/loop";
+import { RunId } from "@usine/core/run";
 import {
   AwaitingPollView,
   BoardTaskView,
@@ -211,6 +212,73 @@ describe("Tasks list model", () => {
     const rows = taskRows(lanes(attention), boardStalled());
     assert.strictEqual(rows.find(({ task }) => task.number === 18)?.status._tag, "Idle");
     assert.strictEqual(taskCounts(rows), "4 in flight, 1 needs attention, 1 done");
+  });
+
+  it("keeps a Task in flight on any of its failures that waits on the operator, though the desk lists a resolved one first", () => {
+    /** `overview` with an audit Run on #28 that failed before its review did, its failure
+     * resolved. */
+    const withAudit = (overview: ReturnType<typeof boardOverview>) =>
+      changeTasks(overview, (task) => {
+        if (task.number !== 28) return task;
+        const review = lastRunOf(task);
+        const audit = new RunView({
+          ...review,
+          id: RunId.make("run-pinned-audit"),
+          loop: LoopName.make("audit"),
+          openedAt: minutesAgo(200),
+          closedAt: minutesAgo(190),
+          attempts: [],
+          canResolveFailure: false,
+        });
+        return new BoardTaskView({ ...task, runs: [audit, ...task.runs] });
+      });
+    /** The desk's list for `overview`, with #28's failures in the desk's order: same Item, so by
+     * Loop name, the audit first. */
+    const deskOf = (overview: ReturnType<typeof boardOverview>) => {
+      const pinned = taskOf(28, overview);
+      const [item] = pinned.items;
+      assert(item !== undefined);
+      const failures = pinned.runs.map(
+        (run) =>
+          new StalledItemView({
+            repository: run.repository,
+            loop: run.loop,
+            item,
+            reason: new RunFailedView({ run }),
+          }),
+      );
+      assert.deepStrictEqual(
+        failures.map(({ loop }) => loop),
+        [LoopName.make("audit"), LoopName.make("review")],
+      );
+      return boardStalled().flatMap((stall) => (stall.item.number === 28 ? failures : [stall]));
+    };
+
+    // The review's failure still waits on the operator, so #28 stays in flight on it.
+    const mixed = withAudit(boardOverview());
+    const rows = taskRows(lanes(mixed), deskOf(mixed));
+    assert.deepStrictEqual(order(rows), [
+      [31, "Running"],
+      [7, "AwaitingApproval"],
+      [44, "Queued"],
+      [28, "Stalled"],
+      [18, "Idle"],
+      [6, "Done"],
+    ]);
+    const pinned = rows[3]?.status;
+    assert(pinned?._tag === "Stalled");
+    assert.strictEqual(pinned.stall.loop, LoopName.make("review"));
+    assert.strictEqual(pinned.run.id, RunId.make("run-pinned"));
+    assert.strictEqual(taskCounts(rows), "4 in flight, 1 done");
+
+    // Once the review's failure is resolved too, nothing about #28 waits on the operator: it is
+    // idle on the desk's first failure, the audit's, and the heading leaves it out.
+    const resolved = withAudit(boardOverviewResolved());
+    const settled = taskRows(lanes(resolved), deskOf(resolved));
+    const idle = settled.find(({ task }) => task.number === 28)?.status;
+    assert(idle?._tag === "Idle");
+    assert.strictEqual(idle.stall.loop, LoopName.make("audit"));
+    assert.strictEqual(taskCounts(settled), "3 in flight, 1 done");
   });
 
   it("explains a queued Run with the stall that names it, not an older stall on another Item", () => {
