@@ -494,6 +494,41 @@ export const boardOverviewDocumentedLongLoop = () =>
     });
   });
 
+const reviewing = link(46, "pr", "Keep a running card in the lane its Run was triggered from");
+
+/**
+ * The Board while `review` runs on #46. The Loop removed `review`, the label that triggered it, so
+ * #46 carries only `ci` now, and the server keeps its card in Review, the lane of that label,
+ * until the Run ends.
+ */
+export const boardOverviewReviewing = () => {
+  const running = new RunView({
+    ...run("run-reviewing", reviewing, "review", "Running", 2, [
+      attempt(1, minutesAgo(2), "running"),
+    ]),
+    loopPaused: false,
+  });
+  const held = task([reviewing], ["ci"], [running]);
+  const overview = boardOverview();
+  return new ReadyOverview({
+    ...overview,
+    projects: overview.projects.map(
+      (project) =>
+        new ProjectView({
+          ...project,
+          board: new BoardView({
+            ...project.board,
+            lanes: project.board.lanes.map((lane) =>
+              lane._tag === "WritableBoardLane" && lane.name === "Review"
+                ? new WritableBoardLaneView({ ...lane, items: [held, ...lane.items] })
+                : lane,
+            ),
+          }),
+        }),
+    ),
+  });
+};
+
 const stalled = (loopName: string, item: BoardItemLink, reason: StalledItemView["reason"]) =>
   new StalledItemView({
     repository: boardRepository,

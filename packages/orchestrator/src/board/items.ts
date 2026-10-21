@@ -21,6 +21,19 @@ export interface ProjectedItem {
 
 const labelsFrom = Schema.decodeUnknownEffect(Schema.Array(GitHubLabelName));
 
+// Only the labels are read, so a payload stored before a later field joined the slice still reads.
+const IssueLabels = Schema.Struct({ labels: IssuePayload.fields.labels });
+const PullRequestLabels = Schema.Struct({ labels: PullRequestPayload.fields.labels });
+
+/**
+ * The labels in `payload`, an Item payload of `kind` such as the one the Event of a Run
+ * recorded when its trigger matched. Fails when the payload has no labels of that shape.
+ */
+export const payloadLabels = (kind: ProjectedItem["kind"], payload: Schema.Json) =>
+  Schema.decodeUnknownEffect(kind === "issue" ? IssueLabels : PullRequestLabels)(payload).pipe(
+    Effect.flatMap(({ labels }) => labelsFrom(labels.nodes.map(({ name }) => name))),
+  );
+
 const projectionError = (item: ItemProjection, message: string) =>
   new BoardProjectionError({
     repository: item.repository,

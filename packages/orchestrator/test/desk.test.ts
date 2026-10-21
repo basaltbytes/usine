@@ -359,6 +359,7 @@ const deskLayer = (polls: ReadonlyArray<RepositoryPoll>) => {
           .slice(0, limit),
       ),
     forItems: (keys) => Effect.succeed(runs.filter(({ itemKey }) => keys.includes(itemKey))),
+    events: () => Effect.die("unused"),
     revision: () => Effect.die("unused"),
     transcript: (query) =>
       Effect.succeed(query.attemptId === AttemptId.make("running-8-attempt") ? transcript : []),

@@ -6,7 +6,7 @@ import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { Attempt, AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
 import { AgentFailure } from "@usine/core/attempt/failure";
 import { AttemptCanceled, AttemptFailed, AttemptSucceeded } from "@usine/core/attempt/outcome";
-import { EventId } from "@usine/core/event";
+import { DedupKey, Event, EventId } from "@usine/core/event";
 import { ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { OperatorLogin } from "@usine/core/operator";
@@ -25,7 +25,7 @@ import {
 } from "@usine/engine/item-projection";
 import { LoopControl } from "@usine/engine/loop-control";
 import { RepositoryLabelProjectionReader } from "@usine/engine/repository-label-projection";
-import { RunReader, RunSummary } from "@usine/engine/run-reader";
+import { RunEvent, RunReader, RunSummary } from "@usine/engine/run-reader";
 import { DateTime, Effect, Layer, Option, Ref, Schema } from "effect";
 import { OperatorObservation } from "../src/operator/operator.ts";
 import { PollingTriggers } from "../src/polling-triggers.ts";
@@ -356,7 +356,10 @@ const runs = [
   ),
 ];
 
-const observation = (requested: Ref.Ref<ReadonlyArray<string>>) => {
+const observation = (
+  requested: Ref.Ref<ReadonlyArray<string>>,
+  runEvents: ReadonlyArray<RunEvent> = [],
+) => {
   const reader = Layer.succeed(RunReader)({
     inspect: () => Effect.die("unused"),
     evidence: () => Effect.die("unused"),
@@ -366,6 +369,7 @@ const observation = (requested: Ref.Ref<ReadonlyArray<string>>) => {
       Ref.set(requested, keys).pipe(
         Effect.as(runs.filter(({ itemKey }) => keys.includes(itemKey))),
       ),
+    events: (runIds) => Effect.succeed(runEvents.filter(({ runId }) => runIds.includes(runId))),
     revision: () => Effect.succeed(Option.none()),
     transcript: () => Effect.die("unused"),
     attemptsByWorker: () => Effect.succeed([]),
@@ -412,13 +416,17 @@ const observation = (requested: Ref.Ref<ReadonlyArray<string>>) => {
   );
 };
 
-const readTask = (number: number, project: RepositoryName = repository) =>
+const readTask = (
+  number: number,
+  project: RepositoryName = repository,
+  runEvents: ReadonlyArray<RunEvent> = [],
+) =>
   Effect.gen(function* () {
     const requested = yield* Ref.make<ReadonlyArray<string>>([]);
     const task = yield* Effect.gen(function* () {
       const operator = yield* OperatorObservation;
       return yield* operator.task(instance, project, ItemNumber.make(number));
-    }).pipe(Effect.provide(observation(requested)));
+    }).pipe(Effect.provide(observation(requested, runEvents)));
     return { task, requested: yield* Ref.get(requested) };
   });
 
@@ -498,6 +506,24 @@ describe("Task view", () => {
       );
       assert.deepStrictEqual(task.comments, []);
       assert.isFalse(task.needsYou);
+    }),
+  );
+
+  it.effect("names the lane its running Run was triggered from as the Board does", () =>
+    Effect.gen(function* () {
+      // fix-ci was triggered while #42 carried `ready`; it carries `ready-for-review` now.
+      const triggered = new RunEvent({
+        runId: RunId.make("run-fix-again"),
+        event: new Event({
+          id: EventId.make("event-run-fix-again"),
+          dedupKey: DedupKey.make("event-run-fix-again"),
+          payload: { number: 42, labels: { totalCount: 1, nodes: [{ name: "ready" }] } },
+          receivedAt: at("2026-10-06T08:59:00.000Z"),
+        }),
+      });
+      const { task } = yield* readTask(40, repository, [triggered]);
+      assert.strictEqual(task.current, gitHubItemKey(repository, 42));
+      assert.strictEqual(task.lane.name, "Ready");
     }),
   );
 

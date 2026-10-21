@@ -60,6 +60,7 @@ import {
   decodeProjectionRevision,
   decodeReopenedEvents,
   decodeReopenings,
+  decodeRunEventRows,
   decodeRunIds,
   decodeRunRows,
   encodeAgent,
@@ -74,6 +75,7 @@ import {
   encodeStepResult,
   eventFromRow,
   runAgainFromRow,
+  runEventFromRow,
   runFromRow,
   runSummaryFromRow,
   stepFromRow,
@@ -352,6 +354,28 @@ export const queriesFor = (database: RunDatabaseClient) => {
     ]);
     const storedRuns = [...openRuns, ...closedRuns].sort(newestRunFirst);
     return yield* summariesWithAttempts(storedRuns);
+  });
+
+  const runEvents = Effect.fn("RunStoreQueries.runEvents")(function* (
+    runIds: ReadonlyArray<RunId>,
+  ) {
+    // Chunked like the Item histories, to stay below adapter bind-parameter limits.
+    const rows = yield* Effect.forEach(EffectArray.chunksOf([...new Set(runIds)], 100), (ids) =>
+      database
+        .select({
+          runId: runs.runId,
+          eventId: events.eventId,
+          dedupKey: events.dedupKey,
+          payload: events.payloadJson,
+          receivedAt: events.receivedAt,
+        })
+        .from(runs)
+        .innerJoin(events, eq(events.eventId, runs.eventId))
+        .where(inArray(runs.runId, ids))
+        .execute()
+        .pipe(Effect.flatMap(decodeRunEventRows)),
+    );
+    return rows.flat().map(runEventFromRow);
   });
 
   const closedRunSummaries = Effect.fn("RunStoreQueries.closedRunSummaries")(function* (
@@ -961,6 +985,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     runSummaries,
     closedRunSummaries,
     itemRunSummaries,
+    runEvents,
     runForEvent,
     snapshot,
     updateStepResult,

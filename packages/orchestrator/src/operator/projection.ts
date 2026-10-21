@@ -179,6 +179,23 @@ export const readUnrecordedEnds = Effect.fn("Operator.readUnrecordedEnds")(funct
 });
 
 /**
+ * The Event of each running Run among `summaries`, by Run, for `projectBoard`: a running Run
+ * keeps its Task's card in the lane its trigger matched, read from the Event's payload.
+ */
+export const readRunningEvents = Effect.fn("Operator.readRunningEvents")(function* (
+  runs: RunReader["Service"],
+  summaries: ReadonlyArray<RunSummary>,
+) {
+  const running = summaries.flatMap(({ run }) => (run.state._tag === "Running" ? [run.id] : []));
+  const read = yield* runs.events(running);
+  yield* Effect.logDebug("Read the Events of the running Runs", {
+    running: running.length,
+    events: read.length,
+  });
+  return new Map(read.map(({ runId, event }) => [runId, event] as const));
+});
+
+/**
  * The operator's view of a saved Run: `pausedLoops` says whether its Loop is
  * paused and `workers` how each Attempt's Worker is reached.
  */

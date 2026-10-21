@@ -27,7 +27,7 @@ A managed repo as the operator sees it: the repo with the board, runs, and usine
 _Avoid_: repo (for the operator-facing surface: the registry declares managed repos, and the operator works in projects)
 
 **Board**:
-A project's kanban view: the project's tasks grouped into lanes, with each task's run history on the task's card. A task's current item determines the task's lane. The board is also a trigger surface: dragging a card writes the label swap to the task's current item on GitHub.
+A project's kanban view: the project's tasks grouped into lanes, with each task's run history on the task's card. A task's current item determines the task's lane, except while the task's newest open run is running: its card then stays in the lane whose label the run's trigger matched, since a loop often removes that label first. The board is also a trigger surface: dragging a card writes the label swap to the task's current item on GitHub.
 _Avoid_: kanban (the form, not the name), pipeline
 
 **Overview**:
