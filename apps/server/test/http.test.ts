@@ -497,8 +497,7 @@ describe("operator HTTP API", () => {
           }),
         ),
       cancel: () => Effect.void,
-      discardLeftovers: (worker) =>
-        Effect.fail(new LeftoversDiscardRejectedError({ worker, running: 2 })),
+      discardLeftovers: () => Effect.void,
       moveBoardItem: (move) =>
         move.toLane === "proposed:ready"
           ? Effect.fail(
@@ -558,17 +557,6 @@ describe("operator HTTP API", () => {
       assert.deepStrictEqual(await blocked.json(), {
         error: "RunRetryBlockedError",
         message: `Cannot retry Run ${runId}: Run run-open of Loop fix-ci is open on the same Item. Retry after it closes, or cancel it first.`,
-      });
-
-      const running = await rejectingApp.handler(
-        new Request("http://localhost/api/workers/usine-worker-2/discard-leftovers", {
-          method: "POST",
-        }),
-      );
-      assert.strictEqual(running.status, 409);
-      assert.deepStrictEqual(await running.json(), {
-        error: "LeftoversDiscardRejectedError",
-        message: "2 attempts still run on usine-worker-2; discard its leftovers once they end.",
       });
 
       const edit = JSON.stringify({ task: "Look again", agent: agentName });
@@ -789,7 +777,8 @@ describe("operator HTTP API", () => {
           : Effect.fail(new CycleBudgetResetRejectedError({ askId: id })),
       retry: (id) => record(`retry:${id}`),
       cancel: (id) => record(`cancel:${id}`),
-      discardLeftovers: (worker) => record(`discard:${worker}`),
+      discardLeftovers: (worker) =>
+        Effect.fail(new LeftoversDiscardRejectedError({ worker, running: 2 })),
       pause: (loop) =>
         loop === loopName
           ? record(`pause:${loop}`)
@@ -887,9 +876,14 @@ describe("operator HTTP API", () => {
           }),
           { ok: true },
         );
-        assert.deepStrictEqual(
-          yield* client.discardLeftovers({ params: { worker: WorkerName.make("local") } }),
-          { ok: true },
+        const kept = yield* Effect.flip(
+          client.discardLeftovers({ params: { worker: WorkerName.make("local") } }),
+        );
+        assert.instanceOf(kept, OperatorHttpError);
+        assert.strictEqual(kept.status, 409);
+        assert.strictEqual(
+          kept.message,
+          "2 attempts still run on local; discard its leftovers once they end.",
         );
         assert.deepStrictEqual(interventions, [
           "reset:current-ask",
@@ -900,7 +894,6 @@ describe("operator HTTP API", () => {
           `pause:${loopName}`,
           `unpause:${loopName}`,
           "move:basaltbytes/usine#31:authored:Review",
-          "discard:local",
         ]);
 
         const missingId = RunId.make("missing/run");

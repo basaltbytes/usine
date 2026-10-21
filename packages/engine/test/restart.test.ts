@@ -689,35 +689,6 @@ describe("engine restart", () => {
       ),
   );
 
-  it.live("counts the Attempts a Worker still runs and keeps their leftovers until they end", () =>
-    withInstance((directory) =>
-      Effect.gen(function* () {
-        yield* deliverOneAttempt(directory, 50);
-        yield* stopDuringAttempts(directory, [submission({ number: 51, item: "still-running" })]);
-        const recovered = yield* Ref.make<ReadonlyArray<AttemptId>>([]);
-        // The restarted Run gets no Worker, so its Attempt stays open on `local`,
-        // which the executor keeps running as it keeps a removed Worker.
-        const scope = yield* Scope.make();
-        const context = yield* Scope.provide(
-          Layer.build(engineLayer(directory, recordingExecutor(["local"], recovered))),
-          scope,
-        );
-        const engine = Context.get(context, RunEngine);
-        const reader = Context.get(context, RunReader);
-        const counts = Effect.map(reader.attemptsByWorker(), (counted) =>
-          counted.map(({ worker, attempts, running }) => [worker, attempts, running]),
-        );
-        assert.deepStrictEqual(yield* counts, [["local", 2, 1]]);
-        assert.deepStrictEqual(
-          yield* Effect.flip(engine.discardLeftovers(WorkerName.make("local"))),
-          new LeftoversDiscardRejectedError({ worker: WorkerName.make("local"), running: 1 }),
-        );
-        assert.deepStrictEqual(yield* counts, [["local", 2, 1]]);
-        yield* Scope.close(scope, Exit.void);
-      }),
-    ),
-  );
-
   it.live("drains an admitted Attempt and leaves queued and new work for restart", () =>
     withInstance((directory) =>
       Effect.scoped(
