@@ -117,8 +117,9 @@ const stopDuringAttempts = (directory: InstanceDirectory, submissions: ReadonlyA
  * checkout whatever `isLive` reports. Every checkout it reconciles becomes a
  * pushed salvage, and an open Attempt whose parent failed records the comment
  * it posted. Worker `local` has one slot per Attempt in `live`. Startup reads
- * whether each open Attempt is live at once, and occupies a slot for it, which
- * `leased` counts as the scheduler does. Until `gate` opens, a Run waits to
+ * whether each open Attempt is live at once, and occupies a slot for it and
+ * for each closed Attempt it cannot stop, which `leased` counts as the
+ * scheduler does. Until `gate` opens, a Run waits to
  * read it again, and for a Worker; then a Run waits for a free slot. An
  * Attempt then records what it resumes from. The
  * reattachment of an Attempt in `stalled` never acquires its checkout, as
@@ -902,6 +903,83 @@ describe("engine restart", () => {
             [Option.some("Canceled")],
           );
           yield* Effect.repeat(TxRef.get(worker.leased), {
+            until: (count) => count === 0,
+            schedule: Schedule.spaced("10 millis"),
+          }).pipe(Effect.timeout("2 seconds"));
+          yield* Scope.close(scope, Exit.void);
+        }),
+      ),
+  );
+
+  it.live(
+    "keeps the slot of a canceled Attempt whose parent task outlives another restart until that task is confirmed stopped",
+    () =>
+      withInstance((directory) =>
+        Effect.gen(function* () {
+          const [canceled] = yield* stopDuringAttempts(directory, [
+            submission({ number: 35, item: "canceled-unstoppable-then-restarted" }),
+          ]);
+          assert(canceled !== undefined);
+
+          // After a first restart, the operator cancels the Run while it still
+          // reads its Attempt, and the parent task cannot be stopped.
+          const first = yield* restartedExecutor([canceled]);
+          yield* Ref.set(first.unstoppable, new Set([canceled.id]));
+          const firstScope = yield* Scope.make();
+          const firstEngine = Context.get(
+            yield* Scope.provide(Layer.build(engineLayer(directory, first.executor)), firstScope),
+            RunEngine,
+          );
+          const refusal = yield* Effect.flip(firstEngine.cancel(canceled.runId));
+          assert.strictEqual(refusal._tag, "AttemptCancellationError");
+          assert.strictEqual(yield* TxRef.get(first.leased), 1);
+          yield* Scope.close(firstScope, Exit.void);
+
+          // The orchestrator restarts again. The parent task still runs on
+          // `local`, which has one slot, and it still cannot be stopped.
+          const second = yield* restartedExecutor([canceled]);
+          yield* Ref.set(second.unstoppable, new Set([canceled.id]));
+          const scope = yield* Scope.make();
+          const engine = Context.get(
+            yield* Scope.provide(Layer.build(engineLayer(directory, second.executor)), scope).pipe(
+              Effect.provideService(ReconcileInterval, "50 millis"),
+            ),
+            RunEngine,
+          );
+          assert.strictEqual(yield* TxRef.get(second.leased), 1);
+          const fresh = yield* engine.submit(
+            submission({ number: 36, item: "after-the-second-restart" }),
+          );
+          assert(fresh._tag === "Claimed");
+          yield* Deferred.succeed(second.gate, undefined);
+
+          // The closed Attempt keeps its slot across the reconciles that try
+          // the stop again, so the new Run waits.
+          yield* Effect.repeat(Ref.get(second.refused), {
+            until: (ids) => ids.length >= 3,
+            schedule: Schedule.spaced("10 millis"),
+          });
+          assert.deepStrictEqual((yield* engine.inspect(fresh.runId)).attempts, []);
+          assert.strictEqual(yield* TxRef.get(second.leased), 1);
+          assert.deepStrictEqual(yield* Ref.get(second.reconciled), []);
+
+          // Once the stop is confirmed, a reconcile salvages the checkout and
+          // releases the slot, and the new Run takes it.
+          yield* Ref.set(second.unstoppable, new Set());
+          const delivered = yield* waitFor(
+            engine,
+            fresh.runId,
+            ({ run }) => run.state._tag === "Succeeded",
+          );
+          assert.lengthOf(delivered.attempts, 1);
+          assert.deepStrictEqual(
+            (yield* engine.inspect(canceled.runId)).attempts.map(({ outcome, salvage }) => [
+              Option.map(outcome, ({ _tag }) => _tag),
+              Option.map(salvage, ({ _tag }) => _tag),
+            ]),
+            [[Option.some("Canceled"), Option.some("Pushed")]],
+          );
+          yield* Effect.repeat(TxRef.get(second.leased), {
             until: (count) => count === 0,
             schedule: Schedule.spaced("10 millis"),
           }).pipe(Effect.timeout("2 seconds"));

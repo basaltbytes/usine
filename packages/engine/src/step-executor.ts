@@ -82,15 +82,16 @@ export class StepExecutor extends Context.Service<
     ) => Effect.Effect<Option.Option<Result.Result<StepResult, AttemptFailure>>, AttemptFailure>;
     /**
      * Reconciles an old checkout before new Attempts start; records its salvage before releasing
-     * any work. The engine calls it only for an Attempt that no Run reattaches: at startup for
-     * every persisted Attempt except an open one whose parent task `isLive` reports live or whose
-     * liveness cannot be read, and for that one when its Run closes the Attempt before an
-     * execution ran `checkoutAcquired` for it, once `interrupt` confirmed that its parent task
-     * stopped. It stops the Attempt's parent task first if that task is still live, and fails,
-     * leaving the checkout, when it cannot confirm the stop. It reconciles the checkout whatever
-     * `isLive` reports. For an open Attempt whose parent task failed with no launch to record it,
-     * it also records the comments the Attempt posted on its Run's Item if its checkout is still
-     * on the Worker.
+     * any work. The engine calls it only for an Attempt that no Run reattaches. At startup it
+     * calls it for every persisted Attempt except an open one whose parent task `isLive` reports
+     * live or whose liveness cannot be read, and a closed one whose parent task `interrupt` cannot
+     * confirm stopped. It calls it for one of those later, once `interrupt` confirms that the
+     * parent task stopped: for an open one, only when its Run closes the Attempt before an
+     * execution ran `checkoutAcquired` for it. It stops the Attempt's parent task first if that
+     * task is still live, and fails, leaving the checkout, when it cannot confirm the stop. It
+     * reconciles the checkout whatever `isLive` reports. For an open Attempt whose parent task
+     * failed with no launch to record it, it also records the comments the Attempt posted on its
+     * Run's Item if its checkout is still on the Worker.
      */
     readonly recover: <E>(
       attempt: AttemptRecovery,
@@ -122,9 +123,10 @@ export class StepExecutor extends Context.Service<
      * than it has slots, and takes no new one until enough of them end. At startup, before any
      * Run reserves, the engine occupies a slot for each open Attempt whose parent task may have
      * outlived the restart, so no new Attempt takes that slot while the Attempt's Run decides
-     * whether to reattach it (#177). The engine occupies only a Worker `workers` lists. It
-     * releases the returned lease when the reattached Attempt ends, or once `interrupt` confirms
-     * that the parent task of an Attempt its Run does not reattach stopped.
+     * whether to reattach it (#177). It also occupies one for each closed Attempt whose parent
+     * task `interrupt` cannot confirm stopped. The engine occupies only a Worker `workers` lists.
+     * It releases the returned lease when the reattached Attempt ends, or once `interrupt`
+     * confirms that the parent task of an Attempt no Run reattaches stopped.
      */
     readonly occupy: (worker: WorkerName) => Effect.Effect<WorkerLease>;
     /**

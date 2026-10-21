@@ -117,7 +117,9 @@ const reattaching = (open: Option.Option<OpenAttempt>): Option.Option<Attempt> =
  * `resume` or `reconcile`. The driver also reconciles the checkouts earlier
  * processes left, and keeps the checkout of an open Attempt whose parent task
  * is live, with a slot of its Worker, until an execution that reattaches the
- * Attempt acquires it, or the Run closes the Attempt first.
+ * Attempt acquires it, or the Run closes the Attempt first. It keeps the
+ * checkout and the slot of a closed Attempt whose parent task it cannot
+ * confirm stopped until a reconcile confirms the stop.
  */
 export class RunDriver extends Context.Service<
   RunDriver,
@@ -140,7 +142,7 @@ export class RunDriver extends Context.Service<
      * did not run, and starts the fiber of every open Run that is not waiting
      * for its approval. Runs whose fiber already runs here are left alone. It
      * also tries again to stop the parent task of each Attempt `releaseKept`
-     * could not confirm stopped.
+     * or `recoverWorkspaces` could not confirm stopped.
      */
     readonly reconcile: () => Effect.Effect<void, RunStoreError>;
     /**
@@ -158,7 +160,11 @@ export class RunDriver extends Context.Service<
      * `StepExecutor.occupy`, before any Run reserves one (#177). The slot
      * stays taken while the parent task may run: its Run reattaches the
      * Attempt in it, and the slot is released when the reattached Attempt
-     * ends, or when the reconcile confirms that the parent task stopped.
+     * ends, or when the reconcile confirms that the parent task stopped. A
+     * closed Attempt whose parent task cannot be confirmed stopped, as after a
+     * cancel that could not confirm the stop before the restart, keeps its
+     * checkout and occupies a slot of its Worker too, and each `reconcile`
+     * tries the stop again, as for `releaseKept`.
      */
     readonly recoverWorkspaces: () => Effect.Effect<void, RunStoreError>;
     /**
@@ -186,9 +192,10 @@ export class RunDriver extends Context.Service<
       const crypto = yield* Crypto.Crypto;
       const fibers = yield* FiberMap.make<RunId>();
       const checkouts = yield* checkoutRecoveryFor(store, executor);
-      // The Attempts whose Run closed before using what startup kept for
-      // them, while their parent task could not be confirmed stopped. Their
-      // checkout and slot stay kept, and each reconcile tries the stop again.
+      // The Attempts whose Run closed before using what startup kept for them,
+      // in this process or before the restart, while their parent task could
+      // not be confirmed stopped. Their checkout and slot stay kept, and each
+      // reconcile tries the stop again.
       const unconfirmed = yield* Ref.make<ReadonlySet<AttemptId>>(new Set());
 
       // Annotated because a fiber's continuation calls launch again, which TypeScript cannot infer.
@@ -570,6 +577,13 @@ export class RunDriver extends Context.Service<
           );
       });
 
+      const recoverWorkspaces = Effect.fn("RunDriver.recoverWorkspaces")(function* () {
+        // A cancel before the restart closed these Attempts without confirming
+        // that their parent task stopped; `recoverClosed` logged each one.
+        const unstopped = yield* checkouts.atStartup();
+        yield* Ref.update(unconfirmed, (ids) => new Set([...ids, ...unstopped]));
+      });
+
       const reconcile = Effect.fn("RunDriver.reconcile")(function* () {
         // A closed Run's fiber no longer drives the Attempt whose stop it could not confirm.
         const unstopped = [...(yield* Ref.get(unconfirmed))];
@@ -611,7 +625,7 @@ export class RunDriver extends Context.Service<
         stop,
         continueWithNewest,
         reconcile,
-        recoverWorkspaces: checkouts.atStartup,
+        recoverWorkspaces,
         releaseKept,
       };
     }),
