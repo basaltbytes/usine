@@ -116,9 +116,11 @@ const stopDuringAttempts = (directory: InstanceDirectory, submissions: ReadonlyA
  * records for the Attempts in `unstoppable`; `recover` reconciles the
  * checkout whatever `isLive` reports. Every checkout it reconciles becomes a
  * pushed salvage, and an open Attempt whose parent failed records the comment
- * it posted. Startup reads whether each open Attempt is live at once, and
- * occupies a slot for it; until `gate` opens, a Run waits to read it again,
- * and for a Worker. An Attempt then records what it resumes from. The
+ * it posted. Worker `local` has one slot per Attempt in `live`. Startup reads
+ * whether each open Attempt is live at once, and occupies a slot for it, which
+ * `leased` counts as the scheduler does. Until `gate` opens, a Run waits to
+ * read it again, and for a Worker; then a Run waits for a free slot. An
+ * Attempt then records what it resumes from. The
  * reattachment of an Attempt in `stalled` never acquires its checkout, as
  * when the scheduler awaits the settings or the bot login before preparing
  * it, and one in `unprepared` fails first, as when its credential cannot be
@@ -141,7 +143,19 @@ const restartedExecutor = Effect.fn("test.restartedExecutor")(function* (
     unprepared: yield* Ref.make<ReadonlySet<AttemptId>>(new Set()),
     read: yield* Ref.make<ReadonlySet<AttemptId>>(new Set()),
     gate: yield* Deferred.make<void>(),
+    leased: yield* TxRef.make(0),
   };
+  const lease = {
+    worker: WorkerName.make("local"),
+    release: TxRef.update(state.leased, (count) => count - 1),
+  };
+  const freeSlot = Effect.tx(
+    Effect.gen(function* () {
+      const count = yield* TxRef.get(state.leased);
+      if (count >= live.length) return yield* Effect.txRetry;
+      yield* TxRef.set(state.leased, count + 1);
+    }),
+  );
   const stop = (attemptId: AttemptId) =>
     Effect.gen(function* () {
       if ((yield* Ref.get(state.unstoppable)).has(attemptId)) {
@@ -189,11 +203,8 @@ const restartedExecutor = Effect.fn("test.restartedExecutor")(function* (
       }),
     intervene: () => Effect.void,
     interrupt: stop,
-    reserve: () =>
-      Deferred.await(state.gate).pipe(
-        Effect.as({ worker: WorkerName.make("local"), release: Effect.void }),
-      ),
-    occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
+    reserve: () => Deferred.await(state.gate).pipe(Effect.andThen(freeSlot), Effect.as(lease)),
+    occupy: () => TxRef.update(state.leased, (count) => count + 1).pipe(Effect.as(lease)),
     execute: (execution, io) =>
       Effect.gen(function* () {
         const { id } = execution.attempt;
@@ -806,6 +817,94 @@ describe("engine restart", () => {
             (yield* Ref.get(worker.reconciled)).map(({ attemptId }) => attemptId),
             [waiting.id, preparing.id],
           );
+          yield* Scope.close(scope, Exit.void);
+        }),
+      ),
+  );
+
+  it.live(
+    "keeps a surviving Attempt's slot until its parent task is confirmed stopped, so no new Attempt takes it",
+    () =>
+      withInstance((directory) =>
+        Effect.gen(function* () {
+          const [unread, unprepared, canceled] = yield* stopDuringAttempts(directory, [
+            submission({ number: 26, item: "kept-unread-unstoppable" }),
+            submission({ number: 27, item: "kept-unprepared-unstoppable" }),
+            submission({ number: 28, item: "kept-canceled-unstoppable" }),
+          ]);
+          assert(unread !== undefined && unprepared !== undefined && canceled !== undefined);
+          // `local` has three slots, and startup occupies one for each surviving Attempt.
+          const worker = yield* restartedExecutor([unread, unprepared, canceled]);
+          const scope = yield* Scope.make();
+          const engine = Context.get(
+            yield* Scope.provide(Layer.build(engineLayer(directory, worker.executor)), scope).pipe(
+              Effect.provideService(ReconcileInterval, "50 millis"),
+            ),
+            RunEngine,
+          );
+          assert.strictEqual(yield* TxRef.get(worker.leased), 3);
+          const fresh = yield* engine.submit(submission({ number: 29, item: "after-the-restart" }));
+          assert(fresh._tag === "Claimed");
+
+          // Every parent task still runs, and none can be stopped yet. The
+          // first Run cannot read whether its Attempt is live. The second
+          // reattaches its Attempt, whose execution fails before it acquires
+          // the checkout. The third reattaches its Attempt, whose execution
+          // stalls until the operator cancels the Run.
+          yield* Ref.set(worker.unreadable, new Set([unread.id]));
+          yield* Ref.set(worker.unprepared, new Set([unprepared.id]));
+          yield* Ref.set(worker.stalled, new Set([canceled.id]));
+          yield* Ref.set(worker.unstoppable, new Set([unread.id, unprepared.id, canceled.id]));
+          yield* Deferred.succeed(worker.gate, undefined);
+          yield* Effect.repeat(Ref.get(worker.resumed), {
+            until: (seen) => seen.has(canceled.runId),
+            schedule: Schedule.spaced("10 millis"),
+          });
+          const refusal = yield* Effect.flip(engine.cancel(canceled.runId));
+          assert.strictEqual(refusal._tag, "AttemptCancellationError");
+          yield* Effect.repeat(Ref.get(worker.refused), {
+            until: (ids) => ids.includes(unread.id) && ids.includes(unprepared.id),
+            schedule: Schedule.spaced("10 millis"),
+          });
+
+          // Each slot stays taken while its parent task may run, across the
+          // reconciles that try each stop again, so the new Run waits.
+          yield* Effect.sleep("150 millis");
+          assert.deepStrictEqual((yield* engine.inspect(fresh.runId)).attempts, []);
+          assert.strictEqual(yield* TxRef.get(worker.leased), 3);
+          assert.deepStrictEqual(yield* Ref.get(worker.reconciled), []);
+
+          // Once the stops are confirmed, each slot is released after its
+          // checkout is reconciled, and every Run gets its turn.
+          yield* Ref.set(worker.unstoppable, new Set());
+          for (const kept of [unread, unprepared]) {
+            const resumed = yield* waitFor(
+              engine,
+              kept.runId,
+              ({ run }) => run.state._tag === "Succeeded",
+            );
+            assert.deepStrictEqual(
+              resumed.attempts.map(({ salvage }) => Option.map(salvage, ({ _tag }) => _tag)),
+              [Option.some("Pushed"), Option.none()],
+            );
+          }
+          const delivered = yield* waitFor(
+            engine,
+            fresh.runId,
+            ({ run }) => run.state._tag === "Succeeded",
+          );
+          assert.lengthOf(delivered.attempts, 1);
+          const closed = yield* waitFor(engine, canceled.runId, ({ attempts }) =>
+            attempts.every(({ salvage }) => Option.isSome(salvage)),
+          );
+          assert.deepStrictEqual(
+            closed.attempts.map(({ outcome }) => Option.map(outcome, ({ _tag }) => _tag)),
+            [Option.some("Canceled")],
+          );
+          yield* Effect.repeat(TxRef.get(worker.leased), {
+            until: (count) => count === 0,
+            schedule: Schedule.spaced("10 millis"),
+          }).pipe(Effect.timeout("2 seconds"));
           yield* Scope.close(scope, Exit.void);
         }),
       ),

@@ -1,14 +1,14 @@
 import { AttemptId } from "@usine/core/attempt";
 import type { AttemptRecovery } from "@usine/core/attempt/salvage";
 import { Effect, Option, Ref, Result, Schema } from "effect";
-import type { StepExecutor } from "../step-executor.ts";
+import type { StepExecutor, WorkerLease } from "../step-executor.ts";
 import type { RunStore } from "../store/store.ts";
 
 /**
  * The parent task of `attemptId`, an open Attempt whose Run closes it without
- * reattaching it, could not be confirmed stopped. Its checkout stays on its
- * Worker, and the Run's next Attempt does not start, so neither overtakes a
- * task that may still write to the checkout.
+ * reattaching it, could not be confirmed stopped. Its checkout and the slot of
+ * its Worker stay kept, and the Run's next Attempt does not start, so neither
+ * a new Attempt nor the reconcile overtakes a task that may still run there.
  */
 class ParentStopUnconfirmedError extends Schema.TaggedError<ParentStopUnconfirmedError>(
   "@usine/engine/internal/ParentStopUnconfirmedError",
@@ -17,8 +17,11 @@ class ParentStopUnconfirmedError extends Schema.TaggedError<ParentStopUnconfirme
   cause: Schema.Defect(),
 }) {}
 
-const without = (ids: ReadonlySet<AttemptId>, attemptId: AttemptId): ReadonlySet<AttemptId> => {
-  const remaining = new Set(ids);
+const without = (
+  leases: ReadonlyMap<AttemptId, WorkerLease>,
+  attemptId: AttemptId,
+): ReadonlyMap<AttemptId, WorkerLease> => {
+  const remaining = new Map(leases);
   remaining.delete(attemptId);
   return remaining;
 };
@@ -26,24 +29,26 @@ const without = (ids: ReadonlySet<AttemptId>, attemptId: AttemptId): ReadonlySet
 /**
  * Reconciles the checkouts that earlier processes left on the Workers through
  * `StepExecutor.recover`, recording what each one preserved in the run tables.
- * The checkout of an open Attempt whose parent task is live stays on its
- * Worker for its Run, which still owns its recovery until an execution that
- * reattaches the Attempt has acquired it: `acquired` hands it to that
- * execution's executor. `reconcile` reconciles it, once its parent task is
- * confirmed stopped, when the Run closes the Attempt before that hand-off:
- * without reattaching it, after a reattachment that failed first, or on a
- * cancel (#180). `atStartup` returns the open Attempts whose checkout it
- * kept, for `RunDriver` to occupy their slots. `RunDriver` exposes both steps
- * to the engine.
+ * The checkout of an open Attempt whose parent task is live, or whose liveness
+ * cannot be read, stays on its Worker for its Run. Startup also occupies a
+ * slot of that Worker for the Attempt through `StepExecutor.occupy`, before
+ * any Run reserves one (#177). Both stay kept while the parent task may still
+ * run, so no new Attempt takes the slot, until an execution that reattaches
+ * the Attempt acquires the checkout: `acquired` hands both to that execution,
+ * whose Run releases the slot when the Attempt ends. `reconcile` gives them
+ * back when the Run closes the Attempt before that hand-off: without
+ * reattaching it, after a reattachment that failed first, or on a cancel
+ * (#180). It releases the slot only once the parent task is confirmed
+ * stopped. `RunDriver` exposes these steps to the engine.
  */
 export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
   store: RunStore["Service"],
   executor: StepExecutor["Service"],
 ) {
   // The open Attempts whose checkout startup left on their Worker for a
-  // reattachment. Each stays until an execution of its Run acquires the
-  // checkout or the Run reconciles it.
-  const kept = yield* Ref.make<ReadonlySet<AttemptId>>(new Set());
+  // reattachment, each with the slot it occupies there. Each stays until an
+  // execution of its Run acquires the checkout or the Run reconciles it.
+  const kept = yield* Ref.make<ReadonlyMap<AttemptId, WorkerLease>>(new Map());
 
   /** Reconciles `attempt`'s checkout; a failure is logged and the checkout stays on its Worker. */
   const recover = (attempt: AttemptRecovery) =>
@@ -66,9 +71,9 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
 
   /**
    * Keeps the checkout of an open Attempt whose parent task is live for its
-   * Run, and reconciles any other. One whose liveness cannot be read is kept
-   * too: its Run reads it again before it decides. Returns whether it kept
-   * the checkout.
+   * Run, with a slot of its Worker, and reconciles any other. One whose
+   * liveness cannot be read is kept too: its Run reads it again before it
+   * decides.
    */
   const recoverOpen = Effect.fn("CheckoutRecovery.recoverOpen")(function* (
     attempt: AttemptRecovery,
@@ -76,10 +81,7 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
     const fields = { attemptId: attempt.attemptId, worker: attempt.worker };
     yield* Effect.annotateCurrentSpan(fields);
     const live = yield* executor.isLive(attempt.attemptId).pipe(Effect.result);
-    if (Result.isSuccess(live) && !live.success) {
-      yield* recover(attempt);
-      return false;
-    }
+    if (Result.isSuccess(live) && !live.success) return yield* recover(attempt);
     if (Result.isFailure(live))
       yield* Effect.logWarning(
         "Could not read whether an open Attempt's parent task is live; its checkout stays for its Run to decide",
@@ -90,11 +92,27 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
         "Leaving the checkout of an open Attempt whose parent task is live for its Run to reattach",
         fields,
       );
-    yield* Ref.update(kept, (ids) => new Set(ids).add(attempt.attemptId));
-    return true;
+    // Recorded in the same uninterruptible step as the lease, so no slot is
+    // occupied unrecorded. Its release frees the slot once, since both the
+    // Run that reattaches the Attempt and `reconcile` may call it.
+    yield* executor.occupy(attempt.worker).pipe(
+      Effect.flatMap((lease) =>
+        Effect.cached(lease.release).pipe(
+          Effect.map((release) => ({ worker: lease.worker, release })),
+        ),
+      ),
+      Effect.flatMap((lease) =>
+        Ref.update(kept, (leases) => new Map(leases).set(attempt.attemptId, lease)),
+      ),
+      Effect.uninterruptible,
+    );
+    yield* Effect.logInfo(
+      "Occupied a slot on the Worker of an open Attempt kept for its Run to reattach",
+      fields,
+    );
   });
 
-  /** Reconciles every persisted Attempt on a configured Worker, and returns the open ones whose checkout it kept. */
+  /** Reconciles every persisted Attempt on a configured Worker, keeping the open ones `recoverOpen` keeps. */
   const atStartup = Effect.fn("CheckoutRecovery.atStartup")(function* () {
     const configured = new Set(yield* executor.workers);
     const candidates = yield* store.salvageCandidates;
@@ -111,23 +129,50 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
     }
     // Before Run recovery can admit a retry, publish and durably record any
     // work left by its predecessor. Failed recovery keeps the checkout on disk.
-    return yield* Effect.filter(reconcilable, (attempt) =>
-      attempt.open ? recoverOpen(attempt) : recover(attempt).pipe(Effect.as(false)),
+    yield* Effect.forEach(
+      reconcilable,
+      (attempt) => (attempt.open ? recoverOpen(attempt) : recover(attempt)),
+      { discard: true },
     );
   });
 
   /**
+   * The slot startup occupied for `attemptId`, for its Run to reattach the
+   * Attempt in; none when startup kept nothing for it. Until the execution
+   * acquires the checkout, the slot stays kept with it, and its `release`
+   * frees nothing: a reattachment that fails or is canceled before then
+   * holds the slot until `reconcile` confirms that the parent task stopped.
+   */
+  const reattachSlot = Effect.fn("CheckoutRecovery.reattachSlot")(function* (attemptId: AttemptId) {
+    const occupied = Option.fromUndefinedOr((yield* Ref.get(kept)).get(attemptId));
+    return Option.map(occupied, (lease): WorkerLease => ({
+      worker: lease.worker,
+      release: Ref.get(kept).pipe(
+        Effect.flatMap((leases) =>
+          leases.has(attemptId)
+            ? Effect.logInfo(
+                "The slot startup occupied stays kept with the checkout no execution acquired, until the Attempt's parent task is confirmed stopped",
+                { attemptId, worker: lease.worker },
+              )
+            : lease.release,
+        ),
+      ),
+    }));
+  });
+
+  /**
    * The execution of `attemptId` acquired its checkout: its executor salvages
-   * and releases a checkout startup kept from here. Does nothing for any other.
+   * and releases a checkout startup kept from here, and its Run releases the
+   * slot when the Attempt ends. Does nothing for any other.
    */
   const acquired = Effect.fn("CheckoutRecovery.acquired")(function* (attemptId: AttemptId) {
-    const handedOver = yield* Ref.modify(kept, (ids) => [
-      ids.has(attemptId),
-      without(ids, attemptId),
+    const handedOver = yield* Ref.modify(kept, (leases) => [
+      leases.has(attemptId),
+      without(leases, attemptId),
     ]);
     if (handedOver)
       yield* Effect.logInfo(
-        "The reattached Attempt's execution acquired the checkout startup kept; its executor releases it from here",
+        "The reattached Attempt's execution acquired the checkout startup kept; its executor releases the checkout from here, and its Run the slot once the Attempt ends",
         { attemptId },
       );
   });
@@ -146,7 +191,7 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
     const stopped = yield* executor.interrupt(attemptId).pipe(Effect.result);
     if (Result.isFailure(stopped)) {
       yield* Effect.logWarning(
-        "Could not confirm that the parent task of an Attempt its Run does not reattach stopped; its checkout stays, and the Run starts no next Attempt until the stop is confirmed",
+        "Could not confirm that the parent task of an Attempt its Run does not reattach stopped; its checkout and its Worker's slot stay, and the Run starts no next Attempt until the stop is confirmed",
         { attemptId, errorTag: stopped.failure._tag, message: stopped.failure.message },
       );
       return yield* new ParentStopUnconfirmedError({ attemptId, cause: stopped.failure });
@@ -188,7 +233,8 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
 
   const reconcile = Effect.fn("CheckoutRecovery.reconcile")(function* (attemptId: AttemptId) {
     yield* Effect.annotateCurrentSpan({ attemptId });
-    if (!(yield* Ref.get(kept)).has(attemptId)) {
+    const occupied = (yield* Ref.get(kept)).get(attemptId);
+    if (occupied === undefined) {
       yield* Effect.logDebug("No checkout startup kept for the Attempt awaits reconciliation", {
         attemptId,
       });
@@ -197,9 +243,18 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
     yield* recoverKept(attemptId);
     // Forgotten only once reconciled: when a cancel interrupts the Run's fiber
     // during the reconcile, the cancel reconciles the checkout again, and a
-    // Run whose parent task was not confirmed stopped tries again.
-    yield* Ref.update(kept, (ids) => without(ids, attemptId));
+    // Run whose parent task was not confirmed stopped tries again. Until the
+    // stop is confirmed, the parent task may still run on its Worker, so the
+    // slot it occupies stays taken (#177).
+    yield* Ref.update(kept, (leases) => without(leases, attemptId)).pipe(
+      Effect.andThen(occupied.release),
+      Effect.uninterruptible,
+    );
+    yield* Effect.logInfo(
+      "Released the slot startup occupied for an Attempt whose parent task is confirmed stopped",
+      { attemptId, worker: occupied.worker },
+    );
   });
 
-  return { atStartup, acquired, reconcile } as const;
+  return { atStartup, reattachSlot, acquired, reconcile } as const;
 });

@@ -122,8 +122,9 @@ export class StepExecutor extends Context.Service<
      * than it has slots, and takes no new one until enough of them end. At startup, before any
      * Run reserves, the engine occupies a slot for each open Attempt whose parent task may have
      * outlived the restart, so no new Attempt takes that slot while the Attempt's Run decides
-     * whether to reattach it (#177). The engine occupies only a Worker `workers` lists. The
-     * returned lease must be released when the Attempt ends or its Run does not reattach it.
+     * whether to reattach it (#177). The engine occupies only a Worker `workers` lists. It
+     * releases the returned lease when the reattached Attempt ends, or once `interrupt` confirms
+     * that the parent task of an Attempt its Run does not reattach stopped.
      */
     readonly occupy: (worker: WorkerName) => Effect.Effect<WorkerLease>;
     /**
