@@ -23,10 +23,27 @@ import {
   ToolFinished,
   ToolStarted,
 } from "@usine/core/agent/session";
-import { Context, Deferred, Effect, Fiber, Layer, Option, Ref, Schema, Stream } from "effect";
+import {
+  type Cause,
+  Context,
+  Deferred,
+  Duration,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Option,
+  Queue,
+  Ref,
+  Result,
+  Schema,
+  Scope,
+  Stream,
+} from "effect";
 import {
   AgentResultError,
   ClaudeChildBackend,
+  ClaudeLoginLock,
   ChildBackend,
   type ChildRequest,
   type RunningSession,
@@ -306,6 +323,81 @@ const apiRetryMessage = (retry: typeof ClaudeApiRetry.Type): string => {
   return `API request failed ${failure} (${retry.error}); retry ${retry.attempt} of ${retry.max_retries} in ${delay}`;
 };
 
+/**
+ * The text Claude Code ends a turn with when another Claude process holds the
+ * lock on the login it has to refresh, or exited while it held it.
+ */
+const LOGIN_CONTENDED = "Failed to refresh OAuth token: another Claude Code process";
+
+/**
+ * How long a child waits before each new launch after its Claude process lost
+ * the login refresh lock; Claude's error says to retry in a minute. When the
+ * last launch fails the same way, the parent receives the error (#453).
+ */
+const LOGIN_RETRY_DELAYS: ReadonlyArray<Duration.Duration> = [
+  Duration.seconds(15),
+  Duration.seconds(30),
+  Duration.seconds(60),
+];
+
+/**
+ * How long a launch holds its Worker's Claude login lock and waits for a first
+ * message that shows whether Claude got past the login. A launch that shows
+ * nothing in that time continues as a started session.
+ */
+const LOGIN_WINDOW = Duration.seconds(60);
+
+/** Messages that only arrive once an API request was sent with a usable login. */
+const ClaudeLoginEvidence = Schema.Union([
+  Schema.Struct({ type: Schema.Literals(["rate_limit_event", "stream_event"]) }),
+  Schema.Struct({
+    type: Schema.Literal("system"),
+    subtype: Schema.Literals(["api_retry", "thinking_tokens"]),
+  }),
+]);
+
+const mentionsLoginContention = (text: string): boolean => text.includes(LOGIN_CONTENDED);
+
+/** What a launch's messages so far show about the Worker's Claude login. */
+type LoginCheck = "waiting" | "loggedIn" | "contended";
+
+/**
+ * Reads one of a launch's first messages. `init` and the other session notices
+ * can come before the first API request, which is where Claude refreshes an
+ * expired login, so they decide nothing. A model answer, a rate-limit or
+ * thinking update, an API retry, or a result shows the login worked, except a
+ * result that relays the refresh lock error with no tokens spent: that launch
+ * failed before its task began. The synthetic answer that carries the same
+ * error waits for that result.
+ */
+const loginCheck = (message: Schema.Json, spentTokens: boolean): LoginCheck => {
+  if (Schema.is(ClaudeResultMessage)(message)) {
+    const reported = [
+      ...(message.result === undefined ? [] : [message.result]),
+      ...(message.errors ?? []),
+    ];
+    return !spentTokens && reported.some(mentionsLoginContention) ? "contended" : "loggedIn";
+  }
+  if (Schema.is(ClaudeContentMessage)(message) && message.type === "assistant") {
+    const contended = message.message.content.some(
+      (block) => Schema.is(ClaudeTextBlock)(block) && mentionsLoginContention(block.text),
+    );
+    return contended && !spentTokens ? "waiting" : "loggedIn";
+  }
+  return Schema.is(ClaudeLoginEvidence)(message) ? "loggedIn" : "waiting";
+};
+
+/** One launch of Claude Code for a child: its input, its process, and its output so far. */
+interface ClaudeLaunch {
+  readonly input: AsyncInput;
+  readonly query: ClaudeQuery;
+  /** The messages the login check read, in order; the rest follow in `output`. */
+  readonly read: ReadonlyArray<Schema.Json>;
+  readonly output: Queue.Dequeue<Schema.Json, SessionOperationError | Cause.Done>;
+  /** What `read` showed about the login: undecided when the output ended, failed, or showed nothing in time. */
+  readonly login: Exclude<LoginCheck, "waiting"> | "undecided";
+}
+
 const sessionEventsFrom = (
   message: Schema.Json,
   session: ChildSession,
@@ -345,50 +437,74 @@ const sessionEventsFrom = (
 
 const makeClaudeChild = Effect.gen(function* () {
   const sdk = yield* ClaudeSdk;
+  const logins = yield* ClaudeLoginLock;
 
-  const launch: ChildBackend["Service"]["launch"] = Effect.fn("ClaudeChildBackend.launch")(
-    function* (request) {
-      yield* Effect.annotateCurrentSpan({
-        agent: request.session.agent,
-        effort: request.session.brain.effort,
-        harness: request.session.brain.harness,
-        model: request.session.brain.model,
-        parentSessionId: request.session.parentId,
-        sessionId: request.session.id,
-      });
-      yield* Effect.logInfo("Launching Claude child session");
-      const input = new AsyncInput();
-      const context = yield* Effect.context<never>();
-      const scope = yield* Effect.scope;
-      let boundary = Effect.void;
-      const pauseAtBoundary: HookCallback = async (_input, _id, options) => {
-        await Effect.runPromiseWith(context)(
-          Effect.acquireUseRelease(
-            Effect.forkIn(
-              Effect.suspend(() => boundary),
-              scope,
-            ),
-            Fiber.join,
-            Fiber.interrupt,
-          ),
-          { signal: options.signal },
-        );
-        return {};
-      };
-      const query = sdk.open(input, {
-        ...optionsFor(request, (text) => {
-          Effect.runForkWith(context)(
-            Effect.logDebug("Claude child stderr", {
-              sessionId: request.session.id,
-              text: text.trimEnd(),
+  /**
+   * Takes the request's Worker login lock in a fiber of the current scope and
+   * returns once it holds it, with the effect that releases it. The lock is
+   * also released after `LOGIN_WINDOW`, so a launch that hangs does not stop
+   * every other Claude launch and preflight on the Worker.
+   */
+  const holdLogin = Effect.fn("ClaudeChildBackend.holdLogin")(function* (request: ChildRequest) {
+    const held = yield* Deferred.make<void>();
+    const released = yield* Deferred.make<void>();
+    yield* Effect.forkScoped(
+      logins.withLock(request.worker)(
+        Deferred.succeed(held, undefined).pipe(
+          Effect.andThen(Deferred.await(released)),
+          Effect.timeoutOption(LOGIN_WINDOW),
+          Effect.flatMap(
+            Option.match({
+              onSome: () => Effect.void,
+              onNone: () =>
+                Effect.logWarning(
+                  "Claude child showed no sign of its login in time; releasing the Worker's Claude login lock",
+                  { sessionId: request.session.id, worker: request.worker },
+                ),
             }),
-          );
-        }),
-        hooks: {
-          PreToolUse: [{ hooks: [pauseAtBoundary], timeout: 86_400 }],
-          PostToolUse: [{ hooks: [pauseAtBoundary], timeout: 86_400 }],
-        },
-      });
+          ),
+        ),
+      ),
+    );
+    yield* Deferred.await(held);
+    yield* Effect.logDebug("Holding the Worker's Claude login lock to launch the child", {
+      sessionId: request.session.id,
+      worker: request.worker,
+    });
+    return Deferred.succeed(released, undefined).pipe(Effect.asVoid);
+  });
+
+  /** Reads `output` into `read` until a message settles the login check. */
+  const checkLogin = Effect.fn("ClaudeChildBackend.checkLogin")(function* (
+    output: Queue.Dequeue<Schema.Json, SessionOperationError | Cause.Done>,
+    read: Array<Schema.Json>,
+  ) {
+    const tokens = claudeTokenMeter();
+    let spentTokens = false;
+    for (;;) {
+      const next = yield* Effect.result(Queue.take(output));
+      // The session reports a closed or failed output; the check has nothing to add.
+      if (Result.isFailure(next)) return "undecided" as const;
+      read.push(next.success);
+      spentTokens ||= Option.exists(tokens(next.success), ({ totalTokens }) => totalTokens > 0);
+      const check = loginCheck(next.success, spentTokens);
+      if (check !== "waiting") return check;
+    }
+  });
+
+  /**
+   * Launches Claude Code once for `request` and sends it the task, holding the
+   * Worker's login lock until its first messages show whether Claude got past
+   * the login. Everything the launch opens belongs to the current scope.
+   */
+  const launchOnce = Effect.fn("ClaudeChildBackend.launchOnce")(function* (
+    request: ChildRequest,
+    options: ClaudeQueryOptions,
+  ) {
+    const release = yield* holdLogin(request);
+    return yield* Effect.gen(function* () {
+      const input = new AsyncInput();
+      const query = sdk.open(input, options);
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => {
           input.end();
@@ -407,6 +523,126 @@ const makeClaudeChild = Effect.gen(function* () {
           message: `Claude does not expose model ${request.session.brain.model}`,
         });
       }
+      input.offer(userMessage(request.prompt));
+      const output = yield* Queue.make<Schema.Json, SessionOperationError | Cause.Done>();
+      yield* Effect.forkScoped(
+        Stream.fromAsyncIterable(query, (cause) =>
+          operationError("stream", request, "Claude output stream failed", cause),
+        ).pipe(Stream.runIntoQueue(output)),
+      );
+      const read: Array<Schema.Json> = [];
+      const login = Option.getOrElse(
+        yield* checkLogin(output, read).pipe(Effect.timeoutOption(LOGIN_WINDOW)),
+        () => "undecided" as const,
+      );
+      yield* Effect.logDebug("Claude child's first messages settled its login check", {
+        sessionId: request.session.id,
+        worker: request.worker,
+        login,
+        messages: read.length,
+      });
+      return { input, query, read, output, login } satisfies ClaudeLaunch;
+    }).pipe(Effect.ensuring(release));
+  });
+
+  /**
+   * Launches Claude Code for `request`, and launches it again after each delay
+   * in `LOGIN_RETRY_DELAYS` while it fails on the Worker's login refresh lock.
+   * Each launch has its own scope inside `scope`; a failed one is closed before
+   * the next, so its process and its messages leave no trace on the session.
+   */
+  const launchWithRetries = Effect.fn("ClaudeChildBackend.launchWithRetries")(function* (
+    request: ChildRequest,
+    options: ClaudeQueryOptions,
+    scope: Scope.Scope,
+  ) {
+    for (let retry = 0; ; retry += 1) {
+      const launchScope = yield* Scope.fork(scope);
+      const opened = yield* launchOnce(request, options).pipe(Scope.provide(launchScope));
+      if (opened.login !== "contended") {
+        if (opened.login === "undecided")
+          yield* Effect.logInfo("Claude child started without showing whether its login worked", {
+            sessionId: request.session.id,
+            worker: request.worker,
+          });
+        return opened;
+      }
+      const delay = LOGIN_RETRY_DELAYS[retry];
+      if (delay === undefined) {
+        yield* Effect.logWarning(
+          "Claude child still could not refresh the Worker's Claude login; returning the error to the parent",
+          {
+            sessionId: request.session.id,
+            parentSessionId: request.session.parentId,
+            worker: request.worker,
+            retries: retry,
+          },
+        );
+        return opened;
+      }
+      yield* Scope.close(launchScope, Exit.void);
+      yield* Effect.logInfo(
+        "Claude child could not refresh the Worker's Claude login; launching it again",
+        {
+          sessionId: request.session.id,
+          parentSessionId: request.session.parentId,
+          worker: request.worker,
+          retry: retry + 1,
+          maxRetries: LOGIN_RETRY_DELAYS.length,
+          delay: Duration.format(delay),
+        },
+      );
+      yield* Effect.sleep(delay);
+    }
+  });
+
+  const launch: ChildBackend["Service"]["launch"] = Effect.fn("ClaudeChildBackend.launch")(
+    function* (request) {
+      yield* Effect.annotateCurrentSpan({
+        agent: request.session.agent,
+        effort: request.session.brain.effort,
+        harness: request.session.brain.harness,
+        model: request.session.brain.model,
+        parentSessionId: request.session.parentId,
+        sessionId: request.session.id,
+        worker: request.worker,
+      });
+      yield* Effect.logInfo("Launching Claude child session");
+      const context = yield* Effect.context<never>();
+      const scope = yield* Effect.scope;
+      let boundary = Effect.void;
+      const pauseAtBoundary: HookCallback = async (_input, _id, options) => {
+        await Effect.runPromiseWith(context)(
+          Effect.acquireUseRelease(
+            Effect.forkIn(
+              Effect.suspend(() => boundary),
+              scope,
+            ),
+            Fiber.join,
+            Fiber.interrupt,
+          ),
+          { signal: options.signal },
+        );
+        return {};
+      };
+      const { input, query, read, output } = yield* launchWithRetries(
+        request,
+        {
+          ...optionsFor(request, (text) => {
+            Effect.runForkWith(context)(
+              Effect.logDebug("Claude child stderr", {
+                sessionId: request.session.id,
+                text: text.trimEnd(),
+              }),
+            );
+          }),
+          hooks: {
+            PreToolUse: [{ hooks: [pauseAtBoundary], timeout: 86_400 }],
+            PostToolUse: [{ hooks: [pauseAtBoundary], timeout: 86_400 }],
+          },
+        },
+        scope,
+      );
 
       const channel = yield* sessionChannel({
         label: "Claude child session",
@@ -440,7 +676,6 @@ const makeClaudeChild = Effect.gen(function* () {
       // API retries Claude reported for the current turn, and whether the last one is unanswered.
       let retries = 0;
       let retrying = false;
-      input.offer(userMessage(request.prompt));
 
       const reportRetry = Effect.fn("ClaudeChildBackend.reportRetry")(function* (
         retry: typeof ClaudeApiRetry.Type,
@@ -479,9 +714,7 @@ const makeClaudeChild = Effect.gen(function* () {
         );
       });
 
-      const consume = Stream.fromAsyncIterable(query, (cause) =>
-        operationError("stream", request, "Claude output stream failed", cause),
-      ).pipe(
+      const consume = Stream.concat(Stream.fromIterable(read), Stream.fromQueue(output)).pipe(
         Stream.runForEach((message) =>
           Effect.gen(function* () {
             const retry = decodeApiRetry(message);

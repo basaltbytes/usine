@@ -164,7 +164,10 @@ export const subagentTool = (services: ExtensionServices) => {
       sessionId: session.id,
       taskExcerpt: excerpt,
     });
-    const child = yield* services.backend.launch(childRequest);
+    // The child's own logs, including its fibers', name the Attempt: this tool runs outside it.
+    const child = yield* services.backend
+      .launch(childRequest)
+      .pipe(Effect.annotateLogs({ attemptId: spec.attemptId, worker: request.worker }));
     yield* register(hub, child);
     yield* Effect.addFinalizer((exit) =>
       Exit.isFailure(exit)
