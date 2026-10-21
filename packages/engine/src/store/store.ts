@@ -42,6 +42,7 @@ import { plainRetry, type RetryRequest } from "../engine/retry.ts";
 import { StepExecution } from "../step-executor.ts";
 import { TranscriptEntry, TranscriptQuery } from "../transcript.ts";
 import { attemptWindowQueries } from "./attempt-windows.ts";
+import { leftoverQueries } from "./leftovers.ts";
 import { persistence, submissionFromRow } from "./codec.ts";
 import { queriesFor, type QueuedEvents } from "./queries.ts";
 import {
@@ -561,9 +562,14 @@ const makeRunStore = Effect.gen(function* () {
     yield* Effect.annotateCurrentSpan({ worker });
     const discardedAt = yield* DateTime.now;
     return yield* database.transaction((transaction) =>
-      queriesFor(transaction).discardLeftovers(worker, discardedAt),
+      leftoverQueries(transaction).discardLeftovers(worker, discardedAt),
     );
   }, persistence("discard Attempt leftovers"));
+
+  const openAttempts = Effect.fn("RunStore.openAttempts")(function* (worker: WorkerName) {
+    yield* Effect.annotateCurrentSpan({ worker });
+    return yield* leftoverQueries(database).openAttempts(worker);
+  }, persistence("count open Attempts"));
 
   const finishAttempt = Effect.fn("RunStore.finishAttempt")(function* (
     attempt: Attempt,
@@ -935,6 +941,7 @@ const makeRunStore = Effect.gen(function* () {
     recordComments,
     attemptWindows,
     discardLeftovers,
+    openAttempts,
     submission: (runId: RunId) =>
       queries.eventRouteByRun(runId).pipe(
         Effect.flatMap((routes) =>
@@ -1055,6 +1062,8 @@ export class RunStore extends Context.Service<
     ) => Effect.Effect<Option.Option<AttemptRecovery>, RunStoreError>;
     /** Marks every Attempt recorded on `worker` whose leftovers are not discarded yet, so reconciliation skips them; returns how many it marked. */
     readonly discardLeftovers: (worker: WorkerName) => Effect.Effect<number, RunStoreError>;
+    /** How many Attempts recorded on `worker` have no outcome yet, leaving out those whose leftovers were discarded. */
+    readonly openAttempts: (worker: WorkerName) => Effect.Effect<number, RunStoreError>;
     /**
      * Resolves attention for the current failed Attempt atomically; stale requests
      * are rejected. True when this ended the hold of the Attempt's question or

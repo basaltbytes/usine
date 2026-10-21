@@ -13,6 +13,7 @@ import {
 import { TranscriptAllQuery, TranscriptEntry, TranscriptQuery } from "../transcript.ts";
 import type { RunStoreError } from "../engine/error.ts";
 import { persistence } from "../store/codec.ts";
+import { leftoverQueries } from "../store/leftovers.ts";
 import { queriesFor } from "../store/queries.ts";
 
 const makeRunReader = Effect.gen(function* () {
@@ -62,7 +63,7 @@ const makeRunReader = Effect.gen(function* () {
     queries.transcript(query).pipe(persistence("read Attempt transcript")),
   );
   const attemptsByWorker = Effect.fn("RunReader.attemptsByWorker")(() =>
-    queries.attemptCountsByWorker().pipe(persistence("count Attempts by Worker")),
+    leftoverQueries(database).attemptCountsByWorker().pipe(persistence("count Attempts by Worker")),
   );
   const sightings = Effect.fn("RunReader.sightings")((itemKeys: ReadonlyArray<ItemKey>) =>
     queries.loopItems.sightings(itemKeys).pipe(persistence("read Loop sightings")),
@@ -111,7 +112,10 @@ export class RunReader extends Context.Service<
     readonly transcript: (
       query: TranscriptQuery,
     ) => Effect.Effect<ReadonlyArray<TranscriptEntry>, RunStoreError>;
-    /** The Attempts startup reconciliation visits, counted per Worker and ordered by Worker name; Workers without any are left out. */
+    /**
+     * The Attempts startup reconciliation visits, counted per Worker and ordered by Worker name,
+     * with how many of them are still open; Workers without any are left out.
+     */
     readonly attemptsByWorker: () => Effect.Effect<ReadonlyArray<WorkerAttempts>, RunStoreError>;
     /**
      * What each Loop last saw of the supplied Items, one entry per Loop that

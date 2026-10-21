@@ -40,6 +40,7 @@ const errorStatuses = {
   RunOperationRejectedError: 409,
   RunRetryBlockedError: 409,
   RunInterventionRejectedError: 409,
+  LeftoversDiscardRejectedError: 409,
   RosterAgentNotFoundError: 404,
   LoopNotFoundError: 404,
   CycleBudgetResetRejectedError: 409,
