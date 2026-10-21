@@ -90,6 +90,10 @@ _Avoid_: stage, node, activity (a workflow-engine term, not the domain concept)
 One try of a step on a worker. A retry is a new attempt under the same step, never a new run. Only typed infra errors are retried automatically, up to a cap. An agent failure requires operator action.
 _Avoid_: retry (the act, not the record, which is an attempt)
 
+**Attempt window**:
+When an attempt was at work on its run's item: from its start until its outcome was recorded, and open while it runs. Every attempt on a local or SSH worker writes to GitHub as the same App, so the run reader gives a write on the item to the attempt whose window holds it, and the harvest leaves out a signed comment posted in the window of another attempt of the same agent. A write that two windows hold belongs to neither.
+_Avoid_: session (the parent's or a child's harness conversation), lease (a worker slot reservation)
+
 **Reattach**:
 The orchestrator continuing an open attempt after a restart when the durable task of the attempt's Pi parent is still live, with the same identity, number, and worktree, and without using a retry. Applies to every worker. A reattachment whose worktree is gone fails, and the next attempt starts fresh.
 _Avoid_: retry (starts a new attempt), takeover (operator intervention in a live session)
