@@ -1,13 +1,7 @@
 import { DotsThreeIcon } from "@phosphor-icons/react";
 import { Link } from "@tanstack/react-router";
-import { AttemptTask } from "@usine/core/attempt";
 import type { RunId } from "@usine/core/run";
-import {
-  EditAndRetry as Amendment,
-  type RunView,
-  type TaskItemView,
-  type TaskView,
-} from "@usine/orchestrator/operator";
+import type { RunView, TaskItemView, TaskView } from "@usine/orchestrator/operator";
 import { Option } from "effect";
 import { type ReactNode, useState } from "react";
 import { StateMark } from "@/components/status-badge";
@@ -47,10 +41,16 @@ import {
   runActionLabel,
   runActionProgress,
   runAgainBlocked,
+  runAgainProgress,
   timestampLabel,
 } from "../operator-copy.ts";
 import { projectParams } from "../overview.ts";
-import { type RunActionRequest, useRunAction, useRunAgain } from "../run-actions.ts";
+import {
+  type RunActionRequest,
+  unchangedRunAgain,
+  useRunAction,
+  useRunAgain,
+} from "../run-actions.ts";
 import { EditAndRetry, type EditIntent, editApplies } from "../run-intervention/edit-and-retry.tsx";
 import { pullRequestNumber } from "../run-page/item.ts";
 import { ApprovalLine } from "../run-page/approval.tsx";
@@ -149,7 +149,7 @@ const RowActions = ({
   readonly status: (message: ReactNode) => void;
 }) => {
   const action = useRunAction();
-  const again = useRunAgain(run.id);
+  const again = useRunAgain();
   const [confirmingCancel, setConfirmingCancel] = useState(false);
   if (action.isPending && action.variables !== undefined)
     return (
@@ -160,7 +160,7 @@ const RowActions = ({
   if (again.isPending)
     return (
       <span role="status" className="text-xs text-muted-foreground">
-        Opening a run…
+        {runAgainProgress}
       </span>
     );
   const act = (request: RunActionRequest) =>
@@ -172,7 +172,7 @@ const RowActions = ({
       },
     );
   const runAgain = () =>
-    again.mutate(new Amendment({ task: AttemptTask.make(run.task), agent: run.agent }), {
+    again.mutate(unchangedRunAgain(run), {
       onSuccess: (result) => {
         if (result._tag === "Claimed") {
           status(null);
@@ -310,7 +310,7 @@ const RunRow = ({
               )}
             </p>
             <FailureLine run={run} />
-            {run.runAgain !== null && <RunAgainLine run={run} className="text-xs" />}
+            {run.runAgain !== null && <RunAgainLine run={run} source="link" className="text-xs" />}
             {run.approval !== null && <ApprovalLine approval={run.approval} className="text-xs" />}
             <FoldedFacts run={run} />
             {status !== null && (

@@ -29,6 +29,7 @@ import {
 import { cn } from "@/lib/utils";
 import { elapsedLabel, itemKindLabel, openedTitle, runActionLabel } from "../operator-copy.ts";
 import type { RunActions } from "../run-actions.ts";
+import type { CardRunAgain } from "./run-again.ts";
 
 /** Where a card can move: the other writable lanes, unavailable while a move is saving. */
 export interface CardMoves {
@@ -70,26 +71,32 @@ const RunHistory = ({
 );
 
 /** The card's actions, listing only those that apply now: GitHub links, the current Run's drawer
- * and operator actions, earlier Runs, and lane moves. */
+ * and operator actions, Run again on a latest Run that ended, earlier Runs, and lane moves. */
 export const CardMenu = ({
   item,
   run,
   moves,
   openRun,
   action,
+  again,
   className,
 }: {
   readonly item: BoardTaskView;
   /** The Run the card shows, or null when it shows none. */
   readonly run: RunView | null;
   readonly moves: CardMoves;
+  /** Opens a Run's drawer. */
   readonly openRun: (runId: RunId) => void;
   readonly action: RunActions;
+  /** Run again for the card's Task, which opens the new Run's drawer itself. */
+  readonly again: CardRunAgain;
   readonly className?: string;
 }) => {
   const [confirmingCancel, setConfirmingCancel] = useState(false);
   const subject = `${itemKindLabel(item.kind).toLowerCase()} #${item.number}`;
   const past = item.runs.filter(({ id }) => id !== run?.id);
+  // A Task whose latest Run succeeded or was canceled shows no Run line, so Run again names the Loop.
+  const ended = item.run?.canRunAgain === true ? item.run : null;
   const groups: Array<{ readonly key: string; readonly content: ReactNode }> = [
     {
       key: "links",
@@ -120,26 +127,37 @@ export const CardMenu = ({
       ),
     });
   // The card shows a sent action's progress; its menu offers no action until the answer arrives.
-  if (run !== null && !action.isPending && (run.canApprove || run.canRetry || run.canCancel))
+  const sending = action.isPending || again.isPending;
+  const offered =
+    ended !== null || (run !== null && (run.canApprove || run.canRetry || run.canCancel));
+  if (!sending && offered)
     groups.push({
       key: "actions",
       content: (
         <>
-          {run.canApprove && (
+          {run?.canApprove && (
             <DropdownMenuItem
               onClick={() => action.mutate({ runId: run.id, request: { action: "approve" } })}
             >
               {runActionLabel.approve}
             </DropdownMenuItem>
           )}
-          {run.canRetry && (
+          {run?.canRetry && (
             <DropdownMenuItem
               onClick={() => action.mutate({ runId: run.id, request: { action: "retry" } })}
             >
               {runActionLabel.retry}
             </DropdownMenuItem>
           )}
-          {run.canCancel && (
+          {ended !== null && (
+            <DropdownMenuItem onClick={() => again.send(ended)}>
+              {runActionLabel.runAgain}
+              <span className="ml-auto truncate pl-4 text-xs text-muted-foreground">
+                {ended.loop}
+              </span>
+            </DropdownMenuItem>
+          )}
+          {run?.canCancel && (
             <DropdownMenuItem variant="destructive" onClick={() => setConfirmingCancel(true)}>
               {runActionLabel.cancel}
             </DropdownMenuItem>

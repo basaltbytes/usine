@@ -59,7 +59,7 @@ export const EventDocument = ({
               <p className="mt-2 text-md">
                 Opened by {detail.run.loop} on {detail.run.repository}
               </p>
-              <RunAgainLine run={detail.run} className="mt-2 block text-sm" />
+              <RunAgainLine run={detail.run} source="link" className="mt-2 block text-sm" />
               <ApprovalLine approval={detail.run.approval} className="mt-2 block text-sm" />
             </>
           ),
@@ -96,7 +96,7 @@ export const EventDocument = ({
                   ),
                 })}
               </dl>
-              <RunAgainLine run={detail.run} className="block text-sm" />
+              <RunAgainLine run={detail.run} source="link" className="block text-sm" />
               <ApprovalLine approval={detail.run.approval} className="block text-sm" />
               {Option.match(event.body, {
                 onNone: () => null,

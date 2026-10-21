@@ -1,17 +1,16 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { AttemptTask } from "@usine/core/attempt";
 import type { LoopName } from "@usine/core/loop";
-import {
-  type CycleBudgetUsedUpView,
-  EditAndRetry,
-  type RunView,
-  type StalledItemView,
-} from "@usine/orchestrator/operator";
+import type { CycleBudgetUsedUpView, RunView, StalledItemView } from "@usine/orchestrator/operator";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { api } from "../api.ts";
 import { runActionLabel, runActionProgress, runAgainBlocked } from "../operator-copy.ts";
-import { type RunActionRequest, useRunAction, useRunAgain } from "../run-actions.ts";
+import {
+  type RunActionRequest,
+  unchangedRunAgain,
+  useRunAction,
+  useRunAgain,
+} from "../run-actions.ts";
 
 /** How the action sits on its screen: a quiet button at the end of a desk row, or an outline
  * button under the reason on a Board card. */
@@ -103,7 +102,7 @@ const RunAgainAction = ({
   readonly appearance: StallActionAppearance;
   readonly run: RunView;
 }) => {
-  const again = useRunAgain(run.id);
+  const again = useRunAgain();
   const blocked = again.data?._tag === "CycleBlocked";
   return (
     <ActionButton
@@ -111,9 +110,7 @@ const RunAgainAction = ({
       label={again.isPending ? "Opening…" : runActionLabel.runAgain}
       disabled={again.isPending}
       error={blocked ? runAgainBlocked : (again.error?.message ?? null)}
-      onClick={() =>
-        again.mutate(new EditAndRetry({ task: AttemptTask.make(run.task), agent: run.agent }))
-      }
+      onClick={() => again.mutate(unchangedRunAgain(run))}
     />
   );
 };
