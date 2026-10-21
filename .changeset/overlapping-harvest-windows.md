@@ -4,7 +4,7 @@
 "@usine/executor": minor
 ---
 
-`harvestFacts` and `harvestPostedComments` leave out a comment or review posted while another Attempt of the same Agent was open on the Run's Item. Two Loops' Runs of one Agent on one pull request write as one bot login and sign alike, so such a comment could be either Attempt's, and neither records it. Each one left out gets an info log line that names the comment and both Attempts, and the harvest's summary line counts them as `ambiguous`.
+`harvestFacts` and `harvestPostedComments` leave out a comment or review posted while another Attempt of the same Agent was open on the Run's Item. Two Loops' Runs of one Agent on one pull request write as one bot login and sign alike, so such a comment could be either Attempt's, and neither records it. Each one left out gets an info log line that names the comment and both Attempts, and the harvest's summary line counts them as `ambiguous`. A comment counts from its creation and a review from its submission, so a comment the bot login posted before the Worker prepared the checkout and edited since is no longer recorded; the summary line counts those as `edited`.
 
 `@usine/core`: `@usine/core/attempt` exports `AttemptWindow`, the time an Attempt was at work on its Item according to its record, with `windowOf`, `windowHolds`, and `windowsOverlap`. The Run reader and the harvest both apply this rule. `HarvestSpec` has `overlapping`, the windows of the Agent's other Attempts that overlap this Attempt on the Item. `AttemptChannel.Sink` and `RecoverySink` have `overlapping`, which reads those windows.
 

@@ -265,9 +265,10 @@ const credentialLogin = Effect.fn("StepResult.credentialLogin")(function* <E>(
  * The comments and reviews the Attempt posted on its Run's Item: the Item's
  * conversation comments and, on a pull request, its submitted reviews and
  * their diff comments, written by the RunSpec's bot login, or else by the
- * login GitHub reports for the Attempt's credential, created or updated since
- * the Worker prepared the checkout, ending with the Attempt's Agent's
- * signature, and posted inside none of the `overlapping` windows.
+ * login GitHub reports for the Attempt's credential, posted since the Worker
+ * prepared the checkout, ending with the Attempt's Agent's signature, and
+ * posted inside none of the `overlapping` windows. A comment is posted when it
+ * is created, even when it is edited later, and a review when it is submitted.
  */
 const harvestComments = Effect.fn("StepResult.harvestComments")(function* <E>(
   spec: HarvestSpec,
@@ -338,18 +339,19 @@ const harvestComments = Effect.fn("StepResult.harvestComments")(function* <E>(
     ],
     { concurrency: "unbounded" },
   );
-  const written = (user: typeof Author.Type, at: DateTime.Utc) =>
-    user !== null && user.login === login && DateTime.toEpochMillis(at) >= since;
+  const byLogin = (user: typeof Author.Type) => user !== null && user.login === login;
+  const sincePrepared = (at: DateTime.Utc) => DateTime.toEpochMillis(at) >= since;
   // A pending review and its comments are a draft only their author sees.
   const pending = new Set(
     reviews.flat().flatMap(({ id, state }) => (state === "PENDING" ? [id] : [])),
   );
-  // What the login wrote since preparation, each with its body and the time
+  // What GitHub lists that the login wrote, each with its body and the time
   // it was posted: a comment's creation, even when edited later, or a
-  // review's submission.
-  const candidates = [
-    ...conversation.flat().flatMap(({ url, user, body, createdAt, updatedAt }) =>
-      written(user, updatedAt)
+  // review's submission. GitHub lists every review, so only those submitted
+  // since preparation are kept.
+  const written = [
+    ...conversation.flat().flatMap(({ url, user, body, createdAt }) =>
+      byLogin(user)
         ? [
             {
               body,
@@ -363,7 +365,8 @@ const harvestComments = Effect.fn("StepResult.harvestComments")(function* <E>(
       state !== "PENDING" &&
       submittedAt !== undefined &&
       submittedAt !== null &&
-      written(user, submittedAt)
+      byLogin(user) &&
+      sincePrepared(submittedAt)
         ? [
             {
               body,
@@ -373,8 +376,8 @@ const harvestComments = Effect.fn("StepResult.harvestComments")(function* <E>(
           ]
         : [],
     ),
-    ...diffComments.flat().flatMap(({ url, user, body, createdAt, updatedAt, reviewId }) =>
-      (reviewId === null || !pending.has(reviewId)) && written(user, updatedAt)
+    ...diffComments.flat().flatMap(({ url, user, body, createdAt, reviewId }) =>
+      (reviewId === null || !pending.has(reviewId)) && byLogin(user)
         ? [
             {
               body,
@@ -385,6 +388,12 @@ const harvestComments = Effect.fn("StepResult.harvestComments")(function* <E>(
         : [],
     ),
   ];
+  // `since` lists the comments updated since preparation, so it also lists
+  // one the login posted before then and edited since. Only what the login
+  // posted inside the Attempt's own window can be the Attempt's (#429): that
+  // comment was posted before the window opened, and the edit could be any
+  // Attempt's, so no Attempt records it.
+  const candidates = written.filter(({ at }) => sincePrepared(at));
   // All Attempts that write as one bot login share it, such as two Loops' Runs
   // on one pull request, so the login alone does not tell their comments apart.
   // The Attempt prompt asks the Agent to end each comment and review with its
@@ -431,6 +440,8 @@ const harvestComments = Effect.fn("StepResult.harvestComments")(function* <E>(
     // Written by the login since preparation without the Agent's signature:
     // another Agent's, or one this Agent left unsigned.
     unsigned: candidates.length - signed.length,
+    // Posted by the login before preparation and edited since: not posted by this Attempt.
+    edited: written.length - candidates.length,
     // Signed, but posted while another Attempt of the Agent was open on the Item.
     ambiguous: signed.length - posted.length,
     overlapping: spec.overlapping.map(({ attemptId }) => attemptId),
@@ -473,7 +484,7 @@ const enrichment = <A, E extends { readonly _tag: string; readonly message: stri
  * remote branch or pull request ref points at was never pushed, so it has no
  * pull request and GitHub is not asked. Comments are those GitHub lists for
  * the bot login the Attempt writes as, the factory's App or a Worker's GitHub
- * integration, since the Worker prepared the checkout, that end with the
+ * integration, posted since the Worker prepared the checkout, that end with the
  * signature of the Attempt's Agent (`githubSignature`), leaving out those
  * posted while another Attempt of that Agent was open on the Item
  * (`spec.overlapping`), which could be either's. Both GitHub discoveries

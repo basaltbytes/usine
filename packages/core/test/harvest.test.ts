@@ -388,6 +388,11 @@ describe("harvesting an Attempt's facts", () => {
           updated_at: at,
         });
         const conversation = pages(
+          // Posted the day before, and edited at 12:07 while both were open.
+          {
+            ...posted("issuecomment-0", "2026-10-18T09:00:00Z"),
+            updated_at: "2026-10-19T12:07:00Z",
+          },
           posted("issuecomment-1", "2026-10-19T12:01:00Z"),
           posted("issuecomment-2", "2026-10-19T12:07:00Z"),
           posted("issuecomment-3", "2026-10-19T12:15:00Z"),
@@ -420,7 +425,9 @@ describe("harvesting an Attempt's facts", () => {
           overlapping: [window(fix, "2026-10-19T12:00:00.100Z", "2026-10-19T12:10:00.000Z")],
         });
 
-        // The 12:07 comment falls in both windows, so neither Attempt records it.
+        // The 12:07 comment falls in both windows, so neither Attempt records
+        // it. The comment edited at 12:07 was posted before either window
+        // opened, so neither records it either.
         assert.deepStrictEqual(comments(fixed.facts), [["issue-comment", url("issuecomment-1")]]);
         assert.deepStrictEqual(comments(documented.facts), [
           ["issue-comment", url("issuecomment-3")],

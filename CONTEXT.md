@@ -91,7 +91,7 @@ One try of a step on a worker. A retry is a new attempt under the same step, nev
 _Avoid_: retry (the act, not the record, which is an attempt)
 
 **Attempt window**:
-When an attempt was at work on its run's item: from its start until its outcome was recorded, and open while it runs. Every attempt on a local or SSH worker writes to GitHub as the same App, so the run reader gives a write on the item to the attempt whose window holds it, and the harvest leaves out a signed comment posted in the window of another attempt of the same agent. A write that two windows hold belongs to neither.
+When an attempt was at work on its run's item: from its start until its outcome was recorded, and open while it runs. Every attempt on a local or SSH worker writes to GitHub as the same App, so the run reader gives a write on the item to the attempt whose window holds it, and the harvest keeps a signed comment only when it was posted in its own attempt's window and in no other attempt's of the same agent. A write that two windows hold belongs to neither.
 _Avoid_: session (the parent's or a child's harness conversation), lease (a worker slot reservation)
 
 **Reattach**:
