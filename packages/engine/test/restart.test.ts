@@ -21,7 +21,11 @@ import {
   Scope,
   TxRef,
 } from "effect";
-import { ReconcileInterval, RunEngine } from "../src/engine/engine.ts";
+import {
+  LeftoversDiscardRejectedError,
+  ReconcileInterval,
+  RunEngine,
+} from "../src/engine/engine.ts";
 import { runIdFor, type Submission } from "../src/engine/submission.ts";
 import { RunReader } from "../src/run-reader/run-reader.ts";
 import { StepExecutor } from "../src/step-executor.ts";
@@ -851,11 +855,21 @@ describe("engine restart", () => {
           const engine = Context.get(context, RunEngine);
           const reader = Context.get(context, RunReader);
           assert.deepStrictEqual(
-            (yield* reader.attemptsByWorker()).map(({ worker, attempts }) => [worker, attempts]),
-            [["local", 1]],
+            (yield* reader.attemptsByWorker()).map(({ worker, attempts, running }) => [
+              worker,
+              attempts,
+              running,
+            ]),
+            [["local", 1, 0]],
           );
           // A configured Worker's Attempts stay reconciled at every start.
-          assert.strictEqual(yield* engine.discardLeftovers(WorkerName.make("usine-worker-1")), 0);
+          assert.deepStrictEqual(
+            yield* Effect.flip(engine.discardLeftovers(WorkerName.make("usine-worker-1"))),
+            new LeftoversDiscardRejectedError({
+              worker: WorkerName.make("usine-worker-1"),
+              running: 0,
+            }),
+          );
           assert.strictEqual(yield* engine.discardLeftovers(WorkerName.make("local")), 1);
           assert.deepStrictEqual(yield* reader.attemptsByWorker(), []);
           yield* Scope.close(firstScope, Exit.void);

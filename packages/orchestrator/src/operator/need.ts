@@ -91,15 +91,26 @@ export class ConfigFileNeed extends Schema.TaggedClass<ConfigFileNeed>(
  * Startup does not reconcile them, so any checkout they left stays on that
  * Worker. Declaring the Worker again reconciles them at the next `usine up`;
  * discarding their leftovers stops tracking them and leaves the Worker as it is.
+ * A Worker a reload removed keeps running the Attempts it started, and the
+ * engine refuses to discard its leftovers until `running` is 0.
  */
 export class UnconfiguredWorkerNeed extends Schema.TaggedClass<UnconfiguredWorkerNeed>(
   "@usine/orchestrator/UnconfiguredWorkerNeed",
-)("UnconfiguredWorkerNeed", {
-  id: Schema.String,
-  worker: WorkerName,
-  /** How many Attempts recorded on the Worker startup would otherwise reconcile. */
-  attempts: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
-}) {}
+)(
+  "UnconfiguredWorkerNeed",
+  Schema.Struct({
+    id: Schema.String,
+    worker: WorkerName,
+    /** How many Attempts recorded on the Worker startup would otherwise reconcile. */
+    attempts: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+    /** How many of `attempts` are still open: no outcome is recorded for them yet. */
+    running: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  }).check(
+    Schema.makeFilter(({ attempts, running }) => running <= attempts, {
+      message: "Expected no more open Attempts than Attempts",
+    }),
+  ),
+) {}
 
 /** An Item stopped opening Runs and requires an explicit reset of its shared cycle budget. */
 export class CycleBudgetNeed extends Schema.TaggedClass<CycleBudgetNeed>("CycleBudgetNeed")(

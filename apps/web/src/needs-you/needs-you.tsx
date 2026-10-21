@@ -14,12 +14,16 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useOpenRun } from "../open-run.ts";
 import { needCopy, runActionLabel, runActionProgress } from "../operator-copy.ts";
-import { useRunAction } from "../run-actions.ts";
+import { isRunOperationRejected, usePendingRunAction, useRunAction } from "../run-actions.ts";
 import { CycleBudgetAsk } from "./cycle-budget-ask.tsx";
 import { NeedItem } from "./need-item.tsx";
 import { UnconfiguredWorkerAsk } from "./unconfigured-worker-ask.tsx";
 
-/** A Run waiting for approval, approved or canceled from Needs you; the entry opens its drawer. */
+/**
+ * A Run waiting for approval, approved or canceled from Needs you; the entry opens its drawer.
+ * While any screen sends an action on the Run, its buttons are disabled and say what is sent.
+ * A refusal because the Run has moved on shows no error: the entry leaves with the refresh.
+ */
 const ApprovalAsk = ({
   need,
   compact,
@@ -30,25 +34,29 @@ const ApprovalAsk = ({
   const openRun = useOpenRun();
   const action = useRunAction();
   const [confirmingCancel, setConfirmingCancel] = useState(false);
-  const sent = action.isPending ? action.variables?.request.action : undefined;
+  const sent = usePendingRunAction(need.runId);
   return (
     <>
       <NeedItem
         copy={needCopy(need)}
         compact={compact}
         open={() => openRun(need.runId)}
-        error={action.error?.message ?? null}
+        error={
+          action.error === null || isRunOperationRejected(action.error)
+            ? null
+            : action.error.message
+        }
         actions={
           <>
             <Button
-              disabled={action.isPending}
+              disabled={sent !== undefined}
               onClick={() => action.mutate({ runId: need.runId, request: { action: "approve" } })}
             >
               {sent === "approve" ? runActionProgress.approve : runActionLabel.approve}
             </Button>
             <Button
               variant="ghost"
-              disabled={action.isPending}
+              disabled={sent !== undefined}
               onClick={() => setConfirmingCancel(true)}
             >
               {sent === "cancel" ? runActionProgress.cancel : runActionLabel.cancel}

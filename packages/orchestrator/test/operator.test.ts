@@ -84,6 +84,7 @@ import {
   TailTranscriptRequest,
 } from "../src/operator/transcript.ts";
 import { FailureView, LocalWorkerAccess, SshWorkerAccess } from "../src/operator/attempt.ts";
+import { UnconfiguredWorkerNeed } from "../src/operator/need.ts";
 import { Operator } from "../src/operator/operator.ts";
 import { ReadyOverview } from "../src/operator/overview.ts";
 import { ApprovalView, EditAndRetry, SessionIntervention } from "../src/operator/run.ts";
@@ -407,7 +408,9 @@ const testLayer = (
     revision: () => Ref.get(projectionRevision),
     transcript: readTranscript,
     attemptsByWorker: () =>
-      Effect.succeed([new WorkerAttempts({ worker: WorkerName.make("local"), attempts: 3 })]),
+      Effect.succeed([
+        new WorkerAttempts({ worker: WorkerName.make("local"), attempts: 3, running: 1 }),
+      ]),
     sightings: () => Effect.succeed([]),
   });
   const controls = Layer.succeed(LoopControl)({
@@ -1524,7 +1527,7 @@ describe("Operator", () => {
           Effect.map(operator.overview(current), ({ needsYou }) =>
             needsYou.filter((need) => need._tag === "UnconfiguredWorkerNeed"),
           );
-        // The reader reports three Attempts on `local`, the Worker `instance` declares.
+        // The reader reports three Attempts on `local`, the Worker `instance` declares, one of them open.
         assert.deepStrictEqual(yield* unconfiguredNeeds(instance), []);
         // A reload that changes only the Worker leaves the runtime store as it
         // was; the overview must not answer from its cache.
@@ -1541,10 +1544,11 @@ describe("Operator", () => {
             ],
           }),
         });
+        // The reload removed `local` while it still runs one Attempt.
         const needs = yield* unconfiguredNeeds(switched);
         assert.deepStrictEqual(
-          needs.map(({ id, worker, attempts }) => [id, worker, attempts]),
-          [["unconfigured-worker:local", "local", 3]],
+          needs.map(({ id, worker, attempts, running }) => [id, worker, attempts, running]),
+          [["unconfigured-worker:local", "local", 3, 1]],
         );
         const encoded = Schema.encodeUnknownSync(ReadyOverview)(
           new ReadyOverview({ projects: [], loops: [], needsYou: needs }),
@@ -1553,6 +1557,19 @@ describe("Operator", () => {
       }).pipe(Effect.provide(testLayer(approved, moved, reads, revision)));
     }),
   );
+
+  it("lists a Worker whose every Attempt still runs, and refuses more open Attempts than Attempts", () => {
+    const need = (running: number) =>
+      new UnconfiguredWorkerNeed({
+        id: "unconfigured-worker:local",
+        worker: WorkerName.make("local"),
+        attempts: 1,
+        running,
+      });
+    // A removed Worker's only Attempt still runs: the entry says so rather than failing the overview.
+    assert.doesNotThrow(() => need(1));
+    assert.throws(() => need(2));
+  });
 
   it("shows an Agent's blocker to the operator as its own failure kind", () => {
     const encoded = Schema.encodeUnknownSync(FailureView)(

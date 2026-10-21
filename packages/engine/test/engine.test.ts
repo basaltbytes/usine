@@ -23,6 +23,7 @@ import { RunDatabase, type RunDatabaseClient } from "../src/database/database.ts
 import { localSqliteLayer } from "../src/database/local-sqlite.ts";
 import {
   layerWithDatabase,
+  LeftoversDiscardRejectedError,
   ReconcileInterval,
   RetryRequest,
   RunEngine,
@@ -683,6 +684,39 @@ describe("durable run engine", () => {
           assert(Option.isSome(outcome));
           assert.strictEqual(outcome.value._tag, "Canceled");
         }).pipe(Effect.provide(runtime));
+      }),
+    ),
+  );
+
+  it.live("counts the Attempts a Worker still runs and refuses to discard their leftovers", () =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
+          Effect.succeed(stepResult("ended on local")),
+          Effect.never,
+        ]);
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const reader = yield* RunReader;
+          const ended = yield* engine.submit(submission({ number: 12, item: "ended-on-local" }));
+          assert(ended._tag === "Claimed");
+          yield* waitFor(engine, ended.runId, ({ run }) => run.state._tag === "Succeeded");
+          const running = yield* engine.submit(submission({ number: 13, item: "runs-on-local" }));
+          assert(running._tag === "Claimed");
+          yield* waitFor(engine, running.runId, ({ attempts }) => attempts.length === 1);
+
+          const counts = Effect.map(reader.attemptsByWorker(), (counted) =>
+            counted.map(({ worker, attempts, running }) => [worker, attempts, running]),
+          );
+          assert.deepStrictEqual(yield* counts, [["local", 2, 1]]);
+          // `local` is in `StepExecutor.workers`, as a Worker a reload removed stays until its last Attempt ends.
+          const local = WorkerName.make("local");
+          assert.deepStrictEqual(
+            yield* Effect.flip(engine.discardLeftovers(local)),
+            new LeftoversDiscardRejectedError({ worker: local, running: 1 }),
+          );
+          assert.deepStrictEqual(yield* counts, [["local", 2, 1]]);
+        }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
       }),
     ),
   );
