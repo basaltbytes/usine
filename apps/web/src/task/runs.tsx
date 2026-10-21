@@ -310,7 +310,7 @@ const RunRow = ({
               )}
             </p>
             <FailureLine run={run} />
-            {run.runAgain !== null && <RunAgainLine run={run} className="text-xs" />}
+            {run.runAgain !== null && <RunAgainLine run={run} source="link" className="text-xs" />}
             {run.approval !== null && <ApprovalLine approval={run.approval} className="text-xs" />}
             <FoldedFacts run={run} />
             {status !== null && (

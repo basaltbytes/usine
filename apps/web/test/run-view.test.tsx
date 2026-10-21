@@ -63,6 +63,7 @@ import { Outline } from "../src/run-page/outline.tsx";
 import { readerDocument } from "../src/run-transcript/document/model.ts";
 import { projectTranscript } from "../src/run-transcript/model.ts";
 import { SalvageLine } from "../src/run-transcript/outcome.tsx";
+import { WithRouter } from "./memory-router.tsx";
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const itemKey = Schema.encodeSync(GitHubItemKey)(["github", repository, ItemNumber.make(33)]);
@@ -586,7 +587,11 @@ describe("Run approval", () => {
   // Approved before usine recorded who approved.
   const unrecorded = approved(null);
   const eventDocument = (view: RunView) =>
-    renderToStaticMarkup(<EventDocument detail={detail(view)} />);
+    renderToStaticMarkup(
+      <WithRouter>
+        <EventDocument detail={detail(view)} />
+      </WithRouter>,
+    );
   const outline = (view: RunView) =>
     renderToStaticMarkup(
       <Outline
@@ -642,5 +647,11 @@ describe("Run approval", () => {
       );
       assert.notInclude(render(run()), "Run again");
     }
+    // The Event document links the earlier Run's page; the outline entry is a button, so no link.
+    assert.include(
+      eventDocument(ranAgain(philippe)),
+      `href="/projects/basaltbytes/usine/runs/${from}"`,
+    );
+    assert.notInclude(outline(ranAgain(philippe)), `/runs/${from}`);
   });
 });

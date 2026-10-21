@@ -152,6 +152,11 @@ it("lists every Run newest first, each opening its Run page with why it ended", 
   await expect
     .element(rowOf("plan").getByRole("link", { name: "#41" }))
     .toHaveAttribute("href", `https://github.com/${taskRepository}/pull/41`);
+  // The Run that was run again opens from its short id, not from the row's own Run page.
+  await rowOf("fix-ci", 1).getByRole("link", { name: "run-canc", exact: true }).click();
+  await expect
+    .poll(() => router.state.location.pathname)
+    .toBe(`/projects/${taskRepository}/runs/run-canceled`);
 });
 
 it("offers only the actions that apply to each Run, and never a disabled button", async () => {

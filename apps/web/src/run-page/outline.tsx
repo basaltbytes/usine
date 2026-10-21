@@ -390,7 +390,7 @@ export const Outline = ({
       >
         <span className="block font-medium">Event</span>
         <span className="line-clamp-2 text-xs text-muted-foreground">{eventPreview}</span>
-        <RunAgainLine run={run} className="mt-0.5 block text-xs" />
+        <RunAgainLine run={run} source="text" className="mt-0.5 block text-xs" />
         <ApprovalLine approval={run.approval} className="mt-0.5 block text-xs" />
       </button>
       <div className="h-2.5" />
