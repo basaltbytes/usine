@@ -99,7 +99,8 @@ const sidebarLink = (name: string) => {
 
 it("lists only the tasks with runs, in flight first, with their status, runs, last run, pull request, time, tokens, and cost", async () => {
   await mount(list);
-  await expect.element(page.getByText("5 in flight, 1 done", { exact: true })).toBeVisible();
+  // The task canceled a day ago and unchanged since is not in flight.
+  await expect.element(page.getByText("4 in flight, 1 done", { exact: true })).toBeVisible();
   // Every listed task added up: 41, 15, 10, and 30 min of attempts, and the priced tasks' dollars.
   await expect
     .element(page.getByText("7 runs, 1 h 36 min, 87.3K tokens, $5.50 estimate", { exact: true }))
@@ -114,9 +115,9 @@ it("lists only the tasks with runs, in flight first, with their status, runs, la
     "Tokens",
     "Cost",
   ]);
-  // Running, then waiting for approval, then queued and stalled by when the run opened, then
-  // the merged task; the four tasks no loop ever ran on are absent. A task reads as its
-  // originating issue.
+  // Running, then waiting for approval, then queued and stalled by when the run opened, then the
+  // canceled task and the merged one by when their last run closed; the four tasks no loop ever
+  // ran on are absent. A task reads as its originating issue.
   await expect.poll(rowTexts).toEqual([
     ["#9Redesign the Board columns and cards", "Running implement"],
     [
@@ -199,16 +200,16 @@ it("says Needs attention for a failure no stall explains, then the last run's ou
   queryClient.setQueryData(["desk"], desk(boardStalled().filter(({ item }) => item.number !== 28)));
   await mount(list);
   await expect
-    .element(page.getByText("4 in flight, 1 needs attention, 1 done", { exact: true }))
+    .element(page.getByText("3 in flight, 1 needs attention, 1 done", { exact: true }))
     .toBeVisible();
   const pinned = rowOf(/Pin GitHub Actions/u);
   await expect.element(pinned.getByRole("cell").nth(1)).toHaveTextContent("Needs attention");
-  // It ended 80m ago and still follows #18, stalled since its run opened a day ago.
-  await expect.element(pinned).toBe(table().getByRole("row").nth(5).element());
+  // It ended 80m ago, so it comes before #18, whose run was canceled a day ago.
+  await expect.element(pinned).toBe(table().getByRole("row").nth(4).element());
 
   queryClient.setQueryData(["overview"], boardOverviewResolved());
   await expect.element(pinned.getByRole("cell").nth(1)).toHaveTextContent(/^Failed$/u);
-  await expect.element(page.getByText("4 in flight, 1 done", { exact: true })).toBeVisible();
+  await expect.element(page.getByText("3 in flight, 1 done", { exact: true })).toBeVisible();
 });
 
 it("says No runs yet when no task has a run", async () => {
