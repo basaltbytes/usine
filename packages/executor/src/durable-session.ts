@@ -529,34 +529,20 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
   });
 
   /**
-   * Whether startup recovery must leave `attempt`'s checkout for its
-   * reattachment: true when the Attempt is open and `isLive` says a restart
-   * reattaches it. A closed Attempt's parent task is canceled here, since
-   * nothing reattaches it.
+   * Stops `attempt`'s parent task before recovery reconciles its checkout.
+   * The engine recovers an Attempt only once no Run reattaches it, so an open
+   * Attempt is reconciled even when `isLive` still reports it: its parent
+   * task is stopped, and a report that was never harvested stays unharvested
+   * while its checkout is salvaged (#180).
    */
-  const awaitsReattach = Effect.fn("DurableSession.awaitsReattach")(function* (
+  const stopForRecovery = Effect.fn("DurableSession.stopForRecovery")(function* (
     attempt: AttemptRecovery,
   ) {
     yield* Effect.annotateCurrentSpan({ attemptId: attempt.attemptId, worker: attempt.worker });
-    if (!attempt.open) {
-      yield* stopTask(attempt.attemptId, "its Attempt is closed");
-      return false;
-    }
-    const live = yield* isLive(attempt.attemptId).pipe(
-      Effect.tapError((error) =>
-        Effect.logWarning(
-          "Could not read whether an open Attempt's parent task is live; reconciling its checkout",
-          { attemptId: attempt.attemptId, worker: attempt.worker, message: error.message },
-        ),
-      ),
-      Effect.orElseSucceed(() => false),
+    yield* stopTask(
+      attempt.attemptId,
+      attempt.open ? "its Run does not reattach the Attempt" : "its Attempt is closed",
     );
-    if (live)
-      yield* Effect.logInfo("Leaving the checkout of a live Attempt for its reattachment", {
-        attemptId: attempt.attemptId,
-        worker: attempt.worker,
-      });
-    return live;
   });
 
   /**
@@ -665,7 +651,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
     intervene,
     isLive,
     outcome,
-    awaitsReattach,
+    stopForRecovery,
     recoverPostedComments,
     storedRequest,
   } as const;

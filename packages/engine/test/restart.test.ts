@@ -4,6 +4,7 @@ import { AgentFailure, type AttemptFailure, InfraFailure } from "@usine/core/att
 import { type AttemptRecovery, SalvagePushed } from "@usine/core/attempt/salvage";
 import type { InstanceDirectory } from "@usine/core/instance";
 import { CommitSha } from "@usine/core/repository";
+import type { RunId } from "@usine/core/run";
 import { Comment, type StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
 import {
@@ -103,35 +104,47 @@ const stopDuringAttempts = (directory: InstanceDirectory, submissions: ReadonlyA
   });
 
 /**
- * The executor of the restarted runtime, whose parent tasks `live` holds. As
- * the real one does, `recover` leaves the checkout of an open Attempt whose
- * parent task is live for its reattachment, and `interrupt` stops a parent
- * task. Every checkout it reconciles becomes a pushed salvage, and an open
- * Attempt whose parent failed records the comment it posted. Runs wait for a
- * Worker until `slot` opens; an Attempt then records what it resumes from.
+ * The executor of the restarted runtime, whose parent tasks `live` holds and
+ * whose liveness cannot be read for the Attempts in `unreadable`. As the real
+ * one does, `recover` and `interrupt` stop a parent task, and `recover`
+ * reconciles the checkout whatever `isLive` reports. Every checkout it
+ * reconciles becomes a pushed salvage, and an open Attempt whose parent
+ * failed records the comment it posted. Runs wait for a Worker until `slot`
+ * opens; an Attempt then records what it resumes from.
  */
 const restartedExecutor = Effect.fn("test.restartedExecutor")(function* (
   live: ReadonlyArray<Attempt>,
 ) {
   const state = {
     live: yield* Ref.make<ReadonlySet<AttemptId>>(new Set(live.map(({ id }) => id))),
+    unreadable: yield* Ref.make<ReadonlySet<AttemptId>>(new Set()),
     stored: yield* Ref.make<ReadonlyMap<AttemptId, Result.Result<StepResult, AttemptFailure>>>(
       new Map(),
     ),
     reconciled: yield* Ref.make<ReadonlyArray<AttemptRecovery>>([]),
-    resumed: yield* Ref.make<ReadonlyArray<Option.Option<SalvagePushed>>>([]),
+    resumed: yield* Ref.make<ReadonlyMap<RunId, Option.Option<SalvagePushed>>>(new Map()),
     slot: yield* Deferred.make<void>(),
   };
+  const stop = (attemptId: AttemptId) =>
+    Ref.update(state.live, (ids) => new Set([...ids].filter((id) => id !== attemptId)));
   const executor = Layer.succeed(StepExecutor)({
     workers: Effect.succeed([WorkerName.make("local")]),
-    isLive: (attemptId) => Ref.get(state.live).pipe(Effect.map((ids) => ids.has(attemptId))),
+    isLive: (attemptId) =>
+      Effect.gen(function* () {
+        if ((yield* Ref.get(state.unreadable)).has(attemptId))
+          return yield* new InfraFailure({
+            message: "Could not read the parent task",
+            cause: "storage unavailable",
+          });
+        return (yield* Ref.get(state.live)).has(attemptId);
+      }),
     outcome: (attemptId) =>
       Ref.get(state.stored).pipe(
         Effect.map((results) => Option.fromUndefinedOr(results.get(attemptId))),
       ),
     recover: (attempt, record) =>
       Effect.gen(function* () {
-        if (attempt.open && (yield* Ref.get(state.live)).has(attempt.attemptId)) return;
+        yield* stop(attempt.attemptId);
         yield* Ref.update(state.reconciled, (seen) => [...seen, attempt]);
         const stored = (yield* Ref.get(state.stored)).get(attempt.attemptId);
         if (attempt.open && stored !== undefined && Result.isFailure(stored))
@@ -143,16 +156,15 @@ const restartedExecutor = Effect.fn("test.restartedExecutor")(function* (
         );
       }),
     intervene: () => Effect.void,
-    interrupt: (attemptId) =>
-      Ref.update(state.live, (ids) => new Set([...ids].filter((id) => id !== attemptId))),
+    interrupt: stop,
     reserve: () =>
       Deferred.await(state.slot).pipe(
         Effect.as({ worker: WorkerName.make("local"), release: Effect.void }),
       ),
     execute: (execution) =>
-      Ref.update(state.resumed, (seen) => [...seen, execution.resume]).pipe(
-        Effect.as(stepResult("resumed from the salvage")),
-      ),
+      Ref.update(state.resumed, (seen) =>
+        new Map(seen).set(execution.run.id, execution.resume),
+      ).pipe(Effect.as(stepResult("resumed from the salvage"))),
   });
   return { ...state, executor };
 });
@@ -424,12 +436,13 @@ describe("engine restart", () => {
     () =>
       withInstance((directory) =>
         Effect.gen(function* () {
-          const [gone, failed] = yield* stopDuringAttempts(directory, [
+          const [gone, failed, unread] = yield* stopDuringAttempts(directory, [
             submission({ number: 20, item: "kept-then-gone" }),
             submission({ number: 21, item: "kept-then-failed" }),
+            submission({ number: 23, item: "kept-then-unread" }),
           ]);
-          assert(gone !== undefined && failed !== undefined);
-          const worker = yield* restartedExecutor([gone, failed]);
+          assert(gone !== undefined && failed !== undefined && unread !== undefined);
+          const worker = yield* restartedExecutor([gone, failed, unread]);
           const scope = yield* Scope.make();
           const engine = Context.get(
             yield* Scope.provide(Layer.build(engineLayer(directory, worker.executor)), scope),
@@ -437,25 +450,31 @@ describe("engine restart", () => {
           );
           assert.deepStrictEqual(yield* Ref.get(worker.reconciled), []);
 
-          // Before either Run gets a Worker, one parent task is gone and the other failed.
-          yield* Ref.set(worker.live, new Set());
+          // Before the Runs get a Worker, one parent task is gone and another
+          // failed. The third still reports live, as a parent's report that
+          // was never harvested does, but its Run cannot read that.
+          yield* Ref.set(worker.live, new Set([unread.id]));
+          yield* Ref.set(worker.unreadable, new Set([unread.id]));
           yield* Ref.set(
             worker.stored,
             new Map([[failed.id, Result.fail(new AgentFailure({ message: "failed unattached" }))]]),
           );
           yield* Deferred.succeed(worker.slot, undefined);
 
-          const resumed = yield* waitFor(
-            engine,
-            gone.runId,
-            ({ run }) => run.state._tag === "Succeeded",
-          );
-          const [interrupted] = resumed.attempts;
-          assert(interrupted !== undefined && Option.isSome(interrupted.salvage));
-          assert(interrupted.salvage.value._tag === "Pushed");
-          assert.deepStrictEqual(yield* Ref.get(worker.resumed), [
-            Option.some(interrupted.salvage.value),
-          ]);
+          for (const kept of [gone, unread]) {
+            const resumed = yield* waitFor(
+              engine,
+              kept.runId,
+              ({ run }) => run.state._tag === "Succeeded",
+            );
+            const [interrupted] = resumed.attempts;
+            assert(interrupted !== undefined && Option.isSome(interrupted.salvage));
+            assert(interrupted.salvage.value._tag === "Pushed");
+            assert.deepStrictEqual(
+              (yield* Ref.get(worker.resumed)).get(kept.runId),
+              Option.some(interrupted.salvage.value),
+            );
+          }
           const stopped = yield* waitFor(
             engine,
             failed.runId,

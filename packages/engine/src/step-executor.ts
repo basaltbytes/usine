@@ -69,12 +69,13 @@ export class StepExecutor extends Context.Service<
     ) => Effect.Effect<Option.Option<Result.Result<StepResult, AttemptFailure>>, AttemptFailure>;
     /**
      * Reconciles an old checkout before new Attempts start; records its salvage before releasing
-     * any work. It leaves the checkout of an open Attempt whose parent task `isLive` reports live
-     * for its reattachment. For an open Attempt whose parent task failed with no launch to record
-     * it, it also records the comments the Attempt posted on its Run's Item if its checkout is
-     * still on the Worker. The engine calls it at startup for every persisted Attempt except an
-     * open one whose parent task is live, and for that one when its Run closes the Attempt
-     * without reattaching it.
+     * any work. The engine calls it only for an Attempt that no Run reattaches: at startup for
+     * every persisted Attempt except an open one whose parent task `isLive` reports live or whose
+     * liveness cannot be read, and for that one when its Run closes the Attempt without
+     * reattaching it. It stops the Attempt's parent task first if that task is still live, and
+     * reconciles the checkout whatever `isLive` reports. For an open Attempt whose parent task
+     * failed with no launch to record it, it also records the comments the Attempt posted on its
+     * Run's Item if its checkout is still on the Worker.
      */
     readonly recover: <E>(
       attempt: AttemptRecovery,

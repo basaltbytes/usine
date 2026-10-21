@@ -9,7 +9,7 @@ import { WorkerName } from "@usine/core/worker";
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
 
 import { TestClock } from "effect/testing";
-import { Cause, Deferred, Effect, Exit, Fiber, Logger, Option, Scope } from "effect";
+import { Cause, Effect, Exit, Fiber, Logger, Option, Scope } from "effect";
 
 import {
   aloneOnItem,
@@ -281,50 +281,6 @@ describe("exe.dev preparation", () => {
       }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
     },
   );
-
-  it.effect("leaves the checkout of a live open Attempt for its reattachment", () => {
-    const ssh = fakeSsh();
-    ssh.state.cacheExists = true;
-    const started = Deferred.makeUnsafe<void>();
-    return Effect.gen(function* () {
-      const executor = yield* Executor;
-      const prepared = yield* executor.prepare(request);
-      yield* prepared
-        .launch({
-          append: () => Effect.void,
-          salvage: () => Effect.void,
-          comments: () => Effect.void,
-          windows: aloneOnItem(),
-        })
-        .pipe(Effect.forkChild);
-      yield* Deferred.await(started);
-      const before = ssh.state.commands.length;
-      yield* executor.recover(
-        {
-          attemptId: request.attemptId,
-          repository: request.repository,
-          worker: WORKER,
-          ref: request.salvageRef,
-          permissions: "write",
-          succeeded: false,
-          open: true,
-        },
-        {
-          salvage: () => Effect.void,
-          comments: () => Effect.void,
-          windows: aloneOnItem(),
-        },
-      );
-      assert.strictEqual(ssh.state.commands.length, before);
-    }).pipe(
-      Effect.scoped,
-      Effect.provide(
-        runtime(ssh.layer, () =>
-          Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
-        ),
-      ),
-    );
-  });
 
   it.effect(
     "removes the checkout retained by a failed remote stop on a succeeded Attempt without salvage",

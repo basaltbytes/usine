@@ -124,19 +124,10 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
       );
       return;
     }
-    if (attempt.open) {
-      // `recover` leaves the checkout of an open Attempt whose parent task is
-      // live for its reattachment. Nothing reattaches this one now.
-      yield* executor.interrupt(attemptId).pipe(
-        Effect.tapError((error) =>
-          Effect.logWarning(
-            "Could not stop the parent task of an open Attempt its Run does not reattach; reconciling its checkout",
-            { ...fields, errorTag: error._tag, message: error.message },
-          ),
-        ),
-        Effect.ignore,
-      );
-    }
+    // The Run has decided not to reattach the Attempt. `recover` stops a
+    // parent task that is still live, then reconciles the checkout even when
+    // `isLive` still reports the Attempt, as for a parent's report that was
+    // never harvested.
     yield* Effect.logInfo(
       "Reconciling the checkout startup kept for an Attempt that was not reattached",
       fields,

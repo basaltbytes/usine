@@ -291,9 +291,12 @@ export class Executor extends Context.Service<
   {
     /**
      * Reconciles an old checkout before new Attempts start; records its salvage before releasing
-     * any work. For an open Attempt whose parent task failed before the orchestrator stopped, it
-     * first records the comments the Attempt posted on its Run's Item, harvested from the checkout
-     * with the Attempt's credential; a checkout or credential that is gone records none.
+     * any work. The orchestrator calls it only for an Attempt that no Run reattaches, so it first
+     * stops the Attempt's parent task if durable storage still holds it live, and reconciles the
+     * checkout of an open Attempt even when `isLive` reports it. For an open Attempt whose parent
+     * task failed before the orchestrator stopped, it first records the comments the Attempt
+     * posted on its Run's Item, harvested from the checkout with the Attempt's credential; a
+     * checkout or credential that is gone records none.
      */
     readonly recover: <E>(
       attempt: AttemptRecovery,
