@@ -135,6 +135,7 @@ describe("local worker Loop permissions", () => {
                     append: () => Effect.void,
                     salvage: () => Effect.void,
                     comments: () => Effect.void,
+                    transcript: Effect.succeed([]),
                     windows: aloneOnItem(request(permissions).attemptId),
                   }),
                 );

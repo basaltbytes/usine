@@ -193,6 +193,7 @@ export const attemptGuard = (
       salvage: io.salvage,
       comments: io.comments,
       windows: io.windows,
+      transcript: io.transcript,
     };
     return {
       sink,

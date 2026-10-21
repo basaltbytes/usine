@@ -39,6 +39,7 @@ describe("exe.dev preparation", () => {
           .launch({
             append: () => Effect.void,
             comments: () => Effect.void,
+            transcript: Effect.succeed([]),
             windows: aloneOnItem(),
             salvage: (value) =>
               Effect.sync(() => {
@@ -124,6 +125,7 @@ describe("exe.dev preparation", () => {
         prepared.launch({
           append: () => Effect.void,
           comments: () => Effect.void,
+          transcript: Effect.succeed([]),
           windows: aloneOnItem(),
           salvage: () => Effect.fail(recordFailure),
         }),
@@ -182,6 +184,7 @@ describe("exe.dev preparation", () => {
           .launch({
             append: () => Effect.void,
             comments: () => Effect.void,
+            transcript: Effect.succeed([]),
             windows: aloneOnItem(),
             salvage: (value) =>
               Effect.sync(() => {
@@ -211,6 +214,7 @@ describe("exe.dev preparation", () => {
         append: () => Effect.void,
         salvage: () => Effect.void,
         comments: () => Effect.void,
+        transcript: Effect.succeed([]),
         windows: aloneOnItem(),
       });
       const released = ssh.state.commands.length;
@@ -297,6 +301,7 @@ describe("exe.dev preparation", () => {
           append: () => Effect.void,
           salvage: () => Effect.void,
           comments: () => Effect.void,
+          transcript: Effect.succeed([]),
           windows: aloneOnItem(),
         });
         assert.strictEqual(result.message, `Completed: ${request.task}`);
@@ -470,6 +475,7 @@ describe("exe.dev preparation", () => {
         append: () => Effect.void,
         salvage: () => Effect.void,
         comments: () => Effect.void,
+        transcript: Effect.succeed([]),
         windows: aloneOnItem(),
       });
       assert.strictEqual(result.message, `Completed: ${request.task}`);
@@ -512,6 +518,7 @@ describe("exe.dev preparation", () => {
           append: () => Effect.void,
           salvage: () => Effect.void,
           comments: () => Effect.void,
+          transcript: Effect.succeed([]),
           windows: aloneOnItem(),
         });
         assert.strictEqual(result.message, `Completed: ${request.task}`);
@@ -595,6 +602,7 @@ describe("exe.dev preparation", () => {
           append: () => Effect.void,
           salvage: () => Effect.void,
           comments: () => Effect.void,
+          transcript: Effect.succeed([]),
           windows: aloneOnItem(),
         })
         .pipe(Effect.flip);
@@ -619,6 +627,7 @@ describe("exe.dev preparation", () => {
           append: () => Effect.void,
           salvage: () => Effect.void,
           comments: () => Effect.void,
+          transcript: Effect.succeed([]),
           windows: aloneOnItem(),
         });
       }).pipe(Effect.scoped);

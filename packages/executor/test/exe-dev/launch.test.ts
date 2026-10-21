@@ -21,26 +21,13 @@ import {
   WORKTREE,
   fails,
   fakeSsh,
+  recording,
   remoteLine,
   request,
   runtime,
 } from "./support.ts";
 
 const KILL_CHILDREN = `exec 'sh' '-c' '${CHILD_KILL_SCRIPT.replaceAll("'", `'"'"'`)}' 'sh' '${WORKTREE}'`;
-
-const recording = () => {
-  const transcript: Array<[AttemptChannel.Direction, AttemptChannel.Envelope]> = [];
-  const sink: AttemptChannel.Sink = {
-    salvage: () => Effect.void,
-    comments: () => Effect.void,
-    windows: aloneOnItem(),
-    append: (direction, envelope) =>
-      Effect.sync(() => {
-        transcript.push([direction, envelope]);
-      }),
-  };
-  return { transcript, sink };
-};
 
 /** A parent that reports it started, then works until its task is canceled or this process stops. */
 const working =
@@ -430,6 +417,7 @@ describe("exe.dev launch", () => {
             Effect.sync(
               () => void recorded.push(comments.map(({ kind, url }) => kind + " " + url.href)),
             ),
+          transcript: Effect.succeed([]),
           windows: aloneOnItem().pipe(
             Effect.map(({ own }) => new AttemptWindows({ own, overlapping: [...opened] })),
           ),
@@ -481,6 +469,7 @@ describe("exe.dev launch", () => {
           Effect.sync(
             () => void recorded.push(...comments.map(({ kind, url }) => `${kind} ${url.href}`)),
           ),
+        transcript: Effect.succeed([]),
         windows: Effect.succeed(
           new AttemptWindows({
             own: Option.some(

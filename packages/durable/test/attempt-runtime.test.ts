@@ -388,6 +388,7 @@ describe("durable AttemptRuntime", () => {
             }),
           salvage: () => Effect.void,
           comments: () => Effect.void,
+          transcript: Effect.die("The durable runtime never reads the Attempt transcript"),
           windows: Effect.die("The durable runtime never reads the Attempt windows"),
         };
         const stopped = yield* runtime.execute(request, sink).pipe(Effect.flip);
@@ -984,6 +985,7 @@ describe("durable AttemptRuntime", () => {
               : Effect.void,
           salvage: () => Effect.void,
           comments: () => Effect.void,
+          transcript: Effect.die("The durable runtime never reads the Attempt transcript"),
           windows: Effect.die("The durable runtime never reads the Attempt windows"),
         };
         const failure = yield* runtime.execute(request, sink).pipe(Effect.flip);

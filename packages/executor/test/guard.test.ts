@@ -55,6 +55,7 @@ const setup = (
         append: () => Effect.void,
         salvage: () => Effect.void,
         comments: () => Effect.void,
+        transcript: Effect.succeed([]),
         windows: aloneOnItem(attemptId),
       },
     );

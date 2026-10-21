@@ -153,6 +153,7 @@ describe("local worker runaway guard", () => {
               append: () => Effect.void,
               salvage: () => Effect.void,
               comments: () => Effect.void,
+              transcript: Effect.succeed([]),
               windows: aloneOnItem(attemptId),
               checkoutAcquired: Effect.void,
             })
