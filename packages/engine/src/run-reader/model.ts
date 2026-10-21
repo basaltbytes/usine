@@ -41,6 +41,15 @@ export class RunSnapshot extends Schema.Class<RunSnapshot>("@usine/engine/RunSna
   permissions: LoopPermissions,
 }) {}
 
+/**
+ * A Run and the Event it was opened for: a trigger's match, a reopening, or a Run again. The
+ * Event's payload is the Item as the trigger saw it, which can differ from the Item now.
+ */
+export class RunEvent extends Schema.Class<RunEvent>("@usine/engine/RunEvent")({
+  runId: RunId,
+  event: Event,
+}) {}
+
 /** A Run snapshot and all its saved transcript entries from the same database transaction. */
 export class RunEvidence extends Schema.Class<RunEvidence>("@usine/engine/RunEvidence")({
   snapshot: RunSnapshot,

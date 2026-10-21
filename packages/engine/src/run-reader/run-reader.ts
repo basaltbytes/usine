@@ -5,6 +5,7 @@ import { RunDatabase } from "../database/database.ts";
 import {
   type LoopSighting,
   ProjectionRevision,
+  type RunEvent,
   RunEvidence,
   RunSnapshot,
   RunSummary,
@@ -58,6 +59,9 @@ const makeRunReader = Effect.gen(function* () {
   const forItems = Effect.fn("RunReader.forItems")((itemKeys: ReadonlyArray<ItemKey>) =>
     queries.itemRunSummaries(itemKeys).pipe(persistence("read Item Run histories")),
   );
+  const events = Effect.fn("RunReader.events")((runIds: ReadonlyArray<RunId>) =>
+    queries.runEvents(runIds).pipe(persistence("read the Events of Runs")),
+  );
   const transcript = Effect.fn("RunReader.transcript")((query: TranscriptQuery) =>
     queries.transcript(query).pipe(persistence("read Attempt transcript")),
   );
@@ -74,6 +78,7 @@ const makeRunReader = Effect.gen(function* () {
     list,
     closed,
     forItems,
+    events,
     revision,
     transcript,
     attemptsByWorker,
@@ -105,6 +110,13 @@ export class RunReader extends Context.Service<
     readonly forItems: (
       itemKeys: ReadonlyArray<ItemKey>,
     ) => Effect.Effect<ReadonlyArray<RunSummary>, RunStoreError>;
+    /**
+     * The Event each of the supplied Runs was opened for, its payload the Item as the trigger
+     * saw it; in no particular order, once per Run, and without the Runs that do not exist.
+     */
+    readonly events: (
+      runIds: ReadonlyArray<RunId>,
+    ) => Effect.Effect<ReadonlyArray<RunEvent>, RunStoreError>;
     /** `None` means the invalidation row is absent: treat every cached projection as stale. */
     readonly revision: () => Effect.Effect<Option.Option<ProjectionRevision>, RunStoreError>;
     /** Reads the requested portion of one Attempt's saved transcript in append order. */
@@ -128,6 +140,7 @@ export class RunReader extends Context.Service<
 
 export {
   LoopSighting,
+  RunEvent,
   RunEvidence,
   RunSnapshot,
   RunSummary,

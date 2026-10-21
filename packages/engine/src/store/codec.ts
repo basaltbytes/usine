@@ -21,7 +21,7 @@ import { Comment, StepResult } from "@usine/core/step/result";
 import { Effect, Option, Schema } from "effect";
 import { EnginePersistenceError, RunStoreError } from "../engine/error.ts";
 import { IgnoreReason, Submission } from "../engine/submission.ts";
-import { ProjectionRevision, RunSummary } from "../run-reader/model.ts";
+import { ProjectionRevision, RunEvent, RunSummary } from "../run-reader/model.ts";
 import { TranscriptEntry, TranscriptSequence } from "../transcript.ts";
 
 export const EventRouteRow = Schema.Struct({
@@ -103,6 +103,14 @@ const DiscardRow = Schema.Struct({ reason: IgnoreReason });
 
 const ProjectionRevisionRow = Schema.Struct({ revision: ProjectionRevision });
 
+const RunEventRow = Schema.Struct({
+  runId: RunId,
+  eventId: EventId,
+  dedupKey: DedupKey,
+  payload: Schema.Json,
+  receivedAt: Schema.DateTimeUtcFromString,
+});
+
 const ReopeningRow = Schema.Struct({ ...EventRouteRow.fields, reopening: Schema.Int });
 const ReopenedEventRow = Schema.Struct({ eventId: EventId, dedupKey: DedupKey });
 
@@ -110,6 +118,7 @@ export const decodeEventRoutes = Schema.decodeUnknownEffect(Schema.Array(EventRo
 export const decodeReopenings = Schema.decodeUnknownEffect(Schema.Array(ReopeningRow));
 export const decodeReopenedEvents = Schema.decodeUnknownEffect(Schema.Array(ReopenedEventRow));
 export const decodeRunRows = Schema.decodeUnknownEffect(Schema.Array(RunRow));
+export const decodeRunEventRows = Schema.decodeUnknownEffect(Schema.Array(RunEventRow));
 export const decodeAttemptRows = Schema.decodeUnknownEffect(Schema.Array(AttemptRow));
 export const decodeRunIds = Schema.decodeUnknownEffect(Schema.Array(RunIdRow));
 export const decodeDiscards = Schema.decodeUnknownEffect(Schema.Array(DiscardRow));
@@ -148,6 +157,17 @@ export const eventFromRow = (row: EventRouteRow): Event =>
     dedupKey: row.dedupKey,
     payload: row.payload,
     receivedAt: row.receivedAt,
+  });
+
+export const runEventFromRow = (row: typeof RunEventRow.Type): RunEvent =>
+  new RunEvent({
+    runId: row.runId,
+    event: new Event({
+      id: row.eventId,
+      dedupKey: row.dedupKey,
+      payload: row.payload,
+      receivedAt: row.receivedAt,
+    }),
   });
 
 export const submissionFromRow = (row: EventRouteRow): Submission =>

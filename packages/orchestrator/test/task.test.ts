@@ -366,6 +366,7 @@ const observation = (requested: Ref.Ref<ReadonlyArray<string>>) => {
       Ref.set(requested, keys).pipe(
         Effect.as(runs.filter(({ itemKey }) => keys.includes(itemKey))),
       ),
+    events: () => Effect.die("unused"),
     revision: () => Effect.succeed(Option.none()),
     transcript: () => Effect.die("unused"),
     attemptsByWorker: () => Effect.succeed([]),

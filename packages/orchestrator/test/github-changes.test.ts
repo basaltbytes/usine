@@ -226,6 +226,7 @@ const testLayer = (current: Ref.Ref<RunSnapshot>, requests: Ref.Ref<ReadonlyArra
           reviewRun,
         ]),
       ),
+    events: () => Effect.die("unused"),
     revision: () => Effect.die("unused"),
     transcript: (query) => Effect.succeed(query.attemptId === first.id ? [lastRow] : []),
     attemptsByWorker: () => Effect.die("unused"),

@@ -404,6 +404,7 @@ const testLayer = (
       ),
     closed: () => Effect.succeed([]),
     forItems: () => Effect.succeed([runSnapshot]),
+    events: () => Effect.die("unused"),
     revision: () => Ref.get(projectionRevision),
     transcript: readTranscript,
     attemptsByWorker: () =>
