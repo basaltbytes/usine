@@ -258,7 +258,12 @@ export const queriesFor = (database: RunDatabaseClient) => {
 
   const attemptCountsByWorker = Effect.fn("RunStoreQueries.attemptCountsByWorker")(function* () {
     const rows = yield* database
-      .select({ worker: attempts.workerName, attempts: sql<number>`count(*)` })
+      .select({
+        worker: attempts.workerName,
+        attempts: sql<number>`count(*)`,
+        // An Attempt without an outcome is still open: it runs, or its Run has not closed it yet.
+        running: sql<number>`sum(case when ${isNull(attempts.outcomeJson)} then 1 else 0 end)`,
+      })
       .from(attempts)
       .where(isNull(attempts.leftoversDiscardedAt))
       .groupBy(attempts.workerName)

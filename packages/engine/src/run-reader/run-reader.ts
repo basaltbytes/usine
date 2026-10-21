@@ -111,7 +111,10 @@ export class RunReader extends Context.Service<
     readonly transcript: (
       query: TranscriptQuery,
     ) => Effect.Effect<ReadonlyArray<TranscriptEntry>, RunStoreError>;
-    /** The Attempts startup reconciliation visits, counted per Worker and ordered by Worker name; Workers without any are left out. */
+    /**
+     * The Attempts startup reconciliation visits, counted per Worker and ordered by Worker name,
+     * with how many of them are still open; Workers without any are left out.
+     */
     readonly attemptsByWorker: () => Effect.Effect<ReadonlyArray<WorkerAttempts>, RunStoreError>;
     /**
      * What each Loop last saw of the supplied Items, one entry per Loop that

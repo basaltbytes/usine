@@ -146,6 +146,7 @@ describe("unconfigured Worker copy in Needs attention", () => {
       id: "unconfigured-worker:local",
       worker: WorkerName.make("local"),
       attempts,
+      running: 0,
     });
 
   it("names the Worker, counts its Attempts, and gives both ways out", () => {

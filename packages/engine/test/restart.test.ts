@@ -653,8 +653,12 @@ describe("engine restart", () => {
           const engine = Context.get(context, RunEngine);
           const reader = Context.get(context, RunReader);
           assert.deepStrictEqual(
-            (yield* reader.attemptsByWorker()).map(({ worker, attempts }) => [worker, attempts]),
-            [["local", 1]],
+            (yield* reader.attemptsByWorker()).map(({ worker, attempts, running }) => [
+              worker,
+              attempts,
+              running,
+            ]),
+            [["local", 1, 0]],
           );
           // A configured Worker's Attempts stay reconciled at every start.
           assert.strictEqual(yield* engine.discardLeftovers(WorkerName.make("usine-worker-1")), 0);
@@ -672,6 +676,32 @@ describe("engine restart", () => {
           yield* Scope.close(secondScope, Exit.void);
         }),
       ),
+  );
+
+  it.live("counts the Attempts a Worker still runs apart from those that ended", () =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        yield* deliverOneAttempt(directory, 50);
+        yield* stopDuringAttempts(directory, [submission({ number: 51, item: "still-running" })]);
+        const recovered = yield* Ref.make<ReadonlyArray<AttemptId>>([]);
+        // The restarted Run gets no Worker, so its Attempt stays open on `local`.
+        const scope = yield* Scope.make();
+        const context = yield* Scope.provide(
+          Layer.build(engineLayer(directory, recordingExecutor(["local"], recovered))),
+          scope,
+        );
+        const reader = Context.get(context, RunReader);
+        assert.deepStrictEqual(
+          (yield* reader.attemptsByWorker()).map(({ worker, attempts, running }) => [
+            worker,
+            attempts,
+            running,
+          ]),
+          [["local", 2, 1]],
+        );
+        yield* Scope.close(scope, Exit.void);
+      }),
+    ),
   );
 
   it.live("drains an admitted Attempt and leaves queued and new work for restart", () =>

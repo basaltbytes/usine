@@ -414,10 +414,15 @@ const makeOperatorObservation = Effect.gen(function* () {
       needsYou.push(new ConfigFileNeed({ id: `config-file:${file}`, kind: "loop", error }));
     }
     const configuredWorkers = new Set(instance.config.workers.map(({ name }) => name));
-    for (const { worker, attempts } of workerAttempts) {
+    for (const { worker, attempts, running } of workerAttempts) {
       if (configuredWorkers.has(worker)) continue;
       needsYou.push(
-        new UnconfiguredWorkerNeed({ id: `unconfigured-worker:${worker}`, worker, attempts }),
+        new UnconfiguredWorkerNeed({
+          id: `unconfigured-worker:${worker}`,
+          worker,
+          attempts,
+          running,
+        }),
       );
     }
     const overview = new ReadyOverview({ projects, loops, needsYou });
