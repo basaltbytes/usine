@@ -8,6 +8,7 @@ import { AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
+import { WorkerName } from "@usine/core/worker";
 import { Effect, Fiber, Layer, Logger, Option, Queue, Stream } from "effect";
 import {
   AgentResultError,
@@ -101,6 +102,7 @@ const delayedPiStart = () => {
 
 describe("Pi child backend", () => {
   const childRequest = new ChildRequest({
+    worker: WorkerName.make("worker-1"),
     environment: { HOME: "/home/worker", PATH: "/usr/bin:/bin" },
     host: new LocalProcess(),
     session: new ChildSession({

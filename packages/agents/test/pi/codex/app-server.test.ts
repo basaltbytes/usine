@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
 import { AgentName } from "@usine/core/agent";
+import { WorkerName } from "@usine/core/worker";
 import {
   Cause,
   Deferred,
@@ -27,6 +28,7 @@ import {
 } from "../../../src/pi/codex/app-server.ts";
 
 const request = new ChildRequest({
+  worker: WorkerName.make("worker-1"),
   environment: { HOME: "/home/worker", PATH: "/usr/bin:/bin" },
   host: new LocalProcess(),
   session: new ChildSession({

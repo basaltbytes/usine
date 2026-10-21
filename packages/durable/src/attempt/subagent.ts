@@ -150,6 +150,7 @@ export const subagentTool = (services: ExtensionServices) => {
       cwd: WorkingDirectory.make(request.cwd),
       environment: request.environment,
       host: request.host,
+      worker: request.worker,
       prompt: assembleChildPrompt({
         agent: spec.agent.name,
         persona: spec.agent.persona,

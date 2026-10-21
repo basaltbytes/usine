@@ -9,6 +9,7 @@ import {
   ChildSessionCount,
 } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
+import { WorkerName } from "@usine/core/worker";
 import {
   AgentFailure,
   AttemptFailure,
@@ -40,6 +41,8 @@ export class ChildRequest extends Schema.Class<ChildRequest>("@usine/agents/Chil
   environment: Schema.Record(Schema.String, Schema.String),
   /** Where the child's process runs. */
   host: ChildHost,
+  /** The Worker whose machine `host` reaches. Claude children on one Worker share its Claude login. */
+  worker: WorkerName,
 }) {}
 
 /** The final message a parent or child session returns. */

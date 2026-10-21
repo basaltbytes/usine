@@ -3,6 +3,7 @@ import { BrainSpec, Harness, HARNESSES, ModelId } from "@usine/core/agent/brain"
 import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
 import { AgentName } from "@usine/core/agent";
 import * as AttemptChannel from "@usine/core/attempt/channel";
+import { WorkerName } from "@usine/core/worker";
 import { Effect, Layer, Stream } from "effect";
 import { LocalProcess } from "../../src/child-host/child-host.ts";
 import {
@@ -19,6 +20,7 @@ import { childDispatcherLayer } from "../../src/pi/children.ts";
 
 const request = (harness: Harness) =>
   new ChildRequest({
+    worker: WorkerName.make("worker-1"),
     environment: { HOME: "/home/worker", PATH: "/usr/bin:/bin" },
     session: new ChildSession({
       id: AgentSessionId.make(`child-${harness}`),

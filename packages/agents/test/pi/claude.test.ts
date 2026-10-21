@@ -21,6 +21,7 @@ import {
   OperatorMessage,
   Release,
 } from "@usine/core/attempt/channel";
+import { WorkerName } from "@usine/core/worker";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -54,6 +55,7 @@ const request = (
   host: ChildHost = new LocalProcess(),
 ) =>
   new ChildRequest({
+    worker: WorkerName.make("worker-1"),
     environment: { HOME: "/home/worker", PATH: "/usr/bin:/bin" },
     host,
     session: new ChildSession({
