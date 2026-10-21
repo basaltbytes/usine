@@ -84,6 +84,7 @@ import {
   TailTranscriptRequest,
 } from "../src/operator/transcript.ts";
 import { FailureView, LocalWorkerAccess, SshWorkerAccess } from "../src/operator/attempt.ts";
+import { UnconfiguredWorkerNeed } from "../src/operator/need.ts";
 import { Operator } from "../src/operator/operator.ts";
 import { ReadyOverview } from "../src/operator/overview.ts";
 import { ApprovalView, EditAndRetry, SessionIntervention } from "../src/operator/run.ts";
@@ -1556,6 +1557,19 @@ describe("Operator", () => {
       }).pipe(Effect.provide(testLayer(approved, moved, reads, revision)));
     }),
   );
+
+  it("lists a Worker whose every Attempt still runs, and refuses more open Attempts than Attempts", () => {
+    const need = (running: number) =>
+      new UnconfiguredWorkerNeed({
+        id: "unconfigured-worker:local",
+        worker: WorkerName.make("local"),
+        attempts: 1,
+        running,
+      });
+    // A removed Worker's only Attempt still runs: the entry says so rather than failing the overview.
+    assert.doesNotThrow(() => need(1));
+    assert.throws(() => need(2));
+  });
 
   it("shows an Agent's blocker to the operator as its own failure kind", () => {
     const encoded = Schema.encodeUnknownSync(FailureView)(
