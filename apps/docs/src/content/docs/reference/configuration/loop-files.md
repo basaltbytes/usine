@@ -167,7 +167,11 @@ usine records the permission level with each Event, so a Run keeps the level its
 
 An exe.dev Worker uses exe.dev's GitHub integration, which grants the access of exe.dev's own GitHub App and cannot narrow it to `read`. An exe.dev Worker therefore refuses the Attempts of a `read` Loop before it attaches the integration: the Attempt fails with a message that names the Worker and the Loop, usine does not retry it, and the failed Run shows in **Needs attention**. Run `read` Loops on a local or SSH Worker.
 
-Two gaps remain. On the local Worker, the Agent runs as your Unix user, so it can read GitHub credentials in your home directory, such as gh's own login, and push with them ([#384](https://github.com/basaltbytes/usine/issues/384)). On an SSH Worker, an Attempt can read the token or caller token of another Attempt running on the same machine at the same time ([#231](https://github.com/basaltbytes/usine/issues/231), [#243](https://github.com/basaltbytes/usine/issues/243)), so a `read` Attempt that runs beside a `write` one can reach access that pushes.
+`read` holds against the agent's tools, which use the attempt's token. How far it holds against an agent that looks for other credentials on purpose depends on the worker:
+
+- On the local worker, the agent runs as your Unix user, so it can read your own credentials in your home directory, such as gh's login, and push with them. The local worker is for agents you trust with your own access; see [what a local attempt can reach](/guides/add-a-worker/#what-a-local-attempt-can-reach).
+- An SSH worker has no GitHub credential of yours, and an SSH worker behind a gateway has no GitHub token on disk. Run a loop whose agent you don't trust that far on [SSH workers](/guides/add-a-worker/#ssh-workers), with or without a gateway, instead of the local worker.
+- On an SSH worker, an attempt can read the token or caller token of another attempt running on the same machine at the same time ([#231](https://github.com/basaltbytes/usine/issues/231), [#243](https://github.com/basaltbytes/usine/issues/243)), so a `read` attempt that runs beside a `write` one can reach access that pushes.
 
 ```yaml title="loops/review-pr.md"
 permissions: read
