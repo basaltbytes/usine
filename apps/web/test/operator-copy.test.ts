@@ -141,11 +141,12 @@ describe("reload summary on the Loops page", () => {
 });
 
 describe("unconfigured Worker copy in Needs attention", () => {
-  const need = (attempts: number) =>
+  const need = (attempts: number, running = 0) =>
     new UnconfiguredWorkerNeed({
       id: "unconfigured-worker:local",
       worker: WorkerName.make("local"),
       attempts,
+      running,
     });
 
   it("names the Worker, counts its Attempts, and gives both ways out", () => {
@@ -156,5 +157,13 @@ describe("unconfigured Worker copy in Needs attention", () => {
     assert.include(copy.detail, "Declare the worker again");
     assert.include(copy.detail, "discard the leftovers");
     assert.include(needCopy(need(1)).detail, "1 recorded attempt on it");
+  });
+
+  it("says how many Attempts still run on a removed Worker", () => {
+    assert.strictEqual(
+      needCopy(need(3, 2)).detail,
+      "local is not in usine.yaml. 2 attempts still run on it; discard its leftovers once they end",
+    );
+    assert.include(needCopy(need(3, 1)).detail, "1 attempt still runs on it");
   });
 });

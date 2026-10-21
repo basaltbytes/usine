@@ -1,5 +1,6 @@
 import { AttemptId } from "@usine/core/attempt";
 import { RunId } from "@usine/core/run";
+import { WorkerName } from "@usine/core/worker";
 import { Schema } from "effect";
 
 /** No Run with the requested identity exists in this instance's records. */
@@ -64,6 +65,20 @@ export class RunInterventionRejectedError extends Schema.TaggedError<RunInterven
   runId: RunId,
   attemptId: AttemptId,
   message: Schema.NonEmptyString,
+}) {}
+
+/**
+ * The operator asked to discard the leftovers of `worker`, a Worker the engine
+ * still runs Attempts on: `usine.yaml` declares it, or a reload removed it and
+ * `running` of its Attempts are still open. Nothing was discarded; once the
+ * Worker is removed and its last Attempt ended, the same request discards them.
+ */
+export class LeftoversDiscardRejectedError extends Schema.TaggedError<LeftoversDiscardRejectedError>(
+  "@usine/engine/LeftoversDiscardRejectedError",
+)("LeftoversDiscardRejectedError", {
+  worker: WorkerName,
+  /** How many Attempts recorded on `worker` are still open. */
+  running: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 }) {}
 
 /** The store's failures plus the cancellation handshake failure only the engine raises. */

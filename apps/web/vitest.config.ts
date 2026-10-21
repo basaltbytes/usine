@@ -265,6 +265,13 @@ export default mergeConfig(
                     body: route.request().postDataJSON(),
                   };
                 },
+                // Answers every Discard leftovers request with the refusal `body`.
+                refuseDiscardLeftovers: async ({ page }, body: string) => {
+                  await page.unroute("**/api/workers/*/discard-leftovers");
+                  await page.route("**/api/workers/*/discard-leftovers", (route) =>
+                    route.fulfill({ status: 409, contentType: "application/json", body }),
+                  );
+                },
                 boardResponses: async ({ page }, overview: string, moveStatus: 200 | 503) => {
                   await page.unroute("**/api/overview");
                   await page.unroute("**/api/projects/board-test/repo/items/*/lane");

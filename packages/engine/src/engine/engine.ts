@@ -10,6 +10,7 @@ import { Context, Crypto, type Duration, Effect, Layer, Match, Option, Result } 
 import { RunDatabase } from "../database/database.ts";
 import {
   AttemptCancellationError,
+  LeftoversDiscardRejectedError,
   RunInterventionRejectedError,
   type RunEngineError,
 } from "./error.ts";
@@ -227,11 +228,12 @@ const makeRunEngine = Effect.gen(function* () {
   const discardLeftovers = Effect.fn("RunEngine.discardLeftovers")(function* (worker: WorkerName) {
     yield* Effect.annotateCurrentSpan({ worker });
     if ((yield* stepExecutor.workers).includes(worker)) {
+      const running = yield* store.openAttempts(worker);
       yield* Effect.logInfo(
         "Leftovers kept; the Worker is configured or still runs Attempts, so its Attempts stay tracked",
-        { worker },
+        { worker, running },
       );
-      return 0;
+      return yield* new LeftoversDiscardRejectedError({ worker, running });
     }
     const attempts = yield* store.discardLeftovers(worker);
     yield* Effect.logInfo(
@@ -296,10 +298,14 @@ export class RunEngine extends Context.Service<
     /**
      * Stops reconciling the Attempts recorded on `worker`, a Worker this engine
      * does not run, and leaves whatever they left on it in place. Returns how
-     * many Attempts it marked; a Worker the engine runs is left unchanged and
-     * the result is 0.
+     * many Attempts it marked. A Worker in `StepExecutor.workers`, one
+     * `usine.yaml` declares or a removed one until its last Attempt ends, is
+     * left unchanged: the request fails with `LeftoversDiscardRejectedError`,
+     * which counts the Worker's open Attempts.
      */
-    readonly discardLeftovers: (worker: WorkerName) => Effect.Effect<number, RunEngineError>;
+    readonly discardLeftovers: (
+      worker: WorkerName,
+    ) => Effect.Effect<number, RunEngineError | LeftoversDiscardRejectedError>;
     /** Reads the Run's current state, effective task and Agent, Step result, and Attempt history. */
     readonly inspect: (runId: RunId) => Effect.Effect<RunSnapshot, RunEngineError>;
     /** Addresses one current Attempt explicitly so an old drawer cannot steer its replacement. */
@@ -422,6 +428,7 @@ export {
   EnginePersistenceError,
   AttemptCancellationError,
   RunInterventionRejectedError,
+  LeftoversDiscardRejectedError,
   RunStoreError,
   RunEngineError,
 } from "./error.ts";
