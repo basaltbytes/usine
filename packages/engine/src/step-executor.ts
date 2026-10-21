@@ -106,8 +106,16 @@ export class StepExecutor extends Context.Service<
       attemptId: AttemptId,
       intervention: AttemptChannel.Intervention,
     ) => Effect.Effect<void, AttemptFailure>;
-    /** Waits for Worker capacity; the returned lease must be released after execution or cancellation. */
-    readonly reserve: (submission: Submission) => Effect.Effect<WorkerLease, AttemptFailure>;
+    /**
+     * Waits for Worker capacity; the returned lease must be released after execution or
+     * cancellation. With `worker`, the lease comes from that Worker only, and the wait lasts until
+     * one of its slots is free: the Run reattaches an open Attempt whose parent task and checkout
+     * stay on that Worker (#177).
+     */
+    readonly reserve: (
+      submission: Submission,
+      worker: Option.Option<WorkerName>,
+    ) => Effect.Effect<WorkerLease, AttemptFailure>;
     /**
      * Runs the reserved Attempt, or reattaches to it when `execution.reattach` is set, recording
      * channel activity through `io`, and waits for its result. It runs `io.checkoutAcquired` once

@@ -903,14 +903,14 @@ describe("store failures in a Run's fiber", () => {
             const scripted = yield* StepExecutor;
             return StepExecutor.of({
               ...scripted,
-              reserve: (request: Submission) =>
+              reserve: (request: Submission, worker: Option.Option<WorkerName>) =>
                 Ref.getAndUpdate(reserved, (count) => count + 1).pipe(
                   Effect.tap((count) =>
                     Effect.sync(() => {
                       if (count === 0) failures.left = Number.POSITIVE_INFINITY;
                     }),
                   ),
-                  Effect.andThen(scripted.reserve(request)),
+                  Effect.andThen(scripted.reserve(request, worker)),
                 ),
             });
           }),

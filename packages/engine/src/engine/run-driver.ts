@@ -459,7 +459,7 @@ export class RunDriver extends Context.Service<
           // parked in `reserve`; the scheduler releases or reoffers the slot in its own
           // onInterrupt. The release obligation begins only once the lease exists.
           outcome = yield* Effect.uninterruptibleMask((restore) =>
-            restore(executor.reserve(submission)).pipe(
+            restore(executor.reserve(submission, Option.none())).pipe(
               Effect.flatMap((lease) =>
                 restore(admission.withAttempt(runId, executeAttempt(runId, lease.worker))).pipe(
                   Effect.ensuring(lease.release),
