@@ -72,16 +72,20 @@ export class StepExecutor extends Context.Service<
      * any work. The engine calls it only for an Attempt that no Run reattaches: at startup for
      * every persisted Attempt except an open one whose parent task `isLive` reports live or whose
      * liveness cannot be read, and for that one when its Run closes the Attempt without
-     * reattaching it. It stops the Attempt's parent task first if that task is still live, and
-     * reconciles the checkout whatever `isLive` reports. For an open Attempt whose parent task
-     * failed with no launch to record it, it also records the comments the Attempt posted on its
-     * Run's Item if its checkout is still on the Worker.
+     * reattaching it, once `interrupt` confirmed that its parent task stopped. It stops the
+     * Attempt's parent task first if that task is still live, and fails, leaving the checkout,
+     * when it cannot confirm the stop. It reconciles the checkout whatever `isLive` reports. For
+     * an open Attempt whose parent task failed with no launch to record it, it also records the
+     * comments the Attempt posted on its Run's Item if its checkout is still on the Worker.
      */
     readonly recover: <E>(
       attempt: AttemptRecovery,
       record: RecoverySink<E>,
     ) => Effect.Effect<void, E | AttemptFailure>;
-    /** Requests that the identified Attempt stop its current work. */
+    /**
+     * Stops the identified Attempt's current work, including a parent task that outlived a restart
+     * and was not reattached. Fails when that parent task cannot be confirmed stopped.
+     */
     readonly interrupt: (attemptId: AttemptId) => Effect.Effect<void, AttemptFailure>;
     /** Sends a nonterminal operator action to a live session in the identified Attempt. */
     readonly intervene: (

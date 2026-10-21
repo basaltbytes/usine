@@ -102,10 +102,11 @@ type OpenAttempt =
  * supersede, or revoke closes the Run under its fiber, that operation takes
  * care of the queued Events instead. A fiber that ends without closing its Run
  * (approval, operator retry, this process stopping, a store failure that
- * outlasted its retries) leaves the Run for `resume` or `reconcile`. The
- * driver also reconciles the checkouts earlier processes left, and keeps the
- * checkout of an open Attempt whose parent task is live until its Run
- * reattaches the Attempt or closes it.
+ * outlasted its retries, an open Attempt's parent task it could not confirm
+ * stopped) leaves the Run for `resume` or `reconcile`. The driver also
+ * reconciles the checkouts earlier processes left, and keeps the checkout of
+ * an open Attempt whose parent task is live until its Run reattaches the
+ * Attempt or closes it.
  */
 export class RunDriver extends Context.Service<
   RunDriver,
@@ -136,15 +137,18 @@ export class RunDriver extends Context.Service<
      * parent task is live, or whose liveness cannot be read, keeps its
      * checkout for its Run: the Run reattaches the Attempt, or reconciles the
      * checkout when it closes the Attempt without reattaching it, before its
-     * next Attempt starts.
+     * next Attempt starts. When that Attempt's parent task cannot be confirmed
+     * stopped, the Run's fiber stops before its next Attempt, and the next
+     * reconcile drives the Run again.
      */
     readonly recoverWorkspaces: () => Effect.Effect<void, RunStoreError>;
     /**
      * Reconciles the checkout `recoverWorkspaces` kept for `attemptId`, an
      * Attempt that closes without a reattachment, as when the operator cancels
      * its Run, and records its salvage. Does nothing for an Attempt whose
-     * checkout startup did not keep, or that its Run reattached. A failure is
-     * logged, and the checkout stays on its Worker for the next startup.
+     * checkout startup did not keep, or that its Run reattached. A failure,
+     * including a parent task that cannot be confirmed stopped, is logged, and
+     * the checkout stays on its Worker for the next startup.
      */
     readonly reconcileCheckout: (attemptId: AttemptId) => Effect.Effect<void>;
   }
@@ -356,7 +360,10 @@ export class RunDriver extends Context.Service<
         const open = yield* openAttempt(runId);
         if (Option.isSome(open) && open.value._tag !== "Live") {
           // Reconciled while the Attempt is still open, as startup reconciles
-          // one, so the next Attempt resumes from its salvage.
+          // one, so the next Attempt resumes from its salvage. A parent task
+          // that cannot be confirmed stopped fails this fiber before the next
+          // Attempt begins; the next reconcile drives the Run again, which
+          // reads whether the Attempt is live once more.
           yield* checkouts.reconcile(open.value.attempt.id);
         }
         if (Option.isSome(open) && open.value._tag === "Finished") {
@@ -495,7 +502,11 @@ export class RunDriver extends Context.Service<
         continueWithNewest,
         reconcile,
         recoverWorkspaces: checkouts.atStartup,
-        reconcileCheckout: checkouts.reconcile,
+        // The reconcile logged the stop it could not confirm; the checkout stays kept.
+        reconcileCheckout: (attemptId: AttemptId) =>
+          checkouts
+            .reconcile(attemptId)
+            .pipe(Effect.catchTag("ParentStopUnconfirmedError", () => Effect.void)),
       };
     }),
   );

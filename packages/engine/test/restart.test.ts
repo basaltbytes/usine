@@ -21,7 +21,7 @@ import {
   Schedule,
   Scope,
 } from "effect";
-import { RunEngine, RunEngineShutdown } from "../src/engine/engine.ts";
+import { ReconcileInterval, RunEngine, RunEngineShutdown } from "../src/engine/engine.ts";
 import { runIdFor, type Submission } from "../src/engine/submission.ts";
 import { RunReader } from "../src/run-reader/run-reader.ts";
 import { StepExecutor } from "../src/step-executor.ts";
@@ -106,11 +106,13 @@ const stopDuringAttempts = (directory: InstanceDirectory, submissions: ReadonlyA
 /**
  * The executor of the restarted runtime, whose parent tasks `live` holds and
  * whose liveness cannot be read for the Attempts in `unreadable`. As the real
- * one does, `recover` and `interrupt` stop a parent task, and `recover`
- * reconciles the checkout whatever `isLive` reports. Every checkout it
- * reconciles becomes a pushed salvage, and an open Attempt whose parent
- * failed records the comment it posted. Runs wait for a Worker until `slot`
- * opens; an Attempt then records what it resumes from.
+ * one does, `recover` and `interrupt` stop a parent task, and fail without
+ * touching the checkout when that task cannot be stopped, which `refused`
+ * records for the Attempts in `unstoppable`; `recover` reconciles the
+ * checkout whatever `isLive` reports. Every checkout it reconciles becomes a
+ * pushed salvage, and an open Attempt whose parent failed records the comment
+ * it posted. Runs wait for a Worker until `slot` opens; an Attempt then
+ * records what it resumes from.
  */
 const restartedExecutor = Effect.fn("test.restartedExecutor")(function* (
   live: ReadonlyArray<Attempt>,
@@ -118,6 +120,8 @@ const restartedExecutor = Effect.fn("test.restartedExecutor")(function* (
   const state = {
     live: yield* Ref.make<ReadonlySet<AttemptId>>(new Set(live.map(({ id }) => id))),
     unreadable: yield* Ref.make<ReadonlySet<AttemptId>>(new Set()),
+    unstoppable: yield* Ref.make<ReadonlySet<AttemptId>>(new Set()),
+    refused: yield* Ref.make<ReadonlyArray<AttemptId>>([]),
     stored: yield* Ref.make<ReadonlyMap<AttemptId, Result.Result<StepResult, AttemptFailure>>>(
       new Map(),
     ),
@@ -126,7 +130,16 @@ const restartedExecutor = Effect.fn("test.restartedExecutor")(function* (
     slot: yield* Deferred.make<void>(),
   };
   const stop = (attemptId: AttemptId) =>
-    Ref.update(state.live, (ids) => new Set([...ids].filter((id) => id !== attemptId)));
+    Effect.gen(function* () {
+      if ((yield* Ref.get(state.unstoppable)).has(attemptId)) {
+        yield* Ref.update(state.refused, (ids) => [...ids, attemptId]);
+        return yield* new InfraFailure({
+          message: "Could not cancel the parent task",
+          cause: "storage unavailable",
+        });
+      }
+      yield* Ref.update(state.live, (ids) => new Set([...ids].filter((id) => id !== attemptId)));
+    });
   const executor = Layer.succeed(StepExecutor)({
     workers: Effect.succeed([WorkerName.make("local")]),
     isLive: (attemptId) =>
@@ -445,21 +458,44 @@ describe("engine restart", () => {
           const worker = yield* restartedExecutor([gone, failed, unread]);
           const scope = yield* Scope.make();
           const engine = Context.get(
-            yield* Scope.provide(Layer.build(engineLayer(directory, worker.executor)), scope),
+            yield* Scope.provide(Layer.build(engineLayer(directory, worker.executor)), scope).pipe(
+              Effect.provideService(ReconcileInterval, "50 millis"),
+            ),
             RunEngine,
           );
           assert.deepStrictEqual(yield* Ref.get(worker.reconciled), []);
 
           // Before the Runs get a Worker, one parent task is gone and another
-          // failed. The third still reports live, as a parent's report that
-          // was never harvested does, but its Run cannot read that.
+          // failed. The third still runs, but its Run cannot read that, and
+          // its parent task cannot be stopped yet.
           yield* Ref.set(worker.live, new Set([unread.id]));
           yield* Ref.set(worker.unreadable, new Set([unread.id]));
+          yield* Ref.set(worker.unstoppable, new Set([unread.id]));
           yield* Ref.set(
             worker.stored,
             new Map([[failed.id, Result.fail(new AgentFailure({ message: "failed unattached" }))]]),
           );
           yield* Deferred.succeed(worker.slot, undefined);
+
+          // While its parent task may still write to the checkout, the Run
+          // reconciles nothing and starts no next Attempt. The next reconcile
+          // drives the Run again, and it tries the stop once more.
+          const [refused, waiting] = yield* Effect.repeat(
+            Effect.all([Ref.get(worker.refused), engine.inspect(unread.runId)]),
+            {
+              until: ([ids, { attempts }]) => ids.length >= 2 || attempts.length > 1,
+              schedule: Schedule.spaced("10 millis"),
+            },
+          );
+          assert.deepStrictEqual(refused.slice(0, 2), [unread.id, unread.id]);
+          assert.deepStrictEqual(
+            waiting.attempts.map(({ outcome, salvage }) => [outcome, salvage]),
+            [[Option.none(), Option.none()]],
+          );
+          assert(
+            !(yield* Ref.get(worker.reconciled)).some(({ attemptId }) => attemptId === unread.id),
+          );
+          yield* Ref.set(worker.unstoppable, new Set());
 
           for (const kept of [gone, unread]) {
             const resumed = yield* waitFor(

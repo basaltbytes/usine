@@ -252,6 +252,55 @@ describe("exe.dev launch", () => {
   );
 
   it.effect(
+    "keeps the checkout of an open Attempt whose parent task it cannot confirm stopped",
+    () => {
+      const ssh = fakeSsh();
+      const storage = new StubStorage();
+      // The parent task outlived the restart, and durable storage cannot cancel it.
+      const failingCancel = (stub: Layer.Layer<AttemptRuntime>) =>
+        Layer.effect(
+          AttemptRuntime,
+          Effect.map(AttemptRuntime, (runtime) =>
+            AttemptRuntime.of({
+              ...runtime,
+              cancel: () =>
+                new InfraFailure({ message: "Cancel failed", cause: "storage unavailable" }),
+            }),
+          ),
+        ).pipe(Layer.provide(stub));
+      return Effect.gen(function* () {
+        yield* stopMidAttempt(ssh, storage);
+        ssh.state.salvage = "dirty";
+        const salvaged: Array<string> = [];
+        yield* Effect.gen(function* () {
+          const executor = yield* Executor;
+          const recovered = yield* executor
+            .recover(openAttempt, {
+              salvage: (salvage) => Effect.sync(() => void salvaged.push(salvage._tag)),
+              comments: () => Effect.die("A parent that may still run has no comment recovered"),
+              windows: aloneOnItem(),
+            })
+            .pipe(Effect.flip);
+          assert(recovered._tag === "ExecutorOperationError");
+          assert.strictEqual(recovered.operation, "cancel");
+          const canceled = yield* executor.cancel(ATTEMPT_ID).pipe(Effect.flip);
+          assert(canceled._tag === "ExecutorOperationError");
+          assert.strictEqual(canceled.operation, "cancel");
+          assert.isTrue(yield* executor.isLive(ATTEMPT_ID), "the parent task may still run");
+        }).pipe(
+          Effect.scoped,
+          Effect.provide(runtime(ssh.layer, completes, storage, failingCancel)),
+        );
+        assert.deepStrictEqual(salvaged, []);
+        assert(
+          !ssh.state.commands.map(remoteLine).some((line) => line.includes("'worktree' 'remove'")),
+          "the checkout stays while its parent task may still write to it",
+        );
+      });
+    },
+  );
+
+  it.effect(
     "runs the parent in this process with the VM as the child host, then harvests and cleans up over SSH",
     () => {
       const ssh = fakeSsh();

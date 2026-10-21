@@ -108,7 +108,12 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
   const runtime = yield* AttemptRuntime;
   const attempts = new Map<AttemptId, ActiveAttempt>();
 
-  /** Cancels the Attempt's parent task if durable storage still holds it live; failures are logged, never raised. */
+  /**
+   * Cancels the Attempt's parent task if durable storage still holds it live.
+   * Succeeds once the task is confirmed stopped, or was not live. Fails, after
+   * logging why, when its liveness cannot be read, or when its cancel fails or
+   * exceeds the interrupt grace, since the task may still be running then.
+   */
   const stopTask = Effect.fn("DurableSession.stopTask")(function* (
     attemptId: AttemptId,
     reason: string,
@@ -122,7 +127,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
         errorTag: live.failure._tag,
         message: live.failure.message,
       });
-      return;
+      return yield* cancelError(attemptId, live.failure);
     }
     if (!live.success) {
       yield* Effect.logDebug("The Attempt's parent task is not live; nothing to stop", {
@@ -135,18 +140,25 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
     const canceled = yield* runtime
       .cancel(attemptId)
       .pipe(Effect.timeoutOption(options.interruptGrace), Effect.result);
-    if (Result.isFailure(canceled))
+    if (Result.isFailure(canceled)) {
       yield* Effect.logWarning("The Attempt's parent task could not be canceled", {
         attemptId,
         reason,
         errorTag: canceled.failure._tag,
         message: canceled.failure.message,
       });
-    else if (Option.isNone(canceled.success))
+      return yield* cancelError(attemptId, canceled.failure);
+    }
+    if (Option.isNone(canceled.success)) {
       yield* Effect.logWarning("Canceling the Attempt's parent task exceeded the interrupt grace", {
         attemptId,
         reason,
       });
+      return yield* cancelError(
+        attemptId,
+        new Error("canceling the parent task exceeded the interrupt grace"),
+      );
+    }
   });
 
   /** Records `comments` through `record`; a failure is logged and never raised. */
@@ -291,6 +303,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
               );
               yield* checkout.keepForReattach;
             } else {
+              // A stop that cannot be confirmed is logged; the Attempt still ends as it did.
               yield* stopTask(
                 attemptId,
                 Option.match(stop, {
@@ -298,7 +311,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
                   onSome: (reason) =>
                     reason._tag === "Cancel" ? "the Attempt was canceled" : "a ceiling tripped",
                 }),
-              );
+              ).pipe(Effect.ignore);
               yield* recordPostedComments(attemptId, checkout, io);
             }
           }
@@ -469,7 +482,10 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
       .pipe(
         Effect.tapError(() =>
           request.reattach
-            ? stopTask(request.attemptId, "its reattachment could not be prepared")
+            ? // A stop that cannot be confirmed is logged; the preparation's failure is reported.
+              stopTask(request.attemptId, "its reattachment could not be prepared").pipe(
+                Effect.ignore,
+              )
             : Effect.void,
         ),
       );
@@ -477,6 +493,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
   /**
    * Cancels the Attempt at any stage, then a live parent task this process
    * never launched, such as one still awaiting its reattachment after a restart.
+   * Fails when that parent task cannot be confirmed stopped.
    */
   const cancel = Effect.fn("DurableSession.cancel")(function* (attemptId: AttemptId) {
     yield* Effect.annotateCurrentSpan({ attemptId });
@@ -533,7 +550,9 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
    * The engine recovers an Attempt only once no Run reattaches it, so an open
    * Attempt is reconciled even when `isLive` still reports it: its parent
    * task is stopped, and a report that was never harvested stays unharvested
-   * while its checkout is salvaged (#180).
+   * while its checkout is salvaged (#180). Fails when the task cannot be
+   * confirmed stopped, so recovery leaves the checkout to a task that may
+   * still write to it.
    */
   const stopForRecovery = Effect.fn("DurableSession.stopForRecovery")(function* (
     attempt: AttemptRecovery,

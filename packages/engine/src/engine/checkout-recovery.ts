@@ -1,8 +1,21 @@
-import type { AttemptId } from "@usine/core/attempt";
+import { AttemptId } from "@usine/core/attempt";
 import type { AttemptRecovery } from "@usine/core/attempt/salvage";
-import { Effect, Option, Ref, Result } from "effect";
+import { Effect, Option, Ref, Result, Schema } from "effect";
 import type { StepExecutor } from "../step-executor.ts";
 import type { RunStore } from "../store/store.ts";
+
+/**
+ * The parent task of `attemptId`, an open Attempt whose Run closes it without
+ * reattaching it, could not be confirmed stopped. Its checkout stays on its
+ * Worker, and the Run's next Attempt does not start, so neither overtakes a
+ * task that may still write to the checkout.
+ */
+class ParentStopUnconfirmedError extends Schema.TaggedError<ParentStopUnconfirmedError>(
+  "@usine/engine/internal/ParentStopUnconfirmedError",
+)("ParentStopUnconfirmedError", {
+  attemptId: AttemptId,
+  cause: Schema.Defect(),
+}) {}
 
 const without = (ids: ReadonlySet<AttemptId>, attemptId: AttemptId): ReadonlySet<AttemptId> => {
   const remaining = new Set(ids);
@@ -16,7 +29,8 @@ const without = (ids: ReadonlySet<AttemptId>, attemptId: AttemptId): ReadonlySet
  * The checkout of an open Attempt whose parent task is live stays on its
  * Worker for its Run: `reattached` hands it to the Run's execution, and
  * `reconcile` reconciles it once the Run closes the Attempt without
- * reattaching it (#180). `RunDriver` exposes both steps to the engine.
+ * reattaching it and its parent task is confirmed stopped (#180).
+ * `RunDriver` exposes both steps to the engine.
  */
 export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
   store: RunStore["Service"],
@@ -97,8 +111,24 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
   /** The Run reattached `attemptId`: its execution takes over the checkout startup kept. */
   const reattached = (attemptId: AttemptId) => Ref.update(kept, (ids) => without(ids, attemptId));
 
-  /** Reconciles the kept checkout of `attemptId`, whose Run closes it without reattaching it. */
+  /**
+   * Reconciles the kept checkout of `attemptId`, whose Run closes it without
+   * reattaching it, once its parent task is confirmed stopped. Fails with
+   * `ParentStopUnconfirmedError`, leaving the checkout, when it is not.
+   */
   const recoverKept = Effect.fn("CheckoutRecovery.recoverKept")(function* (attemptId: AttemptId) {
+    // Neither the reconcile nor the Run's next Attempt may start while the
+    // parent task may still write to the checkout. `recover` stops the task
+    // too, but its failure cannot tell a stop it could not confirm from a
+    // salvage that failed, which only leaves the checkout for the next startup.
+    const stopped = yield* executor.interrupt(attemptId).pipe(Effect.result);
+    if (Result.isFailure(stopped)) {
+      yield* Effect.logWarning(
+        "Could not confirm that the parent task of an Attempt its Run does not reattach stopped; its checkout stays, and the Run starts no next Attempt until the stop is confirmed",
+        { attemptId, errorTag: stopped.failure._tag, message: stopped.failure.message },
+      );
+      return yield* new ParentStopUnconfirmedError({ attemptId, cause: stopped.failure });
+    }
     const found = yield* store.salvageCandidate(attemptId).pipe(Effect.result);
     if (Result.isFailure(found)) {
       yield* Effect.logError(
@@ -124,10 +154,9 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
       );
       return;
     }
-    // The Run has decided not to reattach the Attempt. `recover` stops a
-    // parent task that is still live, then reconciles the checkout even when
-    // `isLive` still reports the Attempt, as for a parent's report that was
-    // never harvested.
+    // The Run has decided not to reattach the Attempt. `recover` reconciles
+    // the checkout even when `isLive` still reports the Attempt, as for a
+    // parent's report that was never harvested.
     yield* Effect.logInfo(
       "Reconciling the checkout startup kept for an Attempt that was not reattached",
       fields,
@@ -145,7 +174,8 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
     }
     yield* recoverKept(attemptId);
     // Forgotten only once reconciled: when a cancel interrupts the Run's fiber
-    // during the reconcile, the cancel reconciles the checkout again.
+    // during the reconcile, the cancel reconciles the checkout again, and a
+    // Run whose parent task was not confirmed stopped tries again.
     yield* Ref.update(kept, (ids) => without(ids, attemptId));
   });
 
