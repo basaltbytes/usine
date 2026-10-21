@@ -9,12 +9,17 @@ import {
   TokenCount,
 } from "@usine/core/agent/session";
 import { AttemptId } from "@usine/core/attempt";
-import { aloneOnItem } from "./exe-dev/support.ts";
+import { recording } from "./exe-dev/support.ts";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentFailure, type AttemptFailure } from "@usine/core/attempt/failure";
 import { DateTime, Deferred, Effect, Fiber, Option, Queue, Result } from "effect";
 import { TestClock } from "effect/testing";
-import { type AttemptGuardLimits, attemptGuard } from "../src/guard.ts";
+import {
+  type AttemptGuardLimits,
+  type AttemptGuardSeed,
+  attemptGuard,
+  guardSeed,
+} from "../src/guard.ts";
 
 const child = (id: string) =>
   new ChildSession({
@@ -27,37 +32,54 @@ const first = child("first");
 const second = child("second");
 const attemptId = AttemptId.make("guarded");
 
+/**
+ * Arms a guard over a sink that records every envelope, as the transcript
+ * does, and runs it until a ceiling trips. Each warning is recorded as the
+ * steer the durable runtime appends for it. `seed` resumes a guard from what
+ * an earlier one recorded, as a reattachment after a restart does.
+ */
 const setup = (
   ceilings: Pick<AttemptGuardLimits, "maxAttemptMinutes" | "maxAttemptTokens">,
-  warnFails = false,
+  options: {
+    readonly warnFails?: boolean;
+    readonly seed?: AttemptGuardSeed;
+  } = {},
 ) =>
   Effect.gen(function* () {
     const warnings: Array<string> = [];
+    const { sink: io } = recording();
     const finished = yield* Deferred.make<void>();
     const inputs = yield* Queue.make<{
       readonly envelope: AttemptChannel.OutboundEnvelope;
       readonly written: Deferred.Deferred<void, AttemptFailure>;
     }>();
+    let inbound = 0;
     const guard = yield* attemptGuard(
       {
         attemptId,
         ...ceilings,
         warn: (message) =>
-          Effect.sync(() => {
+          Effect.gen(function* () {
             warnings.push(message);
-          }).pipe(
-            Effect.andThen(
-              warnFails ? new AgentFailure({ message: "no live channel" }) : Effect.void,
-            ),
-          ),
+            yield* io.append(
+              "inbound",
+              new AttemptChannel.InboundEnvelope({
+                version: AttemptChannel.PROTOCOL_VERSION,
+                attemptId,
+                sequence: AttemptChannel.Sequence.make(++inbound),
+                sentAt: yield* DateTime.now,
+                target: new AttemptChannel.ParentTarget(),
+                operator: "engine",
+                payload: new AttemptChannel.Steer({ message }),
+              }),
+            );
+            if (options.warnFails === true) {
+              return yield* new AgentFailure({ message: "no live channel" });
+            }
+          }),
       },
-      {
-        append: () => Effect.void,
-        salvage: () => Effect.void,
-        comments: () => Effect.void,
-        transcript: Effect.succeed([]),
-        windows: aloneOnItem(attemptId),
-      },
+      io,
+      options.seed ?? guardSeed([]),
     );
     const attempt = Effect.raceFirst(
       Effect.forever(
@@ -84,7 +106,7 @@ const setup = (
             version: AttemptChannel.PROTOCOL_VERSION,
             attemptId,
             sequence: AttemptChannel.Sequence.make(++sequence),
-            sentAt: DateTime.makeUnsafe("2026-09-12"),
+            sentAt: yield* DateTime.now,
             payload,
           }),
         });
@@ -113,7 +135,15 @@ const setup = (
           event: new SessionTokensUpdated({ session, totalTokens: TokenCount.make(count) }),
         }),
       );
-    return { result, emit, hold, usage, warnings, finished };
+    const started = emit(
+      new AttemptChannel.Started({ parentModel: ModelId.make("openai/parent") }),
+    );
+    /** Stops this guard as an orchestrator restart does, and gives the seed its transcript leaves. */
+    const restart = Fiber.interrupt(result).pipe(
+      Effect.andThen(io.transcript),
+      Effect.map(guardSeed),
+    );
+    return { result, emit, hold, usage, started, restart, warnings, finished };
   });
 
 describe("Attempt guard", () => {
@@ -164,7 +194,7 @@ describe("Attempt guard", () => {
       Effect.gen(function* () {
         const { result, hold, usage, warnings } = yield* setup(
           { maxAttemptMinutes: Option.some(1), maxAttemptTokens: Option.some(100) },
-          true,
+          { warnFails: true },
         );
         yield* hold(first, true);
         yield* usage(first, 60);
@@ -201,6 +231,85 @@ describe("Attempt guard", () => {
       yield* Deferred.succeed(finished, undefined);
       const outcome = yield* Fiber.join(result);
       assert(Result.isSuccess(outcome) && outcome.success === "finished");
+    }),
+  );
+
+  it.effect(
+    "trips a reattached Attempt after 70% of its time at 100% of the original, keeping the parent's Hold across the restart",
+    () =>
+      Effect.gen(function* () {
+        const ceilings = { maxAttemptMinutes: Option.some(1), maxAttemptTokens: Option.none() };
+        const before = yield* setup(ceilings);
+        yield* before.started;
+        yield* TestClock.adjust("30 seconds");
+        yield* before.hold("parent", true);
+        yield* TestClock.adjust("2 hours");
+        yield* before.hold("parent", false);
+        yield* TestClock.adjust("12 seconds");
+        // 42 of the 60 unsupervised seconds are spent when the operator holds the parent again.
+        yield* before.hold("parent", true);
+        const seed = yield* before.restart;
+        // Nothing runs the Attempt while the orchestrator is down.
+        yield* TestClock.adjust("10 minutes");
+        const after = yield* setup(ceilings, { seed });
+        yield* TestClock.adjust("1 hour");
+        assert.strictEqual(after.result.pollUnsafe(), undefined, "the Hold outlives the restart");
+        yield* after.hold("parent", false);
+        yield* TestClock.adjust("6 seconds");
+        assert.deepStrictEqual(after.warnings, [
+          "0.8 of 1 minutes used by this Attempt; commit and push your work now.",
+        ]);
+        yield* TestClock.adjust("11 seconds");
+        assert.strictEqual(after.result.pollUnsafe(), undefined);
+        yield* TestClock.adjust("1 second");
+        const outcome = yield* Fiber.join(after.result);
+        assert(Result.isFailure(outcome) && outcome.failure._tag === "RunawayFailure");
+        assert.strictEqual(outcome.failure.ceiling, "wall-clock");
+        assert.deepStrictEqual([...before.warnings, ...after.warnings].length, 1);
+      }),
+  );
+
+  it.effect("counts the tokens of a session that finished before the restart", () =>
+    Effect.gen(function* () {
+      const ceilings = { maxAttemptMinutes: Option.none(), maxAttemptTokens: Option.some(100) };
+      const before = yield* setup(ceilings);
+      yield* before.started;
+      yield* before.usage(first, 60);
+      yield* before.emit(
+        new AttemptChannel.SessionEvent({ event: new SessionFinished({ session: first }) }),
+      );
+      const after = yield* setup(ceilings, { seed: yield* before.restart });
+      yield* after.usage(second, 30);
+      assert.deepStrictEqual(after.warnings, [
+        "90 of 100 tokens used by this Attempt; commit and push your work now.",
+      ]);
+      const rejected = yield* after.usage(second, 40).pipe(Effect.result);
+      assert(Result.isFailure(rejected) && rejected.failure._tag === "RunawayFailure");
+      assert.strictEqual(rejected.failure.ceiling, "tokens");
+    }),
+  );
+
+  it.effect("sends each ceiling's warning once across a restart", () =>
+    Effect.gen(function* () {
+      const ceilings = { maxAttemptMinutes: Option.some(1), maxAttemptTokens: Option.some(100) };
+      const before = yield* setup(ceilings);
+      yield* before.started;
+      yield* TestClock.adjust("50 seconds");
+      yield* before.usage(first, 85);
+      assert.deepStrictEqual(before.warnings, [
+        "0.8 of 1 minutes used by this Attempt; commit and push your work now.",
+        "85 of 100 tokens used by this Attempt; commit and push your work now.",
+      ]);
+      const after = yield* setup(ceilings, { seed: yield* before.restart });
+      yield* after.usage(second, 5);
+      yield* TestClock.adjust("9 seconds");
+      assert.strictEqual(after.result.pollUnsafe(), undefined);
+      assert.deepStrictEqual(after.warnings, []);
+      yield* TestClock.adjust("1 second");
+      const outcome = yield* Fiber.join(after.result);
+      assert(Result.isFailure(outcome) && outcome.failure._tag === "RunawayFailure");
+      assert.strictEqual(outcome.failure.ceiling, "wall-clock");
+      assert.deepStrictEqual(after.warnings, []);
     }),
   );
 });

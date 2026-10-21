@@ -14,6 +14,7 @@ import {
 import {
   Cause,
   Deferred,
+  Duration,
   Effect,
   Exit,
   Fiber,
@@ -29,6 +30,7 @@ import {
   type ExecutorError,
   ExecutorOperationError,
 } from "./executor.ts";
+import { guardSeed } from "./guard.ts";
 import { type AcquiredAttempt, type AttemptStop, preparedAttemptsFor } from "./prepared-attempt.ts";
 
 interface ActiveAttempt {
@@ -107,6 +109,15 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
 ) {
   const runtime = yield* AttemptRuntime;
   const attempts = new Map<AttemptId, ActiveAttempt>();
+  /** Completed by each Attempt's launch once it registered the Attempt in `attempts`. */
+  const registrations = new Map<AttemptId, Deferred.Deferred<void>>();
+  const registration = (attemptId: AttemptId) => {
+    const existing = registrations.get(attemptId);
+    if (existing !== undefined) return existing;
+    const created = Deferred.makeUnsafe<void>();
+    registrations.set(attemptId, created);
+    return created;
+  };
 
   /**
    * Cancels the Attempt's parent task if durable storage still holds it live.
@@ -225,6 +236,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
         execution,
         settled,
       });
+      yield* Deferred.succeed(registration(attemptId), undefined);
       yield* Effect.logInfo("Running the Attempt's parent task", {
         attemptId,
         worker: prepared.worker,
@@ -455,7 +467,47 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
     );
   });
 
-  const prepared = yield* preparedAttemptsFor(stop, intervene);
+  /**
+   * What the guard of the Attempt `request` describes goes on from: for a
+   * reattached Attempt, what its transcript, read through `io`, recorded
+   * before the restart, and for a fresh one the empty transcript it starts
+   * with. A transcript that cannot be read is logged, and the guard then
+   * starts over rather than fail the reattachment, which would leave its
+   * parent task unobserved.
+   */
+  const guardSeedFor = Effect.fn("DurableSession.guardSeed")(function* (
+    request: CheckoutRequest,
+    io: AttemptChannel.Sink,
+  ) {
+    const attemptId = request.attemptId;
+    yield* Effect.annotateCurrentSpan({ attemptId, reattach: request.reattach });
+    if (!request.reattach) return guardSeed([]);
+    const transcript = yield* io.transcript.pipe(Effect.result);
+    if (Result.isFailure(transcript)) {
+      yield* Effect.logWarning(
+        "Could not read the reattached Attempt's transcript; its ceilings start over",
+        { attemptId, errorTag: transcript.failure._tag, message: transcript.failure.message },
+      );
+      return guardSeed([]);
+    }
+    const seed = guardSeed(transcript.success);
+    yield* Effect.logInfo("Resuming the reattached Attempt's ceilings from its transcript", {
+      attemptId,
+      envelopes: transcript.success.length,
+      tokens: [...seed.tokens.values()].reduce((sum, value) => sum + value, 0),
+      unsupervisedMinutes: Math.round(Duration.toMillis(seed.unsupervised) / 6_000) / 10,
+      parentHeld: seed.parentHeld,
+      warned: [...seed.warned],
+    });
+    return seed;
+  });
+
+  const prepared = yield* preparedAttemptsFor(
+    stop,
+    intervene,
+    (attemptId) => Deferred.await(registration(attemptId)),
+    guardSeedFor,
+  );
 
   /**
    * Owns an executor's preparation of `request` through `preparedAttemptsFor`.
@@ -475,6 +527,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
         Effect.addFinalizer(() =>
           Effect.sync(() => {
             attempts.delete(request.attemptId);
+            registrations.delete(request.attemptId);
           }),
         ).pipe(Effect.andThen(acquire)),
         request,

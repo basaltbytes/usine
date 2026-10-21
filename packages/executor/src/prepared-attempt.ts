@@ -7,7 +7,7 @@ import {
 } from "@usine/core/attempt/failure";
 import { Deferred, Effect, Exit, Fiber, Ref, Scope } from "effect";
 import type { CheckoutRequest, ExecutorError, PreparedAttempt } from "./executor.ts";
-import { attemptGuard } from "./guard.ts";
+import { attemptGuard, type AttemptGuardSeed } from "./guard.ts";
 import type { ProvisionedWorktree } from "./provision.ts";
 
 /** Why an Attempt's live session is stopping: operator cancel, or a runaway ceiling that tripped. */
@@ -35,6 +35,9 @@ interface OwnedAttempt {
  * it, and so does a tripped wall-clock ceiling before the guard's race interrupts the
  * launch. Without a live session, cancellation releases the Attempt directly. `cancel`,
  * a failed `prepare`, and `launch` each return only after the Attempt's resources are released.
+ * `registered` completes once the launch registered the Attempt's live session, so
+ * `stop` and `intervene` reach it, and `guardSeed` gives what the Attempt's guard
+ * goes on from, read through its sink.
  */
 export const preparedAttemptsFor = (
   stop: (attemptId: AttemptId, reason: AttemptStop) => Effect.Effect<boolean, ExecutorError>,
@@ -42,6 +45,8 @@ export const preparedAttemptsFor = (
     attemptId: AttemptId,
     intervention: AttemptChannel.Intervention,
   ) => Effect.Effect<void, AttemptFailure>,
+  registered: (attemptId: AttemptId) => Effect.Effect<void>,
+  guardSeed: (request: CheckoutRequest, io: AttemptChannel.Sink) => Effect.Effect<AttemptGuardSeed>,
 ) =>
   Effect.sync(() => {
     const attempts = new Map<AttemptId, OwnedAttempt>();
@@ -111,6 +116,7 @@ export const preparedAttemptsFor = (
                   cause: new Error("prepared Attempt is no longer available"),
                 });
               }
+              const seed = yield* guardSeed(request, io);
               const guard = yield* attemptGuard(
                 {
                   attemptId,
@@ -127,8 +133,15 @@ export const preparedAttemptsFor = (
                     ),
                 },
                 io,
+                seed,
               );
-              const tripped = guard.tripped.pipe(
+              // The clock starts once the launch registered the session `stop` reaches.
+              // A remote launch first waits for its Worker's liveness watch, which the
+              // Attempts reattached on that Worker after a restart contend for; a seed
+              // that leaves no time would trip meanwhile, find no session to stop,
+              // and leave the reattached parent task running.
+              const tripped = registered(attemptId).pipe(
+                Effect.andThen(guard.tripped),
                 Effect.tapError(({ ceiling }) =>
                   stop(attemptId, { _tag: "Runaway", ceiling }).pipe(
                     Effect.tapError((error) =>
