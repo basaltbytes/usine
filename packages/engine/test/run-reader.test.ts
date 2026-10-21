@@ -11,6 +11,7 @@ import { InstanceDirectory } from "@usine/core/instance";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
+import { RunId } from "@usine/core/run";
 import { StepName } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
 import { EffectLogger } from "drizzle-orm/effect-core";
@@ -220,6 +221,41 @@ describe("Loop sightings", () => {
           }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
         }),
       ),
+  );
+});
+
+describe("Run Events", () => {
+  it.live("read the Event each Run was opened for, once per Run, leaving out unknown Runs", () =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([]);
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const reader = yield* RunReader;
+          const first = yield* engine.submit(
+            supportSubmission({ number: 1, item: "first", approval: "required" }),
+          );
+          const second = yield* engine.submit(
+            supportSubmission({ number: 2, item: "second", approval: "required" }),
+          );
+          assert(first._tag === "Claimed" && second._tag === "Claimed");
+
+          const read = yield* reader.events([
+            second.runId,
+            RunId.make("run-that-does-not-exist"),
+            first.runId,
+            second.runId,
+          ]);
+          const byRun = new Map(read.map(({ runId, event }) => [runId, event]));
+          assert.strictEqual(read.length, 2);
+          assert.deepStrictEqual(byRun.get(first.runId)?.id, EventId.make("event-1"));
+          assert.deepStrictEqual(byRun.get(first.runId)?.payload, { revision: 1 });
+          assert.deepStrictEqual(byRun.get(second.runId)?.id, EventId.make("event-2"));
+          assert.deepStrictEqual(byRun.get(second.runId)?.payload, { revision: 2 });
+          assert.deepStrictEqual(yield* reader.events([]), []);
+        }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
+      }),
+    ),
   );
 });
 

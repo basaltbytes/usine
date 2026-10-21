@@ -35,7 +35,12 @@ export class BoardPullRequestView extends Schema.Class<BoardPullRequestView>(
   state: Schema.Literals(["pr-open", "pr-merged"]),
 }) {}
 
-/** A Task projected from linked Items. The current Item determines the key, lane, labels, and move destination; the first issue supplies the Task title. */
+/**
+ * A Task projected from linked Items. The current Item determines the key, lane, labels, and move
+ * destination; the first issue supplies the Task title. While the Task's newest open Run is
+ * running, the card stays in the label lane that matched when that Run was triggered, even after
+ * its Agent changed the labels.
+ */
 export class BoardTaskView extends Schema.Class<BoardTaskView>("@usine/orchestrator/BoardTaskView")(
   {
     ...BoardItemLink.fields,

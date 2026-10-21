@@ -8,12 +8,13 @@ import {
   type LaneSource,
 } from "@usine/config/board";
 import type { ManagedRepo } from "@usine/config/factory";
+import type { Event } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
 import type { LoopName } from "@usine/core/loop";
 import type { RunId } from "@usine/core/run";
 import type { ItemProjection } from "@usine/engine/item-projection";
 import { ItemLabelMutation } from "@usine/github/item-writer";
-import { Effect, Result } from "effect";
+import { Effect, Option, Result } from "effect";
 import {
   BoardTaskView,
   BoardLaneId,
@@ -24,7 +25,7 @@ import {
 } from "../operator/board.ts";
 import { type RunView } from "../operator/run.ts";
 import type { RunUsageView } from "../operator/usage.ts";
-import { projectedItem, type ProjectedItem } from "./items.ts";
+import { payloadLabels, projectedItem, type ProjectedItem } from "./items.ts";
 import { taskCards } from "./tasks.ts";
 
 interface LaneDefinition {
@@ -64,7 +65,7 @@ const laneId = (definition: LaneDefinition): BoardLaneId =>
 
 // GitHub matches label names ignoring case, as the label declarations do.
 const labelLaneFor = (
-  item: Pick<ProjectedItem, "state" | "labels">,
+  item: Pick<ProjectedItem, "labels">,
   lanes: ReadonlyArray<LaneDefinition>,
 ): LaneDefinition | undefined => {
   const itemLabels = new Set(item.labels.map(canonicalLabelName));
@@ -88,11 +89,66 @@ const laneFor = (
     : (labelLaneFor(item, lanes) ?? stateLaneFor(item, lanes));
 
 /**
+ * The label lane that matched when `running`, the card's running Run, was triggered, read from
+ * the labels of its Event's payload. Undefined, so the card is placed by its current Item, when
+ * that Item is closed or merged, the Event was not read or has no labels to read, or none of its
+ * labels routes to a lane.
+ */
+const triggerLaneFor = Effect.fn("Board.triggerLane")(function* (
+  repository: ManagedRepo,
+  view: BoardTaskView,
+  running: RunView,
+  lanes: ReadonlyArray<LaneDefinition>,
+  runEvents: ReadonlyMap<RunId, Event>,
+) {
+  const fields = {
+    repository: repository.name,
+    itemKey: view.itemKey,
+    runId: running.id,
+    loop: running.loop,
+  };
+  yield* Effect.annotateCurrentSpan(fields);
+  if (isSettledItemState(view.state)) return undefined;
+  const event = runEvents.get(running.id);
+  if (event === undefined) {
+    yield* Effect.logDebug(
+      "No Event read for the card's running Run; placing it by its Item's labels",
+      fields,
+    );
+    return undefined;
+  }
+  const labels = yield* payloadLabels(view.kind, event.payload).pipe(
+    Effect.map(Option.some),
+    Effect.catch((error) =>
+      Effect.logWarning(
+        "The running Run's Event has no labels to read; placing its card by its Item's labels",
+        { ...fields, eventId: event.id, errorTag: error._tag, message: error.message },
+      ).pipe(Effect.as(Option.none())),
+    ),
+  );
+  if (Option.isNone(labels)) return undefined;
+  const lane = labelLaneFor({ labels: labels.value }, lanes);
+  yield* Effect.logDebug(
+    lane === undefined
+      ? "No lane label when the card's running Run was triggered; placing it by its Item's labels"
+      : "Keeping the card in the lane its running Run was triggered from",
+    { ...fields, lane: lane?.lane.name ?? "none" },
+  );
+  return lane;
+});
+
+/**
  * Groups the repository's stored Items into Task cards and the cards into lanes.
  * `cycleBlockedItems` mark their Tasks as needing the operator; `itemLoops` names, per
  * Item, the Loops whose trigger matches it now, and a Task carries those of its Items.
  * `runUsage` holds what each Run's sessions drew; a Task adds up its Runs', and a Run absent
- * from it adds no tokens. Callers that read only lanes and membership leave all three empty.
+ * from it adds no tokens. Callers that read only lanes and membership leave these and
+ * `runEvents` empty.
+ *
+ * A card is placed by its current Item's labels, then by its state. A Task whose newest open
+ * Run is running stays instead in the label lane that matched when that Run was triggered,
+ * read from the Run's Event in `runEvents`, because its Agent may have removed the trigger
+ * label already. A Run without its Event there does not hold its card.
  */
 export const projectBoard = Effect.fn("Board.project")(
   (
@@ -103,6 +159,7 @@ export const projectBoard = Effect.fn("Board.project")(
     cycleBlockedItems: ReadonlyArray<ItemKey> = [],
     itemLoops: ReadonlyMap<ItemKey, ReadonlyArray<LoopName>> = new Map(),
     runUsage: ReadonlyMap<RunId, RunUsageView> = new Map(),
+    runEvents: ReadonlyMap<RunId, Event> = new Map(),
   ): Effect.Effect<BoardView> =>
     Effect.gen(function* () {
       yield* Effect.annotateCurrentSpan({ repository: repository.name });
@@ -131,15 +188,20 @@ export const projectBoard = Effect.fn("Board.project")(
         items: items.length,
         tasks: cards.length,
         runs: runs.length,
-        watchedTasks: cards.filter(({ loops }) => loops.length > 0).length,
+        watchedTasks: cards.filter(({ view }) => view.loops.length > 0).length,
+        runningTasks: cards.filter(({ running }) => running !== undefined).length,
       });
       const grouped = new Map<BoardLaneId, Array<BoardTaskView>>();
       for (const definition of lanes) grouped.set(laneId(definition), []);
       const unmatched: Array<BoardTaskView> = [];
-      for (const card of cards) {
-        const definition = laneFor(card, lanes);
-        if (definition === undefined) unmatched.push(card);
-        else grouped.get(laneId(definition))?.push(card);
+      for (const { view, running } of cards) {
+        const triggerLane =
+          running === undefined
+            ? undefined
+            : yield* triggerLaneFor(repository, view, running, lanes, runEvents);
+        const definition = triggerLane ?? laneFor(view, lanes);
+        if (definition === undefined) unmatched.push(view);
+        else grouped.get(laneId(definition))?.push(view);
       }
       const sortItems = (values: Array<BoardTaskView>) =>
         values.sort((left, right) => right.number - left.number);

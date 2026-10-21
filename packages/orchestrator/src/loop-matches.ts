@@ -4,8 +4,8 @@ import type { LoopFile } from "@usine/config/loop";
 import { matchesSelector } from "@usine/config/selector";
 import type { ItemProjection } from "@usine/engine/item-projection";
 import { ExpressionEngine } from "@usine/expression/expression-engine";
-import { Context, Effect, Layer, Option, Result } from "effect";
-import { evaluateTrigger } from "./polling/loop-evaluation.ts";
+import { Array as Arr, Context, Effect, Layer, Option, Result } from "effect";
+import { evaluateTriggerOnEach } from "./polling/loop-evaluation.ts";
 
 /** A Loop whose trigger matches one stored Item now. */
 export interface LoopItemMatch {
@@ -41,27 +41,51 @@ export class LoopMatches extends Context.Service<
     Effect.gen(function* () {
       const expressions = yield* ExpressionEngine;
 
-      const matching = Effect.fn("LoopMatches.matching")(function* (
-        instance: LoadedInstance,
-        repository: ManagedRepo,
-        items: ReadonlyArray<ItemProjection>,
-      ) {
-        yield* Effect.annotateCurrentSpan({ repository: repository.name, items: items.length });
-        const loops = instance.loops.filter(
-          (loop) => loop.trigger.on !== "schedule" && matchesSelector(loop.selector, repository),
-        );
-        const matches: Array<LoopItemMatch> = [];
-        let failures = 0;
-        for (const item of items) {
-          if (Option.isSome(item.goneAt)) continue;
+      const matching = Effect.fn("LoopMatches.matching")(
+        function* (
+          instance: LoadedInstance,
+          repository: ManagedRepo,
+          items: ReadonlyArray<ItemProjection>,
+        ) {
+          yield* Effect.annotateCurrentSpan({ repository: repository.name, items: items.length });
+          const loops = instance.loops.filter(
+            (loop) => loop.trigger.on !== "schedule" && matchesSelector(loop.selector, repository),
+          );
+          const present = items.filter(({ goneAt }) => Option.isNone(goneAt));
+          // Each Loop's trigger is checked once and evaluated on all of its stream's Items in one
+          // call: the overview and the desk match every Loop on every Board Item on each read (#464).
+          const matched = new Map<LoopFile, ReadonlySet<ItemProjection>>();
+          let failures = 0;
           for (const loop of loops) {
-            if (loop.trigger.on !== item.source) continue;
-            const result = yield* Effect.result(
-              evaluateTrigger(loop, repository, item.payload).pipe(
-                Effect.provideService(ExpressionEngine, expressions),
+            const candidates = present.filter(({ source }) => source === loop.trigger.on);
+            if (candidates.length === 0) continue;
+            const evaluated = yield* Effect.result(
+              evaluateTriggerOnEach(
+                loop,
+                repository,
+                candidates.map(({ payload }) => payload),
               ),
             );
-            if (Result.isFailure(result)) {
+            if (Result.isFailure(evaluated)) {
+              failures += candidates.length;
+              yield* Effect.logDebug(
+                "Loop trigger could not be checked; it matches no stored Item",
+                {
+                  repository: repository.name,
+                  loop: loop.name,
+                  items: candidates.length,
+                  errorTag: evaluated.failure._tag,
+                  message: evaluated.failure.message,
+                },
+              );
+              continue;
+            }
+            const hits = new Set<ItemProjection>();
+            for (const [item, result] of Arr.zip(candidates, evaluated.success)) {
+              if (Result.isSuccess(result)) {
+                if (result.success) hits.add(item);
+                continue;
+              }
               failures += 1;
               yield* Effect.logDebug("Loop trigger could not be evaluated on a stored Item", {
                 repository: repository.name,
@@ -70,20 +94,26 @@ export class LoopMatches extends Context.Service<
                 errorTag: result.failure._tag,
                 message: result.failure.message,
               });
-              continue;
             }
-            if (result.success) matches.push({ loop, item });
+            matched.set(loop, hits);
           }
-        }
-        yield* Effect.logDebug("Matched Loop triggers against stored Items", {
-          repository: repository.name,
-          loops: loops.length,
-          items: items.length,
-          matches: matches.length,
-          failures,
-        });
-        return matches;
-      });
+          const matches: Array<LoopItemMatch> = [];
+          for (const item of present) {
+            for (const loop of loops) {
+              if (matched.get(loop)?.has(item) === true) matches.push({ loop, item });
+            }
+          }
+          yield* Effect.logDebug("Matched Loop triggers against stored Items", {
+            repository: repository.name,
+            loops: loops.length,
+            items: items.length,
+            matches: matches.length,
+            failures,
+          });
+          return matches;
+        },
+        Effect.provideService(ExpressionEngine, expressions),
+      );
 
       return { matching };
     }),

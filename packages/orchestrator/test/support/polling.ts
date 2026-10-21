@@ -110,6 +110,7 @@ export const pollingTestLayer = (
     checkBoolean: () => Effect.die("unused"),
     checkScalar: () => Effect.die("unused"),
     evaluateBoolean: () => Effect.die("unused"),
+    evaluateBooleanEach: () => Effect.die("unused"),
     evaluateScalar: () => Effect.die("unused"),
   });
   const runs = Layer.succeed(RunEngine)({

@@ -19,7 +19,7 @@ import { RouterProvider } from "@tanstack/react-router";
 import { ProjectBoard } from "../src/board/board.tsx";
 import { runAgainBlocked, runAgainProgress, timestampLabel } from "../src/operator-copy.ts";
 import { overviewQuery } from "../src/overview.ts";
-import { boardOverview, boardStalled } from "./board-fixture.ts";
+import { boardOverview, boardOverviewReviewing, boardStalled } from "./board-fixture.ts";
 import { memoryRouter } from "./memory-router.tsx";
 import "../src/index.css";
 
@@ -268,6 +268,29 @@ it("times a waiting Run from its opening and a failed one from its failure, with
   expect(markAnimation(failed)).toBe("none");
   const endedAt = runOf("run-pinned").attempts[0]?.endedAt ?? "";
   expect(failed.querySelector("time")?.title).toBe(`Failed at ${timestampLabel(endedAt)}`);
+});
+
+it("shows a card whose running Run's Loop removed its lane label in that lane, counted, with its Run line", async () => {
+  overview = boardOverviewReviewing();
+  await commands.boardResponses(JSON.stringify(Schema.encodeSync(FactoryOverview)(overview)), 200);
+  flushSync(() => queryClient.setQueryData(["overview"], overview));
+  const review = lane("Review");
+  await expect.element(review.getByRole("heading", { name: "Review 2" })).toBeVisible();
+  const card = cardOf(/^Keep a running card/u);
+  expect(review.element().contains(card)).toBe(true);
+  // Pull requests, the lane its state alone routes to, keeps its own two cards.
+  await expect
+    .element(lane("Pull requests").getByRole("heading", { name: "Pull requests 2" }))
+    .toBeVisible();
+  expect(lane("Pull requests").element().contains(card)).toBe(false);
+  await expect.element(page.getByText("8 lanes, 11 items", { exact: true })).toBeVisible();
+  const row = runLine(card, "Running");
+  expect(row.textContent).toBe("reviewRunning2mreviewer");
+  expect(markAnimation(row)).not.toBe("none");
+  // The card shows the labels its pull request carries now.
+  expect([...card.querySelectorAll("[data-slot=badge]")].map((badge) => badge.textContent)).toEqual(
+    ["ci"],
+  );
 });
 
 it("offers Retry beside the failure only on the card whose Run failed", async () => {

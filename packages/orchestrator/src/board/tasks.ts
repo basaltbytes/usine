@@ -18,6 +18,16 @@ interface TaskItem {
   readonly related: Set<TaskItem>;
 }
 
+/** A Task card and the Run in flight that decides its lane. */
+export interface TaskCard {
+  readonly view: BoardTaskView;
+  /**
+   * The Task's newest open Run once an Attempt started it, so its Agent may have changed the
+   * labels its trigger matched. It runs on the card's current Item.
+   */
+  readonly running: RunView | undefined;
+}
+
 const itemLink = (item: ProjectedItem) =>
   new BoardItemLink({
     itemKey: item.itemKey,
@@ -30,7 +40,8 @@ const itemLink = (item: ProjectedItem) =>
 /**
  * Joins explicit issue/PR relationships into Task cards without creating stored Task
  * identities (ADR 0024). `itemLoops` names, per Item, the Loops whose trigger matches it now;
- * `runUsage` holds what each Run's sessions drew, which a card adds up over its Runs.
+ * `runUsage` holds what each Run's sessions drew, which a card adds up over its Runs. Each card
+ * comes with its running Run, which the Board places it by.
  */
 export const taskCards = (
   repository: RepositoryName,
@@ -39,7 +50,7 @@ export const taskCards = (
   cycleBlockedItems: ReadonlyArray<ItemKey>,
   itemLoops: ReadonlyMap<ItemKey, ReadonlyArray<LoopName>>,
   runUsage: ReadonlyMap<RunId, RunUsageView>,
-): ReadonlyArray<BoardTaskView> => {
+): ReadonlyArray<TaskCard> => {
   const runsByItem = EffectArray.groupBy(runs, ({ itemKey }) => itemKey);
   const nodes = items.map((item): TaskItem => ({
     item,
@@ -75,7 +86,7 @@ export const taskCards = (
   }
 
   const visited = new Set<TaskItem>();
-  const cards: Array<BoardTaskView> = [];
+  const cards: Array<TaskCard> = [];
   for (const seed of nodes) {
     if (visited.has(seed)) continue;
     visited.add(seed);
@@ -118,24 +129,23 @@ export const taskCards = (
     const preferred =
       history.find(({ run }) => run.canApprove || run.canResolveFailure) ?? active ?? history[0];
     const runs = history.map(({ run }) => run).reverse();
-    cards.push(
-      new BoardTaskView({
-        ...itemLink(current),
-        title: origin.item.title,
-        state: current.state,
-        labels: current.labels,
-        items: ordered.map(({ item }) => itemLink(item)),
-        pullRequest,
-        runs,
-        run: preferred?.run ?? null,
-        needsYou:
-          history.some(({ run }) => run.canApprove || run.canResolveFailure) ||
-          members.some(({ item }) => blocked.has(item.itemKey)),
-        conflicting: current.conflicting,
-        loops: [...new Set(ordered.flatMap(({ item }) => itemLoops.get(item.itemKey) ?? []))],
-        usage: taskUsage(runs, runUsage),
-      }),
-    );
+    const view = new BoardTaskView({
+      ...itemLink(current),
+      title: origin.item.title,
+      state: current.state,
+      labels: current.labels,
+      items: ordered.map(({ item }) => itemLink(item)),
+      pullRequest,
+      runs,
+      run: preferred?.run ?? null,
+      needsYou:
+        history.some(({ run }) => run.canApprove || run.canResolveFailure) ||
+        members.some(({ item }) => blocked.has(item.itemKey)),
+      conflicting: current.conflicting,
+      loops: [...new Set(ordered.flatMap(({ item }) => itemLoops.get(item.itemKey) ?? []))],
+      usage: taskUsage(runs, runUsage),
+    });
+    cards.push({ view, running: active?.run.state === "Running" ? active.run : undefined });
   }
   return cards;
 };
