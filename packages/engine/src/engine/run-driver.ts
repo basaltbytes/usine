@@ -93,20 +93,28 @@ type OpenAttempt =
     }
   | { readonly _tag: "Interrupted"; readonly attempt: Attempt };
 
+/** The open Attempt the Run reattaches: the one `open` found with a live parent task. */
+const reattaching = (open: Option.Option<OpenAttempt>): Option.Option<Attempt> =>
+  Option.flatMap(open, (found) =>
+    found._tag === "Live" ? Option.some(found.attempt) : Option.none(),
+  );
+
 /**
  * Drives open Runs in this process, one fiber per Run, with usine's run
  * tables as the only durable state. A Run's fiber parks a gated Run for
  * approval, then reserves a Worker, opens or reattaches the Attempt, records
- * its outcome, and repeats until the Run closes. The fiber that closes its Run
- * then gives the newest queued Event of the Item its turn; when cancel,
- * supersede, or revoke closes the Run under its fiber, that operation takes
- * care of the queued Events instead. A fiber that ends without closing its Run
- * (approval, operator retry, this process stopping, a store failure that
- * outlasted its retries, an open Attempt's parent task it could not confirm
- * stopped) leaves the Run for `resume` or `reconcile`. The driver also
- * reconciles the checkouts earlier processes left, and keeps the checkout of
- * an open Attempt whose parent task is live until an execution that
- * reattaches the Attempt acquires it, or the Run closes the Attempt first.
+ * its outcome, and repeats until the Run closes. A Run that reattaches its
+ * open Attempt reserves a slot of the Worker that Attempt runs on (#177). The
+ * fiber that closes its Run then gives the newest queued Event of the Item
+ * its turn; when cancel, supersede, or revoke closes the Run under its fiber,
+ * that operation takes care of the queued Events instead. A fiber that ends
+ * without closing its Run (approval, operator retry, this process stopping, a
+ * store failure that outlasted its retries, an open Attempt's parent task it
+ * could not confirm stopped) leaves the Run for `resume` or `reconcile`. The
+ * driver also reconciles the checkouts earlier processes left, and keeps the
+ * checkout of an open Attempt whose parent task is live until an execution
+ * that reattaches the Attempt acquires it, or the Run closes the Attempt
+ * first.
  */
 export class RunDriver extends Context.Service<
   RunDriver,
@@ -298,9 +306,10 @@ export class RunDriver extends Context.Service<
        * What the Run's open Attempt left when this process started driving it:
        * a parent task to reattach, a result its parent task stored that the
        * Run never recorded, or neither. A read that fails is logged and treated
-       * as finding neither. The Run closes an Attempt it does not reattach
-       * once the checkout a restart kept for it is reconciled, and the next
-       * Attempt resumes from that salvage.
+       * as finding neither. The Run reads it before it reserves a Worker, and
+       * reads a live one again once it holds the slot. The Run closes an
+       * Attempt it does not reattach once the checkout a restart kept for it
+       * is reconciled, and the next Attempt resumes from that salvage.
        */
       const openAttempt = Effect.fn("RunDriver.openAttempt")(function* (runId: RunId) {
         yield* Effect.annotateCurrentSpan({ runId });
@@ -355,13 +364,19 @@ export class RunDriver extends Context.Service<
         return Option.some<OpenAttempt>({ _tag: "Finished", attempt: open, result });
       });
 
-      /** Runs one Attempt on the reserved Worker and returns what it did to the Run. */
+      /**
+       * Runs one Attempt on the reserved Worker and returns what it did to the
+       * Run. `found` is what `openAttempt` found before the Run reserved its slot.
+       */
       const executeAttempt = Effect.fn("RunDriver.attempt")(function* (
         runId: RunId,
         worker: WorkerName,
+        found: Option.Option<OpenAttempt>,
       ) {
         yield* Effect.annotateCurrentSpan({ runId, worker });
-        const open = yield* openAttempt(runId);
+        // The parent task of a live Attempt may stop while its Run waits for a
+        // slot of its Worker, so the Run reads it again before reattaching it.
+        const open = Option.isSome(reattaching(found)) ? yield* openAttempt(runId) : found;
         if (Option.isSome(open) && open.value._tag !== "Live") {
           // Reconciled while the Attempt is still open, as startup reconciles
           // one, so the next Attempt resumes from its salvage. A parent task
@@ -376,11 +391,12 @@ export class RunDriver extends Context.Service<
             .pipe(retryingStore(runId, "finish the Attempt"));
           if (finished._tag !== "RetryAttempt") return finished._tag;
         }
-        const live = Option.flatMap(open, (found) =>
-          found._tag === "Live" ? Option.some(found.attempt.id) : Option.none(),
-        );
         const started = yield* store
-          .beginAttempt(runId, worker, live)
+          .beginAttempt(
+            runId,
+            worker,
+            Option.map(reattaching(open), ({ id }) => id),
+          )
           .pipe(retryingStore(runId, "begin the Attempt"));
         if (started._tag === "AttemptRecoveryFailed") return "RunFailed";
         if (started._tag === "RunClosed") return "Unchanged";
@@ -455,15 +471,19 @@ export class RunDriver extends Context.Service<
 
         let outcome: FinishDecision["_tag"];
         do {
+          // A reattached Attempt's parent task and checkout stay on the Worker
+          // it started on, so its Run waits for a slot of that Worker (#177).
+          const open = yield* openAttempt(runId);
+          const worker = Option.map(reattaching(open), (attempt) => attempt.worker);
           // The wait for a worker slot stays interruptible so a cancel can reach a run
           // parked in `reserve`; the scheduler releases or reoffers the slot in its own
           // onInterrupt. The release obligation begins only once the lease exists.
           outcome = yield* Effect.uninterruptibleMask((restore) =>
-            restore(executor.reserve(submission, Option.none())).pipe(
+            restore(executor.reserve(submission, worker)).pipe(
               Effect.flatMap((lease) =>
-                restore(admission.withAttempt(runId, executeAttempt(runId, lease.worker))).pipe(
-                  Effect.ensuring(lease.release),
-                ),
+                restore(
+                  admission.withAttempt(runId, executeAttempt(runId, lease.worker, open)),
+                ).pipe(Effect.ensuring(lease.release)),
               ),
             ),
           );

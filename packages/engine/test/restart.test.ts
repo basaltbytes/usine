@@ -19,6 +19,7 @@ import {
   Result,
   Schedule,
   Scope,
+  TxRef,
 } from "effect";
 import { ReconcileInterval, RunEngine } from "../src/engine/engine.ts";
 import { runIdFor, type Submission } from "../src/engine/submission.ts";
@@ -352,6 +353,159 @@ describe("engine restart", () => {
         yield* Scope.close(secondScope, Exit.void);
       }),
     ),
+  );
+
+  it.live(
+    "reattaches each live Attempt on a slot of its own Worker, and a third Run waits for one",
+    () =>
+      withInstance((directory) =>
+        Effect.gen(function* () {
+          const local = WorkerName.make("local");
+          const spare = WorkerName.make("spare");
+          const onLocal = submission({ number: 30, item: "live-on-local" });
+          const onSpare = submission({ number: 31, item: "live-on-spare" });
+          const third = submission({ number: 32, item: "after-the-restart" });
+          // Before the restart, each Run's first Attempt starts on its own Worker and keeps running.
+          const firstScope = yield* Scope.make();
+          const firstEngine = Context.get(
+            yield* Scope.provide(
+              Layer.build(
+                engineLayer(
+                  directory,
+                  Layer.succeed(StepExecutor)({
+                    workers: Effect.succeed([local, spare]),
+                    isLive: () => Effect.succeed(false),
+                    outcome: () => Effect.succeed(Option.none()),
+                    recover: () => Effect.void,
+                    intervene: () => Effect.void,
+                    interrupt: () => Effect.void,
+                    reserve: ({ itemKey }) =>
+                      Effect.succeed({
+                        worker: itemKey === onLocal.itemKey ? local : spare,
+                        release: Effect.void,
+                      }),
+                    execute: () => Effect.never,
+                  }),
+                ),
+              ),
+              firstScope,
+            ),
+            RunEngine,
+          );
+          const live = yield* Effect.forEach([onLocal, onSpare], (pending) =>
+            Effect.gen(function* () {
+              const accepted = yield* firstEngine.submit(pending);
+              assert(accepted._tag === "Claimed");
+              const [started] = (yield* waitFor(
+                firstEngine,
+                accepted.runId,
+                ({ attempts }) => attempts.length === 1,
+              )).attempts;
+              assert(started !== undefined);
+              return started;
+            }),
+          );
+          assert.deepStrictEqual(
+            live.map(({ worker }) => worker),
+            [local, spare],
+          );
+          yield* Scope.close(firstScope, Exit.void);
+
+          // After it, each Worker has one slot. As the scheduler does, a
+          // reservation that names a Worker waits for that Worker's slot, and
+          // one that names none takes the first free slot.
+          const holders = yield* TxRef.make<ReadonlyMap<WorkerName, string>>(new Map());
+          const named = yield* Ref.make<ReadonlyMap<string, Option.Option<WorkerName>>>(new Map());
+          const reattached = yield* Ref.make<ReadonlyArray<AttemptId>>([]);
+          const finish = yield* Deferred.make<void>();
+          const takeSlot = (itemKey: string, worker: Option.Option<WorkerName>) =>
+            Effect.tx(
+              Effect.gen(function* () {
+                const held = yield* TxRef.get(holders);
+                const free = [local, spare].filter((name) => !held.has(name));
+                const slot = Option.match(worker, {
+                  onNone: () => free[0],
+                  onSome: (name) => free.find((candidate) => candidate === name),
+                });
+                if (slot === undefined) return yield* Effect.txRetry;
+                yield* TxRef.set(holders, new Map(held).set(slot, itemKey));
+                return slot;
+              }),
+            );
+          const liveIds = new Set(live.map(({ id }) => id));
+          const restarted = Layer.succeed(StepExecutor)({
+            workers: Effect.succeed([local, spare]),
+            isLive: (attemptId) => Effect.succeed(liveIds.has(attemptId)),
+            outcome: () => Effect.succeed(Option.none()),
+            recover: () => Effect.void,
+            intervene: () => Effect.void,
+            interrupt: () => Effect.void,
+            reserve: ({ itemKey }, worker) =>
+              Ref.update(named, (seen) => new Map(seen).set(itemKey, worker)).pipe(
+                Effect.andThen(takeSlot(itemKey, worker)),
+                Effect.map((slot) => ({
+                  worker: slot,
+                  release: TxRef.update(holders, (held) => {
+                    const freed = new Map(held);
+                    freed.delete(slot);
+                    return freed;
+                  }),
+                })),
+              ),
+            execute: (execution, io) =>
+              Effect.gen(function* () {
+                yield* io.checkoutAcquired;
+                if (execution.reattach) {
+                  yield* Ref.update(reattached, (ids) => [...ids, execution.attempt.id]);
+                  yield* Deferred.await(finish);
+                }
+                return stepResult("finished after the restart");
+              }),
+          });
+          const secondScope = yield* Scope.make();
+          const secondEngine = Context.get(
+            yield* Scope.provide(Layer.build(engineLayer(directory, restarted)), secondScope),
+            RunEngine,
+          );
+          yield* Effect.repeat(Ref.get(reattached), {
+            until: (ids) => ids.length === 2,
+            schedule: Schedule.spaced("10 millis"),
+          });
+          assert.deepStrictEqual(
+            yield* Ref.get(named),
+            new Map([
+              [onLocal.itemKey, Option.some(local)],
+              [onSpare.itemKey, Option.some(spare)],
+            ]),
+          );
+          assert.deepStrictEqual(
+            yield* TxRef.get(holders),
+            new Map([
+              [local, onLocal.itemKey],
+              [spare, onSpare.itemKey],
+            ]),
+          );
+
+          const accepted = yield* secondEngine.submit(third);
+          assert(accepted._tag === "Claimed");
+          yield* Effect.sleep("50 millis");
+          assert.deepStrictEqual((yield* secondEngine.inspect(accepted.runId)).attempts, []);
+
+          yield* Deferred.succeed(finish, undefined);
+          for (const { runId, worker } of live) {
+            const [attempt, ...later] = (yield* waitFor(
+              secondEngine,
+              runId,
+              ({ run }) => run.state._tag === "Succeeded",
+            )).attempts;
+            assert(attempt !== undefined && later.length === 0);
+            assert.strictEqual(attempt.worker, worker);
+            assert(Option.isSome(attempt.reattachedAt));
+          }
+          yield* waitFor(secondEngine, accepted.runId, ({ run }) => run.state._tag === "Succeeded");
+          yield* Scope.close(secondScope, Exit.void);
+        }),
+      ),
   );
 
   it.live(

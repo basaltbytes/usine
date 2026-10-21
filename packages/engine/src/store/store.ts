@@ -440,8 +440,10 @@ const makeRunStore = Effect.gen(function* () {
             worker: attempt.worker,
           });
           if (attempt.worker !== worker) {
-            // The parent task and its checkout stay where they started.
-            yield* Effect.logWarning(
+            // The parent task and its checkout stay where they started. The Run
+            // reserves its slot on that Worker (#177), so a lease on another
+            // Worker is a defect of the StepExecutor.
+            yield* Effect.logError(
               "Reattached Attempt keeps its own Worker, not the reserved one",
               {
                 runId,
