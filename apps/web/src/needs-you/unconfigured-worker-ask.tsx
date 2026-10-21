@@ -7,8 +7,9 @@ import { needCopy } from "../operator-copy.ts";
 import { overviewQuery } from "../overview.ts";
 import { NeedItem } from "./need-item.tsx";
 
-/** A Worker that `usine.yaml` no longer declares, whose Attempts' leftovers the operator can discard. */
-export const UnconfiguredWorkerAsk = ({
+/** Discard leftovers, after a confirmation, for a Worker no attempt runs on. A refusal, such as for
+ * a Worker declared again since the overview was read, shows its message under the entry. */
+const DiscardLeftoversAsk = ({
   need,
   compact,
 }: {
@@ -54,3 +55,18 @@ export const UnconfiguredWorkerAsk = ({
     />
   );
 };
+
+/** A Worker that `usine.yaml` no longer declares. Once no attempt runs on it, the operator can
+ * discard its Attempts' leftovers; until then the entry says how many still run. */
+export const UnconfiguredWorkerAsk = ({
+  need,
+  compact,
+}: {
+  readonly need: UnconfiguredWorkerNeed;
+  readonly compact: boolean;
+}) =>
+  need.running > 0 ? (
+    <NeedItem copy={needCopy(need)} compact={compact} fullDetail />
+  ) : (
+    <DiscardLeftoversAsk need={need} compact={compact} />
+  );
