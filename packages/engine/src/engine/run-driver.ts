@@ -21,6 +21,7 @@ import { StepExecutor } from "../step-executor.ts";
 import { RunStore } from "../store/store.ts";
 import { TriggerCondition } from "../trigger-condition.ts";
 import { AttemptAdmission } from "./admission.ts";
+import { checkoutRecoveryFor } from "./checkout-recovery.ts";
 import type {
   EnginePersistenceError,
   RunNotFoundError,
@@ -96,7 +97,8 @@ type OpenAttempt =
  * supersede, or revoke closes the Run under its fiber, that operation takes
  * care of the queued Events instead. A fiber that ends without closing its Run
  * (approval, operator retry, this process stopping, a store failure that
- * outlasted its retries) leaves the Run for `resume` or `reconcile`.
+ * outlasted its retries) leaves the Run for `resume` or `reconcile`. The
+ * driver also reconciles the checkouts earlier processes left.
  */
 export class RunDriver extends Context.Service<
   RunDriver,
@@ -120,6 +122,12 @@ export class RunDriver extends Context.Service<
      * for its approval. Runs whose fiber already runs here are left alone.
      */
     readonly reconcile: () => Effect.Effect<void, RunStoreError>;
+    /**
+     * Reconciles at startup, through `StepExecutor.recover`, the checkout of
+     * every persisted Attempt on a Worker the executor runs, recording its
+     * salvage before any Run admits its next Attempt.
+     */
+    readonly recoverWorkspaces: () => Effect.Effect<void, RunStoreError>;
   }
 >()("@usine/engine/internal/RunDriver") {
   static readonly layer = Layer.effect(
@@ -132,6 +140,7 @@ export class RunDriver extends Context.Service<
       const items = yield* ItemProjectionWriter;
       const crypto = yield* Crypto.Crypto;
       const fibers = yield* FiberMap.make<RunId>();
+      const checkouts = checkoutRecoveryFor(store, executor);
 
       // Annotated because a fiber's continuation calls launch again, which TypeScript cannot infer.
       const launch: RunDriver["Service"]["launch"] = Effect.fn("RunDriver.launch")(function* (
@@ -454,7 +463,14 @@ export class RunDriver extends Context.Service<
         else yield* Effect.logInfo("Runs recovered from the run tables", fields);
       });
 
-      return { launch, resume, stop, continueWithNewest, reconcile };
+      return {
+        launch,
+        resume,
+        stop,
+        continueWithNewest,
+        reconcile,
+        recoverWorkspaces: checkouts.atStartup,
+      };
     }),
   );
 }
