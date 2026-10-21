@@ -1,6 +1,7 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 
+import { Agent, AgentName } from "@usine/core/agent";
 import {
   AgentSessionId,
   ChildSession,
@@ -28,6 +29,7 @@ import { Comment, StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
 
 import { DateTime, Effect, FileSystem, Layer, Option, Result, Schema } from "effect";
+import { TestClock } from "effect/testing";
 import { SqlClient } from "effect/unstable/sql";
 
 import { localSqliteLayer } from "../../src/database/local-sqlite.ts";
@@ -1273,6 +1275,84 @@ describe("cursor store", () => {
         assert(Option.isNone((yield* store.snapshot(runId)).step.result));
       }),
     ),
+  );
+
+  // Two Loops' Runs of one Agent on one Item sign their comments alike (#429).
+  it.effect(
+    "gives an Attempt the windows of its Agent's other Attempts on its Item that overlap its own",
+    () =>
+      withRunStore(
+        Effect.gen(function* () {
+          const store = yield* RunStore;
+          const worker = WorkerName.make("local");
+          const claim = (name: string, loop: string, item: string, agent = testAgent) =>
+            store
+              .recordAndClaim(
+                new Submission({
+                  ...lifecycleSubmission,
+                  event: new Event({
+                    ...lifecycleSubmission.event,
+                    id: EventId.make(name),
+                    dedupKey: DedupKey.make(`${name}/revision`),
+                  }),
+                  loop: LoopName.make(loop),
+                  itemKey: ItemKey.make(item),
+                  agent,
+                }),
+                RunId.make(name),
+              )
+              .pipe(Effect.as(RunId.make(name)));
+          const begin = (runId: RunId) =>
+            store
+              .beginAttempt(runId, worker, Option.none())
+              .pipe(
+                Effect.flatMap((started) =>
+                  started._tag === "AttemptStarted"
+                    ? Effect.succeed(started.execution.attempt)
+                    : Effect.die(`Run ${runId} did not start`),
+                ),
+              );
+          const fail = (attempt: Attempt) =>
+            store.finishAttempt(
+              attempt,
+              Result.fail(new AgentFailure({ message: "Checks failed" })),
+            );
+          const overlapping = (attempt: Attempt) =>
+            store
+              .overlappingWindows(attempt.id)
+              .pipe(
+                Effect.map((windows) =>
+                  windows.map(({ attemptId, endedAt }) => [attemptId, Option.isSome(endedAt)]),
+                ),
+              );
+
+          const fix = yield* claim("fix", "fix", "pull-71");
+          const ended = yield* begin(fix);
+          yield* fail(ended);
+          // Another Agent signs differently, so its Attempts are never listed.
+          yield* begin(
+            yield* claim(
+              "review",
+              "review",
+              "pull-71",
+              new Agent({ ...testAgent, name: AgentName.make("reviewer") }),
+            ),
+          );
+          yield* TestClock.adjust("2 seconds");
+          yield* store.retry(fix);
+          const retried = yield* begin(fix);
+          const triage = yield* begin(yield* claim("triage", "triage", "pull-71"));
+          yield* begin(yield* claim("elsewhere", "fix", "issue-12"));
+
+          // The first fix Attempt ended a second before either started.
+          assert.deepStrictEqual(yield* overlapping(retried), [[triage.id, false]]);
+          assert.deepStrictEqual(yield* overlapping(triage), [[retried.id, false]]);
+          assert.deepStrictEqual(yield* overlapping(ended), []);
+          yield* TestClock.adjust("1 second");
+          yield* fail(triage);
+          assert.deepStrictEqual(yield* overlapping(retried), [[triage.id, true]]);
+        }),
+      ),
   );
 });
 
