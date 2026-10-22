@@ -144,10 +144,10 @@ write_files:
       systemctl restart dnsmasq
       if [ -e /run/resolvconf/interface/lo.dnsmasq ]; then resolvconf -d lo.dnsmasq; fi
       systemctl reload ssh
-      version=v22.23.2
+      version=v24.22.1
       case "$(uname -m)" in
-        x86_64) arch=x64 sum=d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307 ;;
-        aarch64) arch=arm64 sum=fff4078c5def658577f92c88db7db3bc0072924bfb93fe52c1e744a54e94abb8 ;;
+        x86_64) arch=x64 sum=6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6 ;;
+        aarch64) arch=arm64 sum=dbabf7a1cbf947e6059ffad2c27b80041db97dea1e553b62afdee7f13fca336e ;;
         *) echo "unsupported architecture $(uname -m)" >&2; exit 1 ;;
       esac
       archive=$(mktemp)

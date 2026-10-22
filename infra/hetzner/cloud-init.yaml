@@ -75,7 +75,7 @@ write_files:
       apt-get update
       DEBIAN_FRONTEND=noninteractive apt-get install -y gh nodejs
       # Codex is pinned to a version usine's protocol conformance gate supports.
-      npm install -g pnpm@11.20.0 @anthropic-ai/claude-code@2.1.296 @openai/codex@0.153.4
+      npm install -g pnpm@11.20.0 @anthropic-ai/claude-code@2.1.303 @openai/codex@0.153.4
       # Applies the overcommit setting of /etc/sysctl.d now, not at the next boot.
       sysctl --system
       install -d -o usine -g usine -m 0700 /home/usine/.usine /home/usine/.cache /home/usine/.cache/turbo
