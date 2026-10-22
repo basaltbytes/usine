@@ -4,3 +4,17 @@ updates:
     directory: /
     schedule:
       interval: monthly
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      npm:
+        patterns:
+          - "*"
+      # Security updates, which also reach transitive dependencies such as
+      # undici, open as one grouped PR instead of one PR per advisory.
+      npm-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
