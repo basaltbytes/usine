@@ -199,7 +199,7 @@ Subtracting two timestamps gives a duration, and you can compare two durations. 
 
 An `if` must still produce a `bool` and an interpolation a scalar, so end a chain with `orValue` or `hasValue()`: `{{ item.?milestone.?title }}` fails validation with `Expected a scalar value, got optional<string>`.
 
-cel-js doesn't check field names after `.?`, so `item.?milestone.?titel.orValue("none") == "v1"` loads and is always `false`. In an `if`, where such a typo silently changes which Items match, prefer the `!= null` form, which keeps field names checked.
+cel-js doesn't check field names after `.?`, so `item.?milestone.?titel.orValue("none") == "v1"` loads and is always `false`. In an `if`, where such a typo silently changes which items match, prefer the `!= null` form, which keeps field names checked.
 
 ## Label declarations
 
