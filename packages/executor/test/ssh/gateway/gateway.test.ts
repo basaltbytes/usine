@@ -2,13 +2,23 @@ import { assert, describe, it } from "@effect/vitest";
 import { RemoteShell } from "@usine/agents/child-host";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { HarnessReady, HarnessUnavailableError } from "@usine/core/agent/capability";
+import { AttemptId } from "@usine/core/attempt";
 import type { AttemptSalvage } from "@usine/core/attempt/salvage";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
 import { completes, type StubParent, StubStorage } from "@usine/durable/testing";
-import { Attachment, AttachmentId, Attachments, InstallationCredential } from "@usine/gateway";
+import {
+  AnthropicProvider,
+  AnthropicSubscriptionToken,
+  Attachment,
+  AttachmentId,
+  Attachments,
+  InstallationCredential,
+  SettingsInForce,
+  UpstreamBase,
+} from "@usine/gateway";
 import { DateTime, Deferred, Effect, Fiber, Option, Redacted } from "effect";
 import { TestClock } from "effect/testing";
 import { CheckoutRequest, Executor } from "../../../src/executor.ts";
@@ -671,7 +681,7 @@ describe("SSH Worker behind a Gateway", () => {
         yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
         assert.deepStrictEqual(
           gateway.calls.map(({ method, path }) => `${method} ${path}`),
-          ["GET /v1/attachments"],
+          ["GET /v1/attachments", "GET /v1/providers"],
         );
         const lines = machine.state.calls.map(({ line }) => line);
         assert(
@@ -734,7 +744,7 @@ describe("SSH Worker behind a Gateway", () => {
           gateway.calls.map(
             ({ method, path, delivered }) => `${method} ${path} ${String(delivered)}`,
           ),
-          ["GET /v1/attachments true"],
+          ["GET /v1/attachments true", "GET /v1/providers true"],
         );
       }).pipe(Effect.provide(gatewayRuntime(machine, mintingProvider(), gateway)));
     },
@@ -772,6 +782,102 @@ describe("SSH Worker behind a Gateway", () => {
         assert.include(lines, "exec 'claude' '--version'");
         assert(!lines.some((line) => line.includes("'auth' 'status'")));
         assert(!lines.some((line) => line.includes("http_connect")), "no provider host is checked");
+      }).pipe(Effect.provide(gatewayRuntime(machine, mintingProvider(), gateway)));
+    },
+  );
+
+  it.effect(
+    "records the kind of the Gateway's Anthropic credential at each preflight, and an Attempt's Claude Code children carry the latest",
+    () => {
+      const machine = fakeMachine();
+      const gateway = fakeGateway(machine);
+      const given: Array<AttemptRequest> = [];
+      const parent: StubParent = (context) => {
+        given.push(context.request);
+        return completes(context);
+      };
+      const run = (attemptId: string) =>
+        Effect.gen(function* () {
+          const executor = yield* Executor;
+          const prepared = yield* executor.prepare(
+            new CheckoutRequest({ ...request, attemptId: AttemptId.make(attemptId) }),
+          );
+          yield* prepared.launch(sink);
+        }).pipe(Effect.scoped);
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
+        yield* run("attempt-api-key");
+        assert.deepStrictEqual(given[0]?.gatewayCredential, Option.some("api-key"));
+
+        // A reload of the Gateway swaps its API key for a subscription token.
+        const inForce = yield* SettingsInForce;
+        yield* inForce.replace({
+          ...(yield* inForce.current),
+          providers: {
+            anthropic: Option.some(
+              new AnthropicProvider({
+                upstream: UpstreamBase.make("https://api.anthropic.com"),
+                credential: new AnthropicSubscriptionToken({
+                  token: Redacted.make("sk-ant-oat01-for-executor-tests"),
+                }),
+              }),
+            ),
+            openai: Option.none(),
+          },
+        });
+        yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
+        yield* run("attempt-subscription");
+        assert.deepStrictEqual(given[1]?.gatewayCredential, Option.some("subscription"));
+      }).pipe(Effect.provide(gatewayRuntime(machine, mintingProvider(), gateway, { parent })));
+    },
+  );
+
+  it.effect(
+    "keeps a Gateway too old to report its credentials in the Claude plan pool, with a warning",
+    () => {
+      const machine = fakeMachine();
+      const gateway = fakeGateway(machine);
+      gateway.switches.reportsProviders = false;
+      const logs = capturedLogs();
+      let given: AttemptRequest | undefined;
+      const parent: StubParent = (context) => {
+        given = context.request;
+        return completes(context);
+      };
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
+        const warning = logs.lines.find((line) =>
+          line.includes("does not report the kind of its Anthropic credential"),
+        );
+        assert(warning !== undefined, "the preflight warns that the plan pool is kept");
+        assert.include(warning, '"worker":"eu-one"');
+        const prepared = yield* executor.prepare(request);
+        yield* prepared.launch(sink);
+        assert.deepStrictEqual(given?.gatewayCredential, Option.none());
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(gatewayRuntime(machine, mintingProvider(), gateway, { parent })),
+        Effect.provide(logs.layer),
+      );
+    },
+  );
+
+  it.effect(
+    "preflight reports a Gateway that holds no Anthropic credential while the Worker's llm_providers lists it",
+    () => {
+      const machine = fakeMachine();
+      const gateway = fakeGateway(machine, { anthropic: Option.none(), openai: Option.none() });
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const refused = yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1).pipe(Effect.flip);
+        assert(refused._tag === "WorkerCapabilityError");
+        assert.strictEqual(refused.capability, "gateway");
+        assert.strictEqual(
+          refused.message,
+          "SSH Worker eu-one's Gateway holds no Anthropic credential, but the Worker's llm_providers lists anthropic; set ANTHROPIC_API_KEY or USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN on the Gateway, or remove anthropic from llm_providers",
+        );
       }).pipe(Effect.provide(gatewayRuntime(machine, mintingProvider(), gateway)));
     },
   );

@@ -17,6 +17,7 @@ import {
   ChildSessionBudget,
   ChildSessionCount,
   SessionFinished,
+  sessionPool,
 } from "@usine/core/agent/session";
 import { Deferred, Effect, Exit, Fiber, Match, Option, Result, Stream } from "effect";
 import { durableError } from "../harness.ts";
@@ -144,6 +145,7 @@ export const subagentTool = (services: ExtensionServices) => {
       parentId,
       agent: spec.agent.name,
       brain: spec.agent.brain,
+      gatewayCredential: request.gatewayCredential,
     });
     const childRequest = new ChildRequest({
       session,
@@ -162,6 +164,7 @@ export const subagentTool = (services: ExtensionServices) => {
       attemptedChildren,
       maxChildren: spec.maxChildren,
       sessionId: session.id,
+      pool: sessionPool(session),
       taskExcerpt: excerpt,
     });
     // The child's own logs, including its fibers', name the Attempt: this tool runs outside it.

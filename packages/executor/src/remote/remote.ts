@@ -465,6 +465,11 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         launch: (io: AttemptChannel.Sink) =>
           Effect.scoped(
             Effect.gen(function* () {
+              // The children run the brain of the RunSpec, a reattached one's included.
+              const gatewayCredential = yield* worker.gatewayCredential(
+                machine,
+                prepared.spec.agent.brain.harness,
+              );
               yield* workerWatches.watch({
                 attemptId: request.attemptId,
                 worker: request.worker,
@@ -474,6 +479,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
               return yield* session.launch(prepared, io, {
                 host: access.shell,
                 environment: withGitHooks(access.environment, provisioned.gitHooks),
+                gatewayCredential,
                 harvest: (windows) => harvest(prepared, access, windows),
                 harvestComments: (windows) =>
                   harvestPostedComments(

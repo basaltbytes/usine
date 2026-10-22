@@ -6,15 +6,16 @@ import {
   type AttachmentList,
   type Detached,
   GatewayAdminApi,
+  type LlmProviderList,
 } from "@usine/gateway/admin";
-import { Data, DateTime, Effect, type Redacted, Result, Schema } from "effect";
+import { Data, DateTime, Effect, Option, type Redacted, Result, Schema } from "effect";
 import { HttpClient, HttpClientError, HttpClientRequest } from "effect/unstable/http";
 import { HttpApiClient } from "effect/unstable/httpapi";
 import type { SshWorkerGateway } from "../model.ts";
 import { type GatewayForward, GatewayForwardClosed, type OpenForward } from "./forward.ts";
 
 /** An admin API operation the executor performs on a Worker's Gateway. */
-const GatewayAdminOperation = Schema.Literals(["attach", "renew", "detach", "list"]);
+const GatewayAdminOperation = Schema.Literals(["attach", "renew", "detach", "list", "providers"]);
 type GatewayAdminOperation = typeof GatewayAdminOperation.Type;
 
 /**
@@ -43,6 +44,12 @@ export interface GatewayAdmin {
   readonly detach: (id: AttachmentId) => Effect.Effect<Detached, GatewayAdminError>;
   /** The attachments in force on the Gateway, for every Worker behind it. */
   readonly list: Effect.Effect<AttachmentList, GatewayAdminError>;
+  /**
+   * The LLM providers the Gateway holds a credential for, each with the kind
+   * of that credential. None from a Gateway released before it reported
+   * them, which answers 404.
+   */
+  readonly providers: Effect.Effect<Option.Option<LlmProviderList>, GatewayAdminError>;
 }
 
 /**
@@ -87,6 +94,10 @@ const reason = (failure: { readonly _tag: string }): string => {
       return `the request failed with ${failure._tag}`;
   }
 };
+
+/** The admin API answered that it has no such route: the Gateway was released before the endpoint. */
+const unknownRoute = (failure: { readonly _tag: string }): boolean =>
+  HttpClientError.isHttpClientError(failure) && failure.response?.status === 404;
 
 /** A request that got no answer may have met a forward whose SSH connection died before its client noticed. */
 const unanswered = (failure: { readonly _tag: string }): boolean =>
@@ -192,5 +203,11 @@ export const gatewayAdminFor = Effect.fn("SshExecutor.gatewayAdminFor")(function
       bounded("renew")((client) => client.attachments.renew({ params: { id }, payload: request })),
     detach: (id) => bounded("detach")((client) => client.attachments.detach({ params: { id } })),
     list: bounded("list")((client) => client.attachments.list()),
+    providers: bounded("providers")((client) =>
+      client.llm.providers().pipe(
+        Effect.map(Option.some),
+        Effect.catchIf(unknownRoute, () => Effect.succeedNone),
+      ),
+    ),
   } satisfies GatewayAdmin;
 });

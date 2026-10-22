@@ -948,28 +948,34 @@ describe("durable AttemptRuntime", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.live("gives every child the child host its execute call supplies", () =>
-    Effect.gen(function* () {
-      const database = yield* temporaryDatabase;
-      const host = new RemoteShell({
-        ssh: { command: "ssh", args: ["-o", "BatchMode=yes"] },
-        sshEnvironment: { SSH_AUTH_SOCK: "/tmp/agent.sock" },
-        destination: "worker.exe.xyz",
-      });
-      yield* Effect.gen(function* () {
-        const runtime = yield* AttemptRuntime;
-        const request = attemptRequest("run/step/11", 3, host);
-        const execution = yield* Effect.forkChild(runtime.execute(request, recordingSink().sink));
-        const child = yield* (yield* StubChildren).next;
-        assert.deepStrictEqual(child.request.host, host);
-        yield* child.reply("Done.");
-        yield* Fiber.join(execution);
-      }).pipe(
-        Effect.provide(
-          layer({ database, parent: [delegate("Fix the flaky test"), answer("Done.")] }),
-        ),
-      );
-    }).pipe(Effect.scoped),
+  it.live(
+    "gives every child the child host its execute call supplies, and records on its session the Gateway credential that pays it",
+    () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        const host = new RemoteShell({
+          ssh: { command: "ssh", args: ["-o", "BatchMode=yes"] },
+          sshEnvironment: { SSH_AUTH_SOCK: "/tmp/agent.sock" },
+          destination: "worker.exe.xyz",
+        });
+        yield* Effect.gen(function* () {
+          const runtime = yield* AttemptRuntime;
+          const request = new AttemptRequest({
+            ...attemptRequest("run/step/11", 3, host),
+            gatewayCredential: Option.some("api-key"),
+          });
+          const execution = yield* Effect.forkChild(runtime.execute(request, recordingSink().sink));
+          const child = yield* (yield* StubChildren).next;
+          assert.deepStrictEqual(child.request.host, host);
+          assert.deepStrictEqual(child.request.session.gatewayCredential, Option.some("api-key"));
+          yield* child.reply("Done.");
+          yield* Fiber.join(execution);
+        }).pipe(
+          Effect.provide(
+            layer({ database, parent: [delegate("Fix the flaky test"), answer("Done.")] }),
+          ),
+        );
+      }).pipe(Effect.scoped),
   );
 
   it.live("cancels an Attempt bottom-up and settles its execute call", () =>
