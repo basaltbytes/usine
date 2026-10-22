@@ -23,6 +23,7 @@ const sink = {
   append: () => Effect.void,
   salvage: () => Effect.void,
   comments: () => Effect.void,
+  transcript: Effect.succeed([]),
   windows: aloneOnItem(),
 };
 const SECOND = WorkerName.make("eu-two");

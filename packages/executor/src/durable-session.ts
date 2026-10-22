@@ -1,7 +1,12 @@
 import type { ChildHost } from "@usine/agents/child-host";
 import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { AgentFailure, type AttemptFailure, RunawayFailure } from "@usine/core/attempt/failure";
+import {
+  AgentFailure,
+  type AttemptFailure,
+  InfraFailure,
+  RunawayFailure,
+} from "@usine/core/attempt/failure";
 import type { AttemptRecovery, RecoverySink } from "@usine/core/attempt/salvage";
 import type { AttemptWindowsRead, HarvestSpec } from "@usine/core/step/harvest";
 import type { Comment, StepResult, StepResultFact } from "@usine/core/step/result";
@@ -14,6 +19,7 @@ import {
 import {
   Cause,
   Deferred,
+  Duration,
   Effect,
   Exit,
   Fiber,
@@ -29,6 +35,7 @@ import {
   type ExecutorError,
   ExecutorOperationError,
 } from "./executor.ts";
+import { guardSeed } from "./guard.ts";
 import { type AcquiredAttempt, type AttemptStop, preparedAttemptsFor } from "./prepared-attempt.ts";
 
 interface ActiveAttempt {
@@ -107,6 +114,15 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
 ) {
   const runtime = yield* AttemptRuntime;
   const attempts = new Map<AttemptId, ActiveAttempt>();
+  /** Completed by each Attempt's launch once it registered the Attempt in `attempts`. */
+  const registrations = new Map<AttemptId, Deferred.Deferred<void>>();
+  const registration = (attemptId: AttemptId) => {
+    const existing = registrations.get(attemptId);
+    if (existing !== undefined) return existing;
+    const created = Deferred.makeUnsafe<void>();
+    registrations.set(attemptId, created);
+    return created;
+  };
 
   /**
    * Cancels the Attempt's parent task if durable storage still holds it live.
@@ -225,6 +241,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
         execution,
         settled,
       });
+      yield* Deferred.succeed(registration(attemptId), undefined);
       yield* Effect.logInfo("Running the Attempt's parent task", {
         attemptId,
         worker: prepared.worker,
@@ -455,7 +472,103 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
     );
   });
 
-  const prepared = yield* preparedAttemptsFor(stop, intervene);
+  /**
+   * Delivers the runaway guard's warning steer through `intervene` once an
+   * `execute` call relays the Attempt's channel. The guard starts as soon as
+   * the launch registers the Attempt, while `execute` still reads durable
+   * storage, so the warning a reattachment restores would otherwise find no
+   * channel and be lost (#178). The guard delivers it apart from its checks,
+   * and the launch's end interrupts the wait.
+   */
+  const warnParent = Effect.fn("DurableSession.warnParent")(function* (
+    attemptId: AttemptId,
+    intervention: AttemptChannel.Intervention,
+  ) {
+    yield* Effect.annotateCurrentSpan({ attemptId });
+    yield* runtime.attached(attemptId);
+    yield* intervene(attemptId, intervention);
+  });
+
+  /**
+   * Fails the reattachment of `attemptId` when `read`, one `part` of what its
+   * runaway guard goes on from, fails after the store's retries. Starting that
+   * part over would grant the Attempt a fresh allowance (#178), so its parent
+   * task is stopped and the reattachment fails with an `InfraFailure` naming
+   * `part`. The launch then salvages the checkout, and the Run's next Attempt
+   * starts from that salvage. A stop that cannot be confirmed is logged.
+   */
+  const seedPart =
+    (attemptId: AttemptId, part: string) =>
+    <A>(read: Effect.Effect<A, AttemptFailure>): Effect.Effect<A, InfraFailure> =>
+      read.pipe(
+        Effect.catch((error) =>
+          Effect.gen(function* () {
+            yield* Effect.logError(
+              `Could not read the reattached Attempt's ${part}; the reattachment fails instead of starting its runaway guard over`,
+              { attemptId, part, errorTag: error._tag, message: error.message },
+            );
+            yield* stopTask(attemptId, `its runaway guard cannot read the Attempt's ${part}`).pipe(
+              Effect.ignore,
+            );
+            return yield* new InfraFailure({
+              message: `Could not read the reattached Attempt's ${part}, which its runaway guard resumes from`,
+              cause: error,
+            });
+          }),
+        ),
+      );
+
+  /**
+   * What the guard of the Attempt `request` describes goes on from: for a
+   * reattached Attempt, what its transcript, read through `io`, recorded
+   * before the restart, and the unsupervised time its earlier guards recorded
+   * with its durable record; for a fresh one, nothing. A reattachment reads
+   * only what its armed ceilings use: the transcript for either ceiling, the
+   * unsupervised time for the wall clock. Fails with an `InfraFailure`, once
+   * the parent task is stopped, when one of them cannot be read.
+   */
+  const guardSeedFor = Effect.fn("DurableSession.guardSeed")(function* (
+    request: CheckoutRequest,
+    io: AttemptChannel.Sink,
+  ) {
+    const attemptId = request.attemptId;
+    const wallClock = Option.isSome(request.maxAttemptMinutes);
+    const armed = wallClock || Option.isSome(request.maxAttemptTokens);
+    yield* Effect.annotateCurrentSpan({ attemptId, reattach: request.reattach, armed });
+    if (!request.reattach) return guardSeed([], Duration.zero);
+    if (!armed) {
+      yield* Effect.logDebug("The reattached Attempt arms no ceiling; its guard resumes nothing", {
+        attemptId,
+      });
+      return guardSeed([], Duration.zero);
+    }
+    const transcript = yield* io.transcript.pipe(seedPart(attemptId, "transcript"));
+    const recorded = wallClock
+      ? yield* runtime.unsupervised(attemptId).pipe(seedPart(attemptId, "unsupervised time"))
+      : Option.none<Duration.Duration>();
+    const seed = guardSeed(
+      transcript,
+      Option.getOrElse(recorded, () => Duration.zero),
+    );
+    yield* Effect.logInfo("Resuming the reattached Attempt's ceilings", {
+      attemptId,
+      envelopes: transcript.length,
+      tokens: [...seed.tokens.values()].reduce((sum, value) => sum + value, 0),
+      unsupervisedRecorded: Option.isSome(recorded),
+      unsupervisedMinutes: Math.round(Duration.toMillis(seed.unsupervised) / 6_000) / 10,
+      parentHeld: seed.parentHeld,
+      warned: [...seed.warned],
+    });
+    return seed;
+  });
+
+  const prepared = yield* preparedAttemptsFor(
+    stop,
+    warnParent,
+    (attemptId) => Deferred.await(registration(attemptId)),
+    guardSeedFor,
+    runtime.recordUnsupervised,
+  );
 
   /**
    * Owns an executor's preparation of `request` through `preparedAttemptsFor`.
@@ -475,6 +588,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
         Effect.addFinalizer(() =>
           Effect.sync(() => {
             attempts.delete(request.attemptId);
+            registrations.delete(request.attemptId);
           }),
         ).pipe(Effect.andThen(acquire)),
         request,

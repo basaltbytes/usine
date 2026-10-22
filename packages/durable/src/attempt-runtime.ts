@@ -4,7 +4,7 @@ import { AttemptId } from "@usine/core/attempt";
 import { AgentFailure, AttemptFailure } from "@usine/core/attempt/failure";
 import { StepResult, type StepResultFact } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
-import { Context, Effect, type Option, Result, Schema } from "effect";
+import { Context, type Duration, Effect, type Option, Result, Schema } from "effect";
 
 /**
  * What durable storage keeps of an Attempt's request: what identifies its
@@ -143,15 +143,48 @@ export class AttemptRuntime extends Context.Service<
       attemptId: AttemptId,
       result: StepResult,
     ) => Effect.Effect<void, AttemptFailure>;
+    /**
+     * Keeps with the Attempt's durable record the unsupervised time its
+     * runaway guard has counted, so the guard of a reattachment after an
+     * orchestrator restart goes on from it (#178). The kept time never goes
+     * back: a shorter time than the one kept leaves it as it is.
+     */
+    readonly recordUnsupervised: (
+      attemptId: AttemptId,
+      unsupervised: Duration.Duration,
+    ) => Effect.Effect<void, AttemptFailure>;
+    /**
+     * The unsupervised time the Attempt's runaway guards kept with
+     * `recordUnsupervised`; none when they kept none, as for an Attempt that
+     * ran without a wall-clock ceiling.
+     */
+    readonly unsupervised: (
+      attemptId: AttemptId,
+    ) => Effect.Effect<Option.Option<Duration.Duration>, AttemptFailure>;
     /** The request the Attempt's task was created with, read back for a reattachment; none when the Attempt has no task. */
     readonly request: (
       attemptId: AttemptId,
     ) => Effect.Effect<Option.Option<StoredRequest>, AttemptFailure>;
-    /** Applies an operator action to the live parent or one of its children; the result is recorded through the Attempt's sink. */
+    /**
+     * Applies an operator action to the live parent or one of its children;
+     * the result is recorded through the Attempt's sink. Fails while no
+     * `execute` call in this process relays the Attempt's channel, which
+     * `attached` waits for. It records the input with the envelopes the relay
+     * appends, one at a time, so a sink's `append` must not wait for it.
+     */
     readonly intervene: (
       attemptId: AttemptId,
       intervention: AttemptChannel.Intervention,
     ) => Effect.Effect<void, AttemptFailure>;
+    /**
+     * Completes once an `execute` call in this process relays the Attempt's
+     * channel, so `intervene` reaches it; at once while one does. `execute`
+     * first reads durable storage, so input sent as it starts, such as the
+     * warning a reattached Attempt's runaway guard restores (#178), waits for
+     * this. It never fails and waits as long as no `execute` call relays the
+     * Attempt: callers bound it by the Attempt's own run.
+     */
+    readonly attached: (attemptId: AttemptId) => Effect.Effect<void>;
     /** Cancels the Attempt: aborts the task bottom-up (children, then the parent conversation) and settles `execute`. */
     readonly cancel: (attemptId: AttemptId) => Effect.Effect<void, AttemptFailure>;
     /**

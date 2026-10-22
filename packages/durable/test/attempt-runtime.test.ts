@@ -20,6 +20,7 @@ import {
   Context,
   DateTime,
   Deferred,
+  Duration,
   Effect,
   Exit,
   Fiber,
@@ -118,6 +119,10 @@ describe("durable AttemptRuntime", () => {
         assert.deepStrictEqual(child.request.host, new LocalProcess());
         assert.match(child.request.prompt, /Fix the flaky test/u);
         assert.isTrue(yield* runtime.isLive(request.spec.attemptId));
+        assert.isTrue(Option.isNone(yield* runtime.unsupervised(request.spec.attemptId)));
+        yield* runtime.recordUnsupervised(request.spec.attemptId, Duration.seconds(42));
+        // A shorter time, as an earlier record that commits late, leaves the kept one.
+        yield* runtime.recordUnsupervised(request.spec.attemptId, Duration.seconds(30));
         yield* runtime.notify(
           request.spec.attemptId,
           new AttemptChannel.WorkerResponsive({ worker: request.worker, lastAnsweredAt }),
@@ -170,15 +175,24 @@ describe("durable AttemptRuntime", () => {
           }),
         ),
       );
-      // A restarted orchestrator still reads the report, then the harvested result once recorded.
+      // A restarted orchestrator still reads the report, then the harvested result once
+      // recorded, and the unsupervised time the Attempt's guard kept.
       const attemptId = attemptRequest("run/step/1").spec.attemptId;
       const harvested = new StepResult({ message: "Fixed it.", facts: [] });
       const finished = yield* Effect.gen(function* () {
         const runtime = yield* AttemptRuntime;
         const reported = yield* runtime.finished(attemptId);
         yield* runtime.recordResult(attemptId, harvested);
-        return { reported, recorded: yield* runtime.finished(attemptId) };
+        return {
+          reported,
+          recorded: yield* runtime.finished(attemptId),
+          unsupervised: yield* runtime.unsupervised(attemptId),
+        };
       }).pipe(Effect.provide(layer({ database, parent: [] })));
+      assert.deepStrictEqual(
+        Option.map(finished.unsupervised, Duration.toMillis),
+        Option.some(42_000),
+      );
       assert.deepStrictEqual(
         finished.reported,
         Option.some(
@@ -388,6 +402,7 @@ describe("durable AttemptRuntime", () => {
             }),
           salvage: () => Effect.void,
           comments: () => Effect.void,
+          transcript: Effect.die("The durable runtime never reads the Attempt transcript"),
           windows: Effect.die("The durable runtime never reads the Attempt windows"),
         };
         const stopped = yield* runtime.execute(request, sink).pipe(Effect.flip);
@@ -496,6 +511,59 @@ describe("durable AttemptRuntime", () => {
           assertAdmitted(request.spec.attemptId, recording.outbound());
         }).pipe(
           Effect.provide(layer({ database, parent: [delegate("Fix the flaky test"), steered] })),
+        );
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "completes `attached` once an execute call relays the Attempt's channel, which input sent before cannot reach",
+    () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        yield* Effect.gen(function* () {
+          const runtime = yield* AttemptRuntime;
+          const request = attemptRequest("run/step/33");
+          const attemptId = request.spec.attemptId;
+          const recording = recordingSink();
+          const steer = new AttemptChannel.Intervention({
+            operator: "engine",
+            target: new AttemptChannel.ParentTarget(),
+            action: new AttemptChannel.Steer({ message: "Commit and push your work now." }),
+          });
+          // Waited for before the Attempt has a task in this process, as a
+          // reattached Attempt's guard does while `execute` reads storage (#178).
+          const relayed = yield* Effect.forkChild(runtime.attached(attemptId));
+          const early = yield* runtime.intervene(attemptId, steer).pipe(Effect.flip);
+          assert.strictEqual(early.message, "This Attempt no longer has a live channel");
+          assert.strictEqual(relayed.pollUnsafe(), undefined);
+          const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
+          yield* Fiber.join(relayed).pipe(Effect.timeout("5 seconds"));
+          const child = yield* (yield* StubChildren).next;
+          // At once while the channel is relayed, and the input reaches the parent.
+          yield* runtime.attached(attemptId).pipe(Effect.timeout("1 second"));
+          yield* runtime.intervene(attemptId, steer);
+          yield* child.reply("Child done.");
+          yield* Fiber.join(execution);
+          assert.deepStrictEqual(
+            recording.inbound().map(({ sequence, payload }) => [sequence, payload._tag]),
+            [[1, "Steer"]],
+          );
+          assert.deepStrictEqual(receipts(recording.outbound()), [
+            ["Steer", 1, "queued"],
+            ["Steer", 1, "delivered"],
+          ]);
+          // The channel detached when `execute` returned: a later wait is for the next call.
+          const next = yield* Effect.forkChild(runtime.attached(attemptId));
+          yield* Effect.sleep("50 millis");
+          assert.strictEqual(next.pollUnsafe(), undefined);
+          yield* Fiber.interrupt(next);
+        }).pipe(
+          Effect.provide(
+            layer({
+              database,
+              parent: [delegate("Fix the flaky test"), answer("Committed and pushed.")],
+            }),
+          ),
         );
       }).pipe(Effect.scoped),
   );
@@ -984,6 +1052,7 @@ describe("durable AttemptRuntime", () => {
               : Effect.void,
           salvage: () => Effect.void,
           comments: () => Effect.void,
+          transcript: Effect.die("The durable runtime never reads the Attempt transcript"),
           windows: Effect.die("The durable runtime never reads the Attempt windows"),
         };
         const failure = yield* runtime.execute(request, sink).pipe(Effect.flip);

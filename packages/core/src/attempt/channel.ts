@@ -292,6 +292,13 @@ export interface Sink {
    * comment posted inside the own window and in none of the others.
    */
   readonly windows: Effect.Effect<AttemptWindows, AttemptFailure>;
+  /**
+   * The envelopes `append` recorded for the Attempt so far, in the order they
+   * were appended. An executor reattaching the Attempt after an orchestrator
+   * restart reads them to resume what it counted from the Attempt's activity,
+   * such as its runaway guard.
+   */
+  readonly transcript: Effect.Effect<ReadonlyArray<Envelope>, AttemptFailure>;
 }
 
 /** How far one outbound channel has legally progressed. */
