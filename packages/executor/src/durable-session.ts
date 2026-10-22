@@ -58,11 +58,12 @@ export interface DurableCheckout {
   /** The only environment the parent's children and the harvesting commands see (ADR 0011). */
   readonly environment: Record<string, string>;
   /**
-   * The kind of credential the Gateway in front of the Worker pays the
-   * children with, which their sessions record; none when they pay with
-   * their harness's own login.
+   * Reads the kind of credential the Gateway in front of the Worker pays the
+   * children with, as the Worker's latest preflight recorded it; each child's
+   * session records what it reads as the child starts. Reads none when the
+   * children pay with their harness's own login.
    */
-  readonly gatewayCredential: Option.Option<GatewayCredentialKind>;
+  readonly gatewayCredential: Effect.Effect<Option.Option<GatewayCredentialKind>>;
   /**
    * Collects the commits and pull requests the checkout holds and the comments
    * the Attempt posted on its Item inside its own window and in none of its
@@ -254,7 +255,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
         worker: prepared.worker,
         worktree: prepared.worktree,
         childHost: checkout.host._tag,
-        gatewayCredential: Option.getOrElse(checkout.gatewayCredential, () => "none"),
+        gatewayCredential: Option.getOrElse(yield* checkout.gatewayCredential, () => "none"),
       });
       const running = yield* runtime
         .execute(

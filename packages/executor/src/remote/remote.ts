@@ -465,8 +465,9 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         launch: (io: AttemptChannel.Sink) =>
           Effect.scoped(
             Effect.gen(function* () {
-              // The children run the brain of the RunSpec, a reattached one's included.
-              const gatewayCredential = yield* worker.gatewayCredential(
+              // The children run the brain of the RunSpec, a reattached one's included. Each
+              // child reads the kind as it starts, so a preflight while the Attempt runs applies.
+              const gatewayCredential = worker.gatewayCredential(
                 machine,
                 prepared.spec.agent.brain.harness,
               );

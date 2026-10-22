@@ -38,12 +38,19 @@ export class AttemptRequest extends Schema.Class<AttemptRequest>("@usine/durable
    */
   environment: Schema.Record(Schema.String, Schema.String),
   /**
-   * The kind of credential the Gateway in front of the Worker pays the
-   * children's model requests with (ADR 0027), which each child's session
-   * records so usage counts it in the pool that pays. None when the children
-   * pay with their harness's own login, as on a Worker without a Gateway.
+   * Reads the kind of credential the Gateway in front of the Worker pays the
+   * children's model requests with (ADR 0027), as the Worker's latest
+   * preflight recorded it. The `subagent` tool reads it as each child starts
+   * and records it on the child's session, so usage counts the child in the
+   * pool that pays: a preflight while the Attempt runs applies to its next
+   * child, and a child already started keeps the kind its session recorded.
+   * Reads none when the children pay with their harness's own login, as on a
+   * Worker without a Gateway.
    */
-  gatewayCredential: Schema.Option(GatewayCredentialKind),
+  gatewayCredential: Schema.declare(
+    (u): u is Effect.Effect<Option.Option<GatewayCredentialKind>> => Effect.isEffect(u),
+    { expected: "an Effect that reads the Gateway's credential kind" },
+  ),
 }) {}
 
 /** What the parent said when it finished. Commits, pull requests, and comments are harvested by the executor afterwards. */

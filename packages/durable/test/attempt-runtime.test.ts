@@ -13,6 +13,7 @@ import {
   RunawayFailure,
 } from "@usine/core/attempt/failure";
 import { CommitSha } from "@usine/core/repository";
+import type { GatewayCredentialKind } from "@usine/core/worker";
 import { Commit, StepResult } from "@usine/core/step/result";
 import { LocalProcess, RemoteShell } from "@usine/agents/child-host";
 import { ChildBackend } from "@usine/agents/runtime";
@@ -27,6 +28,7 @@ import {
   Layer,
   Logger,
   Option,
+  Ref,
   Result,
 } from "effect";
 import {
@@ -949,7 +951,7 @@ describe("durable AttemptRuntime", () => {
   );
 
   it.live(
-    "gives every child the child host its execute call supplies, and records on its session the Gateway credential that pays it",
+    "gives every child the child host its execute call supplies, and records on each child's session the Gateway credential in force when it starts",
     () =>
       Effect.gen(function* () {
         const database = yield* temporaryDatabase;
@@ -958,21 +960,36 @@ describe("durable AttemptRuntime", () => {
           sshEnvironment: { SSH_AUTH_SOCK: "/tmp/agent.sock" },
           destination: "worker.exe.xyz",
         });
+        // What the Worker's preflight recorded of its Gateway's credential.
+        const recorded = yield* Ref.make(Option.some<GatewayCredentialKind>("api-key"));
         yield* Effect.gen(function* () {
           const runtime = yield* AttemptRuntime;
           const request = new AttemptRequest({
             ...attemptRequest("run/step/11", 3, host),
-            gatewayCredential: Option.some("api-key"),
+            gatewayCredential: Ref.get(recorded),
           });
           const execution = yield* Effect.forkChild(runtime.execute(request, recordingSink().sink));
-          const child = yield* (yield* StubChildren).next;
-          assert.deepStrictEqual(child.request.host, host);
-          assert.deepStrictEqual(child.request.session.gatewayCredential, Option.some("api-key"));
-          yield* child.reply("Done.");
+          const children = yield* StubChildren;
+          const first = yield* children.next;
+          assert.deepStrictEqual(first.request.host, host);
+          assert.deepStrictEqual(first.request.session.gatewayCredential, Option.some("api-key"));
+          // A preflight while the Attempt runs finds a subscription token on the Gateway.
+          yield* Ref.set(recorded, Option.some("subscription"));
+          yield* first.reply("First part done.");
+          const second = yield* children.next;
+          assert.deepStrictEqual(second.request.host, host);
+          assert.deepStrictEqual(
+            second.request.session.gatewayCredential,
+            Option.some("subscription"),
+          );
+          yield* second.reply("Second part done.");
           yield* Fiber.join(execution);
         }).pipe(
           Effect.provide(
-            layer({ database, parent: [delegate("Fix the flaky test"), answer("Done.")] }),
+            layer({
+              database,
+              parent: [delegate("First part"), delegate("Second part"), answer("Done.")],
+            }),
           ),
         );
       }).pipe(Effect.scoped),

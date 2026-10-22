@@ -2,7 +2,6 @@ import { assert, describe, it } from "@effect/vitest";
 import { RemoteShell } from "@usine/agents/child-host";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { HarnessReady, HarnessUnavailableError } from "@usine/core/agent/capability";
-import { AttemptId } from "@usine/core/attempt";
 import type { AttemptSalvage } from "@usine/core/attempt/salvage";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
@@ -787,30 +786,27 @@ describe("SSH Worker behind a Gateway", () => {
   );
 
   it.effect(
-    "records the kind of the Gateway's Anthropic credential at each preflight, and an Attempt's Claude Code children carry the latest",
+    "records the kind of the Gateway's Anthropic credential at each preflight, and a running Attempt's next Claude Code child reads the latest",
     () => {
       const machine = fakeMachine();
       const gateway = fakeGateway(machine);
-      const given: Array<AttemptRequest> = [];
-      const parent: StubParent = (context) => {
-        given.push(context.request);
-        return completes(context);
-      };
-      const run = (attemptId: string) =>
-        Effect.gen(function* () {
-          const executor = yield* Executor;
-          const prepared = yield* executor.prepare(
-            new CheckoutRequest({ ...request, attemptId: AttemptId.make(attemptId) }),
-          );
-          yield* prepared.launch(sink);
-        }).pipe(Effect.scoped);
+      const started = Deferred.makeUnsafe<AttemptRequest>();
+      const finish = Deferred.makeUnsafe<void>();
+      // The parent stays at work, as one between two children, until the test lets it finish.
+      const parent: StubParent = (context) =>
+        Deferred.succeed(started, context.request).pipe(
+          Effect.andThen(Deferred.await(finish)),
+          Effect.andThen(completes(context)),
+        );
       return Effect.gen(function* () {
         const executor = yield* Executor;
         yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
-        yield* run("attempt-api-key");
-        assert.deepStrictEqual(given[0]?.gatewayCredential, Option.some("api-key"));
+        const prepared = yield* executor.prepare(request);
+        const launch = yield* prepared.launch(sink).pipe(Effect.forkChild);
+        const given = yield* Deferred.await(started);
+        assert.deepStrictEqual(yield* given.gatewayCredential, Option.some("api-key"));
 
-        // A reload of the Gateway swaps its API key for a subscription token.
+        // While the Attempt runs, a reload of the Gateway swaps its API key for a subscription token.
         const inForce = yield* SettingsInForce;
         yield* inForce.replace({
           ...(yield* inForce.current),
@@ -827,9 +823,14 @@ describe("SSH Worker behind a Gateway", () => {
           },
         });
         yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
-        yield* run("attempt-subscription");
-        assert.deepStrictEqual(given[1]?.gatewayCredential, Option.some("subscription"));
-      }).pipe(Effect.provide(gatewayRuntime(machine, mintingProvider(), gateway, { parent })));
+        // The same Attempt's next child records the kind this preflight found.
+        assert.deepStrictEqual(yield* given.gatewayCredential, Option.some("subscription"));
+        yield* Deferred.succeed(finish, undefined);
+        yield* Fiber.join(launch);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(gatewayRuntime(machine, mintingProvider(), gateway, { parent })),
+      );
     },
   );
 
@@ -855,7 +856,8 @@ describe("SSH Worker behind a Gateway", () => {
         assert.include(warning, '"worker":"eu-one"');
         const prepared = yield* executor.prepare(request);
         yield* prepared.launch(sink);
-        assert.deepStrictEqual(given?.gatewayCredential, Option.none());
+        assert(given !== undefined, "the Attempt's parent ran");
+        assert.deepStrictEqual(yield* given.gatewayCredential, Option.none());
       }).pipe(
         Effect.scoped,
         Effect.provide(gatewayRuntime(machine, mintingProvider(), gateway, { parent })),

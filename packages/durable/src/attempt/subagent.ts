@@ -140,12 +140,13 @@ export const subagentTool = (services: ExtensionServices) => {
       );
     }
     const request = yield* Deferred.await(hub.attached);
+    // Read as the child starts, so a preflight since the Attempt launched applies to it.
     const session = new ChildSession({
       id: AgentSessionId.make(`${parentId}:child:${attemptedChildren}`),
       parentId,
       agent: spec.agent.name,
       brain: spec.agent.brain,
-      gatewayCredential: request.gatewayCredential,
+      gatewayCredential: yield* request.gatewayCredential,
     });
     const childRequest = new ChildRequest({
       session,
