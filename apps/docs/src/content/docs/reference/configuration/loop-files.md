@@ -199,7 +199,14 @@ Labels on this issue: {{ item.labels.nodes.map(label, label.name).join(", ") }}
 
 ### When rendering fails
 
-usine type-checks every interpolation when the file loads, but a value can still fail at render time, for example a field that is `null` on this Item (see [null fields](/reference/configuration/expressions/#fields-that-can-be-null)).
+usine type-checks every interpolation when the file loads, but a value can still fail at render time, for example a field that is `null` on this Item (see [null fields](/reference/configuration/expressions/#fields-that-can-be-null)). Test the object with `!= null`, or select through it with `.?` and give a fallback with `orValue` (see [optional values](/reference/configuration/expressions/#optional-values)). Both lines render `none` on an issue without a milestone:
+
+```markdown title="loops/plan-milestone.md"
+Milestone: {{ item.milestone != null ? item.milestone.title : "none" }}
+Milestone: {{ item.?milestone.?title.orValue("none") }}
+```
+
+When rendering does fail:
 
 - For `issue` and `pr` Loops, usine submits no Event for that Loop and Item and continues with the other Loops and Items; the poll cursor still advances. **Needs attention** shows the failure with the Loop, the Item, and the interpolation for as long as it lasts, and usine logs `Loop evaluation failed on an Item` once per Loop, Item, and content hash. usine evaluates the Item again when it changes, and on the first poll after a restart or a reload, so a fixed template renders without waiting for a change.
 - For `schedule` Loops, the Tick fails for that repository, and usine evaluates it again at the next wake.
