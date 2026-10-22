@@ -516,6 +516,59 @@ describe("durable AttemptRuntime", () => {
   );
 
   it.live(
+    "completes `attached` once an execute call relays the Attempt's channel, which input sent before cannot reach",
+    () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        yield* Effect.gen(function* () {
+          const runtime = yield* AttemptRuntime;
+          const request = attemptRequest("run/step/33");
+          const attemptId = request.spec.attemptId;
+          const recording = recordingSink();
+          const steer = new AttemptChannel.Intervention({
+            operator: "engine",
+            target: new AttemptChannel.ParentTarget(),
+            action: new AttemptChannel.Steer({ message: "Commit and push your work now." }),
+          });
+          // Waited for before the Attempt has a task in this process, as a
+          // reattached Attempt's guard does while `execute` reads storage (#178).
+          const relayed = yield* Effect.forkChild(runtime.attached(attemptId));
+          const early = yield* runtime.intervene(attemptId, steer).pipe(Effect.flip);
+          assert.strictEqual(early.message, "This Attempt no longer has a live channel");
+          assert.strictEqual(relayed.pollUnsafe(), undefined);
+          const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
+          yield* Fiber.join(relayed).pipe(Effect.timeout("5 seconds"));
+          const child = yield* (yield* StubChildren).next;
+          // At once while the channel is relayed, and the input reaches the parent.
+          yield* runtime.attached(attemptId).pipe(Effect.timeout("1 second"));
+          yield* runtime.intervene(attemptId, steer);
+          yield* child.reply("Child done.");
+          yield* Fiber.join(execution);
+          assert.deepStrictEqual(
+            recording.inbound().map(({ sequence, payload }) => [sequence, payload._tag]),
+            [[1, "Steer"]],
+          );
+          assert.deepStrictEqual(receipts(recording.outbound()), [
+            ["Steer", 1, "queued"],
+            ["Steer", 1, "delivered"],
+          ]);
+          // The channel detached when `execute` returned: a later wait is for the next call.
+          const next = yield* Effect.forkChild(runtime.attached(attemptId));
+          yield* Effect.sleep("50 millis");
+          assert.strictEqual(next.pollUnsafe(), undefined);
+          yield* Fiber.interrupt(next);
+        }).pipe(
+          Effect.provide(
+            layer({
+              database,
+              parent: [delegate("Fix the flaky test"), answer("Committed and pushed.")],
+            }),
+          ),
+        );
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
     "reports a message to a working child queued until the child reads it, then delivered",
     () =>
       Effect.gen(function* () {

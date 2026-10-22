@@ -488,6 +488,19 @@ const makeAttemptRuntime = Effect.gen(function* () {
       ),
   );
 
+  const attached = Effect.fn("AttemptRuntime.attached")(
+    function* (attemptId: AttemptId) {
+      yield* Effect.annotateCurrentSpan({ attemptId });
+      const relayed = Option.exists(hubs.find(attemptId), ({ channel }) => Option.isSome(channel));
+      if (!relayed) {
+        yield* Effect.logDebug("Waiting for an execute call to relay the Attempt's channel");
+      }
+      yield* hubs.attached(attemptId);
+      if (!relayed) yield* Effect.logDebug("The Attempt's channel is relayed in this process");
+    },
+    (effect, attemptId) => effect.pipe(Effect.annotateLogs({ attemptId })),
+  );
+
   const cancel = Effect.fn("AttemptRuntime.cancel")(
     function* (attemptId: AttemptId) {
       yield* Effect.annotateCurrentSpan({ attemptId });
@@ -557,6 +570,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
     unsupervised,
     request,
     intervene,
+    attached,
     cancel,
     notify,
   });

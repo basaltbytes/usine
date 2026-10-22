@@ -36,7 +36,11 @@ export interface AttemptGuardLimits {
   readonly maxAttemptMinutes: Option.Option<number>;
   /** Consumed-token ceiling across the parent and every child; none leaves the meter unchecked. */
   readonly maxAttemptTokens: Option.Option<number>;
-  /** Delivers the warning steer to the parent session; failures are logged and never fail the Attempt. */
+  /**
+   * Delivers the warning steer to the parent session. It may wait, as for the
+   * parent's channel, since `tripped` delivers each warning apart from the
+   * checks that trip; failures are logged and never fail the Attempt.
+   */
   readonly warn: (message: string) => Effect.Effect<void, AttemptFailure>;
   /**
    * Keeps the unsupervised time counted so far, the seed's included, where
@@ -80,6 +84,7 @@ interface Ceiling {
 
 const ceiling = (limit: number): Ceiling => ({ limit, warnAt: limit * WARNING_FRACTION });
 
+/** Queues a ceiling's warning for delivery; it never waits for the delivery. */
 type Warn = (ceiling: RunawayCeiling, message: string) => Effect.Effect<void>;
 type Observer = (envelope: AttemptChannel.Envelope) => Effect.Effect<void, RunawayFailure>;
 
@@ -225,8 +230,7 @@ const tokenWatcher = (
  * count as each Hold receipt arrives, and `watch` warns at the ceiling's
  * warning point unless the seed's transcript holds that warning already, then
  * trips at its limit. A held Attempt counts nothing and does not trip until
- * it is released, also when the Hold arrived while `watch` was delivering its
- * warning. While `watch` runs, it records the time it counted every
+ * it is released. While `watch` runs, it records the time it counted every
  * `RECORD_INTERVAL` when that time grew, and once more when it is
  * interrupted, as when this process stops, so the guard of a reattachment
  * goes on from it (#178).
@@ -255,8 +259,8 @@ const wallClockWatcher = Effect.fn("AttemptGuard.wallClockWatcher")(function* (
   /**
    * Applies the current Holds to the count at `now`: a Hold ends the stretch
    * being counted, and a release while `watch` runs begins one. Both happen
-   * as the receipt arrives, so a wait busy elsewhere, as on delivering the
-   * warning, finds the count already stopped when it compares it to a limit.
+   * as the receipt arrives, so `watch` finds the count stopped at the Hold
+   * whenever it next compares the count to a limit.
    */
   const supervise = (now: number) => {
     if (holds.size > 0) {
@@ -365,15 +369,24 @@ const wallClockWatcher = Effect.fn("AttemptGuard.wallClockWatcher")(function* (
 
 /** One Attempt under its ceilings: the sink that meters it and the watch of its unsupervised time. */
 export interface AttemptGuard {
-  /** Appends through to the Attempt's sink; the append that reaches the token ceiling fails with `RunawayFailure`. */
+  /**
+   * Appends through to the Attempt's sink; the append that reaches the token
+   * ceiling fails with `RunawayFailure`. An append that reaches the warning
+   * point queues the warning for `tripped` and returns without waiting for
+   * its delivery: the durable runtime records the steer in order with the
+   * envelopes it appends, so a delivery awaited inside `append` would wait on
+   * itself.
+   */
   readonly sink: AttemptChannel.Sink;
   /**
-   * Checks the token total, the seed's included, and counts the unsupervised
-   * time from when it is run, and fails with `RunawayFailure` when the
-   * restored token total or the wall-clock ceiling trips; never ends
-   * otherwise. A token report that reaches the limit later fails its `append`
-   * instead. Interrupting it records the time it counted, within a short
-   * grace.
+   * Checks the token total, the seed's included, counts the unsupervised time
+   * from when it is run, and delivers each queued warning in turn through
+   * `limits.warn`. A delivery that waits, as for the parent's channel, holds
+   * back no check. Fails with `RunawayFailure` when the restored token total
+   * or the wall-clock ceiling trips, dropping a warning not delivered yet;
+   * never ends otherwise. A token report that reaches the limit later fails
+   * its `append` instead. Interrupting it records the time it counted, within
+   * a short grace.
    */
   readonly tripped: Effect.Effect<never, RunawayFailure>;
 }
@@ -386,9 +399,11 @@ export interface AttemptGuard {
  * counted, so a reattached Attempt trips at the same totals as if the
  * orchestrator had not restarted, and a warning its transcript holds is not
  * sent again. `tripped` checks the restored token total as it starts, since
- * a quiet parent may report no more usage. The wall clock records the time it
- * counted through `limits.recordUnsupervised` for the next seed. With no
- * ceiling armed the Attempt runs on the channel untouched.
+ * a quiet parent may report no more usage, and delivers the warnings, which
+ * a reattachment can send before the parent's channel is ready. The wall
+ * clock records the time it counted through `limits.recordUnsupervised` for
+ * the next seed. With no ceiling armed the Attempt runs on the channel
+ * untouched.
  */
 export const attemptGuard = (
   limits: AttemptGuardLimits,
@@ -401,12 +416,27 @@ export const attemptGuard = (
     return Effect.succeed({ sink: io, tripped: Effect.never });
   }
   return Effect.gen(function* () {
+    const warnings = yield* Queue.unbounded<{
+      readonly ceiling: RunawayCeiling;
+      readonly message: string;
+    }>();
     const warn: Warn = (ceiling, message) =>
       Effect.logInfo("Warning the Attempt before its ceiling", {
         attemptId: limits.attemptId,
         ceiling,
-      }).pipe(
-        Effect.andThen(limits.warn(message)),
+      }).pipe(Effect.andThen(Queue.offer(warnings, { ceiling, message })), Effect.asVoid);
+    const deliver = Effect.fn("AttemptGuard.deliverWarning")(function* (
+      ceiling: RunawayCeiling,
+      message: string,
+    ) {
+      yield* Effect.annotateCurrentSpan({ attemptId: limits.attemptId, ceiling });
+      yield* limits.warn(message).pipe(
+        Effect.tap(() =>
+          Effect.logInfo("Delivered the Attempt's ceiling warning", {
+            attemptId: limits.attemptId,
+            ceiling,
+          }),
+        ),
         Effect.tapError((error) =>
           Effect.logWarning("Attempt ceiling warning was not delivered", {
             attemptId: limits.attemptId,
@@ -416,6 +446,7 @@ export const attemptGuard = (
         ),
         Effect.ignore,
       );
+    });
     const meter = Option.map(tokens, (tokens) =>
       tokenWatcher(limits.attemptId, tokens, warn, seed),
     );
@@ -436,8 +467,6 @@ export const attemptGuard = (
       windows: io.windows,
       transcript: io.transcript,
     };
-    // The restored token total is checked beside the wall clock, so delivering
-    // its warning does not hold back the clock's start.
     const restoredTokens = Option.match(meter, {
       onNone: () => Effect.never,
       onSome: ({ resume }) => Effect.andThen(resume, Effect.never),
@@ -446,6 +475,15 @@ export const attemptGuard = (
       onNone: () => Effect.never,
       onSome: ({ watch }) => watch,
     });
-    return { sink, tripped: Effect.raceFirst(restoredTokens, wallClockTrip) };
+    // Warnings are delivered beside the checks, so a delivery that waits for
+    // the parent's channel, as a reattachment's restored warning does, never
+    // holds back a trip (#178).
+    const delivery = Effect.forever(
+      Effect.flatMap(Queue.take(warnings), ({ ceiling, message }) => deliver(ceiling, message)),
+    );
+    return {
+      sink,
+      tripped: Effect.raceFirst(Effect.raceFirst(restoredTokens, wallClockTrip), delivery),
+    };
   });
 };

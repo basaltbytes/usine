@@ -111,6 +111,12 @@ export interface AttemptHubs {
   ) => Effect.Effect<NoticeRouting>;
   /** Queues the report of whether a child read an operator input it had queued. */
   readonly delivery: (hub: AttemptHub, delivery: ChildDelivery) => Effect.Effect<void>;
+  /**
+   * Completes once an `execute` call relays the Attempt's channel, at once
+   * while one does. Before the Attempt has a hub here, the wait is kept for
+   * the hub created next, which completes it when its channel attaches.
+   */
+  readonly attached: (attemptId: AttemptId) => Effect.Effect<void>;
   /** Routes commits to hubs: parent entries in order, task and record changes as wake-ups; wakes every hub after a reopen or the stop. */
   readonly listener: HarnessListener;
 }
@@ -122,6 +128,8 @@ export const attemptHubs = Effect.gen(function* () {
   const byParent = new Map<number, AttemptHub>();
   /** Worker notices for Attempts that have no hub yet. */
   const early = new Map<string, ReadonlyArray<AttemptChannel.WorkerNotice>>();
+  /** What `attached` waits on for Attempts that have no hub yet; their hub starts with it. */
+  const awaited = new Map<string, Deferred.Deferred<AttemptRequest>>();
 
   const bindParent = (hub: AttemptHub, parent: ConversationId) => {
     if (Option.isSome(hub.parent)) return;
@@ -139,8 +147,10 @@ export const attemptHubs = Effect.gen(function* () {
         const queue = yield* Queue.unbounded<RelayItem>();
         const emission = yield* Semaphore.make(1);
         const routing = yield* Semaphore.make(1);
-        const attached = yield* Deferred.make<AttemptRequest>();
-        // No yield until the hub is registered, so `notice` either keeps a notice the hub starts with or queues it.
+        const fresh = yield* Deferred.make<AttemptRequest>();
+        // No yield until the hub is registered, so `notice` either keeps a notice the hub starts
+        // with or queues it, and `attached` either waits on what the hub starts with or on the hub.
+        const attached = awaited.get(attemptId) ?? fresh;
         const created: AttemptHub = {
           attemptId,
           taskId,
@@ -155,12 +165,14 @@ export const attemptHubs = Effect.gen(function* () {
           attached,
         };
         early.delete(attemptId);
+        awaited.delete(attemptId);
         byAttempt.set(attemptId, created);
         byTask.set(taskId, created);
         yield* Effect.logDebug("Tracking the Attempt in this process", {
           attemptId,
           taskId,
           earlyNotices: created.early.map(({ _tag }) => _tag),
+          awaitedAttachment: attached !== fresh,
         });
         return created;
       }),
@@ -225,6 +237,16 @@ export const attemptHubs = Effect.gen(function* () {
         return { _tag: "Kept", kept };
       }),
     delivery: (target, delivery) => Queue.offer(target.queue, delivery).pipe(Effect.asVoid),
+    // `relayAttempt` replaces a hub's `attached` when its channel detaches, so
+    // the wait reads the current one: a channel that detached is waited for again.
+    attached: (attemptId) =>
+      Effect.suspend(() => {
+        const target = byAttempt.get(attemptId);
+        if (target !== undefined) return Deferred.await(target.attached);
+        const kept = awaited.get(attemptId) ?? Deferred.makeUnsafe<AttemptRequest>();
+        awaited.set(attemptId, kept);
+        return Deferred.await(kept);
+      }).pipe(Effect.asVoid),
     listener,
   } satisfies AttemptHubs;
 });

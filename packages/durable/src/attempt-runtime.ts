@@ -165,11 +165,26 @@ export class AttemptRuntime extends Context.Service<
     readonly request: (
       attemptId: AttemptId,
     ) => Effect.Effect<Option.Option<StoredRequest>, AttemptFailure>;
-    /** Applies an operator action to the live parent or one of its children; the result is recorded through the Attempt's sink. */
+    /**
+     * Applies an operator action to the live parent or one of its children;
+     * the result is recorded through the Attempt's sink. Fails while no
+     * `execute` call in this process relays the Attempt's channel, which
+     * `attached` waits for. It records the input with the envelopes the relay
+     * appends, one at a time, so a sink's `append` must not wait for it.
+     */
     readonly intervene: (
       attemptId: AttemptId,
       intervention: AttemptChannel.Intervention,
     ) => Effect.Effect<void, AttemptFailure>;
+    /**
+     * Completes once an `execute` call in this process relays the Attempt's
+     * channel, so `intervene` reaches it; at once while one does. `execute`
+     * first reads durable storage, so input sent as it starts, such as the
+     * warning a reattached Attempt's runaway guard restores (#178), waits for
+     * this. It never fails and waits as long as no `execute` call relays the
+     * Attempt: callers bound it by the Attempt's own run.
+     */
+    readonly attached: (attemptId: AttemptId) => Effect.Effect<void>;
     /** Cancels the Attempt: aborts the task bottom-up (children, then the parent conversation) and settles `execute`. */
     readonly cancel: (attemptId: AttemptId) => Effect.Effect<void, AttemptFailure>;
     /**

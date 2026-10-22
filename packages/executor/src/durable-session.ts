@@ -473,6 +473,23 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
   });
 
   /**
+   * Delivers the runaway guard's warning steer through `intervene` once an
+   * `execute` call relays the Attempt's channel. The guard starts as soon as
+   * the launch registers the Attempt, while `execute` still reads durable
+   * storage, so the warning a reattachment restores would otherwise find no
+   * channel and be lost (#178). The guard delivers it apart from its checks,
+   * and the launch's end interrupts the wait.
+   */
+  const warnParent = Effect.fn("DurableSession.warnParent")(function* (
+    attemptId: AttemptId,
+    intervention: AttemptChannel.Intervention,
+  ) {
+    yield* Effect.annotateCurrentSpan({ attemptId });
+    yield* runtime.attached(attemptId);
+    yield* intervene(attemptId, intervention);
+  });
+
+  /**
    * Fails the reattachment of `attemptId` when `read`, one `part` of what its
    * runaway guard goes on from, fails after the store's retries. Starting that
    * part over would grant the Attempt a fresh allowance (#178), so its parent
@@ -547,7 +564,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
 
   const prepared = yield* preparedAttemptsFor(
     stop,
-    intervene,
+    warnParent,
     (attemptId) => Deferred.await(registration(attemptId)),
     guardSeedFor,
     runtime.recordUnsupervised,

@@ -36,7 +36,7 @@ A child is not resumed after a restart. Its tool call settles as interrupted wit
 
 ## Operator input
 
-`intervene(attemptId, intervention)` needs a live `execute` for the Attempt; it records the inbound envelope, applies the action, and records the result.
+`intervene(attemptId, intervention)` needs a live `execute` for the Attempt; it records the inbound envelope, applies the action, and records the result. It records the envelopes in order with those the relay appends, so a sink's `append` must not wait for it. `execute` relays the Attempt's channel only after reading durable storage, and input sent before that fails; `attached(attemptId)` completes once an `execute` call in this process relays the channel, at once while one does, and waits as long as none does. The executor's runaway guard waits on it to deliver the warning a reattachment owes (#178).
 
 - Parent `OperatorMessage`: places a Hold on the parent. While the Hold lasts, each answer of the parent waits for the operator instead of ending the Attempt; `Release` ends the Hold, and a waiting parent then continues the task with a new turn. A `Steer` places no Hold.
 - Parent `Steer` or `OperatorMessage` while a turn runs: joins the turn after its current tool round. Until then its `InterventionApplied` says `queued`, and a second receipt for the same input sequence reports that the parent read it, or an `InterventionRejected` that it never will. To a paused or waiting parent, it starts the next turn.
@@ -74,4 +74,4 @@ const attempts = layer({
 - `PARENT_MODEL` is the scripted model's id, `faux/faux-1`. It accepts every effort up to `high`; leaving `RunSpec.parentModel` empty selects it too.
 - `StubChildren.next` waits for the next launched child. A `StubChild` exposes its `request`, `emit(event)`, `reply(message)`, `block(message)`, `interrupted`, and the `interventions` it received. A child under a Hold returns its reply only after `Release`.
 - `fauxParent(steps)` and `stubChildBackendLayer` are the two halves, for composing `DurableHarness` with another storage.
-- `stubAttemptRuntime(storage, parent)` is an in-memory `AttemptRuntime` for executor and engine tests that need no parent model: `parent` scripts each Attempt's final message or `AttemptReport` (`completes`, `worksFor(millis)`, or your own `StubParent`), and building it again on the same `StubStorage` simulates a restart. `StubStorage.unsupervised` holds what `recordUnsupervised` kept.
+- `stubAttemptRuntime(storage, parent)` is an in-memory `AttemptRuntime` for executor and engine tests that need no parent model: `parent` scripts each Attempt's final message or `AttemptReport` (`completes`, `worksFor(millis)`, or your own `StubParent`), and building it again on the same `StubStorage` simulates a restart. `StubStorage.unsupervised` holds what `recordUnsupervised` kept. Its `attached` completes once `execute` starts recording the Attempt's activity.

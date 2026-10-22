@@ -66,6 +66,8 @@ const durableAttempt = () => {
  * default, and runs it until a ceiling trips. Each warning is recorded as the
  * steer the durable runtime appends for it. The guard goes on from what the
  * earlier guards of `attempt` left, as a reattachment after a restart does.
+ * The guard delivers warnings apart from its checks, so `warned` waits for
+ * the ones a test expects.
  */
 const setup = (
   ceilings: Pick<AttemptGuardLimits, "maxAttemptMinutes" | "maxAttemptTokens">,
@@ -78,6 +80,8 @@ const setup = (
 ) =>
   Effect.gen(function* () {
     const warnings: Array<string> = [];
+    /** Signals each warning the guard starts delivering. */
+    const delivering = yield* Queue.unbounded<void>();
     const durable = options.attempt ?? durableAttempt();
     const io = durable.sink;
     const finished = yield* Deferred.make<void>();
@@ -93,6 +97,7 @@ const setup = (
         warn: (message) =>
           Effect.gen(function* () {
             warnings.push(message);
+            yield* Queue.offer(delivering, undefined);
             yield* io.append(
               "inbound",
               new AttemptChannel.InboundEnvelope({
@@ -172,6 +177,11 @@ const setup = (
     const started = emit(
       new AttemptChannel.Started({ parentModel: ModelId.make("openai/parent") }),
     );
+    /** Waits until the guard started delivering `count` warnings. */
+    const warned = (count: number) =>
+      Effect.gen(function* () {
+        while (warnings.length < count) yield* Queue.take(delivering);
+      });
     /** Stops this guard as an orchestrator that shuts down does. */
     const stop = Fiber.interrupt(result);
     /** Stops this guard as an orchestrator that dies does. */
@@ -186,6 +196,7 @@ const setup = (
       stop,
       crash,
       warnings,
+      warned,
       finished,
     };
   });
@@ -195,7 +206,7 @@ describe("Attempt guard", () => {
     "preserves the remaining time across concurrent Holds, the parent's included, warns once at 80% of unsupervised time, and trips at the end",
     () =>
       Effect.gen(function* () {
-        const { result, emit, hold, warnings } = yield* setup({
+        const { result, emit, hold, warnings, warned } = yield* setup({
           maxAttemptMinutes: Option.some(1),
           maxAttemptTokens: Option.some(100),
         });
@@ -221,6 +232,7 @@ describe("Attempt guard", () => {
         yield* hold(second, true);
         yield* TestClock.adjust("39 seconds");
         assert.strictEqual(result.pollUnsafe(), undefined);
+        yield* warned(1);
         assert.deepStrictEqual(warnings, [
           "0.8 of 1 minutes used by this Attempt; commit and push your work now.",
         ]);
@@ -235,11 +247,12 @@ describe("Attempt guard", () => {
   it.effect("stops the wall clock at a Hold placed while its warning is being delivered", () =>
     Effect.gen(function* () {
       const routing = yield* Deferred.make<void>();
-      const { result, hold, warnings } = yield* setup(
+      const { result, hold, warnings, warned } = yield* setup(
         { maxAttemptMinutes: Option.some(1), maxAttemptTokens: Option.none() },
         { delivered: Deferred.await(routing) },
       );
       yield* TestClock.adjust("48 seconds");
+      yield* warned(1);
       assert.strictEqual(warnings.length, 1);
       // The operator holds the parent while the warning waits for the parent's input routing.
       yield* TestClock.adjust("2 seconds");
@@ -259,11 +272,55 @@ describe("Attempt guard", () => {
     }),
   );
 
+  it.effect("trips at the wall-clock limit while its warning still waits for delivery", () =>
+    Effect.gen(function* () {
+      // A warning waits, as for a reattached parent's channel that is not ready yet.
+      const { result, warnings, warned } = yield* setup(
+        { maxAttemptMinutes: Option.some(1), maxAttemptTokens: Option.none() },
+        { delivered: Effect.never },
+      );
+      yield* TestClock.adjust("48 seconds");
+      yield* warned(1);
+      yield* TestClock.adjust("11 seconds");
+      assert.strictEqual(result.pollUnsafe(), undefined);
+      yield* TestClock.adjust("1 second");
+      assert.notStrictEqual(result.pollUnsafe(), undefined, "the delivery holds back no trip");
+      const outcome = yield* Fiber.join(result);
+      assert(Result.isFailure(outcome) && outcome.failure._tag === "RunawayFailure");
+      assert.strictEqual(outcome.failure.ceiling, "wall-clock");
+      assert.strictEqual(warnings.length, 1);
+    }),
+  );
+
+  it.effect(
+    "returns from the append that reaches the token warning point before the warning is delivered",
+    () =>
+      Effect.gen(function* () {
+        // The durable runtime records the steer in order with the envelopes it
+        // appends, so an append that waited for the delivery would wait on itself.
+        const { result, usage, warnings, warned } = yield* setup(
+          { maxAttemptMinutes: Option.none(), maxAttemptTokens: Option.some(100) },
+          { delivered: Effect.never },
+        );
+        yield* usage(first, 85);
+        yield* warned(1);
+        assert.deepStrictEqual(warnings, [
+          "85 of 100 tokens used by this Attempt; commit and push your work now.",
+        ]);
+        const rejected = yield* usage(first, 100).pipe(Effect.result);
+        assert(Result.isFailure(rejected) && rejected.failure._tag === "RunawayFailure");
+        assert.strictEqual(rejected.failure.ceiling, "tokens");
+        const outcome = yield* Fiber.join(result);
+        assert(Result.isFailure(outcome) && outcome.failure._tag === "RunawayFailure");
+        assert.strictEqual(warnings.length, 1);
+      }),
+  );
+
   it.effect(
     "keeps the aggregate token ceiling armed during a Hold, warns once at 80%, and survives an undeliverable warning",
     () =>
       Effect.gen(function* () {
-        const { result, hold, usage, warnings } = yield* setup(
+        const { result, hold, usage, warnings, warned } = yield* setup(
           { maxAttemptMinutes: Option.some(1), maxAttemptTokens: Option.some(100) },
           { warnFails: true },
         );
@@ -273,6 +330,7 @@ describe("Attempt guard", () => {
         yield* usage(first, 20);
         assert.deepStrictEqual(warnings, []);
         yield* usage(second, 25);
+        yield* warned(1);
         assert.deepStrictEqual(warnings, [
           "85 of 100 tokens used by this Attempt; commit and push your work now.",
         ]);
@@ -327,6 +385,7 @@ describe("Attempt guard", () => {
         assert.strictEqual(after.result.pollUnsafe(), undefined, "the Hold outlives the restart");
         yield* after.hold("parent", false);
         yield* TestClock.adjust("6 seconds");
+        yield* after.warned(1);
         assert.deepStrictEqual(after.warnings, [
           "0.8 of 1 minutes used by this Attempt; commit and push your work now.",
         ]);
@@ -352,6 +411,7 @@ describe("Attempt guard", () => {
       yield* before.stop;
       const after = yield* setup(ceilings, { attempt: before.attempt });
       yield* after.usage(second, 30);
+      yield* after.warned(1);
       assert.deepStrictEqual(after.warnings, [
         "90 of 100 tokens used by this Attempt; commit and push your work now.",
       ]);
@@ -377,6 +437,7 @@ describe("Attempt guard", () => {
         // The operator lowers the ceiling before each restart; the parent reports no more usage.
         const lowered = yield* setup(tokens(140), { attempt: before.attempt });
         yield* TestClock.adjust("1 second");
+        yield* lowered.warned(1);
         assert.deepStrictEqual(lowered.warnings, [
           "120 of 140 tokens used by this Attempt; commit and push your work now.",
         ]);
@@ -399,6 +460,7 @@ describe("Attempt guard", () => {
       yield* before.started;
       yield* TestClock.adjust("50 seconds");
       yield* before.usage(first, 85);
+      yield* before.warned(2);
       assert.deepStrictEqual(before.warnings, [
         "0.8 of 1 minutes used by this Attempt; commit and push your work now.",
         "85 of 100 tokens used by this Attempt; commit and push your work now.",
@@ -439,6 +501,7 @@ describe("Attempt guard", () => {
         yield* TestClock.adjust("5 seconds");
         assert.deepStrictEqual(thirdRun.warnings, []);
         yield* TestClock.adjust("1 second");
+        yield* thirdRun.warned(1);
         assert.deepStrictEqual(thirdRun.warnings, [
           "0.8 of 1 minutes used by this Attempt; commit and push your work now.",
         ]);

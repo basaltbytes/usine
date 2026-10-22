@@ -135,6 +135,99 @@ describe("exe.dev ceilings across a restart", () => {
     );
   }
 
+  /**
+   * The stub runtime whose `execute` completes `executing` as it is called,
+   * then relays the Attempt's channel only once `attach` completes, as the
+   * durable runtime's does after reading storage.
+   */
+  const attachingOn =
+    (executing: Deferred.Deferred<void>, attach: Deferred.Deferred<void>) =>
+    (stub: Layer.Layer<AttemptRuntime>) =>
+      Layer.effect(
+        AttemptRuntime,
+        Effect.map(AttemptRuntime, (runtime) =>
+          AttemptRuntime.of({
+            ...runtime,
+            execute: (request, io) =>
+              Deferred.succeed(executing, undefined).pipe(
+                Effect.andThen(Deferred.await(attach)),
+                Effect.andThen(runtime.execute(request, io)),
+              ),
+          }),
+        ),
+      ).pipe(Layer.provide(stub));
+
+  /** A ceiling lowered before a restart below what the Attempt used, past its warning point, and the warning its reattachment owes. */
+  const restoredWarnings = [
+    {
+      ceiling: "tokens",
+      before: { maxAttemptTokens: Option.some(200) },
+      after: { maxAttemptTokens: Option.some(140) },
+      first: ({ emit, session }: StubParentContext) =>
+        emit(
+          new AttemptChannel.SessionEvent({
+            event: new SessionTokensUpdated({ session, totalTokens: TokenCount.make(120) }),
+          }),
+        ),
+      warning: "120 of 140 tokens used by this Attempt; commit and push your work now.",
+    },
+    {
+      ceiling: "wall-clock",
+      before: { maxAttemptMinutes: Option.some(2) },
+      after: { maxAttemptMinutes: Option.some(1) },
+      first: () => Effect.void,
+      warning: "0.8 of 1 minutes used by this Attempt; commit and push your work now.",
+    },
+  ] as const;
+
+  for (const { ceiling, before, after, first, warning } of restoredWarnings) {
+    it.effect(
+      `delivers the ${ceiling} warning a reattachment owes once its parent's channel is relayed`,
+      () => {
+        const ssh = fakeSsh();
+        const storage = new StubStorage();
+        const { transcript, sink } = recording();
+        const steers = () =>
+          transcript.flatMap(([, envelope]) =>
+            envelope._tag === "InboundEnvelope" && envelope.payload._tag === "Steer"
+              ? [envelope.payload.message]
+              : [],
+          );
+        return Effect.gen(function* () {
+          const earlier = new CheckoutRequest({ ...request, ...before });
+          yield* stopAfter(ssh, storage, earlier, sink, "50 seconds", first);
+          assert.deepStrictEqual(steers(), [], "the earlier run passed no warning point");
+          const executing = yield* Deferred.make<void>();
+          const attach = yield* Deferred.make<void>();
+          yield* Effect.gen(function* () {
+            const executor = yield* Executor;
+            yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
+            const prepared = yield* executor.prepare(
+              new CheckoutRequest({ ...request, ...after, reattach: true }),
+            );
+            const launch = yield* prepared.launch(sink).pipe(Effect.forkChild);
+            // The launch registered the Attempt, which starts its guard, before
+            // calling `execute`, which still reads durable storage.
+            yield* Deferred.await(executing);
+            yield* TestClock.adjust("1 second");
+            assert.deepStrictEqual(steers(), []);
+            yield* Deferred.succeed(attach, undefined);
+            for (let tick = 0; tick < 10 && steers().length === 0; tick += 1)
+              yield* TestClock.adjust("10 millis");
+            assert.deepStrictEqual(steers(), [warning]);
+            assert.strictEqual(launch.pollUnsafe(), undefined);
+            yield* Fiber.interrupt(launch);
+          }).pipe(
+            Effect.scoped,
+            Effect.provide(
+              runtime(ssh.layer, () => Effect.never, storage, attachingOn(executing, attach)),
+            ),
+          );
+        });
+      },
+    );
+  }
+
   /** The stub runtime when durable storage cannot read the unsupervised time the earlier guards recorded. */
   const unreadableTime = (stub: Layer.Layer<AttemptRuntime>) =>
     Layer.effect(

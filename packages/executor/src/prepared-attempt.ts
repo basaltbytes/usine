@@ -36,7 +36,8 @@ interface OwnedAttempt {
  * launch. Without a live session, cancellation releases the Attempt directly. `cancel`,
  * a failed `prepare`, and `launch` each return only after the Attempt's resources are released.
  * `registered` completes once the launch registered the Attempt's live session, so
- * `stop` and `intervene` reach it. `guardSeed` gives what the Attempt's guard goes
+ * `stop` reaches it. `warnParent` delivers the guard's warning steer to the parent, and
+ * may wait until the parent's channel can take it. `guardSeed` gives what the Attempt's guard goes
  * on from, and `recordUnsupervised` keeps the unsupervised time the guard counted
  * for the seed of the Attempt's reattachment. When `guardSeed` fails, as for a
  * reattachment whose seed cannot be read, the launch releases the Attempt's
@@ -44,7 +45,7 @@ interface OwnedAttempt {
  */
 export const preparedAttemptsFor = (
   stop: (attemptId: AttemptId, reason: AttemptStop) => Effect.Effect<boolean, ExecutorError>,
-  intervene: (
+  warnParent: (
     attemptId: AttemptId,
     intervention: AttemptChannel.Intervention,
   ) => Effect.Effect<void, AttemptFailure>,
@@ -154,7 +155,7 @@ export const preparedAttemptsFor = (
                   maxAttemptMinutes: request.maxAttemptMinutes,
                   maxAttemptTokens: request.maxAttemptTokens,
                   warn: (message) =>
-                    intervene(
+                    warnParent(
                       attemptId,
                       new AttemptChannel.Intervention({
                         operator: "engine",
