@@ -116,8 +116,15 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
       onSome: (held) => new Set([...held.workers, address.name]),
     });
     const anthropicCredential = yield* Ref.make(Option.none<GatewayCredentialKind>());
+    const warnedOfUnreportedCredential = yield* Ref.make(false);
     return {
-      gateway: { settings, forward, admin, anthropicCredential } satisfies MachineGateway,
+      gateway: {
+        settings,
+        forward,
+        admin,
+        anthropicCredential,
+        warnedOfUnreportedCredential,
+      } satisfies MachineGateway,
       forwards: new Map(current.forwards).set(key, { forward, scope: forwardScope, workers }),
       opened: Option.isNone(shared),
     };

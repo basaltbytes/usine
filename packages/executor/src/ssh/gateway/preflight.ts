@@ -38,12 +38,35 @@ const unreachable = (host: string, command: string, result: CommandResult) =>
   });
 
 /**
+ * Warns that the Gateway is too old to report the kind of its Anthropic
+ * credential, once per Worker (#248): each preflight that runs again, after
+ * a reload gives the Worker more slots or a brain, logs at debug level
+ * instead.
+ */
+const warnOfUnreportedCredential = (worker: WorkerName, gateway: MachineGateway) =>
+  Ref.getAndSet(gateway.warnedOfUnreportedCredential, true).pipe(
+    Effect.flatMap((warned) =>
+      warned
+        ? Effect.logDebug(
+            "SSH Worker's Gateway still does not report the kind of its Anthropic credential; already warned for this Worker",
+            { worker, gateway: gateway.forward.gateway },
+          )
+        : Effect.logWarning(
+            "SSH Worker's Gateway does not report the kind of its Anthropic credential; its Claude Code children count in the Claude plan pool until the Gateway is upgraded",
+            { worker, gateway: gateway.forward.gateway },
+          ),
+    ),
+  );
+
+/**
  * Reads which kind of Anthropic credential the Gateway pays Claude Code
  * with, and records it with the Worker so its children's sessions name the
  * pool that pays (ADR 0013). A Gateway that holds no Anthropic credential
  * while the Worker's `llmProviders` lists it would refuse every Claude Code
  * request, so it fails the preflight. A Gateway too old to report its
- * credentials keeps the Claude plan pool, with a warning.
+ * credentials keeps the Claude plan pool, with a warning logged once per
+ * Worker; every preflight still reads the kind, so an upgraded Gateway's is
+ * recorded at the next one.
  */
 const recordAnthropicCredential = Effect.fn("SshExecutor.recordAnthropicCredential")(function* (
   worker: WorkerName,
@@ -55,10 +78,9 @@ const recordAnthropicCredential = Effect.fn("SshExecutor.recordAnthropicCredenti
   );
   const credential = yield* Option.match(reported, {
     onNone: () =>
-      Effect.logWarning(
-        "SSH Worker's Gateway does not report the kind of its Anthropic credential; its Claude Code children count in the Claude plan pool until the Gateway is upgraded",
-        { worker, gateway: gateway.forward.gateway },
-      ).pipe(Effect.as(Option.none<GatewayCredentialKind>())),
+      warnOfUnreportedCredential(worker, gateway).pipe(
+        Effect.as(Option.none<GatewayCredentialKind>()),
+      ),
     onSome: ({ providers }) => {
       const anthropic = providers.find(({ provider }) => provider === "anthropic");
       return anthropic === undefined

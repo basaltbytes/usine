@@ -78,6 +78,13 @@ export interface MachineGateway {
    * list `anthropic`, and when the Gateway is too old to report it.
    */
   readonly anthropicCredential: Ref.Ref<Option.Option<GatewayCredentialKind>>;
+  /**
+   * Whether a preflight of this Worker has already warned that the Gateway
+   * is too old to report the kind of its Anthropic credential. The warning
+   * is logged once per Worker; later preflights still read the kind, so an
+   * upgraded Gateway's kind is recorded at the next one.
+   */
+  readonly warnedOfUnreportedCredential: Ref.Ref<boolean>;
 }
 
 /** An SSH Worker's machine with the child host that every command and child on it runs through. */

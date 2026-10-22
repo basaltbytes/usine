@@ -835,12 +835,18 @@ describe("SSH Worker behind a Gateway", () => {
   );
 
   it.effect(
-    "keeps a Gateway too old to report its credentials in the Claude plan pool, with a warning",
+    "keeps a Gateway too old to report its credentials in the Claude plan pool, with a warning once per Worker",
     () => {
       const machine = fakeMachine();
       const gateway = fakeGateway(machine);
       gateway.switches.reportsProviders = false;
       const logs = capturedLogs();
+      const warnings = () =>
+        logs.lines.filter((line) =>
+          line.includes(
+            "does not report the kind of its Anthropic credential; its Claude Code children count in the Claude plan pool",
+          ),
+        );
       let given: AttemptRequest | undefined;
       const parent: StubParent = (context) => {
         given = context.request;
@@ -849,15 +855,24 @@ describe("SSH Worker behind a Gateway", () => {
       return Effect.gen(function* () {
         const executor = yield* Executor;
         yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
-        const warning = logs.lines.find((line) =>
-          line.includes("does not report the kind of its Anthropic credential"),
-        );
+        const [warning] = warnings();
         assert(warning !== undefined, "the preflight warns that the plan pool is kept");
         assert.include(warning, '"worker":"eu-one"');
         const prepared = yield* executor.prepare(request);
         yield* prepared.launch(sink);
         assert(given !== undefined, "the Attempt's parent ran");
         assert.deepStrictEqual(yield* given.gatewayCredential, Option.none());
+
+        // A reload that gives the Worker another slot preflights it again.
+        yield* executor.preflight(WORKER, [TEST_AGENT.brain], 2);
+        assert.strictEqual(warnings().length, 1, "the Worker is warned once");
+        assert.deepStrictEqual(yield* given.gatewayCredential, Option.none());
+
+        // Once the Gateway is upgraded, the next preflight still reads and records the kind.
+        gateway.switches.reportsProviders = true;
+        yield* executor.preflight(WORKER, [TEST_AGENT.brain], 2);
+        assert.deepStrictEqual(yield* given.gatewayCredential, Option.some("api-key"));
+        assert.strictEqual(warnings().length, 1);
       }).pipe(
         Effect.scoped,
         Effect.provide(gatewayRuntime(machine, mintingProvider(), gateway, { parent })),
