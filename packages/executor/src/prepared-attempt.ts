@@ -5,9 +5,9 @@ import {
   InfraFailure,
   type RunawayCeiling,
 } from "@usine/core/attempt/failure";
-import { Deferred, Effect, Exit, Fiber, Ref, Scope } from "effect";
+import { Cause, Deferred, type Duration, Effect, Exit, Fiber, Ref, Scope } from "effect";
 import type { CheckoutRequest, ExecutorError, PreparedAttempt } from "./executor.ts";
-import { attemptGuard } from "./guard.ts";
+import { attemptGuard, type AttemptGuardSeed } from "./guard.ts";
 import type { ProvisionedWorktree } from "./provision.ts";
 
 /** Why an Attempt's live session is stopping: operator cancel, or a runaway ceiling that tripped. */
@@ -35,12 +35,28 @@ interface OwnedAttempt {
  * it, and so does a tripped wall-clock ceiling before the guard's race interrupts the
  * launch. Without a live session, cancellation releases the Attempt directly. `cancel`,
  * a failed `prepare`, and `launch` each return only after the Attempt's resources are released.
+ * `registered` completes once the launch registered the Attempt's live session, so
+ * `stop` reaches it. `warnParent` delivers the guard's warning steer to the parent, and
+ * may wait until the parent's channel can take it. `guardSeed` gives what the Attempt's guard goes
+ * on from, and `recordUnsupervised` keeps the unsupervised time the guard counted
+ * for the seed of the Attempt's reattachment. When `guardSeed` fails, as for a
+ * reattachment whose seed cannot be read, the launch releases the Attempt's
+ * resources, recording its salvage, and fails with that failure.
  */
 export const preparedAttemptsFor = (
   stop: (attemptId: AttemptId, reason: AttemptStop) => Effect.Effect<boolean, ExecutorError>,
-  intervene: (
+  warnParent: (
     attemptId: AttemptId,
     intervention: AttemptChannel.Intervention,
+  ) => Effect.Effect<void, AttemptFailure>,
+  registered: (attemptId: AttemptId) => Effect.Effect<void>,
+  guardSeed: (
+    request: CheckoutRequest,
+    io: AttemptChannel.Sink,
+  ) => Effect.Effect<AttemptGuardSeed, InfraFailure>,
+  recordUnsupervised: (
+    attemptId: AttemptId,
+    unsupervised: Duration.Duration,
   ) => Effect.Effect<void, AttemptFailure>,
 ) =>
   Effect.sync(() => {
@@ -99,6 +115,10 @@ export const preparedAttemptsFor = (
             Effect.onError((cause) => release(Exit.failCause(cause))),
           );
 
+          /** Releases the Attempt's resources, then fails when its salvage could not be recorded. */
+          const releaseSalvaged = (exit: Exit.Exit<unknown, unknown>) =>
+            release(exit).pipe(Effect.andThen(Effect.asVoid(prepared.salvaged)));
+
           return {
             workspace: prepared.workspace,
             launch: Effect.fn("PreparedAttempt.launch")(function* (io) {
@@ -111,13 +131,31 @@ export const preparedAttemptsFor = (
                   cause: new Error("prepared Attempt is no longer available"),
                 });
               }
+              // A seed that cannot be read ends the Attempt before its launch: its
+              // checkout is salvaged and the salvage recorded, so the Run's next
+              // Attempt starts from it. The Attempt fails with the seed's failure
+              // first, then any salvage that could not be recorded. An interrupt,
+              // as when this process stops, leaves the checkout to the owner's scope.
+              const seed = yield* guardSeed(request, io).pipe(
+                Effect.onExit((exit) =>
+                  Exit.isSuccess(exit) || Cause.hasInterruptsOnly(exit.cause)
+                    ? Effect.void
+                    : Effect.logWarning(
+                        "The Attempt's runaway guard cannot start; releasing its checkout without launching it",
+                        { attemptId },
+                      ).pipe(
+                        Effect.andThen(prepared.recordSalvage(io.salvage)),
+                        Effect.andThen(releaseSalvaged(exit)),
+                      ),
+                ),
+              );
               const guard = yield* attemptGuard(
                 {
                   attemptId,
                   maxAttemptMinutes: request.maxAttemptMinutes,
                   maxAttemptTokens: request.maxAttemptTokens,
                   warn: (message) =>
-                    intervene(
+                    warnParent(
                       attemptId,
                       new AttemptChannel.Intervention({
                         operator: "engine",
@@ -125,10 +163,18 @@ export const preparedAttemptsFor = (
                         action: new AttemptChannel.Steer({ message }),
                       }),
                     ),
+                  recordUnsupervised: (unsupervised) => recordUnsupervised(attemptId, unsupervised),
                 },
                 io,
+                seed,
               );
-              const tripped = guard.tripped.pipe(
+              // The clock starts once the launch registered the session `stop` reaches.
+              // A remote launch first waits for its Worker's liveness watch, which the
+              // Attempts reattached on that Worker after a restart contend for; a seed
+              // that leaves no time would trip meanwhile, find no session to stop,
+              // and leave the reattached parent task running.
+              const tripped = registered(attemptId).pipe(
+                Effect.andThen(guard.tripped),
                 Effect.tapError(({ ceiling }) =>
                   stop(attemptId, { _tag: "Runaway", ceiling }).pipe(
                     Effect.tapError((error) =>
@@ -150,11 +196,7 @@ export const preparedAttemptsFor = (
                 Effect.forkIn(Effect.raceFirst(prepared.launch(guard.sink), tripped), scope),
                 Fiber.join,
                 Fiber.interrupt,
-              ).pipe(
-                Effect.onExit((exit) =>
-                  release(exit).pipe(Effect.andThen(Effect.asVoid(prepared.salvaged))),
-                ),
-              );
+              ).pipe(Effect.onExit((exit) => releaseSalvaged(exit)));
             }),
           } satisfies PreparedAttempt;
         }),

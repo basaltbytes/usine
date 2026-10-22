@@ -73,6 +73,12 @@ export type AttemptRecord = {
   storageFailure?: string;
   /** Operator inputs whose queued receipt was sent and whose delivery receipt was not, oldest first. */
   queuedInputs?: QueuedInput[];
+  /**
+   * The unsupervised milliseconds the Attempt's runaway guards counted, as
+   * the latest of them recorded; absent until a guard with a wall-clock
+   * ceiling records them, and on records written before it existed.
+   */
+  unsupervisedMillis?: number;
 };
 
 export const ATTEMPT_RECORD_KIND = "usine.attempt";

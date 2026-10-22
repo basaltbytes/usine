@@ -82,6 +82,7 @@ export const recordingSink = () => {
       }),
     salvage: () => Effect.void,
     comments: () => Effect.void,
+    transcript: Effect.die("The durable runtime never reads the Attempt transcript"),
     windows: Effect.die("The durable runtime never reads the Attempt windows"),
   };
   const outbound = () =>

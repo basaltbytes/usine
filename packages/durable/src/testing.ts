@@ -42,6 +42,7 @@ import {
   Context,
   DateTime,
   Deferred,
+  Duration,
   Effect,
   Layer,
   Option,
@@ -323,6 +324,12 @@ export class StubStorage {
    * the executor canceled an Attempt.
    */
   readonly tasks = new Map<AttemptId, StubTask>();
+  /**
+   * The unsupervised time each Attempt's runaway guards kept with
+   * `recordUnsupervised`, as the Attempt's durable record keeps it, by
+   * Attempt id. Tests read it to check what a restart keeps.
+   */
+  readonly unsupervised = new Map<AttemptId, Duration.Duration>();
 }
 
 /** Completes at once with `Completed: <task>`. */
@@ -347,7 +354,11 @@ export const worksFor =
  * state: interrupting `execute` (a stopped process) or a failing parent leaves
  * the task live until someone cancels it, so tests see whether the executor
  * stopped it. A completed task keeps its report, which a later `execute`
- * returns and `finished` reports until `recordResult` replaces it.
+ * returns and `finished` reports until `recordResult` replaces it. The
+ * unsupervised time `recordUnsupervised` keeps goes to `storage`, which
+ * `unsupervised` reads back. `attached` completes once an `execute` call
+ * starts recording the Attempt's activity, as the durable runtime's does once
+ * its relay attaches the Attempt's channel; wrap `execute` to delay it.
  */
 export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = completes) =>
   Layer.effect(
@@ -362,6 +373,13 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
         }
       >();
       const early = new Map<AttemptId, ReadonlyArray<AttemptChannel.WorkerNotice>>();
+      /** Completed once an `execute` call relays the Attempt, which `attached` waits for. */
+      const relayed = new Map<AttemptId, Deferred.Deferred<void>>();
+      const relayedFor = (attemptId: AttemptId) => {
+        const kept = relayed.get(attemptId) ?? Deferred.makeUnsafe<void>();
+        relayed.set(attemptId, kept);
+        return kept;
+      };
       const envelope = (task: StubTask, payload: AttemptChannel.OutboundPayload) =>
         Effect.map(
           DateTime.now,
@@ -395,6 +413,7 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
           const canceled = yield* Deferred.make<void>();
           const active = { io, canceled, started: false };
           attached.set(attemptId, active);
+          Deferred.doneUnsafe(relayedFor(attemptId), Effect.void);
           const session = new ParentSession({
             id: AgentSessionId.make(`parent:${attemptId}`),
             agent: request.spec.agent.name,
@@ -447,7 +466,17 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
           );
           task.state = { _tag: "finished", report, result: Option.none() };
           return report;
-        }).pipe(Effect.ensuring(Effect.sync(() => attached.delete(request.spec.attemptId))));
+        }).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              const attemptId = request.spec.attemptId;
+              attached.delete(attemptId);
+              // A later `attached` waits for the next `execute` call; one waiting already keeps its wait.
+              const kept = relayed.get(attemptId);
+              if (kept !== undefined && Deferred.isDoneUnsafe(kept)) relayed.delete(attemptId);
+            }),
+          ),
+        );
 
       return AttemptRuntime.of({
         execute,
@@ -469,6 +498,13 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
             const state = storage.tasks.get(attemptId)?.state;
             if (state?._tag === "finished") state.result = Option.some(result);
           }),
+        recordUnsupervised: (attemptId, unsupervised) =>
+          Effect.sync(() => {
+            const kept = storage.unsupervised.get(attemptId) ?? Duration.zero;
+            storage.unsupervised.set(attemptId, Duration.max(kept, unsupervised));
+          }),
+        unsupervised: (attemptId) =>
+          Effect.sync(() => Option.fromNullishOr(storage.unsupervised.get(attemptId))),
         request: (attemptId) =>
           Effect.sync(() =>
             Option.map(
@@ -495,6 +531,7 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
             }
             yield* active.io.append("outbound", yield* envelope(task, notice));
           }).pipe(Effect.orDie),
+        attached: (attemptId) => Effect.suspend(() => Deferred.await(relayedFor(attemptId))),
         intervene: (attemptId, intervention) =>
           Effect.gen(function* () {
             const task = storage.tasks.get(attemptId);

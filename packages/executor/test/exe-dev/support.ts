@@ -2,6 +2,7 @@ import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget } from "@usine/core/agent/session";
 import { AttemptTask, AttemptId, AttemptWindow, AttemptWindows } from "@usine/core/attempt";
+import type * as AttemptChannel from "@usine/core/attempt/channel";
 import { InfraFailure } from "@usine/core/attempt/failure";
 import { SalvageRef } from "@usine/core/attempt/salvage";
 import { LoopName } from "@usine/core/loop";
@@ -37,6 +38,22 @@ export const aloneOnItem = (attemptId: AttemptId = ATTEMPT_ID) =>
       overlapping: [],
     }),
   );
+/** A sink that keeps every envelope it is given, as the transcript does, and reads them back. */
+export const recording = () => {
+  const transcript: Array<[AttemptChannel.Direction, AttemptChannel.Envelope]> = [];
+  const sink: AttemptChannel.Sink = {
+    salvage: () => Effect.void,
+    comments: () => Effect.void,
+    transcript: Effect.sync(() => transcript.map(([, envelope]) => envelope)),
+    windows: aloneOnItem(),
+    append: (direction, envelope) =>
+      Effect.sync(() => {
+        transcript.push([direction, envelope]);
+      }),
+  };
+  return { transcript, sink };
+};
+
 export const WORKER = WorkerName.make("remote-one");
 const REPOSITORY = RepositoryName.make("acme/demo");
 // The brand already rejects whitespace and a leading dash; the characters it

@@ -1,4 +1,5 @@
 import type { Attempt, AttemptId } from "@usine/core/attempt";
+import * as AttemptChannel from "@usine/core/attempt/channel";
 import { type AttemptFailure, DefectFailure, InfraFailure } from "@usine/core/attempt/failure";
 import type { RunId } from "@usine/core/run";
 import type { StepResult } from "@usine/core/step/result";
@@ -20,6 +21,7 @@ import {
 import { ItemProjectionWriter } from "../item-projection/item-projection.ts";
 import { StepExecutor } from "../step-executor.ts";
 import { RunStore } from "../store/store.ts";
+import { TranscriptAllQuery } from "../transcript.ts";
 import { TriggerCondition } from "../trigger-condition.ts";
 import { AttemptAdmission } from "./admission.ts";
 import { checkoutRecoveryFor } from "./checkout-recovery.ts";
@@ -465,6 +467,20 @@ export class RunDriver extends Context.Service<
             windows: store
               .attemptWindows(started.execution.attempt.id)
               .pipe(retryingStore(runId, "read the Attempt windows"), asAttemptFailure),
+            transcript: store
+              .transcript(new TranscriptAllQuery({ attemptId: started.execution.attempt.id }))
+              .pipe(
+                retryingStore(runId, "read the Attempt transcript"),
+                asAttemptFailure,
+                // Only an Attempt whose parent task is durable is reattached, and
+                // each recorded the current protocol version. A version bump has to
+                // convert here the envelopes it retires for an Attempt open across it.
+                Effect.map((entries) =>
+                  entries.flatMap(({ envelope }) =>
+                    envelope.version === AttemptChannel.PROTOCOL_VERSION ? [envelope] : [],
+                  ),
+                ),
+              ),
             // A checkout startup kept stays this driver's to reconcile until
             // here: a cancel before it reconciles the checkout (#180).
             checkoutAcquired: checkouts.acquired(started.execution.attempt.id),

@@ -86,6 +86,7 @@ const workingAttempts = (attemptIds: ReadonlyArray<AttemptId>) =>
           }),
         salvage: () => Effect.void,
         comments: () => Effect.void,
+        transcript: Effect.succeed([]),
         windows: aloneOnItem(attemptId),
       }),
       noticesOf: (attemptId: AttemptId) => (outbound.get(attemptId) ?? []).filter(isWorkerNotice),
@@ -116,6 +117,7 @@ describe("SSH Worker", () => {
           append: () => Effect.void,
           salvage: () => Effect.void,
           comments: () => Effect.void,
+          transcript: Effect.succeed([]),
           windows: aloneOnItem(),
         });
 
@@ -195,6 +197,7 @@ describe("SSH Worker", () => {
         append: () => Effect.void,
         salvage: () => Effect.void,
         comments: () => Effect.void,
+        transcript: Effect.succeed([]),
         windows: aloneOnItem(),
       });
       const released = machine.state.calls.length;
@@ -234,6 +237,7 @@ describe("SSH Worker", () => {
         .launch({
           append: () => Effect.void,
           comments: () => Effect.void,
+          transcript: Effect.succeed([]),
           windows: aloneOnItem(),
           salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
         })
@@ -272,6 +276,7 @@ describe("SSH Worker", () => {
           .launch({
             append: () => Effect.void,
             comments: () => Effect.void,
+            transcript: Effect.succeed([]),
             windows: aloneOnItem(),
             salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
           })
@@ -383,6 +388,7 @@ describe("SSH Worker", () => {
         append: () => Effect.void,
         salvage: () => Effect.void,
         comments: () => Effect.void,
+        transcript: Effect.succeed([]),
         windows: aloneOnItem(),
       };
       return Effect.gen(function* () {
@@ -440,6 +446,7 @@ describe("SSH Worker", () => {
           }),
         salvage: () => Effect.void,
         comments: () => Effect.void,
+        transcript: Effect.succeed([]),
         windows: aloneOnItem(),
       };
       const notices = () =>

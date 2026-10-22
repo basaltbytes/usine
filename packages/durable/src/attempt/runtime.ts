@@ -4,7 +4,7 @@ import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
 import type { StepResult } from "@usine/core/step/result";
-import { Effect, Layer, Option, Result, Schema } from "effect";
+import { Duration, Effect, Layer, Option, Result, Schema } from "effect";
 import { type AttemptRequest, AttemptRuntime, type FinishedAttempt } from "../attempt-runtime.ts";
 import { DurableHarness, type DurableHarnessError } from "../harness.ts";
 import { AttemptRecordDoc, type Hold, HoldDoc, RELEASE_GUIDANCE } from "./documents.ts";
@@ -170,6 +170,37 @@ const makeAttemptRuntime = Effect.gen(function* () {
         attemptId,
         facts: result.facts.length,
       });
+    },
+    Effect.catchTag("DurableHarnessError", (error) => Effect.fail(infra(error))),
+  );
+
+  const recordUnsupervised = Effect.fn("AttemptRuntime.recordUnsupervised")(
+    function* (attemptId: AttemptId, unsupervised: Duration.Duration) {
+      yield* Effect.annotateCurrentSpan({ attemptId });
+      const millis = Duration.toMillis(unsupervised);
+      const kept = yield* durable.use(
+        "record the Attempt's unsupervised time",
+        (harness, context) =>
+          harness.commit(async (tx) => {
+            const record = await tx.doc(AttemptRecordDoc, attemptId, null);
+            record.unsupervisedMillis = Math.max(record.unsupervisedMillis ?? 0, millis);
+            return record.unsupervisedMillis;
+          }, context),
+      );
+      yield* Effect.logDebug("Recorded the Attempt's unsupervised time", {
+        attemptId,
+        unsupervisedMillis: millis,
+        keptMillis: kept,
+      });
+    },
+    Effect.catchTag("DurableHarnessError", (error) => Effect.fail(infra(error))),
+  );
+
+  const unsupervised = Effect.fn("AttemptRuntime.unsupervised")(
+    function* (attemptId: AttemptId) {
+      yield* Effect.annotateCurrentSpan({ attemptId });
+      const record = yield* readRecord(durable, attemptId);
+      return Option.map(Option.fromNullishOr(record?.unsupervisedMillis), Duration.millis);
     },
     Effect.catchTag("DurableHarnessError", (error) => Effect.fail(infra(error))),
   );
@@ -457,6 +488,19 @@ const makeAttemptRuntime = Effect.gen(function* () {
       ),
   );
 
+  const attached = Effect.fn("AttemptRuntime.attached")(
+    function* (attemptId: AttemptId) {
+      yield* Effect.annotateCurrentSpan({ attemptId });
+      const relayed = Option.exists(hubs.find(attemptId), ({ channel }) => Option.isSome(channel));
+      if (!relayed) {
+        yield* Effect.logDebug("Waiting for an execute call to relay the Attempt's channel");
+      }
+      yield* hubs.attached(attemptId);
+      if (!relayed) yield* Effect.logDebug("The Attempt's channel is relayed in this process");
+    },
+    (effect, attemptId) => effect.pipe(Effect.annotateLogs({ attemptId })),
+  );
+
   const cancel = Effect.fn("AttemptRuntime.cancel")(
     function* (attemptId: AttemptId) {
       yield* Effect.annotateCurrentSpan({ attemptId });
@@ -522,8 +566,11 @@ const makeAttemptRuntime = Effect.gen(function* () {
     isLive,
     finished,
     recordResult,
+    recordUnsupervised,
+    unsupervised,
     request,
     intervene,
+    attached,
     cancel,
     notify,
   });
