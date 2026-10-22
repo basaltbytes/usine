@@ -13,13 +13,13 @@ The page at `/`, which `usine up` opens, is **Overview**. It shows, in this orde
 
 - **Needs attention**: everything that waits for you, described [below](#needs-attention). When nothing does, it says so, and the right of its heading says when usine last finished polling each repository.
 - **Running**: one row per Attempt in flight across the Projects, with the Item, Loop, Agent, Worker, start time, and last activity. A Worker that stopped answering or a child that cannot reach its provider shows as a yellow line under the Item ([Connectivity warnings](#connectivity-warnings)). When nothing runs, it says how many Worker slots are free.
-- **Stalled**: each Item a Loop's trigger matches now that has no Attempt running on it, with the reason and the one action that moves it again. See [Why an Item is stalled](#why-an-item-is-stalled).
+- **Stalled**: each Item a Loop's trigger matches now that has no Attempt running on it, with the reason and the one action that moves it again. See [Why an Item is stalled](#stalled-items).
 - **Recent runs**: the 10 Runs that closed last, newest first, with their outcome and pull request.
 - **Workers**: one line with each Worker's slots in use and its last preflight, at startup or at a reload.
 
 A row about a Run opens its Run page.
 
-### Why an Item is stalled
+### Stalled Items
 
 | Reason                                                                     | Action                                          |
 | -------------------------------------------------------------------------- | ----------------------------------------------- |

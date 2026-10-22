@@ -1,5 +1,5 @@
 ---
-title: "The dogfood instance's Loops"
+title: "Dogfood instance Loops"
 description: "The five Loops and three Agents of the dogfood instance, the labels that pass an Item from one Loop to the next, and each Loop file."
 sidebar:
   order: 6
@@ -36,7 +36,7 @@ Settings: `poll_interval: 60`, `parent_model: openai-codex/gpt-5.6-terra` (the C
 | `reviewer` | codex | `gpt-6-astra` | high | Delegate the whole review to one child; grade each observation P0 to P3; only P0, P1, and P2 are findings, with file and line references; P3 goes in one ungraded comment. |
 | `finisher` | claude | `claude-fable-5-1` | xhigh | Finish one pull request with the repository's `finish-pr` skill, inside the PR's scope, without merging; delegate the whole task to one child. |
 
-## How the Loops pass work to each other
+## Hand-off between Loops
 
 The engine doesn't change labels itself: every label change below is an instruction in a Loop's prompt, which the agent performs with `gh`. Each Loop's trigger checks the labels that the previous Loop set, so the labels pass an Item from one Loop to the next.
 
@@ -207,7 +207,7 @@ Fetch `refs/pull/{{ item.number }}/head`, verify that it resolves to {{ item.hea
 Once the branch merges cleanly, run the repository gate from the root (`pnpm check && pnpm test && pnpm format:check && pnpm lint && pnpm knip`), fix what the merge broke, commit, and push to `{{ item.headRefName }}`. Post a short COMMENT review on the new head that states what conflicted and how it was resolved. Leave `ready-to-merge` in place.
 ```
 
-## Where the Loops differ from the guide
+## Differences from the guide
 
 The guide and [ADR 0022](https://github.com/basaltbytes/usine/blob/main/docs/adr/0022-item-cycle-budgets-and-comment-reviews.md) say to drop the CEL review counts from fix and finishing Loops, because the cycle budget limits the rounds. `act-on-findings` (`< 3`) and `finish-pr` (`>= 3`) still count reviewer reviews in `if:`. The count uses the `reviews(last: 20)` connection of the payload slice ([queries.ts:84][]). It matches the signature line that `githubSignature` asks every agent to add, which ends in `usine agent: reviewer` ([prompt.ts:28][]).
 

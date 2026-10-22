@@ -1,5 +1,5 @@
 ---
-title: "How an Attempt runs"
+title: "Attempt lifecycle"
 description: "The executor contract, the durable layer, the live channel for interventions, transcripts, the three harnesses."
 sidebar:
   order: 2
@@ -24,7 +24,7 @@ An Attempt goes through six layers. All of them run inside the orchestrator proc
 
 The Effect workflow and cluster modules of [ADR 0003](https://github.com/basaltbytes/usine/blob/main/docs/adr/0003-durable-execution-on-effect-workflow.md) no longer exist. A migration dropped their tables ([`20261011153856_drop_workflow_tables`](https://github.com/basaltbytes/usine/tree/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/engine/drizzle/20261011153856_drop_workflow_tables)), and the Run lifecycle is the fiber described in [Run lifecycle](/architecture/run-lifecycle/).
 
-## One Attempt end to end
+## Sequence
 
 ```mermaid
 sequenceDiagram
@@ -119,7 +119,7 @@ export class Executor extends Context.Service<
 
 `CheckoutRequest` ([executor.ts:93](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/executor.ts#L93)) has the Attempt id, Worker, repository, revision, Event payload, task text, Agent, parent model and effort, `maxChildren`, the two optional ceilings, the salvage ref, the salvage to resume from, and `reattach`. The revision is `HEAD` for issue and schedule Runs ([trigger-submission.ts:17](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/trigger-submission.ts#L17)) and the head commit for pull request Runs ([loop-evaluation.ts:78](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/polling/loop-evaluation.ts#L78)).
 
-### Preparing the checkout
+### Checkout preparation
 
 `provisionWorktree` ([provision.ts:233](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/provision.ts#L233)) is the same for every Worker kind. Under a per-repository lock it clones into a staging directory (`git clone --bare --filter=blob:none`) and renames it to the cache, or updates the cache's remote URL. Then it fetches the revision, records `FETCH_HEAD` as the base commit, fetches the previous Attempt's salvage when the request resumes one, and runs `git worktree add --detach`. The revision of an issue or schedule Run is `HEAD`, so a retry gets the default branch tip as it is at that moment. A resumed salvage goes on top of that base ([#282](https://github.com/basaltbytes/usine/issues/282)):
 
@@ -134,7 +134,7 @@ export class Executor extends Context.Service<
 
 When the parent reports success, the executor harvests the checkout with `harvestFacts` ([harvest.ts:135](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/core/src/step/harvest.ts#L135)): the commits from the base commit to `HEAD`, then the pull requests whose head is the final commit, from `gh api repos/<repo>/commits/<head>/pulls`. When the Attempt made a new final commit that no branch or pull request ref on the remote points at (`git ls-remote origin`), the commit was never pushed, so it has no pull request and GitHub is not asked. Pull request discovery has a ten-second timeout and never fails the Attempt. `StepResult` also allows a `Comment` fact ([result.ts:20](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/core/src/step/result.ts#L20)), but no code produces one.
 
-If the Attempt ends any other way, `salvageWorktree` ([salvage.ts:56](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/salvage.ts#L56)) runs before the worktree is removed. Uncommitted changes become a `wip(usine): salvage attempt <id>` commit, and `git push --force` pushes HEAD to `usine/salvage/<run>/<number>`. If the push fails, the executor keeps the worktree on the Worker and records its path as `Retained`. The next Attempt of the Run applies the newest pushed salvage onto its base, as described in [Preparing the checkout](#preparing-the-checkout) ([ADR 0013](https://github.com/basaltbytes/usine/blob/main/docs/adr/0013-cost-accounting-native-meters-guardrails.md), amendments of 2026-09-18 and 2026-10-18).
+If the Attempt ends any other way, `salvageWorktree` ([salvage.ts:56](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/salvage.ts#L56)) runs before the worktree is removed. Uncommitted changes become a `wip(usine): salvage attempt <id>` commit, and `git push --force` pushes HEAD to `usine/salvage/<run>/<number>`. If the push fails, the executor keeps the worktree on the Worker and records its path as `Retained`. The next Attempt of the Run applies the newest pushed salvage onto its base, as described in [Preparing the checkout](#checkout-preparation) ([ADR 0013](https://github.com/basaltbytes/usine/blob/main/docs/adr/0013-cost-accounting-native-meters-guardrails.md), amendments of 2026-09-18 and 2026-10-18).
 
 ## The durable layer
 

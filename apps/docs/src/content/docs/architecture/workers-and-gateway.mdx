@@ -85,7 +85,7 @@ flowchart TD
   same -->|yes| preflight(["preflight every Worker"])
 ```
 
-## What the executor does for each kind
+## Executor behaviour per Worker kind
 
 ### local
 
@@ -155,7 +155,7 @@ ssh -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=4 -N \
 
 A request that fails a second time fails as it did before the forward: an attach fails the Attempt with `CredentialUnavailableError`, and a renewal is tried again 30 seconds later. While the forward is closed, the error says since when, for example `the forward through usine-gateway is closed since 2026-10-19T08:12:03.000Z: ssh: connect to host 203.0.113.7 port 22: Connection timed out`. While the forward opens but the admin API does not answer, as when the `usine-gateway` service is stopped, the error and the warning say since when it has answered no request, for example `the admin API through usine-gateway has not answered since 2026-10-19T08:12:03.000Z: no answer (TransportError)`, and the warning has `unansweredSince`. The time is kept per Gateway and cleared by the next answered request. The executor keeps reopening the forward for as long as a Worker behind the Gateway remains.
 
-#### Workers a reload adds or removes
+#### Worker changes on reload
 
 `SshWorkers` holds the SSH executor's machines ([ssh/workers.ts][]). It starts with the Workers in `usine.yaml`, and the scheduler changes it on each reload ([scheduler.ts][], [orchestrator/src/ssh.ts][]):
 
@@ -163,7 +163,7 @@ A request that fails a second time fails as it did before the forward: an attach
 - A Worker the reload removes stays with the executor until its last Attempt ends, because the Attempt's credential renewals and cleanup use its machine and its Gateway's forward. Then `removeWorker` takes it away, and closes the forward when it was the last Worker behind that Gateway.
 - A Worker the reload adds back while its Attempts still run keeps the machine it has when its settings are the same. With other settings `addWorker` fails with a `machine` capability error, and the reload is refused until those Attempts end.
 
-### Shared by every remote kind
+### Common to remote kinds
 
 `remoteExecutorFor` ([remote.ts:44][]) contains the checkout, salvage, recovery, and reattach code that SSH and exe.dev share. Each Claude Code or Codex child is one SSH command with a pid file `<worktree>.child-<n>.pid` ([child-host.ts:96][]). `CHILD_KILL_SCRIPT` sends TERM, waits up to five seconds, then sends KILL, before the worktree is kept or removed ([child-host.ts:106][]).
 

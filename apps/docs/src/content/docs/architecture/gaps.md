@@ -85,7 +85,7 @@ See [Workers and the Gateway](/architecture/workers-and-gateway/) for how each W
 
 ## Agent behaviour in the dogfood Loops
 
-See [The dogfood instance's Loops](/architecture/loops-shipped/) for the Loop files.
+See [Dogfood instance Loops](/architecture/loops-shipped/) for the Loop files.
 
 - [#226][]: the reviewer Agent pushed a fix commit to a pull request branch although `review-pr` forbids branch edits.
 - [#242][]: a `finish-pr` commit on the local Worker has the operator as its author instead of the factory's App.

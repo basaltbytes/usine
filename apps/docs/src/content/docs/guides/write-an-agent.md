@@ -43,7 +43,7 @@ If and only if a tool literally named `subagent` is available, delegate this com
 
 The file name without `.md` is the Agent's name, and it must be kebab-case. The body must not be blank, and a file with a key outside this table doesn't load. usine leaves an Agent file that doesn't load out of the roster, and also leaves out every Loop whose `agent` is that Agent. [Agent files](/reference/configuration/agent-files/) lists the full validation rules.
 
-## How an Agent runs an Attempt
+## Attempt execution
 
 Each Attempt runs two levels of sessions.
 

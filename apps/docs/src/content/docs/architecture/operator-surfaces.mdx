@@ -109,7 +109,7 @@ Each action calls the `Operator` service, which calls `RunEngine` ([operator.ts:
 | POST   | `/api/runs/:runId/run-again`       | `{ task, agent }`               | Opens a new Run for the Item state of a `Succeeded` or `Canceled` Run with that task and Agent, and answers `Claimed` with the new Run's id, or `CycleBlocked` with the Item's Ask. 409 for another state or while another Run of the Loop is open on the Item; 404 for an Agent outside the roster or a Loop that is not loaded. |
 | POST   | `/api/runs/:runId/cancel`          |                                 | Cancels an open Run and stops its Attempt; a closed Run is unchanged.                                                                                                                                                                                                                                                             |
 | POST   | `/api/runs/:runId/resolve-failure` | `{ attemptId }`                 | Marks the latest failed Attempt as handled, which removes it from Needs you. For a `QuestionFailure` or a `BlockedFailure`, it also ends the Loop's hold on the Item and gives the Item's newest queued Event its turn ([Operator questions and blockers](/architecture/run-lifecycle/#operator-questions-and-blockers)).         |
-| POST   | `/api/runs/:runId/intervene`       | `{ attemptId, target, action }` | Sends `Steer`, `Interrupt`, `OperatorMessage`, or `Release` to the parent or a child ([How an Attempt runs](/architecture/execution/)).                                                                                                                                                                                           |
+| POST   | `/api/runs/:runId/intervene`       | `{ attemptId, target, action }` | Sends `Steer`, `Interrupt`, `OperatorMessage`, or `Release` to the parent or a child ([Attempt lifecycle](/architecture/execution/)).                                                                                                                                                                                             |
 
 ### Board, Loops, cycle budgets, and Workers
 
@@ -144,7 +144,7 @@ Failures return `{ error, message }`, where `error` is the domain error's tag ([
 | 502    | `GitHubApiError`, `InvalidGitHubResponseError`                                                                                                                                                                                                                                                                                                                                            |
 | 503    | `BackendUnavailableError` (setup mode), `InstallationDiscoveryError`, `AppPermissionError`, `GitHubRateLimitError`                                                                                                                                                                                                                                                                        |
 
-### Calling the API by hand
+### Manual API calls
 
 `curl` sends no `Origin` header, so the cross-site check allows it. The bodies below follow the request schemas ([run.ts:25][]); they weren't tested against a live server for this page.
 

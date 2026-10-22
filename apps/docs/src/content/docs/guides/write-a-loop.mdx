@@ -225,7 +225,7 @@ The **Loops** page under **Configuration** lists every Loop file, the ones that 
 
 The HTTP API has the same switch: `POST /api/loops/<name>/pause` and `POST /api/loops/<name>/unpause`. To retire a Loop permanently, delete or rename its file and reload the configuration.
 
-## When a Loop does not load
+## Loop load errors
 
 usine leaves out a Loop file that has an error and loads the other Loops. It logs the reason and lists the file in **Needs attention** as **Loop quarantined**, at startup and at each reload. usine leaves out a Loop when:
 

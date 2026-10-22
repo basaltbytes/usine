@@ -70,7 +70,7 @@ settings:
   parent_model: openai-codex/gpt-5.6-terra
   parent_effort: medium
 
-# Where Attempts run. Omit the key for one local Worker named `local`.
+# Workers. Omit the key for one local Worker named `local`.
 workers:
   - name: worker-1
     kind: ssh
@@ -101,7 +101,7 @@ repos:
   - name: acme/widgets
 ```
 
-## How the instance files reference each other
+## References between instance files
 
 A Loop file references an Agent file and selects repositories from the registry. usine checks the label names in Lanes and in Loop conditions against the declared labels.
 

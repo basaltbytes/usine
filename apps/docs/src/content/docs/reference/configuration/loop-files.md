@@ -169,7 +169,7 @@ An exe.dev Worker uses exe.dev's GitHub integration, which grants the access of 
 
 `read` holds against the agent's tools, which use the attempt's token. How far it holds against an agent that looks for other credentials on purpose depends on the worker:
 
-- On the local worker, the agent runs as your Unix user, so it can read your own credentials in your home directory, such as gh's login, and push with them. The local worker is for agents you trust with your own access; see [what a local attempt can reach](/guides/add-a-worker/#what-a-local-attempt-can-reach).
+- On the local worker, the agent runs as your Unix user, so it can read your own credentials in your home directory, such as gh's login, and push with them. The local worker is for agents you trust with your own access; see [what a local attempt can reach](/guides/add-a-worker/#network-access-of-a-local-attempt).
 - An SSH worker has no GitHub credential of yours, and an SSH worker behind a gateway has no GitHub token on disk. Run a loop whose agent you don't trust that far on [SSH workers](/guides/add-a-worker/#ssh-workers), with or without a gateway, instead of the local worker.
 - On an SSH worker, an attempt can read the token or caller token of another attempt running on the same machine at the same time ([#231](https://github.com/basaltbytes/usine/issues/231), [#243](https://github.com/basaltbytes/usine/issues/243)), so a `read` attempt that runs beside a `write` one can reach access that pushes.
 
@@ -197,14 +197,14 @@ Values render as text: integers as decimal digits, booleans as `true` or `false`
 Labels on this issue: {{ item.labels.nodes.map(label, label.name).join(", ") }}
 ```
 
-### When rendering fails
+### Rendering errors
 
 usine type-checks every interpolation when the file loads, but a value can still fail at render time, for example a field that is `null` on this Item (see [null fields](/reference/configuration/expressions/#fields-that-can-be-null)).
 
 - For `issue` and `pr` Loops, usine submits no Event for that Loop and Item and continues with the other Loops and Items; the poll cursor still advances. **Needs attention** shows the failure with the Loop, the Item, and the interpolation for as long as it lasts, and usine logs `Loop evaluation failed on an Item` once per Loop, Item, and content hash. usine evaluates the Item again when it changes, and on the first poll after a restart or a reload, so a fixed template renders without waiting for a change.
 - For `schedule` Loops, the Tick fails for that repository, and usine evaluates it again at the next wake.
 
-### What the Agent receives
+### Agent input
 
 The rendered body is the task. The Attempt's Pi parent receives it inside instructions that usine assembles ([`assemblePrompt`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/agents/src/prompt.ts#L58)):
 

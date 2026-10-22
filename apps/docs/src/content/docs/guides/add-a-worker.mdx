@@ -35,7 +35,7 @@ A local Worker's state is under `.usine/workers/<name>/` in the instance folder:
 
 The Worker's Attempts share two caches: the Turborepo cache in `turbo/`, which the executor sets as `TURBO_CACHE_DIR`, and pnpm's store at its default location in that user's home. No other variable of your environment reaches the children, so you set nothing for either cache.
 
-### What a local Attempt can reach
+### Network access of a local Attempt
 
 Each attempt gets its own GitHub token: git's credential helpers are reset so that git reads the attempt's token file, and gh reads the token from the attempt's own `GH_CONFIG_DIR`. The children still run as your Unix user, with your home directory as `HOME`, so they can read every file you can. An agent that looks for your own credentials there can find them, such as gh's login in `~/.config/gh/hosts.yml`, `~/.git-credentials`, or a key in `~/.ssh`, and use them, for example with `GH_CONFIG_DIR=~/.config/gh gh` or a push to a `git@github.com:` URL.
 

@@ -9,7 +9,7 @@ import { CardGrid, FileTree, LinkCard, Steps } from "@astrojs/starlight/componen
 
 A factory is one orchestrator process that you start with `usine up` from an instance folder. The folder contains the configuration that you write and keep in git, and the runtime state that the orchestrator writes under `.usine/`, which you keep out of git. The orchestrator polls the GitHub repositories registered in the folder, opens a Run when an issue or pull request matches a Loop, and serves a web UI on `127.0.0.1` where you follow and steer the work.
 
-## What you need
+## Prerequisites
 
 - Node.js 22 or later, pnpm 11, and Git on the machine that runs the orchestrator.
 - A GitHub account or organization that owns the repositories, where you can create and install a GitHub App.
@@ -169,7 +169,7 @@ The process stays in the foreground and prints `usine is running at http://127.0
 1. The instance folder is not under `/tmp`, `/private/tmp`, `/var/folders`, or `$TMPDIR`, since `.usine/runtime.sqlite` is the only copy of the Run history.
 2. No other `usine up` is running in the same folder. A second one exits and prints the process id from `.usine/instance.pid`.
 3. No other process is listening on the port. usine prints that process's id when `lsof` finds it.
-4. `usine.yaml` is valid. An invalid Loop or Agent file doesn't stop startup: usine leaves that file out and loads the others ([Write a Loop](/guides/write-a-loop/#when-a-loop-does-not-load)).
+4. `usine.yaml` is valid. An invalid Loop or Agent file doesn't stop startup: usine leaves that file out and loads the others ([Write a Loop](/guides/write-a-loop/#loop-load-errors)).
 5. The GitHub App credentials load. Without them usine starts in setup mode instead of stopping.
 6. Every Worker passes preflight for every Agent's harness, and the Gateway admin token of every Worker behind a Gateway is set. [Add a Worker](/guides/add-a-worker/) explains both.
 

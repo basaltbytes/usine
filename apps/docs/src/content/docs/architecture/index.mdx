@@ -137,7 +137,7 @@ flowchart TB
   agents --> core
 ```
 
-## How one change moves through the tree
+## Change propagation through the tree
 
 ```mermaid
 sequenceDiagram
@@ -189,7 +189,7 @@ sequenceDiagram
     description="Polling and content-hashed Events, Run and Attempt states, approval, retry, cancel, revoke, cycle budgets, drain, one Run from trigger to pull request."
   />
   <LinkCard
-    title="How an Attempt runs"
+    title="Attempt lifecycle"
     href="/architecture/execution/"
     description="The executor contract, the durable layer, the live channel for interventions, transcripts, the three harnesses."
   />
@@ -209,7 +209,7 @@ sequenceDiagram
     description="Every HTTP endpoint, the web UI pages, the CLI, logs and spans."
   />
   <LinkCard
-    title="The dogfood instance's Loops"
+    title="Dogfood instance Loops"
     href="/architecture/loops-shipped/"
     description="The five Loops and three Agents of the dogfood instance, with their labels."
   />
