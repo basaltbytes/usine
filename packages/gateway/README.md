@@ -6,7 +6,7 @@ The gateway serves three things:
 
 - **A reverse proxy** for Worker VMs on the private network. `git.<domain>` serves git smart HTTP at `/OWNER/REPO.git` and the GitHub REST and GraphQL API under `/api/` the way GitHub Enterprise Server does, so `gh` works with `GH_HOST=git.<domain>`. It adds the installation token the executor attached for that Worker and repository. `llm.<domain>` serves the Anthropic API under `/anthropic` and an OpenAI-compatible API under `/openai`, with the gateway's API key. Every other host is refused; the forward proxy serves the allowlisted ones.
 - **A forward proxy** for `HTTPS_PROXY` and `HTTP_PROXY`: `CONNECT` on port 443 for HTTPS and absolute-form requests for plain HTTP mirrors, to the hosts on the allowlist only. A tunnel opens only when the client's TLS ClientHello names the CONNECT host itself; a ClientHello that names another host, names none, or uses encrypted ClientHello, and bytes that are not TLS, end the tunnel (`server-name-mismatch`, `server-name-missing`, `not-tls`). It resolves each name itself and refuses a name that resolves to a private, loopback, or link-local address. Before a plain HTTP request leaves for another host, it removes the `X-Usine-Gateway-Token` header and any `Authorization` or `x-api-key` value that is a caller token, and leaves a Worker's other credentials alone.
-- **An admin API** for the executor: attach a credential for a Worker and a repository, renew it, detach it, list attachments. It requires the gateway's admin token as a bearer token. Attachments are kept in memory; the executor attaches again when it renews or restarts. A [reload](#reload) keeps them.
+- **An admin API** for the executor: attach a credential for a Worker and a repository, renew it, detach it, list attachments, and list the [LLM providers](#llm-providers) it holds a credential for. It requires the gateway's admin token as a bearer token. Attachments are kept in memory; the executor attaches again when it renews or restarts. A [reload](#reload) keeps them.
 
 Every refused request is logged at warning level as `Gateway refused a request` with the reason, the host, the client address, and the Worker when the caller token names one. Forwarded requests are logged at info level with the Worker, repository, method, path, and status. No token, key, or request body is logged.
 
@@ -33,7 +33,7 @@ At Hetzner Cloud, `gateway.sh install` runs either one on the gateway VM and res
 | Import | Contents |
 | --- | --- |
 | `@usine/gateway` | The platform-free core: `GatewaySettings`, `SettingsInForce` (the allowlist and LLM providers a reload replaces), `Attachments`, `CallerTokens`, `GatewayProxy` (the reverse proxy as an `HttpServerRequest` handler), `adminRoutes` (the admin API for an `HttpRouter`), `gatewayServices`, the egress allowlist parser, and the domain records. It needs an `HttpClient` that leaves `content-encoding` alone. |
-| `@usine/gateway/admin` | `GatewayAdminApi`, the admin API contract, for `HttpApiClient.make` in the executor, with the records a client sends and reads: `AttachRequest`, `InstallationCredential`, `Attached`, `AttachmentId`, `CallerToken`, `Detached`, and `AttachmentList`, and `GATEWAY_TOKEN_HEADER`. |
+| `@usine/gateway/admin` | `GatewayAdminApi`, the admin API contract, for `HttpApiClient.make` in the executor, with the records a client sends and reads: `AttachRequest`, `InstallationCredential`, `Attached`, `AttachmentId`, `CallerToken`, `Detached`, `AttachmentList`, and `LlmProviderList`, and `GATEWAY_TOKEN_HEADER`. |
 | `@usine/gateway/node` | `gatewayLayer` (the three servers on Node, with undici upstream), `gatewayFromEnvironment`, `settingsFromEnvironment`, `GatewayAddresses`, and `GatewayReload`. |
 | `usine-gateway` | The command the gateway VM runs; it reads the settings below, reloads on SIGHUP, and logs one JSON object per line. |
 
@@ -59,6 +59,16 @@ Before the installation token expires, the executor renews with `PUT /v1/attachm
 The gateway honors a caller token only while its own attachment is in force. After a detach, or when the installation token expires, every request with it is refused, LLM requests included, and a fresh attach for the same Worker and repository gets a new id, so the earlier token stays refused (`stale-caller-token`). A request whose path names another repository than the token is refused. An `AnonymousCredential` attachment adds no credential, which is enough to read a public repository.
 
 A Worker child presents its caller token wherever its tool sends a credential: the `X-Usine-Gateway-Token` header, `Authorization` as `Bearer`, `token`, or `Basic` (password), or `x-api-key`. The gateway removes all of them before it forwards a request.
+
+## LLM providers
+
+`GET /v1/providers` lists the LLM providers the gateway holds a credential for, with the kind of each credential and never the credential itself:
+
+```json
+{"providers": [{"provider": "anthropic", "credential": "api-key"}]}
+```
+
+`credential` is `api-key` for `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`, and `subscription` for `USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN`. A provider without a credential is absent. The answer is the providers in force, so it follows a [reload](#reload). The executor reads it when it checks a Worker whose `llm_providers` lists `anthropic`, so usage reports Claude Code children paid with the gateway's API key in the API keys pool rather than the Claude plan ([ADR 0013](../../docs/adr/0013-cost-accounting-native-meters-guardrails.md)). A gateway released before this endpoint answers 404.
 
 ## A Worker's environment
 

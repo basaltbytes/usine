@@ -1,3 +1,4 @@
+import type { GatewayCredentialKind } from "@usine/core/worker";
 import { Option, Redacted, Schema } from "effect";
 import { Headers } from "effect/unstable/http";
 import { UpstreamBase } from "../upstream.ts";
@@ -64,6 +65,23 @@ export const llmTarget = (pathname: string): Option.Option<LlmTarget> => {
   const provider = match?.[1];
   if (match === null || provider === undefined || !isProviderName(provider)) return Option.none();
   return Option.some({ provider, rest: match[2] ?? "" });
+};
+
+/** The kind of credential the gateway sends to `provider`: OpenAI's is always an API key. */
+export const credentialKind = (
+  provider: AnthropicProvider | OpenAiProvider,
+): GatewayCredentialKind => {
+  switch (provider._tag) {
+    case "OpenAiProvider":
+      return "api-key";
+    case "AnthropicProvider":
+      switch (provider.credential._tag) {
+        case "AnthropicApiKey":
+          return "api-key";
+        case "AnthropicSubscriptionToken":
+          return "subscription";
+      }
+  }
 };
 
 /** The configured provider for `name`, as one value the proxy can forward to. */

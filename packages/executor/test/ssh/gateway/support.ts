@@ -15,6 +15,7 @@ import {
   gatewayServices,
   GITHUB_ORIGINS,
   parseEgressAllowlist,
+  type SettingsInForce,
 } from "@usine/gateway";
 import { type Duration, Effect, Latch, Layer, Option, Redacted, Result, Schema } from "effect";
 import { TestClock } from "effect/testing";
@@ -134,7 +135,7 @@ export const fakeGateway = (machine: ReturnType<typeof fakeMachine>) => {
     HttpClient.HttpClient,
     Effect.gen(function* () {
       const handler = yield* HttpRouter.toHttpEffect(adminRoutes);
-      const services = yield* Effect.context<Attachments | CallerTokens>();
+      const services = yield* Effect.context<Attachments | CallerTokens | SettingsInForce>();
       return HttpClient.make((request) =>
         Effect.gen(function* () {
           const url = new URL(request.url);
