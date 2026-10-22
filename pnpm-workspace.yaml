@@ -31,6 +31,11 @@ catalog:
   typescript: 7.0.2
   vitest: 4.1.11
 
+# undici below 7.30.1 and 8.12.2 accepts certificates it should reject (CVE-2026-109383) and crashes on TLS renegotiation (CVE-2026-87018). The overrides stay in each dependency's major.
+overrides:
+  "undici@7": ^7.30.1
+  "undici@8": ^8.12.2
+
 minimumReleaseAgeExclude:
   - "@anthropic-ai/claude-agent-sdk-darwin-arm64@0.3.261"
   - "@anthropic-ai/claude-agent-sdk-darwin-x64@0.3.261"
