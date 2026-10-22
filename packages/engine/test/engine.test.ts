@@ -79,6 +79,7 @@ describe("durable run engine", () => {
             recover: () => Effect.void,
             intervene: () => Effect.void,
             interrupt: () => Effect.void,
+            occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
             reserve: () =>
               Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
             execute: (execution) =>
@@ -163,6 +164,7 @@ describe("durable run engine", () => {
           isLive: () => Effect.succeed(false),
           outcome: () => Effect.succeed(Option.none()),
           recover: () => Effect.void,
+          occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
           reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
           execute: () => Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
           interrupt: () => Effect.void,
@@ -776,6 +778,7 @@ describe("durable run engine", () => {
           recover: () => Effect.void,
           intervene: () => Effect.void,
           interrupt: () => Effect.void,
+          occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
           reserve: () =>
             Deferred.succeed(reserveEntered, undefined).pipe(
               Effect.andThen(Effect.never),
@@ -937,14 +940,14 @@ describe("store failures in a Run's fiber", () => {
             const scripted = yield* StepExecutor;
             return StepExecutor.of({
               ...scripted,
-              reserve: (request: Submission) =>
+              reserve: (request: Submission, worker: Option.Option<WorkerName>) =>
                 Ref.getAndUpdate(reserved, (count) => count + 1).pipe(
                   Effect.tap((count) =>
                     Effect.sync(() => {
                       if (count === 0) failures.left = Number.POSITIVE_INFINITY;
                     }),
                   ),
-                  Effect.andThen(scripted.reserve(request)),
+                  Effect.andThen(scripted.reserve(request, worker)),
                 ),
             });
           }),

@@ -237,6 +237,151 @@ const logged = (lines: ReadonlyArray<ReadonlyArray<unknown>>, message: string) =
 const local = WorkerName.make("local");
 const spare = WorkerName.make("spare");
 
+describe("Worker scheduler reservations that name a Worker", () => {
+  it.live("lease from that Worker only, without holding up the Runs behind them", () =>
+    withWorkers(
+      localWorkers([
+        ["local", 1],
+        ["spare", 1],
+      ]),
+      () =>
+        Effect.gen(function* () {
+          const scheduler = yield* startScheduler([]);
+          const agent = yield* developer;
+          const onLocal = yield* scheduler.reserve(submission(agent, 1), Option.none());
+          assert.strictEqual(onLocal.worker, local);
+          const reattaching = yield* Effect.forkChild(
+            scheduler.reserve(submission(agent, 2), Option.some(local)),
+          );
+          yield* assertWaiting(reattaching, "local's only slot is leased; spare's stays free");
+          const behind = yield* scheduler.reserve(submission(agent, 3), Option.none());
+          assert.strictEqual(behind.worker, spare);
+          yield* onLocal.release;
+          assert.strictEqual((yield* leaseOf(reattaching)).worker, local);
+        }).pipe(Effect.scoped),
+    ),
+  );
+
+  it.live("take a freed slot before a Run whose Event arrived earlier", () =>
+    withWorkers(localWorkers([["local", 1]]), () =>
+      Effect.gen(function* () {
+        const scheduler = yield* startScheduler([]);
+        const agent = yield* developer;
+        const held = yield* scheduler.reserve(submission(agent, 1), Option.none());
+        const earlier = yield* Effect.forkChild(
+          scheduler.reserve(submission(agent, 2), Option.none()),
+        );
+        yield* assertWaiting(earlier, "the only slot is leased");
+        const reattaching = yield* Effect.forkChild(
+          scheduler.reserve(submission(agent, 5), Option.some(local)),
+        );
+        yield* assertWaiting(reattaching, "the only slot is leased");
+        yield* held.release;
+        assert.strictEqual((yield* leaseOf(reattaching)).worker, local);
+        yield* assertWaiting(earlier, "the reattached Attempt holds the slot");
+      }).pipe(Effect.scoped),
+    ),
+  );
+
+  it.live("warn when usine.yaml does not declare the Worker, and leave the queue on cancel", () =>
+    withWorkers(localWorkers([["local", 1]]), () =>
+      Effect.gen(function* () {
+        const lines: Array<ReadonlyArray<unknown>> = [];
+        const scheduler = yield* startScheduler([]);
+        const agent = yield* developer;
+        yield* scheduler.reserve(submission(agent, 1), Option.none());
+        const gone = WorkerName.make("gone");
+        const reattaching = yield* Effect.forkChild(
+          scheduler
+            .reserve(submission(agent, 2), Option.some(gone))
+            .pipe(Effect.withLogger(logsIn(lines))),
+        );
+        yield* assertWaiting(reattaching, "no slot of an undeclared Worker ever frees");
+        assert.deepStrictEqual(
+          logged(
+            lines,
+            "Run waits for a slot on the Worker its reattached Attempt runs on, which usine.yaml does not declare; it waits until a reload declares that Worker again or the Run is canceled",
+          ),
+          [{ loop: "start-dev", itemKey: "basaltbytes/usine#2", queued: 1, worker: gone }],
+        );
+        yield* Fiber.interrupt(reattaching);
+        const waiting = yield* Effect.forkChild(
+          scheduler
+            .reserve(submission(agent, 3), Option.none())
+            .pipe(Effect.withLogger(logsIn(lines))),
+        );
+        yield* assertWaiting(waiting, "the only slot is leased");
+        assert.deepStrictEqual(logged(lines, "Run waits for a worker slot"), [
+          { loop: "start-dev", itemKey: "basaltbytes/usine#3", queued: 1 },
+        ]);
+      }).pipe(Effect.scoped),
+    ),
+  );
+});
+
+describe("Worker scheduler slots occupied by Attempts that already run", () => {
+  it.live(
+    "count at once, even past max_concurrent_attempts, and take slots from new Attempts until enough end",
+    () =>
+      withWorkers(
+        localWorkers([
+          ["local", 1],
+          ["spare", 1],
+        ]),
+        () =>
+          Effect.gen(function* () {
+            const lines: Array<ReadonlyArray<unknown>> = [];
+            const scheduler = yield* startScheduler([]);
+            const agent = yield* developer;
+            const first = yield* scheduler.occupy(local);
+            const second = yield* scheduler.occupy(local).pipe(Effect.withLogger(logsIn(lines)));
+            assert.deepStrictEqual(
+              logged(
+                lines,
+                "An Attempt that already runs on the Worker occupies a slot beyond its max_concurrent_attempts; the Worker takes no new Attempt until enough of its Attempts end",
+              ),
+              [{ worker: local, running: 2, slots: 1 }],
+            );
+            const onLocal = yield* Effect.forkChild(
+              scheduler.reserve(submission(agent, 1), Option.some(local)),
+            );
+            yield* assertWaiting(onLocal, "two Attempts run on local's one slot");
+            const fresh = yield* scheduler.reserve(submission(agent, 2), Option.none());
+            assert.strictEqual(fresh.worker, spare);
+            yield* first.release;
+            yield* assertWaiting(onLocal, "the first Attempt's slot retired");
+            yield* second.release;
+            assert.strictEqual((yield* leaseOf(onLocal)).worker, local);
+          }).pipe(Effect.scoped),
+      ),
+  );
+
+  it.live("occupy no slot of a Worker the scheduler does not have, and warn", () =>
+    withWorkers(localWorkers([["local", 1]]), () =>
+      Effect.gen(function* () {
+        const lines: Array<ReadonlyArray<unknown>> = [];
+        const scheduler = yield* startScheduler([]);
+        const gone = WorkerName.make("gone");
+        const lease = yield* scheduler.occupy(gone).pipe(Effect.withLogger(logsIn(lines)));
+        assert.deepStrictEqual(
+          logged(
+            lines,
+            "An Attempt already runs on a Worker the scheduler does not have; it occupies no slot, and that Worker takes no new Attempt",
+          ),
+          [{ worker: gone }],
+        );
+        yield* lease.release;
+        assert.deepStrictEqual(yield* scheduler.workers, [local]);
+        const agent = yield* developer;
+        assert.strictEqual(
+          (yield* scheduler.reserve(submission(agent, 1), Option.none())).worker,
+          local,
+        );
+      }).pipe(Effect.scoped),
+    ),
+  );
+});
+
 describe("Worker scheduler on reload", () => {
   it.live("a reload that raises max_concurrent_attempts admits a waiting Run at once", () =>
     withWorkers(localWorkers([["local", 1]]), (root) =>
@@ -245,8 +390,10 @@ describe("Worker scheduler on reload", () => {
         const lines: Array<ReadonlyArray<unknown>> = [];
         const scheduler = yield* startScheduler([]);
         const agent = yield* developer;
-        const first = yield* scheduler.reserve(submission(agent, 1));
-        const waiting = yield* Effect.forkChild(scheduler.reserve(submission(agent, 2)));
+        const first = yield* scheduler.reserve(submission(agent, 1), Option.none());
+        const waiting = yield* Effect.forkChild(
+          scheduler.reserve(submission(agent, 2), Option.none()),
+        );
         yield* assertWaiting(waiting, "one slot is leased");
 
         yield* writeInstanceFiles(root, [["usine.yaml", usineYaml(localWorkers([["local", 2]]))]]);
@@ -272,14 +419,16 @@ describe("Worker scheduler on reload", () => {
           const lines: Array<ReadonlyArray<unknown>> = [];
           const scheduler = yield* startScheduler([]);
           const agent = yield* developer;
-          const first = yield* scheduler.reserve(submission(agent, 1));
-          const second = yield* scheduler.reserve(submission(agent, 2));
+          const first = yield* scheduler.reserve(submission(agent, 1), Option.none());
+          const second = yield* scheduler.reserve(submission(agent, 2), Option.none());
 
           yield* writeInstanceFiles(root, [
             ["usine.yaml", usineYaml(localWorkers([["local", 1]]))],
           ]);
           yield* instances.reload;
-          const waiting = yield* Effect.forkChild(scheduler.reserve(submission(agent, 3)));
+          const waiting = yield* Effect.forkChild(
+            scheduler.reserve(submission(agent, 3), Option.none()),
+          );
           yield* assertWaiting(waiting, "two Attempts run on one slot");
           yield* first.release.pipe(Effect.withLogger(logsIn(lines)));
           yield* assertWaiting(waiting, "the first Attempt's slot retired");
@@ -308,8 +457,8 @@ describe("Worker scheduler on reload", () => {
           const lines: Array<ReadonlyArray<unknown>> = [];
           const scheduler = yield* startScheduler([]);
           const agent = yield* developer;
-          const onLocal = yield* scheduler.reserve(submission(agent, 1));
-          const onSpare = yield* scheduler.reserve(submission(agent, 2));
+          const onLocal = yield* scheduler.reserve(submission(agent, 1), Option.none());
+          const onSpare = yield* scheduler.reserve(submission(agent, 2), Option.none());
           assert.deepStrictEqual([onLocal.worker, onSpare.worker], [local, spare]);
 
           yield* writeInstanceFiles(root, [
@@ -326,7 +475,9 @@ describe("Worker scheduler on reload", () => {
           );
           assert.deepStrictEqual(yield* scheduler.workers, [local, spare]);
 
-          const waiting = yield* Effect.forkChild(scheduler.reserve(submission(agent, 3)));
+          const waiting = yield* Effect.forkChild(
+            scheduler.reserve(submission(agent, 3), Option.none()),
+          );
           yield* onSpare.release.pipe(Effect.withLogger(logsIn(lines)));
           yield* assertWaiting(waiting, "the removed Worker's slot is gone");
           assert.lengthOf(
@@ -352,8 +503,10 @@ describe("Worker scheduler on reload", () => {
           const preflighted: Array<string> = [];
           const scheduler = yield* startScheduler(preflighted);
           const agent = yield* developer;
-          yield* scheduler.reserve(submission(agent, 1));
-          const waiting = yield* Effect.forkChild(scheduler.reserve(submission(agent, 2)));
+          yield* scheduler.reserve(submission(agent, 1), Option.none());
+          const waiting = yield* Effect.forkChild(
+            scheduler.reserve(submission(agent, 2), Option.none()),
+          );
           preflighted.length = 0;
 
           yield* writeInstanceFiles(root, [
@@ -384,8 +537,10 @@ describe("Worker scheduler on reload", () => {
           const running = yield* instances.get;
           const scheduler = yield* startScheduler([], { failing: ["gpu"] });
           const agent = yield* developer;
-          yield* scheduler.reserve(submission(agent, 1));
-          const waiting = yield* Effect.forkChild(scheduler.reserve(submission(agent, 2)));
+          yield* scheduler.reserve(submission(agent, 1), Option.none());
+          const waiting = yield* Effect.forkChild(
+            scheduler.reserve(submission(agent, 2), Option.none()),
+          );
 
           yield* writeInstanceFiles(root, [
             [
@@ -550,8 +705,10 @@ describe("SSH Workers on reload", () => {
           const environment: Record<string, string> = {};
           const scheduler = yield* startSshScheduler(events, { added, environment });
           const agent = yield* developer;
-          yield* scheduler.reserve(submission(agent, 1));
-          const waiting = yield* Effect.forkChild(scheduler.reserve(submission(agent, 2)));
+          yield* scheduler.reserve(submission(agent, 1), Option.none());
+          const waiting = yield* Effect.forkChild(
+            scheduler.reserve(submission(agent, 2), Option.none()),
+          );
           events.length = 0;
 
           environment[TOKEN_ENV] = "admin-token-set-after-startup";
@@ -660,8 +817,8 @@ describe("SSH Workers on reload", () => {
           const events: Array<string> = [];
           const scheduler = yield* startSshScheduler(events);
           const agent = yield* developer;
-          const onFirst = yield* scheduler.reserve(submission(agent, 1));
-          const onSecond = yield* scheduler.reserve(submission(agent, 2));
+          const onFirst = yield* scheduler.reserve(submission(agent, 1), Option.none());
+          const onSecond = yield* scheduler.reserve(submission(agent, 2), Option.none());
           assert.deepStrictEqual([onFirst.worker, onSecond.worker], [build1, build2]);
           events.length = 0;
 
@@ -684,8 +841,8 @@ describe("SSH Workers on reload", () => {
           const events: Array<string> = [];
           const scheduler = yield* startSshScheduler(events);
           const agent = yield* developer;
-          yield* scheduler.reserve(submission(agent, 1));
-          const onSecond = yield* scheduler.reserve(submission(agent, 2));
+          yield* scheduler.reserve(submission(agent, 1), Option.none());
+          const onSecond = yield* scheduler.reserve(submission(agent, 2), Option.none());
           assert.strictEqual(onSecond.worker, build2);
           events.length = 0;
 
@@ -752,7 +909,7 @@ describe("Worker status", () => {
           assert.deepStrictEqual(yield* checks, ["local Passed", "local codex Passed"]);
           assert.deepStrictEqual(yield* status.slots, [{ worker: local, capacity: 2, leased: 0 }]);
 
-          yield* scheduler.reserve(submission(yield* developer, 1));
+          yield* scheduler.reserve(submission(yield* developer, 1), Option.none());
           assert.deepStrictEqual(yield* status.slots, [{ worker: local, capacity: 2, leased: 1 }]);
 
           yield* writeInstanceFiles(root, [

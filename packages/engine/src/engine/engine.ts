@@ -133,10 +133,10 @@ const makeRunEngine = Effect.gen(function* () {
       ? yield* stepExecutor.interrupt(outcome.openAttempt.value).pipe(Effect.result)
       : Result.succeed(undefined);
     yield* driver.stop(runId);
-    // A restart may have kept the Attempt's checkout for a reattachment whose
-    // execution had not acquired it; no execution will now.
-    if (Option.isSome(outcome.openAttempt))
-      yield* driver.reconcileCheckout(outcome.openAttempt.value);
+    // A restart may have kept the Attempt's checkout and a slot of its Worker
+    // for a reattachment whose execution had not acquired the checkout; none
+    // will now. Both stay kept until the parent task is confirmed stopped.
+    if (Option.isSome(outcome.openAttempt)) yield* driver.releaseKept(outcome.openAttempt.value);
     yield* driver.continueWithNewest(runId);
     if (Option.isSome(outcome.openAttempt) && Result.isFailure(handshake)) {
       return yield* new AttemptCancellationError({

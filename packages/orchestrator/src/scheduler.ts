@@ -54,15 +54,21 @@ type ReservationState =
 
 interface Reservation {
   readonly deferred: Deferred.Deferred<WorkerLease>;
+  /** When set, the only Worker the lease may come from: the one the Run's reattached Attempt runs on. */
+  readonly worker: Option.Option<WorkerName>;
   readonly eventTime: number;
   readonly order: number;
   readonly state: Ref.Ref<ReservationState>;
 }
 
-const reservationOrder = Order.combine(
+// A reservation that names its Worker counts an Attempt that already runs
+// there, so it goes before the reservations of new Attempts. Otherwise the
+// Run whose Event arrived first goes first.
+const reservationOrder = Order.combineAll([
+  Order.mapInput(Order.Boolean, (reservation: Reservation) => Option.isNone(reservation.worker)),
   Order.mapInput(Order.Number, (reservation: Reservation) => reservation.eventTime),
   Order.mapInput(Order.Number, (reservation: Reservation) => reservation.order),
-);
+]);
 
 interface WorkerSlots {
   /** How many Attempts the Worker may run at the same time; zero once a reload removed it. */
@@ -93,8 +99,17 @@ const slotPoolOf = (workers: ReadonlyArray<ConfigWorker>, previous: SlotPool): S
   ]);
 };
 
-const freeWorker = (pool: SlotPool): Option.Option<WorkerName> =>
-  Option.fromNullishOr([...pool].find(([, { capacity, leased }]) => leased < capacity)?.[0]);
+const isFree = (pool: SlotPool, worker: WorkerName): boolean => {
+  const slots = pool.get(worker);
+  return slots !== undefined && slots.leased < slots.capacity;
+};
+
+/** The Worker whose free slot can take `reservation`: the one it names, or else the first free one. */
+const workerFor = (pool: SlotPool, reservation: Reservation): Option.Option<WorkerName> =>
+  Option.match(reservation.worker, {
+    onNone: () => Option.fromNullishOr([...pool.keys()].find((worker) => isFree(pool, worker))),
+    onSome: (worker) => (isFree(pool, worker) ? Option.some(worker) : Option.none()),
+  });
 
 const withLeased = (pool: SlotPool, worker: WorkerName, change: number): SlotPool => {
   const slots = pool.get(worker);
@@ -194,21 +209,26 @@ const anyWorker: ExecutorWorkers = { add: () => Effect.void, remove: () => Effec
 
 /**
  * Schedules Attempts FIFO over the Workers and adapts the Executor to the
- * engine's StepExecutor port. It starts with the Workers in `config`, each
- * preflighted with `brains` and the current roster before the layer is ready,
- * and registers with the current instance, so a reload can resize, add, and
- * remove Workers. A reload preflights each Worker it adds or gives more slots
- * with every rostered brain, and each other Worker with the brains it adds,
- * before anything changes. With `options.workers`, a Worker the reload adds
- * joins the executor before its preflight and leaves it again when the reload
- * is refused. A Worker with more running Attempts than slots takes no new
- * Attempt, and each extra slot retires when its Attempt ends; a removed Worker
- * leaves the scheduler, and the executor, when its last Attempt ends. Each Attempt
- * reads its `settings` (child budget, ceilings, parent effort) from the
- * current instance, and gets the bot login it writes to GitHub as: exe.dev's
- * integration bot on exe.dev Workers, the App's bot from `GitHubApp` on the
- * others, or none when the App's installation cannot be read. `WorkerStatus`
- * reads the slots and the last preflight of each Worker.
+ * engine's StepExecutor port. A reservation that names a Worker, as a Run
+ * that reattaches an open Attempt makes, takes a slot of that Worker only,
+ * and goes before the reservations that name none (#177). An Attempt that
+ * already runs on a Worker, as one a restart found live, occupies a slot of
+ * it at once, even past its slots. It starts with the
+ * Workers in `config`, each preflighted with `brains` and the current roster
+ * before the layer is ready, and registers with the current instance, so a
+ * reload can resize, add, and remove Workers. A reload preflights each Worker
+ * it adds or gives more slots with every rostered brain, and each other
+ * Worker with the brains it adds, before anything changes. With
+ * `options.workers`, a Worker the reload adds joins the executor before its
+ * preflight and leaves it again when the reload is refused. A Worker with
+ * more running Attempts than slots takes no new Attempt, and each extra slot
+ * retires when its Attempt ends; a removed Worker leaves the scheduler, and
+ * the executor, when its last Attempt ends. Each Attempt reads its `settings`
+ * (child budget, ceilings, parent effort) from the current instance, and gets
+ * the bot login it writes to GitHub as: exe.dev's integration bot on exe.dev
+ * Workers, the App's bot from `GitHubApp` on the others, or none when the
+ * App's installation cannot be read. `WorkerStatus` reads the slots and the
+ * last preflight of each Worker.
  */
 export const stepExecutorLayer = (
   config: UsineConfig,
@@ -441,15 +461,21 @@ export const stepExecutorLayer = (
         } satisfies WorkerLease;
       });
 
-      // The transaction retries until a reservation and a free slot both exist, then takes both.
+      // The transaction retries until a free slot can take a waiting reservation, then
+      // takes both. A reservation whose Worker has no free slot holds up none behind it.
       const nextAssignment = Effect.tx(
         Effect.gen(function* () {
           const current = yield* TxRef.get(pool);
-          const worker = freeWorker(current);
-          if (Option.isNone(worker)) return yield* Effect.txRetry;
-          const reservation = yield* TxPriorityQueue.take(pending);
-          yield* TxRef.set(pool, withLeased(current, worker.value, 1));
-          return { worker: worker.value, reservation };
+          const next = EffectArray.findFirst(
+            yield* TxPriorityQueue.toArray(pending),
+            (reservation) =>
+              Option.map(workerFor(current, reservation), (worker) => ({ worker, reservation })),
+          );
+          if (Option.isNone(next)) return yield* Effect.txRetry;
+          const { worker, reservation } = next.value;
+          yield* TxPriorityQueue.removeIf(pending, (waiting) => waiting === reservation);
+          yield* TxRef.set(pool, withLeased(current, worker, 1));
+          return next.value;
         }),
       );
 
@@ -472,22 +498,65 @@ export const stepExecutorLayer = (
       );
       yield* Effect.forkScoped(dispatch);
 
+      const occupy: StepExecutor["Service"]["occupy"] = Effect.fn("WorkerScheduler.occupy")(
+        function* (worker) {
+          yield* Effect.annotateCurrentSpan({ worker });
+          // The Attempt runs on the Worker whether or not a slot is free, so the
+          // slot counts it at once; one beyond the Worker's slots retires when an
+          // Attempt there ends, as after a reload that lowers them.
+          const slots = yield* TxRef.modify(
+            pool,
+            (current) => [current.get(worker), withLeased(current, worker, 1)] as const,
+          );
+          if (slots === undefined) {
+            yield* Effect.logWarning(
+              "An Attempt already runs on a Worker the scheduler does not have; it occupies no slot, and that Worker takes no new Attempt",
+              { worker },
+            );
+            return { worker, release: Effect.void } satisfies WorkerLease;
+          }
+          const fields = { worker, running: slots.leased + 1, slots: slots.capacity };
+          if (slots.leased < slots.capacity)
+            yield* Effect.logInfo(
+              "An Attempt that already runs on the Worker occupies a slot",
+              fields,
+            );
+          else
+            yield* Effect.logWarning(
+              "An Attempt that already runs on the Worker occupies a slot beyond its max_concurrent_attempts; the Worker takes no new Attempt until enough of its Attempts end",
+              fields,
+            );
+          return yield* makeLease(worker);
+        },
+      );
+
       const reserve: StepExecutor["Service"]["reserve"] = Effect.fn("WorkerScheduler.reserve")(
-        function* (submission) {
+        function* (submission, worker) {
+          const run = { loop: submission.loop, itemKey: submission.itemKey };
+          yield* Effect.annotateCurrentSpan(run);
+          if (Option.isSome(worker)) yield* Effect.annotateCurrentSpan({ worker: worker.value });
           const deferred = yield* Deferred.make<WorkerLease>();
           const state = yield* Ref.make<ReservationState>({ _tag: "Pending" });
           const reservation: Reservation = {
             deferred,
+            worker,
             eventTime: DateTime.toEpochMillis(submission.event.receivedAt),
             order: yield* Ref.getAndUpdate(nextOrder, (value) => value + 1),
             state,
           };
           yield* TxPriorityQueue.offer(pending, reservation);
-          yield* Effect.logInfo("Run waits for a worker slot", {
-            loop: submission.loop,
-            itemKey: submission.itemKey,
-            queued: yield* TxPriorityQueue.size(pending),
-          });
+          const fields = { ...run, queued: yield* TxPriorityQueue.size(pending) };
+          if (Option.isNone(worker)) yield* Effect.logInfo("Run waits for a worker slot", fields);
+          else if (((yield* TxRef.get(pool)).get(worker.value)?.capacity ?? 0) > 0)
+            yield* Effect.logInfo(
+              "Run waits for a slot on the Worker its reattached Attempt runs on",
+              { ...fields, worker: worker.value },
+            );
+          else
+            yield* Effect.logWarning(
+              "Run waits for a slot on the Worker its reattached Attempt runs on, which usine.yaml does not declare; it waits until a reload declares that Worker again or the Run is canceled",
+              { ...fields, worker: worker.value },
+            );
           return yield* Deferred.await(deferred).pipe(
             Effect.onInterrupt(() =>
               Ref.modify(state, (current) =>
@@ -495,6 +564,11 @@ export const stepExecutorLayer = (
                   ? [Option.some(current.lease), { _tag: "Canceled" } satisfies ReservationState]
                   : [Option.none<WorkerLease>(), { _tag: "Canceled" } satisfies ReservationState],
               ).pipe(
+                // A canceled reservation leaves the queue, so one whose Worker never frees a
+                // slot does not stay in it.
+                Effect.tap(() =>
+                  TxPriorityQueue.removeIf(pending, (waiting) => waiting === reservation),
+                ),
                 Effect.flatMap(
                   Option.match({ onNone: () => Effect.void, onSome: (lease) => lease.release }),
                 ),
@@ -609,6 +683,7 @@ export const stepExecutorLayer = (
         isLive: executor.isLive,
         outcome: executor.outcome,
         reserve,
+        occupy,
         intervene: executor.intervene,
         recover: (attempt, record) =>
           executor

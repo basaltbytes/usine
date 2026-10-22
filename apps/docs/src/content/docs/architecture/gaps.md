@@ -37,7 +37,6 @@ What the code doesn't do yet, or does badly, grouped by area. The issue numbers 
 
 ## Run engine and recovery
 
-- [#177][]: a reattached Attempt keeps its own Worker while the scheduler reserved a slot on another one ([store.ts:284][]).
 - [#178][]: the runaway guard loses an Attempt's elapsed time and its finished sessions' tokens across a reattach.
 
 ## Durable layer
@@ -105,7 +104,6 @@ See [The dogfood instance's Loops](/architecture/loops-shipped/) for the Loop fi
 [writer.ts]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/yaml/writer.ts
 [operator.ts:556]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/operator/operator.ts#L556
 [polling.ts:222]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/polling/polling.ts#L222
-[store.ts:284]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/engine/src/store/store.ts#L284
 [schema.ts:169]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/engine/src/database/schema.ts#L169
 [harvest.ts:135]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/core/src/step/harvest.ts#L135
 [worker-engine.ts:13]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/worker-engine.ts#L13
@@ -119,7 +117,6 @@ See [The dogfood instance's Loops](/architecture/loops-shipped/) for the Loop fi
 [#115]: https://github.com/basaltbytes/usine/issues/115
 [#154]: https://github.com/basaltbytes/usine/issues/154
 [#158]: https://github.com/basaltbytes/usine/issues/158
-[#177]: https://github.com/basaltbytes/usine/issues/177
 [#178]: https://github.com/basaltbytes/usine/issues/178
 [#179]: https://github.com/basaltbytes/usine/issues/179
 [#181]: https://github.com/basaltbytes/usine/issues/181

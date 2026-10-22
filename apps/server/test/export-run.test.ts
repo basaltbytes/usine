@@ -53,6 +53,7 @@ const executor = Layer.succeed(StepExecutor)({
   outcome: () => Effect.succeed(Option.none()),
   recover: () => Effect.void,
   intervene: () => Effect.void,
+  occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
   reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
   interrupt: () => Effect.void,
   execute: (execution, io) =>

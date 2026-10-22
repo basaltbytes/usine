@@ -12,7 +12,6 @@ import {
   Deferred,
   Effect,
   Exit,
-  Fiber,
   Layer,
   Logger,
   Option,
@@ -20,12 +19,12 @@ import {
   Result,
   Schedule,
   Scope,
+  TxRef,
 } from "effect";
 import {
   LeftoversDiscardRejectedError,
   ReconcileInterval,
   RunEngine,
-  RunEngineShutdown,
 } from "../src/engine/engine.ts";
 import { runIdFor, type Submission } from "../src/engine/submission.ts";
 import { RunReader } from "../src/run-reader/run-reader.ts";
@@ -80,6 +79,7 @@ const recordingExecutor = (
     intervene: () => Effect.void,
     interrupt: () => Effect.void,
     reserve: () => Effect.never,
+    occupy: () => Effect.die("no open Attempt survives the restart"),
     execute: () => Effect.die("no Attempt starts after the restart"),
   });
 
@@ -116,11 +116,16 @@ const stopDuringAttempts = (directory: InstanceDirectory, submissions: ReadonlyA
  * records for the Attempts in `unstoppable`; `recover` reconciles the
  * checkout whatever `isLive` reports. Every checkout it reconciles becomes a
  * pushed salvage, and an open Attempt whose parent failed records the comment
- * it posted. Runs wait for a Worker until `slot` opens; an Attempt then
- * records what it resumes from. The reattachment of an Attempt in `stalled`
- * never acquires its checkout, as when the scheduler awaits the settings or
- * the bot login before preparing it, and one in `unprepared` fails first, as
- * when its credential cannot be issued.
+ * it posted. Worker `local` has one slot per Attempt in `live`. Startup reads
+ * whether each open Attempt is live at once, and occupies a slot for it and
+ * for each closed Attempt it cannot stop, which `leased` counts as the
+ * scheduler does. Until `gate` opens, a Run waits to
+ * read it again, and for a Worker; then a Run waits for a free slot. An
+ * Attempt then records what it resumes from. The
+ * reattachment of an Attempt in `stalled` never acquires its checkout, as
+ * when the scheduler awaits the settings or the bot login before preparing
+ * it, and one in `unprepared` fails first, as when its credential cannot be
+ * issued.
  */
 const restartedExecutor = Effect.fn("test.restartedExecutor")(function* (
   live: ReadonlyArray<Attempt>,
@@ -137,8 +142,21 @@ const restartedExecutor = Effect.fn("test.restartedExecutor")(function* (
     resumed: yield* Ref.make<ReadonlyMap<RunId, Option.Option<SalvagePushed>>>(new Map()),
     stalled: yield* Ref.make<ReadonlySet<AttemptId>>(new Set()),
     unprepared: yield* Ref.make<ReadonlySet<AttemptId>>(new Set()),
-    slot: yield* Deferred.make<void>(),
+    read: yield* Ref.make<ReadonlySet<AttemptId>>(new Set()),
+    gate: yield* Deferred.make<void>(),
+    leased: yield* TxRef.make(0),
   };
+  const lease = {
+    worker: WorkerName.make("local"),
+    release: TxRef.update(state.leased, (count) => count - 1),
+  };
+  const freeSlot = Effect.tx(
+    Effect.gen(function* () {
+      const count = yield* TxRef.get(state.leased);
+      if (count >= live.length) return yield* Effect.txRetry;
+      yield* TxRef.set(state.leased, count + 1);
+    }),
+  );
   const stop = (attemptId: AttemptId) =>
     Effect.gen(function* () {
       if ((yield* Ref.get(state.unstoppable)).has(attemptId)) {
@@ -154,6 +172,12 @@ const restartedExecutor = Effect.fn("test.restartedExecutor")(function* (
     workers: Effect.succeed([WorkerName.make("local")]),
     isLive: (attemptId) =>
       Effect.gen(function* () {
+        // Startup reads each open Attempt before its Run does.
+        const byRun = yield* Ref.modify(state.read, (ids) => [
+          ids.has(attemptId),
+          new Set(ids).add(attemptId),
+        ]);
+        if (byRun) yield* Deferred.await(state.gate);
         if ((yield* Ref.get(state.unreadable)).has(attemptId))
           return yield* new InfraFailure({
             message: "Could not read the parent task",
@@ -180,10 +204,8 @@ const restartedExecutor = Effect.fn("test.restartedExecutor")(function* (
       }),
     intervene: () => Effect.void,
     interrupt: stop,
-    reserve: () =>
-      Deferred.await(state.slot).pipe(
-        Effect.as({ worker: WorkerName.make("local"), release: Effect.void }),
-      ),
+    reserve: () => Deferred.await(state.gate).pipe(Effect.andThen(freeSlot), Effect.as(lease)),
+    occupy: () => TxRef.update(state.leased, (count) => count + 1).pipe(Effect.as(lease)),
     execute: (execution, io) =>
       Effect.gen(function* () {
         const { id } = execution.attempt;
@@ -303,6 +325,7 @@ describe("engine restart", () => {
           recover: () => Effect.void,
           intervene: () => Effect.void,
           interrupt: () => Effect.void,
+          occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
           reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
           execute: (execution) =>
             Ref.updateAndGet(executions, (seen) => [
@@ -361,6 +384,191 @@ describe("engine restart", () => {
   );
 
   it.live(
+    "occupies a slot of each live Attempt's own Worker before any Run reads it, so a Run that arrives first waits",
+    () =>
+      withInstance((directory) =>
+        Effect.gen(function* () {
+          const local = WorkerName.make("local");
+          const spare = WorkerName.make("spare");
+          const onLocal = submission({ number: 30, item: "live-on-local" });
+          const onSpare = submission({ number: 31, item: "live-on-spare" });
+          const third = submission({ number: 32, item: "after-the-restart" });
+          // Before the restart, each Run's first Attempt starts on its own Worker and keeps running.
+          const firstScope = yield* Scope.make();
+          const firstEngine = Context.get(
+            yield* Scope.provide(
+              Layer.build(
+                engineLayer(
+                  directory,
+                  Layer.succeed(StepExecutor)({
+                    workers: Effect.succeed([local, spare]),
+                    isLive: () => Effect.succeed(false),
+                    outcome: () => Effect.succeed(Option.none()),
+                    recover: () => Effect.void,
+                    intervene: () => Effect.void,
+                    interrupt: () => Effect.void,
+                    occupy: () => Effect.die("no open Attempt survives into the first runtime"),
+                    reserve: ({ itemKey }) =>
+                      Effect.succeed({
+                        worker: itemKey === onLocal.itemKey ? local : spare,
+                        release: Effect.void,
+                      }),
+                    execute: () => Effect.never,
+                  }),
+                ),
+              ),
+              firstScope,
+            ),
+            RunEngine,
+          );
+          const live = yield* Effect.forEach([onLocal, onSpare], (pending) =>
+            Effect.gen(function* () {
+              const accepted = yield* firstEngine.submit(pending);
+              assert(accepted._tag === "Claimed");
+              const [started] = (yield* waitFor(
+                firstEngine,
+                accepted.runId,
+                ({ attempts }) => attempts.length === 1,
+              )).attempts;
+              assert(started !== undefined);
+              return started;
+            }),
+          );
+          assert.deepStrictEqual(
+            live.map(({ worker }) => worker),
+            [local, spare],
+          );
+          const [liveOnLocal, liveOnSpare] = live;
+          assert(liveOnLocal !== undefined && liveOnSpare !== undefined);
+          yield* Scope.close(firstScope, Exit.void);
+
+          // After it, each Worker has one slot. As the scheduler does, `occupy`
+          // counts an Attempt that already runs on a Worker at once, a
+          // reservation that names a Worker waits for a free slot of it, and
+          // one that names none takes the first free slot.
+          const leased = yield* TxRef.make<ReadonlyMap<WorkerName, number>>(
+            new Map([
+              [local, 0],
+              [spare, 0],
+            ]),
+          );
+          const counted = (worker: WorkerName, change: number) =>
+            TxRef.update(leased, (counts) =>
+              new Map(counts).set(worker, (counts.get(worker) ?? 0) + change),
+            );
+          const leaseOn = (worker: WorkerName) => ({ worker, release: counted(worker, -1) });
+          const freeSlot = (worker: Option.Option<WorkerName>) =>
+            Effect.tx(
+              Effect.gen(function* () {
+                const counts = yield* TxRef.get(leased);
+                const free = [local, spare].filter((name) => (counts.get(name) ?? 0) < 1);
+                const slot = Option.match(worker, {
+                  onNone: () => free[0],
+                  onSome: (name) => free.find((candidate) => candidate === name),
+                });
+                if (slot === undefined) return yield* Effect.txRetry;
+                yield* counted(slot, 1);
+                return slot;
+              }),
+            );
+          // Startup reads each open Attempt at once; the Runs' own reads wait for `read`.
+          const liveIds = new Set(live.map(({ id }) => id));
+          const readAtStartup = yield* Ref.make<ReadonlySet<AttemptId>>(new Set());
+          const read = yield* Deferred.make<void>();
+          const reattached = yield* Ref.make<ReadonlyArray<AttemptId>>([]);
+          const finish = yield* Deferred.make<void>();
+          const restarted = Layer.succeed(StepExecutor)({
+            workers: Effect.succeed([local, spare]),
+            isLive: (attemptId) =>
+              Ref.modify(readAtStartup, (ids) => [
+                ids.has(attemptId),
+                new Set(ids).add(attemptId),
+              ]).pipe(
+                Effect.flatMap((byRun) => (byRun ? Deferred.await(read) : Effect.void)),
+                Effect.as(liveIds.has(attemptId)),
+              ),
+            outcome: () => Effect.succeed(Option.none()),
+            recover: () => Effect.void,
+            intervene: () => Effect.void,
+            interrupt: () => Effect.void,
+            occupy: (worker) => counted(worker, 1).pipe(Effect.as(leaseOn(worker))),
+            reserve: (_, worker) => freeSlot(worker).pipe(Effect.map(leaseOn)),
+            execute: (execution, io) =>
+              Effect.gen(function* () {
+                yield* io.checkoutAcquired;
+                if (execution.reattach) {
+                  yield* Ref.update(reattached, (ids) => [...ids, execution.attempt.id]);
+                  yield* Deferred.await(finish);
+                }
+                return stepResult("finished after the restart");
+              }),
+          });
+          const secondScope = yield* Scope.make();
+          const secondEngine = Context.get(
+            yield* Scope.provide(Layer.build(engineLayer(directory, restarted)), secondScope),
+            RunEngine,
+          );
+          // Neither Run has read its Attempt yet, and each Attempt holds a slot of its own Worker.
+          assert.deepStrictEqual(
+            yield* TxRef.get(leased),
+            new Map([
+              [local, 1],
+              [spare, 1],
+            ]),
+          );
+
+          // A Run that arrives now waits, rather than start an Attempt on a Worker that runs one.
+          const accepted = yield* secondEngine.submit(third);
+          assert(accepted._tag === "Claimed");
+          yield* Effect.sleep("50 millis");
+          assert.deepStrictEqual((yield* secondEngine.inspect(accepted.runId)).attempts, []);
+
+          // Canceling the Run of the Attempt on `spare` before it reads that
+          // Attempt releases its slot, and the waiting Run takes it.
+          yield* secondEngine.cancel(liveOnSpare.runId);
+          const delivered = yield* waitFor(
+            secondEngine,
+            accepted.runId,
+            ({ run }) => run.state._tag === "Succeeded",
+          );
+          assert.deepStrictEqual(
+            delivered.attempts.map(({ worker }) => worker),
+            [spare],
+          );
+
+          // The other Run reattaches its Attempt in the slot startup occupied on `local`.
+          yield* Deferred.succeed(read, undefined);
+          yield* Effect.repeat(Ref.get(reattached), {
+            until: (ids) => ids.length === 1,
+            schedule: Schedule.spaced("10 millis"),
+          });
+          assert.deepStrictEqual(yield* Ref.get(reattached), [liveOnLocal.id]);
+          assert.strictEqual((yield* TxRef.get(leased)).get(local), 1);
+          yield* Deferred.succeed(finish, undefined);
+          const [attempt, ...later] = (yield* waitFor(
+            secondEngine,
+            liveOnLocal.runId,
+            ({ run }) => run.state._tag === "Succeeded",
+          )).attempts;
+          assert(attempt !== undefined && later.length === 0);
+          assert.strictEqual(attempt.worker, local);
+          assert(Option.isSome(attempt.reattachedAt));
+          const canceled = yield* secondEngine.inspect(liveOnSpare.runId);
+          assert.strictEqual(canceled.run.state._tag, "Canceled");
+          assert.lengthOf(canceled.attempts, 1);
+          yield* Scope.close(secondScope, Exit.void);
+          assert.deepStrictEqual(
+            yield* TxRef.get(leased),
+            new Map([
+              [local, 0],
+              [spare, 0],
+            ]),
+          );
+        }),
+      ),
+  );
+
+  it.live(
     "finishes an open Attempt with the result its parent task stored before the restart",
     () =>
       withInstance((directory) =>
@@ -396,6 +604,7 @@ describe("engine restart", () => {
               ),
             intervene: () => Effect.void,
             interrupt: () => Effect.void,
+            occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
             reserve: () =>
               Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
             // The parent finishes and its result is stored, then the process stops before the Run records it.
@@ -492,8 +701,8 @@ describe("engine restart", () => {
           );
           assert.deepStrictEqual(yield* Ref.get(worker.reconciled), []);
 
-          // Before the Runs get a Worker, one parent task is gone and another
-          // failed. The third still runs, but its Run cannot read that, and
+          // Before the Runs read their Attempts, one parent task is gone and
+          // another failed. The third still runs, but its Run cannot read that, and
           // its parent task cannot be stopped yet. The fourth Run reattaches
           // its Attempt, whose execution fails before it acquires the checkout.
           yield* Ref.set(worker.live, new Set([unread.id, unprepared.id]));
@@ -504,7 +713,7 @@ describe("engine restart", () => {
             worker.stored,
             new Map([[failed.id, Result.fail(new AgentFailure({ message: "failed unattached" }))]]),
           );
-          yield* Deferred.succeed(worker.slot, undefined);
+          yield* Deferred.succeed(worker.gate, undefined);
 
           // While its parent task may still write to the checkout, the Run
           // reconciles nothing and starts no next Attempt. The next reconcile
@@ -568,7 +777,7 @@ describe("engine restart", () => {
             submission({ number: 25, item: "kept-then-canceled-while-preparing" }),
           ]);
           assert(waiting !== undefined && preparing !== undefined);
-          // Until `slot` opens, the restarted Runs get no Worker, so their Attempts await their reattachment.
+          // Until `gate` opens, the restarted Runs do not read their Attempts, which await their reattachment.
           const worker = yield* restartedExecutor([waiting, preparing]);
           const scope = yield* Scope.make();
           const engine = Context.get(
@@ -596,10 +805,10 @@ describe("engine restart", () => {
             [waiting.id],
           );
 
-          // The other Run gets a Worker and reattaches its Attempt, whose
+          // The other Run reads its Attempt and reattaches it, and the
           // execution has not acquired the checkout when the Run is canceled.
           yield* Ref.set(worker.stalled, new Set([preparing.id]));
-          yield* Deferred.succeed(worker.slot, undefined);
+          yield* Deferred.succeed(worker.gate, undefined);
           yield* Effect.repeat(Ref.get(worker.resumed), {
             until: (seen) => seen.has(preparing.runId),
             schedule: Schedule.spaced("10 millis"),
@@ -609,6 +818,171 @@ describe("engine restart", () => {
             (yield* Ref.get(worker.reconciled)).map(({ attemptId }) => attemptId),
             [waiting.id, preparing.id],
           );
+          yield* Scope.close(scope, Exit.void);
+        }),
+      ),
+  );
+
+  it.live(
+    "keeps a surviving Attempt's slot until its parent task is confirmed stopped, so no new Attempt takes it",
+    () =>
+      withInstance((directory) =>
+        Effect.gen(function* () {
+          const [unread, unprepared, canceled] = yield* stopDuringAttempts(directory, [
+            submission({ number: 26, item: "kept-unread-unstoppable" }),
+            submission({ number: 27, item: "kept-unprepared-unstoppable" }),
+            submission({ number: 28, item: "kept-canceled-unstoppable" }),
+          ]);
+          assert(unread !== undefined && unprepared !== undefined && canceled !== undefined);
+          // `local` has three slots, and startup occupies one for each surviving Attempt.
+          const worker = yield* restartedExecutor([unread, unprepared, canceled]);
+          const scope = yield* Scope.make();
+          const engine = Context.get(
+            yield* Scope.provide(Layer.build(engineLayer(directory, worker.executor)), scope).pipe(
+              Effect.provideService(ReconcileInterval, "50 millis"),
+            ),
+            RunEngine,
+          );
+          assert.strictEqual(yield* TxRef.get(worker.leased), 3);
+          const fresh = yield* engine.submit(submission({ number: 29, item: "after-the-restart" }));
+          assert(fresh._tag === "Claimed");
+
+          // Every parent task still runs, and none can be stopped yet. The
+          // first Run cannot read whether its Attempt is live. The second
+          // reattaches its Attempt, whose execution fails before it acquires
+          // the checkout. The third reattaches its Attempt, whose execution
+          // stalls until the operator cancels the Run.
+          yield* Ref.set(worker.unreadable, new Set([unread.id]));
+          yield* Ref.set(worker.unprepared, new Set([unprepared.id]));
+          yield* Ref.set(worker.stalled, new Set([canceled.id]));
+          yield* Ref.set(worker.unstoppable, new Set([unread.id, unprepared.id, canceled.id]));
+          yield* Deferred.succeed(worker.gate, undefined);
+          yield* Effect.repeat(Ref.get(worker.resumed), {
+            until: (seen) => seen.has(canceled.runId),
+            schedule: Schedule.spaced("10 millis"),
+          });
+          const refusal = yield* Effect.flip(engine.cancel(canceled.runId));
+          assert.strictEqual(refusal._tag, "AttemptCancellationError");
+          yield* Effect.repeat(Ref.get(worker.refused), {
+            until: (ids) => ids.includes(unread.id) && ids.includes(unprepared.id),
+            schedule: Schedule.spaced("10 millis"),
+          });
+
+          // Each slot stays taken while its parent task may run, across the
+          // reconciles that try each stop again, so the new Run waits.
+          yield* Effect.sleep("150 millis");
+          assert.deepStrictEqual((yield* engine.inspect(fresh.runId)).attempts, []);
+          assert.strictEqual(yield* TxRef.get(worker.leased), 3);
+          assert.deepStrictEqual(yield* Ref.get(worker.reconciled), []);
+
+          // Once the stops are confirmed, each slot is released after its
+          // checkout is reconciled, and every Run gets its turn.
+          yield* Ref.set(worker.unstoppable, new Set());
+          for (const kept of [unread, unprepared]) {
+            const resumed = yield* waitFor(
+              engine,
+              kept.runId,
+              ({ run }) => run.state._tag === "Succeeded",
+            );
+            assert.deepStrictEqual(
+              resumed.attempts.map(({ salvage }) => Option.map(salvage, ({ _tag }) => _tag)),
+              [Option.some("Pushed"), Option.none()],
+            );
+          }
+          const delivered = yield* waitFor(
+            engine,
+            fresh.runId,
+            ({ run }) => run.state._tag === "Succeeded",
+          );
+          assert.lengthOf(delivered.attempts, 1);
+          const closed = yield* waitFor(engine, canceled.runId, ({ attempts }) =>
+            attempts.every(({ salvage }) => Option.isSome(salvage)),
+          );
+          assert.deepStrictEqual(
+            closed.attempts.map(({ outcome }) => Option.map(outcome, ({ _tag }) => _tag)),
+            [Option.some("Canceled")],
+          );
+          yield* Effect.repeat(TxRef.get(worker.leased), {
+            until: (count) => count === 0,
+            schedule: Schedule.spaced("10 millis"),
+          }).pipe(Effect.timeout("2 seconds"));
+          yield* Scope.close(scope, Exit.void);
+        }),
+      ),
+  );
+
+  it.live(
+    "keeps the slot of a canceled Attempt whose parent task outlives another restart until that task is confirmed stopped",
+    () =>
+      withInstance((directory) =>
+        Effect.gen(function* () {
+          const [canceled] = yield* stopDuringAttempts(directory, [
+            submission({ number: 35, item: "canceled-unstoppable-then-restarted" }),
+          ]);
+          assert(canceled !== undefined);
+
+          // After a first restart, the operator cancels the Run while it still
+          // reads its Attempt, and the parent task cannot be stopped.
+          const first = yield* restartedExecutor([canceled]);
+          yield* Ref.set(first.unstoppable, new Set([canceled.id]));
+          const firstScope = yield* Scope.make();
+          const firstEngine = Context.get(
+            yield* Scope.provide(Layer.build(engineLayer(directory, first.executor)), firstScope),
+            RunEngine,
+          );
+          const refusal = yield* Effect.flip(firstEngine.cancel(canceled.runId));
+          assert.strictEqual(refusal._tag, "AttemptCancellationError");
+          assert.strictEqual(yield* TxRef.get(first.leased), 1);
+          yield* Scope.close(firstScope, Exit.void);
+
+          // The orchestrator restarts again. The parent task still runs on
+          // `local`, which has one slot, and it still cannot be stopped.
+          const second = yield* restartedExecutor([canceled]);
+          yield* Ref.set(second.unstoppable, new Set([canceled.id]));
+          const scope = yield* Scope.make();
+          const engine = Context.get(
+            yield* Scope.provide(Layer.build(engineLayer(directory, second.executor)), scope).pipe(
+              Effect.provideService(ReconcileInterval, "50 millis"),
+            ),
+            RunEngine,
+          );
+          assert.strictEqual(yield* TxRef.get(second.leased), 1);
+          const fresh = yield* engine.submit(
+            submission({ number: 36, item: "after-the-second-restart" }),
+          );
+          assert(fresh._tag === "Claimed");
+          yield* Deferred.succeed(second.gate, undefined);
+
+          // The closed Attempt keeps its slot across the reconciles that try
+          // the stop again, so the new Run waits.
+          yield* Effect.repeat(Ref.get(second.refused), {
+            until: (ids) => ids.length >= 3,
+            schedule: Schedule.spaced("10 millis"),
+          });
+          assert.deepStrictEqual((yield* engine.inspect(fresh.runId)).attempts, []);
+          assert.strictEqual(yield* TxRef.get(second.leased), 1);
+          assert.deepStrictEqual(yield* Ref.get(second.reconciled), []);
+
+          // Once the stop is confirmed, a reconcile salvages the checkout and
+          // releases the slot, and the new Run takes it.
+          yield* Ref.set(second.unstoppable, new Set());
+          const delivered = yield* waitFor(
+            engine,
+            fresh.runId,
+            ({ run }) => run.state._tag === "Succeeded",
+          );
+          assert.lengthOf(delivered.attempts, 1);
+          assert.deepStrictEqual(
+            (yield* engine.inspect(canceled.runId)).attempts.map(({ outcome, salvage }) => [
+              Option.map(outcome, ({ _tag }) => _tag),
+              Option.map(salvage, ({ _tag }) => _tag),
+            ]),
+            [[Option.some("Canceled"), Option.some("Pushed")]],
+          );
+          yield* Effect.repeat(TxRef.get(second.leased), {
+            until: (count) => count === 0,
+            schedule: Schedule.spaced("10 millis"),
+          }).pipe(Effect.timeout("2 seconds"));
           yield* Scope.close(scope, Exit.void);
         }),
       ),
@@ -687,162 +1061,6 @@ describe("engine restart", () => {
           yield* Scope.close(secondScope, Exit.void);
         }),
       ),
-  );
-
-  it.live("drains an admitted Attempt and leaves queued and new work for restart", () =>
-    withInstance((directory) =>
-      Effect.scoped(
-        Effect.gen(function* () {
-          const started = yield* Deferred.make<void>();
-          const finish = yield* Deferred.make<void>();
-          const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
-            Deferred.succeed(started, undefined).pipe(
-              Effect.andThen(Deferred.await(finish)),
-              Effect.as(stepResult("finished before shutdown")),
-            ),
-            Effect.succeed(stepResult("queued work after restart")),
-            Effect.succeed(stepResult("new work after restart")),
-          ]);
-          const runtime = engineLayer(directory, executorLayer(plans));
-          const firstScope = yield* Scope.make();
-          const first = Context.get(
-            yield* Scope.provide(Layer.build(runtime), firstScope),
-            RunEngine,
-          );
-          const accepted = yield* first.submit(submission({ number: 42 }));
-          assert(accepted._tag === "Claimed");
-          yield* Deferred.await(started);
-          const queued = submission({ number: 43 });
-          assert.strictEqual((yield* first.submit(queued))._tag, "Queued");
-          const draining = yield* Effect.forkScoped(first.drain(), { startImmediately: true });
-          const next = submission({ number: 44, item: "another-item" });
-          yield* first.submit(next);
-          yield* Deferred.succeed(finish, undefined);
-          yield* Fiber.join(draining);
-          const completed = yield* first.inspect(accepted.runId);
-          assert.strictEqual(completed.run.state._tag, "Succeeded");
-          assert.strictEqual(completed.attempts.length, 1);
-          assert.strictEqual((yield* Ref.get(plans)).length, 2);
-          yield* Scope.close(firstScope, Exit.void);
-
-          const secondScope = yield* Scope.make();
-          const second = Context.get(
-            yield* Scope.provide(Layer.build(runtime), secondScope),
-            RunEngine,
-          );
-          for (const pending of [queued, next]) {
-            const completed = yield* waitFor(
-              second,
-              yield* runIdFor(pending),
-              ({ run }) => run.state._tag === "Succeeded",
-            );
-            assert.strictEqual(completed.attempts.length, 1);
-          }
-          yield* Scope.close(secondScope, Exit.void);
-        }),
-      ),
-    ),
-  );
-
-  it.live("a host shutdown latch closes admission before startup recovery", () =>
-    withInstance((directory) =>
-      Effect.scoped(
-        Effect.gen(function* () {
-          const entered = yield* Deferred.make<void>();
-          const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
-            Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never)),
-            Effect.succeed(stepResult("recovered after restart")),
-          ]);
-          const runtime = engineLayer(directory, executorLayer(plans));
-          const firstScope = yield* Scope.make();
-          const first = Context.get(
-            yield* Scope.provide(Layer.build(runtime), firstScope),
-            RunEngine,
-          );
-          const accepted = yield* first.submit(submission({ number: 48 }));
-          assert(accepted._tag === "Claimed");
-          yield* Deferred.await(entered);
-          yield* Scope.close(firstScope, Exit.void);
-
-          const stopped = yield* Deferred.make<void>();
-          yield* Deferred.succeed(stopped, undefined);
-          const secondScope = yield* Scope.make();
-          const second = Context.get(
-            yield* Scope.provide(Layer.build(runtime), secondScope).pipe(
-              Effect.provideService(RunEngineShutdown, stopped),
-            ),
-            RunEngine,
-          );
-          yield* second.drain();
-          assert.strictEqual((yield* second.inspect(accepted.runId)).attempts.length, 1);
-          assert.strictEqual((yield* Ref.get(plans)).length, 1);
-          yield* Scope.close(secondScope, Exit.void);
-
-          yield* Effect.gen(function* () {
-            const engine = yield* RunEngine;
-            const recovered = yield* waitFor(
-              engine,
-              accepted.runId,
-              ({ run }) => run.state._tag === "Succeeded",
-            );
-            assert.strictEqual(recovered.attempts.length, 2);
-          }).pipe(Effect.provide(runtime));
-        }),
-      ),
-    ),
-  );
-
-  it.live("defers an automatic retry during drain without adding an interruption failure", () =>
-    withInstance((directory) =>
-      Effect.scoped(
-        Effect.gen(function* () {
-          const started = yield* Deferred.make<void>();
-          const finish = yield* Deferred.make<void>();
-          const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
-            Deferred.succeed(started, undefined).pipe(
-              Effect.andThen(Deferred.await(finish)),
-              Effect.andThen(
-                new InfraFailure({ message: "temporary worker failure", cause: "test" }),
-              ),
-            ),
-            Effect.succeed(stepResult("retried after restart")),
-          ]);
-          const runtime = engineLayer(directory, executorLayer(plans));
-          const firstScope = yield* Scope.make();
-          const first = Context.get(
-            yield* Scope.provide(Layer.build(runtime), firstScope),
-            RunEngine,
-          );
-          const accepted = yield* first.submit(submission({ number: 45 }));
-          assert(accepted._tag === "Claimed");
-          yield* Deferred.await(started);
-          const draining = yield* Effect.forkScoped(first.drain(), { startImmediately: true });
-          yield* Deferred.succeed(finish, undefined);
-          yield* Fiber.join(draining);
-          assert.strictEqual((yield* first.inspect(accepted.runId)).attempts.length, 1);
-          assert.strictEqual((yield* Ref.get(plans)).length, 1);
-          yield* Scope.close(firstScope, Exit.void);
-          const secondScope = yield* Scope.make();
-          const second = Context.get(
-            yield* Scope.provide(Layer.build(runtime), secondScope),
-            RunEngine,
-          );
-          const completed = yield* waitFor(
-            second,
-            accepted.runId,
-            ({ run }) => run.state._tag === "Succeeded",
-          );
-          assert.strictEqual(completed.attempts.length, 2);
-          const outcome = completed.attempts[0]?.outcome;
-          assert(
-            outcome !== undefined && Option.isSome(outcome) && outcome.value._tag === "Failed",
-          );
-          assert(outcome.value.failure._tag === "InfraFailure");
-          assert.strictEqual(outcome.value.failure.message, "temporary worker failure");
-          yield* Scope.close(secondScope, Exit.void);
-        }),
-      ),
-    ),
   );
 
   it.live("starts an approved Run whose approval committed just before a crash", () =>
