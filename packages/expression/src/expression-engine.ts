@@ -108,7 +108,8 @@ export interface ExpressionEngineService {
   /**
    * The string literals the expression compares against the `name` field of
    * values reached from `memberPath`, following macro bindings and collection
-   * transformations. Config validation uses it to spot undeclared labels.
+   * transformations. It accepts the syntax the checks accept, optional
+   * selection (`.?`) included. Config validation uses it to spot undeclared labels.
    */
   readonly relatedStringLiterals: (
     source: Source,

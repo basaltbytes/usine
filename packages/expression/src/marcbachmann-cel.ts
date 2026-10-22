@@ -1,11 +1,11 @@
 import {
   type ASTNode,
   Environment as CelEnvironment,
+  type EnvironmentOptions,
   ParseError as CelParseError,
   type ParseResult,
   TypeError as CelTypeError,
   type TypeCheckResult,
-  parse,
 } from "@marcbachmann/cel-js";
 import { Effect, Layer, Option, Predicate, Result, Schema } from "effect";
 import { type Environment, TypeReference } from "./environment.ts";
@@ -18,6 +18,20 @@ import {
 } from "./expression-engine.ts";
 
 const decodeTypeReference = Schema.decodeUnknownSync(TypeReference);
+
+/**
+ * The options of every cel-js environment the layer builds, whether it checks,
+ * evaluates, or parses for {@link relatedStringLiterals}. Every variable must
+ * be declared. Optional types are on, so expressions can use `.?` and `[?]`
+ * selection and `optional` helpers such as `orValue` (#312). The label
+ * analysis shares these options because a parser without optional types
+ * rejects `.?`: one Loop using it would fail the analysis, and the instance
+ * would load without any undeclared-label warning.
+ */
+const ENVIRONMENT_OPTIONS = {
+  unlistedVariablesAreDyn: false,
+  enableOptionalTypes: true,
+} as const satisfies EnvironmentOptions;
 
 type VendorCheckError = CelParseError | CelTypeError;
 
@@ -224,13 +238,20 @@ const scanRelatedLiterals = (
   ];
 };
 
+/**
+ * The literals {@link scanRelatedLiterals} collects in `source`, parsed with
+ * `parser`, an environment built with {@link ENVIRONMENT_OPTIONS} so it reads
+ * the syntax that checking accepts. Parsing reads no variable or type, so one
+ * parser serves every expression.
+ */
 const relatedStringLiterals = Effect.fn("ExpressionEngine.relatedStringLiterals")(function* (
+  parser: CelEnvironment,
   source: Source,
   memberPath: ReadonlyArray<string>,
 ) {
   if (memberPath.length === 0) return [];
   const ast = yield* Effect.try({
-    try: () => parse(source).ast,
+    try: () => parser.parse(source).ast,
     catch: (cause) =>
       cause instanceof CelParseError
         ? checkFailure(source, cause)
@@ -252,7 +273,7 @@ type EnvironmentPurpose = "check" | "evaluate";
  * `T == null`, from which cel-js derives `!=` and the reversed operand order.
  */
 const makeEnvironment = (descriptor: Environment, purpose: EnvironmentPurpose): CelEnvironment => {
-  const environment = new CelEnvironment({ unlistedVariablesAreDyn: false });
+  const environment = new CelEnvironment(ENVIRONMENT_OPTIONS);
   const nullableTypes = new Set<TypeReference>();
   for (const objectType of descriptor.types) {
     environment.registerType(objectType.name, {
@@ -533,6 +554,7 @@ const decodeScalar = Schema.decodeUnknownEffect(Scalar);
 
 const makeExpressionEngine = () => {
   const runtimes = celRuntimes();
+  const parser = new CelEnvironment(ENVIRONMENT_OPTIONS);
 
   const checkBoolean = Effect.fn("ExpressionEngine.checkBoolean")(
     (source: Source, environment: Environment): Effect.Effect<void, ExpressionCheckError> =>
@@ -597,7 +619,8 @@ const makeExpressionEngine = () => {
   });
 
   return ExpressionEngine.of({
-    relatedStringLiterals,
+    relatedStringLiterals: (source, memberPath) =>
+      relatedStringLiterals(parser, source, memberPath),
     checkBoolean,
     checkScalar,
     evaluateBoolean,
@@ -610,7 +633,10 @@ const makeExpressionEngine = () => {
  * Provides {@link ExpressionEngine} on `@marcbachmann/cel-js`, pinned to 8.0.0 as
  * the CEL seam requires
  * ([ADR 0004](../../../docs/adr/0004-loop-files-markdown-cel-frontmatter.md)).
- * The layer has no requirements. Each built layer sets up the cel-js
+ * The layer has no requirements. Expressions can use CEL optional types: `.?`
+ * and `[?]` selection, and `optional` helpers such as `orValue`. A nullable
+ * field that holds `null` is present, so `item.?milestone` holds `null`, while
+ * `item.?milestone.?title` holds no value. Each built layer sets up the cel-js
  * environment of an {@link Environment} once for checking and once for
  * evaluation, the first time an expression needs it, and reuses it for every
  * later call with the same descriptor. It also keeps each expression's check
