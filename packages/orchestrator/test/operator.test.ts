@@ -297,6 +297,18 @@ const apiParent = sessionOf("api-parent", "pi", "openai/gpt-5.5", "developer");
 const claudeChild = sessionOf("claude-child", "claude", "claude-opus-4-7", "developer");
 const planParent = sessionOf("plan-parent", "pi", "openai-codex/gpt-5.5", "developer");
 const codexChild = sessionOf("codex-child", "codex", "gpt-5.6-sol", "reviewer");
+/** A Claude Code child on the SSH Worker, whose Gateway paid its model requests with an API key. */
+const gatewayClaudeChild = new ChildSession({
+  id: AgentSessionId.make("gateway-claude-child"),
+  parentId: AgentSessionId.make("parent-of-gateway-claude-child"),
+  agent: AgentName.make("developer"),
+  brain: new BrainSpec({
+    harness: "claude",
+    model: ModelId.make("claude-opus-4-7"),
+    effort: "high",
+  }),
+  gatewayCredential: Option.some("api-key"),
+});
 /** The transcript row `sequence` of `attempt`: `session` reports `tokens` so far, priced at `usd`. */
 const tokenReport = (
   attempt: AttemptId,
@@ -332,6 +344,7 @@ const usageReports = (
     [attemptId, claudeChild, 20_000, 1.25],
     [retryAttemptId, planParent, 800, 0.3],
     [retryAttemptId, codexChild, 5_000, null],
+    [retryAttemptId, gatewayClaudeChild, 3_000, 0.25],
   ] as const
 ).map(([attempt, session, tokens, usd], index) =>
   tokenReport(attempt, session, tokens, usd, 1_000 + index),
@@ -768,7 +781,7 @@ describe("Operator", () => {
   });
 
   it.effect(
-    "details the Run's Worker, how each Attempt's Worker is reached, Attempt time, why each Attempt began, and its tokens per session and pool",
+    "details the Run's Worker, how each Attempt's Worker is reached, Attempt time, why each Attempt began, and its tokens per session and pool, with a Claude Code child its Gateway paid with an API key among API keys",
     () =>
       Effect.gen(function* () {
         const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
@@ -844,7 +857,7 @@ describe("Operator", () => {
               ["InfraRetry", "2026-08-31T12:09:00.000Z"],
             ],
           );
-          assert.strictEqual(detail.usage.tokens, 27_300);
+          assert.strictEqual(detail.usage.tokens, 30_300);
           assert.deepStrictEqual(
             detail.usage.pools.map(
               ({ pool, tokens, cost }): readonly [string, number, object | null] => [
@@ -854,29 +867,47 @@ describe("Operator", () => {
               ],
             ),
             [
-              ["apiKeys", 1_500, { usd: 0.75, estimate: false }],
+              ["apiKeys", 4_500, { usd: 1, estimate: false }],
               ["claudePlan", 20_000, { usd: 1.25, estimate: true }],
               ["chatgptPlan", 5_800, null],
             ],
           );
+          // The Claude Code child on the local Worker paid with the Claude plan's login, the
+          // one on the SSH Worker with its Gateway's API key, priced at the model's rate.
           assert.deepStrictEqual(
-            detail.usage.sessions.map(({ attemptId: attempt, session, tokens, cost }) => [
-              attempt,
-              session.id,
-              tokens,
-              cost?.usd ?? null,
-            ]),
+            detail.usage.sessions.map(
+              ({
+                attemptId: attempt,
+                session,
+                pool,
+                tokens,
+                cost,
+              }): readonly [string, string, string, number, object | null] => [
+                attempt,
+                session.id,
+                pool,
+                tokens,
+                cost === null ? null : { ...cost },
+              ],
+            ),
             [
-              [attemptId, "api-parent", 1_500, 0.75],
-              [attemptId, "claude-child", 20_000, 1.25],
-              [retryAttemptId, "plan-parent", 800, null],
-              [retryAttemptId, "codex-child", 5_000, null],
+              [attemptId, "api-parent", "apiKeys", 1_500, { usd: 0.75, estimate: false }],
+              [attemptId, "claude-child", "claudePlan", 20_000, { usd: 1.25, estimate: true }],
+              [retryAttemptId, "plan-parent", "chatgptPlan", 800, null],
+              [retryAttemptId, "codex-child", "chatgptPlan", 5_000, null],
+              [
+                retryAttemptId,
+                "gateway-claude-child",
+                "apiKeys",
+                3_000,
+                { usd: 0.25, estimate: false },
+              ],
             ],
           );
 
           // The ended Attempt's reports are read once; the running one's on every poll.
           const again = yield* (yield* Operator).detail(instance, runId);
-          assert.strictEqual(again.usage.tokens, 27_300);
+          assert.strictEqual(again.usage.tokens, 30_300);
           assert.deepStrictEqual(
             again.run.attempts.map(({ workerAccess }) => workerAccess),
             [new LocalWorkerAccess(), null],
@@ -904,13 +935,13 @@ describe("Operator", () => {
               durationMillis: 300_000,
               runningSince: ["2026-08-31T12:06:00.000Z"],
               unmeasured: 0,
-              tokens: 27_300,
+              tokens: 30_300,
               pools: [
-                ["apiKeys", 1_500, 0.75, false],
+                ["apiKeys", 4_500, 1, false],
                 ["claudePlan", 20_000, 1.25, false],
                 ["chatgptPlan", 5_800, null, false],
               ],
-              cost: { usd: 2, estimate: true },
+              cost: { usd: 2.25, estimate: true },
             },
           );
           assert.deepStrictEqual(usageQueries, [
@@ -927,11 +958,11 @@ describe("Operator", () => {
           const laterCard = later.projects[0]?.board.lanes
             .flatMap(({ items }) => items)
             .find(({ runs }) => runs.some(({ id }) => id === runId));
-          assert.strictEqual(laterCard?.usage.tokens, 31_300);
+          assert.strictEqual(laterCard?.usage.tokens, 34_300);
           assert.deepStrictEqual(
             laterCard?.usage.pools.map(({ pool, tokens }) => [pool, tokens]),
             [
-              ["apiKeys", 1_500],
+              ["apiKeys", 4_500],
               ["claudePlan", 20_000],
               ["chatgptPlan", 9_800],
             ],

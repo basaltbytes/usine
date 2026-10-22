@@ -1,4 +1,5 @@
-import { Effect, Option, Schema } from "effect";
+import { Effect, Match, Option, Schema } from "effect";
+import { GatewayCredentialKind } from "../worker.ts";
 import { AgentName } from "./agent.ts";
 import { BrainSpec } from "./brain.ts";
 
@@ -45,6 +46,15 @@ export class ChildSession extends Schema.TaggedClass<ChildSession>("Agent/ChildS
     parentId: AgentSessionId,
     agent: AgentName,
     brain: BrainSpec,
+    /**
+     * The kind of credential the Gateway in front of the child's Worker paid
+     * its model requests with (ADR 0027). None when the child paid with its
+     * harness's own login, as on a Worker without a Gateway, and for sessions
+     * recorded before it was.
+     */
+    gatewayCredential: Schema.OptionFromOptionalKey(GatewayCredentialKind).pipe(
+      Schema.withConstructorDefault(Effect.succeed(Option.none<GatewayCredentialKind>())),
+    ),
   },
 ) {}
 
@@ -152,21 +162,39 @@ export const BillingPool = Schema.Literals(["apiKeys", "claudePlan", "chatgptPla
 export type BillingPool = typeof BillingPool.Type;
 
 /**
- * The billing pool a started session draws from, read from its brain: Claude
- * Code spends the Claude plan, Codex the ChatGPT plan, and Pi the ChatGPT plan
- * through its `openai-codex` provider or API keys otherwise. A Pi session whose
- * credential cannot spend that pool never starts (ADR 0021).
+ * The billing pool a started session draws from, read from its brain and the
+ * kind of credential a Gateway paid its model requests with, if one did.
+ * Claude Code spends API keys when its Worker's Gateway pays with an API
+ * key, and the Claude plan otherwise: with its own login, or with the
+ * Gateway's subscription token (ADR 0013). Codex spends the ChatGPT plan,
+ * and Pi the ChatGPT plan through its `openai-codex` provider or API keys
+ * otherwise. A Pi session whose credential cannot spend that pool never
+ * starts (ADR 0021).
  */
-export const brainPool = (brain: BrainSpec): BillingPool => {
+export const brainPool = (
+  brain: BrainSpec,
+  gatewayCredential: Option.Option<GatewayCredentialKind>,
+): BillingPool => {
   switch (brain.harness) {
     case "claude":
-      return "claudePlan";
+      return Option.contains(gatewayCredential, "api-key") ? "apiKeys" : "claudePlan";
     case "codex":
       return "chatgptPlan";
     case "pi":
       return brain.model.startsWith("openai-codex/") ? "chatgptPlan" : "apiKeys";
   }
 };
+
+/**
+ * The billing pool a recorded session drew from (`brainPool`): the Pi parent
+ * runs in the orchestrator and pays with its own credential, and a child
+ * with the credential of its Worker's Gateway when it records one.
+ */
+export const sessionPool = (session: AgentSession): BillingPool =>
+  Match.valueTags(session, {
+    ParentSession: ({ brain }) => brainPool(brain, Option.none()),
+    ChildSession: ({ brain, gatewayCredential }) => brainPool(brain, gatewayCredential),
+  });
 
 /** A billing pool's observed usage for one allowance window. */
 export class RateLimitWindow extends Schema.Class<RateLimitWindow>("Agent/RateLimitWindow")({
