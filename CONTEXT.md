@@ -178,7 +178,7 @@ The coding-agent runtime set in an agent's brain spec (Claude Code, Codex CLI, o
 _Avoid_: backend, adapter (the usine code that drives a harness, not the concept), runner, agent (the named Agent entity, not the runtime)
 
 **Pool**:
-The billing source that an attempt's usage is charged to: API keys (API-key-authenticated Pi sessions), the Claude plan (Claude Code children), or the ChatGPT plan (Codex children and subscription-authenticated Pi parents). Usage in each pool is measured by that pool's native meter. A pool is not a harness: two harnesses can share one pool.
+The billing source that an attempt's usage is charged to: API keys (API-key-authenticated Pi sessions, and Claude Code children that a gateway pays for with its API key), the Claude plan (other Claude Code children), or the ChatGPT plan (Codex children and subscription-authenticated Pi parents). Usage in each pool is measured by that pool's native meter. A pool is not a harness: two harnesses can share one pool.
 _Avoid_: budget (an amount, not a source), account, quota
 
 **Runaway guard**:
