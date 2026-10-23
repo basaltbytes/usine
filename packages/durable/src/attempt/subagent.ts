@@ -17,6 +17,7 @@ import {
   ChildSessionBudget,
   ChildSessionCount,
   SessionFinished,
+  sessionPool,
 } from "@usine/core/agent/session";
 import { Deferred, Effect, Exit, Fiber, Match, Option, Result, Stream } from "effect";
 import { durableError } from "../harness.ts";
@@ -139,11 +140,13 @@ export const subagentTool = (services: ExtensionServices) => {
       );
     }
     const request = yield* Deferred.await(hub.attached);
+    // Read as the child starts, so a preflight since the Attempt launched applies to it.
     const session = new ChildSession({
       id: AgentSessionId.make(`${parentId}:child:${attemptedChildren}`),
       parentId,
       agent: spec.agent.name,
       brain: spec.agent.brain,
+      gatewayCredential: yield* request.gatewayCredential,
     });
     const childRequest = new ChildRequest({
       session,
@@ -162,6 +165,7 @@ export const subagentTool = (services: ExtensionServices) => {
       attemptedChildren,
       maxChildren: spec.maxChildren,
       sessionId: session.id,
+      pool: sessionPool(session),
       taskExcerpt: excerpt,
     });
     // The child's own logs, including its fibers', name the Attempt: this tool runs outside it.

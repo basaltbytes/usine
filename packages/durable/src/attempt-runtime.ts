@@ -3,7 +3,7 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptId } from "@usine/core/attempt";
 import { AgentFailure, AttemptFailure } from "@usine/core/attempt/failure";
 import { StepResult, type StepResultFact } from "@usine/core/step/result";
-import { WorkerName } from "@usine/core/worker";
+import { GatewayCredentialKind, WorkerName } from "@usine/core/worker";
 import { Context, type Duration, Effect, type Option, Result, Schema } from "effect";
 
 /**
@@ -37,6 +37,20 @@ export class AttemptRequest extends Schema.Class<AttemptRequest>("@usine/durable
    * host the variables are exported on top of the remote machine's own environment.
    */
   environment: Schema.Record(Schema.String, Schema.String),
+  /**
+   * Reads the kind of credential the Gateway in front of the Worker pays the
+   * children's model requests with (ADR 0027), as the Worker's latest
+   * preflight recorded it. The `subagent` tool reads it as each child starts
+   * and records it on the child's session, so usage counts the child in the
+   * pool that pays: a preflight while the Attempt runs applies to its next
+   * child, and a child already started keeps the kind its session recorded.
+   * Reads none when the children pay with their harness's own login, as on a
+   * Worker without a Gateway.
+   */
+  gatewayCredential: Schema.declare(
+    (u): u is Effect.Effect<Option.Option<GatewayCredentialKind>> => Effect.isEffect(u),
+    { expected: "an Effect that reads the Gateway's credential kind" },
+  ),
 }) {}
 
 /** What the parent said when it finished. Commits, pull requests, and comments are harvested by the executor afterwards. */

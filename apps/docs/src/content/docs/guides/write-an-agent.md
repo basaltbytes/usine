@@ -59,7 +59,7 @@ The parent and every child receive the persona, so write it for both. Only the p
 
 | `harness` | Runs                                                                                                      | Requirements where children run                                                                               | Billed to        |
 | --------- | --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ---------------- |
-| `claude`  | the `claude` executable through the Claude Agent SDK, with permission prompts bypassed and only the user's own Claude settings | `claude` on the `PATH`, logged in with a Claude subscription                                                    | the Claude plan  |
+| `claude`  | the `claude` executable through the Claude Agent SDK, with permission prompts bypassed and only the user's own Claude settings | `claude` on the `PATH`, logged in with a Claude subscription                                                    | the Claude plan, or API keys behind a Gateway that pays with its API key |
 | `codex`   | `codex app-server`, with approval policy `never` and the `danger-full-access` sandbox                     | Codex CLI 0.144.0 or 0.153.4, logged in with ChatGPT; usine refuses an API-key login                            | the ChatGPT plan |
 | `pi`      | the Pi coding agent inside the orchestrator process                                                       | a local Worker, and an API key for the model's provider in Pi's configuration                                    | API keys         |
 

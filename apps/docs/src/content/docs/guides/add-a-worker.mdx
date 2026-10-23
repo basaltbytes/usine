@@ -243,7 +243,7 @@ The files are in `infra/hetzner/gateway/`, and `infra/hetzner/gateway/README.md`
          admin_token_env: USINE_GATEWAY_ADMIN_TOKEN
    ```
 
-   Add `llm_providers: [anthropic]` under `gateway` when the Gateway has `ANTHROPIC_API_KEY`. Claude Code children then call `llm.gw.internal/anthropic` with the caller token instead of a login on the Worker, and preflight checks only the `claude` binary. Remove the Claude Code hosts, `api.anthropic.com` and `platform.claude.com`, from the Gateway's `/etc/usine-gateway/egress-allowlist` and restart the service, so that no tunnel can send the caller token past the Gateway. Codex always uses its login on the Worker.
+   Add `llm_providers: [anthropic]` under `gateway` when the Gateway has `ANTHROPIC_API_KEY`. Claude Code children then call `llm.gw.internal/anthropic` with the caller token instead of a login on the Worker, and preflight checks only the `claude` binary. Preflight also asks the Gateway which Anthropic credential it holds: with an API key, the Run page counts these children under API keys, and with a subscription token, under the Claude plan. A Gateway that holds no Anthropic credential fails the preflight. Remove the Claude Code hosts, `api.anthropic.com` and `platform.claude.com`, from the Gateway's `/etc/usine-gateway/egress-allowlist` and restart the service, so that no tunnel can send the caller token past the Gateway. Codex always uses its login on the Worker.
 
 8. Start the orchestrator with the token in its environment:
 

@@ -1,7 +1,7 @@
 import type { BrainSpec, Harness } from "@usine/core/agent/brain";
 import { HarnessReady, HarnessUnavailableError } from "@usine/core/agent/capability";
-import type { WorkerName } from "@usine/core/worker";
-import { Effect, Redacted } from "effect";
+import type { GatewayCredentialKind, WorkerName } from "@usine/core/worker";
+import { Effect, Option, Redacted, Ref } from "effect";
 import type { CommandResult } from "../../child-command.ts";
 import { ExecutorOperationError, WorkerCapabilityError } from "../../executor.ts";
 import type { HarnessProbe } from "../../harness-preflight.ts";
@@ -38,11 +38,94 @@ const unreachable = (host: string, command: string, result: CommandResult) =>
   });
 
 /**
+ * Warns that the Gateway is too old to report the kind of its Anthropic
+ * credential, once per Worker (#248): each preflight that runs again, after
+ * a reload gives the Worker more slots or a brain, logs at debug level
+ * instead.
+ */
+const warnOfUnreportedCredential = (worker: WorkerName, gateway: MachineGateway) =>
+  Ref.getAndSet(gateway.warnedOfUnreportedCredential, true).pipe(
+    Effect.flatMap((warned) =>
+      warned
+        ? Effect.logDebug(
+            "SSH Worker's Gateway still does not report the kind of its Anthropic credential; already warned for this Worker",
+            { worker, gateway: gateway.forward.gateway },
+          )
+        : Effect.logWarning(
+            "SSH Worker's Gateway does not report the kind of its Anthropic credential; its Claude Code children count in the Claude plan pool until the Gateway is upgraded",
+            { worker, gateway: gateway.forward.gateway },
+          ),
+    ),
+  );
+
+/**
+ * Reads which kind of Anthropic credential the Gateway pays Claude Code
+ * with, and records it with the Worker so its children's sessions name the
+ * pool that pays (ADR 0013). A Gateway that holds no Anthropic credential
+ * while the Worker's `llmProviders` lists it would refuse every Claude Code
+ * request, so it fails the preflight. A Gateway too old to report its
+ * credentials keeps the Claude plan pool, with a warning logged once per
+ * Worker; every preflight still reads the kind, so an upgraded Gateway's is
+ * recorded at the next one.
+ */
+const recordAnthropicCredential = Effect.fn("SshExecutor.recordAnthropicCredential")(function* (
+  worker: WorkerName,
+  gateway: MachineGateway,
+) {
+  yield* Effect.annotateCurrentSpan({ worker, gateway: gateway.forward.gateway });
+  const reported = yield* gateway.admin.providers.pipe(
+    Effect.mapError((error) => gatewayGap(worker, error.message, error)),
+  );
+  const credential = yield* Option.match(reported, {
+    onNone: () =>
+      warnOfUnreportedCredential(worker, gateway).pipe(
+        Effect.as(Option.none<GatewayCredentialKind>()),
+      ),
+    onSome: ({ providers }) => {
+      const anthropic = providers.find(({ provider }) => provider === "anthropic");
+      return anthropic === undefined
+        ? Effect.fail(
+            gatewayGap(
+              worker,
+              `SSH Worker ${worker}'s Gateway holds no Anthropic credential, but the Worker's llm_providers lists anthropic; set ANTHROPIC_API_KEY or USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN on the Gateway, or remove anthropic from llm_providers`,
+              new Error(
+                `the Gateway reports ${providers.map(({ provider }) => provider).join(", ") || "no provider"}`,
+              ),
+            ),
+          )
+        : Effect.succeed(Option.some(anthropic.credential));
+    },
+  });
+  yield* Ref.set(gateway.anthropicCredential, credential);
+  return credential;
+});
+
+/**
+ * The kind of credential the Gateway pays a child of `harness` with, as the
+ * Worker's last preflight recorded it: Claude Code's Anthropic credential
+ * when the Gateway holds it. Codex and Pi pay with their own logins.
+ */
+export const gatewayCredentialFor = (
+  gateway: MachineGateway,
+  harness: Harness,
+): Effect.Effect<Option.Option<GatewayCredentialKind>> => {
+  switch (harness) {
+    case "claude":
+      return Ref.get(gateway.anthropicCredential);
+    case "codex":
+    case "pi":
+      return Effect.succeedNone;
+  }
+};
+
+/**
  * Verifies the Gateway in front of an SSH Worker without attaching anything:
  * the executor's forward to its admin API opens, the admin API answers this
  * process with the admin token, the machine's sshd accepts the variables
  * that carry the caller token, and the machine resolves and reaches
- * `git.<domain>`, which refuses a request without a caller token.
+ * `git.<domain>`, which refuses a request without a caller token. When the
+ * Gateway holds the Anthropic credential, it records the kind of that
+ * credential with the Worker (`recordAnthropicCredential`).
  */
 export const verifyGateway = Effect.fn("SshExecutor.verifyGateway")(function* (
   commands: RemoteCommands,
@@ -66,6 +149,9 @@ export const verifyGateway = Effect.fn("SshExecutor.verifyGateway")(function* (
   const { attachments } = yield* admin.list.pipe(
     Effect.mapError((error) => gatewayGap(worker, error.message, error)),
   );
+  const anthropicCredential = settings.llmProviders.includes("anthropic")
+    ? yield* recordAnthropicCredential(worker, gateway)
+    : Option.none<GatewayCredentialKind>();
 
   const { sent } = gatewayEnvironment({
     domain: settings.domain,
@@ -118,6 +204,7 @@ export const verifyGateway = Effect.fn("SshExecutor.verifyGateway")(function* (
     adminPort: settings.adminPort,
     forwardPort: open.url.port,
     llmProviders: settings.llmProviders.join(","),
+    anthropicCredential: Option.getOrElse(anthropicCredential, () => "none"),
     attachments: attachments.filter((attachment) => attachment.worker === worker).length,
   });
 });

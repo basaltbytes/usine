@@ -1,6 +1,7 @@
 import type { SshCommand } from "@usine/agents/child-host";
 import type {
   GatewayAdminPort,
+  GatewayCredentialKind,
   GatewayDomain,
   GatewayLlmProvider,
   SshDestination,
@@ -9,7 +10,7 @@ import type {
   WorkerName,
   WorkerRoot,
 } from "@usine/core/worker";
-import type { Effect, Option, Redacted } from "effect";
+import type { Effect, Option, Redacted, Ref } from "effect";
 import type { HarnessProbe } from "../harness-preflight.ts";
 import type { RemoteMachine } from "../remote/machine.ts";
 import type { GatewayAdmin } from "./gateway/admin.ts";
@@ -70,6 +71,20 @@ export interface MachineGateway {
   readonly settings: SshWorkerGateway;
   readonly forward: GatewayForward;
   readonly admin: GatewayAdmin;
+  /**
+   * The kind of Anthropic credential the Gateway pays Claude Code's requests
+   * with, as the Worker's last preflight read it from the admin API. None
+   * before the first preflight, when the Worker's `llmProviders` does not
+   * list `anthropic`, and when the Gateway is too old to report it.
+   */
+  readonly anthropicCredential: Ref.Ref<Option.Option<GatewayCredentialKind>>;
+  /**
+   * Whether a preflight of this Worker has already warned that the Gateway
+   * is too old to report the kind of its Anthropic credential. The warning
+   * is logged once per Worker; later preflights still read the kind, so an
+   * upgraded Gateway's kind is recorded at the next one.
+   */
+  readonly warnedOfUnreportedCredential: Ref.Ref<boolean>;
 }
 
 /** An SSH Worker's machine with the child host that every command and child on it runs through. */

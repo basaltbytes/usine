@@ -13,7 +13,7 @@ import { remoteExecutorFor } from "../remote/remote.ts";
 import { sshCredentialsFor } from "./credentials.ts";
 import { gatewayAttachmentsFor } from "./gateway/attachments.ts";
 import { gatewayRepositoryUrl } from "./gateway/environment.ts";
-import { gatewayHarnessProbe } from "./gateway/preflight.ts";
+import { gatewayCredentialFor, gatewayHarnessProbe } from "./gateway/preflight.ts";
 import type { SshExecutorOptions, SshMachine } from "./model.ts";
 import { sshPreflightFor } from "./preflight.ts";
 import { sshMachinesFor, SshWorkers } from "./workers.ts";
@@ -86,6 +86,11 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
         Option.match(machine.gateway, {
           onNone: () => `https://github.com/${repository}.git`,
           onSome: ({ settings }) => gatewayRepositoryUrl(settings.domain, repository),
+        }),
+      gatewayCredential: (machine, harness) =>
+        Option.match(machine.gateway, {
+          onNone: () => Effect.succeedNone,
+          onSome: (gateway) => gatewayCredentialFor(gateway, harness),
         }),
       grantFor,
       readOnlyAccessGap: Option.none(),

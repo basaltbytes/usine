@@ -33,7 +33,6 @@ What the code doesn't do yet, or does badly, grouped by area. The issue numbers 
 ## Cost accounting
 
 - [#35][]: Attempt rows have no usage summary and the UI has no Usage page; token counts and rate windows exist only as transcript envelopes ([schema.ts:169][]).
-- [#248][]: usage of Claude Code children paid by the Gateway's API key is reported under the Claude plan pool.
 
 ## Run engine and recovery
 
@@ -143,7 +142,6 @@ See [The dogfood instance's Loops](/architecture/loops-shipped/) for the Loop fi
 [#240]: https://github.com/basaltbytes/usine/issues/240
 [#242]: https://github.com/basaltbytes/usine/issues/242
 [#243]: https://github.com/basaltbytes/usine/issues/243
-[#248]: https://github.com/basaltbytes/usine/issues/248
 [#249]: https://github.com/basaltbytes/usine/issues/249
 [#254]: https://github.com/basaltbytes/usine/issues/254
 [#258]: https://github.com/basaltbytes/usine/issues/258

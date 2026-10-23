@@ -1,6 +1,6 @@
 import { RepositoryName } from "@usine/core/repository";
-import { WorkerName } from "@usine/core/worker";
-import { Schema } from "effect";
+import { GatewayCredentialKind, WorkerName } from "@usine/core/worker";
+import { Option, Schema } from "effect";
 import {
   HttpApi,
   HttpApiEndpoint,
@@ -17,6 +17,13 @@ import {
   AttachmentId,
 } from "../attachment/attachment.ts";
 import { CallerToken } from "../caller/caller.ts";
+import {
+  type AnthropicProvider,
+  credentialKind,
+  LlmProviderName,
+  type LlmProviders,
+  type OpenAiProvider,
+} from "../llm/llm.ts";
 
 export { AttachmentId, InstallationCredential } from "../attachment/attachment.ts";
 export { CallerToken, GATEWAY_TOKEN_HEADER } from "../caller/caller.ts";
@@ -70,6 +77,41 @@ export class AttachmentList extends Schema.Class<AttachmentList>("@usine/gateway
   attachments: Schema.Array(AttachmentSummary),
 }) {}
 
+/** An LLM provider the gateway holds a credential for, with the kind of that credential and never the credential itself. */
+export class LlmProviderSummary extends Schema.Class<LlmProviderSummary>(
+  "@usine/gateway/LlmProviderSummary",
+)({
+  provider: LlmProviderName,
+  credential: GatewayCredentialKind,
+}) {}
+
+/**
+ * The LLM providers the gateway forwards to now, each with the kind of
+ * credential it sends. A provider without a credential is absent, since the
+ * gateway refuses its requests.
+ */
+export class LlmProviderList extends Schema.Class<LlmProviderList>(
+  "@usine/gateway/LlmProviderList",
+)({
+  providers: Schema.Array(LlmProviderSummary),
+}) {
+  static fromProviders({ anthropic, openai }: LlmProviders): LlmProviderList {
+    const listed = (
+      provider: LlmProviderName,
+      configured: Option.Option<AnthropicProvider | OpenAiProvider>,
+    ) =>
+      Option.toArray(
+        Option.map(
+          configured,
+          (held) => new LlmProviderSummary({ provider, credential: credentialKind(held) }),
+        ),
+      );
+    return new LlmProviderList({
+      providers: [...listed("anthropic", anthropic), ...listed("openai", openai)],
+    });
+  }
+}
+
 /**
  * Requires the gateway's admin token as a bearer token on every admin
  * request; a missing or different token is answered with 401. Clients add the
@@ -87,7 +129,10 @@ const strict = { parseOptions: { onExcessProperty: "error" } } as const;
  * one repository at the start of an Attempt, renew it with the same id before
  * the token expires, and detach it at cleanup. Attachments are in memory:
  * after a gateway restart the executor's next renewal stores the attachment
- * again under its id, so the Attempt's caller token stays valid.
+ * again under its id, so the Attempt's caller token stays valid. The executor
+ * also reads which LLM providers the gateway pays for and with which kind of
+ * credential, so usage reports a Worker's children in the pool that pays
+ * (ADR 0013).
  */
 export const GatewayAdminApi = HttpApi.make("GatewayAdminApi").add(
   HttpApiGroup.make("attachments")
@@ -112,5 +157,8 @@ export const GatewayAdminApi = HttpApi.make("GatewayAdminApi").add(
       }),
       HttpApiEndpoint.get("list", "/v1/attachments", { success: AttachmentList }),
     )
+    .middleware(AdminAuthorization),
+  HttpApiGroup.make("llm")
+    .add(HttpApiEndpoint.get("providers", "/v1/providers", { success: LlmProviderList }))
     .middleware(AdminAuthorization),
 );

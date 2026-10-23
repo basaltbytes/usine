@@ -167,6 +167,7 @@ const makeCodexChild = Effect.gen(function* () {
           model: ModelId.make(thread.model),
           effort: request.session.brain.effort,
         }),
+        gatewayCredential: request.session.gatewayCredential,
       });
       const channel = yield* sessionChannel({
         label: "Codex child session",

@@ -1,7 +1,7 @@
 import type { SshCommand } from "@usine/agents/child-host";
 import { safeSegment } from "@usine/core/repository";
-import type { WorkerName } from "@usine/core/worker";
-import { Context, Effect, Equal, Exit, Option, Scope, SynchronizedRef } from "effect";
+import type { GatewayCredentialKind, WorkerName } from "@usine/core/worker";
+import { Context, Effect, Equal, Exit, Option, Ref, Scope, SynchronizedRef } from "effect";
 import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { WorkerCapabilityError } from "../executor.ts";
@@ -115,8 +115,16 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
       onNone: () => new Set([address.name]),
       onSome: (held) => new Set([...held.workers, address.name]),
     });
+    const anthropicCredential = yield* Ref.make(Option.none<GatewayCredentialKind>());
+    const warnedOfUnreportedCredential = yield* Ref.make(false);
     return {
-      gateway: { settings, forward, admin } satisfies MachineGateway,
+      gateway: {
+        settings,
+        forward,
+        admin,
+        anthropicCredential,
+        warnedOfUnreportedCredential,
+      } satisfies MachineGateway,
       forwards: new Map(current.forwards).set(key, { forward, scope: forwardScope, workers }),
       opened: Option.isNone(shared),
     };

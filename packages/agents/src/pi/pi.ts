@@ -152,6 +152,7 @@ const makePiChild = Effect.gen(function* () {
                 model: started.model,
                 effort: request.session.brain.effort,
               }),
+              gatewayCredential: request.session.gatewayCredential,
             });
             const channel = yield* sessionChannel({
               label: "Pi child session",

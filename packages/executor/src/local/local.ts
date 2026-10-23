@@ -497,6 +497,8 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
           session.launch(prepared.workspace, io, {
             host: new LocalProcess(),
             environment,
+            // A local Worker has no Gateway: every harness pays with its own login.
+            gatewayCredential: Effect.succeedNone,
             harvest: (windows) => harvest(prepared.workspace, credential, environment, windows),
             harvestComments: (windows) =>
               harvestPostedComments(

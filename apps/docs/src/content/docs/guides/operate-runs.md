@@ -65,7 +65,7 @@ The drawer refreshes every second while the Run can be canceled, and the rest of
 
 ### Read the Run page
 
-The Run page has the same header as the drawer, and its second line adds **Tokens**: what the Run's sessions used so far, output plus uncached input, as each harness reports it. Select the number to see it per billing pool and per session under each Attempt. A pool with a dollar rate also shows the price its harness put on that usage: API keys at Pi's catalog price, and the Claude plan at the Agent SDK's price, marked **estimate** because the plan bills no dollars per token. The ChatGPT plan has no dollar rate, so it shows **No dollar rate** and never a price. A pool shows no price when one of its sessions was recorded before usine kept prices.
+The Run page has the same header as the drawer, and its second line adds **Tokens**: what the Run's sessions used so far, output plus uncached input, as each harness reports it. Select the number to see it per billing pool and per session under each Attempt. A pool with a dollar rate also shows the price its harness put on that usage: API keys at Pi's catalog price, and the Claude plan at the Agent SDK's price, marked **estimate** because the plan bills no dollars per token. A Claude Code child on a Worker whose Gateway pays with its API key is under API keys, at the Agent SDK's price without the **estimate** mark. The ChatGPT plan has no dollar rate, so it shows **No dollar rate** and never a price. A pool shows no price when one of its sessions was recorded before usine kept prices.
 
 Beside the outline of the Task, the Event, and the Attempts sits the conversation. Each Attempt in the outline shows why it began, its start time, and how long it took:
 

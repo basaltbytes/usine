@@ -1,7 +1,7 @@
 import {
   AgentSession,
   BillingPool,
-  brainPool,
+  sessionPool,
   TokenCount,
   UsdAmount,
 } from "@usine/core/agent/session";
@@ -16,7 +16,9 @@ import type { AttemptView } from "./attempt.ts";
 /**
  * Dollars a harness priced usage at. `estimate` marks the Claude plan's figure,
  * which the Agent SDK computes from its bundled prices for a subscription that
- * bills no dollars (ADR 0013).
+ * bills no dollars. A Claude Code child that a Gateway paid for with an API key
+ * is in the API keys pool, where the same figure is the model's rate for what
+ * the key was billed, so it is no estimate (ADR 0013).
  */
 export class UsageCostView extends Schema.Class<UsageCostView>("@usine/orchestrator/UsageCostView")(
   { usd: UsdAmount, estimate: Schema.Boolean },
@@ -123,7 +125,7 @@ const runUsage = (reports: ReadonlyArray<TranscriptEntry>): RunUsageView => {
     const key = `${attemptId} ${session.id}`;
     const previous = highest.get(key);
     if (previous !== undefined && previous.tokens >= totalTokens) continue;
-    const pool = brainPool(session.brain);
+    const pool = sessionPool(session);
     highest.set(
       key,
       new SessionUsageView({

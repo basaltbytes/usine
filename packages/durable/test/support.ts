@@ -54,6 +54,7 @@ export const attemptRequest = (
     cwd: "/workspace/usine",
     host,
     environment: workerEnvironment,
+    gatewayCredential: Effect.succeedNone,
   });
 
 /** A temporary folder for one test's storage, removed with the scope. */

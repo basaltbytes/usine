@@ -3,7 +3,7 @@ import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi";
 import { Attachment, type AttachmentId, newAttachmentId } from "../attachment/attachment.ts";
 import { Attachments } from "../attachment/store.ts";
 import { CallerClaims, CallerTokens } from "../caller/caller.ts";
-import { GatewaySettings } from "../settings.ts";
+import { GatewaySettings, SettingsInForce } from "../settings.ts";
 import {
   AdminAuthorization,
   type AttachRequest,
@@ -12,6 +12,7 @@ import {
   AttachmentSummary,
   Detached,
   GatewayAdminApi,
+  LlmProviderList,
 } from "./api.ts";
 
 const encoder = new TextEncoder();
@@ -68,7 +69,7 @@ const store = Effect.fn("GatewayAdmin.store")(function* (id: AttachmentId, reque
   return new Attached({ attachment: AttachmentSummary.fromAttachment(attachment), callerToken });
 });
 
-const handlers = HttpApiBuilder.group(GatewayAdminApi, "attachments", (routes) =>
+const attachmentHandlers = HttpApiBuilder.group(GatewayAdminApi, "attachments", (routes) =>
   routes
     .handle("attach", ({ payload }) =>
       Effect.flatMap(newAttachmentId, (id) => store(id, payload)).pipe(
@@ -95,12 +96,29 @@ const handlers = HttpApiBuilder.group(GatewayAdminApi, "attachments", (routes) =
     ),
 );
 
+/** Reports the providers in force, so the answer follows a reload that changes a credential. */
+const llmHandlers = HttpApiBuilder.group(GatewayAdminApi, "llm", (routes) =>
+  routes.handle(
+    "providers",
+    Effect.fn("GatewayAdmin.providers")(function* () {
+      const { providers } = yield* (yield* SettingsInForce).current;
+      const list = LlmProviderList.fromProviders(providers);
+      yield* Effect.annotateCurrentSpan({
+        providers: list.providers
+          .map(({ provider, credential }) => `${provider}:${credential}`)
+          .join(","),
+      });
+      return list;
+    }),
+  ),
+);
+
 /**
  * The admin API's routes, for an `HttpRouter` the platform serves. Bind it
  * to a loopback or otherwise private address: the executor reaches it
  * through its SSH connection to the gateway.
  */
 export const adminRoutes = HttpApiBuilder.layer(GatewayAdminApi).pipe(
-  Layer.provide(handlers),
+  Layer.provide([attachmentHandlers, llmHandlers]),
   Layer.provide(authorization),
 );

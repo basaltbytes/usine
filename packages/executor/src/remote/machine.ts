@@ -1,9 +1,9 @@
 import type { RemoteShell } from "@usine/agents/child-host";
-import type { BrainSpec } from "@usine/core/agent/brain";
+import type { BrainSpec, Harness } from "@usine/core/agent/brain";
 import type { AttemptId } from "@usine/core/attempt";
 import type { LoopPermissions } from "@usine/core/loop";
 import type { RepositoryName } from "@usine/core/repository";
-import type { WorkerKind, WorkerName } from "@usine/core/worker";
+import type { GatewayCredentialKind, WorkerKind, WorkerName } from "@usine/core/worker";
 import type { Effect, Option, Scope } from "effect";
 import type { CredentialUnavailableError, ExecutorError, ExecutorOperation } from "../executor.ts";
 import type { HarnessProbe } from "../harness-preflight.ts";
@@ -73,6 +73,15 @@ export interface RemoteWorker<M extends RemoteMachine> {
   readonly harnessProbe: (machine: M) => HarnessProbe;
   /** The URL the cached clone on `machine` fetches `repository` from. */
   readonly repositoryUrl: (machine: M, repository: RepositoryName) => string;
+  /**
+   * The kind of credential the Gateway in front of `machine` pays a child of
+   * `harness` with, as the Worker's preflight recorded it; none when the
+   * child pays with its harness's own login, as on a Worker without a Gateway.
+   */
+  readonly gatewayCredential: (
+    machine: M,
+    harness: Harness,
+  ) => Effect.Effect<Option.Option<GatewayCredentialKind>>;
   /** Finds how the Worker gets access to `repository`; fails when no access is configured for it. */
   readonly grantFor: (
     repository: RepositoryName,

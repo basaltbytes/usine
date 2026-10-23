@@ -8,13 +8,18 @@ import {
 import {
   AdminToken,
   adminRoutes,
+  AnthropicApiKey,
+  AnthropicProvider,
   Attachments,
   CallerKey,
   CallerTokens,
   GatewaySettings,
   gatewayServices,
   GITHUB_ORIGINS,
+  type LlmProviders,
   parseEgressAllowlist,
+  type SettingsInForce,
+  UpstreamBase,
 } from "@usine/gateway";
 import { type Duration, Effect, Latch, Layer, Option, Redacted, Result, Schema } from "effect";
 import { TestClock } from "effect/testing";
@@ -93,6 +98,17 @@ const bodyOf = (body: { readonly _tag: string }): AdminCall["body"] =>
     ? decodeAttachRequest(decoder.decode(body.body))
     : Option.none();
 
+/** The Gateway's LLM providers unless a test gives others: an Anthropic API key, as `gatewayAddress` lists by default. */
+const GATEWAY_PROVIDERS: LlmProviders = {
+  anthropic: Option.some(
+    new AnthropicProvider({
+      upstream: UpstreamBase.make("https://api.anthropic.com"),
+      credential: new AnthropicApiKey({ key: Redacted.make("sk-ant-api03-for-executor-tests") }),
+    }),
+  ),
+  openai: Option.none(),
+};
+
 /**
  * A Gateway's real admin API and attachment store, served in memory: each
  * request runs the Gateway's own handlers in the caller's fiber, so the test
@@ -101,11 +117,16 @@ const bodyOf = (body: { readonly _tag: string }): AdminCall["body"] =>
  * otherwise. `calls` records what the executor sent, a detach of an
  * attachment in `refusedDetaches` is answered with a server error, a request
  * while `answering` is false meets a stopped admin service and gets no
- * answer, and `settled` waits until no admin request is in flight.
+ * answer, the provider list is answered with 404, as a Gateway released
+ * before it answers, while `reportsProviders` is false, and `settled` waits
+ * until no admin request is in flight. The Gateway holds `providers`.
  */
-export const fakeGateway = (machine: ReturnType<typeof fakeMachine>) => {
+export const fakeGateway = (
+  machine: ReturnType<typeof fakeMachine>,
+  providers: LlmProviders = GATEWAY_PROVIDERS,
+) => {
   const calls: Array<AdminCall> = [];
-  const switches = { refusedDetaches: new Set<string>(), answering: true };
+  const switches = { refusedDetaches: new Set<string>(), answering: true, reportsProviders: true };
   let inFlight = 0;
   const idle = Latch.makeUnsafe(true);
   const tracked = <A, E, R>(request: Effect.Effect<A, E, R>) =>
@@ -124,7 +145,7 @@ export const fakeGateway = (machine: ReturnType<typeof fakeMachine>) => {
   const settings = Layer.succeed(GatewaySettings)({
     domain: DOMAIN,
     github: GITHUB_ORIGINS,
-    providers: { anthropic: Option.none(), openai: Option.none() },
+    providers,
     egress: Result.getOrThrow(parseEgressAllowlist("")),
     adminToken: Schema.decodeSync(AdminToken)(ADMIN_TOKEN),
     callerKey: Schema.decodeSync(CallerKey)("caller-key-for-executor-tests-0123456789"),
@@ -134,7 +155,7 @@ export const fakeGateway = (machine: ReturnType<typeof fakeMachine>) => {
     HttpClient.HttpClient,
     Effect.gen(function* () {
       const handler = yield* HttpRouter.toHttpEffect(adminRoutes);
-      const services = yield* Effect.context<Attachments | CallerTokens>();
+      const services = yield* Effect.context<Attachments | CallerTokens | SettingsInForce>();
       return HttpClient.make((request) =>
         Effect.gen(function* () {
           const url = new URL(request.url);
@@ -168,6 +189,11 @@ export const fakeGateway = (machine: ReturnType<typeof fakeMachine>) => {
               HttpServerResponse.text("refused by the test", { status: 500 }),
               { request },
             );
+          // The router of a Gateway without the route answers an unknown one with an empty 404.
+          if (path === "/v1/providers" && !switches.reportsProviders)
+            return HttpServerResponse.toClientResponse(HttpServerResponse.empty({ status: 404 }), {
+              request,
+            });
           const response = yield* handler.pipe(
             Effect.provideService(
               HttpServerRequest.HttpServerRequest,

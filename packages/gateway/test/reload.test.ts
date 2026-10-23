@@ -30,6 +30,7 @@ import { ADMIN_TOKEN_VALUE, REPOSITORY, WORKER } from "./fixtures.ts";
 const CALLER_KEY_VALUE = "caller-key-for-reload-tests-0123456789";
 const FIRST_KEY = "sk-ant-api03-firstKeyForReloadTests";
 const SECOND_KEY = "sk-ant-api03-secondKeyForReloadTests";
+const SUBSCRIPTION_TOKEN = "sk-ant-oat01-subscriptionTokenForReloadTests";
 
 /** A loopback port nothing listens on at the moment of the call. */
 const freePort = Effect.callback<number>((resume) => {
@@ -164,13 +165,25 @@ const withGateway = <A, E>(
     );
   }).pipe(Effect.scoped, Effect.provide(recordLogs));
 
-/** Attaches the test repository to the test Worker and returns the caller token. */
-const attach = Effect.gen(function* () {
+/** The admin API as the executor calls it, with the gateway's admin token. */
+const adminClient = Effect.gen(function* () {
   const { admin } = yield* GatewayAddresses;
-  const client = yield* HttpApiClient.make(GatewayAdminApi, {
+  return yield* HttpApiClient.make(GatewayAdminApi, {
     baseUrl: `http://${admin.host}:${admin.port}`,
     transformClient: HttpClient.mapRequest(HttpClientRequest.bearerToken(ADMIN_TOKEN_VALUE)),
   });
+});
+
+/** The LLM providers the admin API reports, each with the kind of its credential. */
+const reportedProviders = Effect.gen(function* () {
+  const client = yield* adminClient;
+  const { providers } = yield* client.llm.providers();
+  return providers.map(({ provider, credential }) => ({ provider, credential }));
+});
+
+/** Attaches the test repository to the test Worker and returns the caller token. */
+const attach = Effect.gen(function* () {
+  const client = yield* adminClient;
   const attached = yield* client.attachments.attach({
     payload: new AttachRequest({
       worker: WORKER,
@@ -300,6 +313,29 @@ describe("reloading the gateway", () => {
         assert.notInclude(lines.join("\n"), SECOND_KEY);
       }),
     ),
+  );
+
+  it.live(
+    "the admin API reports the kind of Anthropic credential in force: an API key, then the subscription token a reload swapped in",
+    () =>
+      withGateway(["registry.npmjs.org"], (files) =>
+        Effect.gen(function* () {
+          assert.deepStrictEqual(yield* reportedProviders, [
+            { provider: "anthropic", credential: "api-key" },
+          ]);
+
+          yield* files.write("secrets.env", [
+            ...secretsLines(FIRST_KEY).filter((line) => !line.startsWith("ANTHROPIC_API_KEY=")),
+            `USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN=${SUBSCRIPTION_TOKEN}`,
+          ]);
+          yield* (yield* GatewayReload).reload;
+
+          assert.deepStrictEqual(yield* reportedProviders, [
+            { provider: "anthropic", credential: "subscription" },
+          ]);
+          assert.notInclude(lines.join("\n"), SUBSCRIPTION_TOKEN);
+        }),
+      ),
   );
 
   it.live("settings that need a restart are logged and left as they are", () =>

@@ -99,3 +99,12 @@ export type GatewayAdminPort = typeof GatewayAdminPort.Type;
  */
 export const GatewayLlmProvider = Schema.Literals(["anthropic"]);
 export type GatewayLlmProvider = typeof GatewayLlmProvider.Type;
+
+/**
+ * The kind of credential a Gateway holds for an LLM provider, as its admin
+ * API reports it: an `api-key` is billed at the provider's API rates, and a
+ * `subscription` token draws on a plan, such as a Claude plan from
+ * `claude setup-token` ([ADR 0013](../../../docs/adr/0013-cost-accounting-native-meters-guardrails.md)).
+ */
+export const GatewayCredentialKind = Schema.Literals(["api-key", "subscription"]);
+export type GatewayCredentialKind = typeof GatewayCredentialKind.Type;
