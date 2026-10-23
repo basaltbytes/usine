@@ -159,7 +159,7 @@ const namingWorker =
     error._tag === "ExecutorOperationError"
       ? new ExecutorOperationError({
           operation: error.operation,
-          message: `Worker ${worker}: ${error.message}`,
+          message: `worker "${worker}": ${error.message}`,
           cause: error.cause,
         })
       : error;
@@ -308,7 +308,7 @@ export const stepExecutorLayer = (
           : Option.some({
               block: "workers",
               field: `workers.${worker.name}.kind`,
-              reason: `Worker ${worker.name} is ${worker.kind}, and the running Workers are ${executor.kind}`,
+              reason: `worker "${worker.name}" has kind ${worker.kind}, and the running workers have kind ${executor.kind}`,
             });
 
       const applyWorkers = Effect.fn("WorkerScheduler.applyWorkers")(function* (

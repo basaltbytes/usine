@@ -209,7 +209,7 @@ export const gatewayForwardFor = Effect.fn("SshExecutor.gatewayForwardFor")(func
           Effect.timeoutOption(OPEN_TIMEOUT),
         );
         if (Option.isNone(listening))
-          return notOpened(`ssh did not open the forward within ${OPEN_TIMEOUT}`);
+          return notOpened(`ssh didn't open the forward within ${OPEN_TIMEOUT}`);
         if (Option.isNone(listening.value))
           return notOpened(yield* reported(Number(yield* handle.exitCode)));
 
@@ -253,19 +253,21 @@ export const gatewayForwardFor = Effect.fn("SshExecutor.gatewayForwardFor")(func
         return yield* Effect.raceFirst(
           handle.exitCode.pipe(
             Effect.flatMap((code) => reported(Number(code))),
-            Effect.catch((error) => Effect.succeed(`lost the SSH client: ${error.message}`)),
+            Effect.catch((error) =>
+              Effect.succeed(`can't read the SSH client's exit code: ${error.message}`),
+            ),
             Effect.tap(closedNow),
             Effect.map(exited),
           ),
           Deferred.await(generation.replace).pipe(
-            Effect.andThen(closedNow("replaced at a request's demand")),
+            Effect.andThen(closedNow("replaced after a request got no response")),
             Effect.as(REPLACED),
           ),
         );
       }),
     ).pipe(
       Effect.catch((error) =>
-        Effect.succeed(notOpened(`could not run ${shell.ssh.command}: ${error.message}`)),
+        Effect.succeed(notOpened(`can't run ${shell.ssh.command}: ${error.message}`)),
       ),
     );
   });
@@ -343,7 +345,7 @@ export const gatewayForwardFor = Effect.fn("SshExecutor.gatewayForwardFor")(func
             gateway,
             generation,
             since,
-            reason: `the forward did not open within ${OPEN_WAIT}`,
+            reason: `the forward didn't open within ${OPEN_WAIT}`,
           }),
       ),
     );

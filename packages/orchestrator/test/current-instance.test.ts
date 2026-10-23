@@ -183,7 +183,7 @@ describe("CurrentInstance", () => {
         assert(failure._tag === "RestartRequiredError", failure._tag);
         assert.deepStrictEqual(failure.blocks, ["workers"]);
         assert.deepStrictEqual(failure.fields, ["workers"]);
-        assert.include(failure.message, "restart usine up");
+        assert.include(failure.message, "Restart usine up");
         assert.strictEqual(yield* instances.get, running);
       }),
     ),
@@ -217,7 +217,12 @@ describe("CurrentInstance", () => {
         assert.deepStrictEqual(report.loops.removed, [LoopName.make("start-dev")]);
         assert.deepStrictEqual(
           report.quarantinedLoops.map(({ file, error }) => [file, error.message]),
-          [["loops/start-dev.md", "Unknown agent: ghost"]],
+          [
+            [
+              "loops/start-dev.md",
+              'Unknown agent "ghost": agents/ghost.md is missing or invalid. Fix the agent file, or set agent to an existing agent.',
+            ],
+          ],
         );
         assert.include(warnings, "Loop quarantined; it opens no Runs until its file is fixed");
         const current = yield* instances.get;

@@ -123,7 +123,7 @@ export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <
     Effect.match({
       onFailure: (failure) => Option.some(failureMessage(failure)),
       onSuccess: Option.match({
-        onNone: () => Option.some(`git push did not finish within ${PUSH_TIMEOUT}`),
+        onNone: () => Option.some(`git push didn't finish within ${PUSH_TIMEOUT}`),
         onSome: () => Option.none<string>(),
       }),
     }),

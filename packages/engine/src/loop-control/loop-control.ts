@@ -26,7 +26,7 @@ const makeLoopControl = Effect.gen(function* () {
     return stored === undefined
       ? new LoopRuntimeState({ loop, paused: false })
       : new LoopRuntimeState(stored);
-  }, persistence("read Loop runtime state"));
+  }, persistence("read loop runtime state"));
 
   const states = Effect.fn("LoopControl.states")(function* () {
     const rows = yield* database
@@ -35,7 +35,7 @@ const makeLoopControl = Effect.gen(function* () {
       .orderBy(asc(loopRuntime.loopName))
       .execute();
     return rows.map((row) => new LoopRuntimeState(row));
-  }, persistence("list Loop runtime states"));
+  }, persistence("list loop runtime states"));
 
   const write = Effect.fn("LoopControl.write")(function* (next: LoopRuntimeState) {
     yield* Effect.annotateCurrentSpan({ loop: next.loop });
@@ -55,7 +55,7 @@ const makeLoopControl = Effect.gen(function* () {
         set: { paused: next.paused },
       })
       .execute()
-      .pipe(persistence("write Loop runtime state"));
+      .pipe(persistence("write loop runtime state"));
     yield* Effect.logInfo(next.paused ? "Loop paused" : "Loop unpaused", {
       loop: next.loop,
       paused: next.paused,

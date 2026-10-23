@@ -25,7 +25,7 @@ export const probeFailed = (
   new HarnessUnavailableError({
     harness,
     capability,
-    message: `${command} ${args.join(" ")} failed; check the Worker's ${harness} installation and login`,
+    message: `${command} ${args.join(" ")} failed. Check the ${harness} installation and login on the worker.`,
   });
 
 /**
@@ -64,7 +64,7 @@ export const probeOutput = Effect.fn("HarnessPreflight.command")(function* (
         return yield* new SessionOperationError({
           operation: "launch",
           sessionId: Option.none(),
-          message: `Could not reach ${host.destination} to run ${command}`,
+          message: `Can't reach ${host.destination} to run ${command}`,
           cause: new Error(`${host.ssh.command} exited with code ${SSH_FAILURE}`),
         });
       return { stdout: stdout.trim(), exitCode } satisfies ProbeOutput;
@@ -76,7 +76,7 @@ export const probeOutput = Effect.fn("HarnessPreflight.command")(function* (
         new HarnessUnavailableError({
           harness,
           capability,
-          message: `Worker cannot execute ${command}`,
+          message: `The worker can't run ${command}`,
         }),
       TimeoutError: (cause) =>
         new SessionOperationError({

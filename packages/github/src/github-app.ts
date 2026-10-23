@@ -174,26 +174,29 @@ export class GitHubApp extends Context.Service<
         if (found === undefined) {
           return yield* new InstallationDiscoveryError({
             reason: "missing",
-            message: "The GitHub App is not installed on an account",
+            message:
+              "The GitHub App is not installed on any account. Install it on the account that owns the repositories.",
           });
         }
         if (others.length > 0) {
           return yield* new InstallationDiscoveryError({
             reason: "multiple",
-            message: "The GitHub App must have exactly one installation for this factory",
+            message:
+              "The GitHub App has more than one installation. Uninstall it from every account except one.",
           });
         }
         if (found.suspendedAt !== null) {
           return yield* new InstallationDiscoveryError({
             reason: "suspended",
-            message: "The GitHub App installation is suspended",
+            message:
+              "The GitHub App installation is suspended. Unsuspend it in the installation settings on GitHub.",
           });
         }
         const missing = missingPermissions(found.permissions);
         if (missing.length > 0) {
           return yield* new AppPermissionError({
             missing,
-            message: `The GitHub App installation is missing permissions: ${missing.join(", ")}`,
+            message: `The GitHub App installation is missing permissions: ${missing.join(", ")}. Grant them in the GitHub App settings, then approve the change on the installation.`,
           });
         }
         return new Installation({
@@ -227,8 +230,9 @@ export class GitHubApp extends Context.Service<
         if (lifetime <= 0 || lifetime > TOKEN_MAX_LIFETIME_MS + TOKEN_CLOCK_SKEW_MARGIN_MS) {
           return yield* new InvalidGitHubResponseError({
             operation,
-            message: "GitHub returned an installation token outside the one-hour lifetime bound",
-            detail: `expires_at ${DateTime.formatIso(response.expiresAt)} leaves ${lifetime}ms to live`,
+            message:
+              "GitHub returned an installation token that is expired or exceeds the one-hour lifetime limit",
+            detail: `expires_at ${DateTime.formatIso(response.expiresAt)} is ${lifetime}ms from now`,
           });
         }
         if (lifetime > TOKEN_MAX_LIFETIME_MS) {
@@ -245,8 +249,9 @@ export class GitHubApp extends Context.Service<
         ) {
           return yield* new InvalidGitHubResponseError({
             operation,
-            message: "GitHub did not confirm that the worker token is scoped to exactly one repo",
-            detail: `expected repository id ${scope.repositoryId}, confirmed [${confirmed.map((repo) => repo.id).join(", ")}]`,
+            message:
+              "GitHub did not confirm that the worker token is scoped to exactly one repository",
+            detail: `expected repository ID ${scope.repositoryId}, got [${confirmed.map((repo) => repo.id).join(", ")}]`,
           });
         }
         return new InstallationToken({
@@ -273,7 +278,7 @@ export class GitHubApp extends Context.Service<
           if (response.repositories.length === 0) {
             return yield* new InvalidGitHubResponseError({
               operation: "list-installation-repositories",
-              message: "GitHub pagination ended before total_count repositories were returned",
+              message: "GitHub returned an empty page before it listed total_count repositories",
               detail: `page ${page} was empty after ${installed.length} of ${response.totalCount} repositories`,
             });
           }

@@ -36,9 +36,10 @@ const failureMessage = (failure: AttemptFailure): string =>
     AgentFailure: ({ message }) => message,
     BlockedFailure: ({ message }) => message,
     QuestionFailure: ({ question }) => question,
-    RunawayFailure: ({ ceiling }) => `The runaway guard tripped its ${ceiling} ceiling`,
+    RunawayFailure: ({ ceiling }) =>
+      `The runaway guard stopped the attempt at its ${ceiling} ceiling`,
     ChildSessionBudgetFailure: ({ attemptedChildren, maxChildren }) =>
-      `Attempt tried to spawn child ${attemptedChildren} after reaching its ${maxChildren}-child budget`,
+      `The attempt requested child ${attemptedChildren}, over its budget of ${maxChildren} children`,
   }) || failure._tag;
 
 /** Returns the terminal task state for `failure`. */
@@ -64,7 +65,7 @@ export const settledOf = (task: TaskRecord<JsonValue, JsonValue, unknown>): Sett
   const outcome = task.state.outcome;
   if (outcome === undefined) {
     return Result.fail(
-      new InfraFailure({ message: "The Attempt task is still running", cause: task.state.status }),
+      new InfraFailure({ message: "The attempt task is still running", cause: task.state.status }),
     );
   }
   switch (outcome.status) {
@@ -73,7 +74,7 @@ export const settledOf = (task: TaskRecord<JsonValue, JsonValue, unknown>): Sett
         onNone: () =>
           Result.fail(
             new DefectFailure({
-              message: "The Attempt task completed without a final message",
+              message: "The attempt task completed without a final message",
               cause: outcome.result,
             }),
           ),
@@ -91,19 +92,19 @@ export const settledOf = (task: TaskRecord<JsonValue, JsonValue, unknown>): Sett
       );
     case "aborted":
       return Result.fail(
-        new AgentFailure({ message: "The Attempt was canceled and its parent stopped" }),
+        new AgentFailure({ message: "The attempt was canceled, and its parent stopped" }),
       );
     case "faulted":
       return Result.fail(
         new DefectFailure({
-          message: `The Attempt task faulted: ${outcome.error.message}`,
+          message: `The attempt task faulted: ${outcome.error.message}`,
           cause: outcome.error,
         }),
       );
     case "orphaned":
       return Result.fail(
         new InfraFailure({
-          message: `The Attempt task can no longer run: ${outcome.reason}`,
+          message: `The attempt task can no longer run: ${outcome.reason}`,
           cause: outcome.reason,
         }),
       );

@@ -256,7 +256,7 @@ export const ProjectBoard = ({
       {project.board.failures.length > 0 && (
         <ErrorAlert
           className="mx-4 max-w-3xl md:mx-5"
-          title={`${project.board.failures.length} item projection${project.board.failures.length === 1 ? "" : "s"} quarantined`}
+          title={`${project.board.failures.length} ${project.board.failures.length === 1 ? "item" : "items"} not shown on the board`}
           message={project.board.failures.map((failure) => failure.message).join("\n")}
         />
       )}

@@ -264,7 +264,7 @@ export const attemptTask = (
       yield* call("wait for operator guidance", async (signal) => {
         const scoped = withAbortSignal(signal, context);
         const watch = await runtime.watchDoc(HoldDoc, task.id, scoped);
-        if (watch === undefined) throw new Error("The Attempt task has no Hold document");
+        if (watch === undefined) throw new Error("The attempt task has no Hold document");
         return firstAccepted(watch, (hold) => hold.guidance.length > 0 || released(hold), scoped);
       });
       let resumed = Option.none<"Guidance" | "Release">();

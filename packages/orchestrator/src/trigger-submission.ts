@@ -46,7 +46,7 @@ export const resolveTriggerLoop = Effect.fn("TriggerRouting.resolveLoop")(functi
     return yield* new LoopAgentResolutionError({
       loop: loop.name,
       agent: loop.agent,
-      message: `Loop ${loop.name} references missing Agent ${loop.agent}`,
+      message: `Loop "${loop.name}" references agent "${loop.agent}", which is not in the roster`,
     });
   }
   const agent = loaded.agent;

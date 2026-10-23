@@ -88,5 +88,5 @@ export const projectedItem = (
         conflicting: state === "pr-open" && payload.mergeable === "CONFLICTING",
       };
     }
-    return yield* projectionError(item, `Unsupported Item projection source: ${item.source}`);
+    return yield* projectionError(item, `Unsupported item projection source: ${item.source}`);
   });

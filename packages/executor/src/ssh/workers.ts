@@ -137,9 +137,9 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
           return yield* new WorkerCapabilityError({
             worker: address.name,
             capability: "machine",
-            message: `SSH Worker ${address.name} still has its earlier settings, which its running Attempts use; reload again once they end`,
+            message: `Can't change the settings of SSH worker "${address.name}" while its attempts run. Reload again after they end.`,
             cause: new Error(
-              `SSH Worker ${address.name} is in use at ${existing.address.destination}`,
+              `SSH worker "${address.name}" is in use at ${existing.address.destination}`,
             ),
           });
         }
@@ -231,8 +231,8 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
       return yield* new WorkerCapabilityError({
         worker,
         capability: "machine",
-        message: `No SSH Worker named ${worker} is configured`,
-        cause: new Error("SSH Worker address missing"),
+        message: `No SSH worker named "${worker}" is configured`,
+        cause: new Error("SSH worker address missing"),
       });
     return machine;
   });

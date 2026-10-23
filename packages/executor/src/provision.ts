@@ -455,7 +455,7 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
       (cause) =>
         new ExecutorOperationError({
           operation: "prepare",
-          message: "git returned an invalid object id",
+          message: "Git returned an invalid object ID",
           cause,
         }),
     ),
@@ -627,7 +627,7 @@ const fetchSalvage = Effect.fn("Executor.fetchSalvage")(function* <E>(
             (cause) =>
               new ExecutorOperationError({
                 operation: "prepare",
-                message: "git returned an invalid salvage object id",
+                message: "Git returned an invalid salvage object ID",
                 cause,
               }),
           ),

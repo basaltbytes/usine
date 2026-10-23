@@ -22,19 +22,19 @@ const operatorFailure = (error: BackendError) => {
         return `Run ${error.runId} was not found.`;
       case "RunOperationRejectedError":
         if (error.operation === "resolveFailure")
-          return "This failure is no longer current. Refresh the Run before marking it resolved.";
+          return "This failure is no longer the current one. Refresh the run, then mark it resolved.";
         if (error.operation === "runAgain")
-          return `Run ${error.runId} is ${error.state}. Only a succeeded or canceled Run can run again.`;
-        return `Cannot ${error.operation} Run ${error.runId} while it is ${error.state}.`;
+          return `Run ${error.runId} is ${error.state.toLowerCase()}. Only a succeeded or canceled run can run again.`;
+        return `Cannot ${error.operation} run ${error.runId} while it is ${error.state.toLowerCase()}.`;
       case "CycleBudgetResetRejectedError":
-        return `Cycle budget Ask ${error.askId} is no longer awaiting this answer.`;
+        return `Cycle budget ask ${error.askId} is no longer open.`;
       case "TranscriptAttemptNotFoundError":
-        return `Attempt ${error.attemptId} does not belong to Run ${error.runId}.`;
+        return `Attempt ${error.attemptId} does not belong to run ${error.runId}.`;
       case "LeftoversDiscardRejectedError":
         // No running Attempt: the Worker is back in usine.yaml, or its last Attempt is ending.
         if (error.running === 0)
-          return `${error.worker} is in usine.yaml or an attempt on it is ending. Nothing was discarded.`;
-        return `${error.running} ${error.running === 1 ? "attempt still runs" : "attempts still run"} on ${error.worker}; discard its leftovers once they end.`;
+          return `Could not discard the leftovers on worker "${error.worker}": it is in usine.yaml, or an attempt on it is ending.`;
+        return `${error.running} ${error.running === 1 ? "attempt is" : "attempts are"} still running on worker "${error.worker}". Discard its leftovers after they end.`;
       case "BackendUnavailableError":
       case "RunRetryBlockedError":
       case "RunInterventionRejectedError":
@@ -42,15 +42,15 @@ const operatorFailure = (error: BackendError) => {
       case "LoopNotFoundError":
         return error.message;
       case "BoardProjectNotFoundError":
-        return `Project ${error.repository} was not found.`;
+        return `Project "${error.repository}" was not found.`;
       case "BoardItemNotFoundError":
-        return `Item ${error.repository}#${error.item} was not found on the Board.`;
+        return `Item ${error.repository}#${error.item} was not found on the board.`;
       case "BoardLaneNotFoundError":
-        return `Board Lane ${error.lane} was not found.`;
+        return `Lane "${error.lane}" was not found on the board.`;
       case "GitHubItemNotFoundError":
         return error.message;
       case "BoardLaneReadOnlyError":
-        return `Board Lane ${error.lane} is read-only. Configure label-backed lanes in usine.yaml to enable moves.`;
+        return `Lane "${error.lane}" is read-only. To move items, configure label-backed lanes in usine.yaml.`;
       case "InstallationDiscoveryError":
       case "AppPermissionError":
         return error.message;
@@ -60,7 +60,7 @@ const operatorFailure = (error: BackendError) => {
       case "GitHubRateLimitError":
         return error.message;
       case "EnginePersistenceError":
-        return `Runtime persistence failed while trying to ${error.operation}.`;
+        return `Runtime store error: could not ${error.operation}.`;
       case "AttemptCancellationError":
         return `Attempt ${error.attemptId} could not be canceled.`;
       case "FactoryConfigError":
@@ -101,7 +101,7 @@ const policy = Layer.succeed(OperatorHttpPolicy)((handler, { endpoint }) =>
       });
       return yield* new OperatorHttpError({
         error: "CrossSiteRequestError",
-        message: "Cross-site requests are refused.",
+        message: "Cross-site requests are not allowed.",
       });
     }
     // JSON is accepted regardless of Content-Type, including simple browser POSTs;

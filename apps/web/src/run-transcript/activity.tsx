@@ -32,7 +32,7 @@ export const Elapsed = ({
       dateTime={since}
       aria-live="off"
       className={cn("font-mono tabular-nums", className)}
-      title={`Since ${since}`}
+      title={`Since ${timestampLabel(since)}`}
     >
       {elapsedActivity(since, now)}
     </time>
@@ -109,7 +109,7 @@ export const CurrentActivity = ({ chapter }: { readonly chapter: Chapter }) => {
             <span
               aria-live="off"
               className="ml-auto shrink-0 font-mono tabular-nums text-muted-foreground"
-              title={`Started ${since}`}
+              title={`Started ${timestampLabel(since)}`}
             >
               {elapsedActivity(since, now)}
             </span>

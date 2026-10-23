@@ -537,7 +537,7 @@ const testLayer = (
               repository,
               label: GitHubLabelName.make("ready-for-review"),
               errorTag: "GitHubApiError",
-              message: "GitHub rejected the request with status 500",
+              message: "GitHub returned HTTP status 500",
             }),
           ],
           nextPollAt: Option.none(),

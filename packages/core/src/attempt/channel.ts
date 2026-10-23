@@ -285,19 +285,19 @@ export const admit = (
 ): Result.Result<Progress, Violation> => {
   if (envelope.attemptId !== attemptId) {
     return Result.fail({
-      message: "The outbound channel carried an envelope for another Attempt",
+      message: "The outbound channel has an envelope for another attempt",
       detail: String(envelope.attemptId),
     });
   }
   if (envelope.sequence !== progress.nextSequence) {
     return Result.fail({
-      message: "The outbound channel carried a non-contiguous sequence",
+      message: "The outbound channel has a non-contiguous sequence number",
       detail: `expected ${progress.nextSequence}, received ${envelope.sequence}`,
     });
   }
   if (progress.state === "Terminal") {
     return Result.fail({
-      message: "The outbound channel carried an envelope after its terminal envelope",
+      message: "The outbound channel has an envelope after the terminal envelope",
       detail: envelope.payload._tag,
     });
   }
@@ -307,13 +307,13 @@ export const admit = (
     envelope.payload._tag !== "Failed"
   ) {
     return Result.fail({
-      message: "The outbound channel did not begin with a Started or Failed envelope",
+      message: "The outbound channel doesn't start with a Started or Failed envelope",
       detail: envelope.payload._tag,
     });
   }
   if (progress.state === "Running" && envelope.payload._tag === "Started") {
     return Result.fail({
-      message: "The outbound channel carried more than one Started envelope",
+      message: "The outbound channel has more than one Started envelope",
       detail: "duplicate Started envelope",
     });
   }

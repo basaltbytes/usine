@@ -83,7 +83,7 @@ export class WorkerAttempts extends Schema.Class<WorkerAttempts>("@usine/engine/
     running: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   }).check(
     Schema.makeFilter(({ attempts, running }) => running <= attempts, {
-      message: "Expected no more open Attempts than Attempts",
+      message: "Expected no more open attempts than attempts",
     }),
   ),
 ) {}

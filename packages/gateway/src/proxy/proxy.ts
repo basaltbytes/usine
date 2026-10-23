@@ -133,7 +133,7 @@ export class GatewayProxy extends Context.Service<
             Effect.mapError(({ reason }) =>
               refused(
                 "invalid-caller-token",
-                `The gateway did not issue this caller token (${reason}).`,
+                `The gateway didn't issue this caller token (${reason}).`,
               ),
             ),
           );
@@ -145,7 +145,7 @@ export class GatewayProxy extends Context.Service<
         const stale = refusedCaller(
           claims,
           "stale-caller-token",
-          `The caller token belongs to attachment ${claims.attachment} of ${claims.repository} on Worker ${claims.worker}, which is no longer attached.`,
+          `The caller token belongs to attachment ${claims.attachment} of ${claims.repository} on worker "${claims.worker}", which is no longer attached.`,
         );
         const lookup = yield* attachments.find(claims.attachment);
         return yield* Match.valueTags(lookup, {
@@ -160,7 +160,7 @@ export class GatewayProxy extends Context.Service<
               refusedCaller(
                 claims,
                 "attachment-expired",
-                `The attachment of ${claims.repository} to Worker ${claims.worker} has expired.`,
+                `The attachment of ${claims.repository} to worker "${claims.worker}" has expired.`,
               ),
             ),
           MissingAttachment: () => Effect.fail(stale),
@@ -178,7 +178,7 @@ export class GatewayProxy extends Context.Service<
           return yield* refusedCaller(
             claims,
             "unsupported-path",
-            `The gateway serves git smart HTTP and the GitHub API, not ${target.pathname}.`,
+            `The gateway serves Git smart HTTP and the GitHub API, not ${target.pathname}.`,
           );
         const named = route.value.repository;
         if (
@@ -242,7 +242,7 @@ export class GatewayProxy extends Context.Service<
         return Effect.fail(
           refused(
             "unknown-host",
-            `The gateway serves ${hosts.git} and ${hosts.llm}, not ${target.host}; other hosts go through the forward proxy.`,
+            `The gateway serves ${hosts.git} and ${hosts.llm}, not ${target.host}. Send requests for other hosts through the forward proxy.`,
           ),
         );
       };
@@ -251,7 +251,7 @@ export class GatewayProxy extends Context.Service<
         const request = yield* HttpServerRequest.HttpServerRequest;
         const target = requestTarget(request);
         if (Option.isNone(target)) {
-          const error = refused("unknown-host", "The request names no host.");
+          const error = refused("unknown-host", "The request has no host.");
           yield* Effect.logWarning("Gateway refused a request", {
             reason: error.reason,
             method: request.method,
@@ -335,7 +335,7 @@ const upstreamFailure = (
     Effect.as(
       HttpServerResponse.jsonUnsafe(
         {
-          message: "usine gateway: the upstream could not be reached.",
+          message: "usine gateway: the upstream is unreachable.",
           reason: "upstream-unreachable",
         },
         { status: 502 },

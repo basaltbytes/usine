@@ -6,7 +6,7 @@ const causeMessage = (cause: unknown): string =>
   Option.match(
     Schema.decodeUnknownOption(Schema.Struct({ message: Schema.NonEmptyString }))(cause),
     {
-      onNone: () => "Unknown YAML parsing failure",
+      onNone: () => "The YAML parser failed without an error message",
       onSome: ({ message }) => message,
     },
   );

@@ -58,7 +58,7 @@ it("says how many attempts still run on a removed worker and offers no discard u
   await expect
     .element(
       needs().getByText(
-        "usine-worker-2 is not in usine.yaml. 2 attempts still run on it; discard its leftovers once they end",
+        "usine-worker-2 is not in usine.yaml. 2 attempts still running on it. Discard the leftovers after they end",
         { exact: true },
       ),
     )
@@ -70,7 +70,8 @@ it("offers Discard leftovers once no attempt runs on the worker, and shows why a
   await commands.refuseDiscardLeftovers(
     JSON.stringify({
       error: "LeftoversDiscardRejectedError",
-      message: "1 attempt still runs on usine-worker-2; discard its leftovers once they end.",
+      message:
+        '1 attempt is still running on worker "usine-worker-2". Discard its leftovers after they end.',
     }),
   );
   renderNeeds(removedWorker(0));
@@ -84,7 +85,7 @@ it("offers Discard leftovers once no attempt runs on the worker, and shows why a
   await expect
     .element(
       needs().getByText(
-        "1 attempt still runs on usine-worker-2; discard its leftovers once they end.",
+        '1 attempt is still running on worker "usine-worker-2". Discard its leftovers after they end.',
         { exact: true },
       ),
     )

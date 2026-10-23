@@ -118,7 +118,7 @@ const replaceUnreadable = Effect.fn("AttemptRepair.replaceUnreadable")(function*
       conversationId,
       documents: unreadable.map(({ document }) => document),
       attempt: yield* owningAttempt(harness, conversationId),
-      cause: `The parent conversation ${conversationId} could not be read back from durable storage (${reasons.join("; ")})`,
+      cause: `Can't read the parent conversation ${conversationId} from durable storage: ${reasons.join("; ")}`,
     });
   }
   if (repairs.length === 0) {

@@ -49,7 +49,7 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
         capabilityError(
           worker,
           "machine",
-          `exe.dev returned invalid machine metadata for Worker ${worker}`,
+          `exe.dev returned invalid machine metadata for worker "${worker}"`,
           cause,
         ),
       ),
@@ -59,7 +59,7 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
       return yield* capabilityError(
         worker,
         "machine",
-        `exe.dev has no VM named ${worker}`,
+        `exe.dev has no VM named "${worker}"`,
         new Error("worker VM missing"),
       );
     }
@@ -67,7 +67,7 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
       return yield* capabilityError(
         worker,
         "machine",
-        `exe.dev VM ${worker} is ${vm.status}, not running`,
+        `exe.dev VM "${worker}" is ${vm.status}, not running`,
         new Error(`VM status: ${vm.status}`),
       );
     }
@@ -77,7 +77,7 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
         capabilityError(
           worker,
           "toolchain",
-          `exe.dev VM ${worker} returned an invalid home directory`,
+          `exe.dev VM "${worker}" returned an invalid home directory`,
           cause,
         ),
       ),
@@ -100,21 +100,21 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
   ) {
     const vm = yield* resolveVm(worker).pipe(
       Effect.catchTag("ExecutorOperationError", (cause) =>
-        capabilityError(worker, "machine", `Could not reach exe.dev Worker ${worker}`, cause),
+        capabilityError(worker, "machine", `Can't reach exe.dev worker "${worker}"`, cause),
       ),
     );
     yield* Effect.annotateCurrentSpan({ worker, host: vm.sshDest });
     const gitVersion = (yield* asCapability(
       worker,
       "toolchain",
-      `Worker ${worker} cannot run Git`,
+      `Worker "${worker}" can't run Git`,
       commands.remote("preflight", vm.sshDest, "git", ["--version"]),
     )).trim();
     if (!gitVersion.startsWith("git version ")) {
       return yield* capabilityError(
         worker,
         "toolchain",
-        `Worker ${worker} returned an unrecognized Git version`,
+        `Worker "${worker}" returned an unrecognized Git version`,
         new Error(gitVersion),
       );
     }
@@ -135,7 +135,7 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
       yield* asCapability(
         worker,
         "credentials",
-        `exe.dev GitHub integration ${integration.name} is not ready for ${integration.repository}`,
+        `exe.dev GitHub integration "${integration.name}" isn't ready for ${integration.repository}`,
         commands.lobby("preflight", ["integrations", "test", integration.name]),
       );
     }

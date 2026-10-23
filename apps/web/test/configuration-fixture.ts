@@ -86,7 +86,11 @@ export const configurationJson = {
     {
       name: "ghost",
       file: "loops/ghost.md",
-      error: fileError("loops/ghost.md", "reference", "Unknown agent: ghost"),
+      error: fileError(
+        "loops/ghost.md",
+        "reference",
+        'Unknown agent "ghost": agents/ghost.md is missing or invalid. Fix the agent file, or set agent to an existing agent.',
+      ),
     },
   ],
   agents: [
@@ -147,7 +151,7 @@ export const configurationJson = {
             _tag: "Failed",
             checkedAt: "2026-10-20T09:15:00.000Z",
             capability: "harness-login",
-            message: "Claude Code is not logged in on Worker local",
+            message: "Claude Code needs a subscription login. Run claude auth login on the worker.",
           },
         },
         { harness: "codex", check: { _tag: "Passed", checkedAt: "2026-10-20T09:15:00.000Z" } },

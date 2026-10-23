@@ -141,7 +141,7 @@ describe("LabelReconciler", () => {
                   new GitHubApiError({
                     operation: "create-repository-label",
                     status: Option.some(500),
-                    message: "GitHub rejected the request with status 500",
+                    message: "GitHub returned HTTP status 500",
                   }),
                 )
               : Effect.succeed(createdLabel(label.name)),

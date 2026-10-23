@@ -320,7 +320,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         return yield* new WorkerCapabilityError({
           worker,
           capability: "toolchain",
-          message: `Worker ${worker} returned an unrecognized git version`,
+          message: `Worker "${worker}" returned an unrecognized Git version`,
           cause: new Error(gitVersion),
         });
       }
@@ -370,7 +370,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         Effect.mapError(
           (error) =>
             new InfraFailure({
-              message: `Could not harvest the Attempt's checkout: ${error.message}`,
+              message: `Can't harvest the attempt's checkout: ${error.message}`,
               cause: error,
             }),
         ),
@@ -450,7 +450,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         if (!(yield* fileSystem.exists(worktree)))
           return yield* executorError(
             "prepare",
-            "The checkout of the reattached Attempt is gone",
+            "The reattached attempt's checkout no longer exists",
             new Error(worktree),
           );
         const { spec } = yield* session.storedRequest(request.attemptId);
@@ -466,7 +466,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         Effect.mapError((error) =>
           isExecutorError(error)
             ? error
-            : executorError("prepare", "Attempt workspace preparation failed", error),
+            : executorError("prepare", "Can't prepare the attempt workspace", error),
         ),
       );
 
@@ -508,7 +508,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       recover: (attempt, record) =>
         recover(attempt, record).pipe(
           Effect.catchTag("PlatformError", (cause) =>
-            Effect.fail(executorError("cleanup", "Could not reconcile local salvage", cause)),
+            Effect.fail(executorError("cleanup", "Can't reconcile the local salvage", cause)),
           ),
         ),
       cancel: session.cancel,

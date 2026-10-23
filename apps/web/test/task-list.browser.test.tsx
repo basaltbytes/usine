@@ -163,7 +163,7 @@ it("lists only the tasks with runs, in flight first, with their status and last 
 it("opens the tokens per pool, summed over the task's runs, from the tokens or the cost", async () => {
   await mount(list);
   const redesign = rowOf(/Redesign the Board columns/u);
-  await redesign.getByRole("button", { name: "Tokens: 27.3K. Show them per pool" }).hover();
+  await redesign.getByRole("button", { name: "Tokens: 27.3K. Show per pool" }).hover();
   const pools = page.getByRole("region", { name: "Tokens per pool" });
   await expect.element(pools).toBeVisible();
   await expect.element(pools).toHaveTextContent("API keys1,500$0.75");
@@ -172,7 +172,7 @@ it("opens the tokens per pool, summed over the task's runs, from the tokens or t
   await page.getByRole("heading", { name: "Tasks", level: 1 }).hover();
   await expect.element(pools).not.toBeInTheDocument();
 
-  await redesign.getByRole("button", { name: "Estimated cost: $2.00. Show it per pool" }).hover();
+  await redesign.getByRole("button", { name: "Estimated cost: $2.00. Show per pool" }).hover();
   await expect.element(pools).toHaveTextContent("Claude plan20,000$1.25 estimate");
 });
 
@@ -192,7 +192,7 @@ it("marks the priced dollars with an asterisk while a run has no price yet, and 
   const redesign = rowOf(/Redesign the Board columns/u);
   await expect.element(redesign).toHaveTextContent(/#31open41 min27\.5K\$9\.95\*$/u);
   await redesign
-    .getByRole("button", { name: "Estimated cost: at least $9.95. Show it per pool" })
+    .getByRole("button", { name: "Estimated cost: at least $9.95. Show per pool" })
     .hover();
   const pools = page.getByRole("region", { name: "Tokens per pool" });
   await expect.element(pools).toHaveTextContent("API keys1,500$0.75");

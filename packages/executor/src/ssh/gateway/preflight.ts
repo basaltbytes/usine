@@ -33,7 +33,7 @@ const gatewayGap = (worker: WorkerName, message: string, cause: unknown) =>
 const unreachable = (host: string, command: string, result: CommandResult) =>
   new ExecutorOperationError({
     operation: "preflight",
-    message: `Could not reach ${host} to run ${command}`,
+    message: `Can't reach ${host} to run ${command}`,
     cause: new Error(result.stderr.trim() || `ssh exited with code ${SSH_FAILURE}`),
   });
 
@@ -81,9 +81,9 @@ const recordAnthropicCredential = Effect.fn("SshExecutor.recordAnthropicCredenti
         ? Effect.fail(
             gatewayGap(
               worker,
-              `SSH Worker ${worker}'s Gateway holds no Anthropic credential, but the Worker's llm_providers lists anthropic; set ANTHROPIC_API_KEY or USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN on the Gateway, or remove anthropic from llm_providers`,
+              `The gateway of SSH worker "${worker}" has no Anthropic credential, but the worker's llm_providers includes anthropic. Set ANTHROPIC_API_KEY or USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN on the gateway, or remove anthropic from llm_providers.`,
               new Error(
-                `the Gateway reports ${providers.map(({ provider }) => provider).join(", ") || "no provider"}`,
+                `the gateway reports ${providers.map(({ provider }) => provider).join(", ") || "no provider"}`,
               ),
             ),
           )
@@ -131,7 +131,7 @@ export const verifyGateway = Effect.fn("SshExecutor.verifyGateway")(function* (
     Effect.mapError((closed) =>
       gatewayGap(
         worker,
-        `Could not open the forward to SSH Worker ${worker}'s Gateway admin API through ${closed.gateway}: ${closed.reason}; run ${forward.command} to see why`,
+        `Can't open the forward to the gateway admin API of SSH worker "${worker}" through ${closed.gateway}: ${closed.reason}. Run ${forward.command} to see the SSH error.`,
         closed,
       ),
     ),
@@ -159,7 +159,7 @@ export const verifyGateway = Effect.fn("SshExecutor.verifyGateway")(function* (
   if (dropped.length > 0)
     return yield* gatewayGap(
       worker,
-      `SSH Worker ${worker}'s sshd drops ${dropped.join(", ")}; add AcceptEnv ${GATEWAY_SENT_VARIABLES.join(" ")} to its sshd configuration`,
+      `The sshd on SSH worker "${worker}" doesn't accept ${dropped.join(", ")}. Add AcceptEnv ${GATEWAY_SENT_VARIABLES.join(" ")} to its sshd configuration.`,
       new Error(`variables not received: ${dropped.join(" ")}`),
     );
 
@@ -180,7 +180,7 @@ export const verifyGateway = Effect.fn("SshExecutor.verifyGateway")(function* (
   if (probed.exitCode !== 0 || !REFUSED_WITHOUT_TOKEN.test(probed.stdout))
     return yield* gatewayGap(
       worker,
-      `SSH Worker ${worker} cannot reach its Gateway at ${gitHost}`,
+      `SSH worker "${worker}" can't reach its gateway at ${gitHost}`,
       new Error(
         probed.stderr.trim() ||
           probed.stdout.split("\n")[0]?.trim() ||
@@ -258,7 +258,7 @@ export const gatewayHarnessProbe = (
       return new HarnessUnavailableError({
         harness: "claude",
         capability: "binary",
-        message: "claude --version failed; check the Worker's claude installation",
+        message: "claude --version failed. Check the Claude Code installation on the worker.",
       });
     yield* Effect.logInfo(
       "Claude Code uses the Gateway's Anthropic credential; checked its binary only",
@@ -293,14 +293,14 @@ export const gatewayHarnessProbe = (
       if (answer !== undefined && answer.status !== "000") continue;
       const cause = new Error(
         answer === undefined
-          ? `no answer for ${loginHost}: ${result.stderr.trim() || `sh exited with code ${String(result.exitCode)}`}`
-          : `curl exited with code ${answer.exitCode}; the proxy answered CONNECT with ${answer.connect}`,
+          ? `no response from ${loginHost}: ${result.stderr.trim() || `sh exited with code ${String(result.exitCode)}`}`
+          : `curl exited with code ${answer.exitCode}; the proxy returned ${answer.connect} for CONNECT`,
       );
       return yield* gatewayGap(
         worker,
         answer?.connect === PROXY_REFUSED
-          ? `${label} uses its login on SSH Worker ${worker}, and the Gateway's forward proxy refuses ${loginHost}; add ${loginHost} to the Gateway's egress allowlist`
-          : `${label} uses its login on SSH Worker ${worker}, which cannot reach ${loginHost} through the Gateway's forward proxy at ${proxy}`,
+          ? `${label} uses its login on SSH worker "${worker}", and the gateway's forward proxy blocks ${loginHost}. Add ${loginHost} to the gateway's egress allowlist.`
+          : `${label} uses its login on SSH worker "${worker}", which can't reach ${loginHost} through the gateway's forward proxy at ${proxy}`,
         cause,
       );
     }

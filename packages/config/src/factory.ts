@@ -39,7 +39,7 @@ const uniqueLaneSources = Schema.makeFilter<ReadonlyArray<Lane>>(
     const keys = lanes.flatMap(({ sources }) => sources.map(laneSourceKey));
     return new Set(keys).size === keys.length;
   },
-  { message: "Expected every lane source to be mapped once" },
+  { message: "Expected each lane source in only one lane" },
 );
 
 const Lanes = Schema.Array(Lane).check(uniqueNames, uniqueLaneSources);

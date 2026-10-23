@@ -159,7 +159,7 @@ export const runStateLine = (run: Pick<RunView, "state" | "attempts">): string =
 export const failureReason = (failure: FailureView): string =>
   Match.valueTags(failure, {
     InfraFailure: () => "Infrastructure failure",
-    DefectFailure: () => "Executor defect; retry explicitly",
+    DefectFailure: () => "Executor defect",
     AgentFailure: () => "Agent failure",
     BlockedFailure: () => "Agent blocked",
     QuestionFailure: () => "Question from the agent",
@@ -194,7 +194,7 @@ export const runLineTimeTitle = (state: RunView["state"], since: string): string
 /** The approval source text, shown after the time on the approval line. */
 export const approvalChannelLabel = {
   ui: "from the UI",
-  "github-ask": "from the GitHub Ask",
+  "github-ask": "from GitHub",
 } as const satisfies Record<ApprovalChannel, string>;
 
 export const runActionProgress = {
@@ -214,7 +214,10 @@ export const failureMessage = (failure: FailureView): string =>
     AgentFailure: ({ message }) => message,
     BlockedFailure: ({ message }) => message,
     QuestionFailure: ({ question }) => question,
-    RunawayFailure: ({ ceiling }) => `Runaway guard: ${ceiling} ceiling reached`,
+    RunawayFailure: ({ ceiling }) =>
+      ceiling === "wall-clock"
+        ? "Time limit reached: settings.max_attempt_minutes"
+        : "Token limit reached: settings.max_attempt_tokens",
     ChildSessionBudgetFailure: ({ attemptedChildren, maxChildren }) =>
       `Child session budget of ${maxChildren} used; child ${attemptedChildren} did not start`,
   });
@@ -222,8 +225,8 @@ export const failureMessage = (failure: FailureView): string =>
 /** Returns the note under an operator message that the target session has not read yet. */
 export const queuedMessageLabel = (session: QueuedFor): string =>
   session === "parent"
-    ? "Queued until the current delegation returns"
-    : "Queued until the child's current step ends";
+    ? "Queued until the delegated task ends"
+    : "Queued until the current child step ends";
 
 export const conflictingSalvageMessage = ({ ref, commit }: SalvagePushed): string =>
   `Not applied: the previous attempt's work on ${ref} at ${commit.slice(0, 7)} conflicts with the current revision. It is still on ${ref}`;
@@ -248,13 +251,13 @@ export const needCopy = (need: NeedView): NeedCopy =>
           ? `Question from ${loop}`
           : failure._tag === "BlockedFailure"
             ? `${loop}: blocked`
-            : failure._tag,
+            : `${loop}: ${failureReason(failure).toLowerCase()}`,
       detail: failureMessage(failure),
       repository,
       runId,
     }),
     BoardProjectionNeed: ({ failure }) => ({
-      title: "Item projection quarantined",
+      title: "Item not shown on the board",
       detail: failure.message,
       repository: failure.repository,
       runId: null,
@@ -272,13 +275,17 @@ export const needCopy = (need: NeedView): NeedCopy =>
       runId: null,
     }),
     ScheduleFailureNeed: ({ failure }) => ({
-      title: failure._tag === "ScheduleTickFailure" ? failure.errorTag : failure._tag,
+      title: Match.valueTags(failure, {
+        ScheduleTickFailure: ({ errorTag }) => errorTag,
+        ScheduleAgentFailure: ({ loop }) => `${loop}: agent not loaded`,
+        ScheduleCronFailure: ({ loop }) => `${loop}: schedule not computed`,
+      }),
       detail: failure.message,
       repository: failure._tag === "ScheduleTickFailure" ? failure.repository : null,
       runId: null,
     }),
     ConfigFileNeed: ({ kind, error }) => ({
-      title: kind === "loop" ? "Loop quarantined" : "Agent file not loaded",
+      title: kind === "loop" ? "Loop file not loaded" : "Agent file not loaded",
       detail: `${error.file}: ${error.message.replace(/\.$/u, "")}. Fix the file, then reload the configuration from Configuration > Loops`,
       repository: null,
       runId: null,
@@ -287,8 +294,8 @@ export const needCopy = (need: NeedView): NeedCopy =>
       title: "Worker not configured",
       detail:
         running > 0
-          ? `${worker} is not in usine.yaml. ${running} ${running === 1 ? "attempt still runs" : "attempts still run"} on it; discard its leftovers once they end`
-          : `${worker} is not in usine.yaml. Startup does not reconcile the ${attempts} recorded ${attempts === 1 ? "attempt" : "attempts"} on it. Declare the worker again and restart usine up, or discard the leftovers`,
+          ? `${worker} is not in usine.yaml. ${running} ${running === 1 ? "attempt" : "attempts"} still running on it. Discard the leftovers after they end`
+          : `${worker} is not in usine.yaml. Startup does not reconcile the ${attempts} recorded ${attempts === 1 ? "attempt" : "attempts"} on it. Add the worker back and restart usine up, or discard the leftovers`,
       repository: null,
       runId: null,
     }),
@@ -327,8 +334,8 @@ export const reloadSummary = (reload: InstanceReload): ReadonlyArray<string> => 
   if (leftOut > 0) {
     lines.push(
       leftOut === 1
-        ? "1 file left out, listed in Needs attention"
-        : `${leftOut} files left out, listed in Needs attention`,
+        ? "1 file not loaded, listed in Needs attention"
+        : `${leftOut} files not loaded, listed in Needs attention`,
     );
   }
   return lines;

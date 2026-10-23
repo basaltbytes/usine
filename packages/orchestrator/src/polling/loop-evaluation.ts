@@ -125,7 +125,7 @@ export const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* 
                 new InvalidGitHubResponseError({
                   operation: "fetch-pull-request-snapshot",
                   message: "The pull request payload has no valid head commit",
-                  detail: `PR ${item.number} requires a full headRefOid`,
+                  detail: `pull request #${item.number} has no full headRefOid`,
                 }),
             ),
           ),

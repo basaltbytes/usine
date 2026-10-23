@@ -222,7 +222,7 @@ const TaskCost = ({ usage }: { readonly usage: TaskUsageView }) => {
   return (
     <PoolHover
       usage={usage}
-      label={`Estimated cost: ${unpriced ? "at least " : ""}${usd}. Show it per pool`}
+      label={`Estimated cost: ${unpriced ? "at least " : ""}${usd}. Show per pool`}
       note={unpriced ? unpricedNote : null}
     >
       {usd}
@@ -278,7 +278,7 @@ const TaskListRow = ({
       {row.task.usage.pools.length > 0 && (
         <PoolHover
           usage={row.task.usage}
-          label={`Tokens: ${tokensLabel(row.task.usage.tokens)}. Show them per pool`}
+          label={`Tokens: ${tokensLabel(row.task.usage.tokens)}. Show per pool`}
           note={null}
         >
           {tokensLabel(row.task.usage.tokens)}

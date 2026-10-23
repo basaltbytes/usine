@@ -53,12 +53,14 @@ const readSecretsFile = Effect.fn("GitHubCredentials.readSecretsFile")(function*
   if (info.type !== "File" || (info.mode & 0o777) !== 0o600) {
     return yield* fail(
       "permissions",
-      `GitHub App secrets must be a regular 0600 file: ${secretsPath}`,
+      `${secretsPath} must be a regular file with mode 0600. Run chmod 600 ${secretsPath}.`,
     );
   }
   const source = yield* fileSystem.readFileString(secretsPath).pipe(Effect.mapError(unreadable));
   return yield* decodeCredentialsFile(source, { onExcessProperty: "error" }).pipe(
-    Effect.mapError(() => fail("parse", `GitHub App secrets are invalid at ${secretsPath}`)),
+    Effect.mapError(() =>
+      fail("parse", `${secretsPath} is invalid. It must be JSON with only app_id and private_key.`),
+    ),
   );
 });
 
@@ -74,7 +76,7 @@ export const loadLocalCredentials = Effect.fn("GitHubCredentials.loadLocal")(fun
       () =>
         new EnvironmentCredentialsError({
           message:
-            "USINE_GITHUB_APP_ID and USINE_GITHUB_PRIVATE_KEY must contain valid GitHub App credentials",
+            "USINE_GITHUB_APP_ID or USINE_GITHUB_PRIVATE_KEY is invalid. Set USINE_GITHUB_APP_ID to the numeric App ID and USINE_GITHUB_PRIVATE_KEY to the App's PEM private key.",
         }),
     ),
   );

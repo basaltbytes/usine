@@ -61,7 +61,7 @@ const selectModel = Effect.fn("ParentModel.select")(function* (
       return yield* new UnknownModelError({
         harness: "pi",
         model: named,
-        message: `Pi does not expose model ${named}`,
+        message: `Pi has no model "${named}"`,
       });
     }
     return found.value;
@@ -76,7 +76,7 @@ const selectModel = Effect.fn("ParentModel.select")(function* (
   const available = yield* Effect.tryPromise({
     try: (signal) => models.getAvailable(undefined, { signal }),
     catch: (cause) =>
-      launchError(spec, "Could not list the models with a configured credential", cause),
+      launchError(spec, "Can't list the models that have a configured credential", cause),
   });
   const first = available[0];
   if (first === undefined) {
@@ -120,12 +120,12 @@ export const resolveParent = Effect.fn("ParentModel.resolve")(function* (
       harness: "pi",
       model,
       effort: spec.parentEffort,
-      message: `Pi model ${model} does not support effort ${spec.parentEffort}; supported: ${supported.join(", ")}`,
+      message: `Pi model "${model}" doesn't support effort ${spec.parentEffort}. Supported efforts: ${supported.join(", ")}`,
     });
   }
   const check = yield* Effect.tryPromise({
     try: (signal) => models.checkAuth(selected.provider, { signal }),
-    catch: (cause) => launchError(spec, "Could not check the parent model's credential", cause),
+    catch: (cause) => launchError(spec, "Can't check the parent model's credential", cause),
   });
   const authentication = piAuthentication(
     check,
@@ -144,7 +144,7 @@ export const resolveParent = Effect.fn("ParentModel.resolve")(function* (
       harness: "pi",
       model,
       pool: required,
-      message: `Pi parent model ${model} requires a credential from the ${required} pool`,
+      message: `Pi parent model "${model}" requires a credential from the ${required} pool`,
     });
   }
   yield* Effect.logInfo("Pi parent authenticated", { model, pool });

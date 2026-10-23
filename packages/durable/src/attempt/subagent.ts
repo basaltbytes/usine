@@ -90,7 +90,7 @@ export const subagentTool = (services: ExtensionServices) => {
     );
     if (owner === undefined) {
       return yield* Effect.die(
-        new Error("The subagent tool runs only in an Attempt's parent conversation"),
+        new Error("The subagent tool runs only in an attempt's parent conversation"),
       );
     }
     const stored = yield* storedRequestOf(owner.input);

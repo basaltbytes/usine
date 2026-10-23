@@ -253,7 +253,7 @@ export const RunWorkspace = ({
         {selection._tag === "Event" && <EventDocument detail={detail} />}
         {showsReader && githubChanges.isError && (
           <p className="mx-auto w-full max-w-[38.5rem] px-4 pt-3 text-xs text-muted-foreground sm:px-2">
-            GitHub changes are not shown: {githubChanges.error.message}
+            GitHub changes not loaded: {githubChanges.error.message}
           </p>
         )}
         <div className={cn("flex min-h-0 flex-1 flex-col", !showsReader && "hidden")}>

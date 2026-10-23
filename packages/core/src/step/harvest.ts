@@ -153,7 +153,7 @@ const harvestCommits = Effect.fn("StepResult.harvestCommits")(function* <E>(
       const sha = yield* decodeCommit(separator < 0 ? line : line.slice(0, separator)).pipe(
         Effect.mapError(
           (cause) =>
-            new HarvestError({ stage: "git", message: "git returned an invalid commit id", cause }),
+            new HarvestError({ stage: "git", message: "Git returned an invalid commit ID", cause }),
         ),
       );
       const summary = separator < 0 ? "" : line.slice(separator + 1).trim();
@@ -178,7 +178,7 @@ const harvestPullRequests = Effect.fn("StepResult.harvestPullRequests")(function
   const head = yield* decodeCommit((yield* run("git", ["rev-parse", "HEAD"])).join("")).pipe(
     Effect.mapError(
       (cause) =>
-        new HarvestError({ stage: "git", message: "git returned an invalid final HEAD", cause }),
+        new HarvestError({ stage: "git", message: "Git returned an invalid final HEAD", cause }),
     ),
   );
   const branch = (yield* run("git", ["branch", "--show-current"])).join("");
@@ -448,7 +448,7 @@ const attributeComments = Effect.fn("StepResult.attributeComments")(function* <W
               new HarvestError({
                 stage: "windows",
                 message:
-                  "Could not read the Attempt's window and those of the Agent's other Attempts on the Item",
+                  "Can't read the windows of this attempt and of the agent's other attempts on the item",
                 cause,
               }),
           ),

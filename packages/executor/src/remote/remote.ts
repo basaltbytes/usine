@@ -132,7 +132,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         if (inspected.exitCode === 1) return false;
         if (inspected.exitCode !== 0)
           return yield* executorError(
-            "Could not inspect recovery checkout",
+            "Can't inspect the recovery checkout",
             new Error(inspected.stderr),
           );
         return true;
@@ -212,7 +212,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         Effect.mapError(
           (error) =>
             new InfraFailure({
-              message: `Could not harvest the Attempt's checkout: ${error.message}`,
+              message: `Can't harvest the attempt's checkout: ${error.message}`,
               cause: error,
             }),
         ),
@@ -231,18 +231,18 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       const { cwd, spec } = yield* session.storedRequest(request.attemptId);
       if (cwd !== worktree)
         return yield* executorError(
-          `The reattached Attempt's checkout is not on this ${label} Worker's machine`,
+          `The reattached attempt's checkout isn't on the machine of this ${label} worker`,
           new Error(cwd),
         );
       const inspected = yield* commands.inspect("prepare", machine.shell, "test", ["-d", worktree]);
       if (inspected.exitCode === 1)
         return yield* executorError(
-          "The checkout of the reattached Attempt is gone",
+          "The reattached attempt's checkout no longer exists",
           new Error(worktree),
         );
       if (inspected.exitCode !== 0)
         return yield* executorError(
-          "Could not inspect the reattached Attempt's checkout",
+          "Can't inspect the reattached attempt's checkout",
           new Error(inspected.stderr.trim()),
         );
       yield* stopChildren("prepare", machine, worktree);
@@ -273,7 +273,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         if (inspected.exitCode === 0) return true;
         if (inspected.exitCode === 1) return false;
         return yield* executorError(
-          `Could not inspect the cached clone on Worker ${request.worker}`,
+          `Can't inspect the cached clone on worker "${request.worker}"`,
           new Error(inspected.stderr.trim()),
         );
       }),
@@ -303,7 +303,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         reattach: request.reattach,
       });
       if (request.permissions === "read" && Option.isSome(worker.readOnlyAccessGap)) {
-        const message = `${label} Worker ${request.worker} cannot run the Loop ${request.loop}, which has permissions: read: ${worker.readOnlyAccessGap.value}`;
+        const message = `${label} worker "${request.worker}" can't run loop "${request.loop}", which has permissions: read. ${worker.readOnlyAccessGap.value}.`;
         yield* Effect.logWarning("Refused an Attempt that needs read-only repository access", {
           attemptId: request.attemptId,
           worker: request.worker,
@@ -438,7 +438,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         Effect.mapError((cause) =>
           isExecutorError(cause)
             ? cause
-            : executorError(`${label} workspace preparation failed`, cause),
+            : executorError(`Can't prepare the ${label} attempt workspace`, cause),
         ),
       );
 

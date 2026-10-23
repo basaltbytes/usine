@@ -578,7 +578,7 @@ describe("exe.dev launch", () => {
         assert.strictEqual(refused._tag, "AgentFailure");
         assert.strictEqual(
           refused.message,
-          "This Attempt has no live session in this orchestrator",
+          "This attempt has no live session in this orchestrator",
         );
         const cancel = yield* executor.cancel(ATTEMPT_ID).pipe(Effect.forkChild);
         // A full interrupt grace passes; the cancel must not time out on a stop it didn't start.
@@ -724,7 +724,7 @@ describe("exe.dev launch", () => {
           .prepare(new CheckoutRequest({ ...request, reattach: true }))
           .pipe(Effect.scoped, Effect.flip);
         assert.strictEqual(error._tag, "ExecutorOperationError");
-        assert.strictEqual(error.message, "The checkout of the reattached Attempt is gone");
+        assert.strictEqual(error.message, "The reattached attempt's checkout no longer exists");
         assert(!ssh.state.commands.slice(before).some(({ args }) => args.includes("attach")));
         assert.isFalse(yield* executor.isLive(ATTEMPT_ID));
       }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, completes, storage)));
@@ -856,7 +856,7 @@ describe("exe.dev launch", () => {
         )
         .pipe(Effect.flip);
       assert(error._tag === "WorkerCapabilityError");
-      assert.strictEqual(error.message, "Pi children run only on local Workers");
+      assert.strictEqual(error.message, "Pi children run only on local workers");
     }).pipe(Effect.provide(runtime(ssh.layer)));
   });
 });

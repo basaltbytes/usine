@@ -28,7 +28,7 @@ export class AttemptRequest extends Schema.Class<AttemptRequest>("@usine/durable
    */
   gatewayCredential: Schema.declare(
     (u): u is Effect.Effect<Option.Option<GatewayCredentialKind>> => Effect.isEffect(u),
-    { expected: "an Effect that reads the Gateway's credential kind" },
+    { expected: "an Effect that reads the gateway's credential kind" },
   ),
 }) {}
 
@@ -56,7 +56,7 @@ export const harvestedResult = (
   report.answeredOperator && facts.length === 0
     ? Result.fail(
         new AgentFailure({
-          message: `The parent ended on its answer to the operator and the Attempt delivered no commit, pull request, or comment. Its answer: ${report.message}`,
+          message: `The parent ended with an answer to the operator, and the attempt produced no commit, pull request, or comment. Answer: ${report.message}`,
         }),
       )
     : Result.succeed(new StepResult({ message: report.message, facts }));

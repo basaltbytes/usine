@@ -17,6 +17,14 @@ import { type GatewayForward, GatewayForwardClosed, type OpenForward } from "./f
 const GatewayAdminOperation = Schema.Literals(["attach", "renew", "detach", "list", "providers"]);
 type GatewayAdminOperation = typeof GatewayAdminOperation.Type;
 
+const ACTIONS = {
+  attach: "attach a token",
+  renew: "renew an attachment",
+  detach: "detach an attachment",
+  list: "list the attachments",
+  providers: "list the LLM providers",
+} as const satisfies Record<GatewayAdminOperation, string>;
+
 /**
  * The error for a failed Gateway admin API request. `message` contains no token; the request
  * and raw failure are discarded because an attach request contains the installation token.
@@ -64,24 +72,24 @@ class GatewayAdminUnanswered extends Data.TaggedError("GatewayAdminUnanswered")<
 /** Returns the failure reason, built only from the forward's state or the failure's tag and status. */
 const reason = (failure: { readonly _tag: string }): string => {
   if (failure instanceof GatewayForwardClosed)
-    return `the forward through ${failure.gateway} is closed since ${DateTime.formatIso(failure.since)}: ${failure.reason}`;
+    return `the forward through ${failure.gateway} has been closed since ${DateTime.formatIso(failure.since)}: ${failure.reason}`;
   if (failure instanceof GatewayAdminUnanswered)
-    return `the admin API through ${failure.gateway} has not answered since ${DateTime.formatIso(failure.since)}: ${failure.detail}`;
+    return `the admin API through ${failure.gateway} hasn't responded since ${DateTime.formatIso(failure.since)}: ${failure.detail}`;
   if (HttpClientError.isHttpClientError(failure))
     return failure.response === undefined
-      ? `no answer (${failure.reason._tag})`
-      : `the admin API answered with status ${String(failure.response.status)}`;
+      ? `no response (${failure.reason._tag})`
+      : `the admin API returned status ${String(failure.response.status)}`;
   switch (failure._tag) {
     case "TimeoutError":
-      return `no answer within ${ADMIN_REQUEST_TIMEOUT}`;
+      return `no response within ${ADMIN_REQUEST_TIMEOUT}`;
     case "Unauthorized":
-      return "the Gateway refused the admin token";
+      return "the gateway rejected the admin token";
     case "AttachmentAlreadyExpired":
       return "the token had already expired";
     case "AttachmentConflict":
-      return "the attachment id belongs to another Worker or repository";
+      return "the attachment ID belongs to another worker or repository";
     case "SchemaError":
-      return "the admin API's answer did not match its contract";
+      return "the admin API response doesn't match its schema";
     default:
       return `the request failed with ${failure._tag}`;
   }
@@ -180,7 +188,7 @@ export const gatewayAdminFor = Effect.fn("SshExecutor.gatewayAdminFor")(function
             new GatewayAdminError({
               worker,
               operation,
-              message: `Could not ${operation} on the admin API of Gateway ${forward.gateway} for Worker ${worker}: ${reason(failure)}`,
+              message: `Can't ${ACTIONS[operation]} on the admin API of gateway ${forward.gateway} for worker "${worker}": ${reason(failure)}`,
             }),
         ),
       );

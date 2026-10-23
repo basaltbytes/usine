@@ -375,11 +375,11 @@ describe("GitHubApp", () => {
       const refused = yield* app.workerToken(project, "write").pipe(Effect.flip);
       assert.strictEqual(
         refused.message,
-        "GitHub rejected the request with status 422: The permissions requested are not granted to this installation.",
+        "GitHub returned HTTP status 422: The permissions requested are not granted to this installation.",
       );
       assert.isTrue(isRefusal(refused));
       const outage = yield* app.workerToken(project, "write").pipe(Effect.flip);
-      assert.strictEqual(outage.message, "GitHub rejected the request with status 503");
+      assert.strictEqual(outage.message, "GitHub returned HTTP status 503");
       assert.isFalse(isRefusal(outage));
       const limited = yield* app.workerToken(project, "write").pipe(Effect.flip);
       assert.strictEqual(limited._tag, "GitHubRateLimitError");

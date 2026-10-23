@@ -34,7 +34,7 @@ export const lastCheckedLabel = (
   now: number,
 ): string | null => {
   if (polls.length === 0) return null;
-  if (polls.every(({ polledAt }) => polledAt === null)) return "No poll has finished yet";
+  if (polls.every(({ polledAt }) => polledAt === null)) return "Not checked yet";
   const [only] = polls;
   if (polls.length === 1 && only !== undefined && only.polledAt !== null) {
     return `Last checked ${agoLabel(only.polledAt, now)}`;

@@ -23,6 +23,9 @@ export const referenceIndex = (
   repoNames: new Set(config.repos.map(({ name }) => canonicalRepositoryName(name))),
 });
 
+const quoted = (names: ReadonlyArray<string>): string =>
+  names.map((name) => `"${name}"`).join(", ");
+
 /**
  * Returns the error for a loop that references an agent or selector entry the instance doesn't
  * have, or `None` if every reference resolves.
@@ -37,7 +40,9 @@ export const loopReferenceFailure = (
       new ConfigFileError({ file, stage: "reference", expression: Option.none(), message }),
     );
   if (!references.agentNames.has(loop.agent)) {
-    return referenceError(`Unknown agent: ${loop.agent}`);
+    return referenceError(
+      `Unknown agent "${loop.agent}": agents/${loop.agent}.md is missing or invalid. Fix the agent file, or set agent to an existing agent.`,
+    );
   }
 
   if (Option.isNone(loop.selector)) return Option.none();
@@ -46,7 +51,9 @@ export const loopReferenceFailure = (
       (name) => !references.repoNames.has(canonicalRepositoryName(name)),
     );
     if (missing.length > 0) {
-      return referenceError(`Unknown selector repos: ${missing.join(", ")}`);
+      return referenceError(
+        `Unknown repositories in selector.repos: ${quoted(missing)}. Add them under repos in usine.yaml.`,
+      );
     }
   }
 
@@ -55,7 +62,9 @@ export const loopReferenceFailure = (
       (tag) => !references.registryTags.has(tag),
     );
     if (missing.length > 0) {
-      return referenceError(`Unknown selector tags: ${missing.join(", ")}`);
+      return referenceError(
+        `Unknown tags in selector.tags: ${quoted(missing)}. Add them to a repository's tags in usine.yaml.`,
+      );
     }
   }
   return Option.none();

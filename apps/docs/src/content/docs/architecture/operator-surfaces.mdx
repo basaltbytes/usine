@@ -212,13 +212,13 @@ Usage:
 Options:
   -p, --port <port>            Listen on this port (default: 7331)
   --allow-volatile-instance    Start even when the instance folder is in a temporary directory
-  -o, --output <path>          Write Run evidence here (default: run-<encoded-runId>.json)
-  -h, --help                   Print this usage
-  -v, --version                Print the pinned @usine/server version
+  -o, --output <path>          Write the run evidence to this file (default: run-<encoded-runId>.json)
+  -h, --help                   Print this help
+  -v, --version                Print the installed @usine/server version
 
 Environment:
-  USINE_PORT                     Listen on this port when --port is absent
-  USINE_ALLOW_VOLATILE_INSTANCE  Same as --allow-volatile-instance when set to 1
+  USINE_PORT                     Listen on this port if --port is not set
+  USINE_ALLOW_VOLATILE_INSTANCE  Set to 1 for the same effect as --allow-volatile-instance
 ```
 
 `usine up` ([up.ts:110][]) refuses a volatile instance folder, takes the instance lock ([instance-lock.ts:44][]), refuses a port in use and prints its process's pid if `lsof` finds it ([cli.ts:318][]), loads the instance folder and reloads it on SIGHUP ([reload-signal.ts][]), and then starts setup mode and opens the browser without credentials ([up.ts:129][]), or runs the HTTP server and trigger streams under [graceful shutdown](/architecture/run-lifecycle/#drain) ([shutdown.ts:29][]). `usine backup` is described in [Runtime store](/architecture/storage-and-config/#runtime-store) ([backup.ts:19][]), and `usine export-run` writes a run's snapshot and transcript as JSON ([export-run.ts][]). Each subcommand's `--help` prints the same usage. `@usine/gateway` provides `usine-gateway`, which runs on the gateway VM ([Workers and the gateway](/architecture/workers-and-gateway/)).
