@@ -1,34 +1,34 @@
 # The v1 web UI: projects as home, a kanban board per project
 
-The UI's spine is the work, not the machinery. Home lists the factory's Projects (managed repos as the operator sees them) under a global needs-you strip; a project opens as a Board — a kanban of the repo's items grouped into Lanes, each lane mapping one or more GitHub labels or state sources (`label: ready`, `state: pr open`), configured per repo with defaults proposed from the repo's existing labels and two-way synced (usine never deletes a label). Cards carry the item plus its live run: agent, run state, and the error or approval that needs the operator. Dragging a card between lanes writes the label swap to GitHub — making the board a trigger surface, since a swap is exactly what fires label-protocol loops. Clicking a card opens the run drawer: event (dedup key, payload gist), attempts with typed errors, and the transcript — Pi parent messages with child session events collapsible one level deep. Loops, agents, workers, and lane maps are configuration, demoted to a Configuration section — never the spine.
+The UI centers work, not machinery. Home lists the projects (managed repos as the operator sees them) under a global needs-you strip. A project opens as a board, a kanban of the repo's items in lanes. Each lane maps GitHub labels or states (`label: ready`, `state: pr open`), configured per repo from proposed defaults and synced both ways (usine never deletes a label). Cards show the item and its live run: agent, run state, and any error or approval awaiting the operator. Dragging a card writes the label swap to GitHub, which fires label-protocol loops, so the board is a trigger surface. A card opens the run drawer: the event (dedup key, payload summary), attempts with typed errors, and the transcript, with child sessions collapsible one level under parent messages. Loops, agents, workers, and lane maps are in Configuration.
 
-## Considered Options
+## Considered options
 
-- **Runs console as home** (global run queue, CI-dashboard style) — densest observe surface, but the operator thinks in projects and items, not run rows; kept as the drawer's information design.
-- **Loops as home** (factory floor of loop cards) — puts configuration where the work should be; rejected as spine, its loop-file view lands in Configuration.
-- **Intervention inbox as home** (needs-you cards, everything else collapsed) — right instinct, wrong scope for a whole surface; survives as the global needs-you strip plus per-card badges.
-- **Projects + kanban** (chosen) — the only spine that shows *what agents are working on* in the operator's own vocabulary, and the label-lane mapping makes the board double as a trigger surface for free.
+- **Runs console as home** (CI-dashboard run queue): the densest view, but the operator thinks in projects and items, not run rows; the drawer reuses its design.
+- **Loops as home** (a page of loop cards): puts configuration where the work should be; its loop-file view moves to Configuration.
+- **Intervention inbox as home**: right instinct, too narrow for a whole surface; it remains as the needs-you strip and card badges.
+- **Projects with kanban** (chosen): the only option showing _what agents are working on_ in the operator's terms, with label lanes making the board a trigger surface for free.
 
 ## Consequences
 
-- v1 interventions: **Approve**, **Retry**, **Steer** (message to the Pi parent), **Interrupt** (pause at the next tool boundary, wait for a steer), **Cancel**, **Pause a loop** (stop opening new runs; runtime state, see [ADR 0009](./0009-instance-repo-remote-optional-runtime-state.md)), **Child takeover** (davis-style attach to a running harness child), and **Edit-and-retry** (amend context before the next attempt). Takeover and edit-and-retry mechanics get their own ticket — the attempt channel ([ADR 0006](./0006-executor-contract-run-host-attempt-channel.md)) currently addresses the parent only.
-- Diffs: the run drawer links the PR the run produced — no reconstructed diff view in v1. The transcript is already persisted, so a changes view stays additive.
-- Needs-you (approvals, agent failures, steerable runs) is global chrome — strip on home, badges on project cards and board cards; intervention never requires knowing which project to check.
-- Lane maps are per-repo configuration in the instance repo; a fresh repo gets lanes proposed from its labels. Board sync is a projection over the trigger layer's polled state ([ADR 0007](./0007-polling-triggers-content-hashed-events.md)) — no new data source.
-- Proposed lanes are read-only. Only an authored lane map identifies which labels the Board may exchange; repository labels such as `bug` or `documentation` cannot safely be inferred as workflow state. Cards expose moves only when another authored label-backed lane is available, and the server rejects proposed-lane destinations. Authored moves preserve labels outside their map. To enable moves, configure `repos[].lanes` in `usine.yaml` and restart the orchestrator. This settles the write behavior raised in [#76](https://github.com/basaltbytes/usine/issues/76).
-- **Project** enters the glossary as the operator-facing term (a managed repo plus its board and factory activity); *managed repo* remains the registry-level mechanism.
-- The validated prototype (structure only — its visual language was explicitly rejected; the UI's look is a separate prototype ticket) lives on the `prototype/v1-web-ui` branch.
+- v1 interventions: **Approve**, **Retry**, **Steer** (message the Pi parent), **Interrupt** (pause at the next tool boundary for a steer), **Cancel**, **Pause a loop** (no new runs; runtime state per [ADR 0009](./0009-instance-repo-remote-optional-runtime-state.md)), **Child takeover** (davis-style attach to a harness child), and **Edit-and-retry** (amend context before the next attempt). Takeover and edit-and-retry get their own ticket: the attempt channel ([ADR 0006](./0006-executor-contract-run-host-attempt-channel.md)) addresses only the parent.
+- Diffs: the drawer links the run's PR. v1 has no diff view, and the stored transcript allows one later.
+- Needs-you (approvals, agent failures, steerable runs) is global: a strip on home and badges on project and board cards, so you don't need to know which project to check.
+- Lane maps are per-repo configuration in the instance repo, proposed from a fresh repo's labels. Board sync projects polled trigger state ([ADR 0007](./0007-polling-triggers-content-hashed-events.md)); no new data source.
+- Proposed lanes are read-only: only an authored lane map says which labels the board may swap, since labels like `bug` aren't safely workflow state. Cards offer moves only to another authored label lane, and the server rejects moves to proposed lanes. Authored moves keep labels outside the map. To enable moves, configure `repos[].lanes` in `usine.yaml` and restart. This settles the write question in [#76](https://github.com/basaltbytes/usine/issues/76).
+- **Project** joins the glossary as the operator-facing term (a managed repo with its board and activity); _managed repo_ stays the registry mechanism.
+- The prototype on `prototype/v1-web-ui` validated structure only; its visual language was rejected, and the look is a separate ticket.
 
-## 2026-10-20: the Board hides what no Loop acts on
+## 2026-10-20: the board hides what no loop acts on
 
-The audit of 2026-10-20 found the Board built around everything GitHub holds. Five of nine lanes were empty columns the operator scrolled past, Done and Unmapped held 232 cards, dependabot pull requests filled the Pull requests lane, and nothing said why seven Items in Ready had no Run. The Board now shows the lanes and Tasks the factory acts on, and puts the others behind header toggles.
+The 2026-10-20 audit found the board showing everything on GitHub: five of nine lanes empty, 232 cards in Done and Unmapped, dependabot PRs filling Pull requests, and nothing saying why seven Ready items had no run. The board now shows the lanes and tasks loops act on, the rest behind header toggles:
 
-- A lane without a Task collapses to a narrow column with its name, count, and labels, and widens under a drag to take the drop.
-- The fallback lane and every lane that holds only closed Items leave the lane row for toggles in the header, off by default, with their counts. Toggled on, they come back as lanes at the end of the row, so a card in Unmapped can still be dragged into an authored lane.
-- A Task no Loop can match is hidden until **Show all Items**: no Loop's trigger matches one of its Items now, its current Item carries no label an authored lane uses, it has no open Run, and nothing about it waits in Needs you. The orchestrator evaluates the triggers with `LoopMatches`, the evaluation the poll runs, so the Board and the poll cannot disagree about a match.
-- The arrow between two authored lanes names the Loops whose trigger matches a Task of the left lane, with or without an open Run ([#345](https://github.com/basaltbytes/usine/issues/345)), since an arrow that names only Loops at work is blank whenever nothing runs.
-- A card on the desk's Not moving list carries the desk's reason and action. The Board reads the desk view for it instead of computing reasons a second time.
+- An empty lane collapses to a narrow column with its name, count, and labels, and widens to accept a drag.
+- The fallback lane and closed-only lanes move to header toggles, off by default, with counts. Toggled on, they're last in the row, so Unmapped cards can still move to authored lanes.
+- A task no loop can match is hidden until **Show all Items**: no trigger matches its items, its current item has no authored-lane label, it has no open run, and nothing about it waits in Needs you. The orchestrator uses the poll's `LoopMatches` evaluation, so board and poll agree.
+- The arrow between two authored lanes lists the loops whose trigger matches a left-lane task, open run or not ([#345](https://github.com/basaltbytes/usine/issues/345)); listing only working loops left it blank when idle.
+- A card on the overview's Not moving list shows its reason and action, read from the desk view rather than recomputed.
 
 ## 2026-10-20, later: every lane in one row again
 
-The operator used the second pass on the live Board the same day and rejected three of its changes: empty lanes collapsed to narrow columns, Done and Unmapped behind header toggles, and Tasks no Loop can match hidden by default. The Board went back to every lane in one row, an empty lane at full width, Done and Unmapped last as rails, and every Task the overview returns. The arrows that name the matching Loops and the stall reasons on cards stayed.
+After trying it live the same day, the operator rejected collapsed empty lanes, toggled Done and Unmapped, and hidden unmatched tasks. The board went back to every lane in one row, empty lanes at full width, Done and Unmapped last as rails, and every task the overview returns. Loop arrows and stall reasons stayed.
