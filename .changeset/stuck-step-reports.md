@@ -2,4 +2,4 @@
 "@usine/durable": minor
 ---
 
-`@usine/durable/harness` exports `StuckStepReports`, the number of identical reports with no commit between them after which the harness treats a step as stuck; it defaults to 1,000.
+Adds `StuckStepReports` to `@usine/durable/harness`: how many identical reports without a commit mark a step as stuck (default 1,000).

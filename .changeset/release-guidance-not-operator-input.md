@@ -2,4 +2,4 @@
 "@usine/durable": patch
 ---
 
-A released parent's answer to the release guidance no longer counts as an answer to the operator, so `AttemptReport.answeredOperator` is false and the Attempt is judged on its harvest and final answer like any other.
+A released parent's reply to the release guidance doesn't count as answering the operator, so `AttemptReport.answeredOperator` stays false.

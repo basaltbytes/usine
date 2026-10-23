@@ -5,4 +5,4 @@
 "@usine/executor": patch
 ---
 
-A retried Attempt starts from the Run's revision as it is now, the default branch tip for an issue Run, and rebases the previous Attempt's salvage onto it instead of checking the salvage out on its old base. A salvage with no changes beyond the revision is dropped. A salvage that does not rebase cleanly is left out: the Attempt starts from the revision, the salvage branch keeps the work, and the new `RunSpec.conflictingSalvage` and `Started.conflictingSalvage` name it, so the Agent's prompt and the Attempt's transcript mention it.
+A retried attempt starts from the run's current revision, the default branch tip for an issue run, and rebases the previous attempt's salvage onto it. A salvage with no changes is dropped, and one that doesn't rebase cleanly stays on its branch and appears in the new `RunSpec.conflictingSalvage` and `Started.conflictingSalvage`, which the prompt and transcript mention.
