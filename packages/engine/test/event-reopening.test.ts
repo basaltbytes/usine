@@ -31,7 +31,7 @@ describe("Events of canceled Runs", () => {
           yield* waitFor(engine, first.runId, ({ run }) => run.state._tag === "Waiting");
           yield* engine.cancel(first.runId);
 
-          // The Item has not moved since the cancel, so the cancel holds.
+          // The Item hasn't changed since the cancel, so the Run stays canceled.
           const unchanged = yield* engine.submit(sighting);
           assert(unchanged._tag === "Claimed");
           assert.strictEqual(unchanged.runId, first.runId);

@@ -33,21 +33,22 @@ import {
 } from "./cycle.ts";
 
 /**
- * Identifies one GitHub issue or pull request across its changing snapshots.
- * Encoding uses the canonical repository name and Item number; decoding lets
- * Board consumers locate the Item associated with a Run. Schedule Runs identify
- * the repository alone and do not decode as an Item.
+ * The stable key of a GitHub issue or pull request: the canonical repository name and Item number.
+ * Schedule Run keys contain only the repository and don't decode as an Item.
  */
 export const GitHubItemKey = Schema.toType(ItemKey).pipe(
   Schema.decodeTo(
     Schema.fromJsonString(Schema.Tuple([Schema.Literal("github"), RepositoryName, ItemNumber])),
   ),
 );
-// `toType` preserves the ItemKey brand on the encoded side, so the encoder
-// produces the identity accepted by both the Board projection and Run engine.
+// `toType` keeps the ItemKey brand on the encoded side, so the encoder produces the key used by
+// both the Board projection and the Run engine.
 const encodeGitHubItemKey = Schema.encodeSync(GitHubItemKey);
 
-/** The identity the Board projection and the Run engine use for one Item of `repository`. */
+/**
+ * Returns the key of Item `number` of `repository`, as used by the Board projection and the Run
+ * engine.
+ */
 export const gitHubItemKey = (repository: RepositoryName, number: number): ItemKey =>
   encodeGitHubItemKey([
     "github",
@@ -55,23 +56,21 @@ export const gitHubItemKey = (repository: RepositoryName, number: number): ItemK
     ItemNumber.make(number),
   ]);
 
-/** What one repository's label-catalog request gave its cycle. */
+/** The result of one repository's label catalog request in a cycle. */
 interface LabelCatalogCycle {
   readonly labelEntityTag: Option.Option<EntityTag>;
-  /** True when the ETag changed; the cursor persists it even if no item changed. */
+  /** Whether the ETag changed; the cursor persists it even if no Item changed. */
   readonly entityTagChanged: boolean;
   /**
-   * The catalog GitHub confirmed this cycle: a fresh body, or the stored
-   * projection a 304 vouches for. None when the request failed, so provisioning
-   * waits for a confirmed catalog instead of re-creating labels the repository
-   * already has.
+   * The catalog confirmed this cycle: a fresh body, or the stored projection on a 304. `None` if
+   * the request failed, so provisioning waits instead of re-creating existing labels.
    */
   readonly confirmedLabels: Option.Option<ReadonlyArray<RepositoryLabel>>;
   readonly failures: ReadonlyArray<RepositoryPollFailure>;
   readonly nextPollAt: Option.Option<DateTime.Utc>;
 }
 
-/** The reconciliation result when the cycle had no confirmed catalog to compare against. */
+/** The reconciliation result when the cycle has no confirmed catalog. */
 const DEFERRED_RECONCILIATION: LabelReconciliation = {
   labels: [],
   findings: [],
@@ -80,9 +79,8 @@ const DEFERRED_RECONCILIATION: LabelReconciliation = {
 };
 
 /**
- * Refreshes the stored label catalog that the Board and the label
- * preflight read. A failed request keeps the stored catalog and ETag and
- * defers provisioning; trigger evaluation runs from the change poll alone.
+ * Refreshes the stored label catalog used by the Board and label preflight. On a failed request,
+ * keeps the stored catalog and ETag and defers provisioning.
  */
 const applyLabelCatalog = Effect.fn("PollingTriggers.applyLabelCatalog")(function* (
   repository: RepositoryName,
@@ -134,8 +132,8 @@ const applyLabelCatalog = Effect.fn("PollingTriggers.applyLabelCatalog")(functio
   if (!(detection instanceof RepositoryLabelCatalog)) {
     const projection = yield* repositoryLabelReader.get(repository);
     if (Option.isNone(projection)) {
-      // The ETag vouches for a projection that is no longer stored, so drop
-      // it and fetch the catalog in full next cycle.
+      // The ETag refers to a projection that is no longer stored, so drop it and fetch the full
+      // catalog next cycle.
       yield* Effect.logWarning(
         "Repository label catalog unchanged (304) but its projection is missing; refetching next cycle and deferring label provisioning",
         { repository },
@@ -161,11 +159,8 @@ const applyLabelCatalog = Effect.fn("PollingTriggers.applyLabelCatalog")(functio
 });
 
 /**
- * Refreshes and reconciles one repository's Board label catalog before change
- * detection. Pass the catalog ETag from its stored poll cursor; the result gives
- * the ETag to persist after Item processing, plus preflight findings and backoff.
- * Failed catalog requests retain the stored projection and defer provisioning;
- * persistence failures stop the repository for retry.
+ * Refreshes and reconciles one repository's Board label catalog before change detection, and
+ * returns the ETag to persist after Item processing. Fails on persistence errors.
  */
 export const synchronizeLabels = Effect.fn("PollingTriggers.synchronizeLabels")(function* (
   repository: RepositoryName,
@@ -195,8 +190,8 @@ export const synchronizeLabels = Effect.fn("PollingTriggers.synchronizeLabels")(
     yield* repositoryLabelWriter
       .replace(new RepositoryLabelProjection({ repository, labels: reconciliation.labels }))
       .pipe(
-        // Provisioning may have reported failures before projection storage
-        // fails. Preserve those findings just as for a later Item failure.
+        // Provisioning may have reported failures before projection storage fails. Keep those
+        // findings, as for a later Item failure.
         Effect.mapError((error): InterruptedRepositoryCycle => ({
           _tag: "InterruptedRepositoryCycle",
           error,
@@ -209,16 +204,15 @@ export const synchronizeLabels = Effect.fn("PollingTriggers.synchronizeLabels")(
   return preflight;
 });
 
-/** A fetched snapshot paired with the allowance observed before its request began. */
+/** A fetched snapshot with the request allowance observed before the request. */
 export interface ObservedItem {
   readonly projection: ItemProjection;
   readonly cycleGeneration: CycleGeneration;
 }
 
 /**
- * Fetches a detected Item and durably updates its Board projection regardless of
- * whether any Loop applies. Evaluation uses the returned projection's snapshot,
- * identity and content hash, so Board observation and Run decisions agree.
+ * Fetches a detected Item and updates its Board projection whether or not any Loop applies.
+ * Evaluation uses the returned projection, so Board observation and Run decisions agree.
  */
 export const observeItem = Effect.fn("PollingTriggers.observeItem")(function* (
   repository: RepositoryName,
@@ -250,9 +244,8 @@ export const observeItem = Effect.fn("PollingTriggers.observeItem")(function* (
 });
 
 /**
- * Records in the Board projection of Item `number` that GitHub no longer has
- * it, so its card leaves the open lanes. True when this marked a stored
- * projection.
+ * Marks Item `number`'s Board projection as gone from GitHub, which removes its card from the open
+ * lanes. Returns true if a stored projection was marked.
  */
 export const markItemGone = Effect.fn("PollingTriggers.markItemGone")(function* (
   repository: RepositoryName,

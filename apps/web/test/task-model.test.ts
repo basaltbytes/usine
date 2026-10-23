@@ -84,15 +84,15 @@ describe("Tasks list model", () => {
     assert(run !== undefined);
     return run;
   };
-  /** The desk's stall of the Loop of the Task's last Run on its first Item, for `reason`. */
+  /** Returns a desk stall with `reason` for the Loop of the Task's last Run on its first Item. */
   const stallOf = (task: BoardTaskView, reason: StalledItemView["reason"]) => {
     const [item] = task.items;
     const { repository, loop } = lastRunOf(task);
     assert(item !== undefined);
     return new StalledItemView({ repository, loop, item, reason });
   };
-  /** `overview` with #18's Run, which waited three days, canceled a minute ago before any Attempt
-   * began. */
+  /** Returns `overview` with #18's Run, which waited three days, canceled a minute ago before any
+   * Attempt started. */
   const canceledJustNow = (overview: ReturnType<typeof boardOverview>) =>
     changeTasks(overview, (task) =>
       task.number === 18
@@ -113,10 +113,9 @@ describe("Tasks list model", () => {
 
   it("lists only the Tasks with Runs, in flight first: running, waiting, then pending, queued, and stalled, each by when its Run opened", () => {
     const rows = taskRows(lanes(), boardStalled());
-    // #31 opened 12m ago and runs; #7 opened 3m ago and waits; #44 queued 2m ago, and #28 failed
-    // 95m ago and waits on the operator. #18 was canceled a day ago and is unchanged since, so it
-    // is not in flight and goes before #6, merged two days ago. #12, #15, #40, and #50 never had a
-    // Run.
+    // #31 opened 12m ago and is running; #7 opened 3m ago and is waiting; #44 was queued 2m ago;
+    // #28 failed 95m ago and needs the operator. #18, canceled a day ago and unchanged since, is
+    // not in flight and comes before #6, merged two days ago. #12, #15, #40, and #50 have no Run.
     assert.deepStrictEqual(order(rows), [
       [31, "Running"],
       [7, "AwaitingApproval"],
@@ -133,8 +132,8 @@ describe("Tasks list model", () => {
   });
 
   it("puts every Task in flight before the others, then orders the others by when the last Run ended", () => {
-    // #18's Run was canceled a minute ago and the Item is unchanged since, after #28's failed
-    // review opened 95m ago; that failure still waits on the operator, so #28 comes first.
+    // #18's Run was canceled a minute ago, after #28's failed review opened 95m ago; that failure
+    // still needs the operator, so #28 comes first.
     const canceled = canceledJustNow(boardOverview());
     const dropped = taskOf(18, canceled);
     const stalled = boardStalled().map((stall) =>
@@ -158,7 +157,7 @@ describe("Tasks list model", () => {
     ]);
     assert.strictEqual(taskCounts(attention), "3 in flight, 1 needs attention, 1 done");
 
-    // Once the failure is resolved and nothing is stalled, the last Run's outcome stands.
+    // After the failure is resolved and nothing is stalled, the status is the last Run's outcome.
     const ended = taskRows(lanes(boardOverviewResolved()), []);
     assert.deepStrictEqual(order(ended).slice(3), [
       [28, "Ended"],
@@ -189,16 +188,15 @@ describe("Tasks list model", () => {
       taskRows(lanes(overview), [stallOf(taskOf(number, overview), reason)]).find(
         ({ task }) => task.number === number,
       )?.status._tag;
-    // #18's Run was canceled on the Item's state, which is unchanged since; or the next poll acts on
-    // the Item; or the Loop is paused. Nothing is in flight.
+    // #18's Run was canceled and the Item is unchanged since, or the next poll handles the Item, or
+    // the Loop is paused; in each case nothing is in flight.
     assert.strictEqual(
       statusOf(18, new ClosedUnchangedView({ run: lastRunOf(taskOf(18)) })),
       "Idle",
     );
     assert.strictEqual(statusOf(18, new AwaitingPollView()), "Idle");
     assert.strictEqual(statusOf(18, new LoopPausedView()), "Idle");
-    // #28's failed review, or the Agent's question it ended on, holds the Loop on the operator
-    // until the operator resolves it.
+    // #28's failed review, or the question it ended on, stalls the Loop until the operator acts.
     const pinned = lastRunOf(taskOf(28));
     assert.strictEqual(statusOf(28, new RunFailedView({ run: pinned })), "Stalled");
     assert.strictEqual(statusOf(28, new HeldForOperatorView({ run: pinned })), "Stalled");
@@ -206,8 +204,8 @@ describe("Tasks list model", () => {
     const failure = new RunFailedView({ run: lastRunOf(taskOf(28, resolved)) });
     assert.strictEqual(statusOf(28, failure, resolved), "Idle");
 
-    // An earlier failure on #18 waits on the operator, so the heading counts it as needing
-    // attention; its status stays the stall's.
+    // An earlier failure on #18 needs the operator, so the heading counts it as needing attention;
+    // its status is still the stall's.
     const attention = changeTasks(boardOverview(), (task) =>
       task.number === 18 ? new BoardTaskView({ ...task, needsYou: true }) : task,
     );
@@ -217,7 +215,7 @@ describe("Tasks list model", () => {
   });
 
   it("keeps a Task in flight on any of its failures that waits on the operator, though the desk lists a resolved one first", () => {
-    /** `overview` with an audit Run on #28 that failed before its review did, its failure
+    /** Returns `overview` with a failed audit Run on #28, before its review failed, with the failure
      * resolved. */
     const withAudit = (overview: ReturnType<typeof boardOverview>) =>
       changeTasks(overview, (task) => {
@@ -234,8 +232,8 @@ describe("Tasks list model", () => {
         });
         return new BoardTaskView({ ...task, runs: [audit, ...task.runs] });
       });
-    /** The desk's list for `overview`, with #28's failures in the desk's order: same Item, so by
-     * Loop name, the audit first. */
+    /** Returns the desk's stall list for `overview`; #28's failures are on the same Item, so they
+     * are ordered by Loop name, audit first. */
     const deskOf = (overview: ReturnType<typeof boardOverview>) => {
       const pinned = taskOf(28, overview);
       const [item] = pinned.items;
@@ -256,7 +254,7 @@ describe("Tasks list model", () => {
       return boardStalled().flatMap((stall) => (stall.item.number === 28 ? failures : [stall]));
     };
 
-    // The review's failure still waits on the operator, so #28 stays in flight on it.
+    // The review's failure still needs the operator, so #28 stays in flight.
     const mixed = withAudit(boardOverview());
     const rows = taskRows(lanes(mixed), deskOf(mixed));
     assert.deepStrictEqual(order(rows), [
@@ -273,8 +271,8 @@ describe("Tasks list model", () => {
     assert.strictEqual(pinned.run.id, RunId.make("run-pinned"));
     assert.strictEqual(taskCounts(rows), "4 in flight, 1 done");
 
-    // Once the review's failure is resolved too, nothing about #28 waits on the operator: it is
-    // idle on the desk's first failure, the audit's, and the heading leaves it out.
+    // After the review's failure is also resolved, #28 needs nothing from the operator: it is idle
+    // on the desk's first failure, the audit's, and the heading does not count it.
     const resolved = withAudit(boardOverviewResolved());
     const settled = taskRows(lanes(resolved), deskOf(resolved));
     const idle = settled.find(({ task }) => task.number === 28)?.status;
@@ -317,7 +315,7 @@ describe("Tasks list model", () => {
     assert(row?.status._tag === "Stalled");
     assert.strictEqual(row.status.stall.reason._tag, "QueuedForWorker");
     assert.strictEqual(row.status.run.id, implement.id);
-    // Ordered by the queued Run's opening, 12m ago, so it comes after #44, queued 2m ago.
+    // Ordered by when the queued Run opened, 12m ago, so it comes after #44, queued 2m ago.
     assert.deepStrictEqual(order(taskRows(lanes(queued), stalled)).slice(0, 3), [
       [7, "AwaitingApproval"],
       [44, "Queued"],
@@ -325,7 +323,7 @@ describe("Tasks list model", () => {
     ]);
   });
 
-  /** The line under the Tasks list's heading for `overview`, a `*` after each lower bound. */
+  /** Returns the totals line of the Tasks list for `overview`, with `*` after each lower bound. */
   const totalsLine = (overview: ReturnType<typeof boardOverview>) =>
     totalsFigures(taskTotals(taskRows(lanes(overview), boardStalled()), Date.now()))
       .map(({ figure, words, lowerBound }) => `${figure}${lowerBound === null ? "" : "*"} ${words}`)

@@ -2,8 +2,8 @@ import { Schema } from "effect";
 import { ChildSessionBudget, ChildSessionCount } from "../agent/session.ts";
 
 /**
- * Infrastructure failed around the agent: worker unreachable, checkout failed,
- * parent task lost. The only class the engine retries on its own, capped.
+ * An infrastructure failure outside the agent, such as an unreachable Worker or failed checkout.
+ * It's the only failure the engine retries automatically, up to the attempt cap.
  */
 export class InfraFailure extends Schema.TaggedError<InfraFailure>("AttemptFailure/InfraFailure")(
   "InfraFailure",
@@ -13,15 +13,12 @@ export class InfraFailure extends Schema.TaggedError<InfraFailure>("AttemptFailu
   },
 ) {}
 
-/** A programmer defect captured at the durable execution boundary. Retains its cause for diagnosis and requires an operator retry. */
+/** A programmer defect caught at the durable execution boundary; not retried automatically. */
 export class DefectFailure extends Schema.TaggedError<DefectFailure>(
   "AttemptFailure/DefectFailure",
 )("DefectFailure", { message: Schema.String, cause: Schema.Defect() }) {}
 
-/**
- * The agent ran and failed the work itself. Never auto-retried, since the same
- * agent would fail the same way; the operator decides what changes first.
- */
+/** A task failure reported by the agent; not retried automatically. */
 export class AgentFailure extends Schema.TaggedError<AgentFailure>("AttemptFailure/AgentFailure")(
   "AgentFailure",
   {
@@ -30,10 +27,9 @@ export class AgentFailure extends Schema.TaggedError<AgentFailure>("AttemptFailu
 ) {}
 
 /**
- * The agent stopped at a blocker it cannot resolve itself, and `message` is
- * its report of the blocker and the work left undone. Never auto-retried: as
- * for a question, the Loop holds the Item until the operator retries or
- * resolves the Run, or the Item changes again (ADR 0017).
+ * A blocker the agent can't resolve, described in `message` with the remaining work. The Loop
+ * opens no new Run for the Item until the operator retries or resolves the Run, or the Item
+ * changes (ADR 0017).
  */
 export class BlockedFailure extends Schema.TaggedError<BlockedFailure>(
   "AttemptFailure/BlockedFailure",
@@ -42,9 +38,8 @@ export class BlockedFailure extends Schema.TaggedError<BlockedFailure>(
 }) {}
 
 /**
- * The agent stopped because it needs an operator decision it cannot make
- * itself, and `question` is what it asks. Never auto-retried: the Loop holds
- * the Item until the operator answers or the Item changes again (ADR 0017).
+ * A question that needs an operator decision. The Loop opens no new Run for the Item until the
+ * operator answers or the Item changes (ADR 0017).
  */
 export class QuestionFailure extends Schema.TaggedError<QuestionFailure>(
   "AttemptFailure/QuestionFailure",
@@ -52,21 +47,18 @@ export class QuestionFailure extends Schema.TaggedError<QuestionFailure>(
   question: Schema.NonEmptyString,
 }) {}
 
-/** Which per-attempt ceiling the runaway guard tripped. */
+/** The runaway guard limit that was exceeded. */
 export const RunawayCeiling = Schema.Literals(["wall-clock", "tokens"]);
 export type RunawayCeiling = typeof RunawayCeiling.Type;
 
-/** The runaway guard interrupted an attempt that burned without progress. Never auto-retried (ADR 0013). */
+/** A stop by the runaway guard after the Attempt exceeded `ceiling`; not retried automatically (ADR 0013). */
 export class RunawayFailure extends Schema.TaggedError<RunawayFailure>(
   "AttemptFailure/RunawayFailure",
 )("RunawayFailure", {
   ceiling: RunawayCeiling,
 }) {}
 
-/**
- * The parent tried to spawn more child sessions than the Attempt allows. Never
- * auto-retried, since the same parent would exhaust the same budget again.
- */
+/** A parent request for more child sessions than `maxChildren`; not retried automatically. */
 export class ChildSessionBudgetFailure extends Schema.TaggedError<ChildSessionBudgetFailure>(
   "AttemptFailure/ChildSessionBudgetFailure",
 )("ChildSessionBudgetFailure", {
@@ -85,5 +77,5 @@ export const AttemptFailure = Schema.Union([
 ]);
 export type AttemptFailure = typeof AttemptFailure.Type;
 
-/** The class half of the auto-retry law: only infra failures qualify. `shouldAutoRetry` adds the attempt cap. */
+/** Returns whether the failure is an `InfraFailure`; `shouldAutoRetry` also applies the attempt cap. */
 export const isAutoRetryableFailure = Schema.is(InfraFailure);

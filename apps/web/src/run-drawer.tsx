@@ -85,7 +85,6 @@ const finalEnd = (run: RunDetailView["run"]): Option.Option<AttemptEnd> => {
   return Option.none();
 };
 
-/** The drawer's one paragraph: the outcome or failure, what a live Run is doing, or what an open Run waits for. */
 export const RunSummary = ({ detail }: { readonly detail: RunDetailView }) => {
   const run = detail.run;
   switch (run.state) {
@@ -107,14 +106,13 @@ export const RunSummary = ({ detail }: { readonly detail: RunDetailView }) => {
   }
 };
 
-/** A short summary of one Run over any screen, with its actions and a link to the Run page. */
 export const RunDrawer = ({
   runId,
   open,
   close,
 }: {
   readonly runId: RunId;
-  /** False keeps the last Run mounted while the Sheet plays its exit transition. */
+  /** If `false`, the last Run stays mounted until the Sheet's exit transition ends. */
   readonly open: boolean;
   readonly close: () => void;
 }) => {

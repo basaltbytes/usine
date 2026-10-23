@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 import { CommitSha } from "../repository.ts";
 
-/** A commit the executor found between the workspace base and final HEAD. */
+/** A commit between the workspace base and the final HEAD. */
 export class Commit extends Schema.TaggedClass<Commit>("StepResult/Commit")("Commit", {
   sha: CommitSha,
   summary: Schema.NonEmptyString,
@@ -17,18 +17,16 @@ export class PullRequest extends Schema.TaggedClass<PullRequest>("StepResult/Pul
 ) {}
 
 /**
- * Where a comment sits on GitHub: `issue-comment` in the conversation of an
- * issue or pull request, `review` a submitted pull request review, and
- * `review-comment` on a line of a pull request's diff, a reply in a review
- * thread included.
+ * - `issue-comment`: in an issue or pull request conversation.
+ * - `review`: a submitted pull request review.
+ * - `review-comment`: on a line of a pull request diff, including replies in a review thread.
  */
 export const CommentKind = Schema.Literals(["issue-comment", "review", "review-comment"]);
 export type CommentKind = typeof CommentKind.Type;
 
 /**
- * A GitHub comment or review the agent created or updated on the Run's Item during the Attempt.
- * `at` is when GitHub says it was posted: a comment's creation, a review's submission. None for a
- * comment harvested before these times were recorded.
+ * A GitHub comment or review that the agent created or updated on the Run's Item. `at` is the
+ * creation time of a comment or submission time of a review, or `None` for older records.
  */
 export class Comment extends Schema.TaggedClass<Comment>("StepResult/Comment")("Comment", {
   url: Schema.URLFromString,
@@ -36,11 +34,10 @@ export class Comment extends Schema.TaggedClass<Comment>("StepResult/Comment")("
   at: Schema.OptionFromOptionalKey(Schema.DateTimeUtcFromString),
 }) {}
 
-/** A commit or GitHub artifact recorded as an outcome of the Agent's work. */
 export const StepResultFact = Schema.Union([Commit, PullRequest, Comment]);
 export type StepResultFact = typeof StepResultFact.Type;
 
-/** The agent's final message plus the facts that survive workspace cleanup. */
+/** The agent's final message and the facts kept after workspace cleanup. */
 export class StepResult extends Schema.Class<StepResult>("StepResult")({
   message: Schema.NonEmptyString,
   facts: Schema.Array(StepResultFact),

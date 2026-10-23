@@ -16,7 +16,10 @@ import { repairUnreadableConversations } from "./repair.ts";
 import { appendInbound, emitPayload, readRecord, relayAttempt, relayDeliveries } from "./relay.ts";
 import { readStoredRequest, taskInput } from "./request.ts";
 
-/** The operator input could not be applied; the transcript records why and the Attempt continues. */
+/**
+ * An operator input that couldn't be applied. The reason is recorded in the transcript and the
+ * Attempt continues.
+ */
 class InterventionRefused extends Schema.TaggedError<InterventionRefused>(
   "@usine/durable/InterventionRefused",
 )("InterventionRefused", { message: Schema.NonEmptyString }) {}
@@ -96,7 +99,8 @@ const makeAttemptRuntime = Effect.gen(function* () {
       ),
   );
 
-  // An aborted task is never live: only `cancel` ends one as aborted, and every caller of `cancel` has the engine close the Attempt itself.
+  // An aborted task is never live: only `cancel` aborts a task, and every caller of `cancel` has
+  // the engine close the Attempt.
   const isLive = Effect.fn("AttemptRuntime.isLive")(
     function* (attemptId: AttemptId) {
       yield* Effect.annotateCurrentSpan({ attemptId });
@@ -213,7 +217,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
     Effect.catchTag("DurableHarnessError", (error) => Effect.fail(infra(error))),
   );
 
-  /** Commits a change to the Attempt's Hold document while the task is live; none means it already returned. */
+  /** Commits a change to the Hold document. Returns `None` if the task is no longer live. */
   const supervise = <A>(hub: AttemptHub, change: (document: Hold) => A) =>
     durable.use("update the Hold", (harness, context) =>
       harness.commit(async (tx) => {
@@ -231,9 +235,8 @@ const makeAttemptRuntime = Effect.gen(function* () {
     });
 
   /**
-   * Applies operator input to a live child. A message the working child reads
-   * only at its next boundary is reported queued and recorded, and the child's
-   * report of whether it read it reaches the relay for the second receipt.
+   * Applies operator input to a live child. A working child reads a message at its next turn
+   * boundary, so the message is first reported as queued.
    */
   const routeChild = Effect.fn("AttemptRuntime.routeChild")(function* (
     hub: AttemptHub,
@@ -280,9 +283,8 @@ const makeAttemptRuntime = Effect.gen(function* () {
   });
 
   /**
-   * Commits a change to the Hold that also depends on whether the parent is
-   * working on a turn, read in the same commit; none means the task already
-   * returned.
+   * Commits a Hold change that depends on whether the parent is mid-turn. Returns `None` if the
+   * task is no longer live.
    */
   const superviseParent = <A>(
     hub: AttemptHub,
@@ -301,11 +303,9 @@ const makeAttemptRuntime = Effect.gen(function* () {
     );
 
   /**
-   * Applies operator input to the Pi parent (ADR 0018). An operator message
-   * places a Hold, so the parent's answers wait for the operator until a
-   * release; a steer does not. Input to a working parent joins its current
-   * turn after the running tool call returns, and is reported queued until
-   * then; input to a waiting parent starts its next turn.
+   * Applies operator input to the Pi parent (ADR 0018). An operator message places a Hold and a
+   * steer doesn't; input to a working parent is reported as queued until the running tool call
+   * returns.
    */
   const routeParent = Effect.fn("AttemptRuntime.routeParent")(function* (
     hub: AttemptHub,
@@ -335,7 +335,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
         const conversation = await harness.conversation(parent, context);
         await conversation?.abort(context);
       });
-      // The abort withdrew any queued operator input; its receipt says so.
+      // The abort withdrew any queued operator input; send its rejection receipt.
       yield* relayDeliveries(durable, hub, "live");
       return marked.value.state;
     }
@@ -345,7 +345,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
           return { _tag: "NotSupervised" } as const;
         }
         document.held = document.held.filter((id) => id !== parentId);
-        // An interrupted turn may settle after this commit, so it needs the guidance to resume.
+        // The interrupted turn may end after this commit, so add guidance for it to resume with.
         if (document.paused) {
           document.guidance = [...document.guidance, RELEASE_GUIDANCE];
           document.paused = false;
@@ -577,8 +577,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
 });
 
 /**
- * Runs Attempts on the durable harness. Building it installs the usine
- * extension and resumes the harness's tasks, so every unfinished Attempt
- * continues as soon as the orchestrator starts.
+ * Provides `AttemptRuntime` on the durable harness. Building it installs the usine extension and
+ * resumes unfinished Attempts.
  */
 export const layer = Layer.effect(AttemptRuntime, makeAttemptRuntime);

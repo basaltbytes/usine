@@ -4,28 +4,27 @@ import { LoopName } from "./loop.ts";
 import { RepositoryName } from "./repository.ts";
 import { Schema } from "effect";
 
-/** Maximum Runs one Loop may open for an Item between operator resets. */
+/** The maximum number of Runs one Loop can open for an Item between operator resets. */
 export const CycleLimit = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pipe(
   Schema.brand("CycleLimit"),
 );
 export type CycleLimit = typeof CycleLimit.Type;
 
-/** Identifies one Item allowance between explicit operator resets. */
+/** The ID of the period between two operator resets of an Item's cycle budget. */
 export const CycleGeneration = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pipe(
   Schema.brand("CycleGeneration"),
 );
 export type CycleGeneration = typeof CycleGeneration.Type;
 
-/** The safe default for unattended rounds on an Item. */
 export const DEFAULT_CYCLE_LIMIT = CycleLimit.make(3);
 
-/** Number of admitted or completed rounds for one Loop on an Item. */
+/** The number of admitted or completed Runs of one Loop on an Item. */
 export const CycleCount = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pipe(
   Schema.brand("CycleCount"),
 );
 export type CycleCount = typeof CycleCount.Type;
 
-/** A Loop's charged Runs and settled Runs in the current cycle budget. */
+/** The admitted and completed Runs of one Loop in the current cycle generation. */
 export class LoopCycleCount extends Schema.Class<LoopCycleCount>("LoopCycleCount")(
   Schema.Struct({
     loop: LoopName,
@@ -40,11 +39,11 @@ export class LoopCycleCount extends Schema.Class<LoopCycleCount>("LoopCycleCount
     .annotate({ parseOptions: { onExcessProperty: "error" } }),
 ) {}
 
-/** Identifies the Event and budget generation that first exhausted an Item's allowance. */
+/** The ID of the Event and cycle generation that first exhausted an Item's budget. */
 export const CycleBudgetAskId = EventId.pipe(Schema.brand("CycleBudgetAskId"));
 export type CycleBudgetAskId = typeof CycleBudgetAskId.Type;
 
-/** An Item-level request for an operator reset before further Runs can open. */
+/** An Ask for the operator to reset an Item's cycle budget; no Runs open until the reset. */
 export class CycleBudgetAsk extends Schema.Class<CycleBudgetAsk>("CycleBudgetAsk")(
   Schema.Struct({
     id: CycleBudgetAskId,
@@ -66,7 +65,7 @@ export class CycleBudgetAsk extends Schema.Class<CycleBudgetAsk>("CycleBudgetAsk
     )
     .annotate({ parseOptions: { onExcessProperty: "error" } }),
 ) {
-  /** The furthest completed round; each Loop participates at most once per round. */
+  /** The highest `completed` count across Loops; each Loop runs at most once per round. */
   get completedCycles(): CycleCount {
     return CycleCount.make(Math.max(...this.counts.map(({ completed }) => completed)));
   }

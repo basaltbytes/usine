@@ -25,7 +25,7 @@ export const writeInstanceFiles = Effect.fn("test.writeInstanceFiles")(function*
   }
 });
 
-/** The reloadable current instance over the folder at `root`, loaded the way `usine up` loads it. */
+/** The reloadable current instance over the folder at `root`, loaded as `usine up` loads it. */
 export const reloadableInstanceLayer = (root: InstanceDirectory) =>
   Layer.unwrap(
     Effect.gen(function* () {

@@ -92,9 +92,8 @@ describe("Run evidence reader", () => {
           parentModel: Option.none(),
         };
         const observedStarts = new Set<boolean>();
-        // Try the Started arrival at every database-operation boundary. The
-        // logger schedules arrivals without inspecting SQL or fixing its shape;
-        // the first unreached boundary ends the sweep as query structure changes.
+        // Delivers `Started` at each database operation boundary in turn. The sweep ends at the
+        // first boundary not reached, so it doesn't depend on the query structure.
         for (let boundary = 1; ; boundary += 1) {
           const submitted = yield* engine.submit(
             new Submission({
@@ -261,8 +260,8 @@ describe("Run Events", () => {
 
 describe("Attempts by Worker", () => {
   it("counts a Worker whose every Attempt still runs, and refuses more open Attempts than Attempts", () => {
-    // The first state of a Worker a reload removed: its only Attempt still runs. A count the
-    // schema refused would fail every overview until that Attempt ends.
+    // A Worker removed by a reload, with its only Attempt still running. If the schema rejected
+    // this count, every overview would fail until that Attempt ends.
     const local = WorkerName.make("local");
     assert.doesNotThrow(() => new WorkerAttempts({ worker: local, attempts: 1, running: 1 }));
     assert.throws(() => new WorkerAttempts({ worker: local, attempts: 1, running: 2 }));

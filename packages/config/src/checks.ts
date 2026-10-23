@@ -4,7 +4,7 @@ import { Schema } from "effect";
 export const nonBlankString = (message: string) =>
   Schema.String.check(Schema.isPattern(/\S/u, { message }));
 
-/** Refuses two names that GitHub would treat as one repository. */
+/** Returns a filter that rejects two names GitHub treats as the same repository. */
 export const uniqueRepositoryNames = <A>(nameOf: (value: A) => RepositoryName) =>
   Schema.makeFilter<ReadonlyArray<A>>(
     (values) =>

@@ -3,9 +3,9 @@ import type { ConfigFileError, InstancePath } from "../file.ts";
 import { splitMarkdown } from "../frontmatter.ts";
 import { parseYamlDocument } from "./document.ts";
 
-/** One replacement in authored YAML, preserving the surrounding file. */
+/** A replacement of one value in a YAML file. */
 export class YamlEdit extends Schema.Class<YamlEdit>("@usine/config/YamlEdit")({
-  /** Path in file-key spelling, for example `["settings", "max_children"]`. */
+  /** The keys as written in the file, for example `["settings", "max_children"]`. */
   path: Schema.Array(Schema.NonEmptyString).check(Schema.isNonEmpty()),
   value: Schema.Json,
 }) {}
@@ -15,7 +15,7 @@ const restoreNewlines = (text: string, newline: "\n" | "\r\n"): string => {
   return newline === "\r\n" ? normalized.replaceAll("\n", "\r\n") : normalized;
 };
 
-/** Sets one YAML path and returns the file with its comments, key order, and newline style intact. */
+/** Returns `source` with `edit` applied, keeping comments, key order, and newline style. */
 export const updateYaml = Effect.fn("YamlWriter.updateYaml")(
   (file: InstancePath, source: string, edit: YamlEdit): Effect.Effect<string, ConfigFileError> =>
     Effect.gen(function* () {
@@ -26,13 +26,12 @@ export const updateYaml = Effect.fn("YamlWriter.updateYaml")(
     }),
 );
 
-/** Sets one YAML path in the frontmatter of a Markdown config file and returns the whole file. */
+/** Applies `edit` to the frontmatter of a Markdown config file and returns the whole file. */
 export const updateFrontmatter = Effect.fn("YamlWriter.updateFrontmatter")(
   (file: InstancePath, source: string, edit: YamlEdit): Effect.Effect<string, ConfigFileError> =>
     Effect.gen(function* () {
       const markdown = yield* splitMarkdown(file, source);
-      // A one-line YAML half has no newline to infer a style from, so the file's
-      // delimiter decides.
+      // Takes the newline style from the whole file, because one-line frontmatter has no newline.
       const updated = restoreNewlines(
         yield* updateYaml(file, markdown.yaml, edit),
         markdown.newline,

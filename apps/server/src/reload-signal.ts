@@ -2,9 +2,8 @@ import type { CurrentInstance } from "@usine/orchestrator/current-instance";
 import { Effect, Queue } from "effect";
 
 /**
- * Reloads the instance folder on each SIGHUP until the scope closes, in place
- * of Node's default, which ends the process. Signals that arrive while a
- * reload runs request one more reload.
+ * Reloads the instance folder on each SIGHUP until the scope closes, instead of exiting. A SIGHUP
+ * during a reload triggers one more reload.
  */
 export const reloadOnHangup = (instances: CurrentInstance["Service"]) =>
   Effect.gen(function* () {

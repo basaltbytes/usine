@@ -11,7 +11,10 @@ import { Equal, Schema } from "effect";
 
 const RESTART_BLOCKS = ["workers", "webhooks"] as const;
 
-/** A `usine.yaml` block in which some changes apply only when `usine up` starts, so a reload refuses them. */
+/**
+ * A `usine.yaml` block with changes that apply only when `usine up` starts, so a reload refuses
+ * them.
+ */
 export const RestartBlock = Schema.Literals(RESTART_BLOCKS);
 
 export type RestartBlock = typeof RestartBlock.Type;
@@ -21,7 +24,7 @@ export interface RestartChange {
   readonly block: RestartBlock;
   /** The changed field as a path into `usine.yaml`, such as `webhooks` or `workers.build-1.destination`. */
   readonly field: string;
-  /** What changed, for operators, as a clause such as `the webhooks block changed`. */
+  /** An operator-facing clause, such as `the webhooks block changed`. */
   readonly reason: string;
 }
 
@@ -33,11 +36,8 @@ const nameChanges = <S extends Schema.Top>(name: S) =>
   });
 
 /**
- * What an accepted reload changed compared with the running instance: Loops,
- * Agents, declared labels, registered repositories, and Workers by name, and
- * whether `settings` or the `operator` login changed. A changed Worker has a
- * new `max_concurrent_attempts`. It also lists every Loop and Agent file the
- * reloaded folder left out, which Needs you shows until the file loads.
+ * The changes of an accepted reload by name, whether `settings` or the `operator` login changed,
+ * and the Loop and Agent files that were left out.
  */
 export class InstanceReload extends Schema.Class<InstanceReload>(
   "@usine/orchestrator/InstanceReload",
@@ -79,7 +79,7 @@ const changesBy = <A, N>(
   };
 };
 
-/** Compares a freshly loaded instance folder with the running instance. */
+/** Compares a newly loaded instance folder with the running instance. */
 export const instanceReload = (running: LoadedInstance, loaded: LoadedInstance): InstanceReload =>
   new InstanceReload({
     loops: changesBy(
@@ -118,7 +118,7 @@ export const instanceReload = (running: LoadedInstance, loaded: LoadedInstance):
     invalidAgents: loaded.invalidAgents,
   });
 
-/** The Agents of `loaded` whose brain no Agent of the running instance has. */
+/** Returns the Agents of `loaded` whose brain no running Agent has. */
 export const agentsWithNewBrains = (
   running: LoadedInstance,
   loaded: LoadedInstance,
@@ -130,9 +130,8 @@ export const agentsWithNewBrains = (
 };
 
 /**
- * The changes `loaded` makes that only a restart applies: a changed `webhooks`
- * block, and a changed `workers` block while no Worker runs Attempts, as in
- * setup mode. While Workers run, `workersChange` sorts the `workers` changes.
+ * Returns the changes in `loaded` that only a restart applies: a changed `webhooks` block, and a
+ * changed `workers` block while no Worker runs Attempts, as in setup mode.
  */
 export const restartChanges = (
   running: LoadedInstance,
@@ -157,9 +156,8 @@ const yamlKey = (field: string): string =>
   field.replace(/[A-Z]/gu, (letter) => `_${letter.toLowerCase()}`);
 
 /**
- * The `usine.yaml` keys of a Worker entry, other than `name` and
- * `max_concurrent_attempts`, whose value differs between `before` and
- * `after`; only `kind` when the kind differs.
+ * Returns the keys of a Worker entry, other than `name` and `max_concurrent_attempts`, that differ
+ * between `before` and `after`. Returns only `kind` if the kind differs.
  */
 const changedWorkerSettings = (
   before: ConfigWorker,
@@ -179,22 +177,20 @@ const changedWorkerSettings = (
 
 /** A Worker that a reload keeps with a new `max_concurrent_attempts`. */
 interface ResizedWorker {
-  /** The Worker's reloaded entry. */
   readonly worker: ConfigWorker;
-  /** Its `max_concurrent_attempts` in the running instance. */
+  /** The `max_concurrent_attempts` in the running instance. */
   readonly from: number;
 }
 
-/** How a reload changes the `workers` block, by Worker name. */
+/** The changes a reload makes to the `workers` block, by Worker name. */
 export interface WorkersChange {
   readonly resized: ReadonlyArray<ResizedWorker>;
   readonly added: ReadonlyArray<ConfigWorker>;
   readonly removed: ReadonlyArray<ConfigWorker>;
   /**
-   * The changes the running Workers cannot take: a Worker that keeps its name
-   * but changes its kind or a setting other than `max_concurrent_attempts`,
-   * and a renamed Worker, which is a removed and an added Worker with the same
-   * kind and settings.
+   * The changes running Workers can't apply: a changed kind or setting other than
+   * `max_concurrent_attempts`, and a rename, which counts as a removal plus an addition with the
+   * same settings.
    */
   readonly restart: ReadonlyArray<RestartChange>;
 }

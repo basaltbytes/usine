@@ -1,7 +1,6 @@
-// Packs every published workspace package, installs the tarballs with npm into an
-// empty project, and imports each entry point from there, as a consumer would. It
-// also fails when an installed @earendil-works package is not at a version
-// pnpm-lock.yaml resolves for the workspace.
+// Packs every published workspace package, installs the tarballs with npm into an empty project,
+// and imports each entry point. Fails when an installed @earendil-works package is not at a
+// version that pnpm-lock.yaml resolves for the workspace.
 // Usage: node scripts/check-packed-install.mjs [scratch-directory]
 import { execFileSync, spawnSync } from "node:child_process";
 import {
@@ -61,7 +60,7 @@ const specifiers = readdirSync(scope).flatMap((name) => {
   const manifest = JSON.parse(readFileSync(join(scope, name, "package.json"), "utf8"));
   return Object.keys(manifest.exports ?? {}).map((subpath) => `@usine/${name}${subpath.slice(1)}`);
 });
-// The server has no exports map; `usine` loads these command modules on demand.
+// @usine/server has no exports map; the `usine` CLI imports these command modules lazily.
 specifiers.push(
   "@usine/server/dist/up.js",
   "@usine/server/dist/backup.js",

@@ -1,6 +1,6 @@
 import { Data, Option } from "effect";
 
-/** The most bytes the forward proxy buffers while it waits for a whole ClientHello. */
+/** The maximum bytes the forward proxy buffers while waiting for a complete ClientHello. */
 export const CLIENT_HELLO_LIMIT = 16 * 1024;
 
 const HANDSHAKE_RECORD = 0x16;
@@ -11,10 +11,8 @@ const ENCRYPTED_CLIENT_HELLO = 0xfe0d;
 const MAX_RECORD_LENGTH = 1 << 14;
 
 /**
- * What the first bytes of a tunnel say about the TLS connection inside it:
- * not enough bytes yet, with how many the reader needs before it can say
- * more; not a TLS ClientHello; or a ClientHello with the server name it asks
- * for and whether it encrypts the real one (ECH).
+ * The result of reading a tunnel's first bytes: incomplete with the byte count needed, not a
+ * TLS ClientHello, or a ClientHello with its server name and whether it uses ECH.
  */
 export type ClientHelloRead = Data.TaggedEnum<{
   Incomplete: { readonly needed: number };
@@ -31,7 +29,7 @@ const notTls = (detail: string) => ClientHelloRead.NotTls({ detail });
 const u16 = (bytes: Uint8Array, at: number): number =>
   ((bytes[at] ?? 0) << 8) | (bytes[at + 1] ?? 0);
 
-/** Reads the `host_name` entry of a `server_name` extension (RFC 6066, section 3). */
+/** Returns the `host_name` entry of a `server_name` extension (RFC 6066, section 3). */
 const hostName = (data: Uint8Array): Option.Option<string> => {
   if (data.length < 2 || u16(data, 0) !== data.length - 2) return Option.none();
   let at = 2;
@@ -47,7 +45,7 @@ const hostName = (data: Uint8Array): Option.Option<string> => {
   return Option.none();
 };
 
-/** Parses a ClientHello body: version, random, session id, cipher suites, compression methods, extensions (RFC 8446, section 4.1.2). */
+/** Parses a ClientHello body (RFC 8446, section 4.1.2). */
 const clientHelloBody = (body: Uint8Array): ClientHelloRead => {
   let at = 2 + 32;
   if (at + 1 > body.length) return notTls("ClientHello is truncated");
@@ -79,11 +77,8 @@ const clientHelloBody = (body: Uint8Array): ClientHelloRead => {
 };
 
 /**
- * Reads the TLS ClientHello at the start of `bytes`, joining it across
- * handshake records if the client split it. While it answers `Incomplete`,
- * `needed` is the least number of bytes that can change the answer: the end
- * of the next record header or record, or, once the handshake header is
- * known, the rest of the ClientHello in one more record.
+ * Reads the TLS ClientHello at the start of `bytes`, joining handshake records if the client
+ * split it. For `Incomplete`, `needed` is the smallest byte count that can change the result.
  */
 export const readClientHello = (bytes: Uint8Array): ClientHelloRead => {
   const chunks: Array<Uint8Array> = [];
@@ -119,10 +114,8 @@ export const readClientHello = (bytes: Uint8Array): ClientHelloRead => {
 };
 
 /**
- * Collects a tunnel's first bytes and parses them only once they reach the
- * count the last parse needed, so a client that sends one byte at a time
- * costs a few parses rather than one per byte. A ClientHello that needs more
- * than 16 KiB is refused as `NotTls`.
+ * A buffer for a tunnel's first bytes that parses only when the byte count the last parse
+ * needed is reached. A ClientHello longer than 16 KiB is read as `NotTls`.
  */
 export class ClientHelloReader {
   #chunks: Array<Uint8Array> = [];
@@ -130,7 +123,7 @@ export class ClientHelloReader {
   #needed = 1;
   #parses = 0;
 
-  /** Adds bytes from the client and answers what they say so far. */
+  /** Adds bytes from the client and returns the current read result. */
   push(chunk: Uint8Array): ClientHelloRead {
     this.#chunks.push(chunk);
     this.#length += chunk.length;
@@ -143,7 +136,7 @@ export class ClientHelloReader {
     return read;
   }
 
-  /** Every byte collected so far, in order: what the proxy writes upstream once the tunnel opens. */
+  /** All bytes collected so far, in order; the proxy writes them upstream once the tunnel opens. */
   get bytes(): Uint8Array {
     if (this.#chunks.length !== 1) {
       const joined = new Uint8Array(this.#length);
@@ -157,11 +150,11 @@ export class ClientHelloReader {
     return this.#chunks[0] ?? new Uint8Array(0);
   }
 
-  /** How many times the bytes were parsed. */
+  /** The number of parses so far. */
   get parses(): number {
     return this.#parses;
   }
 }
 
-/** A host name as TLS and CONNECT compare it: lowercase, without a trailing dot. */
+/** Returns `host` lowercased and without a trailing dot, for comparing TLS and CONNECT host names. */
 export const comparableHost = (host: string): string => host.toLowerCase().replace(/\.$/u, "");

@@ -72,10 +72,8 @@ describe("run state machine (ADR 0002)", () => {
     expect(RunState.isOpen(RunState.cancelByOperator(new RunState.Pending()))).toBe(false);
   });
 
-  // Illegal transitions are compile errors, checked by tsc over this file. If a
-  // signature widens so one of these calls compiles, its @ts-expect-error turns
-  // into an unused-directive error and CI fails. The calls are pure, so running
-  // them is harmless.
+  // Each call below must be a type error; if one compiles, its `@ts-expect-error` is unused and
+  // `tsc` fails.
   it("illegal transitions do not compile", () => {
     const pending = new RunState.Pending();
     const waiting = new RunState.Waiting();
@@ -90,7 +88,7 @@ describe("run state machine (ADR 0002)", () => {
     // @ts-expect-error a waiting run has no attempt to fail
     RunState.fail(waiting);
 
-    // Closed runs never move again, except failed → running via retry.
+    // A closed Run has no transitions except `retry` from failed.
     // @ts-expect-error a succeeded run cannot be retried
     RunState.retry(succeeded);
     // @ts-expect-error a canceled run cannot be retried
@@ -104,8 +102,7 @@ describe("run state machine (ADR 0002)", () => {
     // @ts-expect-error a closed run cannot start again
     RunState.start(canceled);
 
-    // A started attempt always finishes (ADR 0007): supersede and revoke stop
-    // at pending | waiting.
+    // `supersede` and `revoke` accept only unstarted states (ADR 0007).
     // @ts-expect-error a running attempt cannot be superseded
     RunState.supersede(running, EventId.make("evt-3"));
     // @ts-expect-error a running attempt cannot be revoked
@@ -113,8 +110,7 @@ describe("run state machine (ADR 0002)", () => {
     // @ts-expect-error a closed run cannot be superseded
     RunState.supersede(succeeded, EventId.make("evt-4"));
 
-    // The approval gate is entered exactly once, from pending, and left only
-    // through approve.
+    // The approval gate is entered only from pending and left only through `approve`.
     // @ts-expect-error only a pending run can be parked on the approval gate
     RunState.awaitApproval(running);
     // @ts-expect-error a waiting run has not passed its approval gate

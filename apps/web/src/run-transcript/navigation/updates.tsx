@@ -3,7 +3,6 @@ import { useEffect, useLayoutEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { useMessageScroller, useMessageScrollerScrollable } from "@/components/ui/message-scroller";
 
-/** Observes the visible conversation and offers a way back to the latest activity. */
 export const UpdateNavigation = ({
   count,
   active,
@@ -16,7 +15,7 @@ export const UpdateNavigation = ({
   readonly count: number;
   readonly active: boolean;
   readonly pendingLatest: boolean;
-  /** A navigation request is moving the reader, so its passing "at latest" state must not acknowledge updates. */
+  /** Whether a navigation request is scrolling the reader; an "at latest" observation during it does not acknowledge updates. */
   readonly revealing: boolean;
   readonly onObserve: (atLatest: boolean) => void;
   readonly onLatest: () => void;
@@ -31,7 +30,7 @@ export const UpdateNavigation = ({
     if (pendingLatest && scrollToEnd({ behavior: "instant" })) onReachedLatest();
   }, [pendingLatest, scrollToEnd, onReachedLatest]);
 
-  // A band of its own at the reader's foot, so the control never covers the outcome or salvage line.
+  // A separate row below the reader, so the control does not cover the outcome or salvage line.
   return (
     <div className="flex h-10 shrink-0 items-center justify-center">
       {count > 0 ? (

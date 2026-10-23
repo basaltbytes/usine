@@ -3,29 +3,29 @@ import { configDefaults, defineConfig, mergeConfig } from "vitest/config";
 import type { Page, Route } from "playwright";
 import vite from "./vite.config.ts";
 
-// Set on Workers built by infra/hetzner/cloud-init.yaml, which have Debian's Chromium instead of Playwright's.
+// Set on Workers from infra/hetzner/cloud-init.yaml, which use Debian's Chromium, not Playwright's.
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
 const delayedMoves = new WeakMap<Page, Promise<Route>>();
 const delayedRunAgains = new WeakMap<Page, Promise<Route>>();
 const interventionRequests = new WeakMap<Page, Array<{ url: string; body: unknown }>>();
 
-/** The approve request of `approvalResponses`, held until `answerApproval`, and what followed it. */
+/** The approve request that `approvalResponses` delays until `answerApproval`, and the requests after it. */
 interface ApprovalExchange {
   readonly request: Promise<Route>;
-  /** Set once the approve request is answered: from then on the stubs serve the state after it. */
+  /** Whether the approve request was answered; if so, the stubs serve the approved state. */
   answered: boolean;
-  /** How many overview requests arrived after the approve request was answered. */
+  /** The number of overview requests received after the approve request was answered. */
   lateOverviews: number;
 }
 const approvals = new WeakMap<Page, ApprovalExchange>();
-// How long an overview request takes once the Run is approved, as on a busy instance (#463).
+// The overview response delay after approval, as on a busy instance (#463).
 const SLOW_OVERVIEW_MS = 5_000;
 
 export default mergeConfig(
   vite,
   defineConfig({
     test: {
-      // Keep browser layout tests from oversubscribing the monorepo test gate.
+      // Limits browser test workers so they do not oversubscribe the monorepo test run.
       maxWorkers: 2,
       attachmentsDir: "./node_modules/.cache/vitest/attachments",
       projects: [
@@ -35,13 +35,13 @@ export default mergeConfig(
         },
         {
           extends: true,
-          // A cache an earlier tree built passes the optimizer's hash check without a dependency these
-          // tests import, and the bundle it then starts mid-run reloads the page under the test files.
+          // A dependency cache from an earlier tree can pass the hash check without a dependency
+          // these tests import; bundling it mid-run reloads the page under the tests.
           optimizeDeps: { force: true },
           test: {
             name: "browser",
             include: ["test/**/*.browser.test.tsx"],
-            // Locator actions wait for the rest of the test timeout, and Chromium renders late on a busy machine.
+            // Locator actions wait up to the test timeout; Chromium is slow on a busy machine.
             testTimeout: 30_000,
             browser: {
               enabled: true,
@@ -154,7 +154,7 @@ export default mergeConfig(
                     });
                   });
                 },
-                // Registered after `interventionResponses`, so it answers run-again requests in its place.
+                // Replaces the run-again route that `interventionResponses` registers.
                 runAgainResponse: async ({ page }, body: string) => {
                   await page.unroute("**/api/runs/intervention-test/run-again");
                   await page.route("**/api/runs/intervention-test/run-again", async (route) => {
@@ -165,9 +165,9 @@ export default mergeConfig(
                   });
                 },
                 recordedInterventions: async ({ page }) => interventionRequests.get(page) ?? [],
-                // Serves Run `approval-run`, waiting for approval: the overview is `before` and its
-                // detail `detailBefore` until `answerApproval` answers the held approve request.
-                // From then on the detail is `detailAfter` and the overview `after`, sent 5 s late.
+                // Serves Run `approval-run` waiting for approval: `before` and `detailBefore` until
+                // `answerApproval` answers the delayed approve request, then `detailAfter` and
+                // `after`, with the overview delayed by 5 s.
                 approvalResponses: async (
                   { page },
                   before: string,
@@ -209,7 +209,7 @@ export default mergeConfig(
                   );
                   await page.route("**/api/runs/approval-run/approve", (route) => receive(route));
                 },
-                // Answers the held approve request with `status` and `body`.
+                // Answers the delayed approve request with `status` and `body`.
                 answerApproval: async ({ page }, status: 200 | 409, body: string) => {
                   const exchange = approvals.get(page);
                   if (exchange === undefined) throw new Error("No approval stubbed");
@@ -242,7 +242,7 @@ export default mergeConfig(
                   await route.fulfill({ contentType: "application/json", body: '{"ok":true}' });
                   delayedMoves.delete(page);
                 },
-                // Holds the next Run again request of any Run until `releaseRunAgain` answers it.
+                // Delays the next Run again request of any Run until `releaseRunAgain`.
                 delayRunAgain: async ({ page }) => {
                   let receive: (route: Route) => void;
                   const request = new Promise<Route>((resolve) => {
@@ -252,7 +252,7 @@ export default mergeConfig(
                   await page.unroute("**/api/runs/*/run-again");
                   await page.route("**/api/runs/*/run-again", (route) => receive(route));
                 },
-                // Answers the held request with `status` and `body`, and returns the path and payload it carried.
+                // Answers the delayed request with `status` and `body`, returning path and payload.
                 releaseRunAgain: async ({ page }, status: 200 | 409, body: string) => {
                   const request = delayedRunAgains.get(page);
                   if (request === undefined) throw new Error("No delayed Run again");
@@ -265,7 +265,7 @@ export default mergeConfig(
                     body: route.request().postDataJSON(),
                   };
                 },
-                // Answers every Discard leftovers request with the refusal `body`.
+                // Answers every Discard leftovers request with the error `body`.
                 refuseDiscardLeftovers: async ({ page }, body: string) => {
                   await page.unroute("**/api/workers/*/discard-leftovers");
                   await page.route("**/api/workers/*/discard-leftovers", (route) =>

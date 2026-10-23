@@ -125,7 +125,9 @@ Implement issue #{{ item.number }}.
     ],
   ] as const;
 
-/** Runs `test` against a reloadable instance over a fresh folder whose `usine.yaml` declares `workers`. */
+/**
+ * Runs `test` against a reloadable instance in a new folder whose `usine.yaml` declares `workers`.
+ */
 const withWorkers = <A, E>(
   workers: string,
   test: (
@@ -160,9 +162,8 @@ const startScheduler = (
   });
 
 /**
- * An executor of `kind` whose preflight records `worker xN: model` for each
- * check and fails for the Workers in `failing`, as on a machine without
- * enough memory.
+ * Returns an executor of `kind` whose preflight records `worker xN: model` for each check and fails
+ * for the Workers in `failing`.
  */
 const recordingExecutor = (
   preflighted: Array<string>,
@@ -217,7 +218,7 @@ const developer = Effect.gen(function* () {
   return first.agent;
 });
 
-/** Gives the dispatcher time to assign a slot that is free, so an unassigned reservation is waiting. */
+/** Asserts that `fiber` is still waiting after the dispatcher had 50 ms to assign a free slot. */
 const assertWaiting = <A, E>(fiber: Fiber.Fiber<A, E>, why: string) =>
   Effect.sleep("50 millis").pipe(
     Effect.andThen(Effect.sync(() => assert.isUndefined(fiber.pollUnsafe(), why))),
@@ -633,7 +634,10 @@ describe("Worker scheduler on reload", () => {
   );
 });
 
-/** An SSH Worker behind the Gateway `usine-gateway`, whose admin token is in the variable `tokenEnv`. */
+/**
+ * Returns an SSH Worker behind the Gateway `usine-gateway`, with its admin token in the variable
+ * `tokenEnv`.
+ */
 const gatewaySshWorker = (
   name: string,
   max: number,
@@ -645,11 +649,9 @@ const gatewaySshWorker = (
 `;
 
 /**
- * Starts the SSH scheduler on the current instance over a `recordingExecutor`
- * of kind `ssh` that records its preflights in `events`, and executor Workers
- * that record each addition and removal there too, keeping each added address
- * in `added`. `environment` is the orchestrator's environment, read when the
- * scheduler reads it.
+ * Starts the SSH scheduler over a `recordingExecutor` of kind `ssh` that records preflights, Worker
+ * additions, and removals in `events`, and each added address in `added`. `environment` is the
+ * orchestrator's environment.
  */
 const startSshScheduler = (
   events: Array<string>,

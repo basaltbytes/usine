@@ -3,7 +3,6 @@ import type { SshDestination } from "@usine/core/worker";
 import { Schema, type Effect } from "effect";
 import type { SshCommand } from "@usine/agents/child-host";
 
-/** The name of one exe.dev edge-injected integration. */
 export const IntegrationName = Schema.String.check(
   Schema.isPattern(/^[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*$/u, {
     message: "Expected an exe.dev integration name safe for the lobby command boundary",
@@ -11,7 +10,7 @@ export const IntegrationName = Schema.String.check(
 ).pipe(Schema.brand("ExeDevIntegrationName"));
 export type IntegrationName = typeof IntegrationName.Type;
 
-/** An absolute remote home directory that cannot smuggle bytes past shell quoting. */
+/** An absolute remote home directory path without NUL, CR, or LF bytes. */
 export const HomePath = Schema.String.check(
   Schema.isPattern(/^\/[^\0\r\n]*$/u, {
     message: "Expected an absolute remote home directory without control bytes",
@@ -19,35 +18,33 @@ export const HomePath = Schema.String.check(
 ).pipe(Schema.brand("ExeDevHomePath"));
 export type HomePath = typeof HomePath.Type;
 
-/** One standing exe.dev GitHub integration; only its VM attachment is per Attempt. */
+/** An existing exe.dev GitHub integration, attached to the Worker's VM per Attempt. */
 export class GitHubIntegration extends Schema.Class<GitHubIntegration>(
   "@usine/executor/ExeDevGitHubIntegration",
 )({
-  /** The repository the integration gives access to. Each repository may appear in only one integration. */
+  /** Must be unique across integrations. */
   repository: RepositoryName,
   /**
-   * The integration's name on exe.dev. Preflight tests it, and each Attempt on
-   * the repository attaches it to the Worker's VM for `credentialGrantMinutes`.
-   * Each name may appear only once in the options.
+   * The integration name on exe.dev, unique in the options. Each Attempt attaches it to the
+   * Worker's VM for `credentialGrantMinutes`.
    */
   name: IntegrationName,
 }) {}
 
-/** How long an exe.dev Worker's repository credential attachment may remain active, in minutes. */
+/** The duration of one credential attachment, in minutes. */
 export const CredentialGrantMinutes = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pipe(
   Schema.brand("ExeDevCredentialGrantMinutes"),
 );
 export type CredentialGrantMinutes = typeof CredentialGrantMinutes.Type;
 
-/** Repository access and SSH settings for the configured exe.dev Workers. */
 export interface ExeDevExecutorOptions {
-  /** Existing native GitHub integrations, one per repository this Worker may receive. */
+  /** Existing exe.dev GitHub integrations, one per repository. */
   readonly githubIntegrations: ReadonlyArray<GitHubIntegration>;
-  /** Local SSH executable and its arguments, used for the lobby, VM commands, and every child. */
+  /** The local SSH command for lobby, VM, and child commands. */
   readonly ssh?: SshCommand;
-  /** Length of each edge credential attachment, renewed at half this length for as long as the Attempt runs; independent of any Attempt ceiling. Defaults to 65 minutes. */
+  /** The length of each credential attachment, in minutes, renewed at half this length. Defaults to 65. */
   readonly credentialGrantMinutes?: CredentialGrantMinutes;
-  /** Grace for the parent task's cancellation, then for the Attempt to settle; each wait is bounded separately. Defaults to 10 seconds. */
+  /** The timeout for the parent task's cancellation, then separately for the Attempt to finish. Defaults to 10 seconds. */
   readonly interruptGrace?: Parameters<typeof Effect.timeoutOption>[1];
 }
 

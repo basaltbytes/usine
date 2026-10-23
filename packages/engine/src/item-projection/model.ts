@@ -11,10 +11,8 @@ export const ItemContentHash = Schema.NonEmptyString.pipe(Schema.brand("ItemCont
 export type ItemContentHash = typeof ItemContentHash.Type;
 
 /**
- * The latest payload a trigger observed for one Item, whatever the source
- * adapter. `goneAt` is when a poll or a queued Event's re-check found that
- * GitHub no longer has the Item; the payload is then the last one GitHub
- * returned. None while GitHub has it.
+ * The latest payload a trigger observed for one Item. `goneAt` is the time a poll or re-check
+ * found the Item missing on GitHub, or `None` while GitHub has it.
  */
 export class ItemProjection extends Schema.Class<ItemProjection>("@usine/engine/ItemProjection")({
   itemKey: ItemKey,

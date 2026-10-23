@@ -7,8 +7,8 @@ import { CredentialProvider, ExecutorOperationError, type WorkerCredential } fro
 import { renewableCredential } from "../renewable-credential.ts";
 
 /**
- * Publishes the Attempt's renewed credential in a private temporary directory
- * that belongs to the Attempt scope, outside its salvaged checkout.
+ * Writes the Attempt's renewed credential to a private temporary directory outside the
+ * checkout, removed when the Attempt scope closes.
  */
 export const localCredentialsFor = Effect.gen(function* () {
   const provider = yield* CredentialProvider;
@@ -30,7 +30,7 @@ export const localCredentialsFor = Effect.gen(function* () {
         attemptId,
         permissions,
         Effect.fn("LocalExecutor.writeCredential")(function* ({ value }: WorkerCredential) {
-          // Rename prevents readers observing truncated credentials during renewal.
+          // Writes then renames so readers never see a partial token.
           yield* fs.writeFileString(`${directory}/token.next`, Redacted.value(value), {
             mode: 0o600,
           });

@@ -17,7 +17,7 @@ import {
 } from "../operator-copy.ts";
 import { indexSessions, type SessionEvents, type InterventionRecord } from "./sessions.ts";
 
-/** How a notice reads: as plain record, as a signal that work may not be progressing, or as a failure. */
+/** The display tone of a notice; `warning` means work may not be progressing. */
 export type NoticeTone = "plain" | "warning" | "failed";
 
 interface NoticeContent {
@@ -32,15 +32,12 @@ interface TranscriptPosition {
   readonly key: string;
   readonly attemptId: AttemptId;
   readonly sequence: TranscriptEventView["sequence"];
-  /** Newest durable event represented by this row, independently of its position. */
+  /** The sequence of the newest event in this row, which can differ from `sequence`. */
   readonly latestSequence: TranscriptEventView["sequence"];
   readonly receivedAt: string;
 }
 
-/**
- * What a notice reports: a session's own event, a harness retrying or reaching its
- * model provider again, an operator input receipt, or an Attempt envelope.
- */
+/** The source of a notice: a session event, a provider retry or recovery, an operator input receipt, or an Attempt envelope. */
 type NoticeOrigin =
   | {
       readonly _tag: "Session";
@@ -58,14 +55,14 @@ type NoticeOrigin =
   | { readonly _tag: "Operator"; readonly operator: string }
   | { readonly _tag: "Envelope"; readonly payload: TranscriptEventView["payload"] };
 
-/** Which session holds an operator input it reads only when its current step ends. */
+/** The session that queued an operator input until its current step ends. */
 export type QueuedFor = "parent" | "child";
 
-/** Prose or a lifecycle notice retained in the conversation. */
+/** A message or lifecycle notice in the conversation. */
 export interface TranscriptNotice extends TranscriptPosition, NoticeContent {
   readonly _tag: "Notice";
   readonly origin: NoticeOrigin;
-  /** The session that accepted this operator input but reads it only when its current step ends, if any. */
+  /** The session that queued this operator input until its current step ends, or `null`. */
   readonly queued: QueuedFor | null;
 }
 
@@ -82,7 +79,7 @@ type ToolState =
       readonly output: Schema.Json;
     };
 
-/** One tool call, paired within its Attempt and session, including an unpaged start when available. */
+/** A tool call matched within its Attempt and session; `start` can come from outside the loaded page. */
 export interface TranscriptTool extends TranscriptPosition {
   readonly _tag: "Tool";
   readonly name: string;
@@ -90,13 +87,13 @@ export interface TranscriptTool extends TranscriptPosition {
   readonly state: ToolState;
 }
 
-/** A child's contents cannot contain another child section (ADR 0008). */
+/** An entry in a conversation; a child section cannot contain another child section (ADR 0008). */
 export type TranscriptEntry = TranscriptNotice | TranscriptTool;
 
-/** Session completion is distinct from the enclosing Attempt's success or failure. */
+/** The status of a session, independent of its Attempt's success or failure. */
 type SessionStatus = "Live" | "Finished" | "Stopped";
 
-/** One session's observed activity, scoped to its Attempt so retries never share state. */
+/** One session's activity, scoped to its Attempt so that retries do not share state. */
 export interface TranscriptSession extends TranscriptPosition {
   readonly _tag: "Session";
   readonly session: AgentSession;
@@ -108,7 +105,7 @@ export interface TranscriptSession extends TranscriptPosition {
   readonly entries: ReadonlyArray<TranscriptEntry>;
 }
 
-/** A flat parent conversation with one section per child session. */
+/** The parent conversation as a flat list, with one section per child session. */
 export interface TranscriptProjection {
   readonly items: ReadonlyArray<TranscriptEntry | TranscriptSession>;
   readonly sessions: ReadonlyArray<TranscriptSession>;
@@ -131,7 +128,7 @@ const notice = (
   origin: NoticeOrigin,
 ): TranscriptNotice => ({ _tag: "Notice", ...position(event), ...content, origin, queued: null });
 
-/** A count of a harness's provider retries in words: `1 retry`, `27 retries`. */
+/** Returns a retry count as text, for example `1 retry` or `27 retries`. */
 export const retriesLabel = (retries: number): string =>
   `${retries} ${retries === 1 ? "retry" : "retries"}`;
 
@@ -273,7 +270,7 @@ const interventionNotice = (record: InterventionRecord): TranscriptNotice => {
   return { ...entry, queued };
 };
 
-/** Folds durable transcript events into conversation rows without reading time or changing stored data. */
+/** Returns the conversation rows for `events`, without reading the clock. */
 export const projectTranscript = (
   events: ReadonlyArray<TranscriptEventView>,
   attempts: ReadonlyArray<AttemptView>,
@@ -282,7 +279,7 @@ export const projectTranscript = (
   const terminalAttempts = new Set(
     attempts.filter(({ outcome }) => outcome !== null).map(({ id }) => id),
   );
-  // Terminal state can be supplied by either the Attempt row or its final frame.
+  // Terminal state comes from either the Attempt row or its final frame.
   for (const { attemptId, payload } of events) {
     if (payload._tag === "Final" || payload._tag === "Failed" || payload._tag === "Interrupted")
       terminalAttempts.add(attemptId);
@@ -294,7 +291,7 @@ export const projectTranscript = (
     if (payload._tag === "InterventionApplied" || payload._tag === "InterventionRejected") {
       continue;
     }
-    // New inputs are rendered from their delivery receipt, including the correct session and attribution.
+    // Operator inputs are rendered from their delivery receipt, which has session and attribution.
     if (
       record.direction === "inbound" &&
       record.operator !== undefined &&
@@ -434,7 +431,7 @@ export const projectTranscript = (
   };
 };
 
-/** Describes observed session activity without assuming unrecorded thinking or success. */
+/** Returns a label for the session's recorded activity, without inferring unrecorded thinking or success. */
 export const sessionActivityLabel = (session: TranscriptSession): string => {
   if (session.status !== "Live") return session.status;
   if (session.paused) return "Paused";

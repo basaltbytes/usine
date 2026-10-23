@@ -57,7 +57,7 @@ const sink = {
   windows: aloneOnItem(),
 };
 
-/** The caller token a child host sends to the machine. */
+/** Returns the caller token that a child host sends to the machine. */
 const callerTokenOf = (request: AttemptRequest | undefined): string => {
   assert(request !== undefined && request.host instanceof RemoteShell);
   const token = request.host.sshEnvironment.GH_ENTERPRISE_TOKEN;
@@ -65,7 +65,7 @@ const callerTokenOf = (request: AttemptRequest | undefined): string => {
   return token;
 };
 
-/** An attachment an earlier orchestrator process made and never detached. */
+/** An attachment left by an earlier orchestrator process. */
 const leftover = (id: string, worker: string) =>
   Effect.gen(function* () {
     const store = yield* Attachments;
@@ -792,7 +792,7 @@ describe("SSH Worker behind a Gateway", () => {
       const gateway = fakeGateway(machine);
       const started = Deferred.makeUnsafe<AttemptRequest>();
       const finish = Deferred.makeUnsafe<void>();
-      // The parent stays at work, as one between two children, until the test lets it finish.
+      // The parent keeps running, as between two children, until the test lets it finish.
       const parent: StubParent = (context) =>
         Deferred.succeed(started, context.request).pipe(
           Effect.andThen(Deferred.await(finish)),
@@ -806,7 +806,7 @@ describe("SSH Worker behind a Gateway", () => {
         const given = yield* Deferred.await(started);
         assert.deepStrictEqual(yield* given.gatewayCredential, Option.some("api-key"));
 
-        // While the Attempt runs, a reload of the Gateway swaps its API key for a subscription token.
+        // While the Attempt runs, a Gateway reload replaces its API key with a subscription token.
         const inForce = yield* SettingsInForce;
         yield* inForce.replace({
           ...(yield* inForce.current),

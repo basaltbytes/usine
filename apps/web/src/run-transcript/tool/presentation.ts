@@ -5,7 +5,7 @@ import { JsonObject, code, content, fields, object, string, type ToolSection } f
 
 export type { ToolSection } from "./sections.ts";
 
-/** Recorded work for compact summaries, independent of formatted subjects and readable sections. */
+/** The tool call data used by burst summaries. */
 export type ToolActivity =
   | {
       readonly _tag: "Files";
@@ -15,7 +15,7 @@ export type ToolActivity =
   | { readonly _tag: "Command"; readonly command: string | undefined }
   | { readonly _tag: "Search" | "Delegation" | "Tool" };
 
-/** A tool's purpose, subject, and readable content; its original payload remains on TranscriptTool. */
+/** The display form of a tool call; the original payload is on `TranscriptTool`. */
 export interface ToolPresentation {
   readonly category: "command" | "read" | "edit" | "write" | "search" | "agent" | "tool";
   readonly activity: ToolActivity;
@@ -25,7 +25,6 @@ export interface ToolPresentation {
   readonly output: ReadonlyArray<ToolSection>;
 }
 
-// Classifies a harness tool name at the presentation boundary.
 const toolCategory = (name: string): ToolPresentation["category"] => {
   switch (name.toLowerCase()) {
     case "bash":
@@ -184,7 +183,6 @@ const tool = ({ input, output, name }: Payload): Body => {
   };
 };
 
-/** Decodes known harness envelopes for display without changing or discarding the durable tool payload. */
 export const presentTool = (entry: TranscriptTool): ToolPresentation => {
   const payload: Payload = {
     name: entry.name,

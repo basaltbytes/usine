@@ -6,11 +6,11 @@ import { RegistryTag, UsineConfig } from "../factory.ts";
 import { LoopFile } from "../loop.ts";
 import type { AgentFile } from "../agent.ts";
 
-/** The agent and selector names a loop may reference in one loaded instance. */
+/** The names a loop can reference in a loaded instance. */
 export interface ReferenceIndex {
   readonly agentNames: ReadonlySet<AgentName>;
   readonly registryTags: ReadonlySet<RegistryTag>;
-  /** Registry repository names through `canonicalRepositoryName`, since GitHub ignores case. */
+  /** The registry repository names, canonicalized with `canonicalRepositoryName`. */
   readonly repoNames: ReadonlySet<string>;
 }
 
@@ -24,9 +24,8 @@ export const referenceIndex = (
 });
 
 /**
- * Returns the reference error that quarantines this loop, if it names an agent
- * or selector entry the instance does not have. The folder loader reports it
- * per file and LoadedInstance refuses to construct with it.
+ * Returns the error for a loop that references an agent or selector entry the instance doesn't
+ * have, or `None` if every reference resolves.
  */
 export const loopReferenceFailure = (
   file: InstancePath,

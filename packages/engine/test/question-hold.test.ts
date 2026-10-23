@@ -19,7 +19,7 @@ const question = new QuestionFailure({
   question: "Should the egress transport be HTTP CONNECT or a SOCKS proxy?",
 });
 
-/** Whether no Run exists yet for the submission's Event. */
+/** Returns whether no Run exists yet for the submission's Event. */
 const hasNoRun = (engine: RunEngine["Service"], sighting: ReturnType<typeof submission>) =>
   Effect.gen(function* () {
     const missing = yield* Effect.flip(engine.inspect(yield* runIdFor(sighting)));
@@ -90,7 +90,7 @@ describe("Attempts that end with an operator question", () => {
           yield* waitFor(engine, asked.runId, ({ run }) => run.state._tag === "Failed");
           yield* engine.reconcile();
           assert(yield* hasNoRun(engine, posted));
-          // Polling sees the question's own comment again: it is the state the question holds.
+          // Polling sees the question's own comment again, which is the held state.
           assert.strictEqual((yield* engine.submit(posted))._tag, "Held");
           assert(yield* hasNoRun(engine, posted));
         }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));

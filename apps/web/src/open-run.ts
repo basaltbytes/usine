@@ -1,7 +1,7 @@
 import { useNavigate } from "@tanstack/react-router";
 import type { RunId } from "@usine/core/run";
 
-/** Opens the drawer over the current screen by writing the run id into the root search. */
+/** Returns a function that opens the Run drawer over the current route by setting the `run` search param. */
 export const useOpenRun = () => {
   const navigate = useNavigate();
   return (runId: RunId) =>

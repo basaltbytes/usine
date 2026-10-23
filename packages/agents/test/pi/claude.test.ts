@@ -47,7 +47,7 @@ import {
   type ClaudeUserMessage,
 } from "../../src/pi/claude.ts";
 
-/** One login lock for every Worker: each test launches its children on one Worker. */
+/** A single login lock for all Workers, since each test launches its children on one Worker. */
 const loginLock = Layer.effect(
   ClaudeLoginLock,
   Effect.map(Semaphore.make(1), (mutex) =>
@@ -55,13 +55,12 @@ const loginLock = Layer.effect(
   ),
 );
 
-/** The Claude backend with a login lock the test can also take. */
+/** The Claude backend, with a login lock that the test can also acquire. */
 const claudeChild = claudeChildLayer.pipe(Layer.provideMerge(loginLock));
 
-/** Shows that Claude's first API request went out with a working login. */
+/** The event that shows Claude's first API request succeeded with a working login. */
 const rateLimitEvent = { type: "rate_limit_event", rate_limit_info: { status: "allowed" } };
 
-/** Ignores whether a queued operator message is read; the test does not observe it. */
 const noDelivery: OnDelivery = () => Effect.void;
 
 const RECORD_SSH = fileURLToPath(new URL("../fixtures/record-ssh.mjs", import.meta.url));
@@ -109,7 +108,7 @@ const scripted = (
 const LOGIN_ERROR =
   "Failed to refresh OAuth token: another Claude Code process is refreshing it or exited mid-refresh. This is usually transient; retry in a minute, and if it persists close other Claude Code processes or sign in again";
 
-/** What Claude Code prints when another process holds its login's refresh lock: an error answer and a result, no tokens spent. */
+/** Claude Code's output when another process has its login refresh lock: an error and a result, with no tokens used. */
 const loginContended: ReadonlyArray<Schema.Json> = [
   {
     type: "assistant",
@@ -124,9 +123,9 @@ const loginContended: ReadonlyArray<Schema.Json> = [
 ];
 
 /**
- * A Claude SDK whose first `contended` launches lose the login refresh lock and whose later ones
- * finish the task. Like Claude Code's streaming-input sessions, a launch that lost the lock waits
- * for its next user message, so its output stays open until the launch is closed.
+ * Returns a fake Claude SDK whose first `contended` launches lose the login refresh lock and whose
+ * later launches finish the task. A launch that lost the lock keeps its output open until it is
+ * closed, as in Claude Code's streaming-input sessions.
  */
 const loginRace = (contended: number) => {
   const launches: Array<{ closed: boolean }> = [];
@@ -169,7 +168,7 @@ const loginRace = (contended: number) => {
   return { launches, sdk };
 };
 
-/** Collects the info lines logged where its `layer` is provided. */
+/** Returns a logger `layer` and the info lines logged where it is provided. */
 const infoLines = () => {
   const lines: Array<string> = [];
   const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
@@ -178,7 +177,7 @@ const infoLines = () => {
   return { lines, layer: Logger.layer([logger]) };
 };
 
-/** Advances the test clock until `fiber` ends, so the launch's retry delays pass. */
+/** Advances the test clock in 5-second steps until `fiber` ends. */
 const joinAdvancingClock = Effect.fn(function* <A, E>(fiber: Fiber.Fiber<A, E>) {
   while (fiber.pollUnsafe() === undefined) yield* TestClock.adjust("5 seconds");
   return yield* Fiber.join(fiber);
@@ -375,7 +374,7 @@ describe("Claude child backend", () => {
               queued_turn_count: 0,
             },
             { type: "system", subtype: "session_state_changed", state: "idle" },
-            // An empty snapshot is not a final answer: the notification still needs a turn.
+            // An empty task snapshot is not a final answer; the notification still needs a turn.
             { type: "system", subtype: "background_tasks_changed", tasks: [] },
             { type: "system", subtype: "task_notification", task_id: "gate", status: "completed" },
             { type: "system", subtype: "session_state_changed", state: "running" },
@@ -447,7 +446,7 @@ describe("Claude child backend", () => {
   it.effect("reports a message sent during a turn read once no queued turn holds it", () =>
     Effect.gen(function* () {
       const messages = yield* Queue.make<Schema.Json, Cause.Done>();
-      // A launch returns once Claude shows that its login worked.
+      // A launch returns after the first rate-limit event confirms the login.
       yield* Queue.offer(messages, rateLimitEvent);
       const context = yield* Effect.context<never>();
       const output = Stream.toAsyncIterableWith(Stream.fromQueue(messages), context);
@@ -499,7 +498,7 @@ describe("Claude child backend", () => {
   it.effect("keeps a held Claude conversation open until release and records one launch", () =>
     Effect.gen(function* () {
       const messages = yield* Queue.make<Schema.Json, Cause.Done>();
-      // A launch returns once Claude shows that its login worked.
+      // A launch returns after the first rate-limit event confirms the login.
       yield* Queue.offer(messages, rateLimitEvent);
       const idle = yield* Queue.make<void>();
       const context = yield* Effect.context<never>();
@@ -538,7 +537,7 @@ describe("Claude child backend", () => {
           (yield* Effect.promise(() => entered.next())).value?.message.content,
           "Review with me",
         );
-        // The CLI repeats `init` ahead of every turn with the same session id.
+        // The CLI sends `init` with the same session ID before every turn.
         const init = { type: "system", subtype: "init", session_id: "claude-session-1" };
         yield* Queue.offer(messages, init);
         yield* Queue.offer(messages, {
@@ -596,7 +595,7 @@ describe("Claude child backend", () => {
   it.effect("closes a paused tool hook with its child scope even without a vendor abort", () =>
     Effect.gen(function* () {
       const messages = yield* Queue.make<Schema.Json, Cause.Done>();
-      // A launch returns once Claude shows that its login worked.
+      // A launch returns after the first rate-limit event confirms the login.
       yield* Queue.offer(messages, rateLimitEvent);
       const context = yield* Effect.context<never>();
       const output = Stream.toAsyncIterableWith(Stream.fromQueue(messages), context);

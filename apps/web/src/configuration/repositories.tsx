@@ -34,13 +34,12 @@ const laneLabels = (repository: RepositoryConfigurationView): ReadonlyArray<Labe
     sources.flatMap((source) => (source._tag === "Label" ? [source.label] : [])),
   );
 
-/** How a repository's labels stand, and whether that needs the operator. */
 interface LabelStanding {
   readonly text: string;
   readonly problem: boolean;
 }
 
-/** How the repository's lane and declared labels stand, such as 2 missing on GitHub. */
+/** Returns a summary of the repository's lane and declared labels, for example `2 missing on GitHub`. */
 const labelStanding = (repository: RepositoryConfigurationView): LabelStanding => {
   const labels = [...repository.declaredLabels, ...laneLabels(repository)];
   if (labels.length === 0) return { text: "No labels", problem: false };
@@ -101,7 +100,6 @@ const RepositoryRow = ({ repository }: { readonly repository: RepositoryConfigur
   );
 };
 
-/** Every registered repository with its lanes, label standing, and Loops. */
 export const RepositoriesList = ({
   configuration,
 }: {
@@ -139,8 +137,8 @@ export const RepositoriesList = ({
   </ConfigurationPage>
 );
 
-/** What is wrong with a label in this repository, beside its chip; nothing while it is on GitHub
- * or before polling has read the repository's labels. */
+/** Renders the problem with a label next to its chip; renders nothing if the label exists on GitHub
+ * or the labels have not been polled yet. */
 const LabelStanding = ({ label }: { readonly label: LabelStateView }) => {
   if (label.failure !== null)
     return <span className="text-destructive">{label.failure.message}</span>;
@@ -235,8 +233,6 @@ const RepositoryFacts = ({ repository }: { readonly repository: RepositoryConfig
   </Facts>
 );
 
-/** One registered repository in full: its lanes in Board order with each label as GitHub has it,
- * and the labels usine creates there. */
 export const RepositoryDetail = ({
   owner,
   name,

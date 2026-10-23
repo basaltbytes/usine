@@ -4,7 +4,7 @@ import type { EgressAllowlist } from "./egress/egress.ts";
 import type { GitHubOrigins } from "./github/github.ts";
 import type { LlmProviders } from "./llm/llm.ts";
 
-/** The HMAC key caller tokens are signed with, decoded from its raw value: at least 32 characters, held only by the gateway. */
+/** The HMAC key that signs caller tokens, at least 32 characters, known only to the Gateway. */
 export const CallerKey = Schema.RedactedFromValue(
   Schema.String.check(
     Schema.isMinLength(32, { message: "Expected a caller key of at least 32 characters" }),
@@ -12,7 +12,7 @@ export const CallerKey = Schema.RedactedFromValue(
 );
 export type CallerKey = typeof CallerKey.Type;
 
-/** The bearer token the executor sends to the admin API, decoded from its raw value: at least 32 characters. */
+/** The bearer token the executor sends to the admin API, at least 32 characters. */
 export const AdminToken = Schema.RedactedFromValue(
   Schema.String.check(
     Schema.isMinLength(32, { message: "Expected an admin token of at least 32 characters" }),
@@ -21,12 +21,9 @@ export const AdminToken = Schema.RedactedFromValue(
 export type AdminToken = typeof AdminToken.Type;
 
 /**
- * The gateway's configuration as the platform entry point read it at
- * startup. Secrets stay `Redacted` and are only unwrapped where they are sent
- * or used to sign. A reload replaces the egress allowlist and the LLM
- * providers in `SettingsInForce`, and requests read them there; `egress` and
- * `providers` here keep their startup values, and the other settings change
- * only with a restart.
+ * The Gateway's configuration as read at startup. Secrets stay `Redacted` until sent or used to
+ * sign. `egress` and `providers` keep their startup values; reloaded values are in
+ * `SettingsInForce`. Other settings change only with a restart.
  */
 export class GatewaySettings extends Context.Service<
   GatewaySettings,
@@ -40,23 +37,23 @@ export class GatewaySettings extends Context.Service<
   }
 >()("@usine/gateway/GatewaySettings") {}
 
-/** The settings a reload replaces without a restart: the egress allowlist and the LLM providers. */
+/** The settings a reload replaces: the egress allowlist and LLM providers. */
 export interface ReloadableSettings {
   readonly egress: EgressAllowlist;
   readonly providers: LlmProviders;
 }
 
 /**
- * The egress allowlist and LLM providers in force. They start as the ones in
- * `GatewaySettings`, and a reload replaces them. A request reads them once,
- * when it is decided, so a tunnel the previous allowlist opened stays open.
+ * The current egress allowlist and LLM providers, initially from `GatewaySettings` and
+ * replaced by each reload. A request reads them once, so a tunnel opened under the previous
+ * allowlist stays open.
  */
 export class SettingsInForce extends Context.Service<
   SettingsInForce,
   {
-    /** The allowlist and providers requests are decided with now. */
+    /** Returns the current allowlist and providers. */
     readonly current: Effect.Effect<ReloadableSettings>;
-    /** Replaces them for every request decided afterwards. */
+    /** Replaces them for all later requests. */
     readonly replace: (next: ReloadableSettings) => Effect.Effect<void>;
   }
 >()("@usine/gateway/SettingsInForce") {
@@ -70,6 +67,6 @@ export class SettingsInForce extends Context.Service<
   );
 }
 
-/** The host names the gateway serves under its domain. */
+/** Returns the host names the Gateway serves under `domain`. */
 export const gatewayHosts = (domain: GatewayDomain) =>
   ({ git: `git.${domain}`, llm: `llm.${domain}` }) as const;

@@ -15,24 +15,24 @@ import { RunId } from "@usine/core/run";
 import { StepName } from "@usine/core/step";
 import { Crypto, Effect, Encoding, Option, Schema } from "effect";
 
-/** A matched Event with the Loop, Item, and execution choices that determine the work owed. */
+/** A matched Event with its Loop, Item, and Run settings. */
 export class Submission extends Schema.Class<Submission>("@usine/engine/Submission")({
   event: Event,
   itemKey: ItemKey,
   loop: LoopName,
   step: StepName,
   approval: ApprovalRequirement,
-  /** What the Run's Attempts may do to their repository, from the Loop when the Event matched. */
+  /** The repository access of the Run's Attempts, from the Loop at match time. */
   permissions: LoopPermissions.pipe(
     Schema.withDecodingDefaultKey(Effect.succeed("write" as const)),
     Schema.withConstructorDefault(Effect.succeed("write" as const)),
   ),
-  /** Item Runs default to three rounds; schedule adapters explicitly supply None. */
+  /** The cycle limit; schedule triggers set `None`. */
   cycleLimit: Schema.Option(CycleLimit).pipe(
     Schema.withDecodingDefaultTypeKey(Effect.succeed(Option.some(DEFAULT_CYCLE_LIMIT))),
     Schema.withConstructorDefault(Effect.succeed(Option.some(DEFAULT_CYCLE_LIMIT))),
   ),
-  /** Capture before fetching trigger input. A reset supersedes older observations. */
+  /** The Item's cycle generation, read before fetching trigger input. */
   cycleGeneration: CycleGeneration.pipe(
     Schema.withDecodingDefaultKey(Effect.succeed(CycleGeneration.make(0))),
     Schema.withConstructorDefault(Effect.succeed(CycleGeneration.make(0))),
@@ -44,14 +44,10 @@ export class Submission extends Schema.Class<Submission>("@usine/engine/Submissi
   parentModel: Schema.Option(ModelId),
 }) {}
 
-// Runs opened before the engine drove them itself took this Effect workflow
-// execution id; hashing the same input keeps every Run id stable.
+// Older Runs used this Effect workflow execution ID; hashing the same input keeps Run IDs stable.
 const RUN_ID_NAMESPACE = "@usine/engine/DurableRun";
 
-/**
- * The id of the Run a Submission's Event opens: the first 16 bytes of the
- * SHA-256 of the Event's dedup key, in hex. The same Event always names the same Run.
- */
+/** Returns the Run ID for the Submission's Event: the first 16 bytes, in hex, of the SHA-256 of its namespaced dedup key. */
 export const runIdFor = Effect.fn("Submission.runIdFor")(function* (submission: Submission) {
   const crypto = yield* Crypto.Crypto;
   const digest = yield* crypto
@@ -61,10 +57,9 @@ export const runIdFor = Effect.fn("Submission.runIdFor")(function* (submission: 
 });
 
 /**
- * The Event the engine records when the Item comes back to the state of an
- * Event whose Run was canceled: the trigger's Submission under a dedup key made
- * from the original Event's key and the reopening's number, so its Run gets an
- * id of its own and the original Event keeps its Run (#267).
+ * Returns the Submission recorded when the Item returns to the state of an Event whose Run was
+ * canceled. Its dedup key combines the original key and the reopening number, so the new Run
+ * gets its own ID (#267).
  */
 export const reopeningOf = (
   submission: Submission,
@@ -78,13 +73,13 @@ export const reopeningOf = (
   });
 };
 
-/** The Event now owns a Run; submitting it again returns the same run id. */
+/** A result for an Event that has a Run; submitting it again returns the same Run ID. */
 export class Claimed extends Schema.TaggedClass<Claimed>("@usine/engine/Claimed")("Claimed", {
   eventId: EventId,
   runId: RunId,
 }) {}
 
-/** A running Attempt on the same Item must finish before this Event is reconsidered. */
+/** A result for an Event that waits until a running Attempt on the same Item finishes. */
 export class Queued extends Schema.TaggedClass<Queued>("@usine/engine/Queued")("Queued", {
   eventId: EventId,
 }) {}
@@ -95,30 +90,28 @@ export const IgnoreReason = Schema.Literals(IGNORED_REASONS);
 
 export type IgnoreReason = typeof IgnoreReason.Type;
 
-/** The Event stays in the ledger but can no longer open a Run. */
+/** A result for an Event that is recorded but can't open a Run. */
 export class Ignored extends Schema.TaggedClass<Ignored>("@usine/engine/Ignored")("Ignored", {
   eventId: EventId,
   reason: IgnoreReason,
 }) {}
 
 /**
- * The Agent of `runId` stopped for the operator with a question or a blocker,
- * and the Event shows the Item as the stop left it, so it waits. It opens a
- * Run once the operator resolves the stop, or a later Event replaces it when
- * the Item changes again (#241, #341).
+ * A result for an Event that waits because the Agent of `runId` stopped with a question or
+ * blocker. It opens a Run once the operator resolves the stop, or a later Event replaces it when
+ * the Item changes (#241, #341).
  */
 export class Held extends Schema.TaggedClass<Held>("@usine/engine/Held")("Held", {
   eventId: EventId,
   runId: RunId,
 }) {}
 
-/** No Run opened because this Item requires an explicit cycle-budget reset. */
+/** A result for an Event that opened no Run because the Item needs a cycle-budget reset. */
 export class CycleBlocked extends Schema.TaggedClass<CycleBlocked>("@usine/engine/CycleBlocked")(
   "CycleBlocked",
   { eventId: EventId, ask: CycleBudgetAsk },
 ) {}
 
-/** Whether a recorded Event owns a Run, waits behind running work or an operator hold, or can no longer open a Run. */
 export const SubmissionResult = Schema.Union([Claimed, Queued, Held, Ignored, CycleBlocked]);
 
 export type SubmissionResult = typeof SubmissionResult.Type;

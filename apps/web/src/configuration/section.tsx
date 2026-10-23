@@ -6,8 +6,7 @@ import { TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { SectionReloadButton, SectionReloadResult } from "./reload.tsx";
 
-/** A Configuration page: full width, its heading with the section's Reload configuration action,
- * then the result of the last reload. `file` names the authored file a detail page shows. */
+/** `file` is the authored file shown on a detail page. */
 export const ConfigurationPage = ({
   title,
   counts,
@@ -41,8 +40,7 @@ export const ConfigurationPage = ({
   </Page>
 );
 
-/** A detail page's body: what the file says at length beside a rail of its short facts, the rail
- * first on narrow screens. */
+/** On narrow screens, renders the facts rail before the main column. */
 export const DetailColumns = ({
   facts,
   children,
@@ -56,14 +54,13 @@ export const DetailColumns = ({
   </div>
 );
 
-/** One titled part of a detail page's main column. */
 export const DetailSection = ({
   title,
   aside,
   children,
 }: {
   readonly title: string;
-  /** A short note beside the title, such as a count. */
+  /** A short note next to the title, for example a count. */
   readonly aside?: ReactNode;
   readonly children: ReactNode;
 }) => (
@@ -76,7 +73,6 @@ export const DetailSection = ({
   </section>
 );
 
-/** A definition list of short facts, label beside value. */
 export const Facts = ({ children }: { readonly children: ReactNode }) => (
   <dl className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-3 gap-y-3 text-sm">{children}</dl>
 );
@@ -94,12 +90,10 @@ export const Fact = ({
   </>
 );
 
-/** Text that is absent from the file, such as `Not set`, in the muted tone. */
 export const Unset = ({ children }: { readonly children: ReactNode }) => (
   <span className="text-muted-foreground">{children}</span>
 );
 
-/** Keys and values copied from a file's frontmatter, in mono, keys muted. */
 export const Frontmatter = ({
   entries,
   className,
@@ -122,7 +116,7 @@ export const Frontmatter = ({
   </dl>
 );
 
-/** A table row that opens a detail page; its first cell holds the link that keyboard users reach. */
+/** Renders a table row that opens a detail page on click; keyboard users use the link in its first cell. */
 export const OpeningRow = ({
   open,
   children,
@@ -138,14 +132,13 @@ export const OpeningRow = ({
   </TableRow>
 );
 
-/** The link in an opening row's first cell. */
+/** Classes for the link in the first cell of an `OpeningRow`. */
 export const rowLinkClass =
   "rounded-sm font-medium whitespace-nowrap outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring/70 focus-visible:outline-solid";
 
-/** A file that did not load: the word in red beside its dot. */
 export const NotLoaded = () => <StatusBadge state="Failed" label="Not loaded" />;
 
-/** A detail page whose name the loaded configuration does not have. */
+/** Renders a detail page for a name that the loaded configuration does not contain. */
 export const Missing = ({
   title,
   children,

@@ -55,11 +55,11 @@ import { ISSUE_PAYLOAD_QUERY, PULL_REQUEST_PAYLOAD_QUERY, issuesPresentQuery } f
 
 const WATERMARK_OVERLAP_MS = 5_000;
 const RATE_LIMIT_PRESSURE_THRESHOLD = 100;
-/** Caps one cycle's REST walk. The watermark resumes the remainder next cycle. */
+/** The maximum REST pages per cycle; the watermark resumes the rest next cycle. */
 const MAX_CHANGE_PAGES = 10;
-/** Caps one repository's label walk so a pathological catalog cannot run unbounded. */
+/** The maximum label pages per repository. */
 const MAX_LABEL_PAGES = 100;
-/** How many issue numbers one `missingIssues` GraphQL request asks about. */
+/** The number of issue numbers per `missingIssues` GraphQL request. */
 const ISSUES_PER_PRESENCE_CHECK = 50;
 
 const RestChangedItem = Schema.Struct({
@@ -94,7 +94,7 @@ const PullRequestData = Schema.Struct({
   ),
 });
 const IssuePresence = Schema.NullOr(Schema.Struct({ number: Schema.Int }));
-/** The answer to `issuesPresentQuery(count)`: every alias from `i0` to `i<count - 1>` must be present. */
+/** The response schema for `issuesPresentQuery(count)`; every alias from `i0` to `i<count - 1>` must be present. */
 const issuesPresentData = (count: number) =>
   Schema.Struct({
     repository: Schema.OptionFromNullOr(
@@ -138,7 +138,7 @@ const nextPollAt = (headers: Headers, now: number) =>
     rateLimitResetMillis(headers, RATE_LIMIT_PRESSURE_THRESHOLD),
   ]);
 
-/** The `rel="next"` URL from a Link header when GitHub has more pages. */
+/** Returns the `rel="next"` URL from a Link header, if GitHub has more pages. */
 const nextPageUrl = (link: string | undefined): Option.Option<string> => {
   if (link === undefined) return Option.none();
   const match = /<(?<url>[^>]+)>;\s*rel="next"/u.exec(link);
@@ -191,35 +191,33 @@ const newerWatermark = (cursor: PollCursor, items: ReadonlyArray<ChangedItem>) =
   return epochs.length === 0 ? Option.none<DateTime.Utc>() : dateTimeAt(Math.max(...epochs));
 };
 
-/** Finds changed GitHub Items and fetches the snapshots used to select work for Loops. */
+/** The service that finds changed GitHub Items and fetches their snapshots for Loop selection. */
 export class GitHubPolling extends Context.Service<
   GitHubPolling,
   {
-    /** Finds issue and PR updates since the saved cursor; persist the returned cursor after processing the detected Items. */
+    /** Returns issue and PR updates since the saved cursor. Persist the returned cursor after processing the detected Items. */
     readonly changes: (
       repository: RepositoryName,
       cursor: PollCursor,
     ) => Effect.Effect<ChangeDetection, GitHubAppError>;
-    /** Reads the repository's label catalog, or confirms the catalog named by `entityTag` is unchanged. */
+    /** Returns the repository's label catalog, or confirms that the catalog with `entityTag` is unchanged. */
     readonly labels: (
       repository: RepositoryName,
       entityTag: Option.Option<EntityTag>,
     ) => Effect.Effect<RepositoryLabelCatalog | RepositoryLabelsNotModified, GitHubAppError>;
     /**
-     * Fetches an Item's selection and prompt payload together with its
-     * timestamp-independent content hash. Fails with `GitHubItemNotFoundError`
-     * when the repository answers but has no such Item.
+     * Returns an Item's selection and prompt payload with its content hash. Fails with
+     * `GitHubItemNotFoundError` if the repository responds but has no such Item.
      */
     readonly snapshot: (
       repository: RepositoryName,
       item: ChangedItem,
     ) => Effect.Effect<PayloadSnapshot, GitHubAppError | GitHubItemNotFoundError>;
     /**
-     * Returns the issue numbers among `numbers` that the repository no longer
-     * has: deleted, transferred, or out of the App's reach. Asks GitHub in
-     * GraphQL requests of 50 numbers each, one after another, and sends none
-     * for an empty list. A repository that comes back null fails with
-     * `InvalidGitHubResponseError`, since it says nothing about its issues.
+     * Returns the issue numbers in `numbers` that the repository no longer has (deleted,
+     * transferred, or not readable by the App). Sends sequential GraphQL requests of 50 numbers,
+     * and none for an empty list. Fails with `InvalidGitHubResponseError` if the repository is
+     * null.
      */
     readonly missingIssues: (
       repository: RepositoryName,
@@ -285,7 +283,7 @@ export class GitHubPolling extends Context.Service<
         };
       });
 
-      /** Walks the label pages after an already-fetched first page, under the label page cap. */
+      /** Fetches the label pages after the first page, up to the label page cap. */
       const remainingLabelPages = Effect.fn("GitHubPolling.remainingLabelPages")(function* (
         operation: GitHubOperation,
         firstPage: {
@@ -384,8 +382,8 @@ export class GitHubPolling extends Context.Service<
           Effect.mapError((error) => invalidResponse("poll-repository-changes", error.message)),
         );
         const items = toChangedItems(decoded);
-        // The ETag is efficiency only: a page without one costs conditional requests next cycle, never correctness.
-        // Only the first page's tag matches the canonical URL the next cycle re-requests.
+        // The ETag is only for efficiency: a page without one costs unconditional requests next cycle.
+        // Only the first page's tag matches the canonical URL requested next cycle.
         const entityTag = Schema.decodeUnknownOption(EntityTag)(response.headers.etag);
         if (Option.isNone(entityTag)) {
           yield* Effect.logWarning("GitHub omitted the changes ETag; next poll is unconditional", {
@@ -593,7 +591,7 @@ export {
 const makeContentHash = (crypto: Crypto.Crypto) =>
   Effect.fn("GitHubPolling.contentHash")(function* (payload: Schema.Json) {
     const encoded = new TextEncoder().encode(JSON.stringify(canonicalContent(payload)));
-    // An in-memory SHA-256 digest fails only on a broken platform, so a failure here is a defect.
+    // An in-memory SHA-256 digest fails only on a broken platform, so a failure is a defect.
     const digest = yield* crypto.digest("SHA-256", encoded).pipe(Effect.orDie);
     return ContentHash.make(
       Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join(""),

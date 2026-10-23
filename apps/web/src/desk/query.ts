@@ -5,7 +5,6 @@ import { api } from "../api.ts";
 const BUSY_DESK_REFRESH_MS = 3_000;
 const IDLE_DESK_REFRESH_MS = 15_000;
 
-/** The desk's Running now, Not moving, Last outcomes, Workers, and poll times. */
 export const deskQuery = () => ({
   queryKey: ["desk"] as const,
   queryFn: () => api((client) => client.desk()),

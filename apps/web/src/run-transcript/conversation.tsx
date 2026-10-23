@@ -40,13 +40,13 @@ import { readingRows } from "./reader/anchor.ts";
 import { RestoreReader } from "./reader/restore.tsx";
 import { RememberReader } from "./reader/remember.tsx";
 
-/** A request from outside the reader to show a place in it; a new id repeats the same place. */
+/** A request to show a reader location; a new `id` repeats a request for the same location. */
 export interface ReaderRequest {
   readonly id: number;
   readonly target: ReaderTarget;
 }
 
-// A narrow reader opening on a finished Run starts at its outcome's own line, not mid-message.
+// On a narrow screen, a finished Run opens at its outcome line instead of mid-message.
 const narrowEntry = (document: ReaderDocument): ReaderTarget | null => {
   const last = document.chapters.at(-1);
   if (last === undefined || last.live || !window.matchMedia("(max-width: 1023px)").matches)
@@ -55,7 +55,7 @@ const narrowEntry = (document: ReaderDocument): ReaderTarget | null => {
   return row === undefined ? null : { messageId: row.key, tool: null };
 };
 
-/** Reports where the operator is reading while the reader is shown. */
+/** Reports the reading position while the reader is shown. */
 const TrackReading = ({
   document,
   active,
@@ -80,8 +80,8 @@ const SCROLL_KEYS = ["ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"
 const KEYS_TOWARD_START = ["ArrowUp", "Home", "PageUp"];
 
 /**
- * Whether scrolling `delta` pixels (negative toward the start) from `target` moves an area nested
- * between it and the viewport, such as a long tool output, instead of the viewport.
+ * Returns whether scrolling `delta` pixels (negative toward the start) from `target` scrolls a nested
+ * area, such as a long tool output, instead of the viewport.
  */
 const scrollsNestedArea = (target: EventTarget, viewport: Element, delta: number) => {
   if (delta === 0) return false;
@@ -102,11 +102,9 @@ const scrollsNestedArea = (target: EventTarget, viewport: Element, delta: number
 };
 
 /**
- * The scrolling conversation. The scroller stops following on every wheel turn, swipe, and scroll
- * key before these handlers run, and follows again only after a scroll that ends at the latest row.
- * One toward the end that finds the reader already there scrolls nothing, so the viewport resumes
- * following itself. A wheel turn or swipe that a nested area takes leaves the conversation in place
- * and the reader following as it was.
+ * The scroller stops following on every wheel, swipe, or scroll key before these handlers run.
+ * Following resumes after a scroll that ends at the latest row, including one toward the end when
+ * already there; a wheel or swipe that scrolls a nested area does not change it.
  */
 const ConversationViewport = ({
   viewportRef,
@@ -116,11 +114,11 @@ const ConversationViewport = ({
   children,
 }: {
   readonly viewportRef: RefObject<HTMLDivElement | null>;
-  /** The reader follows incoming activity whenever it is at the latest row. */
+  /** Whether the reader is at the latest row and follows new activity. */
   readonly following: boolean;
-  /** The operator scrolls the conversation itself. */
+  /** Called when the operator scrolls the conversation. */
   readonly onNavigate: () => void;
-  /** The operator presses or activates something inside the conversation, or scrolls an area in it. */
+  /** Called when the operator presses or activates something in the conversation, or scrolls a nested area. */
   readonly onInteract: () => void;
   readonly children: ReactNode;
 }) => {
@@ -159,7 +157,7 @@ const ConversationViewport = ({
         else onInteract();
       }}
       onKeyDown={(event) => {
-        // Let focused buttons activate on Space without changing the reader's follow intention.
+        // Space on a focused button activates it without changing whether the reader follows.
         const activatesButton =
           event.key === " " &&
           event.target instanceof Element &&
@@ -195,16 +193,16 @@ const Reader = ({
 }: {
   readonly runId: RunId;
   readonly document: ReaderDocument;
-  /** Newest raw transcript event, including events no row shows. */
+  /** The newest transcript event, including events that no row shows. */
   readonly through: TranscriptSequence | null;
-  /** Changes when transcript rows grow or change, so the reading position can be kept. */
+  /** A value that changes whenever transcript rows change size or content. */
   readonly revision: number;
   readonly runTask: string;
   readonly history: TranscriptHistory;
-  /** False while the reader is hidden, so it neither captures nor acknowledges. */
+  /** Whether the reader is shown; while `false`, it neither saves its position nor acknowledges updates. */
   readonly active: boolean;
   readonly request: ReaderRequest | null;
-  /** Receives the Attempt and checkpoint being read as the reader scrolls. */
+  /** Called with the Attempt and checkpoint being read as the reader scrolls. */
   readonly onReading: (place: ReadingPlace) => void;
 }) => {
   const [saved] = useState(() => readerMemory(() => window.localStorage).read(runId, Date.now()));
@@ -326,8 +324,5 @@ const Reader = ({
   );
 };
 
-/**
- * A Run's Attempts as one document that follows incoming activity until the reader scrolls
- * away, reporting the Attempt and checkpoint being read so the outline can follow.
- */
+/** Renders a Run's Attempts as one document that follows new activity until the reader scrolls away. */
 export const Conversation = memo(Reader);

@@ -23,14 +23,14 @@ interface Scripted {
   readonly push?: "fails" | "stalls";
 }
 
-/** What a failed git command looks like from an adapter: the exit code as the message, git's stderr as the cause. */
+/** A failed git command as an executor reports it: the exit code in the message and git's stderr as the cause. */
 const PUSH_REJECTED = new ExecutorOperationError({
   operation: "cleanup",
   message: "git exited with code 128",
   cause: new Error("remote: Repository not found.\n"),
 });
 
-/** A git that answers from the script and records every call, in order. */
+/** Returns a git that responds from `script` and records every call in order. */
 const fakeGit = (script: Scripted) => {
   const calls: Array<ReadonlyArray<string>> = [];
   let committed = false;
@@ -162,7 +162,7 @@ describe("salvageWorktree", () => {
       assert(Option.isSome(result) && result.value._tag === "Retained");
       assert.strictEqual(result.value.path, WORKTREE);
       assert.deepStrictEqual(result.value.commit, Option.some(SNAPSHOT));
-      // The exit code alone cannot tell a deleted remote from a revoked App.
+      // The exit code alone can't distinguish a deleted remote from a revoked App.
       assert.include(result.value.message, "git exited with code 128");
       assert.include(result.value.message, "remote: Repository not found.");
     }),

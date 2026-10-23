@@ -31,7 +31,7 @@ const operatorFailure = (error: BackendError) => {
       case "TranscriptAttemptNotFoundError":
         return `Attempt ${error.attemptId} does not belong to Run ${error.runId}.`;
       case "LeftoversDiscardRejectedError":
-        // No open Attempt: the Worker is declared again, or its last Attempt is ending.
+        // No running Attempt: the Worker is back in usine.yaml, or its last Attempt is ending.
         if (error.running === 0)
           return `${error.worker} is in usine.yaml or an attempt on it is ending. Nothing was discarded.`;
         return `${error.running} ${error.running === 1 ? "attempt still runs" : "attempts still run"} on ${error.worker}; discard its leftovers once they end.`;
@@ -78,11 +78,8 @@ const operatorFailure = (error: BackendError) => {
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
 
 /**
- * Cross-site request forgery guard. Browsers attach `Origin` to every
- * cross-origin request, including the simple POSTs this API accepts, so a
- * present non-loopback origin can only be another site driving the operator's
- * browser and its request is refused before the handler runs. Requests without
- * the header (curl, same-origin GETs) pass through.
+ * Whether the request has a non-loopback `Origin`, which marks a cross-site request. Requests
+ * without `Origin` (curl, same-origin GETs) are allowed.
  */
 const crossSiteOrigin = (request: HttpServerRequest.HttpServerRequest): boolean => {
   const origin = request.headers.origin;
@@ -107,8 +104,8 @@ const policy = Layer.succeed(OperatorHttpPolicy)((handler, { endpoint }) =>
         message: "Cross-site requests are refused.",
       });
     }
-    // The operator API has always accepted JSON regardless of Content-Type,
-    // including simple browser POSTs. Keep that convention behind the origin guard.
+    // JSON is accepted regardless of Content-Type, including simple browser POSTs;
+    // `crossSiteOrigin` guards against CSRF.
     const decoded =
       endpoint.payload.size === 0
         ? handler

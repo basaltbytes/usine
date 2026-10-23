@@ -1,13 +1,10 @@
 import { Schema } from "effect";
 
 /**
- * The request shapes usine sends to the Codex app server, restated from
- * `@pwrdrvr/codex-app-server-protocol@0.144.0` (codex-cli 0.144.0) because
- * that package resolves only under bundler-style resolution.
- * This is the baseline protocol. Additional supported CLI builds are verified
- * against their generated types and the live steering/interruption contracts.
- * `protocol-conformance/check.ts` compiles against the baseline package and fails
- * `pnpm check` when these shapes drift.
+ * Request types sent to the Codex app server, copied from
+ * `@pwrdrvr/codex-app-server-protocol@0.144.0` (codex-cli 0.144.0) because that package resolves
+ * only under bundler module resolution. `protocol-conformance/check.ts` fails `pnpm check` if these
+ * types drift from the package.
  */
 export interface InitializeParams {
   readonly clientInfo: {
@@ -64,7 +61,7 @@ export interface TurnInterruptParams {
   readonly turnId: string;
 }
 
-// Only authentication mode crosses this boundary; account identity is never logged.
+// Decodes only the authentication type, so account identity is never logged.
 export const AccountResponse = Schema.Struct({
   account: Schema.NullOr(Schema.Struct({ type: Schema.String })),
   requiresOpenaiAuth: Schema.Boolean,

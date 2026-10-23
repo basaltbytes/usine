@@ -16,11 +16,7 @@ import { useBoardMoves } from "../board/moves.ts";
 import { itemKindLabel, moveProgressMessage } from "../operator-copy.ts";
 import { itemStateLine } from "./model.ts";
 
-/**
- * The Task's originating Item, its number linking to GitHub, and its title; then how its current
- * Item stands, its lane, and its labels. Move to relabels the current Item as a Board move does,
- * offered only while another writable lane exists and no move of this Task is saving.
- */
+/** Shows Move to only if another writable lane exists and no move of this Task is pending. */
 export const TaskHeader = ({
   task,
   project,
@@ -28,7 +24,7 @@ export const TaskHeader = ({
 }: {
   readonly task: TaskView;
   readonly project: ProjectView;
-  /** True in setup mode, where operator actions are unavailable. */
+  /** Whether operator actions are unavailable, as in setup mode. */
   readonly disabled: boolean;
 }) => {
   const moves = useBoardMoves(project);
@@ -47,7 +43,7 @@ export const TaskHeader = ({
       : project.board.lanes.filter(
           (lane) => lane._tag === "WritableBoardLane" && lane.id !== placed.lane.id,
         );
-  // The overview follows a move every second while it is pending, so the lane is read from it.
+  // The overview polls every second while a move is pending, so the lane name comes from it.
   const laneName =
     project.board.lanes.find(({ id }) => id === pending?.toLane)?.name ??
     placed?.lane.name ??

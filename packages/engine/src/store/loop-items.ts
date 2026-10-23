@@ -32,7 +32,7 @@ const decodeOwnerRows = Schema.decodeUnknownEffect(
   Schema.Array(Schema.Struct({ eventId: EventId, runId: RunId })),
 );
 
-/** Transaction-local reads and writes of what each Loop last saw of an Item, and of operator holds. */
+/** Returns the Loop sighting and operator hold queries that run on the caller's transaction. */
 export const loopItemQueries = (database: RunDatabaseClient) => {
   const where = (loop: LoopName, itemKey: ItemKey) =>
     and(eq(loopItems.loopName, loop), eq(loopItems.itemKey, itemKey));
@@ -52,7 +52,7 @@ export const loopItemQueries = (database: RunDatabaseClient) => {
     return Option.fromNullishOr(rows[0]);
   });
 
-  /** Records a trigger's sighting of `eventId` and returns what the Loop saw before it. */
+  /** Records a sighting of `eventId` and returns the Loop's previous sighting. */
   const sighted = Effect.fn("LoopItems.sighted")(function* (
     loop: LoopName,
     itemKey: ItemKey,
@@ -72,10 +72,7 @@ export const loopItemQueries = (database: RunDatabaseClient) => {
     return before;
   });
 
-  /**
-   * Records a sighting that did not match, which also ends an operator hold. A
-   * Loop that never saw the Item matching has nothing to record.
-   */
+  /** Records a non-matching sighting and ends any operator hold; does nothing if the Loop has no row. */
   const unmatched = Effect.fn("LoopItems.unmatched")(function* (loop: LoopName, itemKey: ItemKey) {
     yield* database
       .update(loopItems)
@@ -84,7 +81,7 @@ export const loopItemQueries = (database: RunDatabaseClient) => {
       .execute();
   });
 
-  /** The operator hold that keeps the Loop on the Item, if one does. */
+  /** Returns the Loop's operator hold on the Item, or `None`. */
   const hold = Effect.fn("LoopItems.hold")(function* (loop: LoopName, itemKey: ItemKey) {
     return Option.flatMap(yield* row(loop, itemKey), ({ heldByRunId, heldEventId }) =>
       heldByRunId === null
@@ -97,11 +94,9 @@ export const loopItemQueries = (database: RunDatabaseClient) => {
   });
 
   /**
-   * Starts the hold of `runId`, whose Attempt stopped for the operator, unless
-   * the Loop last saw the Item not matching. `opened` is the Run's Event,
-   * recorded as the Loop's sighting for an Item it has no record of; `queued` is
-   * the newest Event waiting behind the Run, already the Item's state after the
-   * stop. True when the hold started.
+   * Starts the operator hold of `runId` unless the Loop's last sighting was a non-match, and
+   * returns whether it started. `opened` is recorded as the sighting if the Loop has no row;
+   * `queued` is the newest queued Event, already the state after the stop.
    */
   const startHold = Effect.fn("LoopItems.startHold")(function* (
     loop: LoopName,
@@ -124,7 +119,7 @@ export const loopItemQueries = (database: RunDatabaseClient) => {
     return true;
   });
 
-  /** Records `eventId` as the Item's state after the stop that holds the Loop. */
+  /** Records `eventId` as the Item's state after the stop. */
   const holdAt = Effect.fn("LoopItems.holdAt")(function* (
     loop: LoopName,
     itemKey: ItemKey,
@@ -145,7 +140,7 @@ export const loopItemQueries = (database: RunDatabaseClient) => {
       .execute();
   });
 
-  /** Ends the hold of `runId`, wherever it holds a Loop. True when there was one. */
+  /** Ends the operator hold of `runId` on any Loop and returns whether there was one. */
   const releaseRun = Effect.fn("LoopItems.releaseRun")(function* (runId: RunId) {
     const released = yield* database
       .update(loopItems)
@@ -157,14 +152,13 @@ export const loopItemQueries = (database: RunDatabaseClient) => {
   });
 
   /**
-   * What each Loop last saw of the supplied Items. The Event of a sighting is
-   * the newest one the engine opened again or the operator ran again for the
-   * Event the trigger submitted, as later sightings of that state join it.
+   * Returns each Loop's last sighting of the Items in `itemKeys`, with the newest reopening or
+   * run-again Event for the submitted Event.
    */
   const sightings = Effect.fn("LoopItems.sightings")(function* (itemKeys: ReadonlyArray<ItemKey>) {
     const keys = [...new Set(itemKeys)];
     if (keys.length === 0) return [];
-    // Chunks keep each read below the adapter's bind-parameter limit.
+    // Chunks keep each read below the driver's bind-parameter limit.
     const rows = (yield* Effect.forEach(EffectArray.chunksOf(keys, 100), (chunk) =>
       database
         .select({

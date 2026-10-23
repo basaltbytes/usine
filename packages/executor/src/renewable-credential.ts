@@ -8,27 +8,23 @@ import type {
   WorkerCredential,
 } from "./executor.ts";
 
-/** Renewal publishes a fresh token once the current one expires within this window. */
+/** The remaining lifetime, in milliseconds, below which a new token is issued. */
 const RENEWAL_WINDOW_MILLIS = 5 * 60_000;
 
-/** An Attempt's repository credential, published for its processes and renewed while the caller's scope is open. */
 interface RenewableCredential<A, E> {
-  /** What publishing the first token returned. */
+  /** The return value of `publish` for the first token. */
   readonly published: A;
-  /** Publishes a fresh token when the current one expires within five minutes. */
+  /** Issues and publishes a new token if the current one expires within five minutes. */
   readonly refresh: () => Effect.Effect<void, E | CredentialUnavailableError>;
   /** Replaces every token issued for the Attempt in `text` with `[REDACTED]`. */
   readonly scrub: (text: string) => string;
 }
 
 /**
- * Issues the Attempt's single-repository token at the level of its Loop
- * `permissions`, hands it with its expiry to
- * `publish`, and keeps publishing a fresh one before it expires until the
- * caller's scope closes; every issued token is then removed from its
- * `Redacted` wrapper, so `Redacted.value` on it throws.
- * Register the cleanup of whatever `publish` writes or attaches before
- * calling this, so it runs after renewal has stopped.
+ * Issues the Attempt's single-repository token with its Loop `permissions`, passes it to
+ * `publish`, and publishes a new one before each expiry until the caller's scope closes. Then
+ * wipes every issued token, so `Redacted.value` throws. Register cleanup for what `publish`
+ * writes before calling this, so the cleanup runs after renewal stops.
  */
 export const renewableCredential = Effect.fn("Executor.renewableCredential")(function* <A, E>(
   issue: CredentialProvider["Service"]["issue"],
@@ -69,7 +65,7 @@ export const renewableCredential = Effect.fn("Executor.renewableCredential")(fun
       }),
     );
   });
-  // This scope predates checkout finalizers, so renewal remains alive through
+  // Forked in a scope opened before the checkout finalizers, so renewal continues through
   // salvage and stops before the published credential is removed.
   yield* Effect.forever(
     Effect.sleep("30 seconds").pipe(

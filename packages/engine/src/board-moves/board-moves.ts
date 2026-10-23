@@ -75,15 +75,15 @@ const makeBoardMoves = Effect.gen(function* () {
 });
 
 /**
- * The operator's Board moves, kept so that a label change the factory made for one
- * is not taken for an Agent's. Each move is recorded before its labels are sent.
+ * The service that records the operator's Board moves, so their label changes aren't attributed
+ * to an Agent. Each move is recorded before its labels are sent.
  */
 export class BoardMoves extends Context.Service<
   BoardMoves,
   {
-    /** Records a move about to be sent to GitHub; a failure means nothing was sent. */
+    /** Records a move before it's sent to GitHub. If recording fails, nothing was sent. */
     readonly record: (move: BoardMoveRecord) => Effect.Effect<void, EnginePersistenceError>;
-    /** The Item's moves sent at or after `since`, oldest first. */
+    /** Returns the Item's moves at or after `since`, oldest first. */
     readonly onItem: (
       itemKey: ItemKey,
       since: DateTime.Utc,

@@ -4,7 +4,7 @@ import type { ExtensionServices } from "./services.ts";
 import { subagentTool } from "./subagent.ts";
 import { attemptTask } from "./task.ts";
 
-/** The extension's name, stored by every parent conversation that selects it. */
+/** The extension name, stored in every parent conversation that selects it. */
 const USINE_EXTENSION = "usine";
 
 const parentGuidance = [
@@ -16,9 +16,8 @@ const parentGuidance = [
 ].join("\n");
 
 /**
- * The usine extension: the `usine.attempt` task, the `subagent` tool, and the
- * parent's guidance section. Parent conversations select it and its tool by
- * name, so a restarted process resumes them once it installs the extension.
+ * Returns the usine extension: the `usine.attempt` task, the `subagent` tool, and the parent's
+ * guidance section.
  */
 export const usineExtension = (services: ExtensionServices) => {
   const tool = subagentTool(services);

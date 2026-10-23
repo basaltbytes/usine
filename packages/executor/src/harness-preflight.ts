@@ -9,19 +9,17 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import { logPreflightFailure, ExecutorOperationError, WorkerCapabilityError } from "./executor.ts";
 
 /**
- * Reports one rostered brain's readiness on a Worker. Only a readiness report
- * proves a capability gap; transport failures and timeouts stay retryable
- * infrastructure errors.
+ * A function that reports one brain's readiness on a Worker. Only a readiness report indicates a
+ * capability gap; transport failures and timeouts are retryable `ExecutorOperationError`s.
  */
 export type HarnessProbe = (
   brain: BrainSpec,
 ) => Effect.Effect<HarnessReadiness, ExecutorOperationError | WorkerCapabilityError>;
 
 /**
- * Checks each distinct brain through `probe` and turns an unavailable harness
- * into a capability error. A Claude check holds `worker`'s lock in `logins`
- * until it returns, so two Attempts preparing on one Worker never refresh its
- * Claude login at the same time, nor while a Claude child starts there (#453).
+ * Probes each distinct brain and fails with a capability error if a harness is unavailable. A
+ * Claude probe holds `worker`'s lock in `logins`, so two preparations on one Worker never
+ * refresh the Claude login concurrently or while a Claude child starts (#453).
  */
 export const verifyHarnessReadiness = Effect.fn("Executor.verifyHarnessReadiness")(function* (
   worker: WorkerName,
@@ -56,10 +54,9 @@ export const verifyHarnessReadiness = Effect.fn("Executor.verifyHarnessReadiness
 }, logPreflightFailure);
 
 /**
- * Checks one brain where `host` runs children, with the `@usine/agents/preflight`
- * checks and `environment` as a child of the Worker would see it, never the
- * orchestrator's own (ADR 0011). A timed-out or unreachable probe stays a
- * retryable infrastructure error.
+ * Returns a probe that checks one brain where `host` runs children, with `environment` as the
+ * child's environment (ADR 0011). A timeout or unreachable host is a retryable infrastructure
+ * error.
  */
 export const agentsHarnessProbe =
   (

@@ -50,9 +50,9 @@ export const localSqliteLayer = (instanceDirectory: InstanceDirectory) => {
     RunDatabase,
     Effect.gen(function* () {
       const drizzle = yield* SQLiteDrizzle.makeWithDefaults();
-      // SQLite ignores foreign_keys changes inside a transaction. Drizzle
-      // rebuilds referenced tables while migrating, so disable before its
-      // transaction and restore enforcement even when a migration fails.
+      // SQLite ignores `foreign_keys` changes inside a transaction, and Drizzle rebuilds
+      // referenced tables while migrating, so enforcement is turned off before migrating and
+      // back on even if a migration fails.
       yield* drizzle.run(sql`PRAGMA foreign_keys = OFF`).execute();
       yield* migrate(drizzle, {
         migrationsFolder,
@@ -71,7 +71,7 @@ export const localSqliteLayer = (instanceDirectory: InstanceDirectory) => {
   return database.pipe(Layer.provideMerge(sqlClient));
 };
 
-/** The local runtime on `.usine/runtime.sqlite`. */
+/** Returns the local runtime layer on `.usine/runtime.sqlite`. */
 export const layer = (
   instanceDirectory: InstanceDirectory,
 ): Layer.Layer<
@@ -89,7 +89,7 @@ export const layer = (
   StepExecutor | TriggerCondition
 > => layerWithDatabase(localSqliteLayer(instanceDirectory)).pipe(Layer.provide(NodeServices.layer));
 
-/** Observation services initialize the local database but never recover Runs or start Attempts. */
+/** Returns the observation layer, which initializes the local database but never recovers Runs or starts Attempts. */
 export const observationLayer = (
   instanceDirectory: InstanceDirectory,
 ): Layer.Layer<
@@ -137,7 +137,7 @@ const existingSqliteLayer = (instanceDirectory: InstanceDirectory) =>
     ),
   );
 
-/** Opens an existing `.usine/runtime.sqlite` in SQLite read-only mode, without initializing or migrating the database. */
+/** Returns a layer that opens an existing `.usine/runtime.sqlite` read-only, without initializing or migrating it. */
 export const runReaderLayer = (
   instanceDirectory: InstanceDirectory,
 ): Layer.Layer<RunReader, EnginePersistenceError> => {
@@ -148,7 +148,7 @@ export const runReaderLayer = (
   return RunReader.layer.pipe(Layer.provide(database));
 };
 
-/** A failed backup operation, with both paths because SQLite copy errors can come from either file. */
+/** An error from a backup, with both paths because a copy error can come from either file. */
 export class RuntimeStoreBackupError extends Schema.TaggedError<RuntimeStoreBackupError>(
   "@usine/engine/RuntimeStoreBackupError",
 )("RuntimeStoreBackupError", {
@@ -176,9 +176,9 @@ const failureReason = (cause: PlatformError.PlatformError | SqlError): string =>
   });
 };
 
-/** Copies `.usine/runtime.sqlite` to a new file while the orchestrator runs.
- * The destination directory must exist and support hard links. Opens the source
- * read-only and saves a complete backup without overwriting an existing file.
+/**
+ * Copies `.usine/runtime.sqlite` to `destination` while the orchestrator runs, without
+ * overwriting an existing file. The destination directory must exist and support hard links.
  */
 export const backup = Effect.fn("LocalSqlite.backup")(
   function* (instanceDirectory: InstanceDirectory, destination: string) {

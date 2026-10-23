@@ -6,7 +6,7 @@ import { repositoryLabelProjections } from "../database/schema.ts";
 import { EnginePersistenceError } from "../engine/error.ts";
 import { RepositoryLabel, RepositoryLabelProjection } from "./model.ts";
 
-/** Rows written before colors were kept are bare names and read as colorless labels. */
+/** Older rows store bare names, read as labels without a color. */
 const LegacyLabelNames = Schema.Array(Schema.String);
 const isLegacyLabelNames = Schema.is(LegacyLabelNames);
 const RepositoryLabelProjectionRow = Schema.Struct({
@@ -105,7 +105,7 @@ export class RepositoryLabelProjectionReader extends Context.Service<
 export class RepositoryLabelProjectionWriter extends Context.Service<
   RepositoryLabelProjectionWriter,
   {
-    /** `true` means the durable projection changed. */
+    /** Replaces the stored catalog and returns whether it changed. */
     readonly replace: (
       projection: RepositoryLabelProjection,
     ) => Effect.Effect<boolean, EnginePersistenceError>;

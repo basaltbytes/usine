@@ -8,27 +8,33 @@ import { AttemptStart } from "@usine/core/attempt/start";
 import { SshDestination, SshPort, WorkerName } from "@usine/core/worker";
 import { Effect, Schema } from "effect";
 
-/** An infra failure as the operator sees it; the defect cause stays behind this boundary. */
+/** An infra failure without its defect cause. */
 export class InfraFailureView extends Schema.TaggedClass<InfraFailureView>(
   "@usine/orchestrator/InfraFailureView",
 )("InfraFailure", { message: Schema.String }) {}
 
-/** A captured programmer defect requiring operator intervention; the original cause stays behind this boundary. */
+/** A captured programmer defect that needs operator intervention, without the original cause. */
 export class DefectFailureView extends Schema.TaggedClass<DefectFailureView>(
   "@usine/orchestrator/DefectFailureView",
 )("DefectFailure", { message: Schema.String }) {}
 
-/** An agent failure message safe to display to the operator. */
+/** An agent failure message that is safe to show to the operator. */
 export class AgentFailureView extends Schema.TaggedClass<AgentFailureView>(
   "@usine/orchestrator/AgentFailureView",
 )("AgentFailure", { message: Schema.String }) {}
 
-/** The blocker an Agent reported when it stopped; its Loop holds the Item until the operator acts or the Item changes. */
+/**
+ * The blocker an Agent reported when it stopped. The Item's next state opens no Run of the Loop
+ * (ADR 0017).
+ */
 export class BlockedFailureView extends Schema.TaggedClass<BlockedFailureView>(
   "@usine/orchestrator/BlockedFailureView",
 )("BlockedFailure", { message: Schema.String }) {}
 
-/** The question an Agent asked the operator when it stopped; its Loop holds the Item until the operator answers. */
+/**
+ * The question an Agent asked the operator when it stopped. The Item's next state opens no Run of
+ * the Loop (ADR 0017).
+ */
 export class QuestionFailureView extends Schema.TaggedClass<QuestionFailureView>(
   "@usine/orchestrator/QuestionFailureView",
 )("QuestionFailure", { question: Schema.String }) {}
@@ -46,7 +52,7 @@ export class ChildSessionBudgetFailureView extends Schema.TaggedClass<ChildSessi
   attemptedChildren: ChildSessionCount,
 }) {}
 
-/** An Attempt failure with only the details the operator can inspect. */
+/** An Attempt failure with only the details shown to the operator. */
 export const FailureView = Schema.Union([
   InfraFailureView,
   DefectFailureView,
@@ -58,12 +64,12 @@ export const FailureView = Schema.Union([
 ]);
 export type FailureView = typeof FailureView.Type;
 
-/** An Attempt that completed successfully. */
+/** An Attempt that succeeded. */
 export class SucceededAttemptView extends Schema.TaggedClass<SucceededAttemptView>(
   "@usine/orchestrator/SucceededAttemptView",
 )("Succeeded", {}) {}
 
-/** An Attempt that ended with a failure the operator can inspect. */
+/** An Attempt that failed. */
 export class FailedAttemptView extends Schema.TaggedClass<FailedAttemptView>(
   "@usine/orchestrator/FailedAttemptView",
 )("Failed", { failure: FailureView }) {}
@@ -73,7 +79,7 @@ export class CanceledAttemptView extends Schema.TaggedClass<CanceledAttemptView>
   "@usine/orchestrator/CanceledAttemptView",
 )("Canceled", {}) {}
 
-/** The terminal outcome displayed for an Attempt; a live Attempt has no outcome. */
+/** The terminal outcome of an Attempt. A running Attempt has none. */
 export const AttemptOutcomeView = Schema.Union([
   SucceededAttemptView,
   FailedAttemptView,
@@ -81,32 +87,29 @@ export const AttemptOutcomeView = Schema.Union([
 ]);
 export type AttemptOutcomeView = typeof AttemptOutcomeView.Type;
 
-/** A Worker on the orchestrator's own machine: its paths are paths on that machine. */
+/** A Worker on the orchestrator's machine, so its paths are local paths. */
 export class LocalWorkerAccess extends Schema.TaggedClass<LocalWorkerAccess>(
   "@usine/orchestrator/LocalWorkerAccess",
 )("Local", {}) {}
 
 /**
- * A Worker on another machine, reached with `ssh` at `destination`, on `port`
- * when `usine.yaml` sets one and on the client's default port when null.
+ * A Worker on another machine, accessed with `ssh` at `destination`. `port` is null if `usine.yaml`
+ * sets none, which uses the client's default.
  */
 export class SshWorkerAccess extends Schema.TaggedClass<SshWorkerAccess>(
   "@usine/orchestrator/SshWorkerAccess",
 )("Ssh", { destination: SshDestination, port: Schema.NullOr(SshPort) }) {}
 
-/** How the operator reaches a Worker's machine, read from the Worker's entry in `usine.yaml`. */
+/** How the operator accesses a Worker's machine, from its `usine.yaml` entry. */
 export const WorkerAccess = Schema.Union([LocalWorkerAccess, SshWorkerAccess]);
 export type WorkerAccess = typeof WorkerAccess.Type;
 
-/**
- * One Attempt's identity, Worker and how to reach it, effective brain, why and
- * when it started, its end time, optional terminal outcome, and salvaged work.
- */
+/** One Attempt with its Worker, effective brain, start, end, outcome, and salvaged work. */
 export class AttemptView extends Schema.Class<AttemptView>("@usine/orchestrator/AttemptView")({
   id: AttemptId,
   number: AttemptNumber,
   worker: WorkerName,
-  /** How the operator reaches `worker`; null when `usine.yaml` no longer declares it. */
+  /** How the operator accesses `worker`, or null if `usine.yaml` no longer declares it. */
   workerAccess: Schema.NullOr(WorkerAccess),
   brain: BrainSpec,
   task: AttemptTask,
@@ -114,12 +117,15 @@ export class AttemptView extends Schema.Class<AttemptView>("@usine/orchestrator/
   operatorIntervened: Schema.Boolean,
   startedAt: Schema.String,
   outcome: Schema.NullOr(AttemptOutcomeView),
-  /** When the outcome was recorded; null while the Attempt runs and for Attempts closed before end times were recorded. */
+  /**
+   * When the outcome was recorded. Null while the Attempt runs and for Attempts closed before end
+   * times were recorded.
+   */
   endedAt: Schema.NullOr(Schema.String),
   salvage: Schema.NullOr(AttemptSalvage),
-  /** Why the Attempt began; null for a later Attempt begun before usine recorded it. */
+  /** Why the Attempt began, or null for a later Attempt begun before this was recorded. */
   start: Schema.NullOr(AttemptStart).pipe(Schema.withConstructorDefault(Effect.succeed(null))),
-  /** When an orchestrator restart last reattached the Attempt; null if none did. */
+  /** When an orchestrator restart last reattached the Attempt, or null if none did. */
   reattachedAt: Schema.NullOr(Schema.String).pipe(
     Schema.withConstructorDefault(Effect.succeed(null)),
   ),

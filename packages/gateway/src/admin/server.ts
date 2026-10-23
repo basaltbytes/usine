@@ -22,7 +22,7 @@ const digest = (value: string) =>
     Effect.map((bytes) => new Uint8Array(bytes)),
   );
 
-/** Compares two digests in time that does not depend on where they differ. */
+/** Returns whether two digests are equal, in constant time. */
 const sameDigest = (left: Uint8Array, right: Uint8Array): boolean => {
   let difference = left.length ^ right.length;
   for (let index = 0; index < Math.min(left.length, right.length); index++)
@@ -52,7 +52,7 @@ const authorization = Layer.effect(
   }),
 );
 
-/** Stores the attachment under `id` and answers with the caller token bound to it. */
+/** Stores the attachment under `id` and returns its caller token. */
 const store = Effect.fn("GatewayAdmin.store")(function* (id: AttachmentId, request: AttachRequest) {
   yield* Effect.annotateCurrentSpan({
     attachment: id,
@@ -73,7 +73,7 @@ const attachmentHandlers = HttpApiBuilder.group(GatewayAdminApi, "attachments", 
   routes
     .handle("attach", ({ payload }) =>
       Effect.flatMap(newAttachmentId, (id) => store(id, payload)).pipe(
-        // A fresh 128-bit id cannot already belong to another attachment.
+        // A new 128-bit ID can't belong to another attachment.
         Effect.catchTag("AttachmentConflict", Effect.die),
       ),
     )
@@ -96,7 +96,7 @@ const attachmentHandlers = HttpApiBuilder.group(GatewayAdminApi, "attachments", 
     ),
 );
 
-/** Reports the providers in force, so the answer follows a reload that changes a credential. */
+/** Handlers that return the current LLM providers, including changes from a reload. */
 const llmHandlers = HttpApiBuilder.group(GatewayAdminApi, "llm", (routes) =>
   routes.handle(
     "providers",
@@ -114,9 +114,8 @@ const llmHandlers = HttpApiBuilder.group(GatewayAdminApi, "llm", (routes) =>
 );
 
 /**
- * The admin API's routes, for an `HttpRouter` the platform serves. Bind it
- * to a loopback or otherwise private address: the executor reaches it
- * through its SSH connection to the gateway.
+ * The admin API routes for an `HttpRouter`. Bind them to a loopback or private address; the
+ * executor connects through SSH.
  */
 export const adminRoutes = HttpApiBuilder.layer(GatewayAdminApi).pipe(
   Layer.provide([attachmentHandlers, llmHandlers]),

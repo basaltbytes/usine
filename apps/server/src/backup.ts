@@ -3,18 +3,15 @@ import { backup as backupDurableStorage } from "@usine/durable/backup";
 import { backup as backupDatabase } from "@usine/engine/local-sqlite";
 import { Console, Effect, FileSystem, Path } from "effect";
 
-/** Where the durable storage copy goes, beside the runtime copy: `backup.sqlite` gives `backup.durable.sqlite`. */
+/** Returns the durable storage copy path: `backup.sqlite` becomes `backup.durable.sqlite`. */
 const durableDestination = (path: Path.Path, destination: string): string => {
   const { dir, name, ext } = path.parse(destination);
   return path.join(dir, `${name}.durable${ext === "" ? ".sqlite" : ext}`);
 };
 
 /**
- * Copies the current instance's runtime database to `output`, resolved from the
- * working directory, and its durable storage beside it. The durable storage is
- * copied first, so the runtime copy is the newer one: an Attempt it shows open
- * either has its parent task in the durable copy or is retried. A failed runtime
- * copy removes the durable copy this call wrote.
+ * Copies the runtime database to `output` and the durable storage next to it, durable storage
+ * first. If the runtime copy fails, removes the durable copy.
  */
 export const backup = Effect.fn("Cli.backup")(function* (output: string) {
   const directory = InstanceDirectory.make(process.cwd());

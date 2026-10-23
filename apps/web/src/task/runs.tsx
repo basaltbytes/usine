@@ -62,7 +62,6 @@ const COLUMNS = 8;
 
 const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`;
 
-/** The pull request a Run produced, as its number linking to GitHub. */
 const PullRequestLink = ({ url }: { readonly url: string }) => (
   <a
     href={url}
@@ -99,7 +98,7 @@ const Opened = ({ run }: { readonly run: RunView }) => (
   </time>
 );
 
-/** The facts that have no column of their own below the widest layout, on one wrapping line. */
+/** Renders the facts that have no column below the `xl` breakpoint. */
 const FoldedFacts = ({ run }: { readonly run: RunView }) => (
   <p className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-xs text-muted-foreground xl:hidden">
     <span className="font-medium text-foreground sm:hidden">{run.state}</span>
@@ -111,7 +110,6 @@ const FoldedFacts = ({ run }: { readonly run: RunView }) => (
   </p>
 );
 
-/** Why a Failed Run stopped: its typed reason, then the message, on at most two lines. */
 const FailureLine = ({ run }: { readonly run: RunView }) =>
   Option.match(runFailure(run), {
     onNone: () => null,
@@ -123,7 +121,7 @@ const FailureLine = ({ run }: { readonly run: RunView }) =>
     ),
   });
 
-/** The one action a Run that needs the operator offers beside its menu: Approve or Retry. */
+/** Returns the action shown as a button next to the menu, or `null` if none. */
 const primaryAction = (run: RunView): "approve" | "retry" | null =>
   run.canApprove ? "approve" : run.canRetry && run.canResolveFailure ? "retry" : null;
 
@@ -133,10 +131,7 @@ interface MenuEntry {
   readonly select: () => void;
 }
 
-/**
- * A Run's actions that apply now: its primary action as a button when it needs the operator, the
- * others behind one menu. While an action is sent the cell says so instead of offering more.
- */
+/** While an action is pending, shows its progress instead of the actions. */
 const RowActions = ({
   run,
   onEdit,
@@ -276,7 +271,7 @@ const RunRow = ({
   openRun,
 }: {
   readonly run: RunView;
-  /** The Task's Item the Run works on, named when the Task has more than one. */
+  /** The Task's Item for the Run; shown only if the Task has more than one Item. */
   readonly item: TaskItemView | null;
   readonly openRun: (runId: RunId) => void;
 }) => {
@@ -355,10 +350,7 @@ const RunRow = ({
   );
 };
 
-/**
- * The Task's timeline: every Run on its Items, newest first, each opening its Run page, with the
- * actions that apply to it.
- */
+/** Renders every Run on the Task's Items, newest first. */
 export const TaskRuns = ({
   task,
   openRun,

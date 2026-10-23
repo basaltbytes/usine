@@ -57,8 +57,8 @@ describe("exe.dev preparation", () => {
         const lines = ssh.state.commands.map(remoteLine);
         const push = lines.findIndex((line) => line.includes("'push' '--force'"));
         assert(push >= 0, "the salvage push never ran");
-        // Preparation removes any stale directory first; only a removal after
-        // the push is cleanup.
+        // Preparation first removes any stale directory; only a removal after the push counts as
+        // cleanup.
         const removal = lines.findIndex(
           (line, index) =>
             index > push &&
@@ -342,7 +342,7 @@ describe("exe.dev preparation", () => {
     return Effect.gen(function* () {
       const executor = yield* Executor;
       const recorded: Array<AttemptSalvage> = [];
-      // Reconciliation visits the whole Attempt history, succeeded or not.
+      // Reconciliation runs for every Attempt, succeeded or not.
       for (const [index, succeeded] of [true, false, true, true].entries()) {
         yield* executor.recover(
           {
@@ -437,8 +437,7 @@ describe("exe.dev preparation", () => {
     return Effect.gen(function* () {
       const executor = yield* Executor;
       yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
-      // The sweep failure is isolated: prepare proceeds, and the path outside
-      // the Worker root is never touched.
+      // The sweep failure doesn't block prepare, and the path outside the Worker root isn't touched.
       const prepared = yield* executor.prepare(request);
       assert.strictEqual(prepared.workspace.spec.attemptId, ATTEMPT_ID);
       assert.deepStrictEqual(prepared.workspace.spec.payload, request.payload);
@@ -548,8 +547,7 @@ describe("exe.dev preparation", () => {
       `cancels preparation during ${phase} before launching and releases acquired resources`,
       () => {
         const ssh = fakeSsh();
-        // Partial preparation has never started a child and must roll back
-        // without requiring a working remote stop.
+        // Partial preparation never started a child, so rollback must not need a working remote stop.
         ssh.state.failStop = true;
         return Effect.gen(function* () {
           const executor = yield* Executor;
@@ -631,8 +629,8 @@ describe("exe.dev preparation", () => {
           windows: aloneOnItem(),
         });
       }).pipe(Effect.scoped);
-      // The grant detaches last, so its count at the owner's exit shows whether
-      // the owner returned while the canceling fiber was still cleaning up.
+      // The grant detaches last, so its count at the owner's exit shows whether the owner returned
+      // before the canceling fiber finished cleanup.
       const released = yield* attempt.pipe(Effect.exit, Effect.map(detaches), Effect.forkChild);
       while (!ssh.state.parked) yield* Effect.yieldNow;
       const canceling = yield* Effect.forkChild(executor.cancel(ATTEMPT_ID));
@@ -660,7 +658,7 @@ describe("exe.dev preparation", () => {
           }),
         )
         .pipe(Effect.scoped, Effect.forkChild);
-      // Let the second prepare reach the held repository lock.
+      // Lets the second prepare wait on the held repository lock.
       for (let turn = 0; turn < 20; turn += 1) yield* Effect.yieldNow;
       yield* executor.cancel(AttemptId.make("remote-run/execute/2"));
       const exit = yield* Fiber.await(waiting);

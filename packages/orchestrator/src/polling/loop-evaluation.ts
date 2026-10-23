@@ -26,7 +26,7 @@ import { LoopEvaluationFailure } from "./evaluation-failures.ts";
 interface ItemCycle {
   readonly submissions: ReadonlyArray<SubmissionResult>;
   readonly revokedRuns: number;
-  /** Loops that could not evaluate the Item; the Item's other Loops still ran. */
+  /** Loops that couldn't evaluate the Item; the Item's other Loops still ran. */
   readonly failures: ReadonlyArray<LoopEvaluationFailure>;
 }
 
@@ -41,16 +41,14 @@ const eventKey = (
       canonicalRepositoryName(repository.name),
       item.number,
       item.contentHash,
-      // Preserve pre-budget identities while making every reset a fresh Event
-      // with the current rendered task, Agent and authored limit.
+      // Keep pre-budget identities, and make every reset a new Event with the current rendered
+      // task, Agent, and limit.
       ...(cycleGeneration === 0 ? [] : [cycleGeneration]),
     ]),
   );
 
 /**
- * Whether `loop`'s trigger `if:` holds for one Item of `repository`, given the
- * Item's payload slice. The poll decides a match this way, and `LoopMatches`
- * the same way on many Items with {@link evaluateTriggerOnEach}.
+ * Whether `loop`'s trigger `if:` matches one Item of `repository`, given the Item's payload slice.
  */
 const evaluateTrigger = (
   loop: LoopFile,
@@ -66,10 +64,9 @@ const evaluateTrigger = (
   });
 
 /**
- * Whether `loop`'s trigger `if:` holds for each of `payloads`, Items of
- * `repository`, as {@link evaluateTrigger} decides it for one; the expression
- * is checked once. The results follow the order of `payloads`, each with its
- * Item's evaluation failure; a check failure fails the whole call.
+ * Whether `loop`'s trigger `if:` matches each of `payloads`, checking the expression once. Results
+ * follow the order of `payloads`, each with its own evaluation failure; a check failure fails the
+ * whole call.
  */
 export const evaluateTriggerOnEach = (
   loop: LoopFile,
@@ -91,11 +88,8 @@ export const evaluateTriggerOnEach = (
   });
 
 /**
- * Evaluates an already projected Item against its repository's active Loops,
- * renders matching prompts, and submits or revokes Runs. A Loop whose `if:` or
- * prompt fails comes back as a failure while the other Loops still run; the
- * caller logs and records it. Run failures stop the repository before its
- * cursor commits. Schedule Ticks have separate evaluation semantics.
+ * Evaluates a projected Item against its repository's active Loops and submits or revokes Runs.
+ * Returns `if:` and prompt failures per Loop; fails on Run errors.
  */
 export const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* (
   repository: ManagedRepo,
@@ -142,8 +136,7 @@ export const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* 
   for (const { agent, loop, parentModel } of loops) {
     yield* Effect.annotateCurrentSpan({ loop: loop.name, agent: agent.name });
     const matches = yield* Effect.result(evaluateTrigger(loop, repository, payload));
-    // A failed `if:` says nothing about whether the Item matches, so its queued
-    // Runs stay as they are.
+    // A failed `if:` gives no answer about the match, so the Item's queued Runs stay as they are.
     if (Result.isFailure(matches)) {
       failures.push(
         new LoopEvaluationFailure({
@@ -223,10 +216,8 @@ export const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* 
 });
 
 /**
- * Revokes the unstarted Runs of the issue or pull request `number` that GitHub
- * no longer has, for each of the repository's active Loops on `stream`, as
- * `evaluateItem` does for an Item that stops matching; running Attempts
- * continue. Returns how many Runs it revoked.
+ * Revokes the unstarted Runs of the deleted issue or pull request `number` for each active Loop on
+ * `stream`, and returns how many it revoked. Running Attempts continue.
  */
 export const revokeMissingItem = Effect.fn("PollingTriggers.revokeMissingItem")(function* (
   repository: ManagedRepo,

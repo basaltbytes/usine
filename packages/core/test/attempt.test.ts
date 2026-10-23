@@ -94,7 +94,7 @@ describe("Attempt windows", () => {
       endedAt: endedAt === null ? Option.none() : Option.some(DateTime.makeUnsafe(endedAt)),
     });
 
-  // GitHub dates a comment posted at 12:00:00.600 as 12:00:00, which both windows hold.
+  // GitHub timestamps a comment posted at 12:00:00.600 as 12:00:00, which is inside both windows.
   it("overlap when one ends in the second the other starts, and never once it ended a second before", () => {
     const ended = window("review/1", "2026-10-21T11:00:00.000Z", "2026-10-21T12:00:00.400Z");
     expect(windowsOverlap(ended, window("fix/1", "2026-10-21T12:00:00.700Z", null))).toBe(true);

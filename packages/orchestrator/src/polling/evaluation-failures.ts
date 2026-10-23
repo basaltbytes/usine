@@ -7,12 +7,12 @@ import { ChangedIssue, type ChangedItem, ChangedPullRequest } from "@usine/githu
 import { Effect, Option, Schema } from "effect";
 import { RepositoryPollFailure } from "./cycle.ts";
 
-/** One Loop that could not evaluate an Item: its `if:` failed, or its prompt did not render. */
+/** A Loop that couldn't evaluate an Item: its `if:` failed or its prompt didn't render. */
 export class LoopEvaluationFailure extends Schema.Class<LoopEvaluationFailure>(
   "@usine/orchestrator/LoopEvaluationFailure",
 )({
   loop: LoopName,
-  /** The authored part that failed: the trigger's `if:` or a prompt interpolation. */
+  /** The failed part: the trigger's `if:` or a prompt interpolation. */
   stage: Schema.Literals(["if", "prompt"]),
   expression: Schema.OptionFromNullOr(Source),
   errorTag: Schema.NonEmptyString,
@@ -20,10 +20,8 @@ export class LoopEvaluationFailure extends Schema.Class<LoopEvaluationFailure>(
 }) {}
 
 /**
- * An Item whose latest evaluation failed for at least one Loop. The poll cursor
- * keeps it until the Item is evaluated again, so Needs you keeps showing its
- * failures, and the first poll of a new process retries it with the Loops that
- * process loaded.
+ * An Item whose latest evaluation failed for at least one Loop. The poll cursor keeps it until the
+ * Item is evaluated again, and the first poll of a new process retries it.
  */
 export class FailingItem extends Schema.Class<FailingItem>("@usine/orchestrator/FailingItem")({
   stream: Schema.Literals(["issue", "pr"]),
@@ -33,13 +31,13 @@ export class FailingItem extends Schema.Class<FailingItem>("@usine/orchestrator/
   failures: Schema.NonEmptyArray(LoopEvaluationFailure),
 }) {}
 
-/** The detection entry that fetches a failing Item again. */
+/** Returns the detection entry that fetches a failing Item again. */
 export const changedItem = (failing: FailingItem): ChangedItem =>
   failing.stream === "issue"
     ? new ChangedIssue({ number: failing.number, updatedAt: failing.updatedAt })
     : new ChangedPullRequest({ number: failing.number, updatedAt: failing.updatedAt });
 
-/** The failing Item an evaluation leaves behind, or none when every Loop evaluated. */
+/** Returns the failing Item that an evaluation leaves, or `None` if every Loop evaluated. */
 export const failingItem = (
   item: ChangedItem,
   contentHash: ItemContentHash,
@@ -67,7 +65,7 @@ const failedPart = (failure: LoopEvaluationFailure): string =>
         onSome: (expression) => `prompt {{ ${expression} }}`,
       });
 
-/** The Needs you entries of a failing Item, one per Loop, each naming the Loop and the Item. */
+/** Returns the Needs you entries of a failing Item, one per Loop. */
 export const failingItemPollFailures = (
   repository: RepositoryName,
   failing: FailingItem,
@@ -90,10 +88,8 @@ const sameLoopPart = (left: LoopEvaluationFailure, right: LoopEvaluationFailure)
   left.loop === right.loop && left.stage === right.stage;
 
 /**
- * Logs the Loop failures of one evaluated Item once per Loop, Item and content
- * hash. `previous` is what the cursor recorded before this evaluation: a failure
- * it already holds at the same content hash logs at debug, and a Loop that
- * failed before and no longer fails logs its recovery.
+ * Logs one evaluated Item's Loop failures once per Loop, Item, and content hash. A failure already
+ * in `previous` at the same hash logs at Debug, and a Loop that no longer fails logs its recovery.
  */
 export const logItemEvaluation = Effect.fn("PollingTriggers.logItemEvaluation")(function* (
   repository: RepositoryName,

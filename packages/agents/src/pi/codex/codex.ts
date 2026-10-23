@@ -52,7 +52,7 @@ import { codexPoolUnavailable, initializeCodex, verifyCodexAccount } from "./acc
 
 export { CodexAppServer, codexAppServerLive, type CodexConnection } from "./app-server.ts";
 
-/** Server pushes with no session event shape; they still reach the operator's logs. */
+/** The server notification methods with no session event equivalent; they are only logged. */
 const DIAGNOSTIC_METHODS: ReadonlySet<string> = new Set([
   "error",
   "warning",
@@ -198,7 +198,7 @@ const makeCodexChild = Effect.gen(function* () {
       const pendingMessages: string[] = [];
       let lastText: string | undefined;
       let finalText: string | undefined;
-      // Provider retries the app server reported for the current turn, and whether the last one is unanswered.
+      // Provider retries reported for the current turn, and whether the last retry is unresolved.
       let retries = 0;
       let retrying = false;
       const startTurn = Effect.fn("CodexChildBackend.startTurn")(function* (message: string) {
@@ -504,7 +504,7 @@ const makeCodexChild = Effect.gen(function* () {
                 sessionId: session.id,
               });
             }
-            // Streaming deltas repeat content that the completed items deliver.
+            // Streaming deltas duplicate the content of completed items.
             if (method.toLowerCase().includes("delta")) return;
             yield* Effect.logDebug("Ignoring an unhandled Codex notification", {
               method,
@@ -546,5 +546,4 @@ const makeCodexChild = Effect.gen(function* () {
   return CodexChildBackend.of({ launch });
 });
 
-/** Provides Codex coding sessions for tasks delegated by a parent. */
 export const codexChildBackendLayer = Layer.effect(CodexChildBackend, makeCodexChild);

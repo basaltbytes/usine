@@ -89,10 +89,8 @@ const laneFor = (
     : (labelLaneFor(item, lanes) ?? stateLaneFor(item, lanes));
 
 /**
- * The label lane that matched when `running`, the card's running Run, was triggered, read from
- * the labels of its Event's payload. Undefined, so the card is placed by its current Item, when
- * that Item is closed or merged, the Event was not read or has no labels to read, or none of its
- * labels routes to a lane.
+ * Returns the label lane that matched when `running` was triggered, from its Event's labels, or
+ * `undefined` if the current Item is closed or merged or no lane can be read from the Event.
  */
 const triggerLaneFor = Effect.fn("Board.triggerLane")(function* (
   repository: ManagedRepo,
@@ -138,17 +136,8 @@ const triggerLaneFor = Effect.fn("Board.triggerLane")(function* (
 });
 
 /**
- * Groups the repository's stored Items into Task cards and the cards into lanes.
- * `cycleBlockedItems` mark their Tasks as needing the operator; `itemLoops` names, per
- * Item, the Loops whose trigger matches it now, and a Task carries those of its Items.
- * `runUsage` holds what each Run's sessions drew; a Task adds up its Runs', and a Run absent
- * from it adds no tokens. Callers that read only lanes and membership leave these and
- * `runEvents` empty.
- *
- * A card is placed by its current Item's labels, then by its state. A Task whose newest open
- * Run is running stays instead in the label lane that matched when that Run was triggered,
- * read from the Run's Event in `runEvents`, because its Agent may have removed the trigger
- * label already. A Run without its Event there does not hold its card.
+ * Groups the repository's stored Items into Task cards and the cards into lanes. A card with a
+ * running Run stays in the lane its trigger matched, read from `runEvents`.
  */
 export const projectBoard = Effect.fn("Board.project")(
   (

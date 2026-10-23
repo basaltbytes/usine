@@ -19,7 +19,7 @@ export class UndeclaredTriggerLabelWarning extends Schema.TaggedClass<Undeclared
   label: GitHubLabelName,
 }) {}
 
-/** Diagnostics that do not block a load. */
+/** The diagnostics that don't block a load. */
 export const ConfigWarning = Schema.Union([
   UndeclaredLaneLabelWarning,
   UndeclaredTriggerLabelWarning,

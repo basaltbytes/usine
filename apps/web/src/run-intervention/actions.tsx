@@ -13,11 +13,7 @@ import {
 } from "../run-actions.ts";
 import type { EditIntent } from "./edit-and-retry.tsx";
 
-/**
- * The Run actions that apply now: Approve, Retry, Edit and retry, Run again, Edit and run
- * again, Mark resolved or Mark answered, and Cancel Run behind a confirmation. Nothing
- * renders when none applies.
- */
+/** If no action applies, renders nothing. */
 export const RunActions = ({
   run,
   onEdit,
@@ -25,9 +21,9 @@ export const RunActions = ({
   className,
 }: {
   readonly run: RunView;
-  /** Opens the task and Agent editor for a retry or a run again; offered only while that applies. */
+  /** Opens the task and Agent editor for a retry or a run again. */
   readonly onEdit: (intent: EditIntent) => void;
-  /** Shows the Run that running this one again opened. */
+  /** Opens the Run that Run again created. */
   readonly openRun: (runId: RunId) => void;
   readonly className?: string;
 }) => {

@@ -41,9 +41,9 @@ const PAGE = 64;
 const unavailable = () =>
   new AgentFailure({ message: "This Attempt no longer has a live channel" });
 
-/** pi-durable entry ids are plain numbers; 0 sorts before every committed entry. */
+/** Returns `value` as an `EntryId`, where 0 sorts before every committed entry. */
 const entryId = (value: number): EntryId =>
-  // SAFETY: the value is either 0 or an id pi-durable assigned and this package stored.
+  // SAFETY: the value is 0 or an ID assigned by pi-durable and stored by this package.
   value as EntryId;
 
 const entryQuery = (
@@ -74,17 +74,18 @@ type RelayCursor = Pick<RelayProgress, "entry" | "tokens">;
 
 const cursorOf = ({ entry, tokens }: RelayProgress): RelayCursor => ({ entry, tokens });
 
-/** Reads one Attempt's durable record; absent until `execute` first creates its task. */
+/**
+ * Reads the Attempt's durable record. Returns `undefined` before the first `execute` creates its
+ * task.
+ */
 export const readRecord = (durable: DurableHarness["Service"], attemptId: string) =>
   durable.use("read the Attempt record", (harness, context) =>
     harness.snapshot(AttemptRecordDoc, attemptId, context),
   );
 
 /**
- * Sends `payloads` with the next sequences, then commits the progress they
- * reach in the Attempt's record. The appends come first: a crash before the
- * commit sends the same payloads again with the same sequences, which the
- * transcript keeps once, instead of leaving a gap `admit` would reject.
+ * Appends `payloads` with the next sequence numbers, then commits the progress. Appending first
+ * means a crash resends the payloads with the same sequence numbers instead of leaving a gap.
  */
 const emit = (
   durable: DurableHarness["Service"],
@@ -130,14 +131,14 @@ const emit = (
     }),
   );
 
-/** Sends one payload that is not derived from a parent entry, such as an intervention result. */
+/** Sends a payload that is not derived from a parent entry, such as an intervention result. */
 export const emitPayload = (
   durable: DurableHarness["Service"],
   hub: AttemptHub,
   payload: AttemptChannel.OutboundPayload,
 ) => emit(durable, hub, [payload], cursorOf);
 
-/** Records one operator input in the transcript with the next inbound sequence, and returns that sequence. */
+/** Appends an operator input to the transcript and returns its inbound sequence number. */
 export const appendInbound = (
   durable: DurableHarness["Service"],
   hub: AttemptHub,
@@ -172,7 +173,10 @@ export const appendInbound = (
 
 const decodeIntervention = Schema.decodeUnknownEffect(AttemptChannel.Intervention);
 
-/** The parent's supervision state once it read an input; a retired Hold reads as none. */
+/**
+ * Returns the parent's supervision state after it read an input. A retired Hold counts as not
+ * paused and not held.
+ */
 const deliveredState = (durable: DurableHarness["Service"], hub: AttemptHub) =>
   Effect.map(
     durable.use("read the Hold", (harness, context) =>
@@ -185,7 +189,7 @@ const deliveredState = (durable: DurableHarness["Service"], hub: AttemptHub) =>
       }),
   );
 
-/** Drops an operator input from the ones waiting for their second receipt. */
+/** Removes an operator input from `queuedInputs`. */
 const forgetQueuedInput = (
   durable: DurableHarness["Service"],
   hub: AttemptHub,
@@ -200,7 +204,7 @@ const forgetQueuedInput = (
     }, context),
   );
 
-/** The second receipt of an operator input a child queued and never read. */
+/** Sends the second receipt for an operator input that a child queued and never read. */
 const childStoppedFirst = (
   durable: DurableHarness["Service"],
   hub: AttemptHub,
@@ -218,14 +222,8 @@ const childStoppedFirst = (
   );
 
 /**
- * Sends the second receipt of each queued operator input whose session has
- * stopped waiting on it: applied once the parent read it, rejected when the
- * parent stopped first. While the Attempt is `live`, an input still queued
- * keeps waiting; once it has `ended`, none ever will be read. A child of this
- * process reports its own inputs through `relayChildDelivery`; an input
- * queued by a child of a process that stopped is rejected, since that child
- * is gone. The caller holds the hub's routing permit, so this receipt always
- * follows the queued one.
+ * Sends the second receipt for each resolved queued operator input, and rejects all unread ones if
+ * `attempt` is `ended`. The caller must hold the hub's routing permit.
  */
 export const relayDeliveries = Effect.fn("AttemptRelay.deliveries")(function* (
   durable: DurableHarness["Service"],
@@ -307,11 +305,8 @@ export const relayDeliveries = Effect.fn("AttemptRelay.deliveries")(function* (
 });
 
 /**
- * Sends the second receipt of an operator input a child queued, once the
- * child reports it: applied with the child's state when it read the input,
- * rejected when it stopped first. A report for an input whose second receipt
- * was sent already changes nothing. The caller holds the hub's routing permit,
- * so this receipt always follows the queued one.
+ * Sends the second receipt for a child-queued operator input when the child reports it, unless it
+ * was already sent. The caller must hold the hub's routing permit.
  */
 const relayChildDelivery = Effect.fn("AttemptRelay.childDelivery")(function* (
   durable: DurableHarness["Service"],
@@ -350,12 +345,8 @@ const relayChildDelivery = Effect.fn("AttemptRelay.childDelivery")(function* (
 });
 
 /**
- * Relays one Attempt to `io` until its terminal envelope is sent: `Started`,
- * the parent's committed entries, the children's events, and the executor's
- * Worker notices in the order they happened, then exactly one `Final`,
- * `Failed`, or `Interrupted`. Worker notices that arrive before the parent
- * started follow `Started`; a parent that never starts drops them. Progress
- * is durable, so a later call continues the same sequence.
+ * Relays one Attempt to `io` in order of occurrence until exactly one terminal envelope (`Final`,
+ * `Failed`, or `Interrupted`) is sent. Continues from the durable progress of an earlier call.
  */
 export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
   durable: DurableHarness["Service"],
@@ -459,7 +450,7 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
     });
   });
 
-  /** The parent's session once it started, after `Started` and the Worker notices that arrived before it. */
+  /** Starts the parent and, if it started, relays the early Worker notices. */
   const ensureStarted = Effect.gen(function* () {
     const started = yield* startParent;
     if (Option.isSome(started)) yield* relayEarlyNotices;

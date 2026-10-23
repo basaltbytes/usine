@@ -1,16 +1,14 @@
-/** The `hosts.yml` that makes gh authenticate to github.com with `token`. */
+/** Returns the gh `hosts.yml` content that authenticates github.com with `token`. */
 export const ghHostsConfig = (token: string): string =>
   `github.com:\n    user: x-access-token\n    oauth_token: ${JSON.stringify(token)}\n    git_protocol: https\n    users:\n        x-access-token:\n            oauth_token: ${JSON.stringify(token)}\n`;
 
-/** The `config.yml` gh expects beside `hosts.yml`. */
+/** The gh `config.yml` content, required next to `hosts.yml`. */
 export const GH_CONFIG = 'version: "1"\n';
 
 /**
- * The variables that give an Attempt's processes its repository credential,
- * kept in `directory` outside its checkout: git asks the credential helper,
- * which reads the `token` file on each authentication, and gh reads the
- * `hosts.yml` in its own `GH_CONFIG_DIR` on each invocation. Renewing the
- * files is enough; no expiring token is frozen in a child's environment.
+ * Returns the environment variables that point git and gh at the credential files in
+ * `directory`. git reads `directory/token` and gh reads `directory/hosts.yml` on each use, so
+ * renewing the token only requires rewriting those files.
  */
 export const credentialEnvironment = (directory: string) =>
   ({

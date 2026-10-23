@@ -6,11 +6,7 @@ import { ItemNumber } from "../item.ts";
 import { CommitSha, RepositoryRevision } from "../repository.ts";
 import { Comment, type CommentKind, Commit, PullRequest, type StepResultFact } from "./result.ts";
 
-/**
- * The part of an Attempt's RunSpec that harvesting reads: where its checkout
- * started, what it was given, when the Worker prepared it, the bot login it
- * writes to GitHub as, and the Agent whose signature its comments end with.
- */
+/** The fields of `RunSpec` that harvesting reads. */
 export type HarvestSpec = Pick<
   RunSpec,
   | "attemptId"
@@ -24,32 +20,21 @@ export type HarvestSpec = Pick<
 >;
 
 /**
- * Reads, from the orchestrator's records, the harvested Attempt's own window
- * on its Run's Item and the windows of the other Attempts of its Agent that
- * overlap it there. The harvest runs it once GitHub has listed the Attempt's
- * comments, so it reads every Attempt that could have posted one of them,
- * including one that started while the harvest ran, and the end the
- * orchestrator recorded for this Attempt when it closed it before the
- * harvest, as a cancel does.
+ * An effect that reads the harvested Attempt's `AttemptWindows`. Harvesting runs it after
+ * GitHub lists the comments, so the result includes Attempts that started during the harvest.
  */
 export type AttemptWindowsRead<W> = Effect.Effect<AttemptWindows, W>;
 
 /**
- * Runs one read-only `git` or `gh` command in the Attempt's checkout and returns
- * its stdout lines. A non-zero exit is the runner's own failure.
+ * A function that runs a read-only `git` or `gh` command in the checkout and returns its
+ * stdout lines. Fails with `E` on a non-zero exit.
  */
 export type HarvestCommand<E> = (
   command: "git" | "gh",
   args: ReadonlyArray<string>,
 ) => Effect.Effect<ReadonlyArray<string>, E>;
 
-/**
- * The harvest could not use what it read: git or GitHub answered a harvesting
- * command with output that is not a valid result (`git`, `github`), or the
- * Attempt's own window and those of its Agent's other Attempts on the Item
- * could not be read (`windows`), so the Attempt's comments cannot be told
- * from theirs.
- */
+/** An error for invalid `git` or GitHub output, or for Attempt windows that can't be read. */
 export class HarvestError extends Schema.TaggedError<HarvestError>("@usine/core/HarvestError")(
   "HarvestError",
   {
@@ -69,20 +54,12 @@ const decodePullRequestPages = Schema.decodeUnknownEffect(
 );
 const decodeCommit = Schema.decodeUnknownEffect(CommitSha);
 
-/**
- * The issue or pull request a Run's payload describes, by the `number` and
- * `url` of GitHub's issue and pull request payload slices. A schedule Run's
- * payload has neither.
- */
+/** Decodes the Item `number` and `url` from a payload. Returns `None` for a schedule payload. */
 const decodePayloadItem = Schema.decodeUnknownOption(
   Schema.Struct({ number: ItemNumber, url: Schema.URLFromString }),
 );
 
-/**
- * Asks GitHub for the login of the credential the command runs with. GitHub
- * does not document what it returns for an installation token, so harvesting
- * asks only when the RunSpec names no bot login.
- */
+/** The GraphQL query for the credential's login, used only if the `RunSpec` has no bot login. */
 const VIEWER_QUERY = "query=query { viewer { login } }";
 const decodeViewer = Schema.decodeUnknownEffect(
   Schema.fromJsonString(
@@ -93,8 +70,8 @@ const decodeViewer = Schema.decodeUnknownEffect(
 );
 
 const Author = Schema.NullOr(Schema.Struct({ login: Schema.String }));
-// GitHub's schema makes an issue comment's body optional and a review's or a
-// review comment's body required; a review submitted without text has "".
+// GitHub's schema has an optional body for issue comments and a required body for reviews and
+// review comments; a review without text has an empty body.
 const IssueCommentResponse = Schema.Struct({
   url: Schema.URLFromString,
   user: Author,
@@ -135,7 +112,7 @@ const decodeReviewCommentPages = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Array(Schema.Array(ReviewCommentResponse))),
 );
 
-/** Runs one `gh` command and decodes its output as `what`. */
+/** Runs a `gh` command and decodes its output. Fails with a `github` `HarvestError` if the output is invalid. */
 const askGitHub = <A, E, D>(
   run: HarvestCommand<E>,
   args: ReadonlyArray<string>,
@@ -157,13 +134,13 @@ const askGitHub = <A, E, D>(
     ),
   );
 
-/** The commits between the checkout's base and its final HEAD, oldest first. */
+/** Returns the commits from the checkout's base to its final HEAD, oldest first. */
 const harvestCommits = Effect.fn("StepResult.harvestCommits")(function* <E>(
   spec: HarvestSpec,
   run: HarvestCommand<E>,
 ) {
   yield* Effect.annotateCurrentSpan({ attemptId: spec.attemptId, repository: spec.repository });
-  // A commit id never contains a space, so the first one ends it.
+  // The first space ends the commit ID.
   const lines = yield* run("git", [
     "log",
     "--reverse",
@@ -192,7 +169,7 @@ const harvestCommits = Effect.fn("StepResult.harvestCommits")(function* <E>(
   );
 });
 
-/** The pull requests whose head is the checkout's final commit, each once. */
+/** Returns the pull requests whose head is the checkout's final commit, without duplicates. */
 const harvestPullRequests = Effect.fn("StepResult.harvestPullRequests")(function* <E>(
   spec: HarvestSpec,
   run: HarvestCommand<E>,
@@ -205,8 +182,8 @@ const harvestPullRequests = Effect.fn("StepResult.harvestPullRequests")(function
     ),
   );
   const branch = (yield* run("git", ["branch", "--show-current"])).join("");
-  // Executors start detached. An unchanged default-branch Attempt has no
-  // PR candidate; a fixed revision, changed HEAD, or agent-created branch does.
+  // Checkouts start detached. There's no candidate if HEAD is unchanged, no branch was created,
+  // and the revision isn't a fixed commit.
   if (
     head === spec.baseCommit &&
     spec.revision !== RepositoryRevision.make(spec.baseCommit) &&
@@ -217,8 +194,8 @@ const harvestPullRequests = Effect.fn("StepResult.harvestPullRequests")(function
     });
     return [];
   }
-  // A pull request's head is the tip of its branch and of refs/pull/<n>/head;
-  // GitHub answers HTTP 422 for a commit that was never pushed.
+  // GitHub returns HTTP 422 for a commit that was never pushed, so first check that a branch or
+  // `refs/pull/<n>/head` points at it.
   if (head !== spec.baseCommit) {
     const refs = yield* run("git", ["ls-remote", "origin", "refs/heads/*", "refs/pull/*/head"]);
     if (!refs.some((ref) => ref.startsWith(`${head}\t`))) {
@@ -235,8 +212,7 @@ const harvestPullRequests = Effect.fn("StepResult.harvestPullRequests")(function
     decodePullRequestPages,
     "pull request results",
   );
-  // Associated PRs can contain this commit as an ancestor. Record only
-  // PRs whose head is the checkout's final commit, once across all pages.
+  // The response also has pull requests that contain the commit as an ancestor.
   const facts = new Map<number, PullRequest>();
   for (const pr of pages.flat()) {
     if (pr.head.sha === head)
@@ -250,13 +226,13 @@ const harvestPullRequests = Effect.fn("StepResult.harvestPullRequests")(function
   return [...facts.values()];
 });
 
-/** The login whose comments harvesting keeps, and where it came from. */
+/** The login whose comments harvesting keeps, and its source. */
 interface Author {
   readonly login: string;
   readonly source: "run-spec" | "viewer";
 }
 
-/** The login GitHub reports for the Attempt's credential, for a RunSpec that names no bot login. */
+/** Returns the login of the Attempt's credential, as reported by GitHub. */
 const credentialLogin = Effect.fn("StepResult.credentialLogin")(function* <E>(
   spec: HarvestSpec,
   item: ItemNumber,
@@ -275,19 +251,18 @@ const credentialLogin = Effect.fn("StepResult.credentialLogin")(function* <E>(
   return { login: data.viewer.login, source: "viewer" } satisfies Author;
 });
 
-/** A signed comment or review the Attempt's bot login posted, and the time GitHub records it was posted. */
+/** A signed comment or review by the Attempt's bot login, with its GitHub post time. */
 interface Posted {
   readonly fact: Comment;
   readonly at: DateTime.Utc;
 }
 
 /**
- * What GitHub lists on a Run's Item for the Attempt's bot login, before the
- * Attempt windows on the Item are read: `signed`, the comments and
- * reviews the login posted since the Worker prepared the checkout and ended
- * with the Agent's signature; `unsigned`, how many it posted then without that
- * signature; and `edited`, how many comments it posted before then and edited
- * since.
+ * The comments by the Attempt's bot login on the Run's Item, before windows are applied.
+ *
+ * - `signed`: posted since preparation and ending with the Agent's signature.
+ * - `unsigned`: the number posted since preparation without the signature.
+ * - `edited`: the number posted before preparation and edited since.
  */
 interface Listing {
   readonly item: ItemNumber;
@@ -299,13 +274,9 @@ interface Listing {
 }
 
 /**
- * Lists what the Attempt posted on its Run's Item: the Item's conversation
- * comments and, on a pull request, its submitted reviews and their diff
- * comments, written by the RunSpec's bot login, or else by the login GitHub
- * reports for the Attempt's credential, posted since the Worker prepared the
- * checkout, and ending with the Attempt's Agent's signature. A comment is
- * posted when it is created, even when it is edited later, and a review when
- * it is submitted. None for a Run without an Item or a preparation time.
+ * Lists the comments, and for a pull request the submitted reviews and diff comments, that the
+ * bot login posted on the Run's Item since preparation. Returns `None` if the Run has no Item
+ * or no preparation time.
  */
 const listComments = Effect.fn("StepResult.listComments")(function* <E>(
   spec: HarvestSpec,
@@ -378,14 +349,12 @@ const listComments = Effect.fn("StepResult.listComments")(function* <E>(
   );
   const byLogin = (user: typeof Author.Type) => user !== null && user.login === login;
   const sincePrepared = (at: DateTime.Utc) => DateTime.toEpochMillis(at) >= since;
-  // A pending review and its comments are a draft only their author sees.
+  // A pending review and its comments are a draft visible only to its author.
   const pending = new Set(
     reviews.flat().flatMap(({ id, state }) => (state === "PENDING" ? [id] : [])),
   );
-  // What GitHub lists that the login wrote, each with its body and the time
-  // it was posted: a comment's creation, even when edited later, or a
-  // review's submission. GitHub lists every review, so only those submitted
-  // since preparation are kept.
+  // A comment's post time is its creation time and a review's is its submission time. The
+  // reviews endpoint ignores `since`, so reviews are filtered by submission time.
   const written = [
     ...conversation.flat().flatMap(({ url, user, body, createdAt }) =>
       byLogin(user)
@@ -425,17 +394,11 @@ const listComments = Effect.fn("StepResult.listComments")(function* <E>(
         : [],
     ),
   ];
-  // `since` lists the comments updated since preparation, so it also lists
-  // one the login posted before then and edited since. Only what the login
-  // posted inside the Attempt's own window can be the Attempt's (#429): that
-  // comment was posted before the window opened, and the edit could be any
-  // Attempt's, so no Attempt records it.
+  // `since` filters by update time, so it also returns comments created before preparation and
+  // edited later; those are dropped (#429).
   const posted = written.filter(({ at }) => sincePrepared(at));
-  // All Attempts that write as one bot login share it, such as two Loops' Runs
-  // on one pull request, so the login alone does not tell their comments apart.
-  // The Attempt prompt asks the Agent to end each comment and review with its
-  // signature, and only those that do are the Attempt's (ADR 0006, #394).
-  // A body often ends with a newline, so trailing whitespace is ignored.
+  // Attempts that write as the same bot login are distinguished by the Agent's signature
+  // (ADR 0006, #394). Trailing whitespace is ignored.
   const signature = githubSignature(spec.agent.name);
   const signed = posted.filter(
     ({ body }) => body !== undefined && body.trimEnd().endsWith(signature),
@@ -450,11 +413,7 @@ const listComments = Effect.fn("StepResult.listComments")(function* <E>(
   });
 });
 
-/**
- * `window` for a log line: its start and end as an ISO interval, ending
- * `open` while its Attempt runs, or `unrecorded` for an Attempt that ended
- * before end times were recorded.
- */
+/** Formats `window` as an ISO interval for logs, with the end `open` while running. Returns `unrecorded` for `None`. */
 const describeWindow = (window: Option.Option<AttemptWindow>) =>
   Option.match(window, {
     onNone: () => "unrecorded",
@@ -465,19 +424,9 @@ const describeWindow = (window: Option.Option<AttemptWindow>) =>
   });
 
 /**
- * The comments and reviews in `listing` that are the Attempt's: those whose
- * time the Attempt's own window holds and none of the windows of its Agent's
- * other Attempts on the Item does, both read through `windows` (#429). The
- * listing starts at preparation, but the orchestrator can close the Attempt
- * before the harvest, as a cancel does before its executor stops, and a
- * comment posted after that end is not the Attempt's. An Attempt of the Agent
- * that started after that end does not overlap this one, so only the own
- * window leaves its comments out. Two Attempts of one Agent open on one Item
- * at once sign alike, so a comment posted while another of them was open
- * could be either's and is neither's, the rule the Run reader applies to the
- * App's changes. The windows are read only once GitHub has listed the
- * comments, and not at all when none is signed. A read that fails is a
- * `HarvestError` at the `windows` stage.
+ * Returns the signed comments in `listing` that are inside the Attempt's own window and outside
+ * the overlapping windows (#429). Reads `windows` only if a comment is signed. Fails with a
+ * `windows` `HarvestError` if the read fails.
  */
 const attributeComments = Effect.fn("StepResult.attributeComments")(function* <W>(
   spec: HarvestSpec,
@@ -489,10 +438,7 @@ const attributeComments = Effect.fn("StepResult.attributeComments")(function* <W
     repository: spec.repository,
     item: listing.item,
   });
-  // An Attempt that posted a listed comment had started before GitHub listed
-  // it, so a read made now has its window, even when it started while this
-  // harvest ran, and so does the end the orchestrator recorded for this
-  // Attempt before the harvest. A read made before the listing could miss them.
+  // Read after the listing so the result includes every Attempt that could have posted a comment.
   const { own, overlapping } =
     listing.signed.length === 0
       ? new AttemptWindows({ own: Option.none(), overlapping: [] })
@@ -556,27 +502,23 @@ const attributeComments = Effect.fn("StepResult.attributeComments")(function* <W
     issueComments: counted("issue-comment"),
     reviews: counted("review"),
     reviewComments: counted("review-comment"),
-    // Written by the login since preparation without the Agent's signature:
-    // another Agent's, or one this Agent left unsigned.
+    // Posted since preparation without the Agent's signature.
     unsigned: listing.unsigned,
-    // Posted by the login before preparation and edited since: not posted by this Attempt.
+    // Posted before preparation and edited since.
     edited: listing.edited,
-    // Signed, but posted outside the Attempt's own window: after a cancel
-    // ended it, such as by an Attempt of the Agent that started since.
+    // Signed, but posted outside the Attempt's own window, for example after a cancel.
     outside: outside.length,
     // Signed, but posted while another Attempt of the Agent was open on the Item.
     ambiguous: ambiguous.length,
-    // The windows read, none when no listed comment was signed.
+    // Empty if no listed comment is signed.
     overlapping: overlapping.map(({ attemptId }) => attemptId),
   });
   return posted;
 });
 
 /**
- * GitHub discovery is read-only enrichment of a finished Attempt: a failure or
- * a ten-second stall records nothing it looked for and keeps the other facts.
- * `nothing` is what the discovery then gives, and `retaining` says what the
- * Attempt keeps, for the warning.
+ * Runs `discovery` with a 10-second timeout. If it fails or times out, logs a warning that ends
+ * with `retaining` and returns `nothing`.
  */
 const enrichment = <A, E extends { readonly _tag: string; readonly message: string }>(
   spec: HarvestSpec,
@@ -603,12 +545,8 @@ const enrichment = <A, E extends { readonly _tag: string; readonly message: stri
   );
 
 /**
- * The comments and reviews the Attempt posted on its Run's Item
- * (`listComments`) inside its own window, which no other Attempt of its Agent
- * open on the Item could have posted (`attributeComments`). Listing them is
- * GitHub discovery (`enrichment`), and the `HarvestError` this fails with is
- * a failure to read the windows. `retaining` says what the Attempt keeps when
- * the discovery fails.
+ * Returns the comments and reviews attributed to the Attempt. If GitHub discovery fails, returns
+ * an empty list. Fails with `HarvestError` if the windows can't be read.
  */
 const harvestComments = <E extends { readonly _tag: string; readonly message: string }, W>(
   spec: HarvestSpec,
@@ -625,7 +563,7 @@ const harvestComments = <E extends { readonly _tag: string; readonly message: st
     ),
   );
 
-/** Warns that the Attempt windows on the Item could not be read, and what the harvest does without them. */
+/** Logs a warning that the windows couldn't be read, ending with `outcome`. */
 const windowsUnread = (spec: HarvestSpec, outcome: string) => (error: HarvestError) =>
   Effect.logWarning(
     `Could not read the Attempt's window and those of the Agent's other Attempts on the Item, so the Attempt's comments cannot be told from theirs; ${outcome}`,
@@ -637,22 +575,10 @@ const windowsUnread = (spec: HarvestSpec, outcome: string) => (error: HarvestErr
   );
 
 /**
- * The facts an Attempt's checkout holds once its agent has finished: new
- * commits, then the pull requests at its final commit, then the comments and
- * reviews the Attempt posted on its Run's Item. A new final commit that no
- * remote branch or pull request ref points at was never pushed, so it has no
- * pull request and GitHub is not asked. Comments are those GitHub lists for
- * the bot login the Attempt writes as, the factory's App or a Worker's GitHub
- * integration, posted since the Worker prepared the checkout, that end with
- * the signature of the Attempt's Agent (`githubSignature`). Of those it keeps
- * the ones posted inside the Attempt's own window that `windows` reads, and
- * in none of the windows of the Agent's other Attempts on the Item it reads
- * with it, since those could be another Attempt's of that Agent. Both GitHub
- * discoveries are read-only enrichment, so a GitHub failure or a ten-second
- * stall keeps the commits and records none of what it looked for rather than
- * failing completed work. Windows that cannot be read
- * fail the harvest, as an invalid git result does, since its comments cannot
- * be told from the other Attempts'.
+ * Returns the facts from a finished Attempt's checkout: new commits, the pull requests at the
+ * final commit, and the comments and reviews attributed to the Attempt. A GitHub failure or
+ * 10-second timeout drops only the GitHub facts. Fails with `HarvestError` if git output is
+ * invalid or the windows can't be read.
  */
 export const harvestFacts = Effect.fn("StepResult.harvest")(function* <
   E extends { readonly _tag: string; readonly message: string },
@@ -669,11 +595,8 @@ export const harvestFacts = Effect.fn("StepResult.harvest")(function* <
 });
 
 /**
- * The comments and reviews an Attempt that ended without success posted on its
- * Run's Item, found as `harvestFacts` finds them. Its commits and pull requests
- * are not collected, since the Attempt delivered no result. A GitHub failure, a
- * ten-second stall, or windows that `windows` cannot read records none and
- * never fails.
+ * Returns the comments and reviews that an unsuccessful Attempt posted on the Run's Item,
+ * attributed as in `harvestFacts`. Never fails; on any error, returns an empty list.
  */
 export const harvestPostedComments = Effect.fn("StepResult.harvestPostedComments")(function* <
   E extends { readonly _tag: string; readonly message: string },

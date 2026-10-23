@@ -21,8 +21,7 @@ import { capabilityLabel, reloadRefusalLead } from "./copy.ts";
 
 const ReloadContext = createContext<ConfigurationReload | null>(null);
 
-/** Keeps one reload for the whole Configuration section, so its result stays on screen while the
- * operator moves between its pages. */
+/** Provides one reload state to the Configuration section, so the result stays visible across its pages. */
 export const SectionReloadProvider = ({ children }: { readonly children: ReactNode }) => (
   <ReloadContext value={useReloadConfiguration()}>{children}</ReloadContext>
 );
@@ -61,7 +60,7 @@ const agentLink = (agent: string) => (
   </Link>
 );
 
-/** A `usine.yaml` path such as `workers.build-1.destination`, linked to the page that shows it. */
+/** Links a `usine.yaml` field path such as `workers.build-1.destination` to the page that shows it. */
 const fieldLink = (field: string) => {
   const worker = /^workers\.([a-z0-9-]+)\.[a-z_]+$/u.exec(field)?.[1];
   if (worker !== undefined)
@@ -100,7 +99,7 @@ const reloadRefusalOf = (error: Error): ReloadRefusal | null =>
     ? error
     : null;
 
-/** The fields, Agents, Workers, or repository a refused reload names, each linked to its page. */
+/** Renders a link to each field, Agent, Worker, or repository listed in a reload rejection. */
 const RefusalSubjects = ({ refusal }: { readonly refusal: ReloadRefusal }) => {
   switch (refusal.error) {
     case "FactoryConfigError":
@@ -153,9 +152,7 @@ const RefusalSubjects = ({ refusal }: { readonly refusal: ReloadRefusal }) => {
   }
 };
 
-/** What the section's last reload changed and which files it left out, or why it was refused, what
- * the refusal names, and that the running configuration stayed; nothing before the first reload or
- * once dismissed. */
+/** Renders nothing before the first reload or after the result is dismissed. */
 export const SectionReloadResult = () => {
   const reload = useSectionReload();
   const at =

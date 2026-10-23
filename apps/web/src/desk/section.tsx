@@ -7,7 +7,6 @@ import { TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { projectParams } from "../overview.ts";
 
-/** One desk block: its title, an optional count beside it, an optional note at the right, then its body. */
 export const DeskSection = ({
   id,
   title,
@@ -19,7 +18,7 @@ export const DeskSection = ({
   readonly id: string;
   readonly title: string;
   readonly count?: number | undefined;
-  /** Needs you counts in its own tone, as the sidebar does. */
+  /** `needs-you` uses the Needs you tone, as in the sidebar. */
   readonly countTone?: "muted" | "needs-you";
   readonly note?: ReactNode;
   readonly children: ReactNode;
@@ -47,14 +46,13 @@ export const DeskSection = ({
   </section>
 );
 
-/** The sentence an empty desk block shows in place of its table. */
 export const EmptyLine = ({ children }: { readonly children: ReactNode }) => (
   <p className="text-sm text-muted-foreground">{children}</p>
 );
 
 const decodeItemKey = Schema.decodeUnknownOption(GitHubItemKey);
 
-/** The Item's number in mono and its title, truncated to the cell; a Run without a known Item shows its id. */
+/** If the Item is unknown, shows the Run ID. */
 export const ItemTitle = ({
   item,
   run,
@@ -82,7 +80,7 @@ export const ItemTitle = ({
   );
 };
 
-/** Links the Run page of `run`; the row around it opens the same page on a click anywhere. */
+/** Renders a link to the Run page of `run`; the enclosing row opens the same page on click. */
 export const RunPageLink = ({
   run,
   children,
@@ -100,7 +98,7 @@ export const RunPageLink = ({
   </Link>
 );
 
-/** A table row that opens the Run page of `run`, or a row that opens nothing when there is no Run. */
+/** Renders a table row that opens the Run page of `run` on click; if `run` is `null`, the row is not clickable. */
 export const RunRow = ({
   run,
   className,

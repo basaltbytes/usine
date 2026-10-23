@@ -122,7 +122,7 @@ it("reloads the configuration from any Configuration page and shows what changed
     await expect.element(page.getByText("Loops added: triage")).toBeVisible();
     await expect.element(page.getByRole("link", { name: "triage", exact: true })).toBeVisible();
 
-    // The result stays on screen while the operator moves to another page of the section.
+    // The reload result stays visible after navigating to another Configuration page.
     await page.getByRole("link", { name: "Workers", exact: true }).click();
     await expect.element(page.getByRole("heading", { name: "Workers" })).toBeVisible();
     await expect.element(page.getByText("Loops added: triage")).toBeVisible();
@@ -139,7 +139,7 @@ it("reloads the configuration from any Configuration page and shows what changed
     await page.getByRole("button", { name: "Dismiss the reload result" }).click();
     await expect.element(page.getByText("Configuration not reloaded")).not.toBeInTheDocument();
 
-    // A refused preflight links the Worker whose check failed and what the reload adds.
+    // A failed preflight links to the Worker whose check failed and to what the reload adds.
     const refusal = page.getByRole("alert").filter({ hasText: "Configuration not reloaded" });
     await page.getByRole("button", { name: "Reload configuration" }).click();
     await expect
@@ -150,7 +150,7 @@ it("reloads the configuration from any Configuration page and shows what changed
     await refusal.getByRole("link", { name: "local" }).click();
     await expect.element(page.getByRole("heading", { name: "local" })).toBeVisible();
 
-    // A change only a restart applies links each changed field of usine.yaml.
+    // A change that needs a restart links to each changed usine.yaml field.
     await page.getByRole("button", { name: "Reload configuration" }).click();
     await expect
       .element(refusal.getByText("Changed in usine.yaml:", { exact: false }))

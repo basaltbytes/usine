@@ -13,14 +13,9 @@ import { GitHubItemKey } from "./polling/repository-sync.ts";
 const decodeItemKey = Schema.decodeUnknownOption(GitHubItemKey);
 
 /**
- * Re-evaluates a queued Event's trigger against a fresh GitHub snapshot of its
- * Item, using the Loops and registry of the current instance. The stored
- * projection is not enough: the Run that just closed may have changed the
- * Item after the poll that recorded the Event and before the next poll. An
- * Item GitHub no longer has answers `item-gone`, so the engine revokes its
- * Events and marks its projection gone. Any other failure, or a check that
- * exceeds five seconds, answers `matches`, so the Run opens as it did before
- * the check existed; the next poll revokes it if the Item moved on.
+ * Re-evaluates a queued Event's trigger against a fresh GitHub snapshot of its Item. Returns
+ * `item-gone` if the Item no longer exists, and `matches` on any other failure or after five
+ * seconds.
  */
 export const triggerConditionLayer: Layer.Layer<
   TriggerCondition,

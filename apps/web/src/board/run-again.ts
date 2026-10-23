@@ -5,26 +5,23 @@ import type { RunAgainResult } from "@usine/engine/engine";
 import type { RunView } from "@usine/orchestrator/operator";
 import { unchangedRunAgain, useRunAgain } from "../run-actions.ts";
 
-/** What a Board card shows of its Task's latest Run again request, and how it sends one. */
+/** The state of a Task's latest Run again request, and a function to send one. */
 export interface CardRunAgain {
-  /** Whether the latest request still waits for its answer. */
+  /** Whether the latest request is in flight. */
   readonly isPending: boolean;
-  /** The answer to the latest request: the new Run, or the cycle-budget Ask that blocked it. */
+  /** The response to the latest request: the new Run, or the cycle budget Ask that blocked it. */
   readonly data: RunAgainResult | undefined;
-  /** Why the latest request failed, such as the server's refusal; null when it did not. */
+  /** The error of the latest request, or `null` if it did not fail. */
   readonly error: Error | null;
-  /** Runs `run` again with the task and Agent it ran with. */
+  /** Runs `run` again with the same task and Agent. */
   readonly send: (run: RunView) => void;
 }
 
 const cardRunAgainKey = (itemKey: ItemKey) => ["run-again", "board-card", itemKey] as const;
 
 /**
- * Run again for the Board card of the Task whose key is `itemKey`. A card remounts when it changes
- * lanes, after a move or a poll that routes its Item elsewhere, so its requests live in the
- * mutation cache under that key rather than in the card: the remounted card still shows a pending
- * request and its answer. A `Claimed` answer opens the new Run's drawer through `openRun`, over
- * whichever screen shows when it arrives.
+ * Returns the Run again state for the card of the Task with `itemKey`, read from the mutation cache
+ * so it survives the card remounting after a lane change. On a `Claimed` response, calls `openRun`.
  */
 export const useCardRunAgain = (
   itemKey: ItemKey,
@@ -32,7 +29,7 @@ export const useCardRunAgain = (
 ): CardRunAgain => {
   const mutationKey = cardRunAgainKey(itemKey);
   const again = useRunAgain({ mutationKey, onClaimed: openRun });
-  // The cache lists the key's requests oldest first, including those an earlier mount sent.
+  // The mutation cache returns this key's requests oldest first, including an earlier mount's.
   const latest = useMutationState<MutationState<RunAgainResult>>({
     filters: { mutationKey, exact: true },
     select: ({ state }) => state,

@@ -7,7 +7,7 @@ import {
   HttpServerResponse,
 } from "effect/unstable/http";
 
-/** Connection-level headers that describe one hop and are never forwarded (RFC 9110, section 7.6.1). */
+/** Connection-level headers that are never forwarded (RFC 9110, section 7.6.1). */
 const HOP_BY_HOP = [
   "connection",
   "keep-alive",
@@ -22,7 +22,7 @@ const HOP_BY_HOP = [
   "host",
 ] as const;
 
-/** Removes hop-by-hop headers, including any the `Connection` header names. */
+/** Returns `headers` without hop-by-hop headers, including those listed in `Connection`. */
 export const endToEndHeaders = (headers: Headers.Headers): Headers.Headers => {
   const listed = Option.match(Headers.get(headers, "connection"), {
     onNone: (): ReadonlyArray<string> => [],
@@ -42,11 +42,10 @@ const hasBody = (request: HttpServerRequest.HttpServerRequest): boolean =>
   });
 
 /**
- * Sends `request` to `upstream` with `headers` and streams the response
- * back unchanged: status, end-to-end headers, and body bytes, including any
- * `content-encoding`. Request bodies stream too, so a git push or a long
- * model response is never buffered. The client span is turned off, so no
- * header value is recorded in a trace.
+ * Sends `request` to `upstream` with `headers` and streams the response back unchanged:
+ * status, end-to-end headers, and body bytes, including any `content-encoding`. Bodies stream
+ * in both directions without buffering. The client span is disabled, so no header value is
+ * recorded in a trace.
  */
 export const forwardRequest = (
   client: HttpClient.HttpClient,

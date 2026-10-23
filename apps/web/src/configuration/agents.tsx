@@ -93,7 +93,6 @@ const InvalidAgentRow = ({ agent }: { readonly agent: InvalidAgentView }) => {
   );
 };
 
-/** Every Agent file: the ones that did not load first, then the roster, each opening its detail. */
 export const AgentsList = ({ configuration }: { readonly configuration: ConfigurationView }) => (
   <ConfigurationPage title="Agents" counts={agentCounts(configuration)}>
     {configuration.agents.length === 0 && configuration.invalidAgents.length === 0 ? (
@@ -128,7 +127,7 @@ export const AgentsList = ({ configuration }: { readonly configuration: Configur
   </ConfigurationPage>
 );
 
-/** Where a parent setting comes from: this file, `settings` in `usine.yaml`, or the fallback. */
+/** Renders the source of a parent setting: this file, `settings` in `usine.yaml`, or the fallback. */
 const Source = ({ children }: { readonly children: string }) => (
   <p className="mt-0.5 text-xs text-muted-foreground">{children}</p>
 );
@@ -192,8 +191,7 @@ const AgentFacts = ({
   </Facts>
 );
 
-/** One Agent file in full: its persona beside its brain and the Loops that name it, or why it did
- * not load; `name` is the file's name without `.md`. */
+/** `name` is the Agent file name without `.md`. */
 export const AgentDetail = ({
   name,
   configuration,

@@ -5,10 +5,10 @@ import { CodeBlock, CodeBlockHeader, CodeBlockTitle } from "@/components/ai-elem
 import { CopyButton } from "@/components/ai-elements/copy-button";
 import type { TranscriptSession } from "./model.ts";
 
-// Quote each shell argument independently, including apostrophes in worker paths.
+// Returns the value single-quoted for a POSIX shell, with apostrophes escaped.
 const shellArgument = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
 
-/** How each harness reopens a saved conversation by id; Pi keeps no session to resume. */
+/** The resume command per harness; `None` for Pi, which has no resumable session. */
 const RESUME_COMMANDS = {
   claude: Option.some("claude --resume"),
   codex: Option.some("codex resume --"),
@@ -16,10 +16,8 @@ const RESUME_COMMANDS = {
 } satisfies Record<Harness, Option.Option<string>>;
 
 /**
- * Where the operator runs `command`, a command line for the worker's machine:
- * as is for a local worker or one `usine.yaml` no longer declares, and over
- * `ssh -t` for an ssh worker. The remote shell parses `ssh`'s last argument
- * again, so the whole command is quoted once more.
+ * Returns `command` for the operator's terminal: unchanged for a local or undeclared Worker, or
+ * quoted again and wrapped in `ssh -t` for an SSH Worker.
  */
 const fromOperatorTerminal = (access: WorkerAccess | null, command: string): string => {
   if (access === null || access._tag === "Local") return command;
@@ -27,7 +25,7 @@ const fromOperatorTerminal = (access: WorkerAccess | null, command: string): str
   return ["ssh", "-t", ...port, access.destination, shellArgument(command)].join(" ");
 };
 
-/** Reopens a saved child conversation from the operator's terminal, on the worker that ran it. */
+/** Renders the command that resumes a child session from the operator's terminal on its Worker. */
 export const SessionHandoff = ({
   session,
   attempt,

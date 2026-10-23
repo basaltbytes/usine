@@ -10,36 +10,26 @@ import { gatewayAdminFor } from "./gateway/admin.ts";
 import { type GatewayForward, gatewayForwardFor } from "./gateway/forward.ts";
 import type { MachineGateway, SshMachine, SshWorkerAddress, SshWorkerGateway } from "./model.ts";
 
-/**
- * The Workers the SSH executor runs Attempts on. It starts with the Workers
- * of `SshExecutorOptions.workers`, and a reload adds and removes Workers
- * through it while the executor runs.
- */
+/** The Workers of the SSH executor, starting with `SshExecutorOptions.workers`. A reload adds and removes Workers at runtime. */
 export class SshWorkers extends Context.Service<
   SshWorkers,
   {
     /**
-     * Gives the executor the machine at `address`, so preflight and Attempts
-     * can use the Worker it names. Behind a Gateway, the Worker shares the
-     * forward to the Gateway's admin API with the other Workers behind the
-     * same `destination` and `adminPort`, or opens it when it is the first.
-     * Adding a Worker the executor has with the same address changes nothing;
-     * with another address it fails with a `machine` capability error,
-     * because the Worker's running Attempts still use the machine it has.
+     * Adds the machine at `address` for preflight and Attempts. Behind a Gateway, shares the admin
+     * API forward with other Workers that have the same `destination` and `adminPort`, or opens it.
+     * Adding a Worker again with the same address does nothing; with a different address, fails
+     * with a `machine` capability error.
      */
     readonly addWorker: (address: SshWorkerAddress) => Effect.Effect<void, WorkerCapabilityError>;
     /**
-     * Takes the machine of `worker` away, so a request that names the Worker
-     * fails with a `machine` capability error. Call it once no Attempt runs
-     * on the Worker: when it was the last Worker behind its Gateway, the
-     * forward to the Gateway's admin API closes. Removing a Worker the
-     * executor does not have changes nothing.
+     * Removes `worker`'s machine, so later requests for it fail with a `machine` capability error.
+     * Call only when no Attempt runs on the Worker. If it was the last Worker behind its Gateway,
+     * closes the admin API forward. Removing an unknown Worker does nothing.
      */
     readonly removeWorker: (worker: WorkerName) => Effect.Effect<void>;
   }
 >()("@usine/executor/SshWorkers") {}
 
-/** The executor's forward to one Gateway's admin API, the scope it runs in, and the Workers behind that Gateway. */
 interface HeldForward {
   readonly forward: GatewayForward;
   readonly scope: Scope.Closeable;
@@ -48,14 +38,14 @@ interface HeldForward {
 
 interface Machines {
   readonly byWorker: ReadonlyMap<WorkerName, SshMachine>;
-  /** By Gateway destination and admin port. */
+  /** Keyed by Gateway destination and admin port. */
   readonly forwards: ReadonlyMap<string, HeldForward>;
 }
 
 const forwardKey = ({ destination, adminPort }: SshWorkerGateway) =>
   `${destination} ${String(adminPort)}`;
 
-/** The SSH client for one Worker: the shared options, then its own port and key. */
+/** Returns the SSH command for one Worker: the shared options, then its port and key. */
 const sshCommandFor = (base: SshCommand, address: SshWorkerAddress): SshCommand => ({
   command: base.command,
   args: [
@@ -69,10 +59,9 @@ const sshCommandFor = (base: SshCommand, address: SshWorkerAddress): SshCommand 
 });
 
 /**
- * The SSH Workers' machines, which `addWorker` and `removeWorker` change
- * while the executor runs, and `machineFor`, which reads them at each call.
- * Each forward to a Gateway's admin API runs in its own scope inside the
- * caller's, so it closes with its last Worker or with the caller's scope.
+ * Returns the SSH Workers' machines, which `addWorker` and `removeWorker` change at runtime and
+ * `machineFor` reads on each call. Each admin API forward runs in its own child scope and
+ * closes with its last Worker or the caller's scope.
  */
 export const sshMachinesFor = Effect.fnUntraced(function* (
   base: SshCommand,
@@ -97,7 +86,7 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
     return { forward, scope: forwardScope };
   });
 
-  /** The Gateway in front of `address`'s machine, with the forward it shares or opens, and the forwards afterwards. */
+  /** Returns the Gateway for `address`'s machine with the forward it shares or opens, and the updated forwards. */
   const gatewayFor = Effect.fnUntraced(function* (
     current: Machines,
     address: SshWorkerAddress,

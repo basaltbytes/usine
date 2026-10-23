@@ -10,7 +10,7 @@ const TasksRoute = () => {
   const { data } = useSuspenseQuery(overviewQuery());
   const desk = useQuery(deskQuery());
   const project = data.projects.find((candidate) => candidate.repository === repository);
-  // A live refetch can drop the project after the loader admitted it.
+  // A refetch after the loader ran can remove the project.
   if (project === undefined) return <ProjectNotFound />;
   return <TaskList project={project} stalled={desk.data?.notMoving ?? []} />;
 };

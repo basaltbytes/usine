@@ -63,25 +63,20 @@ import {
 
 export type { HarnessProbe } from "../harness-preflight.ts";
 
-/** Storage and session settings for Attempts executed on the local machine. */
 export interface LocalExecutorOptions {
-  /** Factory folder under which local Worker caches and Attempt checkouts are stored. */
+  /** The directory for local Worker caches and Attempt checkouts. */
   readonly instanceDirectory: InstanceDirectory;
-  /** Repository fetch URL override, for example a local mirror; defaults to the GitHub HTTPS clone URL. */
+  /** Returns the fetch URL for `repository`, for example a local mirror. Defaults to the GitHub HTTPS clone URL. */
   readonly repositoryUrl?: (repository: RepositoryName) => string;
-  /** Grace for the parent task's cancellation, then for the Attempt to settle; each wait is bounded separately. Defaults to two seconds. */
+  /** The timeout for the parent task's cancellation, then separately for the Attempt to finish. Defaults to two seconds. */
   readonly interruptGrace?: Parameters<typeof Effect.timeoutOption>[1];
-  /** Probes one rostered brain on this machine; defaults to the `@usine/agents/preflight` checks, which start no prompt. */
+  /** Defaults to the `@usine/agents/preflight` checks, which send no prompt. */
   readonly harnessReadiness?: HarnessProbe;
 }
 
 const isExecutorError = Schema.is(ExecutorError);
 
-/**
- * Git and gh commands for an Attempt inherit only these variables. The App
- * private key and every other orchestrator secret stay out; the single-repo
- * worker token is the only credential they receive (ADR 0011).
- */
+/** The only process variables passed to an Attempt's git and gh commands (ADR 0011). */
 const HOST_ENVIRONMENT_ALLOWLIST = [
   "HOME",
   "LANG",
@@ -141,9 +136,8 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       yield* executeCommand(operation, command, args, commandOptions);
     });
 
-    // Git can echo the ambient token in diagnostics. Scrub before forming an
-    // error or passing its stdout to the revision parser: the stderr kept in the
-    // error's cause is then safe to record on the Attempt and show an operator.
+    // Git can print the token in diagnostics, so output is scrubbed before it's put in an error or
+    // parsed.
     const credentialedGit =
       (credential: Effect.Success<ReturnType<typeof credentials>>) =>
       (operation: ExecutorOperation, args: ReadonlyArray<string>) =>
@@ -160,9 +154,8 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
           });
         });
 
-    // Recovery owns checkout removal. Startup only prunes registrations whose
-    // directories are already absent; unknown crash leftovers, and the checkouts
-    // of live Attempts awaiting reattachment, stay on disk.
+    // Startup only prunes worktree registrations whose directories are gone; recovery removes
+    // checkouts. Unknown leftovers and checkouts awaiting reattachment stay on disk.
     const sweepAbandonedWorktrees = Effect.fn("LocalExecutor.sweepAbandonedWorktrees")(
       function* () {
         if (!(yield* fileSystem.exists(workersRoot))) return;
@@ -351,18 +344,15 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       });
     }, logPreflightFailure);
 
-    // Nothing an Attempt runs inherits this process's environment, which holds
-    // the App private key: only the allowlist and the Attempt's credential (ADR 0011).
+    // Attempt commands receive only the allowlist and the Attempt's credential, never this
+    // process's environment, which contains the App private key (ADR 0011).
     const attemptEnvironment = (
       workspace: AttemptWorkspace,
       credential: Effect.Success<ReturnType<typeof credentials>>,
     ) => ({
       ...credential.environment,
-      // A linked worktree's git common dir is the bare cache itself, and Turbo
-      // puts its cache next to the common dir, so an unscoped run from the
-      // worktree would write `repos/.turbo` beside the bare caches. The Worker
-      // cache is shared across that Worker's Attempts and stays out of the
-      // directory the startup sweep treats as cache storage.
+      // Turbo writes its cache next to the git common dir, which for a linked worktree is the bare
+      // cache. One cache per Worker, outside the directory the startup sweep treats as cache storage.
       TURBO_CACHE_DIR: path.join(workersRoot, workspace.worker, "turbo"),
     });
 
@@ -497,7 +487,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
           session.launch(prepared.workspace, io, {
             host: new LocalProcess(),
             environment,
-            // A local Worker has no Gateway: every harness pays with its own login.
+            // Local Workers have no Gateway; every harness uses its own login.
             gatewayCredential: Effect.succeedNone,
             harvest: (windows) => harvest(prepared.workspace, credential, environment, windows),
             harvestComments: (windows) =>
@@ -531,10 +521,9 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
   });
 
 /**
- * Runs Attempts in isolated checkouts on the local machine, each with its Pi
- * parent as a durable task in this process (`AttemptRuntime`), so an
- * orchestrator restart reattaches a live Attempt instead of failing it.
- * Requires Node; worker contracts are platform-free.
+ * The executor for the local machine. Each Attempt runs in its own checkout with its Pi parent
+ * as a durable task in this process (`AttemptRuntime`), so a live Attempt reattaches after an
+ * orchestrator restart. Requires Node.
  */
 export const layer = (
   options: LocalExecutorOptions,

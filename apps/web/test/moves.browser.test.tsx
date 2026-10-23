@@ -117,7 +117,6 @@ const move = async (number: number, destination: string) => {
   await page.getByRole("menuitem", { name: destination, exact: true }).click();
   await expect.element(page.getByRole("menu")).not.toBeInTheDocument();
 };
-/** Opens the card's menu to check whether Move to is offered, then closes it. */
 const expectMovable = async (number: number, movable: boolean) => {
   await actions(number).click();
   await expect.element(page.getByRole("menu")).toBeVisible();

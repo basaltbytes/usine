@@ -12,7 +12,7 @@ const BoardRoute = () => {
   const desk = useQuery(deskQuery());
   const openRun = useOpenRun();
   const project = data.projects.find((candidate) => candidate.repository === repository);
-  // A live refetch can drop the project after the loader admitted it.
+  // A refetch after the loader ran can remove the project.
   if (project === undefined) return <ProjectNotFound />;
   return (
     <ProjectBoard

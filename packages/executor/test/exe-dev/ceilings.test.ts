@@ -15,9 +15,8 @@ import { CheckoutRequest, Executor } from "../../src/executor.ts";
 import { ATTEMPT_ID, TEST_AGENT, WORKER, fakeSsh, recording, request, runtime } from "./support.ts";
 
 /**
- * Runs `checkout` in one orchestrator process whose parent does `first`, then
- * works quietly, sending nothing more into the transcript, and stops that
- * process `after` the parent started.
+ * Runs `checkout` in one orchestrator process whose parent runs `first` and then sends
+ * nothing, and stops the process `after` the parent starts.
  */
 const stopAfter = (
   ssh: ReturnType<typeof fakeSsh>,
@@ -55,10 +54,10 @@ describe("exe.dev ceilings across a restart", () => {
       const reattach = new CheckoutRequest({ ...minute, reattach: true });
       const { transcript, sink } = recording();
       return Effect.gen(function* () {
-        // The parent works quietly for 30 of its 60 seconds, then the process stops.
+        // The parent is silent for 30 of its 60 seconds, then the process stops.
         yield* stopAfter(ssh, storage, minute, sink, "30 seconds");
         yield* TestClock.adjust("10 minutes");
-        // Reattached, it works 12 more seconds, then the process stops again.
+        // After reattachment, the parent runs 12 more seconds, then the process stops again.
         yield* stopAfter(ssh, storage, reattach, sink, "12 seconds");
         yield* TestClock.adjust("10 minutes");
         yield* Effect.gen(function* () {
@@ -66,7 +65,7 @@ describe("exe.dev ceilings across a restart", () => {
           yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
           const prepared = yield* executor.prepare(reattach);
           const launch = yield* prepared.launch(sink).pipe(Effect.forkChild);
-          // One second at a time, so the guard arms its next timer after the warning.
+          // Advances one second at a time so the guard sets its next timer after the warning.
           for (let second = 0; second < 17; second += 1) yield* TestClock.adjust("1 second");
           assert.strictEqual(launch.pollUnsafe(), undefined);
           yield* TestClock.adjust("1 second");
@@ -87,7 +86,7 @@ describe("exe.dev ceilings across a restart", () => {
     },
   );
 
-  /** A ceiling the operator lowers before a restart, below what the Attempt already used. */
+  /** Ceilings lowered before a restart to below what the Attempt already used. */
   const lowered = [
     {
       ceiling: "wall-clock",
@@ -96,7 +95,7 @@ describe("exe.dev ceilings across a restart", () => {
       first: () => Effect.void,
     },
     {
-      // The parent reports no more usage once reattached, as the relay sends only a grown total.
+      // After reattachment the parent reports no more usage; the relay sends a total only when it grows.
       ceiling: "tokens",
       before: { maxAttemptTokens: Option.some(200) },
       after: { maxAttemptTokens: Option.some(100) },
@@ -136,9 +135,8 @@ describe("exe.dev ceilings across a restart", () => {
   }
 
   /**
-   * The stub runtime whose `execute` completes `executing` as it is called,
-   * then relays the Attempt's channel only once `attach` completes, as the
-   * durable runtime's does after reading storage.
+   * Returns a stub runtime whose `execute` completes `executing` when called and relays the
+   * channel only after `attach` completes, like the durable runtime after reading storage.
    */
   const attachingOn =
     (executing: Deferred.Deferred<void>, attach: Deferred.Deferred<void>) =>
@@ -157,7 +155,7 @@ describe("exe.dev ceilings across a restart", () => {
         ),
       ).pipe(Layer.provide(stub));
 
-  /** A ceiling lowered before a restart below what the Attempt used, past its warning point, and the warning its reattachment owes. */
+  /** Ceilings lowered before a restart to past the warning point, with the warning the reattachment must send. */
   const restoredWarnings = [
     {
       ceiling: "tokens",
@@ -206,8 +204,8 @@ describe("exe.dev ceilings across a restart", () => {
               new CheckoutRequest({ ...request, ...after, reattach: true }),
             );
             const launch = yield* prepared.launch(sink).pipe(Effect.forkChild);
-            // The launch registered the Attempt, which starts its guard, before
-            // calling `execute`, which still reads durable storage.
+            // The launch registers the Attempt and starts its guard before `execute` finishes reading
+            // durable storage.
             yield* Deferred.await(executing);
             yield* TestClock.adjust("1 second");
             assert.deepStrictEqual(steers(), []);
@@ -228,7 +226,7 @@ describe("exe.dev ceilings across a restart", () => {
     );
   }
 
-  /** The stub runtime when durable storage cannot read the unsupervised time the earlier guards recorded. */
+  /** Returns a stub runtime that fails to read the recorded unsupervised time. */
   const unreadableTime = (stub: Layer.Layer<AttemptRuntime>) =>
     Layer.effect(
       AttemptRuntime,
@@ -241,12 +239,12 @@ describe("exe.dev ceilings across a restart", () => {
       ),
     ).pipe(Layer.provide(stub));
 
-  /** What a reattachment cannot read, and the ceiling of the earlier run that recorded it. */
+  /** The data a reattachment fails to read, with the ceiling of the earlier run that recorded it. */
   const unreadable = [
     {
       part: "transcript",
       ceilings: { maxAttemptTokens: Option.some(100) },
-      // A finished child's 80 tokens and the warning they brought are in the transcript only.
+      // A finished child's 80 tokens and the resulting warning are only in the transcript.
       first: ({ emit, session }: StubParentContext) =>
         emit(
           new AttemptChannel.SessionEvent({
@@ -282,7 +280,7 @@ describe("exe.dev ceilings across a restart", () => {
                 envelope._tag === "InboundEnvelope" && envelope.payload._tag === "Steer",
             ).length;
           const warned = steers();
-          // Each salvage records the parent task's state then: none may write to the checkout.
+          // Records the parent task's state at each salvage; no live task may write to the checkout.
           const salvaged: Array<string> = [];
           yield* Effect.gen(function* () {
             const executor = yield* Executor;

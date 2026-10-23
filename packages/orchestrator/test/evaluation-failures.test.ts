@@ -132,7 +132,7 @@ const advanced = new PollCursor({
   watermark: Option.some(updatedAt),
 });
 
-/** Reports `items` once from an empty cursor, then reports no change. */
+/** Returns `items` once from an empty cursor, then no changes. */
 const changesOnce =
   (items: ReadonlyArray<ChangedIssue | ChangedPullRequest>): GitHubPolling["Service"]["changes"] =>
   (_repository, cursor) =>
@@ -172,7 +172,7 @@ const claimingRuns = Layer.succeed(RunEngine)({
   transcript: () => Effect.die("unused"),
 });
 
-/** A fresh PollingTriggers, as one `usine up` process builds it, over a shared cursor store. */
+/** A new PollingTriggers, as one `usine up` process builds it, over a shared cursor store. */
 const processLayer = (github: GitHubPolling["Service"], cursors: CursorStore["Service"]) =>
   PollingTriggers.layer.pipe(
     Layer.provide(

@@ -529,7 +529,7 @@ describe("Operator desk", () => {
             preflight === null ? null : `${preflight._tag} ${preflight.checkedAt}`,
           ]),
           [
-            // A harness that stands failed outranks a newer pass.
+            // A failed harness check outranks a newer pass.
             ["local 1/2", `Failed ${DateTime.formatIso(time("06:00:00"))}`],
             ["spare 0/1", `Passed ${DateTime.formatIso(time("05:30:00"))}`],
             ["fresh 0/1", null],

@@ -7,7 +7,7 @@ interface RunDatabaseEffect extends QueryEffectHKTBase {
   readonly error: EffectDrizzleQueryError;
 }
 
-/** The Effect database the run projection store queries, independent of the SQLite driver. */
+/** The Effect database client for the Run store, independent of the SQLite driver. */
 export type RunDatabaseClient = SQLiteEffectDatabase<RunDatabaseEffect, unknown>;
 
 export class RunDatabase extends Context.Service<RunDatabase, RunDatabaseClient>()(

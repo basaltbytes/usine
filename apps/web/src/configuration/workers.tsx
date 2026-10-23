@@ -39,8 +39,8 @@ import {
 const slotsLabel = ({ capacity, leased }: WorkerSlotsView): string =>
   `${leased} of ${plural(capacity, "slot")} in use`;
 
-/** One cell per slot, filled in the running tone while an Attempt holds it. After a reload lowers
- * `max_concurrent_attempts`, the Attempts still running past it add filled cells. */
+/** Renders one cell per slot, filled while an Attempt uses it. If a reload lowers
+ * `max_concurrent_attempts`, Attempts still running above the limit add filled cells. */
 const SlotCells = ({ slots }: { readonly slots: WorkerSlotsView }) => (
   <span aria-hidden="true" className="inline-flex flex-wrap gap-1">
     {Array.from({ length: Math.max(slots.capacity, slots.leased) }, (_, index) => (
@@ -111,8 +111,7 @@ const WorkerRow = ({ worker }: { readonly worker: WorkerConfigurationView }) => 
   );
 };
 
-/** Every Worker `usine.yaml` declares with its slots in use and last preflight, then the Workers a
- * reload removed that still run Attempts. */
+/** Renders the Workers declared in `usine.yaml`, then the Workers removed by a reload that still run Attempts. */
 export const WorkersList = ({ configuration }: { readonly configuration: ConfigurationView }) => {
   const running = configuration.workers.some(({ slots }) => slots !== null);
   return (
@@ -252,8 +251,6 @@ const WorkerFacts = ({ worker }: { readonly worker: WorkerConfigurationView }) =
   </div>
 );
 
-/** One Worker in full: its slots and the last preflight of its prerequisites and of each harness,
- * beside where it runs and its Gateway. */
 export const WorkerDetail = ({
   name,
   configuration,

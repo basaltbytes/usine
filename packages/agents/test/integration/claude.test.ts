@@ -12,7 +12,7 @@ const brain = new BrainSpec({
   effort: "low",
 });
 
-// Each contract runs one child at a time, so no launch needs to wait for the Worker's login.
+// Contracts run one child at a time, so launches skip the Worker login lock.
 const noLoginLock = Layer.succeed(ClaudeLoginLock)({ withLock: () => (effect) => effect });
 
 const live = <A, E>(

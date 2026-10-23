@@ -44,11 +44,11 @@ export const capabilityLabel = {
   gateway: "Gateway",
 } satisfies Record<Capability, string>;
 
-/** What a failed check found missing, such as `harness login`, or that the check itself failed. */
+/** Returns the missing capability of a failed check, for example `harness login`, or `check failed` if the check itself failed. */
 export const failedCheckLabel = (check: Extract<PreflightCheckView, { _tag: "Failed" }>) =>
   check.capability === null ? "check failed" : capabilityLabel[check.capability];
 
-/** Where a Worker runs its Attempts' children, as `usine.yaml` locates it. */
+/** Returns the Worker's location from `usine.yaml`. */
 export const workerPlace = (worker: WorkerConfigurationView): string => {
   switch (worker.kind) {
     case "local":
@@ -60,13 +60,12 @@ export const workerPlace = (worker: WorkerConfigurationView): string => {
   }
 };
 
-/** How a Worker's last preflight went, at the newest failed check, else at the newest check. */
 interface PreflightSummary {
   readonly state: "passed" | "failed" | "unchecked";
   readonly checkedAt: string | null;
 }
 
-/** The newest failed check of a Worker, else its newest check, else none. */
+/** Returns a summary of the Worker's newest failed check, else its newest check, else `unchecked`. */
 export const preflightSummary = (worker: WorkerConfigurationView): PreflightSummary => {
   const checks = [
     ...(worker.prerequisites === null ? [] : [worker.prerequisites]),
@@ -83,7 +82,7 @@ export const preflightSummary = (worker: WorkerConfigurationView): PreflightSumm
   return { state: "unchecked", checkedAt: null };
 };
 
-/** Counts beside the Loops heading, such as `5 loops, 1 paused, 1 not loaded`. */
+/** Returns the count text for the Loops heading, for example `5 loops, 1 paused, 1 not loaded`. */
 export const loopCounts = (configuration: ConfigurationView): string => {
   const paused = configuration.loops.filter(({ paused: isPaused }) => isPaused).length;
   const quarantined = configuration.quarantinedLoops.length;
@@ -94,7 +93,7 @@ export const loopCounts = (configuration: ConfigurationView): string => {
   ].join(", ");
 };
 
-/** What kind of refusal stopped a reload, before its message. */
+/** Returns the text shown before a reload error message, or `null` for other errors. */
 export const reloadRefusalLead = (error: OperatorHttpError["error"] | undefined): string | null => {
   switch (error) {
     case "FactoryConfigError":

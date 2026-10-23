@@ -12,7 +12,7 @@ import {
 import { AdminToken, CallerKey, GatewaySettings } from "../settings.ts";
 import { UpstreamBase } from "../upstream.ts";
 
-/** Where the gateway reads its egress allowlist when `USINE_GATEWAY_EGRESS_ALLOWLIST` is not set. */
+/** The allowlist path if `USINE_GATEWAY_EGRESS_ALLOWLIST` isn't set. */
 export const DEFAULT_EGRESS_ALLOWLIST_PATH = "/etc/usine-gateway/egress-allowlist";
 
 const Secret = Schema.RedactedFromValue(Schema.NonEmptyString);
@@ -20,31 +20,29 @@ const Secret = Schema.RedactedFromValue(Schema.NonEmptyString);
 const upstream = (name: string, fallback: string) =>
   Config.schema(UpstreamBase, name).pipe(Config.withDefault(UpstreamBase.make(fallback)));
 
-/** The gateway set an Anthropic API key and a subscription token at once; only one can be sent. */
+/** The error when both an Anthropic API key and a subscription token are set. */
 export class ConflictingAnthropicCredentials extends Schema.TaggedError<ConflictingAnthropicCredentials>()(
   "ConflictingAnthropicCredentials",
   { message: Schema.String },
 ) {}
 
-/** An environment file named in `USINE_GATEWAY_ENVIRONMENT_FILES` could not be read. */
+/** The error when a file listed in `USINE_GATEWAY_ENVIRONMENT_FILES` can't be read. */
 export class EnvironmentFileError extends Schema.TaggedError<EnvironmentFileError>()(
   "EnvironmentFileError",
   { path: Schema.String, message: Schema.String },
 ) {}
 
-/** Where the gateway's settings come from: its environment files over the process environment. */
+/** The Gateway's settings source: its environment files layered over the process environment. */
 export interface SettingsSource {
-  /** The environment files, in the order they were read; empty when none is named. */
+  /** The environment files in read order; empty if none is listed. */
   readonly files: ReadonlyArray<string>;
   readonly provider: ConfigProvider.ConfigProvider;
 }
 
 /**
- * Reads the environment files that `USINE_GATEWAY_ENVIRONMENT_FILES` in
- * `base` names, separated by `:`, each with one `KEY=value` per line, and
- * puts them over `base`: a variable in a later file overrides the same one
- * in an earlier file and in `base`, as systemd's `EnvironmentFile=` does.
- * Without that variable the settings come from `base` alone.
+ * Reads the `:`-separated environment files listed in `USINE_GATEWAY_ENVIRONMENT_FILES` in
+ * `base`, one `KEY=value` per line, and layers them over `base`. Later files override earlier
+ * ones, as with systemd's `EnvironmentFile=`. Without that variable, returns `base` alone.
  */
 export const readSettingsSource = Effect.fn("GatewayNode.readSettingsSource")(function* (
   base: ConfigProvider.ConfigProvider,
@@ -67,7 +65,7 @@ export const readSettingsSource = Effect.fn("GatewayNode.readSettingsSource")(fu
   return { files, provider } satisfies SettingsSource;
 });
 
-/** The LLM providers the settings configure, with their credentials. */
+/** The LLM providers and credentials from the settings. */
 export const llmProviders = Effect.gen(function* () {
   const anthropicKey = yield* Config.option(Config.schema(Secret, "ANTHROPIC_API_KEY"));
   const subscription = yield* Config.option(
@@ -97,7 +95,6 @@ export const llmProviders = Effect.gen(function* () {
   } satisfies LlmProviders;
 });
 
-/** The allowlist file's path. */
 export const egressAllowlistPath = Config.string("USINE_GATEWAY_EGRESS_ALLOWLIST").pipe(
   Config.withDefault(DEFAULT_EGRESS_ALLOWLIST_PATH),
 );
@@ -111,17 +108,12 @@ export const readEgressAllowlist = Effect.fn("GatewayNode.readEgressAllowlist")(
   return yield* Effect.fromResult(parseEgressAllowlist(text));
 });
 
-/** An address and port a gateway server listens on. */
 export interface Listener {
   readonly host: string;
   readonly port: number;
 }
 
-/**
- * The three listeners: the reverse proxy Workers reach for GitHub and the
- * LLMs, the forward proxy for allowlisted hosts, and the admin API for the
- * executor.
- */
+/** The listeners for the reverse proxy (GitHub and LLMs), the forward proxy (allowlisted hosts), and the admin API (executor). */
 export interface GatewayListeners {
   readonly proxy: Listener;
   readonly egress: Listener;
@@ -135,9 +127,8 @@ const listener = (prefix: string, host: string, port: number) =>
   });
 
 /**
- * Listeners from the environment. The proxies default to loopback so that a
- * gateway started without configuration is reachable from nowhere; the VM's
- * unit sets them to its private address.
+ * Listeners from the environment. The proxies default to loopback, so an unconfigured Gateway
+ * is unreachable; the VM's unit sets its private address.
  */
 export const listenersFromEnvironment = Config.all({
   proxy: listener("USINE_GATEWAY_PROXY", "127.0.0.1", 80),
@@ -145,11 +136,7 @@ export const listenersFromEnvironment = Config.all({
   admin: listener("USINE_GATEWAY_ADMIN", "127.0.0.1", 7070),
 });
 
-/**
- * The settings only a restart changes: the domain and the listeners the
- * servers are bound to, the admin token, and the caller key, which every
- * caller token in use is signed with.
- */
+/** The settings that only a restart changes: the domain, the listeners, the admin token, and the caller key that signs all caller tokens. */
 export interface RestartSettings {
   readonly domain: GatewayDomain;
   readonly adminToken: AdminToken;
@@ -157,7 +144,6 @@ export interface RestartSettings {
   readonly listeners: GatewayListeners;
 }
 
-/** Reads the restart-only settings. */
 export const restartSettings: Config.Config<RestartSettings> = Config.all({
   domain: Config.schema(GatewayDomain, "USINE_GATEWAY_DOMAIN"),
   adminToken: Config.schema(AdminToken, "USINE_GATEWAY_ADMIN_TOKEN"),
@@ -165,7 +151,6 @@ export const restartSettings: Config.Config<RestartSettings> = Config.all({
   listeners: listenersFromEnvironment,
 });
 
-/** The gateway's settings and listeners as it started. */
 export interface StartupSettings {
   readonly settings: GatewaySettings["Service"];
   readonly listeners: GatewayListeners;
@@ -189,9 +174,8 @@ const startupSettings = Effect.gen(function* () {
 });
 
 /**
- * Reads the gateway's settings from `source` at startup. A missing secret,
- * an invalid value, or an unreadable allowlist fails, so the gateway stops
- * before it listens.
+ * Reads the Gateway's settings from `source`. Fails on a missing secret, an invalid value, or
+ * an unreadable allowlist, so the Gateway stops before it listens.
  */
 export const readStartupSettings = Effect.fn("GatewayNode.readStartupSettings")(function* (
   source: SettingsSource,
@@ -203,11 +187,9 @@ export const readStartupSettings = Effect.fn("GatewayNode.readStartupSettings")(
 });
 
 /**
- * Reads the gateway's settings once at startup: the domain and secrets from
- * the environment files that `USINE_GATEWAY_ENVIRONMENT_FILES` names, over
- * the process environment, and the egress allowlist from its file. A missing
- * secret, an invalid value, or an unreadable file stops the gateway before
- * it listens.
+ * The Gateway's settings, read once at startup from the files in
+ * `USINE_GATEWAY_ENVIRONMENT_FILES` over the process environment, plus the egress allowlist
+ * file. Fails on a missing secret, an invalid value, or an unreadable file.
  */
 export const settingsFromEnvironment = Layer.effect(
   GatewaySettings,

@@ -9,10 +9,10 @@ import { type RemoteCommands, sendingShell } from "../../remote/commands.ts";
 import type { MachineGateway, SshMachine } from "../model.ts";
 import { forwardProxyUrl, GATEWAY_SENT_VARIABLES, gatewayEnvironment } from "./environment.ts";
 
-/** A stand-in caller token, so preflight can check what reaches the machine without attaching anything. */
+/** A placeholder caller token that lets preflight check the sent variables without attaching anything. */
 const PROBE_TOKEN = Redacted.make("usine-preflight");
 
-/** Takes name and value argument pairs and prints each name whose variable does not have that value on the machine. */
+/** A script that takes name and value pairs and prints each name whose variable doesn't have that value on the machine. */
 const SENT_VARIABLES_SCRIPT = `
 while [ "$#" -gt 1 ]; do
   test "$(printenv "$1")" = "$2" || echo "$1"
@@ -20,16 +20,16 @@ while [ "$#" -gt 1 ]; do
 done
 `.trim();
 
-/** The header the Gateway names its refusal in, and the reason it gives a request without a caller token. */
+/** Matches the Gateway's refusal header for a request without a caller token. */
 const REFUSED_WITHOUT_TOKEN = /^x-usine-gateway-refusal:\s*missing-caller-token\s*$/imu;
 
-/** OpenSSH exits with 255 when it cannot reach the machine or run the command there. */
+/** The exit code OpenSSH uses when it can't connect to the machine or run the command. */
 const SSH_FAILURE = 255;
 
 const gatewayGap = (worker: WorkerName, message: string, cause: unknown) =>
   new WorkerCapabilityError({ worker, capability: "gateway", message, cause });
 
-/** The SSH client could not reach the machine to run `command`: a transport failure, not a capability gap. */
+/** Returns the error for an SSH transport failure, which isn't a capability gap. */
 const unreachable = (host: string, command: string, result: CommandResult) =>
   new ExecutorOperationError({
     operation: "preflight",
@@ -38,10 +38,8 @@ const unreachable = (host: string, command: string, result: CommandResult) =>
   });
 
 /**
- * Warns that the Gateway is too old to report the kind of its Anthropic
- * credential, once per Worker (#248): each preflight that runs again, after
- * a reload gives the Worker more slots or a brain, logs at debug level
- * instead.
+ * Logs a warning, once per Worker, that the Gateway is too old to report its Anthropic
+ * credential kind (#248). Later preflights log at debug level.
  */
 const warnOfUnreportedCredential = (worker: WorkerName, gateway: MachineGateway) =>
   Ref.getAndSet(gateway.warnedOfUnreportedCredential, true).pipe(
@@ -59,14 +57,10 @@ const warnOfUnreportedCredential = (worker: WorkerName, gateway: MachineGateway)
   );
 
 /**
- * Reads which kind of Anthropic credential the Gateway pays Claude Code
- * with, and records it with the Worker so its children's sessions name the
- * pool that pays (ADR 0013). A Gateway that holds no Anthropic credential
- * while the Worker's `llmProviders` lists it would refuse every Claude Code
- * request, so it fails the preflight. A Gateway too old to report its
- * credentials keeps the Claude plan pool, with a warning logged once per
- * Worker; every preflight still reads the kind, so an upgraded Gateway's is
- * recorded at the next one.
+ * Reads the Gateway's Anthropic credential kind and records it for the Worker (ADR 0013).
+ * Fails if the Worker's `llmProviders` includes Anthropic and the Gateway has no Anthropic
+ * credential. If the Gateway is too old to report credentials, keeps the Claude plan pool and
+ * logs a warning.
  */
 const recordAnthropicCredential = Effect.fn("SshExecutor.recordAnthropicCredential")(function* (
   worker: WorkerName,
@@ -101,9 +95,8 @@ const recordAnthropicCredential = Effect.fn("SshExecutor.recordAnthropicCredenti
 });
 
 /**
- * The kind of credential the Gateway pays a child of `harness` with, as the
- * Worker's last preflight recorded it: Claude Code's Anthropic credential
- * when the Gateway holds it. Codex and Pi pay with their own logins.
+ * Returns the credential kind the Gateway injects for `harness`, as recorded by the last
+ * preflight. Only Claude Code uses a Gateway credential; Codex and Pi use their own logins.
  */
 export const gatewayCredentialFor = (
   gateway: MachineGateway,
@@ -119,13 +112,10 @@ export const gatewayCredentialFor = (
 };
 
 /**
- * Verifies the Gateway in front of an SSH Worker without attaching anything:
- * the executor's forward to its admin API opens, the admin API answers this
- * process with the admin token, the machine's sshd accepts the variables
- * that carry the caller token, and the machine resolves and reaches
- * `git.<domain>`, which refuses a request without a caller token. When the
- * Gateway holds the Anthropic credential, it records the kind of that
- * credential with the Worker (`recordAnthropicCredential`).
+ * Verifies the Gateway in front of an SSH Worker without attaching anything: the admin API
+ * forward opens and accepts the admin token, the machine's sshd accepts the caller-token
+ * variables, and the machine can connect to `git.<domain>`, which rejects a request without a caller
+ * token. If the Gateway has the Anthropic credential, records its kind for the Worker.
  */
 export const verifyGateway = Effect.fn("SshExecutor.verifyGateway")(function* (
   commands: RemoteCommands,
@@ -210,10 +200,9 @@ export const verifyGateway = Effect.fn("SshExecutor.verifyGateway")(function* (
 });
 
 /**
- * The harnesses that can use the operator's login on the Worker's machine,
- * and the hosts that login calls through the Gateway's forward proxy: the
- * model API, and the OAuth endpoint that the login and its token refreshes
- * call. `infra/hetzner/gateway/egress-allowlist` lists them.
+ * The harnesses that can use the operator's login on the machine, with the hosts each login
+ * calls through the forward proxy. `infra/hetzner/gateway/egress-allowlist` lists the same
+ * hosts.
  */
 const LOGINS = {
   claude: { label: "Claude Code", hosts: ["api.anthropic.com", "platform.claude.com"] },
@@ -225,9 +214,9 @@ const LOGINS = {
 type LoginHarness = keyof typeof LOGINS;
 
 /**
- * Takes the forward proxy's URL and host names, and prints one line per
- * host: the host, curl's exit code, the proxy's answer to CONNECT, and the
- * host's HTTP status, which is 000 when the host did not answer.
+ * A script that takes the forward proxy URL and host names, and prints one line per host: the
+ * host, curl's exit code, the proxy's CONNECT status, and the host's HTTP status (`000` if the
+ * host didn't respond).
  */
 const LOGIN_HOSTS_SCRIPT = `
 proxy=$1
@@ -240,17 +229,15 @@ done
 
 const LOGIN_HOST_ANSWER = /^(\S+) (\d+) (\d{3}) (\d{3})$/u;
 
-/** The status the forward proxy answers a CONNECT with when its allowlist does not list the host. */
+/** The CONNECT status the forward proxy returns for a host that isn't in its allowlist. */
 const PROXY_REFUSED = "403";
 
 /**
- * Checks a brain on a Worker behind a Gateway (ADR 0027). When the Gateway
- * holds the Anthropic credential, Claude Code calls it at `llm.<domain>`
- * and only its binary is checked. Otherwise Claude Code, and Codex always,
- * use the operator's login on the machine, as on a Worker without a Gateway
- * (ADR 0026): `probe` checks the login, then the machine must reach the
- * login's hosts through the forward proxy. Pi goes to `probe`, which refuses
- * it on any remote machine.
+ * Probes a brain on a Worker behind a Gateway (ADR 0027). If the Gateway has the Anthropic
+ * credential, checks only the Claude Code binary. Otherwise, Claude Code and Codex use the
+ * operator's login (ADR 0026): `probe` checks the login, then the machine must connect to the
+ * login's hosts through the forward proxy. Pi goes to `probe`, which rejects it on any remote
+ * machine.
  */
 export const gatewayHarnessProbe = (
   commands: RemoteCommands,

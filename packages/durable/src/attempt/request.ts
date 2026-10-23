@@ -5,25 +5,28 @@ import { type AttemptRequest, StoredRequest } from "../attempt-runtime.ts";
 import type { DurableHarness } from "../harness.ts";
 import { readRecord } from "./relay.ts";
 
-/** The `usine.attempt` task's input: its `StoredRequest`, encoded, so no credential reaches storage. */
+/**
+ * The input of the `usine.attempt` task: the encoded `StoredRequest`, which contains no
+ * credentials.
+ */
 export type AttemptTaskInput = typeof StoredRequest.Encoded;
 
 const encodeStored = Schema.encodeSync(StoredRequest);
 const decodeStored = Schema.decodeUnknownEffect(StoredRequest);
 const decodeStoredOption = Schema.decodeUnknownOption(StoredRequest);
 
-/** The Attempt a task record's input belongs to; none when the input is not a stored request. */
+/** Returns the Attempt ID of a task input, or `None` if the input isn't a stored request. */
 export const attemptIdOf = (input: JsonValue): Option.Option<AttemptId> =>
   Option.map(decodeStoredOption(input), ({ spec }) => spec.attemptId);
 
 export const taskInput = (request: AttemptRequest): AttemptTaskInput =>
   encodeStored(new StoredRequest({ spec: request.spec, worker: request.worker, cwd: request.cwd }));
 
-/** Decodes a stored task input, typed or as a task record returns it; a malformed one is a defect, since only this package writes it. */
+/** Decodes a stored task input. Dies on a malformed input, since only this package writes it. */
 export const storedRequestOf = (input: AttemptTaskInput | JsonValue) =>
   decodeStored(input).pipe(Effect.orDie);
 
-/** Reads back the request an Attempt's task was created with; none when the Attempt has no task. */
+/** Reads the request the Attempt's task was created with, or `None` if the Attempt has no task. */
 export const readStoredRequest = (durable: DurableHarness["Service"], attemptId: AttemptId) =>
   Effect.gen(function* () {
     const taskId = (yield* readRecord(durable, attemptId))?.taskId ?? null;

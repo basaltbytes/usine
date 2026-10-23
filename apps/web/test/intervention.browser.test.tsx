@@ -258,7 +258,7 @@ it("retains unsent guidance and displays a delivery failure", async () => {
       held={false}
     />,
   );
-  // A parent that is neither paused nor held has nothing to release.
+  // Release parent is not offered when the parent is neither paused nor held.
   await expect
     .element(page.getByRole("button", { name: "Release parent" }))
     .not.toBeInTheDocument();
