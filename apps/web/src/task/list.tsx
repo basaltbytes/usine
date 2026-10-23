@@ -81,7 +81,7 @@ const usageTrigger =
 const stallTone = ({ reason }: StalledItemView): string =>
   Match.valueTags(reason, {
     AwaitingApproval: () => "Waiting",
-    HeldForOperator: () => "needs-you",
+    SuppressedForOperator: () => "needs-you",
     CycleBudgetUsedUp: () => "needs-you",
     RunFailed: () => "Failed",
     ClosedUnchanged: ({ run }) => run.state,

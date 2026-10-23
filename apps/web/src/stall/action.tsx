@@ -182,7 +182,7 @@ export const StallAction = ({
           label={runActionLabel.approve}
         />
       ) : null;
-    case "HeldForOperator": {
+    case "SuppressedForOperator": {
       const attempt = reason.run.attempts.at(-1);
       if (!reason.run.canResolveFailure || attempt === undefined) return null;
       const question =

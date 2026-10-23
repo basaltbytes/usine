@@ -201,7 +201,7 @@ const summary = (
 const sighting = (
   item: number,
   run: string | null,
-  heldBy: string | null = null,
+  suppressedBy: string | null = null,
   loop: LoopFile = startDev,
 ) =>
   new LoopSighting({
@@ -209,7 +209,7 @@ const sighting = (
     itemKey: itemKey(item),
     event: Option.some(EventId.make(`event-${run ?? item}`)),
     run: Option.map(Option.fromNullishOr(run), RunId.make),
-    heldBy: Option.map(Option.fromNullishOr(heldBy), RunId.make),
+    suppressedBy: Option.map(Option.fromNullishOr(suppressedBy), RunId.make),
   });
 
 const canceledByOperator = new RunState.Canceled({ reason: new RunState.OperatorCanceled() });
@@ -452,7 +452,7 @@ describe("Operator desk", () => {
         desk.notMoving.map(({ loop, item, reason }) => [item.number, loop, reason._tag]),
         [
           [3, "start-dev", "AwaitingApproval"],
-          [2, "start-dev", "HeldForOperator"],
+          [2, "start-dev", "SuppressedForOperator"],
           [5, "start-dev", "CycleBudgetUsedUp"],
           [6, "start-dev", "RunFailed"],
           [1, "start-dev", "ClosedUnchanged"],

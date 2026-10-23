@@ -99,8 +99,8 @@ export class LoopSighting extends Schema.Class<LoopSighting>("@usine/engine/Loop
   event: Schema.Option(EventId),
   /** The Run of `event`, or `None` while it waits or after it was ignored. */
   run: Schema.Option(RunId),
-  /** The Run whose Attempt stopped with a question or blocker, or `None`. */
-  heldBy: Schema.Option(RunId),
+  /** The Run that suppresses the Item after a question or blocker, or `None`. */
+  suppressedBy: Schema.Option(RunId),
 }) {}
 
 /** The monotonic version of the operator projection. */

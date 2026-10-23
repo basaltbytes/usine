@@ -1151,7 +1151,7 @@ export {
   ProviderRetryingView,
   ConnectivityWarningView,
   RunningAttemptView,
-  HeldForOperatorView,
+  SuppressedForOperatorView,
   ClosedUnchangedView,
   RunFailedView,
   LoopPausedView,

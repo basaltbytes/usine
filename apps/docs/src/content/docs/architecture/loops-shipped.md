@@ -118,7 +118,7 @@ Post the review on GitHub. If you find any actionable issue, explain it with fil
 
 ### act-on-findings
 
-An attempt that ended with a question for the operator used to repeat until the cycle budget ran out ([#241][]). usine now holds the pull request until the operator answers or the pull request changes ([Operator questions and blockers](/architecture/run-lifecycle/#operator-questions-and-blockers)).
+An attempt that ended with a question for the operator used to repeat until the cycle budget ran out ([#241][]). usine now suppresses the pull request for the loop until the operator answers or the pull request changes ([Operator questions and blockers](/architecture/run-lifecycle/#operator-questions-and-blockers)).
 
 ```markdown title="loops/act-on-findings.md"
 ---

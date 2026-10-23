@@ -82,7 +82,7 @@ const commit = (
 
 /**
  * Returns the failure for a child's stored report if the parent didn't relay one. A harness failure
- * maps to `AgentFailure`, which doesn't put the Item on hold.
+ * maps to `AgentFailure`, which doesn't suppress the Item.
  */
 const childReportFailure = ({
   message,

@@ -388,7 +388,7 @@ export {
   Submission,
   Claimed,
   Queued,
-  Held,
+  Suppressed,
   Ignored,
   CycleBlocked,
   IgnoreReason,

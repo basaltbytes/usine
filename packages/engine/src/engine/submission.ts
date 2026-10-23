@@ -101,10 +101,10 @@ export class Ignored extends Schema.TaggedClass<Ignored>("@usine/engine/Ignored"
  * blocker. It opens a Run once the operator resolves the stop, or a later Event replaces it when
  * the Item changes (#241, #341).
  */
-export class Held extends Schema.TaggedClass<Held>("@usine/engine/Held")("Held", {
-  eventId: EventId,
-  runId: RunId,
-}) {}
+export class Suppressed extends Schema.TaggedClass<Suppressed>("@usine/engine/Suppressed")(
+  "Suppressed",
+  { eventId: EventId, runId: RunId },
+) {}
 
 /** A result for an Event that opened no Run because the Item needs a cycle-budget reset. */
 export class CycleBlocked extends Schema.TaggedClass<CycleBlocked>("@usine/engine/CycleBlocked")(
@@ -112,6 +112,6 @@ export class CycleBlocked extends Schema.TaggedClass<CycleBlocked>("@usine/engin
   { eventId: EventId, ask: CycleBudgetAsk },
 ) {}
 
-export const SubmissionResult = Schema.Union([Claimed, Queued, Held, Ignored, CycleBlocked]);
+export const SubmissionResult = Schema.Union([Claimed, Queued, Suppressed, Ignored, CycleBlocked]);
 
 export type SubmissionResult = typeof SubmissionResult.Type;

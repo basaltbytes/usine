@@ -269,11 +269,11 @@ const CardFace = ({
   const run = currentRun(item);
   const actionError = action?.error?.message ?? null;
   const runAgainError = again?.error?.message ?? null;
-  // If the stall is for the failure note's Run, the note shows it, with the stall's action if held.
+  // If the stall is for the failure note's Run, the note shows it, with a suppression's action.
   const onFailure =
     stall !== null &&
     failure !== null &&
-    (stall.reason._tag === "RunFailed" || stall.reason._tag === "HeldForOperator") &&
+    (stall.reason._tag === "RunFailed" || stall.reason._tag === "SuppressedForOperator") &&
     stall.reason.run.id === failure.run.id;
   const stallAction =
     stall === null || action === null ? null : (
@@ -310,7 +310,7 @@ const CardFace = ({
       )}
       {failure !== null && (
         <FailureNote failure={failure}>
-          {onFailure && stall?.reason._tag === "HeldForOperator" ? (
+          {onFailure && stall?.reason._tag === "SuppressedForOperator" ? (
             stallAction
           ) : (
             <RetryButton failure={failure} action={action} />
