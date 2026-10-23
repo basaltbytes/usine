@@ -1,69 +1,65 @@
-# Self-hosted agent sandboxes in exe.dev's shape
+# Self-hosted agent sandboxes like exe.dev
 
-Research for [issue #223](https://github.com/basaltbytes/usine/issues/223): an EU-hosted Worker that
-usine controls, as a replacement for exe.dev. Snapshot taken
-2026-10-12. Every claim cites a primary source: vendor docs, source repositories, release pages, and
-posts or recorded interviews by the people who built the thing. Where a fact is not documented, the
-note says so. It extends the August study of exe.dev's product surface,
-[`docs/research/exe-dev.md`](https://github.com/basaltbytes/usine/blob/research/exe-dev/docs/research/exe-dev.md),
-and does not repeat it.
+Research for [issue #223](https://github.com/basaltbytes/usine/issues/223): an EU-hosted worker that
+usine controls, to replace exe.dev. Snapshot date: 2026-10-12. Claims cite primary sources (vendor
+docs, source repositories, release pages, the builders' posts and interviews); undocumented facts
+are marked. This extends the August study of exe.dev's product surface,
+[`docs/research/exe-dev.md`](https://github.com/basaltbytes/usine/blob/research/exe-dev/docs/research/exe-dev.md).
 
-Why this matters for usine: an exe.dev Worker today is one persistent VM per Worker, reached with
-`ssh <vm>.exe.xyz`, with Claude Code and Codex children started as one SSH command each and a pid
-file beside the worktree (`packages/agents/src/child-host/child-host.ts`), and a per-repository
-GitHub grant attached through exe.dev's GitHub integration for the Attempt's window
-([ADR 0011](../adr/0011-github-app-identity-scoped-worker-tokens.md)). Harness logins are on the VM
-([ADR 0006](../adr/0006-executor-contract-run-host-attempt-channel.md)). A replacement has to keep
-that shape: an SSH destination, a checkout on a persistent disk, and credentials attached to the
-machine without reaching the agent.
+An exe.dev worker is one persistent VM (`ssh <vm>.exe.xyz`) that runs each Claude Code or Codex child
+as one SSH command with a pid file beside the worktree
+(`packages/agents/src/child-host/child-host.ts`). Harness logins are on the VM
+([ADR 0006](../adr/0006-executor-contract-run-host-attempt-channel.md)), and exe.dev's GitHub
+integration attaches a per-repository grant for the attempt window
+([ADR 0011](../adr/0011-github-app-identity-scoped-worker-tokens.md)). A replacement needs an SSH
+destination, a checkout on a persistent disk, and machine-attached credentials the agent can't read.
 
-## 1. How exe.dev is built
+## 1. exe.dev architecture
 
-exe.dev is run by Bold Software, Inc. David Crawshaw (Tailscale co-founder) and Josh Bleecher Snyder
+Bold Software, Inc. runs exe.dev. David Crawshaw (Tailscale co-founder) and Josh Bleecher Snyder
 founded it after building the Sketch coding agent, which ran each agent in a local Docker container
 ([meet exe.dev](https://blog.exe.dev/meet-exe.dev),
 [building a cloud](https://crawshaw.io/blog/building-a-cloud),
-[Sketch README](https://github.com/boldsoftware/sketch)). Blog bylines name Ian Lance Taylor, Maisem
-Ali, and Philip Zeyliger among the engineers ([blog](https://blog.exe.dev/)). It raised a $35m Series
-A in April 2026 ([announcement](https://blog.exe.dev/series-a)). Most of the stack is closed. The
-public sources are the docs, the blog, two recorded interviews with Crawshaw, and a few repositories.
-The table lists what each source says, layer by layer.
+[Sketch README](https://github.com/boldsoftware/sketch)). Blog bylines include engineers Ian Lance
+Taylor, Maisem Ali, and Philip Zeyliger ([blog](https://blog.exe.dev/)). It raised a $35m Series A in
+April 2026 ([announcement](https://blog.exe.dev/series-a)). Most of the stack is closed. Public
+sources are the docs, the blog, two recorded interviews with Crawshaw, and a few repositories:
 
 | Layer | What is public | Source |
 | --- | --- | --- |
-| Hardware | "Most of our machines we buy are physical bare metal devices." Latitude.sh hosts much of it; AWS bare metal for customers who ask; "We don't use Hetzner". A narrow range of AMD EPYC CPUs so live migration works. | [Kubelist ep. 54](https://www.heavybit.com/library/podcasts/the-kubelist-podcast/ep-54-the-age-of-personalized-software-with-david-crawshaw) |
+| Hardware | "Most of our machines we buy are physical bare metal devices." Mostly at Latitude.sh; AWS bare metal on request; "We don't use Hetzner". A narrow range of AMD EPYC CPUs, for live migration. | [Kubelist ep. 54](https://www.heavybit.com/library/podcasts/the-kubelist-podcast/ep-54-the-age-of-personalized-software-with-david-crawshaw) |
 | Sub-processors | AWS, Google Cloud, Latitude.sh, NetActuate for compute; ClickHouse for logs. | [sub-processors](https://exe.dev/docs/sub-processors) |
-| VMM | Cloud Hypervisor on KVM, called "an implementation detail (and may change!)". One VMM process per VM, all of an account's VMs in one cgroup per pool. | [how it works](https://exe.dev/docs/faq/how-exedev-works), [architecture](https://exe.dev/docs/architecture) |
-| Kernel and init | exe.dev builds a stock kernel with module support turned off; customers cannot choose a kernel. An injected init "gets out of the way and lets systemd take over". The init (`exetini`, `exe-init` in the image comments) is not public. | [Kubelist ep. 54](https://www.heavybit.com/library/podcasts/the-kubelist-podcast/ep-54-the-age-of-personalized-software-with-david-crawshaw), [exeuntu Dockerfile](https://github.com/boldsoftware/exeuntu/blob/main/Dockerfile) |
-| Boot | "We turn an OCI image into a virtual block device and then start it as a machine." Creating a VM takes about two seconds. The default image mounts `/dev/vda` as ext4 and grows it on first boot. | [Kubelist ep. 54](https://www.heavybit.com/library/podcasts/the-kubelist-podcast/ep-54-the-age-of-personalized-software-with-david-crawshaw), [how it works](https://exe.dev/docs/faq/how-exedev-works), [exeuntu Dockerfile](https://github.com/boldsoftware/exeuntu/blob/main/Dockerfile) |
+| VMM | Cloud Hypervisor on KVM, "an implementation detail (and may change!)". One VMM process per VM; an account's VMs share one cgroup per pool. | [how it works](https://exe.dev/docs/faq/how-exedev-works), [architecture](https://exe.dev/docs/architecture) |
+| Kernel and init | Stock kernel with module support off, not customer-selectable. An injected init (`exetini`, `exe-init` in the image comments; not public) "gets out of the way and lets systemd take over". | [Kubelist ep. 54](https://www.heavybit.com/library/podcasts/the-kubelist-podcast/ep-54-the-age-of-personalized-software-with-david-crawshaw), [exeuntu Dockerfile](https://github.com/boldsoftware/exeuntu/blob/main/Dockerfile) |
+| Boot | "We turn an OCI image into a virtual block device and then start it as a machine." About two seconds per VM. The default image mounts `/dev/vda` as ext4 and grows it on first boot. | [Kubelist ep. 54](https://www.heavybit.com/library/podcasts/the-kubelist-podcast/ep-54-the-age-of-personalized-software-with-david-crawshaw), [how it works](https://exe.dev/docs/faq/how-exedev-works), [exeuntu Dockerfile](https://github.com/boldsoftware/exeuntu/blob/main/Dockerfile) |
 | Memory | Ballooning and tiered swap; "there's a bit more RAM than is advertised"; "the vast majority of the VMs we run are idle". | [Kubelist ep. 54](https://www.heavybit.com/library/podcasts/the-kubelist-podcast/ep-54-the-age-of-personalized-software-with-david-crawshaw) |
-| CPU isolation | Linux core scheduling cookies per team, so VMs of different teams never share a physical core. | [hyper-thread post](https://blog.exe.dev/crossing-the-hyper-thread-boundary) |
-| Disk | Local NVMe. Changes stream to another server in the region; the docs say "a few seconds behind", the interview says "at most one-minute-old". `cp` clones a VM copy-on-write in a couple of seconds. Historical disk snapshots are announced but not launched. The storage software is not documented. | [architecture](https://exe.dev/docs/architecture), [Kubelist ep. 54](https://www.heavybit.com/library/podcasts/the-kubelist-podcast/ep-54-the-age-of-personalized-software-with-david-crawshaw), [January update](https://blog.exe.dev/jan26-update), [High Leverage ep. 11](https://www.heavybit.com/library/podcasts/high-leverage/ep-11-why-agents-need-computers-with-david-crawshaw) |
-| Live migration | The block diff and RAM are shipped to another host; SSH connections are cut and HTTP requests paused. | [Kubelist ep. 54](https://www.heavybit.com/library/podcasts/the-kubelist-podcast/ep-54-the-age-of-personalized-software-with-david-crawshaw) |
-| HTTPS edge | An anycast network from a provider and a global load balancer exe.dev wrote, at "dozens of sites". A TLS proxy routes on SNI and the Host header; private by default behind exe.dev login. | [architecture](https://exe.dev/docs/architecture), [Kubelist ep. 54](https://www.heavybit.com/library/podcasts/the-kubelist-podcast/ep-54-the-age-of-personalized-software-with-david-crawshaw), [proxy](https://exe.dev/docs/proxy) |
-| SSH front door | `vm.exe.xyz` is a CNAME to one of a pool of shared IPv4 addresses. Each address is used by at most one VM per owner, so the SSH proxy routes on the pair (client public key's user, destination IP). It needs the local destination IP, which "is easy on bare metal". | [SSH has no Host header](https://blog.exe.dev/ssh-host-header) |
-| Connection handling | A separate `exepipe` process owns sockets. The proxy authenticates and passes both file descriptors over a Unix socket; `exepipe` copies with `splice`, and on upgrade hands its listeners to a new `exepipe` so open connections survive deploys. | [exepipe post](https://blog.exe.dev/adding-features-without-interrupting-network-connections) |
-| Control plane | Go, `sqlc`, one central database behind a single writer process; proxies around the world cache rows and receive invalidations. The lobby (`ssh exe.dev`) is in the United States for every account. | [sqlc post](https://blog.exe.dev/we-taught-sqlc-to-invalidate-our-caches), [regions](https://exe.dev/docs/regions) |
-| Credential proxies | The VM calls `<name>.int.exe.xyz`; exe.dev checks the integration is attached to that VM and adds a header, basic auth, a bearer token, an AWS SigV4 signature, or a minted OAuth token before forwarding. GitHub runs through exe.dev's own GitHub App at `github.int.exe.xyz/OWNER/REPO`, optionally read-only. How the edge identifies the calling VM is not documented. | [integrations](https://exe.dev/docs/integrations), [HTTP proxy](https://exe.dev/docs/integrations-http-proxy), [token mint](https://exe.dev/docs/integrations-token-mint), [GitHub](https://exe.dev/docs/integrations-github), [GitHub URLs](https://blog.exe.dev/github-integration-improvements), [secrets post](https://blog.exe.dev/http-proxy-secrets) |
-| LLM gateway | `llm.int.exe.xyz` serves Anthropic, OpenAI, and Fireworks with exe.dev's keys, the customer's API key, a ChatGPT subscription connected by device code, or workload identity federation with Anthropic or OpenAI. Claude Code runs with `ANTHROPIC_BASE_URL` set to it and a placeholder key; Codex with a custom `model_provider`. | [LLM integration](https://exe.dev/docs/integrations-llm), [Anthropic WIF](https://exe.dev/docs/integrations-anthropic-wif) |
-| Workload identity | exe.dev runs an OIDC issuer; a VM obtains a short-lived token proving which VM it is and exchanges it with AWS, GCP, Anthropic, OpenAI, or Tailscale. | [OAuth for agents](https://blog.exe.dev/oauth-for-agents), [integrations](https://exe.dev/docs/integrations) |
+| CPU isolation | Linux core scheduling cookies per team: VMs of different teams never share a physical core. | [hyper-thread post](https://blog.exe.dev/crossing-the-hyper-thread-boundary) |
+| Disk | Local NVMe, streamed to another server in the region: "a few seconds behind" (docs), "at most one-minute-old" (interview). `cp` makes a copy-on-write VM clone in a couple of seconds. Historical disk snapshots announced, not launched. Storage software undocumented. | [architecture](https://exe.dev/docs/architecture), [Kubelist ep. 54](https://www.heavybit.com/library/podcasts/the-kubelist-podcast/ep-54-the-age-of-personalized-software-with-david-crawshaw), [January update](https://blog.exe.dev/jan26-update), [High Leverage ep. 11](https://www.heavybit.com/library/podcasts/high-leverage/ep-11-why-agents-need-computers-with-david-crawshaw) |
+| Live migration | Block diff and RAM move to another host; SSH connections drop, HTTP requests pause. | [Kubelist ep. 54](https://www.heavybit.com/library/podcasts/the-kubelist-podcast/ep-54-the-age-of-personalized-software-with-david-crawshaw) |
+| HTTPS edge | A provider's anycast network plus exe.dev's own global load balancer, at "dozens of sites". A TLS proxy routes on SNI and Host; private by default behind exe.dev login. | [architecture](https://exe.dev/docs/architecture), [Kubelist ep. 54](https://www.heavybit.com/library/podcasts/the-kubelist-podcast/ep-54-the-age-of-personalized-software-with-david-crawshaw), [proxy](https://exe.dev/docs/proxy) |
+| SSH front door | `vm.exe.xyz` is a CNAME to a pooled shared IPv4 address used by at most one VM per owner, so the SSH proxy routes on (client public key's user, destination IP). That needs the local destination IP, which "is easy on bare metal". | [SSH has no Host header](https://blog.exe.dev/ssh-host-header) |
+| Connection handling | A separate `exepipe` process keeps the sockets: the proxy authenticates and passes both file descriptors over a Unix socket, `exepipe` copies with `splice`, and on upgrade passes its listeners to a new `exepipe`, so connections survive deploys. | [exepipe post](https://blog.exe.dev/adding-features-without-interrupting-network-connections) |
+| Control plane | Go and `sqlc`; one central database behind a single writer process; proxies worldwide cache rows and receive invalidations. The lobby (`ssh exe.dev`) is in the US for every account. | [sqlc post](https://blog.exe.dev/we-taught-sqlc-to-invalidate-our-caches), [regions](https://exe.dev/docs/regions) |
+| Credential proxies | The VM calls `<name>.int.exe.xyz`; exe.dev checks that the integration is attached to that VM, adds a header, basic auth, a bearer token, an AWS SigV4 signature, or a minted OAuth token, and forwards. GitHub goes through exe.dev's GitHub App at `github.int.exe.xyz/OWNER/REPO`, optionally read-only. How the edge identifies the VM is undocumented. | [integrations](https://exe.dev/docs/integrations), [HTTP proxy](https://exe.dev/docs/integrations-http-proxy), [token mint](https://exe.dev/docs/integrations-token-mint), [GitHub](https://exe.dev/docs/integrations-github), [GitHub URLs](https://blog.exe.dev/github-integration-improvements), [secrets post](https://blog.exe.dev/http-proxy-secrets) |
+| LLM gateway | `llm.int.exe.xyz` serves Anthropic, OpenAI, and Fireworks with exe.dev's keys, the customer's API key, a ChatGPT subscription connected by device code, or workload identity federation with Anthropic or OpenAI. Claude Code uses it as `ANTHROPIC_BASE_URL` with a placeholder key; Codex as a custom `model_provider`. | [LLM integration](https://exe.dev/docs/integrations-llm), [Anthropic WIF](https://exe.dev/docs/integrations-anthropic-wif) |
+| Workload identity | exe.dev runs an OIDC issuer; a VM gets a short-lived token proving its identity and exchanges it with AWS, GCP, Anthropic, OpenAI, or Tailscale. | [OAuth for agents](https://blog.exe.dev/oauth-for-agents), [integrations](https://exe.dev/docs/integrations) |
 | HTTPS API | `POST /exec` runs a lobby command, including `ssh <vm> <cmd>`; tokens are SSH signatures (`sshminisig` is in the public repo). | [run on VM](https://exe.dev/docs/https-api-run-on-vm), [sshminisig](https://github.com/boldsoftware/exe.dev/tree/main/sshminisig) |
-| Default image | `exeuntu`: Ubuntu 24.04 with systemd, Docker, headless Chromium, and `claude`, `codex`, `pi`, and `opencode` installed by its own updater; Tailscale installed and disabled. | [exeuntu Dockerfile](https://github.com/boldsoftware/exeuntu/blob/main/Dockerfile) |
+| Default image | `exeuntu`: Ubuntu 24.04 with systemd, Docker, headless Chromium, and `claude`, `codex`, `pi`, and `opencode` from its own updater; Tailscale installed, disabled. | [exeuntu Dockerfile](https://github.com/boldsoftware/exeuntu/blob/main/Dockerfile) |
 | Enterprise | Single-tenant hosts, or BYOC hosts in the customer's account that "need hardware virtualization and local NVMe drives", operated by exe.dev; 99.9% monthly uptime SLA. | [single tenant](https://exe.dev/docs/enterprise-single-tenant), [BYOC](https://exe.dev/docs/enterprise-byoc), [SLA](https://exe.dev/docs/enterprise-sla) |
 
 Since the August note, exe.dev added pools (a reserved vCPU/memory allotment, $0.105 per 2 vCPU /
 4 GiB unit-hour on Work) and standalone VMs billed hourly while running
 ([pools](https://exe.dev/docs/pools), [standalone VMs](https://exe.dev/docs/standalone-vms)).
 
-Crawshaw on why VMs and not containers, from the Sketch work: "Even almost all of a Linux kernel,
+Crawshaw on VMs instead of containers, from the Sketch work: "Even almost all of a Linux kernel,
 which is gVisor, isn't enough" and "You need to give an agent just a computer"
 ([High Leverage ep. 11](https://www.heavybit.com/library/podcasts/high-leverage/ep-11-why-agents-need-computers-with-david-crawshaw)).
 On speed: "it wasn't really Firecracker or the VMMs that made VMs fast"
 ([Kubelist ep. 54](https://www.heavybit.com/library/podcasts/the-kubelist-podcast/ep-54-the-age-of-personalized-software-with-david-crawshaw)).
 
-### What comes from Tailscale's open source
+### Tailscale open-source reuse
 
-The public record shows little direct reuse. All of it:
+The public record shows little direct reuse:
 
 - `execonnect`, the customer-side daemon that opens outbound tunnels from a private network to exe.dev
   (Apache-2.0), imports `github.com/tailscale/wireguard-go` and `tailscale.com/types/key`, and uses
@@ -78,31 +74,26 @@ The public record shows little direct reuse. All of it:
   ([crawshaw/httpts](https://github.com/crawshaw/httpts)).
 
 No public source shows `tsnet`, Tailscale SSH (`tailssh`), or DERP in exe.dev's product path. The
-SSH front door is exe.dev's own mechanism (routing on key plus destination IP), unlike Tailscale SSH,
-which is an SSH server inside each tailnet node built on `tailscale/gliderssh` and
-`golang.org/x/crypto/ssh`
+SSH front door routes on key plus destination IP, unlike Tailscale SSH, an SSH server in each tailnet
+node built on `tailscale/gliderssh` and `golang.org/x/crypto/ssh`
 ([tailssh.go](https://github.com/tailscale/tailscale/blob/main/ssh/tailssh/tailssh.go)). Bold Software
-keeps a fork of `tg123/sshpiper` (an SSH reverse proxy, MIT) with two unmerged branch commits, one by
-Josh Bleecher Snyder in May 2025 and one by Crawshaw in October 2025 ("add ssh cert signature
-advertising") ([boldsoftware/sshpiper](https://github.com/boldsoftware/sshpiper/branches)). Whether
-the production SSH proxy is built on it is not documented.
+forked `tg123/sshpiper` (an SSH reverse proxy, MIT), with two unmerged branch commits by Josh
+Bleecher Snyder (May 2025) and Crawshaw (October 2025, "add ssh cert signature advertising")
+([boldsoftware/sshpiper](https://github.com/boldsoftware/sshpiper/branches)). Whether the
+production SSH proxy uses it is undocumented.
 
-### Data protection position
+### Data protection
 
-The lobby is in the United States for all accounts ([regions](https://exe.dev/docs/regions)); the
-terms are governed by California law
-([terms](https://exe.dev/docs/terms-of-service)); the infrastructure sub-processors are AWS, Google Cloud,
-Latitude.sh, and NetActuate, with Standard Contractual Clauses for transfers out of the EEA
-([sub-processors](https://exe.dev/docs/sub-processors)). The privacy notice refers to exe.dev acting
-as a processor on customers' behalf, but no data processing agreement is published
-([privacy notice](https://exe.dev/docs/privacy-notice)). A Frankfurt region and Enterprise BYOC exist,
-but in both cases exe.dev operates the hosts. None of this meets "EU infrastructure that we
-control".
+The lobby is in the US ([regions](https://exe.dev/docs/regions)), California law governs the terms
+([terms](https://exe.dev/docs/terms-of-service)), and sub-processors move data out of the EEA under
+Standard Contractual Clauses ([sub-processors](https://exe.dev/docs/sub-processors)). The privacy
+notice says exe.dev acts as a processor, but publishes no data processing agreement
+([privacy notice](https://exe.dev/docs/privacy-notice)). exe.dev operates the hosts in the Frankfurt
+region and in Enterprise BYOC. None of this meets "EU infrastructure that we control".
 
-## 2. Open-source projects with the same idea
+## 2. Comparable open-source projects
 
-Stars, licences, and release dates below come from the GitHub API on 2026-10-12, at the repository
-linked in each row.
+Stars, licences, and release dates: GitHub API, 2026-10-12, for each row's linked repository.
 
 ### Isolation layers
 
@@ -119,39 +110,37 @@ linked in each row.
 | [Incus](https://github.com/lxc/incus) | containers and QEMU VMs, REST API, clustering | VMs only | not documented | ZFS/Btrfs/LVM snapshots | containers only | Apache-2.0 | 6.4k | v7.5.1, 2026-09-25 |
 | [libkrun](https://github.com/containers/libkrun) | VMM as a library | yes (HVF on macOS) | not documented | not documented | through krunvm and others | Apache-2.0 | 2.8k | v1.19.6, 2026-09-29 |
 
-Details that bear on a coding-agent Worker:
+Details relevant to a coding-agent worker:
 
 - Firecracker has no virtio-fs ([microvm.nix](https://github.com/microvm-nix/microvm.nix)) and
   networks only through TAP devices
   ([network setup](https://github.com/firecracker-microvm/firecracker/blob/main/docs/network-setup.md)).
-  Its snapshot docs say network connectivity is not guaranteed after resume, vsock connections close,
-  and resuming one snapshot several times is insecure because randomness and tokens are replicated
+  After a snapshot resume, network connectivity isn't guaranteed and vsock connections close, and
+  resuming one snapshot more than once is insecure because randomness and tokens are replicated
   ([snapshot support](https://github.com/firecracker-microvm/firecracker/blob/main/docs/snapshotting/snapshot-support.md)).
-  Hocus moved from Firecracker to QEMU because Firecracker never returned guest memory to the host
-  (an idle VM kept 32 GB) and did not reclaim disk; the evaluation took two months
+  After a two-month evaluation, Hocus moved to QEMU: Firecracker never returned guest memory to the
+  host (an idle VM kept 32 GB) and didn't reclaim disk
   ([Hocus](https://hocus.dev/blog/qemu-vs-firecracker/)).
 - Cloud Hypervisor restores in `copy`, `ondemand` (userfaultfd lazy paging, merged 2026-03-13), or
   `copyonwrite` mode, where clones from one snapshot share page cache
   ([snapshot docs](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/main/docs/snapshot_restore.md),
   [PR #7800](https://github.com/cloud-hypervisor/cloud-hypervisor/pull/7800)). Snapshots and live
-  migration do not work across major versions, which ship every six weeks
+  migration don't work across major versions, released every six weeks
   ([releases](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/main/docs/releases.md)). It has
   virtio-fs through an external `virtiofsd`
   ([fs docs](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/main/docs/fs.md)).
-- gVisor does not support io_uring by default, block-device filesystems such as ext4, KVM inside the
+- gVisor doesn't support io_uring by default, block-device filesystems such as ext4, KVM inside the
   sandbox, or full iptables ([compatibility](https://gvisor.dev/docs/user_guide/compatibility/)).
-  Anthropic's deployment guide measures file I/O heavy work at "up to 10-200× slower"
-  ([secure deployment](https://code.claude.com/docs/en/agent-sdk/secure-deployment)), which is what a
-  compiler or `pnpm install` does. Crawshaw's view from running Sketch on it: "Even almost all of a
-  Linux kernel, which is gVisor, isn't enough"
-  ([High Leverage ep. 11](https://www.heavybit.com/library/podcasts/high-leverage/ep-11-why-agents-need-computers-with-david-crawshaw)).
-- Sysbox shares the host kernel and its README calls it weaker than VMs; Docker sponsors it but does
-  not officially support it ([sysbox](https://github.com/nestybox/sysbox)).
-- Incus has projects confined to a certificate and a multi-user daemon that creates one project per
+  Anthropic's deployment guide measures file I/O heavy work, such as a compiler or `pnpm install`, at
+  "up to 10-200× slower"
+  ([secure deployment](https://code.claude.com/docs/en/agent-sdk/secure-deployment)).
+- Sysbox shares the host kernel, and its README calls it weaker than VMs; Docker sponsors it but
+  doesn't officially support it ([sysbox](https://github.com/nestybox/sysbox)).
+- Incus has projects confined to a certificate, and a multi-user daemon that creates one project per
   user ([projects](https://linuxcontainers.org/incus/docs/main/explanation/projects/)); OCI images are
   documented for containers only ([instances](https://linuxcontainers.org/incus/docs/main/explanation/instances/)).
 
-### Platforms that hand an agent a machine
+### Platforms that give an agent a machine
 
 | Project | Isolation | Access | Persistence | Self-hosting | Credential injection | Egress policy | Licence | Stars | Latest release |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -168,32 +157,33 @@ Details that bear on a coding-agent Worker:
 | [Arrakis](https://github.com/abshkbh/arrakis) | Cloud Hypervisor | REST, SSH | snapshot with processes | single host | no | no | AGPL-3.0 | 0.9k | 2025-06-02, dormant |
 | [Daytona](https://github.com/daytonaio/daytona) | privileged Docker containers ([runner](https://github.com/daytonaio/daytona/blob/v0.190.0/apps/runner/pkg/docker/container_configs.go)) | API, SSH gateway | snapshots, volumes | Compose, "not safe to use in production" | not documented | CIDR list | AGPL-3.0 at v0.190.0 | 71.6k | archived 2026-06 |
 
-What changed in 2026 and matters here:
+Changes in 2026 that matter here:
 
 - E2B retired its Nomad-based multi-node deployment on 2026-09-10 "ahead of a new deploy path"
-  ([commit](https://github.com/e2b-dev/runtime/commit/8a1c4888)); what remains is single-node "E2B
-  Embed", which needs `/dev/kvm`, hugepages, and Ubuntu 24.04
+  ([commit](https://github.com/e2b-dev/runtime/commit/8a1c4888)), leaving single-node "E2B Embed",
+  which needs `/dev/kvm`, hugepages, and Ubuntu 24.04
   ([Embed](https://github.com/e2b-dev/runtime/blob/main/embed/README.md)). Secret injection is
-  documented for E2B Cloud ([docs](https://docs.e2b.dev/secrets/inject.md)); the architecture doc
-  names an `orchestrator-ee` that resolves secrets at egress, and the open `main.go` wires only the
-  plain TCP firewall ([architecture](https://github.com/e2b-dev/runtime/blob/main/docs/ARCHITECTURE.md),
-  [main.go](https://github.com/e2b-dev/runtime/blob/main/packages/orchestrator/main.go)). Reading the
-  code, the injecting proxy is not open source.
+  documented for E2B Cloud ([docs](https://docs.e2b.dev/secrets/inject.md)), through an
+  `orchestrator-ee` that resolves secrets at egress; the open `main.go` wires only the plain TCP
+  firewall, so the injecting proxy is not open source
+  ([architecture](https://github.com/e2b-dev/runtime/blob/main/docs/ARCHITECTURE.md),
+  [main.go](https://github.com/e2b-dev/runtime/blob/main/packages/orchestrator/main.go)).
 - Daytona moved development private in June 2026
   ([announcement](https://daytona.io/dotfiles/updates/daytona-is-going-closed-source)).
 - CubeSandbox (created 2026-04) and OpenShell (created 2026-02) are under a year old.
 - Coder's Community edition has no AI Gateway or Agent Firewall and caps Tasks at 1,000 agent
   workspace builds ([Tasks](https://coder.com/docs/@v2.36.3/ai-coder/tasks)).
 - Ubicloud is the only open project found that runs Cloud Hypervisor VMs on rented EU bare metal
-  (Hetzner) with SSH access and nftables firewalls. Its control plane is Ruby and Postgres, it boots
-  cloud images, not OCI images, and it has no credential proxy
+  (Hetzner) with SSH access and nftables firewalls. It has a Ruby and Postgres control plane, boots
+  cloud images rather than OCI, and has no credential proxy
   ([README](https://github.com/ubicloud/ubicloud)).
 
-Hosted or closed products, for reference only: Docker Sandboxes (licence not stated) keeps a Claude subscription session token on
-the host, "never stored inside the sandbox" ([Docker](https://docs.docker.com/ai/sandboxes/get-started/)),
-with a host proxy that injects credentials
-([isolation](https://docs.docker.com/ai/sandboxes/security/isolation/)); Fly Sprites, Modal, Vercel
-Sandbox, Cloudflare Sandbox, Northflank, Freestyle, Morph, Runloop, and Blaxel are hosted only.
+Hosted or closed products, for reference: Docker Sandboxes (licence not stated) keeps a Claude
+subscription session token on the host, "never stored inside the sandbox"
+([Docker](https://docs.docker.com/ai/sandboxes/get-started/)), with a host proxy that injects
+credentials ([isolation](https://docs.docker.com/ai/sandboxes/security/isolation/)). Fly Sprites,
+Modal, Vercel Sandbox, Cloudflare Sandbox, Northflank, Freestyle, Morph, Runloop, and Blaxel are hosted
+only.
 
 ### Proxies that inject credentials
 
@@ -210,53 +200,51 @@ Sandbox, Cloudflare Sandbox, Northflank, Freestyle, Morph, Runloop, and Blaxel a
 | [agentgateway](https://github.com/agentgateway/agentgateway) (Linux Foundation) | base URL | `backendAuth` token exchange | policies | Apache-2.0 | 5.3k | v1.6.0 |
 | [coder/httpjail](https://github.com/coder/httpjail) | transparent interception | none | JS or shell rules | CC0-1.0 | 1.0k | v0.6.2 |
 
-Anthropic's own [Claude apps gateway](https://code.claude.com/docs/en/claude-apps-gateway) ships in
-the `claude` binary and keeps the upstream credential (Bedrock, Vertex, Foundry, or an API key)
-server-side, but it has no subscription upstream and "There is no service-token flow for unattended
-pipelines", so it does not fit unattended Workers.
+Anthropic's [Claude apps gateway](https://code.claude.com/docs/en/claude-apps-gateway), in the
+`claude` binary, keeps the upstream credential (Bedrock, Vertex, Foundry, or an API key)
+server-side. With no subscription upstream and "no service-token flow for unattended pipelines", it
+doesn't fit unattended workers.
 
-## 3. The pieces of our own
+## 3. Components to build
 
-Each piece below lists the options with evidence, then the choice that fits usine. usine needs less
-than exe.dev sells: the orchestrator is the only SSH client, Workers serve no public HTTPS, and
-anything durable is pushed to GitHub before a worktree is removed (salvage, ADR 0006).
+usine needs less than exe.dev sells: the orchestrator is the only SSH client, workers serve no public
+HTTPS, and durable work is pushed to GitHub before a worktree is removed (salvage, ADR 0006).
 
 ### 3.1 Isolation
 
 | Option | What it gives | Cost of running it | Fit |
 | --- | --- | --- | --- |
-| A KVM VM rented from an EU cloud, one per Worker | the provider's hypervisor isolates customers; SSH; persistent disk | none beyond the VM; but Hetzner Cloud has no nested virtualization ("No, this is not possible on cloud server", [FAQ](https://docs.hetzner.com/cloud/servers/faq/)), so no microVMs inside it | good for a first stage; slow to create, no clones |
+| A KVM VM rented from an EU cloud, one per Worker | the provider's hypervisor isolates customers; SSH; persistent disk | none beyond the VM; Hetzner Cloud has no nested virtualization ("No, this is not possible on cloud server", [FAQ](https://docs.hetzner.com/cloud/servers/faq/)), so no microVMs inside | good first stage; slow to create, no clones |
 | Cloud Hypervisor on rented bare metal | what exe.dev runs; snapshots with CoW restore, live migration, virtio-fs, hotplug | we operate hosts, kernels, and VMM upgrades every six weeks | best match for a later stage |
 | Firecracker on bare metal | smallest VMM, fastest documented boot | no virtio-fs; memory is not returned to the host (Hocus); snapshot caveats above | good for short-lived per-Attempt VMs, weaker for persistent Workers |
-| Incus VMs (QEMU) | mature API, projects per tenant, ZFS clones, clustering | heavier VMM; no OCI-as-VM | a reasonable middle path if we want a product rather than code |
-| gVisor or Kata containers | container workflow | gVisor's file I/O and syscall gaps hurt builds; Kata runs pods or containers and documents no workspace checkpoint | not a fit for a full dev machine |
+| Incus VMs (QEMU) | mature API, projects per tenant, ZFS clones, clustering | heavier VMM; no OCI-as-VM | a middle path if we want a product, not code |
+| gVisor or Kata containers | container workflow | gVisor's file I/O and syscall gaps slow builds; Kata runs pods or containers, with no documented workspace checkpoint | no fit for a full dev machine |
 
 ### 3.2 Image baking and harness logins
 
-- **For a rented VM**: a cloud-init user-data file that installs git, Node, `gh`, `claude`, and `codex`
-  on Debian, run at first boot ([cloud-init](https://cloudinit.readthedocs.io/en/latest/)). exe.dev's
-  `exeuntu` Dockerfile is a working reference for which services to disable in a VM image
-  ([Dockerfile](https://github.com/boldsoftware/exeuntu/blob/main/Dockerfile)); its licence is not an
-  OSI licence (GitHub reports "Other"), so read it, do not copy it.
-- **For our own VMM**: build an OCI image with a Dockerfile, export its filesystem, and write it into
-  an ext4 file with `mkfs.ext4 -d <dir>`, which populates the filesystem from a directory
-  ([mke2fs](https://man7.org/linux/man-pages/man8/mke2fs.8.html)). Firecracker documents the same
+- **Rented VM**: a cloud-init user-data file that installs git, Node, `gh`, `claude`, and `codex` on
+  Debian at first boot ([cloud-init](https://cloudinit.readthedocs.io/en/latest/)). exe.dev's
+  `exeuntu` Dockerfile shows which services to disable in a VM image
+  ([Dockerfile](https://github.com/boldsoftware/exeuntu/blob/main/Dockerfile)); its licence is not
+  OSI (GitHub reports "Other"), so read it, don't copy it.
+- **Our own VMM**: build an OCI image from a Dockerfile, export its filesystem, and write it into an
+  ext4 file with `mkfs.ext4 -d <dir>`
+  ([mke2fs](https://man7.org/linux/man-pages/man8/mke2fs.8.html)); Firecracker documents the same
   approach with a mounted image ([rootfs guide](https://github.com/firecracker-microvm/firecracker/blob/main/docs/rootfs-and-kernel-setup.md)).
-  The kernel is ours to build, with the root filesystem driver built in. Per-VM disks are
-  copy-on-write clones of that base (LVM thin snapshots, ZFS clones, or qcow2 backing files).
+  We build the kernel, with the root filesystem driver built in. Per-VM disks are copy-on-write
+  clones of that base (LVM thin snapshots, ZFS clones, or qcow2 backing files).
 - **Harness logins** stay the operator's task (ADR 0006). Claude Code accepts a one-year subscription
   token from `claude setup-token` in `CLAUDE_CODE_OAUTH_TOKEN`, or a `/login` stored in
   `~/.claude/.credentials.json` on Linux
   ([authentication](https://code.claude.com/docs/en/authentication)). Codex accepts
-  `codex login --device-auth`, or a copied `~/.codex/auth.json`, which it refreshes during use
+  `codex login --device-auth`, or a copied `~/.codex/auth.json` that it refreshes during use
   ([Codex auth](https://learn.chatgpt.com/docs/auth)). Both put a subscription credential on the VM;
   section 3.4 covers the alternative.
 
 ### 3.3 Network reach
 
 usine's `RemoteShell` child host already takes arbitrary SSH client arguments and a destination
-(`packages/agents/src/child-host/child-host.ts`), so every option below plugs in without a code
-change to the child host.
+(`packages/agents/src/child-host/child-host.ts`), so no option below needs a child host change.
 
 | Option | Notes | Source |
 | --- | --- | --- |
@@ -268,76 +256,73 @@ change to the child host.
 | NetBird | WireGuard mesh with a self-hosting guide; management, signal, and relay are AGPL-3.0 | [netbird](https://github.com/netbirdio/netbird) (29.9k stars, v0.80.0) |
 | tsnet in the orchestrator | Go only; no Node.js binding exists, `libtailscale` has no releases | [tsnet](https://tailscale.com/kb/1244/tsnet), [libtailscale](https://github.com/tailscale/libtailscale) |
 
-One orchestrator talking to a handful of hosts does not need a mesh. A private network with one
-bastion, or WireGuard between the orchestrator and each host, covers it.
+One orchestrator and a few hosts don't need a mesh: a private network with one bastion, or WireGuard
+between the orchestrator and each host, is enough.
 
 ### 3.4 Credential proxies
 
-The design that needs no CA in the VM is the one exe.dev uses: the VM calls a private hostname over
-plain HTTP or HTTPS, and a reverse proxy outside the VM adds the credential and forwards to the real
-API. Anthropic's deployment guide recommends the same pattern ("run a proxy outside the agent's
-security boundary that injects credentials") and notes that `ANTHROPIC_BASE_URL` gives the proxy
-plaintext requests while `HTTPS_PROXY` gives it only an opaque tunnel unless it intercepts TLS
-([secure deployment](https://code.claude.com/docs/en/agent-sdk/secure-deployment)).
+exe.dev's design needs no CA in the VM: the VM calls a private hostname over plain HTTP or HTTPS,
+and a reverse proxy outside the VM adds the credential and forwards to the real API. Anthropic's
+deployment guide recommends this ("run a proxy outside the agent's security boundary that injects
+credentials"): `ANTHROPIC_BASE_URL` gives the proxy plaintext requests, while `HTTPS_PROXY` gives it
+an opaque tunnel unless it intercepts TLS
+([secure deployment](https://code.claude.com/docs/en/agent-sdk/secure-deployment)). For usine, the
+proxy must handle:
 
-What the proxy has to do for usine:
-
-- **GitHub.** The orchestrator already mints a one-hour installation token scoped to the Attempt's
+- **GitHub.** The orchestrator already mints a one-hour installation token scoped to the attempt's
   repository with `POST /app/installations/{id}/access_tokens` and its `repositories` parameter
   ([REST docs](https://docs.github.com/en/rest/apps/apps#create-an-installation-access-token-for-an-app));
   git authenticates with it as user `x-access-token`
   ([installation auth](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/authenticating-as-a-github-app-installation)).
-  The executor would attach that token to the proxy for the VM and the repository, as it attaches an
-  exe.dev integration today, and detach it at cleanup. The VM clones
-  `http://git.<gateway>/OWNER/REPO.git`; the proxy checks that the calling VM has a grant for that
-  repository and adds `Authorization`. `gh` needs the REST API on the same host, as exe.dev does with
+  The executor would attach that token to the proxy for the VM and repository, as it attaches an
+  exe.dev integration today (`integrations attach --for`), and detach it at cleanup. The VM clones
+  `http://git.<gateway>/OWNER/REPO.git`, and the proxy adds `Authorization` if the calling VM has a
+  grant for that repository. `gh` needs the REST API on the same host, like exe.dev's
   `GH_HOST=github.int.exe.xyz` ([GitHub integration](https://exe.dev/docs/integrations-github)).
-- **Claude Code.** `ANTHROPIC_BASE_URL` points it at the proxy; `ANTHROPIC_AUTH_TOKEN` is sent as
-  `Authorization: Bearer` ([authentication](https://code.claude.com/docs/en/authentication)). With an
-  API key, the key is in the proxy only. With a subscription, Anthropic documents only the case
-  where the login stays on the machine and the gateway forwards it, including the OAuth capability in
-  `anthropic-beta` ([LLM gateways](https://code.claude.com/docs/en/llm-gateway)). Swapping a
-  placeholder for a subscription token at the proxy is not documented by Anthropic; Docker
-  Sandboxes states that it keeps the session token on the host
-  ([Docker](https://docs.docker.com/ai/sandboxes/get-started/)) but does not say how. This needs a
-  test and a reading of the subscription terms before usine relies on it.
+- **Claude Code.** `ANTHROPIC_BASE_URL` points it at the proxy, and `ANTHROPIC_AUTH_TOKEN` is sent as
+  `Authorization: Bearer` ([authentication](https://code.claude.com/docs/en/authentication)), so an
+  API key stays in the proxy. For a subscription, Anthropic documents only a login that stays on the
+  machine, which the gateway forwards with the OAuth capability in `anthropic-beta`
+  ([LLM gateways](https://code.claude.com/docs/en/llm-gateway)), not a placeholder swapped for a
+  subscription token at the proxy. Docker Sandboxes keeps the session token on the host
+  ([Docker](https://docs.docker.com/ai/sandboxes/get-started/)) without saying how.
 - **Codex.** A custom `model_provider` with `base_url` points it at the proxy
   ([config reference](https://learn.chatgpt.com/docs/config-file/config-reference)). For a ChatGPT
   plan, OpenAI documents a gateway that forwards `/responses` and `/models` to
   `https://chatgpt.com/backend-api/codex` with the client's ChatGPT token
   ([gateway](https://learn.chatgpt.com/docs/enterprise/sign-in-with-chatgpt-through-a-gateway)).
-  Codex's own client sends `Authorization: Bearer` and `ChatGPT-Account-ID`
+  Codex sends `Authorization: Bearer` and `ChatGPT-Account-ID`
   ([source](https://github.com/openai/codex/blob/main/codex-rs/model-provider/src/bearer_auth_provider.rs)),
-  and exe.dev runs exactly the variant where the ChatGPT account is connected to the proxy and the VM
-  has no OpenAI credential ([LLM integration](https://exe.dev/docs/integrations-llm)). So the ChatGPT case has a
-  working precedent; the Claude subscription case does not.
-- **Identity of the caller.** exe.dev does not document how its edge identifies the calling VM. On
-  our own host the TAP device or private address identifies it, provided nftables drops packets whose
-  source address is not the one assigned to that interface. On a rented VM, a per-VM bearer token
-  sent by git (`http.extraHeader`) and by the harnesses is the fallback; it is a credential on the VM,
-  but one that works only from inside the private network and grants only what the proxy allows.
+  and exe.dev runs the variant with the ChatGPT account connected to the proxy and no OpenAI
+  credential on the VM ([LLM integration](https://exe.dev/docs/integrations-llm)): a working
+  precedent the Claude subscription case lacks.
+- **Caller identity.** On our own host, the TAP device or private address identifies the VM, if
+  nftables drops packets whose source address isn't the one assigned to that interface. On a rented
+  VM, the fallback is a per-VM bearer token sent by git (`http.extraHeader`) and the harnesses: a
+  credential on the VM, but usable only inside the private network and only for what the proxy
+  allows.
 
-Candidates for the proxy itself: a small service of our own (git smart HTTP and REST passthrough,
-streaming LLM passthrough, and an attach/detach API for the executor) is the closest fit, because the
-injection rule (which VM, which repository, until when) is usine's. superfly/tokenizer already has a
-GitHub App processor, but it expects the client to send a sealed secret in a `Proxy-Tokenizer` header
-over plain HTTP, which git and the harnesses do not do without wrappers. Envoy's injector is alpha and
-static per route. iron-proxy and sandbox-runtime need a CA in the VM. LiteLLM covers API keys only.
-Anthropic warns that a gateway must keep up with what Claude Code sends
-([LLM gateways](https://code.claude.com/docs/en/llm-gateway)); a passthrough that forwards headers
-and streams verbatim keeps that maintenance small.
+The best fit is a small service of our own (git smart HTTP and REST passthrough, streaming LLM
+passthrough, and an attach/detach API for the executor), because usine sets the injection rule
+(which VM, which repository, until when). superfly/tokenizer has a GitHub App processor but expects
+a sealed secret in a `Proxy-Tokenizer` header over plain HTTP, which git and the harnesses don't
+send without wrappers. Envoy's injector is alpha and static per route, iron-proxy and
+sandbox-runtime need a CA in the VM, and LiteLLM covers API keys only. Anthropic warns that a
+gateway must keep up with what Claude Code sends
+([LLM gateways](https://code.claude.com/docs/en/llm-gateway)); forwarding headers and streams
+verbatim keeps that work small.
 
 ### 3.5 Egress policy
 
 Firecracker "does not perform any network traffic filtering" and documents per-TAP nftables rules
 instead, including dropping the metadata address
 ([production host setup](https://github.com/firecracker-microvm/firecracker/blob/main/docs/prod-host-setup.md)).
-The layout that follows from it: the VM's only route is the gateway; DNS resolves through the
-gateway; the GitHub and LLM hostnames go to the injecting proxy; everything else (npm, PyPI, crates,
-release downloads) goes through an allowlisting forward proxy such as Squid peek-and-splice or
-Smokescreen. An SNI allowlist without TLS interception can be evaded by domain fronting
-([secure deployment](https://code.claude.com/docs/en/agent-sdk/secure-deployment)); that residual risk
-is acceptable for package registries when no secret is reachable from the VM.
+So: the gateway is the VM's only route and DNS resolver, GitHub and LLM hostnames go to the
+injecting proxy, and everything else (npm, PyPI, crates, release downloads) goes through an
+allowlisting forward proxy such as Squid peek-and-splice or Smokescreen. Domain fronting can evade
+an SNI allowlist without TLS interception
+([secure deployment](https://code.claude.com/docs/en/agent-sdk/secure-deployment)), which is
+acceptable for package registries when the VM can reach no secret.
 
 ### 3.6 Lifecycle
 
@@ -348,22 +333,21 @@ is acceptable for package registries when no secret is reachable from the VM.
 | Park | Hetzner bills a server "regardless of whether it is turned on or not" until it is deleted ([billing FAQ](https://docs.hetzner.com/cloud/billing/faq/)); park by snapshot and delete | stop the VMM; only disk space is used on a host already paid for |
 | Destroy | provider API | remove the TAP, nftables rules, and volume |
 
-exe.dev's own parking is memory ballooning and tiered swap with "a bit more RAM than is advertised"
-([Kubelist ep. 54](https://www.heavybit.com/library/podcasts/the-kubelist-podcast/ep-54-the-age-of-personalized-software-with-david-crawshaw)).
-That density matters to a hosting business with many idle VMs; usine's Workers are busy or deleted.
+exe.dev's memory ballooning and tiered swap (section 1) suit a hosting business with many idle VMs;
+usine's workers are busy or deleted.
 
 ### 3.7 Multi-tenancy
 
-- One VM per customer Worker at minimum. Today several Attempts on one exe.dev VM share the machine,
-  and the VM has edge grants for every repository it is running at once
-  ([ADR 0011](../adr/0011-github-app-identity-scoped-worker-tokens.md)); per-customer Workers keep that
-  sharing inside one customer.
-- On shared hosts, Linux core scheduling keeps two tenants off sibling hyper-threads, which is what
-  exe.dev does per team ([post](https://blog.exe.dev/crossing-the-hyper-thread-boundary),
+- At minimum, one VM per customer worker. Attempts on one exe.dev VM share the machine and its edge
+  grants for every repository it runs
+  ([ADR 0011](../adr/0011-github-app-identity-scoped-worker-tokens.md)); per-customer workers limit
+  that sharing to one customer.
+- On shared hosts, Linux core scheduling keeps two tenants off sibling hyper-threads, as exe.dev does
+  per team ([post](https://blog.exe.dev/crossing-the-hyper-thread-boundary),
   [kernel docs](https://docs.kernel.org/admin-guide/hw-vuln/core-scheduling.html)). exe.dev's
-  argument for single-tenant hosts (a hypervisor escape or cache side channel has no other customer to
-  reach) applies equally to usine ([single tenant](https://exe.dev/docs/enterprise-single-tenant)).
-- The proxy keys every grant by VM, so a customer's VM can never be granted another customer's
+  argument for single-tenant hosts, that a hypervisor escape or cache side channel then has no other
+  customer to reach, applies to usine too ([single tenant](https://exe.dev/docs/enterprise-single-tenant)).
+- The proxy stores every grant per VM, so a customer's VM can't get a grant for another customer's
   repository.
 
 ### 3.8 EU hosting
@@ -385,14 +369,14 @@ nested virtualization on its VPS
 Hetzner, Scaleway, and OVHcloud publish data processing agreements
 ([Hetzner](https://docs.hetzner.com/general/company-and-policy/data-protection-at-hetzner),
 [Scaleway](https://www.scaleway.com/en/docs/account/how-to/download-scaleway-contracts/),
-[OVHcloud](https://contract.eu.ovhapis.com/1.0/pdf/OVH_Data_Protection_Agreement-ie.pdf)). Ubicloud
-already automates Cloud Hypervisor hosts on Hetzner bare metal through the Robot API, which is
-evidence the combination works ([README](https://github.com/ubicloud/ubicloud)).
+[OVHcloud](https://contract.eu.ovhapis.com/1.0/pdf/OVH_Data_Protection_Agreement-ie.pdf)). Ubicloud's
+automation of Cloud Hypervisor hosts on Hetzner bare metal through the Robot API shows the
+combination works ([README](https://github.com/ubicloud/ubicloud)).
 
 ### 3.9 Effort and running cost
 
-These are estimates by the author of this note, not sourced figures, except where a link says
-otherwise. Engineering time assumes one engineer who knows the usine executor.
+The author's estimates, unsourced except where linked, for one engineer who knows the usine
+executor.
 
 | Piece | Build | Running cost | Ongoing operation |
 | --- | --- | --- | --- |
@@ -405,62 +389,56 @@ For sizing, actuated's guide fits 10 jobs of 4 vCPU and 12 GB on a 32-thread, 12
 
 ## 4. Recommendation
 
-No open project gives usine an EU-hostable, SSH-reachable, persistent Worker with a GitHub and LLM
-credential proxy in one piece. E2B's open runtime is single-node and leaves out its injecting proxy,
-Daytona closed its source, Coder keeps agent network controls in Premium, and the projects that do
-inject credentials (CubeSandbox, OpenSandbox, OpenShell, Gondolin, microsandbox) are under a year old
-or are libraries. The pieces exist separately and are small enough to assemble. The executor seam
-needs no change for any stage: credentials are machine-attached capabilities and making a Worker
-ready is adapter-specific ([ADR 0006](../adr/0006-executor-contract-run-host-attempt-channel.md)).
+No open project provides an EU-hostable, SSH-reachable, persistent worker with a GitHub and LLM
+credential proxy (see section 2): the projects that inject credentials (CubeSandbox, OpenSandbox,
+OpenShell, Gondolin, microsandbox) are under a year old or are libraries. The pieces exist
+separately and are small enough to assemble. No stage changes the executor seam: credentials are
+machine-attached capabilities, and making a worker ready is adapter-specific
+([ADR 0006](../adr/0006-executor-contract-run-host-attempt-channel.md)).
 
 ### Stage 1: an `ssh` Worker on a rented EU VM
 
-A third Worker kind for any Linux machine reachable over SSH. One VM per customer at Hetzner
-(Falkenstein, Nuremberg, or Helsinki), built from a cloud-init file kept in the repository, with
-inbound SSH open to the orchestrator only. Children run exactly as on exe.dev today: one SSH command
-each, with the pid file beside the worktree. GitHub access uses the one-hour single-repository token
-the orchestrator already mints, written for the Attempt as the local Worker does and wiped at cleanup.
-Harness logins are on the VM, as on exe.dev today.
+A third worker kind, for any Linux machine reachable over SSH: one VM per customer at Hetzner
+(Falkenstein, Nuremberg, or Helsinki), built from a cloud-init file in the repository, with inbound
+SSH open only to the orchestrator. Children and harness logins work as on exe.dev. GitHub access uses
+the orchestrator's one-hour single-repository token, written for the attempt as on the local worker
+and wiped at cleanup.
 
-Gives up, compared with exe.dev: a GitHub token is on the VM for up to an hour, which is the blast
-radius ADR 0011 already accepts for the local Worker; there is no egress control beyond IP firewall
-rules; a Worker takes minutes to create and cannot be cloned. Gains: customer code is on EU
-infrastructure under the provider's DPA with no US control plane, and pushes are attributed to the
-factory's own App instead of `exe-dev-github-integration[bot]`
+Compared with exe.dev, a GitHub token is on the VM for up to an hour (the blast radius ADR 0011
+accepts for the local worker), egress control is only IP firewall rules, and a worker takes minutes
+to create and can't be cloned. In exchange, customer code is on EU infrastructure under the
+provider's DPA with no US control plane, and pushes are attributed to the instance's own GitHub App
+instead of `exe-dev-github-integration[bot]`
 ([ADR 0011](../adr/0011-github-app-identity-scoped-worker-tokens.md)).
 
 ### Stage 2: a gateway host with the credential proxy and egress allowlist
 
-Worker VMs lose their public address and are reachable only through one gateway VM on a private
-network. The gateway is the SSH bastion (`ProxyJump`), the DNS resolver, the injecting proxy for GitHub and the LLM
-providers, and the allowlisting forward proxy for package registries, with nftables denying anything
-else. The executor's credential step changes from writing a token to attaching it to the gateway for
-that VM and repository, and detaching it at cleanup, which is the shape of exe.dev's
-`integrations attach --for`. API keys and the ChatGPT plan move into the proxy, following exe.dev's
-documented ChatGPT variant. The Claude subscription login stays on the VM until a test shows that a
-placeholder swap at the proxy works and the subscription terms allow it.
+Worker VMs have no public address and are reachable only through one gateway VM on a private
+network. The gateway is the `ProxyJump` bastion (section 3.3), the credential proxy (3.4), and the
+egress layout (3.5), with nftables denying everything else. The executor attaches tokens to it
+instead of writing them to the VM. API keys and the ChatGPT plan move into the proxy, as in exe.dev's
+ChatGPT variant. The Claude subscription login stays on the VM until a test shows that a placeholder
+swap at the proxy works and the subscription terms allow it.
 
-Gives up: Workers are still persistent rented VMs, slow to create. The providers do not document
-whether their private networks stop one VM from using another's source address, so each VM also
-sends a per-VM gateway token; that token is useless outside the private network and grants only what
-the executor attached.
+Workers are still persistent rented VMs, slow to create. The providers don't document whether their
+private networks stop one VM from using another's source address, so each VM also sends the per-VM
+gateway token from section 3.4.
 
 ### Stage 3: our own Cloud Hypervisor hosts
 
-Only if Attempts need their own VM, or Worker count makes rented VMs expensive. Two Hetzner AX102
+Only if attempts need their own VM, or the worker count makes rented VMs expensive: two Hetzner AX102
 hosts (or a Scaleway Elastic Metal machine for a pilot) running Cloud Hypervisor, an image pipeline
-from Dockerfile to ext4, copy-on-write volumes, one TAP and nftables chain per VM, the stage 2
-gateway on each host, and a small host agent that creates, clones, stops, and destroys VMs for the
-executor. With clones in seconds, the executor can give each Attempt its own VM cloned from a warm
-Worker, so Attempts on one Worker are separated by a hypervisor instead of a directory. Ubicloud is
-the alternative to writing the host side ourselves: it already runs Cloud Hypervisor on Hetzner, at
-the cost of an AGPL Ruby control plane, cloud images instead of OCI, and no credential proxy.
+from Dockerfile to ext4, copy-on-write volumes, one TAP and nftables chain per VM, the stage 2 gateway
+on each host, and a small host agent that creates, clones, stops, and destroys VMs for the executor.
+With clones in seconds, each attempt can get its own VM cloned from a warm worker, separated from
+other attempts by a hypervisor instead of a directory. Ubicloud could replace the host side, with
+the limits listed in section 2 and an AGPL licence.
 
-Gives up: we operate hardware. Disk durability depends on mirrored NVMe and on pushes to GitHub, not on
-a streamed replica, and a host is drained ([ADR 0023](../adr/0023-graceful-attempt-drain.md)), not
+We would operate hardware. Disk durability depends on mirrored NVMe and pushes to GitHub, not a
+streamed replica, and hosts are drained ([ADR 0023](../adr/0023-graceful-attempt-drain.md)), not
 live-migrated.
 
-### What exe.dev does that is hard to reproduce, and whether usine needs it
+### exe.dev capabilities that are hard to reproduce
 
 | exe.dev capability | Hard because | Matters for usine |
 | --- | --- | --- |
@@ -472,11 +450,7 @@ live-migrated.
 
 ## Verdict
 
-usine can drop exe.dev for an EU Worker it controls without building exe.dev. Stage 1 is a few days
-of work on top of the existing remote child host and gives EU hosting with the local Worker's
-credential posture: a one-hour, single-repository GitHub token on the machine.
-Stage 2, a gateway with a credential-injecting reverse proxy and an egress allowlist, takes a few
-weeks and removes the GitHub token, API keys, and the ChatGPT login from the machine, matching exe.dev's integrations for
-everything usine uses except the Claude subscription, which needs a test. Stage 3, our own Cloud
-Hypervisor hosts, is the expensive part of exe.dev's shape and is worth building only when
-per-Attempt VMs or Worker density justify operating hardware.
+usine can replace exe.dev with an EU worker it controls without building exe.dev. Stage 1 takes a few
+days and stage 2 a few weeks; together they match exe.dev's integrations for everything usine uses
+except the Claude subscription, which needs a test. Stage 3 is worth building only when per-attempt
+VMs or worker density justify operating hardware.
