@@ -85,12 +85,12 @@ export class RunningAttemptView extends Schema.Class<RunningAttemptView>(
 }) {}
 
 /**
- * An Agent's question or blocker that stops the Loop on the Item until the operator answers or
- * resolves `run`, or the Item changes (ADR 0017).
+ * An Agent's question or blocker that suppresses the Item for the Loop until the operator answers
+ * or resolves `run`, or the Item changes (ADR 0017).
  */
-export class HeldForOperatorView extends Schema.TaggedClass<HeldForOperatorView>(
-  "@usine/orchestrator/HeldForOperatorView",
-)("HeldForOperator", { run: RunView }) {}
+export class SuppressedForOperatorView extends Schema.TaggedClass<SuppressedForOperatorView>(
+  "@usine/orchestrator/SuppressedForOperatorView",
+)("SuppressedForOperator", { run: RunView }) {}
 
 /**
  * `run` succeeded or was canceled on the Item's current state, so the Loop opens no other Run until
@@ -133,7 +133,7 @@ export class AwaitingPollView extends Schema.TaggedClass<AwaitingPollView>(
 /** The reason a matched Item has no running Attempt. */
 export const StallReasonView = Schema.Union([
   AwaitingApprovalView,
-  HeldForOperatorView,
+  SuppressedForOperatorView,
   CycleBudgetUsedUpView,
   RunFailedView,
   ClosedUnchangedView,
@@ -237,11 +237,13 @@ const stallReason = ({
   }
   if (paused) return Option.some(new LoopPausedView());
   const runOf = (runId: RunView["id"]) => Option.fromNullishOr(runs.find(({ id }) => id === runId));
-  const holding = Option.flatMap(
-    Option.flatMap(sighting, ({ heldBy }) => heldBy),
+  const suppressing = Option.flatMap(
+    Option.flatMap(sighting, ({ suppressedBy }) => suppressedBy),
     runOf,
   );
-  if (Option.isSome(holding)) return Option.some(new HeldForOperatorView({ run: holding.value }));
+  if (Option.isSome(suppressing)) {
+    return Option.some(new SuppressedForOperatorView({ run: suppressing.value }));
+  }
   if (Option.isSome(ask)) return Option.some(new CycleBudgetUsedUpView({ ask: ask.value }));
   const owner = Option.flatMap(
     Option.flatMap(sighting, ({ run }) => run),
@@ -263,7 +265,7 @@ const stallReason = ({
  */
 const REASON_ORDER: ReadonlyArray<StallReasonView["_tag"]> = [
   "AwaitingApproval",
-  "HeldForOperator",
+  "SuppressedForOperator",
   "CycleBudgetUsedUp",
   "RunFailed",
   "ClosedUnchanged",
@@ -474,7 +476,7 @@ const makeDesk = Effect.gen(function* () {
         reason: reason.value._tag,
         ...Match.valueTags(reason.value, {
           AwaitingApproval: ({ run }) => ({ runId: run.id }),
-          HeldForOperator: ({ run }) => ({ runId: run.id }),
+          SuppressedForOperator: ({ run }) => ({ runId: run.id }),
           CycleBudgetUsedUp: ({ ask }) => ({ askId: ask.id }),
           RunFailed: ({ run }) => ({ runId: run.id }),
           ClosedUnchanged: ({ run }) => ({ runId: run.id, state: run.state }),

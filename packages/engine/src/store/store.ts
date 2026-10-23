@@ -18,13 +18,13 @@ import { RunDatabase } from "../database/database.ts";
 import {
   Claimed,
   CycleBlocked,
-  Held,
   Ignored,
   Queued,
   reopeningOf,
   runIdFor,
   Submission,
   SubmissionResult,
+  Suppressed,
 } from "../engine/submission.ts";
 import {
   RunNotFoundError,
@@ -48,7 +48,6 @@ import { queriesFor, type QueuedEvents } from "./queries.ts";
 import {
   beginAttempt as decideBeginAttempt,
   cameBack,
-  holdEvent,
   cancelRun,
   claimRun,
   finishAttempt as decideFinishAttempt,
@@ -56,6 +55,7 @@ import {
   type OperatorStop,
   resightEvent,
   retryRun,
+  suppressionDecision,
   type FinishDecision,
   type Settlement,
 } from "../engine/lifecycle.ts";
@@ -147,8 +147,8 @@ const makeRunStore = Effect.gen(function* () {
   });
 
   /**
-   * Claims a recorded Event that has no Run and wasn't ignored: keeps it waiting during an
-   * operator hold, queues it, or opens its Run as `runId`.
+   * Claims a recorded Event that has no Run and wasn't ignored: keeps it waiting during a
+   * suppression, queues it, or opens its Run as `runId`.
    */
   const claimEvent = Effect.fn("RunStore.claimEvent")(function* (
     tx: ReturnType<typeof queriesFor>,
@@ -160,35 +160,35 @@ const makeRunStore = Effect.gen(function* () {
         result: new Ignored({ eventId: recorded.event.id, reason: "superseded" }),
       });
     }
-    const hold = yield* tx.loopItems.hold(recorded.loop, recorded.itemKey);
-    if (Option.isSome(hold)) {
-      const held = holdEvent(hold.value, recorded.event.id);
+    const suppression = yield* tx.loopItems.suppression(recorded.loop, recorded.itemKey);
+    if (Option.isSome(suppression)) {
+      const decision = suppressionDecision(suppression.value, recorded.event.id);
       const fields = {
         eventId: recorded.event.id,
-        heldBy: hold.value.runId,
+        suppressedBy: suppression.value.runId,
         loop: recorded.loop,
         itemKey: recorded.itemKey,
       };
-      switch (held._tag) {
-        case "HoldAt":
-          yield* tx.loopItems.holdAt(recorded.loop, recorded.itemKey, recorded.event.id);
+      switch (decision._tag) {
+        case "SuppressFrom":
+          yield* tx.loopItems.suppressFrom(recorded.loop, recorded.itemKey, recorded.event.id);
           yield* Effect.logInfo(
             "First Item state after the Agent stopped for the operator; it waits for the operator",
             fields,
           );
           return new Claim({
-            result: new Held({ eventId: recorded.event.id, runId: hold.value.runId }),
+            result: new Suppressed({ eventId: recorded.event.id, runId: suppression.value.runId }),
           });
-        case "Hold":
+        case "Suppress":
           yield* Effect.logInfo(
             "Item unchanged since the Agent stopped for the operator; no Run opens",
             fields,
           );
           return new Claim({
-            result: new Held({ eventId: recorded.event.id, runId: hold.value.runId }),
+            result: new Suppressed({ eventId: recorded.event.id, runId: suppression.value.runId }),
           });
-        case "Release":
-          yield* tx.loopItems.release(recorded.loop, recorded.itemKey);
+        case "Lift":
+          yield* tx.loopItems.lift(recorded.loop, recorded.itemKey);
           yield* Effect.logInfo(
             "Item changed after the Agent stopped for the operator; the Loop acts on its new state",
             fields,
@@ -336,8 +336,8 @@ const makeRunStore = Effect.gen(function* () {
   });
 
   // The Event queued during the Attempt is usually the Agent's own question or blocker comment,
-  // so it becomes the held state.
-  const holdForOperator = Effect.fn("RunStore.holdForOperator")(function* (
+  // so it becomes the suppressed state.
+  const suppressForOperator = Effect.fn("RunStore.suppressForOperator")(function* (
     tx: ReturnType<typeof queriesFor>,
     current: RunSnapshot,
     stop: OperatorStop,
@@ -346,7 +346,7 @@ const makeRunStore = Effect.gen(function* () {
     const queued = Option.map(yield* tx.nextQueued(runId), ({ submission }) => submission.event.id);
     const fields = { runId, loop: current.run.loop, itemKey: current.itemKey, stop };
     if (
-      yield* tx.loopItems.startHold(
+      yield* tx.loopItems.startSuppression(
         current.run.loop,
         current.itemKey,
         runId,
@@ -354,14 +354,14 @@ const makeRunStore = Effect.gen(function* () {
         queued,
       )
     ) {
-      yield* Effect.logInfo("Agent stopped for the operator; its Loop holds the Item", {
+      yield* Effect.logInfo("Agent stopped for the operator; its Loop suppresses the Item", {
         ...fields,
-        heldEventId: Option.getOrElse(queued, () => "none yet"),
+        suppressedEventId: Option.getOrElse(queued, () => "none yet"),
       });
       return;
     }
     yield* Effect.logInfo(
-      "Agent stopped for the operator, but nothing is held; the Loop last saw the Item not matching",
+      "Agent stopped for the operator, but nothing is suppressed; the Loop last saw the Item not matching",
       fields,
     );
   });
@@ -580,7 +580,7 @@ const makeRunStore = Effect.gen(function* () {
         const decision = decideFinishAttempt(current, attempt.id, result);
         yield* applyFinish(tx, attempt.runId, decision);
         const stop = operatorStop(decision);
-        if (Option.isSome(stop)) yield* holdForOperator(tx, current, stop.value);
+        if (Option.isSome(stop)) yield* suppressForOperator(tx, current, stop.value);
         return decision;
       }),
     );
@@ -617,9 +617,13 @@ const makeRunStore = Effect.gen(function* () {
           return false;
         }
         yield* tx.resolveFailure(runId, attemptId);
-        const released = yield* tx.loopItems.releaseRun(runId);
-        yield* Effect.logInfo("Run failure resolved", { runId, attemptId, releasedHold: released });
-        return released;
+        const lifted = yield* tx.loopItems.liftRun(runId);
+        yield* Effect.logInfo("Run failure resolved", {
+          runId,
+          attemptId,
+          liftedSuppression: lifted,
+        });
+        return lifted;
       }),
     );
   }, persistence("resolve Run failure"));
@@ -689,9 +693,9 @@ const makeRunStore = Effect.gen(function* () {
               agent: amendment.value.agent.name,
             });
           }
-          // A retry ends the operator hold, so Events queue behind the running Run again.
-          if (yield* tx.loopItems.releaseRun(runId)) {
-            yield* Effect.logInfo("Operator retry ends the hold on the Item", { runId });
+          // A retry lifts the suppression, so Events queue behind the running Run again.
+          if (yield* tx.loopItems.liftRun(runId)) {
+            yield* Effect.logInfo("Operator retry lifts the suppression of the Item", { runId });
           }
           yield* tx.setNextStart(
             runId,
@@ -880,7 +884,7 @@ const makeRunStore = Effect.gen(function* () {
         if ((yield* tx.blockingRun(submission.loop, submission.itemKey)).length > 0) {
           return Option.none<RunId>();
         }
-        if (Option.isSome(yield* tx.loopItems.hold(submission.loop, submission.itemKey))) {
+        if (Option.isSome(yield* tx.loopItems.suppression(submission.loop, submission.itemKey))) {
           return Option.none<RunId>();
         }
         if (!(yield* tx.cycles.isCurrentEvent(submission))) return Option.none<RunId>();
@@ -993,13 +997,13 @@ export class RunStore extends Context.Service<
     /**
      * Records an executor result if `attempt` is still the Run's open Attempt, committing its
      * outcome, the Step result, and the Run state together. A question or blocker also starts the
-     * Loop's operator hold on the Item.
+     * Loop's suppression of the Item.
      */
     readonly finishAttempt: (
       attempt: Attempt,
       result: Result.Result<StepResult, AttemptFailure>,
     ) => Effect.Effect<FinishDecision, RunStoreError>;
-    /** Returns the newest queued Event of the Run's Loop and Item, or `None` during an operator hold. */
+    /** Returns the newest queued Event of the Run's Loop and Item, or `None` during a suppression. */
     readonly nextQueued: (
       runId: RunId,
     ) => Effect.Effect<Option.Option<QueuedEvents>, RunStoreError>;
@@ -1007,7 +1011,7 @@ export class RunStore extends Context.Service<
     readonly parkForApproval: (runId: RunId) => Effect.Effect<RunState.RunState, RunStoreError>;
     /**
      * The closed Runs whose Item still has a queued Event that no continuation opened or revoked,
-     * excluding Items under an operator hold.
+     * excluding Items under a suppression.
      */
     readonly pendingContinuations: Effect.Effect<ReadonlyArray<RunId>, RunStoreError>;
     /** The open Runs that a fiber drives: pending, queued, or running, but not waiting for approval. */
@@ -1048,7 +1052,7 @@ export class RunStore extends Context.Service<
     readonly openAttempts: (worker: WorkerName) => Effect.Effect<number, RunStoreError>;
     /**
      * Marks the current failed Attempt as resolved, rejecting stale requests. Returns whether this
-     * ended an operator hold, so the Item's queued Events get their turn.
+     * lifted a suppression, so the Item's queued Events get their turn.
      */
     readonly resolveFailure: (
       runId: RunId,

@@ -4,12 +4,12 @@ import {
   AwaitingPollView,
   BoardTaskView,
   ClosedUnchangedView,
-  HeldForOperatorView,
   LoopPausedView,
   QueuedForWorkerView,
   RunFailedView,
   RunView,
   StalledItemView,
+  SuppressedForOperatorView,
 } from "@usine/orchestrator/operator";
 import { Option } from "effect";
 import { assert, describe, it } from "vitest";
@@ -199,7 +199,7 @@ describe("Tasks list model", () => {
     // #28's failed review, or the question it ended on, stalls the Loop until the operator acts.
     const pinned = lastRunOf(taskOf(28));
     assert.strictEqual(statusOf(28, new RunFailedView({ run: pinned })), "Stalled");
-    assert.strictEqual(statusOf(28, new HeldForOperatorView({ run: pinned })), "Stalled");
+    assert.strictEqual(statusOf(28, new SuppressedForOperatorView({ run: pinned })), "Stalled");
     const resolved = boardOverviewResolved();
     const failure = new RunFailedView({ run: lastRunOf(taskOf(28, resolved)) });
     assert.strictEqual(statusOf(28, failure, resolved), "Idle");

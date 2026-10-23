@@ -84,14 +84,14 @@ The status is the first that applies:
 3. The stall reason of a pending or queued run, as on the overview.
 4. `Done`, if the current item is merged or closed and no run is open.
 5. A stalled task's reason.
-6. `Needs attention`, if a failed run or a hold needs the operator.
+6. `Needs attention`, if a failed run or a suppression needs the operator.
 7. The last run's outcome, such as `Failed`.
 
 A stall reason includes its own time, such as `Canceled 3d ago, unchanged since`, and gets no second one.
 
 Tasks in flight come first (running, waiting for approval, pending, queued, stalled), each by when its run opened, newest first. A stalled task is in flight while an open run, an agent's question or blocker, a used-up cycle budget, or an unresolved failure blocks one of its loops; its status names that stall. Other tasks follow by when their last run closed, newest first; a run canceled before any attempt counts from the cancel. This includes stalled tasks not blocked that way (last run closed on an unchanged item, item waiting for the next poll, loop paused, or failure resolved), which keep the stall reason as status.
 
-The heading counts tasks without zeros, such as `2 in flight, 1 needs attention, 2 done`; a stalled task not in flight counts as needing attention only while a failed run or a hold needs the operator. The line below totals the listed tasks, such as `197 runs, 12 h 8 min* elapsed, 127.5M tokens, $134.34* estimated`, omitting the cost if nothing is priced and showing a `*` only while a listed task's figure has one, with the reason in its tooltip.
+The heading counts tasks without zeros, such as `2 in flight, 1 needs attention, 2 done`; a stalled task not in flight counts as needing attention only while a failed run or a suppression needs the operator. The line below totals the listed tasks, such as `197 runs, 12 h 8 min* elapsed, 127.5M tokens, $134.34* estimated`, omitting the cost if nothing is priced and showing a `*` only while a listed task's figure has one, with the reason in its tooltip.
 
 Columns follow the table's width, not the window's; [`DESIGN.md`](DESIGN.md#layout) gives the breakpoints and column sizing. On a phone, the table never scrolls sideways.
 

@@ -4,6 +4,6 @@
 "@usine/server": patch
 ---
 
-A child's harness failure, such as a failed Codex turn, ends the attempt with `AgentFailure` and no longer holds the item. Only `[usine:blocked]` ends an attempt with `BlockedFailure`.
+A child's harness failure, such as a failed Codex turn, ends the attempt with `AgentFailure` and no longer suppresses the item. Only `[usine:blocked]` ends an attempt with `BlockedFailure`.
 
 `@usine/agents/runtime` adds `FAILED_MARKER` (`[usine:failed]`), which `reportText` writes for an `AgentResultError` and `reportedOutcome` reads back. The `@usine/durable/testing` stub child adds `fail`, and the run page's reader hides the marker.
