@@ -584,7 +584,7 @@ describe("Run approval", () => {
   const philippe = Option.some(OperatorLogin.make("Philippe"));
   const fromUi = approved(new ApprovalSource({ channel: "ui", approver: philippe }));
   const fromAsk = approved(new ApprovalSource({ channel: "github-ask", approver: philippe }));
-  // Approved before usine recorded who approved.
+  // Approved before usine recorded the approver.
   const unrecorded = approved(null);
   const eventDocument = (view: RunView) =>
     renderToStaticMarkup(
@@ -647,7 +647,7 @@ describe("Run approval", () => {
       );
       assert.notInclude(render(run()), "Run again");
     }
-    // The Event document links the earlier Run's page; the outline entry is a button, so no link.
+    // The Event document links to the earlier Run's page; the outline entry is a button instead.
     assert.include(
       eventDocument(ranAgain(philippe)),
       `href="/projects/basaltbytes/usine/runs/${from}"`,

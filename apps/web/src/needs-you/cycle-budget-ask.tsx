@@ -6,7 +6,7 @@ import { needCopy } from "../operator-copy.ts";
 import { overviewQuery } from "../overview.ts";
 import { NeedItem } from "./need-item.tsx";
 
-/** An Item-level Ask that remains actionable without creating a Run. */
+/** Renders the cycle budget Ask of an Item; resetting the budget does not create a Run. */
 export const CycleBudgetAsk = ({
   need,
   compact,

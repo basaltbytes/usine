@@ -162,8 +162,8 @@ describe("Item cycle budgets", () => {
               yield* store.recordAndClaim(nextTick, idFor(nextTick));
             }),
           );
-          // Reconstruct the pre-feature schema around real Run history, then let
-          // the normal local adapter apply the upgrade on its next startup.
+          // Rebuilds the schema from before cycle budgets around real Run history; the local
+          // adapter applies the upgrade on its next startup.
           yield* Effect.sync(() => {
             const database = new DatabaseSync(join(directory, ".usine/runtime.sqlite"));
             try {

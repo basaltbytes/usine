@@ -5,9 +5,8 @@ import { type AgentSessionError, type OnDelivery, SessionOperationError } from "
 import type { SessionChannel } from "./session.ts";
 
 /**
- * How a harness took an operator message: `read` when it starts the next turn
- * of an idle session or joins the running turn at once, `queued` when the
- * harness reads it only at its next boundary.
+ * How the harness accepted an operator message: `read` if it starts the next turn of an idle session
+ * or joins the running turn immediately, `queued` if the harness reads it at its next boundary.
  */
 export type MessageTaken = "read" | "queued";
 
@@ -15,31 +14,29 @@ interface ConversationOptions {
   readonly session: ChildSession;
   readonly channel: SessionChannel;
   /**
-   * Queues guidance during a turn, or starts another turn in the same idle
-   * session. A harness that answers `queued` reports the read later through
-   * the conversation's `read`.
+   * Queues a message during a turn, or starts another turn in an idle session. If it returns
+   * `queued`, the harness reports the read later through `read`.
    */
   readonly send: (
     message: string,
     activity: "running" | "idle",
   ) => Effect.Effect<MessageTaken, AgentSessionError>;
-  /** Requests a pause using the harness's boundary mechanism. */
+  /** Requests a pause at the harness's next boundary. */
   readonly pause: Effect.Effect<void, AgentSessionError>;
-  /** Releases harness resources only once the session can actually return. */
+  /** Releases harness resources; runs only when the session is about to return. */
   readonly beforeFinish: Effect.Effect<void, AgentSessionError>;
 }
 
-/** An operator message the harness queued, and whom to tell once it reads it or the session stops first. */
+/** An operator message the harness queued, and the callback for when it is read or the session stops. */
 interface QueuedMessage {
   readonly message: string;
   readonly onDelivery: OnDelivery;
 }
 
 /**
- * Keeps an idle child addressable while held, and parks interrupted sessions
- * until guidance arrives. Operator messages the harness queued are reported
- * read when the harness says so, when its turn ends, or as unread when the
- * conversation's scope closes first.
+ * Keeps an idle child addressable while on Hold, and keeps an interrupted session waiting until
+ * guidance arrives. Queued operator messages are reported as read when the harness reads them or the
+ * turn ends, and as unread if the scope closes first.
  */
 export const sessionConversation = Effect.fn("SessionConversation.make")(function* (
   options: ConversationOptions,
@@ -53,7 +50,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
   let resume = yield* Deferred.make<void>();
   const queued: Array<QueuedMessage> = [];
 
-  /** Reports the oldest `count` queued messages read, with the session's state now. */
+  /** Reports the oldest `count` queued messages as read, with the current session state. */
   const deliver = (count: number) =>
     Effect.suspend(() => {
       const read = queued.splice(0, Math.max(0, count));
@@ -92,7 +89,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
   const finish = Effect.fn("SessionConversation.finish")(function* (message: string) {
     yield* Effect.annotateCurrentSpan({ sessionId: session.id });
     if (yield* channel.isTerminal) return;
-    // A turn ends only after its harness read every message queued into it; an interrupted turn may have dropped them.
+    // A completed turn has read every message queued into it; an interrupted turn may drop them.
     if (!paused) yield* deliver(queued.length);
     if (held || paused) {
       idle = Option.some(message);
@@ -140,8 +137,8 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     } else {
       const stopped = Option.isSome(idle) || paused;
       const activity = Option.isSome(idle) ? "idle" : "running";
-      // Completion shares this lock: a successful message owns its Hold before
-      // an in-flight turn can return, while a refused message changes no state.
+      // Completion takes the same lock, so an accepted message sets the Hold before a running turn
+      // can return; a rejected message changes no state.
       taken = yield* options.send(action.message, activity);
       if (action._tag === "OperatorMessage") held = true;
       paused = false;
@@ -165,14 +162,14 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     finish: (message: string) => mutex.withPermits(1)(finish(message)),
     intervene,
     /**
-     * Reports queued operator messages read: `count` answers how many of the
-     * oldest the harness has read, given the queued messages oldest first.
+     * Reports queued operator messages as read; `count` receives the queued messages oldest first and
+     * returns how many of the oldest were read.
      */
     read: (count: (messages: ReadonlyArray<string>) => number) =>
       mutex.withPermits(1)(
         Effect.suspend(() => deliver(count(queued.map(({ message }) => message)))),
       ),
-    /** Harness hooks await this before starting another tool or model request. */
+    /** Waits until the session is not paused; harness hooks run it before each tool call or model request. */
     awaitUnpaused: Effect.suspend(() => (paused ? Deferred.await(resume) : Effect.void)),
     isPaused: Effect.sync(() => paused),
     isClosing: Effect.sync(() => closing),

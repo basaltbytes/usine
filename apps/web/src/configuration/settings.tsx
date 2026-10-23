@@ -3,10 +3,10 @@ import type { ReactNode } from "react";
 import { ConfigurationPage } from "./section.tsx";
 
 interface Setting {
-  /** The key as `usine.yaml` spells it. */
+  /** The key as written in `usine.yaml`. */
   readonly key: string;
   readonly value: ReactNode;
-  /** What the value does, in a sentence. */
+  /** A one-sentence description of what the value does. */
   readonly effect: string;
 }
 
@@ -111,8 +111,7 @@ const groups = (
   ],
 ];
 
-/** The `settings` and `operator` keys of `usine.yaml` and its webhooks mode, defaults applied,
- * each with what its value does. */
+/** Renders the `settings` and `operator` keys of `usine.yaml` and the webhooks mode, with defaults applied. */
 export const SettingsPage = ({ configuration }: { readonly configuration: ConfigurationView }) => (
   <ConfigurationPage title="Settings">
     <div className="flex max-w-4xl flex-col gap-8 pt-2">

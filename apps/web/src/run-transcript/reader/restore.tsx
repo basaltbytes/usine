@@ -6,7 +6,6 @@ import { locateReadingAnchor, type ReadingRow } from "./anchor.ts";
 import { VISIBLE_ROW_EDGE } from "../scroll-position.tsx";
 import type { ReadingAnchor } from "./memory.ts";
 
-/** History uses the page's request and cache seam, including its failure and retry UI. */
 export interface ReaderHistory {
   readonly earlier: TranscriptPageCursor | undefined;
   readonly loading: boolean;
@@ -14,7 +13,7 @@ export interface ReaderHistory {
   readonly load: () => void;
 }
 
-/** Restores only after ancestor disclosures mount; explicit reader navigation cancels the target. */
+/** Restores the scroll position after ancestor disclosures have mounted; a navigation by the reader cancels the restore. */
 export const RestoreReader = ({
   target,
   rows,
@@ -82,7 +81,7 @@ export const RestoreReader = ({
     const frame = requestAnimationFrame(() => {
       const viewport = viewportRef.current;
       if (viewport === null || viewport.clientHeight === 0) return;
-      // Places the saved surface at its saved offset; false when it is not laid out.
+      // Scrolls the saved row to its saved offset; returns false when the row is not laid out.
       const align = (row: ReadingRow, saved: number): boolean => {
         const element = Array.from(
           viewport.querySelectorAll<HTMLElement>("[data-transcript-id]"),
@@ -110,9 +109,9 @@ export const RestoreReader = ({
             ? "Saved place not in the loaded history, showing nearby activity"
             : "Saved row no longer available, showing the nearest activity",
         );
-      // Rows the jump brought into view replace their estimated heights on the next frame;
-      // place the surface again, then let the registry publish the restored scrollability
-      // before permitting capture. Restoration never acknowledges unread activity.
+      // Rows scrolled into view get their measured heights on the next frame, so the row is aligned
+      // again, and capture waits until the registry updates scrollability. Restoring does not
+      // acknowledge unread activity.
       settle = requestAnimationFrame(() => {
         if (location._tag === "Row") align(location.row, location.offset);
         completion = requestAnimationFrame(onRestored);

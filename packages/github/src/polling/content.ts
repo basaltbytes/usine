@@ -1,8 +1,8 @@
 import { Schema } from "effect";
 
 /**
- * Timestamp fields in the payload schemas in payload.ts. Add each new timestamp
- * field here so changes to it remain outside the content hash (ADR 0007).
+ * The timestamp fields in the payload.ts schemas, excluded from the content hash (ADR 0007).
+ * Add each new timestamp field here.
  */
 const TIMESTAMP_FIELDS: ReadonlySet<string> = new Set([
   "closedAt",

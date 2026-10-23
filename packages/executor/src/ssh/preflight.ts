@@ -14,7 +14,7 @@ import type { RemoteCommands } from "../remote/commands.ts";
 import { verifyGateway } from "./gateway/preflight.ts";
 import type { SshMachine } from "./model.ts";
 
-/** Succeeds when `$1` is a directory the SSH user can write to. */
+/** A script that succeeds if `$1` is a directory the SSH user can write to. */
 const WRITABLE_DIRECTORY_SCRIPT = 'test -d "$1" && test -w "$1"';
 
 const capabilityError = (
@@ -25,11 +25,10 @@ const capabilityError = (
 ): WorkerCapabilityError => new WorkerCapabilityError({ worker, capability, message, cause });
 
 /**
- * Verifies an SSH Worker without changing its machine: the SSH client connects
- * to it, the configured root is a writable directory, Git runs, its memory
- * carries its concurrent Attempts, the Gateway in front of it answers and is
- * reachable from it when it has one, and each rostered brain is ready where
- * the Attempt's children run, a Claude brain under the Worker's lock in `logins`.
+ * Verifies an SSH Worker without changing its machine: SSH connects, the root is a writable
+ * directory, Git runs, memory is enough for the concurrent Attempts, the Gateway (if any)
+ * responds and is reachable, and each brain is ready. Claude brains are checked under the
+ * Worker's lock in `logins`.
  */
 export const sshPreflightFor = (
   commands: RemoteCommands,

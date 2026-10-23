@@ -1,52 +1,50 @@
 import type { AgentSessionId } from "@usine/core/agent/session";
 import { Schema } from "effect";
 
-/** Children run as processes on this machine. */
+/** A host that runs children as local processes. */
 export class LocalProcess extends Schema.TaggedClass<LocalProcess>("@usine/agents/LocalProcess")(
   "LocalProcess",
   {},
 ) {}
 
-/** The local SSH executable and the options placed before the destination. */
+/** The local SSH executable and the options before the destination. */
 export const SshCommand = Schema.Struct({
   command: Schema.NonEmptyString,
   args: Schema.Array(Schema.String),
 });
 export type SshCommand = typeof SshCommand.Type;
 
-/** Children run on another machine, each as one SSH command whose standard streams are the child's. */
+/** A host that runs each child on another machine as one SSH command, through its standard streams. */
 export class RemoteShell extends Schema.TaggedClass<RemoteShell>("@usine/agents/RemoteShell")(
   "RemoteShell",
   {
     ssh: SshCommand,
     /**
-     * The SSH client's own process environment: what SSH needs to reach the
-     * machine, never the orchestrator's secrets (ADR 0011), and the variables
-     * an `-o SendEnv=` option in `ssh` names. Only those reach the child, so a
-     * value that must stay out of the command line, such as a Gateway caller
-     * token, travels here; never log this field.
+     * The SSH client's process environment: what SSH needs to connect, never the orchestrator's
+     * secrets (ADR 0011), plus the variables that `-o SendEnv=` options in `ssh` forward to the
+     * child. Use it for values that must not appear on the command line, such as a Gateway caller
+     * token. Never log this field.
      */
     sshEnvironment: Schema.Record(Schema.String, Schema.String),
-    /** The SSH destination, passed to the client as one argument. */
+    /** The SSH destination, passed as one argument. */
     destination: Schema.NonEmptyString,
   },
 ) {}
 
-/** Where an Attempt's children run, chosen by the Worker that prepared its checkout. */
+/** The host that runs an Attempt's children, chosen by the Worker that prepared its checkout. */
 export const ChildHost = Schema.Union([LocalProcess, RemoteShell]);
 export type ChildHost = typeof ChildHost.Type;
 
-/** One command for a host to run. */
+/** A command for a host to run. */
 export interface HostInvocation {
-  /** The directory the command starts in; the host user's home directory when absent. */
+  /** The working directory; defaults to the host user's home directory. */
   readonly cwd?: string | undefined;
   /**
-   * The command's complete environment on this machine. On a remote shell,
-   * the variables exported on top of the shell's own environment; undefined
-   * values are skipped.
+   * The command's complete environment on a local host, or the variables exported on top of a remote
+   * shell's environment; `undefined` values are skipped.
    */
   readonly environment?: Readonly<Record<string, string | undefined>> | undefined;
-  /** On a remote shell, holds the command's pid while it runs, so cleanup can stop it after its SSH client is gone. */
+  /** On a remote shell, the file that contains the command's PID while it runs, so cleanup can stop it after the SSH client exits. */
   readonly pidFile?: string | undefined;
   readonly command: string;
   readonly args: ReadonlyArray<string>;
@@ -59,9 +57,8 @@ const quote = (value: string): string => `'${value.replaceAll("'", `'"'"'`)}'`;
 const quoted = (words: ReadonlyArray<string>): string => words.map(quote).join(" ");
 
 /**
- * The command line a remote POSIX shell runs for `invocation`, every word
- * quoted so it passes OpenSSH's remote-command boundary unchanged. A variable
- * name that is not a shell identifier is a defect, since names are not quoted.
+ * Returns the remote POSIX shell command line for `invocation`, with every word quoted so it passes
+ * through OpenSSH unchanged. Throws if a variable name is not a shell identifier.
  */
 const remoteShellCommand = (invocation: HostInvocation): string => {
   const exports = Object.entries(invocation.environment ?? {}).flatMap(([name, value]) => {
@@ -74,14 +71,14 @@ const remoteShellCommand = (invocation: HostInvocation): string => {
   ];
   const command = [invocation.command, ...invocation.args];
   if (invocation.pidFile === undefined) return [...setup, `exec ${quoted(command)}`].join(" && ");
-  // The inner shell records its own pid, then becomes the command. The file
-  // exists only while the command runs, so cleanup never signals a reused pid.
+  // The inner shell writes its PID, then execs the command. The file exists only while the command
+  // runs, so cleanup never signals a reused PID.
   const pidFile = quote(invocation.pidFile);
   const run = `sh -c 'printf %s "$$" > "$0" && exec "$@"' ${pidFile} ${quoted(command)}`;
   return `${[...setup, run].join(" && ")}; code=$?; rm -f ${pidFile}; exit "$code"`;
 };
 
-/** The SSH client's arguments that run `invocation` on the host's machine: its options, the destination, and one remote command line. */
+/** Returns the SSH client arguments that run `invocation`: the options, the destination, and one remote command line. */
 export const sshArguments = (host: RemoteShell, invocation: HostInvocation): Array<string> => [
   ...host.ssh.args,
   host.destination,
@@ -89,19 +86,15 @@ export const sshArguments = (host: RemoteShell, invocation: HostInvocation): Arr
   remoteShellCommand(invocation),
 ];
 
-/**
- * Where a remote child's pid is kept while it runs: beside its worktree,
- * named by the child's number in its session id.
- */
+/** Returns the PID file path of a remote child: next to its worktree, named by the child number in its session ID. */
 export const childPidFile = (worktree: string, session: AgentSessionId): string =>
   `${worktree}.child-${session.slice(session.lastIndexOf(":") + 1)}.pid`;
 
 /**
- * Stops every child an Attempt still runs on a remote host before its
- * worktree is kept or removed: for each `<worktree>.child-*.pid` that
- * `childPidFile` names, TERM, a bounded wait, then KILL. Run it with `sh -c`
- * and the worktree as `$1`; stdout reports one outcome per pid file. An SSH
- * client that exits does not prove its remote command has stopped.
+ * A shell script that stops an Attempt's remaining remote children before its worktree is kept or
+ * removed: for each `<worktree>.child-*.pid`, it sends TERM, waits, then sends KILL. Run it with
+ * `sh -c` and the worktree as `$1`; it prints one outcome per PID file. An exited SSH client does
+ * not mean that its remote command stopped.
  */
 export const CHILD_KILL_SCRIPT = `
 found=0

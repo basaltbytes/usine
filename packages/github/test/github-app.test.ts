@@ -131,7 +131,7 @@ describe("GitHubApp", () => {
         assert.strictEqual(Redacted.value(worker.value), "worker-secret");
         yield* app.workerToken(covered, "write");
 
-        // One lease serves both orchestrator calls. Each worker call mints afresh.
+        // Both orchestrator calls share one lease; each Worker call mints a new token.
         const discoveries = requests.filter((request) =>
           request.url.endsWith("/app/installations?per_page=2"),
         );

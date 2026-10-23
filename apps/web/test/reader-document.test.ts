@@ -394,7 +394,7 @@ describe("error count", () => {
       attempt(new FailedAttemptView({ failure })),
       new AttemptView({ ...attempt(null), id: second, number: AttemptNumber.make(2) }),
     ]);
-    // The failed push is the last thing the first Attempt did, so its failure counts it.
+    // The push is the first Attempt's last call, so the Attempt failure (event:10) counts it.
     const toolKey = (attempt: AttemptId, callId: string) =>
       JSON.stringify([attempt, child.id, callId]);
     assert.deepEqual(counted, {

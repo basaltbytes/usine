@@ -20,8 +20,8 @@ import ts from "typescript";
  */
 
 /**
- * The unexported constant a class extends in its declaration file, for the three Effect class
- * builders the packages use. TypeScript emits one when the source class extends an expression:
+ * Returns the unexported constant that a class extends in its declaration file, for the three Effect
+ * class builders the packages use. TypeScript emits one when the source class extends an expression:
  * `class Run extends Schema.Class<Run>("Run")({…})` becomes `declare const Run_base:
  * Schema.Class<…>` and `class Run extends Run_base`.
  *
@@ -73,9 +73,10 @@ function baseKind(checker, baseType) {
 }
 
 /**
- * An object type under the class that contains the members this plugin adds to it until
- * `moveMembers` moves them into the class. For a member created directly under the class, TypeDoc
- * looks up the member in the class's instance type to find where it's inherited from, and warns.
+ * Returns an object type under the class that contains the members this plugin adds, until
+ * `moveMembers` moves them into the class. TypeDoc warns about a member created directly under the
+ * class, because it looks the member up in the class's instance type to find where it's inherited
+ * from.
  *
  * @param {import("typedoc").Context} context
  * @param {DeclarationReflection} reflection
@@ -87,9 +88,9 @@ function memberHolder(context, reflection) {
 }
 
 /**
- * Converts the operations of a `Context.ServiceClass<Self, Key, Operations>` base. They are what
- * `yield* Service` returns, and the class only exposes them as the `Service` member declared in
- * Effect, which TypeDoc leaves out as external.
+ * Converts the operations of a `Context.ServiceClass<Self, Key, Operations>` base. They are the
+ * value of `yield* Service`; the class exposes them only as the `Service` member declared in Effect,
+ * which TypeDoc omits as external.
  *
  * @param {import("typedoc").Context} context
  * @param {DeclarationReflection} reflection
@@ -270,10 +271,10 @@ function isTupleReference(checker, type) {
 }
 
 /**
- * An object type listing each property of `type` with the type the checker resolves for it.
- * TypeDoc renders the `props` type of a `Schema.Class` constructor as `object`, because the type
- * is the result of mapped types and has no symbol of its own. Its kind is `Interface` rather than
- * `TypeLiteral`, so the parameters table shows it in one row instead of one row per property.
+ * Returns an object type that lists each property of `type` with its resolved type. TypeDoc renders
+ * the `props` type of a `Schema.Class` constructor as `object` because the type comes from mapped
+ * types and has no symbol. The kind is `Interface`, not `TypeLiteral`, so the parameters table
+ * shows it in one row instead of one row per property.
  *
  * @param {import("typedoc").Context} context
  * @param {ts.Type} type

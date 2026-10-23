@@ -4,27 +4,22 @@ import type { InstanceDirectory } from "@usine/core/instance";
 import { Effect, FileSystem, Option, Path, type PlatformError, Schema } from "effect";
 import { durableStoragePath } from "./storage-path.ts";
 
-/** A failed durable storage backup, with both paths because a copy error can come from either file. */
+/**
+ * A failed durable storage backup, with both paths because a copy error can come from either file.
+ */
 export class DurableStorageBackupError extends Schema.TaggedError<DurableStorageBackupError>(
   "@usine/durable/DurableStorageBackupError",
 )("DurableStorageBackupError", {
   /**
-   * The backup step that failed. `open`: checking or opening the durable storage file.
-   * `stage`: creating the temporary copy beside `destination`. `copy`: SQLite's backup into
-   * that copy. `publish`: hard-linking the copy to `destination`, which fails when a file
-   * already exists there.
+   * The failed step: `open` (the storage file), `stage` (the temporary copy), `copy` (SQLite's
+   * backup), or `publish` (the hard link to `destination`, which fails if the file exists).
    */
   operation: Schema.Literals(["open", "stage", "copy", "publish"]),
-  /** Path of the instance's durable storage file, `.usine/durable.sqlite` in the instance directory. */
+  /** The path of `.usine/durable.sqlite` in the instance directory. */
   source: Schema.String,
-  /** The destination path the caller passed to `backup`. */
   destination: Schema.String,
-  /**
-   * A short description of the failure for operators: the platform error's description or code,
-   * SQLite's error message, or why the source is not a regular file.
-   */
+  /** A short operator-facing description of the failure. */
   reason: Schema.String,
-  /** The underlying file system or SQLite error. */
   cause: Schema.Defect(),
 }) {}
 
@@ -43,13 +38,8 @@ const sqliteReason = (cause: unknown): string =>
   cause instanceof Error && cause.message.length > 0 ? cause.message : String(cause);
 
 /**
- * Copies the instance's `.usine/durable.sqlite` to `destination` while the
- * orchestrator runs, through SQLite's backup API on a read-only connection, so
- * the copy holds every committed transaction, including those still in the
- * WAL. The copy is written beside the destination, then hard-linked into place,
- * so an existing file is never overwritten; the destination directory must
- * exist and support hard links. Returns false, writing nothing, when the
- * instance has no durable storage yet.
+ * Copies `.usine/durable.sqlite`, including its WAL, to `destination` without overwriting an
+ * existing file. Returns `false` if the instance has no durable storage.
  */
 export const backup = Effect.fn("DurableStorage.backup")(
   function* (instanceDirectory: InstanceDirectory, destination: string) {
@@ -96,7 +86,8 @@ export const backup = Effect.fn("DurableStorage.backup")(
         yield* fileSystem
           .writeFile(staged, new Uint8Array(), { mode: 0o600 })
           .pipe(Effect.mapError(failed("stage", platformReason)));
-        // The copy cannot be canceled; it finishes before the connection closes and staging is removed.
+        // The backup cannot be canceled; it completes before the connection is closed and the
+        // staged file removed.
         const pages = yield* Effect.acquireUseRelease(
           Effect.try({
             try: () => new DatabaseSync(source, { readOnly: true, timeout: 5_000 }),

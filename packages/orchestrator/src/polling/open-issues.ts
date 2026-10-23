@@ -7,10 +7,10 @@ import { RepositoryPollFailure, repositoryFailureLogFields } from "./cycle.ts";
 import { revokeMissingItem } from "./loop-evaluation.ts";
 import { markItemGone } from "./repository-sync.ts";
 
-/** How long a repository waits after checking its open issues before the poll checks them again. */
+/** The minimum time between open issue checks of a repository. */
 export const OPEN_ISSUE_CHECK_INTERVAL = Duration.minutes(10);
 
-/** What one check of a repository's open issues gave its poll cycle. */
+/** The result of one open issue check in a poll cycle. */
 interface OpenIssueCheck {
   readonly revokedRuns: number;
   readonly failures: ReadonlyArray<RepositoryPollFailure>;
@@ -24,13 +24,9 @@ export const NO_OPEN_ISSUE_CHECK: OpenIssueCheck = {
 };
 
 /**
- * Asks GitHub whether it still has each issue that `repository`'s stored
- * projections show as open. Change detection never lists an issue that was
- * deleted or transferred, so this is how such an issue leaves the Board's open
- * lanes: each one GitHub no longer has is marked gone and its unstarted Runs
- * are revoked, as for an Item that only the poll cursor kept. A failed GitHub
- * request is logged and reported, and a rate limit becomes a backoff; neither
- * stops the repository's cycle. Persistence failures do.
+ * Marks each issue stored as open in `repository` that GitHub no longer has as gone, and revokes
+ * its unstarted Runs. Reports GitHub request failures without failing the cycle; fails on
+ * persistence errors.
  */
 export const checkOpenIssues = Effect.fn("PollingTriggers.checkOpenIssues")(function* (
   repository: ManagedRepo,

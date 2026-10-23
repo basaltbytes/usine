@@ -17,6 +17,7 @@ import {
   ChildSessionBudget,
   ChildSessionCount,
   SessionFinished,
+  sessionPool,
 } from "@usine/core/agent/session";
 import { Deferred, Effect, Exit, Fiber, Match, Option, Result, Stream } from "effect";
 import { durableError } from "../harness.ts";
@@ -27,7 +28,7 @@ import { storedRequestOf } from "./request.ts";
 import type { ExtensionServices } from "./services.ts";
 import { firstAccepted } from "./watch.ts";
 
-/** The parent's only tool. */
+/** The name of the parent's only tool. */
 export const SUBAGENT_TOOL = "subagent";
 
 type SpawnDetails = { childSessionId: string };
@@ -59,7 +60,7 @@ const aborted = (context: ChordContext, sessionId: AgentSessionId): Effect.Effec
       }),
   });
 
-/** Keeps the child addressable by id for operator input while its scope is open. */
+/** Registers the child in `hub.children` until the scope closes. */
 const register = (hub: AttemptHub, child: RunningSession) =>
   Effect.acquireRelease(
     Effect.sync(() => {
@@ -69,10 +70,9 @@ const register = (hub: AttemptHub, child: RunningSession) =>
   );
 
 /**
- * Builds the `subagent` tool: one call delegates one focused task to a child
- * of the Agent's harness, in the Attempt's checkout, and returns its report. A
- * child is not replay-safe: after a restart the call settles as interrupted
- * with the output committed so far, and the parent may spawn a new child.
+ * Builds the `subagent` tool, which runs one task in a child of the Agent's harness and returns the
+ * child's report. After a restart, a running call ends as interrupted, because children aren't
+ * replay-safe.
  */
 export const subagentTool = (services: ExtensionServices) => {
   const spawn = Effect.fn("Subagent.spawn")(function* (
@@ -139,11 +139,13 @@ export const subagentTool = (services: ExtensionServices) => {
       );
     }
     const request = yield* Deferred.await(hub.attached);
+    // Read when each child starts, so a preflight that ran after the Attempt launched applies.
     const session = new ChildSession({
       id: AgentSessionId.make(`${parentId}:child:${attemptedChildren}`),
       parentId,
       agent: spec.agent.name,
       brain: spec.agent.brain,
+      gatewayCredential: yield* request.gatewayCredential,
     });
     const childRequest = new ChildRequest({
       session,
@@ -162,11 +164,11 @@ export const subagentTool = (services: ExtensionServices) => {
       attemptedChildren,
       maxChildren: spec.maxChildren,
       sessionId: session.id,
+      pool: sessionPool(session),
       taskExcerpt: excerpt,
     });
-    // The child's own logs, including its fibers', name the Attempt: this tool runs outside it.
-    // A launch can wait out retry delays before it starts the child, so an abort interrupts it
-    // there and the tool's scope closes whatever it opened.
+    // Annotate logs with the Attempt because this tool runs outside the Attempt's fiber. An abort
+    // interrupts a launch that is still waiting through retry delays.
     const child = yield* Effect.raceFirst(
       services.backend
         .launch(childRequest)
@@ -214,7 +216,8 @@ export const subagentTool = (services: ExtensionServices) => {
             : Effect.void,
         ),
       );
-    // The child's result carries the same report that ends its stream.
+    // These errors end the stream with the same report the child's result contains, so they are
+    // ignored here.
     const forwarding = yield* child.events.pipe(
       Stream.runForEach(forward),
       Effect.catchTag(

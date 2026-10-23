@@ -1,26 +1,21 @@
 ---
 title: Expressions
-description: The CEL dialect of Loop conditions and prompt interpolation, the item and repo variables for each trigger, and the functions and macros available.
+description: The CEL dialect of loop conditions and prompt interpolation, the item and repo variables for each trigger, and the functions and macros available.
 sidebar:
   order: 4
 ---
 
-Loop files use expressions in two places:
+Loop files use [CEL](https://github.com/google/cel-spec) expressions in `trigger.if`, which must produce a `bool`, and in each `{{ ... }}` of the body, which must produce a `string`, `int`, `uint`, `double`, `bool`, or `null`. The `@usine/expression` package evaluates them with [`@marcbachmann/cel-js`](https://www.npmjs.com/package/@marcbachmann/cel-js) 8.0.0 ([`marcbachmann-cel.ts`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/expression/src/marcbachmann-cel.ts#L245)).
 
-- `trigger.if` selects Items. It must produce a `bool`.
-- Each `{{ ... }}` in the Loop body inserts a value into the task. It must produce a scalar: `string`, `int`, `uint`, `double`, `bool`, or `null`.
-
-Expressions use [CEL](https://github.com/google/cel-spec), the Common Expression Language. The `@usine/expression` package evaluates them with [`@marcbachmann/cel-js`](https://www.npmjs.com/package/@marcbachmann/cel-js) 8.0.0 ([`marcbachmann-cel.ts`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/expression/src/marcbachmann-cel.ts#L245)).
-
-The environment is typed. When a Loop file loads, usine type-checks every expression against the variables of its trigger's Stream, and quarantines the Loop on an unknown field, a type mismatch, or a wrong result type. Evaluation happens later, against each Item's payload or each Tick.
+When a loop file loads, usine type-checks every expression against its stream's variables, and quarantines the loop on an unknown field, a type mismatch, or a wrong result type. Evaluation happens later, against each item's payload or tick.
 
 ## Variables
 
-Every expression can use two variables, `repo` and `item`. Their types come from the payload slices in [`payload-slices.ts`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/payload-slices.ts#L173), and the values come from GitHub's GraphQL API with GitHub's field names ([`queries.ts`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/github/src/polling/queries.ts#L1)).
+Expressions can use `repo` and `item`. Their types come from the payload slices in [`payload-slices.ts`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/payload-slices.ts#L173), and the values come from GitHub's GraphQL API, with GitHub's field names ([`queries.ts`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/github/src/polling/queries.ts#L1)).
 
 ### `repo`
 
-The managed repository the Item or Tick belongs to ([`repositoryContext`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/payload-slices.ts#L244)).
+The managed repository that the item or tick belongs to ([`repositoryContext`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/payload-slices.ts#L244)).
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -30,7 +25,7 @@ The managed repository the Item or Tick belongs to ([`repositoryContext`](https:
 
 ### `item` for `on: issue`
 
-The issue payload slice ([`IssuePayload`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/github/src/polling/payload.ts#L48)). A field marked nullable can be `null` on a given Item; see [fields that can be null](#fields-that-can-be-null).
+The issue payload slice ([`IssuePayload`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/github/src/polling/payload.ts#L48)). A field marked nullable can be `null` on a given item. See [Fields that can be null](#fields-that-can-be-null).
 
 | Field | Type | Nullable | Description |
 | --- | --- | --- | --- |
@@ -44,8 +39,8 @@ The issue payload slice ([`IssuePayload`](https://github.com/basaltbytes/usine/b
 | `updatedAt` | string | | ISO 8601 UTC timestamp. |
 | `closedAt` | string | yes | ISO 8601 UTC timestamp. |
 | `author.login` | string | `author` | `author` is null for a deleted account. |
-| `issueType.name` | string | `issueType` | `issueType` is null when the issue has no type. |
-| `milestone.title` | string | `milestone` | `milestone` is null when the issue has no milestone. |
+| `issueType.name` | string | `issueType` | `issueType` is null if the issue has no type. |
+| `milestone.title` | string | `milestone` | `milestone` is null if the issue has no milestone. |
 | `labels.totalCount` | int | | |
 | `labels.nodes[].name` | string | | The first 50 labels. |
 | `assignees.totalCount` | int | | |
@@ -53,7 +48,7 @@ The issue payload slice ([`IssuePayload`](https://github.com/basaltbytes/usine/b
 | `comments.totalCount` | int | | |
 | `comments.nodes[]` | list | | The last 20 comments: `author.login` (`author` nullable), `body`, `createdAt`. |
 | `closedByPullRequestsReferences.totalCount` | int | | |
-| `closedByPullRequestsReferences.nodes[]` | list | | The first 10 pull requests that close the issue, closed ones included: `number`, `state`, `isDraft`, `url`. |
+| `closedByPullRequestsReferences.nodes[]` | list | | The first 10 pull requests that close the issue, including closed ones: `number`, `state`, `isDraft`, `url`. |
 
 ### `item` for `on: pr`
 
@@ -74,14 +69,14 @@ The pull-request payload slice ([`PullRequestPayload`](https://github.com/basalt
 | `author.login` | string | `author` | `author` is null for a deleted account. |
 | `baseRefName` | string | | The target branch. |
 | `headRefName` | string | | The source branch. |
-| `headRefOid` | string | | The head commit SHA. Attempts of `pr` Loops start from this commit. |
+| `headRefOid` | string | | The head commit SHA. Attempts of `pr` loops start from this commit. |
 | `additions` | int | | |
 | `deletions` | int | | |
 | `changedFiles` | int | | |
-| `reviewDecision` | string | yes | `APPROVED`, `CHANGES_REQUESTED`, or `REVIEW_REQUIRED`; null when the branch requires no review. |
+| `reviewDecision` | string | yes | `APPROVED`, `CHANGES_REQUESTED`, or `REVIEW_REQUIRED`. Null if the branch requires no review. |
 | `mergeable` | string | | `MERGEABLE`, `CONFLICTING`, or `UNKNOWN`. GitHub computes it lazily, so the first poll after the base branch changes can return `UNKNOWN`. |
 | `mergeStateStatus` | string | | GitHub's merge state, such as `CLEAN`, `BLOCKED`, `BEHIND`, or `DIRTY`. |
-| `statusCheckRollup.state` | string | `statusCheckRollup` | The combined check state, such as `SUCCESS`, `FAILURE`, or `PENDING`. `statusCheckRollup` is null when the head commit has no checks. |
+| `statusCheckRollup.state` | string | `statusCheckRollup` | The combined check state, such as `SUCCESS`, `FAILURE`, or `PENDING`. `statusCheckRollup` is null if the head commit has no checks. |
 | `labels.totalCount` | int | | |
 | `labels.nodes[].name` | string | | The first 50 labels. |
 | `reviewRequests.totalCount` | int | | |
@@ -93,32 +88,32 @@ The pull-request payload slice ([`PullRequestPayload`](https://github.com/basalt
 | `comments.totalCount` | int | | |
 | `comments.nodes[]` | list | | The last 20 comments: `author.login` (`author` nullable), `body`, `createdAt`. |
 | `closingIssuesReferences.totalCount` | int | | |
-| `closingIssuesReferences.nodes[]` | list | | The first 10 issues the pull request closes: `number`, `state`. |
+| `closingIssuesReferences.nodes[]` | list | | The first 10 issues that the pull request closes: `number`, `state`. |
 
-`requestedReviewer` is null when the reviewer is a deleted account. A team review request has no `login`, so `login` reads as `null`.
+`requestedReviewer` is null if the reviewer is a deleted account. A team review request has no `login`, so `login` reads as `null`.
 
 ### `item` for `on: schedule`
 
-A schedule has no GitHub Item. `item` contains the Tick ([`tickPayload`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/schedule-triggers.ts#L193)).
+A schedule has no GitHub item. `item` contains the tick ([`tickPayload`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/schedule-triggers.ts#L193)).
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `item.tick.scheduledAt` | string | The time the Tick was scheduled for, in UTC, such as `2026-10-19T07:00:00.000Z`. |
+| `item.tick.scheduledAt` | string | The time that the tick was scheduled for, in UTC, such as `2026-10-19T07:00:00.000Z`. |
 | `item.tick.scheduledAtLocal` | string | The same instant in the trigger's time zone, such as `2026-10-19T09:00:00.000+02:00[Europe/Paris]`. |
 | `item.tick.cron` | string | The trigger's `cron`. |
 | `item.tick.tz` | string | The trigger's `tz`. |
 
 ## Fields that can be null
 
-The CEL environment declares the fields marked nullable above as nullable ([`payload-slices.ts`](https://github.com/basaltbytes/usine/blob/main/packages/config/src/payload-slices.ts)). On an Item where such a field is null:
+The fields marked nullable above are nullable in the CEL environment ([`payload-slices.ts`](https://github.com/basaltbytes/usine/blob/main/packages/config/src/payload-slices.ts)). When such a field is null:
 
-- Comparing it with a value gives `false`: `item.reviewDecision == "APPROVED"` is `false` when the branch requires no review.
-- Comparing it with `null` tells whether GitHub has a value, in either order: `item.milestone != null`, `null == item.author`.
-- Reading a field below a null object fails evaluation: `item.milestone.title == "v1"` fails with `No such key: title` on an issue without a milestone. Test the object first: `item.milestone != null && item.milestone.title == "v1"`. CEL's `&&` returns `false` when either side is `false`, even if the other side fails.
-- Selecting through it with `.?` gives an empty optional instead of failing, and `orValue` supplies the fallback: `item.?milestone.?title.orValue("none")` is `"none"` on an issue without a milestone. A null field still counts as present, so `item.?reviewDecision.orValue("NONE")` is `null` when the branch requires no review. See [optional values](#optional-values).
-- `has(item.milestone.title)` is `false`. `has(item.milestone)` is `true`, because the field exists even when its value is null; test the value with `!= null`.
+- Comparing it with a value gives `false`: `item.reviewDecision == "APPROVED"` is `false` if the branch requires no review.
+- Comparing it with `null`, in either order, tests for a value: `item.milestone != null`, `null == item.author`.
+- Reading a field of a null object fails the evaluation: `item.milestone.title == "v1"` fails with `No such key: title` on an issue without a milestone. Test the object first: `item.milestone != null && item.milestone.title == "v1"`. CEL's `&&` returns `false` if either side is `false`, even if the other side fails.
+- Selecting through it with `.?` gives an empty optional instead of failing, and `orValue` supplies the fallback: `item.?milestone.?title.orValue("none")` is `"none"` on an issue without a milestone. A null field still counts as present, so `item.?reviewDecision.orValue("NONE")` is `null` if the branch requires no review. See [Optional values](#optional-values).
+- `has(item.milestone.title)` is `false`, but `has(item.milestone)` is `true`, because the field exists. Test the value with `!= null`.
 
-Fields below a nullable object keep their types, so a misspelled `item.milestone.titel` still stops the Loop from loading. Field names after `.?` aren't checked; see [optional values](#optional-values).
+Fields of a nullable object keep their types, so a misspelled `item.milestone.titel` still quarantines the loop. Field names after `.?` aren't checked. See [Optional values](#optional-values).
 
 ```yaml title="loops/plan-milestone.md"
 trigger:
@@ -128,18 +123,18 @@ trigger:
 
 In the body, `{{ item.milestone != null ? item.milestone.title : "no milestone" }}` and `{{ item.?milestone.?title.orValue("no milestone") }}` both render on every issue. A null value renders as `null`.
 
-## What happens when evaluation fails
+## Evaluation failures
 
-A failure at evaluation time doesn't quarantine the Loop, because the file already passed its checks:
+An evaluation failure doesn't quarantine the loop:
 
-- **`if` of an `issue` or `pr` Loop.** The failure applies to that Loop on that Item only. usine opens no Run for them and leaves the Item's queued Runs as they are; the Item's other Loops, the repository's other Items, and the poll cursor go on. **Needs attention** shows the failure with the Loop and the Item for as long as the Loop fails on that Item, and usine logs it once per Loop, Item, and content hash ([`evaluation-failures.ts`](https://github.com/basaltbytes/usine/blob/main/packages/orchestrator/src/polling/evaluation-failures.ts)). The first poll after a restart or a reload fetches the failing Items again, so a fixed Loop evaluates them without waiting for them to change.
-- **`if` of a `schedule` Loop.** The Tick fails for that repository, and usine evaluates it again at the next wake.
-- **The re-check before a queued Run opens.** usine logs a warning and the Run opens as if the check had passed ([`TriggerCondition.recheck`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/trigger-condition.ts#L87)).
-- **A `{{ ... }}` interpolation.** See [when rendering fails](/reference/configuration/loop-files/#when-rendering-fails).
+- **`if` of an `issue` or `pr` loop.** usine opens no run for that loop on that item and leaves the item's queued runs as they are. Other loops, other items, and the poll cursor continue. **Needs attention** shows the failure with the loop and the item while it lasts, and usine logs it once per loop, item, and content hash ([`evaluation-failures.ts`](https://github.com/basaltbytes/usine/blob/main/packages/orchestrator/src/polling/evaluation-failures.ts)). The first poll after a restart or a reload fetches failing items again, so a fixed loop evaluates them without waiting for a change.
+- **`if` of a `schedule` loop.** The tick fails for that repository, and usine evaluates it again at the next wake.
+- **The recheck before a queued run opens.** usine logs a warning, and the run opens as if the check had passed ([`TriggerCondition.recheck`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/trigger-condition.ts#L87)).
+- **A `{{ ... }}` interpolation.** See [Render failures](/reference/configuration/loop-files/#render-failures).
 
 ## Language
 
-The environment registers only the types and variables above. It adds no functions to cel-js's standard set, and it enables CEL's [optional values](#optional-values).
+The environment registers only the types and variables above. It adds no functions to the cel-js standard set and enables CEL [optional values](#optional-values).
 
 ### Operators
 
@@ -159,7 +154,7 @@ The environment registers only the types and variables above. It adds no functio
 | `list.filter(x, predicate)` | list | `item.reviews.nodes.filter(r, r.state == "COMMENTED")` |
 | `list.map(x, expression)` | list | `item.labels.nodes.map(label, label.name)` |
 | `list.map(x, predicate, expression)` | list | `item.reviews.nodes.map(r, r.state == "COMMENTED", r.body)` |
-| `has(object.field)` | bool | `false` when `object` is null; see above. |
+| `has(object.field)` | bool | `false` if `object` is null. See [Fields that can be null](#fields-that-can-be-null). |
 | `cel.bind(name, value, expression)` | any | `cel.bind(n, size(item.labels.nodes), n > 0 && n < 5)` |
 
 ### Functions
@@ -168,19 +163,19 @@ The environment registers only the types and variables above. It adds no functio
 | --- | --- |
 | `size(x)`, `x.size()` | Length of a string, list, or map. |
 | `s.contains(t)`, `s.startsWith(t)`, `s.endsWith(t)` | Substring tests. |
-| `s.matches(re)` | Regular expression test, in JavaScript `RegExp` syntax. Inline flags such as `(?i)` aren't supported; write `[Cc][Ss][Vv]` or lowercase first. |
+| `s.matches(re)` | Regular expression test, in JavaScript `RegExp` syntax. Inline flags such as `(?i)` aren't supported. Write `[Cc][Ss][Vv]`, or convert to lowercase first. |
 | `s.lowerAscii()`, `s.upperAscii()`, `s.trim()` | Case and whitespace. |
-| `s.indexOf(t)`, `s.lastIndexOf(t)`, `s.substring(start, end)` | Positions and slices; indexes start at 0. |
+| `s.indexOf(t)`, `s.lastIndexOf(t)`, `s.substring(start, end)` | Positions and slices. Indexes start at 0. |
 | `s.split(separator)` | List of strings. |
 | `list.join()`, `list.join(separator)` | Joins a list of strings. |
 | `string(x)`, `int(x)`, `uint(x)`, `double(x)`, `bool(x)`, `bytes(x)`, `dyn(x)` | Conversions. |
 | `type(x)` | The type of a value. |
 | `timestamp(s)` | Parses an ISO 8601 string, such as `item.updatedAt`. |
 | `duration(s)` | Parses a duration such as `"72h"`, `"30m"`, or `"1h30m"`. |
-| `t.getFullYear()`, `t.getMonth()`, `t.getDate()`, `t.getDayOfMonth()`, `t.getDayOfWeek()`, `t.getDayOfYear()`, `t.getHours()`, `t.getMinutes()`, `t.getSeconds()`, `t.getMilliseconds()` | Parts of a timestamp, in UTC, or in the time zone passed as argument. `getMonth` and `getDayOfMonth` start at 0, `getDate` at 1, and `getDayOfWeek` is 0 on Sunday. |
+| `t.getFullYear()`, `t.getMonth()`, `t.getDate()`, `t.getDayOfMonth()`, `t.getDayOfWeek()`, `t.getDayOfYear()`, `t.getHours()`, `t.getMinutes()`, `t.getSeconds()`, `t.getMilliseconds()` | Parts of a timestamp, in UTC or in the time zone passed as an argument. `getMonth` and `getDayOfMonth` start at 0, `getDate` at 1, and `getDayOfWeek` is 0 on Sunday. |
 | `d.getHours()`, `d.getMinutes()`, `d.getSeconds()`, `d.getMilliseconds()` | Parts of a duration. |
 
-Subtracting two timestamps gives a duration, and you can compare two durations. No function returns the current time. A schedule Loop can use `item.tick.scheduledAt` instead.
+Subtracting two timestamps gives a duration, and durations compare. No function returns the current time. A schedule loop can use `item.tick.scheduledAt`.
 
 ### Optional values
 
@@ -188,26 +183,26 @@ Subtracting two timestamps gives a duration, and you can compare two durations. 
 
 | Syntax | Result |
 | --- | --- |
-| `object.?field` | The field, or no value when `object` is null or has no such key. |
-| `map.?key`, `map[?key]` | The entry, or no value when the key is absent. |
-| `list[?index]` | The item, or no value when the index is out of range: `item.labels.nodes[?0].?name.orValue("none")`. |
-| `o.orValue(fallback)` | The value, or `fallback` when there is none. `fallback` must have the value's type. |
-| `o.or(other)` | `o` when it has a value, otherwise the optional `other`. |
+| `object.?field` | The field, or no value if `object` is null or has no such key. |
+| `map.?key`, `map[?key]` | The entry, or no value if the key is absent. |
+| `list[?index]` | The item, or no value if the index is out of range: `item.labels.nodes[?0].?name.orValue("none")`. |
+| `o.orValue(fallback)` | The value, or `fallback` if there is none. `fallback` must have the value's type. |
+| `o.or(other)` | `o` if it has a value, otherwise the optional `other`. |
 | `o.hasValue()` | Whether `o` has a value. |
-| `o.value()` | The value. Evaluation fails when there is none. |
+| `o.value()` | The value. Evaluation fails if there is none. |
 | `optional.of(x)`, `optional.none()` | An optional with or without a value. |
 
-An `if` must still produce a `bool` and an interpolation a scalar, so end a chain with `orValue` or `hasValue()`: `{{ item.?milestone.?title }}` fails validation with `Expected a scalar value, got optional<string>`.
+An `if` must still produce a `bool` and an interpolation a scalar, so end a chain with `orValue` or `hasValue()`. `{{ item.?milestone.?title }}` fails validation with `Expected a scalar value, got optional<string>`.
 
 cel-js doesn't check field names after `.?`, so `item.?milestone.?titel.orValue("none") == "v1"` loads and is always `false`. In an `if`, where such a typo silently changes which items match, prefer the `!= null` form, which keeps field names checked.
 
 ## Label declarations
 
-When an instance loads, usine collects the string literals that a Loop's `if` compares with the `name` of a value under `item.labels`, through `==`, `!=`, `in`, and the `exists`, `all`, `exists_one`, `filter`, and `map` macros ([`relatedStringLiterals`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/expression/src/marcbachmann-cel.ts#L225)). A literal that isn't declared under `labels` in `usine.yaml` produces the warning `Loop trigger references an undeclared GitHub label`, and the Loop still loads.
+When an instance loads, usine collects the string literals that a loop's `if` compares with a label `name` under `item.labels`, through `==`, `!=`, `in`, and the `exists`, `all`, `exists_one`, `filter`, and `map` macros ([`relatedStringLiterals`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/expression/src/marcbachmann-cel.ts#L225)). For each literal that `usine.yaml` doesn't declare under `labels`, it logs `Loop trigger references an undeclared GitHub label`. The loop still loads.
 
-## Examples from real Loops
+## Examples
 
-An issue is ready and no open pull request closes it yet:
+An issue is ready, and no open pull request closes it yet:
 
 ```yaml title="loops/start-dev.md"
 if: >-
@@ -216,7 +211,7 @@ if: >-
   !item.closedByPullRequestsReferences.nodes.exists(pr, pr.state == "OPEN")
 ```
 
-A pull request is ready for review and no outcome label is present:
+A pull request is ready for review, and no outcome label is present:
 
 ```yaml title="loops/review-pr.md"
 if: >-
@@ -227,7 +222,7 @@ if: >-
   !item.labels.nodes.exists(label, label.name == "ready-to-merge")
 ```
 
-A review left findings to fix. The condition doesn't count reviews: the Loop's `max_cycles` limits the review and fix rounds on each pull request ([Bounded review and fix Loops](/guides/review-fix-loops/)):
+A review left findings to fix. The loop's `max_cycles`, not the condition, limits the rounds ([Write review and fix loops](/guides/review-fix-loops/)):
 
 ```yaml title="loops/act-on-findings.md"
 if: >-
@@ -263,7 +258,7 @@ if: >-
   timestamp(item.tick.scheduledAt).getDayOfWeek(item.tick.tz) != 6
 ```
 
-Prompt interpolations from the same Loops:
+Prompt interpolations from the same loops:
 
 ```markdown title="loops/rebase-pr.md"
 Pull request #{{ item.number }} is marked `ready-to-merge` but GitHub reports its branch `{{ item.headRefName }}` as conflicting with `{{ item.baseRefName }}`.

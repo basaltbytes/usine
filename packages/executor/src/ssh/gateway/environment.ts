@@ -4,20 +4,15 @@ import { type CallerToken, GATEWAY_TOKEN_HEADER } from "@usine/gateway/admin";
 import { Redacted } from "effect";
 
 /**
- * The Unix socket on a Worker behind a Gateway that systemd forwards to the
- * Gateway's port 80 (`infra/hetzner/gateway/worker-cloud-init.yaml`). gh
- * sends plain HTTP over it; to `GH_HOST` itself it sends only HTTPS.
+ * The Unix socket that systemd forwards to the Gateway's port 80
+ * (`infra/hetzner/gateway/worker-cloud-init.yaml`). gh sends plain HTTP over it, and only HTTPS
+ * to `GH_HOST` directly.
  */
 const GH_GATEWAY_SOCKET = "/run/usine-gateway/http.sock";
 
-/** The port of the Gateway's forward proxy. */
 const FORWARD_PROXY_PORT = 3128;
 
-/**
- * The variables an Attempt behind a Gateway receives through the SSH
- * connection, because their values contain its caller token. The Worker's
- * sshd must accept each of them with `AcceptEnv`.
- */
+/** The variables sent through the SSH connection because they contain the caller token. The Worker's sshd must accept each in `AcceptEnv`. */
 export const GATEWAY_SENT_VARIABLES = [
   "GIT_CONFIG_VALUE_0",
   "GH_ENTERPRISE_TOKEN",
@@ -25,19 +20,17 @@ export const GATEWAY_SENT_VARIABLES = [
   "ANTHROPIC_AUTH_TOKEN",
 ] as const;
 
-/** The Gateway's forward proxy as a Worker behind the Gateway at `domain` reaches it; an Attempt's children get it as `HTTPS_PROXY`. */
+/** Returns the Gateway's forward proxy URL from a Worker; children receive it as `HTTPS_PROXY`. */
 export const forwardProxyUrl = (domain: GatewayDomain): string =>
   `http://${domain}:${FORWARD_PROXY_PORT}`;
 
-/** Where a Worker behind the Gateway at `domain` clones and fetches `repository`. */
+/** Returns the URL a Worker behind the Gateway clones and fetches `repository` from. */
 export const gatewayRepositoryUrl = (domain: GatewayDomain, repository: RepositoryName): string =>
   `http://git.${domain}/${repository}.git`;
 
 /**
- * The files of gh's configuration directory on a Worker behind the Gateway
- * at `domain`: requests go through the Gateway's socket, and `git.<domain>`
- * is a known host. Neither file contains a token; gh reads the caller token
- * from `GH_ENTERPRISE_TOKEN` and `GH_TOKEN`.
+ * Returns gh's configuration files for the Gateway at `domain`. Neither file contains a token;
+ * gh reads the caller token from `GH_ENTERPRISE_TOKEN` and `GH_TOKEN`.
  */
 export const ghGatewayConfig = (domain: GatewayDomain) =>
   ({
@@ -45,20 +38,17 @@ export const ghGatewayConfig = (domain: GatewayDomain) =>
     "hosts.yml": `git.${domain}:\n    git_protocol: https\n`,
   }) as const;
 
-/** What a Worker's Attempt needs to reach GitHub and its LLM providers through its Gateway. */
 export interface GatewayEnvironmentOptions {
   readonly domain: GatewayDomain;
   readonly llmProviders: ReadonlyArray<GatewayLlmProvider>;
-  /** The directory on the machine that contains `ghGatewayConfig`'s files. */
+  /** The machine directory that contains the `ghGatewayConfig` files. */
   readonly ghConfigDirectory: string;
   readonly callerToken: CallerToken;
 }
 
 /**
- * An Attempt's environment behind a Gateway. `exported` contains no secret
- * and is exported in each command line. `sent` contains the caller token
- * wherever a tool expects its credential and reaches the machine through the
- * SSH connection, never in a command line.
+ * An Attempt's environment behind a Gateway. `exported` has no secrets and goes in each command
+ * line; `sent` contains the caller token and goes only through the SSH connection.
  */
 export interface GatewayEnvironment {
   readonly exported: Readonly<Record<string, string>>;
@@ -66,24 +56,19 @@ export interface GatewayEnvironment {
 }
 
 /**
- * Points git, gh, package managers, and Claude Code (when the Gateway holds
- * the Anthropic credential) at the Gateway at `domain`:
+ * Returns the environment that points git, gh, package managers, and Claude Code at the
+ * Gateway at `domain`.
  *
- * - git sends the caller token in `x-usine-gateway-token` to `git.<domain>`
- *   only, and rewrites `https://github.com/` and `https://git.<domain>/` to
- *   the Gateway, so a push to a github.com remote or a URL gh builds goes
- *   there too. The header value is configuration entry 0, so it travels in
- *   `GIT_CONFIG_VALUE_0`.
- * - gh uses `git.<domain>` as its host through the Gateway's socket, with
- *   the caller token as both its enterprise and GitHub token, so absolute
- *   pagination links and github.com URLs authenticate through the socket too.
- * - Package managers use the forward proxy at `<domain>:3128`; local
- *   addresses and the Gateway's own names go direct.
- * - Claude Code calls `llm.<domain>/anthropic` with the caller token when
- *   the Gateway holds the Anthropic credential. Otherwise, and for Codex,
- *   nothing is set here: the harness uses its login on the machine and
- *   reaches its provider through the forward proxy, whose allowlist must
- *   list the login's hosts (`gatewayHarnessProbe` checks that it does).
+ * - git sends the caller token in `x-usine-gateway-token` to `git.<domain>` only, and rewrites
+ *   `https://github.com/` and `https://git.<domain>/` to the Gateway. The header value is
+ *   config entry 0 (`GIT_CONFIG_VALUE_0`).
+ * - gh uses `git.<domain>` through the Gateway socket, with the caller token as both its
+ *   enterprise and GitHub token, so absolute pagination links also authenticate.
+ * - Package managers use the forward proxy at `<domain>:3128`; local addresses and the
+ *   Gateway's own names bypass it.
+ * - Claude Code calls `llm.<domain>/anthropic` with the caller token if the Gateway has the
+ *   Anthropic credential. Otherwise, and for Codex, the harness uses its own login through the
+ *   forward proxy, whose allowlist must include the login's hosts.
  */
 export const gatewayEnvironment = (options: GatewayEnvironmentOptions): GatewayEnvironment => {
   const { domain, callerToken } = options;

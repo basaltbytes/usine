@@ -26,27 +26,27 @@ const persistence = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     ),
   );
 
-/** Durable Item-level Asks and explicit resets, independent of trigger and notification transports. */
+/** The service for Item-level cycle-budget Asks and operator resets. */
 export class CycleBudgets extends Context.Service<
   CycleBudgets,
   {
-    /** Capture this generation before fetching an Item's trigger input and include it in its Event identity. */
+    /** Returns the Item's cycle generation; callers read it before fetching trigger input and include it in the Event identity. */
     readonly generation: (
       itemKey: ItemKey,
     ) => Effect.Effect<CycleGeneration, EnginePersistenceError>;
-    /** All unanswered cycle-budget Asks, including Items whose labels no longer match. */
+    /** Returns all unanswered cycle-budget Asks, including those for Items whose labels no longer match. */
     readonly asks: () => Effect.Effect<ReadonlyArray<CycleBudgetAsk>, EnginePersistenceError>;
-    /** Records an answer for this exact Ask and requests fresh trigger evaluation. Repeats are idempotent. */
+    /** Records the answer to the Ask and requests fresh trigger evaluation; repeated calls are idempotent. */
     readonly reset: (
       askId: CycleBudgetAskId,
       answer: Event,
     ) => Effect.Effect<void, EnginePersistenceError | CycleBudgetResetRejectedError>;
-    /** Resets still awaiting a durable polling-cursor restart. */
+    /** Returns the resets that still wait for a durable polling-cursor restart. */
     readonly pendingResets: () => Effect.Effect<
       ReadonlyArray<CycleBudgetReset>,
       EnginePersistenceError
     >;
-    /** Acknowledges only this generation after fresh polling progress was durably recorded. */
+    /** Acknowledges the reset for its generation only, after fresh polling progress is recorded. */
     readonly acknowledgeReset: (
       reset: CycleBudgetReset,
     ) => Effect.Effect<void, EnginePersistenceError>;
@@ -124,8 +124,8 @@ export class CycleBudgets extends Context.Service<
                 .set({ generation, askJson: null, resetPending: true })
                 .where(eq(itemCycleBudgets.itemKey, ask.itemKey))
                 .execute();
-              // Pending work retains its reservation in the new allowance. Started
-              // Runs finish against their original allowance and retries never charge again.
+              // Unstarted Runs move their reservation to the new generation. Started Runs keep the
+              // old one, and retries don't charge again.
               yield* transaction
                 .update(cycleReservations)
                 .set({ generation })

@@ -10,4 +10,4 @@
 "@usine/server": patch
 ---
 
-Write each package's `tsc -b` build info under `dist/`, so removing `dist` by hand also removes the incremental state and the next build re-emits instead of finding nothing to do. The build info is excluded from the published files.
+Each package writes its `tsc -b` build info under `dist/`, so removing `dist` also removes the incremental state. The build info isn't published.

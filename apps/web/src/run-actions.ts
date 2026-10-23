@@ -17,21 +17,19 @@ import {
 import { OperatorHttpError } from "@usine/orchestrator/operator/http";
 import { api } from "./api.ts";
 
-/** An operator decision on one Run; resolving a failure names the failed Attempt it answers. */
+/** An operator action on one Run; resolving a failure includes the failed Attempt. */
 export type RunActionRequest =
   | { readonly action: "approve" | "retry" | "cancel" }
   | { readonly action: "resolveFailure"; readonly attemptId: AttemptId };
 
-/** One Run action as a screen sends it. */
 interface RunActionVariables {
   readonly runId: RunId;
   readonly request: RunActionRequest;
 }
 
-// Files every screen's Run actions in the mutation cache, so any screen can see one in flight.
+// The mutation key of all Run actions, so any screen can see one in flight.
 const runActionKey = ["run-action"] as const;
 
-/** `overview` without its Needs you entries about `runId`, which an action on that Run answered. */
 const withoutRunNeeds = (overview: FactoryOverview, runId: RunId): FactoryOverview => {
   const needsYou = overview.needsYou.filter((need) => !("runId" in need) || need.runId !== runId);
   return overview._tag === "Ready"
@@ -40,8 +38,8 @@ const withoutRunNeeds = (overview: FactoryOverview, runId: RunId): FactoryOvervi
 };
 
 /**
- * Whether `error` is the server refusing a Run action because the Run's state no longer allows it,
- * such as approving a Run another screen has approved: the screen that sent it showed the Run stale.
+ * Returns whether the server rejected a Run action because the Run's state no longer allows it, for
+ * example approving a Run that another screen already approved.
  */
 export const isRunOperationRejected = (error: Error): boolean =>
   error instanceof OperatorHttpError && error.error === "RunOperationRejectedError";
@@ -57,10 +55,9 @@ const useRefreshRun = () => {
 };
 
 /**
- * Sends Run actions from any screen. Success drops the Run's Needs you entries from the cached
- * overview at once, then refreshes the overview, the desk, and that Run's detail; the request
- * stays pending until that refresh lands, for `usePendingRunAction` too. A refusal that
- * `isRunOperationRejected` recognizes refreshes them the same way before the request fails.
+ * Sends Run actions. On success, removes the Run's Needs you entries from the cached overview, then
+ * refetches the overview, desk, and Run detail; the mutation stays pending until the refetch ends.
+ * An error that `isRunOperationRejected` matches triggers the same refetch.
  */
 export const useRunAction = () => {
   const queryClient = useQueryClient();
@@ -74,9 +71,8 @@ export const useRunAction = () => {
           : client[request.action]({ params: { runId } }),
       ),
     onSuccess: (_, { runId }) => {
-      // The overview can take seconds to answer the refresh; until then Needs you would still
-      // offer the action the server has just taken. The refresh cancels any overview request in
-      // flight, so an answer sent before this action cannot bring the entries back.
+      // The overview refetch can take seconds; until then Needs you would still offer the action.
+      // The refetch cancels overview requests in flight, so an older response cannot restore them.
       queryClient.setQueryData<FactoryOverview>(["overview"], (overview) =>
         overview === undefined ? overview : withoutRunNeeds(overview, runId),
       );
@@ -86,12 +82,11 @@ export const useRunAction = () => {
   });
 };
 
-/** The pending state and last error of a screen's Run actions. */
 export type RunActions = ReturnType<typeof useRunAction>;
 
 /**
- * The action that any screen is sending on Run `runId` through `useRunAction`, until the refresh
- * after it lands; undefined while none is. The latest wins when several are pending.
+ * Returns the action that any screen is sending on `runId`, until its refetch ends, or `undefined`.
+ * If several are pending, returns the latest.
  */
 export const usePendingRunAction = (runId: RunId): RunActionRequest["action"] | undefined =>
   useMutationState<MutationState<unknown, Error, RunActionVariables>>({
@@ -101,21 +96,17 @@ export const usePendingRunAction = (runId: RunId): RunActionRequest["action"] | 
     .filter(({ variables }) => variables?.runId === runId)
     .at(-1)?.variables?.request.action;
 
-/** Running `run` again with the task and Agent it ran with, as Run again does without the editor. */
 export const unchangedRunAgain = (run: RunView) => ({
   runId: run.id,
   amendment: new EditAndRetry({ task: AttemptTask.make(run.task), agent: run.agent }),
 });
 
 /**
- * Opens a new Run for the Item state of a succeeded or canceled Run, from any screen, with the
- * task and roster Agent `amendment` names. Success refreshes the overview, the desk, and that
- * Run's detail; the result names the new Run, or the cycle-budget Ask that blocked it.
- *
- * `mutationKey` files the requests in the mutation cache, so a component that remounts while one
- * is in flight can read it back with `useMutationState`. `onClaimed` receives the new Run's id
- * after the refresh, even when the component that sent the request has unmounted since; a
- * callback passed to `mutate` is dropped then.
+ * Opens a new Run for the Item of a succeeded or canceled Run, with the task and Agent in
+ * `amendment`. On success, refetches the overview, desk, and Run detail; the result is the new Run
+ * or the cycle budget Ask that blocked it. `mutationKey` lets a remounted component read pending
+ * requests with `useMutationState`. `onClaimed` is called with the new Run's ID after the refetch,
+ * even if the sending component has unmounted.
  */
 export const useRunAgain = ({
   mutationKey = ["run-again"],

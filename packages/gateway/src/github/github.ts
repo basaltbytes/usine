@@ -4,14 +4,14 @@ import { Headers } from "effect/unstable/http";
 import type { AttachmentCredential } from "../attachment/attachment.ts";
 import { UpstreamBase } from "../upstream.ts";
 
-/** Where the gateway forwards GitHub requests: `web` serves git smart HTTP, `api` REST and GraphQL, `uploads` release asset uploads. */
+/** The upstream origins for GitHub requests: `web` for git smart HTTP, `api` for REST and GraphQL, `uploads` for release asset uploads. */
 export interface GitHubOrigins {
   readonly web: UpstreamBase;
   readonly api: UpstreamBase;
   readonly uploads: UpstreamBase;
 }
 
-/** github.com itself. */
+/** The github.com origins. */
 export const GITHUB_ORIGINS: GitHubOrigins = {
   web: UpstreamBase.make("https://github.com"),
   api: UpstreamBase.make("https://api.github.com"),
@@ -19,16 +19,14 @@ export const GITHUB_ORIGINS: GitHubOrigins = {
 };
 
 /**
- * The host a GitHub request named. `gateway` is `git.<domain>`, which serves
- * git at `/OWNER/REPO.git` and the API under `/api/` the way GitHub
- * Enterprise Server does, so `gh` works with `GH_HOST` set to it. The other
- * three are GitHub's own hosts, which reach the gateway when `gh` sends every
- * request through its `http_unix_socket`, for example when it follows a URL
- * from an API response.
+ * The host a GitHub request was sent to. `gateway` is `git.<domain>`, which serves git at
+ * `/OWNER/REPO.git` and the API under `/api/` like GitHub Enterprise Server, so `gh` works with
+ * `GH_HOST` set to it. The others are GitHub's own hosts, used when `gh` sends requests through
+ * its `http_unix_socket`, for example to follow a URL from an API response.
  */
 export type GitHubHost = "gateway" | "web" | "api" | "uploads";
 
-/** GitHub's own host names and what each serves. */
+/** GitHub's host names and what each serves. */
 export const GITHUB_HOSTS: ReadonlyMap<string, GitHubHost> = new Map([
   ["github.com", "web"],
   ["api.github.com", "api"],
@@ -36,9 +34,8 @@ export const GITHUB_HOSTS: ReadonlyMap<string, GitHubHost> = new Map([
 ]);
 
 /**
- * A GitHub request the gateway forwards: git smart HTTP for a repository, or
- * an API call. `repository` is the repository the path names; GraphQL and
- * calls such as `/user` name none.
+ * A forwarded GitHub request: git smart HTTP for a repository, or an API call. `repository` is
+ * the repository in the path; GraphQL and calls such as `/user` have none.
  */
 export interface GitHubRoute {
   readonly protocol: "git" | "api";
@@ -63,7 +60,7 @@ const gitRoute = (origins: GitHubOrigins, pathname: string, search: string) => {
   }));
 };
 
-/** An API route; a `/repos/OWNER/REPO` path whose segments are not a repository name is unsupported. */
+/** Returns the route for an API path, or `None` for a `/repos/OWNER/REPO` path whose segments aren't a valid repository name. */
 const apiRoute = (base: UpstreamBase, rest: string, search: string): Option.Option<GitHubRoute> => {
   const path = rest === "" ? "/" : rest;
   const match = REPOSITORY_PATH.exec(path);
@@ -84,9 +81,8 @@ const afterPrefix = (pathname: string, prefix: string): Option.Option<string> =>
     : Option.none();
 
 /**
- * Maps a GitHub request to its upstream URL and the repository it names.
- * `none` means the gateway does not serve that path: web pages, and anything
- * else outside git smart HTTP, Git LFS, and the API.
+ * Returns the upstream URL and repository for a GitHub request. Returns `None` for paths
+ * outside git smart HTTP, Git LFS, and the API, such as web pages.
  */
 export const githubRoute = (
   origins: GitHubOrigins,
@@ -113,10 +109,9 @@ export const githubRoute = (
 };
 
 /**
- * Adds an attachment's credential to a GitHub request whose caller
- * credential has already been removed. git authenticates with the token as
- * the `x-access-token` password; the API takes it as a bearer token. An
- * anonymous attachment adds nothing.
+ * Adds the attachment's credential to a GitHub request whose caller credential was removed: as
+ * the `x-access-token` password for git, or as a bearer token for the API. An anonymous
+ * attachment adds nothing.
  */
 export const withGitHubCredential = (
   route: GitHubRoute,

@@ -6,15 +6,14 @@ import type { Comment } from "../step/result.ts";
 import type { WorkerName } from "../worker.ts";
 import type { AttemptId, AttemptNumber, AttemptWindows } from "./attempt.ts";
 
-/** The remote branch name that holds one Attempt's unfinished work, `usine/salvage/<run>/<attempt>`. */
+/** The remote branch `usine/salvage/<run>/<attempt>` with an Attempt's unfinished work. */
 export const SalvageRef = Schema.NonEmptyString.pipe(Schema.brand("SalvageRef"));
 export type SalvageRef = typeof SalvageRef.Type;
 
-/** The salvage branch an Attempt pushes to when it ends without success. */
 export const salvageRefFor = (runId: RunId, number: AttemptNumber): SalvageRef =>
   SalvageRef.make(`usine/salvage/${safeSegment(runId)}/${number}`);
 
-/** The Attempt's unfinished work was committed and pushed to `ref`; `commit` is the pushed head. */
+/** Unfinished work committed and pushed to `ref`; `commit` is the pushed head. */
 export class SalvagePushed extends Schema.TaggedClass<SalvagePushed>("AttemptSalvage/Pushed")(
   "Pushed",
   {
@@ -23,7 +22,7 @@ export class SalvagePushed extends Schema.TaggedClass<SalvagePushed>("AttemptSal
   },
 ) {}
 
-/** Salvage failed; `path` stays on the Worker for reconciliation. `commit` is the last known commit, or absent when inspection failed. */
+/** A failed salvage that left the workspace at `path` on the Worker. `commit` is `None` if inspection failed. */
 export class SalvageRetained extends Schema.TaggedClass<SalvageRetained>("AttemptSalvage/Retained")(
   "Retained",
   {
@@ -33,34 +32,25 @@ export class SalvageRetained extends Schema.TaggedClass<SalvageRetained>("Attemp
   },
 ) {}
 
-/** What the executor preserved of an Attempt's workspace when the Attempt ended without a `Succeeded` outcome. */
+/** What the executor kept of the workspace of an unsuccessful Attempt. */
 export const AttemptSalvage = Schema.Union([SalvagePushed, SalvageRetained]);
 export type AttemptSalvage = typeof AttemptSalvage.Type;
 
-/** Identifies a persisted Attempt whose Worker may still hold a checkout. */
+/** A persisted Attempt whose checkout can still exist on its Worker. */
 export interface AttemptRecovery {
   readonly attemptId: AttemptId;
   readonly worker: WorkerName;
   readonly repository: RepositoryName;
   readonly ref: SalvageRef;
-  /** The permission level of the Attempt's Loop; a `read` Attempt's leftover checkout is removed rather than salvaged. */
+  /** The Loop permissions; a leftover checkout of a `read` Attempt is removed, not salvaged. */
   readonly permissions: LoopPermissions;
-  /** The Attempt delivered its result, so a leftover checkout is removed rather than salvaged. */
+  /** Whether the Attempt succeeded, in which case a leftover checkout is removed, not salvaged. */
   readonly succeeded: boolean;
-  /** The Attempt has no outcome yet: an orchestrator restart may reattach it if its parent task is still live. */
+  /** Whether the Attempt has no outcome yet, so a restart can reattach it if its parent task runs. */
   readonly open: boolean;
 }
 
-/**
- * Where startup reconciliation records what a persisted Attempt left:
- * `salvage` records what the executor preserved of its checkout, and
- * `comments` the comments and reviews it posted on its Run's Item when its
- * parent task failed and the orchestrator stopped before recording them.
- * `windows` reads its own window on that Item and those of the other Attempts
- * of its Agent that overlap it there: the harvest of those comments reads
- * them once GitHub has listed the comments, and keeps only one posted inside
- * the own window and in none of the others.
- */
+/** The storage that startup reconciliation uses for a persisted Attempt's salvage, comments, and windows. */
 export interface RecoverySink<E> {
   readonly salvage: (salvage: AttemptSalvage) => Effect.Effect<void, E>;
   readonly comments: (comments: ReadonlyArray<Comment>) => Effect.Effect<void, E>;

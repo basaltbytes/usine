@@ -3,11 +3,8 @@ import { OperatorLogin } from "../operator.ts";
 import { RunId } from "./run.ts";
 
 /**
- * How a Run was opened by the operator running an earlier Run again: `from` is
- * the succeeded or canceled Run whose Item state it runs again, and
- * `requestedBy` the operator login that asked. The web UI has no sign-in and
- * acts as the login `usine.yaml` names, so a Run run again while it names none
- * has no requester. The Run opened at the time of the request (ADR 0002).
+ * The origin of a Run created by running a succeeded or canceled Run again (ADR 0002).
+ * `requestedBy` is the operator login from `usine.yaml`, or `None` if none is configured.
  */
 export class RunAgain extends Schema.Class<RunAgain>("RunAgain")(
   Schema.Struct({

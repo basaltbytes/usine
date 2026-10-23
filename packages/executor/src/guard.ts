@@ -4,24 +4,21 @@ import type * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptFailure, RunawayCeiling, RunawayFailure } from "@usine/core/attempt/failure";
 import { Clock, Duration, Effect, Option, Queue } from "effect";
 
-/** The share of a ceiling at which the guard warns the parent session once, before tripping. */
+/** The fraction of a ceiling at which the parent gets one warning steer. */
 const WARNING_FRACTION = 0.8;
 
 /**
- * How often a guard with a wall-clock ceiling records the unsupervised time
- * it counted while that time grows: each orchestrator that stops without
- * shutting down loses at most this much of it. That tolerance is accepted
- * (#178): exact accounting across a crash would need a durable write per tick.
+ * The interval for recording unsupervised time while it grows. An orchestrator that exits
+ * without shutting down loses at most this much (#178).
  */
 const RECORD_INTERVAL = Duration.seconds(30);
 
-/** How long a stopping guard waits to record the unsupervised time it counted last. */
+/** The timeout for the final unsupervised-time record when the guard stops. */
 const LAST_RECORD_GRACE = Duration.seconds(5);
 
-/** The words every warning steer ends with, after the unit its ceiling counts in. */
+/** The suffix of every warning steer, after the ceiling's unit. */
 const WARNING_ENDING = "used by this Attempt; commit and push your work now.";
 
-/** The unit each ceiling's warning counts in. */
 const WARNING_UNITS = {
   tokens: "tokens",
   "wall-clock": "minutes",
@@ -32,21 +29,18 @@ const warning = (ceiling: RunawayCeiling, used: number, limit: number): string =
 
 export interface AttemptGuardLimits {
   readonly attemptId: AttemptId;
-  /** Wall-clock ceiling in minutes; none leaves the timer unarmed. */
+  /** The wall-clock ceiling in minutes, or `None` for no limit. */
   readonly maxAttemptMinutes: Option.Option<number>;
-  /** Consumed-token ceiling across the parent and every child; none leaves the meter unchecked. */
+  /** The token ceiling across the parent and all children, or `None` for no limit. */
   readonly maxAttemptTokens: Option.Option<number>;
   /**
-   * Delivers the warning steer to the parent session. It may wait, as for the
-   * parent's channel, since `tripped` delivers each warning apart from the
-   * checks that trip; failures are logged and never fail the Attempt.
+   * Sends the warning steer to the parent session. Can wait for the parent's channel without
+   * delaying the ceiling checks; failures are logged and don't fail the Attempt.
    */
   readonly warn: (message: string) => Effect.Effect<void, AttemptFailure>;
   /**
-   * Keeps the unsupervised time counted so far, the seed's included, where
-   * the guard of a reattachment reads it back as its seed. The wall clock
-   * records it every `RECORD_INTERVAL` while it counts and once more when it
-   * stops; failures are logged and never fail the Attempt.
+   * Persists the unsupervised time counted so far, including the seed, for a later reattachment.
+   * Called every `RECORD_INTERVAL` while the count grows and once on stop; failures are logged.
    */
   readonly recordUnsupervised: (
     unsupervised: Duration.Duration,
@@ -54,29 +48,20 @@ export interface AttemptGuardLimits {
 }
 
 /**
- * What an Attempt's guards counted so far, which its next guard goes on from:
- * a reattached Attempt's guard resumes where the guard before the orchestrator
- * restart stopped instead of starting over (#178), and a fresh Attempt's
- * empty transcript gives the guard nothing to resume.
+ * The counts restored from earlier guards, so a reattached Attempt's guard continues instead of
+ * starting over (#178). Empty for a new Attempt.
  */
 export interface AttemptGuardSeed {
-  /** The highest token count each session reported, a session that finished before the restart included. */
+  /** The highest token count each session reported, including sessions that finished before the restart. */
   readonly tokens: ReadonlyMap<AgentSessionId, number>;
-  /**
-   * The unsupervised time the earlier guards recorded with
-   * `recordUnsupervised`. Only a running guard counts, so the quiet time
-   * before a restart counts and the time the orchestrator was stopped does
-   * not. The transcript cannot tell either: it shows neither when the
-   * orchestrator stopped nor where a restart fell.
-   */
+  /** The unsupervised time recorded by earlier guards, excluding time the orchestrator was stopped. */
   readonly unsupervised: Duration.Duration;
-  /** The parent's Hold was still placed: it outlives the restart, while a held child does not survive it. */
+  /** Whether the parent was on Hold at the restart. A parent's Hold persists across restarts; a child's doesn't. */
   readonly parentHeld: boolean;
-  /** The ceilings whose warning steer the transcript holds, so the guard does not send it again. */
+  /** The ceilings whose warning steer is already in the transcript. */
   readonly warned: ReadonlySet<RunawayCeiling>;
 }
 
-/** One armed ceiling: the limit that trips the guard and the point at which it warns first. */
 interface Ceiling {
   readonly limit: number;
   readonly warnAt: number;
@@ -84,11 +69,11 @@ interface Ceiling {
 
 const ceiling = (limit: number): Ceiling => ({ limit, warnAt: limit * WARNING_FRACTION });
 
-/** Queues a ceiling's warning for delivery; it never waits for the delivery. */
+/** A function that queues a ceiling's warning without waiting for delivery. */
 type Warn = (ceiling: RunawayCeiling, message: string) => Effect.Effect<void>;
 type Observer = (envelope: AttemptChannel.Envelope) => Effect.Effect<void, RunawayFailure>;
 
-/** Keeps each session's highest token report; reports are cumulative. Returns whether `envelope` was one. */
+/** Stores the session's token count from `envelope` if higher, because reports are cumulative. Returns whether `envelope` was a token report. */
 const recordTokens = (
   reported: Map<AgentSessionId, number>,
   envelope: AttemptChannel.Envelope,
@@ -101,7 +86,7 @@ const recordTokens = (
   return true;
 };
 
-/** Holds by session: the parent, which operator input addresses without an id, or a child by its id. */
+/** Returns the Hold key: `"parent"` for the parent session, or the session ID for a child. */
 const holdKey = (session: AttemptChannel.SessionTarget | AgentSession): string => {
   switch (session._tag) {
     case "Parent":
@@ -115,9 +100,8 @@ const holdKey = (session: AttemptChannel.SessionTarget | AgentSession): string =
 };
 
 /**
- * Applies `envelope` to the sessions under a Hold: an intervention receipt
- * places or removes its target's Hold, and a finished session never holds
- * again, so a late receipt cannot reopen it.
+ * Updates the held sessions from `envelope`. An intervention receipt places or removes its
+ * target's Hold; a finished session is never held again, so a late receipt is ignored.
  */
 const recordHolds = (
   holds: Set<string>,
@@ -137,7 +121,7 @@ const recordHolds = (
   }
 };
 
-/** The ceiling whose warning `envelope` sent: a steer to the parent that ends as the guard's warnings do. */
+/** Returns the ceiling whose warning steer `envelope` is: a parent steer that ends with the ceiling's unit and `WARNING_ENDING`. */
 const warnedCeiling = (envelope: AttemptChannel.Envelope): Option.Option<RunawayCeiling> => {
   if (
     envelope._tag !== "InboundEnvelope" ||
@@ -154,12 +138,7 @@ const warnedCeiling = (envelope: AttemptChannel.Envelope): Option.Option<Runaway
   );
 };
 
-/**
- * What the guard of a reattached Attempt resumes from: the `unsupervised`
- * time its earlier guards recorded, and from the envelopes its transcript
- * recorded in append order, the tokens each session reported, whether the
- * parent is still held, and the warnings already sent.
- */
+/** Returns a reattached guard's seed from `unsupervised` and the transcript `envelopes` in append order. */
 export const guardSeed = (
   transcript: ReadonlyArray<AttemptChannel.Envelope>,
   unsupervised: Duration.Duration,
@@ -178,11 +157,9 @@ export const guardSeed = (
 };
 
 /**
- * Sums the highest reported count per session, the seed's included; tokens
- * keep accumulating through Holds. `observe` checks the total at each report,
- * and `resume` checks it as it stands: a total restored from the seed warns
- * or trips without waiting for another report, which a quiet parent may never
- * send (#178).
+ * Returns a watcher that sums the highest reported count per session, including the seed;
+ * Holds don't pause it. `resume` checks the restored total immediately, so it can warn or trip
+ * without another report (#178).
  */
 const tokenWatcher = (
   attemptId: AttemptId,
@@ -192,7 +169,7 @@ const tokenWatcher = (
 ) => {
   const reported = new Map(seed.tokens);
   let warned = seed.warned.has("tokens");
-  /** Trips at the limit, else warns once past the warning point; returns the total. */
+  /** Trips at the limit, or warns once past the warning point. Returns the total. */
   const check = Effect.gen(function* () {
     const consumed = [...reported.values()].reduce((sum, value) => sum + value, 0);
     if (consumed >= tokens.limit) {
@@ -225,15 +202,10 @@ const tokenWatcher = (
 };
 
 /**
- * Counts unsupervised milliseconds on top of the seed's: `observe` tracks
- * which sessions are held, the parent included, and stops or resumes the
- * count as each Hold receipt arrives, and `watch` warns at the ceiling's
- * warning point unless the seed's transcript holds that warning already, then
- * trips at its limit. A held Attempt counts nothing and does not trip until
- * it is released. While `watch` runs, it records the time it counted every
- * `RECORD_INTERVAL` when that time grew, and once more when it is
- * interrupted, as when this process stops, so the guard of a reattachment
- * goes on from it (#178).
+ * Returns a watcher that counts unsupervised milliseconds on top of the seed, paused while any
+ * session is held. `watch` warns at the warning point unless the warning is already in the
+ * transcript, then trips at the limit. While running, it records the count every
+ * `RECORD_INTERVAL` if it grew, and once more on interruption (#178).
  */
 const wallClockWatcher = Effect.fn("AttemptGuard.wallClockWatcher")(function* (
   attemptId: AttemptId,
@@ -244,23 +216,21 @@ const wallClockWatcher = Effect.fn("AttemptGuard.wallClockWatcher")(function* (
 ) {
   const ended = new Set<string>();
   const holds = new Set<string>(seed.parentHeld ? ["parent"] : []);
-  /** Wakes a wait of `watch` when supervision changes; one pending wake is enough for it to look again. */
+  /** Signals `watch` when supervision changes; one pending signal is enough. */
   const changed = yield* Queue.sliding<void>(1);
-  /** Whether `watch` has started: nothing counts before the launch registered the session. */
+  /** Whether `watch` has started; nothing is counted before. */
   let watching = false;
-  /** The unsupervised milliseconds of the stretches that ended, the seed's included. */
+  /** The unsupervised milliseconds of completed intervals, including the seed. */
   let counted = Duration.toMillis(seed.unsupervised);
-  /** When the unsupervised stretch being counted began; none while held, and before `watch` runs. */
+  /** The start of the current unsupervised interval, or `None` while held or before `watch` runs. */
   let since = Option.none<number>();
-  /** The unsupervised milliseconds `record` kept last, or the seed's. */
+  /** The unsupervised milliseconds last persisted, initially the seed's. */
   let recorded = counted;
   const usedAt = (now: number) =>
     counted + Option.match(since, { onNone: () => 0, onSome: (began) => now - began });
   /**
-   * Applies the current Holds to the count at `now`: a Hold ends the stretch
-   * being counted, and a release while `watch` runs begins one. Both happen
-   * as the receipt arrives, so `watch` finds the count stopped at the Hold
-   * whenever it next compares the count to a limit.
+   * Applies the current Holds at `now`: a Hold ends the current interval, and a release while
+   * `watch` runs starts one.
    */
   const supervise = (now: number) => {
     if (holds.size > 0) {
@@ -285,7 +255,7 @@ const wallClockWatcher = Effect.fn("AttemptGuard.wallClockWatcher")(function* (
       });
       yield* Queue.offer(changed, undefined);
     });
-  /** Waits until `until` unsupervised milliseconds are counted, and returns the count; never ends while held. */
+  /** Waits until `until` unsupervised milliseconds are counted and returns the count. Never returns while held. */
   const unsupervised = Effect.fn("AttemptGuard.unsupervised")(function* (until: number) {
     yield* Effect.annotateCurrentSpan({ attemptId, untilMillis: until });
     for (;;) {
@@ -298,7 +268,7 @@ const wallClockWatcher = Effect.fn("AttemptGuard.wallClockWatcher")(function* (
       yield* Queue.take(changed).pipe(Effect.timeoutOption(until - used));
     }
   });
-  /** Records the unsupervised time counted so far if it grew since the last record; a failure is logged. */
+  /** Records the unsupervised time if it grew since the last record; logs a failure. */
   const recordCounted = Effect.fn("AttemptGuard.recordUnsupervised")(function* () {
     yield* Effect.annotateCurrentSpan({ attemptId });
     const used = usedAt(yield* Clock.currentTimeMillis);
@@ -325,8 +295,7 @@ const wallClockWatcher = Effect.fn("AttemptGuard.wallClockWatcher")(function* (
       Effect.ignore,
     );
   });
-  // A stopping process must not wait on storage for long: the time since the
-  // previous record is then lost, as when the process does not shut down.
+  // Bounded by LAST_RECORD_GRACE; on timeout, the time since the previous record is lost.
   const lastRecord = recordCounted().pipe(
     Effect.timeoutOption(LAST_RECORD_GRACE),
     Effect.flatMap(
@@ -367,43 +336,27 @@ const wallClockWatcher = Effect.fn("AttemptGuard.wallClockWatcher")(function* (
   return { observe, watch };
 });
 
-/** One Attempt under its ceilings: the sink that meters it and the watch of its unsupervised time. */
 export interface AttemptGuard {
   /**
-   * Appends through to the Attempt's sink; the append that reaches the token
-   * ceiling fails with `RunawayFailure`. An append that reaches the warning
-   * point queues the warning for `tripped` and returns without waiting for
-   * its delivery: the durable runtime records the steer in order with the
-   * envelopes it appends, so a delivery awaited inside `append` would wait on
-   * itself.
+   * The Attempt's sink, wrapped. The append that reaches the token ceiling fails with
+   * `RunawayFailure`. An append that reaches the warning point queues the warning for `tripped`
+   * without waiting, because awaiting delivery inside `append` would deadlock.
    */
   readonly sink: AttemptChannel.Sink;
   /**
-   * Checks the token total, the seed's included, counts the unsupervised time
-   * from when it is run, and delivers each queued warning in turn through
-   * `limits.warn`. A delivery that waits, as for the parent's channel, holds
-   * back no check. Fails with `RunawayFailure` when the restored token total
-   * or the wall-clock ceiling trips, dropping a warning not delivered yet;
-   * never ends otherwise. A token report that reaches the limit later fails
-   * its `append` instead. Interrupting it records the time it counted, within
-   * a short grace.
+   * Checks the restored token total, counts unsupervised time, and sends queued warnings through
+   * `limits.warn`. Fails with `RunawayFailure` when the restored token total or the wall-clock
+   * ceiling trips; never succeeds. On interruption, records the counted time within
+   * `LAST_RECORD_GRACE`.
    */
   readonly tripped: Effect.Effect<never, RunawayFailure>;
 }
 
 /**
- * Arms the Attempt ceilings that are configured: Holds pause elapsed
- * execution time; reported tokens continue accumulating. Each armed ceiling
- * sends the parent one warning steer at `WARNING_FRACTION` of its limit.
- * The ceilings count on from `seed`, what the Attempt's earlier guards
- * counted, so a reattached Attempt trips at the same totals as if the
- * orchestrator had not restarted, and a warning its transcript holds is not
- * sent again. `tripped` checks the restored token total as it starts, since
- * a quiet parent may report no more usage, and delivers the warnings, which
- * a reattachment can send before the parent's channel is ready. The wall
- * clock records the time it counted through `limits.recordUnsupervised` for
- * the next seed. With no ceiling armed the Attempt runs on the channel
- * untouched.
+ * Arms the configured Attempt ceilings, each with one warning steer at `WARNING_FRACTION` of
+ * its limit. Holds pause the wall clock; tokens keep accumulating. Counts continue from `seed`,
+ * so a reattached Attempt trips at the same totals as without the restart. With no ceiling set,
+ * `sink` is `io` and `tripped` never completes.
  */
 export const attemptGuard = (
   limits: AttemptGuardLimits,
@@ -475,9 +428,8 @@ export const attemptGuard = (
       onNone: () => Effect.never,
       onSome: ({ watch }) => watch,
     });
-    // Warnings are delivered beside the checks, so a delivery that waits for
-    // the parent's channel, as a reattachment's restored warning does, never
-    // holds back a trip (#178).
+    // Delivers warnings in a separate loop so a delivery waiting for the parent's channel doesn't
+    // delay a trip (#178).
     const delivery = Effect.forever(
       Effect.flatMap(Queue.take(warnings), ({ ceiling, message }) => deliver(ceiling, message)),
     );

@@ -17,8 +17,8 @@ it.effect(
             admission.withAttempt(RunId.make("startup-recovery"), Effect.void),
             { startImmediately: true },
           );
-          // Admission is synchronous. Successful admission would already have
-          // completed this fiber; a denied Attempt waits interruptibly for teardown.
+          // Admission is synchronous, so an admitted Attempt would have completed this fiber; a
+          // denied one waits interruptibly for teardown.
           assert.strictEqual(denied.pollUnsafe(), undefined);
           yield* Fiber.interrupt(denied);
           yield* admission.drain();

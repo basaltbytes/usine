@@ -10,7 +10,7 @@ import { TranscriptToolRow } from "../tool/tool.tsx";
 import { isGroupOpen, useTranscriptDisclosure } from "./disclosure.tsx";
 import { burstSummary } from "./summary.ts";
 
-/** From the first recorded start to the last recorded result; none until a call has returned. */
+/** Returns the milliseconds from the first call's start to the last recorded result, or `None` if no call has returned or the span is under one second. */
 export const burstSpan = (tools: ReadonlyArray<TranscriptTool>): Option.Option<number> => {
   const ends = tools.flatMap(({ state }) =>
     state._tag === "Finished" || state._tag === "Error" ? [Date.parse(state.receivedAt)] : [],
@@ -25,7 +25,6 @@ export const burstSpan = (tools: ReadonlyArray<TranscriptTool>): Option.Option<n
   return Number.isFinite(span) && span >= 1000 ? Option.some(span) : Option.none();
 };
 
-/** One quiet line saying what a burst of tool calls did; opening it shows each call's panel. */
 export const ToolBurst = ({ burst }: { readonly burst: Burst }) => {
   const { state, change } = useTranscriptDisclosure();
   const { scrollToMessage } = useMessageScroller();
@@ -73,7 +72,7 @@ export const ToolBurst = ({ burst }: { readonly burst: Burst }) => {
         </span>
       </CollapsibleTrigger>
       <CollapsibleContent className="collapsible-motion -mx-2 space-y-1 px-2 pt-1 pb-2">
-        {/* The burst row already skips rendering while far from view; its calls keep real heights. */}
+        {/* The burst row already has content-visibility, so its calls render at their real heights. */}
         {burst.tools.map((tool) => (
           <MessageScrollerItem
             key={tool.key}

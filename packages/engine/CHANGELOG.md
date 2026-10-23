@@ -4,17 +4,11 @@
 
 ### Minor Changes
 
-- 8b9d544: Add operator takeover, session pause and resume, and edit-and-retry.
-  
-  Protocol v5 addresses guidance to the Pi parent or a live child. Pause waits at a tool boundary; a message resumes the same session. Messaging a child holds its result until release. Cancel stops the whole Attempt. Messages and delivery receipts identify the operator in the transcript, and stored v3 and v4 transcripts remain readable.
-  
-  Failed Runs can retry with an amended task and roster agent. Later Attempts retain those amendments and record their effective task, agent, and intervention flag. The Run drawer exposes these controls for parent and child conversations, including held children outside the loaded history page. Holds pause the elapsed-time budget while the token ceiling remains active.
+- 8b9d544: Adds operator takeover, session pause and resume, and edit-and-retry (protocol v5). A message to a child holds its result until release, holds pause the elapsed-time limit, and v3 and v4 transcripts stay readable.
 
 ### Patch Changes
 
-- 5828a95: Persist Claude and Codex child sessions and record their native ids and worker paths in transcripts. Show copyable resume commands in the Run drawer, including for completed sessions outside the loaded history page.
-  
-  Upgrade the orchestrator and run host together for Attempt channel protocol v6. Existing protocol-v3 through v5 transcripts remain readable.
+- 5828a95: Persists Claude and Codex child sessions, and the run drawer shows copyable resume commands. Protocol v6 needs the orchestrator and run host upgraded together; v3 to v5 transcripts stay readable.
 - Updated dependencies [5828a95]
 - Updated dependencies [8b9d544]
   - @usine/core@0.3.0
@@ -23,20 +17,16 @@
 
 ### Minor Changes
 
-- 3f80f88: Apply `settings.max_children` as a per-Attempt child-session budget. Protocol v4 sends the budget to the Pi parent, records each accepted spawn with its cumulative count and task excerpt, and reports an excess spawn as a typed non-retryable failure with the configured and attempted counts. Durable protocol-v3 transcript envelopes remain readable after the live channel upgrade.
-- 388e59d: Add `usine export-run <runId>` to save one Run's detail, Attempt history, and complete transcripts as a local JSON file. Use `--output <path>` to choose the destination. Existing files are preserved, and missing Runs or export failures return a nonzero exit status.
-  
-  Add `RunReader.evidence(runId)` for a consistent snapshot and complete transcripts from one transaction, and `runReaderLayer(instanceDirectory)` for read-only access to an existing local runtime database without migrations.
-- a36f46e: Bound issue and pull-request feedback cycles across Runs with `max_cycles` (default three per Loop). Persist Item-level exhaustion Asks, expose explicit resets in the operator UI and HTTP API, and require fresh trigger evaluation after a reset. Upgrade existing Run history and queued Events into the budget.
-  
-  Use comment reviews and Loop-defined outcome labels for agents sharing a GitHub App identity. Required independent approvals and merging remain operator actions.
-- 83edd04: Add `usine backup <path>` to copy the runtime database while the orchestrator runs. Backups include all tables and committed WAL data, preserve existing destination files, and support restoring Run evidence. Document backup and restore requirements.
+- 3f80f88: Applies `settings.max_children` as a child-session budget per attempt; an excess spawn fails without a retry (protocol v4). v3 transcripts stay readable.
+- 388e59d: Adds `usine export-run <runId>`, which saves a run's detail, attempts, and transcripts to a new JSON file (set the path with `--output <path>`). Adds `RunReader.evidence(runId)` and the read-only `runReaderLayer(instanceDirectory)`.
+- a36f46e: Adds `max_cycles` (default 3 per loop), a per-item cycle budget with an ask when it's used up and a reset in the UI and API. Agents that share a GitHub App identity review with comments and outcome labels.
+- 83edd04: Adds `usine backup <path>`, which copies the runtime database, including committed WAL data, while the orchestrator runs, and never overwrites an existing file.
 
 ### Patch Changes
 
-- 162b323: Record executor defects as non-retryable Attempt failures with safe operator messages. Keep Attempt admission and cleanup in one service operation, and match Task relationships by canonical PR paths.
-- 5c47dc2: Drain admitted Attempts on SIGINT or SIGTERM before closing the runtime. Defer queued work and automatic retries until restart, with a bounded shutdown wait and a second-signal force stop.
-- b628897: Join linked issue and PR Items into Board tasks with complete saved Run histories, per-task Run and Attempt counts, and explicit current-Item lane moves.
+- 162b323: Records executor defects as non-retryable attempt failures with safe operator messages, and matches task relationships by canonical PR paths.
+- 5c47dc2: On SIGINT or SIGTERM, the orchestrator drains admitted attempts and defers queued work and retries until restart; a second signal forces a stop.
+- b628897: Groups linked issue and PR items into board tasks with their run history and run and attempt counts.
 - Updated dependencies [3f80f88]
 - Updated dependencies [162b323]
 - Updated dependencies [a36f46e]
@@ -50,18 +40,18 @@
 
 ### Minor Changes
 
-- da13037: Run Attempts through an in-process Pi parent with the usine subagents extension and a headless Claude Code child. Assemble prompts from the payload snapshot, agent persona, and CEL-rendered loop body; persist the effective brain and parent model; stream typed parent and child session events over protocol v2; and pass steer and interrupt controls to the live session.
-- 16e7212: Add per-repository Board lane maps, durable projections of GitHub Items and repository labels from polling, live Run data on Board cards, quarantined Item diagnostics, and lane-scoped label moves through the operator API.
-- a8d8df4: Add the durable Drizzle-backed Event, Run, Step, and Attempt engine with approval, retry, supersede, revoke, restart recovery, and a portable SQLite database seam. The root entry is platform-free; the Node local adapter lives at `@usine/engine/local-sqlite`.
-- 24eef02: Add CLI port overrides, help and version output, occupied-port diagnostics, and a two-second timeout when `usine up` opens the setup page. The operator API now returns attempts, needs, and transcript events without exposing infrastructure causes. Cold and live transcript reads have explicit response limits, and the web drawer can continue loading rows beyond its initial 500-row page. Concurrent overview requests reuse one projection computation, and local-worker polling budgets include their timing rationale.
-- fb24c80: Add Codex app-server and API-key-only Pi SDK children to the subagents extension. Dispatch children from the rostered harness, emit normalized session and ChatGPT pool events, and record the effective parent model on each Attempt through protocol v3; each child's effective brain rides its `SessionStarted` transcript event.
-- ae86c6c: Add `usine up` with a local observe-and-intervene UI. Persist Loop pause state in the runtime database; list every open Run plus the newest settled ones and project protocol transcripts; expose approve, retry, cancel, pause, and unpause through the embeddable orchestrator; and preserve durable observation while the foreground server waits for missing GitHub App credentials with trigger execution idle.
-- 6e61cbf: Add the local worker runtime: capacity-aware scheduling, isolated Git worktrees, per-Attempt credentials, protocol-v2 run-host channels, durable transcripts, structured results, and cooperative cancellation with hard-kill cleanup.
-- 1a9669d: Persist efficiency-only trigger cursors in the run database. Detect GitHub issue and pull-request changes with conditional REST polling, fetch and content-hash fixed GraphQL payload slices, and turn matching loop state into durable Events through the orchestrator polling service.
+- da13037: Runs attempts through an in-process Pi parent with the usine subagents extension and a headless Claude Code child, and streams typed session events over protocol v2.
+- 16e7212: Adds per-repository board lane maps, item and label projections from polling, live run data on board cards, quarantined item diagnostics, and lane label moves through the operator API.
+- a8d8df4: Adds the Drizzle-backed durable engine with approval, retry, supersede, revoke, and restart recovery; the Node adapter is `@usine/engine/local-sqlite`.
+- 24eef02: Adds CLI port overrides, help and version output, and occupied-port diagnostics to `usine up`. The operator API hides infrastructure causes and limits transcript reads, and the drawer loads more than 500 rows.
+- fb24c80: Adds Codex app-server and API-key-only Pi children to the subagents extension (protocol v3).
+- ae86c6c: Adds `usine up` with a local UI that lists open and recent runs with their transcripts and offers approve, retry, cancel, pause, and unpause. Loop pause state persists in the runtime database.
+- 6e61cbf: Adds the local worker runtime: scheduling, isolated Git worktrees, per-attempt credentials, durable transcripts, structured results, and cancellation.
+- 1a9669d: Polls GitHub with conditional REST requests, stores trigger cursors in the run database, and turns matching loop state into durable events.
 
 ### Patch Changes
 
-- 3041f9d: Move the instance-folder directory brand and the approval-requirement literal set into `@usine/core` (`Instance.Directory`, `Loop.ApprovalRequirement`) so the engine and the config loader share one owner. `@usine/engine` re-exports `InstanceDirectory` and `ApprovalRequirement` unchanged.
+- 3041f9d: Moves `Instance.Directory` and `Loop.ApprovalRequirement` to `@usine/core`; `@usine/engine` still exports `InstanceDirectory` and `ApprovalRequirement`.
 - Updated dependencies [da13037]
 - Updated dependencies [16e7212]
 - Updated dependencies [a8d8df4]
@@ -79,4 +69,4 @@
 
 ### Patch Changes
 
-- 781b664: First publish of the nine usine blocks. `@usine/core` ships the Event → Run → Step → Attempt domain model: branded ids, the typestate run state machine (pending → waiting → running → succeeded / failed / canceled), and the attempt-failure taxonomy (infra / agent / runaway) with the auto-retry law. The other eight blocks reserve their seams while the engine grows.
+- 781b664: First publish of the nine usine blocks. `@usine/core` contains the event, run, step, and attempt domain model, the run state machine, and the attempt failure kinds.

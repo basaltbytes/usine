@@ -11,8 +11,7 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 
-/** Placeholder for the loading, unreachable, and not-found states shown before a screen can render.
- * It fills the viewport, or the work panel below Needs you when `inPanel`. */
+/** Renders the loading, unreachable, or not-found screen in the viewport, or in the work panel below Needs you if `inPanel` is set. */
 export const BootScreen = ({
   title,
   description,

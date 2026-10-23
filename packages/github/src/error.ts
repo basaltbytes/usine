@@ -2,7 +2,7 @@ import { Match, Option, Schema } from "effect";
 import { InstallationDiscoveryError } from "./installation.ts";
 import { AppPermissionError } from "./access.ts";
 
-/** The GitHub request that failed, shared by API, rate-limit, and response errors. */
+/** The GitHub request that failed, used by API, rate-limit, and response errors. */
 export const GitHubOperation = Schema.Literals([
   "create-repository-label",
   "discover-installation",
@@ -20,7 +20,7 @@ export const GitHubOperation = Schema.Literals([
 ]);
 export type GitHubOperation = typeof GitHubOperation.Type;
 
-/** A failed GitHub request, with an HTTP status when a response was received. */
+/** A failed GitHub request, with the HTTP status if a response was received. */
 export class GitHubApiError extends Schema.TaggedError<GitHubApiError>(
   "@usine/github/GitHubApiError",
 )("GitHubApiError", {
@@ -29,7 +29,7 @@ export class GitHubApiError extends Schema.TaggedError<GitHubApiError>(
   message: Schema.NonEmptyString,
 }) {}
 
-/** GitHub deferred the request until retryAt; callers can schedule a later attempt. */
+/** The error when GitHub defers the request until `retryAt`. */
 export class GitHubRateLimitError extends Schema.TaggedError<GitHubRateLimitError>(
   "@usine/github/GitHubRateLimitError",
 )("GitHubRateLimitError", {
@@ -38,19 +38,19 @@ export class GitHubRateLimitError extends Schema.TaggedError<GitHubRateLimitErro
   message: Schema.NonEmptyString,
 }) {}
 
-/** GitHub returned a response that cannot be decoded or is missing required content. */
+/** The error when a GitHub response can't be decoded or lacks required content. */
 export class InvalidGitHubResponseError extends Schema.TaggedError<InvalidGitHubResponseError>(
   "@usine/github/InvalidGitHubResponseError",
 )("InvalidGitHubResponseError", {
   operation: GitHubOperation,
   message: Schema.NonEmptyString,
-  /** What made the response invalid: the decode path, the missing field, or the GraphQL errors. */
+  /** The decode path, missing field, or GraphQL errors. */
   detail: Schema.NonEmptyString,
 }) {}
 
 /**
- * GitHub has no Item with this number in the repository: it was deleted or
- * transferred, or the App can no longer read it. The repository itself answered.
+ * The error when the repository has no Item with this number because it was deleted,
+ * transferred, or is no longer readable by the App. The repository itself responded.
  */
 export class GitHubItemNotFoundError extends Schema.TaggedError<GitHubItemNotFoundError>(
   "@usine/github/GitHubItemNotFoundError",
@@ -60,7 +60,7 @@ export class GitHubItemNotFoundError extends Schema.TaggedError<GitHubItemNotFou
   message: Schema.NonEmptyString,
 }) {}
 
-/** Failures from discovering installation access or making an authenticated GitHub request. */
+/** The errors from installation discovery or an authenticated GitHub request. */
 export const GitHubAppError = Schema.Union([
   InstallationDiscoveryError,
   AppPermissionError,
@@ -71,13 +71,10 @@ export const GitHubAppError = Schema.Union([
 export type GitHubAppError = typeof GitHubAppError.Type;
 
 /**
- * Whether GitHub gave a definite answer that sending the request again does
- * not change: the App has no usable installation, the installation lacks a
- * required permission, or GitHub answered with a 4xx status other than 408
- * and 429, such as 422 for a permission the installation does not grant or
- * 403 for a suspended installation. A request that could not be sent, a
- * server error, a rate limit, and a response that breaks GitHub's API
- * contract are not refusals.
+ * Returns whether GitHub gave a definite response that a retry won't change: no usable
+ * installation, a missing permission, or a 4xx status other than 408 and 429 (for example, 422
+ * for an ungranted permission or 403 for a suspended installation). Send failures, server
+ * errors, rate limits, and responses that break GitHub's API contract aren't refusals.
  */
 export const isRefusal = (error: GitHubAppError): boolean =>
   Match.valueTags(error, {

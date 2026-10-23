@@ -2,4 +2,4 @@
 "@usine/engine": patch
 ---
 
-Startup reconciliation calls `StepExecutor.recover` once per persisted Attempt, however many services the engine layer is provided to. It ran once per service before, so `usine up` reconciled every Attempt four times and logged each of its lines four times.
+Fixes startup reconciliation calling `StepExecutor.recover` once per service that the engine layer is provided to. `usine up` reconciles each attempt once instead of four times.

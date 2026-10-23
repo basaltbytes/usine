@@ -25,9 +25,8 @@ import { testAppLayer } from "../support/github-app.ts";
 import { alwaysHoldsLayer } from "../support/polling.ts";
 
 /**
- * Reads the windows of `attemptId` running alone on its Run's Item: its own,
- * open since before any time a test clock or GitHub fixture gives, and no
- * other Attempt of its Agent there, so the harvest keeps every signed comment.
+ * Returns windows where `attemptId` is the only Attempt of its Agent on the Item, open since before
+ * any test time, so the harvest keeps every signed comment.
  */
 export const aloneOnItem = (attemptId: AttemptId) =>
   Effect.succeed(
@@ -40,9 +39,9 @@ export const aloneOnItem = (attemptId: AttemptId) =>
   );
 
 export const TOKEN = "one-attempt-test-token";
-// Each live transition crosses real git worktree and child-process boundaries.
-// The 10-second poll horizon absorbs slow CI hosts, and the 10 ms cadence still
-// reports the last durable state when a transition stalls.
+// Each live transition crosses real git worktree and child-process boundaries. The 10-second poll
+// horizon allows for slow CI hosts, and the 10 ms interval still reports the last durable state
+// when a transition stalls.
 export const STATE_POLL_ATTEMPTS = 1_000;
 // The capacity test completes three sequential Attempt lifecycles, so its
 // per-test ceiling must cover more than one state-poll horizon plus cleanup.
@@ -174,7 +173,10 @@ export const waitForStarted = Effect.fn("test.waitForStarted")(function* (
   return yield* Effect.die(`Attempt ${attemptId} never reported Started`);
 });
 
-/** Waits for the first Attempt's salvage record; the executor writes it after the Run's state has settled. */
+/**
+ * Waits for the first Attempt's salvage record, which the executor writes after the Run's state is
+ * final.
+ */
 export const waitForSalvage = Effect.fn("test.waitForSalvage")(function* (
   engine: RunEngine["Service"],
   runId: RunId,
@@ -187,14 +189,17 @@ export const waitForSalvage = Effect.fn("test.waitForSalvage")(function* (
   return yield* Effect.die(`Run ${runId} recorded no salvage`);
 });
 
-/** How a test runtime differs from the default: its parent tasks, credentials, or executor settings. */
+/** Overrides for a test runtime: parent tasks, credentials, or executor settings. */
 export interface LocalRuntimeOptions {
   readonly attemptRuntime?: Layer.Layer<AttemptRuntime>;
   readonly credentials?: Layer.Layer<CredentialProvider>;
   readonly executor?: Omit<LocalExecutorOptions, "instanceDirectory">;
 }
 
-/** The orchestrator layer for one local Worker over `remote`; every call builds a fresh runtime. */
+/**
+ * Returns the orchestrator layer for one local Worker over `remote`, building a new runtime on each
+ * call.
+ */
 export const localRuntime = (
   instance: InstanceDirectory,
   remote: string,

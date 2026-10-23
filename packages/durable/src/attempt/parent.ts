@@ -19,18 +19,18 @@ import type { AttemptId } from "@usine/core/attempt";
 import type { RunSpec } from "@usine/core/attempt/channel";
 import { Effect, Option } from "effect";
 
-/** The model the Attempt's Pi parent runs with, checked against its effort and credential before the conversation exists. */
+/** The parent model, validated against the effort and credential. */
 interface ResolvedParent {
   readonly ref: ModelRef;
   readonly model: ModelId;
   readonly pool: PiPool;
 }
 
-/** usine's id for the Attempt's Pi parent, the default target of operator input. */
+/** Returns the session ID of the Attempt's Pi parent, the default target of operator input. */
 export const parentSessionId = (attemptId: AttemptId): AgentSessionId =>
   AgentSessionId.make(`parent:${attemptId}`);
 
-/** The parent as session events record it: the rostered Agent with the model actually resolved. */
+/** Returns the parent session with the rostered Agent and the resolved model. */
 export const parentSession = (spec: RunSpec, model: ModelId): ParentSession =>
   new ParentSession({
     id: parentSessionId(spec.attemptId),
@@ -93,10 +93,9 @@ const selectModel = Effect.fn("ParentModel.select")(function* (
 });
 
 /**
- * Resolves the parent's model, effort, and billing pool exactly as a Pi parent
- * session did before it ran in the orchestrator: an unknown model, an effort the
- * model cannot run, and a credential outside the provider's pool all fail
- * before the conversation is created.
+ * Resolves the parent's model, effort, and billing pool. Fails before the conversation is created
+ * if the model is unknown, doesn't support the effort, or the credential is outside the provider's
+ * pool.
  */
 export const resolveParent = Effect.fn("ParentModel.resolve")(function* (
   models: Models,

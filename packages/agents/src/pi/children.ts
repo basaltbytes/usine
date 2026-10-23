@@ -24,8 +24,5 @@ const makeChildDispatcher = Effect.gen(function* () {
   });
 });
 
-/**
- * Selects Claude Code, Codex, or Pi for each delegated task from the Agent's harness.
- * Supply the three backend layers here, or use a concrete backend directly.
- */
+/** Dispatches each delegated task to the Claude Code, Codex, or Pi backend according to the Agent's harness; requires all three backend layers. */
 export const childDispatcherLayer = Layer.effect(ChildBackend, makeChildDispatcher);

@@ -1,6 +1,5 @@
 import { Schema } from "effect";
 
-/** Kebab-case name of a configured Worker. */
 export const WorkerName = Schema.String.check(
   Schema.isPattern(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u, {
     message: "Expected a kebab-case Worker name",
@@ -9,15 +8,13 @@ export const WorkerName = Schema.String.check(
 
 export type WorkerName = typeof WorkerName.Type;
 
-/** The Worker kinds the engine has an adapter for. */
 export const WORKER_KINDS = ["local", "exe.dev", "ssh"] as const;
 export const WorkerKind = Schema.Literals(WORKER_KINDS);
 export type WorkerKind = typeof WorkerKind.Type;
 
 /**
- * The login of the GitHub bot account an Attempt writes as, `<slug>[bot]`:
- * the factory's App on local and SSH Workers, and exe.dev's GitHub
- * integration on exe.dev Workers (ADR 0011).
+ * The GitHub bot login that an Attempt writes as: the factory's GitHub App on local and SSH
+ * Workers, or the exe.dev GitHub integration on exe.dev Workers (ADR 0011).
  */
 export const BotLogin = Schema.String.check(
   Schema.isPattern(/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\[bot\]$/u, {
@@ -27,10 +24,8 @@ export const BotLogin = Schema.String.check(
 export type BotLogin = typeof BotLogin.Type;
 
 /**
- * Where the local `ssh` client connects: a host name, an address, or a Host
- * alias from the operator's SSH configuration, optionally prefixed by a user.
- * It is passed to `ssh` as one argument, so a value that could read as an
- * option (`-oProxyCommand=...`) cannot be constructed.
+ * The `ssh` destination: a host name, address, or SSH config Host alias, optionally prefixed
+ * with `user@`. Rejects values that `ssh` could parse as an option, such as `-oProxyCommand=...`.
  */
 export const SshDestination = Schema.String.check(
   Schema.isPattern(/^(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/u, {
@@ -39,16 +34,12 @@ export const SshDestination = Schema.String.check(
 ).pipe(Schema.brand("SshDestination"));
 export type SshDestination = typeof SshDestination.Type;
 
-/** The TCP port the SSH server of a Worker's machine listens on. */
 export const SshPort = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65_535 })).pipe(
   Schema.brand("SshPort"),
 );
 export type SshPort = typeof SshPort.Type;
 
-/**
- * The private key file the local `ssh` client authenticates with, absolute
- * or relative to the orchestrator user's home (`~/.ssh/usine_worker`).
- */
+/** The `ssh` private key path, absolute or starting with `~/`. */
 export const SshIdentityFile = Schema.String.check(
   Schema.isPattern(/^(?:\/|~\/)[!-~]+$/u, {
     message: "Expected an absolute or ~/ key path without spaces or control characters",
@@ -57,9 +48,8 @@ export const SshIdentityFile = Schema.String.check(
 export type SshIdentityFile = typeof SshIdentityFile.Type;
 
 /**
- * The absolute directory on a Worker's machine under which every Worker using
- * it keeps its cached clones, Attempt checkouts, and Attempt credentials, at
- * `<root>/workers/<worker>`. Printable characters only, no trailing slash.
+ * The absolute directory on the Worker's machine that contains `workers/<worker>`, with cached
+ * clones, Attempt checkouts, and Attempt credentials.
  */
 export const WorkerRoot = Schema.String.check(
   Schema.isPattern(/^(?:\/[!-.0-~]+)+$/u, {
@@ -69,10 +59,9 @@ export const WorkerRoot = Schema.String.check(
 export type WorkerRoot = typeof WorkerRoot.Type;
 
 /**
- * The private DNS domain of the Gateway in front of a Worker's machine
- * ([ADR 0027](../../../docs/adr/0027-gateway-credential-proxy.md)). The
- * machine resolves `git.<domain>` for GitHub, `llm.<domain>` for the LLM
- * providers, and `<domain>` itself for the forward proxy.
+ * The Gateway's private DNS domain, which serves `git.<domain>` for GitHub, `llm.<domain>` for
+ * LLM providers, and `<domain>` for the forward proxy
+ * ([ADR 0027](../../../docs/adr/0027-gateway-credential-proxy.md)).
  */
 export const GatewayDomain = Schema.String.check(
   Schema.isPattern(
@@ -82,20 +71,23 @@ export const GatewayDomain = Schema.String.check(
 ).pipe(Schema.brand("GatewayDomain"));
 export type GatewayDomain = typeof GatewayDomain.Type;
 
-/**
- * The TCP port a Gateway's admin API listens on, on the Gateway's own
- * loopback interface (`USINE_GATEWAY_ADMIN_PORT`). The executor reaches it
- * through a forward over its SSH connection to the Gateway.
- */
+/** The Gateway admin API port on the Gateway's loopback interface (`USINE_GATEWAY_ADMIN_PORT`), used through an SSH forward. */
 export const GatewayAdminPort = Schema.Int.check(
   Schema.isBetween({ minimum: 1, maximum: 65_535 }),
 ).pipe(Schema.brand("GatewayAdminPort"));
 export type GatewayAdminPort = typeof GatewayAdminPort.Type;
 
 /**
- * An LLM provider whose credential the Gateway holds, so the harness that
- * uses it calls the Gateway with the Attempt's caller token instead of a
- * login on the machine: `anthropic` for Claude Code.
+ * An LLM provider whose credential the Gateway stores. The harness for that provider, such as
+ * Claude Code for `anthropic`, uses the Attempt's caller token instead of a login on the machine.
  */
 export const GatewayLlmProvider = Schema.Literals(["anthropic"]);
 export type GatewayLlmProvider = typeof GatewayLlmProvider.Type;
+
+/**
+ * The kind of LLM provider credential that the Gateway stores, as reported by its admin API.
+ * `api-key` is billed at API rates; `subscription` uses a plan, such as a Claude plan from
+ * `claude setup-token` ([ADR 0013](../../../docs/adr/0013-cost-accounting-native-meters-guardrails.md)).
+ */
+export const GatewayCredentialKind = Schema.Literals(["api-key", "subscription"]);
+export type GatewayCredentialKind = typeof GatewayCredentialKind.Type;

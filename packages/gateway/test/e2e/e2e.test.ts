@@ -15,8 +15,8 @@ import { GatewayAddresses, gatewayLayer, type Listener } from "../../src/node/no
 import { ADMIN_TOKEN_VALUE, NO_PROVIDERS, WORKER, settingsLayer } from "../fixtures.ts";
 import { tlsThroughTunnel } from "../tunnel.ts";
 
-// These tests reach github.com and registry.npmjs.org, anonymously, so CI needs no secret.
-// They are skipped where the machine has no direct route to the internet, such as a Worker behind a Gateway (#273).
+// These tests access github.com and registry.npmjs.org anonymously, so CI needs no secret.
+// They're skipped on machines without a direct internet route, such as a Worker behind a Gateway (#273).
 const directEgress = await new Promise<boolean>((resolve) => {
   const socket = connect({ host: "api.github.com", port: 443 });
   socket.setTimeout(3_000);
@@ -82,7 +82,7 @@ const attachPublicRepository = Effect.gen(function* () {
   return Redacted.value(attached.callerToken);
 });
 
-/** The environment a Worker child would have: nothing from this machine's git or gh configuration. */
+/** Returns a Worker child's environment, without this machine's git or gh configuration. */
 const workerEnvironment = (home: string) => ({
   PATH: process.env.PATH ?? "/usr/bin:/bin",
   HOME: home,
@@ -92,7 +92,7 @@ const workerEnvironment = (home: string) => ({
   GH_PROMPT_DISABLED: "1",
 });
 
-/** Forwards a Unix socket to the gateway proxy, as `systemd-socket-proxyd` does on a Worker. */
+/** Forwards a Unix socket to the Gateway proxy, like `systemd-socket-proxyd` on a Worker. */
 const socketForwarder = (path: string, proxy: Listener) =>
   Effect.acquireRelease(
     Effect.callback<ReturnType<typeof createServer>>((resume) => {
@@ -152,7 +152,7 @@ describe.skipIf(!directEgress)("the gateway against GitHub", () => {
         yield* Effect.promise(() =>
           writeFile(join(directory, "config.yml"), `http_unix_socket: ${socket}\n`),
         );
-        // `rate_limit` does not count against GitHub's anonymous rate limit, so CI runners sharing an address cannot exhaust it.
+        // `rate_limit` doesn't count against GitHub's anonymous rate limit, so CI runners that share an address can't exhaust it.
         const answered = yield* run("gh", ["api", "rate_limit", "--jq", ".resources.core.limit"], {
           ...workerEnvironment(directory),
           GH_CONFIG_DIR: directory,

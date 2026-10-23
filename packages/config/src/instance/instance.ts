@@ -5,7 +5,7 @@ import { AgentFile, InvalidAgent } from "../agent.ts";
 import { ConfigWarning } from "./diagnostics.ts";
 import { referenceIndex, loopReferenceFailure } from "./references.ts";
 
-/** One consistent snapshot of an instance folder. Construction fails if a loop references a name the instance does not have. */
+/** A snapshot of an instance folder. Construction fails if a loop references an unknown agent or selector entry. */
 export class LoadedInstance extends Schema.Class<LoadedInstance>("@usine/config/LoadedInstance")(
   Schema.Struct({
     config: UsineConfig,

@@ -16,10 +16,9 @@ import { StepResult } from "@usine/core/step/result";
 import { Array as EffectArray, Option, Result } from "effect";
 import type { IgnoreReason } from "./submission.ts";
 
-// Engine policy, not a limit imposed on consumers of the core Attempt model.
 const MAX_AUTO_ATTEMPTS = AttemptNumber.make(3);
 
-/** A Run and its Attempts in ascending attempt-number order, read together. */
+/** A Run and its Attempts, ordered by Attempt number. */
 interface RunProgress {
   readonly run: Run;
   readonly attempts: ReadonlyArray<Attempt>;
@@ -51,7 +50,7 @@ type RunSucceeded = {
   readonly result: StepResult;
 };
 
-/** Changes that must commit together when an Attempt finishes. Only success stores a Step result. */
+/** The changes committed together when an Attempt finishes. */
 export type FinishDecision = RetryAttempt | RunFailed | RunSucceeded | Unchanged;
 
 const openAttempt = (current: RunProgress): Option.Option<Attempt> =>
@@ -72,8 +71,8 @@ const failRunningAttempt = (
 };
 
 /**
- * Settles the current Attempt from its executor result. Infrastructure failure
- * can retry up to three total Attempts; a late or repeated completion changes nothing.
+ * Returns the changes for the executor result of `attemptId`. An infrastructure failure is
+ * retried up to 3 Attempts in total; a late or repeated result returns `Unchanged`.
  */
 export const finishAttempt = (
   current: RunProgress,
@@ -85,8 +84,7 @@ export const finishAttempt = (
   }
   const attempt = openAttempt(current);
   if (Option.isNone(attempt)) return { _tag: "Unchanged", reason: "NoOpenAttempt" };
-  // A completion from before restart or operator retry cannot settle the
-  // replacement Attempt, even though the Run is Running again.
+  // A result from before a restart or retry doesn't apply to the replacement Attempt.
   if (attempt.value.id !== attemptId) return { _tag: "Unchanged", reason: "AttemptReplaced" };
   if (Result.isFailure(result)) {
     return failRunningAttempt(current.run.state, attempt.value, result.failure);
@@ -118,9 +116,7 @@ type StartDecision =
   | RunFailed
   | { readonly _tag: "RunClosed"; readonly state: RunState.RunState };
 
-// Only a pushed salvage can be fetched on the next Worker. A later Attempt
-// whose own push failed keeps its worktree on that Worker, so the retry resumes
-// from the newest salvage that was published.
+// Only a pushed salvage can be fetched on another Worker, so a retry resumes from the newest one.
 const newestPushedSalvage = (attempts: ReadonlyArray<Attempt>): Option.Option<SalvagePushed> =>
   EffectArray.findLast(attempts, (attempt) =>
     Option.filter(
@@ -130,15 +126,9 @@ const newestPushedSalvage = (attempts: ReadonlyArray<Attempt>): Option.Option<Sa
   );
 
 /**
- * Admits the next Attempt after a Worker reservation. An unfinished previous
- * Attempt indicates a restart. When its parent task is still `live`, the
- * Attempt is reattached: it keeps its identity and number and spends no retry.
- * Otherwise it counts against the same retry cap as ordinary infrastructure
- * failure, with `interruption` as the runtime's explanation. The caller creates
- * a new Attempt's identity and timestamp only when admitted. `resume` names the
- * pushed salvage the Attempt's checkout starts from, if any. `requested` is the
- * operator retry that reopened the Run, if one did; otherwise a later Attempt
- * follows an infrastructure failure or a restart, and the first one the Event.
+ * Returns how the next Attempt starts after a Worker reservation. If an open Attempt's parent
+ * task is `live`, reattaches it without using a retry; otherwise fails it with `interruption`,
+ * counted against the retry cap. `requested` is the operator retry that reopened the Run, if any.
  */
 export const beginAttempt = (
   current: RunProgress,
@@ -191,10 +181,7 @@ type CancelDecision =
       }>;
     };
 
-/**
- * Cancels open work and, if executing, its unfinished Attempt. A Run awaiting
- * capacity may have no Attempt, or only the closed Attempt preceding a retry.
- */
+/** Returns the cancel decision for an open Run and its open Attempt, if any. */
 export const cancelRun = (current: RunProgress): CancelDecision => {
   if (!RunState.isOpen(current.run.state)) return { _tag: "AlreadyClosed" };
   return {
@@ -216,10 +203,8 @@ type RetryDecision =
   | { readonly _tag: "RetryRejected" };
 
 /**
- * Reopens a failed Run for operator retry regardless of its Attempt count.
- * A request while the Run runs but has no open Attempt, as after a retry that
- * has not started its Attempt yet, is accepted and changes nothing; once an
- * Attempt is open, retrying is rejected.
+ * Returns the operator retry decision, regardless of the Attempt count. A retry of a running Run
+ * with no open Attempt changes nothing; a retry of a running Attempt is rejected.
  */
 export const retryRun = (current: RunProgress): RetryDecision => {
   const state = current.run.state;
@@ -231,16 +216,14 @@ export const retryRun = (current: RunProgress): RetryDecision => {
 };
 
 /**
- * What a Loop saw of an Item before the current sighting: none when the Loop
- * never saw it, `Some(None)` after a sighting that did not match, and
- * `Some(Some(event))` for the Event a trigger last submitted.
+ * The Loop's previous sighting of an Item: `None` if never seen, `Some(None)` after a
+ * non-matching sighting, and `Some(Some(event))` for the last submitted Event.
  */
 export type PreviousSighting = Option.Option<Option.Option<EventId>>;
 
 /**
- * Whether a sighting of `eventId` finds the Item back in a state the Loop had
- * left: since it last saw this Event, the Loop saw the Item not matching or saw
- * another Event. An Item the Loop never saw before has not come back.
+ * Returns whether the previous sighting was a non-match or another Event than `eventId`. Returns
+ * `false` if the Loop never saw the Item.
  */
 export const cameBack = (previous: PreviousSighting, eventId: EventId): boolean =>
   Option.match(previous, {
@@ -248,7 +231,7 @@ export const cameBack = (previous: PreviousSighting, eventId: EventId): boolean 
     onSome: (observed) => !Option.contains(observed, eventId),
   });
 
-/** How an Event already settled before this sighting: it owns a Run, or it was ignored. */
+/** The state of a recorded Event that has a Run or was ignored. */
 export type Settlement =
   | { readonly _tag: "Owned"; readonly run: Run }
   | { readonly _tag: "Ignored"; readonly reason: IgnoreReason };
@@ -259,12 +242,8 @@ type SightingDecision =
   | { readonly _tag: "ReopenEvent" };
 
 /**
- * Decides what a new sighting of a settled Event does. The Event opens again
- * only when the Item came back to its state (#267) and nothing worked on that
- * state: its Run was canceled, by the operator, a supersede, or a revoke, or the
- * Event was revoked while it waited in the queue. A Run that succeeded or failed
- * keeps its Event, and a failed Run waits for operator retry. An Event that a
- * newer Event superseded in the queue stays ignored.
+ * Returns what a new sighting of the `settled` Event does. The Event reopens only if the Item
+ * came back (#267) and its Run was canceled or the queued Event was revoked.
  */
 export const resightEvent = (settled: Settlement, itemCameBack: boolean): SightingDecision => {
   if (settled._tag === "Owned") {
@@ -278,19 +257,18 @@ export const resightEvent = (settled: Settlement, itemCameBack: boolean): Sighti
 };
 
 /**
- * A hold of a Loop on an Item after an Attempt stopped for the operator: the
- * Run whose Attempt stopped, and the Item's state after the stop once the
- * Loop saw one (#241, #341).
+ * The state that keeps a Loop from opening Runs for an Item after an Attempt stopped for the
+ * operator: the stopped Run, and the Item's state after the stop once seen (#241, #341).
  */
 export interface OperatorHold {
   readonly runId: RunId;
   readonly heldEventId: Option.Option<EventId>;
 }
 
-/** How an Attempt stopped for the operator: it asked a question or reported a blocker. */
+/** The kind of operator stop: a question or a blocker. */
 export type OperatorStop = "question" | "blocker";
 
-/** How the Attempt the decision closes stopped for the operator, if it did; its Loop then holds the Item (ADR 0017). */
+/** Returns the kind of operator stop that fails the Run in `decision`, or `None` (ADR 0017). */
 export const operatorStop = (decision: FinishDecision): Option.Option<OperatorStop> => {
   if (decision._tag !== "RunFailed") return Option.none();
   switch (decision.outcome.failure._tag) {
@@ -309,11 +287,9 @@ type HoldDecision =
   | { readonly _tag: "Release" };
 
 /**
- * Decides what an unclaimed Event does while a hold keeps its Loop on the Item.
- * The first state the Loop sees after the stop normally carries the Agent's
- * own question or blocker comment, so it becomes the held state (`HoldAt`); a
- * later Event with other content means the Item changed again, and the Loop
- * acts on it.
+ * Returns what an unclaimed Event does during an operator hold. The first Event after the stop,
+ * which usually contains the Agent's own comment, becomes the held state (`HoldAt`); a different
+ * later Event releases the hold.
  */
 export const holdEvent = (hold: OperatorHold, eventId: EventId): HoldDecision =>
   Option.match(hold.heldEventId, {
@@ -327,9 +303,8 @@ type ClaimDecision =
   | { readonly _tag: "SupersedeRun"; readonly runId: RunId; readonly state: RunState.Canceled };
 
 /**
- * Decides what to do with an Event that no Run has claimed: open a Run, queue the Event
- * while the Item's Run is running, or supersede the Item's unstarted Run. The ledger handles
- * duplicate and ignored Events before this decision; a running Attempt always finishes (ADR 0007).
+ * Returns what an unclaimed Event does: open a Run, queue behind the Item's running Run, or
+ * supersede the Item's unstarted Run (ADR 0007).
  */
 export const claimRun = (blocking: Option.Option<Run>, eventId: EventId): ClaimDecision => {
   if (Option.isNone(blocking)) return { _tag: "OpenRun" };

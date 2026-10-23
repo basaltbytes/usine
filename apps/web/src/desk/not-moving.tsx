@@ -22,7 +22,7 @@ const StalledRow = ({
   readonly stalled: StalledItemView;
   readonly now: number;
   readonly readOnly: boolean;
-  /** Below `md` the row is one cell: the Item, its Loop, the reason, then the action. */
+  /** Whether to render the row as a single cell, as below the `md` breakpoint. */
   readonly narrow: boolean;
 }) => {
   const run = stallRun(stalled);
@@ -53,10 +53,8 @@ const StalledRow = ({
 };
 
 /**
- * Every Item a Loop's trigger matches with no Attempt running on it, with the reason and the
- * action that moves it again. A row whose reason names a Run opens that Run's page.
- * `readOnly` hides the actions while the factory needs setup; `polled` is false until a poll of
- * some repository has finished, when no Item has been matched yet.
+ * Renders the matched Items with no running Attempt; a row whose reason references a Run opens it.
+ * `readOnly` hides the actions during setup; `polled` is false until the first repository poll ends.
  */
 export const NotMoving = ({
   stalled,

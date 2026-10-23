@@ -151,7 +151,7 @@ export const persistence =
       isRunStoreError(error) ? error : new EnginePersistenceError({ operation, cause: error }),
     );
 
-/** The Event columns of a row; a route row and a Run's Event row both carry them. */
+/** The Event columns shared by route rows and Run Event rows. */
 type EventColumns = Pick<EventRouteRow, "eventId" | "dedupKey" | "payload" | "receivedAt">;
 
 export const eventFromRow = (row: EventColumns): Event =>

@@ -9,8 +9,8 @@ import type { HarnessListener } from "../harness.ts";
 import { ATTEMPT_RECORD_KIND, type AttemptRecord } from "./documents.ts";
 
 /**
- * Whether a child read an operator input it had queued: the child's state
- * when it read it, or none when it stopped first.
+ * Whether a child read a queued operator input, with the child's state when it read it, or `None`
+ * if it stopped first.
  */
 export interface ChildDelivery {
   readonly _tag: "Delivery";
@@ -19,7 +19,7 @@ export interface ChildDelivery {
   readonly delivered: Option.Option<AttemptChannel.InterventionState>;
 }
 
-/** Activity waiting to be relayed, in the order it happened in this process. */
+/** Activity queued for relay, in order of occurrence. */
 export type RelayItem =
   | { readonly _tag: "Entry"; readonly entry: EntryId }
   | { readonly _tag: "Event"; readonly event: AgentSessionEvent }
@@ -27,7 +27,10 @@ export type RelayItem =
   | ChildDelivery
   | { readonly _tag: "Wake" };
 
-/** How far the attached channel has progressed; persisted in the Attempt's record after each parent entry and each other envelope. */
+/**
+ * The relay position of the attached channel, persisted in the Attempt record after each parent
+ * entry and envelope.
+ */
 export interface RelayProgress {
   outbound: AttemptChannel.Progress;
   inbound: number;
@@ -41,41 +44,36 @@ interface AttachedChannel {
   readonly progress: RelayProgress;
 }
 
-/** In-process state of one Attempt: its relay queue, its attached channel, and its live children. */
+/** The in-process state of one Attempt. */
 export interface AttemptHub {
   readonly attemptId: AttemptId;
   readonly taskId: TaskId;
   readonly queue: Queue.Queue<RelayItem>;
   /** Serializes outbound envelopes between the relay and interventions. */
   readonly emission: Semaphore.Semaphore;
-  /** Applies one operator intervention at a time. */
+  /** Serializes operator interventions. */
   readonly routing: Semaphore.Semaphore;
-  /** Live children by id, so an operator message can be addressed to one. */
+  /** The live children by session ID. */
   readonly children: Map<AgentSessionId, RunningSession>;
   /**
-   * Input sequences of the operator inputs a child of this process queued and
-   * has not reported read or unread yet. A queued child input missing here was
-   * queued by a process that stopped, so its child is gone.
+   * The sequence numbers of operator inputs queued by children in this process and not yet reported
+   * read or unread. An input missing from this set was queued by a previous process.
    */
   readonly childInputs: Set<number>;
   parent: Option.Option<ConversationId>;
   channel: Option.Option<AttachedChannel>;
-  /** Worker notices that arrived before the parent started, which the relay sends right after `Started`. */
+  /** The Worker notices received before the parent started, sent right after `Started`. */
   early: ReadonlyArray<AttemptChannel.WorkerNotice>;
   /**
-   * Completed with the request of the `execute` call relaying this Attempt, and
-   * replaced when it detaches. Its child host and environment are never
-   * stored, so new children wait for a live `execute` to supply them.
+   * Completes with the request of the `execute` call relaying this Attempt. Replaced when that call
+   * detaches.
    */
   attached: Deferred.Deferred<AttemptRequest>;
 }
 
 /**
- * The Worker notices to keep for a relay that cannot send them yet, once
- * `notice` arrives after `kept`. Only the Worker's latest state matters, so
- * this keeps the latest notice, and the `WorkerUnresponsive` before a
- * `WorkerResponsive` so the transcript still says the Worker stopped before
- * it says the Worker answers again.
+ * Returns the notices to buffer after `notice`: the latest one, preceded by the last
+ * `WorkerUnresponsive` if the latest is a `WorkerResponsive`.
  */
 export const keepNotice = (
   kept: ReadonlyArray<AttemptChannel.WorkerNotice>,
@@ -87,37 +85,33 @@ export const keepNotice = (
     : [notice];
 };
 
-/** What `AttemptHubs.notice` did with a Worker notice. */
+/** The result of `AttemptHubs.notice`. */
 export type NoticeRouting =
   | { readonly _tag: "Queued" }
   | { readonly _tag: "Kept"; readonly kept: ReadonlyArray<AttemptChannel.WorkerNotice> };
 
 export interface AttemptHubs {
-  /** The Attempt's hub, created on first use with the Worker notices kept for it as its early notices. */
+  /** Returns the Attempt's hub, creating it on first use with the buffered Worker notices. */
   readonly hub: (attemptId: AttemptId, taskId: TaskId) => Effect.Effect<AttemptHub>;
   readonly find: (attemptId: AttemptId) => Option.Option<AttemptHub>;
   /** Routes the parent conversation's entries to the hub from now on. */
   readonly bindParent: (hub: AttemptHub, parent: ConversationId) => void;
-  /** Queues one session event that no parent entry stands for, a child's or the parent's own, behind everything that happened before it. */
+  /** Queues a session event that has no parent entry. */
   readonly event: (hub: AttemptHub, event: AgentSessionEvent) => Effect.Effect<void>;
   /**
-   * Queues one notice about the Attempt's Worker behind everything that
-   * happened before it. While the Attempt has no hub in this process, the
-   * notice is kept with `keepNotice` until the hub is created.
+   * Queues a Worker notice. If the Attempt has no hub in this process, buffers it with `keepNotice`
+   * until the hub is created.
    */
   readonly notice: (
     attemptId: AttemptId,
     notice: AttemptChannel.WorkerNotice,
   ) => Effect.Effect<NoticeRouting>;
-  /** Queues the report of whether a child read an operator input it had queued. */
   readonly delivery: (hub: AttemptHub, delivery: ChildDelivery) => Effect.Effect<void>;
   /**
-   * Completes once an `execute` call relays the Attempt's channel, at once
-   * while one does. Before the Attempt has a hub here, the wait is kept for
-   * the hub created next, which completes it when its channel attaches.
+   * Completes when an `execute` call is relaying the Attempt, even if the hub doesn't exist yet.
    */
   readonly attached: (attemptId: AttemptId) => Effect.Effect<void>;
-  /** Routes commits to hubs: parent entries in order, task and record changes as wake-ups; wakes every hub after a reopen or the stop. */
+  /** Routes commits to hubs and wakes every hub after a reopen or stop. */
   readonly listener: HarnessListener;
 }
 
@@ -126,9 +120,12 @@ export const attemptHubs = Effect.gen(function* () {
   const byAttempt = new Map<string, AttemptHub>();
   const byTask = new Map<number, AttemptHub>();
   const byParent = new Map<number, AttemptHub>();
-  /** Worker notices for Attempts that have no hub yet. */
+  /** The Worker notices for Attempts without a hub. */
   const early = new Map<string, ReadonlyArray<AttemptChannel.WorkerNotice>>();
-  /** What `attached` waits on for Attempts that have no hub yet; their hub starts with it. */
+  /**
+   * The Deferreds that `attached` waits on for Attempts without a hub. A new hub uses this
+   * Deferred.
+   */
   const awaited = new Map<string, Deferred.Deferred<AttemptRequest>>();
 
   const bindParent = (hub: AttemptHub, parent: ConversationId) => {
@@ -148,8 +145,8 @@ export const attemptHubs = Effect.gen(function* () {
         const emission = yield* Semaphore.make(1);
         const routing = yield* Semaphore.make(1);
         const fresh = yield* Deferred.make<AttemptRequest>();
-        // No yield until the hub is registered, so `notice` either keeps a notice the hub starts
-        // with or queues it, and `attached` either waits on what the hub starts with or on the hub.
+        // No yield until the hub is registered, so a concurrent `notice` or `attached` sees either
+        // the pre-hub buffers or the registered hub.
         const attached = awaited.get(attemptId) ?? fresh;
         const created: AttemptHub = {
           attemptId,
@@ -237,8 +234,7 @@ export const attemptHubs = Effect.gen(function* () {
         return { _tag: "Kept", kept };
       }),
     delivery: (target, delivery) => Queue.offer(target.queue, delivery).pipe(Effect.asVoid),
-    // `relayAttempt` replaces a hub's `attached` when its channel detaches, so
-    // the wait reads the current one: a channel that detached is waited for again.
+    // Read `attached` at call time: `relayAttempt` replaces it when the channel detaches.
     attached: (attemptId) =>
       Effect.suspend(() => {
         const target = byAttempt.get(attemptId);

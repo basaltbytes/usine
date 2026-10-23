@@ -30,8 +30,9 @@ import { ADMIN_TOKEN_VALUE, REPOSITORY, WORKER } from "./fixtures.ts";
 const CALLER_KEY_VALUE = "caller-key-for-reload-tests-0123456789";
 const FIRST_KEY = "sk-ant-api03-firstKeyForReloadTests";
 const SECOND_KEY = "sk-ant-api03-secondKeyForReloadTests";
+const SUBSCRIPTION_TOKEN = "sk-ant-oat01-subscriptionTokenForReloadTests";
 
-/** A loopback port nothing listens on at the moment of the call. */
+/** Returns a loopback port that's free at the time of the call. */
 const freePort = Effect.callback<number>((resume) => {
   const server = createNetServer();
   server.once("error", (error) => resume(Effect.die(error)));
@@ -45,7 +46,7 @@ const freePort = Effect.callback<number>((resume) => {
   });
 });
 
-/** A stand-in for the Anthropic API that records the `x-api-key` of every request. */
+/** A stand-in for the Anthropic API that records each request's `x-api-key`. */
 const anthropicStandIn = Effect.gen(function* () {
   const keys: Array<string> = [];
   const server = createServer((incoming, response) => {
@@ -70,9 +71,8 @@ const anthropicStandIn = Effect.gen(function* () {
 });
 
 /**
- * The gateway's files in a temporary directory, laid out as cloud-init lays
- * them out on the gateway VM: `settings.env`, `secrets.env`, and the
- * allowlist `settings.env` names.
+ * Writes the Gateway's files to a temporary directory in the gateway VM's cloud-init layout:
+ * `settings.env`, `secrets.env`, and the allowlist that `settings.env` references.
  */
 const gatewayFiles = Effect.gen(function* () {
   const directory = yield* Effect.acquireRelease(
@@ -107,7 +107,7 @@ const secretsLines = (anthropicKey: string) => [
   `ANTHROPIC_API_KEY=${anthropicKey}`,
 ];
 
-/** The gateway's log lines, each with its level, for the test that is running. */
+/** The Gateway's log lines with their levels, for the running test. */
 const lines: Array<string> = [];
 const recordLogs = Logger.layer([
   Logger.make(({ logLevel, message }) => {
@@ -115,7 +115,7 @@ const recordLogs = Logger.layer([
   }),
 ]);
 
-/** The first log line containing every one of `needles`, waiting for it briefly since a reload on SIGHUP runs in its own fiber. */
+/** Returns the first log line containing all `needles`, waiting briefly because a SIGHUP reload runs in its own fiber. */
 const logged = (...needles: ReadonlyArray<string>) =>
   Effect.suspend(() => {
     const line = lines.find((candidate) => needles.every((needle) => candidate.includes(needle)));
@@ -125,9 +125,8 @@ const logged = (...needles: ReadonlyArray<string>) =>
   }).pipe(Effect.retry({ schedule: Schedule.spaced("20 millis"), times: 100 }));
 
 /**
- * Writes the gateway's files, then runs `body` against `usine-gateway` as
- * the command starts it: from the environment files that
- * `USINE_GATEWAY_ENVIRONMENT_FILES` names.
+ * Writes the Gateway's files, then runs `body` against `usine-gateway` started from the files
+ * in `USINE_GATEWAY_ENVIRONMENT_FILES`.
  */
 const withGateway = <A, E>(
   allowlist: ReadonlyArray<string>,
@@ -164,13 +163,25 @@ const withGateway = <A, E>(
     );
   }).pipe(Effect.scoped, Effect.provide(recordLogs));
 
-/** Attaches the test repository to the test Worker and returns the caller token. */
-const attach = Effect.gen(function* () {
+/** The admin API client with the Gateway's admin token. */
+const adminClient = Effect.gen(function* () {
   const { admin } = yield* GatewayAddresses;
-  const client = yield* HttpApiClient.make(GatewayAdminApi, {
+  return yield* HttpApiClient.make(GatewayAdminApi, {
     baseUrl: `http://${admin.host}:${admin.port}`,
     transformClient: HttpClient.mapRequest(HttpClientRequest.bearerToken(ADMIN_TOKEN_VALUE)),
   });
+});
+
+/** Returns the LLM providers the admin API reports, with each credential kind. */
+const reportedProviders = Effect.gen(function* () {
+  const client = yield* adminClient;
+  const { providers } = yield* client.llm.providers();
+  return providers.map(({ provider, credential }) => ({ provider, credential }));
+});
+
+/** Attaches the test repository to the test Worker and returns the caller token. */
+const attach = Effect.gen(function* () {
+  const client = yield* adminClient;
   const attached = yield* client.attachments.attach({
     payload: new AttachRequest({
       worker: WORKER,
@@ -182,7 +193,7 @@ const attach = Effect.gen(function* () {
   return Redacted.value(attached.callerToken);
 });
 
-/** Sends an Anthropic request through the reverse proxy with the caller token and resolves with the status. */
+/** Sends an Anthropic request through the reverse proxy with the caller token and returns the status. */
 const askAnthropic = (token: string) =>
   Effect.gen(function* () {
     const { proxy } = yield* GatewayAddresses;
@@ -206,9 +217,8 @@ const askAnthropic = (token: string) =>
   });
 
 /**
- * Sends `CONNECT authority` to the forward proxy, closes the tunnel without
- * sending anything, and resolves with the status and refusal reason once the
- * proxy has closed its side too.
+ * Sends `CONNECT authority` to the forward proxy, closes the tunnel without sending anything,
+ * and returns the status and refusal reason after the proxy closes its side.
  */
 const connect = (proxy: Listener, authority: string) =>
   Effect.callback<{ status: number; reason: string | undefined }>((resume) => {
@@ -300,6 +310,29 @@ describe("reloading the gateway", () => {
         assert.notInclude(lines.join("\n"), SECOND_KEY);
       }),
     ),
+  );
+
+  it.live(
+    "the admin API reports the kind of Anthropic credential in force: an API key, then the subscription token a reload swapped in",
+    () =>
+      withGateway(["registry.npmjs.org"], (files) =>
+        Effect.gen(function* () {
+          assert.deepStrictEqual(yield* reportedProviders, [
+            { provider: "anthropic", credential: "api-key" },
+          ]);
+
+          yield* files.write("secrets.env", [
+            ...secretsLines(FIRST_KEY).filter((line) => !line.startsWith("ANTHROPIC_API_KEY=")),
+            `USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN=${SUBSCRIPTION_TOKEN}`,
+          ]);
+          yield* (yield* GatewayReload).reload;
+
+          assert.deepStrictEqual(yield* reportedProviders, [
+            { provider: "anthropic", credential: "subscription" },
+          ]);
+          assert.notInclude(lines.join("\n"), SUBSCRIPTION_TOKEN);
+        }),
+      ),
   );
 
   it.live("settings that need a restart are logged and left as they are", () =>

@@ -1,14 +1,12 @@
-# Domain Docs
+# Domain docs
 
-How the engineering skills should consume this repo's domain documentation when exploring the codebase.
+## Read before exploring
 
-## Before exploring, read these
+- `CONTEXT.md` at the repo root: the domain glossary.
+- `docs/adr/`: the ADRs for the area you work in.
+- `apps/docs/src/content/docs/architecture/index.mdx`: the map of what is built and where it is in the tree.
 
-- **`CONTEXT.md`** at the repo root — the domain glossary.
-- **`docs/adr/`** — read ADRs that touch the area you're about to work in.
-- **`apps/docs/src/content/docs/architecture/index.mdx`**: the map of what is built today and where each piece is in the tree.
-
-If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The `/domain-modeling` skill creates them lazily when terms or decisions actually get resolved.
+If a file doesn't exist, continue without flagging it or suggesting that someone create it. The `/domain-modeling` skill creates these files when terms or decisions are resolved.
 
 ## File structure
 
@@ -21,14 +19,14 @@ Single-context repo:
 └── src/
 ```
 
-## Use the glossary's vocabulary
+## Use glossary terms
 
-When your output names a domain concept (in an issue title, a refactor proposal, a hypothesis, a test name), use the term as defined in `CONTEXT.md`. Don't drift to synonyms the glossary explicitly avoids.
+In your output (issue titles, refactor proposals, hypotheses, test names), name domain concepts with the terms in `CONTEXT.md`, not the synonyms it lists under _Avoid_.
 
-If the concept you need isn't in the glossary yet, that's a signal — either you're inventing language the project doesn't use (reconsider) or there's a real gap (note it for `/domain-modeling`).
+If the concept isn't in the glossary, either you're inventing language the project doesn't use (reconsider) or the glossary has a gap (note it for `/domain-modeling`).
 
 ## Flag ADR conflicts
 
-If your output contradicts an existing ADR, surface it explicitly rather than silently overriding:
+If your output contradicts an ADR, say so instead of overriding it silently:
 
 > _Contradicts ADR-0007 (...) — but worth reopening because…_

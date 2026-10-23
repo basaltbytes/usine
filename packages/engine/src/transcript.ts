@@ -2,11 +2,7 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptId } from "@usine/core/attempt";
 import { Schema } from "effect";
 
-/**
- * Global append order of the persisted transcript. Distinct from
- * `AttemptChannel.Sequence`, which orders messages within one Attempt's channel
- * direction.
- */
+/** The global append order of the stored transcript; distinct from `AttemptChannel.Sequence`. */
 export const TranscriptSequence = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pipe(
   Schema.brand("TranscriptSequence"),
 );
@@ -14,9 +10,8 @@ export const TranscriptSequence = Schema.Int.check(Schema.isGreaterThanOrEqualTo
 export type TranscriptSequence = typeof TranscriptSequence.Type;
 
 /**
- * Protocol versions whose envelopes predate the current wire schema but remain in
- * stored transcripts: v3 and v4 inbound frames carry no session target and only
- * Steer or Interrupt payloads, so they decode against a narrowed shape.
+ * The stored protocol versions that need a separate schema: v3 and v4 inbound frames have no
+ * session target and only Steer or Interrupt payloads.
  */
 const LEGACY_TRANSCRIPT_PROTOCOL_VERSIONS = [3, 4] as const;
 const LegacyVersion = Schema.Literals(LEGACY_TRANSCRIPT_PROTOCOL_VERSIONS);
@@ -36,14 +31,13 @@ const LegacyInboundEnvelope = Schema.Struct({
 });
 
 /**
- * Protocol versions whose envelopes the current wire schema still decodes: v6 added
- * optional harness session metadata and v7 changed only the `Start` frame,
- * which is never stored. Each bump must list the version it retires here.
+ * The stored protocol versions that the current schema still decodes; v7 changed only the
+ * unstored `Start` frame. Each version bump must add the retired version here.
  */
 const COMPATIBLE_TRANSCRIPT_PROTOCOL_VERSIONS = [5, 6] as const;
 const CompatibleVersion = Schema.Literals(COMPATIBLE_TRANSCRIPT_PROTOCOL_VERSIONS);
 
-/** Stored v3–v6 envelopes stay readable; the live channel is v7 only. */
+/** A stored envelope of protocol v3 to v7; the live channel uses only v7. */
 const TranscriptEnvelope = Schema.Union([
   AttemptChannel.Envelope,
   Schema.Struct({ ...AttemptChannel.OutboundEnvelope.fields, version: CompatibleVersion }),
@@ -52,7 +46,7 @@ const TranscriptEnvelope = Schema.Union([
   LegacyInboundEnvelope,
 ]);
 
-/** One append-only row of an Attempt transcript. */
+/** An append-only row of an Attempt transcript. */
 export class TranscriptEntry extends Schema.Class<TranscriptEntry>("@usine/engine/TranscriptEntry")(
   {
     sequence: TranscriptSequence,
@@ -63,48 +57,41 @@ export class TranscriptEntry extends Schema.Class<TranscriptEntry>("@usine/engin
   },
 ) {}
 
-/** All persisted rows for one Attempt, in append order. */
+/** A query for all rows of one Attempt, in append order. */
 export class TranscriptAllQuery extends Schema.TaggedClass<TranscriptAllQuery>(
   "@usine/engine/TranscriptAllQuery",
 )("TranscriptAllQuery", { attemptId: AttemptId }) {}
 
-/** Launch metadata, latest lifecycle, and supervision receipt per session, independent of the visible page. */
+/** A query for each session's launch metadata, latest lifecycle, and supervision receipt. */
 export class TranscriptSessionsQuery extends Schema.TaggedClass<TranscriptSessionsQuery>(
   "@usine/engine/TranscriptSessionsQuery",
 )("TranscriptSessionsQuery", { attemptId: AttemptId }) {}
 
-/**
- * Each session's highest `SessionTokensUpdated` report, the one with the most
- * tokens, whatever page the reader shows. Reports are cumulative, so this
- * row holds the session's whole usage so far.
- */
+/** A query for each session's highest `SessionTokensUpdated` report, which is its cumulative usage. */
 export class TranscriptUsageQuery extends Schema.TaggedClass<TranscriptUsageQuery>(
   "@usine/engine/TranscriptUsageQuery",
 )("TranscriptUsageQuery", { attemptId: AttemptId }) {}
 
-/** The next bounded set of rows after a cursor, in append order, for following an Attempt's activity. */
+/** A query for up to `limit` rows after `after`, in append order. */
 export class TranscriptTailQuery extends Schema.TaggedClass<TranscriptTailQuery>(
   "@usine/engine/TranscriptTailQuery",
 )("TranscriptTailQuery", {
   attemptId: AttemptId,
-  /** Last row already received; the response excludes this row. */
+  /** The last row already received, excluded from the response. */
   after: TranscriptSequence,
-  /** Maximum number of newer rows to return. */
   limit: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
 }) {}
 
-/** The newest bounded page before a cursor, returned in append order for loading earlier activity. */
+/** A query for the newest `limit` rows before `before`, returned in append order. */
 export class TranscriptPageQuery extends Schema.TaggedClass<TranscriptPageQuery>(
   "@usine/engine/TranscriptPageQuery",
 )("TranscriptPageQuery", {
   attemptId: AttemptId,
-  /** Earliest row already loaded, excluded from the response; `None` starts at the current tail. */
+  /** The earliest row already loaded, excluded from the response, or `None` to start at the tail. */
   before: Schema.Option(TranscriptSequence),
-  /** Maximum number of earlier rows to return. */
   limit: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
 }) {}
 
-/** Selects a complete Attempt transcript, its sessions or usage, newer activity, or an earlier page. */
 export const TranscriptQuery = Schema.Union([
   TranscriptAllQuery,
   TranscriptSessionsQuery,

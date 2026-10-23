@@ -31,7 +31,7 @@ import { elapsedLabel, itemKindLabel, openedTitle, runActionLabel } from "../ope
 import type { RunActions } from "../run-actions.ts";
 import type { CardRunAgain } from "./run-again.ts";
 
-/** Where a card can move: the other writable lanes, unavailable while a move is saving. */
+/** The other writable lanes a card can move to; `disabled` while a move is pending. */
 export interface CardMoves {
   readonly targets: ReadonlyArray<BoardLaneView>;
   readonly disabled: boolean;
@@ -70,8 +70,7 @@ const RunHistory = ({
   </DropdownMenuSub>
 );
 
-/** The card's actions, listing only those that apply now: GitHub links, the current Run's drawer
- * and operator actions, Run again on a latest Run that ended, earlier Runs, and lane moves. */
+/** Renders only the actions that currently apply. */
 export const CardMenu = ({
   item,
   run,
@@ -82,20 +81,19 @@ export const CardMenu = ({
   className,
 }: {
   readonly item: BoardTaskView;
-  /** The Run the card shows, or null when it shows none. */
+  /** The Run shown on the card, or `null` if none. */
   readonly run: RunView | null;
   readonly moves: CardMoves;
-  /** Opens a Run's drawer. */
   readonly openRun: (runId: RunId) => void;
   readonly action: RunActions;
-  /** Run again for the card's Task, which opens the new Run's drawer itself. */
+  /** Run again for the card's Task; opens the new Run's drawer on success. */
   readonly again: CardRunAgain;
   readonly className?: string;
 }) => {
   const [confirmingCancel, setConfirmingCancel] = useState(false);
   const subject = `${itemKindLabel(item.kind).toLowerCase()} #${item.number}`;
   const past = item.runs.filter(({ id }) => id !== run?.id);
-  // A Task whose latest Run succeeded or was canceled shows no Run line, so Run again names the Loop.
+  // If the latest Run succeeded or was canceled, there is no Run line, so Run again shows the Loop.
   const ended = item.run?.canRunAgain === true ? item.run : null;
   const groups: Array<{ readonly key: string; readonly content: ReactNode }> = [
     {
@@ -126,7 +124,7 @@ export const CardMenu = ({
         </>
       ),
     });
-  // The card shows a sent action's progress; its menu offers no action until the answer arrives.
+  // While an action is pending, the card shows its progress and the menu offers no actions.
   const sending = action.isPending || again.isPending;
   const offered =
     ended !== null || (run !== null && (run.canApprove || run.canRetry || run.canCancel));

@@ -20,13 +20,11 @@ import {
 const decodeTypeReference = Schema.decodeUnknownSync(TypeReference);
 
 /**
- * The options of every cel-js environment the layer builds, whether it checks,
- * evaluates, or parses for {@link relatedStringLiterals}. Every variable must
- * be declared. Optional types are on, so expressions can use `.?` and `[?]`
- * selection and `optional` helpers such as `orValue` (#312). The label
- * analysis shares these options because a parser without optional types
- * rejects `.?`: one Loop using it would fail the analysis, and the instance
- * would load without any undeclared-label warning.
+ * Options of every cel-js environment that the layer builds, for checking, evaluation, and
+ * {@link relatedStringLiterals}. Every variable must be declared. Optional types enable `.?` and
+ * `[?]` selection and `optional` helpers such as `orValue` (#312). The label analysis shares the
+ * options because a parser without optional types rejects `.?`, and one such loop would fail the
+ * analysis and drop every undeclared-label warning of the instance.
  */
 const ENVIRONMENT_OPTIONS = {
   unlistedVariablesAreDyn: false,
@@ -126,7 +124,7 @@ const MACROS_WITH_BINDINGS: ReadonlySet<string> = new Set([
 
 type MacroBindings = ReadonlyMap<string, ReadonlyArray<string>>;
 
-/** The member path a node reads from, followed back through macro bindings and collection transformations. */
+/** Returns the member path that a node reads, resolved through macro bindings and `filter`/`map` receivers, or `undefined`. */
 const lineagePathOf = (
   node: ASTNode,
   bindings: MacroBindings,
@@ -153,12 +151,7 @@ const lineagePathOf = (
 const startsWithPath = (path: ReadonlyArray<string>, prefix: ReadonlyArray<string>): boolean =>
   prefix.every((part, index) => path[index] === part);
 
-/**
- * The string literals an operand can evaluate to. Only result positions count:
- * a conditional contributes its branches and not its test, a list its
- * elements. `item.state == "OPEN" ? "ready" : "review"` yields the two labels
- * and not the state.
- */
+/** Returns the string literals an operand can evaluate to: a literal, both branches of `?:`, and list elements. */
 const resultStringLiterals = (node: ASTNode): ReadonlyArray<string> => {
   switch (node.op) {
     case "value":
@@ -206,7 +199,7 @@ const comparisonLiterals = (
   }
 };
 
-/** Collects the literals compared against `name` on members bound by macros over the watched collection. */
+/** Returns the literals compared with `name` on values under `memberPath`, including through macro variables. */
 const scanRelatedLiterals = (
   node: ASTNode,
   memberPath: ReadonlyArray<string>,
@@ -239,10 +232,9 @@ const scanRelatedLiterals = (
 };
 
 /**
- * The literals {@link scanRelatedLiterals} collects in `source`, parsed with
- * `parser`, an environment built with {@link ENVIRONMENT_OPTIONS} so it reads
- * the syntax that checking accepts. Parsing reads no variable or type, so one
- * parser serves every expression.
+ * Returns the literals that {@link scanRelatedLiterals} collects from `source`, parsed with
+ * `parser`, an environment built with {@link ENVIRONMENT_OPTIONS} so it accepts the syntax that
+ * checking accepts. Parsing reads no variable or type, so one parser serves every expression.
  */
 const relatedStringLiterals = Effect.fn("ExpressionEngine.relatedStringLiterals")(function* (
   parser: CelEnvironment,
@@ -268,9 +260,9 @@ const relatedStringLiterals = Effect.fn("ExpressionEngine.relatedStringLiterals"
 type EnvironmentPurpose = "check" | "evaluate";
 
 /**
- * cel-js rejects `null` in a typed field and cannot index `dyn<T>`, so checking
- * keeps a nullable field's type and evaluation declares it `dyn`. Both register
- * `T == null`, from which cel-js derives `!=` and the reversed operand order.
+ * Creates the cel-js environment for checking or evaluating `descriptor`. Because cel-js rejects
+ * `null` in a typed field and can't index `dyn<T>`, evaluation declares nullable fields as `dyn`.
+ * Both register `T == null`; cel-js derives `!=` and the reversed operand order from it.
  */
 const makeEnvironment = (descriptor: Environment, purpose: EnvironmentPurpose): CelEnvironment => {
   const environment = new CelEnvironment(ENVIRONMENT_OPTIONS);
@@ -298,27 +290,19 @@ const makeEnvironment = (descriptor: Environment, purpose: EnvironmentPurpose): 
   return environment;
 };
 
-/**
- * Tells a JSON object from an array, `null`, or another primitive. The context
- * is already `Schema.Json`, so a shallow test is enough.
- * `Schema.is(Schema.JsonObject)` would validate each nested object's whole
- * subtree again at every level of the walk, for every Loop and Item the
- * overview and desk evaluate (#464).
- */
+/** Returns whether `value` is a JSON object, checking only the top level because the context is already `Schema.Json` (#464). */
 const isJsonObject = (value: Schema.Json): value is Schema.JsonObject => Predicate.isObject(value);
 
-/** Turns a JSON value of one declared type into the value cel-js evaluates. */
 type Normalize = (value: Schema.Json) => RuntimeValue;
 
-/** A type that needs no normalization: a string, a `map<K,V>`, or an object type with no `int` and no nullable field below it. */
+/** The identity normalizer, compared by reference to skip types that need no normalization. */
 const unchanged: Normalize = (value) => value;
 
-/** A copy of a JSON object whose fields normalization rewrites in place before cel-js reads it. */
 interface NormalizedObject {
   [key: string]: RuntimeValue;
 }
 
-/** Sets `name` on a copied object as an own field, even when it is `__proto__`. */
+/** Sets `name` as an own property, including `__proto__`. */
 const setField = (target: NormalizedObject, name: string, value: RuntimeValue) => {
   if (name === "__proto__") {
     Object.defineProperty(target, name, {
@@ -333,21 +317,16 @@ const setField = (target: NormalizedObject, name: string, value: RuntimeValue) =
 };
 
 /**
- * Compiles how a descriptor's evaluation context is normalized, as the layer's
- * documentation describes: `int` and `uint` numbers become `bigint`, `list<T>`
- * normalizes each item as `T`, and an object type normalizes each declared
- * field and reads an absent nullable field as `null`. Each type reference is
- * compiled once. A value whose type needs nothing is returned as it is, and an
- * object is copied with only its fields that change rewritten, so normalizing
- * an Item's payload leaves its strings and undeclared fields untouched.
+ * Returns the context normalizer for `descriptor`, which converts `int` and `uint` numbers to
+ * `bigint` and sets absent nullable fields to `null`, recursing into `list<T>` items and declared
+ * object fields. Returns unchanged values as is, and shallow-copies changed objects.
  */
 const contextNormalizer = (
   descriptor: Environment,
 ): ((context: Schema.JsonObject) => RuntimeObject) => {
   const objectTypes = new Map(descriptor.types.map((type) => [type.name, type]));
   const compiled = new Map<TypeReference, Normalize>();
-  // A type comes before the types whose fields reference it, so compiling a
-  // field's type never comes back to the type being compiled.
+  // Can't recurse forever: the Environment declares each type before any type that references it.
   const normalizerOf = (type: TypeReference): Normalize => {
     const existing = compiled.get(type);
     if (existing !== undefined) return existing;
@@ -403,10 +382,10 @@ const contextNormalizer = (
   };
 };
 
-/** How many expressions each environment keeps checked or parsed; past that the oldest is dropped. */
+/** The maximum number of cached check results, and of parse results, per environment. */
 const KEPT_EXPRESSIONS = 256;
 
-/** `value` kept under `key` in `kept`, dropping the oldest entry when `kept` is full. */
+/** Stores `value` under `key` and returns it, evicting the oldest entry if the map is full. */
 const keep = <A>(kept: Map<Source, A>, key: Source, value: A): A => {
   if (kept.size >= KEPT_EXPRESSIONS) {
     const oldest = kept.keys().next();
@@ -416,7 +395,7 @@ const keep = <A>(kept: Map<Source, A>, key: Source, value: A): A => {
   return value;
 };
 
-/** One descriptor's cel-js environments, built on first use, and what they keep between calls. */
+/** The per-descriptor cache of cel-js environments and check and parse results. */
 interface DescriptorRuntime {
   readonly normalize: (context: Schema.JsonObject) => RuntimeObject;
   check: Option.Option<CelEnvironment>;
@@ -425,7 +404,7 @@ interface DescriptorRuntime {
   readonly parsed: Map<Source, ParseResult>;
 }
 
-/** Checks and evaluates expressions against descriptors; each call throws what cel-js throws. */
+/** Functions that check and evaluate expressions; both rethrow cel-js errors. */
 interface CelRuntimes {
   readonly check: (descriptor: Environment, source: Source) => TypeCheckResult;
   readonly evaluate: (
@@ -436,22 +415,10 @@ interface CelRuntimes {
 }
 
 /**
- * Builds each descriptor's cel-js environment once per purpose (check or
- * evaluate), and checks and parses each expression once per environment. Building an
- * environment clones cel-js's whole function registry and registers every
- * payload type, and parsing and checking an expression costs more than
- * evaluating it, while the operator's overview and desk evaluate every Loop's
- * trigger on every Board Item each time they are read (#464).
- *
- * A check result depends only on the environment and the expression, so it is
- * kept as it is. A parsed expression is cel-js's `Environment.parse` result,
- * which cel-js evaluates again on each new context; between two evaluations
- * its comprehensions only hold the previous context until the next evaluation
- * replaces it. A build or parse that throws is not kept, and the next call
- * tries again. Each environment keeps its {@link KEPT_EXPRESSIONS} newest expressions.
- * Descriptors are immutable, and the trigger environments are module
- * constants, so they are the keys; a descriptor no caller keeps is released
- * with its environments.
+ * Creates a cache of cel-js environments, check results, and parse results, keyed by descriptor
+ * in a `WeakMap` (#464). Doesn't cache a build or parse that throws, and keeps the
+ * {@link KEPT_EXPRESSIONS} newest entries per cache. A cached parse result retains the last
+ * evaluated context until the next evaluation.
  */
 const celRuntimes = (): CelRuntimes => {
   const runtimes = new WeakMap<Environment, DescriptorRuntime>();
@@ -491,8 +458,7 @@ const celRuntimes = (): CelRuntimes => {
       const parsed =
         runtime.parsed.get(source) ??
         keep(runtime.parsed, source, environmentOf(runtime, descriptor, "evaluate").parse(source));
-      // SAFETY: CEL evaluates to the same value vocabulary the context is built
-      // from, and every caller decodes the expected result type before use.
+      // SAFETY: CEL returns values of the context's types, and callers decode the result type.
       return parsed(runtime.normalize(context)) as RuntimeValue;
     },
   };
@@ -572,7 +538,7 @@ const makeExpressionEngine = () => {
       ),
   );
 
-  /** The value of an already checked condition on `context`, or why it has none. */
+  /** Evaluates an already checked condition on `context`. Fails if the result isn't a boolean. */
   const booleanOn = (
     source: Source,
     environment: Environment,
@@ -593,9 +559,7 @@ const makeExpressionEngine = () => {
     return yield* Effect.fromResult(booleanOn(source, environment, context));
   });
 
-  // One span and one check for every context: evaluating each context in its own
-  // Effect costs several times the evaluation itself, and Loop matching evaluates
-  // every Loop's trigger on every Board Item on each operator read (#464).
+  // One span and one check for all contexts; per-context Effects cost several times more (#464).
   const evaluateBooleanEach = Effect.fn("ExpressionEngine.evaluateBooleanEach")(function* (
     source: Source,
     environment: Environment,
@@ -630,32 +594,19 @@ const makeExpressionEngine = () => {
 };
 
 /**
- * Provides {@link ExpressionEngine} on `@marcbachmann/cel-js`, pinned to 8.0.0 as
- * the CEL seam requires
+ * Provides {@link ExpressionEngine} with `@marcbachmann/cel-js` 8.0.0
  * ([ADR 0004](../../../docs/adr/0004-loop-files-markdown-cel-frontmatter.md)).
- * The layer has no requirements. Expressions can use CEL optional types: `.?`
- * and `[?]` selection, and `optional` helpers such as `orValue`. A nullable
- * field that holds `null` is present, so `item.?milestone` holds `null`, while
- * `item.?milestone.?title` holds no value. Each built layer sets up the cel-js
- * environment of an {@link Environment} once for checking and once for
- * evaluation, the first time an expression needs it, and reuses it for every
- * later call with the same descriptor. It also keeps each expression's check
- * result and parsed form per environment, so checking or evaluating the same
- * expression again, on any context, does not parse it again. Before evaluation it converts JSON integers to
- * `bigint` where the {@link Environment} declares `int`: on a variable, on a
- * field of a declared object type, or as the item type of a `list<T>`, at any
- * depth. It also reads absent nullable fields of declared object types as
- * `null`. It does not convert values inside a `map<K,V>`, so reading a JSON
- * integer from a `map<string,int>` fails evaluation because the value is a
- * `double`. Declare such map values as `double`.
  *
- * `uint` is not supported for `context` values. An expression that reads a
- * variable, non-nullable object field, or list item declared `uint` passes
- * checking but fails evaluation, because the value arrives as a signed
- * integer. A nullable field is evaluated as `dyn`, so a `uint` value read
- * from it, or from a list it holds, arrives as the signed integer: comparing
- * it with a `uint` literal works, but `uint` arithmetic on it fails
- * evaluation. Declare such values as `int`. A `uint` result fails
- * `evaluateScalar` (see {@link Scalar}).
+ * Expressions can use CEL optional types: `.?` and `[?]` selection, and `optional` helpers such as
+ * `orValue`. A nullable field that holds `null` is present, so `item.?milestone` holds `null`, and
+ * `item.?milestone.?title` holds no value.
+ *
+ * Before evaluation, converts JSON integers to `bigint` wherever the {@link Environment}
+ * declares `int`, at any depth, and sets absent nullable fields to `null`. Values inside a
+ * `map<K,V>` aren't converted, so declare integer map values as `double`.
+ *
+ * `uint` isn't supported in `context`; declare such values as `int`. An expression that reads a
+ * non-nullable `uint` value type-checks but fails evaluation. On a nullable field, comparing with a
+ * `uint` literal works but `uint` arithmetic fails. A `uint` result fails `evaluateScalar`.
  */
 export const MarcbachmannCelLayer = Layer.sync(ExpressionEngine)(makeExpressionEngine);

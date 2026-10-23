@@ -40,8 +40,8 @@ const startDevPrompt = `Implement issue #{{ item.number }}, **{{ item.title }}**
 3. Open a pull request that closes #{{ item.number }}.
 `;
 
-/** The configuration view as the server sends it: loaded and quarantined Loops, a roster with an
- * invalid Agent, a local and an SSH Worker, and two repositories. */
+/** The configuration view JSON, with loaded and quarantined Loops, a roster with an invalid Agent, a
+ * local and an SSH Worker, and two repositories. */
 export const configurationJson = {
   loops: [
     {
@@ -222,7 +222,7 @@ export const configurationJson = {
 export const configurationFixture = (): ConfigurationView =>
   Schema.decodeUnknownSync(ConfigurationView)(configurationJson);
 
-/** The fixture with every list empty, as a fresh instance folder reads before anything is added. */
+/** Returns the fixture with every list empty, as for a new instance folder. */
 export const emptyConfiguration = (): ConfigurationView =>
   Schema.decodeUnknownSync(ConfigurationView)({
     ...configurationJson,

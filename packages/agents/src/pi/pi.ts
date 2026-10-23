@@ -152,6 +152,7 @@ const makePiChild = Effect.gen(function* () {
                 model: started.model,
                 effort: request.session.brain.effort,
               }),
+              gatewayCredential: request.session.gatewayCredential,
             });
             const channel = yield* sessionChannel({
               label: "Pi child session",
@@ -159,7 +160,6 @@ const makePiChild = Effect.gen(function* () {
             });
             yield* channel.emit(new SessionStarted({ session }));
             const subscription = yield* subscribePiSession(started.session, session, channel);
-            // After setup succeeds, the ambient scope closes both the subscription and the SDK session.
             yield* Effect.addFinalizer(() =>
               Effect.sync(subscription.unsubscribe).pipe(
                 Effect.andThen(Effect.sync(acquired.dispose)),
@@ -188,5 +188,4 @@ const makePiChild = Effect.gen(function* () {
   return PiChildBackend.of({ launch });
 });
 
-/** Provides Pi coding sessions for tasks delegated by a parent. */
 export const piChildBackendLayer = Layer.effect(PiChildBackend, makePiChild);

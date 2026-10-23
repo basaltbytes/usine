@@ -3,14 +3,14 @@ import { RunId } from "@usine/core/run";
 import { WorkerName } from "@usine/core/worker";
 import { Schema } from "effect";
 
-/** No Run with the requested identity exists in this instance's records. */
+/** An error for a Run ID that doesn't exist. */
 export class RunNotFoundError extends Schema.TaggedError<RunNotFoundError>(
   "@usine/engine/RunNotFoundError",
 )("RunNotFoundError", {
   runId: RunId,
 }) {}
 
-/** The Run's current state does not allow the requested operator action. */
+/** An error for an operator action that the Run's state doesn't allow. */
 export class RunOperationRejectedError extends Schema.TaggedError<RunOperationRejectedError>(
   "@usine/engine/RunOperationRejectedError",
 )("RunOperationRejectedError", {
@@ -19,11 +19,7 @@ export class RunOperationRejectedError extends Schema.TaggedError<RunOperationRe
   state: Schema.String,
 }) {}
 
-/**
- * An operator retry would reopen a failed Run, or running a closed Run again
- * would open a new one, while `openRunId`, another Run of the same Loop and
- * Item, is open. Try again once that Run closes.
- */
+/** An error for a retry or run again while `openRunId`, another Run of the same Loop and Item, is open. */
 export class RunRetryBlockedError extends Schema.TaggedError<RunRetryBlockedError>(
   "@usine/engine/RunRetryBlockedError",
 )("RunRetryBlockedError", {
@@ -32,7 +28,7 @@ export class RunRetryBlockedError extends Schema.TaggedError<RunRetryBlockedErro
   message: Schema.NonEmptyString,
 }) {}
 
-/** An operation could not read or update the instance's durable records. */
+/** An error reading or writing the instance's durable records. */
 export class EnginePersistenceError extends Schema.TaggedError<EnginePersistenceError>(
   "@usine/engine/EnginePersistenceError",
 )("EnginePersistenceError", {
@@ -40,7 +36,7 @@ export class EnginePersistenceError extends Schema.TaggedError<EnginePersistence
   cause: Schema.Defect(),
 }) {}
 
-/** The Run is canceled, but interrupting its active Attempt failed. */
+/** An error for a canceled Run whose active Attempt couldn't be interrupted. */
 export class AttemptCancellationError extends Schema.TaggedError<AttemptCancellationError>(
   "@usine/engine/AttemptCancellationError",
 )("AttemptCancellationError", {
@@ -48,7 +44,7 @@ export class AttemptCancellationError extends Schema.TaggedError<AttemptCancella
   cause: Schema.Defect(),
 }) {}
 
-/** Everything the store itself can fail with. */
+/** The errors that the Run store can fail with. */
 export const RunStoreError = Schema.Union([
   RunNotFoundError,
   RunOperationRejectedError,
@@ -58,7 +54,7 @@ export const RunStoreError = Schema.Union([
 
 export type RunStoreError = typeof RunStoreError.Type;
 
-/** The requested Attempt is no longer live, or its channel could not accept operator input. */
+/** An error for an Attempt that is no longer live or whose channel rejected operator input. */
 export class RunInterventionRejectedError extends Schema.TaggedError<RunInterventionRejectedError>(
   "@usine/engine/RunInterventionRejectedError",
 )("RunInterventionRejectedError", {
@@ -68,20 +64,18 @@ export class RunInterventionRejectedError extends Schema.TaggedError<RunInterven
 }) {}
 
 /**
- * The operator asked to discard the leftovers of `worker`, a Worker the engine
- * still runs Attempts on: `usine.yaml` declares it, or a reload removed it and
- * `running` of its Attempts are still open. Nothing was discarded; once the
- * Worker is removed and its last Attempt ended, the same request discards them.
+ * An error for discarding the leftovers of a Worker that is still in `usine.yaml` or still has
+ * open Attempts. Nothing is discarded.
  */
 export class LeftoversDiscardRejectedError extends Schema.TaggedError<LeftoversDiscardRejectedError>(
   "@usine/engine/LeftoversDiscardRejectedError",
 )("LeftoversDiscardRejectedError", {
   worker: WorkerName,
-  /** How many Attempts recorded on `worker` are still open. */
+  /** The number of open Attempts on `worker`. */
   running: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 }) {}
 
-/** The store's failures plus the cancellation handshake failure only the engine raises. */
+/** The Run store errors plus `AttemptCancellationError`. */
 export const RunEngineError = Schema.Union([
   RunNotFoundError,
   RunOperationRejectedError,

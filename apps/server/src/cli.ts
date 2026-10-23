@@ -8,7 +8,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import type { ServeError } from "effect/unstable/http/HttpServerError";
 
 export const DEFAULT_PORT = 7_331;
-/** The address the HTTP server listens on; the port check probes the same one. */
+/** The address that the HTTP server listens on and the port check probes. */
 export const SERVER_HOST = "127.0.0.1";
 export const BROWSER_OPEN_TIMEOUT = "2 seconds";
 const PORT_HOLDER_TIMEOUT = "2 seconds";
@@ -47,12 +47,12 @@ export class CliVersionError extends Schema.TaggedError<CliVersionError>(
   "@usine/server/CliVersionError",
 )("CliVersionError", { cause: Schema.Defect() }) {}
 
-/** Another process listens on the HTTP port. */
+/** Another process is listening on the HTTP port. */
 export class PortInUseError extends Schema.TaggedError<PortInUseError>(
   "@usine/server/PortInUseError",
 )("PortInUseError", {
   port: Port,
-  /** The listening process's id, when lsof could tell. */
+  /** The PID of the listening process, or `None` if lsof can't find it. */
   holder: Schema.Option(Schema.Int),
 }) {}
 
@@ -60,7 +60,7 @@ export class ServerStartError extends Schema.TaggedError<ServerStartError>(
   "@usine/server/ServerStartError",
 )("ServerStartError", { port: Port, cause: Schema.Defect() }) {}
 
-/** Raised when the instance folder is in a directory the OS may clear. Its runtime store is the only copy of run history. */
+/** The instance folder is in a directory the OS may clear, which would delete the run history. */
 export class VolatileInstanceDirectoryError extends Schema.TaggedError<VolatileInstanceDirectoryError>(
   "@usine/server/VolatileInstanceDirectoryError",
 )("VolatileInstanceDirectoryError", {
@@ -210,7 +210,9 @@ export const parseCli = Effect.fn("Cli.parse")((
   return upCommand(args.slice(1), environment);
 });
 
-/** Directories the OS may clear: `os.tmpdir()`, `$TMPDIR`, and the usual temp locations. */
+/**
+ * Returns the directories the OS may clear: `os.tmpdir()`, `$TMPDIR`, and common temp locations.
+ */
 export const volatileRoots = (environmentTmpdir: Option.Option<string>): ReadonlyArray<string> =>
   [
     ...new Set([
@@ -227,7 +229,7 @@ export const volatileRoots = (environmentTmpdir: Option.Option<string>): Readonl
 const isUnder = (directory: string, root: string): boolean =>
   directory === root || directory.startsWith(root.endsWith(sep) ? root : `${root}${sep}`);
 
-/** Returns the volatile root that contains the directory, if any. Compares the paths as given, without resolving symlinks. */
+/** Returns the volatile root that contains `directory`, if any, without resolving symlinks. */
 export const volatileRoot = (
   directory: string,
   roots: ReadonlyArray<string>,
@@ -240,7 +242,6 @@ const PackageMetadataFromJson = Schema.fromJsonString(
   Schema.Struct({ version: Schema.NonEmptyString }),
 );
 
-/** Reads the version of this installed server from its package.json. */
 export const packageVersion = Effect.fn("Cli.packageVersion")(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const packagePath = fileURLToPath(new URL("../package.json", import.meta.url));
@@ -255,7 +256,7 @@ export const packageVersion = Effect.fn("Cli.packageVersion")(function* () {
 
 const AddressInUse = Schema.Struct({ code: Schema.Literal("EADDRINUSE") });
 
-/** Maps a bind failure to the CLI's startup error, so an address already in use is reported as such. */
+/** Returns `PortInUseError` for `EADDRINUSE`, otherwise `ServerStartError`. */
 export const serverStartError = (port: Port, error: ServeError) =>
   Schema.is(AddressInUse)(error.cause)
     ? new PortInUseError({ port, holder: Option.none() })
@@ -263,7 +264,10 @@ export const serverStartError = (port: Port, error: ServeError) =>
 
 const ProcessIdFromString = Schema.NumberFromString.pipe(Schema.decodeTo(Schema.Int));
 
-/** The id of the process listening on the port, from lsof where it is installed and can see that process. */
+/**
+ * Returns the PID listening on `port` from lsof, or `None` if lsof is missing or can't see the
+ * process.
+ */
 const portHolder = Effect.fn("Cli.portHolder")(function* (port: Port) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const lines = yield* spawner
@@ -285,7 +289,7 @@ const portHolder = Effect.fn("Cli.portHolder")(function* (port: Port) {
   );
 });
 
-/** Fails with `PortInUseError`, naming the process listening on the port when it can be found. */
+/** Fails with `PortInUseError`, with the listening PID if found. */
 export const portInUse = Effect.fn("Cli.portInUse")(function* (port: Port) {
   const holder = yield* portHolder(port);
   yield* Effect.logWarning("Another process listens on the HTTP port", {
@@ -312,8 +316,8 @@ const portTaken = (port: Port) =>
   });
 
 /**
- * Refuses a port another process already listens on, before `usine up` builds its runtime.
- * The probe releases the port at once, so a process that takes it afterwards still fails the server's own bind.
+ * Fails with `PortInUseError` if another process is listening on `port`. Call it before `usine up`
+ * builds its runtime.
  */
 export const refuseTakenPort = Effect.fn("Cli.refuseTakenPort")(function* (port: Port) {
   if (yield* portTaken(port)) return yield* portInUse(port);
@@ -327,7 +331,7 @@ const browserCommand = (url: string) => {
   return { command: "xdg-open", args: [url] };
 };
 
-/** Opens the setup page in a browser; call it only after the HTTP server has bound. */
+/** Opens the setup page in a browser. Call it only after the HTTP server has bound. */
 export const openBrowser = Effect.fn("Cli.openBrowser")(function* (
   url: string,
   timeout: Duration.Input = BROWSER_OPEN_TIMEOUT,

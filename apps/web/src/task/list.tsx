@@ -55,19 +55,17 @@ import { linkedRow, rowLink } from "./section.tsx";
 const pullRequestLink =
   "relative z-10 rounded-sm font-mono text-xs text-primary underline-offset-4 outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring/70 focus-visible:outline-solid";
 
-// The columns follow the table's own width, since the sidebar beside a mid-size window leaves
-// less room than a phone held sideways. Elapsed time always shows. Tokens and Estimated cost need
-// 56rem and Runs and Pull request 64rem.
+// Column visibility uses container queries on the table width, because the sidebar can leave less
+// room than the viewport suggests. Elapsed time is always shown; Tokens and Estimated cost need
+// 56rem, Runs and Pull request 64rem.
 const WIDE_COLUMN = "hidden @5xl:table-cell";
 const USAGE_COLUMN = "hidden @4xl:table-cell";
 
-// The title cell is `w-full max-w-0`: it takes the width the other columns leave, and they keep
-// their narrowest width. Status and Runs, the columns that can wrap or truncate, take their own
-// width up to `--side` and wrap past it, or truncate for Runs, so a short status takes only its
-// words and they give way before the title does. `--side` is an equal share, between 7rem and
-// 13rem, of the table less 26rem for the title, the width of a long issue title, and less
-// `--rest`: the figure columns showing, which their headers set, and the side columns' padding.
-// On a phone Status wraps to its longest word instead, so the table never scrolls sideways.
+// The title cell is `w-full max-w-0`, so it takes the remaining width and the other columns keep
+// their minimum width. Status and Runs are at most `--side` wide; beyond it, Status wraps and Runs
+// truncates. `--side` is an equal share, from 7rem to 13rem, of the table width minus 26rem for the
+// title and minus `--rest`, the width of the visible figure columns and the side padding. On a
+// phone, Status wraps at its longest word, so the table does not scroll horizontally.
 const SIDE_SHARE = [
   "@md:[--side:clamp(7rem,calc((100cqw-26rem-var(--rest))/var(--sides)),13rem)]",
   "[--rest:7rem] [--sides:1] @4xl:[--rest:16.5rem] @5xl:[--rest:23rem] @5xl:[--sides:2]",
@@ -79,7 +77,7 @@ const TOTAL_COLUMN = "py-3 text-right align-top font-mono text-xs/5 whitespace-n
 const usageTrigger =
   "relative z-10 rounded-sm underline-offset-4 outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring/70 focus-visible:outline-solid";
 
-/** The tone of a stall's state mark: the state of the Run its reason names, or what holds it. */
+/** Returns the tone of a stall's state mark, from the Run its reason references or from the reason. */
 const stallTone = ({ reason }: StalledItemView): string =>
   Match.valueTags(reason, {
     AwaitingApproval: () => "Waiting",
@@ -93,9 +91,9 @@ const stallTone = ({ reason }: StalledItemView): string =>
   });
 
 /**
- * A Task's status: the state that gives its mark's tone, its words, and when the last Run was last
- * at work. A stall's words say their own time, so `at` is null for them, and the stall's Loop goes
- * first when neither the fragment nor the last Run names it.
+ * Returns the Task's status mark state, text, and last activity time. For a stall, `at` is `null`
+ * because the text has its own time, and the Loop name is prefixed if the stall text and the last
+ * Run do not include it.
  */
 const statusLine = (
   { task, last, status }: TaskRow,
@@ -119,13 +117,12 @@ const statusLine = (
   });
 };
 
-/** The status's mark and words on the row's 20px line, then ` · ` and the time, such as
- * `Done · 28m ago`; the mark stays on the first line when the words wrap. */
+/** Renders the status, for example `Done · 28m ago`; if the text wraps, the mark stays on the first line. */
 const Status = ({ row, now }: { readonly row: TaskRow; readonly now: number }) => {
   const { state, words, at } = statusLine(row, now);
   // A word wider than `--side`, such as the Loop `dependency_updates`, breaks inside the column:
-  // `min-w-0` lets the words shrink below that word, and `wrap-break-word` breaks it only then, so
-  // on a phone, where the column is as wide as its longest word, the words still wrap between words.
+  // `min-w-0` lets the text shrink below that word, and `wrap-break-word` breaks it only then. On a
+  // phone, where the column is as wide as its longest word, text still wraps between words.
   return (
     <span className={cn("flex items-start gap-1.5 text-xs/5 font-medium", SIDE_CONTENT)}>
       <StateMark state={state} className="mt-1.75" />
@@ -147,8 +144,7 @@ const Status = ({ row, now }: { readonly row: TaskRow; readonly now: number }) =
   );
 };
 
-/** The Loops in the order they first ran, each after the mark of its last Run's state, then the
- * Run count. */
+/** Renders each Loop in first-run order with its last Run's state mark, then the Run count. */
 const Runs = ({ task }: { readonly task: BoardTaskView }) => {
   const loops = taskLoops(task);
   return (
@@ -170,11 +166,11 @@ const Runs = ({ task }: { readonly task: BoardTaskView }) => {
   );
 };
 
-/** The `*` after a figure lower than the real one, hung past the figure's end so the figures of a
- * column stay aligned. Its parent is positioned. */
+/** Renders the `*` after a lower-bound figure, past the figure's end so the column stays aligned;
+ * the parent must be positioned. */
 const LowerBoundMark = () => <span className="absolute left-full text-muted-foreground">*</span>;
 
-/** A Task's Attempt time, counting on while an Attempt runs; nothing before any Attempt began. */
+/** Renders the total Attempt time, which keeps counting while an Attempt runs, or nothing before any Attempt starts. */
 const TaskTime = ({ task, now }: { readonly task: BoardTaskView; readonly now: number }) => {
   const { usage } = task;
   if (task.runs.every(({ attempts }) => attempts.length === 0)) return null;
@@ -187,8 +183,7 @@ const TaskTime = ({ task, now }: { readonly task: BoardTaskView; readonly now: n
   );
 };
 
-/** `children` opening, on hover or focus, the Task's tokens per billing pool, after `note` when it
- * is not null. */
+/** Shows the Task's tokens per billing pool when `children` is hovered or focused, after `note` if set. */
 const PoolHover = ({
   usage,
   label,
@@ -218,8 +213,8 @@ const PoolHover = ({
   </HoverCard>
 );
 
-/** A Task's priced dollars, marked `*` while part of its usage has no price yet; nothing when no
- * usage has a price. */
+/** Renders the Task's cost in dollars, marked `*` if some usage is not priced yet, or nothing if no
+ * usage is priced. */
 const TaskCost = ({ usage }: { readonly usage: TaskUsageView }) => {
   if (usage.cost === null) return null;
   const unpriced = costUnpriced(usage);
@@ -236,7 +231,6 @@ const TaskCost = ({ usage }: { readonly usage: TaskUsageView }) => {
   );
 };
 
-/** The pull request's number as a link, then whether it is open or merged. */
 const PullRequest = ({ pullRequest }: { readonly pullRequest: BoardPullRequestView }) => (
   <span className="inline-flex items-baseline gap-1.5">
     <a href={pullRequest.url} target="_blank" rel="noreferrer" className={pullRequestLink}>
@@ -297,8 +291,8 @@ const TaskListRow = ({
   </TableRow>
 );
 
-/** The totals of every listed Task, such as `9 runs, 6 h 12 min elapsed, 4.8M tokens, $14.20
- * estimated`, each lower bound marked `*` with the reason in its title. */
+/** Renders the totals of all listed Tasks, for example `9 runs, 6 h 12 min elapsed, 4.8M tokens,
+ * $14.20 estimated`; each lower bound is marked `*` with the reason in its title. */
 const TotalsLine = ({ totals }: { readonly totals: TaskTotals }) => (
   <p className="-mt-2 text-sm text-muted-foreground tabular-nums">
     {totalsFigures(totals).map(({ figure, words, lowerBound }, index) => (
@@ -311,9 +305,8 @@ const TotalsLine = ({ totals }: { readonly totals: TaskTotals }) => (
 );
 
 /**
- * The Tasks of a Project that usine ran at least once, as rows: those in flight first, then the
- * rest, as `taskRows` orders them. `stalled` is the desk's list of stalled Items, whose reason a
- * stalled Task's status shows.
+ * Renders the Project's Tasks that usine ran at least once, in `taskRows` order. `stalled` is the
+ * desk's list of stalled Items, used for the status of stalled Tasks.
  */
 export const TaskList = ({
   project,

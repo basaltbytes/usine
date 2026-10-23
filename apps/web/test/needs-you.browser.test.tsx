@@ -79,8 +79,8 @@ const approvalOf = (id: RunId, number: number, title: string) =>
   });
 const approval = approvalOf(runId, 367, "Keep Needs attention current");
 const unrelated = approvalOf(RunId.make("other-run"), 12, "Wait for the operator");
-// The Project lists no Runs, so the overview refreshes on its idle interval and only the
-// requests a test sends reach the slow stub.
+// The Project has no Runs, so the overview polls at its idle interval and the slow stub only
+// receives the requests a test sends.
 const overview = (needsYou: ReadonlyArray<NeedView>) =>
   JSON.stringify(
     Schema.encodeSync(FactoryOverview)(
@@ -147,7 +147,7 @@ afterEach(() => {
   host.remove();
 });
 
-// The open drawer hides the rest of the page from assistive technology, Needs attention included.
+// The open drawer hides the rest of the page, including Needs attention, from assistive technology.
 const needs = page.getByRole("region", { name: "Needs attention", includeHidden: true });
 const entry = (title: string) =>
   needs.getByRole("listitem", { includeHidden: true }).filter({ hasText: title });
@@ -174,7 +174,7 @@ it("holds the Run's approval in Needs attention while the drawer approves it, an
     )
     .toBeEnabled();
   await commands.answerApproval(200, '{"ok":true}');
-  // Well within the 5 s the overview refresh takes, which is still on its way.
+  // Shorter than the 5 s overview refresh, which is still in flight.
   await expect.element(held, { timeout: 2_000 }).not.toBeInTheDocument();
   expect(queryClient.getQueryState(["overview"])?.fetchStatus).toBe("fetching");
   await expect.element(entry("#12 Wait for the operator")).toBeInTheDocument();
@@ -186,7 +186,7 @@ it("holds the Run's approval in Needs attention while the drawer approves it, an
   await expect.element(entry("#12 Wait for the operator")).toBeInTheDocument();
 });
 
-// The server's answer when the Run was approved elsewhere first.
+// Server response when the Run was already approved elsewhere.
 const rejection = JSON.stringify({
   error: "RunOperationRejectedError",
   message: "Cannot approve Run approval-run while it is Running.",
@@ -196,7 +196,7 @@ it("shows no error on a Needs attention approval refused because the Run was app
   const held = entry("#367 Keep Needs attention current");
   await held.getByRole("button", { name: "Approve", exact: true }).click();
   await commands.answerApproval(409, rejection);
-  // The refusal sends a refresh, and the entry waits for it with its buttons disabled.
+  // The rejection triggers an overview refetch; the entry's buttons stay disabled until it returns.
   await expect.poll(() => commands.lateOverviewRequests()).toBe(1);
   await expect.element(held.getByRole("button", { name: "Approving…" })).toBeDisabled();
   await expect.element(held.getByText("Cannot approve", { exact: false })).not.toBeInTheDocument();

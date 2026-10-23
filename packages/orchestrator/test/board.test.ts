@@ -411,7 +411,7 @@ describe("Board projection", () => {
         );
         const card = board.lanes[0]?.items[0];
         assert(card !== undefined);
-        // Each Loop watching one of the Task's Items is named once, the issue's first.
+        // Each Loop matching one of the Task's Items appears once, the issue's Loops first.
         assert.deepStrictEqual(card.loops, [develop, reviewLoop]);
         assert.strictEqual(card.title, "Board lanes");
         assert.strictEqual(card.itemKey, pr.itemKey);
@@ -622,7 +622,7 @@ describe("Task usage", () => {
     outcome: new SucceededAttemptView(),
   });
   const harnesses = { apiKeys: "pi", claudePlan: "claude", chatgptPlan: "codex" } as const;
-  /** One session of `attempt`, drawing `tokens` from `pool`, priced at `usd` or not at all. */
+  /** Returns one session of `attempt` using `tokens` from `pool`, priced at `usd` or unpriced. */
   const session = (
     attempt: string,
     pool: BillingPool,
@@ -647,7 +647,10 @@ describe("Task usage", () => {
           ? null
           : new UsageCostView({ usd: UsdAmount.make(usd), estimate: pool === "claudePlan" }),
     });
-  /** A Run's usage as `RunUsageReader` reads it: a pool has no price while a session has none. */
+  /**
+   * Returns a Run's usage as `RunUsageReader` reads it: a pool has no price while a session has
+   * none.
+   */
   const runUsage = (sessions: ReadonlyArray<SessionUsageView>) =>
     new RunUsageView({
       tokens: TokenCount.make(sessions.reduce((sum, { tokens }) => sum + tokens, 0)),
@@ -720,7 +723,7 @@ describe("Task usage", () => {
     assert.deepStrictEqual(usage.runningSince, ["2026-10-20T12:10:00.000Z"]);
     assert.strictEqual(usage.unmeasured, 1);
     assert.strictEqual(usage.tokens, 27_300);
-    // The ChatGPT plan has no dollar rate, so its usage is not missing a price.
+    // The ChatGPT plan has no dollar rate, so its usage isn't counted as missing a price.
     assert.deepStrictEqual(pools(usage), [
       ["apiKeys", 1_500, 0.75, false],
       ["claudePlan", 20_000, 1.25, false],

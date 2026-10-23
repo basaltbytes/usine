@@ -6,7 +6,7 @@ import { type MessageTaken, sessionConversation } from "./conversation.ts";
 import type { PiSession } from "./sdk.ts";
 import { lastPiMessageText, piUserMessageText, type SessionChannel } from "./session.ts";
 
-/** Holds Pi tool calls and provider requests at their next boundary while an operator pause lasts. */
+/** Creates a gate that blocks Pi tool calls and provider requests at their next boundary while an operator pause is active. */
 export const piPauseGate = Effect.gen(function* () {
   const context = yield* Effect.context<never>();
   const scope = yield* Effect.scope;
@@ -29,7 +29,7 @@ export const piPauseGate = Effect.gen(function* () {
   };
 });
 
-/** Runs successive Pi turns in one SDK session while the conversation owns completion. */
+/** Runs successive Pi turns in one SDK session; the conversation decides when the session completes. */
 export const piTurns = Effect.fn("PiTurns.start")(function* (options: {
   readonly session: ChildSession;
   readonly sdk: PiSession;
@@ -76,7 +76,7 @@ export const piTurns = Effect.fn("PiTurns.start")(function* (options: {
     pause: Effect.void,
     beforeFinish: Effect.void,
   });
-  // Pi takes a steering message off its queue as the message starts in the conversation.
+  // Pi removes a steering message from its queue when the message starts in the conversation.
   const unsubscribe = options.sdk.subscribe((event) => {
     if (event.type !== "message_start") return;
     const text = piUserMessageText(event.message);

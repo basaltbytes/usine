@@ -110,17 +110,13 @@ const TaskBody = ({
   );
 };
 
-/**
- * One Task: its originating Item and lane, every Run on its Items with their actions, its pull
- * requests, and the comments and reviews its Runs posted. A number of any of its Items opens it;
- * the address then names the originating Item.
- */
+/** Opens for the number of any of the Task's Items; the URL then uses the originating Item's number. */
 export const TaskPage = ({
   repository,
   number,
 }: {
   readonly repository: RepositoryName;
-  /** The Item number from the address, not yet known to be one. */
+  /** Item number from the URL, not yet validated. */
   readonly number: string;
 }) =>
   Option.match(decodeNumber(number), {

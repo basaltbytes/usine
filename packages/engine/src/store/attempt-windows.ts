@@ -6,16 +6,13 @@ import { attempts, runs, triggerEvents } from "../database/schema.ts";
 import { attemptFromRow, decodeAttemptRows } from "./codec.ts";
 import { attemptSelection } from "./queries.ts";
 
-/** Reads when the Attempts on one Item were at work, on the caller's transaction. */
+/** Returns the Attempt window queries that run on the caller's transaction. */
 export const attemptWindowQueries = (database: RunDatabaseClient) => {
   /**
-   * The window of `attemptId` as its record holds it now, and the windows of
-   * the other Attempts of its Agent on its Run's Item that overlap it
-   * (`windowsOverlap`): those still open, and those that ended in or after
-   * the second it started. An Attempt that ended before end times were
-   * recorded has no known window: as `attemptId`, it has no own window and no
-   * overlapping ones, and as another Attempt it is left out. Only Attempts
-   * the store holds are asked about, so a missing one is a defect.
+   * Returns the window of `attemptId` and the overlapping windows of the same Agent's other
+   * Attempts on the Item. An Attempt that ended before end times were recorded has no window: for
+   * `attemptId` the result is empty, and other such Attempts are left out. Dies if `attemptId`
+   * isn't recorded.
    */
   const attemptWindows = Effect.fn("RunStoreQueries.attemptWindows")(function* (
     attemptId: AttemptId,

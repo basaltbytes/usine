@@ -10,12 +10,11 @@ import type { CheckoutRequest, ExecutorError, PreparedAttempt } from "./executor
 import { attemptGuard, type AttemptGuardSeed } from "./guard.ts";
 import type { ProvisionedWorktree } from "./provision.ts";
 
-/** Why an Attempt's live session is stopping: operator cancel, or a runaway ceiling that tripped. */
 export type AttemptStop =
   | { readonly _tag: "Cancel" }
   | { readonly _tag: "Runaway"; readonly ceiling: RunawayCeiling };
 
-/** What an adapter's prepare acquires: the launchable Attempt plus its salvage outcome once released. */
+/** The result of an executor's `acquire`: the prepared Attempt and its salvage handles. */
 export interface AcquiredAttempt extends PreparedAttempt {
   readonly salvaged: ProvisionedWorktree["salvaged"];
   readonly recordSalvage: ProvisionedWorktree["recordSalvage"];
@@ -29,19 +28,16 @@ interface OwnedAttempt {
 }
 
 /**
- * Tracks each Attempt of one Executor instance from the start of preparation until
- * its resources are released, so `cancel` reaches it at any stage. `stop` stops the
- * Attempt's live session for a reason and reports whether one existed: `cancel` calls
- * it, and so does a tripped wall-clock ceiling before the guard's race interrupts the
- * launch. Without a live session, cancellation releases the Attempt directly. `cancel`,
- * a failed `prepare`, and `launch` each return only after the Attempt's resources are released.
- * `registered` completes once the launch registered the Attempt's live session, so
- * `stop` reaches it. `warnParent` delivers the guard's warning steer to the parent, and
- * may wait until the parent's channel can take it. `guardSeed` gives what the Attempt's guard goes
- * on from, and `recordUnsupervised` keeps the unsupervised time the guard counted
- * for the seed of the Attempt's reattachment. When `guardSeed` fails, as for a
- * reattachment whose seed cannot be read, the launch releases the Attempt's
- * resources, recording its salvage, and fails with that failure.
+ * Returns `prepare` and `cancel` for one executor's Attempts, tracked from preparation until
+ * release so `cancel` works at any stage. `cancel`, a failed `prepare`, and `launch` each return
+ * only after the Attempt's resources are released.
+ *
+ * - `stop`: stops the live session and returns whether one existed.
+ * - `registered`: completes when the launch registers the live session.
+ * - `warnParent`: sends the guard's warning steer; can wait for the parent's channel.
+ * - `guardSeed`: returns the guard's initial state. If it fails, the launch records salvage,
+ *   releases the resources, and fails.
+ * - `recordUnsupervised`: persists the guard's unsupervised time for a later reattachment.
  */
 export const preparedAttemptsFor = (
   stop: (attemptId: AttemptId, reason: AttemptStop) => Effect.Effect<boolean, ExecutorError>,
@@ -69,8 +65,8 @@ export const preparedAttemptsFor = (
         return;
       }
       yield* Ref.set(active.unavailable, true);
-      // Preserve the live session's terminal envelope and typed delivery errors.
-      // Before registration, scope closure interrupts preparation or process spawn.
+      // With a live session, stops it so its terminal envelope and typed errors are kept. Before
+      // registration, closing the scope interrupts preparation or process spawn.
       if (!(yield* stop(attemptId, { _tag: "Cancel" }))) {
         yield* Effect.logInfo("Canceling Attempt before its channel is ready", { attemptId });
         yield* active.release(Exit.void);
@@ -79,7 +75,7 @@ export const preparedAttemptsFor = (
       }
     }, Effect.uninterruptible);
 
-    /** Owns partial preparation and the live session in one child scope, released at the Attempt's end. */
+    /** Runs preparation and the live session in one child scope that closes when the Attempt ends. */
     const prepare = (
       acquire: Effect.Effect<AcquiredAttempt, ExecutorError, Scope.Scope>,
       request: CheckoutRequest,
@@ -89,9 +85,9 @@ export const preparedAttemptsFor = (
           const scope = yield* Scope.fork(yield* Effect.scope);
           const unavailable = yield* Ref.make(false);
           const released = yield* Deferred.make<void>();
-          // Closing a scope that another fiber is already closing returns at once.
-          // The owner and a concurrent cancel both wait for the first-registered,
-          // last-run finalizer, so neither returns while resources are still held.
+          // Scope.close returns immediately when another fiber is already closing the scope, so the
+          // owner and a concurrent cancel both wait for `released`, set by the first-registered
+          // (last-run) finalizer.
           const release: OwnedAttempt["release"] = (exit) =>
             Scope.close(scope, exit).pipe(Effect.andThen(Deferred.await(released)));
           attempts.set(request.attemptId, {
@@ -107,15 +103,15 @@ export const preparedAttemptsFor = (
             }),
           );
           yield* Scope.addFinalizer(scope, Ref.set(unavailable, true));
-          // Resources have their own child scope: the supervising fiber's finalizer
-          // must stop acquisition before any resources acquired by it are released.
+          // A separate child scope, so the acquiring fiber is interrupted before its resources are
+          // released.
           const resources = yield* Scope.fork(scope);
           const acquiring = yield* Effect.forkIn(Scope.provide(acquire, resources), scope);
           const prepared = yield* restore(Fiber.join(acquiring)).pipe(
             Effect.onError((cause) => release(Exit.failCause(cause))),
           );
 
-          /** Releases the Attempt's resources, then fails when its salvage could not be recorded. */
+          /** Releases the Attempt's resources, then fails if its salvage couldn't be recorded. */
           const releaseSalvaged = (exit: Exit.Exit<unknown, unknown>) =>
             release(exit).pipe(Effect.andThen(Effect.asVoid(prepared.salvaged)));
 
@@ -131,11 +127,9 @@ export const preparedAttemptsFor = (
                   cause: new Error("prepared Attempt is no longer available"),
                 });
               }
-              // A seed that cannot be read ends the Attempt before its launch: its
-              // checkout is salvaged and the salvage recorded, so the Run's next
-              // Attempt starts from it. The Attempt fails with the seed's failure
-              // first, then any salvage that could not be recorded. An interrupt,
-              // as when this process stops, leaves the checkout to the owner's scope.
+              // If the seed can't be read, records salvage and releases the checkout without launching, so
+              // the Run's next Attempt starts from it. On interruption, such as process shutdown, the
+              // owner's scope handles the checkout.
               const seed = yield* guardSeed(request, io).pipe(
                 Effect.onExit((exit) =>
                   Exit.isSuccess(exit) || Cause.hasInterruptsOnly(exit.cause)
@@ -168,11 +162,9 @@ export const preparedAttemptsFor = (
                 io,
                 seed,
               );
-              // The clock starts once the launch registered the session `stop` reaches.
-              // A remote launch first waits for its Worker's liveness watch, which the
-              // Attempts reattached on that Worker after a restart contend for; a seed
-              // that leaves no time would trip meanwhile, find no session to stop,
-              // and leave the reattached parent task running.
+              // Starts the clock only after the launch registers its session. A remote launch first waits
+              // for the Worker's liveness watch, and a seed with no time left could trip before there's a
+              // session to stop.
               const tripped = registered(attemptId).pipe(
                 Effect.andThen(guard.tripped),
                 Effect.tapError(({ ceiling }) =>
@@ -189,9 +181,9 @@ export const preparedAttemptsFor = (
                 ),
               );
               yield* prepared.recordSalvage(io.salvage);
-              // Closing the owner's scope interrupts the session before checkout and
-              // credential finalizers. Interrupting a caller waiting on join must also
-              // stop that scoped fiber, so timeout/cancel completes the handshake first.
+              // Closing the owner's scope interrupts the session before the checkout and credential
+              // finalizers. acquireUseRelease interrupts the forked fiber when the caller waiting on join
+              // is interrupted.
               return yield* Effect.acquireUseRelease(
                 Effect.forkIn(Effect.raceFirst(prepared.launch(guard.sink), tripped), scope),
                 Fiber.join,

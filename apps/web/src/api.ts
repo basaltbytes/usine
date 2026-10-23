@@ -5,7 +5,7 @@ import { HttpApiClient } from "effect/unstable/httpapi";
 
 const makeClient = () => HttpApiClient.make(OperatorApi, { baseUrl: globalThis.location.origin });
 
-/** Runs a typed operator request as a Promise for TanStack Query, preserving decoded failures. */
+/** Runs an operator API request and returns a Promise that rejects with the decoded API error. */
 export const api = <A, E>(
   request: (
     client: Effect.Success<ReturnType<typeof makeClient>>["operator"],

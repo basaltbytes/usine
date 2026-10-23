@@ -2,22 +2,19 @@ import { Context, type Effect } from "effect";
 import type { Submission } from "./engine/submission.ts";
 
 /**
- * What re-evaluating a queued Event's trigger found:
+ * The result of re-evaluating a queued Event's trigger:
+ *
  * - `matches`: the Item still matches, and the Event's Run opens.
- * - `no-longer-matches`: the Item, its Loop, or its repository moved on, and
- *   the Item's queued Events are recorded as ignored (revoked).
- * - `item-gone`: the Item's source no longer has it. The queued Events are
- *   revoked as for `no-longer-matches`, and the Item's Board projection is
- *   marked gone so its card leaves the open lanes.
+ * - `no-longer-matches`: the Item, Loop, or repository changed, and the Item's queued Events
+ *   are revoked.
+ * - `item-gone`: the Item no longer exists. The queued Events are revoked, and the Item's
+ *   projection is marked gone.
  */
 export type TriggerRecheck = "matches" | "no-longer-matches" | "item-gone";
 
 /**
- * Re-evaluates a Loop's trigger against an Item's current state. The engine
- * consults it for a queued Event when the Run ahead of it closes: the poll
- * that recorded the Event may predate that Run's own writes, such as the
- * label swap a finisher makes after its push. An adapter that cannot tell
- * answers `matches`, so the Run opens as it did before the check existed.
+ * The service that re-evaluates a Loop's trigger against an Item's current state when the Run
+ * ahead of a queued Event closes. An adapter that can't tell returns `matches`.
  */
 export class TriggerCondition extends Context.Service<
   TriggerCondition,

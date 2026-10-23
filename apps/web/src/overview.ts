@@ -4,13 +4,13 @@ import type { FactoryOverview, NeedView } from "@usine/orchestrator/operator";
 import { api } from "./api.ts";
 import { needCopy } from "./operator-copy.ts";
 
-/** Path params for /projects/$owner/$name in the shape the route declares. */
+/** Returns the path params for `/projects/$owner/$name`. */
 export const projectParams = (repository: RepositoryName) => ({
   ...splitRepositoryName(repository),
   repository,
 });
 
-/** How many Needs you entries concern each Project; entries about no Project are left out. */
+/** Returns the count of Needs you entries per Project; entries without a Project are omitted. */
 export const needsYouByProject = (
   needs: ReadonlyArray<NeedView>,
 ): ReadonlyMap<RepositoryName, number> => {
@@ -25,7 +25,7 @@ export const needsYouByProject = (
 const ACTIVE_OVERVIEW_REFRESH_MS = 2_000;
 const IDLE_OVERVIEW_REFRESH_MS = 15_000;
 
-/** The one overview query every route reads; the root loader primes it. */
+/** Returns the overview query, which every route uses; the root loader prefetches it. */
 export const overviewQuery = () => ({
   queryKey: ["overview"] as const,
   queryFn: () => api((client) => client.overview()),

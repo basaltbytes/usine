@@ -1,13 +1,13 @@
 ---
 title: Agent files
-description: The frontmatter fields of an Agent file, how its body becomes the Agent's persona, and how the roster is built.
+description: The frontmatter fields of an agent file, how its body becomes the agent's persona, and how usine builds the roster.
 sidebar:
   order: 3
 ---
 
-An Agent is one Markdown file in the `agents/` folder of the instance folder. The filename without `.md` is the Agent's name, which Loop files use in their `agent` field. The frontmatter is the Agent's brain spec: the harness, model, and reasoning effort of the child sessions it runs, plus optional settings for the Attempt's Pi parent. The body is the persona: standing instructions given to every session the Agent runs.
+An agent is one Markdown file in `agents/`. The file name without `.md` is the agent name, which loops use in their `agent` field. The frontmatter is the brain spec: the harness, model, and reasoning effort of the child sessions, and optional settings for the attempt's Pi parent. The body is the persona, the standing instructions for every session of the agent.
 
-The orchestrator reads every file ending in `.md` directly inside `agents/`, in name order, at startup and at each reload ([CLI](/reference/configuration/cli/#reload)). The folder must exist, even when empty. A Run keeps the Agent it was opened with, so an edited Agent applies to new Runs.
+The orchestrator reads every `.md` file directly in `agents/`, in name order, at startup and at each [reload](/reference/configuration/cli/#reload). The folder must exist, even if it's empty. A run keeps the agent that it opened with, so an edited agent applies to new runs.
 
 The schema is [`AgentFrontmatter`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/parser.ts#L44) in `packages/config/src/parser.ts`, which produces an [`AgentFile`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/agent.ts#L7).
 
@@ -24,7 +24,7 @@ parent_effort: medium
 Finish one pull request at a time. Own the latest findings, direct fixes, final inspection, required checks, push, and outcome labels specified by the task. Keep changes within the pull request's scope and do not merge it.
 ```
 
-An Agent without parent settings uses the factory defaults from `usine.yaml`:
+An agent without parent settings uses the factory defaults from `usine.yaml`:
 
 ```markdown title="agents/developer.md"
 ---
@@ -37,65 +37,68 @@ Complete one repository task at a time. Follow the repository instructions, keep
 
 ## File format
 
-The file has the same layout as a Loop file: a `---` line, YAML frontmatter, a closing `---` line, then the body ([`splitMarkdown`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/frontmatter.ts#L24)). The filename must be kebab-case: lowercase letters and digits separated by single hyphens ([`AgentName`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/core/src/agent/agent.ts#L5)).
+The file has the same layout as a loop file: a `---` line, YAML frontmatter, a closing `---` line, and the body ([`splitMarkdown`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/frontmatter.ts#L24)). The file name must be kebab-case: lowercase letters and digits separated by single hyphens ([`AgentName`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/core/src/agent/agent.ts#L5)).
 
 ## Frontmatter fields
 
-An unknown key is an error, as are duplicate keys.
+Unknown keys and duplicate keys are errors.
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
-| `harness` | `claude`, `codex`, `pi` | required | The coding runtime of the Agent's child sessions: Claude Code, Codex CLI, or Pi. |
-| `model` | string | required | The model the harness runs, in the harness's own model ID format. Non-blank; the harness checks that the model exists when a session starts. |
+| `harness` | `claude`, `codex`, `pi` | required | The harness of the agent's child sessions: Claude Code, Codex CLI, or Pi. |
+| `model` | string | required | The model that the harness runs, in the harness's model ID format. Pi takes `provider/model`. Must not be blank. The harness checks that the model exists when a session starts. |
 | `effort` | effort | required | Reasoning effort of the child sessions. |
-| `parent_model` | string | `settings.parent_model` | Model of the Attempt's Pi parent, as `provider/model`. |
-| `parent_effort` | effort | `settings.parent_effort`, then `effort` | Reasoning effort of the Attempt's Pi parent. |
+| `parent_model` | string | `settings.parent_model` | Model of the attempt's Pi parent, as `provider/model`. |
+| `parent_effort` | effort | `settings.parent_effort`, then `effort` | Reasoning effort of the attempt's Pi parent. |
 
-The effort values are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max` ([`EFFORTS`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/core/src/agent/brain.ts#L16)). Which levels work depends on the harness and the model.
+The effort values are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max` ([`EFFORTS`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/core/src/agent/brain.ts#L16)). The levels that work depend on the harness and the model:
 
-### The Pi parent
+- Claude Code turns thinking off for `off` and runs `minimal` as `low`.
+- Codex receives `off` as `none`. The effort must be one that Codex lists for the model, or the child fails to start.
+- Pi uses the effort as the session's thinking level.
 
-Every Attempt runs a Pi parent session inside the orchestrator, whatever harness the Agent uses. The parent receives the rendered task and delegates work to child sessions that run the Agent's harness, model, and effort on the Worker.
+### Pi parent
 
-usine picks the parent's model in this order: the Agent's `parent_model`, then `settings.parent_model` in `usine.yaml`, then Pi's configured default model, then the first Pi model with a configured credential ([`resolveParent`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/durable/src/attempt/parent.ts#L101)). It picks the parent's effort from the Agent's `parent_effort`, then `settings.parent_effort`, then the Agent's own `effort` ([`resolveParentEffort`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/core/src/agent/agent.ts#L39)).
+Every attempt runs a Pi parent session in the orchestrator, whatever harness the agent uses. The parent receives the rendered task and delegates work to child sessions that run the agent's harness, model, and effort on the worker.
 
-An Attempt fails before its conversation starts when Pi doesn't provide the parent model, when the model doesn't support the parent effort, or when no credential is available for the model's provider.
+usine picks the parent model in this order: the agent's `parent_model`, `settings.parent_model` in `usine.yaml`, Pi's configured default model, and the first Pi model with a configured credential ([`resolveParent`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/durable/src/attempt/parent.ts#L101)). It picks the parent effort from the agent's `parent_effort`, then `settings.parent_effort`, then the agent's own `effort` ([`resolveParentEffort`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/core/src/agent/agent.ts#L39)).
 
-## The body: persona
+The parent reads Pi's configuration and credentials for the user who runs `usine up`, from `~/.pi/agent` or the folder in `PI_CODING_AGENT_DIR`. An `openai-codex` model needs a ChatGPT subscription login there and uses the ChatGPT plan. Any other provider needs an API key. usine doesn't check the parent model at startup. An attempt fails with `AgentFailure` before its conversation starts if Pi doesn't provide the parent model, the model doesn't support the parent effort, or no credential is available for the model's provider.
 
-Everything after the closing `---` line is the persona. It must contain at least one non-whitespace character. usine inserts it, unchanged, under an `# Agent persona` heading in the instructions of the Attempt's Pi parent and of every child session the parent spawns ([`assemblePrompt` and `assembleChildPrompt`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/agents/src/prompt.ts#L58)).
+## Persona
 
-Use the persona for instructions that apply to every Loop that uses the Agent: how it works, what it never does, and how it reports. The Loop body contains the task for one Item.
+Everything after the closing `---` line is the persona, and it must not be blank. usine inserts it unchanged, under an `# Agent persona` heading, in the instructions of the Pi parent and of every child that the parent starts ([`assemblePrompt` and `assembleChildPrompt`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/agents/src/prompt.ts#L58)).
 
-usine adds its own instructions after the persona and the task. You can't change them:
+Use the persona for instructions that apply to every loop of the agent: how it works, what it never does, and how it reports. The loop body has the task for one item. After both, usine adds [fixed instructions](/reference/configuration/loop-files/#agent-prompt) that you can't change, including the signature `— usine agent: <name>` at the end of every GitHub comment, issue, pull request, and review.
 
-- Run checks in the foreground, and push every commit to keep before returning.
-- Start the final answer with a reserved blocked marker to report a blocker; that answer fails the Attempt.
-- Submit pull request reviews as comments, never approvals.
-- End every GitHub comment, issue, pull request, and review with `— usine agent: <name>`, where `<name>` is the Agent's name.
+Loops can rely on the signature, as the `act-on-findings` example in [More examples](/reference/configuration/loop-files/#more-examples) does. Agents write to GitHub as one bot login, so an attempt counts a comment or review on its item as its own only if the body ends with its agent's signature. Other comments aren't listed with the attempt on the task page, and don't count as its work when the parent's last turn answered the operator.
 
-Loops can rely on the signature. The `act-on-findings` example in [Loop files](/reference/configuration/loop-files/#more-examples) counts reviews whose body contains `usine agent: reviewer`.
+## Roster
 
-usine uses the signature to tell Attempts apart, because Agents write to GitHub as a shared bot login. An Attempt records a comment or review on its Item as its own only when the body ends with its Agent's signature. A comment without the signature, or with another Agent's signature, is not listed with the Attempt's comments on the Task page, and it does not count as the Attempt's work when the parent's last turn answered the operator.
-
-## The roster
-
-Every valid Agent file is added to the roster. usine leaves out a file that fails validation and quarantines every Loop that references it, with the message `Unknown agent: <name>`. At startup and at each reload, usine logs each invalid Agent file as a warning with its file, stage, and message, and lists it in **Needs attention** as **Agent file not loaded**.
+Every valid agent file is in the roster. usine leaves out an invalid file, and quarantines every loop that references it with `Unknown agent: <name>`. At startup and at each reload, it logs each invalid file with its stage and message, and lists it in **Needs attention** as **Agent file not loaded**.
 
 | Stage | Checks |
 | --- | --- |
-| `schema` | The filename ends in `.md` and is kebab-case. |
+| `schema` | The file name ends in `.md` and is kebab-case. |
 | `read` | The file can be read. |
 | `frontmatter` | Opening and closing `---` lines. |
 | `yaml` | YAML syntax, no duplicate keys, no parser warnings. |
-| `schema` | Frontmatter keys and values; a non-blank body. |
+| `schema` | Frontmatter keys and values, and a non-blank body. |
 
 ### Preflight
 
-When `usine up` starts, it checks every rostered harness, model, and effort on every Worker before it runs any Attempt. A failed check stops startup. A reload runs the same checks on every Worker for each harness, model, and effort that no Agent of the running roster uses, before it replaces the roster. A failed check refuses the reload with `ReloadPreflightError`, and the running roster stays. In setup mode no Worker runs, so a reload checks nothing and the next `usine up` checks the whole roster. An Attempt also checks its own Agent's harness when it starts, and a failed check fails it with `AgentFailure` ([`verifyHarness`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/agents/src/preflight/preflight.ts#L35)).
+usine checks harnesses without installing anything ([`verifyHarness`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/agents/src/preflight/preflight.ts#L35)):
+
+- At startup, it checks every harness, model, and effort in the roster on every worker. A failed check stops startup with an error that gives the worker, the harness, and what is missing.
+- Before a reload replaces the roster, it checks each harness, model, and effort that no running agent uses, on every worker. A failed check refuses the reload with `ReloadPreflightError`. In setup mode, a reload checks nothing, and the next `usine up` checks the whole roster.
+- When an attempt starts, it checks the attempt's agent on the chosen worker. A failed check fails the attempt with `AgentFailure`, and the run waits for you to fix the worker and retry.
 
 | `harness` | Runs | Preflight checks |
 | --- | --- | --- |
-| `claude` | Claude Code | The `claude` binary, and a Claude subscription login on the Worker. Behind a Gateway whose `llm_providers` lists `anthropic`, only the binary. |
-| `codex` | Codex CLI | The `codex` binary at version 0.144.0 or 0.153.4, and an account that can use `model`. |
-| `pi` | Pi, the SDK inside the orchestrator | The model is available with API-key authentication and supports `effort`. Pi children run only on local Workers: on an SSH Worker the check fails. |
+| `claude` | Claude Code | `claude --version` runs, and `claude auth status --json` reports a claude.ai login with the first-party API. Otherwise, the error is `Claude requires a subscription login; run claude auth login on the Worker`. Behind a gateway whose `llm_providers` lists `anthropic`, only the binary. |
+| `codex` | Codex CLI | `codex --version` prints `codex-cli 0.144.0` or `codex-cli 0.153.4`, and the Codex app server reports a ChatGPT account. Otherwise, the error is `Codex children require a ChatGPT login; run codex login on the Worker`. |
+| `pi` | Pi, the SDK in the orchestrator | The model is available with API-key authentication and supports `effort`. Pi children run only on local workers, so the check fails on an SSH worker. |
+
+Each check times out after 60 seconds. usine doesn't check the model of a Claude Code or Codex child until the child starts. Worker preflight also checks Git, memory, and, for SSH workers, the connection and gateway ([Add a worker](/guides/add-a-worker/#preflight)).
+
+All Claude processes on a worker share its Claude login, so usine runs one Claude check at a time on a worker, and none while a Claude child starts there. If a Claude child still fails with `Failed to refresh OAuth token: another Claude Code process ...`, usine starts it again after 15, 30, and then 60 seconds. The parent sees the error only if the last start also fails.

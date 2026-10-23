@@ -18,14 +18,9 @@ const reasonOf = (cause: GitHubAppError): CredentialUnavailableReason =>
   isRefusal(cause) ? "refused" : "unreachable";
 
 /**
- * Mints renewable single-repository GitHub App tokens for each Attempt, at
- * the permission level of the Attempt's Loop (ADR 0011). Project
- * access is discovered on the first mint and cached, so a GitHub outage cannot
- * block startup. A repository added to the installation, or to the current
- * instance's registry by a reload, is found by the refresh that follows a miss.
- * When GitHub refuses, as for a repository the installation does not cover,
- * the credential error is `refused` and its message carries GitHub's reason;
- * an outage or a rate limit gives an `unreachable` one.
+ * Mints renewable single-repository GitHub App tokens at each Attempt's Loop permission level (ADR
+ * 0011). Fails with a `refused` credential error if GitHub refuses, or `unreachable` on an outage
+ * or rate limit.
  */
 export const gitHubCredentialLayer: Layer.Layer<
   CredentialProvider,
@@ -62,7 +57,7 @@ export const gitHubCredentialLayer: Layer.Layer<
         ),
       );
 
-    /** Refreshes the cached project map once on a miss before answering "not covered". */
+    /** Refreshes the cached project map once on a miss before returning "not covered". */
     const projectFor = Effect.fn("GitHubCredentialProvider.projectFor")(function* (
       repository: RepositoryName,
     ) {

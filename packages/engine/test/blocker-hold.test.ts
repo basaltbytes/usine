@@ -17,7 +17,7 @@ const blocker = new BlockedFailure({
   message: "The baseline gate fails on main before any change. Fixing it needs a maintainer.",
 });
 
-/** Whether no Run exists yet for the submission's Event. */
+/** Returns whether no Run exists yet for the submission's Event. */
 const hasNoRun = (engine: RunEngine["Service"], sighting: ReturnType<typeof submission>) =>
   Effect.gen(function* () {
     const missing = yield* Effect.flip(engine.inspect(yield* runIdFor(sighting)));

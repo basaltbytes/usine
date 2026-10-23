@@ -45,7 +45,8 @@ import { layer as sshLayer, sshWorkerAddressesOf } from "../../src/ssh.ts";
 import { fixedConfigLayer } from "../support/current-instance.ts";
 import { alwaysHoldsLayer } from "../support/polling.ts";
 
-// The machine is named by the environment; without it there is nothing to run against.
+// `USINE_SSH_INTEGRATION_DESTINATION` sets the machine; without it, there is nothing to run
+// against.
 const destination = process.env.USINE_SSH_INTEGRATION_DESTINATION;
 const WORKER = WorkerName.make("ssh-integration");
 const PLAIN_SSH = [
@@ -88,7 +89,7 @@ const configFor = (values: Effect.Success<typeof settings>) =>
     ],
   });
 
-/** The shared SSH options, with a separate known-hosts file when one is given. */
+/** Returns the shared SSH options, with a separate known-hosts file if one is set. */
 const sshFor = (values: Effect.Success<typeof settings>) => ({
   command: "ssh",
   args: [
@@ -150,7 +151,7 @@ const succeeds = Effect.fn("SshIntegration.succeeds")(function* (
   return result.stdout;
 });
 
-/** What the scripted parent saw on the machine while the Attempt ran. */
+/** What the scripted parent observed on the machine during the Attempt. */
 interface Observed {
   host?: RemoteShell;
   worktree?: string;
@@ -185,9 +186,8 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
           yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-ssh-integration-" }),
         );
         const observed: Observed = {};
-        // Does what a child does on the machine: uses gh and git with the
-        // Attempt's credential, commits, and leaves a long-running process
-        // whose SSH client this parent then drops.
+        // Acts as a child on the machine: uses gh and git with the Attempt's credential, commits,
+        // and leaves a long-running process whose SSH client the parent then drops.
         const parent: StubParent = ({ request }) =>
           Effect.gen(function* () {
             const host = request.host;
@@ -402,7 +402,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
             brain("codex", "gpt-5.6-sol"),
           ]) {
             const outcome = yield* ssh.preflight(WORKER, [checked], 1).pipe(Effect.result);
-            // A Worker nobody logged in to yet has the harness but not its login.
+            // A Worker that nobody logged in to yet has the harness but not its login.
             if (outcome._tag === "Failure") {
               assert(outcome.failure._tag === "WorkerCapabilityError", outcome.failure.message);
               assert.strictEqual(
@@ -422,7 +422,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
   );
 });
 
-// A Worker behind a Gateway is named by these; without them the Gateway case is skipped.
+// These variables set the Worker behind a Gateway; without them, the Gateway case is skipped.
 const gatewayDestination = process.env.USINE_GATEWAY_INTEGRATION_DESTINATION;
 const GATEWAY_WORKER = WorkerName.make("gateway-integration");
 
@@ -441,7 +441,10 @@ const gatewaySettings = Effect.all({
   credentialsDirectory: Config.string("USINE_GITHUB_INTEGRATION_INSTANCE_DIRECTORY"),
 });
 
-/** The Worker behind the Gateway, with no `llm_providers`: its harnesses use their logins on the machine. */
+/**
+ * Returns the config of the Worker behind the Gateway, with no `llm_providers`, so its harnesses
+ * use their logins on the machine.
+ */
 const gatewayConfigFor = (values: Effect.Success<typeof gatewaySettings>) =>
   Schema.decodeUnknownSync(UsineConfig)({
     version: 1,
@@ -461,7 +464,10 @@ const gatewayConfigFor = (values: Effect.Success<typeof gatewaySettings>) =>
     ],
   });
 
-/** The shared SSH options, with the SSH configuration that names the Worker and its bastion when one is given. */
+/**
+ * Returns the shared SSH options, with the SSH configuration for the Worker and its bastion if one
+ * is set.
+ */
 const gatewaySshFor = (values: Effect.Success<typeof gatewaySettings>) => ({
   command: "ssh",
   args: [
@@ -473,12 +479,14 @@ const gatewaySshFor = (values: Effect.Success<typeof gatewaySettings>) => ({
   ],
 });
 
-/** The local port of the test's own forward to the admin API, which checks the Gateway after the Attempt. */
+/**
+ * The local port of the test's own admin API forward, used to check the Gateway after the Attempt.
+ */
 const CHECK_PORT = 17070;
 
 /**
- * The attachments the Gateway holds, listed through a forward the test opens
- * itself with the Worker's SSH options, separate from the executor's.
+ * Lists the Gateway's attachments through a forward that the test opens with the Worker's SSH
+ * options, separate from the executor's.
  */
 const gatewayAttachments = Effect.fn("GatewayIntegration.attachments")(function* (
   values: Effect.Success<typeof gatewaySettings>,
@@ -513,7 +521,7 @@ const gatewayAttachments = Effect.fn("GatewayIntegration.attachments")(function*
     .pipe(Effect.retry({ schedule: Schedule.spaced("1 second"), times: 20 }));
 });
 
-/** What the scripted parent saw on a Worker behind a Gateway. */
+/** What the scripted parent observed on a Worker behind a Gateway. */
 interface ObservedBehindGateway {
   host?: RemoteShell;
   callerTokenFormat?: string;
@@ -540,12 +548,9 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
           yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-gateway-integration-" }),
         );
         const observed: ObservedBehindGateway = {};
-        // Does what a child does on the machine, with only the Attempt's
-        // child host and environment: git through the Gateway (fetch, push to
-        // the gateway remote, delete through a github.com URL), gh through
-        // its socket, a package registry through the forward proxy, an AAAA
-        // lookup of the proxy's name, and a scan of the machine for GitHub
-        // tokens.
+        // Acts as a child on the machine with only the Attempt's child host and environment: git
+        // and gh through the Gateway, a package registry through the forward proxy, an AAAA lookup
+        // of the proxy's name, and a scan for GitHub tokens.
         const parent: StubParent = ({ request }) =>
           Effect.gen(function* () {
             const host = request.host;
@@ -751,7 +756,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
             brain("codex", "gpt-5.6-sol"),
           ]) {
             const outcome = yield* ssh.preflight(GATEWAY_WORKER, [checked], 1).pipe(Effect.result);
-            // A Worker nobody logged in to yet has the harness but not its login.
+            // A Worker that nobody logged in to yet has the harness but not its login.
             if (outcome._tag === "Failure") {
               assert(outcome.failure._tag === "WorkerCapabilityError", outcome.failure.message);
               assert.strictEqual(

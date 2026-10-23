@@ -16,7 +16,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { ErrorAlert } from "@/components/error-alert";
 
-/** Sends user turns and pause/release controls to one live session. */
 export const SessionComposer = ({
   runId,
   attemptId,
@@ -34,7 +33,6 @@ export const SessionComposer = ({
   const id = useId();
   const queryClient = useQueryClient();
   const child = target._tag === "Child";
-  // A parent can be released only from a pause or a Hold.
   const releasable = child || paused || held;
   const mutation = useMutation({
     mutationFn: (action: OperatorAction) =>

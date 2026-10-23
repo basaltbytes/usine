@@ -2,4 +2,4 @@
 "@usine/orchestrator": patch
 ---
 
-At most once every 10 minutes per repository, the poll asks GitHub whether it still has each issue stored as open, and marks each deleted or transferred one gone, so its card leaves the Board's open lanes, and revokes its unstarted Runs.
+At most every 10 minutes per repository, the poll marks deleted or transferred issues as gone, removing their cards from the board's open lanes and revoking their unstarted runs.

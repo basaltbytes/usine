@@ -5,12 +5,12 @@ import { TranscriptSequence } from "@usine/engine/transcript";
 import { Schema } from "effect";
 import { FailureView } from "./attempt.ts";
 
-/** An Attempt failure recorded in the transcript with displayable details only. */
+/** An Attempt failure in the transcript with only displayable details. */
 export class FailedTranscriptView extends Schema.TaggedClass<FailedTranscriptView>(
   "@usine/orchestrator/FailedTranscriptView",
 )("Failed", { failure: FailureView }) {}
 
-/** Attempt channel messages exposed to the operator, with defect causes removed from failures. */
+/** The Attempt channel messages shown to the operator, with defect causes removed from failures. */
 export const TranscriptPayload = Schema.Union([
   AttemptChannel.Started,
   AttemptChannel.SessionEvent,
@@ -29,7 +29,7 @@ export const TranscriptPayload = Schema.Union([
 ]);
 export type TranscriptPayload = typeof TranscriptPayload.Type;
 
-/** A persisted Attempt channel message with its sequence, direction, and receipt time. */
+/** A stored Attempt channel message with its sequence, direction, and receipt time. */
 export class TranscriptEventView extends Schema.Class<TranscriptEventView>(
   "@usine/orchestrator/TranscriptEventView",
 )({
@@ -42,7 +42,7 @@ export class TranscriptEventView extends Schema.Class<TranscriptEventView>(
   payload: TranscriptPayload,
 }) {}
 
-/** Where the next earlier transcript page starts, scoped to one Attempt. */
+/** The start of the next earlier transcript page within one Attempt. */
 export class TranscriptPageCursor extends Schema.Class<TranscriptPageCursor>(
   "@usine/orchestrator/TranscriptPageCursor",
 )({
@@ -50,17 +50,17 @@ export class TranscriptPageCursor extends Schema.Class<TranscriptPageCursor>(
   before: TranscriptSequence,
 }) {}
 
-/** Requests the newest bounded transcript window when opening a Run. */
+/** A request for the newest bounded transcript window when a Run opens. */
 export class ColdTranscriptRequest extends Schema.TaggedClass<ColdTranscriptRequest>(
   "@usine/orchestrator/ColdTranscriptRequest",
 )("ColdTranscriptRequest", {}) {}
 
-/** Requests transcript events after the last observed sequence. */
+/** A request for transcript events after the last seen sequence. */
 export class TailTranscriptRequest extends Schema.TaggedClass<TailTranscriptRequest>(
   "@usine/orchestrator/TailTranscriptRequest",
 )("TailTranscriptRequest", { after: TranscriptSequence }) {}
 
-/** Requests an earlier page before a sequence within one Attempt. */
+/** A request for an earlier page before a sequence within one Attempt. */
 export class EarlierTranscriptRequest extends Schema.TaggedClass<EarlierTranscriptRequest>(
   "@usine/orchestrator/EarlierTranscriptRequest",
 )("EarlierTranscriptRequest", {
@@ -68,7 +68,7 @@ export class EarlierTranscriptRequest extends Schema.TaggedClass<EarlierTranscri
   before: TranscriptSequence,
 }) {}
 
-/** Selects the initial window, live tail, or earlier page of a Run transcript. */
+/** A request for the initial window, live tail, or an earlier page of a Run transcript. */
 export const TranscriptRequest = Schema.Union([
   ColdTranscriptRequest,
   TailTranscriptRequest,
@@ -76,7 +76,7 @@ export const TranscriptRequest = Schema.Union([
 ]);
 export type TranscriptRequest = typeof TranscriptRequest.Type;
 
-/** The requested Attempt is absent from the Run whose transcript is being read. */
+/** The requested Attempt isn't in the Run whose transcript is being read. */
 export class TranscriptAttemptNotFoundError extends Schema.TaggedError<TranscriptAttemptNotFoundError>(
   "@usine/orchestrator/TranscriptAttemptNotFoundError",
 )("TranscriptAttemptNotFoundError", {

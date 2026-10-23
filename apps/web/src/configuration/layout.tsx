@@ -15,7 +15,6 @@ import { overviewQuery } from "../overview.ts";
 import { usePauseLoop } from "./query.ts";
 import { SectionReloadProvider } from "./reload.tsx";
 
-/** The section's pages, in sidebar order. */
 const CONFIGURATION_PAGES = [
   { to: "/configuration/loops", label: "Loops" },
   { to: "/configuration/agents", label: "Agents" },
@@ -24,7 +23,7 @@ const CONFIGURATION_PAGES = [
   { to: "/configuration/settings", label: "Settings" },
 ] as const;
 
-/** The section's entries in the sidebar; the open page's entry is active while `inSection`. */
+/** The open page's entry is active only when `inSection` is true. */
 export const ConfigurationMenu = ({ inSection }: { readonly inSection: boolean }) => {
   const matchRoute = useMatchRoute();
   return (
@@ -43,14 +42,13 @@ export const ConfigurationMenu = ({ inSection }: { readonly inSection: boolean }
   );
 };
 
-/** The Configuration section around its pages, keeping one reload for all of them. */
+/** Shares one reload state across all Configuration pages. */
 export const ConfigurationSection = () => (
   <SectionReloadProvider>
     <Outlet />
   </SectionReloadProvider>
 );
 
-/** Shown while the configuration loads: the heading row and a few table rows. */
 export const ConfigurationPending = () => (
   <Page width="full">
     <div className="flex items-center justify-between gap-4" aria-busy="true">
@@ -66,7 +64,6 @@ export const ConfigurationPending = () => (
   </Page>
 );
 
-/** Shown when the server did not answer with the configuration. */
 export const ConfigurationUnavailable = ({ error }: { readonly error: Error }) => {
   const router = useRouter();
   return (
@@ -81,14 +78,14 @@ export const ConfigurationUnavailable = ({ error }: { readonly error: Error }) =
   );
 };
 
-/** Pause and Resume for Loops, or null while operator actions are unavailable, as in setup mode. */
+/** Returns `null` if operator actions are unavailable, as in setup mode. */
 export const useLoopPause = () => {
   const pause = usePauseLoop();
   const { data } = useSuspenseQuery(overviewQuery());
   return data._tag === "NeedsSetup" ? null : pause;
 };
 
-/** The header breadcrumb inside the section: `Configuration › Loops`, then the open entry. */
+/** Renders a breadcrumb such as `Configuration › Loops`, followed by the open entry. */
 export const ConfigurationCrumbs = () => {
   const matchRoute = useMatchRoute();
   const params = useParams({ strict: false });

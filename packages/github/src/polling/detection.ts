@@ -4,7 +4,7 @@ import { Effect, Option, Schema } from "effect";
 export const EntityTag = Schema.NonEmptyString.pipe(Schema.brand("GitHubEntityTag"));
 export type EntityTag = typeof EntityTag.Type;
 
-/** REST cursor for efficiency only. Losing it is safe because Event dedup is permanent (ADR 0007). */
+/** A REST cursor used only for efficiency; losing it is safe because Event deduplication is permanent (ADR 0007). */
 export class PollCursor extends Schema.Class<PollCursor>("@usine/github/PollCursor")({
   entityTag: Schema.OptionFromNullOr(EntityTag),
   watermark: Schema.OptionFromNullOr(Schema.DateTimeUtcFromString),
@@ -15,7 +15,7 @@ export class PollCursor extends Schema.Class<PollCursor>("@usine/github/PollCurs
   });
 }
 
-/** An issue number and update time reported by repository change detection. */
+/** An issue number and update time from repository change detection. */
 export class ChangedIssue extends Schema.TaggedClass<ChangedIssue>("@usine/github/ChangedIssue")(
   "ChangedIssue",
   {
@@ -24,7 +24,7 @@ export class ChangedIssue extends Schema.TaggedClass<ChangedIssue>("@usine/githu
   },
 ) {}
 
-/** A pull request number and update time reported by repository change detection. */
+/** A pull request number and update time from repository change detection. */
 export class ChangedPullRequest extends Schema.TaggedClass<ChangedPullRequest>(
   "@usine/github/ChangedPullRequest",
 )("ChangedPullRequest", {
@@ -32,32 +32,32 @@ export class ChangedPullRequest extends Schema.TaggedClass<ChangedPullRequest>(
   updatedAt: Schema.DateTimeUtc,
 }) {}
 
-/** An issue or pull request whose payload needs to be fetched after change detection. */
+/** An issue or pull request whose payload must be fetched after change detection. */
 export const ChangedItem = Schema.Union([ChangedIssue, ChangedPullRequest]);
 export type ChangedItem = typeof ChangedItem.Type;
 
-/** GitHub confirmed that the repository cursor still describes its current state. */
+/** The result when GitHub confirms that the repository cursor is current. */
 export class RepositoryNotModified extends Schema.TaggedClass<RepositoryNotModified>(
   "@usine/github/RepositoryNotModified",
 )("RepositoryNotModified", {
   cursor: PollCursor,
   nextPollAt: Schema.Option(Schema.DateTimeUtc),
-  /** Request backoff from rate pressure or Retry-After; excludes the normal polling interval. */
+  /** The backoff from rate pressure or `Retry-After`, not including the normal polling interval. */
   backoffUntil: Schema.Option(Schema.DateTimeUtc).pipe(
     Schema.withConstructorDefault(Effect.succeed(Option.none())),
   ),
 }) {}
 
-/** Changed Items, the next cursor, and whether the page cap left more Items to fetch. */
+/** Changed Items, the next cursor, and whether the page cap left Items unfetched. */
 export class RepositoryChanges extends Schema.TaggedClass<RepositoryChanges>(
   "@usine/github/RepositoryChanges",
 )("RepositoryChanges", {
   cursor: PollCursor,
   items: Schema.Array(ChangedItem),
-  /** True when the page cap ended the walk early. The rest arrives next cycle. */
+  /** Whether the page cap ended the walk early; the rest is fetched next cycle. */
   backlog: Schema.Boolean,
   nextPollAt: Schema.Option(Schema.DateTimeUtc),
-  /** Request backoff from rate pressure or Retry-After; excludes the normal polling interval. */
+  /** The backoff from rate pressure or `Retry-After`, not including the normal polling interval. */
   backoffUntil: Schema.Option(Schema.DateTimeUtc).pipe(
     Schema.withConstructorDefault(Effect.succeed(Option.none())),
   ),

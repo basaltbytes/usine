@@ -53,13 +53,13 @@ import { type AttemptTaskInput, storedRequestOf } from "./request.ts";
 import type { ExtensionServices } from "./services.ts";
 import { firstAccepted } from "./watch.ts";
 
-/** Where the Attempt's task is: resolving its parent, or running one parent turn. */
+/** The task's checkpoint: resolving the parent, or running one parent turn. */
 export type AttemptCheckpoint =
   | { phase: "prepare" }
   | {
       phase: "run";
       parent: ConversationId;
-      /** Turn 1 submits the assembled prompt; a later turn submits operator guidance. */
+      /** Turn 1 submits the assembled prompt; later turns submit operator guidance. */
       turn: number;
       message: string | null;
     };
@@ -67,7 +67,7 @@ export type AttemptCheckpoint =
 type Runtime = TaskRuntime<AttemptTaskInput, AttemptCheckpoint, AttemptResult, object>;
 type NextState = NextTaskState<AttemptCheckpoint, AttemptResult>;
 
-/** The name of the task that runs one Attempt's parent; stored in every task record. */
+/** The task name of an Attempt's parent task, stored in every task record. */
 export const ATTEMPT_TASK = "usine.attempt";
 
 const call = <A>(operation: string, run: (signal: AbortSignal) => PromiseLike<A>) =>
@@ -81,9 +81,8 @@ const commit = (
 ) => call(operation, () => runtime.commit((tx) => change(tx), context));
 
 /**
- * The failure a child's recorded report ends the Attempt with when the parent
- * did not relay one. A harness failure posted nothing on the Item, so it ends
- * the Attempt with `AgentFailure`, which does not hold the Item.
+ * Returns the failure for a child's stored report if the parent didn't relay one. A harness failure
+ * maps to `AgentFailure`, which doesn't put the Item on hold.
  */
 const childReportFailure = ({
   message,
@@ -115,9 +114,8 @@ const finalAnswer = Effect.fn("AttemptTask.finalAnswer")(function* (
 });
 
 /**
- * Whether the answer replies to an operator message or a steer: the newest
- * user input before it is not the turn's own input, the Attempt's prompt or
- * the release guidance, and no tool result lies between them.
+ * Whether `answer` replies to an operator message or steer: the newest user entry before it isn't
+ * `ownInput`, and no tool result is between them.
  */
 const repliesToOperator = (
   entries: ReadonlyArray<EntryRecord>,
@@ -132,7 +130,7 @@ const repliesToOperator = (
   return false;
 };
 
-/** The operator holds the parent: it is interrupted, has guidance waiting, or is under a Hold. */
+/** Whether the parent is paused, has pending guidance, or is under a Hold. */
 const supervised = (hold: Readonly<Hold>, attemptId: AttemptId): boolean =>
   hold.paused || hold.guidance.length > 0 || hold.held.includes(parentSessionId(attemptId));
 
@@ -150,10 +148,8 @@ const budgetExceeded = (runtime: Runtime, context: ChordContext, attemptId: Atte
   });
 
 /**
- * Builds the `usine.attempt` task. It resolves the parent's model, creates the
- * parent conversation it owns, and submits one turn at a time: the assembled
- * prompt, then operator guidance after an interrupt or under a Hold. The
- * submission's request id makes each turn exactly-once across restarts.
+ * Builds the `usine.attempt` task, which submits the assembled prompt and then operator guidance
+ * one turn at a time. Each turn is submitted exactly once across restarts.
  */
 export const attemptTask = (
   services: ExtensionServices,
@@ -217,7 +213,7 @@ export const attemptTask = (
     });
   });
 
-  /** Queues a parent lifecycle event for the relay; no parent entry stands for waiting on the operator. */
+  /** Queues a parent lifecycle event that has no parent entry, such as waiting on the operator. */
   const announce = Effect.fn("AttemptTask.announce")(function* (
     spec: RunSpec,
     taskId: TaskId,
@@ -244,9 +240,8 @@ export const attemptTask = (
   });
 
   /**
-   * Waits while the operator supervises the parent, then commits its next
-   * turn: the oldest operator guidance, or the release guidance once the
-   * operator ended the pause and the Hold without a message.
+   * Waits while the parent is supervised, then commits the oldest operator guidance, or
+   * `RELEASE_GUIDANCE` if there is none, as its next turn.
    */
   const awaitGuidance = Effect.fn("AttemptTask.awaitGuidance")(function* (
     task: RunningTask<
@@ -262,7 +257,7 @@ export const attemptTask = (
     const parentId = parentSessionId(spec.attemptId);
     const released = (hold: Readonly<Hold>) => !hold.paused && !hold.held.includes(parentId);
     const current = yield* call("read the Hold", () => runtime.snapshot(HoldDoc, task.id, context));
-    // Guidance that is already waiting resumes the parent at once, so it never waits.
+    // Pending guidance resumes the parent immediately, so `Idle` is not announced.
     const waits = (current?.guidance.length ?? 0) === 0;
     if (waits) yield* announce(spec, task.id, runtime, context, "Idle");
     while (true) {
@@ -355,7 +350,7 @@ export const attemptTask = (
           maxChildren: spec.maxChildren,
         },
       );
-      // A failed outcome aborts the work the task still owns, children included.
+      // A failed outcome aborts the task's remaining work, including children.
       yield* commit(runtime, context, "record the exceeded budget", () =>
         failedOutcome(
           new ChildSessionBudgetFailure({

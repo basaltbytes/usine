@@ -5,24 +5,24 @@ import type { RepositoryName } from "@usine/core/repository";
 import { Option, type Schema } from "effect";
 import { BLOCKED_MARKER, QUESTION_MARKER } from "./runtime.ts";
 
-/** The recorded trigger context, Agent instructions, and effective task presented to the parent. */
+/** The trigger context, Agent instructions, and task for the parent prompt. */
 export interface PromptParts {
   readonly repository: RepositoryName;
   readonly payload: Schema.Json;
   readonly agent: AgentName;
   readonly persona: AgentPersona;
   readonly task: AttemptTask;
-  /** The previous Attempt's salvage checked out in the workspace, when the Run is retrying. */
+  /** The previous Attempt's salvage checked out in the workspace, if the Run is retrying. */
   readonly resume: Option.Option<SalvagePushed>;
   /** The previous Attempt's salvage that conflicts with the current revision and is not in the workspace. */
   readonly conflictingSalvage: Option.Option<SalvagePushed>;
 }
 
-/** The Agent's standing instructions and the focused task the parent delegates to a child. */
+/** The Agent instructions and delegated task for a child prompt. */
 export interface ChildPromptParts {
   readonly agent: AgentName;
   readonly persona: AgentPersona;
-  /** Free text authored by the parent model, not the rendered loop task. */
+  /** Free text written by the parent model, not the rendered Loop task. */
   readonly task: string;
 }
 
@@ -61,7 +61,7 @@ const resumeLines = (parts: PromptParts): ReadonlyArray<string> => [
   }),
 ];
 
-/** Builds the parent's instructions from the saved payload, effective task, and Agent persona, including GitHub attribution. */
+/** Returns the parent's instructions, including GitHub attribution. */
 export const assemblePrompt = (parts: PromptParts): string =>
   [
     "# Run context",
@@ -87,7 +87,7 @@ export const assemblePrompt = (parts: PromptParts): string =>
     ...githubInstructions(parts.agent),
   ].join("\n");
 
-/** Builds a child's instructions from the delegated task and Agent persona, including GitHub attribution. */
+/** Returns a child's instructions, including GitHub attribution. */
 export const assembleChildPrompt = (parts: ChildPromptParts): string =>
   [
     "# Agent persona",

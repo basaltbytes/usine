@@ -35,19 +35,14 @@ import { BoardMoves } from "../board-moves/board-moves.ts";
 import { AttemptAdmission } from "./admission.ts";
 import { RunDriver } from "./run-driver.ts";
 
-/**
- * How long the engine waits between reconciles after the one at startup, so an
- * open Run whose fiber stopped, as on a store failure that outlasted its
- * retries, is driven again without a restart. Provide another value to change it.
- */
+/** The interval between periodic reconciles, which restart open Runs whose fiber stopped. */
 export const ReconcileInterval = Context.Reference<Duration.Input>(
   "@usine/engine/ReconcileInterval",
   { defaultValue: () => "3 minutes" },
 );
 
-// Every operation that commits a Run transition also hands it to the Run's
-// fiber. Both happen uninterruptibly, so a caller that goes away cannot leave a
-// committed transition undriven until the next restart.
+// Operations that commit a Run transition also hand it to the Run's fiber, uninterruptibly, so an
+// interrupted caller can't leave a committed transition undriven.
 const makeRunEngine = Effect.gen(function* () {
   const store = yield* RunStore;
   const driver = yield* RunDriver;
@@ -60,8 +55,8 @@ const makeRunEngine = Effect.gen(function* () {
       Effect.provideService(Crypto.Crypto, crypto),
     );
     const claim = yield* store.recordAndClaim(submission, requestedRunId);
-    // The superseded Run's fiber stops before the new Run's fiber starts, so
-    // the Item never has two fibers reserving Workers at once.
+    // Stop the superseded Run's fiber before starting the new one, so the Item never has two
+    // fibers reserving Workers.
     if (Option.isSome(claim.supersededRun)) {
       yield* driver.stop(claim.supersededRun.value);
     }
@@ -115,8 +110,7 @@ const makeRunEngine = Effect.gen(function* () {
   }, Effect.uninterruptible);
 
   const cancel = Effect.fn("RunEngine.cancel")(function* (runId: RunId) {
-    // The closing transaction decides both facts at once: whether the run was
-    // still open, and which attempt was in flight when it closed.
+    // One transaction determines whether the Run was open and which Attempt was running.
     const outcome = yield* store.cancel(runId);
     if (outcome._tag === "AlreadyClosed") {
       yield* Effect.logDebug("Cancel was a no-op; the run was already closed", { runId });
@@ -126,16 +120,14 @@ const makeRunEngine = Effect.gen(function* () {
       runId,
       openAttempt: Option.getOrElse(outcome.openAttempt, () => "none"),
     });
-    // The executor stops the Attempt before its fiber is interrupted: an
-    // interrupted launch that was never stopped keeps its parent task live for
-    // a reattachment that will not come.
+    // Stop the Attempt before interrupting its fiber; otherwise its parent task stays live
+    // waiting for a reattach.
     const handshake = Option.isSome(outcome.openAttempt)
       ? yield* stepExecutor.interrupt(outcome.openAttempt.value).pipe(Effect.result)
       : Result.succeed(undefined);
     yield* driver.stop(runId);
-    // A restart may have kept the Attempt's checkout and a slot of its Worker
-    // for a reattachment whose execution had not acquired the checkout; none
-    // will now. Both stay kept until the parent task is confirmed stopped.
+    // Release a checkout and slot that startup kept for a reattach; they stay kept until the
+    // parent task is confirmed stopped.
     if (Option.isSome(outcome.openAttempt)) yield* driver.releaseKept(outcome.openAttempt.value);
     yield* driver.continueWithNewest(runId);
     if (Option.isSome(outcome.openAttempt) && Result.isFailure(handshake)) {
@@ -243,8 +235,8 @@ const makeRunEngine = Effect.gen(function* () {
     return attempts;
   });
 
-  // Startup reconciliation belongs in this memoized layer: a combinator such as
-  // `Layer.tap` runs again for every service the engine is provided to.
+  // Startup reconciliation runs here because this layer is memoized; `Layer.tap` would run it
+  // once per service the engine is provided to.
   yield* driver.recoverWorkspaces();
   yield* driver.reconcile();
   const interval = yield* ReconcileInterval;
@@ -277,86 +269,73 @@ const makeRunEngine = Effect.gen(function* () {
   } as const;
 });
 
-/** Records Events and manages their Runs through approval, execution, retry, and cancellation. */
+/** The service that records Events and drives their Runs through approval, execution, retry, and cancellation. */
 export class RunEngine extends Context.Service<
   RunEngine,
   {
-    /** Stops admitting Attempts, including retries, and waits for admitted work to settle. Interrupting this wait keeps admission closed until restart. */
+    /** Stops admitting Attempts, including retries, and waits for admitted Attempts to finish. Admission stays closed until restart. */
     readonly drain: () => Effect.Effect<void>;
-    /**
-     * Records the operator's approval Event with who gave it through which
-     * channel, once, and opens the Run's gate; execution still waits for a
-     * Worker slot. A repeated approval keeps the first one's source.
-     */
+    /** Records the approval Event and its source, and opens the Run's approval gate. A repeated approval keeps the first source. */
     readonly approve: (
       runId: RunId,
       approval: Event,
       source: ApprovalSource,
     ) => Effect.Effect<void, RunEngineError>;
-    /** Cancels an open Run and interrupts its active Attempt. An already closed Run is unchanged. */
+    /** Cancels an open Run and interrupts its active Attempt; does nothing for a closed Run. */
     readonly cancel: (runId: RunId) => Effect.Effect<void, RunEngineError>;
     /**
-     * Stops reconciling the Attempts recorded on `worker`, a Worker this engine
-     * does not run, and leaves whatever they left on it in place. Returns how
-     * many Attempts it marked. A Worker in `StepExecutor.workers`, one
-     * `usine.yaml` declares or a removed one until its last Attempt ends, is
-     * left unchanged: the request fails with `LeftoversDiscardRejectedError`,
-     * which counts the Worker's open Attempts.
+     * Stops reconciling the Attempts recorded on `worker`, leaving their files in place, and
+     * returns the number of Attempts marked. Fails with `LeftoversDiscardRejectedError` if
+     * `worker` is in `StepExecutor.workers`.
      */
     readonly discardLeftovers: (
       worker: WorkerName,
     ) => Effect.Effect<number, RunEngineError | LeftoversDiscardRejectedError>;
-    /** Reads the Run's current state, effective task and Agent, Step result, and Attempt history. */
+    /** Returns the Run's state, effective task and Agent, Step result, and Attempt history. */
     readonly inspect: (runId: RunId) => Effect.Effect<RunSnapshot, RunEngineError>;
-    /** Addresses one current Attempt explicitly so an old drawer cannot steer its replacement. */
+    /** Sends operator input to `attemptId`. Fails with `RunInterventionRejectedError` if it isn't the Run's running Attempt. */
     readonly intervene: (
       runId: RunId,
       attemptId: AttemptId,
       intervention: Intervention,
     ) => Effect.Effect<void, RunEngineError>;
     /**
-     * Starts a fiber for every open Run without one in this process, except Runs waiting for their
-     * approval, and opens the queued Events no closed Run continued. Also runs when the engine starts,
-     * then every `ReconcileInterval`.
+     * Starts a fiber for every open Run without one, except Runs waiting for approval, and opens the
+     * queued Events that no closed Run continued. Runs at startup and every `ReconcileInterval`.
      */
     readonly reconcile: () => Effect.Effect<void, RunEngineError>;
     /**
-     * Resolves the current failed Attempt's attention without changing its outcome.
-     * When the Attempt asked the operator a question or reported a blocker, this
-     * ends the Loop's hold on the Item: the Loop evaluates the Item's queued
-     * Events again, and one may open a Run.
+     * Marks the current failed Attempt as resolved without changing its outcome. If the Attempt
+     * stopped with a question or blocker, the Loop evaluates the Item's queued Events again.
      */
     readonly resolveFailure: (
       runId: RunId,
       attemptId: AttemptId,
     ) => Effect.Effect<void, RunEngineError>;
     /**
-     * Requests another Attempt for a failed Run using its existing Event, with
-     * the effective task and Agent the request amends, if it does. The Attempt
-     * records the request, and who made it, as why it began.
+     * Requests another Attempt for a failed Run with its existing Event, applying the request's
+     * task and Agent if set. The Attempt records the request as its start reason.
      */
     readonly retry: (runId: RunId, request?: RetryRequest) => Effect.Effect<void, RunEngineError>;
     /**
-     * Opens a new Run for the Item state of a succeeded or canceled Run, with
-     * the request's task and Agent, as an Event of the operator's that a later
-     * poll of the unchanged Item finds instead of opening another Run. The
-     * Item's cycle budget and the Loop's approval gate apply as to a polled Event.
+     * Opens a new Run for the Item state of a succeeded or canceled Run, with the request's task
+     * and Agent, as an operator Event. The Item's cycle budget and the Loop's approval gate apply.
      */
     readonly runAgain: (
       runId: RunId,
       request: RunAgainRequest,
     ) => Effect.Effect<RunAgainResult, RunEngineError>;
-    /** Cancels unstarted Runs and discards queued Events for a Loop's Item when it stops matching; running Attempts continue. */
+    /** Cancels unstarted Runs and discards queued Events for a Loop's Item that stopped matching; running Attempts continue. */
     readonly revoke: (
       loop: LoopName,
       itemKey: ItemKey,
     ) => Effect.Effect<ReadonlyArray<RunId>, RunEngineError>;
     /**
-     * Records a matching Event and claims its Run, or queues it behind the Item's
-     * running Attempt. Repeated Events are deduplicated; execution continues separately.
+     * Records a matching Event and claims its Run, or queues it behind the Item's running Attempt.
+     * Deduplicates repeated Events.
      */
     readonly submit: (submission: Submission) => Effect.Effect<SubmissionResult, RunEngineError>;
-    /** Reads the requested portion of an Attempt's persisted transcript in append order. */
+    /** Returns the requested part of an Attempt's transcript, in append order. */
     readonly transcript: (
       query: TranscriptQuery,
     ) => Effect.Effect<ReadonlyArray<TranscriptEntry>, RunEngineError>;
@@ -364,11 +343,8 @@ export class RunEngine extends Context.Service<
 >()("@usine/engine/RunEngine") {}
 
 /**
- * Provides Run execution and recovery on the supplied database, whose run
- * tables are the only durable state of the Run lifecycle. The deployment
- * supplies `Crypto`, which hashes dedup keys into Run ids, the Worker
- * implementation through `StepExecutor`, and the trigger re-check for queued
- * Events through `TriggerCondition`.
+ * Returns the engine layers on `database`, which stores all durable Run state. Requires `Crypto`
+ * for Run IDs, `StepExecutor` for Workers, and `TriggerCondition` to re-check queued Events.
  */
 export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
   database: Layer.Layer<RunDatabase, DatabaseError, DatabaseRequirements>,

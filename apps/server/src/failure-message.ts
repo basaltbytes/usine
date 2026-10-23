@@ -4,7 +4,7 @@ import type { CliUsageError, CliVersionError } from "./cli.ts";
 import type { exportRun } from "./export-run.ts";
 import type { up } from "./up.ts";
 
-/** Every expected failure of a CLI command; defects are not in this union and still crash. */
+/** The expected failures of CLI commands. Defects aren't included and still crash. */
 export type CliFailure =
   | CliUsageError
   | CliVersionError
@@ -14,10 +14,13 @@ export type CliFailure =
 
 const messageOf = Schema.decodeUnknownOption(Schema.Struct({ message: Schema.NonEmptyString }));
 
-/** Text without surrounding whitespace or a final period, so it can end a sentence. */
+/** Trims `text` and removes a final period, so it can end a sentence. */
 const clause = (text: string): string => text.trim().replace(/\.$/u, "");
 
-/** The first line of the cause's own message in parentheses, unless `message` already says it. */
+/**
+ * Returns the first line of the cause's message in parentheses, or an empty string if `message`
+ * already contains it.
+ */
 const because = (cause: unknown, message = ""): string =>
   Option.match(messageOf(cause), {
     onNone: () => "",
@@ -27,7 +30,10 @@ const because = (cause: unknown, message = ""): string =>
     },
   });
 
-/** The operator's message for a failed backup of either store; `openHint` says how to fix an unreadable source. */
+/**
+ * Returns the operator message for a failed backup of either store. `openHint` explains how to fix
+ * an unreadable source.
+ */
 const backupFailure = (
   failure: {
     readonly operation: "open" | "stage" | "copy" | "publish";
@@ -63,8 +69,8 @@ const holderOf = (holder: Option.Option<number>): string =>
   Option.match(holder, { onNone: () => "", onSome: (pid) => ` (pid ${pid})` });
 
 /**
- * One plain message for a failed CLI command, naming the file, setting, Worker,
- * or Run at fault and what to do next. Defects never reach this function.
+ * Returns the operator message for a failed CLI command, with the file, setting, Worker, or Run at
+ * fault and the next step.
  */
 export const failureMessage = (failure: CliFailure): string =>
   Match.valueTags(failure, {

@@ -11,37 +11,36 @@ export const HostName = Schema.String.check(
 ).pipe(Schema.brand("HostName"));
 export type HostName = typeof HostName.Type;
 
-/** A TCP port. */
 export const Port = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65_535 })).pipe(
   Schema.brand("Port"),
 );
 export type Port = typeof Port.Type;
 
-/** The ports an allowlist line permits when it names none: HTTPS, and plain HTTP for apt mirrors. */
+/** The ports for an allowlist line without a port: HTTPS, and HTTP for apt mirrors. */
 const DEFAULT_PORTS = [Port.make(443), Port.make(80)] as const;
 
 /**
- * One allowlist line. `exact` permits that host only; `subdomains` permits
- * every name below the domain (`*.pythonhosted.org`), not the domain itself.
+ * An allowlist line. `exact` permits only that host; `subdomains` permits every name below the
+ * domain (`*.pythonhosted.org`) but not the domain itself.
  */
 export class EgressRule extends Schema.Class<EgressRule>("@usine/gateway/EgressRule")({
   host: HostName,
   match: Schema.Literals(["exact", "subdomains"]),
   ports: Schema.NonEmptyArray(Port),
 }) {
-  /** Whether this rule covers `host`, whatever the port. */
+  /** Returns whether this rule permits `host` on any port. */
   covers(host: HostName): boolean {
     return this.match === "exact" ? host === this.host : host.endsWith(`.${this.host}`);
   }
 }
 
-/** Why the allowlist file could not be read: the line and what is wrong with it. */
+/** The error for an unreadable allowlist file, with the line and the problem. */
 export class EgressAllowlistError extends Schema.TaggedError<EgressAllowlistError>()(
   "EgressAllowlistError",
   { line: Schema.Int, message: Schema.String },
 ) {}
 
-/** A destination the allowlist permits, with the rule that permits it. */
+/** A permitted destination and the rule that permits it. */
 export class EgressPermitted extends Schema.TaggedClass<EgressPermitted>()("EgressPermitted", {
   host: HostName,
   port: Port,
@@ -49,12 +48,10 @@ export class EgressPermitted extends Schema.TaggedClass<EgressPermitted>()("Egre
 }) {}
 
 /**
- * Why a destination is refused: its host is not listed, its port is not, it
- * is an IP address, or its name resolves to a private, loopback, or
- * link-local address (checked by a proxy that resolves names itself). For a
- * tunnel, also when the client's first bytes are not a TLS ClientHello, when
- * the ClientHello names no server or hides it with ECH, or when it names
- * another server than the CONNECT host.
+ * The reason a destination is refused: unlisted host or port, an IP address, or a name that
+ * resolves to a private, loopback, or link-local address. For a tunnel, also: the first bytes
+ * aren't a TLS ClientHello, or the ClientHello has no server name, hides it with ECH, or has a
+ * different server name than the CONNECT host.
  */
 export const EgressRefusalReason = Schema.Literals([
   "host-not-allowed",
@@ -67,7 +64,7 @@ export const EgressRefusalReason = Schema.Literals([
 ]);
 export type EgressRefusalReason = typeof EgressRefusalReason.Type;
 
-/** A destination the allowlist refuses. `host` is the raw host the client asked for. */
+/** A refused destination. `host` is the raw host the client requested. */
 export class EgressRefused extends Schema.TaggedClass<EgressRefused>()("EgressRefused", {
   host: Schema.String,
   port: Schema.Int,
@@ -81,15 +78,11 @@ const IPV4_LITERAL = /^\d{1,3}(?:\.\d{1,3}){3}$/u;
 const isHostName = Schema.is(HostName);
 const isPort = Schema.is(Port);
 
-/**
- * The hosts Workers may reach through the gateway's forward proxy. Everything
- * not listed is refused; IP addresses are always refused, since a rule names
- * hosts and an address would bypass it.
- */
+/** The hosts Workers can connect to through the forward proxy. Unlisted hosts and all IP addresses are refused. */
 export class EgressAllowlist extends Schema.Class<EgressAllowlist>(
   "@usine/gateway/EgressAllowlist",
 )({ rules: Schema.Array(EgressRule) }) {
-  /** Decides whether a client may open a connection to `host` on `port`. */
+  /** Returns the decision for a connection to `host` on `port`. */
   decide(host: string, port: number): EgressDecision {
     const normalized = host.toLowerCase().replace(/\.$/u, "");
     if (IPV4_LITERAL.test(normalized) || normalized.includes(":"))
@@ -133,9 +126,8 @@ const parseLine = (text: string, line: number): Result.Result<EgressRule, Egress
 };
 
 /**
- * Parses an allowlist file: one rule per line, `#` starts a comment, blank
- * lines are skipped. A line is `host`, `*.domain`, or either with `:port`;
- * without a port the rule permits 443 and 80.
+ * Parses an allowlist file with one rule per line: `host` or `*.domain`, optionally with
+ * `:port` (443 and 80 by default). `#` starts a comment and blank lines are skipped.
  */
 export const parseEgressAllowlist = (
   text: string,

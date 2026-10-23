@@ -32,7 +32,7 @@ const gateway = gatewayLayer({ proxy: LOOPBACK, egress: LOOPBACK, admin: LOOPBAC
   Layer.provideMerge(FetchHttpClient.layer),
 );
 
-/** The gateway's log lines, each with its level, for the tests that provide `gatewayRecordingLogs`. */
+/** The Gateway's log lines with their levels, for tests that provide `gatewayRecordingLogs`. */
 const gatewayLines: Array<string> = [];
 
 const gatewayRecordingLogs = gateway.pipe(
@@ -48,7 +48,7 @@ const gatewayRecordingLogs = gateway.pipe(
   ),
 );
 
-/** The first of `lines` containing `needle`, waiting for it briefly since the proxy logs after it closes a connection. */
+/** Returns the first line in `lines` containing `needle`, waiting briefly because the proxy logs after closing a connection. */
 const logged = (lines: ReadonlyArray<string>, needle: string) =>
   Effect.suspend(() => {
     const line = lines.find((candidate) => candidate.includes(needle));
@@ -57,17 +57,16 @@ const logged = (lines: ReadonlyArray<string>, needle: string) =>
       : Effect.succeed(line);
   }).pipe(Effect.retry({ schedule: Schedule.spaced("20 millis"), times: 100 }));
 
-/** The refusal logged with `reason`. */
+/** Returns the refusal logged with `reason`. */
 const refusalLogged = (reason: string) => logged(gatewayLines, `"reason":"${reason}"`);
 
-/** What the forward proxy needs on its own, without the reverse proxy and admin API. */
+/** The services the forward proxy needs without the reverse proxy and admin API. */
 const egressServices = CallerTokens.layer.pipe(Layer.provideMerge(settingsLayer(NO_PROVIDERS)));
 
 /**
- * A local upstream answering with `handler`, and a forward proxy whose
- * gateway destination is that upstream, so a request for
- * `http://git.gw.test/...` relays to it. `messages` collects the proxy's log
- * lines.
+ * Starts a local upstream that responds with `handler`, and a forward proxy whose Gateway
+ * destination is that upstream, so `http://git.gw.test/...` relays to it. `messages` collects
+ * the proxy's log lines.
  */
 const relayToUpstream = (handler: RequestListener) =>
   Effect.gen(function* () {
@@ -96,7 +95,7 @@ const relayToUpstream = (handler: RequestListener) =>
     return { proxy, messages };
   });
 
-/** A body chunk an upstream keeps sending until its connection is destroyed. */
+/** A body chunk an upstream sends repeatedly until its connection is destroyed. */
 const CHUNK = Buffer.alloc(64 * 1024);
 
 const admin = (token: string) =>
@@ -108,7 +107,7 @@ const admin = (token: string) =>
     });
   });
 
-/** Sends `CONNECT authority` to the forward proxy and resolves with the status and refusal reason. */
+/** Sends `CONNECT authority` to the forward proxy and returns the status and refusal reason. */
 const connect = (proxy: Listener, authority: string) =>
   Effect.callback<{ status: number; reason: string | undefined }>((resume) => {
     const outgoing = request({
@@ -126,7 +125,7 @@ const connect = (proxy: Listener, authority: string) =>
     outgoing.end();
   });
 
-/** Sends an absolute-form `GET url` to the forward proxy, as `HTTP_PROXY` clients do, and resolves with the status and refusal reason. */
+/** Sends an absolute-form `GET url` to the forward proxy, like `HTTP_PROXY` clients, and returns the status and refusal reason. */
 const relayed = (proxy: Listener, url: string) =>
   Effect.callback<{ status: number; reason: string | undefined }>((resume) => {
     const outgoing = request(
@@ -202,7 +201,7 @@ describe("the Node gateway", () => {
       ]);
       const upstream = createServer((_request, response) => {
         response.writeHead(200);
-        // Wait until the Worker has received the first chunk before truncating.
+        // Waits until the Worker has received the first chunk before truncating.
         response.write("partial");
       });
       yield* Effect.acquireRelease(
@@ -405,7 +404,7 @@ describe("the Node gateway", () => {
         const outgoing = request(
           { host: proxy.host, port: proxy.port, path: "http://git.gw.test/partial" },
           (response) => {
-            // A truncated response emits an error before close; assert the incomplete body below.
+            // A truncated response emits an error before close; the incomplete body is asserted below.
             response.on("error", () => {});
             response.once("close", () => resume(Effect.succeed(response.complete)));
             response.resume();
@@ -426,7 +425,7 @@ describe("the Node gateway", () => {
       const { proxy, messages } = yield* relayToUpstream((_request, response) => {
         response.writeHead(200);
         response.once("close", () => Deferred.doneUnsafe(upstreamClosed, Effect.void));
-        // Only the connection's destruction ends this body; a paused relay stalls it on backpressure instead.
+        // Only destroying the connection ends this body; a paused relay stalls on backpressure instead.
         const fill = (): void => {
           if (response.write(CHUNK)) setImmediate(fill);
           else response.once("drain", fill);
@@ -499,7 +498,7 @@ describe("the Node gateway", () => {
           status: 200,
           reason: undefined,
         });
-        // The reverse proxy answers, so the request got there; it carries no caller token.
+        // The reverse proxy responded, which shows the request arrived; it has no caller token.
         assert.deepStrictEqual(
           yield* relayed(egress, "http://git.gw.test/acme/demo.git/info/refs"),
           {

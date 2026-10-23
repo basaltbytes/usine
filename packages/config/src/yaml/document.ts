@@ -12,8 +12,8 @@ const causeMessage = (cause: unknown): string =>
   );
 
 /**
- * Parses YAML into a Document AST that keeps source tokens, so an edit through
- * it preserves formatting. Duplicate keys and parser warnings are errors.
+ * Parses YAML into a Document that keeps source tokens, so edits preserve formatting. Fails on
+ * duplicate keys and parser warnings.
  */
 export const parseYamlDocument = (
   file: InstancePath,

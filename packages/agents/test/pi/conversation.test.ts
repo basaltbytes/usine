@@ -43,24 +43,23 @@ const conversation = (session: ChildSession) =>
       beforeFinish: Effect.void,
     });
     const result = yield* Deferred.await(channel.result).pipe(Effect.forkChild);
-    /** The tags of the events the session emitted since the last call. */
+    /** Returns the tags of the events the session emitted since the last call. */
     const emitted = Queue.clear(channel.events).pipe(
       Effect.map((events) => events.map((event) => event._tag)),
     );
     return { ...controls, result, turns, emitted };
   });
 
-/** Ignores whether a queued operator message is read; the test does not observe it. */
 const noDelivery: OnDelivery = () => Effect.void;
 
-/** Records each delivery report: the state when the harness read the message, or none. */
+/** Records each delivery report: the intervention state when the harness read the message, or `None`. */
 const deliveries = () => {
   const reports: Array<Option.Option<InterventionState>> = [];
   const onDelivery: OnDelivery = (delivered) =>
     Effect.sync(() => {
       reports.push(delivered);
     });
-  /** Each report as `read` with the Hold then, or `unread`. */
+  /** Returns each report as `read` with the Hold state at that time, or `unread`. */
   const seen = () =>
     reports.map((report) =>
       Option.match(report, {

@@ -19,7 +19,7 @@ const confirmation = (output: Schema.Json | undefined): ReadonlyArray<ToolSectio
     section._tag === "Code" ? { _tag: "Text", label: section.label, text: section.text } : section,
   );
 
-/** Presents file operations using recorded contents and patches, with replacements as the fallback. */
+/** Returns the presentation of a file tool call from its recorded contents and patches, or from the edit's old and new text if they are missing. */
 export const presentFile = (
   input: Schema.Json | undefined,
   output: Schema.Json | undefined,

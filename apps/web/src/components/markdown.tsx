@@ -13,8 +13,7 @@ const MarkdownLink = ({ node: _node, ...props }: ComponentProps<"a"> & { node?: 
 
 const COMPONENTS: Components = { a: MarkdownLink };
 
-/** Renders agent and operator prose from Markdown, styled by shadcn/typeset (src/typeset.css).
- * `remarkPlugins` and `components` add to the defaults, for prose with marks of its own. */
+/** Renders Markdown with the styles in src/typeset.css; `remarkPlugins` and `components` are merged with the defaults. */
 export const Markdown = ({
   children,
   className,

@@ -37,7 +37,7 @@ import {
   LocalWorkerAccess,
 } from "@usine/orchestrator/operator";
 
-// The browser test server answers lane writes for this repository only.
+// The browser test server handles lane writes only for this repository.
 const boardRepository = RepositoryName.make("board-test/repo");
 
 const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
@@ -82,7 +82,7 @@ const attempt = (
 const isClosed = (state: RunView["state"]) =>
   state === "Succeeded" || state === "Failed" || state === "Canceled";
 
-/** A Run opened `minutes` ago; a closed one closed when its last Attempt ended, else when it opened. */
+/** Returns a Run opened `minutes` ago; a closed Run closed when its last Attempt ended, else when it opened. */
 const run = (
   id: string,
   item: BoardItemLink,
@@ -114,7 +114,7 @@ const run = (
     canRunAgain: state === "Succeeded" || state === "Canceled",
   });
 
-/** What one billing pool drew: its tokens, its priced dollars, and whether some usage has no price. */
+/** Returns one billing pool's tokens, priced dollars, and whether some usage has no price. */
 const pool = (
   name: TaskPoolUsageView["pool"],
   tokens: number,
@@ -131,7 +131,7 @@ const pool = (
     unpriced,
   });
 
-/** A Task's usage as the server adds it up: its Runs' Attempt time and the pools they drew from. */
+/** Returns a Task's usage as the server computes it: its Runs' Attempt time and billing pools. */
 export const taskUsageOf = (
   runs: ReadonlyArray<RunView>,
   pools: ReadonlyArray<TaskPoolUsageView> = [],
@@ -171,7 +171,7 @@ const task = (
     readonly conflicting?: boolean;
     readonly state?: BoardTaskView["state"];
     readonly loops?: ReadonlyArray<string>;
-    /** The pools the Task's Runs drew from, summed over them. */
+    /** The billing pools of the Task's Runs, summed. */
     readonly pools?: ReadonlyArray<TaskPoolUsageView>;
   } = {},
 ) => {
@@ -185,7 +185,7 @@ const task = (
     state,
     labels: labels.map((label) => GitHubLabelName.make(label)),
     items: members,
-    // The current Item is the Task's newest pull request whenever it has one.
+    // If the Task has a pull request, the current Item is the newest one.
     pullRequest:
       current.kind === "pr" && (state === "pr-open" || state === "pr-merged")
         ? new BoardPullRequestView({ number: current.number, url: current.url, state })
@@ -238,10 +238,10 @@ const pinnedRun = run("run-pinned", pinned, "review", "Failed", 95, [
 ]);
 
 /**
- * A Board with every card shape: lane-only and overflowing labels, a linked PR, and open, waiting,
- * failed, canceled and finished Runs; an empty Merge lane; a dependabot pull request no Loop can
- * match and one with an open Run; Done, with an issue and its merged PR, and Unmapped, with an
- * issue, at the end.
+ * Returns a Board with every card variant: lane-only and overflowing labels, a linked PR, and open,
+ * waiting, failed, canceled, and finished Runs; an empty Merge lane; a dependabot pull request that
+ * no Loop matches and one with an open Run; and, at the end, Done with an issue and its merged PR,
+ * and Unmapped with an issue.
  */
 const boardProject = () =>
   new ProjectView({
@@ -297,7 +297,7 @@ const boardProject = () =>
                 attempt(2, minutesAgo(6), "running"),
               ]),
             ],
-            // The plan Run is priced; the implement Run is on the ChatGPT plan, with no dollar rate.
+            // The plan Run is priced; the implement Run is on the unpriced ChatGPT plan.
             {
               pools: [
                 pool("apiKeys", 1_500, 0.75),
@@ -372,7 +372,7 @@ export const boardOverview = () =>
     needsYou: [],
   });
 
-/** `overview` with each Task `change` returns in place of the Task. */
+/** Returns `overview` with each Task replaced by the result of `change`. */
 export const changeTasks = (
   overview: ReadyOverview,
   change: (task: BoardTaskView) => BoardTaskView,
@@ -395,8 +395,8 @@ export const changeTasks = (
     ),
   });
 
-/** The Board after the operator resolved the failed review of the pinned pull request (#28), so
- * nothing about it waits on the operator. */
+/** Returns the Board after the operator resolved the failed review of pull request #28, so it
+ * needs nothing from the operator. */
 export const boardOverviewResolved = () =>
   changeTasks(boardOverview(), (task) => {
     if (task.itemKey !== pinned.itemKey) return task;
@@ -405,8 +405,8 @@ export const boardOverviewResolved = () =>
   });
 
 /**
- * The Board with #9's implement Run on the Claude plan instead of the ChatGPT plan: its Attempt
- * has reported 6,000 tokens but no price yet, so the Claude plan's $9.20, and the Task's $9.95,
+ * Returns the Board with #9's implement Run on the Claude plan instead of the ChatGPT plan. Its
+ * Attempt reported 6,000 tokens but no price yet, so the Claude plan's $9.20 and the Task's $9.95
  * are lower bounds.
  */
 export const boardOverviewUnpriced = () =>
@@ -422,8 +422,8 @@ export const boardOverviewUnpriced = () =>
         }),
   );
 
-/** The Board with #18's canceled Attempt ended before end times were recorded, so the Task's
- * attempt time is unknown. */
+/** Returns the Board with #18's canceled Attempt ended before end times were recorded, so the
+ * Task's Attempt time is unknown. */
 export const boardOverviewUntimed = () =>
   changeTasks(boardOverview(), (task) => {
     if (task.itemKey !== dropped.itemKey) return task;
@@ -438,7 +438,7 @@ export const boardOverviewUntimed = () =>
     });
   });
 
-/** The package each Task that ran documents in `boardOverviewDocumented`, by originating Item. */
+/** The package in the title of each Task that ran in `boardOverviewDocumented`, by originating Item. */
 const documentedPackages = new Map([
   [9, "core"],
   [7, "agents"],
@@ -449,10 +449,10 @@ const documentedPackages = new Map([
 ]);
 
 /**
- * The Board with each Task that ran titled after one of the TSDoc issues, such as `Document the
- * public API of @usine/orchestrator in TSDoc`: titles that read alike up to the package near
- * their end. The merged Task (#5) has wide figures: its Run finished 28 minutes ago after 1 h 21
- * min of attempts, and $12.62 on the Claude plan with a session not priced yet.
+ * Returns the Board with each Task that ran titled like `Document the public API of
+ * @usine/orchestrator in TSDoc`, so titles differ only in the package name near the end. The
+ * merged Task (#5) has wide figures: its Run finished 28 minutes ago after 1 h 21 min of Attempts,
+ * and $12.62 on the Claude plan with a session not priced yet.
  */
 export const boardOverviewDocumented = () =>
   changeTasks(boardOverview(), (task) => {
@@ -476,8 +476,8 @@ export const boardOverviewDocumented = () =>
   });
 
 /**
- * `boardOverviewDocumented` with #9's running Run on the `dependency_updates` Loop, so its status,
- * `Running dependency_updates`, holds one word wider than the Status column's share of the table.
+ * Returns `boardOverviewDocumented` with #9's running Run on the `dependency_updates` Loop, so its
+ * status, `Running dependency_updates`, has a word wider than the Status column.
  */
 export const boardOverviewDocumentedLongLoop = () =>
   changeTasks(boardOverviewDocumented(), (task) => {
@@ -497,9 +497,8 @@ export const boardOverviewDocumentedLongLoop = () =>
 const reviewing = link(46, "pr", "Keep a running card in the lane its Run was triggered from");
 
 /**
- * The Board while `review` runs on #46. The Loop removed `review`, the label that triggered it, so
- * #46 carries only `ci` now, and the server keeps its card in Review, the lane of that label,
- * until the Run ends.
+ * Returns the Board while `review` runs on #46. The Loop removed its trigger label `review`, so #46
+ * has only `ci`, and the server keeps the card in the Review lane until the Run ends.
  */
 export const boardOverviewReviewing = () => {
   const running = new RunView({
@@ -537,7 +536,7 @@ const stalled = (loopName: string, item: BoardItemLink, reason: StalledItemView[
     reason,
   });
 
-/** The desk's stalled Items for the Board's Items, in the desk's order. */
+/** Returns the desk's stalled Items for the Board's Items, in desk order. */
 export const boardStalled = () => [
   stalled("implement", salvage, new AwaitingApprovalView({ run: salvageRun })),
   stalled("review", pinned, new RunFailedView({ run: pinnedRun })),

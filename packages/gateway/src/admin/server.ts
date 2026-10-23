@@ -3,7 +3,7 @@ import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi";
 import { Attachment, type AttachmentId, newAttachmentId } from "../attachment/attachment.ts";
 import { Attachments } from "../attachment/store.ts";
 import { CallerClaims, CallerTokens } from "../caller/caller.ts";
-import { GatewaySettings } from "../settings.ts";
+import { GatewaySettings, SettingsInForce } from "../settings.ts";
 import {
   AdminAuthorization,
   type AttachRequest,
@@ -12,6 +12,7 @@ import {
   AttachmentSummary,
   Detached,
   GatewayAdminApi,
+  LlmProviderList,
 } from "./api.ts";
 
 const encoder = new TextEncoder();
@@ -21,7 +22,7 @@ const digest = (value: string) =>
     Effect.map((bytes) => new Uint8Array(bytes)),
   );
 
-/** Compares two digests in time that does not depend on where they differ. */
+/** Returns whether two digests are equal, in constant time. */
 const sameDigest = (left: Uint8Array, right: Uint8Array): boolean => {
   let difference = left.length ^ right.length;
   for (let index = 0; index < Math.min(left.length, right.length); index++)
@@ -51,7 +52,7 @@ const authorization = Layer.effect(
   }),
 );
 
-/** Stores the attachment under `id` and answers with the caller token bound to it. */
+/** Stores the attachment under `id` and returns its caller token. */
 const store = Effect.fn("GatewayAdmin.store")(function* (id: AttachmentId, request: AttachRequest) {
   yield* Effect.annotateCurrentSpan({
     attachment: id,
@@ -68,11 +69,11 @@ const store = Effect.fn("GatewayAdmin.store")(function* (id: AttachmentId, reque
   return new Attached({ attachment: AttachmentSummary.fromAttachment(attachment), callerToken });
 });
 
-const handlers = HttpApiBuilder.group(GatewayAdminApi, "attachments", (routes) =>
+const attachmentHandlers = HttpApiBuilder.group(GatewayAdminApi, "attachments", (routes) =>
   routes
     .handle("attach", ({ payload }) =>
       Effect.flatMap(newAttachmentId, (id) => store(id, payload)).pipe(
-        // A fresh 128-bit id cannot already belong to another attachment.
+        // A new 128-bit ID can't belong to another attachment.
         Effect.catchTag("AttachmentConflict", Effect.die),
       ),
     )
@@ -95,12 +96,28 @@ const handlers = HttpApiBuilder.group(GatewayAdminApi, "attachments", (routes) =
     ),
 );
 
+/** Handlers that return the current LLM providers, including changes from a reload. */
+const llmHandlers = HttpApiBuilder.group(GatewayAdminApi, "llm", (routes) =>
+  routes.handle(
+    "providers",
+    Effect.fn("GatewayAdmin.providers")(function* () {
+      const { providers } = yield* (yield* SettingsInForce).current;
+      const list = LlmProviderList.fromProviders(providers);
+      yield* Effect.annotateCurrentSpan({
+        providers: list.providers
+          .map(({ provider, credential }) => `${provider}:${credential}`)
+          .join(","),
+      });
+      return list;
+    }),
+  ),
+);
+
 /**
- * The admin API's routes, for an `HttpRouter` the platform serves. Bind it
- * to a loopback or otherwise private address: the executor reaches it
- * through its SSH connection to the gateway.
+ * The admin API routes for an `HttpRouter`. Bind them to a loopback or private address; the
+ * executor connects through SSH.
  */
 export const adminRoutes = HttpApiBuilder.layer(GatewayAdminApi).pipe(
-  Layer.provide(handlers),
+  Layer.provide([attachmentHandlers, llmHandlers]),
   Layer.provide(authorization),
 );

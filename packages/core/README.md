@@ -1,48 +1,62 @@
 # @usine/core
 
-Domain model for [usine](https://github.com/basaltbytes/usine), an agent-agnostic software factory: the Event → Run → Step → Attempt vocabulary every other block types against, plus the shared instance, repository, worker, and agent values.
+Domain model for [usine](https://github.com/basaltbytes/usine): event, run, step, and attempt types for every other block, plus shared instance, repo, worker, and agent values.
 
-Import each domain concept from its owning subpath. Identities, records, and operations share that domain module.
+0.x APIs change without notice. Supply the peer dependency `effect` at the pinned version.
+
+## Subpaths
 
 | Subpath | Exports |
 | --- | --- |
 | `@usine/core/event` | `Event`, `EventId`, `DedupKey` |
-| `@usine/core/run`, `@usine/core/run/state` | `Run`, `RunId`; the run state machine as a tagged union with typestate transitions (`RunState.start`, `RunState.supersede`, ...) |
+| `@usine/core/run`, `@usine/core/run/state` | `Run`, `RunId`; the run state machine as a tagged union with typestate transitions (`RunState.start`, `RunState.supersede`, and others) |
 | `@usine/core/step`, `@usine/core/step/result` | `Step`, `StepName`; `StepResult` and its facts (`Commit`, `PullRequest`, `Comment`) |
-| `@usine/core/step/harvest` | `harvestFacts`, `harvestPostedComments`, `HarvestError`, `HarvestSpec`, `AttemptWindowsRead`: the commits and pull requests an Attempt's checkout holds once its agent finished, and the comments and reviews the Attempt posted on its Run's Item (written by its bot login since the Worker prepared the checkout, ending with its Agent's signature, and posted inside its own window and in none of the windows of its Agent's other Attempts there, which the harvest reads through the caller's `AttemptWindowsRead` once GitHub has listed the comments), read through a caller-supplied `git`/`gh` runner |
-| `@usine/core/attempt` | `Attempt`, `AttemptId`, `AttemptNumber`, `AttemptTask`, `shouldAutoRetry`, and when an Attempt was at work on its Item: `AttemptWindow`, `windowOf`, `windowHolds`, `windowsOverlap`, `AttemptWindows` |
+| `@usine/core/step/harvest` | `harvestFacts`, `harvestPostedComments`, `HarvestError`, `HarvestSpec`, `AttemptWindowsRead`: the commits and pull requests in an attempt's finished checkout, and the comments and reviews it posted on its item, read with the caller's `git`/`gh` runner |
+| `@usine/core/attempt` | `Attempt`, `AttemptId`, `AttemptNumber`, `AttemptTask`, `shouldAutoRetry`, and `AttemptWindow`, `windowOf`, `windowHolds`, `windowsOverlap`, `AttemptWindows` |
 | `@usine/core/attempt/outcome` | `AttemptSucceeded`, `AttemptFailed`, `AttemptCanceled`, `AttemptOutcome` |
 | `@usine/core/attempt/failure` | `InfraFailure`, `DefectFailure`, `AgentFailure`, `RunawayFailure`, `ChildSessionBudgetFailure`, `AttemptFailure`, `isAutoRetryableFailure` |
-| `@usine/core/attempt/salvage` | `SalvageRef`, `salvageRefFor`, `SalvagePushed`, `SalvageRetained`, `AttemptSalvage`, `AttemptRecovery`, `RecoverySink` (whose `windows` reads the windows a recovered Attempt's comment harvest needs) |
-| `@usine/core/attempt/start` | Why an Attempt began: `StartedByEvent`, `StartedByRetry`, `StartedByEditAndRetry` (with the operator login), `StartedByInfraRetry`, `StartedAfterRestart`, `AttemptStart`, and `OperatorRetryStart` |
-| `@usine/core/attempt/channel` | The attempt channel: `RunSpec`, the versioned envelopes, the `Sink` that stores them, reads them back (`transcript`), and reads the windows the harvest needs (`windows`), and the `admit` reducer. Import it as a namespace (`AttemptChannel.Started`) |
-| `@usine/core/agent`, `@usine/core/agent/brain`, `@usine/core/agent/session` | `Agent`, `AgentName`, `AgentPersona`, parent-model resolution, `githubSignature` (the line an Agent ends its GitHub comments with); `BrainSpec`, `ModelId`, `Harness`, `Effort`; `AgentSessionId`, session descriptors, `AgentSessionEvent`, `ChildSessionBudget`, `ChildSessionCount` |
+| `@usine/core/attempt/salvage` | `SalvageRef`, `salvageRefFor`, `SalvagePushed`, `SalvageRetained`, `AttemptSalvage`, `AttemptRecovery`, `RecoverySink` (its `windows` reads the windows a recovered attempt's harvest needs) |
+| `@usine/core/attempt/start` | Why an attempt started: `StartedByEvent`, `StartedByRetry`, `StartedByEditAndRetry` (with the operator login), `StartedByInfraRetry`, `StartedAfterRestart`, `AttemptStart`, `OperatorRetryStart` |
+| `@usine/core/attempt/channel` | `RunSpec`, versioned envelopes, the `Sink` (stores envelopes, reads the `transcript` and the harvest's `windows`), and the `admit` reducer. Import as a namespace (`AttemptChannel.Started`). |
+| `@usine/core/agent`, `/agent/brain`, `/agent/session` | `Agent`, `AgentName`, `AgentPersona`, parent model resolution, `githubSignature` (the last line of an agent's GitHub comments); `BrainSpec`, `ModelId`, `Harness`, `Effort`; `AgentSessionId`, session descriptors, `AgentSessionEvent`, `ChildSessionBudget`, `ChildSessionCount` |
 | `@usine/core/agent/capability` | `HarnessCapability`, `HarnessReady`, `HarnessUnavailableError`, and the credential-free `HarnessReadiness` preflight response |
 | `@usine/core/repository` | `RepositoryName`, `RepositoryRevision`, `CommitSha`, `safeSegment`, `splitRepositoryName`, `canonicalRepositoryName` |
-| `@usine/core/worker`, `@usine/core/item`, `@usine/core/loop`, `@usine/core/instance` | `WorkerName`, `WorkerKind`; `ItemKey`, `ItemNumber`; `LoopName`, `ApprovalRequirement`; `InstanceDirectory` |
+| `@usine/core/worker`, `/item`, `/loop`, `/instance` | `WorkerName`, `WorkerKind`, `GatewayCredentialKind`; `ItemKey`, `ItemNumber`; `LoopName`, `ApprovalRequirement`; `InstanceDirectory` |
+| `@usine/core/cycle-budget` | `CycleLimit`, `CycleGeneration`, `CycleCount`, `LoopCycleCount`, `CycleBudgetAsk` |
 
-Branded schemas are exported under their brand name, and each has an `export type` twin of the same name so the name works in type positions too.
+Branded schemas are exported under their brand name, as a value and a type. `PullRequest` and `Comment` facts use `URL` values in memory and strings in JSON, so step results round-trip through the channel and durable storage.
 
-`PullRequest` and `Comment` facts use `URL` values in memory and URL strings in JSON, so Step results round-trip through the Attempt channel and durable storage.
+## Runs
 
-The run state machine is `pending → waiting → queued → running → succeeded / failed / canceled`, with `failed → running` on operator retry. The failure taxonomy separates infra failures (the only auto-retryable class, capped), agent failures (always wait for the operator), runaway guard failures, and exhausted child-session budgets. Guard failures never auto-retry.
+The run state machine is `pending → waiting → queued → running → succeeded / failed / canceled`, plus `failed → running` on operator retry. `RunState.operatorActions(state)` returns which of approval, retry, failure resolution, cancel, and run again apply. Command handlers share these typed transitions.
 
-`RunState.operatorActions(state)` returns approval, retry, failure-resolution, cancel, and run-again availability for operator views. A succeeded or canceled Run can run again: the operator opens a new Run for its Item state, recorded as `RunAgain` (`@usine/core/run/again`) with the Run it ran again and who asked. The command handlers enforce the same lifecycle through the typed transitions. Failure resolution is available only in the failed state; operator views also check whether the latest failed Attempt has already been resolved.
+- Run again opens a new run for the item state of a succeeded or canceled run. `RunAgain` (`/run/again`) records the original run and who asked.
+- Failure resolution applies only in the failed state; operator views also hide it once the latest failed attempt is resolved.
 
-Each Attempt records the child `BrainSpec` and effective Pi parent model used for that try. `RunSpec` holds the immutable repository, payload, task, agent context, and child-session budget an Attempt's parent starts from; outbound `SessionEvent` envelopes retain parent and first-level child session identity.
+An item-level `CycleBudgetAsk`, which can exist before another run opens, records the exhausted loop, its limit, and the participating loops' admitted and completed runs.
 
-Everything is 0.x: APIs change without notice while the engine grows. `effect` is a peer dependency — supply it yourself at the pinned version.
+## Attempts
 
-Import `CycleLimit`, `CycleGeneration`, `CycleCount`, `LoopCycleCount`, and `CycleBudgetAsk` from `@usine/core/cycle-budget`. An Item-level Ask records the exhausted Loop, its limit, and participating Loops’ admitted and completed Runs; it can exist before another Run is opened.
+Each attempt records its child `BrainSpec`, its effective Pi parent model, why it started (`start`, none for attempts from before usine recorded it), and when a restart last reattached it (`reattachedAt`). `RunSpec` is the immutable repo, payload, task, agent context, and child-session budget that the parent starts from.
 
-`DefectFailure` records a programmer defect captured at a boundary that needs a serializable Attempt outcome. It retains the original cause and never qualifies for automatic retry.
+Only infra failures retry automatically, up to a cap. Agent failures wait for the operator. Runaway guard failures, exhausted child-session budgets, and `DefectFailure` never retry automatically; `DefectFailure` records a defect caught at a boundary that needs a serializable outcome, with its original cause.
 
-An `Attempt` records why it began (`start`, none for a later Attempt begun before usine recorded it) and when a restart last reattached it (`reattachedAt`).
+## Attempt windows
 
-`AttemptWindow` is when an Attempt was at work on its Run's Item, from its record: `startedAt` through `endedAt`, none while it is open. `windowOf(attempt)` reads it from an `Attempt`, and is none for an Attempt that ended before end times were recorded. GitHub records times to the second, so `windowHolds(window, at)` opens a window at the second its Attempt started, and `windowsOverlap` says whether GitHub can record a time two windows both hold. Every Attempt on a local or SSH Worker writes as the same App, so a write in two Attempts' windows belongs to neither. The Run reader applies this rule to the App's changes, and the harvest to the comments an Attempt signed: it keeps one only when it was posted since the Worker prepared the checkout, its creation or a review's submission, inside the Attempt's own window, and in none of the windows of the Agent's other Attempts that overlap it on the Item. `AttemptWindows` holds those windows as the orchestrator's records give them when read: `own`, and `overlapping`. The harvest reads them through the caller's `AttemptWindowsRead` once GitHub has listed the comments. An Attempt that started while the harvest ran is therefore among them. So is the end the orchestrator recorded when it closed this Attempt before the harvest, as a cancel does before the executor stops: a comment posted after that end is not this Attempt's, and an Attempt that started after it does not overlap this one.
+`AttemptWindow` is when an attempt worked on its run's item: `startedAt` to `endedAt` from its record, with no end while open. `windowOf(attempt)` returns none for an attempt that ended before usine recorded end times. `windowHolds(window, at)` opens a window at its start second, since GitHub records times to the second. `windowsOverlap` says whether GitHub can record a time inside both windows.
 
-`SessionTokensUpdated` carries a session's cumulative `TokenCount` and, as `costUsd`, the `UsdAmount` its harness priced that usage at: Pi from its model catalog, Claude Code from the Agent SDK's prices. Codex prices nothing, and transcripts recorded before prices were decode to `Option.none()`. `brainPool(brain)` names the billing pool a started session draws from (ADR 0021).
+Attempts on local and SSH workers all write as the same GitHub App, so a write inside two attempts' windows belongs to neither, in the run reader and in the harvest. The harvest keeps a comment only if the bot login wrote it with the agent's signature, after the worker prepared the checkout (creation, or a review's submission), inside the attempt's own window, and in no window of the agent's other overlapping attempts.
 
-`SessionStarted.harnessSession` optionally records a `HarnessSession`: the harness-native `HarnessSessionId` and worker working directory (`cwd`). Missing metadata in older transcripts decodes to `Option.none()`; usine's session identity remains separate.
+The harvest reads `AttemptWindows` (`own`, `overlapping`) through `AttemptWindowsRead` after GitHub lists the comments, so they include attempts started during the harvest and any end the orchestrator recorded first, as a cancel does before the executor stops. Comments after that end, and attempts started after it, don't count.
 
-Envelopes carry `PROTOCOL_VERSION` (7), which the transcript store uses to read envelopes stored by earlier versions. Version 7 added the previous Attempt's pushed salvage to `RunSpec` (`resume`); version 6 added saved harness session metadata.
+## Sessions and usage
+
+Outbound `SessionEvent` envelopes keep parent and first-level child session identity.
+
+`SessionTokensUpdated` has a session's cumulative `TokenCount` and, as `costUsd`, the `UsdAmount` its harness priced it at: Pi from its model catalog, Claude Code from the Agent SDK. Codex sets no price. Older transcripts decode it to `Option.none()`.
+
+`ChildSession.gatewayCredential` is the `GatewayCredentialKind` the gateway in front of the child's worker used for its model requests: none if the child used its harness's login, and in older transcripts. `brainPool(brain, gatewayCredential)` returns a started session's billing pool; `sessionPool(session)` reads a recorded one's. A Claude Code child is in `apiKeys` if its gateway used an API key, otherwise in `claudePlan` (ADR 0013, ADR 0021).
+
+The optional `SessionStarted.harnessSession` (`HarnessSession`) records the harness's `HarnessSessionId` and the worker `cwd`, apart from usine's session identity. Older transcripts decode it to `Option.none()`.
+
+Envelopes include `PROTOCOL_VERSION` (7), which the transcript store uses to read older envelopes. Version 7 added the previous attempt's pushed salvage to `RunSpec` (`resume`); version 6 added harness session metadata.

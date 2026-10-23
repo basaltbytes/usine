@@ -12,17 +12,10 @@
 
 ### Patch Changes
 
-- b9e38a7: Import expression schemas, environment descriptors, and typed errors from
-  `@usine/expression/expression-engine`. This replaces the `/model` entry point;
-  update existing `/model` imports to `/expression-engine`.
-  
-  Organize GitHub authentication, access, polling, and operator view contracts by
-  responsibility while preserving their existing public entry points and schemas.
-- 354e598: Provision factory-wide GitHub label declarations before polling, report non-blocking preflight failures, and warn when Board lanes or Loop triggers use undeclared labels. Label names follow GitHub's contract (at most 50 characters, no surrounding whitespace), and provisioning waits for a confirmed catalog instead of creating labels blindly after a failed catalog request.
-- 7cf4887: Refresh Board moves from GitHub promptly and evaluate their Loops without waiting for the next periodic poll. Coalesce self-write Hints, preserve normal polling and Event deduplication, and honor GitHub request backoff.
-  
-  Keep moved cards in their destination through stale refreshes and project navigation, show saving and synchronization progress, and keep every Board lane reachable beside the sidebar.
-- 4c97cae: Accept valid installation tokens when GitHub's clock is slightly ahead, without extending the local lease beyond one hour.
+- b9e38a7: Moves expression schemas, environment descriptors, and typed errors from `/model` to `@usine/expression/expression-engine`; update your imports. GitHub contracts are reorganized without changing public entry points.
+- 354e598: Creates declared GitHub labels before polling and warns when board lanes or loop triggers use undeclared labels. Label names allow at most 50 characters and no surrounding whitespace.
+- 7cf4887: Board moves refresh from GitHub and evaluate their loops at once instead of at the next poll, and moved cards stay in their destination through stale refreshes.
+- 4c97cae: Accepts installation tokens when GitHub's clock is slightly ahead, without extending the local lease past one hour.
 - Updated dependencies [3f80f88]
 - Updated dependencies [162b323]
 - Updated dependencies [a36f46e]
@@ -36,9 +29,9 @@
 
 ### Minor Changes
 
-- 16e7212: Add per-repository Board lane maps, durable projections of GitHub Items and repository labels from polling, live Run data on Board cards, quarantined Item diagnostics, and lane-scoped label moves through the operator API.
-- 57d383b: Add a shared GitHub repository identity and implement GitHub App authentication, installation discovery, per-project installation coverage, 0600 local credential loading, and one-repository worker tokens.
-- 1a9669d: Persist efficiency-only trigger cursors in the run database. Detect GitHub issue and pull-request changes with conditional REST polling, fetch and content-hash fixed GraphQL payload slices, and turn matching loop state into durable Events through the orchestrator polling service.
+- 16e7212: Adds per-repository board lane maps, item and label projections from polling, live run data on board cards, quarantined item diagnostics, and lane label moves through the operator API.
+- 57d383b: Adds GitHub App authentication, installation discovery, per-project installation coverage, local credential loading (mode 0600), and single-repository worker tokens.
+- 1a9669d: Polls GitHub with conditional REST requests, stores trigger cursors in the run database, and turns matching loop state into durable events.
 
 ### Patch Changes
 
@@ -59,4 +52,4 @@
 
 ### Patch Changes
 
-- 781b664: First publish of the nine usine blocks. `@usine/core` ships the Event → Run → Step → Attempt domain model: branded ids, the typestate run state machine (pending → waiting → running → succeeded / failed / canceled), and the attempt-failure taxonomy (infra / agent / runaway) with the auto-retry law. The other eight blocks reserve their seams while the engine grows.
+- 781b664: First publish of the nine usine blocks. `@usine/core` contains the event, run, step, and attempt domain model, the run state machine, and the attempt failure kinds.

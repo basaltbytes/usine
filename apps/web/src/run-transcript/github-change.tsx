@@ -13,7 +13,7 @@ const reviewed = {
   DISMISSED: (item) => <>Reviewed {item}, since dismissed</>,
 } satisfies Record<ReviewedView["state"], (item: ReactNode) => ReactNode>;
 
-/** The Item number in a comment or review URL, linking to that comment or review. */
+/** Renders a link to a comment or review URL, labelled with the issue or pull request number in it. */
 const ItemLink = ({ url, what }: { readonly url: string; readonly what: string }) => {
   const number = /\/(?:issues|pull)\/(\d+)/u.exec(url)?.[1];
   return (
@@ -56,7 +56,6 @@ const Labels = ({ change }: { readonly change: LabelChanges }) => {
   );
 };
 
-/** One quiet line for a change an Agent made on the Run's GitHub Item, its labels in their GitHub colors. */
 export const GitHubChangeLine = ({ row }: { readonly row: GitHubChangeRow }) => (
   <div
     title={`GitHub recorded this at ${timestampLabel(row.at)}`}

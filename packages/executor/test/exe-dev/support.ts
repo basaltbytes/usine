@@ -25,9 +25,8 @@ import type { StandardCommand } from "effect/unstable/process/ChildProcess";
 export const ATTEMPT_ID = AttemptId.make("remote-run/execute/1");
 
 /**
- * Reads the windows of `attemptId` running alone on its Run's Item: its own,
- * open since before any time a test clock or GitHub fixture gives, and no
- * other Attempt of its Agent there, so the harvest keeps every signed comment.
+ * Returns the windows of `attemptId` alone on its Run's Item: its own window, open since before
+ * any test time, and no other Attempt of its Agent, so the harvest keeps every signed comment.
  */
 export const aloneOnItem = (attemptId: AttemptId = ATTEMPT_ID) =>
   Effect.succeed(
@@ -38,7 +37,7 @@ export const aloneOnItem = (attemptId: AttemptId = ATTEMPT_ID) =>
       overlapping: [],
     }),
   );
-/** A sink that keeps every envelope it is given, as the transcript does, and reads them back. */
+/** Returns a sink that stores every envelope, like the transcript, and reads them back. */
 export const recording = () => {
   const transcript: Array<[AttemptChannel.Direction, AttemptChannel.Envelope]> = [];
   const sink: AttemptChannel.Sink = {
@@ -56,8 +55,8 @@ export const recording = () => {
 
 export const WORKER = WorkerName.make("remote-one");
 const REPOSITORY = RepositoryName.make("acme/demo");
-// The brand already rejects whitespace and a leading dash; the characters it
-// still allows ($, ;, quotes) must die at the shell-quoting boundary.
+// The brand rejects whitespace and a leading dash; the characters it allows ($, ;, quotes) must
+// be neutralized by shell quoting.
 const REVISION = RepositoryRevision.make("main;$(touch$IFS/tmp/usine-injected)");
 const COMMIT = CommitSha.make("0123456789abcdef0123456789abcdef01234567");
 export const SALVAGE_COMMIT = CommitSha.make("fedcba9876543210fedcba9876543210fedcba98");
@@ -92,25 +91,25 @@ type SweepMode = "valid" | "invalid-path";
 
 interface FakeSshState {
   readonly commands: Array<StandardCommand>;
-  /** When set, the next `rm -rf` on the Attempt worktree exits non-zero. */
+  /** Whether the next `rm -rf` on the Attempt worktree exits non-zero. */
   failWorktreeRm: boolean;
   /** Whether the VM's Claude Code reports a subscription login. */
   claudeLoggedIn: boolean;
-  /** The simulated remote operation parks until its SSH client is killed. */
+  /** The remote operation that hangs until its SSH client is killed. */
   hangPreparation: "none" | "preflight" | "clone" | "fetch" | "attach" | "promotion" | "checkout";
   parked: boolean;
   failAttach: boolean;
   failStop: boolean;
   cacheExists: boolean;
-  /** The Attempt's worktree was removed from the VM behind the executor's back. */
+  /** Whether the Attempt's worktree was removed from the VM outside the executor. */
   worktreeGone: boolean;
-  /** What the salvage finds in the worktree after an unsuccessful Attempt. */
+  /** The worktree state that salvage finds after an unsuccessful Attempt. */
   salvage: "clean" | "dirty" | "push-fails" | "inspect-fails" | "add-fails" | "commit-fails";
   salvageCommitted: boolean;
   resumeFailure?: "lookup" | "fetch" | "decode";
   /** GitHub's `--slurp` pages for the conversation comments of Item 42. */
   issueComments: string;
-  /** Runs each time `gh` lists the conversation comments of Item 42, before it answers. */
+  /** Called each time `gh` lists Item 42's conversation comments, before it responds. */
   onIssueComments: () => void;
 }
 
@@ -154,13 +153,13 @@ const hangingHandle = Effect.gen(function* () {
   });
 });
 
-/** The single remote command line an SSH invocation carries after `--`. */
+/** Returns the remote command line after `--` in an SSH invocation. */
 export const remoteLine = (command: StandardCommand): string => {
   const separator = command.args.indexOf("--");
   return separator < 0 ? "" : (command.args[separator + 1] ?? "");
 };
 
-/** Fakes the local SSH client: the exe.dev lobby and every command on the Worker's VM. */
+/** Returns a fake local SSH client for the exe.dev lobby and the commands on the Worker's VM. */
 export const fakeSsh = (sweepMode: SweepMode = "valid") => {
   const state: FakeSshState = {
     commands: [],
@@ -253,7 +252,7 @@ export const fakeSsh = (sweepMode: SweepMode = "valid") => {
       if (line.startsWith("exec 'find' ") && line.includes("/attempts'")) {
         if (sweepMode !== "valid") return oneShotHandle("/tmp/not-a-worker-child\0", 0);
         const attemptsRoot = "/home/exedev/.usine/workers/remote-one/attempts";
-        // The Attempt's checkout is listed exactly when `test -d` would find it.
+        // Lists the Attempt's checkout only when `test -d` would find it.
         const listed = state.cacheExists
           ? [`${attemptsRoot}/abandoned-attempt`, `${attemptsRoot}/remote-run_execute_1`]
           : [`${attemptsRoot}/abandoned-attempt`];
@@ -335,20 +334,19 @@ export const request = new CheckoutRequest({
   resume: Option.none(),
 });
 
-/** Fails the Attempt the way a crashed parent does. */
+/** A parent that fails the Attempt like a crash. */
 export const fails: StubParent = () =>
   Effect.fail(new InfraFailure({ message: "The parent stopped", cause: new Error("crash") }));
 
 /**
- * The exe.dev executor over the fake SSH client, with each Attempt's parent
- * scripted by `parent` on `storage`. Build it again on the same storage to
- * simulate an orchestrator restart.
+ * Returns the exe.dev executor over the fake SSH client, with each parent scripted by `parent`
+ * on `storage`. Rebuilding it on the same storage simulates an orchestrator restart.
  */
 export const runtime = (
   sshLayer: Layer.Layer<ChildProcessSpawner.ChildProcessSpawner>,
   parent: StubParent = completes,
   storage: StubStorage = new StubStorage(),
-  /** Wraps the stub runtime, for tests that hold one of its durable operations open. */
+  /** Wraps the stub runtime, for tests that block one of its durable operations. */
   wrap: (stub: Layer.Layer<AttemptRuntime>) => Layer.Layer<AttemptRuntime> = (stub) => stub,
 ) =>
   exeDevLayer({

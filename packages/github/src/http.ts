@@ -33,9 +33,9 @@ const ErrorBody = Schema.Struct({ message: Schema.NonEmptyString });
 const decodeErrorBody = Schema.decodeUnknownOption(ErrorBody);
 
 /**
- * `failure` with the reason GitHub's error response gives in its `message`
- * field appended, such as `The permissions requested are not granted to this
- * installation.`; `failure` unchanged when the body has no such field.
+ * Returns `failure` with the `message` field of GitHub's error response appended, for example
+ * `The permissions requested are not granted to this installation.`. Returns `failure`
+ * unchanged if the body has no such field.
  */
 export const withGitHubReason = (
   failure: GitHubApiError,
@@ -105,11 +105,11 @@ const latestEpoch = (candidates: ReadonlyArray<Option.Option<number>>): Option.O
   return epochs.length === 0 ? Option.none() : Option.some(Math.max(...epochs));
 };
 
-/** The epoch when GitHub allows the next request, from `retry-after` and an exhausted primary rate-limit budget. */
+/** Returns the epoch milliseconds when GitHub allows the next request, from `retry-after` or an exhausted primary rate limit. */
 export const rateLimitRetryEpoch = (headers: Headers, now: number): Option.Option<number> =>
   latestEpoch([retryAfterMillis(headers["retry-after"], now), rateLimitResetMillis(headers, 0)]);
 
-/** Turns a non-2xx GitHub response into a typed error. A rate-limit status with a known retry time becomes a wait, not a failure. */
+/** Returns the typed error for a non-2xx GitHub response: `GitHubRateLimitError` for a 403 or 429 with a known retry time, otherwise `GitHubApiError`. */
 export const statusError = (
   operation: GitHubOperation,
   response: HttpClientResponse.HttpClientResponse,

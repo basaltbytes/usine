@@ -2,4 +2,4 @@
 "@usine/config": patch
 ---
 
-Agent frontmatter renames `parent_model` and `parent_effort` to `parentModel` and `parentEffort` with `Schema.encodeKeys`, as `Settings` does. Agent files parse the same as before.
+Renames the decoded agent fields `parent_model` and `parent_effort` to `parentModel` and `parentEffort`; agent files don't change.

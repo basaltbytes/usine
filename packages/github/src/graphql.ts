@@ -11,10 +11,10 @@ import {
 } from "./http.ts";
 import type { InstallationToken } from "./installation.ts";
 
-/** GraphQL rate limiting sometimes omits reset headers. Wait at least this long then. */
+/** The wait for a GraphQL rate limit without reset headers, in milliseconds. */
 const GRAPHQL_RATE_LIMIT_FALLBACK_MS = 60_000;
 
-/** The GraphQL transport envelope. `errors` arrives on HTTP 200 and must be read. */
+/** The GraphQL response envelope. `errors` can arrive with HTTP 200. */
 const GraphqlEnvelope = Schema.Struct({
   data: Schema.optionalKey(Schema.Unknown),
   errors: Schema.optionalKey(
@@ -28,10 +28,9 @@ const GraphqlEnvelope = Schema.Struct({
 });
 
 /**
- * Sends one GraphQL query under `token` and decodes its `data` with `dataSchema`.
- * GitHub reports failures on HTTP 200: rate limiting becomes `GitHubRateLimitError`,
- * a NOT_FOUND error leaves its null field for `dataSchema` to decode, and any other
- * error fails with GitHub's messages.
+ * Sends one GraphQL query with `token` and decodes `data` with `dataSchema`. Fails with
+ * `GitHubRateLimitError` on rate limiting, and with GitHub's messages on other errors. A
+ * NOT_FOUND error leaves its null field for `dataSchema` to decode.
  */
 export const queryGraphql = Effect.fn("GitHub.queryGraphql")(function* <
   S extends Schema.Codec<unknown, unknown, never, unknown>,
@@ -68,8 +67,8 @@ export const queryGraphql = Effect.fn("GitHub.queryGraphql")(function* <
         message: "GitHub GraphQL asked usine to wait before retrying",
       });
     }
-    // GitHub reports a missing Item as a NOT_FOUND error beside a null
-    // field, which `dataSchema` decodes as absent for the caller to judge.
+    // GitHub reports a missing Item as a NOT_FOUND error with a null field, which `dataSchema`
+    // decodes as absent.
     if (!envelope.errors.every((error) => error.type === "NOT_FOUND")) {
       return yield* invalidResponse(
         operation,
