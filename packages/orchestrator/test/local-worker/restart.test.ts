@@ -45,7 +45,10 @@ import {
   waitFor,
 } from "./support.ts";
 
-/** The local composition over the durable testing runtime on `database`, with the parent model answering `steps`. */
+/**
+ * Returns the local composition over the durable testing runtime on `database`, with the parent
+ * model answering `steps`.
+ */
 const durableRuntime = (
   instance: InstanceDirectory,
   remote: string,
@@ -233,8 +236,8 @@ describe("local worker restart", () => {
         const instance = InstanceDirectory.make(root);
         const remote = yield* makeRemote(root);
         const database = `${root}/durable.sqlite`;
-        // Credentials close to expiry renew before every harvesting command; once the
-        // child has replied, the first renewal holds the harvest until the process stops.
+        // Credentials close to expiry renew before every harvesting command; once the child has
+        // replied, the first renewal blocks the harvest until the process stops.
         const holdRenewals = yield* Ref.make(false);
         const harvesting = yield* Deferred.make<void>();
         const holdingCredentials = Layer.succeed(CredentialProvider)({

@@ -39,7 +39,7 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
   const logins = yield* ClaudeLoginLock;
   const workers = yield* Ref.make(new Map<WorkerName, VmState>());
 
-  /** Checks a brain on the VM, where the Attempt's children run; the checks export nothing there. */
+  /** Returns a harness probe that runs on the VM with no extra environment variables. */
   const harnessProbe = (shell: RemoteShell) => agentsHarnessProbe(spawner, shell, {});
 
   const resolveVm = Effect.fn("ExeDevExecutor.resolveVm")(function* (worker: WorkerName) {
@@ -154,8 +154,6 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
     });
   }, logPreflightFailure);
 
-  // Both resolveVm failures are members of the ExecutorError union prepare
-  // reports, so a stopped VM keeps its typed capability shape.
   const vmFor = Effect.fn("ExeDevExecutor.vmFor")(function* (worker: WorkerName) {
     const cached = (yield* Ref.get(workers)).get(worker);
     if (cached !== undefined) return cached;

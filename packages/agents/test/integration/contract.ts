@@ -31,9 +31,9 @@ import {
   WorkingDirectory,
 } from "../../src/runtime.ts";
 
-// The test controls when the command can finish; model/network latency cannot
-// race a fixed sleep. The PID proves the tool actually spawned its command;
-// a broken test still releases the process within two minutes.
+// The command exits when the test creates `release`, so model and network latency cannot race a
+// fixed sleep. The PID file shows that the tool spawned the command; the script exits after two
+// minutes if never released.
 const waitScript = `import { existsSync, renameSync, writeFileSync } from 'node:fs';
 writeFileSync('command.marker', process.env.USINE_CONTRACT_MARKER ?? '');
 writeFileSync('command.pid.tmp', String(process.pid));
@@ -44,7 +44,7 @@ const timer = setInterval(() => {
 setTimeout(() => process.exit(1), 120000).unref();
 `;
 
-/** Where a contract child runs and the environment it is given. */
+/** The host a contract child runs on, and its environment. */
 export interface ContractHost {
   readonly host: ChildHost;
   readonly environment: Readonly<Record<string, string>>;
@@ -57,17 +57,13 @@ const processEnvironment = (): Record<string, string> =>
     Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined),
   );
 
-/** This machine, with this process's environment as the child's complete environment. */
+/** The local machine; the child's environment is exactly this process's environment. */
 export const localHost: ContractHost = {
   host: new LocalProcess(),
   environment: { ...processEnvironment(), USINE_CONTRACT_MARKER: MARKER },
 };
 
-/**
- * A remote host whose SSH client is the test shim: the remote command line
- * runs on this machine, on top of the shim's environment, as it would on a
- * Worker VM on top of the VM's own.
- */
+/** A remote host whose SSH client is the test shim; the remote command runs locally on top of the shim's environment, as on a Worker VM. */
 export const shimHost: ContractHost = {
   host: new RemoteShell({
     ssh: {
@@ -241,8 +237,8 @@ export const interruptionContract = (
     Effect.gen(function* () {
       yield* running.interrupt.pipe(Effect.timeout("15 seconds"));
       const result = yield* running.result.pipe(Effect.result, Effect.timeout("15 seconds"));
-      // Assert while the owning session scope is still open. Scope cleanup must
-      // not conceal an interrupt implementation that leaves the tool running.
+      // Checked before the session scope closes, so scope cleanup cannot hide an interrupt that
+      // leaves the tool running.
       yield* stopped.pipe(Effect.timeout("10 seconds"));
       if (Result.isFailure(result)) assert.strictEqual(result.failure._tag, "AgentResultError");
       else

@@ -29,7 +29,7 @@ const noItemProjections: ItemProjectionReader["Service"] = {
 
 export const itemProjectionReaderLayer = Layer.succeed(ItemProjectionReader)(noItemProjections);
 
-/** A queued Event always keeps its turn: the engine's pre-check behavior. */
+/** A `TriggerCondition` whose recheck always returns `matches`. */
 export const alwaysHoldsLayer = Layer.succeed(TriggerCondition)({
   recheck: () => Effect.succeed("matches"),
 });
@@ -61,7 +61,7 @@ const forgetfulCursorStore: CursorStore["Service"] = {
   write: () => Effect.void,
 };
 
-/** An in-memory cursor store that also exposes what each poll persisted. */
+/** Returns an in-memory cursor store that also exposes what each poll persisted. */
 export const memoryCursorStore = () => {
   const stored = new Map<string, Schema.Json>();
   const store: CursorStore["Service"] = {

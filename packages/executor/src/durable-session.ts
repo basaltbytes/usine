@@ -41,55 +41,49 @@ import { type AcquiredAttempt, type AttemptStop, preparedAttemptsFor } from "./p
 
 interface ActiveAttempt {
   readonly worker: AttemptWorkspace["worker"];
-  /** The launch's scope: intervention delivery outlives its caller inside it. */
+  /** The launch scope. Intervention deliveries fork into it so their caller can't interrupt them. */
   readonly scope: Scope.Scope;
-  /** Why the Attempt is stopping; the first reason wins. */
+  /** The reason the Attempt is stopping; only the first is kept. */
   readonly stopping: Ref.Ref<Option.Option<AttemptStop>>;
-  /** The running `execute` call, interrupted when a stop's grace runs out. */
+  /** The running `execute` fiber, interrupted when a stop's grace period expires. */
   readonly execution: Ref.Ref<Option.Option<Fiber.Fiber<AttemptReport, AttemptFailure>>>;
-  /** The run has ended: the session takes no more operator input and no further stop; only its release remains. */
+  /** Completes when the run ends. After that, `stop` does nothing and `intervene` fails with `AgentFailure`. */
   readonly settled: Deferred.Deferred<void>;
 }
 
-/** What launch needs from the Attempt's checkout: where its children run, the environment its work runs in, the harvest once the parent finishes, and how to keep it for a reattachment. */
 export interface DurableCheckout {
-  /** The machine that holds the checkout, where the parent's children run. */
+  /** The host with the checkout, where the children run. */
   readonly host: ChildHost;
-  /** The only environment the parent's children and the harvesting commands see (ADR 0011). */
+  /** The complete environment for the children and harvesting commands (ADR 0011). */
   readonly environment: Record<string, string>;
   /**
-   * Reads the kind of credential the Gateway in front of the Worker pays the
-   * children with, as the Worker's latest preflight recorded it; each child's
-   * session records what it reads as the child starts. Reads none when the
-   * children pay with their harness's own login.
+   * Returns the credential kind the Gateway injects for the children, from the Worker's latest
+   * preflight. Returns `None` if the children use their harness's own login.
    */
   readonly gatewayCredential: Effect.Effect<Option.Option<GatewayCredentialKind>>;
   /**
-   * Collects the commits and pull requests the checkout holds and the comments
-   * the Attempt posted on its Item inside its own window and in none of its
-   * Agent's other Attempts' windows there, which `windows` reads once GitHub
-   * has listed the comments. Fails when the windows cannot be read.
+   * Returns the checkout's commits and pull requests, and the comments the Attempt posted on its
+   * Item within its own window and outside the windows of the Agent's other Attempts. Reads
+   * `windows` after GitHub lists the comments, and fails if they can't be read.
    */
   readonly harvest: (
     windows: AttemptWindowsRead<AttemptFailure>,
   ) => Effect.Effect<ReadonlyArray<StepResultFact>, AttemptFailure>;
   /**
-   * Collects only the comments, as `harvest` does, for an Attempt that ended
-   * without success; none when GitHub fails or the windows cannot be read.
+   * Returns only the comments, filtered as in `harvest`, for an unsuccessful Attempt. Returns none
+   * if GitHub fails or the windows can't be read.
    */
   readonly harvestComments: (
     windows: AttemptWindowsRead<AttemptFailure>,
   ) => Effect.Effect<ReadonlyArray<Comment>>;
-  /** Preserves the checkout when a restart needs to reattach the parent or repeat an unrecorded harvest. */
+  /** Keeps the checkout on disk so a restart can reattach the parent or repeat an unrecorded harvest. */
   readonly keepForReattach: Effect.Effect<void>;
 }
 
 /**
- * Collects the comments the Attempt that `spec` describes posted on its Item,
- * in its checkout with a credential it acquires for the purpose, keeping
- * those posted inside the Attempt's own window and in none of the others
- * `windows` reads, as `DurableCheckout` does. It fails only when that
- * credential cannot be acquired.
+ * A function that returns the comments the Attempt described by `spec` posted on its Item, read
+ * from its checkout with a new credential and filtered by `windows`. Fails only if the
+ * credential can't be acquired.
  */
 export type PostedCommentsHarvest = <W>(
   spec: HarvestSpec,
@@ -97,7 +91,7 @@ export type PostedCommentsHarvest = <W>(
 ) => Effect.Effect<ReadonlyArray<Comment>, ExecutorError>;
 
 export interface DurableSessionOptions {
-  /** Bounds each cancellation stage: the parent task's abort, then the Attempt settling. */
+  /** The timeout for each cancellation stage: the parent task's abort, then the Attempt's end. */
   readonly interruptGrace: Parameters<typeof Effect.timeoutOption>[1];
 }
 
@@ -109,20 +103,17 @@ const cancelError = (attemptId: AttemptId, cause: unknown) =>
   });
 
 /**
- * Runs Attempts whose Pi parent is a durable task in this process
- * (`AttemptRuntime`), for every Worker kind: the executors supply the
- * checkout, and everything about the parent task lives here. Interrupting a
- * launch that was not stopped first is this process stopping: the parent
- * task stays live in durable storage and the checkout stays on disk for the
- * reattachment after restart. Every other way an Attempt ends leaves no live
- * parent task behind.
+ * Returns the session that runs Attempts whose Pi parent is a durable task in this process
+ * (`AttemptRuntime`), for every Worker kind. If a launch is interrupted without a stop, the
+ * parent task stays live and the checkout stays on disk for reattachment after restart; every
+ * other ending stops the parent task.
  */
 export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
   options: DurableSessionOptions,
 ) {
   const runtime = yield* AttemptRuntime;
   const attempts = new Map<AttemptId, ActiveAttempt>();
-  /** Completed by each Attempt's launch once it registered the Attempt in `attempts`. */
+  /** Completed by each launch after it adds its Attempt to `attempts`. */
   const registrations = new Map<AttemptId, Deferred.Deferred<void>>();
   const registration = (attemptId: AttemptId) => {
     const existing = registrations.get(attemptId);
@@ -133,10 +124,9 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
   };
 
   /**
-   * Cancels the Attempt's parent task if durable storage still holds it live.
-   * Succeeds once the task is confirmed stopped, or was not live. Fails, after
-   * logging why, when its liveness cannot be read, or when its cancel fails or
-   * exceeds the interrupt grace, since the task may still be running then.
+   * Cancels the Attempt's parent task if durable storage reports it live. Fails with a `cancel`
+   * `ExecutorOperationError` if liveness can't be read, or the cancel fails or exceeds
+   * `interruptGrace`.
    */
   const stopTask = Effect.fn("DurableSession.stopTask")(function* (
     attemptId: AttemptId,
@@ -185,7 +175,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
     }
   });
 
-  /** Records `comments` through `record`; a failure is logged and never raised. */
+  /** Calls `record` with `comments`; failures are logged, not raised. */
   const recordComments = Effect.fn("DurableSession.recordComments")(function* <E>(
     attemptId: AttemptId,
     comments: ReadonlyArray<Comment>,
@@ -211,15 +201,9 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
   });
 
   /**
-   * Records the comments and reviews an Attempt that ended without success
-   * posted on its Run's Item, once its parent task has stopped. The harvest
-   * reads the Attempt's own window and those of its Agent's other Attempts on
-   * the Item through `io.windows` once GitHub has listed the comments. A
-   * canceled Attempt's window ended when the orchestrator closed it, before
-   * its parent task stopped, so a comment posted after that is not its own.
-   * The harvest records none when the windows cannot be read, since its
-   * comments cannot be told from theirs. A failure is logged and never
-   * changes how the Attempt ended.
+   * Records the comments and reviews an unsuccessful Attempt posted on its Run's Item, after its
+   * parent task stops. A canceled Attempt's window ends when the orchestrator closes it, so later
+   * comments are excluded. Failures are logged without changing the Attempt's result.
    */
   const recordPostedComments = Effect.fn("DurableSession.recordPostedComments")(function* (
     attemptId: AttemptId,
@@ -282,13 +266,9 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
       )
         return yield* new AgentFailure({ message: "The Attempt's parent task was canceled" });
       const report = yield* executed;
-      // The harvest reads the windows once GitHub has listed the comments, not
-      // at preparation or before it starts: an Attempt of the Agent that
-      // starts on the Item later, even while the harvest runs, overlaps this
-      // one too, and a cancel can close this one's window first (#429).
-      // Without them the harvest cannot tell this Attempt's comments from
-      // another's, so a read that fails fails the Attempt, as an invalid git
-      // result does.
+      // Reads the windows after GitHub lists the comments, because a later Attempt of the same Agent
+      // can overlap this one and a cancel can close this window first (#429). A failed read fails
+      // the Attempt.
       const facts = yield* checkout.harvest(io.windows);
       const harvested = harvestedResult(report, facts);
       if (Result.isFailure(harvested)) {
@@ -318,8 +298,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
     return yield* Effect.scoped(run).pipe(
       Effect.onExit((exit) =>
         Effect.gen(function* () {
-          // Settle first: from here `stop` and `intervene` see an ended run, so
-          // `stopping` is final when the branches below read it.
+          // Complete `settled` first so `stopping` cannot change while the branches below read it.
           yield* Deferred.succeed(settled, undefined);
           if (Exit.isFailure(exit)) {
             const stop = yield* Ref.get(stopping);
@@ -330,7 +309,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
               );
               yield* checkout.keepForReattach;
             } else {
-              // A stop that cannot be confirmed is logged; the Attempt still ends as it did.
+              // stopTask logs its own failure; the Attempt's result is unchanged.
               yield* stopTask(
                 attemptId,
                 Option.match(stop, {
@@ -348,11 +327,10 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
   });
 
   /**
-   * Stops a launched Attempt for `reason` and reports whether one was running
-   * here: cancels its parent task, then waits for the Attempt to settle within
-   * the grace before interrupting it. The launch fails with the first reason.
-   * A run that has already ended has nothing to stop; its session stays
-   * registered until its resources are released, which the caller waits for.
+   * Stops a launched Attempt for `reason` and returns whether one was running here. Cancels the
+   * parent task, then waits up to `interruptGrace` before interrupting the Attempt; the launch
+   * fails with the first reason. For a run that already ended, does nothing, and the caller waits
+   * for its resources to be released.
    */
   const stop = Effect.fn("DurableSession.stop")(function* (
     attemptId: AttemptId,
@@ -476,19 +454,16 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
           errorTag: error._tag,
         }),
       ),
-      // Delivery belongs to the Attempt, so a disconnected HTTP caller cannot cut it short.
+      // Forks into the Attempt's scope so a disconnected HTTP caller doesn't interrupt delivery.
       Effect.forkIn(active.scope),
       Effect.flatMap(Fiber.join),
     );
   });
 
   /**
-   * Delivers the runaway guard's warning steer through `intervene` once an
-   * `execute` call relays the Attempt's channel. The guard starts as soon as
-   * the launch registers the Attempt, while `execute` still reads durable
-   * storage, so the warning a reattachment restores would otherwise find no
-   * channel and be lost (#178). The guard delivers it apart from its checks,
-   * and the launch's end interrupts the wait.
+   * Sends the runaway guard's warning steer through `intervene` after `execute` attaches to the
+   * Attempt's channel. The guard starts before `execute` reads durable storage, so sending
+   * immediately would drop a warning restored on reattachment (#178).
    */
   const warnParent = Effect.fn("DurableSession.warnParent")(function* (
     attemptId: AttemptId,
@@ -500,12 +475,9 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
   });
 
   /**
-   * Fails the reattachment of `attemptId` when `read`, one `part` of what its
-   * runaway guard goes on from, fails after the store's retries. Starting that
-   * part over would grant the Attempt a fresh allowance (#178), so its parent
-   * task is stopped and the reattachment fails with an `InfraFailure` naming
-   * `part`. The launch then salvages the checkout, and the Run's next Attempt
-   * starts from that salvage. A stop that cannot be confirmed is logged.
+   * Wraps `read`, one `part` of the guard's restored state. If `read` fails after the store's
+   * retries, stops the parent task and fails the reattachment with an `InfraFailure` for `part`,
+   * because restarting that part would reset the Attempt's allowance (#178).
    */
   const seedPart =
     (attemptId: AttemptId, part: string) =>
@@ -529,13 +501,10 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
       );
 
   /**
-   * What the guard of the Attempt `request` describes goes on from: for a
-   * reattached Attempt, what its transcript, read through `io`, recorded
-   * before the restart, and the unsupervised time its earlier guards recorded
-   * with its durable record; for a fresh one, nothing. A reattachment reads
-   * only what its armed ceilings use: the transcript for either ceiling, the
-   * unsupervised time for the wall clock. Fails with an `InfraFailure`, once
-   * the parent task is stopped, when one of them cannot be read.
+   * Returns the initial runaway guard state for `request`, empty for a new Attempt. On
+   * reattachment, reads the transcript if any ceiling is set and the unsupervised time if
+   * `maxAttemptMinutes` is set. Fails with an `InfraFailure` after stopping the parent task if a
+   * read fails.
    */
   const guardSeedFor = Effect.fn("DurableSession.guardSeed")(function* (
     request: CheckoutRequest,
@@ -581,9 +550,8 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
   );
 
   /**
-   * Owns an executor's preparation of `request` through `preparedAttemptsFor`.
-   * A reattachment that cannot be prepared has its parent task canceled, so
-   * the task never runs unobserved and the engine retries on a fresh Attempt.
+   * Wraps an executor's `acquire` with `preparedAttemptsFor`. If a reattachment can't be prepared,
+   * cancels its parent task so the engine retries on a new Attempt.
    */
   const prepare = (
     acquire: Effect.Effect<AcquiredAttempt, ExecutorError, Scope.Scope>,
@@ -591,10 +559,8 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
   ) =>
     prepared
       .prepare(
-        // The first finalizer of the resources scope runs last, so the session
-        // stays registered until checkout and credential cleanup finish. Removing
-        // it when the launch settled let a second cancel close the scope while
-        // the launch was still returning (#197).
+        // Added first so it runs last: the session stays registered until checkout and credential
+        // cleanup finish (#197).
         Effect.addFinalizer(() =>
           Effect.sync(() => {
             attempts.delete(request.attemptId);
@@ -606,7 +572,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
       .pipe(
         Effect.tapError(() =>
           request.reattach
-            ? // A stop that cannot be confirmed is logged; the preparation's failure is reported.
+            ? // stopTask logs its own failure; the preparation error is returned.
               stopTask(request.attemptId, "its reattachment could not be prepared").pipe(
                 Effect.ignore,
               )
@@ -615,9 +581,8 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
       );
 
   /**
-   * Cancels the Attempt at any stage, then a live parent task this process
-   * never launched, such as one still awaiting its reattachment after a restart.
-   * Fails when that parent task cannot be confirmed stopped.
+   * Cancels the Attempt at any stage, then stops a live parent task this process didn't launch,
+   * for example one awaiting reattachment. Fails if that task can't be confirmed stopped.
    */
   const cancel = Effect.fn("DurableSession.cancel")(function* (attemptId: AttemptId) {
     yield* Effect.annotateCurrentSpan({ attemptId });
@@ -626,8 +591,8 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
   });
 
   /**
-   * Whether a restart reattaches the open Attempt: its parent task still runs,
-   * or it reported success and its checkout was not harvested into a recorded result yet.
+   * Returns whether the open Attempt's parent task is running or reported success without a
+   * recorded harvest. If true, a restart reattaches it.
    */
   const isLive = Effect.fn("DurableSession.isLive")(function* (attemptId: AttemptId) {
     yield* Effect.annotateCurrentSpan({ attemptId });
@@ -646,7 +611,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
     return unharvested;
   });
 
-  /** The result an Attempt's finished parent task left in durable storage: the recorded harvest, or the parent's failure. */
+  /** Returns the stored result of a finished parent task: the recorded harvest or the parent's failure. */
   const outcome = Effect.fn("DurableSession.outcome")(function* (attemptId: AttemptId) {
     yield* Effect.annotateCurrentSpan({ attemptId });
     const finished = yield* runtime.finished(attemptId);
@@ -670,13 +635,9 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
   });
 
   /**
-   * Stops `attempt`'s parent task before recovery reconciles its checkout.
-   * The engine recovers an Attempt only once no Run reattaches it, so an open
-   * Attempt is reconciled even when `isLive` still reports it: its parent
-   * task is stopped, and a report that was never harvested stays unharvested
-   * while its checkout is salvaged (#180). Fails when the task cannot be
-   * confirmed stopped, so recovery leaves the checkout to a task that may
-   * still write to it.
+   * Stops `attempt`'s parent task before recovery reconciles its checkout, even if `isLive` returns
+   * true. An unharvested report stays unharvested while the checkout is salvaged (#180). Fails if
+   * the task can't be confirmed stopped.
    */
   const stopForRecovery = Effect.fn("DurableSession.stopForRecovery")(function* (
     attempt: AttemptRecovery,
@@ -689,15 +650,9 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
   });
 
   /**
-   * Records, during startup reconciliation, the comments and reviews an open
-   * Attempt posted on its Run's Item when durable storage holds its parent's
-   * failure. The Run closes such an Attempt from that failure without
-   * launching it again, so no launch recorded them. `harvest` collects them
-   * from the Attempt's checkout, and is none when the checkout is gone; it
-   * keeps those posted inside the Attempt's own window and in none of the
-   * others `record.windows` reads once GitHub has listed them, as a launch
-   * does, and records none when they cannot be read. Any other Attempt
-   * records nothing, and every failure is logged, never raised.
+   * During startup reconciliation, records the comments and reviews an open Attempt posted on its
+   * Run's Item if durable storage has its parent's failure. `harvest` is `None` if the checkout is
+   * gone. Does nothing for other Attempts; failures are logged, not raised.
    */
   const recoverPostedComments = Effect.fn("DurableSession.recoverPostedComments")(function* <E>(
     attempt: AttemptRecovery,
@@ -765,7 +720,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
     yield* recordComments(attemptId, comments.success, record.comments);
   });
 
-  /** The request a reattached Attempt's parent task was created with; a missing one fails the reattachment. */
+  /** Returns the request the reattached Attempt's parent task was created with. Fails with a `prepare` `ExecutorOperationError` if it's missing or unreadable. */
   const storedRequest = Effect.fn("DurableSession.storedRequest")(function* (attemptId: AttemptId) {
     yield* Effect.annotateCurrentSpan({ attemptId });
     const stored = yield* runtime.request(attemptId).pipe(

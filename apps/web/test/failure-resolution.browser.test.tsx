@@ -175,7 +175,7 @@ it("resolves a failure from Needs attention while retaining unrelated attention,
     await expect
       .element(drawer.getByText("Work was completed separately", { exact: false }))
       .toBeVisible();
-    // The labelled button in the body and the expand icon beside Close lead to the same page.
+    // The labelled button in the body and the expand icon next to Close both link to the Run page.
     const toPage = drawer.getByRole("link", { name: "Open run page" });
     await expect.poll(() => toPage.elements().length).toBe(2);
     expect(new Set(toPage.elements().map((link) => link.getAttribute("href")))).toEqual(

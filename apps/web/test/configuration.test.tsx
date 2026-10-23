@@ -19,7 +19,6 @@ import { SettingsPage } from "../src/configuration/settings.tsx";
 import { WorkerDetail, WorkersList } from "../src/configuration/workers.tsx";
 import { configurationFixture, emptyConfiguration } from "./configuration-fixture.ts";
 
-/** Renders a Configuration page inside a router and the section's reload, as its route does. */
 const render = async (page: () => ReactNode): Promise<string> => {
   const queryClient = new QueryClient();
   const router = createRouter({

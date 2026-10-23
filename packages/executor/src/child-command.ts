@@ -8,13 +8,9 @@ export interface CommandResult {
   readonly stdout: string;
 }
 
-/** Bounds every adapter command so a hung clone or SSH hop stays cancellable. */
 const COMMAND_TIMEOUT = "10 minutes";
 
-/**
- * Returns only the named process variables, so the App private key and every
- * other orchestrator secret stay out of the child.
- */
+/** Returns the variables in `names` that are set in the process environment. */
 export const allowlistedEnvironment = (
   names: ReadonlyArray<string>,
 ): Effect.Effect<Record<string, string>> =>
@@ -24,13 +20,12 @@ export const allowlistedEnvironment = (
     ),
   ).pipe(
     Effect.map((entries) => Object.fromEntries(Arr.getSomes(entries))),
-    // An unreadable process environment at layer build is a defect, not a failure to handle.
     Effect.orDie,
   );
 
 /**
- * Runs one child process under the timeout and returns its whole output; the
- * caller decides what the exit code means.
+ * Runs `command` with a 10-minute timeout and returns its exit code and output without checking
+ * the exit code. Fails with `ExecutorOperationError` if the command can't run or times out.
  */
 export const collectCommand = (
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
@@ -71,7 +66,7 @@ export const collectCommand = (
     ),
   );
 
-/** Returns the collected stdout, or logs and fails when the exit code is non-zero. */
+/** Returns the collected stdout. If the exit code is non-zero, logs a warning and fails with `ExecutorOperationError`. */
 export const requireSuccess = Effect.fn("Executor.requireSuccess")(function* (
   operation: ExecutorOperation,
   host: string,

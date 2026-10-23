@@ -49,7 +49,7 @@ const initialFiles = [
   ["loops/start-dev.md", loopFile("developer")],
 ] as const;
 
-/** Runs `test` against a reloadable instance over a fresh folder holding `initialFiles`. */
+/** Runs `test` against a reloadable instance in a new folder with `initialFiles`. */
 const withFolder = <A, E>(
   test: (
     root: InstanceDirectory,
@@ -71,9 +71,8 @@ const warningsIn = (messages: Array<unknown>) =>
 const unused = () => Effect.die("unused");
 
 /**
- * Starts the Worker scheduler on the current instance with an executor whose
- * preflight records `worker: harness/model` for each brain it checks and fails
- * on a `claude` brain, as on Workers where Claude Code is logged out.
+ * Starts the Worker scheduler with an executor whose preflight records `worker: harness/model` for
+ * each brain and fails on a `claude` brain.
  */
 const startWorkers = (preflighted: Array<string>) =>
   Effect.gen(function* () {

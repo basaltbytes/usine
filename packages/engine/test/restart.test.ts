@@ -66,7 +66,7 @@ const deliverOneAttempt = (directory: InstanceDirectory, number: number) =>
     return delivered;
   });
 
-/** The executor of a restarted runtime that runs `workers`, starts nothing, and records each `recover` call. */
+/** Returns a restarted runtime's executor that runs `workers`, starts nothing, and records each `recover` call. */
 const recordingExecutor = (
   workers: ReadonlyArray<string>,
   recovered: Ref.Ref<ReadonlyArray<AttemptId>>,
@@ -109,23 +109,19 @@ const stopDuringAttempts = (directory: InstanceDirectory, submissions: ReadonlyA
   });
 
 /**
- * The executor of the restarted runtime, whose parent tasks `live` holds and
- * whose liveness cannot be read for the Attempts in `unreadable`. As the real
- * one does, `recover` and `interrupt` stop a parent task, and fail without
- * touching the checkout when that task cannot be stopped, which `refused`
- * records for the Attempts in `unstoppable`; `recover` reconciles the
- * checkout whatever `isLive` reports. Every checkout it reconciles becomes a
- * pushed salvage, and an open Attempt whose parent failed records the comment
- * it posted. Worker `local` has one slot per Attempt in `live`. Startup reads
- * whether each open Attempt is live at once, and occupies a slot for it and
- * for each closed Attempt it cannot stop, which `leased` counts as the
- * scheduler does. Until `gate` opens, a Run waits to
- * read it again, and for a Worker; then a Run waits for a free slot. An
- * Attempt then records what it resumes from. The
- * reattachment of an Attempt in `stalled` never acquires its checkout, as
- * when the scheduler awaits the settings or the bot login before preparing
- * it, and one in `unprepared` fails first, as when its credential cannot be
- * issued.
+ * Returns a fake `StepExecutor` for a restarted runtime, controlled through `state`.
+ *
+ * - `live`: Attempts whose parent task is live; Worker `local` has one slot per such Attempt.
+ * - `unreadable`: Attempts whose liveness can't be read.
+ * - `unstoppable`: Attempts whose parent task can't be stopped; `recover` and `interrupt` fail
+ *   without touching the checkout and add them to `refused`.
+ * - `stalled`: reattached Attempts that never acquire their checkout.
+ * - `unprepared`: reattached Attempts that fail before acquiring their checkout.
+ * - `gate`: until it opens, a Run waits before reading its Attempt again and before a Worker.
+ * - `leased`: the number of occupied slots, counted as the scheduler does.
+ *
+ * Every reconciled checkout becomes a pushed salvage, and an open Attempt whose parent failed
+ * records the comment it posted.
  */
 const restartedExecutor = Effect.fn("test.restartedExecutor")(function* (
   live: ReadonlyArray<Attempt>,
@@ -508,7 +504,7 @@ describe("engine restart", () => {
             yield* Scope.provide(Layer.build(engineLayer(directory, restarted)), secondScope),
             RunEngine,
           );
-          // Neither Run has read its Attempt yet, and each Attempt holds a slot of its own Worker.
+          // Neither Run has read its Attempt yet, and each Attempt occupies a slot on its own Worker.
           assert.deepStrictEqual(
             yield* TxRef.get(leased),
             new Map([
@@ -517,7 +513,7 @@ describe("engine restart", () => {
             ]),
           );
 
-          // A Run that arrives now waits, rather than start an Attempt on a Worker that runs one.
+          // A new Run waits instead of starting an Attempt on a Worker that runs one.
           const accepted = yield* secondEngine.submit(third);
           assert(accepted._tag === "Claimed");
           yield* Effect.sleep("50 millis");
@@ -777,7 +773,7 @@ describe("engine restart", () => {
             submission({ number: 25, item: "kept-then-canceled-while-preparing" }),
           ]);
           assert(waiting !== undefined && preparing !== undefined);
-          // Until `gate` opens, the restarted Runs do not read their Attempts, which await their reattachment.
+          // Until `gate` opens, the restarted Runs don't read their Attempts, which wait to be reattached.
           const worker = yield* restartedExecutor([waiting, preparing]);
           const scope = yield* Scope.make();
           const engine = Context.get(
@@ -1148,7 +1144,7 @@ describe("engine restart", () => {
           const queuedRunId = yield* runIdFor(queued);
           yield* committedBeforeCrash(directory, (store) =>
             Effect.gen(function* () {
-              // The first Attempt settled with an automatic retry still owed.
+              // The first Attempt ended with an automatic retry still owed.
               yield* store.recordAndClaim(retrying, retryingRunId);
               const interrupted = yield* store.beginAttempt(
                 retryingRunId,

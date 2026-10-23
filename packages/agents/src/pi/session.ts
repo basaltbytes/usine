@@ -18,22 +18,21 @@ import { type AgentSessionError, reportedOutcome, SessionResult } from "../runti
 import type { PiMessage, PiSession, PiSessionEvent } from "./sdk.ts";
 
 export interface SessionChannelOptions {
-  /** Adapter name printed in the terminal log lines. */
+  /** The adapter name in log lines. */
   readonly label: string;
   readonly sessionId: AgentSessionId;
 }
 
 /**
- * Shared session state: one event queue, one result, and a latch so exactly
- * one terminal transition wins. Cleanups registered through `onTerminal` run
- * on that transition.
+ * The state of one session: an event queue, a result, and a latch that allows one terminal
+ * transition. Cleanups registered with `onTerminal` run on that transition.
  */
 export interface SessionChannel {
   readonly events: Queue.Queue<AgentSessionEvent, AgentSessionError | Cause.Done>;
   readonly result: Deferred.Deferred<SessionResult, AgentSessionError>;
   readonly isTerminal: Effect.Effect<boolean>;
   readonly onTerminal: (cleanup: () => void) => void;
-  /** Queues one event; after the terminal transition the event is logged and dropped. */
+  /** Queues an event; after the terminal transition, logs and drops it. */
   readonly emit: (event: AgentSessionEvent) => Effect.Effect<void>;
   readonly fail: (error: AgentSessionError) => Effect.Effect<void>;
   readonly finish: (session: AgentSession, message: string) => Effect.Effect<void>;
@@ -149,7 +148,7 @@ const PiUserMessage = Schema.Struct({
   content: Schema.Union([Schema.String, Schema.Array(Schema.Json)]),
 });
 
-/** The text of a user message, as Pi compares it with the messages it queued; none for any other message. */
+/** Returns the text of a user message as Pi compares it with its queued messages, or `None` for other messages. */
 export const piUserMessageText = (message: PiMessage): Option.Option<string> => {
   if (!Schema.is(PiUserMessage)(message)) return Option.none();
   if (Schema.is(Schema.String)(message.content)) return Option.some(message.content);
@@ -200,12 +199,8 @@ const sessionEventFrom = (
 };
 
 /**
- * Subscribes the Pi SDK's synchronous listener to one session channel.
- * Normalized events reach the queue on the SDK's own tick so none can trail
- * the prompt's resolution. Pi's provider retries become `ProviderRetrying` and
- * `ProviderRecovered`, counted per turn: the count restarts when Pi settles a
- * prompt (`agent_settled`). Compactions have no normalized shape and are logged
- * so a silent wait stays explainable.
+ * Subscribes to `piSession` and queues normalized events synchronously, so none arrive after the
+ * prompt resolves. Provider retries are counted per turn and reset on `agent_settled`.
  */
 export const subscribePiSession = (
   piSession: PiSession,
@@ -217,7 +212,7 @@ export const subscribePiSession = (
     const log = Effect.runForkWith(context);
     let lastText: string | undefined;
     let total: SessionUsage = { totalTokens: TokenCount.make(0), costUsd: Option.none() };
-    // Provider retries Pi reported in the current turn, and whether the last one is unanswered.
+    // Provider retries reported in the current turn, and whether the last retry is unresolved.
     let retries = 0;
     let retrying = false;
     const offer = (sessionEvent: AgentSessionEvent) => {

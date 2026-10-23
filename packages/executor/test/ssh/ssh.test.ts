@@ -33,7 +33,7 @@ import {
 
 const allowlisted = new Set<string>(SSH_ENVIRONMENT_ALLOWLIST);
 
-/** A second request on the same Worker, with its own Attempt and salvage ref. */
+/** Returns a request on the same Worker with its own Attempt and salvage ref. */
 const requestFor = (attempt: number) =>
   new CheckoutRequest({
     ...request,
@@ -44,10 +44,7 @@ const requestFor = (attempt: number) =>
 const isWorkerNotice = (payload: AttemptChannel.OutboundPayload) =>
   payload._tag === "WorkerUnresponsive" || payload._tag === "WorkerResponsive";
 
-/**
- * Parents for `attemptIds` that signal once they work and finish when told,
- * with a transcript per Attempt.
- */
+/** Returns parents for `attemptIds` that signal when they start and finish when told, with one transcript per Attempt. */
 const workingAttempts = (attemptIds: ReadonlyArray<AttemptId>) =>
   Effect.gen(function* () {
     const outbound = new Map<AttemptId, Array<AttemptChannel.OutboundPayload>>();
@@ -644,7 +641,7 @@ describe("SSH Worker", () => {
             yield* Deferred.succeed(signalsOf(attemptId).done, undefined);
           for (const fiber of [first, late, latest]) yield* Fiber.join(fiber);
         }).pipe(
-          // A failed assertion would otherwise leave cleanup waiting on a stalled machine.
+          // Prevents a failed assertion from leaving cleanup waiting on a stalled machine.
           Effect.ensuring(Effect.sync(() => (machine.state.stalled = false))),
           Effect.scoped,
           Effect.provide(runtime(machine, credentials, parent)),

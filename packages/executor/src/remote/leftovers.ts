@@ -5,18 +5,16 @@ import type { RemoteCommands } from "./commands.ts";
 import type { RemoteMachine } from "./machine.ts";
 import { attemptPathsOn } from "./sweep.ts";
 
-/** What earlier processes left on one remote Worker, as seen by this process. */
 interface WorkerLeftovers<M extends RemoteMachine> {
   readonly machine: M;
-  /** The paths found directly under the Worker's `attempts` directory. */
+  /** The paths directly under the Worker's `attempts` directory. */
   readonly checkouts: ReadonlySet<string>;
 }
 
 /**
- * Resolves a Worker's machine, runs `reclaim` on it, and lists its leftover
- * Attempt checkouts once per Worker for this executor, so reconciling an
- * Attempt with no leftover checkout needs no SSH round trip. A Worker that
- * cannot be resolved or listed stays unreconciled until the next start.
+ * Resolves a Worker's machine, runs `reclaim` on it, and lists its leftover checkouts, once per
+ * Worker per executor. A Worker that can't be resolved or listed isn't reconciled until the
+ * next start.
  */
 export const workerLeftoversFor = <M extends RemoteMachine, E>(
   commands: RemoteCommands,

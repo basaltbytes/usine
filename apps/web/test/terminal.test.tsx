@@ -4,8 +4,8 @@ import { assert, it } from "vitest";
 import { build, esmExternalRequirePlugin } from "vite";
 
 it("renders bundled command output containing ANSI colors and literal markup", async () => {
-  // Vitest's SSR loader unwraps CommonJS differently from Vite's browser build.
-  // Render the shipped module so an invalid ANSI component export cannot hide.
+  // Vitest's SSR loader handles CommonJS differently from Vite's browser build, so the test renders
+  // the built module to catch a broken ANSI component export.
   const result = await build({
     configFile: fileURLToPath(new URL("../vite.config.ts", import.meta.url)),
     root: fileURLToPath(new URL("..", import.meta.url)),
@@ -49,5 +49,5 @@ it("renders bundled command output containing ANSI colors and literal markup", a
   assert.include(html, "&lt;script&gt;literal output&lt;/script&gt;");
   assert.include(html, 'aria-label="Copy output"');
   assert.notInclude(html, "\u001b[");
-  // The production build shares CI CPUs with the monorepo suites.
+  // The production build shares CI CPUs with the other suites.
 }, 30_000);

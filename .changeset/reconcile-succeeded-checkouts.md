@@ -4,4 +4,4 @@
 "@usine/executor": patch
 ---
 
-Reconcile the checkout of a succeeded Attempt at startup. When exe.dev cleanup could not confirm the remote run host had stopped, the checkout stayed on the VM and the abandoned-worktree sweep warned about it at every start without anyone removing it. `RunStore.salvageCandidates` now lists every Attempt with a `succeeded` flag on `AttemptRecovery`, and both executors remove a succeeded Attempt's leftover checkout instead of salvaging it: its result was already delivered, so nothing is pushed or recorded and no credential is issued for the removal. Because the reconcile now visits the whole Attempt history, the exe.dev executor resolves each Worker and lists its leftover checkouts once per start: an Attempt that left no checkout costs no SSH round trip, and a Worker that is gone fails its Attempts after a single lookup.
+Startup reconciles the leftover checkout of a succeeded attempt: both executors remove it without salvage or a credential. `RunStore.salvageCandidates` lists every attempt with a `succeeded` flag on `AttemptRecovery`, and the exe.dev executor lists each worker's leftover checkouts once per start.

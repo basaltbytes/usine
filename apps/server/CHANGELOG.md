@@ -4,9 +4,7 @@
 
 ### Patch Changes
 
-- 5828a95: Persist Claude and Codex child sessions and record their native ids and worker paths in transcripts. Show copyable resume commands in the Run drawer, including for completed sessions outside the loaded history page.
-  
-  Upgrade the orchestrator and run host together for Attempt channel protocol v6. Existing protocol-v3 through v5 transcripts remain readable.
+- 5828a95: Persists Claude and Codex child sessions, and the run drawer shows copyable resume commands. Protocol v6 needs the orchestrator and run host upgraded together; v3 to v5 transcripts stay readable.
 - Updated dependencies [5828a95]
 - Updated dependencies [8b9d544]
   - @usine/core@0.3.0
@@ -19,35 +17,29 @@
 
 ### Minor Changes
 
-- 8b6718d: Make Run conversations easier to follow with expandable tool activity, readable commands and file changes, live session status, transcript filters, and scrolling that preserves the reader’s position. Move Task, Event, and Attempt details into separate tabs. Use AI Elements for tool panels, syntax-highlighted source, and terminal output; keep complete tool payloads available under Raw details.
-- 388e59d: Add `usine export-run <runId>` to save one Run's detail, Attempt history, and complete transcripts as a local JSON file. Use `--output <path>` to choose the destination. Existing files are preserved, and missing Runs or export failures return a nonzero exit status.
-  
-  Add `RunReader.evidence(runId)` for a consistent snapshot and complete transcripts from one transaction, and `runReaderLayer(instanceDirectory)` for read-only access to an existing local runtime database without migrations.
-- 83edd04: Add `usine backup <path>` to copy the runtime database while the orchestrator runs. Backups include all tables and committed WAL data, preserve existing destination files, and support restoring Run evidence. Document backup and restore requirements.
-- aeb587f: Group adjacent completed tools into expandable summaries, keep tool and child-session choices across conversation filters, and show the active command or file with elapsed time and recent activity. File edits show their patch before confirmation and metadata.
-- ef9fd20: Show new conversation updates while reading earlier activity, without counting tool results twice or treating older history as new. Jump to the latest conversation or navigate directly to errors, automatically revealing their tool output and child session.
+- 8b6718d: Reworks the run conversation with expandable tool activity, live session status, transcript filters, and scrolling that keeps your position, and moves task, event, and attempt details to separate tabs.
+- 388e59d: Adds `usine export-run <runId>`, which saves a run's detail, attempts, and transcripts to a new JSON file (set the path with `--output <path>`). Adds `RunReader.evidence(runId)` and the read-only `runReaderLayer(instanceDirectory)`.
+- 83edd04: Adds `usine backup <path>`, which copies the runtime database, including committed WAL data, while the orchestrator runs, and never overwrites an existing file.
+- aeb587f: Groups adjacent completed tools into expandable summaries and shows the active command or file with its elapsed time. File edits show their patch first.
+- ef9fd20: Shows new conversation updates while you read earlier activity, and adds jumps to the latest message and to errors.
 
 ### Patch Changes
 
-- ffc26c9: Describe completed Run tool groups with compact action summaries, including file names and recognized test or build invocations. Distinguish shared file names, count distinct recorded file paths, and update summaries as earlier inputs load. Keep each tool's result available in its expandable details.
-- 162b323: Record executor defects as non-retryable Attempt failures with safe operator messages. Keep Attempt admission and cleanup in one service operation, and match Task relationships by canonical PR paths.
-- c7c8a79: Simplify expanded Run tools with flat disclosure rows and indented details. Code, terminal output, and diffs retain distinct panels with copy controls.
-- 5c47dc2: Drain admitted Attempts on SIGINT or SIGTERM before closing the runtime. Defer queued work and automatic retries until restart, with a bounded shutdown wait and a second-signal force stop.
-- f4f5938: Keep failed commands inside adjacent activity groups, show the group's error count, and let error navigation reopen collapsed groups and child activity to reveal the original failure details.
-- a36f46e: Bound issue and pull-request feedback cycles across Runs with `max_cycles` (default three per Loop). Persist Item-level exhaustion Asks, expose explicit resets in the operator UI and HTTP API, and require fresh trigger evaluation after a reset. Upgrade existing Run history and queued Events into the budget.
-  
-  Use comment reviews and Loop-defined outcome labels for agents sharing a GitHub App identity. Required independent approvals and merging remain operator actions.
-- f42d393: Publish the operator HTTP contract at `@usine/orchestrator/operator/http` and derive server handlers and browser requests from it. Preserve existing URLs, response envelopes, transcript query conventions, and operator actions while validating transport failures for typed clients.
-- 354e598: Provision factory-wide GitHub label declarations before polling, report non-blocking preflight failures, and warn when Board lanes or Loop triggers use undeclared labels. Label names follow GitHub's contract (at most 50 characters, no surrounding whitespace), and provisioning waits for a confirmed catalog instead of creating labels blindly after a failed catalog request.
-- 7cf4887: Refresh Board moves from GitHub promptly and evaluate their Loops without waiting for the next periodic poll. Coalesce self-write Hints, preserve normal polling and Event deduplication, and honor GitHub request backoff.
-  
-  Keep moved cards in their destination through stale refreshes and project navigation, show saving and synchronization progress, and keep every Board lane reachable beside the sidebar.
-- 28ec315: Support Codex CLI 0.153.4 and gracefully stop Codex child processes before completing their sessions, including background commands left alive by turn interruption.
-- 6b53a10: Reduce visual noise in Run tool activity with indented groups, aligned hover backgrounds, fewer separators, and implicit success. Replace file-read offset and limit fields with a compact line-range cue beside the source.
-- dd81b60: Make proposed Board lanes read-only to preserve descriptive GitHub labels. Configure an authored lane map in usine.yaml to enable moves; authored moves exchange only labels in that map.
-- 2cfd65b: Serve the web application shell for direct browser requests to client-side routes while preserving 404 responses for unknown API routes and missing static files.
-- b628897: Join linked issue and PR Items into Board tasks with complete saved Run histories, per-task Run and Attempt counts, and explicit current-Item lane moves.
-- 580a873: Remember each Run conversation’s filter, inspected disclosures and reading place across drawer closes and page refreshes. Preserve unread activity while restoring earlier history, and resume following for readers who left at latest.
+- ffc26c9: Completed tool groups show compact action summaries with file names and recognized test or build commands.
+- 162b323: Records executor defects as non-retryable attempt failures with safe operator messages, and matches task relationships by canonical PR paths.
+- c7c8a79: Expanded run tools use flat disclosure rows; code, terminal output, and diffs keep separate panels with copy controls.
+- 5c47dc2: On SIGINT or SIGTERM, the orchestrator drains admitted attempts and defers queued work and retries until restart; a second signal forces a stop.
+- f4f5938: Failed commands stay in their activity group, which shows an error count, and error navigation opens collapsed groups to show the failure.
+- a36f46e: Adds `max_cycles` (default 3 per loop), a per-item cycle budget with an ask when it's used up and a reset in the UI and API. Agents that share a GitHub App identity review with comments and outcome labels.
+- f42d393: Publishes the operator HTTP contract at `@usine/orchestrator/operator/http`; URLs, responses, and operator actions don't change.
+- 354e598: Creates declared GitHub labels before polling and warns when board lanes or loop triggers use undeclared labels. Label names allow at most 50 characters and no surrounding whitespace.
+- 7cf4887: Board moves refresh from GitHub and evaluate their loops at once instead of at the next poll, and moved cards stay in their destination through stale refreshes.
+- 28ec315: Supports Codex CLI 0.153.4 and stops Codex child processes, including leftover background commands, before their sessions complete.
+- 6b53a10: Simplifies run tool activity with indented groups and fewer separators, and file reads show a line range instead of offset and limit fields.
+- dd81b60: Proposed board lanes are read-only. To enable moves, configure a lane map in `usine.yaml`; moves exchange only its labels.
+- 2cfd65b: Serves the web app for direct requests to client-side routes, and still returns 404 for unknown API routes and missing static files.
+- b628897: Groups linked issue and PR items into board tasks with their run history and run and attempt counts.
+- 580a873: Each run conversation remembers its filter, open disclosures, and reading position across drawer closes and page refreshes.
 - Updated dependencies [3f80f88]
 - Updated dependencies [162b323]
 - Updated dependencies [388e59d]
@@ -77,9 +69,9 @@
 
 ### Minor Changes
 
-- 16e7212: Add per-repository Board lane maps, durable projections of GitHub Items and repository labels from polling, live Run data on Board cards, quarantined Item diagnostics, and lane-scoped label moves through the operator API.
-- 24eef02: Add CLI port overrides, help and version output, occupied-port diagnostics, and a two-second timeout when `usine up` opens the setup page. The operator API now returns attempts, needs, and transcript events without exposing infrastructure causes. Cold and live transcript reads have explicit response limits, and the web drawer can continue loading rows beyond its initial 500-row page. Concurrent overview requests reuse one projection computation, and local-worker polling budgets include their timing rationale.
-- ae86c6c: Add `usine up` with a local observe-and-intervene UI. Persist Loop pause state in the runtime database; list every open Run plus the newest settled ones and project protocol transcripts; expose approve, retry, cancel, pause, and unpause through the embeddable orchestrator; and preserve durable observation while the foreground server waits for missing GitHub App credentials with trigger execution idle.
+- 16e7212: Adds per-repository board lane maps, item and label projections from polling, live run data on board cards, quarantined item diagnostics, and lane label moves through the operator API.
+- 24eef02: Adds CLI port overrides, help and version output, and occupied-port diagnostics to `usine up`. The operator API hides infrastructure causes and limits transcript reads, and the drawer loads more than 500 rows.
+- ae86c6c: Adds `usine up` with a local UI that lists open and recent runs with their transcripts and offers approve, retry, cancel, pause, and unpause. Loop pause state persists in the runtime database.
 
 ### Patch Changes
 

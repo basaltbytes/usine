@@ -10,8 +10,6 @@ const stageLabel = {
   reference: "References something missing from the configuration",
 } satisfies Record<FileStage, string>;
 
-/** Why an authored file did not load: the parse stage that refused it, the parser's message, and
- * the expression at fault, then what that costs and how to recover. */
 export const FileError = ({
   error,
   consequence,

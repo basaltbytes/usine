@@ -33,7 +33,7 @@ import {
 } from "./support.ts";
 import { claudeLoginLockLayer } from "@usine/executor";
 
-/** One fresh Attempt of a Run, as the engine hands it to the StepExecutor. */
+/** Returns a new Attempt of a Run, as the engine passes it to the StepExecutor. */
 const freshExecution = (runId: RunId, attemptId: AttemptId) => {
   const selected = submission(5);
   return new StepExecution({
@@ -159,7 +159,7 @@ describe("local worker runaway guard", () => {
             })
             .pipe(Effect.forkChild);
           yield* Deferred.await(started);
-          // One second at a time, so the guard arms its next timer after the warning.
+          // Advance one second at a time, so the guard sets its next timer after the warning.
           for (let second = 0; second < 90 && running.pollUnsafe() === undefined; second += 1) {
             yield* TestClock.adjust("1 second");
           }

@@ -268,7 +268,7 @@ describe("GitHubPolling", () => {
 
     return Effect.gen(function* () {
       const polling = yield* GitHubPolling;
-      // The cursor is efficiency only (ADR 0007). A page without an ETag degrades to unconditional polling and never fails the cycle.
+      // The cursor is only for efficiency (ADR 0007); a page without an ETag falls back to unconditional polling and never fails the cycle.
       const detected = yield* polling.changes(repository, PollCursor.empty);
       assert.strictEqual(detected._tag, "RepositoryChanges");
       if (detected._tag !== "RepositoryChanges") return;
@@ -498,7 +498,7 @@ describe("GitHubPolling", () => {
         .pipe(Effect.flip);
       assert.strictEqual((yield* fetch)._tag, "GitHubItemNotFoundError");
       assert.strictEqual((yield* fetch)._tag, "GitHubItemNotFoundError");
-      // A null repository is not evidence about the Item.
+      // A null repository says nothing about the Item.
       assert.strictEqual((yield* fetch)._tag, "InvalidGitHubResponseError");
     }).pipe(Effect.provide(pollingLayer(client)));
   });
@@ -684,7 +684,7 @@ describe("GitHubPolling", () => {
       const fromEmpties = yield* polling.snapshot(repository, changed);
       assert.strictEqual(fromNulls._tag, "PullRequestSnapshot");
       if (fromNulls._tag !== "PullRequestSnapshot") return;
-      // A null connection is the same information as an empty one. The payload stays non-null and both shapes hash to the same Event identity.
+      // A null connection is equivalent to an empty one; the payload stays non-null and both hash to the same Event identity.
       assert.deepStrictEqual(fromNulls.payload.labels, { totalCount: 0, nodes: [] });
       assert.deepStrictEqual(fromNulls.payload.reviews, { totalCount: 0, nodes: [] });
       assert.strictEqual(fromNulls.contentHash, fromEmpties.contentHash);

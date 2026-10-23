@@ -28,7 +28,6 @@ const Page = ({ label, children }: { readonly label: string; readonly children: 
   </div>
 );
 
-/** The Run's current task in full; Attempts that used an earlier task show it with their metadata. */
 export const TaskDocument = ({ task }: { readonly task: string }) => (
   <Page label="Task">
     <ReaderLine>
@@ -38,11 +37,6 @@ export const TaskDocument = ({ task }: { readonly task: string }) => (
   </Page>
 );
 
-/**
- * The triggering Event: the Item it carried, when it carried one, who ran an earlier Run again
- * to open this one, who approved the Run when its Loop requires approval, and the Event's
- * complete payload under Raw details.
- */
 export const EventDocument = ({
   detail,
 }: {

@@ -10,21 +10,18 @@ import type { ProjectedItem } from "./items.ts";
 
 const decodeUrl = Schema.decodeUnknownOption(Schema.URLFromString);
 
-// Each transient node owns its Runs and links directly to other known Items.
-// Traversal therefore needs no second key lookup or missing-neighbor fallback.
+// Each node links directly to its Runs and to the other known Items, so traversal needs no second
+// key lookup.
 interface TaskItem {
   readonly item: ProjectedItem;
   readonly runs: ReadonlyArray<RunView>;
   readonly related: Set<TaskItem>;
 }
 
-/** A Task card and the Run in flight that decides its lane. */
+/** A Task card and the running Run that sets its lane. */
 export interface TaskCard {
   readonly view: BoardTaskView;
-  /**
-   * The Task's newest open Run once an Attempt started it, so its Agent may have changed the
-   * labels its trigger matched. It runs on the card's current Item.
-   */
+  /** The Task's newest open Run once an Attempt has started, on the card's current Item. */
   readonly running: RunView | undefined;
 }
 
@@ -38,10 +35,8 @@ const itemLink = (item: ProjectedItem) =>
   });
 
 /**
- * Joins explicit issue/PR relationships into Task cards without creating stored Task
- * identities (ADR 0024). `itemLoops` names, per Item, the Loops whose trigger matches it now;
- * `runUsage` holds what each Run's sessions drew, which a card adds up over its Runs. Each card
- * comes with its running Run, which the Board places it by.
+ * Joins explicit issue and pull request relationships into Task cards, without stored Task
+ * identities (ADR 0024). Each card includes its running Run, which sets its Board lane.
  */
 export const taskCards = (
   repository: RepositoryName,
@@ -119,8 +114,8 @@ export const taskCards = (
       );
     // An open Run controls the lane. Between stages, a PR takes over from its issue.
     const current = active?.item ?? prs[0]?.item ?? origin.item;
-    // Open pull requests sort first, so the first one that is open or merged is the open one
-    // or, without an open one, the newest merged one.
+    // Open pull requests sort first, so the first open or merged one is the open one or, without
+    // one, the newest merged one.
     const [pullRequest = null] = prs.flatMap(({ item: { number, url, state } }) =>
       state === "pr-open" || state === "pr-merged"
         ? [new BoardPullRequestView({ number, url, state })]

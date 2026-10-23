@@ -67,20 +67,22 @@ import {
   layer as durableHarnessLayer,
 } from "./harness.ts";
 
-/** One scripted answer of the parent's model, or a function of the request that returns one. */
 export type ParentStep = FauxResponseStep;
 
-/** The parent model the testing layer serves; name it in `RunSpec.parentModel` or leave that empty. */
+/** The model ID that the testing layer serves. */
 export const PARENT_MODEL = ModelId.make("faux/faux-1");
 
-/** The parent delegates `task` to one child through the `subagent` tool. */
+/** Returns a parent turn that calls the `subagent` tool with `task`. */
 export const delegate = (task: string): AssistantMessage =>
   fauxAssistantMessage([fauxToolCall(SUBAGENT_TOOL, { task })], { stopReason: "toolUse" });
 
-/** The parent gives its final answer. */
+/** Returns a parent turn whose final answer is `text`. */
 export const answer = (text: string): AssistantMessage => fauxAssistantMessage([fauxText(text)]);
 
-/** pi-ai model access that answers the parent's requests with `steps`, in order; it accepts every reasoning effort up to `high`. */
+/**
+ * Returns pi-ai model access that answers requests with `steps` in order, at any reasoning effort
+ * up to `high`.
+ */
 export const fauxParent = (
   steps: ReadonlyArray<ParentStep>,
 ): Pick<DurableHarnessOptions, "models" | "defaultModel"> => {
@@ -92,36 +94,38 @@ export const fauxParent = (
   return { models, defaultModel: Option.some(defaultModel) };
 };
 
-/** One child the stub backend launched; the test decides when and how it finishes. */
+/** A child launched by the stub backend and finished by the test. */
 export interface StubChild {
-  /** The request the parent's `subagent` call launched the child with: its session, prompt, checkout, and environment. */
   readonly request: ChildRequest;
-  /** Adds one event to the child's stream. */
   readonly emit: (event: AgentSessionEvent) => Effect.Effect<void>;
   /**
-   * Finishes with `message` as the child's report; under a Hold the report
-   * waits for the release. The turn it ends read every queued operator message.
+   * Reads the queued operator messages, then finishes with `message` as the report. Under a Hold,
+   * the report is delayed until release.
    */
   readonly reply: (message: string) => Effect.Effect<void>;
-  /** Reads the operator messages the child queued while it worked, as a harness does at its next boundary. */
+  /** Reads the queued operator messages, as a harness does at a turn boundary. */
   readonly readQueued: Effect.Effect<void>;
   /** Finishes with a blocked report, which fails the Attempt unless the parent relays it. */
   readonly block: (message: string) => Effect.Effect<void>;
-  /** Finishes by asking the operator `question`, which fails the Attempt unless the parent relays it. */
+  /**
+   * Finishes by asking the operator `question`, which fails the Attempt unless the parent relays
+   * it.
+   */
   readonly ask: (question: string) => Effect.Effect<void>;
-  /** Finishes with a harness failure, which fails the Attempt with `AgentFailure` unless the parent reports otherwise. */
+  /**
+   * Finishes with a harness failure, which fails the Attempt with `AgentFailure` unless the parent
+   * reports otherwise.
+   */
   readonly fail: (message: string) => Effect.Effect<void>;
-  /** Completes once the parent's tool call interrupted the child (abort, cancel, or shutdown). */
+  /** Completes when the parent's tool call interrupts the child (abort, cancel, or shutdown). */
   readonly interrupted: Effect.Effect<void>;
-  /** The operator actions delivered to this child so far. */
   readonly interventions: Effect.Effect<ReadonlyArray<AttemptChannel.OperatorAction>>;
 }
 
-/** The children the stub backend launched, in launch order. */
+/** The children launched by the stub backend, in launch order. */
 export class StubChildren extends Context.Service<
   StubChildren,
   {
-    /** Waits for the next child the parent launches. */
     readonly next: Effect.Effect<StubChild>;
   }
 >()("@usine/durable/testing/StubChildren") {}
@@ -232,7 +236,7 @@ const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: Chil
   return { running, child };
 });
 
-/** A `ChildBackend` whose children run only as the test scripts them through `StubChildren`. */
+/** A `ChildBackend` whose children the test drives through `StubChildren`. */
 export const stubChildBackendLayer: Layer.Layer<ChildBackend | StubChildren> = Layer.effectContext(
   Effect.gen(function* () {
     const launched = yield* Queue.unbounded<StubChild>();
@@ -249,19 +253,14 @@ export const stubChildBackendLayer: Layer.Layer<ChildBackend | StubChildren> = L
   }),
 );
 
-/** What the testing layer runs on. */
 export interface DurableTestingOptions {
-  /** The SQLite file; build another layer on the same file to simulate an orchestrator restart. */
+  /** The SQLite file path. To simulate a restart, build another layer on the same file. */
   readonly database: string;
-  /** The parent model's answers, one per model request, in order. */
+  /** The parent model's answers, one per request. */
   readonly parent: ReadonlyArray<ParentStep>;
 }
 
-/**
- * The durable Attempt runtime on a SQLite file with a scripted parent model
- * and stub children, for driving whole Attempts in tests without a model or a
- * harness binary.
- */
+/** Returns a durable Attempt runtime with a scripted parent model and stub children. */
 export const layer = (options: DurableTestingOptions) =>
   attemptRuntimeLayer.pipe(
     Layer.provideMerge(
@@ -280,22 +279,19 @@ export const layer = (options: DurableTestingOptions) =>
     Layer.provideMerge(stubChildBackendLayer),
   );
 
-/** What a scripted stub parent can do while `execute` runs it. */
 export interface StubParentContext {
   /**
-   * The request this `execute` call received. When the call reattaches a task, this is the new
-   * call's request, not the one the task was created with.
+   * The request passed to this `execute` call, which differs from the stored request on reattach.
    */
   readonly request: AttemptRequest;
-  /** Records one outbound envelope with the task's next sequence. */
+  /** Records an outbound envelope with the task's next sequence number. */
   readonly emit: (payload: AttemptChannel.OutboundPayload) => Effect.Effect<void, AttemptFailure>;
-  /** The parent session the stub reports events for. */
   readonly session: ParentSession;
-  /** Whether this `execute` call reattached a task a previous runtime started. */
+  /** Whether this call reattached a task started by a previous runtime. */
   readonly reattached: boolean;
 }
 
-/** A stub parent's work after Started; its result is the parent's final message, or its whole report. */
+/** The stub parent's work after `Started`, returning the final message or a full report. */
 export type StubParent = (
   context: StubParentContext,
 ) => Effect.Effect<string | AttemptReport, AttemptFailure>;
@@ -312,53 +308,27 @@ interface StubTask {
   inbound: number;
 }
 
-/**
- * The durable storage behind stub runtimes: tasks and their sequence counters
- * survive a runtime being closed and built again, as pi-durable storage
- * survives an orchestrator restart.
- */
+/** Stub runtime storage that persists across runtime rebuilds, to simulate a restart. */
 export class StubStorage {
-  /**
-   * Each Attempt's stub task by Attempt id, with the request that created it and its state:
-   * `live`, `finished` with its report, or `canceled`. Tests read the state to check whether
-   * the executor canceled an Attempt.
-   */
+  /** The stub tasks by Attempt ID, with their creating request and state. */
   readonly tasks = new Map<AttemptId, StubTask>();
-  /**
-   * The unsupervised time each Attempt's runaway guards kept with
-   * `recordUnsupervised`, as the Attempt's durable record keeps it, by
-   * Attempt id. Tests read it to check what a restart keeps.
-   */
+  /** The time stored by `recordUnsupervised`, by Attempt ID. */
   readonly unsupervised = new Map<AttemptId, Duration.Duration>();
 }
 
-/** Completes at once with `Completed: <task>`. */
+/** Completes immediately with `Completed: <task>`. */
 export const completes: StubParent = ({ request }) =>
   Effect.succeed(`Completed: ${request.spec.task}`);
 
-/** Works for `millis` before completing. */
+/** Waits `millis` milliseconds, then completes like `completes`. */
 export const worksFor =
   (millis: number): StubParent =>
   (context) =>
     Effect.sleep(`${millis} millis`).pipe(Effect.andThen(completes(context)));
 
 /**
- * An in-memory `AttemptRuntime` over `storage`, for executor and engine tests
- * that need no parent model. It records Started, the parent's session events,
- * intervention receipts, Worker notices (those sent before `execute` starts
- * the Attempt right after its start events, kept as the durable runtime keeps
- * them), and a Final without facts (the executor harvests those) through the
- * Attempt's sink,
- * numbering them per task so a reattached `execute` continues the sequence.
- * Only a completed parent leaves the live
- * state: interrupting `execute` (a stopped process) or a failing parent leaves
- * the task live until someone cancels it, so tests see whether the executor
- * stopped it. A completed task keeps its report, which a later `execute`
- * returns and `finished` reports until `recordResult` replaces it. The
- * unsupervised time `recordUnsupervised` keeps goes to `storage`, which
- * `unsupervised` reads back. `attached` completes once an `execute` call
- * starts recording the Attempt's activity, as the durable runtime's does once
- * its relay attaches the Attempt's channel; wrap `execute` to delay it.
+ * Returns an in-memory `AttemptRuntime` over `storage` for tests that need no parent model. An
+ * interrupted `execute` or a failing parent leaves the task live until it is canceled.
  */
 export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = completes) =>
   Layer.effect(
@@ -373,7 +343,7 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
         }
       >();
       const early = new Map<AttemptId, ReadonlyArray<AttemptChannel.WorkerNotice>>();
-      /** Completed once an `execute` call relays the Attempt, which `attached` waits for. */
+      /** Deferreds that complete when an `execute` call relays the Attempt. */
       const relayed = new Map<AttemptId, Deferred.Deferred<void>>();
       const relayedFor = (attemptId: AttemptId) => {
         const kept = relayed.get(attemptId) ?? Deferred.makeUnsafe<void>();
@@ -436,7 +406,8 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
           } else {
             yield* event(new TextOutput({ session, text: "Resumed after a restart" }));
           }
-          // A notice sent while the kept ones are recorded is kept too, so this ends only when none is left.
+          // Notices sent while the buffered ones are recorded are buffered too, so loop until none
+          // is left.
           for (let kept = early.get(attemptId); kept !== undefined; kept = early.get(attemptId)) {
             early.delete(attemptId);
             for (const notice of kept) yield* emit(notice);
@@ -471,7 +442,8 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
             Effect.sync(() => {
               const attemptId = request.spec.attemptId;
               attached.delete(attemptId);
-              // A later `attached` waits for the next `execute` call; one waiting already keeps its wait.
+              // Drop only a completed Deferred, so a later `attached` waits for the next `execute`
+              // call and a pending one keeps waiting.
               const kept = relayed.get(attemptId);
               if (kept !== undefined && Deferred.isDoneUnsafe(kept)) relayed.delete(attemptId);
             }),

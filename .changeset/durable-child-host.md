@@ -2,4 +2,4 @@
 "@usine/durable": minor
 ---
 
-`AttemptRequest` carries the Attempt's child host, and the `subagent` tool gives it to every child, so the Worker decides where children run while the parent stays in the orchestrator. Like the environment, the child host comes with each `execute` call and is never stored. `@usine/durable/testing` adds `stubAttemptRuntime`, `StubStorage`, `StubParent`, `completes`, and `worksFor`: an in-memory `AttemptRuntime` for executor and engine tests.
+`AttemptRequest` contains the attempt's child host, which the `subagent` tool passes to every child, so the worker decides where children run. `@usine/durable/testing` adds `stubAttemptRuntime`, `StubStorage`, `StubParent`, `completes`, and `worksFor`, an in-memory `AttemptRuntime` for executor and engine tests.

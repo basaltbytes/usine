@@ -4,7 +4,7 @@ import type { ReaderDocument } from "../document/model.ts";
 import type { TranscriptTool } from "../model.ts";
 import type { ReadingAnchor } from "./memory.ts";
 
-/** One possible reading surface, including its disclosure path and durable burst members. */
+/** A scroll target in the reader, with the disclosure keys to open and its burst's member keys. */
 export interface ReadingRow {
   readonly key: string;
   readonly surface: ReadingAnchor["surface"];
@@ -44,7 +44,7 @@ const plainRow = (key: string, sequence: TranscriptSequence): ReadingRow => ({
   groupKeys: [],
 });
 
-/** Indexes rendered identities without retaining any of their contents in a bookmark. */
+/** Returns every scroll target in `document` as keys and sequences, without content. */
 export const readingRows = (document: ReaderDocument): ReadonlyArray<ReadingRow> =>
   document.chapters.flatMap((chapter) =>
     chapter.rows.flatMap((row): ReadonlyArray<ReadingRow> => {
@@ -92,9 +92,8 @@ type Restoration =
     };
 
 /**
- * Prefers the same durable member even when its burst gains an earlier first call.
- * Waits for history until the matching row reaches its saved sequence.
- * Exhausted history falls back to the nearest surviving row.
+ * Returns the row matching `anchor`, including inside a burst that gained an earlier call. If no
+ * matching row is loaded, returns `Earlier` while history is available, else the nearest row.
  */
 export const locateReadingAnchor = (
   anchor: ReadingAnchor,
@@ -106,7 +105,7 @@ export const locateReadingAnchor = (
       row.surface === anchor.surface &&
       (row.key === anchor.key || (row.surface === "group" && row.groupKeys.includes(anchor.key))),
   );
-  // A result can arrive before its earlier input page while retaining the same tool identity.
+  // A tool result can load before the page with its input, and keeps the same tool key.
   if (exact !== undefined && exact.sequence <= anchor.sequence)
     return { _tag: "Row", row: exact, offset: anchor.offset, fallback: false };
   if (history === "available") return { _tag: "Earlier" };

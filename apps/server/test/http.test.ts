@@ -133,7 +133,7 @@ const run = new RunView({
 });
 const detail = new RunDetailView({
   sessionState: [],
-  // An approved Run that the operator ran again, so the detail round trip carries both records.
+  // An approved Run that the operator ran again, so the detail round trip includes both records.
   run: new RunView({
     ...run,
     state: "Queued",
@@ -424,8 +424,8 @@ describe("operator HTTP API", () => {
     assert.strictEqual(crossSite.status, 403);
     assert.strictEqual((await crossSite.json()).error, "CrossSiteRequestError");
 
-    // A loopback origin (the Vite dev server) reaches the handler; the
-    // needs-setup 503 proves the guard let it through.
+    // A loopback origin (the Vite dev server) passes the guard; the needs-setup 503 shows the
+    // handler ran.
     const loopback = await app.handler(
       new Request(`http://localhost/api/runs/${runId}/approve`, {
         method: "POST",
@@ -611,8 +611,8 @@ describe("operator HTTP API", () => {
       assert.match(refusal.message, /read-only/i);
       assert.match(refusal.message, /usine\.yaml/);
 
-      // Authored fields are strict even though JSON has always been accepted
-      // independently of the caller's Content-Type.
+      // Authored fields are validated strictly, although JSON is accepted regardless of
+      // Content-Type.
       for (const body of ["{", '{"toLane":"authored:Review","typo":true}', '{"toLane":42}']) {
         const invalid = await rejectingApp.handler(
           new Request("http://localhost/api/projects/basaltbytes/usine/items/31/lane", {
@@ -677,7 +677,7 @@ describe("operator HTTP API", () => {
         new Request("http://localhost/api/instance/reload", { method: "POST" }),
       );
       assert.strictEqual(preflight.status, 409);
-      // What the check observed ("logged out") stays on the server.
+      // The check's observation ("logged out") is not sent to the client.
       assert.deepStrictEqual(await preflight.json(), {
         error: "ReloadPreflightError",
         message: preflightMessage,

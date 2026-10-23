@@ -1,16 +1,15 @@
-// The reserved markers an Agent's final answer opens with (see @usine/agents).
+// The reserved markers at the start of an Agent's final answer (see @usine/agents).
 const MARKER = /^\s*\[usine:(blocked|question|failed)\]/u;
 
-/** The reserved marker an Agent message opens with: a blocker, an operator question, or none. */
+/** Returns the `blocked` or `question` marker at the start of an Agent message, or `null`. */
 export const answerMarker = (text: string): "blocked" | "question" | null => {
   const marker = MARKER.exec(text)?.[1];
   return marker === "blocked" || marker === "question" ? marker : null;
 };
 
-/** The message as the reader shows it: the reserved opening marker is protocol, not prose. */
 export const withoutMarker = (text: string): string => text.replace(MARKER, "").trimStart();
 
-/** Text compared for repetition, so a copy that differs only in its marker or spacing is the same message. */
+/** Returns text for duplicate detection, ignoring the marker and whitespace differences. */
 export const comparableText = (text: string): string =>
   withoutMarker(text).replace(/\s+/gu, " ").trim();
 
@@ -23,7 +22,7 @@ const plainLine = (line: string): string =>
     .replace(/(^|[\s(])\*(\S(?:.*?\S)?)\*(?=[\s).,;:!?]|$)/gu, "$1$2")
     .trim();
 
-/** Markdown as plain running text, for previews that clamp to a few lines. */
+/** Returns Markdown as plain text on one line, without code blocks. */
 export const previewText = (text: string): string =>
   text
     .replace(/```[\s\S]*?(?:```|$)/gu, "\n")
@@ -33,8 +32,8 @@ export const previewText = (text: string): string =>
     .join(" ");
 
 /**
- * Names a message by its own first sentence, as plain text on one line. Code blocks
- * and Markdown syntax are left out; a first line without sentence punctuation is used whole.
+ * Returns the message's first sentence as plain text, without code blocks or Markdown syntax. If the
+ * first line has no sentence punctuation, returns the whole line.
  */
 export const checkpointText = (text: string): string => {
   const lines = withoutMarker(text)
@@ -46,14 +45,13 @@ export const checkpointText = (text: string): string => {
   return /^(.*?[.!?…])(?=\s|$)/u.exec(first)?.[1] ?? first;
 };
 
-// What fits on one outline row at 13px beside its indentation, and the shortest clause that
-// still names the message on its own rather than the first item of a list.
+// Characters per outline row at 13px, and the minimum length of a clause used as a label.
 const LABEL_LENGTH = 32;
 const CLAUSE_LENGTH = 12;
 
 /**
- * Shortens a checkpoint's sentence to one outline row without cutting a word: a long
- * sentence gives its first clause when that clause fits, otherwise its first words with an ellipsis.
+ * Shortens `sentence` to `LABEL_LENGTH` characters without cutting a word: returns its first clause
+ * if that fits, otherwise its first words and an ellipsis.
  */
 export const checkpointLabel = (sentence: string): string => {
   if (sentence.length <= LABEL_LENGTH) return sentence;

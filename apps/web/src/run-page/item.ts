@@ -2,16 +2,16 @@ import type { FactoryOverview, RunView } from "@usine/orchestrator/operator";
 import { GitHubItemKey } from "@usine/orchestrator/polling-triggers";
 import { Option, Schema } from "effect";
 
-/** The GitHub Item a Run works on, with its title when the Board or the Event knows it. */
+/** The GitHub Item of a Run; `title` is `None` if neither the Board nor the Event has it. */
 export interface RunItem {
   readonly number: number;
   readonly url: string;
   readonly title: Option.Option<string>;
-  /** The Item is itself a pull request, so it is the Run's pull request when the Run produced none. */
+  /** Whether the Item is a pull request; if so, it is shown as the Run's pull request when the Run opened none. */
   readonly pullRequest: boolean;
 }
 
-/** The issue or pull request snapshot an Item trigger's Event carries; other fields are ignored. */
+/** The issue or pull request snapshot in an Item trigger's Event payload; other fields are ignored. */
 const ItemSnapshot = Schema.Struct({
   number: Schema.Number,
   title: Schema.String,
@@ -24,7 +24,7 @@ const ItemSnapshot = Schema.Struct({
   ),
 });
 
-/** A triggering Event that carries a GitHub issue or pull request, as the reader describes it. */
+/** The GitHub issue or pull request in a triggering Event. */
 export interface EventItem {
   readonly kind: "Issue" | "Pull request";
   readonly number: number;
@@ -39,7 +39,7 @@ export interface EventItem {
 const decodeItemKey = Schema.decodeOption(GitHubItemKey);
 const decodeSnapshot = Schema.decodeUnknownOption(ItemSnapshot);
 
-/** Reads the Event payload as a GitHub Item snapshot; schedule ticks and other payloads have none. */
+/** Decodes the GitHub Item in an Event payload. Returns `None` for schedule ticks and other payloads. */
 export const eventItem = (payload: Schema.Json): Option.Option<EventItem> =>
   Option.map(decodeSnapshot(payload), (snapshot) => ({
     kind: snapshot.url.includes("/pull/") ? "Pull request" : "Issue",
@@ -53,9 +53,8 @@ export const eventItem = (payload: Schema.Json): Option.Option<EventItem> =>
   }));
 
 /**
- * The Item behind a Run, titled from the Board when it shows the Item, else from the Event.
- * Schedule Runs key the repository itself, not an issue or pull request, so they have none.
- * GitHub resolves `/issues/N` to `/pull/N`.
+ * Returns the Run's Item, titled from the Board if it shows the Item, else from the Event; `None` for
+ * schedule Runs. The fallback URL uses `/issues/N`, which GitHub redirects to `/pull/N`.
  */
 export const runItem = (
   run: Pick<RunView, "itemKey">,
@@ -82,7 +81,7 @@ export const runItem = (
     };
   });
 
-/** Two lines naming what started the Run, for the outline. */
+/** Returns two lines describing what started the Run. */
 export const eventPreview = (loop: string, payload: Schema.Json): string =>
   Option.match(eventItem(payload), {
     onNone: () => `Opened by ${loop}`,
@@ -92,6 +91,5 @@ export const eventPreview = (loop: string, payload: Schema.Json): string =>
       }`,
   });
 
-/** The pull request number in its GitHub URL. */
 export const pullRequestNumber = (url: string): Option.Option<string> =>
   Option.fromNullishOr(/\/pull\/(\d+)/u.exec(url)?.[1]);

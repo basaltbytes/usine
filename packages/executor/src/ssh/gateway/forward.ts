@@ -4,31 +4,27 @@ import { type GatewayAdminPort, SshDestination } from "@usine/core/worker";
 import { DateTime, Deferred, Effect, Fiber, Option, Ref, Result, Schema, Stream } from "effect";
 import { ChildProcess, type ChildProcessSpawner } from "effect/unstable/process";
 
-/** What the forward's SSH client prints, through OpenSSH's `LocalCommand`, once its local port listens. */
+/** The line the SSH client prints through `LocalCommand` when its local port is listening. */
 const OPEN_LINE = "usine-gateway-forward-open";
 
-/** How long one SSH client may take to connect and listen before the executor ends it and starts another. */
+/** The time an SSH client has to connect and listen before it's replaced. */
 const OPEN_TIMEOUT = "30 seconds";
 
-/** How long a request waits for the forward to open; the forward answers sooner unless its own fiber stopped. */
+/** The time a request waits for the forward to open. */
 const OPEN_WAIT = "1 minute";
 
-/** The pause before the next SSH client doubles after each failure, from one second up to this. */
+/** The maximum pause between SSH clients, in milliseconds. The pause doubles from one second after each failure. */
 const MAX_PAUSE_MILLIS = 60_000;
 
-/** The forward to a Gateway's admin API while one SSH client carries it. */
 export interface OpenForward {
-  /** Which SSH client carries the forward, counted from 1; a reopen replaces exactly this one. */
+  /** The SSH client number, starting at 1. `reopen` replaces only this generation. */
   readonly generation: number;
-  /** The admin API at the forward's local port. */
   readonly url: URL;
 }
 
 /**
- * The executor's forward to a Gateway's admin API is closed: its SSH client
- * did not open, or exited and has not been replaced yet. `since` is when the
- * Gateway became unreachable through the forward, and `reason` is what the
- * SSH client reported.
+ * The error for a closed admin API forward, whose SSH client didn't open or exited. `since` is
+ * when the Gateway became unreachable, and `reason` is the SSH client's error.
  */
 export class GatewayForwardClosed extends Schema.TaggedError<GatewayForwardClosed>(
   "@usine/executor/GatewayForwardClosed",
@@ -40,42 +36,35 @@ export class GatewayForwardClosed extends Schema.TaggedError<GatewayForwardClose
 }) {}
 
 /**
- * The executor's own SSH forward from a local port to one Gateway's admin
- * API (ADR 0027, amendment of 2026-10-19). It opens with the first Worker
- * behind the Gateway, reopens after a pause whenever its SSH client exits,
- * and closes with the last Worker behind the Gateway or with the executor.
+ * An SSH forward from a local port to a Gateway's admin API (ADR 0027, amendment of
+ * 2026-10-19). It opens with the first Worker behind the Gateway, reopens after a pause when
+ * its client exits, and closes with the last Worker or the executor.
  */
 export interface GatewayForward {
-  /** The Gateway's SSH destination, which names it in logs and messages. */
+  /** The Gateway's SSH destination, used to identify it in logs and messages. */
   readonly gateway: SshDestination;
-  /** The SSH client an operator runs to open the same forward by hand and see why it does not open. */
+  /** The SSH command an operator can run to open the same forward manually. */
   readonly command: string;
-  /** The open forward. Waits while an SSH client is opening it, and fails at once while it is closed. */
+  /** Returns the open forward, waiting while a client is opening. Fails immediately while the forward is closed. */
   readonly current: Effect.Effect<OpenForward, GatewayForwardClosed>;
   /**
-   * Replaces SSH client `generation`, or cuts short the pause after it
-   * closed, and waits for the client that follows. When another request
-   * replaced it already, waits for the forward as it is now instead.
+   * Replaces SSH client `generation`, or ends the pause after it closed, and waits for the next
+   * client. If another request already replaced it, waits for the current forward.
    */
   readonly reopen: (generation: number) => Effect.Effect<OpenForward, GatewayForwardClosed>;
-  /**
-   * Records that a request sent through the open forward at `sentAt` got no
-   * answer from the Gateway's admin API, and returns when the first request
-   * that got none since the last answer was sent.
-   */
+  /** Records an unanswered request sent at `sentAt`, and returns when the first unanswered request since the last response was sent. */
   readonly unanswered: (sentAt: DateTime.Utc) => Effect.Effect<DateTime.Utc>;
-  /** Records that the Gateway's admin API answered a request, so the next unanswered one starts a new silence. */
+  /** Records a response from the admin API, so the next unanswered request starts a new outage. */
   readonly answered: Effect.Effect<void>;
 }
 
-/** One SSH client of the forward, with the signals between it, the requests, and the next client. */
 interface Generation {
   readonly number: number;
-  /** Settles once the client listens, or fails to. */
+  /** Completes when the client is listening or has failed to listen. */
   readonly opened: Deferred.Deferred<OpenForward, GatewayForwardClosed>;
-  /** Completed by a reopen: ends the client, or the pause after it closed. */
+  /** Completed by `reopen` to end the client or the pause after it. */
   readonly replace: Deferred.Deferred<void>;
-  /** The client that follows, once it starts. */
+  /** The next client, once it starts. */
   readonly next: Deferred.Deferred<Generation>;
 }
 
@@ -88,7 +77,6 @@ type ForwardState =
       readonly closed: GatewayForwardClosed;
     };
 
-/** How one SSH client of the forward ended. */
 type ClientEnd =
   | { readonly _tag: "NotOpened"; readonly reason: string }
   | { readonly _tag: "Exited"; readonly reason: string }
@@ -98,10 +86,9 @@ const notOpened = (reason: string): ClientEnd => ({ _tag: "NotOpened", reason })
 const exited = (reason: string): ClientEnd => ({ _tag: "Exited", reason });
 const REPLACED: ClientEnd = { _tag: "Replaced" };
 
-/** What a TCP listener reports as its address. */
 const ListenerAddress = Schema.Struct({ port: Schema.Int });
 
-/** A port on 127.0.0.1 that the kernel picks among the free ones, released again for the SSH client to listen on. */
+/** Returns a free port on 127.0.0.1 picked by the kernel, released for the SSH client to listen on. */
 const freeLocalPort = Effect.callback<number, Error>((resume) => {
   const server = createServer();
   server.once("error", (cause) => resume(Effect.fail(cause)));
@@ -118,7 +105,7 @@ const freeLocalPort = Effect.callback<number, Error>((resume) => {
   });
 });
 
-/** The SSH client's error output on one line, or its exit code when it printed none. */
+/** Returns the SSH client's stderr on one line, or its exit code if stderr is empty. */
 const complaint = (stderr: string, exitCode: number): string => {
   const lines = stderr
     .split("\n")
@@ -131,12 +118,10 @@ const pauseAfter = (failures: number): number =>
   Math.min(1000 * 2 ** Math.max(failures - 1, 0), MAX_PAUSE_MILLIS);
 
 /**
- * Opens the executor's forward to the admin API at `adminPort` on the
- * Gateway at `gateway`, with the SSH client and environment of `shell`, the
- * ones the executor's other SSH clients use, and keeps it open until the
- * caller's scope closes. Each SSH client listens on a port of 127.0.0.1
- * that the kernel picks, so it never competes with a forward the operator
- * opens.
+ * Opens a forward to the admin API at `adminPort` on `gateway`, using the SSH client and
+ * environment of `shell`, and keeps it open until the caller's scope closes. Each client
+ * listens on a kernel-picked port of 127.0.0.1, so it never conflicts with an operator's
+ * forward.
  */
 export const gatewayForwardFor = Effect.fn("SshExecutor.gatewayForwardFor")(function* (
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
@@ -160,7 +145,7 @@ export const gatewayForwardFor = Effect.fn("SshExecutor.gatewayForwardFor")(func
   const argumentsFor = (port: number) => [
     ...shell.ssh.args,
     "-N",
-    // LocalCommand runs once every listener is up, ExitOnForwardFailure ends a client that cannot listen, and ControlPath=none keeps it off any connection the operator shares.
+    // LocalCommand runs when all listeners are up, ExitOnForwardFailure exits if a listener fails, and ControlPath=none avoids the operator's shared connections.
     "-o",
     "ExitOnForwardFailure=yes",
     "-o",
@@ -249,7 +234,7 @@ export const gatewayForwardFor = Effect.fn("SshExecutor.gatewayForwardFor")(func
               closedSince: DateTime.formatIso(since),
             }),
         });
-        // The state leaves Open before anything else runs, so no request reads a port the client no longer holds.
+        // Sets the state to closed first, so no request uses a port the client no longer listens on.
         const closedNow = (reason: string) =>
           DateTime.now.pipe(
             Effect.flatMap((since) =>
@@ -285,7 +270,7 @@ export const gatewayForwardFor = Effect.fn("SshExecutor.gatewayForwardFor")(func
     );
   });
 
-  // Runs until the caller's scope closes; each SSH client is one named span.
+  // Runs until the caller's scope closes, with one span per SSH client.
   const supervise = Effect.gen(function* () {
     let generation = first;
     let failures = 0;

@@ -27,13 +27,12 @@ import {
 } from "../fixtures.ts";
 
 /*
- * Checks whether Claude Code works when the Worker has only a placeholder
- * subscription token and the gateway swaps in the real one. Run it with
- * `pnpm --filter @usine/gateway test:placeholder-swap`; it needs `claude` on
- * PATH. The stub check runs Claude Code against a local Anthropic stub and
- * records what reached it. The live check also needs a real subscription
- * token from `claude setup-token` in CLAUDE_CODE_OAUTH_TOKEN and is skipped
- * without it.
+ * Checks whether Claude Code works when the Worker has only a placeholder subscription token
+ * and the Gateway swaps in the real one. Run with
+ * `pnpm --filter @usine/gateway test:placeholder-swap`; requires `claude` on PATH. The stub
+ * check runs Claude Code against a local Anthropic stub and records the requests. The live
+ * check also requires a real token from `claude setup-token` in CLAUDE_CODE_OAUTH_TOKEN and
+ * is skipped without it.
  */
 
 const STUB_SUBSCRIPTION_TOKEN = "sk-ant-oat01-stub-subscription-token-for-the-swap-check";
@@ -102,7 +101,7 @@ const JSON_ANSWER = JSON.stringify({
   usage: { input_tokens: 1, output_tokens: 1 },
 });
 
-/** A stand-in for api.anthropic.com that records what each request carried and answers "OK". */
+/** A stand-in for api.anthropic.com that records each request and responds "OK". */
 const anthropicStub = Effect.acquireRelease(
   Effect.callback<{ port: number; seen: Array<Seen>; close: () => void }>((resume) => {
     const seen: Array<Seen> = [];
@@ -153,7 +152,7 @@ const runClaude = (env: Record<string, string>) =>
     child.stdin?.end();
   });
 
-/** Runs Claude Code on a "Worker" whose only Anthropic credential is the gateway's caller token. */
+/** Runs Claude Code on a test Worker whose only Anthropic credential is the Gateway's caller token. */
 const swap = (providers: LlmProviders) =>
   Effect.gen(function* () {
     const { proxy, egress, admin } = yield* GatewayAddresses;

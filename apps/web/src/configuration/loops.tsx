@@ -43,7 +43,7 @@ const LoopState = ({ paused }: { readonly paused: boolean }) => (
   <StatusBadge state={paused ? "paused" : "live"} label={paused ? "Paused" : "Active"} />
 );
 
-/** Pause or Resume for a Loop; absent while operator actions are unavailable, as in setup mode. */
+/** Renders nothing when operator actions are unavailable, as in setup mode. */
 const PauseButton = ({
   loop,
   pause,
@@ -147,8 +147,7 @@ const QuarantinedRow = ({ loop }: { readonly loop: QuarantinedLoopView }) => {
   );
 };
 
-/** Every Loop file: the ones that did not load first, then the loaded ones, each opening its
- * detail. `pause` is null while operator actions are unavailable. */
+/** `pause` is `null` if operator actions are unavailable. */
 export const LoopsList = ({
   configuration,
   pause,
@@ -323,8 +322,7 @@ const LoadedLoop = ({
   );
 };
 
-/** One Loop file in full: its trigger, selector, and prompt as parsed beside its facts, or why it
- * did not load; `name` is the file's name without `.md`. */
+/** `name` is the Loop file name without `.md`. */
 export const LoopDetail = ({
   name,
   configuration,

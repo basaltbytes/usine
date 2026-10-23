@@ -26,7 +26,7 @@ const agent = new Agent({
   persona: AgentPersona.make("Implement the issue carefully."),
 });
 
-/** The environment children must receive instead of the test process's own. */
+/** The environment that children receive instead of the test process's environment. */
 export const workerEnvironment = { PATH: "/usr/bin:/bin", GH_CONFIG_DIR: "/tmp/usine-gh" };
 
 export const attemptRequest = (
@@ -57,13 +57,16 @@ export const attemptRequest = (
     gatewayCredential: Effect.succeedNone,
   });
 
-/** A temporary folder for one test's storage, removed with the scope. */
+/** A temporary folder for one test's storage, removed when the scope closes. */
 export const temporaryDatabase = Effect.acquireRelease(
   Effect.sync(() => mkdtempSync(join(tmpdir(), "usine-durable-"))),
   (directory) => Effect.sync(() => rmSync(directory, { force: true, recursive: true })),
 ).pipe(Effect.map((directory) => join(directory, "durable.sqlite")));
 
-/** Records envelopes like the transcript store: one row per direction and sequence. */
+/**
+ * Returns a sink that records envelopes like the transcript store, one row per direction and
+ * sequence.
+ */
 export const recordingSink = () => {
   const recorded: Array<{
     readonly direction: AttemptChannel.Direction;
@@ -97,7 +100,10 @@ export const recordingSink = () => {
   return { sink, outbound, inbound };
 };
 
-/** Folds the channel law over every outbound envelope and requires one terminal envelope at the end. */
+/**
+ * Asserts that every outbound envelope passes `AttemptChannel.admit` and the final state is
+ * `Terminal`.
+ */
 export const assertAdmitted = (
   attemptId: string,
   envelopes: ReadonlyArray<AttemptChannel.OutboundEnvelope>,
@@ -113,7 +119,10 @@ export const assertAdmitted = (
   assert.strictEqual(progress.state, "Terminal");
 };
 
-/** A readable trace of the relayed payloads: envelope tags, session events with their session role. */
+/**
+ * Returns a readable trace of the relayed payloads: envelope tags, and session events with their
+ * session role.
+ */
 export const trace = (envelopes: ReadonlyArray<AttemptChannel.OutboundEnvelope>) =>
   envelopes.flatMap(({ payload }) => {
     if (payload._tag !== "SessionEvent") return [payload._tag];

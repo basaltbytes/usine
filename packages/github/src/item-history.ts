@@ -9,28 +9,28 @@ import { invalidResponse } from "./http.ts";
 import type { AppSlug } from "./installation.ts";
 import { RepositoryLabel, RepositoryLabelColor, RepositoryLabelName } from "./polling/labels.ts";
 
-/** Caps one timeline walk; more changes than this since `since` fail rather than return part of them. */
+/** The maximum timeline pages per walk; more changes since `since` fail instead of returning partial results. */
 const MAX_TIMELINE_PAGES = 10;
 
-/** The factory's App added a label to the Item; `label` is the label as GitHub defines it now. */
+/** A label the App added to the Item; `label` is its current GitHub definition. */
 export class LabelAdded extends Schema.TaggedClass<LabelAdded>("@usine/github/LabelAdded")(
   "LabelAdded",
   { at: Schema.DateTimeUtc, label: RepositoryLabel },
 ) {}
 
-/** The factory's App removed a label from the Item; `label` is the label as GitHub defines it now. */
+/** A label the App removed from the Item; `label` is its current GitHub definition. */
 export class LabelRemoved extends Schema.TaggedClass<LabelRemoved>("@usine/github/LabelRemoved")(
   "LabelRemoved",
   { at: Schema.DateTimeUtc, label: RepositoryLabel },
 ) {}
 
-/** The factory's App commented on the Item; `url` opens the comment on GitHub. */
+/** A comment the App posted on the Item; `url` links to it. */
 export class Commented extends Schema.TaggedClass<Commented>("@usine/github/Commented")(
   "Commented",
   { at: Schema.DateTimeUtc, url: Schema.NonEmptyString },
 ) {}
 
-/** How a submitted pull request review stands on GitHub. */
+/** The state of a submitted pull request review. */
 export const ReviewState = Schema.Literals([
   "APPROVED",
   "CHANGES_REQUESTED",
@@ -39,14 +39,14 @@ export const ReviewState = Schema.Literals([
 ]);
 export type ReviewState = typeof ReviewState.Type;
 
-/** The factory's App submitted a review of the pull request; `url` opens the review on GitHub. */
+/** A review the App submitted on the pull request; `url` links to it. */
 export class Reviewed extends Schema.TaggedClass<Reviewed>("@usine/github/Reviewed")("Reviewed", {
   at: Schema.DateTimeUtc,
   url: Schema.NonEmptyString,
   state: ReviewState,
 }) {}
 
-/** One change the factory's App made on an issue or pull request, at the time GitHub recorded it. */
+/** A change the App made on an issue or pull request, with GitHub's timestamp. */
 export const ItemChange = Schema.Union([LabelAdded, LabelRemoved, Commented, Reviewed]);
 export type ItemChange = typeof ItemChange.Type;
 
@@ -153,23 +153,22 @@ const appChange = (slug: AppSlug, node: TimelineNode): ReadonlyArray<ItemChange>
       return byApp(node.author) ? [new Commented({ at: node.createdAt, url: node.url })] : [];
     case "PullRequestReview": {
       const state = node.state;
-      // A pending review is a draft only its author sees; it changed nothing on GitHub yet.
+      // A pending review is a draft visible only to its author and hasn't changed anything on GitHub.
       if (!byApp(node.author) || state === "PENDING") return [];
       return [new Reviewed({ at: node.submittedAt ?? node.createdAt, url: node.url, state })];
     }
   }
 };
 
-/** Reads what the factory's GitHub App changed on an Item, from the Item's GitHub timeline. */
+/** The App's changes on an Item, read from the Item's GitHub timeline. */
 export class GitHubItemHistory extends Context.Service<
   GitHubItemHistory,
   {
     /**
-     * The labels the App added or removed, its comments, and its submitted reviews on
-     * one issue or pull request at or after `since`, oldest first. Changes by every
-     * other actor are left out. Labels carry their current GitHub name, color, and
-     * description. Fails with `GitHubItemNotFoundError` when the repository answers
-     * but has no such Item.
+     * Returns the labels the App added or removed, its comments, and its submitted reviews on one
+     * issue or pull request at or after `since`, oldest first. Labels have their current name,
+     * color, and description. Fails with `GitHubItemNotFoundError` if the repository responds but
+     * has no such Item.
      */
     readonly appChanges: (
       repository: RepositoryName,

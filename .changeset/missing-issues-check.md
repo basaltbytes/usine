@@ -2,4 +2,4 @@
 "@usine/github": patch
 ---
 
-`GitHubPolling.missingIssues(repository, numbers)` returns the issue numbers the repository no longer has, asking GitHub in one GraphQL request per 50 numbers.
+Adds `GitHubPolling.missingIssues(repository, numbers)`: the issue numbers GitHub no longer has, 50 per GraphQL request.

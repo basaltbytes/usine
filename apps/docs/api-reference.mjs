@@ -5,10 +5,7 @@ import { documentedPackages, entryPoints, packagesDirectory } from "./typedoc/pa
 
 const output = "reference/api";
 
-/**
- * Generates one page per package and one per public subpath under `reference/api/`, from the
- * declaration files the packages' builds emit.
- */
+/** The starlight-typedoc plugin, which generates one page per package and per public subpath under `reference/api/` from the built declaration files. */
 export const apiReference = starlightTypeDoc({
   entryPoints,
   tsconfig: fileURLToPath(new URL("tsconfig.typedoc.json", import.meta.url)),
@@ -18,7 +15,7 @@ export const apiReference = starlightTypeDoc({
     name: "API",
     displayBasePath: packagesDirectory,
     router: "module",
-    // The router numbers repeated anchors itself, and Astro's heading ids can number differently.
+    // The router numbers repeated anchors, and Astro's heading IDs can number them differently.
     useHTMLAnchors: true,
     entryFileName: "index",
     excludeExternals: true,
@@ -31,10 +28,7 @@ export const apiReference = starlightTypeDoc({
   },
 });
 
-/**
- * One group per package, linking its page and its subpaths' pages. Members are headings on their
- * subpath's page, which keeps the sidebar small: Starlight renders all of it into every page.
- */
+/** The API sidebar, with one group per package and its subpath pages; members are not listed. */
 export const apiSidebarGroup = {
   label: "API",
   collapsed: true,

@@ -6,15 +6,12 @@ import { attempts } from "../database/schema.ts";
 import { WorkerAttempts } from "../run-reader/model.ts";
 import { encodeDateTime } from "./codec.ts";
 
-// Startup reconciliation visits an Attempt until the operator discards its leftovers.
+// Startup reconciliation visits an Attempt until its leftovers are discarded.
 const tracked = isNull(attempts.leftoversDiscardedAt);
-// An Attempt without an outcome is still open: it runs, or its Run has not closed it yet.
+// An Attempt without an outcome is open.
 const open = isNull(attempts.outcomeJson);
 
-/**
- * Counts and discards, per Worker, the Attempts startup reconciliation visits,
- * on the caller's transaction.
- */
+/** Returns the per-Worker leftover queries that run on the caller's transaction. */
 export const leftoverQueries = (database: RunDatabaseClient) => {
   const attemptCountsByWorker = Effect.fn("RunStoreQueries.attemptCountsByWorker")(function* () {
     const rows = yield* database
@@ -31,13 +28,13 @@ export const leftoverQueries = (database: RunDatabaseClient) => {
     return yield* Schema.decodeUnknownEffect(Schema.Array(WorkerAttempts))(rows);
   });
 
-  /** How many tracked Attempts on `worker` are open; 0 for a Worker without any tracked Attempt. */
+  /** Returns the number of open tracked Attempts on `worker`. */
   const openAttempts = Effect.fn("RunStoreQueries.openAttempts")(function* (worker: WorkerName) {
     const counted = yield* attemptCountsByWorker();
     return counted.find((count) => count.worker === worker)?.running ?? 0;
   });
 
-  /** Stops tracking every Attempt on `worker`; returns how many it marked. */
+  /** Stops tracking every Attempt on `worker` and returns the number marked. */
   const discardLeftovers = Effect.fn("RunStoreQueries.discardLeftovers")(function* (
     worker: WorkerName,
     discardedAt: DateTime.Utc,

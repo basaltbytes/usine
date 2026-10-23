@@ -4,26 +4,26 @@ import type { WorkerName } from "@usine/core/worker";
 import type { ExecutorError, WorkerCapability } from "@usine/executor";
 import { Array as Arr, Context, type DateTime, Effect, Layer, Option, Order, Schema } from "effect";
 
-/** A Worker's slots as the scheduler holds them now. */
+/** A Worker's current slot usage in the scheduler. */
 export interface WorkerSlots {
   readonly worker: WorkerName;
-  /** How many Attempts the Worker may run at the same time; zero once a reload removed it. */
+  /** The maximum concurrent Attempts, or zero after a reload removed the Worker. */
   readonly capacity: number;
-  /** How many Attempts hold one of its slots, which can exceed `capacity` after a reload lowered it. */
+  /** The number of Attempts with a slot, which can exceed `capacity` after a reload lowered it. */
   readonly leased: number;
 }
 
-/** A preflight check that found what it verifies ready. */
+/** A passed preflight check. */
 export interface PreflightPassed {
   readonly _tag: "Passed";
   readonly checkedAt: DateTime.Utc;
 }
 
-/** A preflight check that found a prerequisite missing or could not run. */
+/** A preflight check that found a missing prerequisite or couldn't run. */
 export interface PreflightFailed {
   readonly _tag: "Failed";
   readonly checkedAt: DateTime.Utc;
-  /** The missing prerequisite; none when the check itself failed, such as a timed-out probe. */
+  /** The missing prerequisite, or `None` if the check itself failed, such as a timed-out probe. */
   readonly capability: Option.Option<WorkerCapability>;
   /** The executor's summary for operators. */
   readonly message: string;
@@ -39,12 +39,12 @@ export interface HarnessPreflight {
 }
 
 /**
- * The last preflight of a Worker: its own prerequisites (its machine, Git,
- * memory, Gateway, and credentials), and each harness it was checked with.
+ * The last preflight of a Worker: its own prerequisites (machine, Git, memory, Gateway, and
+ * credentials) and each checked harness.
  */
 export interface WorkerPreflight {
   readonly worker: WorkerName;
-  /** None until a preflight decided the Worker's own prerequisites. */
+  /** `None` until a preflight checked the Worker's own prerequisites. */
   readonly prerequisites: Option.Option<PreflightCheck>;
   /** In harness name order. */
   readonly harnesses: ReadonlyArray<HarnessPreflight>;
@@ -68,13 +68,8 @@ const withHarnesses = (
   );
 
 /**
- * `previous` after one preflight of `brains` that ended at `checkedAt`,
- * passed when `failure` is none. A passed preflight passes the Worker's own
- * prerequisites and every harness of `brains`. A harness that reported itself
- * unavailable fails, and each harness checked before it passes; the Worker's
- * own record stays as it was, because an exe.dev Worker checks its GitHub
- * integration after its harnesses. Any other failure fails the Worker's own
- * prerequisites and leaves its harnesses as they were.
+ * Returns `previous` updated with one preflight of `brains`. An unavailable harness fails that
+ * harness and passes the ones checked before it; any other `failure` fails only the prerequisites.
  */
 export const recordPreflight = (
   previous: WorkerPreflight,
@@ -117,35 +112,30 @@ export const recordPreflight = (
   };
 };
 
-/** A Worker no preflight has checked yet. */
+/** Returns the preflight record of a Worker that no preflight has checked. */
 export const unchecked = (worker: WorkerName): WorkerPreflight => ({
   worker,
   prerequisites: Option.none(),
   harnesses: [],
 });
 
-/**
- * What the scheduler knows of its Workers now: the slots each one holds and
- * the last preflight of each, so the operator can see capacity and readiness
- * without reading the logs.
- */
+/** The scheduler's current slot usage and last preflight of each Worker. */
 export class WorkerStatus extends Context.Service<
   WorkerStatus,
   {
     /**
-     * The slots of each Worker that runs Attempts, in `usine.yaml` order, then
-     * of each Worker a reload removed, until its last Attempt ends.
+     * The slots of each Worker in `usine.yaml` order, then of each removed Worker until its last
+     * Attempt ends.
      */
     readonly slots: Effect.Effect<ReadonlyArray<WorkerSlots>>;
     /**
-     * The last preflight of each Worker checked since startup: the startup
-     * preflight, then each preflight of a reload that adds Workers, slots, or
-     * brains, including a refused reload's.
+     * The last preflight of each Worker checked since startup, including a refused reload's
+     * preflight.
      */
     readonly preflights: Effect.Effect<ReadonlyArray<WorkerPreflight>>;
   }
 >()("@usine/orchestrator/WorkerStatus") {
-  /** No Worker runs Attempts and none was preflighted, as in setup mode. */
+  /** A status with no Workers and no preflights, as in setup mode. */
   static readonly idle = Layer.succeed(WorkerStatus)({
     slots: Effect.succeed([]),
     preflights: Effect.succeed([]),

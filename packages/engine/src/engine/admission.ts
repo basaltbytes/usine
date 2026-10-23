@@ -2,11 +2,11 @@ import type { RunId } from "@usine/core/run";
 import { Context, Deferred, Effect, Layer, Option, Ref } from "effect";
 import { RunEngineShutdown } from "./shutdown.ts";
 
-/** Process-local Attempt admission. Durable Runs stay recoverable when admission closes (ADR 0023). */
+/** The process-local gate for starting Attempts; closing it leaves durable Runs recoverable (ADR 0023). */
 export class AttemptAdmission extends Context.Service<
   AttemptAdmission,
   {
-    /** Admits and brackets one Attempt through outcome persistence; denied work waits for runtime teardown. */
+    /** Runs `attempt` and tracks it until its outcome is persisted. If admission is closed, waits for runtime teardown. */
     readonly withAttempt: <A, E, R>(
       runId: RunId,
       attempt: Effect.Effect<A, E, R>,
@@ -26,8 +26,8 @@ export class AttemptAdmission extends Context.Service<
 
       const enter = Effect.fn("AttemptAdmission.enter")(function* (runId: RunId) {
         yield* Effect.annotateCurrentSpan({ runId });
-        // The host completes the same latch synchronously on a signal. This
-        // read and the active-set update are one atomic Ref.modify callback.
+        // The host completes the latch synchronously on a signal, so the check and the set update
+        // are in one atomic `Ref.modify`.
         const admitted = yield* Ref.modify(active, (current) =>
           Deferred.isDoneUnsafe(shutdown)
             ? ([false, current] as const)

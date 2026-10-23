@@ -12,7 +12,7 @@ import type { Stream } from "./trigger.ts";
 
 const reference = Schema.decodeUnknownSync(TypeReference);
 
-/** Mark a field `nullable` where the GitHub payload slice can hold `null` for it or omit it. */
+/** A field name, its CEL type, and `nullable` if the GitHub payload can have `null` for the field or omit it. */
 type FieldDeclaration = readonly [name: string, type: string, nullability?: "nullable"];
 
 const objectType = (name: string, fields: ReadonlyArray<FieldDeclaration>): ObjectType =>
@@ -187,7 +187,7 @@ const environment = (types: ReadonlyArray<ObjectType>, itemType: string): Enviro
     ],
   });
 
-/** The CEL environment for issue triggers: the `item` type mirrors the issue payload slice. */
+/** The CEL environment for issue triggers, with the issue payload slice as `item`. */
 export const issueEnvironment = environment(
   [
     actor,
@@ -205,7 +205,7 @@ export const issueEnvironment = environment(
   "IssuePayload",
 );
 
-/** The CEL environment for pull-request triggers: the `item` type mirrors the pull-request payload slice. */
+/** The CEL environment for pull-request triggers, with the pull-request payload slice as `item`. */
 export const pullRequestEnvironment = environment(
   [
     actor,
@@ -231,7 +231,7 @@ export const pullRequestEnvironment = environment(
   "PullRequestPayload",
 );
 
-/** The CEL environment for schedule triggers: `item.tick` has `scheduledAt`, `scheduledAtLocal`, `cron`, and `tz`. */
+/** The CEL environment for schedule triggers; `item.tick` has `scheduledAt`, `scheduledAtLocal`, `cron`, and `tz`. */
 export const scheduleEnvironment = environment([tick, schedule], "SchedulePayload");
 
 export const environmentFor = (stream: Stream): Environment => {
@@ -245,10 +245,7 @@ export const environmentFor = (stream: Stream): Environment => {
   }
 };
 
-/**
- * The value of the CEL `repo` variable. A field added here must also be added
- * to the `RepoContext` type, and the reverse.
- */
+/** Returns the value of the CEL `repo` variable; its fields must match the `RepoContext` type. */
 export const repositoryContext = (repository: ManagedRepo): Schema.JsonObject => {
   const { owner } = splitRepositoryName(repository.name);
   return {

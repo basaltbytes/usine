@@ -6,7 +6,7 @@ import { useEffect } from "react";
 import { api } from "../api.ts";
 import { overviewQuery } from "../overview.ts";
 
-/** A card whose label write is still being saved or observed on the Board. */
+/** A card whose label change is still saving or not yet shown on the Board. */
 export interface BoardMoveProgress {
   readonly itemKey: ItemKey;
   readonly toLane: BoardLaneView["id"];
@@ -20,8 +20,8 @@ interface TrackedMove extends BoardMoveProgress {
 
 const moveKey = (repository: RepositoryName) => ["board-moves", repository] as const;
 
-// A newer routing change may already have advanced past the drop destination.
-// Unrelated label changes and Run updates must not undo the accepted move.
+// A move ends once the Item's state or lane labels differ from the source, even if they no longer
+// match the drop lane; other labels and Run updates are ignored.
 const stillSyncing = (move: TrackedMove, lanes: ReadonlyArray<BoardLaneView>): boolean => {
   if (move.phase === "saving") return true;
   const current = lanes
@@ -35,11 +35,10 @@ const stillSyncing = (move: TrackedMove, lanes: ReadonlyArray<BoardLaneView>): b
   );
 };
 
-/** Keeps a Project's accepted moves visible until authoritative routing state changes. */
+/** Tracks the Project's accepted moves until the Item's routing state on the Board changes. */
 export const useBoardMoves = (project: ProjectView) => {
   const queryClient = useQueryClient();
-  // The query cache outlives routes. A GitHub backoff must not discard an
-  // accepted move merely because its Project is closed and opened again.
+  // The query cache outlives routes, so moves are kept if the Project reopens during a backoff.
   const { data: pendingMoves = [] } = useQuery<ReadonlyArray<TrackedMove>>({
     queryKey: moveKey(project.repository),
     queryFn: skipToken,
@@ -56,8 +55,7 @@ export const useBoardMoves = (project: ProjectView) => {
   const moves: ReadonlyArray<BoardMoveProgress> = pendingMoves.filter((move) =>
     stillSyncing(move, project.board.lanes),
   );
-  // A first move has no open Run yet, so the overview's idle cadence would
-  // otherwise delay both confirmation and the approval prompt after the Hint.
+  // A first move has no open Run, so the idle interval would delay confirmation and approval.
   useQuery({ ...overviewQuery(), enabled: moves.length > 0, refetchInterval: 1_000 });
   useEffect(() => {
     queryClient.setQueryData<ReadonlyArray<TrackedMove>>(moveKey(project.repository), (current) => {
@@ -85,8 +83,8 @@ export const useBoardMoves = (project: ProjectView) => {
         }),
       );
     },
-    // Bind callbacks to the request's repository: route navigation can replace
-    // the observer's current options while the request is still in flight.
+    // Callbacks use the request's repository because navigation can replace the observer's options
+    // while the request is in flight.
     onSuccess: (_, { repository, itemKey }) => {
       updateMoves(repository, (moves) =>
         moves.map((move) => (move.itemKey === itemKey ? { ...move, phase: "syncing" } : move)),

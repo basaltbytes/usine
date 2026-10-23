@@ -39,7 +39,7 @@ const decodeToolResult = Schema.decodeUnknownOption(ToolResultMessage);
 const isTextBlock = Schema.is(TextBlock);
 const isToolCallBlock = Schema.is(ToolCallBlock);
 
-/** The trimmed text of an assistant entry, when it has any. */
+/** Returns the trimmed text of an assistant entry, or `None` if it has no text. */
 export const assistantText = (entry: EntryRecord): Option.Option<string> =>
   Option.flatMap(decodeAssistant(entry.model?.[0]), (message) => {
     const text = message.content
@@ -51,10 +51,8 @@ export const assistantText = (entry: EntryRecord): Option.Option<string> =>
   });
 
 /**
- * The session events one committed parent entry stands for, in the order the
- * Pi SDK emitted them: an assistant entry's text, then one start per tool
- * call; a tool result's output. Other entries (user input, prompt changes,
- * compaction summaries) are not session events.
+ * Returns the session events for one committed parent entry, in Pi SDK emission order. User input,
+ * prompt changes, and compaction summaries produce no events.
  */
 export const entryEvents = (
   entry: EntryRecord,
@@ -119,16 +117,15 @@ const UsageLedger = Schema.Struct({
 });
 const decodeUsage = Schema.decodeUnknownOption(UsageLedger);
 
-/** A conversation's `TokenCount` and the dollars Pi priced it at, none when no model was priced. */
+/** A conversation's token count and cost. `costUsd` is `None` if no model was priced. */
 interface LedgerUsage {
   readonly totalTokens: TokenCount;
   readonly costUsd: Option.Option<UsdAmount>;
 }
 
 /**
- * A conversation's consumption from its `pi.usage` ledger: output plus uncached
- * input, where a cache write is new context and a cache read is not, summed
- * over every model it called, with the dollar totals Pi recorded for them.
+ * Sums a conversation's `pi.usage` ledger over every model. Tokens are output plus uncached input,
+ * where cache writes count and cache reads don't.
  */
 export const ledgerUsage = (usage: Readonly<UsageState> | undefined): LedgerUsage => {
   const models = Option.match(decodeUsage(usage), {

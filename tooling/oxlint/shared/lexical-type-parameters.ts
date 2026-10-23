@@ -28,7 +28,7 @@ function collectInferTypeParameterNames(
   }
 }
 
-/** Collect type binders that are in scope at a node and can shadow module aliases. */
+/** Returns the type parameter names declared by `node` and its enclosing nodes, which can shadow module-level type aliases. */
 export function lexicalTypeParameterNames(
   node: ESTree.Node,
   visitorKeys: VisitorKeys,

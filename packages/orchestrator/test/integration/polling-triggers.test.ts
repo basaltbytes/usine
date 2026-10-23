@@ -270,8 +270,8 @@ describe("live GitHub polling", () => {
                   Effect.gen(function* () {
                     const afterRestart = yield* polling.poll(instance);
                     const restartedRun = runIdFrom(afterRestart.submissions);
-                    // The same holds across a restart: the durable ledger, not
-                    // the lost in-memory state, prevents a second run.
+                    // The same applies across a restart: the durable ledger, not the lost in-memory
+                    // state, prevents a second Run.
                     assert(
                       Option.isNone(restartedRun) || restartedRun.value === first.runId,
                       "a restart must not open a second run for the same state",

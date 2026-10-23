@@ -117,7 +117,7 @@ const completed = (
     ),
   ];
 };
-// Summarizes every call, delegations included, as one burst would.
+// Summarizes all calls, delegations included, as a single burst.
 const summary = (events: ReadonlyArray<TranscriptEventView>) => {
   const [first, ...rest] = projectTranscript(events, [])
     .sessions.flatMap(({ entries }) => entries)
@@ -139,7 +139,7 @@ it("folds the calls between two messages into one line that says what ran", () =
   ];
   const html = render(events);
 
-  // This one exact example verifies the compact separator and sentence casing.
+  // The only exact-string check, for the separator and sentence casing.
   assert.include(html, "Edited conversation.tsx · ran tests");
   assert.notMatch(summary(events), /\b(?:passed|succeeded|successful)\b/iu);
   assert.include(html, "2 tool calls");

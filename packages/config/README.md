@@ -1,15 +1,16 @@
 # @usine/config
 
-Reads and edits the authored files in a [usine](https://github.com/basaltbytes/usine) instance folder:
+Reads and edits the files of a [usine](https://github.com/basaltbytes/usine) instance folder. The [`usine.yaml`](https://docs.usine.dev/reference/configuration/usine-yaml/), [loop file](https://docs.usine.dev/reference/configuration/loop-files/), and [agent file](https://docs.usine.dev/reference/configuration/agent-files/) references describe every key.
 
-- `usine.yaml` defines the schema version, factory-wide GitHub labels, managed-repo registry, settings, workers, webhook mode, and operator login.
-- `loops/*.md` combines strict YAML frontmatter with a Markdown prompt. The parser type-checks the trigger and every `{{ CEL expression }}` against that trigger's payload.
-- `agents/*.md` records a named agent's harness, model, effort, optional parent model, optional parent effort, and persona.
-- `updateYaml` and `updateFrontmatter` change one path through the YAML document tree while retaining comments, key order, and the Markdown body.
+- `usine.yaml`: schema version, factory-wide GitHub labels, the managed-repo registry, settings, workers, webhook mode, and operator login.
+- `loops/*.md`: strict YAML frontmatter and a Markdown prompt. The parser type-checks the trigger and every `{{ CEL expression }}` against the trigger's payload.
+- `agents/*.md`: harness, model, effort, optional parent model and parent effort, and persona.
 
-Authored keys are snake_case (`poll_interval`, `max_concurrent_attempts`); the decoded domain types expose camelCase fields (`pollInterval`, `maxConcurrentAttempts`). The rename is part of the schema, so edits encode back to the authored casing.
+`updateYaml` and `updateFrontmatter` change one path in the YAML tree and keep comments, key order, and the Markdown body. Files use snake_case keys (`poll_interval`, `max_concurrent_attempts`); decoded types use camelCase (`pollInterval`, `maxConcurrentAttempts`). The schema does the rename, so edits keep snake_case.
 
-Declare the GitHub labels used by Loops and Board lanes once. Usine provisions missing declarations in every managed repository; existing definitions are never edited or deleted. `color` is an optional six-digit hexadecimal value without `#`:
+## Labels and lanes
+
+Declare the labels that loops and lanes use once. usine creates missing labels in every managed repo and never edits or deletes labels:
 
 ```yaml
 labels:
@@ -19,11 +20,9 @@ labels:
   - name: ready-for-review
 ```
 
-Label names follow GitHub's contract: at most 50 characters, no surrounding whitespace, and unique without regard to case; descriptions are at most 100 characters. A lane source or trigger-expression string literal that refers to an undeclared label becomes a non-blocking entry in `LoadedInstance.warnings`; prose in prompt bodies is not inspected.
+An undeclared label in a lane source or a trigger expression string literal adds a non-blocking entry to `LoadedInstance.warnings`. Prompt prose isn't checked.
 
-Set `settings.max_children` to the number of child sessions one Attempt may spawn. The default is 4, and the count includes sequential and concurrent child sessions.
-
-Each managed repository can define an exclusive Board lane map. A lane accepts one or more GitHub label or Item-state sources:
+Each managed repo can define an exclusive board lane map of label and item state sources:
 
 ```yaml
 repos:
@@ -38,16 +37,29 @@ repos:
           - state: pr-open
 ```
 
-Valid state sources are `issue-open`, `issue-closed`, `pr-open`, `pr-closed`, and `pr-merged`. `issue-closed`, `pr-closed`, and `pr-merged` are settled states, as `isSettledItemState` reports: the Board places a closed issue or a closed or merged pull request by its state alone, whatever labels it still carries. Lane names and sources must be unique within the repository. Repositories without an authored map receive proposed lanes from the labels observed during GitHub polling.
+`isSettledItemState` reports the settled states, `issue-closed`, `pr-closed`, and `pr-merged`; the board places such an item by state alone, whatever its labels. A repo without a lane map gets proposed lanes from the labels that polling finds.
 
-`workers` must contain at least one uniquely named worker. If the key is absent, the parser supplies one local worker named `local` with a concurrency limit of one. Set `kind` to `local` or `exe.dev` to select its executor, and set `max_concurrent_attempts` to control how many Attempts it can run at once.
+## Settings and workers
 
-`InstanceFolder.load` takes an `InstanceDirectory` (from `@usine/core/instance`) and returns one atomic `LoadedInstance` snapshot. An invalid `usine.yaml` fails the load with a `FactoryConfigError`; an invalid loop enters `quarantinedLoops` with a `ConfigFileError` naming the file and stage, without blocking valid siblings. Invalid agents appear in `invalidAgents`, and loops that name them are quarantined. A `LoadedInstance` always satisfies its own reference rule: every loaded loop names a rostered agent and registered selector entries, enforced at construction. Non-blocking authored-reference diagnostics appear in `warnings`. The `ConfigError` union covers both failure types.
+`settings.max_children` (default 4) limits the child sessions, sequential and concurrent, that one attempt can start. Without a `workers` key, the parser adds a local worker named `local` that runs one attempt at a time. A worker's `kind` (`local`, `exe.dev`, or `ssh`) selects its executor.
 
-Import factory settings and registry types from `@usine/config/factory`, Board lanes from `@usine/config/board`, and label declarations from `@usine/config/label`. Authored loop, trigger, and agent schemas are available at `/loop`, `/trigger`, and `/agent`; `/selector` provides both the selector schema and matching operation. `/instance` provides `LoadedInstance` and its warnings, while `/file` provides file paths and typed loading failures. Shared identities and agent personas come from their owning `@usine/core` modules.
+Issue and pull request loops accept `max_cycles`, a positive integer (default 3): the number of runs each loop can open on an item between operator resets. The first admission past it blocks runs from every loop on the item. Schedule loops are exempt. See [Write review and fix loops](https://docs.usine.dev/guides/review-fix-loops/).
 
-The package exports Effect services and layers. Import `InstanceFolder` from `@usine/config/instance-folder` and `ConfigParser` from `@usine/config/parser`. Supply `FileSystem.FileSystem` and `Path.Path` implementations when composing `InstanceFolder.layer`; `ConfigParser.layer` requires `ExpressionEngine` from `@usine/expression/expression-engine`.
+## Load an instance
 
-All APIs remain 0.x and can change between minor releases.
+`InstanceFolder.load` takes an `InstanceDirectory` (`@usine/core/instance`) and returns one atomic `LoadedInstance` snapshot:
 
-Issue and pull-request Loops accept `max_cycles`, a positive integer defaulting to three. Each Loop may open that many Runs on an Item between operator resets. The first excess admission blocks further Runs from every Loop on the Item. Schedule Loops are exempt. See the [review/fix guide](../../apps/docs/src/content/docs/guides/review-fix-loops.md) for authored examples.
+- An invalid `usine.yaml` fails the load with `FactoryConfigError`.
+- An invalid loop goes to `quarantinedLoops` with a `ConfigFileError` naming the file and stage. Valid loops still load.
+- Invalid agents go to `invalidAgents`, and loops that use them are quarantined.
+- Non-blocking reference diagnostics go to `warnings`.
+
+`ConfigError` is the union of both errors. The `LoadedInstance` constructor enforces that every loop references a rostered agent and registered selector entries.
+
+## Imports
+
+Subpaths: `/factory` (settings and registry), `/board` (lanes), `/label`, `/loop`, `/trigger`, `/agent`, `/selector` (schema and matching), `/instance` (`LoadedInstance` and warnings), and `/file` (file paths and loading failures). Shared identities and agent personas come from `@usine/core`.
+
+`InstanceFolder` (`/instance-folder`) and `ConfigParser` (`/parser`) are Effect services. `InstanceFolder.layer` needs `FileSystem.FileSystem` and `Path.Path`; `ConfigParser.layer` needs `ExpressionEngine` from `@usine/expression/expression-engine`.
+
+The 0.x APIs can change between minor releases.

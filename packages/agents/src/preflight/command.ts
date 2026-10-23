@@ -6,16 +6,16 @@ import type { ChildHost } from "../child-host/child-host.ts";
 import { hostCommand } from "../child-host/command.ts";
 import { SessionOperationError } from "../runtime.ts";
 
-/** OpenSSH exits with 255 when it cannot reach the remote machine or run the command there. */
+/** The exit code OpenSSH returns if it cannot connect or run the remote command. */
 const SSH_FAILURE = 255;
 
-/** What a readiness command printed on stdout, trimmed, and the code it exited with. */
+/** The trimmed stdout and exit code of a readiness command. */
 interface ProbeOutput {
   readonly stdout: string;
   readonly exitCode: number;
 }
 
-/** The refusal for a readiness command that exited non-zero; it names the command and none of its output. */
+/** Returns the error for a readiness command that exited non-zero; the message includes the command but not its output. */
 export const probeFailed = (
   harness: Harness,
   capability: HarnessCapability,
@@ -29,10 +29,9 @@ export const probeFailed = (
   });
 
 /**
- * Runs a bounded readiness command on `host` and returns its output and exit
- * code, without retaining its potentially sensitive diagnostics. An
- * unreachable remote host or a timeout fails the check as incomplete, not as
- * a missing harness.
+ * Runs a readiness command on `host` with a 30-second timeout and returns its trimmed stdout and
+ * exit code; stderr is discarded. If the remote host is unreachable or the command times out, fails
+ * with `SessionOperationError`.
  */
 export const probeOutput = Effect.fn("HarnessPreflight.command")(function* (
   host: ChildHost,
@@ -90,7 +89,7 @@ export const probeOutput = Effect.fn("HarnessPreflight.command")(function* (
   );
 });
 
-/** Runs a readiness command as `probeOutput` does and returns its stdout, refusing the harness when it exits non-zero. */
+/** Runs a readiness command and returns its trimmed stdout. Fails with `HarnessUnavailableError` if the command exits non-zero. */
 export const probeCommand = (
   host: ChildHost,
   environment: Readonly<Record<string, string>>,

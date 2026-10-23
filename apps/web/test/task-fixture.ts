@@ -138,7 +138,7 @@ const conflicting = item(
   true,
 );
 
-/** Issue #40 with a merged and an open, conflicting pull request, and a Run of every outcome. */
+/** Returns issue #40 with a merged pull request, an open conflicting pull request, and a Run of every outcome. */
 export const fullTask = () =>
   new TaskView({
     repository: taskRepository,
@@ -259,7 +259,7 @@ export const fullTask = () =>
 
 const quiet = item(12, "issue", "Document the cycle budget reset", "issue-open", ["backlog"]);
 
-/** Issue #12 alone in the Backlog: no Run, no pull request, nothing posted. */
+/** Returns issue #12 in the Backlog with no Run, pull request, or comment. */
 export const quietTask = () =>
   new TaskView({
     repository: taskRepository,
@@ -310,7 +310,7 @@ const writable = (name: string, label: string, tasks: ReadonlyArray<TaskView>) =
     items: tasks.map(card),
   });
 
-/** The overview whose Board places both Tasks, with Ready as another lane a move can target. */
+/** Returns an overview whose Board has both Tasks, plus a Ready lane as a move target. */
 export const taskOverview = () =>
   new ReadyOverview({
     loops: [],

@@ -4,15 +4,12 @@ import { api } from "../api.ts";
 
 const CONFIGURATION_REFRESH_MS = 5_000;
 
-/** The instance folder as the orchestrator parsed it, with its runtime state; every Configuration
- * page reads it. Slots and preflights change while Attempts run, so it refreshes on its own. */
 export const configurationQuery = () => ({
   queryKey: ["configuration"] as const,
   queryFn: () => api((client) => client.configuration()),
   refetchInterval: CONFIGURATION_REFRESH_MS,
 });
 
-/** Pauses or resumes a Loop, then refreshes the configuration and the overview that both show it. */
 export const usePauseLoop = () => {
   const queryClient = useQueryClient();
   return useMutation({

@@ -5,6 +5,6 @@
 "@usine/server": patch
 ---
 
-Attempts record when they end: `Attempt.endedAt` in `@usine/core`, a migration adding `ended_at` to `usine_attempts`, and `AttemptView.endedAt` in `@usine/orchestrator/operator`. Attempts that ended before this change have none.
+Adds attempt end times: `Attempt.endedAt` in `@usine/core`, an `ended_at` column in `usine_attempts`, and `AttemptView.endedAt` in `@usine/orchestrator/operator`. Attempts that ended before this change have no end time.
 
-The Board shows the labels and Item states of each lane under its name, labels in their GitHub colors. A card shows a Run only while the Run is open or failed and not yet resolved. Its time counts from when the Run opened while it is `Waiting` or `Queued`, from when its current Attempt started while it is `Running`, and from the failure once it is `Failed`, and its tooltip gives the full timestamp. The card menu lists only the actions that apply to the card.
+The board shows each lane's labels, in their GitHub colors, and item states under its name. A card shows a run only while the run is open or failed and unresolved, with the time since the run opened, its current attempt started, or it failed, and the card menu lists only the actions that apply.

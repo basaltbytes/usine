@@ -26,9 +26,8 @@ import { GatewaySettings, gatewayHosts, SettingsInForce } from "../settings.ts";
 import { endToEndHeaders, forwardRequest } from "./forward.ts";
 
 /**
- * Why the gateway refused a request. Every refusal is logged at warning
- * level with this reason, the host, and the Worker when the caller token
- * names one, and the response carries it in `x-usine-gateway-refusal`.
+ * The reason the Gateway refused a request. Each refusal is logged at warning level with the
+ * reason, host, and Worker (if known), and returned in `x-usine-gateway-refusal`.
  */
 export const RefusalReason = Schema.Literals([
   "unknown-host",
@@ -42,7 +41,7 @@ export const RefusalReason = Schema.Literals([
 ]);
 export type RefusalReason = typeof RefusalReason.Type;
 
-/** The header a refused response names its reason in. */
+/** The response header that contains the refusal reason. */
 export const REFUSAL_HEADER = "x-usine-gateway-refusal";
 
 const REFUSAL_STATUS = {
@@ -56,29 +55,29 @@ const REFUSAL_STATUS = {
   "provider-not-configured": 503,
 } as const satisfies Record<RefusalReason, number>;
 
-/** A refusal, with the caller's claims once its token has been verified. */
+/** A refusal, with the caller's claims once its token is verified. */
 class Refused extends Data.TaggedError("Refused")<{
   readonly reason: RefusalReason;
   readonly message: string;
   readonly caller: Option.Option<CallerClaims>;
 }> {}
 
-/** A refusal before the caller token was verified. */
+/** Returns a refusal for a request whose caller token isn't verified yet. */
 const refused = (reason: RefusalReason, message: string) =>
   new Refused({ reason, message, caller: Option.none() });
 
-/** A refusal of a verified caller. */
+/** Returns a refusal for a verified caller. */
 const refusedCaller = (claims: CallerClaims, reason: RefusalReason, message: string) =>
   new Refused({ reason, message, caller: Option.some(claims) });
 
-/** Where a request is going: the host it named, without a port, and its path and query. */
+/** A request's host without its port, and its path and query. */
 interface RequestTarget {
   readonly host: string;
   readonly pathname: string;
   readonly search: string;
 }
 
-/** Reads the target from an origin-form request and its `Host`, or from an absolute-form request URL. */
+/** Returns the target from an origin-form request and its `Host`, or from an absolute-form URL. */
 const requestTarget = (
   request: HttpServerRequest.HttpServerRequest,
 ): Option.Option<RequestTarget> => {
@@ -96,16 +95,15 @@ const requestTarget = (
 };
 
 /**
- * The reverse proxy Worker VMs reach on the private network. `git.<domain>`
- * serves GitHub with the attached installation token and `llm.<domain>`
- * serves the LLM providers with the gateway's API keys in force; every
- * request presents a caller token whose attachment is in force. Any other
- * host is refused: the forward proxy serves the allowlisted ones.
+ * The reverse proxy for Worker VMs on the private network. `git.<domain>` serves GitHub with
+ * the attached installation token, and `llm.<domain>` serves the LLM providers with the
+ * current credentials. Every request must have a caller token for an active attachment; other
+ * hosts are refused.
  */
 export class GatewayProxy extends Context.Service<
   GatewayProxy,
   {
-    /** Forwards one Worker request with the attached credential, or refuses it and logs why. */
+    /** Forwards one Worker request with the attached credential, or refuses and logs it. */
     readonly handle: Effect.Effect<
       HttpServerResponse.HttpServerResponse,
       never,

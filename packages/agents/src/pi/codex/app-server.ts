@@ -18,18 +18,17 @@ import { type ChildHost, childPidFile } from "../../child-host/child-host.ts";
 import { hostCommand } from "../../child-host/command.ts";
 import { type WorkingDirectory, SessionOperationError } from "../../runtime.ts";
 
-/** Worker directory and optional session identity for a scoped app-server connection. */
+/** The settings of one app-server connection. */
 export interface CodexClient {
-  /** The checkout, on the machine `host` names. */
+  /** The checkout directory on `host`. */
   readonly cwd: WorkingDirectory;
-  /** None during preflight, before a child Session exists. */
+  /** `None` during preflight, before a child session exists. */
   readonly sessionId: Option.Option<AgentSessionId>;
   /**
-   * The complete environment of the app server and every command it runs on
-   * this machine, or the variables exported on a remote host's own environment.
+   * The complete environment of the app server and its commands on a local host, or the variables
+   * exported on top of a remote host's environment.
    */
   readonly environment: Readonly<Record<string, string>>;
-  /** Where the app server runs. */
   readonly host: ChildHost;
 }
 
@@ -38,9 +37,9 @@ export interface CodexNotification {
   readonly params: Schema.Json;
 }
 
-/** One JSON-RPC connection to the app server, scoped to its process. */
+/** A JSON-RPC connection to the app server, scoped to its process. */
 export interface CodexConnection {
-  /** Closes stdin and waits for the app server to release its threads and commands. */
+  /** Closes stdin and waits for the app server to shut down its threads and commands. */
   readonly close: Effect.Effect<void, SessionOperationError>;
   readonly notifications: Stream.Stream<CodexNotification, SessionOperationError>;
   readonly request: (
@@ -55,7 +54,7 @@ export interface CodexConnection {
   ) => Effect.Effect<void, SessionOperationError>;
 }
 
-/** Spawns the Codex app-server process and exposes its JSON-RPC connection. */
+/** The service that spawns the Codex app-server process and provides its JSON-RPC connection. */
 export class CodexAppServer extends Context.Service<
   CodexAppServer,
   {
@@ -113,19 +112,16 @@ const repositoryTrustOverride = (cwd: string): string =>
 const disableRecursiveAgentsOverride = "features.multi_agent=false";
 
 /**
- * The app-server process for `client`, on the machine its host names. It
- * starts in the home directory, outside the worktree it receives through its
- * thread parameters, so process startup cannot read repository-owned config
- * before thread trust is set.
+ * Returns the app-server command for `client` on its host. The process starts in the home directory,
+ * not the worktree, so startup cannot read repository config before thread trust is set.
  */
 export const codexAppServerCommand = (
   client: CodexClient,
   stdin?: ChildProcess.CommandOptions["stdin"],
 ): ChildProcess.Command => {
   const lifetime: ChildProcess.CommandOptions = {
-    // Stay in the launching process's group so its hard kill reaps the app
-    // server too; the bounded SIGTERM window is the grace-then-force stop
-    // (ADR 0006).
+    // Not detached, so killing the launching process group also kills the app server; SIGTERM is
+    // followed by SIGKILL after 5 seconds (ADR 0006).
     detached: false,
     forceKillAfter: "5 seconds",
   };
@@ -213,9 +209,8 @@ const makeCodexAppServer = Effect.gen(function* () {
         yield* Queue.fail(notifications, error);
       });
 
-      // One effect per stdout line, without a span: a line is not an
-      // operation. Unrecognized input is logged and skipped so a stray frame
-      // cannot fail the session and trigger an infra retry (ADR 0002).
+      // Handles one stdout line, without a span. Unrecognized input is logged and skipped, so a
+      // stray frame does not fail the session and cause an infra retry (ADR 0002).
       const routeLine = (line: string) =>
         Effect.gen(function* () {
           if (line.trim().length === 0) return;
@@ -291,8 +286,8 @@ const makeCodexAppServer = Effect.gen(function* () {
               closed
                 ? Effect.void
                 : handle.exitCode.pipe(
-                    // On process exit, its monitor owns the richer diagnostic.
-                    // A live process that closes stdout still fails promptly.
+                    // If the process exits within 5 seconds, its exit monitor reports the error;
+                    // otherwise a running process that closed stdout fails here.
                     Effect.timeout("5 seconds"),
                     Effect.matchEffect({
                       onSuccess: () => Effect.void,
@@ -363,9 +358,9 @@ const makeCodexAppServer = Effect.gen(function* () {
         ),
         Effect.forkScoped,
       );
-      // Stdio EOF runs Codex's thread shutdown, including background commands.
-      // SIGTERM bypasses that cleanup in stdio mode. Share one bounded shutdown
-      // across terminal delivery and scope release, even if the caller is canceled.
+      // Closing stdin runs Codex's thread shutdown, including background commands; SIGTERM skips it
+      // in stdio mode. One bounded shutdown is shared by terminal delivery and scope release, and
+      // it runs even if the caller is interrupted.
       const rejectPending = (cause: unknown) =>
         Effect.gen(function* () {
           const waiting = yield* Ref.getAndSet(pending, new Map());

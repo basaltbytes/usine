@@ -8,12 +8,11 @@ const isQuestion = (run: RunView): boolean => {
   return outcome?._tag === "Failed" && outcome.failure._tag === "QuestionFailure";
 };
 
-/** Whether the stall fragment starts with its Loop, as `review paused` does, so no Loop name
- * goes before it. */
+/** Returns whether the stall fragment already starts with the Loop name, as `review paused` does, so callers do not prefix it. */
 export const stallNamesLoop = ({ reason }: StalledItemView): boolean =>
   reason._tag === "LoopPaused";
 
-/** Why a matched Item is stalled, as one short fragment. The overview page and the Board both show it. */
+/** Returns a short fragment that states why a matched Item is stalled. */
 export const stallSentence = ({ loop, reason }: StalledItemView, now: number): string =>
   Match.valueTags(reason, {
     AwaitingApproval: () => "Waiting for approval",

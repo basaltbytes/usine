@@ -2,4 +2,4 @@
 "@usine/agents": minor
 ---
 
-Remove the Pi parent runtime, which only the run host used; the Pi parent runs in `@usine/durable`. `@usine/agents/pi/live`, `AgentRuntime`, `LaunchRequest`, `ChildSessions`, `piParentLayer`, and the subagents extension are removed. `PiStartOptions.toolMode` is removed and `PiStartOptions.model` is a required `ModelId`, since only children and preflight start Pi sessions; the `AuthenticationUnavailable` and `UnsupportedAuthentication` start results no longer carry `requiredPool`. The `typebox` dependency is dropped.
+Removes the Pi parent runtime, which runs in `@usine/durable`: `@usine/agents/pi/live`, `AgentRuntime`, `LaunchRequest`, `ChildSessions`, `piParentLayer`, the subagents extension, and the `typebox` dependency. Removes `PiStartOptions.toolMode`, makes `PiStartOptions.model` a required `ModelId`, and removes `requiredPool` from the `AuthenticationUnavailable` and `UnsupportedAuthentication` start results.

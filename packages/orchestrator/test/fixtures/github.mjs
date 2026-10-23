@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 
-// Answers `gh api` lookups from the records the test's parent wrote in the checkout:
-// the pull request at the final commit, and the review it posted on pull request 71.
-// It refuses the GraphQL viewer query: the scheduler gives the harvest its bot login.
+// Answers `gh api` lookups from the records the test's parent wrote in the checkout, and refuses
+// the GraphQL viewer query because the scheduler provides the bot login.
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 

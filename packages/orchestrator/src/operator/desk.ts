@@ -24,24 +24,29 @@ import { checkView, PreflightCheckView, WorkerSlotsView } from "./configuration.
 import { runView, workerAccesses } from "./projection.ts";
 import { RunView } from "./run.ts";
 
-/** How many newest transcript rows of an Attempt in flight the desk reads for its activity and warnings. */
+/** The number of newest transcript rows the desk reads per running Attempt. */
 const RECENT_TRANSCRIPT_ROWS = 200;
-/** How many closed Runs Last outcomes lists. */
+/** The number of closed Runs in Last outcomes. */
 const LAST_OUTCOMES = 10;
-/** How many settled Runs that closed last the desk reads, before leaving out those replaced before starting. */
+/**
+ * The number of recently closed Runs the desk reads before excluding those replaced before
+ * starting.
+ */
 const CLOSED_RUNS_READ = 100;
-/** How many newest Items of each repository the desk matches against the Loops, as many as a Board shows. */
+/**
+ * The number of newest Items per repository that the desk matches against the Loops, the same as a
+ * Board shows.
+ */
 const DESK_ITEMS = 500;
 
-/** The Attempt's Worker has not answered the executor's probe since `lastAnsweredAt`. */
+/** The Attempt's Worker hasn't answered the executor's probe since `lastAnsweredAt`. */
 export class WorkerSilentView extends Schema.TaggedClass<WorkerSilentView>(
   "@usine/orchestrator/WorkerSilentView",
 )("WorkerSilent", { worker: WorkerName, lastAnsweredAt: Schema.String }) {}
 
 /**
- * A session's harness keeps retrying its model provider: `retries` so far in
- * the turn, the harness's latest report, and when the first unanswered retry
- * was recorded.
+ * A session's harness is retrying its model provider: the retries in this turn, the latest report,
+ * and when the first unanswered retry was recorded.
  */
 export class ProviderRetryingView extends Schema.TaggedClass<ProviderRetryingView>(
   "@usine/orchestrator/ProviderRetryingView",
@@ -52,37 +57,44 @@ export class ProviderRetryingView extends Schema.TaggedClass<ProviderRetryingVie
   since: Schema.String,
 }) {}
 
-/** A connectivity problem an Attempt's transcript leaves open; a signal, never a stop (ADR 0013). */
+/**
+ * An open connectivity problem in an Attempt's transcript. It's a warning and never stops the
+ * Attempt (ADR 0013).
+ */
 export const ConnectivityWarningView = Schema.Union([WorkerSilentView, ProviderRetryingView]);
 export type ConnectivityWarningView = typeof ConnectivityWarningView.Type;
 
-/** One Attempt in flight, with its Run, its Item, and what its newest transcript rows show. */
+/** A running Attempt with its Run, Item, and recent transcript activity. */
 export class RunningAttemptView extends Schema.Class<RunningAttemptView>(
   "@usine/orchestrator/RunningAttemptView",
 )({
   run: RunView,
-  /** The Run's Attempt in flight. */
   attempt: AttemptView,
-  /** The Run's Item as its Board card links it; null for a schedule Run or an Item the desk did not read. */
+  /**
+   * The Run's Item as its Board card links it, or null for a schedule Run or an Item the desk
+   * didn't read.
+   */
   item: Schema.NullOr(BoardItemLink),
   /**
-   * When the Attempt's sessions last showed work; Worker notices, pool meters, and
-   * provider retries do not count. Null when its newest rows show none.
+   * When the Attempt's sessions last showed work, excluding Worker notices, pool meters, and
+   * provider retries. Null if the newest rows show none.
    */
   lastActivityAt: Schema.NullOr(Schema.String),
-  /** The connectivity problems still open after the Attempt's newest rows. */
+  /** The connectivity problems still open after the newest rows. */
   warnings: Schema.Array(ConnectivityWarningView),
 }) {}
 
-/** An Agent's question or blocker holds the Loop on the Item until the operator answers or resolves `run`, or the Item changes (ADR 0017). */
+/**
+ * An Agent's question or blocker that stops the Loop on the Item until the operator answers or
+ * resolves `run`, or the Item changes (ADR 0017).
+ */
 export class HeldForOperatorView extends Schema.TaggedClass<HeldForOperatorView>(
   "@usine/orchestrator/HeldForOperatorView",
 )("HeldForOperator", { run: RunView }) {}
 
 /**
- * `run` succeeded or was canceled on the Item's current state, which has not
- * changed since, so the Loop's trigger opens no other Run for it (ADR 0007).
- * Running `run` again opens one.
+ * `run` succeeded or was canceled on the Item's current state, so the Loop opens no other Run until
+ * the state changes (ADR 0007).
  */
 export class ClosedUnchangedView extends Schema.TaggedClass<ClosedUnchangedView>(
   "@usine/orchestrator/ClosedUnchangedView",
@@ -113,15 +125,12 @@ export class QueuedForWorkerView extends Schema.TaggedClass<QueuedForWorkerView>
   "@usine/orchestrator/QueuedForWorkerView",
 )("QueuedForWorker", { run: RunView }) {}
 
-/**
- * No Event of the Loop owns a Run for the Item's current state yet: the Loop
- * has not seen that state, or its Event waits. The next poll acts on it.
- */
+/** No Event of the Loop has a Run for the Item's current state yet. The next poll acts on it. */
 export class AwaitingPollView extends Schema.TaggedClass<AwaitingPollView>(
   "@usine/orchestrator/AwaitingPollView",
 )("AwaitingPoll", {}) {}
 
-/** Why an Item a Loop's trigger matches has no Attempt running on it. */
+/** The reason a matched Item has no running Attempt. */
 export const StallReasonView = Schema.Union([
   AwaitingApprovalView,
   HeldForOperatorView,
@@ -134,7 +143,7 @@ export const StallReasonView = Schema.Union([
 ]);
 export type StallReasonView = typeof StallReasonView.Type;
 
-/** An Item a Loop's trigger matches now with no Attempt running on it, and why. */
+/** An Item that a Loop's trigger matches with no running Attempt, and the reason. */
 export class StalledItemView extends Schema.Class<StalledItemView>(
   "@usine/orchestrator/StalledItemView",
 )({
@@ -144,34 +153,38 @@ export class StalledItemView extends Schema.Class<StalledItemView>(
   reason: StallReasonView,
 }) {}
 
-/** A Run that closed, with its Item and when it closed. */
+/** A closed Run with its Item and close time. */
 export class ClosedRunView extends Schema.Class<ClosedRunView>("@usine/orchestrator/ClosedRunView")(
   {
     run: RunView,
-    /** The Run's Item as its Board card links it; null for a schedule Run or an Item the desk did not read. */
+    /**
+     * The Run's Item as its Board card links it, or null for a schedule Run or an Item the desk
+     * didn't read.
+     */
     item: Schema.NullOr(BoardItemLink),
-    /** When it closed, even for a Run canceled before any Attempt; the Run's `closedAt`. */
+    /** The Run's `closedAt`, set even for a Run canceled before any Attempt. */
     closedAt: Schema.String,
   },
 ) {}
 
-/** One Worker on the desk's Workers line: its slots and where its last preflight stands. */
+/** One Worker on the desk's Workers line, with its slots and last preflight. */
 export class WorkerView extends Schema.Class<WorkerView>("@usine/orchestrator/WorkerView")({
   name: WorkerName,
   /**
-   * Its slots as the scheduler holds them; while the scheduler runs no Attempt,
-   * as in setup mode, its declared `max_concurrent_attempts` with none leased.
+   * The slots as the scheduler leases them. If the scheduler runs no Attempts (as in setup mode),
+   * the declared `max_concurrent_attempts` with none leased.
    */
   slots: WorkerSlotsView,
   /**
-   * The newest failed check among its own prerequisites and its harnesses
-   * when one of them stands failed, else the newest passed check; null before
-   * any preflight.
+   * The newest failed check among the Worker's prerequisites and harnesses, or else the newest
+   * passed check. Null before the first preflight.
    */
   preflight: Schema.NullOr(PreflightCheckView),
 }) {}
 
-/** When the factory last finished polling a managed repository; null before the first poll ends. */
+/**
+ * When the factory last finished polling a managed repository, or null before the first poll ends.
+ */
 export class RepositoryPollView extends Schema.Class<RepositoryPollView>(
   "@usine/orchestrator/RepositoryPollView",
 )({
@@ -180,9 +193,8 @@ export class RepositoryPollView extends Schema.Class<RepositoryPollView>(
 }) {}
 
 /**
- * The operator's desk: the Attempts in flight, the matched Items that are not
- * moving and why, the Runs that closed last, the Workers' slots, and when each
- * repository was last polled. Needs you comes from the overview.
+ * The operator's desk: running Attempts, stalled matched Items, recently closed Runs, Worker slots,
+ * and poll times. Needs you comes from the overview.
  */
 export class DeskView extends Schema.Class<DeskView>("@usine/orchestrator/DeskView")({
   running: Schema.Array(RunningAttemptView),
@@ -192,7 +204,7 @@ export class DeskView extends Schema.Class<DeskView>("@usine/orchestrator/DeskVi
   polls: Schema.Array(RepositoryPollView),
 }) {}
 
-/** What the desk knows about one Loop on one matched Item. */
+/** The desk's facts about one Loop on one matched Item. */
 interface StallFacts {
   /** The Loop's Runs on the Item, newest first. */
   readonly runs: ReadonlyArray<RunView>;
@@ -203,9 +215,7 @@ interface StallFacts {
 }
 
 /**
- * Why a Loop's matched Item is not moving, in the order the engine applies
- * its rules: an open Run first, then the Loop's pause, an operator hold, the
- * cycle budget, and the closed Run that owns the Item's current state. None
+ * Returns why a Loop's matched Item isn't moving, checking the engine's rules in order, or `None`
  * while an Attempt runs on the Item.
  */
 const stallReason = ({
@@ -247,7 +257,10 @@ const stallReason = ({
   return Option.some(new AwaitingPollView());
 };
 
-/** Not moving lists what waits on the operator first and what waits on the factory last. */
+/**
+ * The Not moving order: reasons that wait on the operator first, those that wait on the factory
+ * last.
+ */
 const REASON_ORDER: ReadonlyArray<StallReasonView["_tag"]> = [
   "AwaitingApproval",
   "HeldForOperator",
@@ -280,10 +293,8 @@ const isActivity = ({ direction, envelope }: TranscriptEntry): boolean => {
 };
 
 /**
- * What one Attempt's newest transcript rows, in append order, show: when its
- * sessions last worked, and the connectivity problems still open: the Worker
- * until it answers again, and each session's provider retries until it reaches
- * its provider again, goes idle, or finishes.
+ * Returns when the Attempt's sessions last worked and which connectivity problems are still open,
+ * from its newest transcript rows.
  */
 const attemptActivity = (
   entries: ReadonlyArray<TranscriptEntry>,
@@ -330,7 +341,7 @@ const attemptActivity = (
 
 const checkedAt = (check: PreflightCheck): number => DateTime.toEpochMillis(check.checkedAt);
 
-/** Where a Worker's last preflight stands, as `WorkerView.preflight` describes it. */
+/** Returns the Worker's current preflight check, as described in `WorkerView.preflight`. */
 const standingCheck = (preflight: WorkerPreflight): Option.Option<PreflightCheck> => {
   const checks = [
     ...Option.toArray(preflight.prerequisites),
@@ -346,14 +357,19 @@ const standingCheck = (preflight: WorkerPreflight): Option.Option<PreflightCheck
   );
 };
 
-/** When a closed Run closed, as the store recorded it. The store dates every closed Run; the
- * fallback, its last Attempt's end or start, else its opening, only covers the nullable field. */
+/**
+ * Returns when a closed Run closed. The fallback (the last Attempt's end or start, else the opening
+ * time) only covers the nullable field.
+ */
 const closedAt = (run: RunView): string => {
   const last = run.attempts.at(-1);
   return run.closedAt ?? last?.endedAt ?? last?.startedAt ?? run.openedAt;
 };
 
-/** A Run the engine canceled before any Attempt, because a newer Event or the Item's change replaced it. */
+/**
+ * Whether the engine canceled the Run before any Attempt because a newer Event or an Item change
+ * replaced it.
+ */
 const replacedBeforeStart = ({ run, attempts }: RunSummary): boolean =>
   attempts.length === 0 &&
   run.state._tag === "Canceled" &&
@@ -412,7 +428,7 @@ const makeDesk = Effect.gen(function* () {
     for (const { items } of repositories) {
       for (const stored of items) {
         const projected = yield* Effect.result(projectedItem(stored));
-        // The Board reports an Item it cannot project in Needs you.
+        // The Board reports an Item it can't project in Needs you.
         if (Result.isFailure(projected)) continue;
         const { itemKey, kind, number, title, url } = projected.success;
         links.set(itemKey, new BoardItemLink({ itemKey, kind, number, title, url }));
@@ -572,7 +588,7 @@ const makeDesk = Effect.gen(function* () {
 export class OperatorDesk extends Context.Service<
   OperatorDesk,
   {
-    /** The desk of the supplied instance; `OperatorObservation.desk` documents what it holds. */
+    /** Returns the instance's desk, as described in `OperatorObservation.desk`. */
     readonly desk: (instance: LoadedInstance) => Effect.Effect<DeskView, RunStoreError>;
   }
 >()("@usine/orchestrator/OperatorDesk") {

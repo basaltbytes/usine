@@ -1,7 +1,7 @@
 import { Source } from "@usine/expression/expression-engine";
 import { Schema } from "effect";
 
-/** Path of one authored file, relative to the instance folder. */
+/** A file path relative to the instance folder. */
 export const InstancePath = Schema.NonEmptyString.pipe(Schema.brand("InstancePath"));
 
 export type InstancePath = typeof InstancePath.Type;
@@ -17,7 +17,7 @@ export const FileStage = Schema.Literals([
 
 export type FileStage = typeof FileStage.Type;
 
-/** A failure pinned to one authored file and one parse stage, so the UI can quarantine that file alone. */
+/** An error in one file at one parse stage; only that file is quarantined. */
 export class ConfigFileError extends Schema.TaggedError<ConfigFileError>(
   "@usine/config/ConfigFileError",
 )("ConfigFileError", {
@@ -27,7 +27,7 @@ export class ConfigFileError extends Schema.TaggedError<ConfigFileError>(
   message: Schema.NonEmptyString,
 }) {}
 
-/** The registry or settings could not be loaded, which blocks the whole instance. */
+/** An error loading the registry or settings, which fails the whole instance load. */
 export class FactoryConfigError extends Schema.TaggedError<FactoryConfigError>(
   "@usine/config/FactoryConfigError",
 )("FactoryConfigError", {

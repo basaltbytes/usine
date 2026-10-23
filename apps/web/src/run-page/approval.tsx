@@ -3,11 +3,7 @@ import { Option } from "effect";
 import { cn } from "@/lib/utils";
 import { approvalChannelLabel, dayTimeLabel, timestampLabel } from "../operator-copy.ts";
 
-/**
- * Who approved the Run, when, and from where, as one quiet line that wraps only
- * between its parts. An approval given before usine recorded its source shows
- * only that it happened and when; a Run with no approval shows nothing.
- */
+/** Renders nothing if there is no approval; without a recorded source, shows only that the Run was approved and when. */
 export const ApprovalLine = ({
   approval,
   className,

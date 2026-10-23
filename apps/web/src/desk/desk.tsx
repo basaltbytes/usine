@@ -36,7 +36,6 @@ const NoProjects = () => {
   );
 };
 
-/** Everything that waits on the operator, or a line saying nothing does and when polling last checked. */
 export const DeskNeedsYou = ({
   needs,
   polls,
@@ -77,10 +76,7 @@ const LoadingBlock = ({ id, title }: { readonly id: string; readonly title: stri
   </DeskSection>
 );
 
-/**
- * The Overview page at `/`: Needs attention, Running, Stalled, and Recent runs in reading order,
- * then the Workers in one line. Needs attention comes from the overview; the other blocks from the desk.
- */
+/** Renders the Overview page at `/`. Needs attention reads the overview query; the other sections read the desk query. */
 export const Desk = () => {
   const { data: overview } = useSuspenseQuery(overviewQuery());
   const desk = useQuery(deskQuery());

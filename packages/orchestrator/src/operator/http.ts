@@ -60,21 +60,20 @@ const errorStatuses = {
 } as const;
 
 /**
- * An operator request that could not be fulfilled. `error` preserves the domain
- * failure's identity and `message` is safe to show to the operator; persistence
- * details, credentials, and defect causes never travel in this envelope.
+ * A failed operator request. `error` is the domain failure's tag and `message` is safe to show;
+ * persistence details, credentials, and defect causes are never included.
  */
 export class OperatorHttpError extends Schema.Error<OperatorHttpError>(
   "@usine/orchestrator/OperatorHttpError",
 )({ error: Schema.Literals(Record.keys(errorStatuses)), message: Schema.String }) {
-  /** The existing HTTP status associated with this refusal or failure. */
+  /** The HTTP status for this error. */
   get status() {
     return errorStatuses[this.error];
   }
 }
 
-// The established envelope uses `error` as its discriminator. Schema.Error keeps
-// that wire shape while giving browser callers an Error with a validated identity.
+// The envelope uses `error` as its discriminator; `Schema.Error` keeps that wire shape and gives
+// browser callers a validated Error.
 const errors = [...new Set(Object.values(errorStatuses))].map((status) =>
   OperatorHttpError.check(Schema.makeFilter((error) => error.status === status)).annotate({
     httpApiStatus: status,
@@ -82,9 +81,9 @@ const errors = [...new Set(Object.values(errorStatuses))].map((status) =>
 );
 
 /**
- * Server policy for the operator transport: refuse cross-site origins before
- * decoding or executing requests, and translate failures into operator envelopes.
- * A server must supply this middleware; generated clients need no middleware layer.
+ * Server middleware for the operator API that refuses cross-site origins before decoding requests
+ * and maps failures to operator envelopes. Servers must provide it; generated clients don't need
+ * it.
  */
 export class OperatorHttpPolicy extends HttpApiMiddleware.Service<OperatorHttpPolicy>()(
   "@usine/orchestrator/OperatorHttpPolicy",
@@ -92,9 +91,8 @@ export class OperatorHttpPolicy extends HttpApiMiddleware.Service<OperatorHttpPo
 ) {}
 
 /**
- * The Worker preflight failure behind a refused reload: the Worker capability
- * that is missing, the Worker operation that failed, or the repository whose
- * credential could not be obtained. What the check observed stays on the server.
+ * The Worker preflight failure behind a refused reload. The check's observation isn't sent to the
+ * client.
  */
 export const ReloadPreflightFailure = Schema.Union([
   Schema.TaggedStruct("WorkerCapabilityError", {
@@ -113,28 +111,25 @@ export const ReloadPreflightFailure = Schema.Union([
 ]);
 export type ReloadPreflightFailure = typeof ReloadPreflightFailure.Type;
 
-/**
- * A reload refused because `usine.yaml` changed in a way only a restart of
- * `usine up` applies. It keeps the operator envelope's `error` and `message`.
- */
+/** A reload refused because `usine.yaml` changed in a way that needs a restart of `usine up`. */
 export class RestartRequiredRefusal extends Schema.Error<RestartRequiredRefusal>(
   "@usine/orchestrator/RestartRequiredRefusal",
 )(
   {
     error: Schema.Literal("RestartRequiredError"),
     message: Schema.String,
-    /** The `usine.yaml` blocks the changed fields belong to. */
+    /** The `usine.yaml` blocks that contain the changed fields. */
     blocks: Schema.NonEmptyArray(RestartBlock),
-    /** The changed fields, as paths into `usine.yaml` such as `webhooks` or `workers.build-1.destination`. */
+    /**
+     * The changed fields as paths into `usine.yaml`, such as `webhooks` or
+     * `workers.build-1.destination`.
+     */
     fields: Schema.NonEmptyArray(Schema.NonEmptyString),
   },
   { httpApiStatus: 409 },
 ) {}
 
-/**
- * A reload refused because Worker preflight failed for the Agents and Workers
- * it adds. It keeps the operator envelope's `error` and `message`.
- */
+/** A reload refused because Worker preflight failed for the Agents and Workers it adds. */
 export class ReloadPreflightRefusal extends Schema.Error<ReloadPreflightRefusal>(
   "@usine/orchestrator/ReloadPreflightRefusal",
 )(
@@ -143,17 +138,14 @@ export class ReloadPreflightRefusal extends Schema.Error<ReloadPreflightRefusal>
     message: Schema.String,
     /** The reloaded Agents whose brains preflight checked on every Worker. */
     agents: Schema.Array(AgentName),
-    /** The Workers the reload adds or gives more slots, which preflight checked. */
+    /** The Workers added or given more slots by the reload, which preflight checked. */
     workers: Schema.Array(WorkerName),
     cause: ReloadPreflightFailure,
   },
   { httpApiStatus: 409 },
 ) {}
 
-/**
- * A reload refused because `usine.yaml`, or a file it depends on, could not be
- * loaded. It keeps the operator envelope's `error` and `message`.
- */
+/** A reload refused because `usine.yaml` or a file it depends on couldn't be loaded. */
 export class FactoryConfigRefusal extends Schema.Error<FactoryConfigRefusal>(
   "@usine/orchestrator/FactoryConfigRefusal",
 )(
@@ -166,10 +158,10 @@ export class FactoryConfigRefusal extends Schema.Error<FactoryConfigRefusal>(
   { httpApiStatus: 422 },
 ) {}
 
-/** Why a reload kept the running instance, with the fields, Agents, Workers, or file it names. */
+/** The reason a reload kept the running instance. */
 export type ReloadRefusal = RestartRequiredRefusal | ReloadPreflightRefusal | FactoryConfigRefusal;
 
-/** The refusal the reload endpoint answers for `error`, with `message` for the operator. */
+/** Returns the reload endpoint's refusal for `error`, with `message` for the operator. */
 export const reloadRefusal = (error: InstanceReloadError, message: string): ReloadRefusal =>
   Match.valueTags(error, {
     RestartRequiredError: ({ _tag, blocks, fields }) =>
@@ -204,8 +196,7 @@ export const reloadRefusal = (error: InstanceReloadError, message: string): Relo
   });
 
 const absent = Schema.optionalKey(Schema.Never);
-// URLSearchParams.get previously selected the first occurrence of a query key.
-// Preserve that convention when HttpApi supplies repeated keys as arrays.
+// Use the first occurrence of a repeated query key, as `URLSearchParams.get` did.
 const queryValue = Schema.Union([
   Schema.String,
   Schema.NonEmptyArray(Schema.String).pipe(
@@ -223,8 +214,8 @@ const sequence = queryValue.pipe(
   Schema.decodeTo(TranscriptSequence),
 );
 
-// Each wire variant rules out the other cursors before decoding into the existing
-// domain request. Unknown search keys remain ignored, as in the original API.
+// Each wire variant rules out the other cursors before decoding into the domain request. Unknown
+// search keys are ignored.
 const transcriptQuery = Schema.Union([
   Schema.Struct({ after: absent, before: absent, attempt: absent }).pipe(
     Schema.decodeTo(
@@ -268,18 +259,8 @@ const runParams = { runId: RunId };
 const loopParams = { loop: LoopName };
 
 /**
- * The operator's HTTP reads and interventions. Server handlers and generated
- * clients derive URLs, request codecs, successful responses, and typed failures
- * from this contract. Action acknowledgement means the request was accepted;
- * subsequent observation reports execution and GitHub polling progress. A
- * reload of the instance folder answers with what it changed, or with its
- * refusal and the fields, Agents, Workers, or file that refusal names; running a
- * Run again with the new Run or the cycle-budget Ask that blocked it. The
- * configuration read returns the instance folder as parsed, with its runtime
- * state.
- *
- * This capability is platform-free (ADRs 0012 and 0020). Library consumers can
- * continue using Operator directly without an HTTP server or client.
+ * The operator's HTTP API contract for reads and interventions, shared by server handlers and
+ * generated clients. An action's acknowledgement only means the request was accepted.
  */
 export const OperatorApi = HttpApi.make("OperatorApi").add(
   HttpApiGroup.make("operator")
@@ -374,7 +355,6 @@ export const OperatorApi = HttpApi.make("OperatorApi").add(
       }),
     )
     .add(HttpApiEndpoint.get("configuration", "/api/configuration", { success: ConfigurationView }))
-    // The desk at `/`: Running now, Not moving, Last outcomes, Workers, and poll times.
     .add(HttpApiEndpoint.get("desk", "/api/desk", { success: DeskView }))
     .middleware(OperatorHttpPolicy),
 );

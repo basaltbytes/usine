@@ -2,8 +2,8 @@ import { AppSlug, GitHubApp, Installation, InstallationId } from "@usine/github/
 import { Effect, Layer } from "effect";
 
 /**
- * A `GitHubApp` installed as the App `usine-test`, whose bot is
- * `usine-test[bot]`, for compositions that read only the installation.
+ * A `GitHubApp` for the App `usine-test` with bot `usine-test[bot]`, for compositions that only
+ * read the installation.
  */
 export const testAppLayer = Layer.succeed(GitHubApp)({
   installation: () =>

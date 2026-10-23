@@ -9,38 +9,34 @@ import type { WorkerName } from "@usine/core/worker";
 import { DateTime, Effect, Fiber, Match, Option, Ref, type Scope, Semaphore } from "effect";
 import type { RemoteCommands } from "./commands.ts";
 
-/** How long the executor waits between two probes of a Worker while an Attempt runs on it. */
 const PROBE_INTERVAL = "1 minute";
-/** The SSH client's own bound on the TCP connection, the server's banner, and the key exchange. */
+/** The SSH `ConnectTimeout` in seconds, covering the TCP connection, server banner, and key exchange. */
 const CONNECT_TIMEOUT_SECONDS = 20;
-/** The bound on a whole probe, so a session that opens but never runs its command counts as no answer. */
+/** The timeout for a whole probe, in seconds. A session that opens but never runs the command counts as unanswered. */
 const PROBE_TIMEOUT_SECONDS = 45;
 
 type Probe =
   | { readonly _tag: "Answered" }
   | { readonly _tag: "Unanswered"; readonly reason: string };
 
-/** Whether the Worker answered its last probe, and when it last did. */
 type Liveness =
   | { readonly _tag: "Answering"; readonly lastAnsweredAt: DateTime.Utc }
   | {
       readonly _tag: "Silent";
       readonly lastAnsweredAt: DateTime.Utc;
-      /** Probes in a row that got no answer. */
+      /** The number of consecutive unanswered probes. */
       readonly unanswered: number;
-      /** What the last probe saw. */
+      /** The failure reported by the last probe. */
       readonly reason: string;
-      /** The Attempts told that the Worker stopped answering; only they hear that it answers again. */
+      /** The Attempts notified that the Worker stopped responding; only these get the "responding again" notice. */
       readonly told: ReadonlySet<AttemptId>;
     };
 
-/** A notice and the Attempts whose transcripts get it. */
 interface Report {
   readonly notice: WorkerNotice;
   readonly attemptIds: ReadonlyArray<AttemptId>;
 }
 
-/** The liveness after a probe, and what it reports to the Attempts' transcripts, if anything. */
 interface Observation {
   readonly liveness: Liveness;
   readonly report: Option.Option<Report>;
@@ -53,12 +49,10 @@ const reportTo = (
   attemptIds.length === 0 ? Option.none() : Option.some({ notice, attemptIds });
 
 /**
- * The liveness after a probe at `now` while the Attempts `watching` run on
- * the Worker, and the notice for their transcripts. Every Attempt not yet
- * told hears that the Worker stopped answering at the first probe that gets
- * no answer; one that joins while the Worker is silent is told as it joins
- * (`joinSilent`). When the Worker answers again, only the Attempts told that
- * it stopped hear so.
+ * Returns the next liveness after a probe at `now`, with the notice for the `watching` Attempts.
+ * On the first unanswered probe, every Attempt not yet notified gets a "stopped responding"
+ * notice. When the Worker responds again, only notified Attempts get a "responding again"
+ * notice.
  */
 const observe = (
   worker: WorkerName,
@@ -99,9 +93,8 @@ const observe = (
 };
 
 /**
- * The liveness once `attemptId` joins the watch, and the notice for its
- * transcript: while the Worker is silent, an Attempt not yet told hears that
- * it stopped answering, with what the last probe saw.
+ * Returns the liveness after `attemptId` joins the watch. If the Worker is silent, an Attempt
+ * not yet notified gets a "stopped responding" notice with the last probe's failure.
  */
 const joinSilent = (worker: WorkerName, liveness: Liveness, attemptId: AttemptId): Observation =>
   liveness._tag === "Answering" || liveness.told.has(attemptId)
@@ -125,41 +118,33 @@ const lastLine = (text: string): string =>
     .filter((line) => line !== "")
     .at(-1) ?? "";
 
-/** An Attempt that hears about the liveness of the Worker it runs on. */
 interface WorkerWatcher {
   readonly attemptId: AttemptId;
   /** Records a notice in the Attempt's transcript. */
   readonly report: (notice: WorkerNotice) => Effect.Effect<void>;
 }
 
-/** What `WorkerWatches.watch` needs to probe an Attempt's Worker and report on it. */
 interface WorkerWatch extends WorkerWatcher {
   readonly worker: WorkerName;
-  /** The machine's own child host; the probe sends no Attempt secret. */
+  /** The machine's shell, without Attempt secrets. */
   readonly shell: RemoteShell;
 }
 
-/** The liveness watches of one executor: one per Worker while any Attempt runs on it. */
+/** The liveness watches of one executor, one per Worker with a running Attempt. */
 export interface WorkerWatches {
   /**
-   * Adds the Attempt to its Worker's watch until the caller's scope closes.
-   * The first Attempt on a Worker starts the watch, and the last one to
-   * leave ends it. The watch runs `true` on the Worker's machine over a new
-   * SSH connection every minute, and reports through the `report` of every
-   * Attempt on the Worker and a log line when the machine stops answering
-   * and when it answers again. An Attempt that joins while the machine does
-   * not answer hears so as it joins, and hears that the machine answers
-   * again only after it heard that it stopped. It never stops or fails an
-   * Attempt, whatever the Worker does (ADR 0013).
+   * Adds the Attempt to its Worker's watch until the caller's scope closes. Every minute, the
+   * watch runs `true` on the machine over a new SSH connection; when the machine stops or resumes
+   * responding, it calls `report` for each Attempt and logs a line. Never stops or fails an
+   * Attempt (ADR 0013).
    */
   readonly watch: (watch: WorkerWatch) => Effect.Effect<void, never, Scope.Scope>;
 }
 
 /**
- * Probes one Worker every minute until interrupted, keeps what it saw in
- * `liveness`, and reports to the Attempts `watchers` returns at each probe.
- * It holds `lock` from reading `liveness` to the last report, as joins do, so
- * each Attempt gets its notices in the order the watch decided them.
+ * Probes one Worker every minute until interrupted, stores the result in `liveness`, and
+ * reports to the Attempts from `watchers`. Holds `lock` from reading `liveness` to the last
+ * report, so each Attempt gets its notices in order.
  */
 const watchWorker = (
   commands: RemoteCommands,
@@ -249,7 +234,7 @@ const watchWorker = (
         }
       });
 
-    // The watch outlives the Attempt whose launch started it, so each probe is its own trace.
+    // Root span: the watch can run longer than the Attempt that started it.
     const check = Effect.fn("RemoteExecutor.probeWorker", { root: true })(function* () {
       yield* Effect.annotateCurrentSpan({ worker, host });
       const result = yield* probe;
@@ -259,7 +244,6 @@ const watchWorker = (
     return yield* Effect.sleep(PROBE_INTERVAL).pipe(Effect.andThen(check()), Effect.forever);
   });
 
-/** One Worker's running watch, what it last saw, and the Attempts it reports to. */
 interface Watched {
   readonly liveness: Ref.Ref<Liveness>;
   readonly watchers: Map<AttemptId, WorkerWatcher>;
@@ -267,9 +251,8 @@ interface Watched {
 }
 
 /**
- * The liveness watches of an executor that reaches its Workers' machines
- * with `commands`. Each watch runs in the caller's scope, so the executor's
- * layer ends any watch still running when it closes.
+ * Returns the liveness watches that probe Workers' machines through `commands`. Each watch runs
+ * in the caller's scope and stops when that scope closes.
  */
 export const workerWatchesFor = (
   commands: RemoteCommands,

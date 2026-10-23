@@ -29,14 +29,14 @@ import type { TranscriptSession } from "../run-transcript/model.ts";
 import { ApprovalLine } from "./approval.tsx";
 import { RunAgainLine } from "./run-again.tsx";
 
-/** The part of the Run the reader shows: the Task, the Event, or an Attempt and one of its sessions. */
+/** The part of the Run shown in the reader: the Task, the Event, or an Attempt and one of its sessions. */
 export type OutlineSelection =
   | { readonly _tag: "Task" }
   | { readonly _tag: "Event" }
   | {
       readonly _tag: "Attempt";
       readonly attemptId: AttemptId;
-      /** The session chosen in the outline; the composer addresses it while it is live. */
+      /** The session selected in the outline; while it is live, the composer sends to it. */
       readonly sessionKey: string | null;
     };
 
@@ -57,7 +57,7 @@ const chapterState = (chapter: Chapter): string =>
         },
       );
 
-/** An Attempt's span, from its start to its recorded end. */
+/** Returns the Attempt's span from start to recorded end, or `None` before it starts. */
 const chapterSpan = (chapter: Chapter): Option.Option<string> =>
   Option.flatMap(chapter.attempt, ({ startedAt }) =>
     Option.map(chapter.endedAt, (ended) =>
@@ -65,7 +65,7 @@ const chapterSpan = (chapter: Chapter): Option.Option<string> =>
     ),
   );
 
-/** A live session's supervision state, worded for the outline; a working session counts its time. */
+/** Returns a live session's status text; for a working session, it includes the elapsed time. */
 const sessionStatus = (
   session: TranscriptSession,
 ): { readonly text: string; readonly tone: string; readonly since?: string } | null => {
@@ -131,7 +131,7 @@ const CheckpointButton = ({
 }: {
   readonly checkpoint: Checkpoint;
   readonly current: string | null;
-  /** Shows who said it, for a checkpoint listed outside its session's folded turns. */
+  /** Whether to show the speaker, for a checkpoint listed outside its session's folded turns. */
   readonly named: boolean;
   readonly onCheckpoint: (checkpoint: Checkpoint) => void;
 }) => (
@@ -150,10 +150,8 @@ const CheckpointButton = ({
 );
 
 /**
- * An Attempt's checkpoints on one rail, in conversation order: each run of one
- * session's turns as one entry that opens to its sentences, and every other
- * checkpoint as its own entry. The reading mark sits on the checkpoint being
- * read, or on its folded entry while that entry is closed.
+ * Renders an Attempt's checkpoints in conversation order, with consecutive turns of one session in
+ * one fold. The reading mark is on the checkpoint being read, or on its fold while the fold is closed.
  */
 const Timeline = ({
   chapter,
@@ -161,7 +159,7 @@ const Timeline = ({
   onCheckpoint,
 }: {
   readonly chapter: Chapter;
-  /** The checkpoint at the reader's reading line, marked on the rail. */
+  /** The checkpoint at the reader's reading line. */
   readonly current: string | null;
   readonly onCheckpoint: (checkpoint: Checkpoint) => void;
 }) => {
@@ -190,7 +188,7 @@ const Timeline = ({
       );
     };
     place();
-    // Opening a fold moves the rows below it while it grows.
+    // Opening a fold moves the rows below it while it expands.
     const observer = new ResizeObserver(place);
     observer.observe(rail);
     return () => observer.disconnect();
@@ -320,10 +318,8 @@ const ChapterTree = ({
 );
 
 /**
- * The Run's parts: Task and Event with a preview each, the Event with who ran the Run again and
- * its approval when it has them, then each Attempt. While the reader
- * is shown, the Attempt being read opens to its sessions and checkpoints, and the
- * checkpoint at the reading line is marked.
+ * While the reader is shown, expands the Attempt being read to its sessions and checkpoints and marks
+ * the checkpoint at the reading line.
  */
 export const Outline = ({
   run,
@@ -342,9 +338,9 @@ export const Outline = ({
   readonly eventPreview: string;
   readonly document: ReaderDocument;
   readonly selection: OutlineSelection;
-  /** Where the reader is; it decides the open Attempt while an Attempt is selected. */
+  /** The reader's position; while an Attempt is selected, it determines the expanded Attempt. */
   readonly reading: ReadingPlace | null;
-  /** The session the composer addresses, marked as selected. */
+  /** The session the composer sends to, shown as selected. */
   readonly composerSession: string | null;
   readonly onSelect: (selection: OutlineSelection) => void;
   readonly onCheckpoint: (checkpoint: Checkpoint, chapter: Chapter) => void;
@@ -356,7 +352,7 @@ export const Outline = ({
   const open = selection._tag === "Attempt" ? (reading?.attemptId ?? selection.attemptId) : null;
   const current = selection._tag === "Attempt" ? (reading?.checkpointKey ?? null) : null;
   useEffect(() => {
-    // Keep the marked checkpoint in view when the outline scrolls on its own.
+    // If the outline is scrollable, keeps the marked checkpoint in view.
     const nav = navRef.current;
     if (nav === null || current === null || nav.scrollHeight <= nav.clientHeight) return;
     const marked = nav.querySelector<HTMLElement>('[aria-current="location"]');

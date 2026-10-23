@@ -1,38 +1,38 @@
 # usine
 
-An agent-agnostic software factory: an engine where loops — trigger → agent-run automations authored as files in git — run against many repos from one headless orchestrator with a web UI.
+usine runs coding agents (Claude Code, Codex, Pi) on GitHub issues and pull requests across many repos. Loops, defined as files in git, pair a trigger with an agent run. One headless orchestrator runs them and serves a web UI.
 
-The spec lives in [CONTEXT.md](./CONTEXT.md) (domain glossary) and [docs/adr/](./docs/adr) (decision records). This repository is a pnpm + turbo monorepo; the engine ships as independently versioned 0.x packages under the `@usine` npm scope, carved along the seams the spec drew.
+Glossary: [CONTEXT.md](./CONTEXT.md). Decision records: [docs/adr/](./docs/adr). This pnpm and turbo monorepo publishes the engine as blocks: independently versioned 0.x packages under the `@usine` npm scope.
 
 ## Layout
 
-| Package                                          | What it is                                                                                                                      |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
-| [`@usine/core`](./packages/core)                 | Domain model: Event → Run → Step → Attempt, branded ids, the run state machine, the attempt-failure taxonomy                    |
-| [`@usine/expression`](./packages/expression)     | CEL expression seam: check and evaluate selection expressions                                                                   |
-| [`@usine/config`](./packages/config)             | Config file machinery: parse, validate, and surgically rewrite the instance repo's files (usine.yaml, loop files, agent files)  |
-| [`@usine/github`](./packages/github)             | Polling change detection, per-stream GraphQL slice fetchers, GitHub App auth and token minting                                  |
-| [`@usine/engine`](./packages/engine)             | Event ledger, dedup/supersede/revoke, run scheduling, durable-execution seam, SQLite store                                      |
-| [`@usine/agents`](./packages/agents)             | Claude Code, Codex, and Pi child backends, Attempt prompts, and harness preflight                                               |
-| [`@usine/durable`](./packages/durable)           | Each Attempt's Pi parent as a pi-durable task in the orchestrator, resumed after a restart                                      |
-| [`@usine/executor`](./packages/executor)         | Scoped Attempt resources, with local, exe.dev, and SSH executors                                                      |
-| [`@usine/gateway`](./packages/gateway)           | The Gateway service for Workers on a private network: GitHub and LLM reverse proxies, forward proxy with an allowlist, admin API   |
-| [`@usine/orchestrator`](./packages/orchestrator) | The embeddable composition: the full engine as an Effect layer, startable in-process                                            |
-| [`@usine/server`](./apps/server)                 | Thin `usine up` CLI that runs the orchestrator in the foreground and serves the local web UI                                   |
-| `apps/web`                                       | The web UI (never published)                                                                                                    |
-| [`apps/docs`](./apps/docs)                       | The documentation site, built with Astro Starlight, at [docs.usine.dev](https://docs.usine.dev)                                 |
+| Package                                          | Contents                                                              |
+| ------------------------------------------------ | --------------------------------------------------------------------- |
+| [`@usine/core`](./packages/core)                 | Domain model: events, runs, steps, attempts, run states, failures     |
+| [`@usine/expression`](./packages/expression)     | CEL expression checking and evaluation                                |
+| [`@usine/config`](./packages/config)             | Parses, validates, and edits `usine.yaml`, loop files, and agent files |
+| [`@usine/github`](./packages/github)             | Polling, GraphQL payload fetchers, GitHub App auth and tokens         |
+| [`@usine/engine`](./packages/engine)             | Event ledger, dedup, supersede, revoke, run scheduling, SQLite store  |
+| [`@usine/agents`](./packages/agents)             | Claude Code, Codex, and Pi child backends, prompts, harness preflight |
+| [`@usine/durable`](./packages/durable)           | Each attempt's Pi parent as a pi-durable task, resumed after restarts |
+| [`@usine/executor`](./packages/executor)         | Attempt resources on local, exe.dev, and SSH workers                  |
+| [`@usine/gateway`](./packages/gateway)           | GitHub and LLM proxies, allowlisted egress, admin API for private workers |
+| [`@usine/orchestrator`](./packages/orchestrator) | The full engine as an Effect layer you can start in-process           |
+| [`@usine/server`](./apps/server)                 | The `usine up` CLI, which runs the orchestrator and serves the web UI |
+| `apps/web`                                       | Web UI (not published)                                                |
+| [`apps/docs`](./apps/docs)                       | Astro Starlight site at [docs.usine.dev](https://docs.usine.dev)      |
 
-`effect` is exact-pinned once, in the [workspace catalog](./pnpm-workspace.yaml), and declared as a peer dependency by the published libraries: consumers supply `effect` themselves, so there is one Effect runtime per tree.
+Published packages take `effect`, pinned in the [workspace catalog](./pnpm-workspace.yaml), as a peer dependency, so your tree has one Effect runtime.
 
 ## Run a factory
 
-From an instance folder containing `usine.yaml`, `agents/`, and `loops/`:
+In an instance folder with `usine.yaml`, `agents/`, and `loops/`, run:
 
 ```sh
 usine up
 ```
 
-The foreground process prints the local UI address. If GitHub App credentials are not available, the UI stays up in setup mode while polling and scheduling remain idle. Supply `USINE_GITHUB_APP_ID` and `USINE_GITHUB_PRIVATE_KEY`, or put the equivalent `app_id` and `private_key` fields in a mode-0600 `.usine/github-app.json` file.
+It prints the local UI address. Without GitHub App credentials, the UI runs in setup mode, and polling and schedules stay idle. Set `USINE_GITHUB_APP_ID` and `USINE_GITHUB_PRIVATE_KEY`, or put `app_id` and `private_key` in `.usine/github-app.json` with mode `0600`.
 
 ## Development
 
@@ -47,6 +47,6 @@ pnpm format    # oxfmt
 
 ## Releases
 
-Versioning and publishing run through [changesets](https://github.com/changesets/changesets): every user-visible change adds a changeset, CI opens a release PR, and merging it publishes the bumped packages. Everything is 0.x — APIs change without notice while the engine grows.
+[Changesets](https://github.com/changesets/changesets) handles releases: add a changeset for each user-visible change; CI opens a release PR, and merging it publishes. 0.x APIs change without notice.
 
-The packages publish under the npm `usine` org. If that org turns out to be taken, the recorded fallback is the `@usine-dev` scope (matching the domain), applied everywhere — the bare `usine` package name is squatted by an unrelated dead package (ADR 0012).
+If the `usine` npm org is unavailable, ADR 0012 moves every package to the `@usine-dev` scope. The unscoped `usine` name belongs to an unrelated, unmaintained package.

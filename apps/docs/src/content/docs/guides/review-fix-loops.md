@@ -1,19 +1,15 @@
 ---
-title: Bounded review and fix Loops
-description: Write review, fix, and finishing Loops whose rounds on one Item stop at the cycle budget until you reset it.
+title: Write review and fix loops
+description: Write review, fix, and finishing loops whose rounds on one item stop at the cycle budget until you reset it.
 sidebar:
   order: 4
 ---
 
-Each issue or pull request has a durable cycle budget. A Loop's `max_cycles` sets how many Runs it can open on that Item between operator resets; the default is three. Each Loop has its own count, so three review/fix rounds allow three reviews and three fixes. An Attempt retry uses the Run's existing reservation, and work canceled before its first Attempt gives its reservation back. Schedule Loops have no cycle budget.
-
-When a Loop has used its limit, its next matching Event opens an Ask in **Needs attention** instead of a Run. The Ask shows the Item, the Loops involved, the admitted Runs, and the completed rounds. While it's open, no Loop can open a Run on that Item, a finishing Loop included. Runs that already have a reservation can finish. Changing labels or restarting the process doesn't reset the budget.
-
-After you inspect the Item, use **Reset cycle budget**. This starts a new allowance and requests a new poll; only active Loops that match the Item at that point can open work. A paused Loop stays paused. The Ask stays visible even when the Item's labels no longer match any Loop. Issue [#36](https://github.com/basaltbytes/usine/issues/36) tracks GitHub notifications and answers.
+A review loop and a fix loop can pass a pull request back and forth. Each loop's [`max_cycles`](/reference/configuration/loop-files/#max_cycles) (default 3) limits its runs on one item. When a loop reaches it, usine waits for you in **Needs attention** instead of opening another run, and you inspect the item and select **Reset cycle budget**. So the triggers don't need to count reviews.
 
 ## Review outcomes
 
-Agents that use the same GitHub App share its author identity, and GitHub doesn't allow that identity to approve its own PR. Submit a `COMMENT` review on the reviewed head commit, and use explicit outcome labels:
+Agents share the GitHub App's identity, which can't approve its own PR. So reviewers submit a `COMMENT` review on the reviewed head commit and set outcome labels:
 
 | Outcome             | Add                     | Remove                                 |
 | ------------------- | ----------------------- | -------------------------------------- |
@@ -21,13 +17,13 @@ Agents that use the same GitHub App share its author identity, and GitHub doesn'
 | Clean review        | `review-passed`         | `agent-review-findings`, `ready-for-review` |
 | Fix pushed          | `ready-for-review`      | `agent-review-findings`, `review-passed` |
 
-Before posting a result or changing outcome labels, verify that the PR still has the reviewed head. If the head changed, leave the PR queued for a new review. A success label records an Agent's result but doesn't satisfy GitHub's required-review rule. The operator gives any required independent approval and merges the PR.
+Tell the reviewer to check that the PR still has the reviewed head before it posts or relabels, and to leave the PR queued for a new review if the head changed. A success label doesn't satisfy GitHub's required-review rule: you give any required approval and merge.
 
-Set [`permissions: read`](/reference/configuration/loop-files/#permissions) on review Loops so the reviewer's GitHub token cannot push to the branch it reviews, and say in the prompt that a reviewer that notices it broke a rule reports its findings on the required commit and does not retry the review on a later head.
+Set [`permissions: read`](/reference/configuration/loop-files/#permissions) on review loops so that the reviewer can't push to the branch. Tell the reviewer that if it breaks a rule, it reports its findings on the required commit and doesn't retry on a later head.
 
-## Authored example
+## Example loops
 
-Declare `ready-for-review`, `agent-review-findings`, `review-passed`, and `ready-to-merge` in `usine.yaml`'s `labels` list, and define the `reviewer` and `developer` Agents. Add a `selector` to these Loops if the instance manages repositories that shouldn't use them.
+Declare `ready-for-review`, `agent-review-findings`, `review-passed`, and `ready-to-merge` in `labels`, and define the `reviewer` and `developer` agents. Add a `selector` if some repositories shouldn't use these loops.
 
 ```markdown title="loops/review-pr.md"
 ---
@@ -51,7 +47,7 @@ findings add agent-review-findings and remove review-passed; a clean review
 adds review-passed and removes agent-review-findings. Do not merge.
 ```
 
-The Attempt of a pull request Run starts detached at the head commit that the Event recorded, so the review starts at `headRefOid`. The second head check detects a push made during the review.
+The attempt starts at the head commit that the event recorded, `headRefOid`. The second head check detects a push during the review.
 
 `loops/act-on-findings.md` uses `agent: developer`, `max_cycles: 3`, and this trigger:
 
@@ -63,9 +59,7 @@ trigger:
     item.labels.nodes.exists(label, label.name == "agent-review-findings")
 ```
 
-Its prompt tells the Agent to check out the PR branch (`{{ item.headRefName }}`), fix the findings, run the repository checks, push, and apply the “Fix pushed” labels. If the Agent can't complete the fix, it must leave the findings visible.
-
-When a finding needs a decision that only you can make, the Agent posts its question on the PR and ends its answer with `[usine:question]`. The Run fails with `QuestionFailure`, and **Needs attention** shows the question. The Loop then holds the PR: polling sees the Agent's own comment and opens no Run for it, so the question costs one Attempt and one round of the budget, not three. The Loop acts on the PR again when you push a commit or comment on the PR, when you remove and add the Loop's label, when you **Retry** or **Edit and retry** the Run with your answer, or when you **Mark answered** in the Run drawer. A blocker the Agent reports with `[usine:blocked]` holds the PR the same way, and **Mark resolved** releases it.
+Its prompt tells the agent to check out `{{ item.headRefName }}`, fix the findings, run the checks, push, and apply the "Fix pushed" labels. If the agent can't fix them, it leaves the findings visible. A finding that needs your decision becomes a question, which costs one attempt and one round, not three ([Answer a question](/guides/operate-runs/#answer-a-question)).
 
 `loops/finish-pr.md` runs only after a clean review:
 
@@ -77,8 +71,10 @@ trigger:
     item.labels.nodes.exists(label, label.name == "review-passed")
 ```
 
-Its prompt tells the Agent to remove `review-passed`, run the finishing checks, and add `ready-to-merge` on success so the operator can review the PR. The Agent doesn't merge it.
+Its prompt tells the agent to remove `review-passed`, run the finishing checks, and add `ready-to-merge` on success. You review and merge.
 
-If you upgrade an instance whose triggers count reviewer reviews in CEL, remove those counts from both the fix and finishing triggers. In particular, remove the branch that starts finishing when the count reaches three: when the budget runs out, usine now waits for an operator decision. After the database upgrade, existing completed Runs count toward the first allowance, and the same limit applies to queued Item Events when usine admits them.
+## Upgrade triggers that count reviews
 
-See [ADR 0022](https://github.com/basaltbytes/usine/blob/main/docs/adr/0022-item-cycle-budgets-and-comment-reviews.md) for persistence and identity decisions, and [GitHub's review rules](https://docs.github.com/en/pull-requests/how-tos/review-pull-requests/approving-a-pull-request-with-required-reviews) for required approvals.
+If your triggers count reviews in CEL, remove the counts from the fix and finishing triggers, including any branch that starts finishing at three reviews: usine now waits for you when the budget runs out. After the database upgrade, existing completed runs count toward the first allowance, and the limit applies to queued item events when usine admits them.
+
+See [ADR 0022](https://github.com/basaltbytes/usine/blob/main/docs/adr/0022-item-cycle-budgets-and-comment-reviews.md) for the persistence and identity decisions, and [GitHub's rules for required reviews](https://docs.github.com/en/pull-requests/how-tos/review-pull-requests/approving-a-pull-request-with-required-reviews).

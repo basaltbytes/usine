@@ -15,9 +15,8 @@ import { Match, Option } from "effect";
 import { durationLabel, tokensLabel, usdLabel } from "../operator-copy.ts";
 
 /**
- * How long a Run's Attempts ran, added up: each ended Attempt from its start to its end, and a
- * live Attempt up to `now`. None when no Attempt started, or when an ended Attempt has no
- * recorded end, since the sum would then undercount.
+ * Returns the total Attempt time of a Run: each ended Attempt from start to end, and a running
+ * Attempt up to `now`. Returns `None` if no Attempt started or an ended Attempt has no recorded end.
  */
 export const attemptsDuration = (
   run: Pick<RunView, "attempts">,
@@ -38,7 +37,7 @@ export const attemptsDuration = (
   return Option.some(total);
 };
 
-/** The typed failure that closed a Failed Run's latest Attempt; none for any other Run. */
+/** Returns the failure of a Failed Run's latest Attempt, or `None` for any other Run. */
 export const runFailure = (
   run: Pick<RunView, "state" | "attempts">,
 ): Option.Option<FailureView> => {
@@ -48,8 +47,8 @@ export const runFailure = (
     : Option.none();
 };
 
-/** An Item's state and kind in words, such as `Open issue` or `Merged pull request #41`; the
- * number is named when the Item is not the Task's originating one. */
+/** Returns an Item's state and kind, for example `Open issue` or `Merged pull request #41`; the
+ * number is included if the Item is not the Task's originating Item. */
 export const itemStateLine = (
   item: Pick<TaskItemView, "kind" | "number" | "state">,
   origin: boolean,
@@ -58,16 +57,15 @@ export const itemStateLine = (
   return `${itemStateLabel(item.state)} ${kind}${origin ? "" : ` #${item.number}`}`;
 };
 
-/** When a Run was last at work: when it closed, even before any Attempt began; while it is open,
- * its last Attempt's end, that Attempt's start while it runs or when no end was recorded, or when
- * the Run opened before any Attempt started. */
+/** Returns when a Run was last active: its close time if it is closed; otherwise its last Attempt's
+ * end, that Attempt's start while it runs or if no end was recorded, or the Run's open time before
+ * any Attempt. */
 export const runActivityAt = (run: Pick<RunView, "attempts" | "openedAt" | "closedAt">): string => {
   const last = run.attempts.at(-1);
   return run.closedAt ?? last?.endedAt ?? last?.startedAt ?? run.openedAt;
 };
 
-/** The entries of the desk's stalled list that are about one of the Task's Items, in the desk's
- * order: one per Loop and Item. */
+/** Returns the desk's stall entries for the Task's Items in desk order, one per Loop and Item. */
 const taskStalls = (
   stalled: ReadonlyArray<StalledItemView>,
   task: Pick<BoardTaskView, "items">,
@@ -76,74 +74,70 @@ const taskStalls = (
   return stalled.filter(({ item }) => keys.has(item.itemKey));
 };
 
-/** The stall of a Task: the first entry of the desk's stalled list that is about one of the
- * Task's Items, or null when none is. */
+/** Returns the first desk stall entry for one of the Task's Items, or `null`. */
 export const taskStall = (
   stalled: ReadonlyArray<StalledItemView>,
   task: Pick<BoardTaskView, "items">,
 ): StalledItemView | null => taskStalls(stalled, task)[0] ?? null;
 
-/** The Run a stall reason names, or null when the reason is about the Loop or the Item alone, as
- * a paused Loop, a used-up cycle budget, or a coming poll are. */
+/** Returns the Run that a stall reason references, or `null` if the reason is only about the Loop
+ * or the Item, such as a paused Loop, a used-up cycle budget, or a pending poll. */
 export const stallRun = ({ reason }: Pick<StalledItemView, "reason">): RunView | null =>
   "run" in reason ? reason.run : null;
 
-/** A Task's originating Item, the first of its Items: its earliest issue, or its earliest pull
- * request when it has none. */
+/** Returns the Task's originating Item: its earliest issue, or its earliest pull request if it has
+ * no issue. */
 export const taskOrigin = (task: BoardTaskView): BoardItemLink =>
-  // The view's schema refuses a Task without Items; the current Item only satisfies the type.
+  // The view schema rejects a Task without Items; the fallback only satisfies the type.
   task.items[0] ?? task;
 
-/** The number that addresses a Task's page: its originating Item's. */
+/** Returns the number in the Task page URL, which is the originating Item's number. */
 export const taskNumber = (task: BoardTaskView): string => String(taskOrigin(task).number);
 
 /**
- * Where usine's work on a Task stands, as the Tasks list's Status column says it. Running,
- * AwaitingApproval, Queued, and Stalled are in flight, each with the Run whose opening orders it
- * in the list (see `rowPlace` and `countedAs`).
+ * The Task's status in the Tasks list. `Running`, `AwaitingApproval`, `Queued`, and `Stalled` are in
+ * flight, each with the Run whose open time orders it (see `rowPlace` and `countedAs`).
  */
 type TaskStatus =
-  /** `run` has an Attempt at work. */
+  /** `run` has a running Attempt. */
   | { readonly _tag: "Running"; readonly run: RunView }
-  /** `run` waits for the operator's approval. */
+  /** `run` is waiting for approval. */
   | { readonly _tag: "AwaitingApproval"; readonly run: RunView }
-  /** `run` is pending or queued, and the desk has not said why yet. */
+  /** `run` is pending or queued, and the desk has no reason for it yet. */
   | { readonly _tag: "Queued"; readonly run: RunView }
   /**
-   * A Loop's trigger matches one of the Task's Items with no Attempt running on it, and `stall`'s
-   * reason keeps the work open (see `keepsInFlight`): the first such stall of the Task's, in the
-   * desk's order. `run` is the Run that reason names, the pending or queued one when one is open,
-   * else the last Run.
+   * A Loop's trigger matches one of the Task's Items with no running Attempt, and `stall` is the
+   * first stall in desk order that keeps the work in flight (see `keepsInFlight`). `run` is the Run
+   * the reason references, else the open pending or queued Run, else the last Run.
    */
   | { readonly _tag: "Stalled"; readonly stall: StalledItemView; readonly run: RunView }
   /**
-   * A Loop's trigger matches one of the Task's Items, but no Run is open and none of the Task's
-   * stalls holds anything on the operator: the last Run closed on the Item's unchanged state, the
-   * next poll acts on it, the Loop is paused, or the failure is resolved. `stall` is the first of
-   * them in the desk's order.
+   * A Loop's trigger matches one of the Task's Items, but no Run is open and no stall needs the
+   * operator: the last Run closed on the unchanged Item, the next poll handles it, the Loop is
+   * paused, or the failure is resolved. `stall` is the first stall in desk order.
    */
   | { readonly _tag: "Idle"; readonly stall: StalledItemView }
-  /** Nothing is open or stalled, and a failed Run or a hold on one of the Items waits on the
-   * operator, as the Board card's Needs attention says. */
+  /** Nothing is open or stalled, and a failed Run or a Hold on one of the Items needs the
+   * operator, as on the Board card. */
   | { readonly _tag: "NeedsAttention" }
   /** The current Item is merged or closed and no Run is open. */
   | { readonly _tag: "Done" }
-  /** Nothing is open, stalled, or waiting on the operator: the last Run's outcome stands. */
+  /** Nothing is open, stalled, or needs the operator; the status is the last Run's outcome. */
   | { readonly _tag: "Ended"; readonly run: RunView };
 
-/** A Task usine ran at least once, as a row of the Tasks list. */
+/** A Tasks list row for a Task that usine ran at least once. */
 export interface TaskRow {
   readonly task: BoardTaskView;
-  /** The Task's latest Run, whose last activity the Status column's time gives. */
+  /** The Task's latest Run; the Status column shows its last activity time. */
   readonly last: RunView;
   readonly status: TaskStatus;
 }
 
 /**
- * Whether `stall` keeps its Task in flight: its reason names an open Run, or holds the Loop on the
- * operator, as an Agent's question or blocker, a used-up cycle budget, and a failure not yet
- * resolved do. A paused Loop keeps a Task in flight only beside an open Run, which `taskStatus`
- * reads before any stall.
+ * Returns whether `stall` keeps its Task in flight: its reason references an open Run, or stalls the
+ * Loop until the operator acts, as for a question, a blocker, a used-up cycle budget, or an
+ * unresolved failure. A paused Loop keeps a Task in flight only with an open Run, which `taskStatus`
+ * checks before stalls.
  */
 const keepsInFlight = ({ reason }: StalledItemView): boolean =>
   Match.valueTags(reason, {
@@ -157,17 +151,16 @@ const keepsInFlight = ({ reason }: StalledItemView): boolean =>
     AwaitingPoll: () => false,
   });
 
-/** The first Run, newest first, whose state is one of `states`. */
 const newestIn = (
   runs: ReadonlyArray<RunView>,
   ...states: ReadonlyArray<RunView["state"]>
 ): RunView | undefined => [...runs].reverse().find(({ state }) => states.includes(state));
 
 /**
- * A Task's status, the first that applies: a Run at work, a Run waiting for approval, a pending or
- * queued Run with the desk's reason for that Run, Done for a merged or closed current Item, a
- * stall of the Task's that keeps the work open, any other stall of the Task's as idle, Needs
- * attention, and last the outcome of `last`. `stalled` is the desk's list.
+ * Returns the first status that applies: a running Run, a Run waiting for approval, a pending or
+ * queued Run with the desk's reason for it, `Done` for a merged or closed current Item, a stall that
+ * keeps the work in flight, any other stall as `Idle`, `NeedsAttention`, and finally the outcome of
+ * `last`.
  */
 const taskStatus = (
   task: BoardTaskView,
@@ -180,17 +173,16 @@ const taskStatus = (
   if (waiting !== undefined) return { _tag: "AwaitingApproval", run: waiting };
   const queued = newestIn(task.runs, "Pending", "Queued");
   if (queued !== undefined) {
-    // The desk lists a stall per Loop and Item, and one about an older closed Run on another of
-    // the Task's Items can come first; only the reason that names the queued Run explains it.
+    // The desk has one stall per Loop and Item, and a stall for an older closed Run on another Item
+    // can come first; only the stall that references the queued Run explains it.
     const own = stalled.find((stall) => stallRun(stall)?.id === queued.id);
     return own === undefined
       ? { _tag: "Queued", run: queued }
       : { _tag: "Stalled", stall: own, run: queued };
   }
   if (isSettledItemState(task.state)) return { _tag: "Done" };
-  // The desk orders its failures by Item and Loop, not by whether they are resolved, so a resolved
-  // one can come before another Loop's failure that still waits on the operator. Any stall that
-  // keeps the work open outranks the first.
+  // The desk orders failures by Item and Loop, not by resolution, so a resolved failure can come
+  // before another Loop's unresolved one. A stall that keeps the work in flight takes precedence.
   const stalls = taskStalls(stalled, task);
   const open = stalls.find(keepsInFlight);
   if (open !== undefined) return { _tag: "Stalled", stall: open, run: stallRun(open) ?? last };
@@ -201,10 +193,10 @@ const taskStatus = (
 };
 
 /**
- * A row's place in the list: its group, then the time that orders it within the group, newest
- * first. In flight comes first, running, then waiting for approval, then pending, queued, and
- * stalled, each by when its Run opened; every other Task follows, idle ones included, by when its
- * last Run closed, which for a Run canceled before any Attempt is the cancel, not its opening.
+ * Returns a row's group and its sort time within the group, newest first. In-flight rows come first:
+ * running, then waiting for approval, then pending, queued, and stalled, each by Run open time. All
+ * other Tasks, idle ones included, follow by last Run close time, which for a Run canceled before any
+ * Attempt is the cancel time.
  */
 const rowPlace = ({ status, last }: TaskRow): readonly [group: number, at: number] => {
   switch (status._tag) {
@@ -224,9 +216,8 @@ const rowPlace = ({ status, last }: TaskRow): readonly [group: number, at: numbe
 };
 
 /**
- * The Tasks of the lanes that have at least one Run, as Tasks list rows in the list's order (see
- * `rowPlace`); of two Tasks placed alike, the one with the higher current Item number comes
- * first. `stalled` is the desk's list of stalled Items, which a row's status reads.
+ * Returns the Tasks list rows for the Tasks in `lanes` that have at least one Run, in `rowPlace`
+ * order; ties go to the higher current Item number. `stalled` is the desk's list of stalled Items.
  */
 export const taskRows = (
   lanes: ReadonlyArray<BoardLaneView>,
@@ -248,8 +239,8 @@ export const taskRows = (
 const HEADING_COUNTS = ["in flight", "needs attention", "done"] as const;
 
 /**
- * The heading count a row adds to; null for a Task that shows its last Run's outcome, and for an
- * idle one unless a failed Run or a hold on one of its Items waits on the operator.
+ * Returns the heading count that a row adds to; `null` for a Task that shows its last Run's outcome,
+ * and for an idle Task unless a failed Run or a Hold on one of its Items needs the operator.
  */
 const countedAs = ({ task, status }: TaskRow): (typeof HEADING_COUNTS)[number] | null => {
   switch (status._tag) {
@@ -270,8 +261,8 @@ const countedAs = ({ task, status }: TaskRow): (typeof HEADING_COUNTS)[number] |
 };
 
 /**
- * The Tasks list's heading counts, such as `2 in flight, 1 needs attention, 2 done`, leaving out a
- * zero count; undefined when all three are zero.
+ * Returns the Tasks list heading counts, for example `2 in flight, 1 needs attention, 2 done`,
+ * without zero counts; `undefined` if all are zero.
  */
 export const taskCounts = (rows: ReadonlyArray<TaskRow>): string | undefined => {
   const shown = HEADING_COUNTS.flatMap((what) => {
@@ -282,8 +273,8 @@ export const taskCounts = (rows: ReadonlyArray<TaskRow>): string | undefined => 
 };
 
 /**
- * A Task's Attempt time at `now`: its ended Attempts' time, and each Attempt at work counted from
- * its start up to `now`.
+ * Returns the Task's Attempt time at `now`: the ended Attempts' time plus each running Attempt from
+ * its start to `now`.
  */
 export const taskDuration = (
   usage: Pick<TaskUsageView, "durationMillis" | "runningSince">,
@@ -295,26 +286,26 @@ export const taskDuration = (
   );
 
 /**
- * Whether part of a Task's usage in a pool with a dollar rate has no price yet, so its cost is a
- * lower bound.
+ * Returns whether some of the Task's usage in a pool with a dollar rate has no price yet, so the cost
+ * is a lower bound.
  */
 export const costUnpriced = (usage: Pick<TaskUsageView, "pools">): boolean =>
   usage.pools.some(({ unpriced }) => unpriced);
 
-/** What the listed Tasks took, added up, as the line under the Tasks list's heading says. */
+/** The totals of the listed Tasks, shown under the Tasks list heading. */
 export interface TaskTotals {
   readonly runs: number;
   readonly durationMillis: number;
-  /** Ended Attempts with no recorded end, which `durationMillis` leaves out. */
+  /** The number of ended Attempts with no recorded end; `durationMillis` excludes them. */
   readonly unmeasured: number;
   readonly tokens: number;
-  /** The priced Tasks' dollars; null when no Task has a price. */
+  /** The total cost in dollars of the priced Tasks, or `null` if no Task has a price. */
   readonly usd: number | null;
   /** Whether a listed Task has usage with no price yet, so `usd` is a lower bound. */
   readonly unpriced: boolean;
 }
 
-/** The runs, Attempt time at `now`, tokens, and dollars of every row, added up. */
+/** Returns the totals of Runs, Attempt time at `now`, tokens, and dollars over all rows. */
 export const taskTotals = (rows: ReadonlyArray<TaskRow>, now: number): TaskTotals => {
   const costs = rows.flatMap(({ task }) => (task.usage.cost === null ? [] : [task.usage.cost]));
   return {
@@ -327,15 +318,15 @@ export const taskTotals = (rows: ReadonlyArray<TaskRow>, now: number): TaskTotal
   };
 };
 
-/** Why an elapsed time marked `*` is lower than the real one. */
+/** The reason an elapsed time marked `*` is lower than the real one. */
 export const untimedNote = "Some attempts have no recorded timing; the real figure is higher";
 
-/** Why an estimated cost marked `*` is lower than the real one. */
+/** The reason an estimated cost marked `*` is lower than the real one. */
 export const unpricedNote = "Some sessions have no price yet; the real figure is higher";
 
 /**
- * A figure of the line under the Tasks list's heading and the words after it, such as `12 h 8 min`
- * and `elapsed`. `lowerBound` says why the real figure is higher, null when the figure is whole.
+ * A figure in the totals line and the words after it, for example `12 h 8 min` and `elapsed`.
+ * `lowerBound` is the reason the real figure is higher, or `null` if the figure is complete.
  */
 export interface TotalsFigure {
   readonly figure: string;
@@ -344,9 +335,9 @@ export interface TotalsFigure {
 }
 
 /**
- * The figures of the line under the Tasks list's heading, which reads
- * `197 runs, 12 h 8 min* elapsed, 127.5M tokens, $134.34* estimated` with a `*` after each lower
- * bound; the cost is left out when no Task has a price.
+ * Returns the figures of the totals line, for example
+ * `197 runs, 12 h 8 min* elapsed, 127.5M tokens, $134.34* estimated`; the cost is omitted if no Task
+ * has a price.
  */
 export const totalsFigures = (totals: TaskTotals): ReadonlyArray<TotalsFigure> => [
   { figure: String(totals.runs), words: totals.runs === 1 ? "run" : "runs", lowerBound: null },
@@ -373,8 +364,7 @@ export interface TaskLoop {
   readonly state: RunView["state"];
 }
 
-/** The Loops that ran on a Task, each named once in the order they first ran, with the state of
- * each one's last Run. */
+/** Returns each Loop that ran on the Task once, in first-run order, with the state of its last Run. */
 export const taskLoops = (task: Pick<BoardTaskView, "runs">): ReadonlyArray<TaskLoop> => {
   // A Map keeps the order of first insertion when a later Run of the same Loop replaces the state.
   const states = new Map<LoopName, RunView["state"]>();
@@ -382,7 +372,7 @@ export const taskLoops = (task: Pick<BoardTaskView, "runs">): ReadonlyArray<Task
   return [...states].map(([loop, state]) => ({ loop, state }));
 };
 
-/** An Item's state as GitHub names it: Open, Closed, or Merged. */
+/** Returns the GitHub name of an Item state: Open, Closed, or Merged. */
 export const itemStateLabel = (state: LaneItemState): string => {
   switch (state) {
     case "issue-open":
@@ -396,7 +386,6 @@ export const itemStateLabel = (state: LaneItemState): string => {
   }
 };
 
-/** What an Agent posted, as GitHub names it. */
 export const commentKindLabel = (kind: CommentKind): string => {
   switch (kind) {
     case "issue-comment":
@@ -408,6 +397,6 @@ export const commentKindLabel = (kind: CommentKind): string => {
   }
 };
 
-/** An Item's number and kind, as Board cards show them: `#41 PR` or `#40 Issue`. */
+/** Returns an Item's number and kind as shown on Board cards: `#41 PR` or `#40 Issue`. */
 export const itemReference = (item: Pick<TaskItemView, "kind" | "number">): string =>
   `#${item.number} ${item.kind === "pr" ? "PR" : "Issue"}`;

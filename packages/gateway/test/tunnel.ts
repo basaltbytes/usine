@@ -4,10 +4,10 @@ import { connect } from "node:tls";
 import { Effect, Option } from "effect";
 import type { Listener } from "../src/node/node.ts";
 
-/** What a client saw when it used a tunnel: the CONNECT status if it was not 200, or how the connection inside went. */
+/** The client's result from a tunnel: the CONNECT status if not 200, or the result of the inner connection. */
 type TunnelOutcome = "connected" | "refused" | "closed" | `status ${number}`;
 
-/** Sends `CONNECT authority` and hands the tunnel's socket to `inside` once the proxy answers 200. */
+/** Sends `CONNECT authority` and passes the tunnel's socket to `inside` after a 200 response. */
 const tunnel = (
   proxy: Listener,
   authority: string,
@@ -33,8 +33,8 @@ const tunnel = (
   });
 
 /**
- * Starts TLS inside a tunnel with `servername` in its ClientHello, or with
- * none, and verifies the server's certificate against Node's CAs.
+ * Starts TLS inside a tunnel with `servername` in the ClientHello, or none, and verifies the
+ * server certificate against Node's CAs.
  */
 export const tlsThroughTunnel = (
   proxy: Listener,
@@ -59,7 +59,7 @@ export const tlsThroughTunnel = (
     secure.once("close", () => done("refused"));
   });
 
-/** Writes `bytes` into a tunnel and reports when the proxy closes it. */
+/** Writes `bytes` into a tunnel and returns when the proxy closes it. */
 export const rawThroughTunnel = (proxy: Listener, authority: string, bytes: string) =>
   tunnel(proxy, authority, (socket, done) => {
     socket.on("error", () => socket.destroy());
@@ -67,7 +67,7 @@ export const rawThroughTunnel = (proxy: Listener, authority: string, bytes: stri
     socket.write(bytes);
   });
 
-/** Closes a tunnel once the proxy answers 200, before writing anything into it, and reports when the proxy closes it too. */
+/** Closes a tunnel after the 200 response without writing anything, and returns when the proxy closes it too. */
 export const abandonedTunnel = (proxy: Listener, authority: string) =>
   tunnel(proxy, authority, (socket, done) => {
     socket.on("error", () => socket.destroy());
@@ -75,7 +75,7 @@ export const abandonedTunnel = (proxy: Listener, authority: string) =>
     socket.end();
   });
 
-/** Opens a tunnel and keeps it open without writing anything, so the proxy waits for its ClientHello. */
+/** Opens a tunnel and keeps it open without writing, so the proxy waits for a ClientHello. */
 export const silentTunnel = (proxy: Listener, authority: string) =>
   Effect.callback<Socket>((resume) => {
     const outgoing = request({

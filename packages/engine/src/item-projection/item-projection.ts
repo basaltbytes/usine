@@ -27,7 +27,7 @@ const persistence =
   <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, EnginePersistenceError, R> =>
     Effect.mapError(effect, (cause) => new EnginePersistenceError({ operation, cause }));
 
-/** Newest Items first. The bound keeps a long-lived repository's Board response finite. */
+/** The options for listing Item projections, newest first. */
 export interface ItemProjectionListOptions {
   readonly limit: number;
 }
@@ -159,15 +159,12 @@ const makeWriter = Effect.gen(function* () {
 export class ItemProjectionReader extends Context.Service<
   ItemProjectionReader,
   {
-    /** The newest `limit` Item projections of one repository, highest number first. */
+    /** Returns the newest `limit` Item projections of `repository`, highest number first. */
     readonly list: (
       repository: RepositoryName,
       options: ItemProjectionListOptions,
     ) => Effect.Effect<ReadonlyArray<ItemProjection>, EnginePersistenceError>;
-    /**
-     * The numbers of `repository`'s issue projections whose last payload is
-     * open and that are not marked gone, lowest first, however many there are.
-     */
+    /** Returns the numbers of `repository`'s open issues that aren't marked gone, lowest first, without a limit. */
     readonly openIssues: (
       repository: RepositoryName,
     ) => Effect.Effect<ReadonlyArray<ItemNumber>, EnginePersistenceError>;
@@ -179,15 +176,11 @@ export class ItemProjectionReader extends Context.Service<
 export class ItemProjectionWriter extends Context.Service<
   ItemProjectionWriter,
   {
-    /**
-     * Stores the Item as `item` describes it, which clears a recorded `goneAt`
-     * for an observed snapshot. `true` means the durable projection changed.
-     */
+    /** Stores `item`, clearing `goneAt` for an observed snapshot. Returns whether the stored projection changed. */
     readonly upsert: (item: ItemProjection) => Effect.Effect<boolean, EnginePersistenceError>;
     /**
-     * Records that GitHub no longer has the Item, keeping its last payload, so
-     * the Board stops showing it as open. `true` when this marked a stored
-     * projection; an Item already gone keeps its first `goneAt`.
+     * Records that GitHub no longer has the Item, keeping its last payload. Returns whether a
+     * stored projection was marked; an Item already gone keeps its first `goneAt`.
      */
     readonly markGone: (
       itemKey: ItemKey,

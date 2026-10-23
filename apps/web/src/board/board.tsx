@@ -46,15 +46,15 @@ import { BoardColumn } from "./column.tsx";
 import { laneFlows } from "./flow.tsx";
 import { type BoardMoveProgress, useBoardMoves } from "./moves.ts";
 
-/** The lanes that accept moves come first, so work in flight opens the Board; the read-only lanes
- * follow. Each group keeps its configured order, and the fallback lane stays last. */
+/** Returns writable lanes first, then read-only lanes, each in configured order, with the fallback
+ * lane last. */
 export const orderLanes = (lanes: ReadonlyArray<BoardLaneView>): ReadonlyArray<BoardLaneView> => [
   ...lanes.filter(({ _tag }) => _tag === "WritableBoardLane"),
   ...lanes.filter(({ _tag, origin }) => _tag !== "WritableBoardLane" && origin !== "fallback"),
   ...lanes.filter(({ origin }) => origin === "fallback"),
 ];
 
-/** A drop lands on a lane or on one of its cards; either way the lane is the target. */
+/** Returns the lane of a drop target, which is either a lane or one of its cards. */
 export const laneUnder = (
   over: UniqueIdentifier,
   lanes: ReadonlyArray<BoardLaneView>,
@@ -62,9 +62,9 @@ export const laneUnder = (
   lanes.find((lane) => lane.id === over) ??
   lanes.find((lane) => lane.items.some(({ itemKey }) => itemKey === over));
 
-/** The lane under the pointer wins; corner distance would hand a tall empty lane's drop to the
- * cards of the lane next to it. A keyboard drag has no pointer, so the dragged card's top-left
- * corner stands in for it; intersection is the last fallback. */
+/** Uses the lane under the pointer, or under the dragged card's top-left corner for a keyboard drag,
+ * then falls back to intersection. Corner distance isn't used because it assigns a drop on a tall
+ * empty lane to the next lane's cards. */
 const dropCollision: CollisionDetection = (args) => {
   const within = pointerWithin(args);
   if (within.length > 0) return within;
@@ -78,8 +78,8 @@ const dropCollision: CollisionDetection = (args) => {
   return rectIntersection(args);
 };
 
-/** Left and Right move a keyboard drag to the top of the nearest lane that takes drops on that
- * side; Up and Down move it between cards as sortable lists do. */
+/** Returns a keyboard coordinate getter: Left and Right move a drag to the top of the nearest lane
+ * on that side that accepts drops; Up and Down move it between cards. */
 const laneKeyboardCoordinates =
   (lanes: ReadonlyArray<BoardLaneView>): KeyboardCoordinateGetter =>
   (event, args) => {
@@ -100,7 +100,7 @@ const laneKeyboardCoordinates =
     return next === undefined ? undefined : { x: next.left, y: next.top };
   };
 
-/** Shows a move in its target lane while the label write and the next poll are in flight. */
+/** Returns `lanes` with the moved card in its target lane, for display while the move is pending. */
 const applyMove = (
   lanes: ReadonlyArray<BoardLaneView>,
   move: BoardMoveProgress,
@@ -110,8 +110,7 @@ const applyMove = (
   const laneLabels = new Set(
     lanes.flatMap((lane) => (lane._tag === "WritableBoardLane" ? lane.labels : [])),
   );
-  // Placement and progress explain the pending destination; stale source-lane
-  // chips would contradict it. Other labels still come from the live snapshot.
+  // Removes the stale lane labels from the moved card; other labels come from the live snapshot.
   const card = { ...moved, labels: moved.labels.filter((label) => !laneLabels.has(label)) };
   return lanes.map((lane) => {
     const items = lane.items.filter(({ itemKey }) => itemKey !== move.itemKey);
@@ -119,7 +118,7 @@ const applyMove = (
   });
 };
 
-/** Runs whose Item has no card, such as schedule Runs and quarantined Items, so they stay reachable. */
+/** Returns the Runs whose Item has no card, such as schedule Runs and Runs on quarantined Items. */
 export const runsWithoutCard = (project: ProjectView): ReadonlyArray<RunView> => {
   const carded = new Set(
     project.board.lanes.flatMap(({ items }) =>
@@ -136,7 +135,7 @@ const UncardedRuns = ({
   readonly runs: ReadonlyArray<RunView>;
   readonly openRun: (runId: RunId) => void;
 }) => (
-  // Pinned to the left edge of the Board's scroll area, at most as wide as what it shows.
+  // Sticks to the left edge of the Board's scroll area and is no wider than the scroll container.
   <Card className="sticky left-4 w-[min(64rem,calc(100cqw-2rem))] md:left-5 md:w-[min(64rem,calc(100cqw-2.5rem))]">
     <CardHeader>
       <CardTitle>Runs without a card</CardTitle>
@@ -185,17 +184,14 @@ const UncardedRuns = ({
   </Card>
 );
 
-/** The card being dragged and the lane it left. */
 interface DragSource {
   readonly item: BoardTaskView;
   readonly lane: BoardLaneView;
 }
 
 /**
- * A Project's Board: every lane of Task cards in one row. `loops` are the instance's Loops with
- * their pause state, for the flow arrows; `stalled` is the desk's list of stalled Items, whose
- * reason a card shows when one of its Items is on it. `disabled` turns off moves and actions while
- * the instance needs setup.
+ * `stalled` is the desk's list of stalled Items, whose reasons are shown on their cards; `disabled`
+ * turns off moves and actions during setup.
  */
 export const ProjectBoard = ({
   project,

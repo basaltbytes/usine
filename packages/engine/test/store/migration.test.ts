@@ -24,7 +24,7 @@ import { RunStore } from "../../src/store/store.ts";
 
 import { testAgent, lifecycleSubmission } from "./support.ts";
 
-/** Seeds a pending Run in a historical schema: today's store writes columns added by later migrations. */
+/** Seeds a pending Run in an old schema directly, because the current store writes columns from later migrations. */
 const seedPendingRun = (runId: RunId) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
@@ -73,7 +73,7 @@ describe("Attempt migrations", () => {
       yield* Effect.scoped(
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient;
-          // Seed the historical schema directly: today's store writes columns added by later migrations.
+          // Seeds the old schema directly, because the current store writes columns from later migrations.
           const agent = JSON.stringify(Schema.encodeSync(Agent)(testAgent));
           const eventId = lifecycleSubmission.event.id;
           yield* sql`INSERT INTO usine_events (event_id, dedup_key, payload_json, received_at)
@@ -94,8 +94,8 @@ describe("Attempt migrations", () => {
             payload: { _tag: "Started", parentModel: "openai/model" },
           });
           yield* sql`INSERT INTO usine_attempt_transcripts (attempt_id, direction, channel_sequence, envelope, received_at) VALUES (${id}, 'outbound', 1, ${envelope}, '2026-09-12T00:00:00.000Z')`;
-          // v6 was the live version until v7 changed only the unstored `Start` frame;
-          // bumping the envelope literal alone once made every existing transcript unreadable.
+          // v7 changed only the unstored `Start` frame; bumping the envelope literal alone once made
+          // every v6 transcript unreadable.
           const previousVersion = JSON.stringify({
             _tag: "OutboundEnvelope",
             version: 6,
@@ -173,7 +173,7 @@ describe("Run driver migration", () => {
         Effect.gen(function* () {
           yield* seedPendingRun(runId);
           const sql = yield* SqlClient.SqlClient;
-          // The tables Effect's SingleRunner kept beside usine's, and a pending command.
+          // The tables that Effect's SingleRunner created next to usine's, and a pending command.
           yield* sql`CREATE TABLE cluster_migrations (migration_id integer PRIMARY KEY)`;
           yield* sql`CREATE TABLE cluster_messages (id text PRIMARY KEY)`;
           yield* sql`CREATE TABLE cluster_replies (id text PRIMARY KEY)`;

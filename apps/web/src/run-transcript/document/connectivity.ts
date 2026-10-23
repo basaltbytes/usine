@@ -1,14 +1,14 @@
 import type { TranscriptEventView } from "@usine/orchestrator/operator";
 import { DateTime } from "effect";
 
-/** The Attempt's Worker has not answered the executor's probe since `lastAnsweredAt`. */
+/** A Worker that has not answered the executor's probe since `lastAnsweredAt`. */
 interface WorkerSilent {
   readonly _tag: "WorkerSilent";
   readonly worker: string;
   readonly lastAnsweredAt: string;
 }
 
-/** A session's harness keeps retrying its model provider; `since` is the first retry without an answer after it. */
+/** A harness that is retrying its model provider; `since` is the time of the first unanswered retry. */
 interface ProviderRetrying {
   readonly _tag: "ProviderRetrying";
   readonly sessionId: string;
@@ -18,14 +18,10 @@ interface ProviderRetrying {
   readonly since: string;
 }
 
-/** A connectivity problem the Attempt's newest loaded events leave open; a signal, never a stop. */
+/** A connectivity problem still open at the newest loaded event; it does not stop the Attempt. */
 export type ConnectivityWarning = WorkerSilent | ProviderRetrying;
 
-/**
- * The connectivity problems still open after `events`, one Attempt's in transcript
- * order: the Worker until it answers again, and each session's provider retries
- * until it reaches its provider again, waits for the operator, or finishes.
- */
+/** Returns the connectivity problems still open after `events`, which are one Attempt's events in transcript order. */
 export const openConnectivity = (
   events: ReadonlyArray<TranscriptEventView>,
 ): ReadonlyArray<ConnectivityWarning> => {

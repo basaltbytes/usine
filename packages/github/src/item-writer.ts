@@ -9,7 +9,7 @@ import type { GitHubAppError } from "./error.ts";
 const LabelResponse = Schema.Array(Schema.Struct({ name: Schema.NonEmptyString }));
 const LabelNames = Schema.Array(Schema.NonEmptyString).check(Schema.isUnique());
 
-/** Labels to add and remove on one Item. Labels outside these two sets are left alone. */
+/** The labels to add and remove on one Item; other labels are unchanged. */
 export class ItemLabelMutation extends Schema.Class<ItemLabelMutation>(
   "@usine/github/ItemLabelMutation",
 )({
@@ -29,7 +29,7 @@ const labelUrl = (repository: RepositoryName, item: number, label: string): stri
 export class GitHubItemWriter extends Context.Service<
   GitHubItemWriter,
   {
-    /** Adds and removes only the named labels and keeps every other applied label. */
+    /** Adds and removes only the listed labels and keeps every other applied label. */
     readonly updateLabels: (
       repository: RepositoryName,
       item: ItemNumber,

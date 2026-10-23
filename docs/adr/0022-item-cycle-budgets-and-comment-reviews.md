@@ -1,67 +1,27 @@
 # Item cycle budgets and comment-only agent reviews
 
-An Item has a durable cycle budget shared by its Loops. Each Loop may open at most
-`max_cycles` Runs between explicit operator resets, default three. A round is the
-nth Run of each participating Loop: three review/fix rounds permit three reviews
-and three fixes. The next admission that exceeds a Loop's limit opens one Item-level
-Ask and blocks all further Runs on that Item, including finishing Loops. Schedule
-Ticks have no Item feedback cycle and do not use this limit.
+Each item has a durable cycle budget shared by its loops: a loop opens at most `max_cycles` runs (default three) between operator resets. A round is each participating loop's nth run, so three review/fix rounds mean three reviews and three fixes. The admission that would exceed a limit opens one item-level ask and blocks every further run on the item, finishing loops included. Schedule ticks skip this limit.
 
-Admission reserves a round in the same transaction that opens its Run. Repeated
-Events and Attempt retries never charge twice. A canceled Run with no Attempt
-returns its reservation; started Runs keep theirs regardless of outcome. This
-prevents concurrent admissions from overspending while excluding superseded work
-that never used a Worker. Runs already admitted retain their reserved allowance
-and finish; the Ask prevents admission of further Runs.
+Admission reserves a round in the run-opening transaction. Repeated events and retries never charge twice. A canceled run with no attempt returns its reservation; started runs keep theirs. This prevents concurrent overspending and ignores superseded work that never used a worker. Admitted runs still finish.
 
-The Ask records its Item, participating Loops, counts, and exhausted limit. It
-persists even when labels change or Loops stop matching. Reset answers are Events
-bound to the Ask identity, so a repeated answer cannot reset a later budget. Reset
-also records a durable request to re-poll the repository. Polling fetches current
-state and checks active Loops before opening work; reset never executes a saved
-stale prompt directly. There is no automatic reset on convergence, label removal,
-configuration reload, or process restart.
+The ask records its item, loops, counts, and exhausted limit, and survives label changes and loops that stop matching. Reset answers are events bound to the ask, so a repeated answer can't reset a later budget. A reset records a durable re-poll request, and polling checks current state and active loops before opening work, never running a stale saved prompt. Nothing resets automatically (convergence, label removal, reload, restart).
 
-This extends [ADR 0013](./0013-cost-accounting-native-meters-guardrails.md)'s per-Attempt guards without introducing dollar budgets.
-It also extends ADR 0017 with an Item-level Ask before a Run exists. These Asks are
-actionable in the operator UI's Needs you strip; GitHub delivery and phone answers
-belong to the notifier feature tracked in #36.
+This extends the per-attempt guards of [ADR 0013](./0013-cost-accounting-native-meters-guardrails.md) without dollar budgets, and ADR 0017 with an item-level ask before any run exists. These asks are answered in Needs you; GitHub delivery and phone answers wait for the notifier (#36).
 
-All Agents retain the shared App identity from ADR 0011. Agent reviews use GitHub's
-`COMMENT` event at the reviewed head commit, with findings and outcome labels
-defined by the Loop. The review/fix example uses `agent-review-findings` and
-`review-passed`; either outcome removes the opposite label. A success label means
-the agent found no actionable issues and does not satisfy GitHub required-review
-rules. The operator supplies any required independent approval and merges.
+Agents share the App identity of ADR 0011. Agent reviews use GitHub's `COMMENT` event at the reviewed head commit, with loop-defined findings and outcome labels (the review/fix example's `agent-review-findings` and `review-passed`, each removing the other). A success label means no actionable issues, not a required review; the operator gives any required independent approval and merges.
 
-This resolves the identity decision in #77 without introducing a second credential
-set. GitHub disallows approving one's own PR; distinct personas or installation
-tokens do not change the App's author identity.
+This resolves the identity question in #77 without a second credential set: GitHub disallows approving your own PR, and personas or installation tokens don't change the App's authorship.
 
-## Considered Options
+## Considered options
 
-- Count posted reviews in CEL: the limit depends on review text, misses Runs that
-  fail before posting, and cannot durably block other Loops on the Item.
-- Bound each Attempt only: retries and separate review/fix Runs still permit an
-  endless sequence of bounded Attempts.
-- Add authored chain membership: makes every Loop author maintain a second group
-  definition. The existing Item identity already connects the feedback path.
-- Use a second GitHub App for approving reviews: introduces another credential set
-  and operator setup requirement. Comment reviews plus explicit labels preserve
-  the shared identity and leave required independent approval to the operator.
+- **Count posted reviews in CEL**: depends on review text, misses runs that fail before posting, and can't durably block other loops.
+- **Bound each attempt only**: retries and separate review and fix runs still loop endlessly.
+- **Authored chain membership**: a second group definition per loop, though item identity already links the feedback path.
+- **A second, approving GitHub App**: another credential set and setup step.
 
 ## Consequences
 
-- Existing completed Run history and queued Item Events join the default budget
-  during upgrade. An Item already at its limit asks before the next Run opens.
-- Changing labels, restarting, or renaming a Loop cannot clear an existing Ask.
-  A new Loop name has no prior count before exhaustion; Loop-file edits are trusted
-  operator configuration, not an agent-controlled way to resume a blocked Item.
-- Trigger adapters capture the Item's generation before fetching its snapshot.
-  That generation is immutable in the Event route and part of its deduplication
-  key after a reset. Queue selection and admission reject older observations,
-  including polls that were already fetching or rendering when the reset occurred.
-  Fresh polling produces a new Event with the current task, Agent, and limit;
-  previously queued Events are never promoted into the new allowance.
-- Old CEL review-count workarounds should be removed from fix and finishing Loops;
-  the [migration guide](../../apps/docs/src/content/docs/guides/review-fix-loops.md) shows the replacement.
+- On upgrade, completed run history and queued item events join the default budget; an item at its limit asks before its next run.
+- Label changes, restarts, and loop renames don't clear asks. A new loop name starts at zero; loop-file edits are trusted operator configuration, not an agent's way to unblock an item.
+- Trigger adapters capture the item's generation before fetching its snapshot. It's immutable in the event route and, after a reset, part of the dedup key. Queue selection and admission reject older observations, including polls in flight at the reset. Fresh polling yields a new event with the current task, agent, and limit; earlier queued events never enter the new allowance.
+- Remove old CEL review-count workarounds from fix and finishing loops; the [migration guide](../../apps/docs/src/content/docs/guides/review-fix-loops.md) shows the replacement.

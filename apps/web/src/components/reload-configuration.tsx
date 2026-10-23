@@ -9,8 +9,7 @@ import { reloadSummary } from "../operator-copy.ts";
 
 export type ConfigurationReload = UseMutationResult<InstanceReload, Error, void>;
 
-/** Loads the instance folder again, then refreshes the overview, the Agent roster, and the
- * configuration, whose Worker preflights a refused reload can change too. */
+/** Reloads the instance folder; the configuration query is invalidated even if the reload is rejected, because Worker preflights can still change. */
 export const useReloadConfiguration = (): ConfigurationReload => {
   const queryClient = useQueryClient();
   return useMutation({
@@ -31,7 +30,7 @@ export const ReloadConfigurationButton = ({ reload }: { readonly reload: Configu
   </Button>
 );
 
-/** What the last reload changed, or why it was refused; nothing before the first reload. */
+/** Renders the changes from the last reload, or the reason it was rejected; renders nothing before the first reload. */
 export const ReloadOutcome = ({ reload }: { readonly reload: ConfigurationReload }) => {
   if (reload.isError)
     return <ErrorAlert title="Configuration not reloaded" message={reload.error.message} />;

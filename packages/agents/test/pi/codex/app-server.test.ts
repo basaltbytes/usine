@@ -123,7 +123,6 @@ const spawnerFor = (
     ),
   );
 
-/** Waits until the transport has written `count` stdin lines. */
 const awaitStdinLines = (process: FakeProcess, count: number) =>
   Effect.gen(function* () {
     while (process.stdinLines.length < count) yield* Effect.yieldNow;

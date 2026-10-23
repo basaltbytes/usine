@@ -42,9 +42,8 @@ import { assert, describe, it } from "vitest";
 import { liveBackendLayer } from "../src/backend.ts";
 import { apiRoutes } from "../src/http.ts";
 
-// The dogfood instance has five Loops and about 500 Items on its Board; the
-// overview and the desk each evaluate every Loop's trigger on every Item, and
-// the web UI polls both at once.
+// The dogfood instance has five Loops and about 500 Items on its Board; the overview and the desk
+// each evaluate every Loop's trigger on every Item, and the web UI polls both at once.
 const BOARD_ITEMS = 500;
 const LABELS = [
   "ready-for-agent",
@@ -53,7 +52,7 @@ const LABELS = [
   "agent-review-findings",
   "review-passed",
 ];
-// The read endpoints answer within this while an Attempt starts (#464).
+// Maximum read latency while an Attempt starts (#464).
 const READ_BUDGET_MILLIS = 500;
 const READS = 3;
 
@@ -105,7 +104,7 @@ const instance = new LoadedInstance({
   warnings: [],
 });
 
-// One Item in ten carries a Loop's label, as on a Board where most work is done.
+// One Item in ten has a Loop's label, as on a Board where most work is done.
 const labelOf = (number: number) =>
   number % 10 === 0 ? (LABELS[(number / 10) % LABELS.length] ?? "bug") : "bug";
 
@@ -170,7 +169,7 @@ const started = (number: number) =>
     parentModel: Option.none(),
   });
 
-/** How long `effect` took on the real clock, and its value. */
+/** Runs `effect` and returns its value with the elapsed real-clock milliseconds. */
 const timed = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   Effect.gen(function* () {
     const before = yield* Clock.currentTimeMillis;
@@ -213,7 +212,7 @@ describe("operator read latency", () => {
         const items = yield* ItemProjectionWriter;
         const runs = yield* RunEngine;
         const reads = yield* OperatorObservation;
-        // The running factory's backend; the reads it serves are the Operator's observation.
+        // Serves the overview and desk from `OperatorObservation`.
         const operator = yield* Effect.provide(
           Operator,
           Layer.mock(Operator)({ overview: reads.overview, desk: reads.desk }),
@@ -233,7 +232,7 @@ describe("operator read latency", () => {
 
         yield* Effect.gen(function* () {
           const client = yield* HttpClient.HttpClient;
-          // Until the response body has arrived, as the web UI waits for it.
+          // Measured until the response body has arrived, as the web UI waits for it.
           const read = (path: string) =>
             timed(client.get(path).pipe(Effect.flatMap((response) => response.text)));
           for (let number = 1; number <= BOARD_ITEMS; number += 1)
@@ -241,12 +240,9 @@ describe("operator read latency", () => {
           yield* runs.submit(started(10));
           yield* Deferred.await(preparing);
 
-          // While an Attempt starts, its Agent relabels Items and the engine records the
-          // Attempt, so the projection revision keeps changing and each overview read
-          // projects again. The web UI polls the overview and the desk together, and both
-          // run on one event loop, so each round requests them at once. The fastest of a
-          // few rounds measures what a read costs, not how busy the machine running the
-          // tests is; a read that waited on the parked Attempt would wait in every round.
+          // Each round requests the overview and desk together, as the web UI does, while the
+          // projection keeps changing. The fastest round measures the read cost independent of
+          // machine load.
           const rounds = [];
           for (let round = 1; round <= READS; round += 1) {
             yield* items.upsert(

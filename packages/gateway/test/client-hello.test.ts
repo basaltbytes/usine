@@ -24,7 +24,7 @@ const serverNameExtension = (name: string) => {
   return extension(0x0000, [...u16(entry.length), ...entry]);
 };
 
-/** A ClientHello handshake message with the given extensions, the way RFC 8446 lays it out. */
+/** Returns a ClientHello handshake message with `extensions`, in the RFC 8446 layout. */
 const clientHello = (extensions: ReadonlyArray<ReadonlyArray<number>>) => {
   const body = [
     0x03,
@@ -61,7 +61,7 @@ const serverNameOf = (bytes: Uint8Array) => {
   return read;
 };
 
-/** The first bytes Node's own TLS client sends for `servername`, captured by a local listener. */
+/** Returns the first bytes Node's TLS client sends for `servername`, captured by a local listener. */
 const nodeClientHello = (servername: string) =>
   Effect.callback<Uint8Array>((resume) => {
     const server = createServer((socket) => {
