@@ -134,6 +134,21 @@ Test: someone with no context reads the sentence once and knows what is true and
 
 **No markdown in plain text contexts** — emails, DMs, SMS. Asterisks rendering as symbols is an instant tell.
 
+## Writing documentation or code comments
+
+**No narrated headings.** AI titles a section as a short story about the system: "How an Attempt runs", "What the executor does for each kind", "When a Loop does not load", "Why an Item is stalled", "The dogfood instance's Loops". The question form and the possessive give the parts of a program intentions, and the heading says nothing about what the section contains. Cut the narration and leave the subject; the body explains the rest. The same goes for the body text: "the executor's job", "the Loop's turn", "the Worker decides" are the same pattern in a sentence, so write what the part is or does in plain terms there too.
+
+| Before | After |
+|---|---|
+| How an Attempt runs | Attempt lifecycle |
+| The dogfood instance's Loops | Dogfood instance Loops |
+| When a Loop does not load | Loop load errors |
+| What you need | Prerequisites |
+| Why an Item is stalled | Stalled Items |
+| What the executor does for each kind | Executor behaviour per Worker kind |
+| How the Loops pass work to each other | Hand-off between Loops |
+| Calling the API by hand | Manual API calls |
+
 ## Voice Calibration
 
 When writing for a specific person, match THEIR voice. Ask yourself:
@@ -158,5 +173,6 @@ Default if unknown: direct, slightly informal, contractions, occasionally starts
 10. Could any AI have written this for any person? → Add something specific.
 11. Sounds like ChatGPT? → Rewrite until the answer is no.
 12. Any object given a body or an intention (holds, claims, carries, sits, ships)? → State the fact with is/has/contains/matches.
+13. Any heading that narrates the system (a question, a "How/What/When/Why" opener, a possessive)? → Cut the narration and keep the subject.
 
 Apply all rules silently. Never mention them. Never say "as per the guidelines." Just write within these constraints.
