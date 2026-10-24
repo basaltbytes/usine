@@ -19,17 +19,13 @@ import {
 
 const decodeTypeReference = Schema.decodeUnknownSync(TypeReference);
 
-/**
- * Options of every cel-js environment that the layer builds, for checking, evaluation, and
- * {@link relatedStringLiterals}. Every variable must be declared. Optional types enable `.?` and
- * `[?]` selection and `optional` helpers such as `orValue` (#312). The label analysis shares the
- * options because a parser without optional types rejects `.?`, and one such loop would fail the
- * analysis and drop every undeclared-label warning of the instance.
- */
 const ENVIRONMENT_OPTIONS = {
   unlistedVariablesAreDyn: false,
   enableOptionalTypes: true,
 } as const satisfies EnvironmentOptions;
+
+/** Parser for {@link relatedStringLiterals}, with the checking options so that it accepts `.?`. */
+const parser = new CelEnvironment(ENVIRONMENT_OPTIONS);
 
 type VendorCheckError = CelParseError | CelTypeError;
 
@@ -231,13 +227,7 @@ const scanRelatedLiterals = (
   ];
 };
 
-/**
- * Returns the literals that {@link scanRelatedLiterals} collects from `source`, parsed with
- * `parser`, an environment built with {@link ENVIRONMENT_OPTIONS} so it accepts the syntax that
- * checking accepts. Parsing reads no variable or type, so one parser serves every expression.
- */
 const relatedStringLiterals = Effect.fn("ExpressionEngine.relatedStringLiterals")(function* (
-  parser: CelEnvironment,
   source: Source,
   memberPath: ReadonlyArray<string>,
 ) {
@@ -520,7 +510,6 @@ const decodeScalar = Schema.decodeUnknownEffect(Scalar);
 
 const makeExpressionEngine = () => {
   const runtimes = celRuntimes();
-  const parser = new CelEnvironment(ENVIRONMENT_OPTIONS);
 
   const checkBoolean = Effect.fn("ExpressionEngine.checkBoolean")(
     (source: Source, environment: Environment): Effect.Effect<void, ExpressionCheckError> =>
@@ -583,8 +572,7 @@ const makeExpressionEngine = () => {
   });
 
   return ExpressionEngine.of({
-    relatedStringLiterals: (source, memberPath) =>
-      relatedStringLiterals(parser, source, memberPath),
+    relatedStringLiterals,
     checkBoolean,
     checkScalar,
     evaluateBoolean,
@@ -597,9 +585,9 @@ const makeExpressionEngine = () => {
  * Provides {@link ExpressionEngine} with `@marcbachmann/cel-js` 8.0.0
  * ([ADR 0004](../../../docs/adr/0004-loop-files-markdown-cel-frontmatter.md)).
  *
- * Expressions can use CEL optional types: `.?` and `[?]` selection, and `optional` helpers such as
- * `orValue`. A nullable field that holds `null` is present, so `item.?milestone` holds `null`, and
- * `item.?milestone.?title` holds no value.
+ * Expressions can use CEL optional values, such as `item.?milestone.?title.orValue("none")`. A
+ * nullable field that holds `null` counts as present, so `item.?milestone` holds `null` and
+ * `item.?milestone.?title` is empty.
  *
  * Before evaluation, converts JSON integers to `bigint` wherever the {@link Environment}
  * declares `int`, at any depth, and sets absent nullable fields to `null`. Values inside a
