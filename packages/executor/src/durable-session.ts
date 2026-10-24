@@ -309,7 +309,8 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
               );
               yield* checkout.keepForReattach;
             } else {
-              // stopTask logs its own failure; the Attempt's result is unchanged.
+              // stopTask logs its own failure; the Attempt's result is unchanged. The engine then
+              // confirms the stop through `cancel` before it frees the Worker slot.
               yield* stopTask(
                 attemptId,
                 Option.match(stop, {

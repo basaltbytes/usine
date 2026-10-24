@@ -125,7 +125,7 @@ export class RunDriver extends Context.Service<
     /**
      * Opens the queued Events whose continuation didn't run and starts a fiber for every open Run
      * without one, except Runs waiting for approval. Also retries the parent task stops that
-     * `releaseKept` or `recoverWorkspaces` couldn't confirm.
+     * `releaseKept`, `recoverWorkspaces`, or the end of an Attempt couldn't confirm.
      */
     readonly reconcile: () => Effect.Effect<void, RunStoreError>;
     /** Returns the closed Attempts whose parent task stop `reconcile` retries. */
@@ -138,16 +138,16 @@ export class RunDriver extends Context.Service<
      */
     readonly recoverWorkspaces: () => Effect.Effect<void, RunStoreError>;
     /**
-     * Moves the slot that the fiber of the canceled Run `runId` holds to its Attempt `attemptId`,
-     * so the slot stays taken after the fiber stops, until `releaseKept` confirms that the parent
-     * task stopped (#475). Does nothing if the fiber holds no slot.
+     * Moves the slot that the fiber of Run `runId` holds to its Attempt `attemptId`, whose parent
+     * task may still run, so the slot stays taken after the fiber frees it, until `releaseKept`
+     * confirms that the parent task stopped (#475). Does nothing if the fiber holds no slot.
      */
     readonly holdSlot: (runId: RunId, attemptId: AttemptId) => Effect.Effect<void>;
     /**
-     * Releases the slot kept for `attemptId`, an Attempt of the closed Run `runId`: the slot that
-     * `holdSlot` moved, or what `recoverWorkspaces` kept for reattaching it. Once the parent task
-     * is confirmed stopped, reconciles a kept checkout and releases the slot; until then both stay
-     * kept (#177, #475) and each `reconcile` retries.
+     * Releases the slot kept for `attemptId`, an Attempt of Run `runId`: the slot that `holdSlot`
+     * moved, or what `recoverWorkspaces` kept for reattaching it. Once the parent task is confirmed
+     * stopped, reconciles a kept checkout and releases the slot; until then both stay kept (#177,
+     * #475) and each `reconcile` retries.
      */
     readonly releaseKept: (runId: RunId, attemptId: AttemptId) => Effect.Effect<void>;
   }
@@ -177,7 +177,7 @@ export class RunDriver extends Context.Service<
             owned
               ? lease.release
               : Effect.logDebug(
-                  "The Run's slot stays with its canceled Attempt until the parent task is confirmed stopped",
+                  "The Run's slot stays with its Attempt until the parent task is confirmed stopped",
                   { runId, worker: lease.worker },
                 ),
           ),
@@ -479,6 +479,9 @@ export class RunDriver extends Context.Service<
           // once the checkout was acquired, and fails this fiber while the stop is unconfirmed.
           yield* checkouts.reconcile(started.execution.attempt.id);
         }
+        // Before the Attempt closes, so a cancel meanwhile still finds it open and keeps its slot.
+        if (Result.isFailure(result))
+          yield* confirmStopAfterFailure(runId, started.execution.attempt.id, worker);
         const finished = yield* store
           .finishAttempt(started.execution.attempt, result)
           .pipe(retryingStore(runId, "finish the attempt"));
@@ -551,7 +554,7 @@ export class RunDriver extends Context.Service<
         ]);
         if (Option.isNone(lease)) {
           yield* Effect.logDebug(
-            "The canceled Run's fiber holds no slot in this process; no slot moves to its Attempt",
+            "The Run's fiber holds no slot in this process; no slot moves to its Attempt",
             { runId, attemptId },
           );
           return;
@@ -564,6 +567,37 @@ export class RunDriver extends Context.Service<
         Ref.update(unconfirmed, (stops) =>
           stops.has(stop.attemptId) ? stops : new Map(stops).set(stop.attemptId, stop),
         );
+
+      /**
+       * Confirms through `StepExecutor.interrupt` that the parent task of `attemptId`, which failed
+       * on `worker`, stopped. The executor stops the task when an Attempt fails but doesn't report
+       * whether the stop succeeded. If the stop isn't confirmed, the Attempt keeps the Run's slot,
+       * as on a cancel, and each `reconcile` retries the stop (#512).
+       */
+      const confirmStopAfterFailure = Effect.fn("RunDriver.confirmStopAfterFailure")(function* (
+        runId: RunId,
+        attemptId: AttemptId,
+        worker: WorkerName,
+      ) {
+        const fields = { runId, attemptId, worker };
+        yield* Effect.annotateCurrentSpan(fields);
+        const stopped = yield* executor.interrupt(attemptId).pipe(Effect.result);
+        if (Result.isSuccess(stopped)) {
+          yield* Effect.logDebug(
+            "The parent task of the failed Attempt is confirmed stopped; the Run's slot is freed",
+            fields,
+          );
+          return;
+        }
+        yield* Effect.logWarning(
+          "Could not confirm that the parent task of the failed Attempt stopped; the Attempt keeps its Run's slot, and each reconcile tries the stop again",
+          { ...fields, errorTag: stopped.failure._tag, message: stopped.failure.message },
+        );
+        yield* holdSlot(runId, attemptId).pipe(
+          Effect.andThen(recordUnconfirmed(new UnconfirmedStop({ attemptId, runId, worker }))),
+          Effect.uninterruptible,
+        );
+      });
 
       const releaseKept = Effect.fn("RunDriver.releaseKept")(function* (
         runId: RunId,
@@ -579,7 +613,7 @@ export class RunDriver extends Context.Service<
         yield* Effect.annotateCurrentSpan({ worker });
         yield* recordUnconfirmed(new UnconfirmedStop({ attemptId, runId, worker }));
         yield* Effect.logWarning(
-          "The parent task of an Attempt whose Run closed is not confirmed stopped; its Worker's slot, and any checkout startup kept, stay kept, and the next reconcile tries the stop again",
+          "The parent task of a closed Attempt is not confirmed stopped; its Worker's slot, and any checkout startup kept, stay kept, and the next reconcile tries the stop again",
           { runId, attemptId, worker },
         );
       });

@@ -37,9 +37,9 @@ interface Occupied extends WorkerLease {
  * the checkout, and occupies a Worker slot through `StepExecutor.occupy` (#177), for an open
  * Attempt whose parent task is live or unreadable and for a closed Attempt whose parent task
  * isn't confirmed stopped. `acquired` hands a kept checkout and slot to the reattaching
- * execution. `hold` keeps the slot of a canceled Attempt whose execution acquired its checkout
- * (#475). `reconcile` reconciles a kept checkout that the Run closes without that hand-off
- * (#180), and releases the slot once the parent task is confirmed stopped.
+ * execution. `hold` keeps the slot of an Attempt whose parent task may still run after a cancel
+ * or a failure (#475, #512). `reconcile` reconciles a kept checkout that the Run closes without
+ * that hand-off (#180), and releases the slot once the parent task is confirmed stopped.
  */
 export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
   store: RunStore["Service"],
@@ -212,9 +212,9 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
   });
 
   /**
-   * Keeps `lease` as the slot of `attemptId`, a canceled Attempt whose execution may have acquired
-   * its checkout, until `reconcile` confirms that its parent task stopped. If the Attempt already
-   * has a slot here, releases `lease` instead.
+   * Keeps `lease` as the slot of `attemptId`, an Attempt whose parent task may still run, until
+   * `reconcile` confirms that the task stopped. If the Attempt already has a slot here, releases
+   * `lease` instead.
    */
   const hold = Effect.fn("CheckoutRecovery.hold")(function* (
     attemptId: AttemptId,
@@ -237,13 +237,13 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
     );
     if (held) {
       yield* Effect.logInfo(
-        "The canceled Attempt keeps its Run's slot until its parent task is confirmed stopped",
+        "The Attempt keeps its Run's slot until its parent task is confirmed stopped",
         fields,
       );
       return;
     }
     yield* Effect.logDebug(
-      "The canceled Attempt already has a slot kept until its parent task is confirmed stopped; releasing its Run's lease",
+      "The Attempt already has a slot kept until its parent task is confirmed stopped; releasing its Run's lease",
       fields,
     );
     yield* release;
@@ -268,7 +268,7 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
           failure,
         )
       : Effect.logWarning(
-          "Could not confirm that the parent task of a canceled Attempt stopped; its Worker's slot stays taken until a reconcile confirms the stop",
+          "Could not confirm that the parent task of a closed Attempt stopped; its Worker's slot stays taken until a reconcile confirms the stop",
           failure,
         );
     return yield* new ParentStopUnconfirmedError({

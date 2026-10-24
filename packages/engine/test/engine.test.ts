@@ -43,6 +43,7 @@ import {
   conditionLayer,
   engineLayer,
   executorLayer,
+  oneSlotExecutor,
   stepResult,
   submission,
   testAgent,
@@ -870,6 +871,100 @@ describe("durable run engine", () => {
           );
         }),
       ),
+  );
+
+  it.live(
+    "keeps the slot of a failed Attempt whose parent task can't be stopped until a retried stop succeeds",
+    () =>
+      withInstance((directory) =>
+        Effect.gen(function* () {
+          const worker = yield* oneSlotExecutor([
+            Effect.fail(new InfraFailure({ message: "Lost the parent task", cause: "offline" })),
+            Effect.succeed(stepResult("ran in the freed slot")),
+          ]);
+          yield* Ref.set(worker.unstoppable, true);
+          yield* Effect.gen(function* () {
+            const engine = yield* RunEngine;
+            const unconfirmed = yield* UnconfirmedStops;
+            const accepted = yield* engine.submit(submission({ number: 44, item: "unstoppable" }));
+            assert(accepted._tag === "Claimed");
+
+            // The Run's retry waits for the slot across the reconciles that retry the stop.
+            const [, { attempts }] = yield* Effect.repeat(
+              Effect.all([Ref.get(worker.stops), engine.inspect(accepted.runId)]),
+              {
+                until: ([stops, { attempts }]) => stops.length >= 4 || attempts.length > 1,
+                schedule: Schedule.spaced("10 millis"),
+              },
+            );
+            const [failed] = attempts;
+            assert(failed !== undefined);
+            assert.lengthOf(attempts, 1);
+            assert.deepStrictEqual(
+              Option.map(failed.outcome, ({ _tag }) => _tag),
+              Option.some("Failed"),
+            );
+            assert.strictEqual(yield* TxRef.get(worker.leased), 1);
+            assert.deepStrictEqual(yield* unconfirmed.list, [
+              new UnconfirmedStop({
+                attemptId: failed.id,
+                runId: accepted.runId,
+                worker: WorkerName.make("local"),
+              }),
+            ]);
+
+            // Once a retry stops the parent task, the slot is released and the retry takes it.
+            yield* Ref.set(worker.unstoppable, false);
+            const delivered = yield* waitFor(
+              engine,
+              accepted.runId,
+              ({ run }) => run.state._tag === "Succeeded",
+            );
+            assert.lengthOf(delivered.attempts, 2);
+            assert.deepStrictEqual(yield* unconfirmed.list, []);
+            yield* Effect.repeat(TxRef.get(worker.leased), {
+              until: (count) => count === 0,
+              schedule: Schedule.spaced("10 millis"),
+            }).pipe(Effect.timeout("2 seconds"));
+          }).pipe(
+            Effect.provide(engineLayer(directory, worker.executor)),
+            Effect.provideService(ReconcileInterval, "50 millis"),
+          );
+        }),
+      ),
+  );
+
+  it.live("frees the slot of a failed Attempt at once when its parent task stops", () =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        const worker = yield* oneSlotExecutor([
+          Effect.fail(new InfraFailure({ message: "Lost the parent task", cause: "offline" })),
+          Effect.succeed(stepResult("ran in the freed slot")),
+        ]);
+        // With the default reconcile interval, no reconcile runs during the test, so only the
+        // freed slot lets the retry start.
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const unconfirmed = yield* UnconfirmedStops;
+          const accepted = yield* engine.submit(submission({ number: 45, item: "stoppable" }));
+          assert(accepted._tag === "Claimed");
+          const delivered = yield* waitFor(
+            engine,
+            accepted.runId,
+            ({ run }) => run.state._tag === "Succeeded",
+          );
+          const [failed] = delivered.attempts;
+          assert(failed !== undefined);
+          assert.lengthOf(delivered.attempts, 2);
+          assert.deepStrictEqual(yield* Ref.get(worker.stops), [failed.id]);
+          assert.deepStrictEqual(yield* unconfirmed.list, []);
+          yield* Effect.repeat(TxRef.get(worker.leased), {
+            until: (count) => count === 0,
+            schedule: Schedule.spaced("10 millis"),
+          }).pipe(Effect.timeout("2 seconds"));
+        }).pipe(Effect.provide(engineLayer(directory, worker.executor)));
+      }),
+    ),
   );
 
   it.live("cancels a run parked in the worker queue without starting an attempt", () =>
