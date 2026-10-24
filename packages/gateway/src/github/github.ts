@@ -34,11 +34,11 @@ export const GITHUB_HOSTS: ReadonlyMap<string, GitHubHost> = new Map([
 ]);
 
 /**
- * A forwarded GitHub request: git smart HTTP for a repository, or an API call. `repository` is
- * the repository in the path; GraphQL and calls such as `/user` have none.
+ * A forwarded GitHub request: git smart HTTP or a release download for a repository, or an API
+ * call. `repository` is the repository in the path; GraphQL and calls such as `/user` have none.
  */
 export interface GitHubRoute {
-  readonly protocol: "git" | "api";
+  readonly protocol: "git" | "release" | "api";
   readonly upstream: string;
   readonly repository: Option.Option<RepositoryName>;
 }
@@ -46,18 +46,35 @@ export interface GitHubRoute {
 const GIT_PATH =
   /^\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/(?:info\/refs|git-upload-pack|git-receive-pack|info\/lfs(?:\/[^?#]*)?)$/u;
 
+/** `/OWNER/REPO/releases/download/TAG/FILE`, whose tag can contain `/`, and `/OWNER/REPO/releases/latest/download/FILE`. */
+const RELEASE_DOWNLOAD_PATH =
+  /^\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/releases\/(?:download\/.+|latest\/download)\/[^/]+$/u;
+
+const WEB_PATHS = [
+  ["git", GIT_PATH],
+  ["release", RELEASE_DOWNLOAD_PATH],
+] as const;
+
 const REPOSITORY_PATH = /^\/repos\/([^/]+)\/([^/]+)(?:\/|$)/u;
 
 const decodeRepository = Schema.decodeUnknownOption(RepositoryName);
 
-const gitRoute = (origins: GitHubOrigins, pathname: string, search: string) => {
-  const match = GIT_PATH.exec(pathname);
-  if (match === null) return Option.none();
-  return Option.map(decodeRepository(`${match[1]}/${match[2]}`), (repository): GitHubRoute => ({
-    protocol: "git",
-    upstream: `${origins.web}${pathname}${search}`,
-    repository: Option.some(repository),
-  }));
+/** Returns the github.com route for a repository's git smart HTTP or release download path. */
+const webRoute = (
+  origins: GitHubOrigins,
+  pathname: string,
+  search: string,
+): Option.Option<GitHubRoute> => {
+  for (const [protocol, pattern] of WEB_PATHS) {
+    const match = pattern.exec(pathname);
+    if (match !== null)
+      return Option.map(decodeRepository(`${match[1]}/${match[2]}`), (repository) => ({
+        protocol,
+        upstream: `${origins.web}${pathname}${search}`,
+        repository: Option.some(repository),
+      }));
+  }
+  return Option.none();
 };
 
 /** Returns the route for an API path, or `None` for a `/repos/OWNER/REPO` path whose segments aren't a valid repository name. */
@@ -82,7 +99,7 @@ const afterPrefix = (pathname: string, prefix: string): Option.Option<string> =>
 
 /**
  * Returns the upstream URL and repository for a GitHub request. Returns `None` for paths
- * outside git smart HTTP, Git LFS, and the API, such as web pages.
+ * outside git smart HTTP, Git LFS, release downloads, and the API, such as web pages.
  */
 export const githubRoute = (
   origins: GitHubOrigins,
@@ -92,7 +109,7 @@ export const githubRoute = (
 ): Option.Option<GitHubRoute> => {
   switch (host) {
     case "web":
-      return gitRoute(origins, pathname, search);
+      return webRoute(origins, pathname, search);
     case "api":
       return apiRoute(origins.api, pathname, search);
     case "uploads":
@@ -103,15 +120,34 @@ export const githubRoute = (
       if (Option.isSome(rest)) return apiRoute(origins.api, rest.value, search);
       const upload = afterPrefix(pathname, "/api/uploads");
       if (Option.isSome(upload)) return apiRoute(origins.uploads, upload.value, search);
-      return gitRoute(origins, pathname, search);
+      return webRoute(origins, pathname, search);
     }
   }
 };
 
 /**
+ * Returns `location` on `git.<domain>` if it points at github.com or api.github.com, with its
+ * path and query, so a Worker follows GitHub's redirects, such as those for a renamed
+ * repository, through the gateway. API paths move under `/api/v3`. Returns `None` for other
+ * hosts, such as the release asset hosts.
+ */
+export const gatewayLocation = (
+  origins: GitHubOrigins,
+  gitHost: string,
+  location: URL,
+): Option.Option<URL> => {
+  const target = `${location.origin}${location.pathname}`;
+  const onGateway = (prefix: string) => (rest: string) =>
+    new URL(`http://${gitHost}${prefix}${rest}${location.search}${location.hash}`);
+  return Option.map(afterPrefix(target, origins.web), onGateway("")).pipe(
+    Option.orElse(() => Option.map(afterPrefix(target, origins.api), onGateway("/api/v3"))),
+  );
+};
+
+/**
  * Adds the attachment's credential to a GitHub request whose caller credential was removed: as
- * the `x-access-token` password for git, or as a bearer token for the API. An anonymous
- * attachment adds nothing.
+ * the `x-access-token` password for github.com, which serves git and release downloads, or as a
+ * bearer token for the API. An anonymous attachment adds nothing.
  */
 export const withGitHubCredential = (
   route: GitHubRoute,
@@ -126,9 +162,9 @@ export const withGitHubCredential = (
       return Headers.set(
         headers,
         "authorization",
-        route.protocol === "git"
-          ? `Basic ${Encoding.encodeBase64(`x-access-token:${token}`)}`
-          : `Bearer ${token}`,
+        route.protocol === "api"
+          ? `Bearer ${token}`
+          : `Basic ${Encoding.encodeBase64(`x-access-token:${token}`)}`,
       );
     }
   }

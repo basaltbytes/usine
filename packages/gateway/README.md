@@ -4,11 +4,11 @@ The service on the gateway host in front of usine's worker VMs ([ADR 0027](../..
 
 The gateway serves:
 
-- **A reverse proxy** for workers on the private network. `git.<domain>` serves git smart HTTP at `/OWNER/REPO.git` and the GitHub REST and GraphQL API under `/api/`, as GitHub Enterprise Server does, so `gh` works with `GH_HOST=git.<domain>`. It adds the installation token that the executor attached for that worker and repo. `llm.<domain>` serves the Anthropic API under `/anthropic` and an OpenAI-compatible API under `/openai` with the gateway's API key. Other hosts are refused; the forward proxy serves the allowlisted ones.
+- **A reverse proxy** for workers on the private network. `git.<domain>` serves git smart HTTP at `/OWNER/REPO.git`, release downloads, and the GitHub REST and GraphQL API under `/api/`, as GitHub Enterprise Server does, so `gh` works with `GH_HOST=git.<domain>`. It adds the installation token that the executor attached for that worker and repo; see [GitHub paths](#github-paths). `llm.<domain>` serves the Anthropic API under `/anthropic` and an OpenAI-compatible API under `/openai` with the gateway's API key. Other hosts are refused; the forward proxy serves the allowlisted ones.
 - **A forward proxy** for `HTTPS_PROXY` and `HTTP_PROXY`: `CONNECT` on port 443 for HTTPS and absolute-form requests for plain HTTP mirrors, to allowlisted hosts only. A tunnel opens only if the client's TLS ClientHello names the CONNECT host. A ClientHello naming another host or none, an encrypted ClientHello, or non-TLS bytes end the tunnel (`server-name-mismatch`, `server-name-missing`, `not-tls`). It resolves each name itself and refuses private, loopback, and link-local addresses. Before a plain HTTP request leaves, it removes `X-Usine-Gateway-Token` and any `Authorization` or `x-api-key` value that is a caller token, and leaves other credentials alone.
 - **An admin API** for the executor: attach, renew, detach, and list a worker's repo credentials, and list the [LLM providers](#llm-providers) it has credentials for. It requires the admin token as a bearer token. Attachments are kept in memory; the executor attaches again when it renews or restarts. A [reload](#reload) keeps them.
 
-Refused requests log `Gateway refused a request` at warning level, with the reason, host, client address, and the caller token's worker. Forwarded requests log at info with the worker, repo, method, path, and status. No token, key, or request body is logged.
+Refused requests log `Gateway refused a request` at warning level, with the reason, host, client address, and the caller token's worker. Forwarded requests log at info with the worker, repo, method, path, and status, and with the host of the response's `Location` header (`target`), if any; release downloads log as `Served a GitHub release download`. A [rewritten](#github-paths) `Location` header also logs `Rewrote a GitHub Location header to the gateway`, with the original host (`from`) and the new path. No token, key, request body, or query string is logged.
 
 ## Install
 
@@ -59,6 +59,27 @@ Before the installation token expires, the executor renews with `PUT /v1/attachm
 A caller token works only while its attachment is in force. After a detach or token expiry, every request with it is refused, LLM requests included, and a new attach for the same worker and repo gets a new id, so the old token stays refused (`stale-caller-token`). A request whose path names another repo than the token is refused. An `AnonymousCredential` attachment adds no credential, which is enough to read a public repo.
 
 A child sends its caller token wherever its tool sends a credential: the `X-Usine-Gateway-Token` header, `Authorization` as `Bearer`, `token`, or `Basic` (password), or `x-api-key`. The gateway removes all of them before forwarding.
+
+## GitHub paths
+
+`git.<domain>` serves these paths with the attachment's installation token. A path that names another repo than the caller token is refused with `repository-mismatch`; other paths, such as web pages, with `unsupported-path`.
+
+| Path on `git.<domain>` | Upstream | Token sent as |
+| --- | --- | --- |
+| `/OWNER/REPO.git/info/refs`, `/OWNER/REPO.git/git-upload-pack`, `/OWNER/REPO.git/git-receive-pack`, `/OWNER/REPO.git/info/lfs/...`, each also without `.git` | `https://github.com` | the `x-access-token` password |
+| `/OWNER/REPO/releases/download/TAG/FILE`, `/OWNER/REPO/releases/latest/download/FILE` | `https://github.com` | the `x-access-token` password |
+| `/api/v3/...`, `/api/graphql` | `https://api.github.com` | a bearer token |
+| `/api/uploads/...` | `https://uploads.github.com` | a bearer token |
+
+GitHub answers a release download with a redirect to an asset host, such as `release-assets.githubusercontent.com` or `objects.githubusercontent.com`, in a URL signed for that file for a few minutes. The gateway returns the redirect unchanged and doesn't follow it, so the token goes only to github.com. The worker fetches the asset through the forward proxy, which needs the asset hosts on the egress allowlist: the GitHub release assets rows of [`egress-allowlist`](../../infra/hetzner/gateway/egress-allowlist). On a worker, where `GH_TOKEN` holds the caller token:
+
+```sh
+curl -fL -u ":$GH_TOKEN" -o tool.tar.gz http://git.<domain>/OWNER/REPO/releases/download/TAG/FILE
+```
+
+curl sends `-u` credentials only to the host of the first URL; a header set with `-H` would also reach the asset host.
+
+GitHub redirects some requests for a renamed or transferred repo: API calls to `https://api.github.com/repositories/ID/...`, and release downloads to the new name on github.com. The gateway rewrites a `Location` on github.com or api.github.com to `http://git.<domain>`, with API paths under `/api/v3`, and keeps the path and query, so the client follows it through the gateway. A `Location` on any other host passes unchanged. The gateway checks the followed request like any other, so a redirect to a path with the repo's new name is refused with `repository-mismatch` until the executor attaches the repo under that name.
 
 ## LLM providers
 

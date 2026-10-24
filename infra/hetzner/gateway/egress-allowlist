@@ -42,7 +42,8 @@ static.rust-lang.org
 proxy.golang.org
 sum.golang.org
 
-# GitHub release assets and archives, read only
+# GitHub release assets and archives, read only. Release downloads from
+# git.<domain> redirect to the first two.
 objects.githubusercontent.com
 release-assets.githubusercontent.com
 codeload.github.com

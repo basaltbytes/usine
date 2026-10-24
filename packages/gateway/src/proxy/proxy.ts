@@ -18,6 +18,7 @@ import {
 import {
   GITHUB_HOSTS,
   type GitHubHost,
+  gatewayLocation,
   githubRoute,
   withGitHubCredential,
 } from "../github/github.ts";
@@ -167,6 +168,24 @@ export class GatewayProxy extends Context.Service<
         });
       });
 
+      /** Points a `Location` at github.com or api.github.com to `git.<domain>`, and logs the rewrite. */
+      const throughGateway = Effect.fn("GatewayProxy.throughGateway")(function* (
+        answer: HttpServerResponse.HttpServerResponse,
+        attachment: Attachment,
+      ) {
+        const from = Option.flatMap(Headers.get(answer.headers, "location"), absoluteUrl);
+        const to = Option.flatMap(from, (url) => gatewayLocation(settings.github, hosts.git, url));
+        if (Option.isNone(from) || Option.isNone(to)) return answer;
+        yield* Effect.logInfo("Rewrote a GitHub Location header to the gateway", {
+          worker: attachment.worker,
+          repository: attachment.repository,
+          status: answer.status,
+          from: from.value.host,
+          path: to.value.pathname,
+        });
+        return HttpServerResponse.setHeader(answer, "location", to.value.href);
+      });
+
       const github = Effect.fn("GatewayProxy.github")(function* (
         request: HttpServerRequest.HttpServerRequest,
         target: RequestTarget,
@@ -178,7 +197,7 @@ export class GatewayProxy extends Context.Service<
           return yield* refusedCaller(
             claims,
             "unsupported-path",
-            `The gateway serves Git smart HTTP and the GitHub API, not ${target.pathname}.`,
+            `The gateway serves Git smart HTTP, release downloads, and the GitHub API, not ${target.pathname}.`,
           );
         const named = route.value.repository;
         if (
@@ -195,10 +214,20 @@ export class GatewayProxy extends Context.Service<
           attachment.credential,
           withoutCallerCredentials(endToEndHeaders(request.headers)),
         );
-        const response = yield* forwardRequest(client, request, route.value.upstream, headers);
-        yield* forwarded("Forwarded a GitHub request", request, target, attachment, response, {
-          protocol: route.value.protocol,
-        });
+        const response = yield* throughGateway(
+          yield* forwardRequest(client, request, route.value.upstream, headers),
+          attachment,
+        );
+        yield* forwarded(
+          route.value.protocol === "release"
+            ? "Served a GitHub release download"
+            : "Forwarded a GitHub request",
+          request,
+          target,
+          attachment,
+          response,
+          { protocol: route.value.protocol, ...redirectTarget(response) },
+        );
         return response;
       });
 
@@ -279,6 +308,16 @@ const refusalResponse = (error: Refused): HttpServerResponse.HttpServerResponse 
     { message: `usine gateway: ${error.message}`, reason: error.reason },
     { status: REFUSAL_STATUS[error.reason], headers: { [REFUSAL_HEADER]: error.reason } },
   );
+
+const absoluteUrl = (value: string): Option.Option<URL> =>
+  Result.getSuccess(Result.try(() => new URL(value)));
+
+/** Returns the host a response redirects to, without the `Location` path and query, which can hold a signature. */
+const redirectTarget = (response: HttpServerResponse.HttpServerResponse) =>
+  Option.match(Option.flatMap(Headers.get(response.headers, "location"), absoluteUrl), {
+    onNone: () => ({}),
+    onSome: (url) => ({ target: url.host }),
+  });
 
 const clientAddress = (request: HttpServerRequest.HttpServerRequest): string =>
   Option.getOrElse(request.remoteAddress, () => "unknown");
