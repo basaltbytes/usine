@@ -16,8 +16,8 @@ import {
 import { fetchRunDetail } from "./fetch.ts";
 
 /**
- * A Run's detail, shared by the drawer and the Run page. The first read takes the newest
- * transcript window; later reads append the tail, every second while the Run can be canceled.
+ * Returns the Run detail query. The first fetch reads the newest transcript window and later fetches
+ * append the tail; it polls every second while the Run can be canceled.
  */
 export const useRunDetail = (runId: RunId, enabled: boolean) => {
   const queryClient = useQueryClient();
@@ -47,7 +47,7 @@ export const useRunDetail = (runId: RunId, enabled: boolean) => {
   });
 };
 
-/** Loads one Attempt's earlier transcript page into the cached Run detail. */
+/** Fetches one Attempt's earlier transcript page and merges it into the cached Run detail. */
 export const useEarlierTranscript = (runId: RunId) => {
   const queryClient = useQueryClient();
   return useMutation({

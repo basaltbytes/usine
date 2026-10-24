@@ -40,7 +40,7 @@ const spec: HarvestSpec = {
 
 class CommandFailed extends Data.TaggedError("CommandFailed")<{ readonly message: string }> {}
 
-/** The window of an Attempt from `startedAt`, until `endedAt` or open. */
+/** Returns an Attempt window that is open if `endedAt` is `null`. */
 const window = (attemptId: AttemptId, startedAt: string, endedAt: string | null = null) =>
   new AttemptWindow({
     attemptId,
@@ -48,7 +48,7 @@ const window = (attemptId: AttemptId, startedAt: string, endedAt: string | null 
     endedAt: Option.fromNullOr(endedAt).pipe(Option.map(DateTime.makeUnsafe)),
   });
 
-/** `spec`'s Attempt, open on its Item since 12:00:00.100 with no other Attempt of its Agent there. */
+/** The windows of `spec`'s Attempt, open since 12:00:00.100, with no overlapping Attempt. */
 const ALONE = new AttemptWindows({
   own: Option.some(window(spec.attemptId, "2026-10-19T12:00:00.100Z")),
   overlapping: [],
@@ -59,13 +59,8 @@ type Answer = Effect.Effect<ReadonlyArray<string>, CommandFailed>;
 const PULL_REQUESTS = `gh api repos/acme/demo/commits/${HEAD}/pulls?per_page=100 --paginate --slurp`;
 
 /**
- * Harvests a checkout whose agent committed `HEAD` on top of the base, with
- * `remoteRefs` as the remote's branch and pull request refs, `pullRequests`
- * as GitHub's answer for the final commit, and `github` answering the other
- * GitHub commands for `harvested`, and `windows` reading the Attempt's own
- * window and those of the Agent's other Attempts on the Item. Returns the
- * facts, the commands run, the log lines at warning level or above, and the
- * info log messages.
+ * Runs `harvestFacts` against scripted `git` and `gh` output. Returns the facts, the commands
+ * run, the warning-or-higher log lines, and the info log messages.
  */
 const harvest = (
   remoteRefs: ReadonlyArray<string>,
@@ -113,12 +108,12 @@ const VIEWER = "gh api graphql -f query=query { viewer { login } }";
 const ISSUE_COMMENTS = `gh api repos/acme/demo/issues/12/comments?since=${SINCE}&per_page=100 --paginate --slurp`;
 const pages = (...items: ReadonlyArray<object>): Answer =>
   Effect.succeed([JSON.stringify([items])]);
-/** A body the Attempt's Agent signed as its prompt asks, ending with a newline as `gh` bodies often do. */
+/** Returns `text` with the developer Agent's signature and a trailing newline. */
 const signed = (text: string) => `${text}\n\n— usine agent: developer\n`;
 const comments = (facts: ReadonlyArray<StepResultFact>) =>
   facts.flatMap((fact) => (fact._tag === "Comment" ? [[fact.kind, fact.url.href]] : []));
 
-/** A Run on pull request 71 or issue 12 of acme/demo, prepared at 12:00:00.250. */
+/** Returns a spec for pull request 71 or issue 12 of `acme/demo`, prepared at 12:00:00.250. */
 const itemRun = (path: "pull/71" | "issues/12"): HarvestSpec => ({
   ...spec,
   payload: { number: Number(path.split("/")[1]), url: `https://github.com/acme/demo/${path}` },
@@ -281,7 +276,7 @@ describe("harvesting an Attempt's facts", () => {
           ["review", review],
           ["review-comment", reply],
         ]);
-        // A comment is dated by its creation, even when the Attempt edited it later; a review by its submission.
+        // A comment's time is its creation time, even if edited later; a review's is its submission time.
         assert.deepStrictEqual(
           facts.flatMap((fact) =>
             fact._tag === "Comment" ? [Option.map(fact.at, DateTime.formatIso)] : [],
@@ -394,8 +389,8 @@ describe("harvesting an Attempt's facts", () => {
     "leaves out what the Agent's other Attempt on the Item could have posted while both were open",
     () =>
       Effect.gen(function* () {
-        // Two Loops' Runs give the developer Agent pull request 71 at once: the
-        // fix Attempt from 12:00 to 12:10, the docs Attempt from 12:05 on.
+        // Two Loops run the developer Agent on pull request 71: the fix Attempt from 12:00 to
+        // 12:10 and the docs Attempt from 12:05.
         const fix = AttemptId.make("fix/implement/1");
         const docs = AttemptId.make("docs/implement/1");
         const fixWindow = window(fix, "2026-10-19T12:00:00.100Z");
@@ -460,9 +455,8 @@ describe("harvesting an Attempt's facts", () => {
           ),
         );
 
-        // The 12:07 comment falls in both windows, so neither Attempt records
-        // it. The comment edited at 12:07 was posted before either window
-        // opened, so neither records it either.
+        // The 12:07 comment is inside both windows, so neither Attempt records it. The comment
+        // edited at 12:07 was created before both windows, so neither records it.
         assert.deepStrictEqual(comments(fixed.facts), [["issue-comment", url("issuecomment-1")]]);
         assert.deepStrictEqual(comments(documented.facts), [
           ["issue-comment", url("issuecomment-3")],
@@ -492,8 +486,8 @@ describe("harvesting an Attempt's facts", () => {
     "reads the windows once GitHub has listed the comments, so an Attempt that started during the harvest counts",
     () =>
       Effect.gen(function* () {
-        // The docs Attempt of the developer Agent starts on pull request 71
-        // while the fix Attempt's harvest runs, and posts before GitHub answers.
+        // The docs Attempt starts on pull request 71 during the fix Attempt's harvest and posts
+        // before GitHub responds.
         const docs = window(AttemptId.make("docs/implement/1"), "2026-10-19T12:10:01Z");
         const open: Array<AttemptWindow> = [];
         const comment = "https://github.com/acme/demo/pull/71#issuecomment-5";
@@ -541,11 +535,9 @@ describe("harvesting an Attempt's facts", () => {
     "records no comment posted after a canceled Attempt's window ended, though no window overlaps it",
     () =>
       Effect.gen(function* () {
-        // The operator cancels the fix Attempt at 12:10: the orchestrator ends
-        // its window, then stops its executor, which harvests its comments.
-        // Meanwhile the docs Attempt of the developer Agent starts on pull
-        // request 71 at 12:10:02 and posts at 12:10:03. It started after the
-        // fix Attempt's window ended, so it does not overlap it.
+        // The operator cancels the fix Attempt at 12:10; the orchestrator ends its window, then
+        // stops its executor, which harvests. The docs Attempt starts at 12:10:02, after that
+        // window ended, and posts at 12:10:03.
         const canceled = window(spec.attemptId, "2026-10-19T12:00:00.100Z", "2026-10-19T12:10:00Z");
         const own = (anchor: string, at: string) => ({
           html_url: `https://github.com/acme/demo/pull/71#${anchor}`,
@@ -559,7 +551,7 @@ describe("harvesting an Attempt's facts", () => {
             `gh api repos/acme/demo/issues/71/comments?since=${SINCE}&per_page=100 --paginate --slurp`,
             pages(
               own("issuecomment-1", "2026-10-19T12:09:59Z"),
-              // Posted in the second the window ended, which GitHub cannot tell apart.
+              // Posted in the second the window ended; GitHub timestamps can't distinguish it.
               own("issuecomment-2", "2026-10-19T12:10:00Z"),
               own("issuecomment-3", "2026-10-19T12:10:03Z"),
             ),

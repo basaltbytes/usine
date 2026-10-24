@@ -3,4 +3,4 @@
 "@usine/orchestrator": patch
 ---
 
-An open pull request that the poll drops because GitHub no longer has it now leaves the Board's open lanes. The poll records it with the new `ItemProjectionWriter.markGone`, which sets `goneAt` on the Item's projection and keeps its last payload, and the Board places a gone Item by its closed state (`pr-closed` or `issue-closed`). A later poll that observes the Item again clears `goneAt`. A migration adds `gone_at` to `usine_item_projections`; no row is deleted.
+An open pull request that GitHub no longer has leaves the board's open lanes. The poll calls the new `ItemProjectionWriter.markGone`, which sets `goneAt` on the item's projection until a later poll sees the item again, and the board places a gone item by its closed state; a migration adds `gone_at` to `usine_item_projections`.

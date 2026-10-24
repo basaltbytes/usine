@@ -17,10 +17,10 @@ export const OTHER_ATTACHMENT = AttachmentId.make("attachment-two-0000000");
 export const ADMIN_TOKEN_VALUE = "admin-token-for-tests-0123456789abcdef";
 const CALLER_KEY_VALUE = "caller-key-for-tests-0123456789abcdef";
 
-/** The allowlist tests run with; `localhost` is listed so the private-address check can be seen refusing it. */
+/** The test allowlist; `localhost` is listed so tests can check that the private-address check refuses it. */
 const TEST_ALLOWLIST = ["registry.npmjs.org", "*.githubusercontent.com", "localhost"].join("\n");
 
-/** Settings for tests, with the providers a test needs, and the same settings in force. */
+/** Returns test settings with the providers a test needs, and the same values in `SettingsInForce`. */
 export const settingsLayer = (
   providers: LlmProviders,
   callerKey: string = CALLER_KEY_VALUE,

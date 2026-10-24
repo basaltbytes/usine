@@ -132,7 +132,7 @@ const advanced = new PollCursor({
   watermark: Option.some(updatedAt),
 });
 
-/** Reports `items` once from an empty cursor, then reports no change. */
+/** Returns `items` once from an empty cursor, then no changes. */
 const changesOnce =
   (items: ReadonlyArray<ChangedIssue | ChangedPullRequest>): GitHubPolling["Service"]["changes"] =>
   (_repository, cursor) =>
@@ -172,7 +172,7 @@ const claimingRuns = Layer.succeed(RunEngine)({
   transcript: () => Effect.die("unused"),
 });
 
-/** A fresh PollingTriggers, as one `usine up` process builds it, over a shared cursor store. */
+/** A new PollingTriggers, as one `usine up` process builds it, over a shared cursor store. */
 const processLayer = (github: GitHubPolling["Service"], cursors: CursorStore["Service"]) =>
   PollingTriggers.layer.pipe(
     Layer.provide(
@@ -252,7 +252,7 @@ describe("Loop evaluation failures", () => {
           assert.strictEqual(first.failures[0]?.errorTag, "ExpressionEvaluationError");
           assert.match(
             first.failures[0]?.message ?? "",
-            /^Loop milestone: if: failed on issue #28: No such key: title/u,
+            /^Loop "milestone": if: failed on issue #28: No such key: title/u,
           );
           const saved = Schema.decodeUnknownSync(Schema.Struct({ cursor: PollCursor }))(
             cursors.stored.get(`github-poll:${repository}`),
@@ -302,7 +302,7 @@ describe("Loop evaluation failures", () => {
         assert.strictEqual(first.failures.length, 1);
         assert.match(
           first.failures[0]?.message ?? "",
-          /^Loop review: prompt \{\{ item\.statusCheckRollup\.state \}\} failed on pull request #12: No such key: state/u,
+          /^Loop "review": prompt \{\{ item\.statusCheckRollup\.state \}\} failed on pull request #12: No such key: state/u,
         );
         // Open pull requests are fetched on every poll; the failure stays
         // reported without being logged again.

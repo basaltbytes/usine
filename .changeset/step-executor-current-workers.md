@@ -2,4 +2,4 @@
 "@usine/engine": minor
 ---
 
-`StepExecutor.workers` is an effect that lists the Workers the executor runs Attempts on now, so a Worker a reload removes stays in the list until its last Attempt ends and leaves it then. `RunEngine.discardLeftovers` reads it on each call: it keeps the leftovers of a Worker that is configured or still runs Attempts, and discards those of a removed Worker once its last Attempt has ended.
+`StepExecutor.workers` is an effect that lists the executor's current workers, including a removed worker until its last attempt ends. `RunEngine.discardLeftovers` reads it on each call and discards the leftovers of a removed worker only after its last attempt ends.

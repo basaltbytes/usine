@@ -26,7 +26,7 @@ export type LocalSecretsError = typeof LocalSecretsError.Type;
 
 const AppIdFromString = Schema.FiniteFromString.pipe(Schema.decodeTo(AppId));
 
-/** Each variable may be absent on its own. A present but invalid one is an error, not a fallback to the file. */
+/** Each variable is optional; a set but invalid one is an error, not a fallback to the file. */
 const environment = Config.all({
   appId: Config.option(Config.schema(AppIdFromString, "USINE_GITHUB_APP_ID")),
   privateKey: Config.option(Config.schema(RedactedPrivateKey, "USINE_GITHUB_PRIVATE_KEY")),
@@ -53,18 +53,20 @@ const readSecretsFile = Effect.fn("GitHubCredentials.readSecretsFile")(function*
   if (info.type !== "File" || (info.mode & 0o777) !== 0o600) {
     return yield* fail(
       "permissions",
-      `GitHub App secrets must be a regular 0600 file: ${secretsPath}`,
+      `${secretsPath} must be a regular file with mode 0600. Run chmod 600 ${secretsPath}.`,
     );
   }
   const source = yield* fileSystem.readFileString(secretsPath).pipe(Effect.mapError(unreadable));
   return yield* decodeCredentialsFile(source, { onExcessProperty: "error" }).pipe(
-    Effect.mapError(() => fail("parse", `GitHub App secrets are invalid at ${secretsPath}`)),
+    Effect.mapError(() =>
+      fail("parse", `${secretsPath} is invalid. It must be JSON with only app_id and private_key.`),
+    ),
   );
 });
 
 /**
- * Loads the orchestrator's App credentials. An environment variable wins over
- * its file field, and the file is not read when both variables are set.
+ * Loads the orchestrator's App credentials. An environment variable overrides its file field,
+ * and the file isn't read if both variables are set.
  */
 export const loadLocalCredentials = Effect.fn("GitHubCredentials.loadLocal")(function* (
   root: InstanceDirectory,
@@ -74,7 +76,7 @@ export const loadLocalCredentials = Effect.fn("GitHubCredentials.loadLocal")(fun
       () =>
         new EnvironmentCredentialsError({
           message:
-            "USINE_GITHUB_APP_ID and USINE_GITHUB_PRIVATE_KEY must contain valid GitHub App credentials",
+            "USINE_GITHUB_APP_ID or USINE_GITHUB_PRIVATE_KEY is invalid. Set USINE_GITHUB_APP_ID to the numeric App ID and USINE_GITHUB_PRIVATE_KEY to the App's PEM private key.",
         }),
     ),
   );

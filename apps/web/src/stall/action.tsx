@@ -12,11 +12,9 @@ import {
   useRunAgain,
 } from "../run-actions.ts";
 
-/** How the action sits on its screen: a quiet button at the end of a desk row, or an outline
- * button under the reason on a Board card. */
+/** The placement: at the end of a desk row, or under the reason on a Board card. */
 type StallActionAppearance = "row" | "card";
 
-/** Refreshes what the desk and every screen show after an action on a stalled Item. */
 const useRefreshDesk = () => {
   const queryClient = useQueryClient();
   return () =>
@@ -71,7 +69,7 @@ const ActionButton = ({
   </span>
 );
 
-/** Approve, Retry, or Mark resolved or answered, on the Run that keeps the Item from moving. */
+/** Renders Approve, Retry, Mark resolved, or Mark answered for the Run that blocks the Item. */
 const RunAction = ({
   appearance,
   run,
@@ -162,10 +160,7 @@ const ResumeAction = ({
   );
 };
 
-/**
- * The one action that moves a stalled Item again, when the operator has one; none otherwise.
- * `readOnly` shows none while the factory needs setup. The desk and the Board card both show it.
- */
+/** Renders the action that unblocks a stalled Item, or nothing if there is none or `readOnly` is set. */
 export const StallAction = ({
   stalled,
   readOnly,
@@ -187,7 +182,7 @@ export const StallAction = ({
           label={runActionLabel.approve}
         />
       ) : null;
-    case "HeldForOperator": {
+    case "SuppressedForOperator": {
       const attempt = reason.run.attempts.at(-1);
       if (!reason.run.canResolveFailure || attempt === undefined) return null;
       const question =

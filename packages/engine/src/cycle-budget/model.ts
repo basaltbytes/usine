@@ -3,14 +3,14 @@ import { ItemKey } from "@usine/core/item";
 import { RepositoryName } from "@usine/core/repository";
 import { Schema } from "effect";
 
-/** A reset whose Item still needs fresh trigger evaluation; acknowledgement is generation-bound. */
+/** A reset whose Item still needs fresh trigger evaluation; acknowledgment is per generation. */
 export class CycleBudgetReset extends Schema.Class<CycleBudgetReset>("CycleBudgetReset")({
   itemKey: ItemKey,
   repository: RepositoryName,
   generation: CycleGeneration,
 }) {}
 
-/** The requested Ask is absent, already answered differently, or no longer current. */
+/** An error for an Ask that is absent, answered differently, or no longer current. */
 export class CycleBudgetResetRejectedError extends Schema.TaggedError<CycleBudgetResetRejectedError>(
   "CycleBudgetResetRejectedError",
 )("CycleBudgetResetRejectedError", { askId: CycleBudgetAskId }) {}

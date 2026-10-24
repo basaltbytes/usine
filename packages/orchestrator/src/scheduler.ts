@@ -54,16 +54,17 @@ type ReservationState =
 
 interface Reservation {
   readonly deferred: Deferred.Deferred<WorkerLease>;
-  /** When set, the only Worker the lease may come from: the one the Run's reattached Attempt runs on. */
+  /**
+   * If set, the only Worker the lease can come from: the Worker of the Run's reattached Attempt.
+   */
   readonly worker: Option.Option<WorkerName>;
   readonly eventTime: number;
   readonly order: number;
   readonly state: Ref.Ref<ReservationState>;
 }
 
-// A reservation that names its Worker counts an Attempt that already runs
-// there, so it goes before the reservations of new Attempts. Otherwise the
-// Run whose Event arrived first goes first.
+// Reservations for a specific Worker (Attempts already running there) go first; otherwise, the Run
+// whose Event arrived first goes first.
 const reservationOrder = Order.combineAll([
   Order.mapInput(Order.Boolean, (reservation: Reservation) => Option.isNone(reservation.worker)),
   Order.mapInput(Order.Number, (reservation: Reservation) => reservation.eventTime),
@@ -71,15 +72,15 @@ const reservationOrder = Order.combineAll([
 ]);
 
 interface WorkerSlots {
-  /** How many Attempts the Worker may run at the same time; zero once a reload removed it. */
+  /** The maximum concurrent Attempts on the Worker, or zero after a reload removed it. */
   readonly capacity: number;
-  /** How many Attempts hold a lease on the Worker. */
+  /** The number of Attempts with a lease on the Worker. */
   readonly leased: number;
 }
 
 /**
- * The slots of each Worker that runs Attempts, in `usine.yaml` order, then of
- * each removed Worker until its last Attempt ends.
+ * The slots of each Worker in `usine.yaml` order, then of each removed Worker until its last
+ * Attempt ends.
  */
 type SlotPool = ReadonlyMap<WorkerName, WorkerSlots>;
 
@@ -104,7 +105,10 @@ const isFree = (pool: SlotPool, worker: WorkerName): boolean => {
   return slots !== undefined && slots.leased < slots.capacity;
 };
 
-/** The Worker whose free slot can take `reservation`: the one it names, or else the first free one. */
+/**
+ * Returns the Worker with a free slot for `reservation`: its specified Worker, or else the first
+ * free one.
+ */
 const workerFor = (pool: SlotPool, reservation: Reservation): Option.Option<WorkerName> =>
   Option.match(reservation.worker, {
     onNone: () => Option.fromNullishOr([...pool.keys()].find((worker) => isFree(pool, worker))),
@@ -136,7 +140,7 @@ const releasedFrom = (pool: SlotPool, worker: WorkerName): [SlotRelease, SlotPoo
     : [{ _tag: "Freed" }, next];
 };
 
-// Only an error a later try can avoid becomes the InfraFailure the engine retries.
+// Only errors that a retry can avoid become the `InfraFailure` that the engine retries.
 const asAttemptFailure = (error: ExecutorError): AgentFailure | InfraFailure =>
   Match.valueTags(error, {
     WorkerCapabilityError: ({ message }) => new AgentFailure({ message }),
@@ -148,14 +152,14 @@ const asAttemptFailure = (error: ExecutorError): AgentFailure | InfraFailure =>
       new InfraFailure({ message: `Executor ${operation} failed: ${message}`, cause: error }),
   });
 
-// The operation error has no Worker field; reports must name the Worker.
+// The operation error has no Worker field, and reports must include the Worker.
 const namingWorker =
   (worker: WorkerName) =>
   (error: ExecutorError): ExecutorError =>
     error._tag === "ExecutorOperationError"
       ? new ExecutorOperationError({
           operation: error.operation,
-          message: `Worker ${worker}: ${error.message}`,
+          message: `worker "${worker}": ${error.message}`,
           cause: error.cause,
         })
       : error;
@@ -172,63 +176,42 @@ const validateWorkers = (
 
 const brainLabel = ({ harness, model, effort }: BrainSpec) => `${harness}/${model}/${effort}`;
 
-/** exe.dev Workers write to GitHub through exe.dev's integration, as its bot (ADR 0011). */
+/** The login that exe.dev Workers write to GitHub as, through exe.dev's integration (ADR 0011). */
 const EXE_DEV_BOT_LOGIN = BotLogin.make("exe-dev-github-integration[bot]");
 const decodeBotLogin = Schema.decodeUnknownOption(BotLogin);
 
 /**
- * How an executor that reaches only the Workers it was given, as the SSH
- * executor does, gains and drops Workers after it starts.
+ * The Worker set of an executor that connects only to the Workers it was given, such as the SSH
+ * executor.
  */
 export interface ExecutorWorkers {
   /**
-   * Gives the executor `worker`, which a reload adds, before its preflight.
-   * A failure refuses the reload with `ReloadPreflightError`.
+   * Adds `worker` to the executor before its preflight. On failure, the reload fails with
+   * `ReloadPreflightError`.
    */
   readonly add: (worker: ConfigWorker) => Effect.Effect<void, ExecutorError>;
   /**
-   * Takes `worker` away once no Attempt runs on it: a Worker a reload
-   * removed, after its last Attempt ended, or a Worker the reload added that
-   * its preflight refused.
+   * Removes `worker` once no Attempt runs on it: a Worker removed by a reload, or one added by a
+   * reload whose preflight failed.
    */
   readonly remove: (worker: WorkerName) => Effect.Effect<void>;
 }
 
-/** How the executor a `stepExecutorLayer` drives takes Workers after startup. */
 export interface StepExecutorOptions {
   /**
-   * The executor's own Worker set, which the scheduler changes with each
-   * reload. Without it, the executor runs any Worker of its kind by name, as
-   * the local executor does.
+   * The executor's Worker set, which the scheduler updates on each reload. If omitted, the executor
+   * runs any Worker of its kind by name, like the local executor.
    */
   readonly workers?: ExecutorWorkers;
 }
 
-/** An executor that runs any Worker of its kind by name, so it has no Worker set to change. */
+/** The Worker set of an executor that runs any Worker of its kind by name. */
 const anyWorker: ExecutorWorkers = { add: () => Effect.void, remove: () => Effect.void };
 
 /**
- * Schedules Attempts FIFO over the Workers and adapts the Executor to the
- * engine's StepExecutor port. A reservation that names a Worker, as a Run
- * that reattaches an open Attempt makes, takes a slot of that Worker only,
- * and goes before the reservations that name none (#177). An Attempt that
- * already runs on a Worker, as one a restart found live, occupies a slot of
- * it at once, even past its slots. It starts with the
- * Workers in `config`, each preflighted with `brains` and the current roster
- * before the layer is ready, and registers with the current instance, so a
- * reload can resize, add, and remove Workers. A reload preflights each Worker
- * it adds or gives more slots with every rostered brain, and each other
- * Worker with the brains it adds, before anything changes. With
- * `options.workers`, a Worker the reload adds joins the executor before its
- * preflight and leaves it again when the reload is refused. A Worker with
- * more running Attempts than slots takes no new Attempt, and each extra slot
- * retires when its Attempt ends; a removed Worker leaves the scheduler, and
- * the executor, when its last Attempt ends. Each Attempt reads its `settings`
- * (child budget, ceilings, parent effort) from the current instance, and gets
- * the bot login it writes to GitHub as: exe.dev's integration bot on exe.dev
- * Workers, the App's bot from `GitHubApp` on the others, or none when the
- * App's installation cannot be read. `WorkerStatus` reads the slots and the
- * last preflight of each Worker.
+ * Schedules Attempts FIFO over the Workers and adapts the Executor to the engine's `StepExecutor`
+ * port. Reservations for a specific Worker go first (#177), and a removed Worker stays until its
+ * last Attempt ends.
  */
 export const stepExecutorLayer = (
   config: UsineConfig,
@@ -250,7 +233,8 @@ export const stepExecutorLayer = (
       const nextOrder = yield* Ref.make(0);
       const preflights = yield* Ref.make(new Map<WorkerName, WorkerPreflight>());
       const executorWorkers = options.workers ?? anyWorker;
-      // Taken by every change to the executor's Workers, so a removal never undoes an addition.
+      // Every change to the executor's Workers takes this permit, so a removal never undoes an
+      // addition.
       const membership = yield* Semaphore.make(1);
       const adding = yield* Ref.make<ReadonlySet<WorkerName>>(new Set());
 
@@ -260,7 +244,7 @@ export const stepExecutorLayer = (
         exit: Exit.Exit<void, ExecutorError>,
       ) {
         const failure = Exit.findErrorOption(exit);
-        // An interrupted or defective preflight says nothing about the Worker.
+        // An interrupted or defective preflight gives no information about the Worker.
         if (Exit.isFailure(exit) && Option.isNone(failure)) return;
         const checkedAt = yield* DateTime.now;
         yield* Ref.update(preflights, (current) =>
@@ -271,7 +255,10 @@ export const stepExecutorLayer = (
         );
       });
 
-      /** Runs `before`, then the Worker's preflight, and records the outcome of both as its preflight. */
+      /**
+       * Runs `before`, then the Worker's preflight, and records both outcomes as the Worker's
+       * preflight.
+       */
       const preflightWorker = (
         worker: ConfigWorker,
         roster: ReadonlyArray<BrainSpec>,
@@ -283,7 +270,10 @@ export const stepExecutorLayer = (
           Effect.onExit((exit) => recordPreflightExit(worker.name, roster, exit)),
         );
 
-      /** Takes `worker` away from the executor unless the scheduler has it or a reload is adding it; callers hold `membership`. */
+      /**
+       * Removes `worker` from the executor unless the scheduler has it or a reload is adding it.
+       * Callers must hold `membership`.
+       */
       const removeUnused = Effect.fn("WorkerScheduler.removeFromExecutor")(function* (
         worker: WorkerName,
       ) {
@@ -300,7 +290,10 @@ export const stepExecutorLayer = (
         yield* executorWorkers.remove(worker);
       });
 
-      /** Ends a reload's addition of `added`, and takes away each one the scheduler does not have. */
+      /**
+       * Ends a reload's addition of `added` and removes each Worker that the scheduler doesn't
+       * have.
+       */
       const settleAdded = (added: ReadonlySet<WorkerName>, removed: ReadonlyArray<WorkerName>) =>
         membership.withPermit(
           Ref.update(
@@ -315,7 +308,7 @@ export const stepExecutorLayer = (
           : Option.some({
               block: "workers",
               field: `workers.${worker.name}.kind`,
-              reason: `Worker ${worker.name} is ${worker.kind}, and the running Workers are ${executor.kind}`,
+              reason: `worker "${worker.name}" has kind ${worker.kind}, and the running workers have kind ${executor.kind}`,
             });
 
       const applyWorkers = Effect.fn("WorkerScheduler.applyWorkers")(function* (
@@ -403,7 +396,7 @@ export const stepExecutorLayer = (
           brains: newBrains.map(brainLabel),
           workers: [...wholeRoster],
         });
-        // An added Worker joins the executor first, so its preflight reaches its machine.
+        // Add the Worker to the executor first, so its preflight can connect to its machine.
         yield* Effect.forEach(
           checks,
           ({ worker, brains }) =>
@@ -461,8 +454,8 @@ export const stepExecutorLayer = (
         } satisfies WorkerLease;
       });
 
-      // The transaction retries until a free slot can take a waiting reservation, then
-      // takes both. A reservation whose Worker has no free slot holds up none behind it.
+      // Retries until a free slot can take a waiting reservation, then takes both. A reservation
+      // whose Worker has no free slot doesn't block the ones behind it.
       const nextAssignment = Effect.tx(
         Effect.gen(function* () {
           const current = yield* TxRef.get(pool);
@@ -501,9 +494,8 @@ export const stepExecutorLayer = (
       const occupy: StepExecutor["Service"]["occupy"] = Effect.fn("WorkerScheduler.occupy")(
         function* (worker) {
           yield* Effect.annotateCurrentSpan({ worker });
-          // The Attempt runs on the Worker whether or not a slot is free, so the
-          // slot counts it at once; one beyond the Worker's slots retires when an
-          // Attempt there ends, as after a reload that lowers them.
+          // The Attempt runs on the Worker even without a free slot, so count it now. A slot over
+          // capacity retires when an Attempt there ends.
           const slots = yield* TxRef.modify(
             pool,
             (current) => [current.get(worker), withLeased(current, worker, 1)] as const,
@@ -564,8 +556,8 @@ export const stepExecutorLayer = (
                   ? [Option.some(current.lease), { _tag: "Canceled" } satisfies ReservationState]
                   : [Option.none<WorkerLease>(), { _tag: "Canceled" } satisfies ReservationState],
               ).pipe(
-                // A canceled reservation leaves the queue, so one whose Worker never frees a
-                // slot does not stay in it.
+                // Remove a canceled reservation from the queue, so one whose Worker never frees a
+                // slot doesn't stay there.
                 Effect.tap(() =>
                   TxPriorityQueue.removeIf(pending, (waiting) => waiting === reservation),
                 ),
@@ -578,7 +570,7 @@ export const stepExecutorLayer = (
         },
       );
 
-      // A login that cannot be read leaves harvesting to ask GitHub; it never fails the Attempt.
+      // If the login can't be read, harvesting asks GitHub; the Attempt never fails for this.
       const botLoginFor = Effect.fn("WorkerScheduler.botLogin")(function* (attemptId: AttemptId) {
         if (executor.kind === "exe.dev") return Option.some(EXE_DEV_BOT_LOGIN);
         const installation = yield* app.installation().pipe(
@@ -656,8 +648,8 @@ export const stepExecutorLayer = (
               ),
               Effect.mapError(asAttemptFailure),
             );
-          // The engine reconciles a checkout a restart kept for a reattachment
-          // until preparation holds it; the executor releases it from here.
+          // The engine reconciles a checkout kept for a reattachment until preparation acquires it;
+          // from here the executor releases it.
           yield* io.checkoutAcquired;
           return yield* prepared.launch(io);
         },

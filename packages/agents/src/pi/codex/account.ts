@@ -8,7 +8,7 @@ import {
 } from "../../protocol/codex.ts";
 import type { CodexConnection } from "./app-server.ts";
 
-/** Negotiates the app-server connection before account inspection or child creation. */
+/** Sends `initialize` and `initialized` to the app server; must run before account checks or creating a child. */
 export const initializeCodex = Effect.fn("Codex.initialize")(function* (
   connection: CodexConnection,
 ) {
@@ -20,16 +20,16 @@ export const initializeCodex = Effect.fn("Codex.initialize")(function* (
   yield* connection.notify("launch", "initialized", {});
 });
 
-/** Operator-facing refusal when Codex cannot prove it uses the ChatGPT pool. */
+/** Returns the error for when Codex cannot confirm that it uses the ChatGPT pool. */
 export const codexPoolUnavailable = (model: ModelId) =>
   new PoolUnavailableError({
     harness: "codex",
     model,
     pool: "chatgptPlan",
-    message: "Codex children require a ChatGPT login; run codex login on the Worker",
+    message: "Codex children need a ChatGPT login. Run codex login on the worker.",
   });
 
-/** Refuses unknown, absent, or API-key authentication before any model request (ADR 0013). */
+/** Verifies the Codex account before any model request. Fails with `PoolUnavailableError` for unknown, missing, or API-key authentication (ADR 0013). */
 export const verifyCodexAccount = Effect.fn("Codex.verifyAccount")(function* (
   connection: CodexConnection,
   model: ModelId,
@@ -45,7 +45,7 @@ export const verifyCodexAccount = Effect.fn("Codex.verifyAccount")(function* (
     Effect.tapError(() =>
       Effect.logError("Codex returned an unrecognized account status", { model }),
     ),
-    // An unrecognized auth response is not evidence of a supported billing pool.
+    // An auth response that does not decode is treated as an unsupported billing pool.
     Effect.mapError(() => codexPoolUnavailable(model)),
   );
   if (account.account?.type !== "chatgpt" || !account.requiresOpenaiAuth) {

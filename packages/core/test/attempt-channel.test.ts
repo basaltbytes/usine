@@ -310,7 +310,7 @@ describe("attempt channel", () => {
     it("rejects a frame for another Attempt", () => {
       const outcome = admitAll([outbound(1, started, AttemptId.make("attempt-2"))]);
       assert(Result.isFailure(outcome));
-      assert.match(outcome.failure.message, /another Attempt/u);
+      assert.match(outcome.failure.message, /another attempt/u);
     });
 
     it("rejects a non-contiguous sequence", () => {
@@ -322,7 +322,7 @@ describe("attempt channel", () => {
     it("rejects a first frame that is not Started", () => {
       const outcome = admitAll([outbound(1, sessionEvent)]);
       assert(Result.isFailure(outcome));
-      assert.match(outcome.failure.message, /begin with a Started or Failed/u);
+      assert.match(outcome.failure.message, /start with a Started or Failed/u);
     });
 
     it("admits a launch failure as the first and terminal frame", () => {
@@ -351,7 +351,7 @@ describe("attempt channel", () => {
         outbound(3, sessionEvent),
       ]);
       assert(Result.isFailure(outcome));
-      assert.match(outcome.failure.message, /after its terminal envelope/u);
+      assert.match(outcome.failure.message, /after the terminal envelope/u);
     });
   });
 });

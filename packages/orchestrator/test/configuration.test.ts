@@ -172,7 +172,7 @@ const finding = new LabelPreflightFinding({
   repository: usine,
   label: GitHubLabelName.make("ready-for-review"),
   errorTag: "GitHubApiError",
-  message: "GitHub rejected the request with status 403",
+  message: "GitHub returned HTTP status 403",
 });
 
 const polling = Layer.succeed(PollingTriggers)({

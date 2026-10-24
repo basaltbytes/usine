@@ -4,6 +4,4 @@
 "@usine/orchestrator": minor
 ---
 
-Expose `mergeable` and `mergeStateStatus` on the pull request payload so `pr` trigger expressions and prompts can react to a conflicting branch, and mark conflicting pull requests on their board card.
-
-Refresh known open pull requests on every poll, including unchanged issue-feed responses, so base changes and delayed mergeability computation update their Board and trigger Loops.
+Adds `mergeable` and `mergeStateStatus` to the pull request payload for `pr` triggers and prompts, and the board marks conflicting pull requests. Each poll refreshes known open pull requests, so base changes and late mergeability results update the board and trigger loops.

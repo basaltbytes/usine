@@ -3,11 +3,7 @@ import type { AgentSession, AgentSessionEvent, HarnessSession } from "@usine/cor
 import type { AttemptId } from "@usine/core/attempt";
 import type { TranscriptEventView } from "@usine/orchestrator/operator";
 
-/**
- * Attributed delivery receipt, including refusal details when the session
- * rejected the input. A queued input's receipts fold into one record: the
- * first one's place with the newest one's payload.
- */
+/** A delivery receipt for an operator input, at the first receipt's position with the newest payload. */
 export type InterventionRecord = TranscriptEventView & {
   readonly payload: Extract<
     TranscriptEventView["payload"],
@@ -28,7 +24,7 @@ interface RecordedSessionEvent {
   >;
 }
 
-/** Session state observes all lifecycle records; conversation contents observe only the loaded page. */
+/** One session's state and events; state comes from all session records, `events` only from the loaded page. */
 export interface SessionEvents {
   readonly attemptId: AttemptId;
   readonly session: AgentSession;
@@ -43,7 +39,7 @@ export interface SessionEvents {
   readonly interventions: Array<InterventionRecord>;
 }
 
-/** Joins paged activity and current supervision once, without rendering metadata as historical rows. */
+/** Groups records by session; records outside the loaded page update only the state fields. */
 export const indexSessions = (
   events: ReadonlyArray<TranscriptEventView>,
   sessionState: ReadonlyArray<TranscriptEventView>,

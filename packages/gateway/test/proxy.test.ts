@@ -59,7 +59,7 @@ interface Sent {
   readonly body: string;
 }
 
-/** What the fake upstream received. */
+/** The requests the fake upstream received. */
 class Upstream extends Context.Service<Upstream, { readonly sent: Ref.Ref<ReadonlyArray<Sent>> }>()(
   "test/Upstream",
 ) {
@@ -108,7 +108,7 @@ const gateway = (providers: LlmProviders) =>
     Layer.provideMerge(captureLogs),
   );
 
-/** Attaches a credential for the test Worker and repository under `id` and returns the caller token for it. */
+/** Attaches `credential` for the test Worker and repository under `id` and returns the caller token. */
 const attachAs = (id: AttachmentId, credential: AttachmentCredential) =>
   Effect.gen(function* () {
     const attachments = yield* Attachments;

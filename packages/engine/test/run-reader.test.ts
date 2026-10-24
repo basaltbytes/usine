@@ -92,9 +92,8 @@ describe("Run evidence reader", () => {
           parentModel: Option.none(),
         };
         const observedStarts = new Set<boolean>();
-        // Try the Started arrival at every database-operation boundary. The
-        // logger schedules arrivals without inspecting SQL or fixing its shape;
-        // the first unreached boundary ends the sweep as query structure changes.
+        // Delivers `Started` at each database operation boundary in turn. The sweep ends at the
+        // first boundary not reached, so it doesn't depend on the query structure.
         for (let boundary = 1; ; boundary += 1) {
           const submitted = yield* engine.submit(
             new Submission({
@@ -167,7 +166,7 @@ describe("Run evidence reader", () => {
 
 describe("Loop sightings", () => {
   it.live(
-    "name the Run that owns the Item's state, following a reopening, and the Run that holds it",
+    "name the Run that owns the Item's state, following a reopening, and the Run that suppresses it",
     () =>
       withInstance((directory) =>
         Effect.gen(function* () {
@@ -179,15 +178,17 @@ describe("Loop sightings", () => {
             const reader = yield* RunReader;
             const sightingsOf = (item: string) => reader.sightings([ItemKey.make(item)]);
 
-            const blocked = yield* engine.submit(supportSubmission({ number: 1, item: "held" }));
+            const blocked = yield* engine.submit(
+              supportSubmission({ number: 1, item: "suppressed" }),
+            );
             assert(blocked._tag === "Claimed");
             yield* waitFor(engine, blocked.runId, ({ run }) => run.state._tag === "Failed");
-            const [held, ...others] = yield* sightingsOf("held");
+            const [suppressed, ...others] = yield* sightingsOf("suppressed");
             assert.deepStrictEqual(others, []);
-            assert.strictEqual(held?.loop, LoopName.make("review"));
-            assert.deepStrictEqual(held?.event, Option.some(EventId.make("event-1")));
-            assert.deepStrictEqual(held?.run, Option.some(blocked.runId));
-            assert.deepStrictEqual(held?.heldBy, Option.some(blocked.runId));
+            assert.strictEqual(suppressed?.loop, LoopName.make("review"));
+            assert.deepStrictEqual(suppressed?.event, Option.some(EventId.make("event-1")));
+            assert.deepStrictEqual(suppressed?.run, Option.some(blocked.runId));
+            assert.deepStrictEqual(suppressed?.suppressedBy, Option.some(blocked.runId));
 
             // A canceled Run keeps its Event until the Item comes back to that state,
             // which opens the Event again under a reopening of its own.
@@ -210,7 +211,7 @@ describe("Loop sightings", () => {
             assert(reopened !== undefined && Option.isSome(reopened.event));
             assert.notStrictEqual(reopened.event.value, EventId.make("event-2"));
             assert.deepStrictEqual(reopened.run, Option.some(back.runId));
-            assert.deepStrictEqual(reopened.heldBy, Option.none());
+            assert.deepStrictEqual(reopened.suppressedBy, Option.none());
 
             // A sighting that does not match records no Event.
             yield* engine.revoke(LoopName.make("review"), ItemKey.make("reopened"));
@@ -261,8 +262,8 @@ describe("Run Events", () => {
 
 describe("Attempts by Worker", () => {
   it("counts a Worker whose every Attempt still runs, and refuses more open Attempts than Attempts", () => {
-    // The first state of a Worker a reload removed: its only Attempt still runs. A count the
-    // schema refused would fail every overview until that Attempt ends.
+    // A Worker removed by a reload, with its only Attempt still running. If the schema rejected
+    // this count, every overview would fail until that Attempt ends.
     const local = WorkerName.make("local");
     assert.doesNotThrow(() => new WorkerAttempts({ worker: local, attempts: 1, running: 1 }));
     assert.throws(() => new WorkerAttempts({ worker: local, attempts: 1, running: 2 }));

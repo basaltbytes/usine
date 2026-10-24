@@ -2,4 +2,4 @@
 "@usine/executor": minor
 ---
 
-The SSH layer also provides `SshWorkers`, whose `addWorker` and `removeWorker` change the executor's Workers while it runs, opening the forward to a Gateway's admin API with the first Worker behind it and closing it with the last.
+The SSH layer adds `SshWorkers`: `addWorker` and `removeWorker` change workers at runtime, opening a gateway's admin forward with its first worker and closing it with its last.

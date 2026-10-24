@@ -62,7 +62,6 @@ const rowSession = (row: ChapterRow): string | null => {
   }
 };
 
-/** The Run page below its header: the outline of the Run's parts, the reader, and the composer of a live Attempt. */
 export const RunWorkspace = ({
   detail,
   history,
@@ -146,7 +145,7 @@ export const RunWorkspace = ({
       if (selection._tag === "Attempt") setReturnTo(selection.attemptId);
       return;
     }
-    // Coming back from the Task or Event to the Attempt being read keeps the reading place.
+    // Returning from the Task or Event to the Attempt being read keeps the scroll position.
     if (selection._tag !== "Attempt" && next.attemptId === returnTo && next.sessionKey === null)
       return;
     const chapter = document.chapters.find(({ attemptId }) => attemptId === next.attemptId);
@@ -155,7 +154,7 @@ export const RunWorkspace = ({
       next.sessionKey === null
         ? undefined
         : chapter.rows.find((row) => rowSession(row) === next.sessionKey);
-    // The outline opens the chosen Attempt at once; the reader confirms it once it lands.
+    // Selects the Attempt in the outline now, before the reader reports it after scrolling.
     follow({ attemptId: chapter.attemptId, checkpointKey: null });
     show({ messageId: first?.key ?? chapter.key, tool: null });
   };
@@ -254,7 +253,7 @@ export const RunWorkspace = ({
         {selection._tag === "Event" && <EventDocument detail={detail} />}
         {showsReader && githubChanges.isError && (
           <p className="mx-auto w-full max-w-[38.5rem] px-4 pt-3 text-xs text-muted-foreground sm:px-2">
-            GitHub changes are not shown: {githubChanges.error.message}
+            GitHub changes not loaded: {githubChanges.error.message}
           </p>
         )}
         <div className={cn("flex min-h-0 flex-1 flex-col", !showsReader && "hidden")}>

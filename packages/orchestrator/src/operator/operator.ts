@@ -127,16 +127,15 @@ export type OperatorError =
   | RunGitHubChangesError;
 export type OperatorObservationError = RunStoreError | TranscriptAttemptNotFoundError;
 
-/** How many settled Runs the overview keeps beside the open ones. */
+/** The number of closed Runs the overview keeps next to the open ones. */
 const OVERVIEW_CLOSED_RUNS = 100;
 
-/** How many newest Items a Board shows; older ones drop off. */
+/** The number of newest Items a Board shows. */
 const OVERVIEW_BOARD_ITEMS = 500;
 
 /**
- * What the overview's Task cards add up: each Board Run's usage when the overview was projected,
- * and the Runs whose Attempt was at work then. A token report adds a transcript row and no
- * projection revision, so a cached overview reads the usage of those Runs again on every read.
+ * Each Board Run's usage at projection time, and the Runs whose Attempt was running then. Token
+ * reports don't change the projection revision, so a cached overview rereads these Runs' usage.
  */
 interface BoardUsage {
   readonly runs: ReadonlyMap<RunId, RunUsageView>;
@@ -149,7 +148,10 @@ interface CachedOverview {
   readonly usage: BoardUsage;
 }
 
-/** `overview` with the cards that hold one of the `changed` Runs adding up their Runs' `usage` again. */
+/**
+ * Returns `overview` with the usage of every card that contains a `changed` Run recomputed from
+ * `usage`.
+ */
 const withRunUsage = (
   overview: ReadyOverview,
   changed: ReadonlySet<RunId>,
@@ -249,9 +251,8 @@ const makeOperatorObservation = Effect.gen(function* () {
           const projectRuns = [...merged.values()].sort(
             (a, b) => b.openedAt.localeCompare(a.openedAt) || b.id.localeCompare(a.id),
           );
-          // The Runs on the Board's Items, whose usage the Task cards add up. The reader keeps
-          // ended Attempts' reports, so only Attempts at work are read again. A running Run's
-          // Event says which lane its card stays in while its Agent changes the labels.
+          // The reader keeps ended Attempts' reports, so only running Attempts are read again. A
+          // running Run's Event gives the lane its card stays in while its Agent changes labels.
           const [usages, runEvents] = yield* Effect.all(
             [
               Effect.forEach(
@@ -371,7 +372,7 @@ const makeOperatorObservation = Effect.gen(function* () {
       } else if (run.canResolveFailure) {
         const attempt = run.attempts.at(-1);
         if (attempt?.outcome?._tag !== "Failed") {
-          return yield* Effect.die(new Error(`Failed Run ${run.id} has no failed Attempt`));
+          return yield* Effect.die(new Error(`Failed run ${run.id} has no failed attempt`));
         }
         needsYou.push(
           new RunFailureNeed({
@@ -447,7 +448,7 @@ const makeOperatorObservation = Effect.gen(function* () {
   });
 
   // Each session keeps its highest report, so a Run's usage changes only with more tokens or
-  // another session; the rest of a cached overview stays as projected.
+  // another session.
   const refreshWorkingUsage = Effect.fn("Operator.refreshWorkingUsage")(function* (
     cached: CachedOverview,
   ) {
@@ -498,8 +499,8 @@ const makeOperatorObservation = Effect.gen(function* () {
           onNone: () => [],
           onSome: ({ failures }) => failures,
         });
-        // Without the invalidation singleton staleness cannot be detected, so the
-        // cache is bypassed.
+        // Without the invalidation singleton, staleness can't be detected, so the cache is
+        // bypassed.
         const token = Option.map(revision, (value) =>
           JSON.stringify([
             value,
@@ -591,28 +592,26 @@ const makeOperatorObservation = Effect.gen(function* () {
   });
 
   const tasks = yield* TaskReader;
-  // The desk: Running now, Not moving, Last outcomes, Workers, and poll times.
   const { desk } = yield* OperatorDesk;
 
   return { detail, overview, task: tasks.read, desk } as const;
 });
 
-/** The read-only operator surface. It needs no trigger execution to build. */
+/** The read-only operator surface, which needs no trigger execution. */
 export class OperatorObservation extends Context.Service<
   OperatorObservation,
   {
     /**
-     * Builds the supplied instance's Projects, Boards, Runs, and items needing operator attention.
-     * The overview is kept until the projection revision or the instance changes; each read still
-     * reads the token reports of the Attempts at work, so a Task card's usage stays current.
+     * Builds the instance's Projects, Boards, Runs, and items needing operator attention. The
+     * result is cached until the projection revision or instance changes, except for running
+     * Attempts' token usage.
      */
     readonly overview: (
       instance: LoadedInstance,
     ) => Effect.Effect<ReadyOverview, OperatorObservationError>;
     /**
-     * Reads one Run and a bounded transcript page; `request` selects the latest,
-     * newer, or earlier activity. Each Attempt says how its Worker is reached
-     * as the supplied instance's `usine.yaml` declares it.
+     * Reads one Run and a bounded transcript page, where `request` selects the latest, newer, or
+     * earlier activity.
      */
     readonly detail: (
       instance: LoadedInstance,
@@ -621,9 +620,8 @@ export class OperatorObservation extends Context.Service<
     ) => Effect.Effect<RunDetailView, OperatorObservationError>;
 
     /**
-     * Reads the Task holding Item `item` of `repository`: its Items, every saved Run on
-     * them, and their harvested comments. Any member's number finds the Task; the view
-     * names its originating Item. Fails when the Item is not among the Board's newest Items.
+     * Reads the Task that contains Item `item` of `repository`, with its Items, saved Runs, and
+     * harvested comments. Fails if the Item isn't among the Board's newest Items.
      */
     readonly task: (
       instance: LoadedInstance,
@@ -631,11 +629,8 @@ export class OperatorObservation extends Context.Service<
       item: ItemNumber,
     ) => Effect.Effect<TaskView, TaskReadError>;
     /**
-     * Builds the supplied instance's desk: the Attempts in flight with their
-     * last activity and open connectivity warnings, each Item a Loop's trigger
-     * matches without an Attempt running on it and why, the Runs that closed
-     * last, the Workers' slots and last preflight, and when each repository
-     * was last polled.
+     * Builds the instance's desk: running Attempts, matched Items with no running Attempt, recently
+     * closed Runs, Worker slots and preflights, and poll times.
      */
     readonly desk: (instance: LoadedInstance) => Effect.Effect<DeskView, OperatorObservationError>;
   }
@@ -708,7 +703,7 @@ const makeOperator = Effect.gen(function* () {
     if (file === undefined)
       return yield* new RosterAgentNotFoundError({
         agent: edit.agent,
-        message: `Agent ${edit.agent} is not in the roster`,
+        message: `Agent "${edit.agent}" is not in the roster`,
       });
     const agent = file.agent;
     yield* runs.retry(
@@ -742,7 +737,7 @@ const makeOperator = Effect.gen(function* () {
       });
       return yield* new LoopNotFoundError({
         loop: current.run.loop,
-        message: `Loop ${current.run.loop} is not loaded, so Run ${runId} cannot run again`,
+        message: `Run ${runId} cannot run again: loop "${current.run.loop}" is not loaded.`,
       });
     }
     const file = instance.agents.find(({ name }) => name === edit.agent);
@@ -753,7 +748,7 @@ const makeOperator = Effect.gen(function* () {
       });
       return yield* new RosterAgentNotFoundError({
         agent: edit.agent,
-        message: `Agent ${edit.agent} is not in the roster`,
+        message: `Agent "${edit.agent}" is not in the roster`,
       });
     }
     const agent = file.agent;
@@ -836,8 +831,7 @@ const makeOperator = Effect.gen(function* () {
         ] as const,
         { concurrency: "unbounded" },
       );
-      // The Items' Runs place each card as the Board shows it, so the move records the lane
-      // the card left, also while a running Run keeps it in the lane it was triggered from.
+      // Place each card as the Board does, so the move records the lane that the card left.
       const summaries = yield* reader.forItems(storedItems.map(({ itemKey }) => itemKey));
       const runEvents = yield* readRunningEvents(reader, summaries);
       const access = workerAccesses(instance.config.workers);
@@ -871,7 +865,7 @@ const makeOperator = Effect.gen(function* () {
       }
       const mutation = labelMutationForBoardMove(board, target);
       const movedAt = yield* DateTime.now;
-      // Recorded before the write, so the Run reader never takes the swap for an Agent's.
+      // Recorded before the write, so the Run reader never attributes the swap to an Agent.
       yield* boardMoves.record(
         new BoardMoveRecord({
           repository: move.repository,
@@ -951,80 +945,83 @@ const makeOperator = Effect.gen(function* () {
   } as const;
 });
 
-/** The operator's view of the factory and actions for approving, retrying, canceling, and directing work. */
+/**
+ * The operator's factory view and actions for approving, retrying, canceling, and directing work.
+ */
 export class Operator extends Context.Service<
   Operator,
   OperatorObservation["Service"] & {
-    /** Answers the Item's current cycle Ask; polling refreshes its state before more Runs open. */
+    /**
+     * Answers the Item's current cycle-budget Ask. Polling refreshes its state before more Runs
+     * open.
+     */
     readonly resetCycleBudget: (askId: CycleBudgetAskId) => Effect.Effect<void, OperatorError>;
     /**
-     * Records the web UI's approval of a waiting Run as given by the operator
-     * login `usine.yaml` names, or by no named approver when it names none;
-     * execution still waits for Worker capacity.
+     * Records the operator's approval of a waiting Run, attributed to the operator login in
+     * `usine.yaml` if one is set. Execution still waits for Worker capacity.
      */
     readonly approve: (
       instance: LoadedInstance,
       runId: RunId,
     ) => Effect.Effect<void, OperatorError>;
-    /** Resolves attention for the failed Attempt displayed to the operator; stale requests are rejected. */
+    /** Resolves attention for the displayed failed Attempt. Rejects stale requests. */
     readonly resolveFailure: (
       runId: RunId,
       attemptId: AttemptId,
     ) => Effect.Effect<void, OperatorError>;
-    /** Requests a new Attempt for a failed Run using its effective task and Agent, as the instance's operator. */
+    /** Requests a new Attempt for a failed Run with its effective task and Agent. */
     readonly retry: (instance: LoadedInstance, runId: RunId) => Effect.Effect<void, OperatorError>;
-    /** Atomically amends a failed Run before requesting its next Attempt. */
+    /** Amends a failed Run and requests its next Attempt atomically. */
     readonly editAndRetry: (
       instance: LoadedInstance,
       runId: RunId,
       edit: EditAndRetry,
     ) => Effect.Effect<void, OperatorError>;
     /**
-     * Opens a new Run for the Item state of a succeeded or canceled Run, with
-     * the edit's task and roster Agent and the Step, approval, and cycle limit
-     * the Run's Loop file names now, as run again by the operator login
-     * `usine.yaml` names. Returns the new Run, or the cycle-budget Ask the Item
-     * opened instead.
+     * Opens a new Run for the Item state of a succeeded or canceled Run, with the edited task and
+     * Agent and the Loop file's current settings. Returns the new Run, or the cycle-budget Ask that
+     * the Item opened instead.
      */
     readonly runAgain: (
       instance: LoadedInstance,
       runId: RunId,
       edit: EditAndRetry,
     ) => Effect.Effect<RunAgainResult, OperatorError>;
-    /** Delivers an attributed action through a live session's Attempt channel. */
+    /** Sends an attributed action through a live session's Attempt channel. */
     readonly intervene: (
       instance: LoadedInstance,
       runId: RunId,
       input: SessionIntervention,
     ) => Effect.Effect<void, OperatorError>;
-    /** Cancels an open Run and interrupts its current Attempt; an already closed Run is unchanged. */
+    /**
+     * Cancels an open Run and interrupts its current Attempt. Does nothing if the Run is already
+     * closed.
+     */
     readonly cancel: (runId: RunId) => Effect.Effect<void, OperatorError>;
     /**
-     * Answers an `UnconfiguredWorkerNeed`: startup stops reconciling the
-     * Attempts recorded on `worker` and whatever they left stays on it. A
-     * Worker `usine.yaml` declares, or a removed one that still runs Attempts,
-     * is left unchanged and the request fails with `LeftoversDiscardRejectedError`.
+     * Answers an `UnconfiguredWorkerNeed` so startup stops reconciling the Attempts recorded on
+     * `worker`. Fails with `LeftoversDiscardRejectedError` if `usine.yaml` declares the Worker or
+     * it still runs Attempts.
      */
     readonly discardLeftovers: (worker: WorkerName) => Effect.Effect<void, OperatorError>;
     /**
-     * Records the move, swaps lane labels on GitHub, and hints an authoritative refresh
-     * of its Board position and Loop matches. A move that cannot be recorded is not sent.
+     * Records the move, swaps lane labels on GitHub, and hints a refresh of the Item's Board
+     * position and Loop matches. If the move can't be recorded, nothing is sent to GitHub.
      */
     readonly moveBoardItem: (
       instance: LoadedInstance,
       move: BoardMove,
     ) => Effect.Effect<void, BoardMoveError>;
     /**
-     * What changed on the Run's GitHub Item while each of its Attempts was at work, read
-     * from the Item's timeline: the Agent's label, comment, and review changes, and the
-     * operator's Board moves.
+     * Reads the changes on the Run's GitHub Item during each Attempt from the Item's timeline: the
+     * Agent's label, comment, and review changes, and the operator's Board moves.
      */
     readonly githubChanges: (
       runId: RunId,
     ) => Effect.Effect<RunGitHubChangesView, RunGitHubChangesError>;
-    /** Pauses new work for a Loop while its existing Runs continue. */
+    /** Pauses new work for a Loop; its existing Runs continue. */
     readonly pause: (loop: LoopName) => Effect.Effect<LoopRuntimeState, EnginePersistenceError>;
-    /** Allows the Loop's triggers to open new Runs again. */
+    /** Lets the Loop's triggers open new Runs again. */
     readonly unpause: (loop: LoopName) => Effect.Effect<LoopRuntimeState, EnginePersistenceError>;
   }
 >()("@usine/orchestrator/Operator") {
@@ -1154,7 +1151,7 @@ export {
   ProviderRetryingView,
   ConnectivityWarningView,
   RunningAttemptView,
-  HeldForOperatorView,
+  SuppressedForOperatorView,
   ClosedUnchangedView,
   RunFailedView,
   LoopPausedView,

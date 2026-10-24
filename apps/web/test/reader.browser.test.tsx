@@ -167,8 +167,8 @@ const atLatest = () => viewport().scrollHeight - viewport().clientHeight - viewp
 const bookmark = () => readerMemory(() => localStorage).read(runId, Date.now());
 const burst = (calls: number) =>
   page.getByRole("button", { name: new RegExp(`${calls} tool calls?$`, "u") });
-// The reader scrolls itself to the latest row after mounting, and an opened burst panel grows over
-// a CSS transition; positions read before either ends do not hold.
+// The reader scrolls to the latest row after mounting, and an opened burst panel expands with a CSS
+// transition; positions read before either ends are not stable.
 const ownScrollEnded = () =>
   expect.poll(() => viewport().hasAttribute("data-autoscrolling")).toBe(false);
 const openBurst = async (calls: number) => {
@@ -190,8 +190,8 @@ const openBurst = async (calls: number) => {
 
 beforeEach(async () => {
   await page.viewport(1280, 800);
-  // Unanswered, the GitHub changes request fails, and a second later its retry adds an error line
-  // above the reader that shrinks it mid-test.
+  // Without a response, the GitHub changes request fails and its retry a second later adds an error
+  // line above the reader, which shrinks it mid-test.
   await commands.githubChangesResponse(
     JSON.stringify(
       Schema.encodeSync(RunGitHubChangesView)(new RunGitHubChangesView({ attempts: [] })),
@@ -544,7 +544,7 @@ it("reveals an error instead of the pending saved place and preserves unread act
         isError: true,
       }),
     ),
-    // The Agent goes on after the failed read, which makes it a recovered tool failure.
+    // The Agent continues after the failed read, so it is a recovered tool failure.
     message(48),
   ];
   mount([...events.slice(30), ...error], runId, {
@@ -598,7 +598,7 @@ it("keeps failed commands inside their burst and reopens inspected errors throug
   const failed = page.getByRole("button", { name: /node check.js.*Error/ });
   await expect.element(failed).not.toBeInTheDocument();
 
-  // The Agent went on after the failed command, so it is counted as recovered, not as an error.
+  // The Agent continued after the failed command, so it counts as recovered, not as an error.
   await expect.element(page.getByRole("button", { name: "Next error" })).not.toBeInTheDocument();
   const next = page.getByRole("button", { name: "Next recovered tool failure", exact: true });
   await next.click();
@@ -674,7 +674,7 @@ it("lets Space on the viewport resume following a paused reader at latest", asyn
   await expect
     .element(page.getByText("Waiting for a result…", { exact: true }))
     .not.toBeInTheDocument();
-  // The current activity line sits below the call; reach the end without a scroll gesture.
+  // The current activity line is below the call; the test sets scrollTop instead of scrolling.
   viewport().scrollTop = viewport().scrollHeight;
   await expect.poll(atLatest).toBeLessThan(9);
   viewport().focus();
@@ -727,9 +727,9 @@ const longRead = [
     }),
   ),
 ];
-// Opening the read pauses the reader, as any inspection does.
+// Opening the read pauses the reader, like any inspection.
 const openLongOutput = async () => {
-  // Tall enough to show the whole output at the latest row, so hovering it scrolls nothing.
+  // Tall enough to show the whole output at the latest row, so hovering it does not scroll.
   host.style.height = "800px";
   mount([...events, ...longRead]);
   await openBurst(1);
@@ -973,7 +973,7 @@ it("opens the outline on the Attempt being read and marks its checkpoint without
   await moveTo(8, 0);
   await expect.element(first).toHaveAttribute("aria-expanded", "true");
   await expect.element(second).toHaveAttribute("aria-expanded", "false");
-  // A closed fold carries the mark of the turn being read; opened, the turn itself does.
+  // A closed fold has the current-location mark of the turn being read; when open, the turn has it.
   const firstTurns = outline.getByRole("button", { name: "Parent, 20 messages" });
   await expect.element(firstTurns).toHaveAttribute("aria-current", "location");
   await firstTurns.click();
@@ -992,7 +992,7 @@ it("opens the outline on the Attempt being read and marks its checkpoint without
 it("opens a finished Run on a narrow screen at its outcome's own line", async () => {
   await page.viewport(390, 844);
   mount([...earlierAttempt, failedEnvelope], runId, undefined, [firstAttempt]);
-  // The row, with its time line stacked above the note on a narrow screen.
+  // The outcome row; on a narrow screen its time line is above the note.
   const outcome = () =>
     [...host.querySelectorAll<HTMLElement>("[data-message-id]")].find(
       (element) => element.dataset.messageId === "event:21",

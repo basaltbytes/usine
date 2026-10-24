@@ -1,19 +1,19 @@
 import { Schema } from "effect";
 import { EntityTag } from "./detection.ts";
 
-/** A repository label name as returned by GitHub, preserved without case conversion. */
+/** A repository label name as returned by GitHub, with case preserved. */
 export const RepositoryLabelName = Schema.NonEmptyString.pipe(
   Schema.brand("GitHubRepositoryLabelName"),
 );
 export type RepositoryLabelName = typeof RepositoryLabelName.Type;
 
-/** GitHub stores label colors as six hex digits without the leading hash. */
+/** A label color as six hex digits without the leading `#`. */
 export const RepositoryLabelColor = Schema.String.check(
   Schema.isPattern(/^[0-9a-fA-F]{6}$/u, { message: "Expected a six-digit hex label color" }),
 ).pipe(Schema.brand("GitHubRepositoryLabelColor"));
 export type RepositoryLabelColor = typeof RepositoryLabelColor.Type;
 
-/** One repository label as GitHub defines it. The name routes lanes, and color and description are presentation only. */
+/** A repository label. The name selects lanes; color and description are for display only. */
 export class RepositoryLabel extends Schema.Class<RepositoryLabel>("@usine/github/RepositoryLabel")(
   {
     name: RepositoryLabelName,
@@ -35,12 +35,12 @@ export class RepositoryLabelCatalog extends Schema.Class<RepositoryLabelCatalog>
   labels: Schema.Array(RepositoryLabel).check(uniqueLabelNames),
 }) {}
 
-/** GitHub confirmed the catalog named by its ETag has not changed. */
+/** The result when GitHub confirms that the catalog with this ETag hasn't changed. */
 export class RepositoryLabelsNotModified extends Schema.TaggedClass<RepositoryLabelsNotModified>(
   "@usine/github/RepositoryLabelsNotModified",
 )("RepositoryLabelsNotModified", {}) {}
 
-/** A complete label catalog or confirmation that the cached catalog is unchanged. */
+/** A complete label catalog, or confirmation that the cached catalog is unchanged. */
 export const RepositoryLabelDetection = Schema.Union([
   RepositoryLabelCatalog,
   RepositoryLabelsNotModified,

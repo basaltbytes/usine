@@ -37,13 +37,13 @@ export const testAgent = new Agent({
 
 export type AttemptPlan = Effect.Effect<StepResult, AttemptFailure>;
 
-/** A `TriggerCondition` that gives every queued Event the same answer. */
+/** Returns a `TriggerCondition` layer that gives every queued Event the same answer. */
 export const conditionLayer = (recheck: Effect.Effect<TriggerRecheck>) =>
   Layer.succeed(TriggerCondition)({ recheck: () => recheck });
 
 /**
- * The local engine over a scripted `StepExecutor`. Queued Events keep their
- * trigger unless the test supplies its own `TriggerCondition`.
+ * Returns the local engine over a scripted `StepExecutor`. Queued Events still match unless the
+ * test provides a `TriggerCondition`.
  */
 export const engineLayer = (
   directory: InstanceDirectory,
@@ -97,7 +97,7 @@ export const submission = (options: {
   });
 };
 
-/** The web UI's approval, acting as the operator `usine.yaml` names. */
+/** A web UI approval by the operator login from `usine.yaml`. */
 export const uiApproval = new ApprovalSource({
   channel: "ui",
   approver: Option.some(OperatorLogin.make("operator")),
@@ -141,8 +141,8 @@ export const withInstance = <A, E, R>(
   }).pipe(Effect.provide(NodeServices.layer));
 
 /**
- * Writes, through the store alone, what a process committed before it
- * stopped, so a test can then start the engine on the same instance.
+ * Writes state through the store only, as a process would before stopping, so a test can then
+ * start the engine on the same instance.
  */
 export const committedBeforeCrash = <A, E>(
   directory: InstanceDirectory,

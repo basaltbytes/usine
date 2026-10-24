@@ -28,7 +28,7 @@ const attachment = (id: AttachmentId, token: string, minutes: number) =>
     expiresAt: DateTime.add(START, { minutes }),
   });
 
-/** Sets the clock before the store starts, so its sweep timer starts from the test's time. */
+/** Sets the clock before the store starts, so its sweep timer starts at the test's time. */
 const at = <A, E>(time: DateTime.Utc, body: Effect.Effect<A, E, Attachments>) =>
   Effect.gen(function* () {
     yield* TestClock.setTime(DateTime.toEpochMillis(time));
@@ -89,7 +89,7 @@ describe("Attachments", () => {
         yield* TestClock.adjust("45 seconds");
         assert.strictEqual((yield* attachments.find(ATTACHMENT))._tag, "ExpiredAttachment");
         assert.deepStrictEqual(yield* attachments.list(), []);
-        // The sweep at the next whole minute forgets it.
+        // The sweep at the next whole minute removes it.
         yield* TestClock.adjust("15 seconds");
         assert.strictEqual((yield* attachments.find(ATTACHMENT))._tag, "MissingAttachment");
       }),

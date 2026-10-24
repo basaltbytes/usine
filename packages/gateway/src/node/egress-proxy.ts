@@ -19,10 +19,9 @@ import { GatewaySettings, gatewayHosts, SettingsInForce } from "../settings.ts";
 import type { Listener } from "./environment.ts";
 
 /**
- * Addresses a public name must never resolve to: private, loopback,
- * link-local, shared, multicast, and reserved ranges. Node checks IPv4-mapped
- * IPv6 addresses against the IPv4 ranges, and a `::ffff:0:0/96` rule would
- * match every IPv4 address.
+ * Returns the ranges a public name must never resolve to: private, loopback, link-local,
+ * shared, multicast, and reserved. Node checks IPv4-mapped IPv6 addresses against the IPv4
+ * ranges, so there's no `::ffff:0:0/96` rule, which would match every IPv4 address.
  */
 const privateAddresses = (): BlockList => {
   const list = new BlockList();
@@ -49,18 +48,18 @@ const privateAddresses = (): BlockList => {
   return list;
 };
 
-/** The DNS lookup of an allowed host failed or returned nothing. */
+/** The error when the DNS lookup of an allowed host fails or returns nothing. */
 class Unresolvable extends Schema.TaggedError<Unresolvable>()("Unresolvable", {
   host: Schema.String,
 }) {}
 
-/** The forward proxy could not listen on its address. */
+/** The error when the forward proxy can't listen on its address. */
 export class EgressProxyListenError extends Schema.TaggedError<EgressProxyListenError>()(
   "EgressProxyListenError",
   { host: Schema.String, port: Schema.Int, message: Schema.String },
 ) {}
 
-/** The upstream connection could not be opened or its response did not finish. */
+/** The error when the upstream connection can't be opened or its response doesn't finish. */
 class Unreachable extends Schema.TaggedError<Unreachable>()("Unreachable", {
   host: Schema.String,
   port: Schema.Int,
@@ -68,10 +67,10 @@ class Unreachable extends Schema.TaggedError<Unreachable>()("Unreachable", {
 }) {}
 
 /**
- * A tunnel refused after its `200 Connection Established`: the client's first
- * bytes were not a TLS ClientHello, named no server or hid it with ECH, named
- * another server than the CONNECT host, or the host resolved to a private
- * address. `serverName` is the name the ClientHello asked for, if any.
+ * The error for a tunnel refused after `200 Connection Established`: the first bytes weren't a
+ * TLS ClientHello; the ClientHello had no server name, hid it with ECH, or had a different one
+ * than the CONNECT host; or the host resolved to a private address. `serverName` is the
+ * ClientHello's server name, if any.
  */
 class TunnelRefused extends Data.TaggedError("TunnelRefused")<{
   readonly reason: "not-tls" | "server-name-missing" | "server-name-mismatch" | "private-address";
@@ -79,10 +78,10 @@ class TunnelRefused extends Data.TaggedError("TunnelRefused")<{
   readonly serverName: Option.Option<string>;
 }> {}
 
-/** The client closed a tunnel before it sent any byte, so there was nothing to check or refuse. */
+/** The error when the client closes a tunnel before sending any bytes. */
 class TunnelAbandoned extends Data.TaggedError("TunnelAbandoned") {}
 
-/** A fatal TLS `unrecognized_name` alert (RFC 8446, section 6), so a client reports why its handshake ended. */
+/** A fatal TLS `unrecognized_name` alert (RFC 8446, section 6), sent so the client can report why the handshake ended. */
 const UNRECOGNIZED_NAME_ALERT = Buffer.from([0x15, 0x03, 0x03, 0x00, 0x02, 0x02, 0x70]);
 
 const CLIENT_HELLO_TIMEOUT = "5 seconds";
@@ -91,11 +90,10 @@ const notTls = (detail: string) =>
   new TunnelRefused({ reason: "not-tls", detail, serverName: Option.none() });
 
 /**
- * Buffers a tunnel's first bytes, `head` included, until they contain a whole
- * TLS ClientHello, at most 16 KiB and five seconds, parsing only when enough
- * bytes have arrived, then pauses the client so nothing more is read before
- * the upstream connection exists. A client that closes the tunnel before
- * sending any byte fails as `TunnelAbandoned`.
+ * Buffers a tunnel's first bytes, including `head`, until they contain a complete ClientHello
+ * (at most 16 KiB and five seconds), then pauses the client so nothing more is read before the
+ * upstream connection exists. Fails with `TunnelAbandoned` if the client closes before sending
+ * any bytes.
  */
 const clientHello = (client: Duplex, head: Buffer) =>
   Effect.callback<
@@ -149,9 +147,8 @@ const clientHello = (client: Duplex, head: Buffer) =>
   );
 
 /**
- * Checks that the ClientHello asks for the CONNECT host itself. On a shared
- * CDN address the same tunnel could otherwise carry a TLS connection to any
- * other tenant of that address.
+ * Checks that the ClientHello's server name is the CONNECT host, so a tunnel to a shared CDN
+ * address can't connect to another tenant of that address.
  */
 const pinnedServerName = (
   host: string,
@@ -189,10 +186,10 @@ const pinnedServerName = (
       );
 };
 
-/** The caller of a forward proxy request as it appears in logs. */
+/** The log fields that identify a forward proxy request's caller. */
 type CallerFields = { readonly worker: WorkerName } | { readonly caller: "none" | "invalid-token" };
 
-/** Where the proxy connects for a request: the gateway's reverse proxy, or an allowed host's address. */
+/** The connection target for a request: the Gateway's reverse proxy, or an allowed host's address. */
 interface Destination {
   readonly address: string;
   readonly port: number;
@@ -200,9 +197,8 @@ interface Destination {
 }
 
 /**
- * How a plain HTTP relay ended: the upstream response was copied whole, or
- * the client closed its connection first, with the upstream status if the
- * response had begun.
+ * How a plain HTTP relay ended: the upstream response was copied completely, or the client
+ * closed first, with the upstream status if the response had started.
  */
 type RelayEnd = Data.TaggedEnum<{
   Relayed: { readonly status: number };
@@ -234,20 +230,19 @@ const statusLine = (status: number, reason: string, body: string, refusal: Optio
   ].join("\r\n");
 
 /**
- * Serves the forward proxy Workers use for package registries and other
- * allowlisted hosts: `CONNECT host:443` for HTTPS, and absolute-form
- * requests (`GET http://host/...`) for plain HTTP mirrors such as apt. A
- * tunnel is opened only after the client's TLS ClientHello names the CONNECT
- * host itself, so one allowed name on a shared address cannot carry a
- * connection to another tenant of it. The proxy resolves each name itself and
- * refuses one that resolves to a private address, so an allowlisted name
- * cannot be pointed at the gateway's own network. A client that sends every request through a proxy, as Claude Code
- * does with `HTTPS_PROXY` set, still reaches `git.<domain>` and
- * `llm.<domain>` on port 80: those go to the reverse proxy at `gateway`. A
- * caller token in `Proxy-Authorization` is optional and only names the Worker
- * in logs. Every refusal is logged with the host, the reason, and the client
- * address. Each request is judged by the allowlist in force when it arrives,
- * so a tunnel stays open after a reload removes its host.
+ * Serves the forward proxy that Workers use for package registries and other allowlisted
+ * hosts: `CONNECT host:443` for HTTPS, and absolute-form requests (`GET http://host/...`) for
+ * plain HTTP mirrors such as apt.
+ *
+ * - A tunnel opens only after the ClientHello's server name matches the CONNECT host.
+ * - The proxy resolves names itself and refuses one that resolves to a private address.
+ * - Requests for `git.<domain>` and `llm.<domain>` on port 80 go to the reverse proxy at
+ *   `gateway`, so a client that proxies everything (Claude Code with `HTTPS_PROXY`) still
+ *   connects to them.
+ * - A caller token in `Proxy-Authorization` is optional and only identifies the Worker in logs.
+ * - Each refusal is logged with the host, reason, and client address.
+ * - Each request is checked against the allowlist current at arrival, so an open tunnel stays
+ *   open after a reload removes its host.
  */
 export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
   listener: Listener,
@@ -261,7 +256,7 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
   const scope = yield* Effect.scope;
   const context = yield* Effect.context<never>();
 
-  /** Who a request comes from, for its log lines: the Worker its caller token names, if it sent a valid one. */
+  /** Returns the log fields for a request's caller: the Worker from a valid caller token, if any. */
   const caller = (value: string | undefined): Effect.Effect<CallerFields> =>
     Option.fromNullishOr(value).pipe(
       Option.flatMap(tokenFromAuthorization),
@@ -284,7 +279,7 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
       ...who,
     });
 
-  /** Resolves an allowed host and returns the first address, or refuses when any address is private. */
+  /** Resolves an allowed host and returns its first address. Fails if any address is private. */
   const resolve = Effect.fn("EgressProxy.resolve")(function* (permitted: EgressPermitted) {
     const addresses = yield* Effect.tryPromise({
       try: () => lookup(permitted.host, { all: true, verbatim: true }),
@@ -313,7 +308,7 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
       return decision._tag === "EgressRefused" ? Effect.fail(decision) : Effect.succeed(decision);
     });
 
-  /** Where a request for `host` on `port` goes: the reverse proxy for the gateway's own names, else the resolved allowed host. */
+  /** Returns the target for `host` on `port`: the reverse proxy for the Gateway's own names, otherwise the resolved allowed host. */
   const destination = (
     host: string,
     port: number,
@@ -353,7 +348,7 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
       return Effect.sync(close);
     });
 
-  /** Refuses a tunnel after its `200 Connection Established`, when closing the connection is all that is left. */
+  /** Closes a tunnel refused after its `200 Connection Established`. */
   const closeRefused = (client: Duplex, refusal: TunnelRefused) => {
     if (refusal.reason === "not-tls") client.destroy();
     else client.end(UNRECOGNIZED_NAME_ALERT);
@@ -385,7 +380,7 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
           statusLine(
             502,
             "Bad Gateway",
-            "usine gateway: the reverse proxy could not be reached.\n",
+            "usine gateway: the reverse proxy is unreachable.\n",
             Option.none(),
           ),
         );
@@ -410,7 +405,7 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
     }
 
     const decision = (yield* inForce.current).egress.decide(host, port);
-    // Plain HTTP goes through the absolute-form relay, which sees the host it is sent to; a tunnel on another port could carry anything.
+    // Only port 443 tunnels are allowed; plain HTTP goes through the absolute-form relay, which checks the host.
     if (decision._tag === "EgressRefused" || port !== 443) {
       const refused =
         decision._tag === "EgressRefused"
@@ -427,7 +422,7 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
       return yield* logRefusal(refused, from, who);
     }
 
-    // The client sends its ClientHello only after this line; no upstream connection exists until its server name is checked.
+    // The client sends its ClientHello after this line; no upstream connection is opened until its server name is checked.
     client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
     const opened = yield* clientHello(client, head).pipe(
       Effect.flatMap((hello) => pinnedServerName(host, hello)),
@@ -504,7 +499,9 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
     );
     if (Option.isNone(url)) {
       response.writeHead(400, { "content-type": "text/plain; charset=utf-8" });
-      response.end("usine gateway: the forward proxy takes CONNECT, or an absolute http:// URL.\n");
+      response.end(
+        "usine gateway: the forward proxy accepts only CONNECT or an absolute http:// URL.\n",
+      );
       return yield* Effect.logWarning("Gateway refused a request", {
         reason: "not-a-proxy-request",
         client: from,
@@ -517,13 +514,10 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
     const forwarded = endToEndHeaders(Headers.fromInput(request.headers));
 
     /**
-     * Sends the request to `target` and copies the response back, until the
-     * upstream response ends or the client closes its connection. A client
-     * that leaves mid-download or mid-upload has its upstream connection
-     * destroyed at once, so no upstream waits on a response nobody reads or
-     * on request bytes that will never arrive. An upstream that cannot be
-     * reached, or whose response ends early, fails as `Unreachable` once the
-     * client's response is destroyed or answered 502.
+     * Sends the request to `target` and copies the response back until it ends or the client
+     * disconnects. If the client disconnects mid-transfer, destroys the upstream connection
+     * immediately. Fails with `Unreachable` if the upstream connection fails or ends early, after
+     * the client's response is destroyed or set to 502.
      */
     const copy = (target: Destination, headers: Headers.Headers) =>
       Effect.callback<RelayEnd, Unreachable>((resume) => {
@@ -563,7 +557,7 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
             incoming.pipe(response);
           },
         );
-        // `close` also follows a finished response, which has settled the relay already; before that, it means the client left.
+        // `close` also fires after a finished response, which already completed the relay; before that, it means the client disconnected.
         response.once("close", () => {
           if (settled) return;
           outgoing.destroy();
@@ -582,7 +576,7 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
 
     const relayed = yield* destination(host, port).pipe(
       Effect.flatMap((target) =>
-        // The reverse proxy needs the caller token; a host outside the gateway must never see it.
+        // Only the reverse proxy receives the caller token; hosts outside the Gateway must never receive it.
         (target.kind === "gateway"
           ? Effect.succeed(forwarded)
           : callers.withoutCallerTokens(forwarded)
@@ -623,7 +617,7 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
     }
     if (!response.headersSent) {
       response.writeHead(502, { "content-type": "text/plain; charset=utf-8" });
-      response.end(`usine gateway: ${host} could not be reached.\n`);
+      response.end(`usine gateway: ${host} is unreachable.\n`);
     }
     yield* Effect.logError("An allowed egress host could not be reached", {
       host,

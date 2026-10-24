@@ -61,10 +61,9 @@ export {
 export { UpstreamBase } from "./upstream.ts";
 
 /**
- * The gateway's shared state for one process: the attachment store, the
- * caller token signer, and the settings in force. The reverse proxy, the
- * forward proxy, the admin API, and a reload must use the same instance, so
- * provide this layer once to all of them.
+ * The Gateway's shared state for one process: the attachment store, the caller token signer,
+ * and the current settings. Provide this layer once to the reverse proxy, forward proxy, admin
+ * API, and reload.
  */
 export const gatewayServices = Layer.mergeAll(
   Attachments.layer,

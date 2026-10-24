@@ -40,8 +40,8 @@ const startDevPrompt = `Implement issue #{{ item.number }}, **{{ item.title }}**
 3. Open a pull request that closes #{{ item.number }}.
 `;
 
-/** The configuration view as the server sends it: loaded and quarantined Loops, a roster with an
- * invalid Agent, a local and an SSH Worker, and two repositories. */
+/** The configuration view JSON, with loaded and quarantined Loops, a roster with an invalid Agent, a
+ * local and an SSH Worker, and two repositories. */
 export const configurationJson = {
   loops: [
     {
@@ -86,7 +86,11 @@ export const configurationJson = {
     {
       name: "ghost",
       file: "loops/ghost.md",
-      error: fileError("loops/ghost.md", "reference", "Unknown agent: ghost"),
+      error: fileError(
+        "loops/ghost.md",
+        "reference",
+        'Unknown agent "ghost": agents/ghost.md is missing or invalid. Fix the agent file, or set agent to an existing agent.',
+      ),
     },
   ],
   agents: [
@@ -147,7 +151,7 @@ export const configurationJson = {
             _tag: "Failed",
             checkedAt: "2026-10-20T09:15:00.000Z",
             capability: "harness-login",
-            message: "Claude Code is not logged in on Worker local",
+            message: "Claude Code needs a subscription login. Run claude auth login on the worker.",
           },
         },
         { harness: "codex", check: { _tag: "Passed", checkedAt: "2026-10-20T09:15:00.000Z" } },
@@ -222,7 +226,7 @@ export const configurationJson = {
 export const configurationFixture = (): ConfigurationView =>
   Schema.decodeUnknownSync(ConfigurationView)(configurationJson);
 
-/** The fixture with every list empty, as a fresh instance folder reads before anything is added. */
+/** Returns the fixture with every list empty, as for a new instance folder. */
 export const emptyConfiguration = (): ConfigurationView =>
   Schema.decodeUnknownSync(ConfigurationView)({
     ...configurationJson,

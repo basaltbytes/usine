@@ -26,7 +26,7 @@ const makeLoopControl = Effect.gen(function* () {
     return stored === undefined
       ? new LoopRuntimeState({ loop, paused: false })
       : new LoopRuntimeState(stored);
-  }, persistence("read Loop runtime state"));
+  }, persistence("read loop runtime state"));
 
   const states = Effect.fn("LoopControl.states")(function* () {
     const rows = yield* database
@@ -35,7 +35,7 @@ const makeLoopControl = Effect.gen(function* () {
       .orderBy(asc(loopRuntime.loopName))
       .execute();
     return rows.map((row) => new LoopRuntimeState(row));
-  }, persistence("list Loop runtime states"));
+  }, persistence("list loop runtime states"));
 
   const write = Effect.fn("LoopControl.write")(function* (next: LoopRuntimeState) {
     yield* Effect.annotateCurrentSpan({ loop: next.loop });
@@ -55,7 +55,7 @@ const makeLoopControl = Effect.gen(function* () {
         set: { paused: next.paused },
       })
       .execute()
-      .pipe(persistence("write Loop runtime state"));
+      .pipe(persistence("write loop runtime state"));
     yield* Effect.logInfo(next.paused ? "Loop paused" : "Loop unpaused", {
       loop: next.loop,
       paused: next.paused,
@@ -77,17 +77,17 @@ const makeLoopControl = Effect.gen(function* () {
   } as const;
 });
 
-/** Records whether triggers may open new Runs for each Loop; existing Runs and authored files stay unchanged. */
+/** The service that records whether triggers can open new Runs for each Loop, without changing Runs or Loop files. */
 export class LoopControl extends Context.Service<
   LoopControl,
   {
-    /** Whether new Runs are paused; a Loop with no recorded runtime state is unpaused. */
+    /** Returns whether new Runs are paused; a Loop without recorded state isn't paused. */
     readonly isPaused: (loop: LoopName) => Effect.Effect<boolean, EnginePersistenceError>;
-    /** Pauses new trigger work for this Loop without stopping its existing Runs. */
+    /** Pauses new Runs for the Loop without stopping its existing Runs. */
     readonly pause: (loop: LoopName) => Effect.Effect<LoopRuntimeState, EnginePersistenceError>;
-    /** Recorded runtime states ordered by Loop name; Loops without stored state are omitted. */
+    /** Reads the recorded runtime states by Loop name, omitting Loops without stored state. */
     readonly states: Effect.Effect<ReadonlyArray<LoopRuntimeState>, EnginePersistenceError>;
-    /** Allows triggers to open new Runs for this Loop again. */
+    /** Lets triggers open new Runs for the Loop again. */
     readonly unpause: (loop: LoopName) => Effect.Effect<LoopRuntimeState, EnginePersistenceError>;
   }
 >()("@usine/engine/LoopControl") {

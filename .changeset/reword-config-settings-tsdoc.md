@@ -2,4 +2,4 @@
 "@usine/config": patch
 ---
 
-Reword TSDoc of the `Settings` fields `maxAttemptMinutes`, `maxAttemptTokens`, and `parentModel` in plain terms.
+Rewords TSDoc for `Settings.maxAttemptMinutes`, `maxAttemptTokens`, and `parentModel`.

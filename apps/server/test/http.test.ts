@@ -133,7 +133,7 @@ const run = new RunView({
 });
 const detail = new RunDetailView({
   sessionState: [],
-  // An approved Run that the operator ran again, so the detail round trip carries both records.
+  // An approved Run that the operator ran again, so the detail round trip includes both records.
   run: new RunView({
     ...run,
     state: "Queued",
@@ -312,7 +312,8 @@ const reloaded = new InstanceReload({
         file: InstancePath.make("loops/ghost.md"),
         stage: "reference",
         expression: Option.none(),
-        message: "Unknown agent: ghost",
+        message:
+          'Unknown agent "ghost": agents/ghost.md is missing or invalid. Fix the agent file, or set agent to an existing agent.',
       }),
     }),
   ],
@@ -374,7 +375,7 @@ describe("operator HTTP API", () => {
     assert.strictEqual(action.status, 503);
     assert.deepStrictEqual(await action.json(), {
       error: "BackendUnavailableError",
-      message: "GitHub App setup is required before operator actions are available.",
+      message: "The GitHub App is not set up. Set it up to use operator actions.",
     });
 
     const configurationResponse = await app.handler(
@@ -424,8 +425,8 @@ describe("operator HTTP API", () => {
     assert.strictEqual(crossSite.status, 403);
     assert.strictEqual((await crossSite.json()).error, "CrossSiteRequestError");
 
-    // A loopback origin (the Vite dev server) reaches the handler; the
-    // needs-setup 503 proves the guard let it through.
+    // A loopback origin (the Vite dev server) passes the guard; the needs-setup 503 shows the
+    // handler ran.
     const loopback = await app.handler(
       new Request(`http://localhost/api/runs/${runId}/approve`, {
         method: "POST",
@@ -464,7 +465,7 @@ describe("operator HTTP API", () => {
           : Effect.fail(
               new LoopNotFoundError({
                 loop: loopName,
-                message: `Loop ${loopName} is not loaded, so Run ${id} cannot run again`,
+                message: `Run ${id} cannot run again: loop "${loopName}" is not loaded.`,
               }),
             ),
       intervene: () => Effect.void,
@@ -480,7 +481,8 @@ describe("operator HTTP API", () => {
           new GitHubItemNotFoundError({
             operation: "fetch-item-timeline",
             item: 247,
-            message: "GitHub has no issue or pull request 247 in basaltbytes/usine",
+            message:
+              "Issue or pull request basaltbytes/usine#247 was not found on GitHub. It was deleted or transferred, or the GitHub App can no longer read it.",
           }),
         ),
       approve: (id: RunId) =>
@@ -493,7 +495,7 @@ describe("operator HTTP API", () => {
           new RunRetryBlockedError({
             runId: id,
             openRunId: RunId.make("run-open"),
-            message: `Cannot retry Run ${id}: Run run-open of Loop fix-ci is open on the same Item. Retry after it closes, or cancel it first.`,
+            message: `Cannot retry run ${id}: run run-open of loop "fix-ci" is open on the same item. Cancel run run-open, or try again after it closes.`,
           }),
         ),
       cancel: () => Effect.void,
@@ -529,7 +531,7 @@ describe("operator HTTP API", () => {
       assert.strictEqual(offBoard.status, 404);
       assert.deepStrictEqual(await offBoard.json(), {
         error: "BoardItemNotFoundError",
-        message: "Item basaltbytes/usine#9999 was not found on the Board.",
+        message: "Item basaltbytes/usine#9999 was not found on the board.",
       });
 
       const gone = await rejectingApp.handler(
@@ -538,7 +540,8 @@ describe("operator HTTP API", () => {
       assert.strictEqual(gone.status, 404);
       assert.deepStrictEqual(await gone.json(), {
         error: "GitHubItemNotFoundError",
-        message: "GitHub has no issue or pull request 247 in basaltbytes/usine",
+        message:
+          "Issue or pull request basaltbytes/usine#247 was not found on GitHub. It was deleted or transferred, or the GitHub App can no longer read it.",
       });
 
       const rejected = await rejectingApp.handler(
@@ -547,7 +550,7 @@ describe("operator HTTP API", () => {
       assert.strictEqual(rejected.status, 409);
       assert.deepStrictEqual(await rejected.json(), {
         error: "RunOperationRejectedError",
-        message: `Cannot approve Run ${runId} while it is Running.`,
+        message: `Cannot approve run ${runId} while it is running.`,
       });
 
       const blocked = await rejectingApp.handler(
@@ -556,7 +559,7 @@ describe("operator HTTP API", () => {
       assert.strictEqual(blocked.status, 409);
       assert.deepStrictEqual(await blocked.json(), {
         error: "RunRetryBlockedError",
-        message: `Cannot retry Run ${runId}: Run run-open of Loop fix-ci is open on the same Item. Retry after it closes, or cancel it first.`,
+        message: `Cannot retry run ${runId}: run run-open of loop "fix-ci" is open on the same item. Cancel run run-open, or try again after it closes.`,
       });
 
       const edit = JSON.stringify({ task: "Look again", agent: agentName });
@@ -566,7 +569,7 @@ describe("operator HTTP API", () => {
       assert.strictEqual(open.status, 409);
       assert.deepStrictEqual(await open.json(), {
         error: "RunOperationRejectedError",
-        message: `Run ${runId} is Running. Only a succeeded or canceled Run can run again.`,
+        message: `Run ${runId} is running. Only a succeeded or canceled run can run again.`,
       });
       const retired = await rejectingApp.handler(
         new Request("http://localhost/api/runs/run-3/run-again", { method: "POST", body: edit }),
@@ -574,7 +577,7 @@ describe("operator HTTP API", () => {
       assert.strictEqual(retired.status, 404);
       assert.deepStrictEqual(await retired.json(), {
         error: "LoopNotFoundError",
-        message: `Loop ${loopName} is not loaded, so Run run-3 cannot run again`,
+        message: `Run run-3 cannot run again: loop "${loopName}" is not loaded.`,
       });
 
       const wrongAttempt = AttemptId.make("attempt-from-another-run");
@@ -584,7 +587,7 @@ describe("operator HTTP API", () => {
       assert.strictEqual(earlier.status, 404);
       assert.deepStrictEqual(await earlier.json(), {
         error: "TranscriptAttemptNotFoundError",
-        message: `Attempt ${wrongAttempt} does not belong to Run ${runId}.`,
+        message: `Attempt ${wrongAttempt} does not belong to run ${runId}.`,
       });
 
       const move = await rejectingApp.handler(
@@ -611,8 +614,8 @@ describe("operator HTTP API", () => {
       assert.match(refusal.message, /read-only/i);
       assert.match(refusal.message, /usine\.yaml/);
 
-      // Authored fields are strict even though JSON has always been accepted
-      // independently of the caller's Content-Type.
+      // Authored fields are validated strictly, although JSON is accepted regardless of
+      // Content-Type.
       for (const body of ["{", '{"toLane":"authored:Review","typo":true}', '{"toLane":42}']) {
         const invalid = await rejectingApp.handler(
           new Request("http://localhost/api/projects/basaltbytes/usine/items/31/lane", {
@@ -644,7 +647,7 @@ describe("operator HTTP API", () => {
         stage: "yaml",
       });
       const restartMessage =
-        "usine.yaml changed in a way that applies only when usine up restarts: Worker local changed its kind from local to ssh. The running configuration is unchanged; restart usine up to apply the change.";
+        'These usine.yaml changes require a restart: worker "local" changed kind from local to ssh. The running configuration is unchanged. Restart usine up to apply them.';
       reloadFailure = new RestartRequiredError({
         blocks: ["workers"],
         fields: ["workers.local.kind"],
@@ -661,7 +664,7 @@ describe("operator HTTP API", () => {
         fields: ["workers.local.kind"],
       });
       const preflightMessage =
-        "Worker preflight failed for Agent reviewer. Worker local: Claude Code is not logged in. The running configuration is unchanged; fix the Worker, usine.yaml, or the Agent file, then reload again.";
+        'Worker preflight failed for agent "reviewer". Worker "local": Claude Code is not logged in. The running configuration is unchanged. Fix the worker, usine.yaml, or the agent file, then reload again.';
       reloadFailure = new ReloadPreflightError({
         agents: [AgentName.make("reviewer")],
         workers: [],
@@ -677,7 +680,7 @@ describe("operator HTTP API", () => {
         new Request("http://localhost/api/instance/reload", { method: "POST" }),
       );
       assert.strictEqual(preflight.status, 409);
-      // What the check observed ("logged out") stays on the server.
+      // The check's observation ("logged out") is not sent to the client.
       assert.deepStrictEqual(await preflight.json(), {
         error: "ReloadPreflightError",
         message: preflightMessage,
@@ -883,7 +886,7 @@ describe("operator HTTP API", () => {
         assert.strictEqual(kept.status, 409);
         assert.strictEqual(
           kept.message,
-          "2 attempts still run on local; discard its leftovers once they end.",
+          '2 attempts are still running on worker "local". Discard its leftovers after they end.',
         );
         assert.deepStrictEqual(interventions, [
           "reset:current-ask",

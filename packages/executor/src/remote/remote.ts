@@ -42,7 +42,7 @@ const isExecutorError = Schema.is(ExecutorError);
 const executorError = (message: string, cause: unknown): ExecutorOperationError =>
   new ExecutorOperationError({ operation: "prepare", message, cause });
 
-/** Writes `$2` to the file `$1`, creating its directory, and makes it executable. */
+/** A script that writes `$2` to the file `$1`, creating its directory, and makes it executable. */
 const WRITE_EXECUTABLE_SCRIPT = String.raw`
 set -e
 mkdir -p "$(dirname "$1")"
@@ -51,12 +51,9 @@ chmod 755 "$1"
 `.trim();
 
 /**
- * The Executor for a Worker whose machine the orchestrator connects to over SSH:
- * each Attempt's Pi parent is a durable task in this process, and its children
- * run on the machine as one SSH command each, with a pid file beside the
- * worktree. `worker` supplies the machine, its preflight, and the Attempt's
- * repository access; checkouts, salvage, recovery, and reattachment are shared
- * by every remote Worker kind.
+ * Returns the executor for Workers accessed over SSH. Each Attempt's Pi parent is a durable task
+ * in this process, and each child runs on the machine as one SSH command with a pid file next
+ * to the worktree. `worker` provides the machine, preflight, and repository access.
  */
 export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<M>) =>
   Effect.gen(function* () {
@@ -90,7 +87,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       });
     });
 
-    /** Runs git on the machine with the Attempt's repository access, renewed first when it is about to expire. */
+    /** Runs git on the machine with the Attempt's repository access, refreshing the credential first if it's about to expire. */
     const accessGit =
       (operation: ExecutorOperation, access: RemoteAccess) => (args: ReadonlyArray<string>) =>
         access.refresh.pipe(
@@ -135,13 +132,12 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         if (inspected.exitCode === 1) return false;
         if (inspected.exitCode !== 0)
           return yield* executorError(
-            "Could not inspect recovery checkout",
+            "Can't inspect the recovery checkout",
             new Error(inspected.stderr),
           );
         return true;
       });
-      // Every persisted Attempt is visited, and almost none left a checkout:
-      // the Worker's one listing answers those without an SSH round trip.
+      // Checks the cached listing first to avoid an SSH round trip per persisted Attempt.
       const present = checkouts.has(worktree) && (yield* inspectCheckout);
       yield* session.recoverPostedComments(
         attempt,
@@ -216,17 +212,16 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         Effect.mapError(
           (error) =>
             new InfraFailure({
-              message: `Could not harvest the Attempt's checkout: ${error.message}`,
+              message: `Can't harvest the attempt's checkout: ${error.message}`,
               cause: error,
             }),
         ),
       );
 
     /**
-     * Confirms an Attempt reattached after a restart can take over its checkout:
-     * its parent task was created for this worktree, and the worktree is still
-     * on the machine. Children that outlived the restart are stopped, since the
-     * parent starts new ones. Returns the RunSpec the parent started with.
+     * Checks that a reattached Attempt's parent task was created for this worktree and the
+     * worktree still exists, then stops children left from before the restart. Returns the
+     * parent's RunSpec.
      */
     const takeOver = Effect.fn(span("takeOver"))(function* (
       request: CheckoutRequest,
@@ -236,25 +231,25 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       const { cwd, spec } = yield* session.storedRequest(request.attemptId);
       if (cwd !== worktree)
         return yield* executorError(
-          `The reattached Attempt's checkout is not on this ${label} Worker's machine`,
+          `The reattached attempt's checkout isn't on the machine of this ${label} worker`,
           new Error(cwd),
         );
       const inspected = yield* commands.inspect("prepare", machine.shell, "test", ["-d", worktree]);
       if (inspected.exitCode === 1)
         return yield* executorError(
-          "The checkout of the reattached Attempt is gone",
+          "The reattached attempt's checkout no longer exists",
           new Error(worktree),
         );
       if (inspected.exitCode !== 0)
         return yield* executorError(
-          "Could not inspect the reattached Attempt's checkout",
+          "Can't inspect the reattached attempt's checkout",
           new Error(inspected.stderr.trim()),
         );
       yield* stopChildren("prepare", machine, worktree);
       return spec;
     });
 
-    /** The checkout primitives on the machine; git runs with the Attempt's repository access. */
+    /** Returns the `WorkspaceOps` for the machine; git runs with the Attempt's repository access. */
     const workspaceOps = (
       request: CheckoutRequest,
       machine: M,
@@ -278,7 +273,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         if (inspected.exitCode === 0) return true;
         if (inspected.exitCode === 1) return false;
         return yield* executorError(
-          `Could not inspect the cached clone on Worker ${request.worker}`,
+          `Can't inspect the cached clone on worker "${request.worker}"`,
           new Error(inspected.stderr.trim()),
         );
       }),
@@ -308,7 +303,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         reattach: request.reattach,
       });
       if (request.permissions === "read" && Option.isSome(worker.readOnlyAccessGap)) {
-        const message = `${label} Worker ${request.worker} cannot run the Loop ${request.loop}, which has permissions: read: ${worker.readOnlyAccessGap.value}`;
+        const message = `${label} worker "${request.worker}" can't run loop "${request.loop}", which has permissions: read. ${worker.readOnlyAccessGap.value}.`;
         yield* Effect.logWarning("Refused an Attempt that needs read-only repository access", {
           attemptId: request.attemptId,
           worker: request.worker,
@@ -356,13 +351,13 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         machine.shell,
         machine.workerDirectory,
       );
-      // A reattachment takes its checkout over before any credential is granted.
+      // A reattachment reuses its checkout before any credential is granted.
       const reattached = request.reattach
         ? Option.some(yield* takeOver(request, machine, worktree))
         : Option.none();
 
-      // A checkout retained after a failed remote stop never closes its scope,
-      // so its salvage is answered here rather than by the checkout finalizer.
+      // A checkout kept after a failed remote stop never closes its scope, so its salvage result
+      // is completed here instead of by the checkout finalizer.
       const salvaged = yield* Deferred.make<Option.Option<AttemptSalvage>, AttemptFailure>();
       const releaseWorkspace = Effect.fn(span("releaseWorkspace"))(
         function* (
@@ -374,8 +369,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
             worker: request.worker,
             host,
           });
-          // The remote children and their checkout form one cleanup dependency:
-          // never close the checkout scope unless this stop request succeeds.
+          // Closes the checkout scope only if stopping the remote children succeeds.
           yield* stopChildren("cleanup", machine, resource.provisioned.workspace.worktree);
           yield* Scope.close(resource.scope, exit);
           const salvage = yield* Effect.exit(resource.provisioned.salvaged);
@@ -398,8 +392,8 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       );
 
       const acquire = Effect.gen(function* () {
-        // Credentials belong to the Attempt scope independently of the checkout:
-        // refusing destructive cleanup must still release them exactly once.
+        // Credentials are scoped to the Attempt, not the checkout, so they are released exactly once
+        // even when checkout cleanup is skipped.
         const access = yield* grant.acquire(
           request.attemptId,
           request.worker,
@@ -424,9 +418,8 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
           Effect.uninterruptibleMask((restore) =>
             Effect.gen(function* () {
               const scope = yield* Scope.make();
-              // Before preparation succeeds no child can exist. Roll back the
-              // partial checkout unconditionally; only a completed workspace is
-              // transferred to the guarded remote-process release above.
+              // No child can exist before preparation succeeds, so a partial checkout is always rolled
+              // back; only a completed workspace uses the guarded release above.
               const provisioned = yield* restore(checkout).pipe(
                 Scope.provide(scope),
                 Effect.onError((cause) => Scope.close(scope, Exit.failCause(cause))),
@@ -445,7 +438,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         Effect.mapError((cause) =>
           isExecutorError(cause)
             ? cause
-            : executorError(`${label} workspace preparation failed`, cause),
+            : executorError(`Can't prepare the ${label} attempt workspace`, cause),
         ),
       );
 
@@ -465,6 +458,12 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         launch: (io: AttemptChannel.Sink) =>
           Effect.scoped(
             Effect.gen(function* () {
+              // Uses the RunSpec's brain, including on reattachment. Each child reads the kind when it
+              // starts, so a preflight during the Attempt takes effect.
+              const gatewayCredential = worker.gatewayCredential(
+                machine,
+                prepared.spec.agent.brain.harness,
+              );
               yield* workerWatches.watch({
                 attemptId: request.attemptId,
                 worker: request.worker,
@@ -474,6 +473,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
               return yield* session.launch(prepared, io, {
                 host: access.shell,
                 environment: withGitHooks(access.environment, provisioned.gitHooks),
+                gatewayCredential,
                 harvest: (windows) => harvest(prepared, access, windows),
                 harvestComments: (windows) =>
                   harvestPostedComments(

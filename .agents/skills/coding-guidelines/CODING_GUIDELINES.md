@@ -32,6 +32,9 @@ opportunistically, not rewritten wholesale on an unrelated change.
 - **Big changes decompose.** Make the change easy, then make the easy change (Beck):
   preparatory refactoring lands separately from the behavior change, each step
   reviewable and revertible on its own.
+- **We are not a fan of comments** They should be used as a last resort when the function, class or 
+algorithm is not self-explanatory enough. At that point the comment should be written with care and no 
+AI Slop, load the /anti-slop-writing SKILL, this is a technical documentation not a novel.
 
 ## 1. Domain integrity (always-valid)
 
@@ -253,6 +256,10 @@ every removal left no tests behind: none orphaned, none asserting absence.
   in all of them, or the divergence is written down. Reviewers flag asymmetry
   (package A revalidates, package B trusts; package A returns Results, package B
   throws) even when each side works locally.
+
+## 8. Security
+
+Before adding complexity for a speculative or vanishingly unlikely race or security edge case, explain the concrete failure mode, likelihood, and complexity cost to the user and get their buy-in. Do not silently expand scope for theoretical robustness.
 
 ## Sources
 

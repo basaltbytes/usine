@@ -2,4 +2,4 @@
 "@usine/orchestrator": patch
 ---
 
-The queued-Event re-check no longer opens a Run for an Item GitHub no longer has. When the fresh snapshot fails with `GitHubItemNotFoundError`, `TriggerCondition.holds` answers `false` and logs it, so the Item's queued Events are revoked as for an Item that stopped matching. A failed request or a re-check that exceeds five seconds still opens the queued Event as before.
+The queued-event recheck no longer opens a run for an item that GitHub no longer has. On `GitHubItemNotFoundError`, `TriggerCondition.holds` returns `false` and the item's queued events are revoked; a failed request or a recheck over five seconds still opens the queued event.

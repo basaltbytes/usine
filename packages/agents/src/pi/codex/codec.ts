@@ -21,11 +21,11 @@ type CodexRequestPayload =
   | TurnSteerParams
   | TurnInterruptParams;
 
-/** Encodes typed Codex request parameters for the app-server JSON transport. */
+/** Returns typed Codex request parameters as JSON for the app-server transport. */
 export const json = (value: CodexRequestPayload): Schema.Json =>
   Schema.decodeUnknownSync(Schema.Json)(JSON.parse(JSON.stringify(value)));
 
-/** Model catalog page used to validate the requested model and reasoning effort. */
+/** The model catalog page, used to validate the requested model and reasoning effort. */
 export const ModelListResponse = Schema.Struct({
   data: Schema.Array(
     Schema.Struct({
@@ -38,42 +38,42 @@ export const ModelListResponse = Schema.Struct({
   ),
   nextCursor: Schema.NullOr(Schema.String),
 });
-/** Thread identity and effective model returned when a child conversation opens. */
+/** The thread ID and effective model returned when a child thread starts. */
 export const ThreadStartResponse = Schema.Struct({
   thread: Schema.Struct({ id: HarnessSessionId }),
   model: Schema.NonEmptyString,
   instructionSources: Schema.Array(Schema.String),
 });
-/** Turn identity required to address guidance and interruption. */
+/** The turn ID, needed to steer or interrupt the turn. */
 export const TurnStartResponse = Schema.Struct({
   turn: Schema.Struct({ id: Schema.NonEmptyString }),
 });
-/** Routes a vendor item to its thread and turn while preserving its JSON details. */
+/** An item notification with its thread and turn IDs; `item` is kept as JSON. */
 export const ItemNotification = Schema.Struct({
   item: Schema.Json,
   threadId: Schema.String,
   turnId: Schema.String,
 });
-/** A user message the thread recorded: a turn's input, or input steered into a running turn once the model reads it. */
+/** A user message recorded in the thread: a turn's input, or steered input once the running turn reads it. */
 export const UserMessageItem = Schema.Struct({
   type: Schema.Literal("userMessage"),
   content: Schema.Array(Schema.Json),
 });
 const UserTextInput = Schema.Struct({ type: Schema.Literal("text"), text: Schema.String });
-/** The text of a recorded user message, as the executor sent it. */
+/** Returns the text of a recorded user message as the executor sent it. */
 export const userMessageText = (item: typeof UserMessageItem.Type): string =>
   item.content
     .filter(Schema.is(UserTextInput))
     .map(({ text }) => text)
     .join("");
-/** Completed assistant prose; phase distinguishes a final answer from commentary. */
+/** A completed assistant message; `phase` distinguishes a final answer from commentary. */
 export const AgentMessageItem = Schema.Struct({
   type: Schema.Literal("agentMessage"),
   id: Schema.NonEmptyString,
   text: Schema.String,
   phase: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
-/** Recognized tool activity with the fields needed to pair starts and results. */
+/** A recognized tool item, with the fields needed to match starts and results. */
 export const ToolItem = Schema.Struct({
   type: Schema.Literals([
     "commandExecution",
@@ -88,7 +88,7 @@ export const ToolItem = Schema.Struct({
   status: Schema.optionalKey(Schema.String),
   success: Schema.optionalKey(Schema.NullOr(Schema.Boolean)),
 });
-/** Turn outcome used to resume a held conversation or report a session failure. */
+/** The outcome of a turn, used to resume a conversation on Hold or report a session failure. */
 export const TurnCompleted = Schema.Struct({
   turn: Schema.Struct({
     id: Schema.String,
@@ -101,11 +101,7 @@ export const TurnCompleted = Schema.Struct({
     ),
   }),
 });
-/**
- * A turn error the app server pushes; with `willRetry` it reports a failed
- * request to the model provider that it will send again, such as
- * `Reconnecting... 2/5`.
- */
+/** A turn error from the app server; if `willRetry` is set, the model provider request is retried, for example `Reconnecting... 2/5`. */
 export const ErrorNotification = Schema.Struct({
   error: Schema.Struct({
     message: Schema.String,
@@ -114,23 +110,22 @@ export const ErrorNotification = Schema.Struct({
   willRetry: Schema.Boolean,
   turnId: Schema.String,
 });
-/** Any notification addressed to one turn, such as an item or a streaming delta. */
+/** Any notification for one turn, for example an item or a streaming delta. */
 export const TurnActivity = Schema.Struct({ turnId: Schema.String });
 
-/** The app server's retry report as the operator reads it: its message, then its details in parentheses. */
+/** Returns the retry message followed by its details in parentheses. */
 export const providerRetryMessage = (error: (typeof ErrorNotification.Type)["error"]): string => {
   const message = error.message.trim() || "Codex is retrying its model provider";
   const details = error.additionalDetails?.trim() ?? "";
   return details === "" ? message : `${message} (${details})`;
 };
-// Upstream sends this notification as a sparse rolling update: any account
-// field may be absent, so only the load figure is required.
+// Upstream sends partial updates where any field can be absent, so only `usedPercent` is required.
 const RateLimitWindow = Schema.Struct({
   usedPercent: Schema.Number,
   windowDurationMins: Schema.optionalKey(Schema.NullOr(Schema.Number)),
   resetsAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
 });
-/** Sparse account usage update; omitted windows remain absent in the normalized snapshot. */
+/** A partial account usage update; omitted windows are also absent in the normalized snapshot. */
 export const RateLimitsUpdated = Schema.Struct({
   rateLimits: Schema.Struct({
     limitId: Schema.optionalKey(Schema.NullOr(Schema.String)),
@@ -140,7 +135,7 @@ export const RateLimitsUpdated = Schema.Struct({
   }),
 });
 
-/** Decodes a required response, attributing malformed data to the client operation and response label. */
+/** Decodes a required response. Fails with `SessionOperationError` for `operation` if the data is malformed. */
 export const decodeResponse = <S extends Schema.Top>(
   schema: S,
   operation: SessionOperationError["operation"],
@@ -154,7 +149,7 @@ export const decodeResponse = <S extends Schema.Top>(
     ),
   );
 
-/** Decodes one notification payload; an undecodable payload is logged and skipped, never fatal. */
+/** Decodes a notification payload; if it does not decode, logs a warning and returns `None`. */
 export const decodeNotification = <S extends Schema.Top>(
   schema: S,
   label: string,
@@ -170,7 +165,7 @@ export const decodeNotification = <S extends Schema.Top>(
     ),
   );
 
-/** Maps a recognized vendor tool kind to the stable transcript tool name. */
+/** Returns the transcript tool name for a Codex tool item. */
 export const toolName = (item: typeof ToolItem.Type): string => {
   switch (item.type) {
     case "commandExecution":
@@ -190,7 +185,7 @@ export const toolName = (item: typeof ToolItem.Type): string => {
   }
 };
 
-/** Normalizes an account window, converting reset timestamps to UTC and absent values to Options. */
+/** Converts a rate-limit window, with reset timestamps in UTC and absent values as `None`. */
 export const rateLimitWindow = (window: typeof RateLimitWindow.Type): CoreRateLimitWindow =>
   new CoreRateLimitWindow({
     usedPercent: window.usedPercent,

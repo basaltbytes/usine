@@ -1,6 +1,5 @@
 import { Schema } from "effect";
 
-/** Content an operator can read without interpreting a harness's tool envelope. */
 export type ToolSection =
   | {
       readonly _tag: "Code";
@@ -48,8 +47,8 @@ export const fields = (
     .map(([key, value]) => ({ label: label(key), value }));
   return entries.length === 0 ? [] : [{ _tag: "Fields", label: title, fields: entries }];
 };
-// Pi returns { content, details }; Claude forwards content itself. Codex dynamic
-// tools use inputText blocks. Other content remains visible as labeled fields.
+// Accepts Pi's `{ content, details }`, Claude's bare content, and Codex dynamic tool `inputText`
+// blocks; any other value becomes labeled fields.
 export const content = (
   value: Schema.Json | undefined,
   title: string,

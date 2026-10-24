@@ -524,8 +524,8 @@ describe("ScheduleTriggers", () => {
 
         yield* TestClock.adjust("60 seconds");
         const second = yield* schedules.tick(instance);
-        // The daily loop's 09:00 tick already fired: no duplicate submit, no
-        // duplicate log line, and the cycle says so.
+        // The daily Loop's 09:00 Tick already fired: no duplicate submission or log line, and the
+        // cycle reports it.
         assert.strictEqual(second.submissions.length, 1);
         assert.strictEqual(second.alreadyFired, 1);
         assert.deepStrictEqual(

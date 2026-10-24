@@ -20,7 +20,7 @@ const closingDelimiterAt = (source: string, newline: "\n" | "\r\n", from: number
   return -1;
 };
 
-/** Splits a Markdown file into its YAML half and its body without parsing either. */
+/** Splits a Markdown file into YAML frontmatter and body without parsing either. */
 export const splitMarkdown = (
   file: InstancePath,
   source: string,

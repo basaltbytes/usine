@@ -21,10 +21,8 @@ export class Orchestrator extends Context.Service<
   Orchestrator,
   {
     /**
-     * Evaluates the triggers until interrupted. Each cycle reads the current
-     * instance, so a reload applies from the next one, and an accepted reload
-     * starts the next poll cycle and the next schedule evaluation without
-     * waiting for `poll_interval` or the schedule sleep.
+     * Evaluates the triggers until interrupted. Each cycle reads the current instance, and an
+     * accepted reload starts the next poll and schedule evaluation immediately.
      */
     readonly run: Effect.Effect<never>;
   }

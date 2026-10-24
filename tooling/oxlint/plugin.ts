@@ -18,13 +18,10 @@ import { noWidenThenAssertRule } from "./rules/no-widen-then-assert.ts";
 import { requireSafetyCommentForTypeAssertionRule } from "./rules/require-safety-comment-for-type-assertion.ts";
 
 /**
- * usine's local Oxlint rules (carried over from balade) for low-evidence and low-signal
- * implementation patterns. Vendored from https://github.com/dmmulroy/anti-slop, last synced at
- * upstream commit 6d53855 (2026-08-18); upstream's opt-in Effect rule is folded in here rather
- * than kept as a separate plugin because this monorepo is Effect end to end. Local deltas beyond
- * that: oxfmt formatting and knip-driven trims in shared/dictionary-types.ts. The usine/* rules
- * are switched off for this directory in .oxlintrc.json — upstream does not self-lint, and its
- * AST reflection legitimately uses the patterns these rules reject.
+ * Local Oxlint rules, vendored from https://github.com/dmmulroy/anti-slop at upstream commit
+ * 6d53855 (2026-08-18), including upstream's opt-in Effect rule. Local changes: oxfmt formatting
+ * and knip-driven trims in shared/dictionary-types.ts. The usine/* rules are disabled for this
+ * directory in .oxlintrc.json because the rule code uses the patterns they reject.
  */
 const usinePlugin = eslintCompatPlugin({
   meta: { name: "usine" },

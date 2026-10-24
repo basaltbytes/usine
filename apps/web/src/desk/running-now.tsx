@@ -12,7 +12,7 @@ import { agoLabel, dayTimeLabel, timestampLabel } from "../operator-copy.ts";
 import { nothingRunning, warningLine } from "./copy.ts";
 import { EmptyLine, ItemTitle, RunPageLink, RunRow } from "./section.tsx";
 
-/** A start time as the clock time when it is today, else its day and time. */
+/** Formats `instant` as a time when it is today, otherwise as a day and time. */
 const startLabel = (instant: string, now: number): string => {
   const start = new Date(instant);
   return start.toDateString() === new Date(now).toDateString()
@@ -86,7 +86,6 @@ const RunningRow = ({
   );
 };
 
-/** Every Attempt in flight across the Projects; each row opens its Run page. */
 export const RunningNow = ({
   running,
   workers,

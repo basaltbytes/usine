@@ -14,14 +14,12 @@ import { BoardCard, type LabelCatalog } from "./card.tsx";
 import { FlowArrow, type LaneFlow } from "./flow.tsx";
 import type { BoardMoveProgress } from "./moves.ts";
 
-/** Whether a lane opens folded into a rail: the fallback lane of unrouted Items, and lanes that
- * hold only closed Items. Neither holds work in flight. */
+/** Returns whether a lane starts folded: true for the fallback lane and for lanes with only closed Items. */
 export const foldsByDefault = (lane: BoardLaneView): boolean =>
   lane.origin === "fallback" ||
   (lane.sources.length > 0 &&
     lane.sources.every((source) => "state" in source && isSettledItemState(source.state)));
 
-/** The labels and Item states that route Items to the lane, labels in their GitHub colors. */
 const LaneSources = ({
   sources,
   catalog,
@@ -47,7 +45,6 @@ const LaneSources = ({
   </ul>
 );
 
-/** A folded lane: a narrow rail with the lane's name and count that opens the lane. */
 const LaneRail = ({ lane, open }: { readonly lane: BoardLaneView; readonly open: () => void }) => (
   <section aria-label={`${lane.name} lane`} className="w-10 shrink-0">
     <button
@@ -67,11 +64,7 @@ const LaneRail = ({ lane, open }: { readonly lane: BoardLaneView; readonly open:
   </section>
 );
 
-/** One lane: its name, count, and sources over a stack of cards, tinted while it is a drag's drop
- * target. The heading stays in view while the cards scroll under it. An authored label lane
- * followed by another one ends its heading with the flow between them; a lane that folds by
- * default can fold back into its rail. `stallOf` gives the stall reason of a Task, when it has
- * one; `readOnly` hides the actions while the instance needs setup. */
+/** `stallOf` returns a Task's stall reason, if any; `readOnly` hides the actions during setup. */
 export const BoardColumn = ({
   lane,
   lanes,

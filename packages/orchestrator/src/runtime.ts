@@ -27,9 +27,8 @@ import { workerEngineLayer } from "./worker-engine.ts";
 import { WorkerStatus } from "./worker-status.ts";
 
 /**
- * A read-only operator composition for when trigger credentials are not
- * available yet: the observation, with the desk, and the configuration read,
- * with no Worker running Attempts.
+ * Provides the read-only operator surface (observation, desk, and configuration) for when trigger
+ * credentials aren't available yet. No Worker runs Attempts.
  */
 export const operatorObservationLayer = (instanceDirectory: InstanceDirectory) =>
   Layer.mergeAll(OperatorObservation.layer, OperatorConfiguration.layer).pipe(
@@ -44,13 +43,8 @@ export const operatorObservationLayer = (instanceDirectory: InstanceDirectory) =
   );
 
 /**
- * The full Node composition for one factory: both trigger streams, the
- * durable engine, Worker execution with each Attempt's Pi parent on the
- * instance's durable storage, and the operator surface. The caller supplies
- * the GitHub credentials and the `CurrentInstance`. Its snapshot when the
- * layer builds selects the executor from the Worker kind in `usine.yaml` and
- * names the brains each Worker preflights; everything else reads the current
- * instance when it acts.
+ * Provides the full Node composition for one factory: trigger streams, the durable engine, Worker
+ * execution, and the operator surface. Requires the GitHub credentials and `CurrentInstance`.
  */
 export const runtimeLayer = (instanceDirectory: InstanceDirectory) => {
   const app = GitHubApp.layer.pipe(
@@ -67,8 +61,8 @@ export const runtimeLayer = (instanceDirectory: InstanceDirectory) => {
     Layer.provide(polling),
     Layer.provide(MarcbachmannCelLayer),
   );
-  // One lock per Worker on its Claude login, shared by the executor's preflight
-  // and the Attempts' Claude children: the engine receives it with the runtime.
+  // One Claude login lock per Worker, shared by the executor's preflight and the Attempts' Claude
+  // children.
   const attemptRuntime = durableAttemptRuntimeLayer(instanceDirectory).pipe(
     Layer.provideMerge(claudeLoginLockLayer),
     Layer.provide(NodeServices.layer),

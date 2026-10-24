@@ -7,27 +7,23 @@ import { ExpressionEngine } from "@usine/expression/expression-engine";
 import { Array as Arr, Context, Effect, Layer, Option, Result } from "effect";
 import { evaluateTriggerOnEach } from "./polling/loop-evaluation.ts";
 
-/** A Loop whose trigger matches one stored Item now. */
+/** A Loop whose trigger currently matches one stored Item. */
 export interface LoopItemMatch {
   readonly loop: LoopFile;
   readonly item: ItemProjection;
 }
 
 /**
- * Which stored Items each Loop's trigger matches now, evaluated as the poll
- * evaluates a changed Item: the Loop's stream and selector, then its `if:`
- * against the Item's stored payload slice.
+ * The stored Items each Loop's trigger currently matches, evaluated as the poll does: stream and
+ * selector, then `if:` against the stored payload slice.
  */
 export class LoopMatches extends Context.Service<
   LoopMatches,
   {
     /**
-     * Pairs each issue and pull-request Loop of `instance` that applies to
-     * `repository` with each of `items` its trigger matches, in the order of
-     * `items`, then of the instance's Loops. Paused Loops are included. An
-     * Item GitHub no longer has matches no Loop. A Loop whose `if:` fails on
-     * an Item is left out of that Item's matches; the poll reports the
-     * failure in Needs you.
+     * Returns each issue and pull request Loop that applies to `repository`, paired with the
+     * `items` its trigger matches. Includes paused Loops; excludes gone Items and Loops whose `if:`
+     * fails.
      */
     readonly matching: (
       instance: LoadedInstance,
@@ -53,7 +49,8 @@ export class LoopMatches extends Context.Service<
           );
           const present = items.filter(({ goneAt }) => Option.isNone(goneAt));
           // Each Loop's trigger is checked once and evaluated on all of its stream's Items in one
-          // call: the overview and the desk match every Loop on every Board Item on each read (#464).
+          // call, because the overview and desk match every Loop on every Board Item on each read
+          // (#464).
           const matched = new Map<LoopFile, ReadonlySet<ItemProjection>>();
           let failures = 0;
           for (const loop of loops) {

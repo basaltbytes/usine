@@ -443,7 +443,7 @@ describe("PollingTriggers", () => {
         assert(dropped28 !== undefined && Option.isSome(dropped28.goneAt));
         assert.strictEqual(dropped28.payload.state, "OPEN");
 
-        // The cursor no longer holds the pull request, so it is not fetched again.
+        // The cursor no longer has the pull request, so it isn't fetched again.
         const after = yield* polling.poll(instance);
         assert.deepStrictEqual(after.failures, []);
         assert.strictEqual(fetches, 2);
@@ -899,7 +899,7 @@ describe("PollingTriggers", () => {
         ],
       );
 
-      // The stored catalog and its ETag survive the failed request.
+      // The stored catalog and its ETag are kept after the failed request.
       const retained = yield* labels.get(watchedRepository);
       assert(Option.isSome(retained));
       assert.deepStrictEqual(
@@ -907,8 +907,8 @@ describe("PollingTriggers", () => {
         ["ready"],
       );
 
-      // The next cycle proves both commit points: the item cursor advanced
-      // past the degraded poll, and the catalog ETag is still sent.
+      // The next cycle checks both commit points: the item cursor advanced past the degraded poll,
+      // and the catalog ETag is still sent.
       const recovered = yield* polling.poll(instance);
       assert.strictEqual(claimedRun(recovered), secondRun);
       const seen = yield* Ref.get(cursorsSeen);
@@ -1149,7 +1149,7 @@ describe("PollingTriggers", () => {
               new GitHubApiError({
                 operation: "poll-repository-changes",
                 status: Option.some(500),
-                message: "GitHub rejected the request with status 500",
+                message: "GitHub returned HTTP status 500",
               }),
             )
           : Effect.succeed(
@@ -1378,7 +1378,7 @@ describe("PollingTriggers", () => {
         yield* Deferred.fail(
           allowRevoke,
           new EnginePersistenceError({
-            operation: "revoke Run",
+            operation: "revoke run",
             cause: "storage unavailable",
           }),
         );
@@ -1398,8 +1398,8 @@ describe("PollingTriggers", () => {
   );
 
   it.effect("isolates one loop's prompt rendering failure and still advances the cursor", () => {
-    // A render failure comes from the loop's authoring and would fail the same
-    // way on re-poll, so it must not wedge the repository.
+    // A render failure comes from the Loop's authoring and would fail the same way on re-poll, so
+    // it must not block the repository.
     const broken = issueLoop("broken-prompt");
     const healthy = issueLoop("healthy-prompt");
     const cursorWrites: Array<CursorKey> = [];
@@ -1562,8 +1562,8 @@ describe("PollingTriggers", () => {
           ),
       };
 
-      // Four concurrent submissions across two repositories all land on one
-      // SQLite engine: distinct runs, no lost or interleaved writes.
+      // Four concurrent submissions across two repositories go to one SQLite engine: distinct Runs,
+      // no lost or interleaved writes.
       yield* Effect.gen(function* () {
         const polling = yield* PollingTriggers;
         const engine = yield* RunEngine;

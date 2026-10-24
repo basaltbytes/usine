@@ -6,13 +6,13 @@ import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import { Array as EffectArray, Effect, Option, Schema } from "effect";
 import type { RunDatabaseClient } from "../database/database.ts";
 import { loopItems, runs, triggerEvents } from "../database/schema.ts";
-import type { OperatorHold, PreviousSighting } from "../engine/lifecycle.ts";
+import type { PreviousSighting, Suppression } from "../engine/lifecycle.ts";
 import { LoopSighting } from "../run-reader/model.ts";
 
 const LoopItemRow = Schema.Struct({
   observedEventId: Schema.NullOr(EventId),
-  heldByRunId: Schema.NullOr(RunId),
-  heldEventId: Schema.NullOr(EventId),
+  suppressedByRunId: Schema.NullOr(RunId),
+  suppressedEventId: Schema.NullOr(EventId),
 });
 const decodeLoopItems = Schema.decodeUnknownEffect(Schema.Array(LoopItemRow));
 const decodeSightingRows = Schema.decodeUnknownEffect(
@@ -21,7 +21,7 @@ const decodeSightingRows = Schema.decodeUnknownEffect(
       loop: LoopName,
       itemKey: ItemKey,
       observedEventId: Schema.NullOr(EventId),
-      heldByRunId: Schema.NullOr(RunId),
+      suppressedByRunId: Schema.NullOr(RunId),
     }),
   ),
 );
@@ -32,7 +32,7 @@ const decodeOwnerRows = Schema.decodeUnknownEffect(
   Schema.Array(Schema.Struct({ eventId: EventId, runId: RunId })),
 );
 
-/** Transaction-local reads and writes of what each Loop last saw of an Item, and of operator holds. */
+/** Returns the Loop sighting and suppression queries that run on the caller's transaction. */
 export const loopItemQueries = (database: RunDatabaseClient) => {
   const where = (loop: LoopName, itemKey: ItemKey) =>
     and(eq(loopItems.loopName, loop), eq(loopItems.itemKey, itemKey));
@@ -42,8 +42,8 @@ export const loopItemQueries = (database: RunDatabaseClient) => {
       yield* database
         .select({
           observedEventId: loopItems.observedEventId,
-          heldByRunId: loopItems.heldByRunId,
-          heldEventId: loopItems.heldEventId,
+          suppressedByRunId: loopItems.suppressedByRunId,
+          suppressedEventId: loopItems.suppressedEventId,
         })
         .from(loopItems)
         .where(where(loop, itemKey))
@@ -52,7 +52,7 @@ export const loopItemQueries = (database: RunDatabaseClient) => {
     return Option.fromNullishOr(rows[0]);
   });
 
-  /** Records a trigger's sighting of `eventId` and returns what the Loop saw before it. */
+  /** Records a sighting of `eventId` and returns the Loop's previous sighting. */
   const sighted = Effect.fn("LoopItems.sighted")(function* (
     loop: LoopName,
     itemKey: ItemKey,
@@ -72,38 +72,36 @@ export const loopItemQueries = (database: RunDatabaseClient) => {
     return before;
   });
 
-  /**
-   * Records a sighting that did not match, which also ends an operator hold. A
-   * Loop that never saw the Item matching has nothing to record.
-   */
+  /** Records a non-matching sighting and lifts any suppression; does nothing if the Loop has no row. */
   const unmatched = Effect.fn("LoopItems.unmatched")(function* (loop: LoopName, itemKey: ItemKey) {
     yield* database
       .update(loopItems)
-      .set({ observedEventId: null, heldByRunId: null, heldEventId: null })
+      .set({ observedEventId: null, suppressedByRunId: null, suppressedEventId: null })
       .where(where(loop, itemKey))
       .execute();
   });
 
-  /** The operator hold that keeps the Loop on the Item, if one does. */
-  const hold = Effect.fn("LoopItems.hold")(function* (loop: LoopName, itemKey: ItemKey) {
-    return Option.flatMap(yield* row(loop, itemKey), ({ heldByRunId, heldEventId }) =>
-      heldByRunId === null
-        ? Option.none<OperatorHold>()
-        : Option.some<OperatorHold>({
-            runId: heldByRunId,
-            heldEventId: Option.fromNullishOr(heldEventId),
+  /** Returns the Loop's suppression of the Item, or `None`. */
+  const suppression = Effect.fn("LoopItems.suppression")(function* (
+    loop: LoopName,
+    itemKey: ItemKey,
+  ) {
+    return Option.flatMap(yield* row(loop, itemKey), ({ suppressedByRunId, suppressedEventId }) =>
+      suppressedByRunId === null
+        ? Option.none<Suppression>()
+        : Option.some<Suppression>({
+            runId: suppressedByRunId,
+            suppressedEventId: Option.fromNullishOr(suppressedEventId),
           }),
     );
   });
 
   /**
-   * Starts the hold of `runId`, whose Attempt stopped for the operator, unless
-   * the Loop last saw the Item not matching. `opened` is the Run's Event,
-   * recorded as the Loop's sighting for an Item it has no record of; `queued` is
-   * the newest Event waiting behind the Run, already the Item's state after the
-   * stop. True when the hold started.
+   * Starts the suppression of `runId` unless the Loop's last sighting was a non-match, and
+   * returns whether it started. `opened` is recorded as the sighting if the Loop has no row;
+   * `queued` is the newest queued Event, already the state after the stop.
    */
-  const startHold = Effect.fn("LoopItems.startHold")(function* (
+  const startSuppression = Effect.fn("LoopItems.startSuppression")(function* (
     loop: LoopName,
     itemKey: ItemKey,
     runId: RunId,
@@ -112,66 +110,71 @@ export const loopItemQueries = (database: RunDatabaseClient) => {
   ) {
     const current = yield* row(loop, itemKey);
     if (Option.exists(current, ({ observedEventId }) => observedEventId === null)) return false;
-    const heldEventId = Option.getOrNull(queued);
+    const suppressedEventId = Option.getOrNull(queued);
     yield* database
       .insert(loopItems)
-      .values({ loopName: loop, itemKey, observedEventId: opened, heldByRunId: runId, heldEventId })
+      .values({
+        loopName: loop,
+        itemKey,
+        observedEventId: opened,
+        suppressedByRunId: runId,
+        suppressedEventId,
+      })
       .onConflictDoUpdate({
         target: [loopItems.loopName, loopItems.itemKey],
-        set: { heldByRunId: runId, heldEventId },
+        set: { suppressedByRunId: runId, suppressedEventId },
       })
       .execute();
     return true;
   });
 
-  /** Records `eventId` as the Item's state after the stop that holds the Loop. */
-  const holdAt = Effect.fn("LoopItems.holdAt")(function* (
+  /** Records `eventId` as the Item's state after the stop. */
+  const suppressFrom = Effect.fn("LoopItems.suppressFrom")(function* (
     loop: LoopName,
     itemKey: ItemKey,
     eventId: EventId,
   ) {
     yield* database
       .update(loopItems)
-      .set({ heldEventId: eventId })
-      .where(and(where(loop, itemKey), isNotNull(loopItems.heldByRunId)))
+      .set({ suppressedEventId: eventId })
+      .where(and(where(loop, itemKey), isNotNull(loopItems.suppressedByRunId)))
       .execute();
   });
 
-  const release = Effect.fn("LoopItems.release")(function* (loop: LoopName, itemKey: ItemKey) {
+  const lift = Effect.fn("LoopItems.lift")(function* (loop: LoopName, itemKey: ItemKey) {
     yield* database
       .update(loopItems)
-      .set({ heldByRunId: null, heldEventId: null })
+      .set({ suppressedByRunId: null, suppressedEventId: null })
       .where(where(loop, itemKey))
       .execute();
   });
 
-  /** Ends the hold of `runId`, wherever it holds a Loop. True when there was one. */
-  const releaseRun = Effect.fn("LoopItems.releaseRun")(function* (runId: RunId) {
-    const released = yield* database
+  /** Lifts the suppression of `runId` on any Loop and returns whether there was one. */
+  const liftRun = Effect.fn("LoopItems.liftRun")(function* (runId: RunId) {
+    const lifted = yield* database
       .update(loopItems)
-      .set({ heldByRunId: null, heldEventId: null })
-      .where(eq(loopItems.heldByRunId, runId))
+      .set({ suppressedByRunId: null, suppressedEventId: null })
+      .where(eq(loopItems.suppressedByRunId, runId))
       .returning({ loopName: loopItems.loopName })
       .execute();
-    return released.length > 0;
+    return lifted.length > 0;
   });
 
   /**
-   * What each Loop last saw of the supplied Items. The Event of a sighting is
-   * the newest one the engine opened again or the operator ran again for the
-   * Event the trigger submitted, as later sightings of that state join it.
+   * Returns each Loop's last sighting of the Items in `itemKeys`, with the newest reopening or
+   * run-again Event for the submitted Event.
    */
   const sightings = Effect.fn("LoopItems.sightings")(function* (itemKeys: ReadonlyArray<ItemKey>) {
     const keys = [...new Set(itemKeys)];
     if (keys.length === 0) return [];
-    // Chunks keep each read below the adapter's bind-parameter limit.
+    // Chunks keep each read below the driver's bind-parameter limit.
     const rows = (yield* Effect.forEach(EffectArray.chunksOf(keys, 100), (chunk) =>
       database
         .select({
           loop: loopItems.loopName,
           itemKey: loopItems.itemKey,
           observedEventId: loopItems.observedEventId,
-          heldByRunId: loopItems.heldByRunId,
+          suppressedByRunId: loopItems.suppressedByRunId,
         })
         .from(loopItems)
         .where(inArray(loopItems.itemKey, chunk))
@@ -209,14 +212,14 @@ export const loopItemQueries = (database: RunDatabaseClient) => {
         .flat()
         .map(({ eventId, runId }) => [eventId, runId] as const),
     );
-    return rows.map(({ loop, itemKey, observedEventId, heldByRunId }) => {
+    return rows.map(({ loop, itemKey, observedEventId, suppressedByRunId }) => {
       const event = Option.map(Option.fromNullishOr(observedEventId), current);
       return new LoopSighting({
         loop,
         itemKey,
         event,
         run: Option.flatMap(event, (eventId) => Option.fromNullishOr(owners.get(eventId))),
-        heldBy: Option.fromNullishOr(heldByRunId),
+        suppressedBy: Option.fromNullishOr(suppressedByRunId),
       });
     });
   });
@@ -224,11 +227,11 @@ export const loopItemQueries = (database: RunDatabaseClient) => {
   return {
     sighted,
     unmatched,
-    hold,
-    startHold,
-    holdAt,
-    release,
-    releaseRun,
+    suppression,
+    startSuppression,
+    suppressFrom,
+    lift,
+    liftRun,
     sightings,
   } as const;
 };

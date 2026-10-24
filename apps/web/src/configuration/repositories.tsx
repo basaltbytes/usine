@@ -34,13 +34,12 @@ const laneLabels = (repository: RepositoryConfigurationView): ReadonlyArray<Labe
     sources.flatMap((source) => (source._tag === "Label" ? [source.label] : [])),
   );
 
-/** How a repository's labels stand, and whether that needs the operator. */
 interface LabelStanding {
   readonly text: string;
   readonly problem: boolean;
 }
 
-/** How the repository's lane and declared labels stand, such as 2 missing on GitHub. */
+/** Returns a summary of the repository's lane and declared labels, for example `2 missing on GitHub`. */
 const labelStanding = (repository: RepositoryConfigurationView): LabelStanding => {
   const labels = [...repository.declaredLabels, ...laneLabels(repository)];
   if (labels.length === 0) return { text: "No labels", problem: false };
@@ -101,7 +100,6 @@ const RepositoryRow = ({ repository }: { readonly repository: RepositoryConfigur
   );
 };
 
-/** Every registered repository with its lanes, label standing, and Loops. */
 export const RepositoriesList = ({
   configuration,
 }: {
@@ -139,15 +137,15 @@ export const RepositoriesList = ({
   </ConfigurationPage>
 );
 
-/** What is wrong with a label in this repository, beside its chip; nothing while it is on GitHub
- * or before polling has read the repository's labels. */
+/** Renders the problem with a label next to its chip; renders nothing if the label exists on GitHub
+ * or the labels have not been polled yet. */
 const LabelStanding = ({ label }: { readonly label: LabelStateView }) => {
   if (label.failure !== null)
     return <span className="text-destructive">{label.failure.message}</span>;
   if (label.onGitHub !== false) return null;
   return (
     <span className="text-destructive">
-      Missing on GitHub{label.declared ? "; usine creates it at the next poll" : ""}
+      Missing on GitHub{label.declared ? ", created at the next poll" : ""}
     </span>
   );
 };
@@ -173,7 +171,7 @@ const LanesTable = ({ repository }: { readonly repository: RepositoryConfigurati
         <TableRow className="hover:bg-transparent">
           <TableHead className="text-right">#</TableHead>
           <TableHead>Lane</TableHead>
-          <TableHead className="w-full">Routes items with</TableHead>
+          <TableHead className="w-full">Items with</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -215,7 +213,7 @@ const RepositoryFacts = ({ repository }: { readonly repository: RepositoryConfig
     </Fact>
     <Fact label="Loops">
       {repository.loops.length === 0 ? (
-        <Unset>No loop selects it</Unset>
+        <Unset>Not selected by any loop</Unset>
       ) : (
         <ul className="flex flex-col gap-0.5">
           {repository.loops.map((loop) => (
@@ -235,8 +233,6 @@ const RepositoryFacts = ({ repository }: { readonly repository: RepositoryConfig
   </Facts>
 );
 
-/** One registered repository in full: its lanes in Board order with each label as GitHub has it,
- * and the labels usine creates there. */
 export const RepositoryDetail = ({
   owner,
   name,
@@ -253,10 +249,10 @@ export const RepositoryDetail = ({
   if (repository === undefined)
     return (
       <ConfigurationPage title={full}>
-        <Missing title="Not a registered repository">
-          <code>repos</code> in <code>usine.yaml</code> does not list {full}.{" "}
+        <Missing title="Repository not registered">
+          {full} is not under <code>repos</code> in <code>usine.yaml</code>.{" "}
           <Link to="/configuration/repositories" className="text-primary hover:underline">
-            See every repository
+            See all repositories
           </Link>
           .
         </Missing>
@@ -275,14 +271,14 @@ export const RepositoryDetail = ({
             ({ onGitHub }) => onGitHub === null,
           ) && (
             <p className="text-muted-foreground">
-              Labels not polled yet; whether each one is on GitHub shows after the first poll.
+              Labels not polled yet. Whether each label is on GitHub shows after the first poll.
             </p>
           )}
           {repository.lanes.length === 0 ? (
             <p className="max-w-[72ch] text-muted-foreground">
-              <code>usine.yaml</code> declares no lanes for this repository. The board shows lanes
-              proposed from the repository labels and takes no moves. Add lanes under{" "}
-              <code>repos[].lanes</code> to move cards.
+              <code>usine.yaml</code> has no lanes for this repository. The board shows lanes
+              proposed from the repository labels, and cards cannot be moved. To move cards, add
+              lanes under <code>repos[].lanes</code>.
             </p>
           ) : (
             <LanesTable repository={repository} />
@@ -291,7 +287,7 @@ export const RepositoryDetail = ({
         <DetailSection title="Labels usine creates" aside="From labels in usine.yaml">
           {repository.declaredLabels.length === 0 ? (
             <p className="text-muted-foreground">
-              <code>labels</code> in <code>usine.yaml</code> declares none.
+              No labels under <code>labels</code> in <code>usine.yaml</code>.
             </p>
           ) : (
             <ul className="flex flex-col gap-2">

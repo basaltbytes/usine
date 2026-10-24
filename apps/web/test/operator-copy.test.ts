@@ -75,9 +75,18 @@ describe("config file copy in Needs attention", () => {
     });
 
   it("names a quarantined Loop's file and reason", () => {
-    const copy = needCopy(need("loop", "loops/ghost.md", "Unknown agent: ghost"));
-    assert.strictEqual(copy.title, "Loop quarantined");
-    assert.include(copy.detail, "loops/ghost.md: Unknown agent: ghost");
+    const copy = needCopy(
+      need(
+        "loop",
+        "loops/ghost.md",
+        'Unknown agent "ghost": agents/ghost.md is missing or invalid. Fix the agent file, or set agent to an existing agent.',
+      ),
+    );
+    assert.strictEqual(copy.title, "Loop file not loaded");
+    assert.include(
+      copy.detail,
+      'loops/ghost.md: Unknown agent "ghost": agents/ghost.md is missing',
+    );
     assert.include(copy.detail, "reload the configuration");
     assert.isNull(copy.runId);
   });
@@ -118,7 +127,8 @@ describe("reload summary on the Loops page", () => {
               _tag: "ConfigFileError",
               file: "loops/start-dev.md",
               stage: "reference",
-              message: "Unknown agent: ghost",
+              message:
+                'Unknown agent "ghost": agents/ghost.md is missing or invalid. Fix the agent file, or set agent to an existing agent.',
             },
           },
         ],
@@ -131,7 +141,7 @@ describe("reload summary on the Loops page", () => {
       "Workers removed: spare",
       "Workers changed: local",
       "Settings changed",
-      "1 file left out, listed in Needs attention",
+      "1 file not loaded, listed in Needs attention",
     ]);
   });
 
@@ -154,7 +164,7 @@ describe("unconfigured Worker copy in Needs attention", () => {
     assert.strictEqual(copy.title, "Worker not configured");
     assert.include(copy.detail, "local is not in usine.yaml");
     assert.include(copy.detail, "114 recorded attempts");
-    assert.include(copy.detail, "Declare the worker again");
+    assert.include(copy.detail, "Add the worker back");
     assert.include(copy.detail, "discard the leftovers");
     assert.include(needCopy(need(1)).detail, "1 recorded attempt on it");
   });
@@ -162,8 +172,8 @@ describe("unconfigured Worker copy in Needs attention", () => {
   it("says how many Attempts still run on a removed Worker", () => {
     assert.strictEqual(
       needCopy(need(3, 2)).detail,
-      "local is not in usine.yaml. 2 attempts still run on it; discard its leftovers once they end",
+      "local is not in usine.yaml. 2 attempts still running on it. Discard the leftovers after they end",
     );
-    assert.include(needCopy(need(3, 1)).detail, "1 attempt still runs on it");
+    assert.include(needCopy(need(3, 1)).detail, "1 attempt still running on it");
   });
 });

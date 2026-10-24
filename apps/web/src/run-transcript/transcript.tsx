@@ -34,7 +34,7 @@ import { Outcome } from "./outcome.tsx";
 import { presentTool } from "./tool/presentation.ts";
 import { ToolDetails, useToolDisclosure } from "./tool/tool.tsx";
 
-/** Earlier pages per Attempt, loaded through the page's request and cache seam. */
+/** Earlier transcript page cursors per Attempt, with their loading state. */
 export interface TranscriptHistory {
   readonly cursors: ReadonlyArray<TranscriptPageCursor>;
   readonly loading: boolean;
@@ -42,7 +42,6 @@ export interface TranscriptHistory {
   readonly load: (cursor: TranscriptPageCursor) => void;
 }
 
-/** A reader row: time and speaker in a narrow column, then content at a 72-character measure for 14px prose. */
 export const ReaderLine = ({
   gutter,
   children,
@@ -132,7 +131,6 @@ const Message = ({
   </ReaderLine>
 );
 
-/** The task a session handed to a child, with the delegation's panels one fold away. */
 const Delegation = ({
   row,
   speaker,
@@ -269,7 +267,6 @@ const Value = ({ children }: { readonly children: ReactNode }) => (
   <span className="font-mono text-foreground">{children}</span>
 );
 
-/** Names the Attempt's Worker, parent model, each child's harness, model and effort, and account readings, once. */
 const AttemptMeta = ({
   chapter,
   runTask,
@@ -463,7 +460,6 @@ const ChapterView = ({
   );
 };
 
-/** The Run's Attempts as one document: a heading and metadata line per Attempt, then its rows in order. */
 export const Transcript = ({
   document,
   runTask,

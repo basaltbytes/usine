@@ -3,10 +3,9 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import type { NeedCopy } from "../operator-copy.ts";
 
-/** One Needs you entry: its title, the Project it concerns, and one line of detail, with its actions
- * on the right. `open` makes the whole entry open what it is about, such as the Run drawer.
- * `fullDetail` lets the detail wrap, with the actions below it, for a recovery that must read in full.
- * `compact` keeps the entry to one line, its detail truncated with the full text in its tooltip. */
+/** `open` makes the whole entry clickable, for example to open the Run drawer. `fullDetail` wraps the detail
+ * and puts the actions below it. `compact` keeps the entry on one line, with the detail truncated
+ * and the full text in a tooltip. */
 export const NeedItem = ({
   copy,
   open,
@@ -18,14 +17,14 @@ export const NeedItem = ({
   readonly copy: Pick<NeedCopy, "title" | "detail" | "repository">;
   readonly open?: (() => void) | undefined;
   readonly actions?: ReactNode;
-  /** Why the last action on this entry failed. */
+  /** The error message of the last failed action on this entry. */
   readonly error?: string | null;
   readonly fullDetail?: boolean;
   readonly compact?: boolean;
 }) => {
   const wraps = fullDetail && !compact;
-  // A compact entry keeps its title whole: below sm the detail wraps to two lines under it,
-  // from sm the entry is one line with the detail shortened beside the title.
+  // A compact entry never truncates the title: below sm the detail wraps to two lines under it;
+  // from sm the detail is truncated beside the title.
   const title = (
     <span
       className={cn(

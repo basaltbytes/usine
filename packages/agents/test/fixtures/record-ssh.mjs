@@ -1,4 +1,4 @@
-// Stands in for ssh: records its arguments and environment to $RECORD_TO, then exits.
+// Fake ssh: writes its arguments and environment to $RECORD_TO, then exits.
 import { writeFileSync } from "node:fs";
 
 writeFileSync(

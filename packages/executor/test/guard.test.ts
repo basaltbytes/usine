@@ -28,10 +28,9 @@ const second = child("second");
 const attemptId = AttemptId.make("guarded");
 
 /**
- * What one Attempt keeps across orchestrator restarts: the transcript its
- * sink records, and the unsupervised time its guards record, of which the
- * longest is kept, as its durable record does. `seed` reads both back, as
- * the durable session does for a reattachment.
+ * Returns the state one Attempt keeps across orchestrator restarts: the transcript and the
+ * longest recorded unsupervised time. `seed` reads both back like the durable session does on
+ * reattachment.
  */
 const durableAttempt = () => {
   const { sink } = recording();
@@ -46,7 +45,7 @@ const durableAttempt = () => {
     seed: Effect.map(sink.transcript, (transcript) =>
       guardSeed(transcript, Duration.millis(Math.max(0, ...recorded))),
     ),
-    /** Runs `stop` as a process that dies: nothing it records on the way out is kept. */
+    /** Runs `stop` like a crashing process: nothing it records during `stop` is kept. */
     dying: <A, E, R>(stop: Effect.Effect<A, E, R>) =>
       Effect.acquireUseRelease(
         Effect.sync(() => {
@@ -62,18 +61,15 @@ const durableAttempt = () => {
 };
 
 /**
- * Arms a guard over the transcript and records of `attempt`, a fresh one by
- * default, and runs it until a ceiling trips. Each warning is recorded as the
- * steer the durable runtime appends for it. The guard goes on from what the
- * earlier guards of `attempt` left, as a reattachment after a restart does.
- * The guard delivers warnings apart from its checks, so `warned` waits for
- * the ones a test expects.
+ * Arms a guard over `attempt` (a new one by default) and runs it until a ceiling trips. Each
+ * warning is recorded as the steer the durable runtime appends. The guard continues from the
+ * earlier guards of `attempt`, like a reattachment.
  */
 const setup = (
   ceilings: Pick<AttemptGuardLimits, "maxAttemptMinutes" | "maxAttemptTokens">,
   options: {
     readonly warnFails?: boolean;
-    /** Completes each warning's delivery, as the parent's input routing does once it is free. */
+    /** Completes each warning's delivery, like the parent's input routing once it's free. */
     readonly delivered?: Effect.Effect<void>;
     readonly attempt?: ReturnType<typeof durableAttempt>;
   } = {},
@@ -182,9 +178,9 @@ const setup = (
       Effect.gen(function* () {
         while (warnings.length < count) yield* Queue.take(delivering);
       });
-    /** Stops this guard as an orchestrator that shuts down does. */
+    /** Stops the guard like an orchestrator shutdown. */
     const stop = Fiber.interrupt(result);
-    /** Stops this guard as an orchestrator that dies does. */
+    /** Stops the guard like an orchestrator crash. */
     const crash = durable.dying(stop);
     return {
       attempt: durable,
@@ -274,7 +270,7 @@ describe("Attempt guard", () => {
 
   it.effect("trips at the wall-clock limit while its warning still waits for delivery", () =>
     Effect.gen(function* () {
-      // A warning waits, as for a reattached parent's channel that is not ready yet.
+      // The warning waits, like one for a reattached parent whose channel isn't ready.
       const { result, warnings, warned } = yield* setup(
         { maxAttemptMinutes: Option.some(1), maxAttemptTokens: Option.none() },
         { delivered: Effect.never },
@@ -296,8 +292,8 @@ describe("Attempt guard", () => {
     "returns from the append that reaches the token warning point before the warning is delivered",
     () =>
       Effect.gen(function* () {
-        // The durable runtime records the steer in order with the envelopes it
-        // appends, so an append that waited for the delivery would wait on itself.
+        // The durable runtime records the steer in order with appended envelopes, so an append that
+        // awaited delivery would deadlock.
         const { result, usage, warnings, warned } = yield* setup(
           { maxAttemptMinutes: Option.none(), maxAttemptTokens: Option.some(100) },
           { delivered: Effect.never },
@@ -485,7 +481,7 @@ describe("Attempt guard", () => {
         const ceilings = { maxAttemptMinutes: Option.some(1), maxAttemptTokens: Option.none() };
         const firstRun = yield* setup(ceilings);
         yield* firstRun.started;
-        // The parent works quietly: nothing reaches the transcript before the orchestrator stops.
+        // The parent is silent: nothing is added to the transcript before the orchestrator stops.
         yield* TestClock.adjust("20 seconds");
         yield* firstRun.stop;
         yield* TestClock.adjust("10 minutes");
@@ -494,7 +490,7 @@ describe("Attempt guard", () => {
         yield* secondRun.usage(first, 10);
         yield* TestClock.adjust("20 seconds");
         yield* secondRun.stop;
-        // The ten minutes of the first restart lie between recorded envelopes now.
+        // The ten minutes of the first restart are now between recorded envelopes.
         yield* TestClock.adjust("10 minutes");
         const thirdRun = yield* setup(ceilings, { attempt: firstRun.attempt });
         // 42 of the 60 unsupervised seconds are spent.
@@ -519,8 +515,8 @@ describe("Attempt guard", () => {
     () =>
       Effect.gen(function* () {
         const ceilings = { maxAttemptMinutes: Option.some(1), maxAttemptTokens: Option.none() };
-        // The guard records its time every 30 seconds and at a clean stop, so a
-        // crash loses at most the 30 seconds since its last record (#178).
+        // The guard records its time every 30 seconds and on a clean stop, so a crash loses at most
+        // 30 seconds (#178).
         const tolerance = 30;
         // One process dies after its record at 30 seconds, the next before its first.
         const crashes = [50, 25];

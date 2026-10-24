@@ -77,18 +77,16 @@ export class FactoryBackend extends Context.Service<
       item: ItemNumber,
     ) => Effect.Effect<TaskView, BackendError>;
     readonly configuration: Effect.Effect<ConfigurationView, BackendError>;
-    /** The desk of the current instance: Running now, Not moving, Last outcomes, Workers, poll times. */
     readonly desk: Effect.Effect<DeskView, BackendError>;
   }
 >()("@usine/server/FactoryBackend") {}
 
-/** The parts of `CurrentInstance` the operator backend reads. */
 type BackendInstance = Pick<CurrentInstance["Service"], "get" | "reload">;
 
 const rosterOf = (instances: BackendInstance) =>
   Effect.map(instances.get, ({ agents }) => agents.map(({ name }) => name));
 
-/** The backend of a running factory; every request reads the current instance. */
+/** Provides the backend of a running factory, which reads the current instance on each request. */
 export const liveBackendLayer = (
   instances: BackendInstance,
   operator: Operator["Service"],
@@ -126,8 +124,8 @@ export const liveBackendLayer = (
   });
 
 /**
- * The read-only backend of setup mode; reading the overview and the
- * configuration and reloading the instance folder still work.
+ * Provides the setup-mode backend, where only the overview, configuration, and reload work. Other
+ * operations fail with `BackendUnavailableError`.
  */
 export const needsSetupBackendLayer = (
   instances: BackendInstance,
@@ -136,7 +134,7 @@ export const needsSetupBackendLayer = (
   configuration: OperatorConfiguration["Service"],
 ): Layer.Layer<FactoryBackend> => {
   const unavailable = new BackendUnavailableError({
-    message: "GitHub App setup is required before operator actions are available.",
+    message: "The GitHub App is not set up. Set it up to use operator actions.",
   });
   const overview = Effect.flatMap(instances.get, observation.overview).pipe(
     Effect.map(

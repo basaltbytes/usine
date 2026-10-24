@@ -97,7 +97,7 @@ const visitBothEnds = async () => {
 
 it("keeps both Board ends reachable when the desktop sidebar is expanded and collapsed", async () => {
   await mountBoard(1024);
-  // A page-level horizontal pan must not move the first lane under the fixed navigation.
+  // Scrolling the page horizontally must not move the first lane under the fixed navigation.
   window.scrollTo({ left: board().getBoundingClientRect().left / 2, top: 0 });
   const navigation = page.getByRole("link", { name: "usine", exact: true });
   const navigationRight = navigation.element().getBoundingClientRect().right;

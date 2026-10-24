@@ -1,8 +1,6 @@
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
-/** A screen's title row: the heading, its counts beside it, then any marks, with the screen's
- * actions at the right. */
 export const PageHeading = ({
   title,
   counts,
@@ -11,7 +9,7 @@ export const PageHeading = ({
   className,
 }: {
   readonly title: string;
-  /** What the screen holds, such as `5 loops`. */
+  /** The count text next to the title, for example `5 loops`. */
   readonly counts?: string | undefined;
   readonly children?: ReactNode;
   readonly actions?: ReactNode;
@@ -27,11 +25,9 @@ export const PageHeading = ({
   </header>
 );
 
-/** How wide a screen's content runs: `prose` stops at 768px so lines stay readable, `full` fills
- * the work panel for tables and side-by-side layouts. */
+/** The content width: `prose` is at most 768px; `full` fills the work panel. */
 export type PageWidth = "prose" | "full";
 
-/** A screen in the work panel, as wide as `width` allows. */
 export const Page = ({
   children,
   width = "prose",

@@ -6,7 +6,7 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   optimizeDeps: {
-    // Local CommonJS is otherwise served unbundled during development.
+    // Pre-bundle this local CommonJS package; Vite otherwise serves it unbundled in development.
     include: ["ansi-to-react-component"],
   },
   plugins: [

@@ -7,7 +7,6 @@ import { cn } from "@/lib/utils";
 import { failureMessage, failureReason } from "../operator-copy.ts";
 import type { AttemptEnd } from "./document/model.ts";
 
-/** A failed Attempt's typed reason and message on a red tint. */
 const FailureNote = ({
   failure,
   className,
@@ -26,7 +25,6 @@ const FailureNote = ({
   </div>
 );
 
-/** Where a failed or canceled Attempt's unfinished work went. */
 export const SalvageLine = ({ salvage }: { readonly salvage: AttemptSalvage | null }) => (
   <p className="text-xs text-muted-foreground wrap-anywhere">
     {salvage === null
@@ -48,7 +46,6 @@ export const SalvageLine = ({ salvage }: { readonly salvage: AttemptSalvage | nu
   </p>
 );
 
-/** How an Attempt ended: the failure note and salvage, the result, or the cancellation. */
 export const Outcome = ({ end }: { readonly end: AttemptEnd }) =>
   Match.valueTags(end, {
     Failed: ({ failure, salvage }) => (

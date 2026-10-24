@@ -4,7 +4,6 @@ import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import { itemStateLabel } from "./model.ts";
 import { linkedRow, rowLink, SectionEmpty, SectionHeading } from "./section.tsx";
 
-/** The Task's pull requests, each opening on GitHub, with its state and whether it conflicts with its base. */
 export const TaskPullRequests = ({ task }: { readonly task: TaskView }) => {
   const pullRequests = task.items.filter(({ kind }) => kind === "pr");
   return (

@@ -183,7 +183,7 @@ describe("Run header", () => {
     );
     assert.include(
       eventPreview("start-dev", detail(view).eventPayload),
-      "start-dev matched issue #33: open, labelled ready-for-agent",
+      "start-dev matched issue #33: open, labeled ready-for-agent",
     );
   });
 
@@ -584,7 +584,7 @@ describe("Run approval", () => {
   const philippe = Option.some(OperatorLogin.make("Philippe"));
   const fromUi = approved(new ApprovalSource({ channel: "ui", approver: philippe }));
   const fromAsk = approved(new ApprovalSource({ channel: "github-ask", approver: philippe }));
-  // Approved before usine recorded who approved.
+  // Approved before usine recorded the approver.
   const unrecorded = approved(null);
   const eventDocument = (view: RunView) =>
     renderToStaticMarkup(
@@ -612,7 +612,7 @@ describe("Run approval", () => {
     const time = dayTimeLabel(approvedAt);
     for (const render of [eventDocument, outline]) {
       assert.include(text(render(fromUi)), `Approved by Philippe · ${time} · from the UI`);
-      assert.include(text(render(fromAsk)), `Approved by Philippe · ${time} · from the GitHub Ask`);
+      assert.include(text(render(fromAsk)), `Approved by Philippe · ${time} · from GitHub`);
       assert.include(render(fromAsk), `dateTime="${approvedAt}"`);
     }
   });
@@ -647,7 +647,7 @@ describe("Run approval", () => {
       );
       assert.notInclude(render(run()), "Run again");
     }
-    // The Event document links the earlier Run's page; the outline entry is a button, so no link.
+    // The Event document links to the earlier Run's page; the outline entry is a button instead.
     assert.include(
       eventDocument(ranAgain(philippe)),
       `href="/projects/basaltbytes/usine/runs/${from}"`,

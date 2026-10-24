@@ -20,9 +20,8 @@ import { NeedItem } from "./need-item.tsx";
 import { UnconfiguredWorkerAsk } from "./unconfigured-worker-ask.tsx";
 
 /**
- * A Run waiting for approval, approved or canceled from Needs you; the entry opens its drawer.
- * While any screen sends an action on the Run, its buttons are disabled and say what is sent.
- * A refusal because the Run has moved on shows no error: the entry leaves with the refresh.
+ * Disables the buttons while any screen sends an action on the Run. If the server rejects the action
+ * because the Run changed state, shows no error.
  */
 const ApprovalAsk = ({
   need,
@@ -90,7 +89,6 @@ const ApprovalAsk = ({
   );
 };
 
-/** One Needs you entry with the actions that apply to it. */
 export const NeedEntry = ({
   need,
   compact,
@@ -120,8 +118,7 @@ export const NeedEntry = ({
   }
 };
 
-/** Everything that waits on the operator across Projects, each entry with its own actions. Renders
- * nothing when nothing does. `compact` lists one line per entry, for screens that read below it. */
+/** If there are no entries, renders nothing. `compact` renders one line per entry. */
 export const NeedsYou = ({
   needs,
   compact = false,

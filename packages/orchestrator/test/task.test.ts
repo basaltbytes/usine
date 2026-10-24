@@ -209,7 +209,10 @@ const summary = (
 
 const succeeded = Option.some(new AttemptSucceeded());
 
-/** Issue #40 with PR #41, linked by the plan Run's result, and PR #42, linked by the issue's closing reference. Issue #50 stands alone. */
+/**
+ * Issue #40 with PR #41, linked by the plan Run's result, and PR #42, linked by the issue's closing
+ * reference. Issue #50 has no links.
+ */
 const items = [
   pullRequest(42, "Fix the flaky reader test", { merged: false, mergeable: "CONFLICTING" }),
   pullRequest(41, "Plan the reader rework", { merged: true, mergeable: "UNKNOWN" }),
@@ -464,8 +467,8 @@ describe("Task view", () => {
       );
       assert.strictEqual(task.runs[0]?.runAgain?.from, "run-fix");
       assert.isTrue(task.needsYou);
-      // A comment carries GitHub's time when the harvest recorded one, and its Attempt's end always;
-      // a Run's comments are newest first by the time it has.
+      // A comment has GitHub's time if the harvest recorded one, and always its Attempt's end; a
+      // Run's comments are newest first by the time they have.
       assert.deepStrictEqual(
         task.comments.map(({ runId, kind, postedAt, attemptEndedAt }) => [
           runId,
@@ -511,7 +514,7 @@ describe("Task view", () => {
 
   it.effect("names the lane its running Run was triggered from as the Board does", () =>
     Effect.gen(function* () {
-      // fix-ci was triggered while #42 carried `ready`; it carries `ready-for-review` now.
+      // fix-ci was triggered while #42 had `ready`; it has `ready-for-review` now.
       const triggered = new RunEvent({
         runId: RunId.make("run-fix-again"),
         event: new Event({

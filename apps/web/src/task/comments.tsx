@@ -7,8 +7,8 @@ import { projectParams } from "../overview.ts";
 import { commentKindLabel, itemReference } from "./model.ts";
 import { linkedRow, rowLink, SectionEmpty, SectionHeading } from "./section.tsx";
 
-/** When a comment was posted, or, for one harvested before GitHub's times were recorded, when its
- * Attempt ended; null when neither is known. */
+/** Returns the posted time, else the Attempt's end time for comments recorded before posted times
+ * were stored; `null` if neither is known. */
 const commentTime = (comment: TaskView["comments"][number]) => {
   if (comment.postedAt !== null)
     return { at: comment.postedAt, title: `Posted ${timestampLabel(comment.postedAt)}` };
@@ -20,10 +20,6 @@ const commentTime = (comment: TaskView["comments"][number]) => {
   return null;
 };
 
-/**
- * The comments and reviews the Task's Runs posted on GitHub, newest Run first: what it is and on
- * which Item, the Run that posted it, and when it was posted. Each opens on GitHub.
- */
 export const TaskComments = ({ task }: { readonly task: TaskView }) => {
   const runs = new Map(task.runs.map((run) => [run.id, run]));
   const items = new Map(task.items.map((item) => [item.itemKey, item]));

@@ -2,4 +2,4 @@
 "@usine/durable": patch
 ---
 
-`AttemptRuntime.notify` keeps a Worker notice sent before the Attempt is relayed or before its parent started, and records it right after `Started` instead of dropping it.
+Fixes `AttemptRuntime.notify` dropping a worker notice sent before the attempt's relay or parent starts; it records the notice after `Started`.

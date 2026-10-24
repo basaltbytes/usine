@@ -16,7 +16,7 @@ export const RunEvidenceFromJson = Schema.fromJsonString(
   { space: 2 },
 );
 
-/** Reading, encoding, or writing Run evidence failed; no successful export was reported. */
+/** A failure to read, encode, or write Run evidence. */
 export class RunExportError extends Schema.TaggedError<RunExportError>(
   "@usine/server/RunExportError",
 )("RunExportError", {
@@ -54,7 +54,7 @@ const writeRunEvidence = Effect.fn("RunEvidence.write")(function* (
       });
       const staged = path.join(temporary, "evidence.json");
       yield* fileSystem.writeFileString(staged, `${json}\n`, { mode: 0o600 });
-      // Publish the complete file atomically. A hard link refuses an existing destination.
+      // Hard-link the complete staged file into place; the link fails if the destination exists.
       yield* fileSystem.link(staged, output);
     }),
   ).pipe(
@@ -103,7 +103,7 @@ export const exportRun = Effect.fn("Cli.exportRun")(
       ),
     );
     yield* writeRunEvidence(evidence, destination);
-    yield* Console.log(`Exported Run ${runId} to ${destination}`);
+    yield* Console.log(`Exported run ${runId} to ${destination}`);
   },
   Effect.tapError((error) =>
     Effect.logWarning(

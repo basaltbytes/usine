@@ -28,7 +28,6 @@ export interface NeedCopy {
 export const brainLine = (brain: BrainSpec): string =>
   `${brain.harness} · ${brain.model} · ${brain.effort}`;
 
-/** Labels of the Run actions that the Run drawer and the Board card menu both offer. */
 export const runActionLabel = {
   approve: "Approve",
   retry: "Retry",
@@ -38,16 +37,14 @@ export const runActionLabel = {
   keepRunning: "Keep running",
 } as const;
 
-/** What a screen says while a Run again request is sent. */
 export const runAgainProgress = "Opening a run…";
 
-/** Why running a Run again opened no Run, and what the operator does next. */
 export const runAgainBlocked = "No run opened: cycle budget used up. Reset it in Needs attention";
 
 export const itemKindLabel = (kind: BoardItemLink["kind"]): string =>
   kind === "pr" ? "Pull request" : "Issue";
 
-/** What opens a Loop's Runs, named like the Item kinds on Board cards. */
+/** Returns the label of a Loop trigger, using the Item kind names from Board cards. */
 export const triggerLabel = (trigger: LoopView["trigger"]): string => {
   switch (trigger) {
     case "issue":
@@ -61,7 +58,7 @@ export const triggerLabel = (trigger: LoopView["trigger"]): string => {
   }
 };
 
-/** How long ago `since` happened, in the largest whole unit: `now`, `12m`, `3h`, or `2d`. */
+/** Returns the time since `since` in the largest whole unit: `now`, `12m`, `3h`, or `2d`. */
 export const elapsedLabel = (since: string, now: number = Date.now()): string => {
   const elapsed = Math.max(0, now - Date.parse(since));
   if (elapsed < 60_000) return "now";
@@ -70,13 +67,13 @@ export const elapsedLabel = (since: string, now: number = Date.now()): string =>
   return `${Math.floor(elapsed / 86_400_000)}d`;
 };
 
-/** How long ago `instant` was, as a phrase: `just now` or `12m ago`. */
+/** Returns the time since `instant` as a phrase: `just now` or `12m ago`. */
 export const agoLabel = (instant: string, now: number): string => {
   const elapsed = elapsedLabel(instant, now);
   return elapsed === "now" ? "just now" : `${elapsed} ago`;
 };
 
-/** An instant as a local date and minute, such as `2026-10-18 17:27`. */
+/** Returns `instant` as a local date and minute, for example `2026-10-18 17:27`. */
 export const timestampLabel = (instant: string): string => {
   const date = new Date(instant);
   const two = (value: number) => String(value).padStart(2, "0");
@@ -85,24 +82,24 @@ export const timestampLabel = (instant: string): string => {
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-/** An instant's local day and minute, such as `15 Oct 19:30`. */
+/** Returns `instant` as a local day and minute, for example `15 Oct 19:30`. */
 export const dayTimeLabel = (instant: string): string => {
   const date = new Date(instant);
   const two = (value: number) => String(value).padStart(2, "0");
   return `${date.getDate()} ${MONTHS[date.getMonth()]} ${two(date.getHours())}:${two(date.getMinutes())}`;
 };
 
-/** An instant's local day, such as `22 Oct`. */
+/** Returns the local day of `date`, for example `22 Oct`. */
 export const dayLabel = (date: Date): string => `${date.getDate()} ${MONTHS[date.getMonth()]}`;
 
-/** An instant's local time of day to the second, such as `19:31:03`. */
+/** Returns the local time of `instant` to the second, for example `19:31:03`. */
 export const clockLabel = (instant: string): string => {
   const date = new Date(instant);
   const two = (value: number) => String(value).padStart(2, "0");
   return `${two(date.getHours())}:${two(date.getMinutes())}:${two(date.getSeconds())}`;
 };
 
-/** A span of time in its largest useful units: `25s`, `22 min`, or `1 h 4 min`. */
+/** Returns a duration in its largest useful units: `25s`, `22 min`, or `1 h 4 min`. */
 export const durationLabel = (milliseconds: number): string => {
   const seconds = Math.max(0, Math.round(milliseconds / 1000));
   if (seconds < 60) return `${seconds}s`;
@@ -113,7 +110,7 @@ export const durationLabel = (milliseconds: number): string => {
     : `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
 };
 
-/** Why an Attempt began, in a phrase: `From the event`, `Retried by PhilDL`, `Retried after an infrastructure failure`. */
+/** Returns why an Attempt started, for example `From the event`, `Retried by PhilDL`, or `Retried after an infrastructure failure`. */
 export const attemptStartLabel = (start: AttemptStart): string =>
   Match.valueTags(start, {
     Event: () => "From the event",
@@ -128,15 +125,15 @@ export const attemptStartLabel = (start: AttemptStart): string =>
     AfterRestart: () => "Started again after a restart",
   });
 
-/** A token count in its largest useful unit: `950`, `27.3K`, `1.2M`. */
+/** Returns a token count in compact notation: `950`, `27.3K`, or `1.2M`. */
 export const tokensLabel = (tokens: number): string =>
   new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(tokens);
 
-/** Dollars to the cent, such as `$1.25`, or `under $0.01` for less than a cent. */
+/** Returns dollars to the cent, for example `$1.25`, or `under $0.01` for less than a cent. */
 export const usdLabel = (usd: number): string =>
   usd > 0 && usd < 0.005 ? "under $0.01" : `$${usd.toFixed(2)}`;
 
-/** How a Run stands, in one phrase: `Failed after 3 attempts`, `Waiting for approval`, `Running, attempt 2`. */
+/** Returns the Run state as a phrase, for example `Failed after 3 attempts`, `Waiting for approval`, or `Running, attempt 2`. */
 export const runStateLine = (run: Pick<RunView, "state" | "attempts">): string => {
   const attempts = run.attempts.length;
   const after =
@@ -159,11 +156,10 @@ export const runStateLine = (run: Pick<RunView, "state" | "attempts">): string =
   }
 };
 
-/** The typed reason of an Attempt failure, in words. */
 export const failureReason = (failure: FailureView): string =>
   Match.valueTags(failure, {
     InfraFailure: () => "Infrastructure failure",
-    DefectFailure: () => "Executor defect; retry explicitly",
+    DefectFailure: () => "Executor defect",
     AgentFailure: () => "Agent failure",
     BlockedFailure: () => "Agent blocked",
     QuestionFailure: () => "Question from the agent",
@@ -171,15 +167,13 @@ export const failureReason = (failure: FailureView): string =>
     ChildSessionBudgetFailure: () => "Child session budget exhausted",
   });
 
-/** A coding harness by its product name. */
 export const harnessLabel = (harness: BrainSpec["harness"]): string =>
   ({ claude: "Claude Code", codex: "Codex", pi: "Pi" })[harness];
 
-/** A billing pool by the account it draws on. */
 export const poolLabel = (pool: BillingPool): string =>
   ({ apiKeys: "API keys", claudePlan: "Claude plan", chatgptPlan: "ChatGPT plan" })[pool];
 
-/** An allowance window's length, such as `7-day` or `5-hour`. */
+/** Returns the length of a rate-limit window, for example `7-day` or `5-hour`. */
 export const windowLabel = (minutes: number): string =>
   minutes % 1440 === 0
     ? `${minutes / 1440}-day`
@@ -187,23 +181,22 @@ export const windowLabel = (minutes: number): string =>
       ? `${minutes / 60}-hour`
       : `${minutes}-minute`;
 
-/** The tooltip of a Run's age, which counts from when the Run opened. */
+/** Returns the tooltip for a Run's age, which is measured from when the Run opened. */
 export const openedTitle = (openedAt: string): string => `Opened ${timestampLabel(openedAt)}`;
 
-/** The tooltip of the time on a Board card's Run line: the instant it counts from and what that instant is. */
+/** Returns the tooltip for the time on a Board card's Run line, with the start time and what it marks. */
 export const runLineTimeTitle = (state: RunView["state"], since: string): string => {
   if (state === "Running") return `Running since ${timestampLabel(since)}`;
   if (state === "Failed") return `Failed at ${timestampLabel(since)}`;
   return openedTitle(since);
 };
 
-/** Where an approval came from, worded to follow its time on the approval line. */
+/** The approval source text, shown after the time on the approval line. */
 export const approvalChannelLabel = {
   ui: "from the UI",
-  "github-ask": "from the GitHub Ask",
+  "github-ask": "from GitHub",
 } as const satisfies Record<ApprovalChannel, string>;
 
-/** The card's status while one of its Run actions is being sent. */
 export const runActionProgress = {
   approve: "Approving…",
   retry: "Retrying…",
@@ -221,16 +214,19 @@ export const failureMessage = (failure: FailureView): string =>
     AgentFailure: ({ message }) => message,
     BlockedFailure: ({ message }) => message,
     QuestionFailure: ({ question }) => question,
-    RunawayFailure: ({ ceiling }) => `Runaway guard: ${ceiling} ceiling reached`,
+    RunawayFailure: ({ ceiling }) =>
+      ceiling === "wall-clock"
+        ? "Time limit reached: settings.max_attempt_minutes"
+        : "Token limit reached: settings.max_attempt_tokens",
     ChildSessionBudgetFailure: ({ attemptedChildren, maxChildren }) =>
       `Child session budget of ${maxChildren} used; child ${attemptedChildren} did not start`,
   });
 
-/** Under an operator message the session it went to has not read yet. */
+/** Returns the note under an operator message that the target session has not read yet. */
 export const queuedMessageLabel = (session: QueuedFor): string =>
   session === "parent"
-    ? "Queued until the current delegation returns"
-    : "Queued until the child's current step ends";
+    ? "Queued until the delegated task ends"
+    : "Queued until the current child step ends";
 
 export const conflictingSalvageMessage = ({ ref, commit }: SalvagePushed): string =>
   `Not applied: the previous attempt's work on ${ref} at ${commit.slice(0, 7)} conflicts with the current revision. It is still on ${ref}`;
@@ -255,13 +251,13 @@ export const needCopy = (need: NeedView): NeedCopy =>
           ? `Question from ${loop}`
           : failure._tag === "BlockedFailure"
             ? `${loop}: blocked`
-            : failure._tag,
+            : `${loop}: ${failureReason(failure).toLowerCase()}`,
       detail: failureMessage(failure),
       repository,
       runId,
     }),
     BoardProjectionNeed: ({ failure }) => ({
-      title: "Item projection quarantined",
+      title: "Item not shown on the board",
       detail: failure.message,
       repository: failure.repository,
       runId: null,
@@ -279,13 +275,17 @@ export const needCopy = (need: NeedView): NeedCopy =>
       runId: null,
     }),
     ScheduleFailureNeed: ({ failure }) => ({
-      title: failure._tag === "ScheduleTickFailure" ? failure.errorTag : failure._tag,
+      title: Match.valueTags(failure, {
+        ScheduleTickFailure: ({ errorTag }) => errorTag,
+        ScheduleAgentFailure: ({ loop }) => `${loop}: agent not loaded`,
+        ScheduleCronFailure: ({ loop }) => `${loop}: schedule not computed`,
+      }),
       detail: failure.message,
       repository: failure._tag === "ScheduleTickFailure" ? failure.repository : null,
       runId: null,
     }),
     ConfigFileNeed: ({ kind, error }) => ({
-      title: kind === "loop" ? "Loop quarantined" : "Agent file not loaded",
+      title: kind === "loop" ? "Loop file not loaded" : "Agent file not loaded",
       detail: `${error.file}: ${error.message.replace(/\.$/u, "")}. Fix the file, then reload the configuration from Configuration > Loops`,
       repository: null,
       runId: null,
@@ -294,14 +294,14 @@ export const needCopy = (need: NeedView): NeedCopy =>
       title: "Worker not configured",
       detail:
         running > 0
-          ? `${worker} is not in usine.yaml. ${running} ${running === 1 ? "attempt still runs" : "attempts still run"} on it; discard its leftovers once they end`
-          : `${worker} is not in usine.yaml. Startup does not reconcile the ${attempts} recorded ${attempts === 1 ? "attempt" : "attempts"} on it. Declare the worker again and restart usine up, or discard the leftovers`,
+          ? `${worker} is not in usine.yaml. ${running} ${running === 1 ? "attempt" : "attempts"} still running on it. Discard the leftovers after they end`
+          : `${worker} is not in usine.yaml. Startup does not reconcile the ${attempts} recorded ${attempts === 1 ? "attempt" : "attempts"} on it. Add the worker back and restart usine up, or discard the leftovers`,
       repository: null,
       runId: null,
     }),
   });
 
-/** One line per kind of change an accepted reload made, or `Nothing changed`. */
+/** Returns one line per kind of change from an accepted reload, or `Nothing changed`. */
 export const reloadChanges = (reload: InstanceReload): ReadonlyArray<string> => {
   const named = [
     ["Loops", reload.loops],
@@ -327,15 +327,15 @@ export const reloadChanges = (reload: InstanceReload): ReadonlyArray<string> => 
   return lines;
 };
 
-/** One line per kind of change an accepted reload made, then the files it left out. */
+/** Returns the reload changes, followed by the files the reload skipped. */
 export const reloadSummary = (reload: InstanceReload): ReadonlyArray<string> => {
   const lines = [...reloadChanges(reload)];
   const leftOut = reload.quarantinedLoops.length + reload.invalidAgents.length;
   if (leftOut > 0) {
     lines.push(
       leftOut === 1
-        ? "1 file left out, listed in Needs attention"
-        : `${leftOut} files left out, listed in Needs attention`,
+        ? "1 file not loaded, listed in Needs attention"
+        : `${leftOut} files not loaded, listed in Needs attention`,
     );
   }
   return lines;

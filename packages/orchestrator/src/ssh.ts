@@ -14,15 +14,13 @@ import { Config, ConfigProvider, Effect, Layer, Option } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
 import { stepExecutorLayer } from "./scheduler.ts";
 
-/** The SSH Workers `usine.yaml` declares, in their declared order. */
+/** Returns the SSH Workers that `usine.yaml` declares, in declared order. */
 export const sshWorkersOf = (config: UsineConfig): ReadonlyArray<SshWorker> =>
   config.workers.filter((worker): worker is SshWorker => worker.kind === "ssh");
 
 /**
- * How the executor reaches `worker`, with its Gateway's admin token read from
- * the variable `admin_token_env` names. An unset variable fails with a
- * `gateway` capability error whose message `missing` writes from the
- * variable's name.
+ * Returns how the executor connects to `worker`, reading the Gateway admin token from
+ * `admin_token_env`. Fails with a `gateway` capability error if the variable is unset.
  */
 const sshWorkerAddressOf = (worker: SshWorker, missing: (variable: string) => string) =>
   Effect.gen(function* () {
@@ -61,11 +59,8 @@ const sshWorkerAddressOf = (worker: SshWorker, missing: (variable: string) => st
   });
 
 /**
- * How the executor reaches each SSH Worker `usine.yaml` declares, in their
- * declared order. The admin token of a Worker's Gateway is read here, at
- * startup, from the environment variable its `admin_token_env` names; an
- * unset variable fails startup with a `gateway` capability error naming the
- * Worker and the variable.
+ * Returns how the executor connects to each declared SSH Worker, reading Gateway admin tokens at
+ * startup. If an `admin_token_env` variable is unset, fails with a `gateway` capability error.
  */
 export const sshWorkerAddressesOf = Effect.fn("Orchestrator.sshWorkerAddressesOf")(function* (
   config: UsineConfig,
@@ -74,20 +69,15 @@ export const sshWorkerAddressesOf = Effect.fn("Orchestrator.sshWorkerAddressesOf
     sshWorkerAddressOf(
       worker,
       (variable) =>
-        `SSH Worker ${worker.name}'s Gateway admin token is missing: set ${variable} in the orchestrator's environment`,
+        `The gateway admin token for SSH worker "${worker.name}" is missing. Set ${variable} in the orchestrator's environment.`,
     ),
   );
 });
 
 /**
- * The scheduler over the SSH executor and its `SshWorkers`, so a reload can
- * resize, add, and remove SSH Workers. A Worker the reload adds joins the
- * executor before its preflight, with its Gateway's admin token read then,
- * through the `ConfigProvider` this layer is built with, from the variable
- * its `admin_token_env` names. An unset variable refuses the reload with a
- * `gateway` capability error that names it: a running process does not see
- * variables set after it started. A removed Worker leaves the executor once
- * its last Attempt ends, and so does an added one whose preflight fails.
+ * Provides the scheduler over the SSH executor, so reloads can resize, add, and remove SSH Workers.
+ * A reload that adds a Worker fails with a `gateway` capability error if its `admin_token_env`
+ * variable is unset.
  */
 export const sshStepExecutorLayer = (config: UsineConfig, brains: ReadonlyArray<BrainSpec>) =>
   Layer.unwrap(
@@ -98,12 +88,12 @@ export const sshStepExecutorLayer = (config: UsineConfig, brains: ReadonlyArray<
         yield* Effect.annotateCurrentSpan({ worker: worker.name });
         if (worker.kind !== "ssh")
           return yield* Effect.die(
-            new Error(`The SSH executor cannot run Worker ${worker.name} of kind ${worker.kind}`),
+            new Error(`The SSH executor cannot run worker "${worker.name}" of kind ${worker.kind}`),
           );
         const address = yield* sshWorkerAddressOf(
           worker,
           (variable) =>
-            `SSH Worker ${worker.name}'s Gateway admin token is missing: ${variable} is not set in the orchestrator's environment. A running process does not see variables set after it started, so set ${variable} and restart usine up, or set admin_token_env to a variable usine up already has`,
+            `The gateway admin token for SSH worker "${worker.name}" is missing: ${variable} is not set in the orchestrator's environment. usine up reads only the variables that were set when it started. Set ${variable} and restart usine up, or set admin_token_env to a variable that usine up already has.`,
         ).pipe(Effect.provideService(ConfigProvider.ConfigProvider, environment));
         yield* machines.addWorker(address);
       });
@@ -114,19 +104,9 @@ export const sshStepExecutorLayer = (config: UsineConfig, brains: ReadonlyArray<
   );
 
 /**
- * The full engine composition for a local orchestrator driving SSH Workers;
- * brains are the instance roster checked at startup, and `options` addresses
- * each Worker's machine (`sshWorkerAddressesOf(config)` for the ones
- * `usine.yaml` declares). The caller provides the `CredentialProvider` that
- * mints each Attempt's single-repository token, the `GitHubApp` whose bot
- * login each Attempt records, the `TriggerCondition` that
- * re-checks queued Events, the `AttemptRuntime` that runs each Attempt's Pi
- * parent in this process, built before the engine so durable storage is
- * resumed before Run recovery, the `ClaudeLoginLock` its Claude children share
- * with preflight, and the `CurrentInstance` whose settings each Attempt reads.
- * Gateway admin APIs are called with `fetch`. A reload can
- * resize, add, and remove SSH Workers (`sshStepExecutorLayer`). It also
- * provides the `WorkerStatus` of its Workers.
+ * Provides the full engine and `WorkerStatus` for SSH Workers. Requires `CredentialProvider`,
+ * `GitHubApp`, `TriggerCondition`, `AttemptRuntime` (built before the engine), `ClaudeLoginLock`,
+ * and `CurrentInstance`.
  */
 export const layer = (
   instanceDirectory: InstanceDirectory,

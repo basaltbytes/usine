@@ -4,27 +4,24 @@ import { type ExecutorOperationError, WorkerCapabilityError } from "./executor.t
 
 const GIB = 1024 ** 3;
 
-// On 2026-10-15 two Attempts running the install, build, and test gates of the
-// usine monorepo on a 4 GB Worker without swap thrashed it until sshd stopped
-// answering (#270).
+// Two Attempts running the usine monorepo gates on a 4 GB Worker without swap made sshd
+// unresponsive (#270).
 const MEMORY_PER_ATTEMPT_WARNING = 3 * GIB;
 const MEMORY_PER_ATTEMPT_MINIMUM = 1.5 * GIB;
 
-/** A machine without swap. */
 const NoSwap = Schema.TaggedStruct("NoSwap", {});
 
-/** A fixed amount of swap in bytes, as Linux reports it. */
+/** A fixed swap size in bytes, as reported by Linux. */
 const SwapSpace = Schema.TaggedStruct("SwapSpace", {
   bytes: Schema.Int.check(Schema.isGreaterThan(0)),
 });
 
-/** Swap that the operating system adds as memory runs short, as macOS does. */
+/** Swap that the OS allocates on demand, as on macOS. */
 export const SwapOnDemand = Schema.TaggedStruct("SwapOnDemand", {});
 
 const WorkerSwap = Schema.Union([NoSwap, SwapSpace, SwapOnDemand]);
 type WorkerSwap = typeof WorkerSwap.Type;
 
-/** The physical memory and swap of the machine where a Worker runs its Attempts. */
 export class WorkerMemory extends Schema.Class<WorkerMemory>("@usine/executor/WorkerMemory")({
   totalBytes: Schema.Int.check(Schema.isGreaterThan(0)),
   swap: WorkerSwap,
@@ -35,7 +32,7 @@ const decodeWorkerMemory = Schema.decodeUnknownOption(WorkerMemory);
 const kibibytes = (meminfo: string, pattern: RegExp): Option.Option<number> =>
   Option.map(Option.fromNullishOr(pattern.exec(meminfo)?.[1]), Number);
 
-/** The memory that Linux reports in `/proc/meminfo`, or none when it lacks MemTotal or SwapTotal. */
+/** Parses `/proc/meminfo`. Returns `None` if MemTotal or SwapTotal is missing. */
 const memoryFromMeminfo = (meminfo: string): Option.Option<WorkerMemory> =>
   Option.flatMap(
     Option.all({
@@ -62,10 +59,9 @@ const memoryError = (worker: WorkerName, message: string, cause: unknown) =>
   new WorkerCapabilityError({ worker, capability: "memory", message, cause });
 
 /**
- * Checks that the machine of `worker` has the memory to run
- * `maxConcurrentAttempts` Attempts at the same time. It refuses less than
- * 1.5 GiB per Attempt, and more than one Attempt on a machine without swap.
- * It logs a warning below 3 GiB per Attempt.
+ * Checks that `worker`'s machine can run `maxConcurrentAttempts` concurrent Attempts. Fails
+ * below 1.5 GiB per Attempt or for more than one Attempt without swap; logs a warning below
+ * 3 GiB per Attempt.
  */
 export const verifyWorkerMemory = Effect.fn("Executor.verifyWorkerMemory")(function* (
   worker: WorkerName,
@@ -87,18 +83,18 @@ export const verifyWorkerMemory = Effect.fn("Executor.verifyWorkerMemory")(funct
     const carried = withoutSwap ? Math.min(fitting, 1) : fitting;
     const advice =
       carried === 0
-        ? "give the machine more memory"
-        : `set max_concurrent_attempts to ${carried} or less, or give the machine more memory`;
+        ? "Add memory to the machine."
+        : `Set max_concurrent_attempts to ${carried} or less, or add memory to the machine.`;
     return yield* memoryError(
       worker,
-      `Worker ${worker} has ${gib(memory.totalBytes)} of memory for max_concurrent_attempts: ${maxConcurrentAttempts}, ${gib(perAttempt)} per Attempt, and an Attempt needs at least ${gib(MEMORY_PER_ATTEMPT_MINIMUM)}; ${advice}`,
+      `Worker "${worker}" has ${gib(memory.totalBytes)} of memory, which is ${gib(perAttempt)} per attempt with max_concurrent_attempts set to ${maxConcurrentAttempts}. An attempt needs at least ${gib(MEMORY_PER_ATTEMPT_MINIMUM)}. ${advice}`,
       memory,
     );
   }
   if (withoutSwap && maxConcurrentAttempts > 1)
     return yield* memoryError(
       worker,
-      `Worker ${worker} has no swap for max_concurrent_attempts: ${maxConcurrentAttempts}, and concurrent Attempts without swap can thrash the machine until SSH stops answering; add swap, or set max_concurrent_attempts to 1`,
+      `Worker "${worker}" has no swap, and max_concurrent_attempts is ${maxConcurrentAttempts}. Concurrent attempts without swap can make the machine thrash until SSH stops responding. Add swap, or set max_concurrent_attempts to 1.`,
       memory,
     );
   if (perAttempt < MEMORY_PER_ATTEMPT_WARNING)
@@ -116,9 +112,8 @@ export const verifyWorkerMemory = Effect.fn("Executor.verifyWorkerMemory")(funct
 });
 
 /**
- * Checks the memory of a Linux machine against `maxConcurrentAttempts`, as
- * `verifyWorkerMemory` does. `meminfo` prints the machine's `/proc/meminfo`;
- * an output without MemTotal or SwapTotal fails the check.
+ * Runs `verifyWorkerMemory` for a Linux machine whose `/proc/meminfo` is returned by `meminfo`.
+ * Fails if the output lacks MemTotal or SwapTotal.
  */
 export const verifyLinuxMemory = Effect.fn("Executor.verifyLinuxMemory")(function* (
   worker: WorkerName,
@@ -127,14 +122,14 @@ export const verifyLinuxMemory = Effect.fn("Executor.verifyLinuxMemory")(functio
 ) {
   const output = yield* meminfo.pipe(
     Effect.mapError((cause) =>
-      memoryError(worker, `Could not read /proc/meminfo on Worker ${worker}`, cause),
+      memoryError(worker, `Can't read /proc/meminfo on worker "${worker}"`, cause),
     ),
   );
   const memory = memoryFromMeminfo(output);
   if (Option.isNone(memory))
     return yield* memoryError(
       worker,
-      `Worker ${worker} reported no MemTotal or SwapTotal in /proc/meminfo`,
+      `/proc/meminfo on worker "${worker}" has no MemTotal or SwapTotal`,
       new Error(output.slice(0, 200)),
     );
   yield* verifyWorkerMemory(worker, maxConcurrentAttempts, memory.value);

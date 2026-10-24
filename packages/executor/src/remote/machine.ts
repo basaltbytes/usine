@@ -1,46 +1,40 @@
 import type { RemoteShell } from "@usine/agents/child-host";
-import type { BrainSpec } from "@usine/core/agent/brain";
+import type { BrainSpec, Harness } from "@usine/core/agent/brain";
 import type { AttemptId } from "@usine/core/attempt";
 import type { LoopPermissions } from "@usine/core/loop";
 import type { RepositoryName } from "@usine/core/repository";
-import type { WorkerKind, WorkerName } from "@usine/core/worker";
+import type { GatewayCredentialKind, WorkerKind, WorkerName } from "@usine/core/worker";
 import type { Effect, Option, Scope } from "effect";
 import type { CredentialUnavailableError, ExecutorError, ExecutorOperation } from "../executor.ts";
 import type { HarnessProbe } from "../harness-preflight.ts";
 import type { RemoteCommands } from "./commands.ts";
 
-/** A Worker's machine and how the remote executor connects to it. */
 export interface RemoteMachine {
-  /** The SSH client and destination that every command and child on the machine runs through. */
   readonly shell: RemoteShell;
-  /** The Worker's directory on the machine: cached clones under `repos`, checkouts under `attempts`. */
+  /** The Worker directory on the machine, with cached clones under `repos` and checkouts under `attempts`. */
   readonly workerDirectory: string;
 }
 
-/** What an Attempt's repository access gives the commands it runs on the machine. */
 export interface RemoteAccess {
   /**
-   * The child host for the Attempt's children, harvesting commands, and git
-   * commands: the machine's own, or one that also sends the Attempt's
-   * secrets to the machine through the SSH connection (`sendingShell`).
+   * The shell for the Attempt's children, harvesting, and git commands: the machine's own, or one
+   * that sends the Attempt's secrets through the SSH connection (`sendingShell`).
    */
   readonly shell: RemoteShell;
-  /** Exported on top of the machine's own environment for the Attempt's children and harvesting commands. Each value is in the command line, so none is secret. */
+  /** The extra environment for the Attempt's children and harvesting commands. Values appear in the command line, so none can be secret. */
   readonly environment: Readonly<Record<string, string>>;
-  /** Exported for the executor's own git commands on the Attempt's checkout: clone, fetch, salvage push. Each value is in the command line, so none is secret. */
+  /** The extra environment for the executor's git commands on the checkout. Values appear in the command line, so none can be secret. */
   readonly gitEnvironment: Readonly<Record<string, string>>;
-  /** Renews the credential on the machine when it expires within minutes; runs before each git and harvesting command. */
+  /** Renews the credential on the machine if it's about to expire. Run before each git and harvesting command. */
   readonly refresh: Effect.Effect<void, ExecutorError>;
   /** Removes every credential this process issued for the Attempt from a command's output. */
   readonly scrub: (text: string) => string;
 }
 
-/** How a remote Worker gives Attempts access to one repository. */
 export interface RemoteGrant<M extends RemoteMachine> {
   /**
-   * Gives the Attempt access to its repository on `machine`, at the level of
-   * its Loop `permissions` where the Worker kind can narrow it, until the
-   * caller's scope closes.
+   * Grants the Attempt access to its repository on `machine` until the caller's scope closes,
+   * restricted to its Loop `permissions` if the Worker kind supports it.
    */
   readonly acquire: (
     attemptId: AttemptId,
@@ -51,40 +45,38 @@ export interface RemoteGrant<M extends RemoteMachine> {
   ) => Effect.Effect<RemoteAccess, ExecutorError, Scope.Scope>;
 }
 
-/** What a remote Worker kind supplies to the executor that runs its Attempts over SSH. */
+/** The Worker-kind implementation for the remote executor. */
 export interface RemoteWorker<M extends RemoteMachine> {
-  /** The Worker kind the executor reports as `Executor.kind`; the scheduler refuses Workers of any other kind. */
+  /** Reported as `Executor.kind`; the scheduler rejects Workers of other kinds. */
   readonly kind: WorkerKind;
-  /** Prefixes the executor's span names, such as `ExeDevExecutor`. */
+  /** The span name prefix, for example `ExeDevExecutor`. */
   readonly spanPrefix: string;
-  /** Names the Worker kind in log messages and errors, such as `exe.dev`. */
   readonly label: string;
-  /** Runs every command on the Worker's machines over SSH. */
   readonly commands: RemoteCommands;
-  /** Resolves the machine a Worker runs on; fails with a typed error when the machine is missing or does not answer. */
+  /** Returns a Worker's machine. Fails with a typed error if the machine is missing or doesn't respond. */
   readonly machineFor: (worker: WorkerName) => Effect.Effect<M, ExecutorError>;
-  /** Verifies a Worker without changing it, as `Executor.preflight` documents. */
+  /** See `Executor.preflight`. */
   readonly preflight: (
     worker: WorkerName,
     brains: ReadonlyArray<BrainSpec>,
     maxConcurrentAttempts: number,
   ) => Effect.Effect<void, ExecutorError>;
-  /** Checks one brain where the machine runs the Attempt's children. */
   readonly harnessProbe: (machine: M) => HarnessProbe;
-  /** The URL the cached clone on `machine` fetches `repository` from. */
+  /** Returns the URL the cached clone on `machine` fetches `repository` from. */
   readonly repositoryUrl: (machine: M, repository: RepositoryName) => string;
-  /** Finds how the Worker gets access to `repository`; fails when no access is configured for it. */
+  /** Returns the credential kind that the Gateway on `machine` injects for `harness`. Returns `None` if the machine has no Gateway or the harness uses its own login. */
+  readonly gatewayCredential: (
+    machine: M,
+    harness: Harness,
+  ) => Effect.Effect<Option.Option<GatewayCredentialKind>>;
+  /** Returns the access grant for `repository`. Fails if none is configured. */
   readonly grantFor: (
     repository: RepositoryName,
   ) => Effect.Effect<RemoteGrant<M>, CredentialUnavailableError>;
-  /**
-   * Why this Worker kind cannot give an Attempt repository access that
-   * cannot push, which a Loop with `permissions: read` needs; none when it
-   * can. `prepare` refuses such an Attempt before any credential is granted.
-   */
+  /** The reason this Worker kind can't grant read-only repository access, or `None` if it can. */
   readonly readOnlyAccessGap: Option.Option<string>;
-  /** Removes what earlier processes left on the Worker's machine that no Attempt can still use; runs before its checkouts are listed. */
+  /** Removes leftovers of earlier processes that no Attempt can use. Runs before the Worker's checkouts are listed. */
   readonly reclaim: (worker: WorkerName) => Effect.Effect<void>;
-  /** Grace for the parent task's cancellation, then for the Attempt to settle. */
+  /** The timeout for the parent task's cancellation, then separately for the Attempt to finish. */
   readonly interruptGrace: Parameters<typeof Effect.timeoutOption>[1];
 }

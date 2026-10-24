@@ -20,38 +20,42 @@ import { Clock, Context, DateTime, Effect, Layer, Match, Option, Ref, Schema } f
 import { GitHubItemKey } from "../polling/repository-sync.ts";
 import { LabelView } from "./board.ts";
 
-/** A label an Attempt's Agent added to the Run's Item, as GitHub defines the label now. */
+/**
+ * A label that an Attempt's Agent added to the Run's Item, with GitHub's current label definition.
+ */
 export class LabelAddedView extends Schema.TaggedClass<LabelAddedView>(
   "@usine/orchestrator/LabelAddedView",
 )("LabelAdded", { at: Schema.String, label: LabelView }) {}
 
-/** A label an Attempt's Agent removed from the Run's Item, as GitHub defines the label now. */
+/**
+ * A label that an Attempt's Agent removed from the Run's Item, with GitHub's current label
+ * definition.
+ */
 export class LabelRemovedView extends Schema.TaggedClass<LabelRemovedView>(
   "@usine/orchestrator/LabelRemovedView",
 )("LabelRemoved", { at: Schema.String, label: LabelView }) {}
 
-/** A comment an Attempt's Agent posted on the Run's Item; `url` opens it on GitHub. */
+/** A comment that an Attempt's Agent posted on the Run's Item. */
 export class CommentedView extends Schema.TaggedClass<CommentedView>(
   "@usine/orchestrator/CommentedView",
 )("Commented", { at: Schema.String, url: Schema.String }) {}
 
-/** A review an Attempt's Agent submitted on the Run's pull request, with how it stands now. */
+/** A review that an Attempt's Agent submitted on the Run's pull request, with its current state. */
 export class ReviewedView extends Schema.TaggedClass<ReviewedView>(
   "@usine/orchestrator/ReviewedView",
 )("Reviewed", { at: Schema.String, url: Schema.String, state: ReviewState }) {}
 
 /**
- * The operator moved the Run's Item between Board lanes while an Attempt was at work.
- * The factory wrote the label swap as the same App the Agent writes as; `at` is when
- * the operator made the move.
+ * An operator move of the Run's Item between Board lanes during an Attempt. `at` is when the
+ * operator made the move.
  */
 export class BoardMovedView extends Schema.TaggedClass<BoardMovedView>(
   "@usine/orchestrator/BoardMovedView",
 )("BoardMoved", { at: Schema.String, fromLane: LaneName, toLane: LaneName }) {}
 
 /**
- * One change on the Run's GitHub Item while an Attempt was at work: a change the
- * Attempt's Agent made, `at` when GitHub recorded it, or the operator's Board move.
+ * A change on the Run's GitHub Item during an Attempt: one made by the Agent, or an operator Board
+ * move.
  */
 export const GitHubChangeView = Schema.Union([
   LabelAddedView,
@@ -62,14 +66,14 @@ export const GitHubChangeView = Schema.Union([
 ]);
 export type GitHubChangeView = typeof GitHubChangeView.Type;
 
-/** What changed on the Run's GitHub Item while one Attempt was at work, oldest first. */
+/** The changes on the Run's GitHub Item during one Attempt, oldest first. */
 export class AttemptGitHubChangesView extends Schema.Class<AttemptGitHubChangesView>(
   "@usine/orchestrator/AttemptGitHubChangesView",
 )({ attemptId: AttemptId, changes: Schema.Array(GitHubChangeView) }) {}
 
 /**
- * The GitHub changes of each of a Run's Attempts on the Run's Item, in Attempt order.
- * A Run without a GitHub Item, such as a schedule Run, lists no Attempts.
+ * The GitHub changes of each of a Run's Attempts, in Attempt order. Empty for a Run without a
+ * GitHub Item, such as a schedule Run.
  */
 export class RunGitHubChangesView extends Schema.Class<RunGitHubChangesView>(
   "@usine/orchestrator/RunGitHubChangesView",
@@ -77,19 +81,24 @@ export class RunGitHubChangesView extends Schema.Class<RunGitHubChangesView>(
 
 export type RunGitHubChangesError = RunStoreError | GitHubAppError | GitHubItemNotFoundError;
 
-/** Ended Attempts whose changes stay in memory; the oldest entries leave first. */
+/** The maximum number of ended Attempts whose changes are cached; the oldest are evicted first. */
 const CACHE_CAPACITY = 1_000;
-/** GitHub's timeline can trail a write by seconds, so an Attempt is cached once it ended this long ago. */
+/**
+ * The time after an Attempt ends before its changes are cached, since GitHub's timeline can trail a
+ * write by seconds.
+ */
 const SETTLE_MILLIS = 60_000;
-/** How far GitHub's clock may run behind the orchestrator's when it records a Board move's label change. */
+/**
+ * The maximum lag of GitHub's clock behind the orchestrator's when recording a Board move's label
+ * change.
+ */
 const CLOCK_SKEW_MILLIS = 1_000;
-/** A Board move's label writes all reach GitHub within this long after the move is recorded. */
+/** The maximum time after a Board move is recorded for all its label writes to appear on GitHub. */
 const MOVE_SPAN_MILLIS = 10_000;
 
 /**
- * Gives each change to the one Attempt whose window holds it (`windowHolds`). Every
- * Agent writes as the same App, so a change that two Attempts on the Item could each
- * have made belongs to neither.
+ * Assigns each change to the one Attempt whose window contains it. A change inside two Attempts'
+ * windows is assigned to neither, since every Agent writes as the same App.
  */
 const attribute = (windows: ReadonlyArray<AttemptWindow>, changes: ReadonlyArray<ItemChange>) => {
   const attributed = new Map<AttemptId, Array<ItemChange>>();
@@ -108,9 +117,8 @@ const attribute = (windows: ReadonlyArray<AttemptWindow>, changes: ReadonlyArray
 };
 
 /**
- * Whether a recorded Board move made this label change: the move sent the same label
- * the same way, and GitHub recorded the change between the second the move was
- * recorded, less the clock skew, and the end of the move's span.
+ * Whether `move` made this label change: same label and direction, recorded between the move time
+ * minus clock skew and the end of the move's span.
  */
 const madeBy = (change: LabelAdded | LabelRemoved) => (move: BoardMoveRecord) => {
   const recorded = DateTime.toEpochMillis(move.at);
@@ -127,9 +135,8 @@ const madeBy = (change: LabelAdded | LabelRemoved) => (move: BoardMoveRecord) =>
 };
 
 /**
- * Splits the App's changes into the operator's Board moves that made some of them
- * and the changes no move made. A move with no change on the timeline, such as a
- * write GitHub refused, is left out.
+ * Splits the App's changes into the Board moves that made some of them and the remaining changes.
+ * Drops moves with no change on the timeline, such as writes GitHub refused.
  */
 const separateBoardMoves = (
   moves: ReadonlyArray<BoardMoveRecord>,
@@ -254,7 +261,7 @@ const makeRunGitHubChanges = Effect.gen(function* () {
         ...placeable.map(({ startedAt }) => DateTime.toEpochMillis(startedAt)),
       );
       const since = DateTime.makeUnsafe(earliest - (earliest % 1_000));
-      // A move recorded shortly before the earliest window can still land in it.
+      // A move recorded shortly before the earliest window can still appear in it.
       const [changes, recorded] = yield* Effect.all(
         [
           history.appChanges(repository, number, since),
@@ -334,13 +341,8 @@ const makeRunGitHubChanges = Effect.gen(function* () {
 });
 
 /**
- * What changed on the Run's GitHub Item while each of a Run's Attempts was at work:
- * the labels the Agent added and removed, its comments, and its reviews, all by the
- * factory's App, and the operator's Board moves. A label change that a recorded Board
- * move made is the operator's, never the Agent's; moves made before moves were
- * recorded read as the Agent's. A read asks GitHub once for the Attempts not yet
- * cached. An Attempt's changes are kept in memory a minute after it ends, after which
- * its window and GitHub's record no longer change.
+ * Reads the Agent's label, comment, and review changes and the operator's Board moves on the Run's
+ * GitHub Item during each Attempt. Label changes made by a recorded Board move are the operator's.
  */
 export class RunGitHubChanges extends Context.Service<
   RunGitHubChanges,

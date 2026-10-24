@@ -6,10 +6,8 @@ import { AttachmentId } from "../attachment/attachment.ts";
 import { GatewaySettings } from "../settings.ts";
 
 /**
- * What a caller token proves: the attachment it was issued with, and that
- * attachment's Worker and repository. Binding the attachment id means a token
- * from an earlier attachment is refused once a new one is made for the same
- * Worker and repository.
+ * The claims in a caller token: its attachment ID, Worker, and repository. Because the
+ * attachment ID is included, a token from an earlier attachment is rejected after a new attach.
  */
 export class CallerClaims extends Schema.Class<CallerClaims>("@usine/gateway/CallerClaims")({
   attachment: AttachmentId,
@@ -18,23 +16,22 @@ export class CallerClaims extends Schema.Class<CallerClaims>("@usine/gateway/Cal
 }) {}
 
 /**
- * The credential a Worker VM sends in place of a real one. The gateway
- * issues it with each attachment and honors it only while that attachment is
- * in force, so it grants nothing the executor did not attach.
+ * The token a Worker VM sends instead of a real credential. It's issued with each attachment
+ * and accepted only while that attachment is active.
  */
 export const CallerToken = Schema.Redacted(Schema.NonEmptyString);
 export type CallerToken = typeof CallerToken.Type;
 
-/** A presented caller token that the gateway did not issue: `malformed` is not in its format, `bad-signature` was not signed with its key. */
+/** The error for a caller token the Gateway didn't issue: `malformed` if the format is wrong, `bad-signature` if it wasn't signed with the Gateway's key. */
 export class CallerTokenRejected extends Schema.TaggedError<CallerTokenRejected>()(
   "CallerTokenRejected",
   { reason: Schema.Literals(["malformed", "bad-signature"]) },
 ) {}
 
-/** The header a caller sets when its tool can add one, such as git with `http.extraHeader`. */
+/** The header for tools that can add one, such as git with `http.extraHeader`. */
 export const GATEWAY_TOKEN_HEADER = "x-usine-gateway-token";
 
-/** Every header that can carry a caller's credential. The gateway removes all of them before it forwards a request. */
+/** The headers that can contain a caller credential; all are removed before forwarding. */
 const CALLER_CREDENTIAL_HEADERS = [
   GATEWAY_TOKEN_HEADER,
   "authorization",
@@ -57,10 +54,9 @@ const encodeClaims = Schema.encodeSync(ClaimsJson);
 const decodeClaims = Schema.decodeUnknownOption(ClaimsJson);
 
 /**
- * Issues and checks caller tokens. A token is `ugw1.<claims>.<HMAC-SHA256>`
- * under the gateway's caller key, so the same attachment yields the same
- * token after a gateway restart or a renewal, and the gateway keeps no token
- * table.
+ * Issues and verifies caller tokens of the form `ugw1.<claims>.<HMAC-SHA256>` under the
+ * Gateway's caller key. The same attachment always yields the same token, so no token table
+ * is kept.
  */
 export class CallerTokens extends Context.Service<
   CallerTokens,
@@ -68,10 +64,8 @@ export class CallerTokens extends Context.Service<
     readonly issue: (claims: CallerClaims) => Effect.Effect<CallerToken>;
     readonly verify: (token: CallerToken) => Effect.Effect<CallerClaims, CallerTokenRejected>;
     /**
-     * Removes caller tokens from headers bound for a host outside the
-     * gateway: the gateway header always, and an `Authorization` or
-     * `x-api-key` value only when it verifies as a caller token, so a
-     * Worker's own credential for a registry still goes through.
+     * Removes caller tokens from headers for a host outside the Gateway: always the Gateway
+     * header, and `Authorization` or `x-api-key` only if the value verifies as a caller token.
      */
     readonly withoutCallerTokens: (headers: Headers.Headers) => Effect.Effect<Headers.Headers>;
   }
@@ -166,9 +160,8 @@ export class CallerTokens extends Context.Service<
 }
 
 /**
- * The credential in an `Authorization` or `Proxy-Authorization` value: the
- * parameter of `Bearer` and `token`, or the password of `Basic` (the user
- * name when the password is empty).
+ * Returns the credential in an `Authorization` or `Proxy-Authorization` value: the `Bearer` or
+ * `token` parameter, or the `Basic` password (the user name if the password is empty).
  */
 export const tokenFromAuthorization = (value: string): Option.Option<CallerToken> => {
   const match = /^(\S+)\s+(\S+)\s*$/u.exec(value.trim());
@@ -189,10 +182,9 @@ export const tokenFromAuthorization = (value: string): Option.Option<CallerToken
 };
 
 /**
- * The caller token a request presents, wherever the Worker's tool puts its
- * credential: the gateway header, then `Authorization` (gh, Claude Code with
- * `ANTHROPIC_AUTH_TOKEN` or `CLAUDE_CODE_OAUTH_TOKEN`, Codex, git with a
- * credential helper), then `x-api-key` (Claude Code with `ANTHROPIC_API_KEY`).
+ * Returns the caller token from the request headers, checking the Gateway header, then
+ * `Authorization` (gh, Codex, git, and Claude Code with `ANTHROPIC_AUTH_TOKEN` or
+ * `CLAUDE_CODE_OAUTH_TOKEN`), then `x-api-key` (Claude Code with `ANTHROPIC_API_KEY`).
  */
 export const presentedToken = (headers: Headers.Headers): Option.Option<CallerToken> =>
   Headers.get(headers, GATEWAY_TOKEN_HEADER).pipe(
@@ -209,6 +201,6 @@ export const presentedToken = (headers: Headers.Headers): Option.Option<CallerTo
     ),
   );
 
-/** Removes every header that can carry a caller's credential. */
+/** Returns `headers` without any header that can contain a caller credential. */
 export const withoutCallerCredentials = (headers: Headers.Headers): Headers.Headers =>
   CALLER_CREDENTIAL_HEADERS.reduce((remaining, name) => Headers.remove(remaining, name), headers);

@@ -6,11 +6,11 @@ import { RegistryTag, UsineConfig } from "../factory.ts";
 import { LoopFile } from "../loop.ts";
 import type { AgentFile } from "../agent.ts";
 
-/** The agent and selector names a loop may reference in one loaded instance. */
+/** The names a loop can reference in a loaded instance. */
 export interface ReferenceIndex {
   readonly agentNames: ReadonlySet<AgentName>;
   readonly registryTags: ReadonlySet<RegistryTag>;
-  /** Registry repository names through `canonicalRepositoryName`, since GitHub ignores case. */
+  /** The registry repository names, canonicalized with `canonicalRepositoryName`. */
   readonly repoNames: ReadonlySet<string>;
 }
 
@@ -23,10 +23,12 @@ export const referenceIndex = (
   repoNames: new Set(config.repos.map(({ name }) => canonicalRepositoryName(name))),
 });
 
+const quoted = (names: ReadonlyArray<string>): string =>
+  names.map((name) => `"${name}"`).join(", ");
+
 /**
- * Returns the reference error that quarantines this loop, if it names an agent
- * or selector entry the instance does not have. The folder loader reports it
- * per file and LoadedInstance refuses to construct with it.
+ * Returns the error for a loop that references an agent or selector entry the instance doesn't
+ * have, or `None` if every reference resolves.
  */
 export const loopReferenceFailure = (
   file: InstancePath,
@@ -38,7 +40,9 @@ export const loopReferenceFailure = (
       new ConfigFileError({ file, stage: "reference", expression: Option.none(), message }),
     );
   if (!references.agentNames.has(loop.agent)) {
-    return referenceError(`Unknown agent: ${loop.agent}`);
+    return referenceError(
+      `Unknown agent "${loop.agent}": agents/${loop.agent}.md is missing or invalid. Fix the agent file, or set agent to an existing agent.`,
+    );
   }
 
   if (Option.isNone(loop.selector)) return Option.none();
@@ -47,7 +51,9 @@ export const loopReferenceFailure = (
       (name) => !references.repoNames.has(canonicalRepositoryName(name)),
     );
     if (missing.length > 0) {
-      return referenceError(`Unknown selector repos: ${missing.join(", ")}`);
+      return referenceError(
+        `Unknown repositories in selector.repos: ${quoted(missing)}. Add them under repos in usine.yaml.`,
+      );
     }
   }
 
@@ -56,7 +62,9 @@ export const loopReferenceFailure = (
       (tag) => !references.registryTags.has(tag),
     );
     if (missing.length > 0) {
-      return referenceError(`Unknown selector tags: ${missing.join(", ")}`);
+      return referenceError(
+        `Unknown tags in selector.tags: ${quoted(missing)}. Add them to a repository's tags in usine.yaml.`,
+      );
     }
   }
   return Option.none();

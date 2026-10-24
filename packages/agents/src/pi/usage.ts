@@ -13,17 +13,15 @@ const PiUsage = Schema.Struct({
   }),
 });
 
-/** What a session used: its `TokenCount` and the dollars its harness priced that at, when it does. */
+/** A session's token count and, if the harness reports one, its cost in dollars. */
 export interface SessionUsage {
   readonly totalTokens: TokenCount;
   readonly costUsd: Option.Option<UsdAmount>;
 }
 
 /**
- * Pi reports usage per completed assistant message with cache reads and writes
- * split out. The message's consumption is its output plus uncached input, where
- * a cache write is new context and a cache read is not. Its price is the
- * dollar total Pi computed from its model catalog, when it reports one.
+ * Returns the usage of one completed Pi assistant message: output plus uncached input, where cache
+ * writes count and cache reads do not, and the dollar cost if Pi reports one.
  */
 export const piMessageUsage = flow(
   Schema.decodeUnknownOption(PiUsage),
@@ -33,7 +31,7 @@ export const piMessageUsage = flow(
   })),
 );
 
-/** Adds one message's usage to a session's running total; a price counts once any message has one. */
+/** Adds a message's usage to a session total; the cost is `Some` once any message has a cost. */
 export const addUsage = (total: SessionUsage, message: SessionUsage): SessionUsage => ({
   totalTokens: TokenCount.make(total.totalTokens + message.totalTokens),
   costUsd: Option.isNone(message.costUsd)
@@ -66,14 +64,10 @@ const decodeAssistant = Schema.decodeUnknownOption(ClaudeAssistantUsage);
 const decodeResult = Schema.decodeUnknownOption(ClaudeResultUsage);
 
 /**
- * Tracks Claude's live message usage and reconciles its cumulative query meter at each result.
- * The Agent SDK's `input_tokens` and `inputTokens` already exclude cache reads and
- * cache writes, so consumption is output plus input plus cache creation.
- * Repeated blocks with the same message id count only their additional tokens.
- * The SDK's result.usage is per-turn and excludes auxiliary work; modelUsage
- * includes that work and stays cumulative across streaming-input turns. Its
- * `costUSD` is the SDK's estimate from its bundled prices, so the price only
- * changes at a result and carries over between them.
+ * Returns a Claude token meter: live message usage between results, reconciled with the cumulative
+ * `modelUsage` at each result. Consumption is output plus input plus cache creation, because the
+ * SDK's input counts exclude cache reads and writes; repeated blocks with one message ID count only
+ * their added tokens. The cost is the SDK's `costUSD` estimate and changes only at a result.
  */
 export const claudeTokenMeter = () => {
   let total = 0;
@@ -105,7 +99,7 @@ export const claudeTokenMeter = () => {
   };
 };
 
-/** Codex's thread meter is cumulative across turns; `inputTokens` includes the cached portion. */
+/** The Codex thread token usage, cumulative across turns; `inputTokens` includes cached input. */
 export const CodexTokenUsage = Schema.Struct({
   threadId: Schema.NonEmptyString,
   tokenUsage: Schema.Struct({
@@ -115,9 +109,8 @@ export const CodexTokenUsage = Schema.Struct({
 export type CodexTokenUsage = typeof CodexTokenUsage.Type;
 
 /**
- * A Codex thread's cumulative consumption: output plus uncached input. The
- * thread's `totalTokens` re-counts the whole context on every turn, cached or
- * not, so it measures conversation length rather than work.
+ * Returns a Codex thread's consumption: output plus uncached input. The thread's `totalTokens` counts
+ * the whole context on every turn, so it is not used.
  */
 export const codexThreadTokens = (total: CodexTokenUsage["tokenUsage"]["total"]): TokenCount =>
   TokenCount.make(total.outputTokens + Math.max(0, total.inputTokens - total.cachedInputTokens));

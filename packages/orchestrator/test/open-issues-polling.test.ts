@@ -239,7 +239,7 @@ describe("PollingTriggers open-issue check", () => {
                   new GitHubApiError({
                     operation: "find-missing-issues",
                     status: Option.some(502),
-                    message: "GitHub rejected the request with status 502",
+                    message: "GitHub returned HTTP status 502",
                   }),
                 )
               : Effect.succeed([]);

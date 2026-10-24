@@ -18,13 +18,13 @@ import { RunDatabase } from "../database/database.ts";
 import {
   Claimed,
   CycleBlocked,
-  Held,
   Ignored,
   Queued,
   reopeningOf,
   runIdFor,
   Submission,
   SubmissionResult,
+  Suppressed,
 } from "../engine/submission.ts";
 import {
   RunNotFoundError,
@@ -48,7 +48,6 @@ import { queriesFor, type QueuedEvents } from "./queries.ts";
 import {
   beginAttempt as decideBeginAttempt,
   cameBack,
-  holdEvent,
   cancelRun,
   claimRun,
   finishAttempt as decideFinishAttempt,
@@ -56,6 +55,7 @@ import {
   type OperatorStop,
   resightEvent,
   retryRun,
+  suppressionDecision,
   type FinishDecision,
   type Settlement,
 } from "../engine/lifecycle.ts";
@@ -64,10 +64,10 @@ const OptionalRunId = Schema.Option(RunId).pipe(
   Schema.withConstructorDefault(Effect.succeed(Option.none<RunId>())),
 );
 
-/** What recording an Event did: its result, the Run it opened, and the unstarted Run it replaced. */
+/** The result of recording an Event, with the Run it opened and the unstarted Run it superseded. */
 export class Claim extends Schema.Class<Claim>("@usine/engine/internal/Claim")({
   result: SubmissionResult,
-  /** The Run this claim opened, which nothing drives yet; a joined Run is not repeated here. */
+  /** The Run that this claim opened, not yet driven; `None` for a joined Run. */
   openedRun: OptionalRunId,
   supersededRun: OptionalRunId,
 }) {}
@@ -78,21 +78,18 @@ export class AttemptStarted extends Schema.TaggedClass<AttemptStarted>(
   execution: StepExecution,
 }) {}
 
-/** Failing the Attempt a restart interrupted spent the Run's last automatic retry, so the Run failed. */
+/** A Run that failed because failing the interrupted Attempt used its last automatic retry. */
 export class AttemptRecoveryFailed extends Schema.TaggedClass<AttemptRecoveryFailed>(
   "@usine/engine/internal/AttemptRecoveryFailed",
 )("AttemptRecoveryFailed", {}) {}
 
-/**
- * The Run closed (canceled, superseded, or revoked) while it waited for a
- * worker slot. Routine once capacity queues exist, never an error.
- */
+/** A Run that closed (canceled, superseded, or revoked) while waiting for a Worker slot; not an error. */
 export class RunClosed extends Schema.TaggedClass<RunClosed>("@usine/engine/internal/RunClosed")(
   "RunClosed",
   {},
 ) {}
 
-/** What `RunStore.cancel` did, decided inside the closing transaction. */
+/** The result of `RunStore.cancel`, decided in the closing transaction. */
 export type CancelOutcome =
   | { readonly _tag: "AlreadyClosed" }
   | { readonly _tag: "Canceled"; readonly openAttempt: Option.Option<AttemptId> };
@@ -133,7 +130,7 @@ const makeRunStore = Effect.gen(function* () {
   const runIdOf = (submission: Submission) =>
     runIdFor(submission).pipe(Effect.provideService(Crypto.Crypto, crypto));
 
-  /** The Run the Event owns, or the reason it was ignored; none for an Event still to claim. */
+  /** Returns the Event's Run or ignore reason, or `None` if the Event isn't claimed yet. */
   const settlementOf = Effect.fn("RunStore.settlementOf")(function* (
     tx: ReturnType<typeof queriesFor>,
     eventId: EventId,
@@ -150,8 +147,8 @@ const makeRunStore = Effect.gen(function* () {
   });
 
   /**
-   * Claims a recorded Event that owns no Run and was not ignored: hold it behind
-   * the Loop's operator hold on the Item, queue it, or open its Run as `runId`.
+   * Claims a recorded Event that has no Run and wasn't ignored: keeps it waiting during a
+   * suppression, queues it, or opens its Run as `runId`.
    */
   const claimEvent = Effect.fn("RunStore.claimEvent")(function* (
     tx: ReturnType<typeof queriesFor>,
@@ -163,35 +160,35 @@ const makeRunStore = Effect.gen(function* () {
         result: new Ignored({ eventId: recorded.event.id, reason: "superseded" }),
       });
     }
-    const hold = yield* tx.loopItems.hold(recorded.loop, recorded.itemKey);
-    if (Option.isSome(hold)) {
-      const held = holdEvent(hold.value, recorded.event.id);
+    const suppression = yield* tx.loopItems.suppression(recorded.loop, recorded.itemKey);
+    if (Option.isSome(suppression)) {
+      const decision = suppressionDecision(suppression.value, recorded.event.id);
       const fields = {
         eventId: recorded.event.id,
-        heldBy: hold.value.runId,
+        suppressedBy: suppression.value.runId,
         loop: recorded.loop,
         itemKey: recorded.itemKey,
       };
-      switch (held._tag) {
-        case "HoldAt":
-          yield* tx.loopItems.holdAt(recorded.loop, recorded.itemKey, recorded.event.id);
+      switch (decision._tag) {
+        case "SuppressFrom":
+          yield* tx.loopItems.suppressFrom(recorded.loop, recorded.itemKey, recorded.event.id);
           yield* Effect.logInfo(
             "First Item state after the Agent stopped for the operator; it waits for the operator",
             fields,
           );
           return new Claim({
-            result: new Held({ eventId: recorded.event.id, runId: hold.value.runId }),
+            result: new Suppressed({ eventId: recorded.event.id, runId: suppression.value.runId }),
           });
-        case "Hold":
+        case "Suppress":
           yield* Effect.logInfo(
             "Item unchanged since the Agent stopped for the operator; no Run opens",
             fields,
           );
           return new Claim({
-            result: new Held({ eventId: recorded.event.id, runId: hold.value.runId }),
+            result: new Suppressed({ eventId: recorded.event.id, runId: suppression.value.runId }),
           });
-        case "Release":
-          yield* tx.loopItems.release(recorded.loop, recorded.itemKey);
+        case "Lift":
+          yield* tx.loopItems.lift(recorded.loop, recorded.itemKey);
           yield* Effect.logInfo(
             "Item changed after the Agent stopped for the operator; the Loop acts on its new state",
             fields,
@@ -240,7 +237,7 @@ const makeRunStore = Effect.gen(function* () {
           recorded.itemKey,
           recorded.event.id,
         );
-        // After a reopening, later sightings of the trigger's Event belong to the newest one.
+        // After a reopening, later sightings of the trigger's Event join the newest reopening.
         const current = Option.getOrElse(yield* tx.newestReopening(recorded.event.id), () => ({
           submission: recorded,
           reopening: 0,
@@ -286,7 +283,7 @@ const makeRunStore = Effect.gen(function* () {
         }
       }),
     );
-  }, persistence("submit Event"));
+  }, persistence("submit event"));
 
   const parkForApproval = Effect.fn("RunStore.parkForApproval")(function* (runId: RunId) {
     yield* Effect.annotateCurrentSpan({ runId });
@@ -302,8 +299,8 @@ const makeRunStore = Effect.gen(function* () {
     );
   }, persistence("park run for approval"));
 
-  // All callers supply a transaction: Attempt, Run, Step and outbox writes
-  // either commit together or roll back together (ADRs 0010 and 0020).
+  // Runs in the caller's transaction, so Attempt, Run, Step, and outbox writes commit or roll
+  // back together (ADR 0010, ADR 0020).
   const applyFinish = Effect.fn("RunStore.applyFinish")(function* (
     tx: ReturnType<typeof queriesFor>,
     runId: RunId,
@@ -338,10 +335,9 @@ const makeRunStore = Effect.gen(function* () {
     yield* tx.updateState(runId, decision.state, endedAt);
   });
 
-  // The Event queued while the Attempt ran is usually the Agent's own question
-  // or blocker comment, so it starts as the held state rather than as a change
-  // to act on.
-  const holdForOperator = Effect.fn("RunStore.holdForOperator")(function* (
+  // The Event queued during the Attempt is usually the Agent's own question or blocker comment,
+  // so it becomes the suppressed state.
+  const suppressForOperator = Effect.fn("RunStore.suppressForOperator")(function* (
     tx: ReturnType<typeof queriesFor>,
     current: RunSnapshot,
     stop: OperatorStop,
@@ -350,7 +346,7 @@ const makeRunStore = Effect.gen(function* () {
     const queued = Option.map(yield* tx.nextQueued(runId), ({ submission }) => submission.event.id);
     const fields = { runId, loop: current.run.loop, itemKey: current.itemKey, stop };
     if (
-      yield* tx.loopItems.startHold(
+      yield* tx.loopItems.startSuppression(
         current.run.loop,
         current.itemKey,
         runId,
@@ -358,14 +354,14 @@ const makeRunStore = Effect.gen(function* () {
         queued,
       )
     ) {
-      yield* Effect.logInfo("Agent stopped for the operator; its Loop holds the Item", {
+      yield* Effect.logInfo("Agent stopped for the operator; its Loop suppresses the Item", {
         ...fields,
-        heldEventId: Option.getOrElse(queued, () => "none yet"),
+        suppressedEventId: Option.getOrElse(queued, () => "none yet"),
       });
       return;
     }
     yield* Effect.logInfo(
-      "Agent stopped for the operator, but nothing is held; the Loop last saw the Item not matching",
+      "Agent stopped for the operator, but nothing is suppressed; the Loop last saw the Item not matching",
       fields,
     );
   });
@@ -441,9 +437,8 @@ const makeRunStore = Effect.gen(function* () {
             worker: attempt.worker,
           });
           if (attempt.worker !== worker) {
-            // The parent task and its checkout stay where they started. The Run
-            // reserves its slot on that Worker (#177), so a lease on another
-            // Worker is a defect of the StepExecutor.
+            // The Run reserves a slot on the Attempt's own Worker (#177), so a lease on another
+            // Worker is a `StepExecutor` defect.
             yield* Effect.logError(
               "Reattached Attempt keeps its own Worker, not the reserved one",
               {
@@ -558,7 +553,7 @@ const makeRunStore = Effect.gen(function* () {
       },
     );
     return windows;
-  }, persistence("read Attempt windows"));
+  }, persistence("read attempt windows"));
 
   const discardLeftovers = Effect.fn("RunStore.discardLeftovers")(function* (worker: WorkerName) {
     yield* Effect.annotateCurrentSpan({ worker });
@@ -566,12 +561,12 @@ const makeRunStore = Effect.gen(function* () {
     return yield* database.transaction((transaction) =>
       leftoverQueries(transaction).discardLeftovers(worker, discardedAt),
     );
-  }, persistence("discard Attempt leftovers"));
+  }, persistence("discard attempt leftovers"));
 
   const openAttempts = Effect.fn("RunStore.openAttempts")(function* (worker: WorkerName) {
     yield* Effect.annotateCurrentSpan({ worker });
     return yield* leftoverQueries(database).openAttempts(worker);
-  }, persistence("count open Attempts"));
+  }, persistence("count open attempts"));
 
   const finishAttempt = Effect.fn("RunStore.finishAttempt")(function* (
     attempt: Attempt,
@@ -585,7 +580,7 @@ const makeRunStore = Effect.gen(function* () {
         const decision = decideFinishAttempt(current, attempt.id, result);
         yield* applyFinish(tx, attempt.runId, decision);
         const stop = operatorStop(decision);
-        if (Option.isSome(stop)) yield* holdForOperator(tx, current, stop.value);
+        if (Option.isSome(stop)) yield* suppressForOperator(tx, current, stop.value);
         return decision;
       }),
     );
@@ -622,12 +617,16 @@ const makeRunStore = Effect.gen(function* () {
           return false;
         }
         yield* tx.resolveFailure(runId, attemptId);
-        const released = yield* tx.loopItems.releaseRun(runId);
-        yield* Effect.logInfo("Run failure resolved", { runId, attemptId, releasedHold: released });
-        return released;
+        const lifted = yield* tx.loopItems.liftRun(runId);
+        yield* Effect.logInfo("Run failure resolved", {
+          runId,
+          attemptId,
+          liftedSuppression: lifted,
+        });
+        return lifted;
       }),
     );
-  }, persistence("resolve Run failure"));
+  }, persistence("resolve run failure"));
 
   const approve = Effect.fn("RunStore.approve")(function* (
     runId: RunId,
@@ -671,8 +670,8 @@ const makeRunStore = Effect.gen(function* () {
           decision: decision._tag,
         });
         if (decision._tag === "Resume") {
-          // A Failed Run is closed, so a later Event may have opened another Run
-          // of this Loop on the Item. Reopening this one would run both at once.
+          // A later Event can have opened another Run of this Loop on the Item; reopening this one
+          // would run both.
           const blocking = (yield* tx.blockingRun(current.run.loop, current.itemKey))[0];
           if (blocking !== undefined) {
             yield* Effect.logInfo("Operator retry rejected; another Run is open on the Item", {
@@ -684,7 +683,7 @@ const makeRunStore = Effect.gen(function* () {
             return yield* new RunRetryBlockedError({
               runId,
               openRunId: blocking.runId,
-              message: `Cannot retry Run ${runId}: Run ${blocking.runId} of Loop ${current.run.loop} is open on the same Item. Retry after it closes, or cancel it first.`,
+              message: `Cannot retry run ${runId}: run ${blocking.runId} of loop "${current.run.loop}" is open on the same item. Cancel run ${blocking.runId}, or try again after it closes.`,
             });
           }
           if (Option.isSome(amendment)) {
@@ -694,9 +693,9 @@ const makeRunStore = Effect.gen(function* () {
               agent: amendment.value.agent.name,
             });
           }
-          // A retry answers the question or clears the blocker: Events wait behind the running Run again.
-          if (yield* tx.loopItems.releaseRun(runId)) {
-            yield* Effect.logInfo("Operator retry ends the hold on the Item", { runId });
+          // A retry lifts the suppression, so Events queue behind the running Run again.
+          if (yield* tx.loopItems.liftRun(runId)) {
+            yield* Effect.logInfo("Operator retry lifts the suppression of the Item", { runId });
           }
           yield* tx.setNextStart(
             runId,
@@ -753,7 +752,7 @@ const makeRunStore = Effect.gen(function* () {
           return yield* new RunRetryBlockedError({
             runId,
             openRunId: blocking.runId,
-            message: `Cannot run Run ${runId} again: Run ${blocking.runId} of Loop ${loop} is open on the same Item. Run it again after that Run closes, or cancel it first.`,
+            message: `Run ${runId} cannot run again: run ${blocking.runId} of loop "${loop}" is open on the same item. Cancel run ${blocking.runId}, or try again after it closes.`,
           });
         }
         const trigger = Option.getOrElse(yield* tx.reopenedEvent(current.event.id), () => ({
@@ -774,8 +773,8 @@ const makeRunStore = Effect.gen(function* () {
           generation,
           receivedAt,
         });
-        // Not a sighting: the Loop's record of the Item stays the trigger's, so a
-        // later poll of the unchanged Item finds the new Run through the reopening.
+        // Not recorded as a sighting, so a later poll of the unchanged Item finds the new Run
+        // through the reopening.
         const recorded = yield* tx.recordTriggerEvent(
           again,
           Option.some({ eventId: trigger.eventId, reopening }),
@@ -859,10 +858,10 @@ const makeRunStore = Effect.gen(function* () {
   const revokeQueued = Effect.fn("RunStore.revokeQueued")(function* (queued: QueuedEvents) {
     const { loop, itemKey, event } = queued.submission;
     yield* Effect.annotateCurrentSpan({ loop, itemKey, eventId: event.id });
-    // Not a sighting: the trigger may still submit the Event from a fetch made
-    // before the closing Run changed the Item, and that Event must stay ignored.
+    // Not recorded as a sighting, because the trigger can still submit this Event from a fetch
+    // made before the closing Run changed the Item.
     return yield* queries.revokeQueued(loop, itemKey, queued.eventIds);
-  }, persistence("revoke queued Events"));
+  }, persistence("revoke queued events"));
 
   const claimQueued = Effect.fn("RunStore.claimQueued")(function* (
     submission: Submission,
@@ -885,14 +884,14 @@ const makeRunStore = Effect.gen(function* () {
         if ((yield* tx.blockingRun(submission.loop, submission.itemKey)).length > 0) {
           return Option.none<RunId>();
         }
-        if (Option.isSome(yield* tx.loopItems.hold(submission.loop, submission.itemKey))) {
+        if (Option.isSome(yield* tx.loopItems.suppression(submission.loop, submission.itemKey))) {
           return Option.none<RunId>();
         }
         if (!(yield* tx.cycles.isCurrentEvent(submission))) return Option.none<RunId>();
         return (yield* openRun(tx, submission, runId)).openedRun;
       }),
     );
-  }, persistence("claim queued Event"));
+  }, persistence("claim queued event"));
 
   const appendTranscript = Effect.fn("RunStore.appendTranscript")(function* (
     direction: AttemptChannel.Direction,
@@ -916,11 +915,11 @@ const makeRunStore = Effect.gen(function* () {
           });
       }),
     );
-  }, persistence("append Attempt transcript"));
+  }, persistence("append attempt transcript"));
 
   const transcript = Effect.fn("RunStore.transcript")(function* (query: TranscriptQuery) {
     return yield* queries.transcript(query);
-  }, persistence("read Attempt transcript"));
+  }, persistence("read attempt transcript"));
 
   return {
     approve,
@@ -929,12 +928,12 @@ const makeRunStore = Effect.gen(function* () {
     cancel,
     claimQueued,
     finishAttempt,
-    nextQueued: (runId: RunId) => queries.nextQueued(runId).pipe(persistence("find queued Event")),
+    nextQueued: (runId: RunId) => queries.nextQueued(runId).pipe(persistence("find queued event")),
     parkForApproval,
     pendingContinuations: queries
       .pendingContinuations()
       .pipe(persistence("list pending continuations")),
-    runIdsToDrive: queries.runIdsToDrive().pipe(persistence("list the Runs to drive")),
+    runIdsToDrive: queries.runIdsToDrive().pipe(persistence("list the runs to drive")),
     recordAndClaim,
     salvageCandidates: queries.salvageCandidates().pipe(persistence("list salvage candidates")),
     salvageCandidate: (attemptId: AttemptId) =>
@@ -963,18 +962,13 @@ const makeRunStore = Effect.gen(function* () {
   } as const;
 });
 
-/**
- * The durable Run projection store. Another backend implements this interface
- * with its own `Layer.effect(RunStore, ...)`; methods speak domain vocabulary
- * and fail only with `RunStoreError`.
- */
+/** The durable Run store; its methods fail only with `RunStoreError`. */
 export class RunStore extends Context.Service<
   RunStore,
   {
     /**
-     * Records the approval Event with who gave it through which channel, and
-     * lets the waiting Run queue for a Worker. True when this call recorded it;
-     * a repeated approval changes nothing, its source included.
+     * Records the approval Event and its source, and queues the waiting Run for a Worker. Returns
+     * whether this call recorded it; a repeated approval changes nothing.
      */
     readonly approve: (
       runId: RunId,
@@ -986,9 +980,8 @@ export class RunStore extends Context.Service<
       envelope: AttemptChannel.Envelope,
     ) => Effect.Effect<void, RunStoreError>;
     /**
-     * Admits the Run's next Attempt on `worker`. `live` names the Run's open
-     * Attempt whose parent task outlived a restart, if any: that Attempt is
-     * reattached; any other open Attempt is failed and the next one opens.
+     * Starts the Run's next Attempt on `worker`. If `live` is the open Attempt, reattaches it;
+     * otherwise fails any open Attempt first.
      */
     readonly beginAttempt: (
       runId: RunId,
@@ -996,113 +989,98 @@ export class RunStore extends Context.Service<
       live: Option.Option<AttemptId>,
     ) => Effect.Effect<AttemptStarted | AttemptRecoveryFailed | RunClosed, RunStoreError>;
     readonly cancel: (runId: RunId) => Effect.Effect<CancelOutcome, RunStoreError>;
-    /** Opens the queued Event's Run as `runId` when the Item has no open Run; none when the Event cannot open one now. */
+    /** Opens the queued Event's Run as `runId` if the Item has no open Run, or returns `None`. */
     readonly claimQueued: (
       submission: Submission,
       runId: RunId,
     ) => Effect.Effect<Option.Option<RunId>, RunStoreError>;
     /**
-     * Records an executor result only if `attempt` is still the Run's open try.
-     * The returned decision tells execution whether to retry; the Attempt's
-     * outcome, the Step result and the Run's closing state commit together. An
-     * Attempt that stopped for the operator with a question or a blocker also
-     * starts its Loop's hold on the Item.
+     * Records an executor result if `attempt` is still the Run's open Attempt, committing its
+     * outcome, the Step result, and the Run state together. A question or blocker also starts the
+     * Loop's suppression of the Item.
      */
     readonly finishAttempt: (
       attempt: Attempt,
       result: Result.Result<StepResult, AttemptFailure>,
     ) => Effect.Effect<FinishDecision, RunStoreError>;
-    /** The newest queued Event of the Run's Loop and Item; none while an operator hold keeps them. */
+    /** Returns the newest queued Event of the Run's Loop and Item, or `None` during a suppression. */
     readonly nextQueued: (
       runId: RunId,
     ) => Effect.Effect<Option.Option<QueuedEvents>, RunStoreError>;
-    /** Moves a pending Run to `Waiting` and returns the Run's state, which stays `Waiting` until an approval arrives. */
+    /** Moves a pending Run to `Waiting` and returns the Run's state. */
     readonly parkForApproval: (runId: RunId) => Effect.Effect<RunState.RunState, RunStoreError>;
     /**
-     * The closed Runs whose Item still has a queued Event that no continuation has
-     * opened or revoked, leaving out Items an operator hold keeps.
+     * The closed Runs whose Item still has a queued Event that no continuation opened or revoked,
+     * excluding Items under a suppression.
      */
     readonly pendingContinuations: Effect.Effect<ReadonlyArray<RunId>, RunStoreError>;
-    /**
-     * Every open Run a fiber drives: pending, queued for a Worker, or running. A
-     * Run waiting for its approval is left out; its approval starts its fiber.
-     */
+    /** The open Runs that a fiber drives: pending, queued, or running, but not waiting for approval. */
     readonly runIdsToDrive: Effect.Effect<ReadonlyArray<RunId>, RunStoreError>;
     /**
-     * Records a trigger's Event as what its Loop last saw of the Item, then claims
-     * it: `requestedRunId` names the Run the Event opens. When the Item came back
-     * to the state of an Event whose Run was canceled, the Event opens again as a
-     * reopening whose Run id derives from its own dedup key (#267).
+     * Records a trigger Event as the Loop's sighting of the Item and claims it, with
+     * `requestedRunId` as the new Run's ID. If the Item came back to the state of an Event whose
+     * Run was canceled, records a reopening with its own Run ID (#267).
      */
     readonly recordAndClaim: (
       submission: Submission,
       requestedRunId: RunId,
     ) => Effect.Effect<Claim, RunStoreError>;
-    /** Records what the executor preserved of an Attempt's workspace, whatever the Attempt's outcome. */
+    /** Records what the executor kept of an Attempt's workspace, whatever the outcome. */
     readonly recordSalvage: (
       attemptId: AttemptId,
       salvage: AttemptSalvage,
     ) => Effect.Effect<void, RunStoreError>;
-    /** Records the comments and reviews an Attempt posted on its Run's Item before it ended without success. */
+    /** Records the comments and reviews an unsuccessful Attempt posted on the Run's Item. */
     readonly recordComments: (
       attemptId: AttemptId,
       comments: ReadonlyArray<Comment>,
     ) => Effect.Effect<void, RunStoreError>;
     /**
-     * `attemptId`'s window as its record holds it when read, none when it
-     * ended before end times were recorded, and the windows of the other
-     * Attempts of its Agent on its Run's Item that overlap it, oldest first.
-     * The Attempt's harvest keeps only a comment posted inside its own window
-     * and in none of the others (ADR 0006, #429).
+     * Returns the Attempt's window and the overlapping windows of the same Agent's other Attempts
+     * on the Item, oldest first (ADR 0006, #429).
      */
     readonly attemptWindows: (attemptId: AttemptId) => Effect.Effect<AttemptWindows, RunStoreError>;
-    /** Every persisted Attempt startup reconciliation visits: all of them except those whose leftovers were discarded. */
+    /** The persisted Attempts that startup reconciliation visits, excluding discarded leftovers. */
     readonly salvageCandidates: Effect.Effect<ReadonlyArray<AttemptRecovery>, RunStoreError>;
-    /** `attemptId` as `salvageCandidates` lists it now; none once its leftovers were discarded. */
+    /** Returns `attemptId` as `salvageCandidates` lists it, or `None` once its leftovers are discarded. */
     readonly salvageCandidate: (
       attemptId: AttemptId,
     ) => Effect.Effect<Option.Option<AttemptRecovery>, RunStoreError>;
-    /** Marks every Attempt recorded on `worker` whose leftovers are not discarded yet, so reconciliation skips them; returns how many it marked. */
+    /** Marks the Attempts on `worker` so reconciliation skips them, and returns the number marked. */
     readonly discardLeftovers: (worker: WorkerName) => Effect.Effect<number, RunStoreError>;
-    /** How many Attempts recorded on `worker` have no outcome yet, leaving out those whose leftovers were discarded. */
+    /** Returns the number of Attempts on `worker` without an outcome, excluding discarded leftovers. */
     readonly openAttempts: (worker: WorkerName) => Effect.Effect<number, RunStoreError>;
     /**
-     * Resolves attention for the current failed Attempt atomically; stale requests
-     * are rejected. True when this ended the hold of the Attempt's question or
-     * blocker, so the Item's queued Events get their turn.
+     * Marks the current failed Attempt as resolved, rejecting stale requests. Returns whether this
+     * lifted a suppression, so the Item's queued Events get their turn.
      */
     readonly resolveFailure: (
       runId: RunId,
       attemptId: AttemptId,
     ) => Effect.Effect<boolean, RunStoreError>;
     /**
-     * Reopens a failed Run for its next Attempt, which records the request as
-     * why it began. True when this call reopened it; a request while the Run
-     * runs between Attempts changes nothing. Fails with `RunRetryBlockedError`
-     * while another Run of the same Loop and Item is open.
+     * Reopens a failed Run for its next Attempt and returns whether this call reopened it. Fails
+     * with `RunRetryBlockedError` while another Run of the same Loop and Item is open.
      */
     readonly retry: (runId: RunId, request?: RetryRequest) => Effect.Effect<boolean, RunStoreError>;
     /**
-     * Opens a new Run for the Item state of a succeeded or canceled Run (#152),
-     * as an operator-originated Event that continues the trigger Event's
-     * reopening numbers. The Item's cycle budget may block it, and the Loop's
-     * approval gate applies once it opens. Fails with `RunOperationRejectedError`
-     * for a Run in any other state and with `RunRetryBlockedError` while another
-     * Run of the same Loop and Item is open; a rejected request records nothing.
+     * Opens a new Run for the Item state of a succeeded or canceled Run as an operator Event
+     * (#152). Fails with `RunOperationRejectedError` for a Run in another state, or with
+     * `RunRetryBlockedError` while another Run of the same Loop and Item is open.
      */
     readonly runAgain: (
       runId: RunId,
       request: RunAgainRequest,
     ) => Effect.Effect<RunAgainResult, RunStoreError>;
-    /** Records that the Loop saw the Item not matching, and revokes its unstarted Runs and queued Events. */
+    /** Records a non-matching sighting and revokes the Loop's unstarted Runs and queued Events for the Item. */
     readonly revoke: (
       loop: LoopName,
       itemKey: ItemKey,
     ) => Effect.Effect<ReadonlyArray<RunId>, RunStoreError>;
-    /** Revokes only observed Events that remain unclaimed; preserves later arrivals and returns the count. */
+    /** Revokes the Events in `queued` that are still unclaimed, keeping later arrivals, and returns the number revoked. */
     readonly revokeQueued: (queued: QueuedEvents) => Effect.Effect<number, RunStoreError>;
     readonly snapshot: (runId: RunId) => Effect.Effect<RunSnapshot, RunStoreError>;
-    /** The Submission that opened the Run, as its trigger Event recorded it. */
+    /** Returns the Submission that opened the Run, as its trigger Event recorded it. */
     readonly submission: (runId: RunId) => Effect.Effect<Submission, RunStoreError>;
     readonly transcript: (
       query: TranscriptQuery,

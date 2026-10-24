@@ -107,7 +107,7 @@ const failingGitHub: GitHubPolling["Service"] = {
       new GitHubApiError({
         operation: "fetch-issue-snapshot",
         status: Option.some(502),
-        message: "GitHub rejected the request with status 502",
+        message: "GitHub returned HTTP status 502",
       }),
     ),
 };

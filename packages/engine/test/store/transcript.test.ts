@@ -336,7 +336,7 @@ describe("Attempt transcripts", () => {
         });
         yield* store.appendTranscript("inbound", currentEnvelope);
 
-        // A v4 row predates session targets, so drop the field the wire added.
+        // A v4 row has no session target, so remove the field.
         const {
           target: _target,
           operator: _operator,

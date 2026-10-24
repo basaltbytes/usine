@@ -6,21 +6,28 @@ import {
   type AttachmentList,
   type Detached,
   GatewayAdminApi,
+  type LlmProviderList,
 } from "@usine/gateway/admin";
-import { Data, DateTime, Effect, type Redacted, Result, Schema } from "effect";
+import { Data, DateTime, Effect, Option, type Redacted, Result, Schema } from "effect";
 import { HttpClient, HttpClientError, HttpClientRequest } from "effect/unstable/http";
 import { HttpApiClient } from "effect/unstable/httpapi";
 import type { SshWorkerGateway } from "../model.ts";
 import { type GatewayForward, GatewayForwardClosed, type OpenForward } from "./forward.ts";
 
-/** An admin API operation the executor performs on a Worker's Gateway. */
-const GatewayAdminOperation = Schema.Literals(["attach", "renew", "detach", "list"]);
+const GatewayAdminOperation = Schema.Literals(["attach", "renew", "detach", "list", "providers"]);
 type GatewayAdminOperation = typeof GatewayAdminOperation.Type;
 
+const ACTIONS = {
+  attach: "attach a token",
+  renew: "renew an attachment",
+  detach: "detach an attachment",
+  list: "list the attachments",
+  providers: "list the LLM providers",
+} as const satisfies Record<GatewayAdminOperation, string>;
+
 /**
- * A request to a Worker's Gateway admin API failed. `message` says why in
- * terms that contain no token: the request and the raw failure are not kept,
- * because the request body of an attach carries the installation token.
+ * The error for a failed Gateway admin API request. `message` contains no token; the request
+ * and raw failure are discarded because an attach request contains the installation token.
  */
 export class GatewayAdminError extends Schema.TaggedError<GatewayAdminError>(
   "@usine/executor/GatewayAdminError",
@@ -30,31 +37,31 @@ export class GatewayAdminError extends Schema.TaggedError<GatewayAdminError>(
   message: Schema.NonEmptyString,
 }) {}
 
-/** The admin API of the Gateway in front of one Worker, as the executor calls it. */
 export interface GatewayAdmin {
-  /** Attaches an Attempt's token for the Worker and a repository; the answer has the new attachment id and its caller token. */
+  /** Attaches an Attempt's token for the Worker and a repository. Returns the attachment ID and its caller token. */
   readonly attach: (request: AttachRequest) => Effect.Effect<Attached, GatewayAdminError>;
-  /** Replaces the token and expiry of attachment `id`, or stores it again after a Gateway restart; the caller token stays the same. */
+  /** Replaces the token and expiry of attachment `id`, or re-creates it after a Gateway restart. The caller token doesn't change. */
   readonly renew: (
     id: AttachmentId,
     request: AttachRequest,
   ) => Effect.Effect<Attached, GatewayAdminError>;
-  /** Removes attachment `id`; the answer says whether the Gateway still had it. */
+  /** Removes attachment `id` and returns whether it existed. */
   readonly detach: (id: AttachmentId) => Effect.Effect<Detached, GatewayAdminError>;
-  /** The attachments in force on the Gateway, for every Worker behind it. */
+  /** Returns the active attachments for all the Gateway's Workers. */
   readonly list: Effect.Effect<AttachmentList, GatewayAdminError>;
+  /**
+   * Returns the LLM providers the Gateway has credentials for, with each credential kind. Returns
+   * `None` if the Gateway predates this endpoint.
+   */
+  readonly providers: Effect.Effect<Option.Option<LlmProviderList>, GatewayAdminError>;
 }
 
-/**
- * How long one admin request may take. A publish holds the Attempt's scope
- * open while it runs, so a request that never answers must end.
- */
+/** The timeout for one admin request. A publish keeps the Attempt's scope open while it runs. */
 const ADMIN_REQUEST_TIMEOUT = "30 seconds";
 
 /**
- * A request through the open forward got no answer from the admin API.
- * `since` is when the first request that got none since the last answer was
- * sent, and `detail` says how this one went unanswered.
+ * The error when an admin request through the open forward gets no response. `since` is when
+ * the first unanswered request after the last response was sent.
  */
 class GatewayAdminUnanswered extends Data.TaggedError("GatewayAdminUnanswered")<{
   readonly gateway: string;
@@ -62,38 +69,42 @@ class GatewayAdminUnanswered extends Data.TaggedError("GatewayAdminUnanswered")<
   readonly detail: string;
 }> {}
 
-/** Why an admin request failed, from the forward's state or the failure's tag and status only. */
+/** Returns the failure reason, built only from the forward's state or the failure's tag and status. */
 const reason = (failure: { readonly _tag: string }): string => {
   if (failure instanceof GatewayForwardClosed)
-    return `the forward through ${failure.gateway} is closed since ${DateTime.formatIso(failure.since)}: ${failure.reason}`;
+    return `the forward through ${failure.gateway} has been closed since ${DateTime.formatIso(failure.since)}: ${failure.reason}`;
   if (failure instanceof GatewayAdminUnanswered)
-    return `the admin API through ${failure.gateway} has not answered since ${DateTime.formatIso(failure.since)}: ${failure.detail}`;
+    return `the admin API through ${failure.gateway} hasn't responded since ${DateTime.formatIso(failure.since)}: ${failure.detail}`;
   if (HttpClientError.isHttpClientError(failure))
     return failure.response === undefined
-      ? `no answer (${failure.reason._tag})`
-      : `the admin API answered with status ${String(failure.response.status)}`;
+      ? `no response (${failure.reason._tag})`
+      : `the admin API returned status ${String(failure.response.status)}`;
   switch (failure._tag) {
     case "TimeoutError":
-      return `no answer within ${ADMIN_REQUEST_TIMEOUT}`;
+      return `no response within ${ADMIN_REQUEST_TIMEOUT}`;
     case "Unauthorized":
-      return "the Gateway refused the admin token";
+      return "the gateway rejected the admin token";
     case "AttachmentAlreadyExpired":
       return "the token had already expired";
     case "AttachmentConflict":
-      return "the attachment id belongs to another Worker or repository";
+      return "the attachment ID belongs to another worker or repository";
     case "SchemaError":
-      return "the admin API's answer did not match its contract";
+      return "the admin API response doesn't match its schema";
     default:
       return `the request failed with ${failure._tag}`;
   }
 };
 
-/** A request that got no answer may have met a forward whose SSH connection died before its client noticed. */
+/** Returns whether the admin API returned 404 because the Gateway predates the endpoint. */
+const unknownRoute = (failure: { readonly _tag: string }): boolean =>
+  HttpClientError.isHttpClientError(failure) && failure.response?.status === 404;
+
+/** Returns whether the request got no response, possibly because the forward's SSH connection died unnoticed. */
 const unanswered = (failure: { readonly _tag: string }): boolean =>
   failure._tag === "TimeoutError" ||
   (HttpClientError.isHttpClientError(failure) && failure.response === undefined);
 
-/** The log field that says since when the Gateway's admin API has been out of reach, when the failure knows. */
+/** Returns the log field with the time the admin API became unreachable, if the failure has it. */
 const sinceFields = (failure: { readonly _tag: string }) => {
   if (failure instanceof GatewayForwardClosed)
     return { closedSince: DateTime.formatIso(failure.since) };
@@ -111,13 +122,9 @@ const adminClientAt = (url: URL, adminToken: Redacted.Redacted<string>) =>
 type AdminClient = Effect.Success<ReturnType<typeof adminClientAt>>;
 
 /**
- * The admin API client for the Gateway in front of `worker`, reached through
- * the executor's `forward` and sending the admin token as a bearer token on
- * every request. A request that finds the forward closed, or gets no answer
- * through it, reopens the forward and is sent once more; a second failure is
- * the request's failure. A request that gets no answer says since when the
- * admin API has answered none, as the forward records it for every Worker
- * behind the Gateway.
+ * Returns the admin API client for the Gateway in front of `worker`, connected through
+ * `forward` with the admin token as a bearer token. If the forward is closed or a request gets
+ * no response, reopens the forward and retries once.
  */
 export const gatewayAdminFor = Effect.fn("SshExecutor.gatewayAdminFor")(function* (
   worker: WorkerName,
@@ -181,7 +188,7 @@ export const gatewayAdminFor = Effect.fn("SshExecutor.gatewayAdminFor")(function
             new GatewayAdminError({
               worker,
               operation,
-              message: `Could not ${operation} on the admin API of Gateway ${forward.gateway} for Worker ${worker}: ${reason(failure)}`,
+              message: `Can't ${ACTIONS[operation]} on the admin API of gateway ${forward.gateway} for worker "${worker}": ${reason(failure)}`,
             }),
         ),
       );
@@ -192,5 +199,11 @@ export const gatewayAdminFor = Effect.fn("SshExecutor.gatewayAdminFor")(function
       bounded("renew")((client) => client.attachments.renew({ params: { id }, payload: request })),
     detach: (id) => bounded("detach")((client) => client.attachments.detach({ params: { id } })),
     list: bounded("list")((client) => client.attachments.list()),
+    providers: bounded("providers")((client) =>
+      client.llm.providers().pipe(
+        Effect.map(Option.some),
+        Effect.catchIf(unknownRoute, () => Effect.succeedNone),
+      ),
+    ),
   } satisfies GatewayAdmin;
 });

@@ -46,9 +46,8 @@ const directChildren = (
   );
 
 /**
- * Lists the paths directly under a Worker's `attempts` directory, creating the
- * directory first so a Worker that never ran an Attempt lists as empty. Every
- * returned path is verified to be a direct child of `attemptsRoot`.
+ * Lists paths directly under a Worker's `attempts` directory, creating it first so a new Worker
+ * lists as empty. Verifies that each path is a direct child of `attemptsRoot`.
  */
 export const attemptPathsOn = Effect.fn("RemoteExecutor.attemptPathsOn")(function* (
   commands: RemoteCommands,
@@ -70,8 +69,8 @@ export const attemptPathsOn = Effect.fn("RemoteExecutor.attemptPathsOn")(functio
 });
 
 /**
- * Preserves crash leftovers and prunes stale cache registrations once per Worker.
- * Only durable Attempt recovery may authorize removing an existing checkout.
+ * Returns a sweep that prunes stale cache registrations once per Worker and keeps crash
+ * leftovers. Only durable Attempt recovery removes an existing checkout.
  */
 export const abandonedWorktreeSweepFor = Effect.fn("RemoteExecutor.abandonedWorktreeSweepFor")(
   function* (commands: RemoteCommands) {
@@ -96,8 +95,8 @@ export const abandonedWorktreeSweepFor = Effect.fn("RemoteExecutor.abandonedWork
             });
             return;
           }
-          // Mark the sweep done before it runs. A partial sweep must not retry in
-          // front of every prepare; the next process start reclaims what failed.
+          // Marked done before running so a failed sweep is not retried before every prepare; the
+          // next process start retries it.
           yield* Ref.update(swept, (current) => new Set(current).add(worker));
 
           const attemptsRoot = `${workerDirectory}/attempts`;
@@ -110,8 +109,8 @@ export const abandonedWorktreeSweepFor = Effect.fn("RemoteExecutor.abandonedWork
           yield* commands.run("prepare", shell, "mkdir", ["-p", reposRoot]);
 
           const attempts = yield* attemptPathsOn(commands, "prepare", shell, attemptsRoot);
-          // An unrecognized path can contain unsalvaged work from a crash. Only
-          // recovery from the durable Attempt record may authorize its removal.
+          // An unrecognized path can contain unsalvaged work from a crash; only recovery from the
+          // durable Attempt record removes it.
           yield* Effect.forEach(
             attempts,
             (worktree) =>

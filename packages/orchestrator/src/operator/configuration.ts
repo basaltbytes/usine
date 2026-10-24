@@ -39,7 +39,7 @@ import { LabelPreflightFinding } from "../label-reconciler.ts";
 import { PollingTriggers } from "../polling-triggers.ts";
 import { type PreflightCheck, WorkerStatus } from "../worker-status.ts";
 
-/** A Loop's selector as its file states it: the repositories and the registry tags it names. */
+/** A Loop's selector as written: the repositories and registry tags. */
 export class LoopSelectorView extends Schema.Class<LoopSelectorView>(
   "@usine/orchestrator/LoopSelectorView",
 )({
@@ -47,18 +47,18 @@ export class LoopSelectorView extends Schema.Class<LoopSelectorView>(
   tags: Schema.NullOr(Schema.Array(RegistryTag)),
 }) {}
 
-/** A loaded Loop file as the orchestrator parsed it, with its runtime pause state. */
+/** A parsed Loop file with its runtime pause state. */
 export class LoopFileView extends Schema.Class<LoopFileView>("@usine/orchestrator/LoopFileView")({
   name: LoopName,
   file: InstancePath,
-  /** The stream the trigger watches, its `on:`. */
+  /** The trigger's `on:` stream. */
   stream: Schema.Literals(["issue", "pr", "schedule"]),
   /** The trigger's `if:` expression as written. */
   condition: Source,
-  /** A schedule trigger's cron and time zone; null for the other streams. */
+  /** A schedule trigger's cron and time zone, or null for the other streams. */
   cron: Schema.NullOr(Cron),
   timeZone: Schema.NullOr(TimeZone),
-  /** Null when the file has no selector, so the Loop applies to every registered repository. */
+  /** Null if the file has no selector, so the Loop applies to every registered repository. */
   selector: Schema.NullOr(LoopSelectorView),
   /** The registered repositories the selector selects, in `usine.yaml` order. */
   repositories: Schema.Array(RepositoryName),
@@ -70,21 +70,21 @@ export class LoopFileView extends Schema.Class<LoopFileView>("@usine/orchestrato
   /** The Markdown prompt template, with its `{{ }}` expressions as written. */
   prompt: PromptTemplate,
   paused: Schema.Boolean,
-  /** Labels the trigger compares Items against that `labels` in `usine.yaml` does not declare. */
+  /** Labels the trigger compares against that `usine.yaml` doesn't declare in `labels`. */
   undeclaredLabels: Schema.Array(GitHubLabelName),
 }) {}
 
-/** A Loop file that opens no Runs because it failed to load, with the stage and reason. */
+/** A Loop file that failed to load and opens no Runs, with the failed stage and reason. */
 export class QuarantinedLoopView extends Schema.Class<QuarantinedLoopView>(
   "@usine/orchestrator/QuarantinedLoopView",
 )({
-  /** The file's name without its folder and `.md`, which names the Loop once it loads. */
+  /** The file name without its folder and `.md` extension. */
   name: Schema.NonEmptyString,
   file: InstancePath,
   error: ConfigFileError,
 }) {}
 
-/** A rostered Agent file as the orchestrator parsed it, with the Loops that name it. */
+/** A parsed rostered Agent file with the Loops that use it. */
 export class AgentFileView extends Schema.Class<AgentFileView>("@usine/orchestrator/AgentFileView")(
   {
     name: AgentName,
@@ -92,35 +92,35 @@ export class AgentFileView extends Schema.Class<AgentFileView>("@usine/orchestra
     harness: Harness,
     model: ModelId,
     effort: Effort,
-    /** The file's own parent model and effort; null when it sets none. */
+    /** The file's own parent model and effort, or null if it sets none. */
     parentModel: Schema.NullOr(ModelId),
     parentEffort: Schema.NullOr(Effort),
-    /**
-     * The parent model an Attempt of this Agent runs: the file's, else
-     * `settings.parent_model`; null leaves the choice to Pi.
-     */
+    /** The file's parent model, else `settings.parent_model`. If null, Pi chooses. */
     resolvedParentModel: Schema.NullOr(ModelId),
-    /** The parent effort an Attempt runs: the file's, else `settings.parent_effort`, else `effort`. */
+    /** The file's parent effort, else `settings.parent_effort`, else `effort`. */
     resolvedParentEffort: Effort,
     persona: AgentPersona,
-    /** The loaded Loops that name this Agent. */
+    /** The loaded Loops that use this Agent. */
     loops: Schema.Array(LoopName),
   },
 ) {}
 
-/** An Agent file left out of the roster because it failed to load, with the stage and reason. */
+/**
+ * An Agent file that failed to load and is left out of the roster, with the failed stage and
+ * reason.
+ */
 export class InvalidAgentView extends Schema.Class<InvalidAgentView>(
   "@usine/orchestrator/InvalidAgentView",
 )({
-  /** The file's name without its folder and `.md`, which names the Agent once it loads. */
+  /** The file name without its folder and `.md` extension. */
   name: Schema.NonEmptyString,
   file: InstancePath,
   error: ConfigFileError,
 }) {}
 
 /**
- * The Gateway in front of an SSH Worker. Its admin token is named by the
- * environment variable it is read from and never travels itself.
+ * The Gateway in front of an SSH Worker. Includes only the name of the environment variable with
+ * its admin token.
  */
 export class GatewayView extends Schema.Class<GatewayView>("@usine/orchestrator/GatewayView")({
   domain: GatewayDomain,
@@ -130,21 +130,21 @@ export class GatewayView extends Schema.Class<GatewayView>("@usine/orchestrator/
   llmProviders: Schema.Array(GatewayLlmProvider),
 }) {}
 
-/** How many Attempts hold a Worker's slots now. */
+/** The current slot usage of a Worker. */
 export class WorkerSlotsView extends Schema.Class<WorkerSlotsView>(
   "@usine/orchestrator/WorkerSlotsView",
 )({
-  /** The slots the scheduler runs Attempts on, `max_concurrent_attempts` once a reload applied it. */
+  /** The number of slots for Attempts: `max_concurrent_attempts` once a reload applied it. */
   capacity: Schema.Int,
   leased: Schema.Int,
 }) {}
 
-/** A preflight check that found what it verifies ready, at an ISO instant. */
+/** A passed preflight check, at an ISO instant. */
 export class PassedCheckView extends Schema.TaggedClass<PassedCheckView>(
   "@usine/orchestrator/PassedCheckView",
 )("Passed", { checkedAt: Schema.String }) {}
 
-/** A preflight check that found a prerequisite missing or could not run, at an ISO instant. */
+/** A preflight check that found a missing prerequisite or couldn't run, at an ISO instant. */
 export class FailedCheckView extends Schema.TaggedClass<FailedCheckView>(
   "@usine/orchestrator/FailedCheckView",
 )("Failed", {
@@ -154,7 +154,6 @@ export class FailedCheckView extends Schema.TaggedClass<FailedCheckView>(
   message: Schema.String,
 }) {}
 
-/** The outcome of one preflight check. */
 export const PreflightCheckView = Schema.Union([PassedCheckView, FailedCheckView]);
 export type PreflightCheckView = typeof PreflightCheckView.Type;
 
@@ -166,28 +165,31 @@ export class HarnessPreflightView extends Schema.Class<HarnessPreflightView>(
   check: PreflightCheckView,
 }) {}
 
-/** A Worker as `usine.yaml` declares it, with its slots in use and its last preflight. */
+/** A Worker as declared in `usine.yaml`, with its slot usage and last preflight. */
 export class WorkerConfigurationView extends Schema.Class<WorkerConfigurationView>(
   "@usine/orchestrator/WorkerConfigurationView",
 )({
   name: WorkerName,
   kind: WorkerKind,
   maxConcurrentAttempts: Schema.Int,
-  /** An SSH Worker's connection and root; null for the other kinds. */
+  /** An SSH Worker's connection and root, or null for the other kinds. */
   destination: Schema.NullOr(SshDestination),
   port: Schema.NullOr(SshPort),
   identityFile: Schema.NullOr(SshIdentityFile),
   root: Schema.NullOr(WorkerRoot),
   gateway: Schema.NullOr(GatewayView),
-  /** Null while the scheduler runs no Attempt on it, as in setup mode. */
+  /** Null while the scheduler runs no Attempts, as in setup mode. */
   slots: Schema.NullOr(WorkerSlotsView),
-  /** The Worker's own prerequisites: its machine, Git, memory, Gateway, and credentials. Null before any preflight decided them. */
+  /**
+   * The Worker's own prerequisites: machine, Git, memory, Gateway, and credentials. Null before any
+   * preflight.
+   */
   prerequisites: Schema.NullOr(PreflightCheckView),
-  /** In harness name order; empty before any harness was checked. */
+  /** In harness name order; empty before any harness check. */
   harnesses: Schema.Array(HarnessPreflightView),
 }) {}
 
-/** A Worker a reload removed while Attempts still run on it; it leaves when the last one ends. */
+/** A Worker removed by a reload that still runs Attempts. It's removed when the last one ends. */
 export class RemovedWorkerView extends Schema.Class<RemovedWorkerView>(
   "@usine/orchestrator/RemovedWorkerView",
 )({
@@ -195,28 +197,28 @@ export class RemovedWorkerView extends Schema.Class<RemovedWorkerView>(
   running: Schema.Int,
 }) {}
 
-/** A GitHub label as one repository has it, from the labels polling last read there. */
+/** A GitHub label in one repository, as of the last label poll. */
 export class LabelStateView extends Schema.Class<LabelStateView>(
   "@usine/orchestrator/LabelStateView",
 )({
   name: GitHubLabelName,
   /** Null until polling has read the repository's labels. */
   onGitHub: Schema.NullOr(Schema.Boolean),
-  /** The repository's color for the label, else the color `labels` declares, as six hex digits. */
+  /** The repository's label color, else the color declared in `labels`, as six hex digits. */
   color: Schema.NullOr(Schema.String),
   description: Schema.NullOr(Schema.String),
-  /** Whether `labels` in `usine.yaml` declares it, so usine creates it when it is missing. */
+  /** Whether `labels` in `usine.yaml` declares the label, so usine creates it if missing. */
   declared: Schema.Boolean,
-  /** Why usine could not create or confirm it at the last poll. */
+  /** The reason usine couldn't create or confirm the label at the last poll. */
   failure: Schema.NullOr(LabelPreflightFinding),
 }) {}
 
-/** A lane source that routes Items with a label. */
+/** A lane source that routes Items by label. */
 export class LabelLaneSourceView extends Schema.TaggedClass<LabelLaneSourceView>(
   "@usine/orchestrator/LabelLaneSourceView",
 )("Label", { label: LabelStateView }) {}
 
-/** A lane source that routes Items in an issue or pull request state. */
+/** A lane source that routes Items by issue or pull request state. */
 export class StateLaneSourceView extends Schema.TaggedClass<StateLaneSourceView>(
   "@usine/orchestrator/StateLaneSourceView",
 )("State", { state: LaneItemState }) {}
@@ -224,7 +226,7 @@ export class StateLaneSourceView extends Schema.TaggedClass<StateLaneSourceView>
 export const LaneSourceView = Schema.Union([LabelLaneSourceView, StateLaneSourceView]);
 export type LaneSourceView = typeof LaneSourceView.Type;
 
-/** One lane `repos[].lanes` declares, with its sources in file order. */
+/** One lane declared in `repos[].lanes`, with its sources in file order. */
 export class LaneConfigurationView extends Schema.Class<LaneConfigurationView>(
   "@usine/orchestrator/LaneConfigurationView",
 )({
@@ -232,21 +234,21 @@ export class LaneConfigurationView extends Schema.Class<LaneConfigurationView>(
   sources: Schema.Array(LaneSourceView),
 }) {}
 
-/** A registered repository with its lanes in Board order, its declared labels, and its Loops. */
+/** A registered repository with its lanes in Board order, declared labels, and Loops. */
 export class RepositoryConfigurationView extends Schema.Class<RepositoryConfigurationView>(
   "@usine/orchestrator/RepositoryConfigurationView",
 )({
   name: RepositoryName,
   tags: Schema.Array(RegistryTag),
-  /** Empty when `usine.yaml` declares no lanes, so the Board proposes lanes from the labels. */
+  /** Empty if `usine.yaml` declares no lanes, so the Board proposes lanes from the labels. */
   lanes: Schema.Array(LaneConfigurationView),
-  /** The labels `labels` in `usine.yaml` declares, as this repository has them. */
+  /** The labels declared in `usine.yaml`, as this repository has them. */
   declaredLabels: Schema.Array(LabelStateView),
   /** The loaded Loops whose selector selects this repository. */
   loops: Schema.Array(LoopName),
 }) {}
 
-/** `settings`, `operator`, and the webhooks mode of `usine.yaml`, defaults applied. */
+/** The `settings`, `operator`, and webhooks mode of `usine.yaml`, with defaults applied. */
 export class SettingsView extends Schema.Class<SettingsView>("@usine/orchestrator/SettingsView")({
   pollInterval: Schema.Int,
   maxChildren: Schema.Int,
@@ -256,15 +258,13 @@ export class SettingsView extends Schema.Class<SettingsView>("@usine/orchestrato
   parentEffort: Schema.NullOr(Effort),
   operator: Schema.NullOr(OperatorLogin),
   webhooks: Schema.Literals(["off", "deliveries", "endpoint"]),
-  /** The public URL of `endpoint` webhooks; null for the other modes. */
+  /** The public URL for `endpoint` webhooks, or null for the other modes. */
   webhooksPublicUrl: Schema.NullOr(Schema.String),
 }) {}
 
 /**
- * The instance folder the orchestrator runs, as parsed: Loops, Agents,
- * Workers, repositories with their lanes, and settings, with the files left
- * out and why, beside the runtime state of each (pauses, slots, preflights,
- * and labels as polled).
+ * The parsed instance folder (Loops, Agents, Workers, repositories, and settings), the files that
+ * failed to load, and the runtime state of each.
  */
 export class ConfigurationView extends Schema.Class<ConfigurationView>(
   "@usine/orchestrator/ConfigurationView",
@@ -284,7 +284,7 @@ const fileStem = (file: InstancePath): string => {
   return name === "" ? file : name;
 };
 
-/** One preflight check as the operator API carries it. */
+/** Returns the operator API view of a preflight check. */
 export const checkView = (check: PreflightCheck): PreflightCheckView =>
   Match.valueTags(check, {
     Passed: ({ checkedAt }) => new PassedCheckView({ checkedAt: DateTime.formatIso(checkedAt) }),
@@ -521,19 +521,15 @@ const makeOperatorConfiguration = Effect.gen(function* () {
 });
 
 /**
- * The operator's read of the configuration: the instance folder as the
- * orchestrator parsed it, beside its runtime state. It reads only what is in
- * memory and the runtime store, never the files again.
+ * The operator's view of the parsed instance folder and its runtime state. Reads only memory and
+ * the runtime store, never the files.
  */
 export class OperatorConfiguration extends Context.Service<
   OperatorConfiguration,
   {
     /**
-     * The supplied instance's Loops, Agents, Workers, repositories, and
-     * settings, with each quarantined Loop and invalid Agent and its error,
-     * each Loop's pause, each Worker's slots and last preflight, and each
-     * repository's labels as polling last read them. No secret is included:
-     * a Gateway's admin token is named by its environment variable only.
+     * Returns the instance's configuration view with runtime state. Contains no secrets: a
+     * Gateway's admin token appears only as its environment variable name.
      */
     readonly view: (
       instance: LoadedInstance,

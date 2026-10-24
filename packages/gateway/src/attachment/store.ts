@@ -18,32 +18,30 @@ const samePair = (left: Attachment, right: Attachment): boolean =>
   canonicalRepositoryName(left.repository) === canonicalRepositoryName(right.repository);
 
 /**
- * The attachments the executor has made, keyed by attachment id and kept in
- * memory only. A gateway restart forgets them, and the executor attaches
- * again, with the same ids, when it renews or restarts.
+ * The in-memory attachment store, keyed by attachment ID. A Gateway restart clears it; the
+ * executor re-attaches with the same IDs when it renews or restarts.
  */
 export class Attachments extends Context.Service<
   Attachments,
   {
     /**
-     * Stores an attachment, or renews the one with the same id: the new
-     * credential and expiry replace the old ones. An id already used for
-     * another Worker or repository is refused.
+     * Stores an attachment, or replaces the credential and expiry of the one with the same ID.
+     * Fails with `AttachmentConflict` if the ID belongs to another Worker or repository.
      */
     readonly attach: (
       attachment: Attachment,
     ) => Effect.Effect<void, AttachmentAlreadyExpired | AttachmentConflict>;
-    /** Removes the attachment; `false` when there was none. */
+    /** Removes the attachment. Returns `false` if it didn't exist. */
     readonly detach: (id: AttachmentId) => Effect.Effect<boolean>;
-    /** Every attachment still in force, oldest expiry first. */
+    /** Returns the active attachments, earliest expiry first. */
     readonly list: () => Effect.Effect<ReadonlyArray<Attachment>>;
-    /** Whether the attachment is in force, and if not, why. */
+    /** Returns whether the attachment is active, expired, or missing. */
     readonly find: (id: AttachmentId) => Effect.Effect<AttachmentLookup>;
-    /** Forgets expired attachments and returns how many it removed. */
+    /** Removes expired attachments and returns the number removed. */
     readonly sweep: () => Effect.Effect<number>;
   }
 >()("@usine/gateway/Attachments") {
-  /** An empty store that sweeps expired attachments every minute while the layer is in scope. */
+  /** An empty store that removes expired attachments every minute while the layer is in scope. */
   static readonly layer = Layer.effect(
     Attachments,
     Effect.gen(function* () {

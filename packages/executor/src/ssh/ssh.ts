@@ -13,7 +13,7 @@ import { remoteExecutorFor } from "../remote/remote.ts";
 import { sshCredentialsFor } from "./credentials.ts";
 import { gatewayAttachmentsFor } from "./gateway/attachments.ts";
 import { gatewayRepositoryUrl } from "./gateway/environment.ts";
-import { gatewayHarnessProbe } from "./gateway/preflight.ts";
+import { gatewayCredentialFor, gatewayHarnessProbe } from "./gateway/preflight.ts";
 import type { SshExecutorOptions, SshMachine } from "./model.ts";
 import { sshPreflightFor } from "./preflight.ts";
 import { sshMachinesFor, SshWorkers } from "./workers.ts";
@@ -27,11 +27,10 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
     if (new Set(options.workers.map(({ name }) => name)).size !== options.workers.length)
       return yield* Effect.die(new Error("SshExecutorOptions.workers contains duplicate names"));
     const { machineFor, workers } = yield* sshMachinesFor(base, commands);
-    // Distinct names cannot clash with a Worker added before them.
+    // Worker names are distinct, so adding them can't fail.
     yield* Effect.forEach(options.workers, workers.addWorker, { discard: true }).pipe(Effect.orDie);
 
-    // The checks export nothing on the machine: a child's harness login lives
-    // there, or at the Gateway in front of it.
+    // Probes with no extra environment; the harness login is on the machine or at its Gateway.
     const harnessProbe = (machine: SshMachine) => {
       const probe =
         options.harnessReadiness?.(machine) ?? agentsHarnessProbe(spawner, machine.shell, {});
@@ -43,8 +42,8 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
     const credentials = yield* sshCredentialsFor(commands, machineFor);
     const attachments = yield* gatewayAttachmentsFor(commands, machineFor);
 
-    // A Worker that moved behind a Gateway may still have tokens an earlier
-    // process wrote on its machine, so every Worker removes them.
+    // Runs for every Worker, because one that moved behind a Gateway can still have tokens from
+    // an earlier process.
     const reclaim = (worker: WorkerName) =>
       credentials.reclaim(worker).pipe(Effect.andThen(attachments.reclaim(worker)));
 
@@ -87,30 +86,26 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
           onNone: () => `https://github.com/${repository}.git`,
           onSome: ({ settings }) => gatewayRepositoryUrl(settings.domain, repository),
         }),
+      gatewayCredential: (machine, harness) =>
+        Option.match(machine.gateway, {
+          onNone: () => Effect.succeedNone,
+          onSome: (gateway) => gatewayCredentialFor(gateway, harness),
+        }),
       grantFor,
       readOnlyAccessGap: Option.none(),
       reclaim,
-      // The grace covers an SSH round trip plus the agent flushing its final
-      // events, not just a local pipe.
       interruptGrace: options.interruptGrace ?? "10 seconds",
     });
     return Context.make(Executor, executor).pipe(Context.add(SshWorkers, workers));
   });
 
 /**
- * Runs Attempts on Linux machines the orchestrator connects to over SSH: each
- * Attempt's Pi parent is a durable task in this process (`AttemptRuntime`),
- * and its children run on the Worker's machine, one SSH command each. A
- * Worker without a Gateway gets the Attempt's single-repository GitHub token
- * written beside its checkout (ADR 0026); a Worker behind a Gateway gets no
- * token, only a caller token for the attachment the executor makes on the
- * Gateway's admin API through `HttpClient` (ADR 0027). It starts with the
- * Workers of `options`, and `SshWorkers` adds and removes Workers while it
- * runs. The executor opens its own SSH forward to a Gateway's admin API with
- * the first Worker behind that Gateway, reopens it whenever its SSH client
- * exits, and closes it with the last Worker behind it or with the layer. An
- * orchestrator restart reattaches a live Attempt to its checkout. Requires
- * Node; worker contracts are platform-free.
+ * The executor for Linux machines accessed over SSH. Each Attempt's Pi parent is a durable task
+ * in this process (`AttemptRuntime`), and each child runs on the machine as one SSH command.
+ * Without a Gateway, the Attempt's GitHub token is written next to its checkout (ADR 0026).
+ * Behind a Gateway, the machine gets only a caller token for an attachment made through the
+ * Gateway's admin API (ADR 0027). `SshWorkers` adds and removes Workers at runtime. Requires
+ * Node.
  */
 export const layer = (
   options: SshExecutorOptions,

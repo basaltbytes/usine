@@ -10,7 +10,7 @@ import { ADMIN_TOKEN_VALUE } from "./fixtures.ts";
 
 const MAIN = fileURLToPath(new URL("../src/node/main.ts", import.meta.url));
 
-/** A loopback port nothing listens on at the moment of the call. */
+/** Returns a loopback port that's free at the time of the call. */
 const freePort = () =>
   new Promise<number>((resolve, reject) => {
     const server = createServer();

@@ -6,9 +6,8 @@ import { layer as localLayer } from "./local.ts";
 import { layer as sshLayer, sshWorkerAddressesOf, sshWorkersOf } from "./ssh.ts";
 
 /**
- * The engine for the Workers `config` declares: the SSH executor when every
- * Worker is `ssh`, the local one otherwise. Any other mix fails at startup
- * with `UnsupportedWorkerError`, because one executor runs every Worker.
+ * Provides the engine for the Workers in `config`: the SSH executor if every Worker is `ssh`,
+ * otherwise the local one. Fails at startup with `UnsupportedWorkerError` on any other mix.
  */
 export const workerEngineLayer = (
   instanceDirectory: InstanceDirectory,

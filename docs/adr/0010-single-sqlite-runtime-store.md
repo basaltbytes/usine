@@ -1,40 +1,40 @@
-# One SQLite file inside the instance folder is the factory's whole runtime memory
+# One SQLite file in the instance folder stores all runtime state
 
-All durable runtime state — the Event ledger and payload snapshots, Run/Step/Attempt rows, attempt transcripts, runtime toggles (pause, intervention marks), polling watermarks, and Effect's own cluster tables — lives in a single SQLite database in a gitignored `.usine/` directory inside the instance repo folder. SQLite is v1's only shipped backend: the single orchestrator process sidesteps the known multi-process lock issue ([Effect-TS/effect#6176](https://github.com/Effect-TS/effect/issues/6176)), nothing in the design needs Postgres-only machinery (polling and cron are in-process timers; Effect's `SingleRunner` polls its own tables, no LISTEN/NOTIFY on any backend), and Postgres stays additive behind the SqlClient seam. The instance folder is therefore the entire factory — authored config committed, runtime state beside it — and moving or backing it up is copying one directory (orchestrator stopped). `usine backup <path>` takes an online copy of the runtime database; authored files and credentials remain separate.
+All durable runtime state is in one SQLite database in the instance folder's gitignored `.usine/` directory: the event ledger and payload snapshots, run, step, and attempt rows, transcripts, runtime toggles (pause, intervention marks), polling watermarks, and Effect's cluster tables. SQLite is v1's only backend. One orchestrator process avoids the lock issue ([Effect-TS/effect#6176](https://github.com/Effect-TS/effect/issues/6176)), polling and cron are in-process timers, and Effect's `SingleRunner` polls its own tables (no LISTEN/NOTIFY), so nothing needs Postgres, which can come later behind the `SqlClient` seam. The folder is the whole instance: to move or back it up, copy it with the orchestrator stopped.
 
-## Considered Options
+## Considered options
 
-- **SQLite + Postgres both in v1** — serves cloud/managed-DB operators day one, but costs portable-SQL discipline and a doubled test matrix for a single-operator tool; rejected as premature.
-- **Postgres only** — one engine, no lock questions, but a running Postgres before first launch breaks zero-config local-first.
-- **Separate databases for Effect and usine** — isolates the alpha dependency's churn, but splits the factory into two files that must move together; prefix separation (`cluster_*` vs usine's tables) in one database gives the isolation that matters.
-- **DB in an XDG data dir** — keeps the instance folder pure git, but the factory then spans two locations that must be gathered to move it.
+- **SQLite and Postgres in v1**: serves managed-database operators sooner, but costs portable-SQL discipline and a doubled test matrix for a single-operator tool. Premature.
+- **Postgres only**: one engine, no lock questions, but needing Postgres before first launch breaks zero-config local-first.
+- **Separate databases for Effect and usine**: isolates alpha-dependency churn, but splits the instance into two files that must move together. `cluster_*` prefixes in one database isolate enough.
+- **Database in an XDG data directory**: keeps the folder pure git, but the instance spans two locations to gather when moving it.
 
 ## Consequences
 
-- Run/Step/Attempt rows are a **projection** of Effect's engine state: usine's engine-seam code writes row transitions at every point it touches the workflow (launch, approval, retry, interrupt, envelope arrival), and a startup sweep polls Effect by deterministic executionId to repair crash-window drift. Effect's envelopes are engine-internal; usine's rows are the operator truth the UI reads.
-- Attempt transcripts are append-only rows in the same database, written as attempt-channel envelopes arrive — live tail and history are the same read; megabytes per attempt is acceptable at single-operator scale.
-- **v1 prunes nothing.** Dedup keys are permanent by decision ([ADR 0002](./0002-run-model-event-run-step-attempt.md)); snapshots, transcripts, and closed-run rows are kept, and Effect's envelope rows are never touched (undocumented alpha internals). Retention machinery is a post-v1 concern if a real factory's file actually gets big.
-- Pushing the instance repo to a remote backs up authored config but **not** runtime state. Losing the DB loses the "never act twice" ledger: on restart, cold start refires on all currently-matching state. For a whole-instance backup, stop the orchestrator and copy the instance folder. `usine backup <path>` copies the runtime database online; back up configuration and credentials separately.
-- usine's own tables migrate via the Effect SQL migrator, in usine's own migration table — same pattern, separate from `cluster_migrations`.
+- Run, step, and attempt rows **project** Effect's engine state: engine-seam code writes row transitions wherever it touches the workflow (launch, approval, retry, interrupt, envelope arrival), and a startup sweep polls Effect by deterministic `executionId` to repair crash drift. Effect's envelopes are internal; the UI reads usine's rows.
+- Transcripts are append-only rows in the same database, written as envelopes arrive, so live tail and history are one read. Megabytes per attempt is fine for one operator.
+- **v1 prunes nothing.** Dedup keys are permanent ([ADR 0002](./0002-run-model-event-run-step-attempt.md)); snapshots, transcripts, and closed runs are kept, and Effect's envelope rows (undocumented alpha internals) are untouched. Retention can follow v1 if a file grows large.
+- Pushing the instance repo backs up config, **not** runtime state. Losing the database loses the "never act twice" ledger: restart refires on all matching state. For a full backup, stop the orchestrator and copy the folder; `usine backup <path>` covers only the runtime database.
+- usine's tables migrate with the Effect SQL migrator, tracked apart from `cluster_migrations`.
 
-## Online backup and Run evidence
+## Online backup and run evidence
 
-`usine backup <path>` opens the runtime database read-only and copies all tables, including committed WAL data, through SQLite's backup API. It writes the copy beside the destination, then uses a hard link to create the final file without overwriting an existing path. The destination filesystem must support hard links. Restore with the orchestrator stopped: replace the runtime database, remove old WAL and SHM files, and use the matching instance configuration and engine version.
+`usine backup <path>` opens the runtime database read-only and copies all tables, committed WAL data included, through SQLite's backup API. It writes beside the destination and hard-links the final file, so no path is overwritten; the filesystem must support hard links. To restore, stop the orchestrator, replace the database, remove old WAL and SHM files, and match the instance configuration and engine version.
 
-`usine export-run <runId>` reads a Run snapshot and every saved transcript entry through `RunReader.evidence` in one transaction. The JSON contains the evidence for that Run; use a database backup to restore the factory. Neither command prunes data or changes the deduplication ledger.
+`usine export-run <runId>` reads a run snapshot and all saved transcript entries through `RunReader.evidence` in one transaction, as that run's JSON evidence; restoring needs a database backup. Neither command prunes data or changes the dedup ledger.
 
 ## Amendment (2026-10-08, #176): two SQLite files in the instance directory
 
-The instance directory now holds two SQLite files: usine's runtime database, and the pi-durable storage (`.usine/durable.sqlite`) that holds each local Attempt's parent task and conversations (ADR 0006 amendment of the same date). They use separate connections and never share a transaction. pi-durable owns its storage format and assumes one writer per storage, and it commits through its own connection whatever file it uses, so putting it in usine's file would buy no atomicity.
+The instance directory now has two SQLite files: the runtime database and pi-durable storage (`.usine/durable.sqlite`) with each local attempt's parent task and conversations (ADR 0006 amendment of the same date). They use separate connections, never one transaction. pi-durable controls its format, assumes one writer, and commits through its own connection, so sharing usine's file would add no atomicity.
 
-The projection-plus-startup-sweep pattern therefore stays for the rows usine keeps. An Attempt row can say open while its parent task has finished, failed, or is still running; at startup the engine reads the task's liveness through the executor and either reattaches the Attempt or fails it, and executor recovery cancels a live task whose Attempt row is already closed. A transcript envelope that a reattached parent sends again after a restart is identified by its Attempt, direction, and channel sequence, and keeps its first stored copy, so the transcript stays one contiguous sequence.
+The projection-plus-sweep pattern therefore stays for usine's rows. An attempt row can say open while its task finished, failed, or still runs: at startup, the engine reads task liveness through the executor and reattaches or fails the attempt, and executor recovery cancels live tasks of closed attempts. A reattached parent's resent envelope is identified by attempt, direction, and channel sequence, and the first stored copy is kept, so the transcript stays contiguous.
 
-Startup order matters: the durable storage is opened and its tasks resumed before the engine reconciles worktrees and recovers Runs. The layers enforce it, since the engine needs the `StepExecutor`, which needs the local executor, which needs the `AttemptRuntime`. Moving or backing up the factory now means copying both files with the orchestrator stopped.
+Durable storage opens and resumes its tasks before the engine reconciles worktrees and recovers runs, an order the layers enforce: the engine needs the `StepExecutor`, which needs the local executor, which needs the `AttemptRuntime`. To move or back up the instance, copy both files with the orchestrator stopped.
 
 ## Amendment (2026-10-12, #183): `usine backup` copies both files
 
-`usine backup <path>` copies the durable storage beside the runtime database (`<name>.durable<ext>`) with the same read-only connection, SQLite backup API, and hard link into place. The two copies are not one snapshot, so the durable storage is copied first: the runtime copy is then the newer one, and any Attempt it shows open either has its parent task in the durable copy or is failed as interrupted and retried. Restore both files together from the same backup.
+`usine backup <path>` also copies the durable storage (`<name>.durable<ext>`) the same way. The copies aren't one snapshot, so the durable storage goes first: every attempt the newer runtime copy shows open either has its task in the durable copy or fails as interrupted and is retried. Restore both files from the same backup.
 
-## Amendment (2026-10-11, #176): the cluster tables are gone
+## Amendment (2026-10-11, #176): the cluster tables are removed
 
-A migration drops `usine_workflow_commands` and Effect's `cluster_messages`, `cluster_replies`, and `cluster_migrations` with the Effect workflow (ADR 0003 amendment of the same date), so the runtime database holds only usine's own tables and pi-durable's storage is the second file.
+A migration drops `usine_workflow_commands` and Effect's `cluster_messages`, `cluster_replies`, and `cluster_migrations` with the Effect workflow (ADR 0003 amendment of the same date), leaving only usine's tables; pi-durable's storage is the second file.

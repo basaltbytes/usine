@@ -45,7 +45,7 @@ const instanceFolderLayer = InstanceFolder.layer.pipe(
   Layer.provide(NodeServices.layer),
 );
 
-/** Loads the instance folder and keeps it reloadable; an invalid `usine.yaml` stops startup. */
+/** Loads the instance folder and keeps it reloadable. Fails if `usine.yaml` is invalid. */
 const loadInstance = Effect.fn("Server.loadInstance")(function* (directory: InstanceDirectory) {
   const context = yield* Layer.build(instanceFolderLayer);
   const initial = yield* Context.get(context, InstanceFolder).load(directory);
@@ -68,7 +68,7 @@ const serve = Effect.fn("Server.serve")(function* (options: {
   );
   yield* Console.log(
     options.openSetupPage
-      ? `usine is waiting for GitHub App setup at ${options.url}`
+      ? `usine is running in setup mode at ${options.url}`
       : `usine is running at ${options.url}`,
   );
   if (options.openSetupPage) {
@@ -114,7 +114,7 @@ export const up = (port: Port, allowVolatileInstance: boolean) =>
       yield* refuseVolatileInstance(directory, allowVolatileInstance).pipe(
         Effect.provide(NodeServices.layer),
       );
-      // Taken before any store opens and released after every store has closed.
+      // Acquired before any store opens and released after every store closes.
       yield* holdInstance(directory).pipe(Effect.provide(NodeServices.layer));
       yield* refuseTakenPort(port).pipe(Effect.provide(NodeServices.layer));
       const instances = yield* loadInstance(directory);

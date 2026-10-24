@@ -259,8 +259,8 @@ describe("queued Event trigger re-check", () => {
 
           yield* Deferred.succeed(gate, undefined);
           yield* waitFor(engine, first.runId, ({ run }) => run.state._tag === "Succeeded");
-          // The first approval covered only its own Run: the queued Event's
-          // Run parks on the gate again before any Attempt.
+          // The first approval applies only to its own Run; the queued Event's Run waits for
+          // approval before any Attempt.
           const secondRunId = yield* runIdFor(second);
           const parked = yield* waitFor(
             engine,

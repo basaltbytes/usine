@@ -5,20 +5,14 @@ import { cn } from "@/lib/utils";
 import { dayTimeLabel, timestampLabel } from "../operator-copy.ts";
 import { projectParams } from "../overview.ts";
 
-/**
- * Who ran an earlier Run again to open this one, when, and which Run it was, as one quiet line
- * that wraps only between its parts. A Run its trigger opened shows nothing.
- */
+/** If the Run was opened by its trigger, renders nothing. */
 export const RunAgainLine = ({
   run,
   source,
   className,
 }: {
   readonly run: Pick<RunView, "runAgain" | "openedAt" | "repository">;
-  /**
-   * How the earlier Run's short id shows: `link` opens its Run page; `text` is for a line inside
-   * a control that opens something else, where a link cannot nest.
-   */
+  /** `link` links the earlier Run's short ID to its Run page; `text` is for use inside another link or button. */
   readonly source: "link" | "text";
   readonly className?: string;
 }) => {
@@ -45,7 +39,7 @@ export const RunAgainLine = ({
       <span className="whitespace-nowrap">
         from run{" "}
         {source === "link" ? (
-          // Raised above the link a Task page row stretches over itself.
+          // Raised above the row-covering link on a Task page.
           <Link
             to="/projects/$owner/$name/runs/$run"
             params={{ ...projectParams(run.repository), run: from }}

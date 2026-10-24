@@ -40,9 +40,9 @@ import {
 } from "./transcript.ts";
 import { ApprovalView, RunDurationView, RunView } from "./run.ts";
 
-/** How many newest rows one cold drawer open loads per Attempt. */
+/** The number of newest rows loaded per Attempt when a drawer opens. */
 const COLD_TRANSCRIPT_LIMIT = 500;
-/** The row cap for one live catch-up response across all Attempts. */
+/** The maximum rows in one live catch-up response across all Attempts. */
 const TAIL_TRANSCRIPT_LIMIT = 500;
 
 export const failureView = (failure: AttemptFailure): FailureView =>
@@ -64,7 +64,7 @@ const attemptOutcomeView = (outcome: AttemptOutcome) =>
     Canceled: () => new CanceledAttemptView(),
   });
 
-/** How the operator reaches each Worker an instance's `usine.yaml` declares, by name. */
+/** How the operator accesses each Worker declared in `usine.yaml`, by name. */
 export type WorkerAccesses = ReadonlyMap<WorkerName, WorkerAccess>;
 
 const workerAccess = (worker: ConfigWorker): WorkerAccess => {
@@ -77,8 +77,8 @@ const workerAccess = (worker: ConfigWorker): WorkerAccess => {
         port: Option.getOrNull(worker.port),
       });
     case "exe.dev":
-      // exe.dev names the VM after the Worker and serves it at `<vm>.exe.xyz`
-      // on the default port; `usine.yaml` holds no address for it.
+      // exe.dev names the VM after the Worker and serves it at `<vm>.exe.xyz` on the default port;
+      // `usine.yaml` has no address for it.
       return new SshWorkerAccess({
         destination: SshDestination.make(`${worker.name}.exe.xyz`),
         port: null,
@@ -86,7 +86,7 @@ const workerAccess = (worker: ConfigWorker): WorkerAccess => {
   }
 };
 
-/** Reads how the operator reaches each of `workers`, as `runView` reports it per Attempt. */
+/** Returns how the operator accesses each of `workers`. */
 export const workerAccesses = (workers: ReadonlyArray<ConfigWorker>): WorkerAccesses =>
   new Map(workers.map((worker) => [worker.name, workerAccess(worker)]));
 
@@ -119,9 +119,8 @@ const attemptView = (
 };
 
 /**
- * Adds up how long a Run's Attempts worked; the open one counts on from its
- * start in the reader. An Attempt closed before end times were recorded ends
- * at its newest transcript row, as the reader shows it, from `lastRows`.
+ * Returns the time a Run's Attempts worked, with the open Attempt's start in `runningSince`. An
+ * Attempt with no recorded end ends at its newest transcript row from `lastRows`.
  */
 export const runDuration = (
   attempts: RunSnapshot["attempts"],
@@ -153,7 +152,7 @@ export const runDuration = (
   return new RunDurationView({ endedMillis, runningSince, unmeasured });
 };
 
-/** The newest transcript row's time of each closed Attempt that has no recorded end. */
+/** Reads the newest transcript row time of each closed Attempt with no recorded end. */
 export const readUnrecordedEnds = Effect.fn("Operator.readUnrecordedEnds")(function* (
   runs: RunReader["Service"],
   snapshot: RunSnapshot,
@@ -178,10 +177,7 @@ export const readUnrecordedEnds = Effect.fn("Operator.readUnrecordedEnds")(funct
   );
 });
 
-/**
- * The Event of each running Run among `summaries`, by Run, for `projectBoard`: a running Run
- * keeps its Task's card in the lane its trigger matched, read from the Event's payload.
- */
+/** Reads the Event of each running Run in `summaries`, by Run, for `projectBoard`. */
 export const readRunningEvents = Effect.fn("Operator.readRunningEvents")(function* (
   runs: RunReader["Service"],
   summaries: ReadonlyArray<RunSummary>,
@@ -196,8 +192,8 @@ export const readRunningEvents = Effect.fn("Operator.readRunningEvents")(functio
 });
 
 /**
- * The operator's view of a saved Run: `pausedLoops` says whether its Loop is
- * paused and `workers` how each Attempt's Worker is reached.
+ * Returns the operator's view of a saved Run. `pausedLoops` gives the paused Loops and `workers`
+ * how each Attempt's Worker is accessed.
  */
 export const runView = (
   snapshot: RunSummary,
@@ -259,7 +255,7 @@ const transcriptPayload = (
     WorkerResponsive: (value) => value,
   });
 
-/** Projects one transcript row, preserving attribution and excluding private failure causes. */
+/** Returns the view of one transcript row, with attribution and without private failure causes. */
 export const transcriptEvent = (entry: TranscriptEntry): TranscriptEventView => {
   const fields = {
     sequence: entry.sequence,

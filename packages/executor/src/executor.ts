@@ -12,7 +12,6 @@ import { BotLogin, WorkerName, WorkerKind } from "@usine/core/worker";
 import { StepResult } from "@usine/core/step/result";
 import { Context, Effect, Option, type Result, Schema, Scope } from "effect";
 
-/** The Worker operation that failed during readiness checks or an Attempt's lifecycle. */
 export const ExecutorOperation = Schema.Literals([
   "preflight",
   "prepare",
@@ -22,12 +21,6 @@ export const ExecutorOperation = Schema.Literals([
 ]);
 export type ExecutorOperation = typeof ExecutorOperation.Type;
 
-/**
- * A prerequisite a Worker must satisfy before it can accept Attempts.
- * `memory` is enough memory on the Worker's machine for its concurrent
- * Attempts. `gateway` is the Gateway in front of the Worker's machine: its
- * admin API answers the orchestrator, and the machine reaches it.
- */
 export const WorkerCapability = Schema.Literals([
   "machine",
   "toolchain",
@@ -38,78 +31,59 @@ export const WorkerCapability = Schema.Literals([
 ]);
 export type WorkerCapability = typeof WorkerCapability.Type;
 
-/** A Worker operation failed before its requested work completed. */
 export class ExecutorOperationError extends Schema.TaggedError<ExecutorOperationError>(
   "@usine/executor/ExecutorOperationError",
 )("ExecutorOperationError", {
-  /**
-   * The operation that failed. `cleanup` covers removing a checkout, its
-   * credential, or the credentials an earlier process left on a Worker.
-   */
+  /** `cleanup` includes removing a checkout, its credential, or credentials left by an earlier process. */
   operation: ExecutorOperation,
-  /**
-   * A summary for operators, such as the command that exited non-zero. The
-   * error has no Worker field, so a caller that reports it names the Worker
-   * itself. The wording is not part of the contract: callers branch on `operation`.
-   */
+  /** An operator-facing summary without the Worker name. Not part of the contract; branch on `operation`. */
   message: Schema.NonEmptyString,
-  /** The underlying failure, for example an `Error` holding a command's standard error, or a timeout. */
+  /** The underlying failure, for example an `Error` with the command's stderr, or a timeout. */
   cause: Schema.Defect(),
 }) {}
 
 /**
- * Why a Worker could not obtain access to a repository. `refused`: the answer
- * does not change on a retry, such as a GitHub App installation that does not
- * cover the repository, lacks a permission, or is suspended, or an exe.dev
- * Worker with no GitHub integration for the repository. `unreachable`: the
- * access could not be obtained now, such as a GitHub outage or rate limit, or
- * a Gateway or exe.dev command that did not answer.
+ * `refused` if a retry gets the same result: the installation doesn't cover the repository,
+ * lacks a permission, or is suspended, or an exe.dev Worker has no integration for it.
+ * `unreachable` if a retry can succeed: a GitHub outage or rate limit, or no response from a
+ * Gateway or exe.dev command.
  */
 export const CredentialUnavailableReason = Schema.Literals(["refused", "unreachable"]);
 export type CredentialUnavailableReason = typeof CredentialUnavailableReason.Type;
 
-/** A Worker could not obtain access to the repository assigned to an Attempt. */
 export class CredentialUnavailableError extends Schema.TaggedError<CredentialUnavailableError>(
   "@usine/executor/CredentialUnavailableError",
 )("CredentialUnavailableError", {
-  /** The repository the Attempt needed access to. */
   repository: RepositoryName,
-  /** Whether trying again can succeed: never for `refused`, possibly later for `unreachable`. */
   reason: CredentialUnavailableReason,
-  /**
-   * A summary for operators, such as a GitHub App installation that does not
-   * cover the repository, with the reason GitHub gave when it refused, or an
-   * exe.dev Worker with no GitHub integration for it.
-   */
+  /** An operator-facing summary, including GitHub's reason for a refusal. */
   message: Schema.NonEmptyString,
-  /** The underlying failure, for example the GitHub API error returned while minting the token. */
+  /** The underlying failure, for example the GitHub API error from minting the token. */
   cause: Schema.Defect(),
 }) {}
 
-/** A verify-only preflight found a Worker capability missing or incompatible. */
+/** The error when preflight finds a Worker capability missing or incompatible. */
 export class WorkerCapabilityError extends Schema.TaggedError<WorkerCapabilityError>(
   "@usine/executor/WorkerCapabilityError",
 )("WorkerCapabilityError", {
-  /** The Worker that lacks the capability. */
   worker: WorkerName,
   /**
-   * The missing prerequisite. `machine`: the machine or VM is absent, stopped,
-   * or unreachable, or its Worker directory is not writable. `toolchain`: Git or a brain's
-   * harness does not run. `memory`: the machine has less than 1.5 GiB of memory per
-   * concurrent Attempt, has no swap for more than one, or does not report its memory.
-   * `harness-login`: a brain's harness is not logged in. `credentials`: an exe.dev
-   * GitHub integration is not ready, or the Worker kind cannot give an Attempt of a
-   * Loop with `permissions: read` access that cannot push. `gateway`: the Gateway in front of the machine
-   * does not answer or is not reachable from it.
+   * - `machine`: the machine or VM is absent, stopped, or unreachable, or its Worker directory
+   *   isn't writable.
+   * - `toolchain`: Git or a brain's harness doesn't run.
+   * - `memory`: less than 1.5 GiB per concurrent Attempt, no swap for more than one, or memory
+   *   not reported.
+   * - `harness-login`: a brain's harness isn't logged in.
+   * - `credentials`: an exe.dev integration isn't ready, or the Worker kind can't issue a
+   *   read-only credential for a `permissions: read` Loop.
+   * - `gateway`: the Gateway doesn't respond or isn't reachable from the machine.
    */
   capability: WorkerCapability,
-  /** A summary for operators of the check that failed. */
   message: Schema.NonEmptyString,
-  /** What the check observed, for example the unrecognized `git --version` output or the harness's readiness report. */
+  /** The observed value, for example unrecognized `git --version` output or the harness readiness report. */
   cause: Schema.Defect(),
 }) {}
 
-/** A readiness, access, or lifecycle failure reported by a Worker operation. */
 export const ExecutorError = Schema.Union([
   ExecutorOperationError,
   CredentialUnavailableError,
@@ -117,7 +91,7 @@ export const ExecutorError = Schema.Union([
 ]);
 export type ExecutorError = typeof ExecutorError.Type;
 
-/** Logs every preflight refusal so a missing capability is explainable from logs alone. */
+/** Logs each preflight failure at error level. */
 export const logPreflightFailure = <A, R>(
   effect: Effect.Effect<A, ExecutorError, R>,
 ): Effect.Effect<A, ExecutorError, R> =>
@@ -135,147 +109,113 @@ export const logPreflightFailure = <A, R>(
         }),
   );
 
-/** The repository, revision, and Agent task assigned to a Worker for one Attempt's checkout. */
 export class CheckoutRequest extends Schema.Class<CheckoutRequest>(
   "@usine/executor/CheckoutRequest",
 )({
-  /**
-   * The Attempt this checkout is for. It names the checkout directory, and
-   * `cancel`, `intervene`, `isLive`, and `outcome` find the Attempt by it.
-   */
+  /** The checkout directory name, and the key for `cancel`, `intervene`, `isLive`, and `outcome`. */
   attemptId: AttemptId,
-  /** The Worker that prepares the checkout and runs the Attempt's children. */
   worker: WorkerName,
-  /**
-   * The GitHub repository to check out. The Attempt's credential gives access to
-   * this repository only (ADR 0011).
-   */
+  /** The only repository the Attempt's credential can access (ADR 0011). */
   repository: RepositoryName,
-  /** The Loop that opened the Attempt's Run. A `read` checkout's pre-push hook names it in its message. */
+  /** The Loop of the Attempt's Run, shown in a `read` checkout's pre-push hook message. */
   loop: LoopName,
   /**
-   * What the Attempt may do to `repository` (ADR 0011). With `read`, its
-   * credential cannot push, and a Worker kind that cannot give it such a
-   * credential refuses it with a `credentials` capability error. Its
-   * checkout's pre-push hook tells the Agent why a push fails, and an
-   * unsuccessful end removes the checkout without salvage.
+   * The Attempt's access to `repository` (ADR 0011). With `read`, the credential can't push, a
+   * pre-push hook explains rejected pushes, and an unsuccessful Attempt's checkout is removed
+   * without salvage. A Worker kind that can't issue such a credential fails `prepare` with a
+   * `credentials` capability error.
    */
   permissions: LoopPermissions,
-  /**
-   * What to fetch. Preparation resolves it to a commit, which becomes the
-   * RunSpec's `baseCommit`, so a branch that moves later does not change the checkout.
-   */
+  /** The revision to fetch, resolved to a commit during preparation and stored as the RunSpec's `baseCommit`. */
   revision: RepositoryRevision,
-  /** The payload of the event that triggered the Run. The parent's prompt includes it as JSON. */
+  /** The payload of the event that triggered the Run, included as JSON in the parent's prompt. */
   payload: Schema.Json,
-  /** The task text the parent receives, after Loop interpolation or an operator's amendment. */
+  /** The parent's task text, after Loop interpolation or operator amendment. */
   task: AttemptTask,
   /**
-   * The rostered Agent that runs the Attempt. Its persona and name go into the
-   * parent's prompt, and its brain runs the children. Preparation verifies that
-   * brain on the Worker first.
+   * The Agent whose persona and name go in the parent's prompt and whose brain runs the
+   * children. Preparation verifies the brain on the Worker.
    */
   agent: Agent,
   /**
-   * The model for the Pi parent. When none is given, the parent uses the
-   * configured default model, then the first model with a credential. A model
-   * that Pi does not know fails the launch.
+   * The Pi parent's model. If `None`, uses the configured default model, then the first model
+   * with a credential. A model unknown to Pi fails the launch.
    */
   parentModel: Schema.Option(ModelId),
-  /**
-   * The most child sessions the parent may start over the Attempt's lifetime.
-   * The next one fails the Attempt with a `ChildSessionBudgetFailure`.
-   */
+  /** The maximum child sessions per Attempt. One more fails the Attempt with `ChildSessionBudgetFailure`. */
   maxChildren: ChildSessionBudget,
-  /** Maximum minutes of live Attempt execution, or none for no timer; preparation and resource cleanup are outside this budget. */
+  /** The maximum minutes of Attempt execution, excluding preparation and cleanup, or `None` for no limit. */
   maxAttemptMinutes: Schema.Option(Schema.Int.check(Schema.isGreaterThan(0))),
-  /** Maximum consumed tokens across the parent and every child, or none for no token ceiling; operator Holds never pause this ceiling. */
+  /** The maximum tokens consumed by the parent and all children, or `None` for no limit. Holds don't pause it. */
   maxAttemptTokens: Schema.Option(Schema.Int.check(Schema.isGreaterThan(0))),
-  /** The reasoning effort of the Pi parent. The launch fails if the parent's model does not support it. */
+  /** The Pi parent's reasoning effort. The launch fails if the model doesn't support it. */
   parentEffort: Effort,
-  /** Where the Worker pushes this Attempt's unfinished work if the Attempt ends without success. */
+  /** The ref that unfinished work is pushed to if the Attempt doesn't succeed. */
   salvageRef: SalvageRef,
-  /** The previous Attempt's pushed salvage to check out instead of the bare revision. */
+  /** The previous Attempt's pushed salvage, checked out instead of `revision`. */
   resume: Schema.Option(SalvagePushed),
   /**
-   * The Attempt outlived an orchestrator restart and its parent task is still
-   * live: preparation takes over the checkout it already has instead of
-   * creating one, and launch reattaches to the running parent.
+   * Whether the parent task is still live after an orchestrator restart. If true, preparation
+   * reuses the existing checkout and launch reattaches to the parent.
    */
   reattach: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
   /**
-   * The bot login the Attempt writes to GitHub as, which harvesting matches
-   * the comments it collects against. Preparation copies it into the RunSpec.
-   * None when the caller does not know it; harvesting then asks GitHub which
-   * login the Attempt's credential has.
+   * The GitHub login the Attempt writes as, copied into the RunSpec; harvesting collects comments
+   * by this author. If `None`, harvesting asks GitHub for the credential's login.
    */
   botLogin: Schema.Option(BotLogin).pipe(
     Schema.withConstructorDefault(Effect.succeed(Option.none<BotLogin>())),
   ),
 }) {}
 
-/** One Attempt's disposable checkout directory. */
 export const WorktreePath = Schema.NonEmptyString.pipe(Schema.brand("WorktreePath"));
 export type WorktreePath = typeof WorktreePath.Type;
 
-/** The serializable location and RunSpec of an Attempt checkout. Owning this record does not grant access to live resources or credentials. */
+/** A serializable checkout location and RunSpec, without credentials or live resources. */
 export class AttemptWorkspace extends Schema.Class<AttemptWorkspace>(
   "@usine/executor/AttemptWorkspace",
 )({
-  /** The Worker whose machine holds the checkout. */
   worker: WorkerName,
-  /**
-   * What the Attempt's parent launches with: the request's fields plus the
-   * commit that preparation resolved the revision to.
-   */
+  /** The request's fields plus the commit that `revision` resolved to. */
   spec: AttemptChannel.RunSpec,
-  /** The checkout's path on the Worker's machine. The parent's children run in it. */
+  /** The checkout path on the Worker's machine, where the children run. */
   worktree: WorktreePath,
 }) {}
 
 /**
- * One prepared Attempt with a scoped checkout and repository access. Use it within
- * the scope that prepared it. Closing that scope stops any active session before
- * removing the checkout and releasing credentials, including when launch never starts.
+ * An Attempt prepared in the caller's scope and valid only within it. Closing that scope stops
+ * any active session, removes the checkout, and releases credentials, whether or not `launch`
+ * ran.
  */
 export interface PreparedAttempt {
-  /** Checkout metadata suitable for inspection or serialization; contains no credentials. */
   readonly workspace: AttemptWorkspace;
   /**
-   * Runs this Attempt once, recording channel activity through `io`. Completion,
-   * failure, or interruption releases its resources before returning. Cleanup
-   * failures are logged without replacing the agent's outcome or retrying its work.
-   * Reusing an Attempt after launch or release fails with an infrastructure error.
+   * Runs the Attempt once, writing channel activity to `io`, and releases its resources before
+   * returning. Cleanup failures are logged without changing the result. Fails with an
+   * infrastructure `AttemptFailure` if called again or after release.
    */
   readonly launch: (io: AttemptChannel.Sink) => Effect.Effect<StepResult, AttemptFailure>;
 }
 
-/** A repository-scoped Worker credential and the instant at which it stops authorizing requests. */
 export class WorkerCredential extends Schema.Class<WorkerCredential>(
   "@usine/executor/WorkerCredential",
 )({
   /**
-   * The token that git and gh authenticate with. The executor never writes it
-   * inside the checkout. When the Attempt's scope closes, it removes the token
-   * from this `Redacted` wrapper, so `Redacted.value` on it throws from then on.
+   * The token for git and gh, never written inside the checkout. Wiped when the Attempt's scope
+   * closes; `Redacted.value` then throws.
    */
   value: Schema.Redacted(Schema.String),
-  /** When the token stops working. The executor requests a new credential once five minutes or fewer remain. */
+  /** A new credential is requested when five minutes or less remain. */
   expiresAt: Schema.DateTimeUtc,
 }) {}
 
-/** Mints renewable repository-scoped credentials for an Attempt. */
 export class CredentialProvider extends Context.Service<
   CredentialProvider,
   {
     /**
-     * Returns a new credential for `repository` only, at the level of the
-     * Attempt's Loop `permissions`: a `read` credential cannot push. The local
-     * and SSH executors call it when preparing the Attempt `attemptId`, then
-     * again before each credential expires, until the Attempt's resources are
-     * released. A failure during preparation fails `prepare`; its `reason`
-     * says whether a retry can succeed. A failed renewal is logged and tried
-     * again 30 seconds later.
+     * Returns a credential for `repository` only, with `permissions` (`read` can't push). The local
+     * and SSH executors call it during `prepare` and again before each expiry until the Attempt's
+     * resources are released; a failed renewal is logged and retried after 30 seconds.
      */
     readonly issue: (
       repository: RepositoryName,
@@ -285,47 +225,40 @@ export class CredentialProvider extends Context.Service<
   }
 >()("@usine/executor/CredentialProvider") {}
 
-/** Prepares isolated checkouts, runs Attempts on a Worker, and releases their resources (ADR 0006). */
+/** The service that prepares checkouts, runs Attempts on a Worker, and releases their resources (ADR 0006). */
 export class Executor extends Context.Service<
   Executor,
   {
     /**
-     * Reconciles an old checkout before new Attempts start; records its salvage before releasing
-     * any work. The orchestrator calls it only for an Attempt that no Run reattaches, so it first
-     * stops the Attempt's parent task if durable storage still holds it live, and reconciles the
-     * checkout of an open Attempt even when `isLive` reports it. When that task cannot be confirmed
-     * stopped, it fails with a `cancel` `ExecutorOperationError` and leaves the checkout in place,
-     * since the task may still write to it. For an open Attempt whose parent
-     * task failed before the orchestrator stopped, it first records the comments the Attempt
-     * posted on its Run's Item, harvested from the checkout with the Attempt's credential; a
-     * checkout or credential that is gone records none.
+     * Reconciles the checkout of an Attempt that no Run reattaches, recording its salvage before
+     * releasing any work, even if `isLive` returns true. First stops the parent task if durable
+     * storage marks it live; if the task can't be confirmed stopped, fails with a `cancel`
+     * `ExecutorOperationError` and leaves the checkout. For an open Attempt whose parent task
+     * failed before the orchestrator stopped, first records the comments it posted on the Run's
+     * Item.
      */
     readonly recover: <E>(
       attempt: AttemptRecovery,
       record: RecoverySink<E>,
     ) => Effect.Effect<void, E | ExecutorError>;
-    /**
-     * The kind of Worker this executor runs Attempts on. Each executor serves one
-     * kind, and the orchestrator does not start when a configured Worker has another.
-     */
+    /** The orchestrator doesn't start if a configured Worker has a different kind. */
     readonly kind: WorkerKind;
     /**
-     * Whether the orchestrator can reattach to the Attempt's parent task after a restart: the
-     * task is still running, or it reported success before the executor harvested its checkout.
+     * Returns whether the parent task is still running, or reported success before its checkout
+     * was harvested. If true, the orchestrator reattaches after a restart.
      */
     readonly isLive: (attemptId: AttemptId) => Effect.Effect<boolean, AttemptFailure>;
     /**
-     * The result that an Attempt's finished parent task wrote to durable storage before an
-     * orchestrator restart: the harvested result, or the parent's failure. None when
-     * nothing is stored, or when `isLive` returns true and the orchestrator reattaches instead.
+     * Returns the result a finished parent task stored before an orchestrator restart: the
+     * harvested result or the parent's failure. Returns `None` if nothing is stored or `isLive` is
+     * true.
      */
     readonly outcome: (
       attemptId: AttemptId,
     ) => Effect.Effect<Option.Option<Result.Result<StepResult, AttemptFailure>>, AttemptFailure>;
     /**
-     * Verifies Git, that the Worker's machine has the memory to run
-     * `maxConcurrentAttempts` Attempts at the same time, and each rostered
-     * brain where the Worker runs children; never installs tools or logs in.
+     * Verifies Git, enough memory for `maxConcurrentAttempts` concurrent Attempts, and each brain
+     * in `brains`. Never installs tools or logs in.
      */
     readonly preflight: (
       worker: WorkerName,
@@ -333,22 +266,21 @@ export class Executor extends Context.Service<
       maxConcurrentAttempts: number,
     ) => Effect.Effect<void, ExecutorError>;
     /**
-     * Verifies the assigned brain before acquiring the Attempt in the caller's scope. Clone, fetch, and lock waits
-     * remain interruptible; partial preparation releases everything already acquired
-     * before reporting failure. Each request identifies a fresh Attempt, or a live one
-     * to reattach when `reattach` is set.
+     * Verifies the Agent's brain, then acquires the checkout and credential in the caller's scope.
+     * Clone, fetch, and lock waits are interruptible; on failure, releases everything acquired so
+     * far. `attemptId` must be new unless `reattach` is set.
      */
     readonly prepare: (
       request: CheckoutRequest,
     ) => Effect.Effect<PreparedAttempt, ExecutorError, Scope.Scope>;
     /**
-     * Stops preparation and releases partial resources, or cancels the live
-     * parent task with a grace period before forced termination, including one that outlived a
-     * restart and was not reattached. Fails when that parent task cannot be confirmed stopped. A
-     * canceled prepared Attempt cannot launch. Repeated cancellation after release is a no-op.
+     * Stops preparation and releases partial resources, or cancels the live parent task with a
+     * grace period before forced termination, including one not reattached after a restart. Fails
+     * if the parent task can't be confirmed stopped. A canceled Attempt can't launch; after
+     * release, does nothing.
      */
     readonly cancel: (attemptId: AttemptId) => Effect.Effect<void, ExecutorError>;
-    /** Delivers an attributed operator action to the active Attempt's live session. */
+    /** Sends an operator intervention to the Attempt's live session. */
     readonly intervene: (
       attemptId: AttemptId,
       intervention: AttemptChannel.Intervention,

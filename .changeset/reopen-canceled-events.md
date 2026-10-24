@@ -2,4 +2,4 @@
 "@usine/engine": patch
 ---
 
-An Event whose Run was canceled, superseded, or revoked opens a new Run when the Loop sees the Item leave that state and come back to it, for example after a label is removed and added again. A queued Event that a revoke ignored opens the same way. While the Item stays as it was, a later sighting still joins the canceled Run. The new Run's Event has the dedup key `["reopened", n, <original key>]`, so existing Run ids do not change. The engine records what each Loop last saw of an Item in the new `usine_loop_items` table.
+An event whose run was canceled, superseded, or revoked, or a queued event that a revoke ignored, opens a new run when the item leaves that state and comes back to it, for example when a label is removed and added again. The new run's event has the dedup key `["reopened", n, <original key>]`, and the engine records each loop's last sighting of an item in the new `usine_loop_items` table.

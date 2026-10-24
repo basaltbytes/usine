@@ -1,14 +1,14 @@
 # pi-durable 1.1.0 as the Pi parent runtime
 
-Research date: 2026-10-08. Sources: the [announcement](https://earendil.com/posts/pi-durable), the published `@earendil-works/pi-durable@1.1.0` package (README, CHANGELOG, type declarations), `packages/durable/docs/spec.md` and the examples in the [pi repo](https://github.com/earendil-works/pi), the experimental durable coding agent at `packages/coding-agent/src/experimental/durable`, and a crash-and-resume experiment run against the package (appendix).
+Research date: 2026-10-08. Sources: the [announcement](https://earendil.com/posts/pi-durable), the published `@earendil-works/pi-durable@1.1.0` package (README, CHANGELOG, type declarations), `packages/durable/docs/spec.md` and the examples in the [pi repo](https://github.com/earendil-works/pi), the experimental durable coding agent at `packages/coding-agent/src/experimental/durable`, and a crash-and-resume experiment against the package (appendix).
 
 ## Finding
 
-pi-durable is a single-process agent harness over one storage: conversations, model turns, tool calls, and host documents are committed atomically before anything is shown, and a reopened storage continues unfinished work from its last checkpoint. It ships SQLite (Node and Cloudflare Durable Object), JSONL, and memory backends, a conformance suite for custom ones, a durable task state machine with ownership and bottom-up abort, an inbox (steer, follow-up, write) for busy conversations, per-conversation agent configuration stored as names, and two observation surfaces (`watch()` for structural view operations, `watchEvents()` for coding-agent style events) that late joiners attach to without replay.
+pi-durable is a single-process agent harness over one storage. It commits conversations, model turns, tool calls, and host documents atomically before showing them, and a reopened storage continues unfinished work from its last checkpoint. It has SQLite (Node and Cloudflare Durable Object), JSONL, and memory backends with a conformance suite for custom ones; a durable task state machine with ownership and bottom-up abort; an inbox (steer, follow-up, write) for busy conversations; per-conversation agent configuration stored as names; and `watch()` (structural view operations) and `watchEvents()` (coding-agent style events), which late joiners attach to without replay.
 
-It replaces usine's **attempt channel, run host, transcript store, Pi parent session plumbing, and the Effect workflow that holds the Run lifecycle**, and adds what usine does not have today: resume of a live Attempt after an orchestrator crash, late-join and multi-client observation of a running session, and operator interventions as ordinary submissions. It does **not** replace the child harness backends (Claude Agent SDK, Codex app-server, Pi child), the executor's worktree, credential, and salvage work, triggers and the Event ledger, the Item and Event rows, or the web UI. Those are the larger part of the code.
+It replaces usine's **attempt channel, run host, transcript store, Pi parent session plumbing, and run-lifecycle Effect workflow**, and adds attempt resume after an orchestrator crash, late-join and multi-client observation, and interventions as ordinary submissions. It does **not** replace the larger part of the code: the child harness backends (Claude Agent SDK, Codex app-server, Pi child), the executor's worktree, credential, and salvage work, triggers, the event ledger, item and event rows, and the web UI.
 
-Adopting it means one architectural change: the Pi parent moves from the Worker into the orchestrator process, and Workers become the place children run. The Run lifecycle itself becomes a pi-durable task on the same storage, so one durable substrate holds Runs, Attempts, and conversations. That replaces ADR 0003's Effect workflow and ADR 0006's one-shot run host; the ADRs get a dated amendment with the new why.
+Adopting it moves the Pi parent from the worker into the orchestrator, and workers run only children. The run lifecycle becomes a pi-durable task on the same storage, so one durable substrate stores runs, attempts, and conversations.
 
 ## Package facts
 
@@ -22,25 +22,25 @@ Adopting it means one architectural change: the Pi parent moves from the Worker 
 | Spec non-goals | no multi-writer merge, no forced termination of non-cooperative extension code inside one process |
 | Failure mode | a commit that fails after storage admission poisons the whole Session: "reopen it" |
 
-usine pins `@earendil-works/pi-coding-agent 0.85.1`, which depends on `pi-ai ^0.85.1`. pi-durable needs `pi-ai ^1.1.0`. The coding-agent package reached 1.1.0 on the same day with a 6,200-line changelog since 0.85. Sharing one `pi-ai` means upgrading the coding-agent SDK first. `ModelRuntime.create`, which usine's `sdk.ts` already uses for API-key and ChatGPT OAuth resolution, is still exported in 1.1.0, and pi-ai 1.1 still ships the `anthropic` and `openai-codex` providers.
+usine pins `@earendil-works/pi-coding-agent 0.85.1`, which depends on `pi-ai ^0.85.1`; pi-durable needs `pi-ai ^1.1.0`. To share one `pi-ai`, upgrade the coding-agent SDK first: it reached 1.1.0 the same day, with a 6,200-line changelog since 0.85. Version 1.1.0 still exports `ModelRuntime.create`, which usine's `sdk.ts` uses for API-key and ChatGPT OAuth resolution, and pi-ai 1.1 still has the `anthropic` and `openai-codex` providers.
 
 ## Mapping to usine concepts
 
 | usine today | pi-durable equivalent | Notes |
 |---|---|---|
 | Pi parent `AgentSession` in the run host, driven through `session.ts`, `conversation.ts`, `turns.ts` | a task-owned `Conversation` with `instructions`, `model`, and the subagent tool selected | `configure()` stores names; the registry supplies code |
-| Attempt channel protocol v7 (NDJSON over stdio or SSH) | none: tool calls commit their intent and output every 100 ms into storage | the "channel" is the commit line |
+| Attempt channel protocol v7 (NDJSON over stdio or SSH) | none: tool calls commit their intent and output to storage every 100 ms | storage replaces the channel |
 | Transcript rows appended as envelopes arrive | conversation entries plus `pi.live` document | `watchEvents()` yields `message_start`, `tool_execution_update`, `inbox_update`, ... |
-| Run drawer live tail and history | `watch()` or `watchEvents()` snapshot plus deltas; a slow client gets a fresh snapshot after 100 frames | late join starts from the current view, nothing replayed |
+| Run drawer live tail and history | `watch()` or `watchEvents()` snapshot plus deltas; a slow client gets a fresh snapshot after 100 frames | |
 | Steer | `submit({ whenBusy: "steer" })`, placed after the current tool round | verified in the experiment |
-| Interrupt (pause until guidance) | `abort()` the conversation then `submit()` guidance, or a `beforeTool` hook that blocks | not a one-call primitive |
-| Operator message to a child, Hold, Release | `submit()` to the child conversation; the subagent tool checks a hold document before returning | the `23-subagent-background` example shows the reporter and request-id pattern |
-| Child session events under the parent | the subagent call's `details` carries the child conversation id; clients attach to it | the experimental durable TUI does this |
-| Cancel and supersede | `harness.abortTask()` on the Run task aborts owned work bottom-up: child tool call, then conversation, then the task's abort handler | documented and covered upstream; not exercised in the experiment |
-| Approval as a consumed Event | a task phase that watches an approval document; the operator commits the document from outside | verified in the experiment |
-| Retry as a new Attempt | a new checkpoint in the Run task, with a new `requestId` for the parent submission | `requestId` makes the submission exactly-once across restarts |
-| Crash mid-Attempt: new Attempt from scratch | the tool call that spawned the child gets an `interrupted` result with its committed output; the parent model continues and can resume the child by the native session id usine already records | this is the headline gain |
-| Pool usage from `SessionTokensUpdated` events | `pi.usage` per conversation and `harness.usage()`; tool results may report usage | children's own meters still come from the child backends |
+| Interrupt (pause until guidance) | `abort()` the conversation then `submit()` guidance, or a blocking `beforeTool` hook | no one-call primitive |
+| Operator message to a child, hold, release | `submit()` to the child conversation; the subagent tool checks a hold document before returning | the `23-subagent-background` example shows the reporter and request-id pattern |
+| Child session events under the parent | the subagent call's `details` contains the child conversation id; clients attach to it | the experimental durable TUI does this |
+| Cancel and supersede | `harness.abortTask()` on the run task aborts owned work bottom-up: child tool call, then conversation, then the task's abort handler | documented and tested upstream; not exercised in the experiment |
+| Approval as a consumed event | a task phase that watches an approval document, which the operator commits from outside | verified in the experiment |
+| Retry as a new attempt | a new checkpoint in the run task, with a new `requestId` for the parent submission | `requestId` makes the submission exactly-once across restarts |
+| Crash mid-attempt: new attempt from scratch | the tool call that spawned the child gets an `interrupted` result with its committed output; the parent model continues and can resume the child by the native session id usine already records | the main gain |
+| Pool usage from `SessionTokensUpdated` events | `pi.usage` per conversation and `harness.usage()`; tool results can report usage | children's own meters still come from the child backends |
 | Compaction: none for the parent | background and manual compaction with retry on context overflow | free |
 
 ## Topology
@@ -60,56 +60,59 @@ worker                               |                                          
       claude / codex / pi child              worktree, credentials, salvage: unchanged
 ```
 
-The parent's own tool set is the subagent tool and nothing else, so the parent needs no `ExecutionEnv`; the Worker seam shrinks to "spawn a harness child here and give me its stdio". Locally that is a child process. On exe.dev it is the SSH exec the executor already runs for the run host. The Claude child is launched by the Agent SDK with `pathToClaudeCodeExecutable: "claude"`; pointing that at an SSH wrapper is the thing to verify first. The Codex child already speaks JSON-RPC over a spawned process's stdio and only needs the spawn to go through the transport. Pi children would run in the orchestrator under the same harness as plain owned conversations.
+The parent's only tool is the subagent tool, so it needs no `ExecutionEnv`, and the worker seam shrinks to "spawn a harness child here and give me its stdio": a child process locally, and on exe.dev the SSH exec the executor already runs for the run host. The Agent SDK launches the Claude child with `pathToClaudeCodeExecutable: "claude"`, which would point at an SSH wrapper. The Codex child already speaks JSON-RPC over a spawned process's stdio and only needs its spawn to use the transport. Pi children would run in the orchestrator's harness as plain owned conversations.
 
-Credentials move in the right direction: the Pi parent's API key or ChatGPT OAuth lives with the orchestrator, children keep using the Worker's login state, and no secret travels on a channel.
+The Pi parent's API key or ChatGPT OAuth stays with the orchestrator, children use the worker's login state, and no secret is sent on a channel.
 
-## What the experiment showed
+## Experiment results
 
-Script in the appendix. A `usine.run` task with phases `gate -> attempt -> settle`, an approval document the operator commits from outside, a task-owned parent conversation, and a `harness_child` tool that is not replay-safe and calls `process.exit(3)` after committing two lines of output.
+The appendix script runs a `usine.run` task through `gate -> attempt -> settle`, with an approval document committed from outside and a task-owned parent conversation. Its `harness_child` tool isn't replay-safe and calls `process.exit(3)` after committing two output lines.
 
-- The task parked in `gate` until the approval document changed, then created the parent conversation and submitted the attempt with `requestId: attempt:<task>:1`.
-- The process died inside the tool call. The saved task state was `pending` at checkpoint `{ phase: "attempt", attempt: 1 }`.
-- A fresh process over the same SQLite file attached `watchEvents()` to the parent before resuming and received the snapshot `[pi.user, pi.system, pi.assistant]`.
-- `resume()` re-entered the `attempt` phase, found the same conversation through task ownership and the same submission (id 16) through its `requestId`, and the tool call settled as `interrupted` with the two output lines preserved in the tool result.
-- An operator steer submitted while the attempt was live was placed after the tool round and appeared as the next user turn before the final answer.
+- The task waited in `gate` until the approval document changed, then created the parent conversation and submitted the attempt with `requestId: attempt:<task>:1`.
+- The process died inside the tool call, leaving the task `pending` at checkpoint `{ phase: "attempt", attempt: 1 }`.
+- A new process on the same SQLite file attached `watchEvents()` to the parent before resuming and got the snapshot `[pi.user, pi.system, pi.assistant]`.
+- `resume()` re-entered the `attempt` phase, found the same conversation through task ownership and the same submission (id 16) through its `requestId`, and ended the tool call as `interrupted`, keeping its two output lines.
+- An operator steer sent during the attempt became the next user turn after the tool round, before the final answer.
 - The task completed; `harness.usage()` reported the two model calls.
 
-Two mistakes in the first draft of the script are worth recording because usine code will make them too. A `runtime.commit` callback's return value is the task's next state, so returning a conversation id from it corrupted the task row, and the resulting failed commit poisoned the Session for every later call until reopen. `watchDoc()` on a document that no commit has created yet returns `undefined`, so a document must be created in an intent commit before it is watched.
+Two mistakes in the script's first draft that usine code is likely to repeat:
+
+- A `runtime.commit` callback returns the task's next state. Returning a conversation id from it corrupted the task row, and the failed commit poisoned the Session for every later call until reopen.
+- `watchDoc()` returns `undefined` for a document that no commit has created yet, so create the document in an intent commit before you watch it.
 
 ## Risks
 
-- **API churn.** Two breaking releases in the package's first week. Exact pin, as with every Pi package, and budget for migrations.
-- **One Session, one process.** A single bad commit from any extension poisons the Session for every running conversation. The orchestrator needs a reopen supervisor, and extensions need the same typed-boundary discipline as everything else.
-- **No forced termination in-process.** A tool that does not honour its abort signal cannot be killed without killing the orchestrator. Mitigated because the parent's only tool delegates to a remote process the transport can kill.
-- **Two SQLite connections, one file.** usine's own rows (Items, Events, Workers, projections) stay under drizzle; Runs, Attempts, and conversations live in pi-durable storage. A usine row and a pi-durable commit are never one transaction, so ADR 0010's projection-plus-startup-sweep pattern stays for the rows usine keeps.
-- **Web UI rework.** The run drawer, ADR 0025's bookmarks, and the transcript reader are keyed on transcript sequences and Attempt/session/call ids. They would read conversation entries and `watchEvents()` instead.
-- **Remote child spawn.** The Agent SDK over an SSH wrapper is unverified. If it does not work, the exe.dev adapter would drive the Claude CLI's stream-json mode directly over SSH.
-- **Cloudflare.** The Durable Object adapter exists and is the natural home for a one-writer harness, but spawning children on a Worker from a Durable Object needs a worker-side agent protocol that does not exist yet. Not a blocker for the local and exe.dev targets.
+- **API churn.** Two breaking releases in the first week: pin exactly, as with every Pi package, and budget for migrations.
+- **One Session, one process.** One bad commit from any extension poisons the Session for every running conversation, so the orchestrator needs a reopen supervisor, and extensions need typed boundaries like other code.
+- **No forced termination in-process.** Killing a tool that ignores its abort signal means killing the orchestrator. The parent's only tool delegates to a remote process that the transport can kill.
+- **Two SQLite connections, one file.** usine's rows (items, events, workers, projections) stay under drizzle; runs, attempts, and conversations move to pi-durable storage. A usine row and a pi-durable commit are never one transaction, so ADR 0010's projection-plus-startup-sweep pattern stays for usine's rows.
+- **Web UI rework.** The run drawer, ADR 0025's bookmarks, and the transcript reader use transcript sequences and attempt/session/call ids, and would read conversation entries and `watchEvents()` instead.
+- **Remote child spawn.** The Agent SDK over an SSH wrapper is unverified. If it fails, the exe.dev adapter would drive the Claude CLI's stream-json mode over SSH.
+- **Cloudflare.** The Durable Object adapter suits a one-writer harness, but spawning children on a worker from a Durable Object needs a worker-side agent protocol that doesn't exist yet. The local and exe.dev targets don't need it.
 
 ## Recommendation
 
-Adopt as the single durable substrate. usine has no users, so a staged migration beside the Effect workflow would be cost without anyone to protect. Order of work:
+Adopt pi-durable as the single durable substrate. usine has no users, so a staged migration beside the Effect workflow protects no one. Order of work:
 
-1. **Upgrade the Pi packages to 1.1.0** on their own: `pi-coding-agent`, `pi-ai`, `chord`. Required to share `pi-ai`, and it isolates the SDK migration from the architecture change.
-2. **Run as a pi-durable task** (gate, attempt, settle, as in the appendix) with the parent conversation owned by the task, the subagent tool spawning the existing Claude and Codex backends through a local child-spawn transport, and the run drawer reading `watchEvents()`. Interventions become submissions: steer is `whenBusy: "steer"`, operator messages to a child are submits to the child conversation, Hold is a document the subagent tool checks before returning. Check: an orchestrator restart during an Attempt resumes it instead of opening a new Attempt.
+1. **Upgrade the Pi packages to 1.1.0** on their own (`pi-coding-agent`, `pi-ai`, `chord`), to share `pi-ai` and keep the SDK migration separate from the architecture change.
+2. **Run as a pi-durable task** (gate, attempt, settle, as in the appendix) that owns the parent conversation. The subagent tool spawns the existing Claude and Codex backends through a local child-spawn transport, the run drawer reads `watchEvents()`, and interventions become submissions as in the mapping table. Check: an orchestrator restart during an attempt resumes it instead of opening a new one.
 3. **exe.dev transport**, after verifying the Agent SDK over an SSH wrapper.
 4. **Delete** the run host package, protocol v7, the transcript store, the parent-side session plumbing in `@usine/agents`, the Effect workflow, and the cluster tables.
 
-ADRs to amend with the new why: 0003 (Run durability is a pi-durable task), 0006 (run host and attempt channel become the child-spawn transport; reattach is in), 0018 (interventions as submissions), 0010 (two SQLite connections, one file), 0005 (the subagents extension becomes a pi-durable extension).
+ADRs to amend, each with a dated entry giving the new why: 0003 (run durability is a pi-durable task), 0006 (run host and attempt channel become the child-spawn transport; reattach is in), 0018 (interventions as submissions), 0010 (two SQLite connections, one file), 0005 (the subagents extension becomes a pi-durable extension).
 
 ## Outcome (2026-10-11)
 
-Steps 1 to 4 landed on main in PRs #188, #194, #202, #206, and #208, with two departures from the order above.
+Steps 1 to 4 merged to main in PRs #188, #194, #202, #206, and #208, with two departures from the plan:
 
-- The pi-durable task is the Attempt (`usine.attempt`), not the Run. The Run loop (approval gate, Worker reserve, Attempt, finish decision, continuation) is an engine fiber over usine's own Run tables with a startup reconcile; the Effect workflow, the workflow commands table, and the cluster tables are gone (ADR 0003 amendment). A Run task would have added a second task type for a dozen lines of state machine whose state already lives in the tables.
-- The transcript store stays. Claude Code and Codex children are processes outside the harness, so their events reach storage only through the relay that appends attempt channel envelopes to `usine_attempt_transcripts`; pi-durable's conversation entries hold the parent alone. The run drawer keeps reading the transcript, and `PROTOCOL_VERSION` stays on the envelopes for that reason.
+- The pi-durable task is the attempt (`usine.attempt`), not the run: a run task would add a second task type for a dozen lines of state machine whose state is already in usine's tables. The run loop (approval gate, worker reserve, attempt, finish decision, continuation) is an engine fiber over the run tables with a startup reconcile. The Effect workflow, the workflow commands table, and the cluster tables are gone (ADR 0003 amendment).
+- The transcript store stays. Claude Code and Codex children run outside the harness, so their events reach storage only through the relay that appends attempt channel envelopes to `usine_attempt_transcripts`; pi-durable's conversation entries contain only the parent. The run drawer still reads the transcript, so `PROTOCOL_VERSION` stays on the envelopes.
 
-Dogfooded on the factory instance: a SIGKILL mid-Attempt followed by a restart reattaches the same Attempt and the Run finishes on it; cancel stops the parent task and its child with no orphan; the approval gate parks and resumes. Open follow-ups are tracked on the issues referenced from #176.
+Dogfooded on the factory instance: after a SIGKILL mid-attempt and a restart, the same attempt reattaches and the run finishes on it; cancel stops the parent task and its child with no orphan; the approval gate waits and resumes. Follow-ups are on the issues linked from #176.
 
 ## Appendix: experiment script
 
-Run with pi-durable, pi-ai, and chord at 1.1.0 installed beside it:
+Run with pi-durable, pi-ai, and chord 1.1.0 installed beside it:
 
 ```sh
 node --experimental-strip-types run-shaped.ts 1   # crashes on purpose inside the tool call
@@ -330,4 +333,4 @@ Observed output of phase 2:
 [p2] events seen after late join: submission, inbox_update, tool_execution_end, message_start, message_end, turn_end, turn_start, run_end, usage_changed
 ```
 
-The empty `answer` in the outcome is the script's text extraction, not the package; the final assistant entry holds the text.
+The empty `answer` in the outcome comes from the script's text extraction, not the package; the final assistant entry contains the text.

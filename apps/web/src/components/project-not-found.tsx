@@ -2,11 +2,11 @@ import { Link } from "@tanstack/react-router";
 import { BootScreen } from "@/components/boot-screen";
 import { Button } from "@/components/ui/button";
 
-/** Shown in the work panel for a Project address that names no registered repository. */
+/** Renders the work panel content for a Project URL that matches no registered repository. */
 export const ProjectNotFound = () => (
   <BootScreen
     title="Project not found"
-    description="This repository is not registered with the running usine."
+    description="This repository is not under repos in usine.yaml."
     tone="error"
     inPanel
   >
