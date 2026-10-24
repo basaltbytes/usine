@@ -1,6 +1,6 @@
 {
   "name": "@usine/gateway",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "The usine gateway: a credential-injecting proxy for GitHub and LLM providers, and an egress allowlist, in front of Worker VMs.",
   "license": "MIT",
   "repository": {

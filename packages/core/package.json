@@ -1,6 +1,6 @@
 {
   "name": "@usine/core",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Domain model for usine: Event → Run → Step → Attempt, branded ids, the run state machine, and the typed attempt-failure taxonomy.",
   "license": "MIT",
   "repository": {
