@@ -311,6 +311,12 @@ export const needCopy = (need: NeedView): NeedCopy =>
       repository: null,
       runId: null,
     }),
+    UnconfirmedStopNeed: ({ loop, repository, runId, attemptNumber, worker }) => ({
+      title: `${loop}: parent task not stopped`,
+      detail: `Attempt ${attemptNumber} still ending on ${worker}, using one slot. Stop retried every few minutes`,
+      repository,
+      runId,
+    }),
   });
 
 /** Returns one line per kind of change from an accepted reload, or `Nothing changed`. */

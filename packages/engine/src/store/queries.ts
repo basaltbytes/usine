@@ -238,9 +238,9 @@ export const queriesFor = (database: RunDatabaseClient) => {
           }),
         ),
       )(rows);
-      return decoded.map(({ runId, number, outcome, ...attempt }) => ({
+      return decoded.map(({ number, outcome, ...attempt }) => ({
         ...attempt,
-        ref: salvageRefFor(runId, number),
+        ref: salvageRefFor(attempt.runId, number),
         succeeded: outcome === "Succeeded",
         open: outcome === "",
       }));

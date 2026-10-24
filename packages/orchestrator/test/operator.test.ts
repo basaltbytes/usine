@@ -47,9 +47,15 @@ import {
 import { StartedByEvent, StartedByInfraRetry } from "@usine/core/attempt/start";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { BlockedFailure, DefectFailure, InfraFailure } from "@usine/core/attempt/failure";
-import { AttemptFailed } from "@usine/core/attempt/outcome";
+import { AttemptCanceled, AttemptFailed } from "@usine/core/attempt/outcome";
 import * as RunState from "@usine/core/run/state";
-import { Claimed, RunAgainRequest, RunEngine } from "@usine/engine/engine";
+import {
+  Claimed,
+  RunAgainRequest,
+  RunEngine,
+  UnconfirmedStop,
+  UnconfirmedStops,
+} from "@usine/engine/engine";
 import {
   ItemContentHash,
   ItemProjection,
@@ -379,6 +385,7 @@ const testLayer = (
   laterReports: ReadonlyArray<TranscriptEntry> = [],
   /** Receives each Board move the operator records, in order. */
   recordedMoves: Array<BoardMoveRecord> = [],
+  unconfirmedStops: Effect.Effect<ReadonlyArray<UnconfirmedStop>> = Effect.succeed([]),
 ) => {
   const readTranscript = (query: TranscriptQuery) =>
     Effect.succeed(
@@ -584,6 +591,7 @@ const testLayer = (
     schedules,
     MarcbachmannCelLayer,
     WorkerStatus.idle,
+    Layer.succeed(UnconfirmedStops)({ list: unconfirmedStops }),
   );
   return Operator.layer.pipe(Layer.provide(dependencies));
 };
@@ -1665,6 +1673,71 @@ describe("Operator", () => {
         assert.deepStrictEqual(Schema.decodeUnknownSync(ReadyOverview)(encoded).needsYou, needs);
       }).pipe(Effect.provide(testLayer(approved, moved, reads, revision)));
     }),
+  );
+
+  it.effect(
+    "lists a closed Attempt whose parent task isn't confirmed stopped until a retried stop succeeds",
+    () =>
+      Effect.gen(function* () {
+        const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+        const moved = yield* Ref.make<ItemLabelMutation | null>(null);
+        const reads = yield* Ref.make(0);
+        const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+        const local = WorkerName.make("local");
+        const original = snapshot.attempts[0];
+        assert(original !== undefined);
+        const canceled = new RunSnapshot({
+          ...snapshot,
+          run: new Run({
+            ...snapshot.run,
+            state: RunState.cancelByOperator(new RunState.Running()),
+          }),
+          attempts: [new Attempt({ ...original, outcome: Option.some(new AttemptCanceled()) })],
+        });
+        const stops = yield* Ref.make([new UnconfirmedStop({ attemptId, runId, worker: local })]);
+        yield* Effect.gen(function* () {
+          const operator = yield* Operator;
+          const unconfirmedNeeds = Effect.map(operator.overview(instance), ({ needsYou }) =>
+            needsYou.filter((need) => need._tag === "UnconfirmedStopNeed"),
+          );
+          const needs = yield* unconfirmedNeeds;
+          assert.deepStrictEqual(
+            needs.map(({ id, repository, runId, loop, attemptNumber, worker }) => [
+              id,
+              repository,
+              runId,
+              loop,
+              attemptNumber,
+              worker,
+            ]),
+            [[`unconfirmed-stop:${attemptId}`, repository, runId, loopName, 1, local]],
+          );
+          const encoded = Schema.encodeUnknownSync(ReadyOverview)(
+            new ReadyOverview({ projects: [], loops: [], needsYou: needs }),
+          );
+          assert.deepStrictEqual(Schema.decodeUnknownSync(ReadyOverview)(encoded).needsYou, needs);
+          // The stop succeeds without a write to the runtime store; the overview must not answer
+          // from its cache.
+          yield* Ref.set(stops, []);
+          assert.deepStrictEqual(yield* unconfirmedNeeds, []);
+        }).pipe(
+          Effect.provide(
+            testLayer(
+              approved,
+              moved,
+              reads,
+              revision,
+              canceled,
+              noCycleBudgets,
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              Ref.get(stops),
+            ),
+          ),
+        );
+      }),
   );
 
   it("lists a Worker whose every Attempt still runs, and refuses more open Attempts than Attempts", () => {

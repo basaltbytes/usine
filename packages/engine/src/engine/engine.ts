@@ -34,6 +34,7 @@ import { CycleBudgets } from "../cycle-budget/cycle-budget.ts";
 import { BoardMoves } from "../board-moves/board-moves.ts";
 import { AttemptAdmission } from "./admission.ts";
 import { RunDriver } from "./run-driver.ts";
+import { UnconfirmedStops } from "./unconfirmed-stops.ts";
 
 /** The interval between periodic reconciles, which restart open Runs whose fiber stopped. */
 export const ReconcileInterval = Context.Reference<Duration.Input>(
@@ -120,15 +121,20 @@ const makeRunEngine = Effect.gen(function* () {
       runId,
       openAttempt: Option.getOrElse(outcome.openAttempt, () => "none"),
     });
+    // The stop can end the Attempt's execution, and its fiber then frees the slot, so the slot
+    // moves to the Attempt first.
+    if (Option.isSome(outcome.openAttempt))
+      yield* driver.holdSlot(runId, outcome.openAttempt.value);
     // Stop the Attempt before interrupting its fiber; otherwise its parent task stays live
     // waiting for a reattach.
     const handshake = Option.isSome(outcome.openAttempt)
       ? yield* stepExecutor.interrupt(outcome.openAttempt.value).pipe(Effect.result)
       : Result.succeed(undefined);
     yield* driver.stop(runId);
-    // Release a checkout and slot that startup kept for a reattach; they stay kept until the
+    // The Attempt's slot, and a checkout that startup kept for a reattach, stay kept until the
     // parent task is confirmed stopped.
-    if (Option.isSome(outcome.openAttempt)) yield* driver.releaseKept(outcome.openAttempt.value);
+    if (Option.isSome(outcome.openAttempt))
+      yield* driver.releaseKept(runId, outcome.openAttempt.value);
     yield* driver.continueWithNewest(runId);
     if (Option.isSome(outcome.openAttempt) && Result.isFailure(handshake)) {
       return yield* new AttemptCancellationError({
@@ -281,7 +287,11 @@ export class RunEngine extends Context.Service<
       approval: Event,
       source: ApprovalSource,
     ) => Effect.Effect<void, RunEngineError>;
-    /** Cancels an open Run and interrupts its active Attempt; does nothing for a closed Run. */
+    /**
+     * Cancels an open Run and interrupts its active Attempt; does nothing for a closed Run. If the
+     * Attempt's parent task can't be confirmed stopped, fails with `AttemptCancellationError`, and
+     * the Attempt keeps its Worker slot until a reconcile confirms the stop (#475).
+     */
     readonly cancel: (runId: RunId) => Effect.Effect<void, RunEngineError>;
     /**
      * Stops reconciling the Attempts recorded on `worker`, leaving their files in place, and
@@ -301,7 +311,8 @@ export class RunEngine extends Context.Service<
     ) => Effect.Effect<void, RunEngineError>;
     /**
      * Starts a fiber for every open Run without one, except Runs waiting for approval, and opens the
-     * queued Events that no closed Run continued. Runs at startup and every `ReconcileInterval`.
+     * queued Events that no closed Run continued, and retries the parent task stops that a cancel
+     * or startup couldn't confirm. Runs at startup and every `ReconcileInterval`.
      */
     readonly reconcile: () => Effect.Effect<void, RunEngineError>;
     /**
@@ -358,7 +369,8 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
   | RepositoryLabelProjectionReader
   | RepositoryLabelProjectionWriter
   | RunEngine
-  | RunReader,
+  | RunReader
+  | UnconfirmedStops,
   RunEngineError | DatabaseError,
   Crypto.Crypto | StepExecutor | TriggerCondition | DatabaseRequirements
 > => {
@@ -369,7 +381,16 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
     Layer.provideMerge(AttemptAdmission.layer),
     Layer.provide(itemWriter),
   );
-  const runEngine = Layer.effect(RunEngine, makeRunEngine).pipe(Layer.provide(driver));
+  const runEngine = Layer.mergeAll(
+    Layer.effect(RunEngine, makeRunEngine),
+    Layer.effect(
+      UnconfirmedStops,
+      Effect.gen(function* () {
+        const running = yield* RunDriver;
+        return UnconfirmedStops.of({ list: running.unconfirmedStops });
+      }),
+    ),
+  ).pipe(Layer.provide(driver));
   return Layer.mergeAll(
     runEngine,
     BoardMoves.layer.pipe(Layer.provide(database)),
@@ -397,6 +418,7 @@ export {
 export { RunAgainRequest, RunAgainResult } from "./run-again.ts";
 export { RetryRequest } from "./retry.ts";
 export { RunEngineShutdown } from "./shutdown.ts";
+export { UnconfirmedStop, UnconfirmedStops } from "./unconfirmed-stops.ts";
 export {
   RunNotFoundError,
   RunOperationRejectedError,

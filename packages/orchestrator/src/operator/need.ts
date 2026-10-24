@@ -1,4 +1,5 @@
 import { ConfigFileError } from "@usine/config/file";
+import { AttemptNumber } from "@usine/core/attempt";
 import { LoopName } from "@usine/core/loop";
 import { CycleBudgetAsk } from "@usine/core/cycle-budget";
 import { RepositoryName } from "@usine/core/repository";
@@ -106,6 +107,21 @@ export class UnconfiguredWorkerNeed extends Schema.TaggedClass<UnconfiguredWorke
   ),
 ) {}
 
+/**
+ * A closed Attempt whose parent task couldn't be confirmed stopped. It is still ending on `worker`
+ * and takes one of its slots until a retried stop succeeds (#475).
+ */
+export class UnconfirmedStopNeed extends Schema.TaggedClass<UnconfirmedStopNeed>(
+  "@usine/orchestrator/UnconfirmedStopNeed",
+)("UnconfirmedStopNeed", {
+  id: Schema.String,
+  repository: RepositoryName,
+  runId: RunId,
+  loop: LoopName,
+  attemptNumber: AttemptNumber,
+  worker: WorkerName,
+}) {}
+
 /** An Item that stopped opening Runs until the operator resets its cycle budget. */
 export class CycleBudgetNeed extends Schema.TaggedClass<CycleBudgetNeed>("CycleBudgetNeed")(
   "CycleBudgetNeed",
@@ -128,5 +144,6 @@ export const NeedView = Schema.Union([
   ScheduleFailureNeed,
   ConfigFileNeed,
   UnconfiguredWorkerNeed,
+  UnconfirmedStopNeed,
 ]);
 export type NeedView = typeof NeedView.Type;

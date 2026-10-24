@@ -1,3 +1,4 @@
+import { AttemptNumber } from "@usine/core/attempt";
 import { SalvagePushed, SalvageRef } from "@usine/core/attempt/salvage";
 import { LoopName } from "@usine/core/loop";
 import { CommitSha, RepositoryName } from "@usine/core/repository";
@@ -10,6 +11,7 @@ import {
   QuestionFailureView,
   RunFailureNeed,
   UnconfiguredWorkerNeed,
+  UnconfirmedStopNeed,
 } from "@usine/orchestrator/operator";
 import { Schema } from "effect";
 import { assert, describe, it } from "vitest";
@@ -175,5 +177,26 @@ describe("unconfigured Worker copy in Needs attention", () => {
       "local is not in usine.yaml. 2 attempts still running on it. Discard the leftovers after they end",
     );
     assert.include(needCopy(need(3, 1)).detail, "1 attempt still running on it");
+  });
+});
+
+describe("unconfirmed stop copy in Needs attention", () => {
+  it("names the Loop, the Attempt, and the Worker it still ends on, and links the Run", () => {
+    const copy = needCopy(
+      new UnconfirmedStopNeed({
+        id: "unconfirmed-stop:attempt",
+        repository: RepositoryName.make("basaltbytes/usine"),
+        runId: RunId.make("canceled"),
+        loop: LoopName.make("develop"),
+        attemptNumber: AttemptNumber.make(2),
+        worker: WorkerName.make("local"),
+      }),
+    );
+    assert.deepStrictEqual(copy, {
+      title: "develop: parent task not stopped",
+      detail: "Attempt 2 still ending on local, using one slot. Stop retried every few minutes",
+      repository: RepositoryName.make("basaltbytes/usine"),
+      runId: RunId.make("canceled"),
+    });
   });
 });

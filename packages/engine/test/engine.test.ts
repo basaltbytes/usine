@@ -18,7 +18,7 @@ import { LoopName } from "@usine/core/loop";
 import { OperatorLogin } from "@usine/core/operator";
 import { ApprovalSource, RunApproval } from "@usine/core/run/approval";
 import { WorkerName } from "@usine/core/worker";
-import { Deferred, Effect, Fiber, Layer, Logger, Option, Ref } from "effect";
+import { Deferred, Effect, Fiber, Layer, Logger, Option, Ref, Schedule, TxRef } from "effect";
 import { RunDatabase, type RunDatabaseClient } from "../src/database/database.ts";
 import { localSqliteLayer } from "../src/database/local-sqlite.ts";
 import {
@@ -27,6 +27,8 @@ import {
   ReconcileInterval,
   RetryRequest,
   RunEngine,
+  UnconfirmedStop,
+  UnconfirmedStops,
 } from "../src/engine/engine.ts";
 import { LoopControl } from "../src/loop-control/loop-control.ts";
 import { RunReader } from "../src/run-reader/run-reader.ts";
@@ -761,6 +763,112 @@ describe("durable run engine", () => {
         }).pipe(Effect.provide(engineLayer(directory, executor, condition)));
       }),
     ),
+  );
+
+  it.live(
+    "keeps the slot of a canceled Attempt whose parent task can't be stopped until a retried stop succeeds",
+    () =>
+      withInstance((directory) =>
+        Effect.gen(function* () {
+          const local = WorkerName.make("local");
+          const unstoppable = submission({ number: 42, item: "unstoppable-parent" });
+          const behind = submission({ number: 43, item: "waits-for-the-slot" });
+          // `local` has one slot, counted as the scheduler counts it.
+          const leased = yield* TxRef.make(0);
+          const refusing = yield* Ref.make(true);
+          const stops = yield* Ref.make(0);
+          const stopRequested = yield* Deferred.make<void>();
+          const executor = Layer.succeed(StepExecutor)({
+            workers: Effect.succeed([local]),
+            isLive: () => Effect.succeed(false),
+            outcome: () => Effect.succeed(Option.none()),
+            recover: () => Effect.void,
+            intervene: () => Effect.void,
+            // Like the durable session, a stop ends the execution within the interrupt grace even
+            // if the parent task's cancel fails.
+            interrupt: () =>
+              Effect.gen(function* () {
+                yield* Ref.update(stops, (count) => count + 1);
+                yield* Deferred.succeed(stopRequested, undefined);
+                yield* Effect.sleep("20 millis");
+                if (yield* Ref.get(refusing))
+                  return yield* new InfraFailure({
+                    message: "Could not cancel the parent task",
+                    cause: "storage unavailable",
+                  });
+              }),
+            occupy: () => Effect.die("no Attempt survives a restart in this test"),
+            reserve: () =>
+              Effect.tx(
+                Effect.gen(function* () {
+                  if ((yield* TxRef.get(leased)) >= 1) return yield* Effect.txRetry;
+                  yield* TxRef.update(leased, (count) => count + 1);
+                }),
+              ).pipe(
+                Effect.as({ worker: local, release: TxRef.update(leased, (count) => count - 1) }),
+              ),
+            execute: (execution, io) =>
+              Effect.gen(function* () {
+                yield* io.checkoutAcquired;
+                if (execution.task !== unstoppable.task) return stepResult("ran in the freed slot");
+                yield* Deferred.await(stopRequested);
+                return yield* new InfraFailure({
+                  message: "The Attempt's execution stopped",
+                  cause: "canceled",
+                });
+              }),
+          });
+          yield* Effect.gen(function* () {
+            const engine = yield* RunEngine;
+            const unconfirmed = yield* UnconfirmedStops;
+            const running = yield* engine.submit(unstoppable);
+            assert(running._tag === "Claimed");
+            const [attempt] = (yield* waitFor(
+              engine,
+              running.runId,
+              ({ attempts }) => attempts.length === 1,
+            )).attempts;
+            assert(attempt !== undefined);
+            const waiting = yield* engine.submit(behind);
+            assert(waiting._tag === "Claimed");
+
+            const refusal = yield* Effect.flip(engine.cancel(running.runId));
+            assert.strictEqual(refusal._tag, "AttemptCancellationError");
+
+            // The slot stays taken across the reconciles that retry the stop, so the Run behind
+            // starts no Attempt.
+            const [, { attempts }] = yield* Effect.repeat(
+              Effect.all([Ref.get(stops), engine.inspect(waiting.runId)]),
+              {
+                until: ([count, { attempts }]) => count >= 4 || attempts.length > 0,
+                schedule: Schedule.spaced("10 millis"),
+              },
+            );
+            assert.deepStrictEqual(attempts, []);
+            assert.strictEqual(yield* TxRef.get(leased), 1);
+            assert.deepStrictEqual(yield* unconfirmed.list, [
+              new UnconfirmedStop({ attemptId: attempt.id, runId: running.runId, worker: local }),
+            ]);
+
+            // Once a retry stops the parent task, the slot is released and the Run behind takes it.
+            yield* Ref.set(refusing, false);
+            const delivered = yield* waitFor(
+              engine,
+              waiting.runId,
+              ({ run }) => run.state._tag === "Succeeded",
+            );
+            assert.lengthOf(delivered.attempts, 1);
+            assert.deepStrictEqual(yield* unconfirmed.list, []);
+            yield* Effect.repeat(TxRef.get(leased), {
+              until: (count) => count === 0,
+              schedule: Schedule.spaced("10 millis"),
+            }).pipe(Effect.timeout("2 seconds"));
+          }).pipe(
+            Effect.provide(engineLayer(directory, executor)),
+            Effect.provideService(ReconcileInterval, "50 millis"),
+          );
+        }),
+      ),
   );
 
   it.live("cancels a run parked in the worker queue without starting an attempt", () =>

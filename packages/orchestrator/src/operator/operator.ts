@@ -25,6 +25,8 @@ import {
   type RunEngineError,
   RunOperationRejectedError,
   type RunStoreError,
+  type UnconfirmedStop,
+  UnconfirmedStops,
 } from "@usine/engine/engine";
 import { ItemProjectionReader } from "@usine/engine/item-projection";
 import { LoopControl, type LoopRuntimeState } from "@usine/engine/loop-control";
@@ -61,6 +63,7 @@ import {
   RunFailureNeed,
   ScheduleFailureNeed,
   UnconfiguredWorkerNeed,
+  UnconfirmedStopNeed,
   type NeedView,
 } from "./need.ts";
 import {
@@ -192,6 +195,7 @@ const makeOperatorObservation = Effect.gen(function* () {
   const loopMatches = yield* LoopMatches;
   const cache = yield* SynchronizedRef.make(Option.none<CachedOverview>());
   const usageReader = yield* RunUsageReader;
+  const stops = yield* UnconfirmedStops;
 
   const projectOverview = Effect.fn("Operator.projectOverview")(function* (
     instance: LoadedInstance,
@@ -199,6 +203,7 @@ const makeOperatorObservation = Effect.gen(function* () {
     preflightFindings: ReadonlyArray<LabelPreflightFinding>,
     scheduleFailures: ReadonlyArray<ScheduleFailure>,
     revision: Option.Option<ProjectionRevision>,
+    unconfirmedStops: ReadonlyArray<UnconfirmedStop>,
   ) {
     const [snapshots, states, cycleAsks, workerAttempts] = yield* Effect.all(
       [
@@ -464,6 +469,30 @@ const makeOperatorObservation = Effect.gen(function* () {
         }),
       );
     }
+    for (const { attemptId, runId, worker } of unconfirmedStops) {
+      const run = allRuns.get(runId) ?? runView(yield* reader.inspect(runId), paused, access);
+      const attempt = run.attempts.find(({ id }) => id === attemptId);
+      if (attempt === undefined) {
+        yield* Effect.logWarning(
+          "The Run has no Attempt with the unconfirmed stop; no need shown",
+          {
+            runId,
+            attemptId,
+          },
+        );
+        continue;
+      }
+      needsYou.push(
+        new UnconfirmedStopNeed({
+          id: `unconfirmed-stop:${attemptId}`,
+          repository: run.repository,
+          runId,
+          loop: run.loop,
+          attemptNumber: attempt.number,
+          worker,
+        }),
+      );
+    }
     const overview = new ReadyOverview({ projects, loops, needsYou });
     yield* Effect.logDebug("Refreshed operator overview", {
       revision,
@@ -510,8 +539,8 @@ const makeOperatorObservation = Effect.gen(function* () {
   const overview = Effect.fn("Operator.overview")((instance: LoadedInstance) =>
     SynchronizedRef.modifyEffect(cache, (cached) =>
       Effect.gen(function* () {
-        const [revision, latestPoll, latestSchedule] = yield* Effect.all(
-          [reader.revision(), polling.latest, schedules.latest] as const,
+        const [revision, latestPoll, latestSchedule, unconfirmedStops] = yield* Effect.all(
+          [reader.revision(), polling.latest, schedules.latest, stops.list] as const,
           { concurrency: "unbounded" },
         );
         const pollFailures = Option.match(latestPoll, {
@@ -547,6 +576,7 @@ const makeOperatorObservation = Effect.gen(function* () {
             pollFailures,
             preflightFindings,
             scheduleFailures,
+            unconfirmedStops.map(({ attemptId }) => attemptId),
           ]),
         );
         if (Option.isNone(token)) {
@@ -559,6 +589,7 @@ const makeOperatorObservation = Effect.gen(function* () {
             preflightFindings,
             scheduleFailures,
             revision,
+            unconfirmedStops,
           );
           return [projected, Option.none<CachedOverview>()] as const;
         }
@@ -575,6 +606,7 @@ const makeOperatorObservation = Effect.gen(function* () {
           preflightFindings,
           scheduleFailures,
           revision,
+          unconfirmedStops,
         );
         return [projected.overview, Option.some({ token: token.value, ...projected })] as const;
       }),
@@ -1151,6 +1183,7 @@ export {
   ScheduleFailureNeed,
   ConfigFileNeed,
   UnconfiguredWorkerNeed,
+  UnconfirmedStopNeed,
   NeedView,
 } from "./need.ts";
 export {
