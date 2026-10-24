@@ -198,7 +198,7 @@ describe("Board Run failure copy", () => {
         }),
       ),
       {
-        title: "ChildSessionBudgetFailure",
+        title: "review: child session budget exhausted",
         detail: message,
         repository,
         runId,

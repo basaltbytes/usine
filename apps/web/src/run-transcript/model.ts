@@ -435,8 +435,8 @@ export const projectTranscript = (
 export const sessionActivityLabel = (session: TranscriptSession): string => {
   if (session.status !== "Live") return session.status;
   if (session.paused) return "Paused";
-  if (session.held) return session.idle ? "Held · waiting for input" : "Held · working";
-  if (session.idle) return "Waiting for operator input";
+  if (session.held) return session.idle ? "Held, waiting for input" : "Held, working";
+  if (session.idle) return "Waiting for input";
   const tool = [...session.entries]
     .reverse()
     .find((entry) => entry._tag === "Tool" && entry.state._tag === "Running");

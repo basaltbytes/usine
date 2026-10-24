@@ -69,7 +69,7 @@ export const NotMoving = ({
 }) => {
   const narrow = useIsMobile();
   if (stalled.length === 0)
-    return <EmptyLine>{polled ? "Nothing stalled" : "No poll has finished yet"}</EmptyLine>;
+    return <EmptyLine>{polled ? "Nothing stalled" : "Not checked yet"}</EmptyLine>;
   return (
     <div className="-mx-2">
       <Table>
@@ -79,7 +79,7 @@ export const NotMoving = ({
             {!narrow && (
               <>
                 <TableHead>Loop</TableHead>
-                <TableHead>Why</TableHead>
+                <TableHead>Reason</TableHead>
                 <TableHead>
                   <span className="sr-only">Action</span>
                 </TableHead>

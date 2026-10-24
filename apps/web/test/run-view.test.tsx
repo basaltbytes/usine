@@ -183,7 +183,7 @@ describe("Run header", () => {
     );
     assert.include(
       eventPreview("start-dev", detail(view).eventPayload),
-      "start-dev matched issue #33: open, labelled ready-for-agent",
+      "start-dev matched issue #33: open, labeled ready-for-agent",
     );
   });
 
@@ -612,7 +612,7 @@ describe("Run approval", () => {
     const time = dayTimeLabel(approvedAt);
     for (const render of [eventDocument, outline]) {
       assert.include(text(render(fromUi)), `Approved by Philippe · ${time} · from the UI`);
-      assert.include(text(render(fromAsk)), `Approved by Philippe · ${time} · from the GitHub Ask`);
+      assert.include(text(render(fromAsk)), `Approved by Philippe · ${time} · from GitHub`);
       assert.include(render(fromAsk), `dateTime="${approvedAt}"`);
     }
   });

@@ -49,7 +49,7 @@ export const restartRequired = (
   new RestartRequiredError({
     blocks: EffectArray.dedupe(EffectArray.map(changes, ({ block }) => block)),
     fields: EffectArray.map(changes, ({ field }) => field),
-    message: `usine.yaml changed in a way that applies only when usine up restarts: ${changes.map(({ reason }) => reason).join("; ")}. The running configuration is unchanged; restart usine up to apply the change.`,
+    message: `These usine.yaml changes require a restart: ${changes.map(({ reason }) => reason).join("; ")}. The running configuration is unchanged. Restart usine up to apply them.`,
   });
 
 /**
@@ -85,24 +85,26 @@ export const reloadPreflightFailed = (
   workers: ReadonlyArray<WorkerName>,
   cause: ExecutorError,
 ): ReloadPreflightError => {
+  const quoted = (names: ReadonlyArray<string>) => names.map((name) => `"${name}"`).join(", ");
   const subjects = [
     ...(agents.length === 0
       ? []
-      : [`${agents.length === 1 ? "Agent" : "Agents"} ${agents.join(", ")}`]),
+      : [`${agents.length === 1 ? "agent" : "agents"} ${quoted(agents)}`]),
     ...(workers.length === 0
       ? []
       : [
-          `${workers.length === 1 ? "Worker" : "Workers"} ${workers.join(", ")}, which the reload adds or gives more slots`,
+          `${workers.length === 1 ? "worker" : "workers"} ${quoted(workers)} (added or given more slots by the reload)`,
         ]),
   ];
   const detail =
     cause._tag === "WorkerCapabilityError"
-      ? `Worker ${cause.worker}: ${cause.message}`
+      ? `Worker "${cause.worker}": ${cause.message}`
       : cause.message;
+  const sentence = `${detail.charAt(0).toUpperCase()}${detail.slice(1)}`.replace(/\.$/u, "");
   return new ReloadPreflightError({
     agents,
     workers,
-    message: `Worker preflight failed for ${subjects.join(" and ")}. ${detail.replace(/\.$/u, "")}. The running configuration is unchanged; fix the Worker, usine.yaml, or the Agent file, then reload again.`,
+    message: `Worker preflight failed for ${subjects.join(" and ")}. ${sentence}. The running configuration is unchanged. Fix the worker, usine.yaml, or the agent file, then reload again.`,
     cause,
   });
 };

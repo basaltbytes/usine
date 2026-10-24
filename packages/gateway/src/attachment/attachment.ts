@@ -7,7 +7,7 @@ import { DateTime, Effect, Encoding, Schema } from "effect";
  * repository gets a new ID, so an earlier caller token is never accepted again.
  */
 export const AttachmentId = Schema.String.check(
-  Schema.isPattern(/^[A-Za-z0-9_-]{22}$/u, { message: "Expected a 22-character attachment id" }),
+  Schema.isPattern(/^[A-Za-z0-9_-]{22}$/u, { message: "Expected a 22-character attachment ID" }),
 ).pipe(Schema.brand("AttachmentId"));
 export type AttachmentId = typeof AttachmentId.Type;
 

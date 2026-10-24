@@ -190,7 +190,7 @@ While a run is `Running`, the drawer has **Message the parent** and, for each li
 
 To take over a session, message it as a user would. You can hold several sessions. While a session is held, the `max_attempt_minutes` clock stops, but tokens count.
 
-A message to a parent that waits on a child shows **Queued until the current delegation returns** under it, in the conversation and the drawer, until the parent reads it. If you paused the parent first, it shows **Not delivered**; send it again to resume the parent. A message to a working child shows **Queued until the child's current step ends**, and the child isn't shown as resumed. A Pi child reads it before its next model request, a Codex child before its next model request in the turn, and a Claude Code child when a tool call returns or as its next turn. If the child stops first, the message shows **Not delivered**.
+A message to a parent that waits on a child shows **Queued until the delegated task ends** under it, in the conversation and the drawer, until the parent reads it. If you paused the parent first, it shows **Not delivered**; send it again to resume the parent. A message to a working child shows **Queued until the current child step ends**, and the child isn't shown as resumed. A Pi child reads it before its next model request, a Codex child before its next model request in the turn, and a Claude Code child when a tool call returns or as its next turn. If the child stops first, the message shows **Not delivered**.
 
 The API also has `Steer`, which adds guidance without a hold, and which the runaway guard sends from the operator `engine` at 80% of a limit. All four actions use `POST /api/runs/<run id>/intervene`. usine refuses an action, and the drawer shows why, if the run isn't `Running`, the attempt isn't the latest, or the session isn't live in this process, such as before a reattach. A session's own refusal, such as a message to a child that has returned, appears in the conversation.
 
@@ -205,14 +205,14 @@ For a Claude Code or Codex child, the terminal icon in the outline shows the ses
 | Entry                                  | Meaning                                                                                                              |
 | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | **\<loop\>: approval needed**          | A run is in `Waiting`. Approve or cancel it.                                                                         |
-| A failure name, such as `AgentFailure` | A run is `Failed`. Read the attempt, then select **Retry**, **Edit and retry**, or **Mark resolved**.                |
+| **\<loop\>: \<failure\>**, such as **review: agent failure** | A run is `Failed`. Read the attempt, then select **Retry**, **Edit and retry**, or **Mark resolved**.                |
 | **Question from \<loop\>**             | An agent asked you a question. See [Answer a question](#answer-a-question).                                          |
 | **Cycle budget exhausted**             | An item reached a loop's [`max_cycles`](/reference/configuration/loop-files/#max_cycles). Inspect it, then select **Reset cycle budget**. |
 | An error name from polling             | A repository's poll failed, for example on a GitHub error, a missing App permission, or an `if:` that fails to evaluate. |
 | **Label preflight failed**             | usine couldn't create a label that `usine.yaml` declares.                                                            |
-| **Item projection quarantined**        | usine couldn't place an item on its board.                                                                           |
+| **Item not shown on the board**        | usine couldn't place an item on its board.                                                                           |
 | A schedule error                       | A schedule loop couldn't evaluate or submit a tick.                                                                  |
-| **Loop quarantined**                   | A loop file failed to load and opens no runs. Fix the file and reload the configuration.                             |
+| **Loop file not loaded**               | A loop file failed to load and opens no runs. Fix the file and reload the configuration.                             |
 | **Agent file not loaded**              | An agent file failed to load and isn't in the roster. Fix the file and reload the configuration.                    |
 | **Worker not configured**              | Attempts are recorded on a worker that `usine.yaml` no longer declares. See [Restarts](#restarts).                   |
 
@@ -253,7 +253,7 @@ Canceling a run whose attempt waits for its reattach salvages and removes the wo
 
 At each start, usine also reconciles checkouts that earlier attempts left on declared workers: it salvages failed and canceled attempts and removes succeeded ones, after it stops the parent task of a canceled attempt that still runs. If it can't confirm that stop, it keeps the worktree and a slot, logs `Could not confirm that the parent task of a closed Attempt stopped`, and retries at each reconcile.
 
-usine skips attempts on a worker that `usine.yaml` no longer declares, for example after you replace `local` with an SSH worker. It logs one warning per start with their count, shows **Worker not configured** in **Needs attention**, and leaves their checkouts. Their runs wait until you declare the worker again or cancel them. Declare the worker again and restart `usine up`, or select **Discard leftovers**, then **Confirm discard**, to stop tracking them without changing the worker. Remove the checkouts yourself. A worker that you declare again reconciles only attempts recorded after the discard. After a reload removes a worker, the entry says how many attempts still run, such as `2 attempts still run on it; discard its leftovers once they end`, and refuses a discard until they end.
+usine skips attempts on a worker that `usine.yaml` no longer declares, for example after you replace `local` with an SSH worker. It logs one warning per start with their count, shows **Worker not configured** in **Needs attention**, and leaves their checkouts. Their runs wait until you declare the worker again or cancel them. Declare the worker again and restart `usine up`, or select **Discard leftovers**, then **Confirm discard**, to stop tracking them without changing the worker. Remove the checkouts yourself. A worker that you declare again reconciles only attempts recorded after the discard. After a reload removes a worker, the entry says how many attempts still run, such as `2 attempts still running on it. Discard the leftovers after they end`, and refuses a discard until they end.
 
 ## Stop the orchestrator
 

@@ -69,7 +69,7 @@ export const sshWorkerAddressesOf = Effect.fn("Orchestrator.sshWorkerAddressesOf
     sshWorkerAddressOf(
       worker,
       (variable) =>
-        `SSH Worker ${worker.name}'s Gateway admin token is missing: set ${variable} in the orchestrator's environment`,
+        `The gateway admin token for SSH worker "${worker.name}" is missing. Set ${variable} in the orchestrator's environment.`,
     ),
   );
 });
@@ -88,12 +88,12 @@ export const sshStepExecutorLayer = (config: UsineConfig, brains: ReadonlyArray<
         yield* Effect.annotateCurrentSpan({ worker: worker.name });
         if (worker.kind !== "ssh")
           return yield* Effect.die(
-            new Error(`The SSH executor cannot run Worker ${worker.name} of kind ${worker.kind}`),
+            new Error(`The SSH executor cannot run worker "${worker.name}" of kind ${worker.kind}`),
           );
         const address = yield* sshWorkerAddressOf(
           worker,
           (variable) =>
-            `SSH Worker ${worker.name}'s Gateway admin token is missing: ${variable} is not set in the orchestrator's environment. A running process does not see variables set after it started, so set ${variable} and restart usine up, or set admin_token_env to a variable usine up already has`,
+            `The gateway admin token for SSH worker "${worker.name}" is missing: ${variable} is not set in the orchestrator's environment. usine up reads only the variables that were set when it started. Set ${variable} and restart usine up, or set admin_token_env to a variable that usine up already has.`,
         ).pipe(Effect.provideService(ConfigProvider.ConfigProvider, environment));
         yield* machines.addWorker(address);
       });

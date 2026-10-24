@@ -156,7 +156,7 @@ const AgentFacts = ({
           ? "Set in this file"
           : configuration.settings.parentModel !== null
             ? "From settings.parent_model"
-            : "Neither this file nor settings sets one"}
+            : "Not set in this file or in settings"}
       </Source>
     </Fact>
     <Fact label="Parent effort">
@@ -214,15 +214,12 @@ export const AgentDetail = ({
   if (invalid !== undefined)
     return (
       <ConfigurationPage title={invalid.name} marks={<NotLoaded />} file={invalid.file}>
-        <FileError
-          error={invalid.error}
-          consequence="Not in the roster; every loop that uses this agent is quarantined."
-        />
+        <FileError error={invalid.error} consequence="Loops that use this agent are not loaded." />
       </ConfigurationPage>
     );
   return (
     <ConfigurationPage title={name}>
-      <Missing title="No agent by this name">
+      <Missing title="Agent not found">
         The configuration has no file <code>agents/{name}.md</code>.{" "}
         <Link to="/configuration/agents" className="text-primary hover:underline">
           See all agents

@@ -43,7 +43,7 @@ const asAttemptFailure = <A, R>(
   Effect.catchTags(effect, {
     EnginePersistenceError: (error: EnginePersistenceError) =>
       new InfraFailure({
-        message: `Engine persistence failed during ${error.operation}`,
+        message: `Runtime store error: could not ${error.operation}`,
         cause: error,
       }),
     RunNotFoundError: (error: RunNotFoundError) => Effect.die(error),
@@ -211,7 +211,7 @@ export class RunDriver extends Context.Service<
       ) {
         yield* Effect.annotateCurrentSpan({ runId: closedRunId, itemKey: submission.itemKey });
         return yield* items.markGone(submission.itemKey, yield* DateTime.now).pipe(
-          retryingStore(closedRunId, "mark the Item's projection gone"),
+          retryingStore(closedRunId, "mark the item's projection gone"),
           Effect.catch((error) =>
             Effect.logWarning(
               "Could not mark the gone Item's projection; its Board card stays in place",
@@ -231,7 +231,7 @@ export class RunDriver extends Context.Service<
         yield* Effect.annotateCurrentSpan({ runId: closedRunId });
         const queued = yield* store
           .nextQueued(closedRunId)
-          .pipe(retryingStore(closedRunId, "read the queued Events"));
+          .pipe(retryingStore(closedRunId, "read the queued events"));
         if (Option.isNone(queued)) return;
         const submission = queued.value.submission;
         const fields = {
@@ -245,7 +245,7 @@ export class RunDriver extends Context.Service<
           // Revoke only the queue read before the remote check.
           const revoked = yield* store
             .revokeQueued(queued.value)
-            .pipe(retryingStore(closedRunId, "revoke the queued Events"));
+            .pipe(retryingStore(closedRunId, "revoke the queued events"));
           if (recheck === "no-longer-matches") {
             yield* Effect.logInfo("Queued Event no longer matches its trigger; revoked", {
               ...fields,
@@ -265,7 +265,7 @@ export class RunDriver extends Context.Service<
         );
         const claimed = yield* store
           .claimQueued(submission, runId)
-          .pipe(retryingStore(closedRunId, "claim the queued Event"));
+          .pipe(retryingStore(closedRunId, "claim the queued event"));
         if (Option.isNone(claimed)) {
           // During the check, the Event was ignored, another Run opened for the Item, or a cycle
           // reset superseded the Event.
@@ -288,7 +288,7 @@ export class RunDriver extends Context.Service<
        */
       const openAttempt = Effect.fn("RunDriver.openAttempt")(function* (runId: RunId) {
         yield* Effect.annotateCurrentSpan({ runId });
-        const current = yield* store.snapshot(runId).pipe(retryingStore(runId, "read the Run"));
+        const current = yield* store.snapshot(runId).pipe(retryingStore(runId, "read the run"));
         const open = current.attempts.at(-1);
         if (
           current.run.state._tag !== "Running" ||
@@ -387,7 +387,7 @@ export class RunDriver extends Context.Service<
         if (Option.isSome(open) && open.value._tag === "Finished") {
           const finished = yield* store
             .finishAttempt(open.value.attempt, open.value.result)
-            .pipe(retryingStore(runId, "finish the Attempt"));
+            .pipe(retryingStore(runId, "finish the attempt"));
           if (finished._tag !== "RetryAttempt") return finished._tag;
         }
         const started = yield* store
@@ -396,7 +396,7 @@ export class RunDriver extends Context.Service<
             worker,
             Option.map(reattaching(open), ({ id }) => id),
           )
-          .pipe(retryingStore(runId, "begin the Attempt"));
+          .pipe(retryingStore(runId, "begin the attempt"));
         if (started._tag === "AttemptRecoveryFailed") return "RunFailed";
         if (started._tag === "RunClosed") return "Unchanged";
 
@@ -411,11 +411,11 @@ export class RunDriver extends Context.Service<
               store.recordComments(started.execution.attempt.id, comments).pipe(asAttemptFailure),
             windows: store
               .attemptWindows(started.execution.attempt.id)
-              .pipe(retryingStore(runId, "read the Attempt windows"), asAttemptFailure),
+              .pipe(retryingStore(runId, "read the attempt windows"), asAttemptFailure),
             transcript: store
               .transcript(new TranscriptAllQuery({ attemptId: started.execution.attempt.id }))
               .pipe(
-                retryingStore(runId, "read the Attempt transcript"),
+                retryingStore(runId, "read the attempt transcript"),
                 asAttemptFailure,
                 // Reattached Attempts recorded the current protocol version. A version bump must
                 // convert retired envelopes here for Attempts open across the upgrade.
@@ -438,7 +438,7 @@ export class RunDriver extends Context.Service<
               }).pipe(
                 Effect.andThen(
                   new DefectFailure({
-                    message: "The step executor crashed outside its typed failure channel",
+                    message: "The step executor crashed with an unexpected error",
                     cause: defect,
                   }),
                 ),
@@ -454,14 +454,14 @@ export class RunDriver extends Context.Service<
         }
         const finished = yield* store
           .finishAttempt(started.execution.attempt, result)
-          .pipe(retryingStore(runId, "finish the Attempt"));
+          .pipe(retryingStore(runId, "finish the attempt"));
         return finished._tag;
       });
 
       const drive = Effect.fn("RunDriver.drive")(function* (runId: RunId) {
         const submission = yield* store
           .submission(runId)
-          .pipe(retryingStore(runId, "read the Run's Submission"));
+          .pipe(retryingStore(runId, "read the run's submission"));
         yield* Effect.annotateCurrentSpan({
           runId,
           loop: submission.loop,
@@ -471,7 +471,7 @@ export class RunDriver extends Context.Service<
           submission.approval === "required" &&
           (yield* store
             .parkForApproval(runId)
-            .pipe(retryingStore(runId, "park the Run for approval")))._tag === "Waiting"
+            .pipe(retryingStore(runId, "park the run for approval")))._tag === "Waiting"
         ) {
           yield* Effect.logInfo("Run waits for its approval", { runId });
           return;

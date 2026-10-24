@@ -33,7 +33,7 @@ export class LoopCycleCount extends Schema.Class<LoopCycleCount>("LoopCycleCount
   })
     .check(
       Schema.makeFilter(({ admitted, completed }) => completed <= admitted, {
-        message: "Completed Runs cannot exceed admitted Runs",
+        message: "Completed runs can't exceed admitted runs",
       }),
     )
     .annotate({ parseOptions: { onExcessProperty: "error" } }),
@@ -59,7 +59,7 @@ export class CycleBudgetAsk extends Schema.Class<CycleBudgetAsk>("CycleBudgetAsk
           new Set(counts.map((count) => count.loop)).size === counts.length &&
           counts.some((count) => count.loop === loop && count.admitted >= limit),
         {
-          message: "Expected unique participating Loops including the exhausted Loop at its limit",
+          message: "Expected unique participating loops, including the exhausted loop at its limit",
         },
       ),
     )

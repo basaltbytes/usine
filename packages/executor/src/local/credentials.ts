@@ -57,7 +57,7 @@ export const localCredentialsFor = Effect.gen(function* () {
           Effect.fail(
             new ExecutorOperationError({
               operation: "prepare",
-              message: "Could not publish Attempt credentials",
+              message: "Can't write the attempt's credential files",
               cause,
             }),
           ),

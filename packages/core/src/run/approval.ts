@@ -18,7 +18,7 @@ export class ApprovalSource extends Schema.Class<ApprovalSource>("ApprovalSource
     .check(
       Schema.makeFilter(
         ({ channel, approver }) => channel !== "github-ask" || Option.isSome(approver),
-        { message: "Expected a GitHub Ask approval to name its approver" },
+        { message: "Expected an approver for a GitHub ask approval" },
       ),
     )
     .annotate({ parseOptions: { onExcessProperty: "error" } }),

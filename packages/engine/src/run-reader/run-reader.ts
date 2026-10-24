@@ -40,7 +40,7 @@ const makeRunReader = Effect.gen(function* () {
           });
         }),
       )
-      .pipe(persistence("read Run evidence"));
+      .pipe(persistence("read run evidence"));
     yield* Effect.logDebug("Run evidence read", {
       runId,
       attempts: evidence.snapshot.attempts.length,
@@ -58,19 +58,19 @@ const makeRunReader = Effect.gen(function* () {
     queries.revision().pipe(persistence("read projection revision")),
   );
   const forItems = Effect.fn("RunReader.forItems")((itemKeys: ReadonlyArray<ItemKey>) =>
-    queries.itemRunSummaries(itemKeys).pipe(persistence("read Item Run histories")),
+    queries.itemRunSummaries(itemKeys).pipe(persistence("read item run histories")),
   );
   const events = Effect.fn("RunReader.events")((runIds: ReadonlyArray<RunId>) =>
-    queries.runEvents(runIds).pipe(persistence("read the Events of Runs")),
+    queries.runEvents(runIds).pipe(persistence("read the events of runs")),
   );
   const transcript = Effect.fn("RunReader.transcript")((query: TranscriptQuery) =>
-    queries.transcript(query).pipe(persistence("read Attempt transcript")),
+    queries.transcript(query).pipe(persistence("read attempt transcript")),
   );
   const attemptsByWorker = Effect.fn("RunReader.attemptsByWorker")(() =>
-    leftoverQueries(database).attemptCountsByWorker().pipe(persistence("count Attempts by Worker")),
+    leftoverQueries(database).attemptCountsByWorker().pipe(persistence("count attempts by worker")),
   );
   const sightings = Effect.fn("RunReader.sightings")((itemKeys: ReadonlyArray<ItemKey>) =>
-    queries.loopItems.sightings(itemKeys).pipe(persistence("read Loop sightings")),
+    queries.loopItems.sightings(itemKeys).pipe(persistence("read loop sightings")),
   );
 
   return {

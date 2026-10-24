@@ -22,7 +22,7 @@ export class LoadedInstance extends Schema.Class<LoadedInstance>("@usine/config/
           Option.isNone(loopReferenceFailure(loopPath(loop.name), loop, references)),
         );
       },
-      { message: "Expected every loop to reference the loaded roster and registry" },
+      { message: "Expected every loop to reference only loaded agents and registry entries" },
     ),
   ),
 ) {}

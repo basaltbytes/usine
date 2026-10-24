@@ -25,7 +25,7 @@ const editCopy = {
   },
   runAgain: {
     title: "Edit and run again",
-    note: "Opens a new run on this item with this task and agent. This run is unchanged",
+    note: "Opens a new run on this item with this task and agent. This run is unchanged.",
     submit: "Save and run again",
   },
 } as const satisfies Record<EditIntent, { title: string; note: string; submit: string }>;

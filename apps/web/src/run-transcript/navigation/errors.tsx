@@ -32,7 +32,7 @@ const wording = {
     count: (total: number, earlier: boolean) => `${total}${earlier ? "+" : ""} recovered`,
     name: "recovered tool failure",
     group: "Recovered tool failures",
-    title: "Failed tool calls the agent recovered from",
+    title: "Failed tool calls followed by more activity in the attempt",
   },
 } as const;
 

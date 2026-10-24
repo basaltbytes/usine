@@ -156,7 +156,9 @@ it("resolves a failure from Needs attention while retaining unrelated attention,
         </QueryClientProvider>,
       ),
     );
-    await page.getByRole("button", { name: /AgentFailure.*Work was completed separately/ }).click();
+    await page
+      .getByRole("button", { name: /implement: agent failure.*Work was completed separately/ })
+      .click();
     await page.getByRole("button", { name: "Mark resolved", exact: true }).click();
     await expect
       .element(page.getByRole("button", { name: "Mark resolved", exact: true }))
@@ -165,7 +167,7 @@ it("resolves a failure from Needs attention while retaining unrelated attention,
     await page.getByRole("button", { name: "Retry", exact: true }).click();
     await expect
       .element(
-        page.getByText("Run newer-run of Loop implement is open on the same Item", {
+        page.getByText('run newer-run of loop "implement" is open on the same item', {
           exact: false,
         }),
       )
@@ -184,7 +186,7 @@ it("resolves a failure from Needs attention while retaining unrelated attention,
     await page.getByRole("button", { name: "Close", exact: true }).click();
     const needs = page.getByRole("region", { name: "Needs attention" });
     await expect
-      .element(needs.getByRole("button", { name: /AgentFailure/ }))
+      .element(needs.getByRole("button", { name: /implement: agent failure/ }))
       .not.toBeInTheDocument();
     await expect
       .element(

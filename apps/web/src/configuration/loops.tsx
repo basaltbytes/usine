@@ -229,7 +229,7 @@ const LoopFacts = ({
       </Fact>
       <Fact label="Repositories">
         {loop.repositories.length === 0 ? (
-          <Unset>None registered matches the selector</Unset>
+          <Unset>No registered repository matches the selector</Unset>
         ) : (
           <ul className="flex flex-col gap-0.5">
             {loop.repositories.map((repository) => (
@@ -243,7 +243,7 @@ const LoopFacts = ({
       <Fact label="Approval">{approvalLabel[loop.approval]}</Fact>
       <Fact label="Max cycles">
         <span className="tabular-nums">{loop.maxCycles}</span>{" "}
-        <Unset>Runs per item before a reset</Unset>
+        <Unset>runs per item before a reset</Unset>
       </Fact>
       <Fact label="Permissions">{permissionsLabel[loop.permissions]}</Fact>
       <Fact label="Step">
@@ -293,9 +293,10 @@ const LoadedLoop = ({
             <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
               <WarningIcon weight="fill" className="mt-0.5 size-3 shrink-0 text-warning" />
               <span>
-                The condition uses {loop.undeclaredLabels.join(", ")}, which <code>labels</code> in{" "}
-                <code>usine.yaml</code> does not declare, so usine does not create{" "}
-                {loop.undeclaredLabels.length === 1 ? "it" : "them"} in the repositories.
+                Condition uses{" "}
+                {loop.undeclaredLabels.length === 1 ? "an undeclared label" : "undeclared labels"}:{" "}
+                {loop.undeclaredLabels.join(", ")}. usine creates only the labels under{" "}
+                <code>labels</code> in <code>usine.yaml</code>.
               </span>
             </p>
           )}
@@ -344,7 +345,7 @@ export const LoopDetail = ({
     );
   return (
     <ConfigurationPage title={name}>
-      <Missing title="No loop by this name">
+      <Missing title="Loop not found">
         The configuration has no file <code>loops/{name}.md</code>.{" "}
         <Link to="/configuration/loops" className="text-primary hover:underline">
           See all loops

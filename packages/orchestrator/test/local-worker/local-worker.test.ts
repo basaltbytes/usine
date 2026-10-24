@@ -286,7 +286,7 @@ describe("local worker", () => {
     "fails once, without an automatic retry, when GitHub refuses the Attempt's token",
     () => {
       const refusal =
-        "Could not mint a worker token for acme/demo: GitHub rejected the request with status 422: The permissions requested are not granted to this installation.";
+        'Could not create a worker token for "acme/demo": GitHub returned HTTP status 422: The permissions requested are not granted to this installation.';
       return withLocalEngine(
         { credentials: failingCredentials("refused", refusal) },
         ({ engine, instance }) =>
@@ -307,7 +307,7 @@ describe("local worker", () => {
     "retries as an infrastructure failure when GitHub cannot be reached for the token",
     () => {
       const outage =
-        "Could not mint a worker token for acme/demo: The request to GitHub could not be sent";
+        'Could not create a worker token for "acme/demo": Could not send the request to GitHub';
       return withLocalEngine(
         { credentials: failingCredentials("unreachable", outage) },
         ({ engine }) =>
@@ -895,7 +895,8 @@ describe("local worker", () => {
             Effect.fail(
               new InstallationDiscoveryError({
                 reason: "missing",
-                message: "The GitHub App is not installed on an account",
+                message:
+                  "The GitHub App is not installed on any account. Install it on the account that owns the repositories.",
               }),
             ),
           installationToken: () => Effect.die("unused"),

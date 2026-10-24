@@ -28,7 +28,7 @@ export const SectionReloadProvider = ({ children }: { readonly children: ReactNo
 
 const useSectionReload = (): ConfigurationReload => {
   const reload = use(ReloadContext);
-  if (reload === null) throw new Error("Configuration pages render inside SectionReloadProvider");
+  if (reload === null) throw new Error("useSectionReload is called outside SectionReloadProvider");
   return reload;
 };
 
@@ -212,7 +212,7 @@ export const SectionReloadResult = () => {
           <ul>
             {leftOut.map(({ file, error }) => (
               <li key={file}>
-                Left out {fileLink(file)}: {error.message.replace(/\.$/u, "")}.
+                {fileLink(file)} not loaded: {error.message.replace(/\.$/u, "")}.
               </li>
             ))}
           </ul>

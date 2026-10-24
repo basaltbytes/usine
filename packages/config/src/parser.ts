@@ -30,7 +30,9 @@ const formatIssue = SchemaIssue.makeFormatterDefault();
 
 // YAML reads an unquoted `if: true` as a boolean; it decodes to the same CEL literal.
 const ConditionFromYaml = Schema.Union([Schema.String, Schema.Boolean])
-  .annotate({ message: "Expected a CEL expression: quote the value so YAML reads it as a string" })
+  .annotate({
+    message: "Expected a CEL expression. Quote the value so that YAML reads it as a string.",
+  })
   .pipe(
     Schema.decodeTo(Source, {
       decode: SchemaGetter.transform((condition: string | boolean) => String(condition)),
@@ -166,7 +168,7 @@ const interpolations = (
           file,
           stage: "expression",
           expression: Option.none(),
-          message: `Unclosed prompt interpolation at character ${start}`,
+          message: `The prompt has an unclosed {{ at character ${start}. Close it with }}.`,
         });
       }
       const expression = body.slice(start + 2, end).trim();

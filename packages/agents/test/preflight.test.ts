@@ -177,7 +177,7 @@ describe("worker harness readiness", () => {
   );
 
   const subscriptionLogin =
-    "Claude requires a subscription login; run claude auth login on the Worker";
+    "Claude Code needs a subscription login. Run claude auth login on the worker.";
   // Claude Code 2.1.296 prints its status and exits 1 when not logged in.
   for (const status of [
     { auth: { loggedIn: false, authMethod: "none", apiProvider: "firstParty" }, exitCode: 1 },
@@ -237,7 +237,7 @@ describe("worker harness readiness", () => {
           assert.strictEqual(error.capability, "login");
           assert.strictEqual(
             error.message,
-            "claude auth status --json failed; check the Worker's claude installation and login",
+            "claude auth status --json failed. Check the claude installation and login on the worker.",
           );
         }).pipe(
           Effect.provide(
@@ -337,7 +337,7 @@ describe("worker harness readiness", () => {
     Effect.gen(function* () {
       const error = yield* verifyHarness(brain("pi"), remote, {}).pipe(Effect.flip);
       assert(error instanceof HarnessUnavailableError);
-      assert.strictEqual(error.message, "Pi children run only on local Workers");
+      assert.strictEqual(error.message, "Pi children run only on local workers");
     }).pipe(
       Effect.provide(commands({})),
       Effect.provide(account(Effect.succeed(null)).layer),

@@ -536,7 +536,7 @@ describe("durable AttemptRuntime", () => {
           // (#178).
           const relayed = yield* Effect.forkChild(runtime.attached(attemptId));
           const early = yield* runtime.intervene(attemptId, steer).pipe(Effect.flip);
-          assert.strictEqual(early.message, "This Attempt no longer has a live channel");
+          assert.strictEqual(early.message, "This attempt no longer has a live channel");
           assert.strictEqual(relayed.pollUnsafe(), undefined);
           const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
           yield* Fiber.join(relayed).pipe(Effect.timeout("5 seconds"));

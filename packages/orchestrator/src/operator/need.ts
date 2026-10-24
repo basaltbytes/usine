@@ -101,7 +101,7 @@ export class UnconfiguredWorkerNeed extends Schema.TaggedClass<UnconfiguredWorke
     running: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   }).check(
     Schema.makeFilter(({ attempts, running }) => running <= attempts, {
-      message: "Expected no more open Attempts than Attempts",
+      message: "Expected no more open attempts than attempts",
     }),
   ),
 ) {}

@@ -12,7 +12,7 @@ export type RepositoryName = typeof RepositoryName.Type;
 /** The branch, tag, commit, or `HEAD` to check out for an Attempt, resolved when the Attempt is prepared. */
 export const RepositoryRevision = Schema.String.check(
   Schema.isPattern(/^[^\s-]\S*$/u, {
-    message: "Expected a git revision without whitespace or a leading dash",
+    message: "Expected a Git revision without whitespace or a leading dash",
   }),
 ).pipe(Schema.brand("RepositoryRevision"));
 export type RepositoryRevision = typeof RepositoryRevision.Type;
@@ -20,7 +20,7 @@ export type RepositoryRevision = typeof RepositoryRevision.Type;
 /** A full SHA-1 or SHA-256 commit ID in lowercase hex. */
 export const CommitSha = Schema.String.check(
   Schema.isPattern(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/u, {
-    message: "Expected a 40- or 64-character lowercase git object id",
+    message: "Expected a 40- or 64-character lowercase Git object ID",
   }),
 ).pipe(Schema.brand("CommitSha"));
 export type CommitSha = typeof CommitSha.Type;

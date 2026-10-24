@@ -60,7 +60,7 @@ export const collectCommand = (
       (cause) =>
         new ExecutorOperationError({
           operation,
-          message: `${command} could not be executed`,
+          message: `Can't run ${command}`,
           cause,
         }),
     ),

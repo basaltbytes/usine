@@ -5,7 +5,8 @@ import type { SshCommand } from "@usine/agents/child-host";
 
 export const IntegrationName = Schema.String.check(
   Schema.isPattern(/^[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*$/u, {
-    message: "Expected an exe.dev integration name safe for the lobby command boundary",
+    message:
+      "Expected an exe.dev integration name of letters and digits, separated by single dots, underscores, or hyphens",
   }),
 ).pipe(Schema.brand("ExeDevIntegrationName"));
 export type IntegrationName = typeof IntegrationName.Type;

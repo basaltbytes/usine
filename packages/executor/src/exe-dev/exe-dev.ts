@@ -87,7 +87,7 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
       gatewayCredential: () => Effect.succeedNone,
       grantFor,
       readOnlyAccessGap: Option.some(
-        "exe.dev's GitHub integration grants the access of exe.dev's own GitHub App and cannot narrow it to read-only",
+        "An exe.dev GitHub integration has the access of exe.dev's GitHub App, which can't be limited to read-only",
       ),
       reclaim: () => Effect.void,
       interruptGrace: options.interruptGrace ?? "10 seconds",

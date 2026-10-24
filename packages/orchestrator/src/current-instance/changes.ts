@@ -147,7 +147,7 @@ export const restartChanges = (
         {
           block: "workers",
           field: "workers",
-          reason: "the workers block changed while no Worker runs",
+          reason: "the workers block changed while no worker is running",
         } as const,
       ]),
 ];
@@ -214,8 +214,8 @@ export const workersChange = (
         field: `workers.${worker.name}.${key}`,
         reason:
           key === "kind"
-            ? `Worker ${worker.name} changed its kind from ${previous.kind} to ${worker.kind}`
-            : `Worker ${worker.name} changed its ${key}`,
+            ? `worker "${worker.name}" changed kind from ${previous.kind} to ${worker.kind}`
+            : `worker "${worker.name}" changed ${key}`,
       });
     }
     if (changed.length === 0 && previous.maxConcurrentAttempts !== worker.maxConcurrentAttempts) {
@@ -230,7 +230,7 @@ export const workersChange = (
     restart.push({
       block: "workers",
       field: `workers.${previous.name}.name`,
-      reason: `Worker ${previous.name} is renamed to ${renamed.name}`,
+      reason: `worker "${previous.name}" was renamed to "${renamed.name}"`,
     });
   }
   return { resized, added, removed, restart };

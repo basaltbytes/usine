@@ -56,7 +56,7 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
           return yield* new HarnessUnavailableError({
             harness: "codex",
             capability: "version",
-            message: `Worker has ${/^codex-cli [0-9]+\.[0-9]+\.[0-9]+$/u.test(version) ? version : "an unrecognized Codex version"}; supported Codex CLI versions: ${supportedCodexVersions.join(", ")}`,
+            message: `The worker has ${/^codex-cli [0-9]+\.[0-9]+\.[0-9]+$/u.test(version) ? version : "an unrecognized Codex version"}. Install a supported Codex CLI version: ${supportedCodexVersions.join(", ")}.`,
           });
         yield* Effect.scoped(
           Effect.gen(function* () {
@@ -100,7 +100,7 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
           apiProvider !== "firstParty"
         )
           return yield* loginError(
-            "Claude requires a subscription login; run claude auth login on the Worker",
+            "Claude Code needs a subscription login. Run claude auth login on the worker.",
           );
         break;
       }
@@ -109,7 +109,7 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
           return yield* new HarnessUnavailableError({
             harness: "pi",
             capability: "binary",
-            message: "Pi children run only on local Workers",
+            message: "Pi children run only on local workers",
           });
         // Pi runs from the SDK installed with this process, not from a CLI binary.
         const sdk = yield* PiSdk;
@@ -127,7 +127,7 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
             new SessionOperationError({
               operation: "launch",
               sessionId: Option.none(),
-              message: `Pi could not check authentication for ${brain.model}`,
+              message: `Can't check Pi authentication for "${brain.model}"`,
               cause,
             }),
           (acquired) =>
@@ -136,7 +136,7 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
               yield* Effect.sync(acquired.dispose);
               if (result._tag !== "Started" || result.pool !== "apiKeys")
                 return yield* loginError(
-                  `Pi child model ${brain.model} requires an available model, supported effort, and API-key authentication`,
+                  `Pi child model "${brain.model}" is unavailable, doesn't support effort ${brain.effort}, or doesn't use an API key`,
                 );
             }),
         );

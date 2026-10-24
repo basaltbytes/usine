@@ -39,7 +39,7 @@ import { parentSession, parentSessionId } from "./parent.ts";
 const PAGE = 64;
 
 const unavailable = () =>
-  new AgentFailure({ message: "This Attempt no longer has a live channel" });
+  new AgentFailure({ message: "This attempt no longer has a live channel" });
 
 /** Returns `value` as an `EntryId`, where 0 sorts before every committed entry. */
 const entryId = (value: number): EntryId =>

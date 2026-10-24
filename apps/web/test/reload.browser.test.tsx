@@ -73,14 +73,14 @@ it("reloads the configuration from any Configuration page and shows what changed
         body: JSON.stringify({
           error: "ReloadPreflightError",
           message:
-            "Worker preflight failed for Agent reviewer and Worker eu-1, which the reload adds or gives more slots. Worker local: Claude Code is not logged in. The running configuration is unchanged; fix the Worker, usine.yaml, or the Agent file, then reload again.",
+            'Worker preflight failed for agent "reviewer" and worker "eu-1" (added or given more slots by the reload). Worker "local": Claude Code needs a subscription login. Run claude auth login on the worker. The running configuration is unchanged. Fix the worker, usine.yaml, or the agent file, then reload again.',
           agents: ["reviewer"],
           workers: ["eu-1"],
           cause: {
             _tag: "WorkerCapabilityError",
             worker: "local",
             capability: "harness-login",
-            message: "Claude Code is not logged in.",
+            message: "Claude Code needs a subscription login. Run claude auth login on the worker.",
           },
         }),
       },
@@ -89,7 +89,7 @@ it("reloads the configuration from any Configuration page and shows what changed
         body: JSON.stringify({
           error: "RestartRequiredError",
           message:
-            "usine.yaml changed in a way that applies only when usine up restarts: Worker eu-1 changed its destination; the webhooks block changed. The running configuration is unchanged; restart usine up to apply the change.",
+            "These usine.yaml changes require a restart: the destination of Worker eu-1 changed; the webhooks block changed. The running configuration is unchanged. Restart usine up to apply them.",
           blocks: ["workers", "webhooks"],
           fields: ["workers.eu-1.destination", "webhooks"],
         }),
@@ -130,7 +130,7 @@ it("reloads the configuration from any Configuration page and shows what changed
     await page.getByRole("button", { name: "Reload configuration" }).click();
     await expect.element(page.getByText("Configuration not reloaded")).toBeVisible();
     await expect
-      .element(page.getByText("usine.yaml, or the loops or agents folder, could not be loaded."))
+      .element(page.getByText("Could not load usine.yaml, the loops folder, or the agents folder."))
       .toBeVisible();
     await expect
       .element(page.getByText("The running configuration is unchanged", { exact: false }))

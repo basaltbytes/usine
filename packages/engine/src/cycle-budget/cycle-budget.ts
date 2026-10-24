@@ -76,7 +76,7 @@ export class CycleBudgets extends Context.Service<
           .asks()
           .pipe(
             Effect.mapError(
-              (cause) => new EnginePersistenceError({ operation: "read cycle Asks", cause }),
+              (cause) => new EnginePersistenceError({ operation: "read cycle asks", cause }),
             ),
           ),
       );
@@ -104,7 +104,7 @@ export class CycleBudgets extends Context.Service<
               if (ask === undefined) return yield* new CycleBudgetResetRejectedError({ askId });
               const budget = yield* cycleQueries(transaction).get(ask.itemKey);
               if (Option.isNone(budget))
-                return yield* Effect.die(new Error("Open cycle Ask has no budget"));
+                return yield* Effect.die(new Error("Open cycle ask has no budget"));
               const generation = budget.value.generation + 1;
               yield* transaction
                 .insert(events)

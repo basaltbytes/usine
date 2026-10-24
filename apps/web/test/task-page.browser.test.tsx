@@ -145,7 +145,7 @@ it("lists every Run newest first, each opening its Run page with why it ended", 
     .toHaveTextContent("The required check lint failed again");
   await expect.element(rowOf("start-dev")).toHaveTextContent("#40 Issue");
   await expect.element(rowOf("review-pr")).toHaveTextContent("Approved by PhilDL");
-  await expect.element(rowOf("review-pr")).toHaveTextContent("from the GitHub Ask");
+  await expect.element(rowOf("review-pr")).toHaveTextContent("from GitHub");
   await expect.element(rowOf("fix-ci", 1)).toHaveTextContent("Run again by PhilDL");
   // Two Attempts of 30 minutes each.
   await expect.element(rowOf("start-dev")).toHaveTextContent("1 h");

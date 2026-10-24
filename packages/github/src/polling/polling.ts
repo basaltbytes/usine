@@ -303,7 +303,7 @@ export class GitHubPolling extends Context.Service<
         if (Option.isSome(next)) {
           return yield* invalidResponse(
             operation,
-            `GitHub label list exceeded ${MAX_LABEL_PAGES} pages`,
+            `the GitHub label list has more than ${MAX_LABEL_PAGES} pages`,
           );
         }
         return catalog.sort((left, right) => left.name.localeCompare(right.name));
@@ -447,13 +447,13 @@ export class GitHubPolling extends Context.Service<
             const repositoryGone = (operation: GitHubOperation) =>
               invalidResponse(
                 operation,
-                `repository ${repository} came back null: deleted, renamed, or access lost`,
+                `repository "${repository}" is null: deleted, renamed, or no longer accessible`,
               );
             const itemGone = (operation: GitHubOperation, kind: string) =>
               new GitHubItemNotFoundError({
                 operation,
                 item: item.number,
-                message: `GitHub has no ${kind} ${item.number} in ${repository}: deleted, transferred, or access lost`,
+                message: `GitHub ${kind} ${repository}#${item.number} was not found. It was deleted or transferred, or the GitHub App can no longer read it.`,
               });
             const completeLabels = Effect.fn("GitHubPolling.completeItemLabels")(function* (
               payload: IssuePayload | PullRequestPayload,
@@ -545,7 +545,7 @@ export class GitHubPolling extends Context.Service<
               if (Option.isNone(data.repository)) {
                 return yield* invalidResponse(
                   "find-missing-issues",
-                  `repository ${repository} came back null: deleted, renamed, or access lost`,
+                  `repository "${repository}" is null: deleted, renamed, or no longer accessible`,
                 );
               }
               const issues = data.repository.value;

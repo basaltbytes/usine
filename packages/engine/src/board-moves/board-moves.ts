@@ -50,7 +50,7 @@ const makeBoardMoves = Effect.gen(function* () {
         fromLane: move.fromLane,
         toLane: move.toLane,
       });
-    }, persistence("record Board move")),
+    }, persistence("record board move")),
     onItem: Effect.fn("BoardMoves.onItem")(function* (itemKey: ItemKey, since: DateTime.Utc) {
       yield* Effect.annotateCurrentSpan({ itemKey });
       const rows = yield* database
@@ -70,7 +70,7 @@ const makeBoardMoves = Effect.gen(function* () {
       return (yield* decodeRows(rows, { onExcessProperty: "error" })).map(
         (row) => new BoardMoveRecord(row),
       );
-    }, persistence("read Board moves")),
+    }, persistence("read board moves")),
   } as const;
 });
 

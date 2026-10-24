@@ -252,7 +252,7 @@ describe("Loop evaluation failures", () => {
           assert.strictEqual(first.failures[0]?.errorTag, "ExpressionEvaluationError");
           assert.match(
             first.failures[0]?.message ?? "",
-            /^Loop milestone: if: failed on issue #28: No such key: title/u,
+            /^Loop "milestone": if: failed on issue #28: No such key: title/u,
           );
           const saved = Schema.decodeUnknownSync(Schema.Struct({ cursor: PollCursor }))(
             cursors.stored.get(`github-poll:${repository}`),
@@ -302,7 +302,7 @@ describe("Loop evaluation failures", () => {
         assert.strictEqual(first.failures.length, 1);
         assert.match(
           first.failures[0]?.message ?? "",
-          /^Loop review: prompt \{\{ item\.statusCheckRollup\.state \}\} failed on pull request #12: No such key: state/u,
+          /^Loop "review": prompt \{\{ item\.statusCheckRollup\.state \}\} failed on pull request #12: No such key: state/u,
         );
         // Open pull requests are fetched on every poll; the failure stays
         // reported without being logged again.

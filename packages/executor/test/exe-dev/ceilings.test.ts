@@ -303,7 +303,7 @@ describe("exe.dev ceilings across a restart", () => {
             assert(failure._tag === "InfraFailure");
             assert.strictEqual(
               failure.message,
-              `Could not read the reattached Attempt's ${part}, which its runaway guard resumes from`,
+              `Can't read the ${part} of the reattached attempt, which the runaway guard needs to resume`,
             );
           }).pipe(
             Effect.scoped,

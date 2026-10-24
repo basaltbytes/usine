@@ -113,7 +113,7 @@ const makeCodexChild = Effect.gen(function* () {
         return yield* new UnknownModelError({
           harness: "codex",
           model: requestedModel,
-          message: `Codex does not expose model ${requestedModel}`,
+          message: `Codex has no model "${requestedModel}"`,
         });
       }
       const effort = request.session.brain.effort === "off" ? "none" : request.session.brain.effort;
@@ -132,7 +132,7 @@ const makeCodexChild = Effect.gen(function* () {
           harness: "codex",
           model: requestedModel,
           effort: request.session.brain.effort,
-          message: `Codex model ${requestedModel} does not support effort ${effort}`,
+          message: `Codex model "${requestedModel}" doesn't support effort ${effort}`,
         });
       }
 

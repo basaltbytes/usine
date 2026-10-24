@@ -68,7 +68,7 @@ const serve = Effect.fn("Server.serve")(function* (options: {
   );
   yield* Console.log(
     options.openSetupPage
-      ? `usine is waiting for GitHub App setup at ${options.url}`
+      ? `usine is running in setup mode at ${options.url}`
       : `usine is running at ${options.url}`,
   );
   if (options.openSetupPage) {

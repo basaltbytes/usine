@@ -2,7 +2,7 @@ import { Schema } from "effect";
 
 /** A provider model name, which the harness checks when the session starts. */
 export const ModelId = Schema.String.check(
-  Schema.isPattern(/\S/u, { message: "Expected a non-blank model id" }),
+  Schema.isPattern(/\S/u, { message: "Expected a non-blank model ID" }),
 ).pipe(Schema.brand("ModelId"));
 export type ModelId = typeof ModelId.Type;
 

@@ -9,7 +9,7 @@ import { ValidSelector } from "./selector.ts";
 import { Trigger } from "./trigger.ts";
 
 const KebabCase = Schema.isPattern(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u, {
-  message: "Expected a kebab-case filename identity",
+  message: "Expected a kebab-case file name",
 });
 
 const LoopFileName = LoopName.check(KebabCase);

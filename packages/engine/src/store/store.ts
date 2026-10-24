@@ -283,7 +283,7 @@ const makeRunStore = Effect.gen(function* () {
         }
       }),
     );
-  }, persistence("submit Event"));
+  }, persistence("submit event"));
 
   const parkForApproval = Effect.fn("RunStore.parkForApproval")(function* (runId: RunId) {
     yield* Effect.annotateCurrentSpan({ runId });
@@ -553,7 +553,7 @@ const makeRunStore = Effect.gen(function* () {
       },
     );
     return windows;
-  }, persistence("read Attempt windows"));
+  }, persistence("read attempt windows"));
 
   const discardLeftovers = Effect.fn("RunStore.discardLeftovers")(function* (worker: WorkerName) {
     yield* Effect.annotateCurrentSpan({ worker });
@@ -561,12 +561,12 @@ const makeRunStore = Effect.gen(function* () {
     return yield* database.transaction((transaction) =>
       leftoverQueries(transaction).discardLeftovers(worker, discardedAt),
     );
-  }, persistence("discard Attempt leftovers"));
+  }, persistence("discard attempt leftovers"));
 
   const openAttempts = Effect.fn("RunStore.openAttempts")(function* (worker: WorkerName) {
     yield* Effect.annotateCurrentSpan({ worker });
     return yield* leftoverQueries(database).openAttempts(worker);
-  }, persistence("count open Attempts"));
+  }, persistence("count open attempts"));
 
   const finishAttempt = Effect.fn("RunStore.finishAttempt")(function* (
     attempt: Attempt,
@@ -626,7 +626,7 @@ const makeRunStore = Effect.gen(function* () {
         return lifted;
       }),
     );
-  }, persistence("resolve Run failure"));
+  }, persistence("resolve run failure"));
 
   const approve = Effect.fn("RunStore.approve")(function* (
     runId: RunId,
@@ -683,7 +683,7 @@ const makeRunStore = Effect.gen(function* () {
             return yield* new RunRetryBlockedError({
               runId,
               openRunId: blocking.runId,
-              message: `Cannot retry Run ${runId}: Run ${blocking.runId} of Loop ${current.run.loop} is open on the same Item. Retry after it closes, or cancel it first.`,
+              message: `Cannot retry run ${runId}: run ${blocking.runId} of loop "${current.run.loop}" is open on the same item. Cancel run ${blocking.runId}, or try again after it closes.`,
             });
           }
           if (Option.isSome(amendment)) {
@@ -752,7 +752,7 @@ const makeRunStore = Effect.gen(function* () {
           return yield* new RunRetryBlockedError({
             runId,
             openRunId: blocking.runId,
-            message: `Cannot run Run ${runId} again: Run ${blocking.runId} of Loop ${loop} is open on the same Item. Run it again after that Run closes, or cancel it first.`,
+            message: `Run ${runId} cannot run again: run ${blocking.runId} of loop "${loop}" is open on the same item. Cancel run ${blocking.runId}, or try again after it closes.`,
           });
         }
         const trigger = Option.getOrElse(yield* tx.reopenedEvent(current.event.id), () => ({
@@ -861,7 +861,7 @@ const makeRunStore = Effect.gen(function* () {
     // Not recorded as a sighting, because the trigger can still submit this Event from a fetch
     // made before the closing Run changed the Item.
     return yield* queries.revokeQueued(loop, itemKey, queued.eventIds);
-  }, persistence("revoke queued Events"));
+  }, persistence("revoke queued events"));
 
   const claimQueued = Effect.fn("RunStore.claimQueued")(function* (
     submission: Submission,
@@ -891,7 +891,7 @@ const makeRunStore = Effect.gen(function* () {
         return (yield* openRun(tx, submission, runId)).openedRun;
       }),
     );
-  }, persistence("claim queued Event"));
+  }, persistence("claim queued event"));
 
   const appendTranscript = Effect.fn("RunStore.appendTranscript")(function* (
     direction: AttemptChannel.Direction,
@@ -915,11 +915,11 @@ const makeRunStore = Effect.gen(function* () {
           });
       }),
     );
-  }, persistence("append Attempt transcript"));
+  }, persistence("append attempt transcript"));
 
   const transcript = Effect.fn("RunStore.transcript")(function* (query: TranscriptQuery) {
     return yield* queries.transcript(query);
-  }, persistence("read Attempt transcript"));
+  }, persistence("read attempt transcript"));
 
   return {
     approve,
@@ -928,12 +928,12 @@ const makeRunStore = Effect.gen(function* () {
     cancel,
     claimQueued,
     finishAttempt,
-    nextQueued: (runId: RunId) => queries.nextQueued(runId).pipe(persistence("find queued Event")),
+    nextQueued: (runId: RunId) => queries.nextQueued(runId).pipe(persistence("find queued event")),
     parkForApproval,
     pendingContinuations: queries
       .pendingContinuations()
       .pipe(persistence("list pending continuations")),
-    runIdsToDrive: queries.runIdsToDrive().pipe(persistence("list the Runs to drive")),
+    runIdsToDrive: queries.runIdsToDrive().pipe(persistence("list the runs to drive")),
     recordAndClaim,
     salvageCandidates: queries.salvageCandidates().pipe(persistence("list salvage candidates")),
     salvageCandidate: (attemptId: AttemptId) =>

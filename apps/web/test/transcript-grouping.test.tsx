@@ -770,7 +770,7 @@ it("shows a message to a working child queued in the child's section until the c
   };
 
   assert.deepStrictEqual(queuedOf(working), ["child"]);
-  assert.include(render(working), "Queued until the child&#x27;s current step ends");
+  assert.include(render(working), "Queued until the current child step ends");
   assert.deepStrictEqual(queuedOf([...working, applied(6, false)]), [null]);
   assert.notInclude(render([...working, applied(6, false)]), "Queued until");
 });

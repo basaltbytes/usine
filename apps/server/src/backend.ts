@@ -134,7 +134,7 @@ export const needsSetupBackendLayer = (
   configuration: OperatorConfiguration["Service"],
 ): Layer.Layer<FactoryBackend> => {
   const unavailable = new BackendUnavailableError({
-    message: "GitHub App setup is required before operator actions are available.",
+    message: "The GitHub App is not set up. Set it up to use operator actions.",
   });
   const overview = Effect.flatMap(instances.get, observation.overview).pipe(
     Effect.map(

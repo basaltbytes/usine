@@ -83,18 +83,18 @@ export const verifyWorkerMemory = Effect.fn("Executor.verifyWorkerMemory")(funct
     const carried = withoutSwap ? Math.min(fitting, 1) : fitting;
     const advice =
       carried === 0
-        ? "give the machine more memory"
-        : `set max_concurrent_attempts to ${carried} or less, or give the machine more memory`;
+        ? "Add memory to the machine."
+        : `Set max_concurrent_attempts to ${carried} or less, or add memory to the machine.`;
     return yield* memoryError(
       worker,
-      `Worker ${worker} has ${gib(memory.totalBytes)} of memory for max_concurrent_attempts: ${maxConcurrentAttempts}, ${gib(perAttempt)} per Attempt, and an Attempt needs at least ${gib(MEMORY_PER_ATTEMPT_MINIMUM)}; ${advice}`,
+      `Worker "${worker}" has ${gib(memory.totalBytes)} of memory, which is ${gib(perAttempt)} per attempt with max_concurrent_attempts set to ${maxConcurrentAttempts}. An attempt needs at least ${gib(MEMORY_PER_ATTEMPT_MINIMUM)}. ${advice}`,
       memory,
     );
   }
   if (withoutSwap && maxConcurrentAttempts > 1)
     return yield* memoryError(
       worker,
-      `Worker ${worker} has no swap for max_concurrent_attempts: ${maxConcurrentAttempts}, and concurrent Attempts without swap can thrash the machine until SSH stops answering; add swap, or set max_concurrent_attempts to 1`,
+      `Worker "${worker}" has no swap, and max_concurrent_attempts is ${maxConcurrentAttempts}. Concurrent attempts without swap can make the machine thrash until SSH stops responding. Add swap, or set max_concurrent_attempts to 1.`,
       memory,
     );
   if (perAttempt < MEMORY_PER_ATTEMPT_WARNING)
@@ -122,14 +122,14 @@ export const verifyLinuxMemory = Effect.fn("Executor.verifyLinuxMemory")(functio
 ) {
   const output = yield* meminfo.pipe(
     Effect.mapError((cause) =>
-      memoryError(worker, `Could not read /proc/meminfo on Worker ${worker}`, cause),
+      memoryError(worker, `Can't read /proc/meminfo on worker "${worker}"`, cause),
     ),
   );
   const memory = memoryFromMeminfo(output);
   if (Option.isNone(memory))
     return yield* memoryError(
       worker,
-      `Worker ${worker} reported no MemTotal or SwapTotal in /proc/meminfo`,
+      `/proc/meminfo on worker "${worker}" has no MemTotal or SwapTotal`,
       new Error(output.slice(0, 200)),
     );
   yield* verifyWorkerMemory(worker, maxConcurrentAttempts, memory.value);

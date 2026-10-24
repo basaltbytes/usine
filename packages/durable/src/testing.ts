@@ -509,7 +509,7 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
             const task = storage.tasks.get(attemptId);
             const active = attached.get(attemptId);
             if (task === undefined || active === undefined)
-              return yield* new AgentFailure({ message: "This Attempt has no live parent" });
+              return yield* new AgentFailure({ message: "This attempt has no live parent" });
             const inputSequence = AttemptChannel.Sequence.make(++task.inbound);
             yield* active.io.append(
               "inbound",

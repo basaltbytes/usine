@@ -13,8 +13,8 @@ Entries:
 - **Failed run**. **Mark resolved**, in its drawer (from **Needs attention** or **Run history**) or run page, clears the warning and its project and board attention, across reloads and restarts, and keeps the outcome, attempt details, transcript, and retry controls. A later failed attempt raises it again.
 - **Cycle budget used up** on an item, with the loops and their counts. **Reset cycle budget** records an explicit answer and refreshes the overview; the runtime fetches current trigger input before opening more work.
 - **Child-session budget used up**, with the configured and attempted counts, also shown in the drawer and reader.
-- **Loop quarantined** or **Agent file not loaded**: a file that failed to load at startup or reload, with the reason, until fixed and reloaded.
-- **Worker not configured**: a worker no longer in `usine.yaml` that has recorded attempts, with their count and the full detail, actions below. Startup doesn't reconcile them. Declare the worker again and restart `usine up`, or choose **Discard leftovers** and **Confirm discard** to stop tracking them, which removes nothing from the worker. While attempts a reload left there still run, the entry says how many (`2 attempts still run on it; discard its leftovers once they end`), and **Discard leftovers** appears after the last ends. A refused discard, for example because the worker is declared again, shows the reason.
+- **Loop file not loaded** or **Agent file not loaded**: a file that failed to load at startup or reload, with the reason, until fixed and reloaded.
+- **Worker not configured**: a worker no longer in `usine.yaml` that has recorded attempts, with their count and the full detail, actions below. Startup doesn't reconcile them. Declare the worker again and restart `usine up`, or choose **Discard leftovers** and **Confirm discard** to stop tracking them, which removes nothing from the worker. While attempts a reload left there still run, the entry says how many (`2 attempts still running on it. Discard the leftovers after they end`), and **Discard leftovers** appears after the last ends. A refused discard, for example because the worker is declared again, shows the reason.
 
 ## Overview
 
@@ -132,7 +132,7 @@ At `/projects/<owner>/<name>/runs/<run>`: the whole run under the drawer's heade
 
 The outline lists the task and the event with two-line previews, then each attempt with its outcome mark, start reason, start time, and duration, counting while it runs. Start reasons are the event, an operator retry, an edit and retry, a retry after an infrastructure failure, or a restart, marked if the restart reattached it.
 
-An approved run of a gated loop adds a line to the event entry and the event in the reader, such as “Approved by octocat · 15 Oct 19:30 · from the UI”, or “from the GitHub Ask” for a 👍 on the ask. It omits the name if `usine.yaml` sets no `operator`, and shows only “Approved” and the time for runs approved before usine recorded approvers.
+An approved run of a gated loop adds a line to the event entry and the event in the reader, such as “Approved by octocat · 15 Oct 19:30 · from the UI”, or “from GitHub” for a 👍 on the ask. It omits the name if `usine.yaml` sets no `operator`, and shows only “Approved” and the time for runs approved before usine recorded approvers.
 
 The attempt being read expands to its sessions (parent and children, with live status, hold state, and working time), then its checkpoints in order. Consecutive messages of one session fold into one entry, such as “developer, 14 messages”, listing each message by its first sentence, cut to a clause or whole words. Blockers, questions, operator messages, worker and provider notices, and the outcome are separate entries named by speaker; a blocker or the final failure is red, and a warning yellow.
 

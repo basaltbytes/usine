@@ -91,7 +91,7 @@ export default mergeConfig(
                       body: JSON.stringify({
                         error: "RunRetryBlockedError",
                         message:
-                          "Cannot retry Run resolution-run: Run newer-run of Loop implement is open on the same Item. Retry after it closes, or cancel it first.",
+                          'Cannot retry run resolution-run: run newer-run of loop "implement" is open on the same item. Cancel run newer-run, or try again after it closes.',
                       }),
                     }),
                   );

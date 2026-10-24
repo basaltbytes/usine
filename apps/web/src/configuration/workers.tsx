@@ -262,8 +262,8 @@ export const WorkerDetail = ({
   if (worker === undefined)
     return (
       <ConfigurationPage title={name}>
-        <Missing title="No worker by this name">
-          <code>usine.yaml</code> declares no worker {name}.{" "}
+        <Missing title="Worker not found">
+          <code>usine.yaml</code> has no worker {name}.{" "}
           <Link to="/configuration/workers" className="text-primary hover:underline">
             See all workers
           </Link>
@@ -277,7 +277,7 @@ export const WorkerDetail = ({
       : [
           {
             subject: "Worker",
-            detail: "Machine, Git, memory, Gateway, and credentials",
+            detail: "Machine, Git, memory, gateway, and credentials",
             check: worker.prerequisites,
           },
         ]),
@@ -307,7 +307,7 @@ export const WorkerDetail = ({
         </DetailSection>
         <DetailSection
           title="Preflight"
-          aside="At startup, and when a reload adds workers, slots, or agents with new brains"
+          aside="At startup, and when a reload adds workers, slots, or an agent with a new harness, model, or effort"
         >
           {checks.length === 0 ? (
             <p className="text-muted-foreground">No preflight since usine up started.</p>

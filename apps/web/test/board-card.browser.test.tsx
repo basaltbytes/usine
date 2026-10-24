@@ -417,7 +417,7 @@ it("keeps a card's Run again through a move to another lane and opens the new Ru
 it("says on the card why Run again opened no Run: a refusal, then a used-up cycle budget", async () => {
   const card = page.elementLocator(cardOf(/^Cache the label catalog/u));
   const refusal =
-    "Cannot run Run run-dropped again: Run run-newer of Loop implement is open on the same Item. Run it again after that Run closes, or cancel it first.";
+    "Cannot run Run run-dropped again: Run run-newer of Loop implement is open on the same Item. Cancel Run run-newer, or try again after it closes.";
   await runDroppedAgain();
   await commands.releaseRunAgain(
     409,
