@@ -16,3 +16,7 @@ export const api = <A, E>(
       Effect.provide(FetchHttpClient.layer),
     ),
   );
+
+/** Returns the message of the value an `api` request rejected with. */
+export const rejectionMessage = (cause: unknown): string =>
+  cause instanceof Error ? cause.message : String(cause);

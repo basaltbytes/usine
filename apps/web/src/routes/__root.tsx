@@ -2,6 +2,7 @@ import { WarningIcon } from "@phosphor-icons/react";
 import { useSuspenseQuery, type QueryClient } from "@tanstack/react-query";
 import {
   createRootRouteWithContext,
+  type ErrorComponentProps,
   Link,
   Outlet,
   useNavigate,
@@ -26,6 +27,7 @@ import { Button } from "@/components/ui/button";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { ConfigurationCrumbs } from "../configuration/layout.tsx";
 import { NeedsYou } from "../needs-you/needs-you.tsx";
+import { rejectionMessage } from "../api.ts";
 import { needsYouByProject, overviewQuery, projectParams } from "../overview.ts";
 import { Suspense, lazy, useState } from "react";
 
@@ -41,10 +43,10 @@ interface RouterContext {
   readonly queryClient: QueryClient;
 }
 
-const Unreachable = ({ error }: { readonly error: Error }) => {
+const Unreachable = ({ error }: ErrorComponentProps) => {
   const router = useRouter();
   return (
-    <BootScreen title="Server unreachable" description={error.message} tone="error">
+    <BootScreen title="Server unreachable" description={rejectionMessage(error)} tone="error">
       <Button variant="outline" onClick={() => void router.invalidate()}>
         Retry
       </Button>
