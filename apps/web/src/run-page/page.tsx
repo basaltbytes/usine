@@ -40,7 +40,7 @@ export const RunPage = ({ runId }: { readonly runId: RunId }) => {
             shared
             heading={(title) => <h1 className="text-xl font-semibold wrap-anywhere">{title}</h1>}
           />
-          <RunFacts run={run} item={item} shared />
+          <RunFacts run={run} item={item} settledItemState={detail.data.settledItemState} shared />
           <WorkFacts detail={detail.data} showUsage />
         </div>
         <RunActions run={run} onEdit={setEditing} openRun={openRun} className="lg:shrink-0" />

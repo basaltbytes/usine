@@ -6,7 +6,7 @@ import { Agent, AgentName, AgentPersona } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptTask } from "@usine/core/attempt";
 import { InfraFailure } from "@usine/core/attempt/failure";
-import { CycleGeneration, CycleLimit } from "@usine/core/cycle-budget";
+import { CycleBudgetAsk, CycleGeneration, CycleLimit } from "@usine/core/cycle-budget";
 import { Event, EventId, DedupKey } from "@usine/core/event";
 import { InstanceDirectory } from "@usine/core/instance";
 import { ItemKey } from "@usine/core/item";
@@ -16,7 +16,7 @@ import { RunId } from "@usine/core/run";
 import { StepName } from "@usine/core/step";
 import { StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
-import { DateTime, Effect, FileSystem, Layer, Option, Result } from "effect";
+import { DateTime, Effect, FileSystem, Layer, Option, Result, Schema } from "effect";
 import { CycleBudgets } from "../src/cycle-budget/cycle-budget.ts";
 import { localSqliteLayer } from "../src/database/local-sqlite.ts";
 import { Submission } from "../src/engine/submission.ts";
@@ -325,6 +325,69 @@ describe("Item cycle budgets", () => {
           );
         }),
       ),
+  );
+
+  it.live("closes an Ask without a reset, records why, and asks again at the next admission", () =>
+    withDirectory((directory) =>
+      Effect.gen(function* () {
+        const ask = yield* inDatabase(
+          directory,
+          Effect.gen(function* () {
+            const store = yield* RunStore;
+            const budgets = yield* CycleBudgets;
+            for (let round = 1; round <= 3; round += 1)
+              yield* complete(submission("review", round));
+            const blocked = yield* store.recordAndClaim(
+              submission("review", 4),
+              RunId.make("blocked"),
+            );
+            assert(blocked.result._tag === "CycleBlocked");
+            const opened = blocked.result.ask;
+            assert.isTrue(yield* budgets.close(opened.id, "ItemClosed"));
+            assert.deepStrictEqual(yield* budgets.asks(), []);
+            assert.isFalse(yield* budgets.close(opened.id, "ItemClosed"));
+            assert.strictEqual(
+              (yield* Effect.flip(budgets.reset(opened.id, event("late-reset"))))._tag,
+              "CycleBudgetResetRejectedError",
+            );
+            assert.strictEqual(yield* budgets.generation(ItemKey.make("pr-72")), 0);
+            assert.deepStrictEqual(yield* budgets.pendingResets(), []);
+            return opened;
+          }),
+        );
+        const closures = yield* Effect.sync(() => {
+          const database = new DatabaseSync(join(directory, ".usine/runtime.sqlite"));
+          try {
+            return database
+              .prepare("SELECT ask_id, item_key, reason, ask_json FROM usine_cycle_ask_closures")
+              .all();
+          } finally {
+            database.close();
+          }
+        });
+        assert.strictEqual(closures.length, 1);
+        assert.strictEqual(closures[0]?.["ask_id"], ask.id);
+        assert.strictEqual(closures[0]?.["item_key"], "pr-72");
+        assert.strictEqual(closures[0]?.["reason"], "ItemClosed");
+        assert.deepStrictEqual(
+          JSON.parse(String(closures[0]?.["ask_json"])),
+          Schema.encodeSync(CycleBudgetAsk)(ask),
+        );
+        yield* inDatabase(
+          directory,
+          Effect.gen(function* () {
+            const store = yield* RunStore;
+            const budgets = yield* CycleBudgets;
+            const next = submission("review", 5);
+            const blocked = yield* store.recordAndClaim(next, idFor(next));
+            assert(blocked.result._tag === "CycleBlocked");
+            assert.notStrictEqual(blocked.result.ask.id, ask.id);
+            assert.strictEqual(blocked.result.ask.completedCycles, 3);
+            assert.deepStrictEqual(yield* budgets.asks(), [blocked.result.ask]);
+          }),
+        );
+      }),
+    ),
   );
 
   it.live(

@@ -23,6 +23,7 @@ export const itemProjectionWriterLayer = Layer.succeed(ItemProjectionWriter)({
 });
 
 const noItemProjections: ItemProjectionReader["Service"] = {
+  get: () => Effect.succeed(Option.none()),
   list: () => Effect.succeed([]),
   openIssues: () => Effect.succeed([]),
 };
@@ -39,6 +40,7 @@ export const emptyCycleBudgets: CycleBudgets["Service"] = {
   asks: () => Effect.succeed([]),
   pendingResets: () => Effect.succeed([]),
   reset: () => Effect.die("unused cycle reset"),
+  close: () => Effect.die("unused cycle ask closure"),
   acknowledgeReset: () => Effect.die("unused cycle reset acknowledgement"),
 };
 

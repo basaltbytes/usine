@@ -385,6 +385,7 @@ const observation = (
     states: Effect.succeed([]),
   });
   const itemReader = Layer.succeed(ItemProjectionReader)({
+    get: () => Effect.die("the Task read reads no single Item"),
     list: () => Effect.succeed(items),
     openIssues: () => Effect.die("the Task read does not check open issues"),
   });

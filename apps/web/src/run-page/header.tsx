@@ -1,10 +1,11 @@
+import type { SettledItemState } from "@usine/config/board";
 import type { RunDetailView, RunDurationView, RunView } from "@usine/orchestrator/operator";
 import { Option } from "effect";
 import type { ReactNode } from "react";
 import { StateMark } from "@/components/status-badge";
 import { useNow } from "@/hooks/use-now";
 import { cn } from "@/lib/utils";
-import { durationLabel, runStateLine } from "../operator-copy.ts";
+import { durationLabel, runStateLine, settledItemLabel } from "../operator-copy.ts";
 import { pullRequestNumber, type RunItem } from "./item.ts";
 import { UsageFact } from "./usage.tsx";
 
@@ -52,6 +53,7 @@ export const RunTitle = ({
 export const RunFacts = ({
   run,
   item,
+  settledItemState = null,
   shared,
   className,
 }: {
@@ -61,6 +63,8 @@ export const RunFacts = ({
   >;
   /** If the Run opened no pull request and the Item is one, the Item is shown as the pull request. */
   readonly item: Option.Option<RunItem>;
+  /** The Item's state if it's closed or merged, shown for a failed Run. */
+  readonly settledItemState?: SettledItemState | null;
   /** Whether the state gets the drawer-to-page view transition name. */
   readonly shared: boolean;
   readonly className?: string;
@@ -109,6 +113,9 @@ export const RunFacts = ({
         Agent <span className="text-foreground">{run.agent}</span>
       </span>
       {run.loopPaused && <span>Loop paused</span>}
+      {run.state === "Failed" && settledItemState !== null && (
+        <span>{settledItemLabel(settledItemState)}</span>
+      )}
     </p>
   );
 };

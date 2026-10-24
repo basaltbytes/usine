@@ -3,9 +3,10 @@ import { ItemKey } from "@usine/core/item";
 import { Event } from "@usine/core/event";
 import * as RunState from "@usine/core/run/state";
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { Context, Effect, Layer, Option } from "effect";
+import { Context, DateTime, Effect, Layer, Option, Schema } from "effect";
 import { RunDatabase } from "../database/database.ts";
 import {
+  cycleAskClosures,
   cycleReservations,
   cycleResets,
   events,
@@ -14,7 +15,11 @@ import {
 } from "../database/schema.ts";
 import { EnginePersistenceError } from "../engine/error.ts";
 import { encodeDateTime, encodePayload } from "../store/codec.ts";
-import { CycleBudgetReset, CycleBudgetResetRejectedError } from "./model.ts";
+import {
+  type CycleBudgetAskCloseReason,
+  CycleBudgetReset,
+  CycleBudgetResetRejectedError,
+} from "./model.ts";
 import { cycleQueries } from "./queries.ts";
 
 const persistence = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -41,6 +46,15 @@ export class CycleBudgets extends Context.Service<
       askId: CycleBudgetAskId,
       answer: Event,
     ) => Effect.Effect<void, EnginePersistenceError | CycleBudgetResetRejectedError>;
+    /**
+     * Closes the Ask without a reset and records `reason`. The Item keeps its cycle generation and
+     * reservations, so its next admission at the limit opens a new Ask. Returns `false` if the Ask
+     * isn't open.
+     */
+    readonly close: (
+      askId: CycleBudgetAskId,
+      reason: CycleBudgetAskCloseReason,
+    ) => Effect.Effect<boolean, EnginePersistenceError>;
     /** Returns the resets that still wait for a durable polling-cursor restart. */
     readonly pendingResets: () => Effect.Effect<
       ReadonlyArray<CycleBudgetReset>,
@@ -159,6 +173,56 @@ export class CycleBudgets extends Context.Service<
           )
           .pipe(persistence);
       });
+      const close = Effect.fn("CycleBudgets.close")(function* (
+        askId: CycleBudgetAskId,
+        reason: CycleBudgetAskCloseReason,
+      ) {
+        yield* Effect.annotateCurrentSpan({ askId, reason });
+        const closedAt = encodeDateTime(yield* DateTime.now);
+        return yield* database
+          .transaction((transaction) =>
+            Effect.gen(function* () {
+              const ask = (yield* cycleQueries(transaction).asks()).find(({ id }) => id === askId);
+              if (ask === undefined) {
+                yield* Effect.logInfo("Cycle-budget Ask is no longer open; nothing to close", {
+                  askId,
+                  reason,
+                });
+                return false;
+              }
+              const askJson = Schema.encodeSync(CycleBudgetAsk)(ask);
+              // An Item that matches again in the same generation raises an Ask with the same ID.
+              yield* transaction
+                .insert(cycleAskClosures)
+                .values({ askId, itemKey: ask.itemKey, reason, askJson, closedAt })
+                .onConflictDoUpdate({
+                  target: cycleAskClosures.askId,
+                  set: { reason, askJson, closedAt },
+                })
+                .execute();
+              yield* transaction
+                .update(itemCycleBudgets)
+                .set({ askJson: null })
+                .where(eq(itemCycleBudgets.itemKey, ask.itemKey))
+                .execute();
+              yield* Effect.logInfo("Closed cycle-budget Ask without a reset", {
+                askId,
+                reason,
+                itemKey: ask.itemKey,
+                repository: ask.repository,
+                loop: ask.loop,
+                completedCycles: ask.completedCycles,
+                counts: ask.counts,
+              });
+              return true;
+            }),
+          )
+          .pipe(
+            Effect.mapError(
+              (cause) => new EnginePersistenceError({ operation: "close cycle ask", cause }),
+            ),
+          );
+      });
       const pendingResets = Effect.fn("CycleBudgets.pendingResets")(() =>
         queries.pendingResets().pipe(
           Effect.map((rows) => rows.map((row) => new CycleBudgetReset(row))),
@@ -193,9 +257,13 @@ export class CycleBudgets extends Context.Service<
           generation: reset.generation,
         });
       });
-      return { generation, asks, reset, pendingResets, acknowledgeReset };
+      return { generation, asks, reset, close, pendingResets, acknowledgeReset };
     }),
   );
 }
 
-export { CycleBudgetReset, CycleBudgetResetRejectedError } from "./model.ts";
+export {
+  CycleBudgetAskCloseReason,
+  CycleBudgetReset,
+  CycleBudgetResetRejectedError,
+} from "./model.ts";

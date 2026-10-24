@@ -216,6 +216,12 @@ For a Claude Code or Codex child, the terminal icon in the outline shows the ses
 | **Agent file not loaded**              | An agent file failed to load and isn't in the roster. Fix the file and reload the configuration.                    |
 | **Worker not configured**              | Attempts are recorded on a worker that `usine.yaml` no longer declares. See [Restarts](#restarts).                   |
 
+Entries about an issue that is closed or a pull request that is closed or merged leave on their own:
+
+- A failed run, question, or blocker on the item isn't listed. The run stays under **Recent runs**, and its drawer says `Issue closed`, `Pull request closed`, or `Pull request merged`. You can still retry it or mark it resolved.
+- The item's **Cycle budget exhausted** entry leaves at the next poll. usine records the ask as closed, not reset, so the item keeps its budget: if the item is reopened and a loop matches it again, the entry comes back.
+- A run waiting for approval is revoked at the next poll if the loop's `if:` requires an open item, such as `item.state == "OPEN"`.
+
 ## Runaway guards
 
 `max_attempt_minutes` and `max_attempt_tokens` in [`settings`](/reference/configuration/usine-yaml/#settings) limit each attempt. Both are off by default:

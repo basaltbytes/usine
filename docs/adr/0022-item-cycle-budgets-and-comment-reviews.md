@@ -25,3 +25,7 @@ This resolves the identity question in #77 without a second credential set: GitH
 - Label changes, restarts, and loop renames don't clear asks. A new loop name starts at zero; loop-file edits are trusted operator configuration, not an agent's way to unblock an item.
 - Trigger adapters capture the item's generation before fetching its snapshot. It's immutable in the event route and, after a reset, part of the dedup key. Queue selection and admission reject older observations, including polls in flight at the reset. Fresh polling yields a new event with the current task, agent, and limit; earlier queued events never enter the new allowance.
 - Remove old CEL review-count workarounds from fix and finishing loops; the [migration guide](../../apps/docs/src/content/docs/guides/review-fix-loops.md) shows the replacement.
+
+## Amendment (2026-10-24, #476): a closed or merged item closes its ask
+
+An ask on a merged pull request stayed in Needs attention with a reset as its only action, though no loop acted on the item any more and a reset would only request fresh polling. Each poll now closes the ask of an item that is closed, merged, or gone with the reason `ItemClosed`. A closure isn't a reset: the generation and reservations stay, so the budget's history keeps counting, and a reopened item at its limit asks again. The closed ask is stored with its reason, so the record says why it left.

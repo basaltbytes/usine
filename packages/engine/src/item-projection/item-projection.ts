@@ -32,24 +32,36 @@ export interface ItemProjectionListOptions {
   readonly limit: number;
 }
 
+const projectionSelection = {
+  itemKey: itemProjections.itemKey,
+  repository: itemProjections.repository,
+  source: itemProjections.source,
+  number: itemProjections.itemNumber,
+  contentHash: itemProjections.contentHash,
+  payload: itemProjections.payloadJson,
+  goneAt: itemProjections.goneAt,
+};
+
 const makeReader = Effect.gen(function* () {
   const database = yield* RunDatabase;
   return {
+    get: Effect.fn("ItemProjectionReader.get")(function* (itemKey: ItemKey) {
+      yield* Effect.annotateCurrentSpan({ itemKey });
+      const rows = yield* database
+        .select(projectionSelection)
+        .from(itemProjections)
+        .where(eq(itemProjections.itemKey, itemKey))
+        .execute();
+      const [row] = yield* decodeRows(rows, { onExcessProperty: "error" });
+      return Option.map(Option.fromNullishOr(row), (stored) => new ItemProjection(stored));
+    }, persistence("read item projection")),
     list: Effect.fn("ItemProjectionReader.list")(function* (
       repository: RepositoryName,
       options: ItemProjectionListOptions,
     ) {
       yield* Effect.annotateCurrentSpan({ repository, limit: options.limit });
       const rows = yield* database
-        .select({
-          itemKey: itemProjections.itemKey,
-          repository: itemProjections.repository,
-          source: itemProjections.source,
-          number: itemProjections.itemNumber,
-          contentHash: itemProjections.contentHash,
-          payload: itemProjections.payloadJson,
-          goneAt: itemProjections.goneAt,
-        })
+        .select(projectionSelection)
         .from(itemProjections)
         .where(eq(itemProjections.repository, repository))
         .orderBy(desc(itemProjections.itemNumber))
@@ -159,6 +171,10 @@ const makeWriter = Effect.gen(function* () {
 export class ItemProjectionReader extends Context.Service<
   ItemProjectionReader,
   {
+    /** Returns the stored projection of the Item `itemKey`, or `None` if no trigger observed it. */
+    readonly get: (
+      itemKey: ItemKey,
+    ) => Effect.Effect<Option.Option<ItemProjection>, EnginePersistenceError>;
     /** Returns the newest `limit` Item projections of `repository`, highest number first. */
     readonly list: (
       repository: RepositoryName,

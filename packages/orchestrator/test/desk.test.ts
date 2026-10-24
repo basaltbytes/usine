@@ -431,6 +431,7 @@ const deskLayer = (polls: ReadonlyArray<RepositoryPoll>) => {
         slots,
         Layer.succeed(CycleBudgets)({ ...emptyCycleBudgets, asks: () => Effect.succeed([ask]) }),
         Layer.succeed(ItemProjectionReader)({
+          get: () => Effect.die("the desk reads no single Item"),
           list: () => Effect.succeed(items),
           openIssues: () => Effect.die("the desk does not check open issues"),
         }),
