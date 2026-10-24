@@ -193,10 +193,15 @@ export class RunDriver extends Context.Service<
           return;
         }
         yield* Effect.logDebug("Starting the Run's fiber", { runId });
+        const launchedBy = yield* Effect.option(Effect.currentSpan);
         yield* FiberMap.run(
           fibers,
           runId,
           drive(runId).pipe(
+            Effect.withSpan("RunDriver.drive", {
+              root: true,
+              links: Option.toArray(Option.map(launchedBy, (span) => ({ span, attributes: {} }))),
+            }),
             Effect.catchCause((cause) =>
               Cause.hasInterruptsOnly(cause)
                 ? Effect.failCause(cause)
@@ -485,7 +490,8 @@ export class RunDriver extends Context.Service<
         return finished._tag;
       });
 
-      const drive = Effect.fn("RunDriver.drive")(function* (runId: RunId) {
+      // `launch` traces it as the root span of the Run's own trace.
+      const drive = Effect.fnUntraced(function* (runId: RunId) {
         const submission = yield* store
           .submission(runId)
           .pipe(retryingStore(runId, "read the run's submission"));

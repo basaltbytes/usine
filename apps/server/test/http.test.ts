@@ -291,6 +291,7 @@ const configurationView = new ConfigurationView({
     operator: null,
     webhooks: "off",
     webhooksPublicUrl: null,
+    tracing: null,
   }),
 });
 const configuration: OperatorConfiguration["Service"] = {

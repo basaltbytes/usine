@@ -75,7 +75,7 @@ const fieldLink = (field: string) => {
         <code>{field}</code>
       </Link>
     );
-  if (field === "webhooks")
+  if (field === "webhooks" || field === "tracing")
     return (
       <Link to="/configuration/settings">
         <code>{field}</code>

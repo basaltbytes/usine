@@ -21,6 +21,7 @@ The setting is in `usine.yaml` because the instance folder is the committed, rep
 
 - Only spans are exported. Logs written inside a span reach the collector as span events; OTLP logs and metrics would extend the same block.
 - `Server.serve` isn't a span: a span around the server, which never returns, would put every HTTP request in one trace.
-- A Run's spans are in the trace of the poll cycle that submitted it.
+- Each Run is a trace of its own. Its root span, `RunDriver.drive`, links to the span that launched the Run, such as a poll cycle or an approval request, so a trace holds one Run, even with an hours-long Attempt, and a poll cycle's trace ends with the cycle ([#508](https://github.com/basaltbytes/usine/issues/508)).
+- The web UI sends no trace headers. Its spans reach no collector, so a header would give each request span a parent that no backend has. The server still accepts trace headers from other clients, such as a proxy that exports its own spans.
 - A failed export request logs a warning. A failed export, after up to three retries, drops the buffered spans and pauses export for 60 seconds. Export never fails the orchestrator, and shutdown waits at most 3 seconds for the last batch.
-- `OTEL_RESOURCE_ATTRIBUTES` in the environment of `usine up` adds resource attributes, because Effect's resource reads it. `service_name` and the installed `@usine/server` version take precedence over it.
+- `OTEL_RESOURCE_ATTRIBUTES` in the environment of `usine up` adds resource attributes, the convention that collectors and SDKs share. `service_name` and the installed `@usine/server` version take precedence over it. A malformed value stops `usine up` from starting with a message that names the key, as a malformed `USINE_PORT` does; Effect's resource would end the process with a defect instead.

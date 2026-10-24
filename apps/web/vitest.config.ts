@@ -7,7 +7,10 @@ import vite from "./vite.config.ts";
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
 const delayedMoves = new WeakMap<Page, Promise<Route>>();
 const delayedRunAgains = new WeakMap<Page, Promise<Route>>();
-const interventionRequests = new WeakMap<Page, Array<{ url: string; body: unknown }>>();
+const interventionRequests = new WeakMap<
+  Page,
+  Array<{ url: string; body: unknown; headers: Array<string> }>
+>();
 
 /** The approve request that `approvalResponses` delays until `answerApproval`, and the requests after it. */
 interface ApprovalExchange {
@@ -140,9 +143,11 @@ export default mergeConfig(
                     }),
                   );
                   await page.route("**/api/runs/intervention-test/*", async (route) => {
-                    interventionRequests
-                      .get(page)
-                      ?.push({ url: route.request().url(), body: route.request().postDataJSON() });
+                    interventionRequests.get(page)?.push({
+                      url: route.request().url(),
+                      body: route.request().postDataJSON(),
+                      headers: Object.keys(await route.request().allHeaders()),
+                    });
                     await route.fulfill({
                       status,
                       contentType: "application/json",
@@ -158,9 +163,11 @@ export default mergeConfig(
                 runAgainResponse: async ({ page }, body: string) => {
                   await page.unroute("**/api/runs/intervention-test/run-again");
                   await page.route("**/api/runs/intervention-test/run-again", async (route) => {
-                    interventionRequests
-                      .get(page)
-                      ?.push({ url: route.request().url(), body: route.request().postDataJSON() });
+                    interventionRequests.get(page)?.push({
+                      url: route.request().url(),
+                      body: route.request().postDataJSON(),
+                      headers: Object.keys(await route.request().allHeaders()),
+                    });
                     await route.fulfill({ contentType: "application/json", body });
                   });
                 },

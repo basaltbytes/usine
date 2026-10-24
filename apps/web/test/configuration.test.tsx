@@ -285,12 +285,14 @@ describe("Repositories page", () => {
 });
 
 describe("Settings page", () => {
-  it("lists settings, the operator, and the webhooks mode with what each does", async () => {
+  it("lists settings, the operator, the webhooks mode, and tracing with what each does", async () => {
     const page = text(await render(() => <SettingsPage configuration={configurationFixture()} />));
     assert.include(page, "settings.poll_interval 60");
     assert.include(page, "settings.max_attempt_minutes Not set No wall-clock ceiling");
     assert.include(page, "settings.max_attempt_tokens 20000000");
     assert.include(page, "operator PhilDL");
     assert.include(page, "webhooks.mode off");
+    assert.include(page, "tracing.otlp_url http://localhost:4318/v1/traces");
+    assert.include(page, "tracing.service_name usine-eu");
   });
 });

@@ -1,8 +1,50 @@
 import type { Tracing } from "@usine/config/factory";
-import { Effect, type FileSystem, Layer, Option } from "effect";
+import {
+  Config,
+  ConfigProvider,
+  Effect,
+  type FileSystem,
+  Layer,
+  Option,
+  Schema,
+  SchemaTransformation,
+} from "effect";
 import { FetchHttpClient, HttpClient } from "effect/unstable/http";
 import { OtlpSerialization, OtlpTracer } from "effect/unstable/observability";
 import { type CliVersionError, packageVersion } from "./cli.ts";
+
+const RESOURCE_ATTRIBUTES = "OTEL_RESOURCE_ATTRIBUTES";
+
+/** `OTEL_RESOURCE_ATTRIBUTES` has a key or value that isn't valid percent-encoding. */
+export class ResourceAttributesError extends Schema.TaggedError<ResourceAttributesError>(
+  "@usine/server/ResourceAttributesError",
+)("ResourceAttributesError", {
+  variable: Schema.Literal(RESOURCE_ATTRIBUTES),
+  /** The parse problem, with the key at fault. */
+  message: Schema.String,
+}) {}
+
+/** Comma-separated `key=value` pairs with percent-encoded keys and values. */
+const ResourceAttributes = Schema.String.pipe(
+  Schema.decodeTo(
+    Schema.Record(Schema.StringFromUriComponent, Schema.StringFromUriComponent),
+    SchemaTransformation.splitKeyValue(),
+  ),
+);
+
+/** Returns the attributes in `OTEL_RESOURCE_ATTRIBUTES`, or none if it's unset. */
+const resourceAttributes = Effect.fn("Tracing.resourceAttributes")(function* () {
+  const refuse = (error: { readonly message: string }) =>
+    new ResourceAttributesError({ variable: RESOURCE_ATTRIBUTES, message: error.message });
+  const value = yield* Config.option(Config.string(RESOURCE_ATTRIBUTES)).pipe(
+    Effect.mapError(refuse),
+  );
+  return yield* Option.match(value, {
+    onNone: () => Effect.succeed({}),
+    onSome: (attributes) =>
+      Schema.decodeUnknownEffect(ResourceAttributes)(attributes).pipe(Effect.mapError(refuse)),
+  });
+});
 
 /** Returns the URL's origin and path, without credentials, query string, or fragment. */
 const loggedUrl = (url: URL) => `${url.origin}${url.pathname}`;
@@ -32,11 +74,12 @@ const exportClientLayer = (collector: string) =>
  * tracer, which exports nothing, if `tracing` is `None`. Logs which of the two applies, and a
  * warning for each failed export request, with the URL's origin and path only. A failed export,
  * after up to 3 retries, drops the buffered spans and pauses export for 60 seconds. Closing the
- * layer's scope flushes buffered spans for at most 3 seconds.
+ * layer's scope flushes buffered spans for at most 3 seconds. Fails with
+ * `ResourceAttributesError` if `tracing` is set and `OTEL_RESOURCE_ATTRIBUTES` is malformed.
  */
 export const tracingLayer = (
   tracing: Option.Option<Tracing>,
-): Layer.Layer<never, CliVersionError, FileSystem.FileSystem> =>
+): Layer.Layer<never, CliVersionError | ResourceAttributesError, FileSystem.FileSystem> =>
   Option.match(tracing, {
     onNone: () =>
       Layer.effectDiscard(
@@ -44,8 +87,16 @@ export const tracingLayer = (
       ),
     onSome: ({ otlpUrl, serviceName }) =>
       Layer.unwrap(
-        Effect.map(packageVersion(), (serviceVersion) =>
-          OtlpTracer.layer({ url: otlpUrl.href, resource: { serviceName, serviceVersion } }).pipe(
+        Effect.gen(function* () {
+          const serviceVersion = yield* packageVersion();
+          const attributes = yield* resourceAttributes();
+          return OtlpTracer.layer({
+            url: otlpUrl.href,
+            resource: { serviceName, serviceVersion, attributes },
+          }).pipe(
+            // `attributes` replaces the resource's own read of OTEL_RESOURCE_ATTRIBUTES, which dies on
+            // a malformed value.
+            Layer.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({}))),
             Layer.provide(OtlpSerialization.layerProtobuf),
             Layer.provide(exportClientLayer(loggedUrl(otlpUrl))),
             Layer.merge(
@@ -57,7 +108,7 @@ export const tracingLayer = (
                 }),
               ),
             ),
-          ),
-        ),
+          );
+        }),
       ),
   });
