@@ -4,19 +4,25 @@ import { FetchHttpClient, HttpClient } from "effect/unstable/http";
 import { OtlpSerialization, OtlpTracer } from "effect/unstable/observability";
 import { type CliVersionError, packageVersion } from "./cli.ts";
 
-const exportClientLayer = (otlpUrl: string) =>
+/** Returns the URL's origin and path, without credentials, query string, or fragment. */
+const loggedUrl = (url: URL) => `${url.origin}${url.pathname}`;
+
+const EXPORT_FAILED = "Span export to the OTLP collector failed";
+
+// The error message is left out because it repeats the request URL.
+const exportClientLayer = (collector: string) =>
   Layer.effect(
     HttpClient.HttpClient,
     Effect.map(HttpClient.HttpClient, (client) =>
       client.pipe(
         HttpClient.filterStatusOk,
-        HttpClient.tapError((error) =>
-          Effect.logWarning("Span export to the OTLP collector failed", {
-            otlpUrl,
-            reason: error.reason._tag,
-            message: error.message,
-          }),
-        ),
+        HttpClient.tapError((error) => {
+          const failure = { otlpUrl: collector, reason: error.reason._tag };
+          return Option.match(Option.fromUndefinedOr(error.response), {
+            onNone: () => Effect.logWarning(EXPORT_FAILED, failure),
+            onSome: ({ status }) => Effect.logWarning(EXPORT_FAILED, { ...failure, status }),
+          });
+        }),
       ),
     ),
   ).pipe(Layer.provide(FetchHttpClient.layer));
@@ -24,9 +30,9 @@ const exportClientLayer = (otlpUrl: string) =>
 /**
  * Exports every ended span to `tracing.otlpUrl` as OTLP/HTTP protobuf, or keeps Effect's default
  * tracer, which exports nothing, if `tracing` is `None`. Logs which of the two applies, and a
- * warning for each failed export request. A failed export, after up to 3 retries, drops the buffered
- * spans and pauses export for 60 seconds. Closing the layer's scope flushes buffered spans for at
- * most 3 seconds.
+ * warning for each failed export request, with the URL's origin and path only. A failed export,
+ * after up to 3 retries, drops the buffered spans and pauses export for 60 seconds. Closing the
+ * layer's scope flushes buffered spans for at most 3 seconds.
  */
 export const tracingLayer = (
   tracing: Option.Option<Tracing>,
@@ -41,11 +47,11 @@ export const tracingLayer = (
         Effect.map(packageVersion(), (serviceVersion) =>
           OtlpTracer.layer({ url: otlpUrl.href, resource: { serviceName, serviceVersion } }).pipe(
             Layer.provide(OtlpSerialization.layerProtobuf),
-            Layer.provide(exportClientLayer(otlpUrl.href)),
+            Layer.provide(exportClientLayer(loggedUrl(otlpUrl))),
             Layer.merge(
               Layer.effectDiscard(
                 Effect.logInfo("Exporting spans over OTLP", {
-                  otlpUrl: otlpUrl.href,
+                  otlpUrl: loggedUrl(otlpUrl),
                   serviceName,
                   serviceVersion,
                 }),

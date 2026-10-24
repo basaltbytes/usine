@@ -347,14 +347,14 @@ Exports the spans of the `usine up` process to an OpenTelemetry collector over O
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
-| `otlp_url` | URL | required | The collector's OTLP/HTTP traces endpoint, such as `http://localhost:4318/v1/traces`. usine posts to it as given, without appending `/v1/traces`. Must start with `http://` or `https://`. |
+| `otlp_url` | URL | required | The collector's OTLP/HTTP traces endpoint, such as `http://localhost:4318/v1/traces`. usine posts to it as given, without appending `/v1/traces`. Must start with `http://` or `https://`, and can't have a username, password, or query string. |
 | `service_name` | string | `usine` | The `service.name` resource attribute of every span. Non-blank. Set it to tell instances apart in one collector. |
 
 `usine up` sends spans in protobuf batches every 5 seconds, and the remaining spans when it stops. Spans keep their `Effect.fn` names, such as `PollingTriggers.pollRepository`, and their domain-id attributes, such as `repository`, `runId`, `attemptId`, and `worker`. The HTTP server and the SQLite client add `http.server` and `sql.execute` spans, and logs written inside a span are span events. The resource also has `service.version`, the installed `@usine/server` version, and the attributes in the `OTEL_RESOURCE_ATTRIBUTES` environment variable of `usine up`, such as `deployment.environment=eu`. Harness processes on workers export no spans.
 
-At startup, `usine up` logs `Exporting spans over OTLP` with the URL, or `Span export is off`. Each failed export request logs `Span export to the OTLP collector failed`. A failed export, after up to three retries, drops the buffered spans and pauses export for 60 seconds. A changed `tracing` block takes effect only after a restart; a reload refuses it with `RestartRequiredError`.
+At startup, `usine up` logs `Exporting spans over OTLP` with the URL's origin and path, or `Span export is off`. Each failed export request logs `Span export to the OTLP collector failed` with the same URL, the failure reason, and the HTTP status, if any. A failed export, after up to three retries, drops the buffered spans and pauses export for 60 seconds. A changed `tracing` block takes effect only after a restart; a reload refuses it with `RestartRequiredError`.
 
-usine sends no authentication headers. To export to a hosted backend, run a collector next to `usine up` that holds the backend's credentials. Span attributes include repository names, URLs, instance folder paths, and SQL statements without their parameter values, so export only to a collector that you control.
+usine sends no authentication headers, and `otlp_url` can't hold a token. To export to a hosted backend, run a collector next to `usine up` that holds the backend's credentials. Span attributes include repository names, URLs, instance folder paths, and SQL statements without their parameter values, so export only to a collector that you control.
 
 ```yaml title="usine.yaml"
 tracing:

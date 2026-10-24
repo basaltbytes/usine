@@ -111,6 +111,13 @@ describe("ConfigParser", () => {
         const failure = yield* parse(tracing).pipe(Effect.flip);
         expect(failure.stage).toBe("schema");
       }
+      for (const otlpUrl of [
+        "https://user:token@collector.example/v1/traces",
+        "https://collector.example/v1/traces?api_key=token",
+      ]) {
+        const failure = yield* parse(["tracing:", `  otlp_url: ${otlpUrl}`]).pipe(Effect.flip);
+        expect(failure.message).toContain("authenticate in a collector next to usine up");
+      }
     }).pipe(Effect.provide(parserLayer)),
   );
 

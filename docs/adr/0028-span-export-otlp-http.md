@@ -14,7 +14,8 @@ The setting is in `usine.yaml` because the instance folder is the committed, rep
 - **`OTEL_EXPORTER_OTLP_*` environment variables** (Effect's `OtlpTracer.layerFromConfig`): the OpenTelemetry convention, but the instance folder would no longer say where its spans go, and a reload couldn't detect a change.
 - **`@effect/opentelemetry` with the OpenTelemetry SDK**: adds sampling, gRPC, and SDK processors, at the cost of a second tracing stack and its dependency tree for one exporter.
 - **Vendor exporters**: a collector translates OTLP for any vendor.
-- **Authentication headers in `usine.yaml`**: would put backend credentials in a committed file. A collector next to `usine up` holds them instead.
+- **Authentication headers in `usine.yaml`**: would put backend credentials in a committed file. A collector next to `usine up` holds them instead, so `otlp_url` rejects a username, password, or query string, where hosted collectors put tokens.
+- **Headers from the `.usine/` secrets file**: keeps credentials out of git, but adds a second secret store format and its loading for what a local collector already does.
 
 ## Consequences
 

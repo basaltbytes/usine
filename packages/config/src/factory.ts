@@ -157,9 +157,13 @@ export const Webhooks = Schema.Union([
 
 export type Webhooks = typeof Webhooks.Type;
 
-const HttpUrl = Schema.URLFromString.check(
+const OtlpUrl = Schema.URLFromString.check(
   Schema.makeFilter((url: URL) => url.protocol === "http:" || url.protocol === "https:", {
     message: "Expected an http or https URL",
+  }),
+  Schema.makeFilter((url: URL) => url.username === "" && url.password === "" && url.search === "", {
+    message:
+      "Expected a URL without a username, password, or query string; authenticate in a collector next to usine up",
   }),
 );
 
@@ -167,9 +171,9 @@ const HttpUrl = Schema.URLFromString.check(
 export class Tracing extends Schema.Class<Tracing>("@usine/config/Tracing")({
   /**
    * The collector's OTLP/HTTP traces endpoint, used as given, such as
-   * `http://localhost:4318/v1/traces`.
+   * `http://localhost:4318/v1/traces`. It has no credentials or query string.
    */
-  otlpUrl: HttpUrl,
+  otlpUrl: OtlpUrl,
   /** The `service.name` resource attribute of every exported span. */
   serviceName: nonBlankString("Expected a non-blank service name").pipe(
     Schema.withDecodingDefaultKey(Effect.succeed("usine")),
