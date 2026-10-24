@@ -65,6 +65,28 @@ Each attempt starts in a new worktree, so only caches outside it carry over. All
 
 Without `TURBO_CACHE_DIR` and a `cacheDir`, Turborepo 2.10 puts a linked worktree's cache beside the main repo, which for an attempt is `<root>/workers/<name>/repos/.turbo/cache`.
 
+## Upgrade the harnesses
+
+`cloud-init.yaml` pins the Claude Code and Codex versions that usine supports, and it runs only when the server is created. When the pins change, install them on each running worker. `usine` has no sudo and root can't log in over SSH, so install them as root through `su` in an SSH session as `usine`:
+
+1. Give root a password with `hcloud server reset-password <name>`, which prints it, then switch to root:
+
+   ```sh
+   ssh -t -i ~/.ssh/usine_worker usine@<address> 'su -'
+   ```
+
+   For a worker behind the gateway, connect with its `Host` entry; see [`gateway/README.md`](gateway/README.md).
+
+2. Run the `npm install -g` line of the setup script in `cloud-init.yaml`, with the variables of `/etc/environment`, which contain the forward proxy behind the gateway. Then lock root's password again:
+
+   ```sh
+   set -a; . /etc/environment; set +a
+   npm install -g pnpm@11.20.0 @anthropic-ai/claude-code@2.1.308 @openai/codex@0.159.2
+   passwd -l root
+   ```
+
+The harness logins stay. `usine up` checks the Codex version at startup and before every attempt.
+
 ## Remove a worker
 
 Remove it from `usine.yaml`, then delete the server and its firewall:

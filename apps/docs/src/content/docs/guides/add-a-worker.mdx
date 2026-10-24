@@ -69,7 +69,7 @@ usine writes each attempt's token to `<root>/workers/<name>/credentials/<attempt
 
 ### Create a worker on Hetzner Cloud
 
-The scripts in `infra/hetzner/` create SSH workers with the `hcloud` CLI. `infra/hetzner/cloud-init.yaml` sets up a Debian 13 machine with a `usine` user that accepts SSH by key only, a 2 GB swap file, and `/home/usine/.usine` for the worker's root. It installs Git, gh, Node.js 24, pnpm 11.20.0, Claude Code 2.1.296, Codex 0.153.4, and Chromium. A cx33 or cpx32 has 7.7 GiB of memory, enough for two attempts without a warning.
+The scripts in `infra/hetzner/` create SSH workers with the `hcloud` CLI. `infra/hetzner/cloud-init.yaml` sets up a Debian 13 machine with a `usine` user that accepts SSH by key only, a 2 GB swap file, and `/home/usine/.usine` for the worker's root. It installs Git, gh, Node.js 24, pnpm 11.20.0, Claude Code 2.1.308, Codex 0.159.2, and Chromium. A cx33 or cpx32 has 7.7 GiB of memory, enough for two attempts without a warning.
 
 Attempts on the machine run as `usine` and share pnpm's default store, `/home/usine/.local/share/pnpm/store`, and the Turborepo cache that `/etc/environment` sets with `TURBO_CACHE_DIR=/home/usine/.cache/turbo`. Children are non-interactive SSH sessions, so they get `/etc/environment` and read no shell profile. `TURBO_CACHE_DIR` overrides a `cacheDir` in the repository's `turbo.json`. Turborepo still writes task logs to `.turbo/` in each package folder of the worktree.
 

@@ -4,10 +4,15 @@ import { HarnessReady, HarnessUnavailableError } from "@usine/core/agent/capabil
 import { Deferred, Effect, Fiber, Layer, Schema, Sink, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { TestClock } from "effect/testing";
+import { readFileSync } from "node:fs";
 import { LocalProcess, RemoteShell } from "../src/child-host/child-host.ts";
 import { CodexAppServer, type CodexConnection } from "../src/pi/codex/app-server.ts";
 import { PiSdk, type PiStartResult } from "../src/pi/sdk.ts";
-import { CODEX_CLI_VERSION, verifyHarness } from "../src/preflight/preflight.ts";
+import {
+  CODEX_CLI_VERSION,
+  supportedCodexVersions,
+  verifyHarness,
+} from "../src/preflight/preflight.ts";
 import packageJson from "../package.json" with { type: "json" };
 
 const brain = (harness: BrainSpec["harness"]) =>
@@ -97,6 +102,17 @@ describe("worker harness readiness", () => {
       CODEX_CLI_VERSION,
       packageJson.devDependencies["@pwrdrvr/codex-app-server-protocol"],
     );
+  });
+
+  // turbo.json lists the cloud-init file as an input of this package's tests.
+  it("pins a supported Codex version in the Hetzner worker image", () => {
+    const cloudInit = readFileSync(
+      new URL("../../../infra/hetzner/cloud-init.yaml", import.meta.url),
+      "utf8",
+    );
+    const pins = [...cloudInit.matchAll(/@openai\/codex@(\S+)/gu)].map(([, version]) => version);
+    assert.lengthOf(pins, 1);
+    assert.oneOf(pins[0], [...supportedCodexVersions]);
   });
 
   for (const result of [
