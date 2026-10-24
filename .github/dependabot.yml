@@ -23,9 +23,6 @@ updates:
       # pi-durable 1.2 storage-failure semantics (#495).
       - dependency-name: "@earendil-works/*"
         versions: [">=1.2.0"]
-      # Codex app-server protocol baseline (#496, ADR 0006).
-      - dependency-name: "@pwrdrvr/codex-app-server-protocol"
-        versions: [">0.144.0"]
     groups:
       npm:
         patterns:

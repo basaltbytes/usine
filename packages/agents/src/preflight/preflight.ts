@@ -14,10 +14,19 @@ import { PiSdk, piSdkLive, usePiStart } from "../pi/sdk.ts";
 import { probeCommand, probeFailed, probeOutput } from "./command.ts";
 
 /** The Codex CLI version of the pinned app-server protocol package used by the conformance check. */
-export const CODEX_CLI_VERSION = "0.144.0";
+export const CODEX_CLI_VERSION = "0.159.2";
 
-// Each additional version needs a review of its generated types and a run of the live contracts.
-const supportedCodexVersions = [CODEX_CLI_VERSION, "0.153.4"];
+/**
+ * The Codex CLI versions that preflight accepts, the conformance baseline first. Adding a version
+ * needs a review of its generated protocol types and a run of the live contracts.
+ */
+export const supportedCodexVersions: ReadonlyArray<string> = [
+  CODEX_CLI_VERSION,
+  "0.159.0",
+  "0.159.1",
+  "0.159.3",
+  "0.153.4",
+];
 
 const ClaudeAuthentication = Schema.Struct({
   loggedIn: Schema.Boolean,

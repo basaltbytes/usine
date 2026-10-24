@@ -101,7 +101,7 @@ describe("worker harness readiness", () => {
 
   for (const result of [
     { stdout: "", exitCode: 127, capability: "binary" },
-    { stdout: "codex-cli 0.153.5", exitCode: 0, capability: "version" },
+    { stdout: "codex-cli 0.144.0", exitCode: 0, capability: "version" },
   ]) {
     it.effect(`refuses a Codex ${result.capability} gap before any account request`, () => {
       const server = account(Effect.succeed(null));
@@ -119,7 +119,7 @@ describe("worker harness readiness", () => {
     });
   }
 
-  for (const version of ["0.144.0", "0.153.4"]) {
+  for (const version of ["0.159.2", "0.159.3", "0.153.4"]) {
     for (const auth of [{ type: "apiKey" }, { type: "chatgpt" }]) {
       it.effect(
         `checks Codex ${version} ${auth.type} authentication and closes its unprompted connection`,

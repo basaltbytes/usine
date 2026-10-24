@@ -43,7 +43,7 @@ Call `executor.preflight(worker, brains, maxConcurrentAttempts)` with the roster
 
 Every adapter compares the machine's memory with `maxConcurrentAttempts`. The local adapter reads `/proc/meminfo` on Linux and physical memory on macOS, where swap grows on demand; exe.dev and SSH read `/proc/meminfo` over SSH. Under 1.5 GiB per concurrent attempt, or no swap with more than one, is a `memory` `WorkerCapabilityError`; under 3 GiB logs a warning ([#270](https://github.com/basaltbytes/usine/issues/270)).
 
-Every adapter runs the `@usine/agents/preflight` checks where children run: local on this machine (override with `LocalExecutorOptions.harnessReadiness`), exe.dev and SSH over SSH (`SshExecutorOptions.harnessReadiness`). Codex needs CLI 0.144.0 or 0.153.4 and a ChatGPT login, Claude its CLI and subscription login, and Pi children API keys for their models. Pi children run tools in the orchestrator, so exe.dev and SSH workers report Pi brains unavailable.
+Every adapter runs the `@usine/agents/preflight` checks where children run: local on this machine (override with `LocalExecutorOptions.harnessReadiness`), exe.dev and SSH over SSH (`SshExecutorOptions.harnessReadiness`). Codex needs CLI 0.153.4 or 0.159.0 through 0.159.3 and a ChatGPT login, Claude its CLI and subscription login, and Pi children API keys for their models. Pi children run tools in the orchestrator, so exe.dev and SSH workers report Pi brains unavailable.
 
 `prepare` repeats the assigned brain's probe before acquiring credentials or a checkout, to catch roster changes and logouts. A capability gap returns `WorkerCapabilityError`, which needs the operator. Transport failures, such as an SSH client that can't reach the VM, and probe timeouts are retryable infrastructure failures.
 
