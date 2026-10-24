@@ -20,9 +20,6 @@ updates:
         versions: [">=5.0.0"]
       - dependency-name: "@vitest/*"
         versions: [">=5.0.0"]
-      # pi-durable 1.2 storage-failure semantics (#495).
-      - dependency-name: "@earendil-works/*"
-        versions: [">=1.2.0"]
     groups:
       npm:
         patterns:

@@ -1,7 +1,11 @@
 import type { Context as ChordContext } from "@earendil-works/chord";
 import { withAbortSignal } from "@earendil-works/chord/context";
 import { Type } from "@earendil-works/pi-ai";
-import { defineTool, type ToolExecutionApi } from "@earendil-works/pi-durable";
+import {
+  defineTool,
+  type ToolExecutionApi,
+  type ToolExecutionResult,
+} from "@earendil-works/pi-durable";
 import { assembleChildPrompt } from "@usine/agents/prompt";
 import {
   ChildRequest,
@@ -284,9 +288,9 @@ export const subagentTool = (services: ExtensionServices) => {
         ),
     });
     return {
-      content: [{ type: "text" as const, text }],
+      output: [{ type: "text" as const, text }],
       details: { childSessionId: session.id },
-    };
+    } satisfies ToolExecutionResult<SpawnDetails>;
   }, Effect.scoped);
 
   return defineTool({

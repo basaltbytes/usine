@@ -7,21 +7,35 @@ import {
   type Extension,
   Harness,
   type ModelRef,
+  SessionFailed,
   type Storage,
-  StorageRejected,
 } from "@earendil-works/pi-durable";
-import { Context, Deferred, Effect, Layer, Option, Result, Schedule, Schema, Scope } from "effect";
+import { Context, Deferred, Effect, Layer, Option, Result, Schema, type Scope } from "effect";
 
 /** A failed pi-durable call. */
 export class DurableHarnessError extends Schema.TaggedError<DurableHarnessError>(
   "@usine/durable/DurableHarnessError",
 )("DurableHarnessError", {
   /**
-   * A description of the failed operation, such as `open`, `resume`, or the `operation` passed to
-   * `use`.
+   * A description of the failed operation, such as `open the durable harness`, or the
+   * `operation` passed to `use`.
    */
   operation: Schema.NonEmptyString,
-  /** The error message, or the stop reason if the harness has stopped. */
+  /** The error message, or the storage error's message if a storage error failed the harness. */
+  message: Schema.NonEmptyString,
+  cause: Schema.Defect(),
+}) {}
+
+/**
+ * A storage error that failed the pi-durable Session. pi-durable then aborts the harness's running
+ * tasks and closes it, and every later call on it fails.
+ */
+export class DurableStorageFailed extends Schema.TaggedError<DurableStorageFailed>(
+  "@usine/durable/DurableStorageFailed",
+)("DurableStorageFailed", {
+  /** The failed harness's generation: 1 for the first open, and one more for each reopen. */
+  generation: Schema.Int,
+  /** The storage error's message. */
   message: Schema.NonEmptyString,
   cause: Schema.Defect(),
 }) {}
@@ -33,17 +47,19 @@ export interface HarnessListener {
    * harness.
    */
   readonly onCommit: (publication: CommitPublication) => void;
-  /** Runs after a poisoned or stuck Session is replaced by a reopened harness. */
-  readonly onReopen: () => void;
-  /** Runs once the harness stops permanently. */
-  readonly onStop: () => void;
+  /**
+   * Runs once a failed harness has closed, before the reopened one resumes its tasks. It must not
+   * block or throw.
+   */
+  readonly onFailure: (failure: DurableStorageFailed) => void;
 }
 
 /**
- * A storage repair that runs on a newly opened harness before its tasks resume. It must log its own
- * failures and never fail.
+ * A storage repair that runs on a newly opened harness before its tasks resume. `storage` is the
+ * storage that the harness opened. A failed read through it fails only that read; a failed read
+ * through `harness` fails the harness. It must log its own failures and never fail.
  */
-export type BeforeResume = (harness: Harness) => Effect.Effect<void>;
+export type BeforeResume = (harness: Harness, storage: Storage) => Effect.Effect<void>;
 
 export interface DurableHarnessOptions {
   /** Opens the storage. Runs again on each reopen. */
@@ -58,9 +74,9 @@ export interface DurableHarnessOptions {
 }
 
 /**
- * The pi-durable Harness over one storage. Reopens the storage and resumes the tasks after a
- * poisoned Session or a stuck step, and stops if the reopened harness gets stuck within
- * `STUCK_AGAIN_MILLIS`.
+ * The pi-durable Harness over one storage. After a storage error fails the harness, reopens the
+ * storage and resumes the tasks, unless `resume` hasn't completed yet. Stops if the reopen fails
+ * or if the reopened harness fails within a minute.
  */
 export class DurableHarness extends Context.Service<
   DurableHarness,
@@ -74,13 +90,13 @@ export class DurableHarness extends Context.Service<
     readonly install: (extension: Extension) => Effect.Effect<void>;
     /**
      * Runs `beforeResume`, then starts the task scheduler, and repeats both on each reopen. Call it
-     * after installing all extensions.
+     * after installing all extensions. Fails with the storage error if one fails the harness first.
      */
     readonly resume: (beforeResume: BeforeResume) => Effect.Effect<void, DurableHarnessError>;
     /**
-     * Runs a call against the open harness and retries it once if the Session was poisoned or
-     * replaced, so the call must be safe to repeat. Fails with the stop reason after the harness
-     * stops.
+     * Runs a call against the open harness. If a storage error fails the harness during the call,
+     * waits for the reopened harness and runs the call once more, so the call must be safe to
+     * repeat. Fails with the storage error before `resume` completes and after the harness stops.
      */
     readonly use: <A>(
       operation: string,
@@ -91,133 +107,69 @@ export class DurableHarness extends Context.Service<
   }
 >()("@usine/durable/DurableHarness") {}
 
-const POISONED_MESSAGE = "Session is poisoned";
-
-/**
- * Whether `cause` is pi-durable's poisoned-Session error, which is identified only by its message
- * prefix.
- */
-const isPoisoned = (cause: unknown): boolean =>
-  cause instanceof Error && cause.message.startsWith(POISONED_MESSAGE);
-
 /** The interval in which repeats of a reported failure are counted and then logged once. */
 const REPORT_LOG_INTERVAL_MILLIS = 5_000;
 
-/**
- * The number of reports of one failure, with no adopted commit between them, after which a step
- * counts as stuck.
- */
-export const StuckStepReports = Context.Reference<number>("@usine/durable/StuckStepReports", {
-  defaultValue: () => 1_000,
-});
+/** A reopened harness that fails within this time stops instead of reopening. */
+const REFAIL_MILLIS = 60_000;
 
-/**
- * If a harness reopened after a stuck step gets stuck again within this time, it stops instead of
- * reopening.
- */
-const STUCK_AGAIN_MILLIS = 60_000;
+const RESUME_OPERATION = "resume the durable tasks";
 
 const messageOf = (cause: unknown): string =>
   cause instanceof Error && cause.message.length > 0 ? cause.message : String(cause) || "unknown";
 
+/**
+ * Returns a `DurableHarnessError` with the message of `cause`. For a `SessionFailed`, uses the
+ * message of the storage error that failed the harness.
+ */
 export const durableError = (operation: string, cause: unknown) =>
-  new DurableHarnessError({ operation, message: messageOf(cause), cause });
-
-/** Returns `storage` with `onPoison` called on every commit failure except `StorageRejected`. */
-const watchCommits = (storage: Storage, onPoison: (cause: unknown) => void): Storage => {
-  const commit: Storage["commit"] = (writes, context) =>
-    storage.commit(writes, context).catch((cause: unknown) => {
-      if (!(cause instanceof StorageRejected)) onPoison(cause);
-      throw cause;
-    });
-  return new Proxy(storage, {
-    get: (target, property) => {
-      if (property === "commit") return commit;
-      // SAFETY: the proxy only forwards Storage members, bound to the target because storage
-      // classes use private state.
-      const member = target[property as keyof Storage];
-      return member instanceof Function ? member.bind(target) : member;
-    },
+  new DurableHarnessError({
+    operation,
+    message: messageOf(cause instanceof SessionFailed ? cause.cause : cause),
+    cause,
   });
-};
 
 /** The repeat counts of one reported failure. */
 interface Repeats {
-  /** The reports since the last adopted commit. */
-  count: number;
   /** The reports not yet logged. */
   unlogged: number;
   loggedAt: number;
 }
 
-interface Opened {
-  readonly generation: number;
-  readonly harness: Harness;
-  readonly openedAt: number;
-  /** Whether this harness replaced one with a stuck step. */
-  readonly afterStuck: boolean;
+/** The state of one opened harness. */
+interface Generation {
+  readonly number: number;
   /** The reported failures by message. */
   readonly reports: Map<string, Repeats>;
+  /** Set before this process closes the harness, so the close isn't taken for a failure. */
+  closing: boolean;
+  /** Set when pi-durable starts closing the harness by itself, after a storage error. */
+  failing: boolean;
+  /** Set once the failure is handled. */
+  handled: boolean;
 }
 
-type ReopenReason = "poisoned" | "stuck";
+interface Opened {
+  readonly generation: Generation;
+  readonly harness: Harness;
+  readonly storage: Storage;
+  readonly openedAt: number;
+}
 
 const make = Effect.fn("DurableHarness.make")(function* (options: DurableHarnessOptions) {
   const services = yield* Effect.context<never>();
   const fork = Effect.runForkWith(services);
-  const stuckStepReports = yield* StuckStepReports;
   const scope = yield* Effect.scope;
   const registry = createRegistry();
   const listeners = new Set<HarnessListener>();
   let resumed = Option.none<BeforeResume>();
-  let started = false;
-  let closed = false;
-  let reopening = Option.none<Deferred.Deferred<Opened>>();
-  let stopped = Option.none<Error>();
-
-  const open = Effect.fn("DurableHarness.open")(function* (
-    generation: number,
-    afterStuck: boolean,
-  ) {
-    yield* Effect.annotateCurrentSpan({ generation });
-    const storage = yield* options.openStorage;
-    const reports = new Map<string, Repeats>();
-    const harness = yield* Effect.tryPromise({
-      try: () =>
-        Harness.open(
-          watchCommits(storage, (cause) => requestReopen(generation, cause, "poisoned")),
-          {
-            models: options.models,
-            registry,
-            onReport: (error) => report(generation, reports, error),
-          },
-          BACKGROUND_CONTEXT,
-        ),
-      catch: (cause) => durableError("open", cause),
-    });
-    harness.subscribeCommits((publication) => {
-      for (const [message, repeats] of reports) {
-        if (repeats.unlogged === 0) reports.delete(message);
-        else repeats.count = 0;
-      }
-      for (const listener of listeners) listener.onCommit(publication);
-    });
-    if (Option.isSome(resumed)) {
-      yield* resumed.value(harness);
-      harness.resume();
-    }
-    yield* Effect.logInfo("Opened the durable harness", {
-      generation,
-      resumed: Option.isSome(resumed),
-    });
-    return {
-      generation,
-      harness,
-      openedAt: Date.now(),
-      afterStuck,
-      reports,
-    } satisfies Opened;
-  });
+  let finalizing = false;
+  let stopped = false;
+  /**
+   * Set while the current harness has failed. Succeeds with the reopened harness, or fails with the
+   * storage failure if no reopen follows.
+   */
+  let failed = Option.none<Deferred.Deferred<Opened, DurableStorageFailed>>();
 
   const logRepeats = (generation: number, message: string, repeats: Repeats) => {
     fork(
@@ -231,18 +183,99 @@ const make = Effect.fn("DurableHarness.make")(function* (options: DurableHarness
     repeats.loggedAt = Date.now();
   };
 
-  const close = Effect.fn("DurableHarness.close")(function* (opened: Opened) {
-    yield* Effect.annotateCurrentSpan({ generation: opened.generation });
-    for (const [message, repeats] of opened.reports) {
-      if (repeats.unlogged > 0) logRepeats(opened.generation, message, repeats);
+  // Called synchronously from inside pi-durable.
+  function report(generation: Generation, cause: unknown) {
+    const message = messageOf(cause);
+    // pi-durable also reports the error that fails the Session; the failure handling logs it.
+    if (generation.failing) {
+      fork(
+        Effect.logDebug("pi-durable reported a failure of a failed harness", {
+          generation: generation.number,
+          cause: message,
+        }),
+      );
+      return;
     }
+    const repeats = generation.reports.get(message);
+    if (repeats === undefined) {
+      generation.reports.set(message, { unlogged: 0, loggedAt: Date.now() });
+      fork(
+        Effect.logWarning("pi-durable reported a failure that did not fail its caller", {
+          generation: generation.number,
+          cause: message,
+        }),
+      );
+      return;
+    }
+    repeats.unlogged += 1;
+    if (Date.now() - repeats.loggedAt >= REPORT_LOG_INTERVAL_MILLIS) {
+      logRepeats(generation.number, message, repeats);
+    }
+  }
+
+  const open = Effect.fn("DurableHarness.open")(function* (number: number) {
+    yield* Effect.annotateCurrentSpan({ generation: number });
+    const storage = yield* options.openStorage;
+    const generation: Generation = {
+      number,
+      reports: new Map(),
+      closing: false,
+      failing: false,
+      handled: false,
+    };
+    const harness = yield* Effect.tryPromise({
+      try: () =>
+        Harness.open(
+          storage,
+          { models: options.models, registry, onReport: (error) => report(generation, error) },
+          BACKGROUND_CONTEXT,
+        ),
+      catch: (cause) => durableError("open the durable harness", cause),
+    });
+    const opened: Opened = { generation, harness, storage, openedAt: Date.now() };
+    harness.subscribeClose(() => {
+      if (generation.closing) return;
+      generation.failing = true;
+      handleFailure(opened);
+    });
+    harness.subscribeCommits((publication) => {
+      for (const [message, repeats] of generation.reports) {
+        if (repeats.unlogged === 0) generation.reports.delete(message);
+      }
+      for (const listener of listeners) listener.onCommit(publication);
+    });
+    if (Option.isSome(resumed)) {
+      yield* resumed.value(harness, storage);
+      yield* Effect.try({
+        try: () => harness.resume(),
+        catch: (cause) => durableError(RESUME_OPERATION, cause),
+      });
+    }
+    yield* Effect.logInfo("Opened the durable harness", {
+      generation: number,
+      resumed: Option.isSome(resumed),
+    });
+    return opened;
+  });
+
+  const flushReports = (generation: Generation) => {
+    for (const [message, repeats] of generation.reports) {
+      if (repeats.unlogged > 0) logRepeats(generation.number, message, repeats);
+    }
+  };
+
+  const close = Effect.fn("DurableHarness.close")(function* (opened: Opened) {
+    const generation = opened.generation;
+    yield* Effect.annotateCurrentSpan({ generation: generation.number });
+    generation.closing = true;
+    flushReports(generation);
     yield* Effect.tryPromise({
       try: () => opened.harness.close(BACKGROUND_CONTEXT),
       catch: (cause) => durableError("close", cause),
     }).pipe(
       Effect.tapError((error) =>
         Effect.logError("Could not close the durable harness", {
-          generation: opened.generation,
+          generation: generation.number,
           message: error.message,
         }),
       ),
@@ -250,112 +283,116 @@ const make = Effect.fn("DurableHarness.make")(function* (options: DurableHarness
     );
   });
 
-  const reopen = Effect.fn("DurableHarness.reopen")(function* (
-    previous: Opened,
-    cause: unknown,
-    ready: Deferred.Deferred<Opened>,
-    reason: ReopenReason,
+  const stop = Effect.fn("DurableHarness.stop")(function* (
+    failure: DurableStorageFailed,
+    ready: Deferred.Deferred<Opened, DurableStorageFailed>,
   ) {
-    yield* Effect.annotateCurrentSpan({ generation: previous.generation, reason });
+    stopped = true;
     yield* Effect.logError(
-      reason === "poisoned"
-        ? "A durable commit failed after storage admission and poisoned the Session; reopening the harness"
-        : "pi-durable keeps retrying a step that cannot succeed; reopening the harness",
-      { generation: previous.generation, cause: messageOf(cause) },
+      "Stopped the durable harness: the storage failed again on reopening; durable calls fail until the orchestrator restarts",
+      { generation: failure.generation, cause: failure.message },
     );
-    yield* close(previous);
-    const next = yield* open(previous.generation + 1, reason === "stuck").pipe(
-      Effect.tapError((error) =>
-        Effect.logError("Could not reopen the durable harness; retrying", {
-          generation: previous.generation + 1,
-          message: error.message,
-        }),
-      ),
-      Effect.retry(Schedule.spaced("1 second")),
-      Effect.orDie,
-    );
-    current = next;
-    reopening = Option.none();
-    yield* Deferred.succeed(ready, next);
-    for (const listener of listeners) listener.onReopen();
-    yield* Effect.logInfo("Reopened the durable harness", { generation: next.generation, reason });
+    yield* Deferred.fail(ready, failure);
   });
 
-  let current = yield* open(1, false);
-  started = true;
-
-  // Called synchronously from inside pi-durable; the reopen runs on its own fiber.
-  function requestReopen(generation: number, cause: unknown, reason: ReopenReason) {
-    if (!started || closed || Option.isSome(stopped) || Option.isSome(reopening)) return;
-    if (current.generation !== generation) return;
-    const ready = Deferred.makeUnsafe<Opened>();
-    reopening = Option.some(ready);
-    fork(reopen(current, cause, ready, reason).pipe(Effect.forkIn(scope)));
-  }
-
-  function stop(target: Opened, cause: unknown) {
-    stopped = Option.some(
-      new Error(
-        `pi-durable keeps retrying a step that fails with: ${messageOf(cause)}. Restart the orchestrator.`,
-        { cause },
-      ),
-    );
-    fork(
-      Effect.logError(
-        "Stopped the durable harness: pi-durable kept retrying a step that cannot succeed, also on a reopened harness; durable calls fail until the orchestrator restarts",
-        { generation: target.generation, cause: messageOf(cause) },
-      ),
-    );
-    for (const listener of listeners) listener.onStop();
-    fork(close(target).pipe(Effect.forkIn(scope)));
-  }
-
-  function stuck(generation: number, cause: unknown) {
-    if (!started || closed || Option.isSome(stopped) || Option.isSome(reopening)) return;
-    if (current.generation !== generation) return;
-    const target = current;
-    // Close now, because no fiber runs while pi-durable retries in microtasks. The reopen or stop
-    // closes it again.
-    void target.harness.close(BACKGROUND_CONTEXT).catch(() => undefined);
-    if (target.afterStuck && Date.now() - target.openedAt < STUCK_AGAIN_MILLIS) stop(target, cause);
-    else requestReopen(generation, cause, "stuck");
-  }
-
-  // Called synchronously from inside pi-durable, possibly thousands of times a second.
-  function report(generation: number, reports: Map<string, Repeats>, cause: unknown) {
-    const message = messageOf(cause);
-    const repeats = reports.get(message);
-    if (repeats === undefined) {
-      reports.set(message, { count: 1, unlogged: 0, loggedAt: Date.now() });
-      fork(
-        Effect.logWarning("pi-durable reported a failure that did not fail its caller", {
-          generation,
-          cause: message,
+  const reopen = Effect.fn("DurableHarness.reopen")(function* (
+    previous: Opened,
+    ready: Deferred.Deferred<Opened, DurableStorageFailed>,
+  ) {
+    const number = previous.generation.number + 1;
+    yield* Effect.annotateCurrentSpan({ generation: number });
+    yield* Effect.logInfo("Reopening the durable harness", { generation: number });
+    const next = yield* open(number).pipe(Effect.result);
+    if (Result.isFailure(next)) {
+      return yield* stop(
+        new DurableStorageFailed({
+          generation: number,
+          message: next.failure.message,
+          cause: next.failure,
         }),
+        ready,
       );
-    } else {
-      repeats.count += 1;
-      repeats.unlogged += 1;
-      if (Date.now() - repeats.loggedAt >= REPORT_LOG_INTERVAL_MILLIS) {
-        logRepeats(generation, message, repeats);
-      }
     }
-    if (isPoisoned(cause)) requestReopen(generation, cause, "poisoned");
-    else if ((repeats?.count ?? 1) >= stuckStepReports) stuck(generation, cause);
+    current = next.success;
+    failed = Option.none();
+    yield* Deferred.succeed(ready, next.success);
+    yield* Effect.logInfo("Reopened the durable harness", { generation: number });
+    // A failure while opening found another harness current.
+    if (next.success.generation.failing) handleFailure(next.success);
+  }, Effect.uninterruptible);
+
+  /** Waits until the failed harness has closed, then reopens it or completes `ready` with the failure. */
+  const recover = Effect.fn("DurableHarness.recover")(function* (
+    opened: Opened,
+    ready: Deferred.Deferred<Opened, DurableStorageFailed>,
+  ) {
+    const number = opened.generation.number;
+    yield* Effect.annotateCurrentSpan({ generation: number });
+    const end = yield* Effect.promise(() => opened.harness.closed);
+    flushReports(opened.generation);
+    const cause = end.reason === "failed" ? end.error : new Error("pi-durable closed the harness");
+    const failure = new DurableStorageFailed({
+      generation: number,
+      message: messageOf(cause),
+      cause,
+    });
+    yield* Effect.logError("A storage error failed the durable harness, and pi-durable closed it", {
+      generation: number,
+      cause: failure.message,
+    });
+    for (const listener of listeners) listener.onFailure(failure);
+    if (finalizing) return yield* Deferred.fail(ready, failure);
+    if (Option.isNone(resumed)) {
+      yield* Effect.logError(
+        "The durable harness failed before its tasks resumed; it stays closed",
+        {
+          generation: number,
+          cause: failure.message,
+        },
+      );
+      return yield* Deferred.fail(ready, failure);
+    }
+    if (number > 1 && Date.now() - opened.openedAt < REFAIL_MILLIS) {
+      return yield* stop(failure, ready);
+    }
+    yield* reopen(opened, ready);
+  });
+
+  let current = yield* open(1);
+
+  // Called synchronously from inside pi-durable; the recovery runs on its own fiber.
+  function handleFailure(opened: Opened) {
+    if (opened.generation.handled || opened !== current || Option.isSome(failed)) return;
+    opened.generation.handled = true;
+    const ready = Deferred.makeUnsafe<Opened, DurableStorageFailed>();
+    failed = Option.some(ready);
+    fork(recover(opened, ready).pipe(Effect.forkIn(scope)));
   }
 
-  const unlessStopped = (operation: string): Effect.Effect<void, DurableHarnessError> =>
-    Option.match(stopped, {
-      onNone: () => Effect.void,
-      onSome: (reason) => Effect.fail(durableError(operation, reason)),
-    });
+  /** Returns the open harness, waiting for a reopen. Fails if the harness stays closed. */
+  const openHarness = (operation: string): Effect.Effect<Opened, DurableHarnessError> =>
+    Effect.suspend(() =>
+      Option.match(failed, {
+        onNone: () => Effect.succeed(current),
+        onSome: (ready) =>
+          Deferred.await(ready).pipe(
+            Effect.mapError(
+              (failure) =>
+                new DurableHarnessError({
+                  operation,
+                  message: stopped
+                    ? `The durable harness stopped after repeated storage errors: ${failure.message}. Restart the orchestrator.`
+                    : failure.message,
+                  cause: failure,
+                }),
+            ),
+          ),
+      }),
+    );
 
-  const opened: Effect.Effect<Opened> = Effect.suspend(() =>
-    Option.match(reopening, {
-      onNone: () => Effect.succeed(current),
-      onSome: Deferred.await,
-    }),
-  );
+  /** Whether `cause` failed the call because a storage error failed `opened`'s harness. */
+  const failedHarness = (opened: Opened, cause: unknown): boolean =>
+    opened.generation.failing || cause instanceof SessionFailed;
 
   const use = <A>(
     operation: string,
@@ -363,21 +400,18 @@ const make = Effect.fn("DurableHarness.make")(function* (options: DurableHarness
   ): Effect.Effect<A, DurableHarnessError> =>
     Effect.gen(function* () {
       for (let attempt = 1; ; attempt += 1) {
-        yield* unlessStopped(operation);
-        const target = yield* opened;
+        const target = yield* openHarness(operation);
         const outcome = yield* Effect.tryPromise({
           try: (signal) => run(target.harness, withAbortSignal(signal, BACKGROUND_CONTEXT)),
           catch: (cause) => cause,
         }).pipe(Effect.result);
         if (Result.isSuccess(outcome)) return outcome.success;
         const cause = outcome.failure;
-        yield* unlessStopped(operation);
-        if (isPoisoned(cause)) requestReopen(target.generation, cause, "poisoned");
-        const replaced = Option.isSome(reopening) || current.generation !== target.generation;
-        if (attempt === 1 && replaced) {
-          yield* Effect.logInfo("Repeating a durable call on the reopened harness", {
+        if (!failedHarness(target, cause)) return yield* durableError(operation, cause);
+        if (attempt === 1) {
+          yield* Effect.logInfo("Repeating a durable call after its harness failed", {
             operation,
-            generation: target.generation,
+            generation: target.generation.number,
           });
           continue;
         }
@@ -387,9 +421,11 @@ const make = Effect.fn("DurableHarness.make")(function* (options: DurableHarness
 
   yield* Effect.addFinalizer(() =>
     Effect.gen(function* () {
-      closed = true;
+      finalizing = true;
       yield* close(current);
-      yield* Effect.logInfo("Closed the durable harness", { generation: current.generation });
+      yield* Effect.logInfo("Closed the durable harness", {
+        generation: current.generation.number,
+      });
     }),
   );
 
@@ -403,15 +439,20 @@ const make = Effect.fn("DurableHarness.make")(function* (options: DurableHarness
         ),
       ),
     resume: Effect.fn("DurableHarness.resume")(function* (beforeResume: BeforeResume) {
-      yield* unlessStopped("resume");
-      const target = yield* opened;
-      yield* beforeResume(target.harness);
-      yield* Effect.try({
+      const target = yield* openHarness(RESUME_OPERATION);
+      yield* beforeResume(target.harness, target.storage);
+      const started = yield* Effect.try({
         try: () => target.harness.resume(),
-        catch: (cause) => durableError("resume", cause),
-      });
+        catch: (cause) => cause,
+      }).pipe(Effect.result);
+      if (Result.isFailure(started)) {
+        if (failedHarness(target, started.failure)) yield* openHarness(RESUME_OPERATION);
+        return yield* durableError(RESUME_OPERATION, started.failure);
+      }
       resumed = Option.some(beforeResume);
-      yield* Effect.logInfo("Resumed durable task scheduling", { generation: target.generation });
+      yield* Effect.logInfo("Resumed durable task scheduling", {
+        generation: target.generation.number,
+      });
     }),
     use,
     subscribe: (listener) =>

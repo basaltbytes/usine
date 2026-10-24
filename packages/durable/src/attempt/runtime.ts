@@ -4,15 +4,15 @@ import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
 import type { StepResult } from "@usine/core/step/result";
-import { Duration, Effect, Layer, Option, Result, Schema } from "effect";
+import { Deferred, Duration, Effect, Layer, Option, Result, Schema } from "effect";
 import { type AttemptRequest, AttemptRuntime, type FinishedAttempt } from "../attempt-runtime.ts";
-import { DurableHarness, type DurableHarnessError } from "../harness.ts";
+import { DurableHarness, type DurableHarnessError, type DurableStorageFailed } from "../harness.ts";
 import { AttemptRecordDoc, type Hold, HoldDoc, RELEASE_GUIDANCE } from "./documents.ts";
 import { usineExtension } from "./extension.ts";
 import { type AttemptHub, attemptHubs } from "./hubs.ts";
 import { encodeResult, finishedOf } from "./outcome.ts";
 import { parentSessionId } from "./parent.ts";
-import { repairUnreadableConversations } from "./repair.ts";
+import { abortEndedAttempts, repairUnreadableConversations } from "./repair.ts";
 import { appendInbound, emitPayload, readRecord, relayAttempt, relayDeliveries } from "./relay.ts";
 import { readStoredRequest, taskInput } from "./request.ts";
 
@@ -28,6 +28,12 @@ const refuse = (message: string) => new InterventionRefused({ message });
 
 const infra = (error: DurableHarnessError) =>
   new InfraFailure({ message: error.message, cause: error });
+
+const storageFailed = (failure: DurableStorageFailed) =>
+  new InfraFailure({
+    message: `Durable storage failed during the attempt: ${failure.message}`,
+    cause: failure,
+  });
 
 const LIVE_STATUSES: ReadonlyArray<string> = ["pending", "running", "waiting"];
 
@@ -47,7 +53,11 @@ const makeAttemptRuntime = Effect.gen(function* () {
   yield* durable.install(extension);
   yield* durable.subscribe(hubs.listener);
   yield* durable.use("open the root conversation", (harness, context) => harness.root(context));
-  yield* durable.resume(repairUnreadableConversations);
+  yield* durable.resume((harness, storage) =>
+    repairUnreadableConversations(harness, storage).pipe(
+      Effect.andThen(Effect.suspend(() => abortEndedAttempts(harness, hubs.takeEnded()))),
+    ),
+  );
 
   const createOrFind = Effect.fn("AttemptRuntime.createOrFind")(function* (
     request: AttemptRequest,
@@ -83,7 +93,19 @@ const makeAttemptRuntime = Effect.gen(function* () {
         { taskId: found.taskId },
       );
       const hub = yield* hubs.hub(attemptId, found.taskId);
-      const settled = yield* relayAttempt(durable, hubs, hub, request, io);
+      const settled = yield* relayAttempt(durable, hubs, hub, request, io).pipe(
+        Effect.raceFirst(
+          Deferred.await(hub.storageFailure).pipe(
+            Effect.tap((failure) =>
+              Effect.logError("A storage error failed the durable harness; the Attempt fails", {
+                generation: failure.generation,
+                cause: failure.message,
+              }),
+            ),
+            Effect.flatMap((failure) => Effect.fail(storageFailed(failure))),
+          ),
+        ),
+      );
       return yield* Result.match(settled, {
         onSuccess: (report) => Effect.logInfo("The Attempt completed").pipe(Effect.as(report)),
         onFailure: (failure) =>
@@ -99,8 +121,8 @@ const makeAttemptRuntime = Effect.gen(function* () {
       ),
   );
 
-  // An aborted task is never live: only `cancel` aborts a task, and every caller of `cancel` has
-  // the engine close the Attempt.
+  // An aborted task is never live: `cancel` aborts a task only for an Attempt the engine closes,
+  // and a reopened harness aborts one only for an Attempt whose `execute` a storage failure ended.
   const isLive = Effect.fn("AttemptRuntime.isLive")(
     function* (attemptId: AttemptId) {
       yield* Effect.annotateCurrentSpan({ attemptId });

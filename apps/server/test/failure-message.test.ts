@@ -1,5 +1,6 @@
 import { FactoryConfigError, InstancePath } from "@usine/config/file";
 import { WorkerName } from "@usine/core/worker";
+import { DurableHarnessError } from "@usine/durable/harness";
 import { EnginePersistenceError } from "@usine/engine/engine";
 import { ExecutorOperationError, WorkerCapabilityError } from "@usine/executor";
 import { assert, describe, it } from "vitest";
@@ -84,6 +85,19 @@ describe("CLI failure messages", () => {
         }),
       ),
       "usine up stopped: runtime store error: could not initialize local database (SQLITE_CANTOPEN: unable to open database file). Check .usine/runtime.sqlite and its folder.",
+    );
+  });
+
+  it("refuses to start with the storage error that failed the durable harness", () => {
+    assert.strictEqual(
+      failureMessage(
+        new DurableHarnessError({
+          operation: "resume the durable tasks",
+          message: "SQLITE_IOERR: disk I/O error",
+          cause: new Error("SQLITE_IOERR: disk I/O error"),
+        }),
+      ),
+      "usine up did not start: durable storage error: could not resume the durable tasks (SQLITE_IOERR: disk I/O error). Check .usine/durable.sqlite and its folder, then run usine up again.",
     );
   });
 });
