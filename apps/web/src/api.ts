@@ -1,6 +1,6 @@
 import { OperatorApi } from "@usine/orchestrator/operator/http";
 import { Effect } from "effect";
-import { FetchHttpClient } from "effect/unstable/http";
+import { FetchHttpClient, HttpClient } from "effect/unstable/http";
 import { HttpApiClient } from "effect/unstable/httpapi";
 
 const makeClient = () => HttpApiClient.make(OperatorApi, { baseUrl: globalThis.location.origin });
@@ -13,6 +13,9 @@ export const api = <A, E>(
 ): Promise<A> =>
   Effect.runPromise(
     Effect.flatMap(makeClient(), (client) => request(client.operator)).pipe(
+      // No exporter sees the browser's spans, so a trace header would give each request span a
+      // parent that no collector has.
+      Effect.provideService(HttpClient.TracerPropagationEnabled, false),
       Effect.provide(FetchHttpClient.layer),
     ),
   );

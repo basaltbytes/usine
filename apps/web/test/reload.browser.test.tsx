@@ -89,9 +89,9 @@ it("reloads the configuration from any Configuration page and shows what changed
         body: JSON.stringify({
           error: "RestartRequiredError",
           message:
-            "These usine.yaml changes require a restart: the destination of Worker eu-1 changed; the webhooks block changed. The running configuration is unchanged. Restart usine up to apply them.",
-          blocks: ["workers", "webhooks"],
-          fields: ["workers.eu-1.destination", "webhooks"],
+            "These usine.yaml changes require a restart: the destination of Worker eu-1 changed; the webhooks block changed; the tracing block changed. The running configuration is unchanged. Restart usine up to apply them.",
+          blocks: ["workers", "webhooks", "tracing"],
+          fields: ["workers.eu-1.destination", "webhooks", "tracing"],
         }),
       },
     ],
@@ -156,6 +156,7 @@ it("reloads the configuration from any Configuration page and shows what changed
       .element(refusal.getByText("Changed in usine.yaml:", { exact: false }))
       .toBeVisible();
     await expect.element(refusal.getByRole("link", { name: "webhooks" })).toBeVisible();
+    await expect.element(refusal.getByRole("link", { name: "tracing" })).toBeVisible();
     await refusal.getByRole("link", { name: "workers.eu-1.destination" }).click();
     await expect.element(page.getByRole("heading", { name: "eu-1" })).toBeVisible();
   } finally {

@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { NodeServices } from "@effect/platform-node";
 import { Tracing } from "@usine/config/factory";
-import { Effect, Layer, Logger, Option, Schema, Tracer } from "effect";
+import { ConfigProvider, Effect, Layer, Logger, Option, Schema, Tracer } from "effect";
 import { assert, describe, it } from "vitest";
 import { tracingLayer } from "../src/tracing.ts";
 
@@ -48,17 +48,35 @@ const annotated = Effect.fn("Test.annotated")(function* () {
   yield* Effect.annotateCurrentSpan({ runId: "run-279" });
 });
 
+interface SpanExportOptions {
+  readonly logs?: Array<string>;
+  /** The process environment; empty by default. */
+  readonly environment?: Record<string, string>;
+}
+
 /** Runs `effect` with span export to `tracing`, then closes the scope, which flushes the spans. */
-const withSpanExport = <A>(tracing: Tracing, effect: Effect.Effect<A>, logs: Array<string> = []) =>
-  Effect.runPromise(
-    Effect.scoped(
-      Effect.flatMap(Layer.build(tracingLayer(Option.some(tracing))), (context) =>
-        Effect.provideContext(effect, context),
-      ),
-    ).pipe(
-      Effect.withLogger(Logger.make(({ message }) => logs.push(JSON.stringify(message)))),
-      Effect.provide(NodeServices.layer),
+const withSpanExport = <A>(
+  tracing: Tracing,
+  effect: Effect.Effect<A>,
+  options?: SpanExportOptions,
+) => Effect.runPromise(spanExport(tracing, effect, options));
+
+/** The effect that `withSpanExport` runs. */
+const spanExport = <A>(
+  tracing: Tracing,
+  effect: Effect.Effect<A>,
+  options: SpanExportOptions = {},
+) =>
+  Effect.scoped(
+    Effect.flatMap(Layer.build(tracingLayer(Option.some(tracing))), (context) =>
+      Effect.provideContext(effect, context),
     ),
+  ).pipe(
+    Effect.withLogger(Logger.make(({ message }) => options.logs?.push(JSON.stringify(message)))),
+    Effect.provide(
+      ConfigProvider.layer(ConfigProvider.fromEnv({ env: options.environment ?? {} })),
+    ),
+    Effect.provide(NodeServices.layer),
   );
 
 describe("tracingLayer", () => {
@@ -80,15 +98,54 @@ describe("tracingLayer", () => {
       await withSpanExport(
         new Tracing({ otlpUrl: collector.url, serviceName: "usine-test" }),
         annotated(),
+        {
+          environment: {
+            OTEL_RESOURCE_ATTRIBUTES: "deployment.environment=eu%2Dwest,service.name=ignored",
+          },
+        },
       );
       assert.lengthOf(collector.received, 1);
       const [request] = collector.received;
       assert.strictEqual(request?.path, "/v1/traces");
       assert.strictEqual(request?.contentType, "application/x-protobuf");
       const body = request?.body.toString("utf8") ?? "";
-      for (const text of ["service.name", "usine-test", "Test.annotated", "runId", "run-279"]) {
+      for (const text of [
+        "service.name",
+        "usine-test",
+        "deployment.environment",
+        "eu-west",
+        "Test.annotated",
+        "runId",
+        "run-279",
+      ]) {
         assert.include(body, text);
       }
+      assert.notInclude(body, "ignored");
+    } finally {
+      await collector.close();
+    }
+  });
+
+  it("refuses a malformed OTEL_RESOURCE_ATTRIBUTES and names the key at fault", async () => {
+    const collector = await startCollector();
+    try {
+      const error = await Effect.runPromise(
+        Effect.flip(
+          spanExport(
+            new Tracing({ otlpUrl: collector.url, serviceName: "usine-test" }),
+            annotated(),
+            {
+              environment: { OTEL_RESOURCE_ATTRIBUTES: "deployment.environment=eu,team=100%" },
+            },
+          ),
+        ),
+      );
+      assert.strictEqual(error._tag, "ResourceAttributesError");
+      if (error._tag !== "ResourceAttributesError") return;
+      assert.strictEqual(error.variable, "OTEL_RESOURCE_ATTRIBUTES");
+      assert.include(error.message, "Expected a valid URI component");
+      assert.include(error.message, '["team"]');
+      assert.lengthOf(collector.received, 0);
     } finally {
       await collector.close();
     }
@@ -110,10 +167,10 @@ describe("tracingLayer", () => {
       };
 
       const startup: Array<string> = [];
-      await withSpanExport(withSecrets(true), Effect.void, startup);
+      await withSpanExport(withSecrets(true), Effect.void, { logs: startup });
       // fetch refuses a URL with credentials, so the failed export runs without them.
       const failure: Array<string> = [];
-      await withSpanExport(withSecrets(false), annotated(), failure);
+      await withSpanExport(withSecrets(false), annotated(), { logs: failure });
 
       const logs = [...startup, ...failure];
       assert.isTrue(startup.some((line) => line.includes("Exporting spans over OTLP")));

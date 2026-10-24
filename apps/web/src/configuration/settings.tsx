@@ -109,9 +109,33 @@ const groups = (
           ]),
     ],
   ],
+  [
+    "Tracing",
+    settings.tracing === null
+      ? [
+          {
+            key: "tracing.otlp_url",
+            value: unset("Not set"),
+            effect: "No span export. A change applies after usine up restarts.",
+          },
+        ]
+      : [
+          {
+            key: "tracing.otlp_url",
+            value: mono(settings.tracing.otlpUrl),
+            effect:
+              "Collector endpoint that receives every span as OTLP/HTTP protobuf. A change applies after usine up restarts.",
+          },
+          {
+            key: "tracing.service_name",
+            value: mono(settings.tracing.serviceName),
+            effect: "The service.name resource attribute of every exported span.",
+          },
+        ],
+  ],
 ];
 
-/** Renders the `settings` and `operator` keys of `usine.yaml` and the webhooks mode, with defaults applied. */
+/** Renders the `settings`, `operator`, and `tracing` keys of `usine.yaml` and the webhooks mode, with defaults applied. */
 export const SettingsPage = ({ configuration }: { readonly configuration: ConfigurationView }) => (
   <ConfigurationPage title="Settings">
     <div className="flex max-w-4xl flex-col gap-8 pt-2">

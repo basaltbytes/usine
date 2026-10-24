@@ -19,7 +19,18 @@ import { OperatorLogin } from "@usine/core/operator";
 import type { RunId } from "@usine/core/run";
 import { ApprovalSource, RunApproval } from "@usine/core/run/approval";
 import { WorkerName } from "@usine/core/worker";
-import { Deferred, Effect, Fiber, Layer, Logger, Option, Ref, Schedule, TxRef } from "effect";
+import {
+  Deferred,
+  Effect,
+  Fiber,
+  Layer,
+  Logger,
+  Option,
+  Ref,
+  Schedule,
+  Tracer,
+  TxRef,
+} from "effect";
 import { RunDatabase, type RunDatabaseClient } from "../src/database/database.ts";
 import { localSqliteLayer } from "../src/database/local-sqlite.ts";
 import {
@@ -235,6 +246,51 @@ describe("durable run engine", () => {
               attempt.outcome.value._tag === "Succeeded",
           );
         }).pipe(Effect.provide(runtime));
+      }),
+    ),
+  );
+
+  it.live("drives each Run in its own trace, linked to the span that launched it", () =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
+          Effect.succeed(stepResult("finished")),
+        ]);
+        const native = yield* Tracer.Tracer;
+        const spans: Array<Tracer.Span> = [];
+        const recording = Tracer.make({
+          span: (options) => {
+            const span = native.span(options);
+            spans.push(span);
+            return span;
+          },
+        });
+
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const accepted = yield* engine
+            .submit(submission({ number: 1 }))
+            .pipe(Effect.withSpan("Test.pollCycle"));
+          assert.strictEqual(accepted._tag, "Claimed");
+          if (accepted._tag !== "Claimed") return;
+          yield* waitFor(engine, accepted.runId, ({ run }) => run.state._tag === "Succeeded");
+        }).pipe(
+          Effect.provide(engineLayer(directory, executorLayer(plans))),
+          Effect.withTracer(recording),
+        );
+
+        const named = (name: string) => spans.find((span) => span.name === name);
+        const poll = named("Test.pollCycle");
+        const launch = named("RunDriver.launch");
+        const drive = named("RunDriver.drive");
+        const attempt = named("RunDriver.attempt");
+        assert(poll && launch && drive && attempt);
+        assert.strictEqual(launch.traceId, poll.traceId);
+        assert(Option.isNone(drive.parent));
+        assert.notStrictEqual(drive.traceId, poll.traceId);
+        assert.lengthOf(drive.links, 1);
+        assert.strictEqual(drive.links[0]?.span, launch);
+        assert.strictEqual(attempt.traceId, drive.traceId);
       }),
     ),
   );

@@ -248,7 +248,7 @@ export class RepositoryConfigurationView extends Schema.Class<RepositoryConfigur
   loops: Schema.Array(LoopName),
 }) {}
 
-/** The `settings`, `operator`, and webhooks mode of `usine.yaml`, with defaults applied. */
+/** The `settings`, `operator`, webhooks mode, and `tracing` of `usine.yaml`, with defaults applied. */
 export class SettingsView extends Schema.Class<SettingsView>("@usine/orchestrator/SettingsView")({
   pollInterval: Schema.Int,
   maxChildren: Schema.Int,
@@ -260,6 +260,8 @@ export class SettingsView extends Schema.Class<SettingsView>("@usine/orchestrato
   webhooks: Schema.Literals(["off", "deliveries", "endpoint"]),
   /** The public URL for `endpoint` webhooks, or null for the other modes. */
   webhooksPublicUrl: Schema.NullOr(Schema.String),
+  /** The span export settings, or null if `usine.yaml` has no `tracing` block. */
+  tracing: Schema.NullOr(Schema.Struct({ otlpUrl: Schema.String, serviceName: Schema.String })),
 }) {}
 
 /**
@@ -478,7 +480,7 @@ const makeOperatorConfiguration = Effect.gen(function* () {
         ),
       });
     });
-    const { settings, webhooks } = config;
+    const { settings, webhooks, tracing } = config;
     const configuration = new ConfigurationView({
       loops,
       quarantinedLoops: instance.quarantinedLoops.map(
@@ -503,6 +505,10 @@ const makeOperatorConfiguration = Effect.gen(function* () {
         operator: Option.getOrNull(config.operator),
         webhooks: webhooks.mode,
         webhooksPublicUrl: webhooks.mode === "endpoint" ? webhooks.publicUrl.href : null,
+        tracing: Option.match(tracing, {
+          onNone: () => null,
+          onSome: ({ otlpUrl, serviceName }) => ({ otlpUrl: otlpUrl.href, serviceName }),
+        }),
       }),
     });
     yield* Effect.logDebug("Read the configuration view", {

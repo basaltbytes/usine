@@ -33,7 +33,9 @@ declare module "vitest/browser" {
   interface BrowserCommands {
     interventionResponses: (status: 200 | 503) => Promise<void>;
     runAgainResponse: (body: string) => Promise<void>;
-    recordedInterventions: () => Promise<Array<{ url: string; body: unknown }>>;
+    recordedInterventions: () => Promise<
+      Array<{ url: string; body: unknown; headers: ReadonlyArray<string> }>
+    >;
   }
 }
 const runId = RunId.make("intervention-test");
@@ -172,6 +174,8 @@ it("edits failed task text and selects the replacement roster agent", async () =
   const requests = await commands.recordedInterventions();
   expect(requests[0]?.url).toContain("/edit-and-retry");
   expect(requests[0]?.body).toEqual({ task: "Resolve the review findings", agent: "reviewer" });
+  expect(requests[0]?.headers).not.toContain("traceparent");
+  expect(requests[0]?.headers).not.toContain("b3");
 });
 
 it("runs a succeeded Run again as it ended or with an edited task and agent, and opens each new Run", async () => {

@@ -97,6 +97,8 @@ export const failureMessage = (failure: CliFailure): string =>
       `usine up stopped: port ${port} is already in use${holderOf(holder)}. Stop that process, or run usine up --port <port> with another port.`,
     ServerStartError: ({ port, cause }) =>
       `usine up stopped: could not listen on 127.0.0.1:${port}${because(cause)}. Run usine up --port <port> to use another port.`,
+    ResourceAttributesError: ({ variable, message }) =>
+      `usine up did not start: ${variable} is invalid: ${clause(message)}. Set it to comma-separated key=value pairs with percent-encoded keys and values, or unset it.`,
     FactoryConfigError: ({ file, stage, message }) =>
       stage === "read"
         ? `usine up did not start: could not read ${file} (${clause(message)}). Run usine up from the instance folder, which contains usine.yaml, agents/, and loops/.`

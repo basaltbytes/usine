@@ -126,6 +126,7 @@ The `usine` process reads these variables:
 | `USINE_GITHUB_APP_ID` | `usine up` | The GitHub App ID, a positive integer. Takes precedence over `app_id` in the secrets file. |
 | `USINE_GITHUB_PRIVATE_KEY` | `usine up` | The App's PEM-encoded RSA private key. Takes precedence over `private_key` in the secrets file. |
 | the name in `admin_token_env` | `usine up` | One per SSH worker with a `gateway`: the token for the gateway's admin API. If it's unset, startup fails. |
+| `OTEL_RESOURCE_ATTRIBUTES` | `usine up` with a [`tracing`](/reference/configuration/usine-yaml/#tracing) block | Resource attributes of exported spans, as comma-separated `key=value` pairs with percent-encoded keys and values. If a key or value isn't valid percent-encoding, `usine up` exits with status 1. |
 
 usine starts in setup mode, without falling back to the file, if a GitHub App variable is set but invalid. It does the same if the secrets file is missing, unreadable, not mode `0600`, or not JSON with exactly the two keys.
 

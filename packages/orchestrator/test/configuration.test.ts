@@ -53,6 +53,8 @@ settings:
 webhooks:
   mode: endpoint
   public_url: https://factory.example/webhooks
+tracing:
+  otlp_url: http://localhost:4318/v1/traces
 workers:
   - name: local
     kind: local
@@ -443,7 +445,7 @@ describe("Configuration view", () => {
     }),
   );
 
-  it.effect("shows settings with their defaults applied, the operator, and the webhooks mode", () =>
+  it.effect("shows settings with their defaults applied, the operator, webhooks, and tracing", () =>
     Effect.gen(function* () {
       const view = yield* readConfiguration;
       assert.deepStrictEqual(view.settings, {
@@ -456,6 +458,7 @@ describe("Configuration view", () => {
         operator: "PhilDL",
         webhooks: "endpoint",
         webhooksPublicUrl: "https://factory.example/webhooks",
+        tracing: { otlpUrl: "http://localhost:4318/v1/traces", serviceName: "usine" },
       });
     }),
   );
