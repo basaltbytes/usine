@@ -5,9 +5,17 @@ name: Deploy docs
 # for the Basaltbytes Cloudflare account; wrangler reads the account ID from
 # apps/docs/wrangler.jsonc.
 
+# Runs when the site or what typedoc reads changes: package sources, manifests,
+# and READMEs.
 on:
   push:
     branches: [main]
+    paths:
+      - "apps/docs/**"
+      - "packages/*/src/**"
+      - "packages/*/package.json"
+      - "packages/*/README.md"
+      - ".github/workflows/deploy-docs.yml"
   workflow_dispatch:
 
 # A push during a deploy waits for it to finish instead of canceling it.
