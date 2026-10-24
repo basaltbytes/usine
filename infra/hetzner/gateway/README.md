@@ -144,7 +144,7 @@ The Hetzner firewall admits SSH from `ORCHESTRATOR_CIDR` only, so the orchestrat
 4. Remove the public SSH rule, with the `ORCHESTRATOR_CIDR` that `create` used:
 
    ```sh
-   hcloud firewall delete-rule usine-gateway --direction in --protocol tcp --port 22 --source-ips 203.0.113.7/32
+   hcloud firewall delete-rule usine-gateway --direction in --protocol tcp --port 22 --source-ips 203.0.113.7/32 --description "SSH from the orchestrator"
    ```
 
 The gateway accepts no inbound UDP. Tailscale still connects directly from most networks, because the Hetzner firewall and nftables both admit replies to the gateway's own packets; from behind a hard NAT, it relays through a DERP server. `tailscale status` on the orchestrator machine shows which.
