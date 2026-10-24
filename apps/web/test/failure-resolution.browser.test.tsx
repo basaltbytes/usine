@@ -43,63 +43,64 @@ declare module "vitest/browser" {
   }
 }
 
-it("resolves a failure from Needs attention while retaining unrelated attention, failed history, and retry, and shows why a retry is refused", async () => {
-  const repository = RepositoryName.make("resolution/project");
-  const runId = RunId.make("resolution-run");
-  const attemptId = AttemptId.make("resolution-attempt");
-  const agent = AgentName.make("developer");
-  const loop = LoopName.make("implement");
-  const failure = new AgentFailureView({ message: "Work was completed separately" });
-  const run = new RunView({
-    id: runId,
-    itemKey: ItemKey.make("github:resolution/project:1"),
-    repository,
-    loop,
-    agent,
-    state: "Failed",
-    loopPaused: false,
-    openedAt: "2026-09-17T00:00:00Z",
-    closedAt: "2026-09-17T00:20:00Z",
-    task: "Complete the issue",
-    attempts: [
-      new AttemptView({
-        id: attemptId,
-        number: AttemptNumber.make(1),
-        worker: WorkerName.make("local"),
-        workerAccess: new LocalWorkerAccess(),
-        brain: new BrainSpec({ harness: "codex", model: ModelId.make("test"), effort: "high" }),
-        task: AttemptTask.make("Complete the issue"),
-        agent,
-        operatorIntervened: false,
-        startedAt: "2026-09-17T00:00:00Z",
-        outcome: new FailedAttemptView({ failure }),
-        endedAt: "2026-09-17T00:20:00Z",
-        salvage: null,
-      }),
-    ],
-    approval: null,
-    runAgain: null,
-    resultMessage: null,
-    pullRequestUrl: null,
-    canApprove: false,
-    canCancel: false,
-    canRunAgain: false,
-    canRetry: true,
-    canResolveFailure: true,
-  });
-  const unrelated = new ApprovalNeed({
-    id: "other-approval",
-    repository: RepositoryName.make("another/project"),
-    runId: RunId.make("other-run"),
-    loop,
-    item: new BoardItemLink({
-      itemKey: ItemKey.make("github:another/project:7"),
-      kind: "issue",
-      number: ItemNumber.make(7),
-      title: "Write the release notes",
-      url: "https://github.com/another/project/issues/7",
+const repository = RepositoryName.make("resolution/project");
+const runId = RunId.make("resolution-run");
+const attemptId = AttemptId.make("resolution-attempt");
+const agent = AgentName.make("developer");
+const loop = LoopName.make("implement");
+const failure = new AgentFailureView({ message: "Work was completed separately" });
+const run = new RunView({
+  id: runId,
+  itemKey: ItemKey.make("github:resolution/project:1"),
+  repository,
+  loop,
+  agent,
+  state: "Failed",
+  loopPaused: false,
+  openedAt: "2026-09-17T00:00:00Z",
+  closedAt: "2026-09-17T00:20:00Z",
+  task: "Complete the issue",
+  attempts: [
+    new AttemptView({
+      id: attemptId,
+      number: AttemptNumber.make(1),
+      worker: WorkerName.make("local"),
+      workerAccess: new LocalWorkerAccess(),
+      brain: new BrainSpec({ harness: "codex", model: ModelId.make("test"), effort: "high" }),
+      task: AttemptTask.make("Complete the issue"),
+      agent,
+      operatorIntervened: false,
+      startedAt: "2026-09-17T00:00:00Z",
+      outcome: new FailedAttemptView({ failure }),
+      endedAt: "2026-09-17T00:20:00Z",
+      salvage: null,
     }),
-  });
+  ],
+  approval: null,
+  runAgain: null,
+  resultMessage: null,
+  pullRequestUrl: null,
+  canApprove: false,
+  canCancel: false,
+  canRunAgain: false,
+  canRetry: true,
+  canResolveFailure: true,
+});
+const unrelated = new ApprovalNeed({
+  id: "other-approval",
+  repository: RepositoryName.make("another/project"),
+  runId: RunId.make("other-run"),
+  loop,
+  item: new BoardItemLink({
+    itemKey: ItemKey.make("github:another/project:7"),
+    kind: "issue",
+    number: ItemNumber.make(7),
+    title: "Write the release notes",
+    url: "https://github.com/another/project/issues/7",
+  }),
+});
+
+it("resolves a failure from Needs attention while retaining unrelated attention, failed history, and retry, and shows why a retry is refused", async () => {
   const before = new ReadyOverview({
     projects: [
       new ProjectView({
@@ -202,6 +203,82 @@ it("resolves a failure from Needs attention while retaining unrelated attention,
     expect(queryClient.getQueryData<ReadyOverview>(["overview"])?.projects[0]?.status).toBe(
       "clear",
     );
+  } finally {
+    flushSync(() => root.unmount());
+    queryClient.clear();
+    host.remove();
+  }
+});
+
+it("leaves a closed issue's failed run out of Needs attention and says in its drawer that the issue is closed", async () => {
+  const overview = JSON.stringify(
+    Schema.encodeSync(FactoryOverview)(
+      new ReadyOverview({
+        projects: [
+          new ProjectView({
+            repository,
+            status: "needs-you",
+            runs: [run],
+            board: new BoardView({ lanes: [], failures: [] }),
+            labels: [],
+            preflightFindings: [],
+          }),
+        ],
+        loops: [],
+        needsYou: [unrelated],
+      }),
+    ),
+  );
+  const detail = JSON.stringify(
+    Schema.encodeSync(RunDetailView)(
+      new RunDetailView({
+        run,
+        eventDedupKey: "event",
+        eventPayload: {},
+        transcript: [],
+        sessionState: [],
+        earlierTranscript: [],
+        settledItemState: "issue-closed",
+      }),
+    ),
+  );
+  await commands.failureResolutionResponses(overview, overview, detail, detail, attemptId);
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const router = createRouter({
+    routeTree,
+    context: { queryClient },
+    history: createMemoryHistory({ initialEntries: [`/?run=${runId}`] }),
+  });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    flushSync(() =>
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>,
+      ),
+    );
+    const drawer = page.getByRole("dialog");
+    await expect.element(drawer.getByText("Issue closed", { exact: true })).toBeVisible();
+    await expect.element(drawer.getByText("Agent failure", { exact: true })).toBeVisible();
+    await expect
+      .element(drawer.getByRole("button", { name: "Mark resolved", exact: true }))
+      .toBeVisible();
+    // The open drawer hides the rest of the page from assistive technology.
+    const needs = page.getByRole("region", { name: "Needs attention", includeHidden: true });
+    await expect
+      .element(
+        needs.getByRole("button", {
+          name: /implement: approval needed.*#7 Write the release notes/,
+          includeHidden: true,
+        }),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(needs.getByRole("button", { name: /implement: agent failure/, includeHidden: true }))
+      .not.toBeInTheDocument();
   } finally {
     flushSync(() => root.unmount());
     queryClient.clear();

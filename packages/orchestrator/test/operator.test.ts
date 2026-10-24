@@ -448,6 +448,7 @@ const testLayer = (
   });
   const itemReader = Layer.succeed(ItemProjectionReader)({
     openIssues: () => Effect.die("the operator does not check open issues"),
+    get: () => Effect.succeed(Option.none()),
     list: () =>
       Effect.succeed([
         new ItemProjection({
@@ -1259,6 +1260,7 @@ describe("Operator", () => {
         asks: () => Ref.get(asks),
         pendingResets: () => Effect.succeed([]),
         acknowledgeReset: () => Effect.die("unused"),
+        close: () => Effect.die("unused"),
         reset: (id, event) =>
           Effect.gen(function* () {
             yield* Ref.update(answered, (values) => [...values, { id, event }]);

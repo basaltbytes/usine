@@ -1,9 +1,9 @@
 import { GitHubLabelName } from "@usine/config/label";
-import type { LaneItemState } from "@usine/config/board";
+import { isSettledItemState, type LaneItemState, type SettledItemState } from "@usine/config/board";
 import { ItemKey, ItemNumber } from "@usine/core/item";
-import type { ItemProjection } from "@usine/engine/item-projection";
+import { type ItemProjection, ItemProjectionReader } from "@usine/engine/item-projection";
 import { IssuePayload, PullRequestPayload } from "@usine/github/polling";
-import { Effect, Option, Schema } from "effect";
+import { Effect, Option, Result, Schema } from "effect";
 import { BoardProjectionError } from "../operator/board.ts";
 
 export interface ProjectedItem {
@@ -90,3 +90,24 @@ export const projectedItem = (
     }
     return yield* projectionError(item, `Unsupported item projection source: ${item.source}`);
   });
+
+/**
+ * Returns the state of the stored Item `itemKey` if it's closed, merged, or gone from GitHub.
+ * Returns `None` for an open Item, an Item that no trigger stored, or a payload that doesn't decode.
+ */
+export const settledItemState = Effect.fn("settledItemState")(function* (itemKey: ItemKey) {
+  yield* Effect.annotateCurrentSpan({ itemKey });
+  const items = yield* ItemProjectionReader;
+  const stored = yield* items.get(itemKey);
+  if (Option.isNone(stored)) return Option.none<SettledItemState>();
+  const projected = yield* Effect.result(projectedItem(stored.value));
+  if (Result.isFailure(projected)) {
+    yield* Effect.logDebug("Stored Item payload doesn't decode; treating the Item as open", {
+      itemKey,
+      message: projected.failure.message,
+    });
+    return Option.none<SettledItemState>();
+  }
+  const { state } = projected.success;
+  return isSettledItemState(state) ? Option.some(state) : Option.none<SettledItemState>();
+});

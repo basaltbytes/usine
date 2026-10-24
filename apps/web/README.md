@@ -16,6 +16,8 @@ Entries:
 - **Loop file not loaded** or **Agent file not loaded**: a file that failed to load at startup or reload, with the reason, until fixed and reloaded.
 - **Worker not configured**: a worker no longer in `usine.yaml` that has recorded attempts, with their count and the full detail, actions below. Startup doesn't reconcile them. Declare the worker again and restart `usine up`, or choose **Discard leftovers** and **Confirm discard** to stop tracking them, which removes nothing from the worker. While attempts a reload left there still run, the entry says how many (`2 attempts still running on it. Discard the leftovers after they end`), and **Discard leftovers** appears after the last ends. A refused discard, for example because the worker is declared again, shows the reason.
 
+A failed run, question, or blocker on an item that is closed or merged isn't listed; the run stays under **Recent runs** and in its drawer, which says `Issue closed`, `Pull request closed`, or `Pull request merged`. A cycle budget entry leaves at the first poll after its item closes or merges.
+
 ## Overview
 
 The first screen, at `/`:
@@ -115,7 +117,7 @@ A run opened from a card menu, **Needs attention**, **Run history**, or **Run ag
 
 - The item's number and title (linked), and the run's state.
 - Its pull request, linked (or the item, if it's a pull request and the run produced none), or `No pull request`.
-- The loop and agent.
+- The loop and agent, and for a failed run on an item that is closed or merged, `Issue closed`, `Pull request closed`, or `Pull request merged`.
 - Once an attempt has started: the newest attempt's worker and the **Duration** of all attempts, counting while one runs.
 - The actions that apply.
 - An outcome paragraph: a succeeded run's result; a failed run's typed reason, message, and salvage; what a waiting or queued run waits for; or a running run's current activity and latest message.

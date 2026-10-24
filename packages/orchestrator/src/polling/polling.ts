@@ -57,6 +57,7 @@ import {
   failingItemPollFailures,
   logItemEvaluation,
 } from "./evaluation-failures.ts";
+import { closeAsksOfClosedItems } from "./closed-item-asks.ts";
 import { evaluateItem, revokeMissingItem } from "./loop-evaluation.ts";
 import { markItemGone, observeItem, synchronizeLabels } from "./repository-sync.ts";
 import { ItemHints, type ItemHint } from "./hints.ts";
@@ -394,6 +395,8 @@ export class PollingTriggers extends Context.Service<
           const itemCycles = observed.map(({ cycle }) => cycle);
           const openIssueCheck = yield* checkOpenIssuesWhenDue(watched);
           yield* hints.defer(openIssueCheck.nextPollAt);
+          // Runs after this cycle's projections and gone marks, so an Item closed now closes its Ask.
+          yield* closeAsksOfClosedItems(watched.repository.name);
           // An Item the cycle did not fetch keeps its recorded failures.
           const failingItems = [
             ...stored.failingItems.filter(({ number }) => !items.has(number)),

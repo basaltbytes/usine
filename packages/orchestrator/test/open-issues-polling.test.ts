@@ -246,6 +246,7 @@ describe("PollingTriggers open-issue check", () => {
           }),
       };
       const items: ItemProjectionReader["Service"] = {
+        get: () => Effect.succeed(Option.none()),
         list: () => Effect.die("the poll does not list projections"),
         openIssues: () => Effect.succeed([ItemNumber.make(28)]),
       };

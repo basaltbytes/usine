@@ -15,6 +15,11 @@ export class CycleBudgetResetRejectedError extends Schema.TaggedError<CycleBudge
   "CycleBudgetResetRejectedError",
 )("CycleBudgetResetRejectedError", { askId: CycleBudgetAskId }) {}
 
+/** The reasons a cycle-budget Ask closes without a reset. `ItemClosed`: the Item was closed or merged. */
+export const CYCLE_BUDGET_ASK_CLOSE_REASONS = ["ItemClosed"] as const;
+export const CycleBudgetAskCloseReason = Schema.Literals(CYCLE_BUDGET_ASK_CLOSE_REASONS);
+export type CycleBudgetAskCloseReason = typeof CycleBudgetAskCloseReason.Type;
+
 export const BudgetRow = Schema.Struct({
   ...CycleBudgetReset.fields,
   ask: Schema.OptionFromNullOr(CycleBudgetAsk),

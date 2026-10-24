@@ -44,6 +44,7 @@ import {
   Schema,
   SynchronizedRef,
 } from "effect";
+import { settledItemState } from "../board/items.ts";
 import { labelMutationForBoardMove, projectBoard } from "../board/projection.ts";
 import type { LabelPreflightFinding } from "../label-reconciler.ts";
 import { LoopMatches } from "../loop-matches.ts";
@@ -358,6 +359,22 @@ const makeOperatorObservation = Effect.gen(function* () {
         ),
       ),
     );
+    const failedItems = new Set(
+      [...allRuns.values()].flatMap((run) =>
+        run.state !== "Waiting" && run.canResolveFailure ? [run.itemKey] : [],
+      ),
+    );
+    const settledItems = new Map(
+      yield* Effect.forEach(
+        failedItems,
+        (key) =>
+          settledItemState(key).pipe(
+            Effect.provideService(ItemProjectionReader, itemReader),
+            Effect.map((state) => [key, state] as const),
+          ),
+        { concurrency: 4 },
+      ),
+    );
     for (const run of allRuns.values()) {
       if (run.state === "Waiting") {
         needsYou.push(
@@ -373,6 +390,16 @@ const makeOperatorObservation = Effect.gen(function* () {
         const attempt = run.attempts.at(-1);
         if (attempt?.outcome?._tag !== "Failed") {
           return yield* Effect.die(new Error(`Failed run ${run.id} has no failed attempt`));
+        }
+        const settled = settledItems.get(run.itemKey) ?? Option.none();
+        if (Option.isSome(settled)) {
+          yield* Effect.logDebug("Failed Run's Item is closed; left out of Needs attention", {
+            runId: run.id,
+            itemKey: run.itemKey,
+            itemState: settled.value,
+            failure: attempt.outcome.failure._tag,
+          });
+          continue;
         }
         needsYou.push(
           new RunFailureNeed({
@@ -565,7 +592,7 @@ const makeOperatorObservation = Effect.gen(function* () {
       { concurrency: "unbounded" },
     );
     const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
-    const [transcript, sessionState, usage, unrecordedEnds] = yield* Effect.all(
+    const [transcript, sessionState, usage, unrecordedEnds, settled] = yield* Effect.all(
       [
         readTranscript(reader, snapshot, request),
         Effect.forEach(
@@ -575,6 +602,9 @@ const makeOperatorObservation = Effect.gen(function* () {
         ),
         usageReader.read(snapshot),
         readUnrecordedEnds(reader, snapshot),
+        settledItemState(snapshot.itemKey).pipe(
+          Effect.provideService(ItemProjectionReader, itemReader),
+        ),
       ],
       { concurrency: "unbounded" },
     );
@@ -586,6 +616,7 @@ const makeOperatorObservation = Effect.gen(function* () {
       sessionState: sessionState.flat().map(transcriptEvent),
       earlierTranscript: transcript.earlier,
       worker: snapshot.attempts.at(-1)?.worker ?? null,
+      settledItemState: Option.getOrNull(settled),
       duration: runDuration(snapshot.attempts, unrecordedEnds),
       usage,
     });

@@ -1,3 +1,4 @@
+import { SettledItemState } from "@usine/config/board";
 import { AgentName } from "@usine/core/agent";
 import { TokenCount } from "@usine/core/agent/session";
 import { AttemptId, AttemptTask } from "@usine/core/attempt";
@@ -131,6 +132,13 @@ export class RunDetailView extends Schema.Class<RunDetailView>("@usine/orchestra
     earlierTranscript: Schema.Array(TranscriptPageCursor),
     /** The Worker of the newest Attempt, or null before the first Attempt. */
     worker: Schema.NullOr(WorkerName).pipe(Schema.withConstructorDefault(Effect.succeed(null))),
+    /**
+     * The state of the Run's Item from the newest poll if the Item is closed, merged, or gone, else
+     * null. Needs attention leaves out a failed Run on such an Item.
+     */
+    settledItemState: Schema.NullOr(SettledItemState).pipe(
+      Schema.withConstructorDefault(Effect.succeed(null)),
+    ),
     duration: RunDurationView.pipe(
       Schema.withConstructorDefault(
         Effect.succeed(new RunDurationView({ endedMillis: 0, runningSince: null, unmeasured: 0 })),

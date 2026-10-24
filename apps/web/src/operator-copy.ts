@@ -1,3 +1,4 @@
+import type { SettledItemState } from "@usine/config/board";
 import { BrainSpec } from "@usine/core/agent/brain";
 import type { BillingPool } from "@usine/core/agent/session";
 import type { SalvagePushed } from "@usine/core/attempt/salvage";
@@ -43,6 +44,17 @@ export const runAgainBlocked = "No run opened: cycle budget used up. Reset it in
 
 export const itemKindLabel = (kind: BoardItemLink["kind"]): string =>
   kind === "pr" ? "Pull request" : "Issue";
+
+export const settledItemLabel = (state: SettledItemState): string => {
+  switch (state) {
+    case "issue-closed":
+      return "Issue closed";
+    case "pr-closed":
+      return "Pull request closed";
+    case "pr-merged":
+      return "Pull request merged";
+  }
+};
 
 /** Returns the label of a Loop trigger, using the Item kind names from Board cards. */
 export const triggerLabel = (trigger: LoopView["trigger"]): string => {

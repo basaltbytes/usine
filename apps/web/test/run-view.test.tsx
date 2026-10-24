@@ -1,3 +1,4 @@
+import type { SettledItemState } from "@usine/config/board";
 import { AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import {
@@ -171,6 +172,28 @@ describe("Run header", () => {
     assert.include(markup, "start-dev");
     assert.include(markup, "developer");
     assert.lengthOf(markup.match(/target="_blank"/gu) ?? [], 1);
+  });
+
+  it("says that a failed Run's Item is closed or merged", () => {
+    const facts = (view: RunView, state: SettledItemState) =>
+      renderToStaticMarkup(
+        <RunFacts
+          run={view}
+          item={runItem(view, undefined, detail(view).eventPayload)}
+          settledItemState={state}
+          shared={false}
+        />,
+      );
+    const failed = run({
+      state: "Failed",
+      attempts: [
+        attempt(new FailedAttemptView({ failure: new AgentFailureView({ message: "x" }) })),
+      ],
+    });
+    assert.include(facts(failed, "issue-closed"), "Issue closed");
+    assert.include(facts(failed, "pr-closed"), "Pull request closed");
+    assert.include(facts(failed, "pr-merged"), "Pull request merged");
+    assert.notInclude(facts(run(), "issue-closed"), "Issue closed");
   });
 
   it("titles the Run from the Board's Item, then from its Event", () => {

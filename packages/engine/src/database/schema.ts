@@ -29,6 +29,10 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
+import {
+  CYCLE_BUDGET_ASK_CLOSE_REASONS,
+  type CycleBudgetAskCloseReason,
+} from "../cycle-budget/model.ts";
 import { IGNORED_REASONS, type IgnoreReason } from "../engine/submission.ts";
 
 export const events = snakeCase.table(
@@ -160,6 +164,27 @@ export const cycleResets = snakeCase.table("usine_cycle_resets", {
     .notNull()
     .references(() => itemCycleBudgets.itemKey),
 });
+
+/** Asks closed without a reset; the Item keeps its generation and reservations. */
+export const cycleAskClosures = snakeCase.table(
+  "usine_cycle_ask_closures",
+  {
+    askId: text().$type<CycleBudgetAskId>().primaryKey(),
+    itemKey: text()
+      .$type<ItemKey>()
+      .notNull()
+      .references(() => itemCycleBudgets.itemKey),
+    reason: text({ enum: CYCLE_BUDGET_ASK_CLOSE_REASONS })
+      .$type<CycleBudgetAskCloseReason>()
+      .notNull(),
+    askJson: text({ mode: "json" }).$type<unknown>().notNull(),
+    closedAt: text().notNull(),
+  },
+  (table) => [
+    check("usine_cycle_ask_closures_reason", sql`${table.reason} in ('ItemClosed')`),
+    check("usine_cycle_ask_closures_ask_json", sql`json_valid(${table.askJson})`),
+  ],
+);
 
 export const runs = snakeCase.table(
   "usine_runs",

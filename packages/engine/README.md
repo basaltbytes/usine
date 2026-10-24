@@ -10,7 +10,7 @@ The default adapter stores the event ledger and run records in `<instance>/.usin
 
 - `CursorStore` stores typed keys with JSON values, for efficiency-only trigger cursors such as GitHub watermarks and ETags. Deleting one safely replays events; the ledger deduplicates.
 - `LoopControl` stores loop pause state; pausing never edits the loop file.
-- `ItemProjectionReader` and `ItemProjectionWriter` store the latest issue and pull request snapshots from polling, which the board reads after a restart without querying GitHub. `list` returns the newest items first, up to `limit`; `openIssues` returns the numbers of open issues not marked gone. Writes change the projection revision only if the content hash changes.
+- `ItemProjectionReader` and `ItemProjectionWriter` store the latest issue and pull request snapshots from polling, which the board reads after a restart without querying GitHub. `get` returns one item's projection; `list` returns the newest items first, up to `limit`; `openIssues` returns the numbers of open issues not marked gone. Writes change the projection revision only if the content hash changes.
 - `RepositoryLabelProjectionReader` and `RepositoryLabelProjectionWriter` store each repo's full label catalog from polling, so repos without items still get proposed lanes. Writes change the revision only if the label set changes.
 - `BoardMoves` (`/board-moves`) stores each board move: repo, item, send time, source and destination lanes, and labels added and removed. The orchestrator records a move before sending its labels, so the factory app's label change for the operator isn't taken for an agent's. `onItem(itemKey, since)` returns an item's moves from `since`, oldest first. Moves don't change the revision.
 
@@ -94,6 +94,8 @@ The [lifecycle decisions](src/engine/lifecycle.ts) decide attempt completion, in
 `CycleBudgets` (`/cycle-budget`) stores item-level exhaustion asks and idempotent reset events. `Submission.cycleLimit` defaults to three; schedule adapters pass `None`. Admission reserves the allowance in a transaction, or returns `CycleBlocked` if the item needs a reset. Retries don't count again, and canceled runs without attempts give their reservation back. On upgrade, existing history and queued events get the default budget.
 
 A reset records a fresh polling request. Trigger adapters read `CycleBudgets.generation(itemKey)` before fetching and put it in `Submission.cycleGeneration` and the event identity. Admission supersedes older observations, including in-flight polls and queued events, and new polling creates an event with current settings. Labels, restarts, and loop changes never clear an ask. See [ADR 0022](../../docs/adr/0022-item-cycle-budgets-and-comment-reviews.md).
+
+`CycleBudgets.close(askId, "ItemClosed")` closes an ask without a reset, for an item that was closed or merged. It records the ask and the reason in `usine_cycle_ask_closures` and keeps the generation and reservations, so the item's next admission at the limit opens a new ask.
 
 ## Drain and shutdown
 

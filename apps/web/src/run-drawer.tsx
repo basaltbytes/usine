@@ -157,7 +157,13 @@ export const RunDrawer = ({
                 Run {run.id} of {run.loop} on {run.repository}
               </SheetDescription>
               <div className="space-y-1">
-                <RunFacts run={run} item={item} shared={open} className="gap-x-4" />
+                <RunFacts
+                  run={run}
+                  item={item}
+                  settledItemState={detail.data.settledItemState}
+                  shared={open}
+                  className="gap-x-4"
+                />
                 <WorkFacts detail={detail.data} showUsage={false} className="gap-x-4" />
               </div>
               <RunActions run={run} onEdit={setEditing} openRun={openRun} />
