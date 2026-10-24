@@ -1,6 +1,6 @@
 {
   "name": "@usine/orchestrator",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "The embeddable usine composition: the full engine as an Effect layer, startable in-process.",
   "license": "MIT",
   "repository": {

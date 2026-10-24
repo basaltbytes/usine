@@ -1,6 +1,6 @@
 {
   "name": "@usine/expression",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "CEL expression seam for usine: check and evaluate the selection expressions loop files use.",
   "license": "MIT",
   "repository": {
