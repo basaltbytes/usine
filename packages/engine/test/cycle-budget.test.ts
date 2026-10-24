@@ -77,6 +77,21 @@ const withDirectory = <A, E, R>(work: (directory: InstanceDirectory) => Effect.E
     return yield* work(directory);
   }).pipe(Effect.provide(NodeServices.layer));
 
+/** Reads the rows of `usine_cycle_ask_closures`. */
+const askClosures = (directory: InstanceDirectory) =>
+  Effect.sync(() => {
+    const database = new DatabaseSync(join(directory, ".usine/runtime.sqlite"));
+    try {
+      return database
+        .prepare(
+          "SELECT ask_id, item_key, reason, ask_json, closed_at FROM usine_cycle_ask_closures",
+        )
+        .all();
+    } finally {
+      database.close();
+    }
+  });
+
 const complete = Effect.fn("test.completeCycleRun")(function* (value: Submission) {
   const store = yield* RunStore;
   const runId = idFor(value);
@@ -355,16 +370,7 @@ describe("Item cycle budgets", () => {
             return opened;
           }),
         );
-        const closures = yield* Effect.sync(() => {
-          const database = new DatabaseSync(join(directory, ".usine/runtime.sqlite"));
-          try {
-            return database
-              .prepare("SELECT ask_id, item_key, reason, ask_json FROM usine_cycle_ask_closures")
-              .all();
-          } finally {
-            database.close();
-          }
-        });
+        const closures = yield* askClosures(directory);
         assert.strictEqual(closures.length, 1);
         assert.strictEqual(closures[0]?.["ask_id"], ask.id);
         assert.strictEqual(closures[0]?.["item_key"], "pr-72");
@@ -385,6 +391,49 @@ describe("Item cycle budgets", () => {
             assert.strictEqual(blocked.result.ask.completedCycles, 3);
             assert.deepStrictEqual(yield* budgets.asks(), [blocked.result.ask]);
           }),
+        );
+      }),
+    ),
+  );
+
+  it.live("updates the closure when a reopened Item raises the closed Ask again", () =>
+    withDirectory((directory) =>
+      Effect.gen(function* () {
+        const blockAndClose = Effect.gen(function* () {
+          const store = yield* RunStore;
+          const budgets = yield* CycleBudgets;
+          // An Item reopened with unchanged content yields the same Event, so the same Ask ID.
+          const blocked = yield* store.recordAndClaim(
+            submission("review", 4),
+            RunId.make("blocked"),
+          );
+          assert(blocked.result._tag === "CycleBlocked");
+          assert.isTrue(yield* budgets.close(blocked.result.ask.id, "ItemClosed"));
+          assert.deepStrictEqual(yield* budgets.asks(), []);
+          return blocked.result.ask;
+        });
+        const first = yield* inDatabase(
+          directory,
+          Effect.gen(function* () {
+            for (let round = 1; round <= 3; round += 1)
+              yield* complete(submission("review", round));
+            return yield* blockAndClose;
+          }),
+        );
+        const [closed] = yield* askClosures(directory);
+        const second = yield* inDatabase(directory, blockAndClose);
+        assert.strictEqual(second.id, first.id);
+        const closures = yield* askClosures(directory);
+        assert.strictEqual(closures.length, 1);
+        assert.strictEqual(closures[0]?.["ask_id"], first.id);
+        assert.strictEqual(closures[0]?.["reason"], "ItemClosed");
+        assert.deepStrictEqual(
+          JSON.parse(String(closures[0]?.["ask_json"])),
+          Schema.encodeSync(CycleBudgetAsk)(second),
+        );
+        assert.isAbove(
+          Date.parse(String(closures[0]?.["closed_at"])),
+          Date.parse(String(closed?.["closed_at"])),
         );
       }),
     ),

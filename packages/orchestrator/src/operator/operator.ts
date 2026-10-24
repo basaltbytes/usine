@@ -36,6 +36,7 @@ import { GitHubItemWriter } from "@usine/github/item-writer";
 import type { GitHubAppError } from "@usine/github/github-app";
 import { ChangedIssue, ChangedPullRequest } from "@usine/github/polling";
 import {
+  Array as EffectArray,
   Context,
   DateTime,
   Effect,
@@ -46,7 +47,7 @@ import {
   Schema,
   SynchronizedRef,
 } from "effect";
-import { settledItemState } from "../board/items.ts";
+import { runNeedsAttention, settledItemState } from "../board/items.ts";
 import { labelMutationForBoardMove, projectBoard } from "../board/projection.ts";
 import type { LabelPreflightFinding } from "../label-reconciler.ts";
 import { LoopMatches } from "../loop-matches.ts";
@@ -295,35 +296,58 @@ const makeOperatorObservation = Effect.gen(function* () {
           const working = history.filter(({ attempts }) =>
             attempts.some(({ outcome }) => Option.isNone(outcome)),
           );
-          const status: ProjectStatus =
-            cycleAsks.some((ask) => ask.repository === name) ||
-            board.failures.length > 0 ||
-            projectFindings.length > 0 ||
-            projectRuns.some((run) => run.canApprove || run.canResolveFailure)
-              ? "needs-you"
-              : projectRuns.some((run) => run.canCancel)
-                ? "active"
-                : "clear";
-          const project = new ProjectView({
-            repository: name,
-            status,
-            runs: projectRuns,
-            board,
-            labels: catalog.map(
-              ({ name: label, color, description }) =>
-                new LabelView({
-                  name: GitHubLabelName.make(label),
-                  color: Option.getOrNull(color),
-                  description: Option.getOrNull(description),
-                }),
-            ),
-            preflightFindings: projectFindings,
-          });
-          return { project, runUsage, working } as const;
+          return { name, projectFindings, projectRuns, board, catalog, runUsage, working } as const;
         }),
       { concurrency: 4 },
     );
-    const projects = projected.map(({ project }) => project);
+    const allRuns = new Map(views.map((run) => [run.id, run]));
+    for (const { projectRuns } of projected)
+      for (const run of projectRuns) allRuns.set(run.id, run);
+    const failedItems = new Set(
+      [...allRuns.values()].flatMap((run) =>
+        run.state !== "Waiting" && run.canResolveFailure ? [run.itemKey] : [],
+      ),
+    );
+    // The Items of failed Runs that are closed, merged, or gone, with their state.
+    const settledItems = new Map(
+      EffectArray.getSomes(
+        yield* Effect.forEach(
+          failedItems,
+          (key) =>
+            settledItemState(key).pipe(
+              Effect.provideService(ItemProjectionReader, itemReader),
+              Effect.map(Option.map((state) => [key, state] as const)),
+            ),
+          { concurrency: 4 },
+        ),
+      ),
+    );
+    const projects = projected.map(({ name, projectFindings, projectRuns, board, catalog }) => {
+      const status: ProjectStatus =
+        cycleAsks.some((ask) => ask.repository === name) ||
+        board.failures.length > 0 ||
+        projectFindings.length > 0 ||
+        projectRuns.some((run) => runNeedsAttention(run, settledItems.has(run.itemKey)))
+          ? "needs-you"
+          : projectRuns.some((run) => run.canCancel)
+            ? "active"
+            : "clear";
+      return new ProjectView({
+        repository: name,
+        status,
+        runs: projectRuns,
+        board,
+        labels: catalog.map(
+          ({ name: label, color, description }) =>
+            new LabelView({
+              name: GitHubLabelName.make(label),
+              color: Option.getOrNull(color),
+              description: Option.getOrNull(description),
+            }),
+        ),
+        preflightFindings: projectFindings,
+      });
+    });
     const usage: BoardUsage = {
       runs: new Map(projected.flatMap(({ runUsage }) => [...runUsage])),
       working: projected.flatMap(({ working }) => working),
@@ -355,29 +379,11 @@ const makeOperatorObservation = Effect.gen(function* () {
         }),
       );
     }
-    const allRuns = new Map(views.map((run) => [run.id, run]));
-    for (const project of projects) for (const run of project.runs) allRuns.set(run.id, run);
     const cardedItems = new Map(
       projects.flatMap(({ board }) =>
         board.lanes.flatMap(({ items }) =>
           items.flatMap((task) => task.items.map((item) => [item.itemKey, item] as const)),
         ),
-      ),
-    );
-    const failedItems = new Set(
-      [...allRuns.values()].flatMap((run) =>
-        run.state !== "Waiting" && run.canResolveFailure ? [run.itemKey] : [],
-      ),
-    );
-    const settledItems = new Map(
-      yield* Effect.forEach(
-        failedItems,
-        (key) =>
-          settledItemState(key).pipe(
-            Effect.provideService(ItemProjectionReader, itemReader),
-            Effect.map((state) => [key, state] as const),
-          ),
-        { concurrency: 4 },
       ),
     );
     for (const run of allRuns.values()) {
@@ -396,14 +402,17 @@ const makeOperatorObservation = Effect.gen(function* () {
         if (attempt?.outcome?._tag !== "Failed") {
           return yield* Effect.die(new Error(`Failed run ${run.id} has no failed attempt`));
         }
-        const settled = settledItems.get(run.itemKey) ?? Option.none();
-        if (Option.isSome(settled)) {
-          yield* Effect.logDebug("Failed Run's Item is closed; left out of Needs attention", {
-            runId: run.id,
-            itemKey: run.itemKey,
-            itemState: settled.value,
-            failure: attempt.outcome.failure._tag,
-          });
+        const settled = settledItems.get(run.itemKey);
+        if (settled !== undefined) {
+          yield* Effect.logDebug(
+            "Failed Run's Item is closed; left out of Needs attention and the Project status",
+            {
+              runId: run.id,
+              itemKey: run.itemKey,
+              itemState: settled,
+              failure: attempt.outcome.failure._tag,
+            },
+          );
           continue;
         }
         needsYou.push(
