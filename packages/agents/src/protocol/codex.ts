@@ -2,7 +2,7 @@ import { Schema } from "effect";
 
 /**
  * Request types sent to the Codex app server, copied from
- * `@pwrdrvr/codex-app-server-protocol@0.144.0` (codex-cli 0.144.0) because that package resolves
+ * `@pwrdrvr/codex-app-server-protocol@0.159.2` (codex-cli 0.159.2) because that package resolves
  * only under bundler module resolution. `protocol-conformance/check.ts` fails `pnpm check` if these
  * types drift from the package.
  */

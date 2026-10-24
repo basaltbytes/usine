@@ -102,7 +102,7 @@ Claude children save sessions, and Codex threads aren't ephemeral. `SessionStart
 
 `preflight(brain, host, environment)` (`/preflight`, Node) checks a worker without a prompt, using a `ChildProcessSpawner` layer. Each check sees `environment` as a child does. On a `RemoteShell` host, checks run over SSH, an SSH failure (exit 255) is an incomplete check rather than a missing harness, and a Pi brain is unavailable.
 
-It accepts Codex CLI **0.144.0 or 0.153.4** with a verified ChatGPT account, a Claude subscription in `claude auth status --json`, and Pi's model and API key through the SDK. `HarnessUnavailableError` reports a missing binary, version, or login; `SessionOperationError` an incomplete check, such as a timeout or failed SDK connection. Install and log in as the worker user before starting usine.
+It accepts Codex CLI **0.153.4 or 0.159.0 through 0.159.3** (`supportedCodexVersions`) with a verified ChatGPT account, a Claude subscription in `claude auth status --json`, and Pi's model and API key through the SDK. `HarnessUnavailableError` reports a missing binary, version, or login; `SessionOperationError` an incomplete check, such as a timeout or failed SDK connection. Install and log in as the worker user before starting usine.
 
 ## Live contract tests
 
@@ -116,4 +116,4 @@ USINE_CODEX_INTEGRATION_MODEL=gpt-5.6-terra pnpm --filter @usine/agents test:int
 USINE_PI_INTEGRATION_MODEL=anthropic/claude-sonnet-4-6 pnpm --filter @usine/agents test:integration:pi
 ```
 
-The protocol conformance baseline is 0.144.0. Codex 0.153.4 also passed its generated protocol types and the real steering and interruption contracts, including Astra. Other CLI builds need verification first.
+The protocol conformance baseline is 0.159.2. Codex 0.159.0, 0.159.1, and 0.159.3 have the same protocol crates. Codex 0.153.4 passed the real steering and interruption contracts, including Astra, and its generated types have the same shape as 0.159.2's for every field the adapter uses. Other CLI builds need verification first.

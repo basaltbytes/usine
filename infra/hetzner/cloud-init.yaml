@@ -74,8 +74,9 @@ write_files:
       echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_24.x nodistro main" > /etc/apt/sources.list.d/nodesource.list
       apt-get update
       DEBIAN_FRONTEND=noninteractive apt-get install -y gh nodejs
-      # Codex is pinned to a version usine's protocol conformance gate supports.
-      npm install -g pnpm@11.20.0 @anthropic-ai/claude-code@2.1.303 @openai/codex@0.153.4
+      # Codex must be one of supportedCodexVersions in @usine/agents/preflight; packages/agents/test/preflight.test.ts checks it.
+      # Claude Code must match the claudeCodeVersion in the package.json of the @anthropic-ai/claude-agent-sdk version that @usine/agents depends on.
+      npm install -g pnpm@11.20.0 @anthropic-ai/claude-code@2.1.308 @openai/codex@0.159.2
       # Applies the overcommit setting of /etc/sysctl.d now, not at the next boot.
       sysctl --system
       install -d -o usine -g usine -m 0700 /home/usine/.usine /home/usine/.cache /home/usine/.cache/turbo
