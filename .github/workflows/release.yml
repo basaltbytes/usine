@@ -7,9 +7,16 @@ name: Release
 # publisher on a package that already exists. Provenance attestations are
 # generated once the repository is public.
 
+# Runs when a changeset lands or the version PR merges, which changes package
+# manifests and changelogs. Other pushes to main have nothing to version.
 on:
   push:
     branches: [main]
+    paths:
+      - ".changeset/**"
+      - "**/package.json"
+      - "**/CHANGELOG.md"
+      - ".github/workflows/release.yml"
   workflow_dispatch:
 
 concurrency: release-${{ github.ref }}
