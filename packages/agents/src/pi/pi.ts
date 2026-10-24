@@ -143,6 +143,11 @@ const makePiChild = Effect.gen(function* () {
                 message: `Pi child model "${started.model}" must use an API key`,
               });
             }
+            yield* Effect.logDebug("Pi child session started", {
+              model: started.model,
+              pool: started.pool,
+              tools: started.tools,
+            });
             const session = new ChildSession({
               id: request.session.id,
               parentId: request.session.parentId,

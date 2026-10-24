@@ -3,7 +3,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assert, describe, it } from "@effect/vitest";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai/providers/faux";
-import type { ExtensionToolContext } from "@earendil-works/pi-coding-agent";
+import {
+  createAgentSession,
+  type CreateAgentSessionOptions,
+  type ExtensionToolContext,
+  SessionManager,
+  SettingsManager,
+  type ToolDefinition,
+} from "@earendil-works/pi-coding-agent";
 import { AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
@@ -25,6 +32,7 @@ import { LocalProcess, RemoteShell } from "../../src/child-host/child-host.ts";
 import { piChildBackendLayer } from "../../src/pi/pi.ts";
 import {
   environmentBashTool,
+  piChildTools,
   PiSdk,
   type PiSession,
   type PiSessionEvent,
@@ -34,6 +42,32 @@ import {
 import { resolvePiPool } from "../../src/pi/authentication.ts";
 
 const noDelivery: OnDelivery = () => Effect.void;
+const childTools = ["read", "bash", "edit", "write"];
+
+/** Runs `env` with `bash` and returns the names of the variables it prints. */
+const environmentNames = (bash: ToolDefinition) =>
+  Effect.promise(() =>
+    bash.execute(
+      "call-1",
+      { command: "env" },
+      undefined,
+      undefined,
+      // SAFETY: without session variables the bash tool reads only the optional `cwd` of its context.
+      {} as ExtensionToolContext,
+    ),
+  ).pipe(
+    Effect.map((result) =>
+      result.content
+        .flatMap((part) => (part.type === "text" ? [part.text] : []))
+        .join("\n")
+        .split("\n")
+        .flatMap((line) => (line.includes("=") ? [line.slice(0, line.indexOf("="))] : [])),
+    ),
+  );
+
+/** Keeps the names that are neither in `expected` nor set by the shell for every command. */
+const notShellSet = (expected: ReadonlyArray<string>) => (name: string) =>
+  ![...expected, "PWD", "OLDPWD", "SHLVL", "_"].includes(name);
 
 describe("Pi pool resolution", () => {
   it("maps ChatGPT subscription authentication to the ChatGPT pool", () => {
@@ -85,9 +119,11 @@ const delayedPiStart = () => {
   return {
     disposeCount: () => disposeCount,
     disposed,
-    resolve: (result: Omit<Extract<PiStartResult, { readonly _tag: "Started" }>, "session">) => {
+    resolve: (
+      result: Omit<Extract<PiStartResult, { readonly _tag: "Started" }>, "session" | "tools">,
+    ) => {
       assert(resolveStart !== undefined);
-      resolveStart({ ...result, session });
+      resolveStart({ ...result, session, tools: childTools });
     },
     start: () => {
       announceStart?.();
@@ -132,6 +168,7 @@ describe("Pi child backend", () => {
             _tag: "Started",
             model: childRequest.session.brain.model,
             pool: "apiKeys",
+            tools: childTools,
             session: {
               messages: [],
               dispose: () => {},
@@ -191,6 +228,7 @@ describe("Pi child backend", () => {
             _tag: "Started",
             model: childRequest.session.brain.model,
             pool: "apiKeys",
+            tools: childTools,
             session: {
               messages: [],
               dispose: () => {},
@@ -285,6 +323,7 @@ describe("Pi child backend", () => {
           model: effectiveModel,
           pool: "apiKeys",
           session,
+          tools: childTools,
         });
       },
     });
@@ -359,6 +398,7 @@ describe("Pi child backend", () => {
           model: childRequest.session.brain.model,
           pool: "apiKeys",
           session,
+          tools: childTools,
         }),
     });
     const warnings: Array<string> = [];
@@ -469,6 +509,7 @@ describe("Pi child backend", () => {
           model,
           pool: "chatgptPlan",
           session,
+          tools: childTools,
         }),
     });
     return Effect.scoped(
@@ -489,30 +530,58 @@ describe("Pi child backend", () => {
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => rmSync(directory, { force: true, recursive: true })),
       );
-      const bash = environmentBashTool(directory, { PATH: "/usr/bin:/bin", USINE_ONLY: "yes" });
-      const result = yield* Effect.promise(() =>
-        bash.execute(
-          "call-1",
-          { command: "env" },
-          undefined,
-          undefined,
-          // SAFETY: without session variables the bash tool reads only the optional `cwd` of its context.
-          {} as ExtensionToolContext,
-        ),
+      const names = yield* environmentNames(
+        environmentBashTool(directory, { PATH: "/usr/bin:/bin", USINE_ONLY: "yes" }),
       );
-      const output = result.content.flatMap((part) => (part.type === "text" ? [part.text] : []));
-      const names = output
-        .join("\n")
-        .split("\n")
-        .flatMap((line) => (line.includes("=") ? [line.slice(0, line.indexOf("="))] : []));
       assert(names.includes("USINE_ONLY"));
-      // The shell itself sets PWD, SHLVL, and _ for every command.
-      assert.deepStrictEqual(
-        names.filter(
-          (name) => !["PATH", "USINE_ONLY", "PWD", "OLDPWD", "SHLVL", "_"].includes(name),
-        ),
-        [],
+      assert.deepStrictEqual(names.filter(notShellSet(["PATH", "USINE_ONLY"])), []);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("gives a child Pi's default tools whatever the global defaultTools setting adds", () =>
+    Effect.gen(function* () {
+      const directory = mkdtempSync(join(tmpdir(), "usine-pi-tools-"));
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => rmSync(directory, { force: true, recursive: true })),
       );
+      process.env.USINE_ORCHESTRATOR_ONLY = "yes";
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          delete process.env.USINE_ORCHESTRATOR_ONLY;
+        }),
+      );
+      const start = (tools: Pick<CreateAgentSessionOptions, "customTools" | "tools">) =>
+        Effect.acquireRelease(
+          Effect.promise(() =>
+            createAgentSession({
+              ...tools,
+              agentDir: directory,
+              cwd: directory,
+              sessionManager: SessionManager.inMemory(directory),
+              settingsManager: SettingsManager.inMemory({
+                defaultTools: ["read", "bash", "edit", "write", "grep", "find", "ls"],
+              }),
+            }),
+          ),
+          ({ session }) => Effect.sync(() => session.dispose()),
+        ).pipe(Effect.map(({ session }) => session));
+      const unpinned = yield* start({});
+      assert.includeMembers(unpinned.getActiveToolNames(), ["grep", "find", "ls"]);
+
+      const child = yield* start(
+        piChildTools(directory, Option.some({ PATH: "/usr/bin:/bin", USINE_REQUEST_ONLY: "yes" })),
+      );
+      assert.sameMembers(child.getActiveToolNames(), childTools);
+      assert.sameMembers(
+        child.getAllTools().map(({ name }) => name),
+        childTools,
+      );
+      const bash = child.getToolDefinition("bash");
+      assert(bash !== undefined);
+      const names = yield* environmentNames(bash);
+      assert(names.includes("USINE_REQUEST_ONLY"));
+      assert.notInclude(names, "USINE_ORCHESTRATOR_ONLY");
+      assert.deepStrictEqual(names.filter(notShellSet(["PATH", "USINE_REQUEST_ONLY"])), []);
     }).pipe(Effect.scoped),
   );
 

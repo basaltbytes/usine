@@ -10,6 +10,7 @@ import {
   SessionManager,
   SettingsManager,
   type AgentSessionEvent,
+  type CreateAgentSessionOptions,
   type InlineExtension,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
@@ -70,6 +71,8 @@ export type PiStartResult =
       readonly model: ModelId;
       readonly pool: PiPool;
       readonly session: PiSession;
+      /** The names of the tools active in `session`. */
+      readonly tools: ReadonlyArray<string>;
     };
 
 /** Returns a bash tool whose commands run with exactly `environment`; Pi's `PI_*` variables are not added. */
@@ -82,6 +85,28 @@ export const environmentBashTool = (
     createBashToolDefinition(cwd, { exposeSessionEnvironment: false, spawnHook: exact }),
   );
 };
+
+/**
+ * Pi's default tools, named so that the global `defaultTools` setting can't add a tool whose
+ * processes inherit this process's environment, such as `grep` or `find`.
+ */
+const piChildToolNames = ["read", "bash", "edit", "write"];
+
+/**
+ * Returns the session options that give a Pi child exactly Pi's default tools. With `environment`,
+ * the bash tool runs its commands with exactly that environment.
+ */
+export const piChildTools = (
+  cwd: string,
+  environment: Option.Option<Readonly<Record<string, string>>>,
+): Pick<CreateAgentSessionOptions, "customTools" | "tools"> => ({
+  tools: [...piChildToolNames],
+  // A custom tool replaces the built-in tool of the same name.
+  customTools: Option.match(environment, {
+    onNone: () => [],
+    onSome: (exact) => [environmentBashTool(cwd, exact)],
+  }),
+});
 
 /** The service that starts a Pi session with the selected model and its repository tools. */
 export class PiSdk extends Context.Service<
@@ -113,25 +138,15 @@ export const piSdkLive = Layer.succeed(PiSdk)({
       noThemes: true,
     });
     await resourceLoader.reload();
-    const sessionOptions = {
+    const { session } = await createAgentSession({
+      ...piChildTools(options.cwd, options.environment),
       cwd: options.cwd,
+      model: selected,
       modelRuntime,
       resourceLoader,
       sessionManager: SessionManager.inMemory(options.cwd),
       settingsManager,
       thinkingLevel: options.thinkingLevel,
-    } as const;
-    // A custom tool replaces the built-in tool of the same name.
-    const environmentScopedSessionOptions = Option.match(options.environment, {
-      onNone: () => sessionOptions,
-      onSome: (environment) => ({
-        ...sessionOptions,
-        customTools: [environmentBashTool(options.cwd, environment)],
-      }),
-    });
-    const { session } = await createAgentSession({
-      ...environmentScopedSessionOptions,
-      model: selected,
     });
     let ownershipTransferred = false;
     try {
@@ -162,6 +177,7 @@ export const piSdkLive = Layer.succeed(PiSdk)({
         model,
         pool,
         session,
+        tools: session.getActiveToolNames(),
       };
     } finally {
       if (!ownershipTransferred) session.dispose();
