@@ -78,6 +78,8 @@ It then gets changed items from `GitHubPolling`, fetches one snapshot each, upda
 
 Change detection never lists deleted or transferred issues, so at most every 10 minutes per repo, the cycle checks every stored open issue with `GitHubPolling.missingIssues`. Missing ones are marked gone, leaving the open lanes, and their pending or approval-waiting work is revoked. A failed check is logged and reported, and retried 10 minutes later.
 
+A pull request's mergeability changes when its base branch moves, without a change that detection lists. The cursor keeps each open pull request with its base branch and `mergeable`, and the head of each base branch. Each cycle reads every base head with `GitHubPolling.baseRefHead`, and fetches an open pull request again when its base head moved or can't be read, or while its `mergeable` is `UNKNOWN`. The first read of a head counts as moved.
+
 An `if:` or prompt that fails on an item affects only that loop and item, and the cursor advances. The cursor records the failing item, so each cycle reports it until the loop evaluates, logging the error once per loop, item, and content hash. The first cycle after a restart or instance change fetches failing items again, so a fix applies without waiting for a change.
 
 Cursors live in the engine's `CursorStore`. When a loop starts watching a repo or its trigger changes, the orchestrator drops that repo's cursor and polls cold; the event ledger absorbs repeats.

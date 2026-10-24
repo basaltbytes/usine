@@ -54,7 +54,11 @@ import { gitHubItemKey } from "../src/polling/repository-sync.ts";
 import { ScheduleTriggers } from "../src/schedule-triggers.ts";
 import { WorkerStatus } from "../src/worker-status.ts";
 import { fixedInstance } from "./support/current-instance.ts";
-import { alwaysHoldsLayer, inertLabelReconcilerLayer } from "./support/polling.ts";
+import {
+  alwaysHoldsLayer,
+  inertLabelReconcilerLayer,
+  unmovedBaseRefHead,
+} from "./support/polling.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const agent = new AgentFile({
@@ -138,6 +142,7 @@ describe("Board self-writes", () => {
           let writeFailure: Option.Option<GitHubAppError> = Option.none();
           let changeRequests = 0;
           const github: GitHubPolling["Service"] = {
+            baseRefHead: unmovedBaseRefHead,
             missingIssues: () => Effect.succeed([]),
             changes: (_repository, cursor) =>
               Effect.gen(function* () {

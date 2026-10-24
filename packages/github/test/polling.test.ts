@@ -12,7 +12,12 @@ import {
   InstallationToken,
   InstallationWide,
 } from "../src/installation.ts";
-import { ChangedIssue, ChangedPullRequest, PollCursor } from "../src/polling/detection.ts";
+import {
+  BaseRefName,
+  ChangedIssue,
+  ChangedPullRequest,
+  PollCursor,
+} from "../src/polling/detection.ts";
 import { RepositoryLabelCatalog, RepositoryLabelsNotModified } from "../src/polling/labels.ts";
 import { GitHubPolling } from "../src/polling/polling.ts";
 
@@ -274,6 +279,52 @@ describe("GitHubPolling", () => {
       assert.strictEqual(detected._tag, "RepositoryChanges");
       if (detected._tag !== "RepositoryChanges") return;
       assert(Option.isNone(detected.cursor.entityTag));
+    }).pipe(Effect.provide(pollingLayer(client)));
+  });
+
+  it.effect("reads a base branch head conditionally and keeps the known head on 304", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = [];
+    const sha = "a".repeat(40);
+    const client = HttpClient.make((request) =>
+      Effect.sync(() => {
+        requests.push(request);
+        if (requests.length === 1) {
+          return response(
+            request,
+            { ref: "refs/heads/release/1.x", object: { sha, type: "commit" } },
+            { headers: { etag: 'W/"head-1"' } },
+          );
+        }
+        return requests.length === 2
+          ? response(request, null, { status: 304 })
+          : response(request, { message: "Not Found" }, { status: 404 });
+      }),
+    );
+
+    return Effect.gen(function* () {
+      const polling = yield* GitHubPolling;
+      const baseRefName = BaseRefName.make("release/1.x");
+      const first = yield* polling.baseRefHead(repository, baseRefName, Option.none());
+      assert.strictEqual(first.sha, sha);
+      assert.deepStrictEqual(first.entityTag, Option.some('W/"head-1"'));
+      assert.strictEqual(
+        yield* polling.baseRefHead(repository, baseRefName, Option.some(first)),
+        first,
+      );
+      assert.strictEqual(
+        requests[0]?.url,
+        "https://api.github.com/repos/basaltbytes/usine/git/ref/heads/release/1.x",
+      );
+      assert.strictEqual(requests[0]?.headers["if-none-match"], undefined);
+      assert.strictEqual(requests[1]?.headers["if-none-match"], 'W/"head-1"');
+
+      // A deleted branch is a 404, which polling answers by fetching its pull requests.
+      const missing = yield* Effect.flip(
+        polling.baseRefHead(repository, baseRefName, Option.some(first)),
+      );
+      assert.strictEqual(missing._tag, "GitHubApiError");
+      if (missing._tag !== "GitHubApiError") return;
+      assert.deepStrictEqual(missing.status, Option.some(404));
     }).pipe(Effect.provide(pollingLayer(client)));
   });
 

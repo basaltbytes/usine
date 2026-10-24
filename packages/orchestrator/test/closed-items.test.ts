@@ -26,6 +26,7 @@ import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { GitHubItemHistory } from "@usine/github/item-history";
 import { GitHubItemWriter } from "@usine/github/item-writer";
 import {
+  BaseRefName,
   ChangedIssue,
   ChangedPullRequest,
   ContentHash,
@@ -43,7 +44,11 @@ import { PollingTriggers } from "../src/polling-triggers.ts";
 import { gitHubItemKey } from "../src/polling/repository-sync.ts";
 import { ScheduleTriggers } from "../src/schedule-triggers.ts";
 import { WorkerStatus } from "../src/worker-status.ts";
-import { alwaysHoldsLayer, inertLabelReconcilerLayer } from "./support/polling.ts";
+import {
+  alwaysHoldsLayer,
+  inertLabelReconcilerLayer,
+  unmovedBaseRefHead,
+} from "./support/polling.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const developer = new AgentFile({
@@ -135,7 +140,7 @@ const pullRequestPayload = (item: GitHubItem): PullRequestPayload => ({
   updatedAt: "2026-10-22T02:15:00Z",
   mergedAt: item.state === "MERGED" ? "2026-10-22T02:15:00Z" : null,
   author: { login: "operator" },
-  baseRefName: "main",
+  baseRefName: BaseRefName.make("main"),
   headRefName: `feature-${item.number}`,
   headRefOid: String(item.round).repeat(40),
   additions: 1,
@@ -158,6 +163,7 @@ const contentHash = (item: GitHubItem) =>
 
 /** Serves every Item in `items` as changed on each poll, with its current state. */
 const fakeGitHub = (items: Map<number, GitHubItem>): GitHubPolling["Service"] => ({
+  baseRefHead: unmovedBaseRefHead,
   missingIssues: () => Effect.succeed([]),
   labels: () =>
     Effect.succeed(new RepositoryLabelCatalog({ labels: [], entityTag: Option.none() })),

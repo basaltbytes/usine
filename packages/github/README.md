@@ -68,6 +68,7 @@ Pass a `CoveredProject` and the attempt's loop permission level to `GitHubApp.wo
 
 - `changes(repository, cursor)`: one conditional Issues REST request, returning changed issue and pull request numbers, the next ETag and watermark, and any rate-limit delay.
 - `labels(repository)`: every page of the repo's label catalog, for board lane proposals.
+- `baseRefHead(repository, baseRefName, known)`: the head commit of a base branch, from one conditional Git refs REST request with the ETag of `known`. A 304 returns `known` and costs no rate limit; a missing branch fails with a 404 `GitHubApiError`.
 - `snapshot(repository, item)`: the issue or pull request payload through GraphQL, with its SHA-256 content hash. The stored payload keeps timestamps; the hash excludes timestamp fields at every level.
 - `missingIssues(repository, numbers)`: the numbers the repo no longer has, deleted or transferred. It sends one GraphQL request per 50 numbers, with an aliased `issue(number:)` field each; an issue that returns null is missing.
 

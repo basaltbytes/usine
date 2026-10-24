@@ -43,6 +43,8 @@ import {
   noCycleBudgets,
   repositoryLabelProjectionReaderLayer,
   repositoryLabelProjectionWriterLayer,
+  baseBranches,
+  unmovedBaseRefHead,
 } from "./support/polling.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
@@ -223,6 +225,7 @@ describe("Loop evaluation failures", () => {
         const fetched: Array<number> = [];
         const logs = capturedLogs();
         const github: GitHubPolling["Service"] = {
+          baseRefHead: unmovedBaseRefHead,
           missingIssues: () => Effect.succeed([]),
           labels: () =>
             Effect.succeed(new RepositoryLabelCatalog({ entityTag: Option.none(), labels: [] })),
@@ -278,7 +281,9 @@ describe("Loop evaluation failures", () => {
       const logs = capturedLogs();
       let contentHash = "a";
       let fetches = 0;
+      const base = baseBranches();
       const github: GitHubPolling["Service"] = {
+        baseRefHead: base.baseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels: () =>
           Effect.succeed(new RepositoryLabelCatalog({ entityTag: Option.none(), labels: [] })),
@@ -304,14 +309,15 @@ describe("Loop evaluation failures", () => {
           first.failures[0]?.message ?? "",
           /^Loop "review": prompt \{\{ item\.statusCheckRollup\.state \}\} failed on pull request #12: No such key: state/u,
         );
-        // Open pull requests are fetched on every poll; the failure stays
-        // reported without being logged again.
+        // The poll that first records the base branch head fetches the pull request again; the
+        // failure stays reported without being logged again.
         const second = yield* polling.poll(instance);
         assert.deepStrictEqual(second.failures, first.failures);
         assert.strictEqual(fetches, 2);
         assert.strictEqual(logs.errors(FAILED), 1);
 
         contentHash = "b";
+        base.move();
         yield* polling.poll(instance);
         assert.strictEqual(logs.errors(FAILED), 2);
         assert.deepStrictEqual(submissions, []);
@@ -328,6 +334,7 @@ describe("Loop evaluation failures", () => {
       const cursors = memoryCursorStore();
       const fetched: Array<number> = [];
       const github: GitHubPolling["Service"] = {
+        baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels: () =>
           Effect.succeed(new RepositoryLabelCatalog({ entityTag: Option.none(), labels: [] })),
@@ -379,6 +386,7 @@ describe("Loop evaluation failures", () => {
       const cursors = memoryCursorStore();
       const fetched: Array<number> = [];
       const github: GitHubPolling["Service"] = {
+        baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels: () =>
           Effect.succeed(new RepositoryLabelCatalog({ entityTag: Option.none(), labels: [] })),
@@ -424,6 +432,7 @@ describe("Loop evaluation failures", () => {
       const cursors = memoryCursorStore();
       let deleted = false;
       const github: GitHubPolling["Service"] = {
+        baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels: () =>
           Effect.succeed(new RepositoryLabelCatalog({ entityTag: Option.none(), labels: [] })),
@@ -470,6 +479,7 @@ describe("Loop evaluation failures", () => {
       const cursors = memoryCursorStore();
       let deleted = false;
       const github: GitHubPolling["Service"] = {
+        baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels: () =>
           Effect.succeed(new RepositoryLabelCatalog({ entityTag: Option.none(), labels: [] })),

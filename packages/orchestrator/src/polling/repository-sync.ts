@@ -20,6 +20,7 @@ import {
   type ChangedItem,
   EntityTag,
   GitHubPolling,
+  type PayloadSnapshot,
   RepositoryLabelCatalog,
   type RepositoryLabelDetection,
 } from "@usine/github/polling";
@@ -240,7 +241,9 @@ export const observeItem = Effect.fn("PollingTriggers.observeItem")(function* (
     stream: projection.source,
     contentHash: projection.contentHash,
   });
-  return { projection, cycleGeneration } satisfies ObservedItem;
+  return { snapshot, projection, cycleGeneration } satisfies ObservedItem & {
+    readonly snapshot: PayloadSnapshot;
+  };
 });
 
 /**

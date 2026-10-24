@@ -1,4 +1,5 @@
 import { Effect, Schema, SchemaGetter } from "effect";
+import { BaseRefName } from "./detection.ts";
 
 const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 
@@ -105,7 +106,7 @@ export const PullRequestPayload = Schema.Struct({
   updatedAt: Timestamp,
   mergedAt: Schema.NullOr(Timestamp),
   author: NullableActor,
-  baseRefName: Schema.String,
+  baseRefName: BaseRefName,
   headRefName: Schema.String,
   headRefOid: Schema.NonEmptyString,
   additions: NonNegativeInt,
@@ -113,8 +114,8 @@ export const PullRequestPayload = Schema.Struct({
   changedFiles: NonNegativeInt,
   reviewDecision: Schema.NullOr(Schema.String),
   // GitHub computes mergeability lazily, so the first fetch after the base changes can return
-  // UNKNOWN. Polling refreshes open PRs even when the REST issue feed is unchanged, until the
-  // value is computed. Older projections decode as UNKNOWN until then.
+  // UNKNOWN. Polling fetches an open PR again after its base branch moves, and on every poll while
+  // the value is UNKNOWN. Older projections decode as UNKNOWN until then.
   mergeable: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed("UNKNOWN"))),
   mergeStateStatus: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed("UNKNOWN"))),
   statusCheckRollup: Schema.NullOr(Schema.Struct({ state: Schema.String })),

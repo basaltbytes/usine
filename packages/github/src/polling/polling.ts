@@ -1,6 +1,6 @@
 import { canonicalContent } from "./content.ts";
 import { ItemNumber } from "@usine/core/item";
-import { RepositoryName, splitRepositoryName } from "@usine/core/repository";
+import { CommitSha, RepositoryName, splitRepositoryName } from "@usine/core/repository";
 import {
   Array as Arr,
   Clock,
@@ -27,6 +27,8 @@ import {
 } from "../http.ts";
 import { GitHubItemNotFoundError, type GitHubAppError, type GitHubOperation } from "../error.ts";
 import {
+  BaseRefHead,
+  type BaseRefName,
   ChangedIssue,
   ChangedPullRequest,
   EntityTag,
@@ -68,6 +70,7 @@ const RestChangedItem = Schema.Struct({
   pullRequest: Schema.optionalKey(Schema.Unknown),
 }).pipe(Schema.encodeKeys({ updatedAt: "updated_at", pullRequest: "pull_request" }));
 const RestChangedItems = Schema.Array(RestChangedItem);
+const RestGitRef = Schema.Struct({ object: Schema.Struct({ sha: CommitSha }) });
 const RestRepositoryLabels = Schema.Array(
   Schema.Struct({
     name: RepositoryLabelName,
@@ -174,6 +177,12 @@ const labelsUrl = (repository: RepositoryName): string => {
   return url.toString();
 };
 
+const baseRefUrl = (repository: RepositoryName, baseRefName: BaseRefName): string => {
+  const { name, owner } = splitRepositoryName(repository);
+  const ref = baseRefName.split("/").map(encodeURIComponent).join("/");
+  return `${API_ROOT}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/git/ref/heads/${ref}`;
+};
+
 const itemLabelsUrl = (repository: RepositoryName, item: number): string => {
   const { name, owner } = splitRepositoryName(repository);
   const url = new URL(
@@ -205,6 +214,16 @@ export class GitHubPolling extends Context.Service<
       repository: RepositoryName,
       entityTag: Option.Option<EntityTag>,
     ) => Effect.Effect<RepositoryLabelCatalog | RepositoryLabelsNotModified, GitHubAppError>;
+    /**
+     * Returns the head commit of branch `baseRefName`. Sends the ETag of `known`, a head read
+     * earlier for the same branch, and returns `known` if GitHub answers 304, which costs no rate
+     * limit. Fails with a 404 `GitHubApiError` if the branch doesn't exist.
+     */
+    readonly baseRefHead: (
+      repository: RepositoryName,
+      baseRefName: BaseRefName,
+      known: Option.Option<BaseRefHead>,
+    ) => Effect.Effect<BaseRefHead, GitHubAppError>;
     /**
      * Returns an Item's selection and prompt payload with its content hash. Fails with
      * `GitHubItemNotFoundError` if the repository responds but has no such Item.
@@ -417,6 +436,42 @@ export class GitHubPolling extends Context.Service<
         });
       });
 
+      const baseRefHead = Effect.fn("GitHubPolling.baseRefHead")(function* (
+        repository: RepositoryName,
+        baseRefName: BaseRefName,
+        known: Option.Option<BaseRefHead>,
+      ) {
+        yield* Effect.annotateCurrentSpan({ repository, baseRefName });
+        const token = yield* app.installationToken();
+        let request = HttpClientRequest.get(baseRefUrl(repository, baseRefName)).pipe(
+          authorized(token.value),
+        );
+        const knownEntityTag = Option.flatMap(known, ({ entityTag }) => entityTag);
+        if (Option.isSome(knownEntityTag)) {
+          request = HttpClientRequest.setHeader(request, "if-none-match", knownEntityTag.value);
+        }
+        const response = yield* execute("fetch-base-ref-head", request);
+        const now = yield* Clock.currentTimeMillis;
+        if (response.status === 304 && Option.isSome(known)) return known.value;
+        if (response.status !== 200) {
+          return yield* statusError("fetch-base-ref-head", response, now);
+        }
+        const decoded = yield* HttpClientResponse.schemaBodyJson(RestGitRef)(response).pipe(
+          Effect.mapError((error) => invalidResponse("fetch-base-ref-head", error.message)),
+        );
+        const entityTag = Schema.decodeUnknownOption(EntityTag)(response.headers.etag);
+        if (Option.isNone(entityTag)) {
+          yield* Effect.logWarning(
+            "GitHub omitted the base branch ETag; next read is unconditional",
+            {
+              repository,
+              baseRefName,
+            },
+          );
+        }
+        return new BaseRefHead({ baseRefName, sha: decoded.object.sha, entityTag });
+      });
+
       const graphql = Effect.fn("GitHubPolling.graphql")(function* <
         S extends Schema.Codec<unknown, unknown, never, unknown>,
       >(
@@ -555,13 +610,15 @@ export class GitHubPolling extends Context.Service<
         return missing.flat();
       });
 
-      return { changes, labels, snapshot, missingIssues };
+      return { changes, labels, baseRefHead, snapshot, missingIssues };
     }),
   );
 }
 
 export {
   EntityTag,
+  BaseRefName,
+  BaseRefHead,
   PollCursor,
   ChangedIssue,
   ChangedPullRequest,

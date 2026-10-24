@@ -30,7 +30,12 @@ import {
 } from "@usine/github/polling";
 import { DateTime, Effect, Option, Schema } from "effect";
 import { PollingTriggers } from "../src/polling-triggers.ts";
-import { emptyCycleBudgets, memoryCursorStore, pollingTestLayer } from "./support/polling.ts";
+import {
+  emptyCycleBudgets,
+  memoryCursorStore,
+  pollingTestLayer,
+  unmovedBaseRefHead,
+} from "./support/polling.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const instance = new LoadedInstance({
@@ -72,6 +77,7 @@ describe("cycle reset polling", () => {
           }),
       };
       const github: GitHubPolling["Service"] = {
+        baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels: () =>
           Effect.succeed(new RepositoryLabelCatalog({ labels: [], entityTag: Option.none() })),
@@ -179,6 +185,7 @@ it.live(
         closedByPullRequestsReferences: { totalCount: 0, nodes: [] },
       });
       const github: GitHubPolling["Service"] = {
+        baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels: () =>
           Effect.succeed(new RepositoryLabelCatalog({ labels: [], entityTag: Option.none() })),

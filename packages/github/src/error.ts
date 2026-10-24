@@ -6,6 +6,7 @@ import { AppPermissionError } from "./access.ts";
 export const GitHubOperation = Schema.Literals([
   "create-repository-label",
   "discover-installation",
+  "fetch-base-ref-head",
   "fetch-item-labels",
   "fetch-issue-snapshot",
   "fetch-item-timeline",
