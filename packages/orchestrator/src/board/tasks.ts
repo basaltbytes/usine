@@ -1,3 +1,4 @@
+import { isSettledItemState } from "@usine/config/board";
 import type { ItemKey } from "@usine/core/item";
 import type { LoopName } from "@usine/core/loop";
 import { canonicalRepositoryName, type RepositoryName } from "@usine/core/repository";
@@ -6,7 +7,7 @@ import { Array as EffectArray, Option, Order, Schema } from "effect";
 import { BoardItemLink, BoardPullRequestView, BoardTaskView } from "../operator/board.ts";
 import type { RunView } from "../operator/run.ts";
 import { type RunUsageView, taskUsage } from "../operator/usage.ts";
-import type { ProjectedItem } from "./items.ts";
+import { type ProjectedItem, runNeedsAttention } from "./items.ts";
 
 const decodeUrl = Schema.decodeUnknownOption(Schema.URLFromString);
 
@@ -134,7 +135,7 @@ export const taskCards = (
       runs,
       run: preferred?.run ?? null,
       needsYou:
-        history.some(({ run }) => run.canApprove || run.canResolveFailure) ||
+        history.some(({ item, run }) => runNeedsAttention(run, isSettledItemState(item.state))) ||
         members.some(({ item }) => blocked.has(item.itemKey)),
       conflicting: current.conflicting,
       loops: [...new Set(ordered.flatMap(({ item }) => itemLoops.get(item.itemKey) ?? []))],

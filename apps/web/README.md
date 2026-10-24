@@ -16,7 +16,7 @@ Entries:
 - **Loop file not loaded** or **Agent file not loaded**: a file that failed to load at startup or reload, with the reason, until fixed and reloaded.
 - **Worker not configured**: a worker no longer in `usine.yaml` that has recorded attempts, with their count and the full detail, actions below. Startup doesn't reconcile them. Declare the worker again and restart `usine up`, or choose **Discard leftovers** and **Confirm discard** to stop tracking them, which removes nothing from the worker. While attempts a reload left there still run, the entry says how many (`2 attempts still running on it. Discard the leftovers after they end`), and **Discard leftovers** appears after the last ends. A refused discard, for example because the worker is declared again, shows the reason.
 
-A failed run, question, or blocker on an item that is closed or merged isn't listed; the run stays under **Recent runs** and in its drawer, which says `Issue closed`, `Pull request closed`, or `Pull request merged`. A cycle budget entry leaves at the first poll after its item closes or merges.
+A failed run, question, or blocker on an item that is closed or merged isn't listed and doesn't mark the project or its card; the run stays under **Recent runs** and in its drawer, which says `Issue closed`, `Pull request closed`, or `Pull request merged`. A cycle budget entry leaves at the first poll after its item closes or merges.
 
 ## Overview
 

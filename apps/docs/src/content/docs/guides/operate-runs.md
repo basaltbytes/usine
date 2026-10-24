@@ -221,7 +221,7 @@ For a Claude Code or Codex child, the terminal icon in the outline shows the ses
 
 Entries about an issue that is closed or a pull request that is closed or merged leave on their own:
 
-- A failed run, question, or blocker on the item isn't listed. The run stays under **Recent runs**, and its drawer says `Issue closed`, `Pull request closed`, or `Pull request merged`. You can still retry it or mark it resolved.
+- A failed run, question, or blocker on the item isn't listed, and it doesn't mark the project or the item's board card as needing attention. The run stays under **Recent runs**, and its drawer says `Issue closed`, `Pull request closed`, or `Pull request merged`. You can still retry it or mark it resolved.
 - The item's **Cycle budget exhausted** entry leaves at the next poll. usine records the ask as closed, not reset, so the item keeps its budget: if the item is reopened and a loop matches it again, the entry comes back.
 - A run waiting for approval is revoked at the next poll if the loop's `if:` requires an open item, such as `item.state == "OPEN"`.
 

@@ -12,6 +12,7 @@ import { ModelId } from "@usine/core/agent/brain";
 import { QuestionFailure } from "@usine/core/attempt/failure";
 import { CycleLimit } from "@usine/core/cycle-budget";
 import { InstanceDirectory } from "@usine/core/instance";
+import { ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { StepName } from "@usine/core/step";
@@ -84,6 +85,20 @@ const reviewPr = new LoopFile({
   step: StepName.make("review"),
   agent: developer.name,
   body: PromptTemplate.make("Review pull request {{ item.number }}."),
+});
+const fixPr = new LoopFile({
+  name: LoopName.make("fix-pr"),
+  trigger: new PullRequestTrigger({
+    on: "pr",
+    if: Source.make(
+      'item.state == "OPEN" && item.labels.nodes.exists(label, label.name == "ready-for-fix")',
+    ),
+  }),
+  selector: Option.none(),
+  approval: "none",
+  step: StepName.make("fix"),
+  agent: developer.name,
+  body: PromptTemplate.make("Fix pull request {{ item.number }}."),
 });
 const instanceWith = (loops: ReadonlyArray<LoopFile>) =>
   new LoadedInstance({
@@ -190,7 +205,7 @@ const fakeGitHub = (items: Map<number, GitHubItem>): GitHubPolling["Service"] =>
 
 const question = "Should this be fixed by pre-registering live Attempts?";
 
-/** Fails every start-dev Attempt with a question and lets every other Attempt succeed. */
+/** Lets every review-pr Attempt succeed and fails every other Attempt with a question. */
 const executor = Layer.succeed(StepExecutor)({
   workers: Effect.succeed([WorkerName.make("local")]),
   isLive: () => Effect.succeed(false),
@@ -201,9 +216,9 @@ const executor = Layer.succeed(StepExecutor)({
   occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
   reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
   execute: (execution) =>
-    execution.run.loop === "start-dev"
-      ? Effect.fail(new QuestionFailure({ question }))
-      : Effect.succeed(new StepResult({ message: "Reviewed", facts: [] })),
+    execution.run.loop === "review-pr"
+      ? Effect.succeed(new StepResult({ message: "Reviewed", facts: [] }))
+      : Effect.fail(new QuestionFailure({ question })),
 });
 
 /** Runs `test` against a real engine in a fresh instance folder, a fake GitHub, and the Operator. */
@@ -334,6 +349,57 @@ describe("Items no Loop acts on", () => {
             desk.lastOutcomes.map(({ run }) => run.id),
             [failed.run.id],
           );
+        }),
+      );
+    },
+  );
+
+  it.live(
+    "gives a Project whose only failed Run is on a merged pull request no status or card ring",
+    () => {
+      const items = new Map<number, GitHubItem>([
+        [470, { kind: "pr", number: 470, state: "OPEN", label: "ready-for-fix", round: 1 }],
+      ]);
+      const instance = instanceWith([fixPr]);
+      return withFactory(
+        items,
+        Effect.gen(function* () {
+          const polling = yield* PollingTriggers;
+          const operator = yield* Operator;
+          const attention = Effect.gen(function* () {
+            const overview = yield* operator.overview(instance);
+            const project = overview.projects[0];
+            const card = project?.board.lanes
+              .flatMap(({ items }) => items)
+              .find(({ number }) => number === 470);
+            const task = yield* operator.task(instance, repository, ItemNumber.make(470));
+            return {
+              status: project?.status,
+              ring: card?.needsYou,
+              taskNeedsYou: task.needsYou,
+              needs: overview.needsYou.map((need) => need._tag),
+            };
+          });
+          yield* polling.poll(instance);
+          const [failed] = yield* settledRuns;
+          assert(failed?.run.state._tag === "Failed");
+          assert.deepStrictEqual(yield* attention, {
+            status: "needs-you",
+            ring: true,
+            taskNeedsYou: true,
+            needs: ["RunFailureNeed"],
+          });
+          update(items, 470, { state: "MERGED" });
+          yield* polling.poll(instance);
+          assert.deepStrictEqual(yield* attention, {
+            status: "clear",
+            ring: false,
+            taskNeedsYou: false,
+            needs: [],
+          });
+          const overview = yield* operator.overview(instance);
+          const run = overview.projects[0]?.runs.find(({ id }) => id === failed.run.id);
+          assert.isTrue(run?.canResolveFailure);
         }),
       );
     },
