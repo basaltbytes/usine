@@ -1,5 +1,6 @@
 import { TokenCount, UsdAmount } from "@usine/core/agent/session";
 import { flow, Option, Schema } from "effect";
+import type { CodexTokenUsage } from "../protocol/codex.ts";
 
 const Count = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 const Dollars = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0));
@@ -98,15 +99,6 @@ export const claudeTokenMeter = () => {
     return Option.some({ totalTokens: TokenCount.make(total), costUsd: cost });
   };
 };
-
-/** The Codex thread token usage, cumulative across turns; `inputTokens` includes cached input. */
-export const CodexTokenUsage = Schema.Struct({
-  threadId: Schema.NonEmptyString,
-  tokenUsage: Schema.Struct({
-    total: Schema.Struct({ inputTokens: Count, cachedInputTokens: Count, outputTokens: Count }),
-  }),
-});
-export type CodexTokenUsage = typeof CodexTokenUsage.Type;
 
 /**
  * Returns a Codex thread's consumption: output plus uncached input. The thread's `totalTokens` counts

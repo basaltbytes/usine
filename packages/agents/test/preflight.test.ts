@@ -15,6 +15,17 @@ import {
 } from "../src/preflight/preflight.ts";
 import packageJson from "../package.json" with { type: "json" };
 
+/** The Claude Code version that the installed Claude Agent SDK bundles. */
+const { claudeCodeVersion } = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Struct({ claudeCodeVersion: Schema.String })),
+)(
+  readFileSync(
+    new URL("../node_modules/@anthropic-ai/claude-agent-sdk/package.json", import.meta.url),
+    "utf8",
+  ),
+);
+const claudeVersionOutput = `${claudeCodeVersion} (Claude Code)`;
+
 const brain = (harness: BrainSpec["harness"]) =>
   new BrainSpec({ harness, model: ModelId.make("provider/model"), effort: "low" });
 const coder = brain("codex");
@@ -105,14 +116,24 @@ describe("worker harness readiness", () => {
   });
 
   // turbo.json lists the cloud-init file as an input of this package's tests.
+  const cloudInitPins = (pattern: RegExp) =>
+    [
+      ...readFileSync(
+        new URL("../../../infra/hetzner/cloud-init.yaml", import.meta.url),
+        "utf8",
+      ).matchAll(pattern),
+    ].map(([, version]) => version);
+
   it("pins a supported Codex version in the Hetzner worker image", () => {
-    const cloudInit = readFileSync(
-      new URL("../../../infra/hetzner/cloud-init.yaml", import.meta.url),
-      "utf8",
-    );
-    const pins = [...cloudInit.matchAll(/@openai\/codex@(\S+)/gu)].map(([, version]) => version);
+    const pins = cloudInitPins(/@openai\/codex@(\S+)/gu);
     assert.lengthOf(pins, 1);
     assert.oneOf(pins[0], [...supportedCodexVersions]);
+  });
+
+  it("pins the Claude Agent SDK's Claude Code version in the Hetzner worker image", () => {
+    assert.deepStrictEqual(cloudInitPins(/@anthropic-ai\/claude-code@(\S+)/gu), [
+      claudeCodeVersion,
+    ]);
   });
 
   for (const result of [
@@ -223,7 +244,7 @@ describe("worker harness readiness", () => {
         }).pipe(
           Effect.provide(
             commands({
-              "claude --version": { stdout: "2.1.296 (Claude Code)", exitCode: 0 },
+              "claude --version": { stdout: claudeVersionOutput, exitCode: 0 },
               "claude auth status --json": {
                 stdout: JSON.stringify(status.auth),
                 exitCode: status.exitCode,
@@ -258,7 +279,7 @@ describe("worker harness readiness", () => {
         }).pipe(
           Effect.provide(
             commands({
-              "claude --version": { stdout: "2.1.296 (Claude Code)", exitCode: 0 },
+              "claude --version": { stdout: claudeVersionOutput, exitCode: 0 },
               "claude auth status --json": status,
             }),
           ),
@@ -318,7 +339,7 @@ describe("worker harness readiness", () => {
     }).pipe(
       Effect.provide(
         commands({
-          [overSsh("exec 'claude' '--version'")]: { stdout: "2.1.296 (Claude Code)", exitCode: 0 },
+          [overSsh("exec 'claude' '--version'")]: { stdout: claudeVersionOutput, exitCode: 0 },
           [overSsh("exec 'claude' 'auth' 'status' '--json'")]: {
             stdout: JSON.stringify({
               loggedIn: true,

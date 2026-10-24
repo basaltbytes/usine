@@ -49,6 +49,7 @@ import {
   type SshExecutorOptions,
   type SshWorkerAddress,
 } from "../../src/ssh/ssh.ts";
+import { claudeVersionOutput } from "../claude-code.ts";
 
 const ATTEMPT_ID = AttemptId.make("remote-run/execute/1");
 
@@ -308,7 +309,7 @@ export const fakeMachine = () => {
       return oneShotHandle("", 0);
     }
     if (line === "exec 'git' '--version'") return oneShotHandle("git version 2.47.3\n", 0);
-    if (line === "exec 'claude' '--version'") return oneShotHandle("2.1.296 (Claude Code)\n", 0);
+    if (line === "exec 'claude' '--version'") return oneShotHandle(claudeVersionOutput, 0);
     if (line === "exec 'claude' 'auth' 'status' '--json'")
       return oneShotHandle(
         JSON.stringify({

@@ -21,6 +21,7 @@ import { GitHubIntegration, IntegrationName } from "../../src/exe-dev/model.ts";
 import { DateTime, Deferred, Effect, Layer, Option, Ref, Sink, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import type { StandardCommand } from "effect/unstable/process/ChildProcess";
+import { claudeVersionOutput } from "../claude-code.ts";
 
 export const ATTEMPT_ID = AttemptId.make("remote-run/execute/1");
 
@@ -226,7 +227,7 @@ export const fakeSsh = (sweepMode: SweepMode = "valid") => {
       }
       if (line === "exec 'cat' '/proc/meminfo'")
         return oneShotHandle("MemTotal:        8074035 kB\nSwapTotal:       2097148 kB\n", 0);
-      if (line === "exec 'claude' '--version'") return oneShotHandle("2.1.296 (Claude Code)\n", 0);
+      if (line === "exec 'claude' '--version'") return oneShotHandle(claudeVersionOutput, 0);
       if (line === "exec 'claude' 'auth' 'status' '--json'") {
         return oneShotHandle(
           JSON.stringify({

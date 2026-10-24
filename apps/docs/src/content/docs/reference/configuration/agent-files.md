@@ -96,7 +96,7 @@ usine checks harnesses without installing anything ([`verifyHarness`](https://gi
 | `harness` | Runs | Preflight checks |
 | --- | --- | --- |
 | `claude` | Claude Code | `claude --version` runs, and `claude auth status --json` reports a claude.ai login with the first-party API. Otherwise, the error is `Claude Code needs a subscription login. Run claude auth login on the worker.`. Behind a gateway whose `llm_providers` lists `anthropic`, only the binary. |
-| `codex` | Codex CLI | `codex --version` prints `codex-cli 0.153.4` or `codex-cli 0.159.0` through `codex-cli 0.159.3`, and the Codex app server reports a ChatGPT account. Otherwise, the error is `Codex children need a ChatGPT login. Run codex login on the worker.`. |
+| `codex` | Codex CLI | `codex --version` prints `codex-cli 0.153.4` or `codex-cli 0.159.0` through `codex-cli 0.159.3`, and the Codex app server reports a ChatGPT account. For an unsupported version, the error is `The worker has codex-cli <version>. Install a supported Codex CLI version: <versions>.`. Without a ChatGPT account, it's `Codex children need a ChatGPT login. Run codex login on the worker.`. |
 | `pi` | Pi, the SDK in the orchestrator | The model is available with API-key authentication and supports `effort`. Pi children run only on local workers, so the check fails on an SSH worker. |
 
 Each check times out after 60 seconds. usine doesn't check the model of a Claude Code or Codex child until the child starts. Worker preflight also checks Git, memory, and, for SSH workers, the connection and gateway ([Add a worker](/guides/add-a-worker/#preflight)).
