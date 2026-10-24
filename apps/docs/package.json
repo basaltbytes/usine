@@ -36,8 +36,8 @@
     "@usine/gateway": "workspace:*",
     "@usine/github": "workspace:*",
     "@usine/orchestrator": "workspace:*",
-    "typescript": "6.0.3",
-    "wrangler": "4.151.2"
+    "typescript": "7.0.2",
+    "wrangler": "4.151.3"
   },
   "engines": {
     "node": ">=22.22.0"

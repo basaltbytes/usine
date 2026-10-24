@@ -36,7 +36,7 @@
     "react-day-picker": "^10.0.2",
     "react-dom": "^19.3.1",
     "react-markdown": "^10.1.0",
-    "react-resizable-panels": "^4.14.6",
+    "react-resizable-panels": "^4.14.8",
     "recharts": "3.10.1",
     "remark-gfm": "^4.0.1",
     "shadcn": "^4.22.1",
@@ -54,10 +54,10 @@
     "@usine/engine": "workspace:*",
     "@usine/tsconfig": "workspace:*",
     "@vitejs/plugin-react": "^6.1.2",
-    "@vitest/browser-playwright": "4.1.11",
+    "@vitest/browser-playwright": "4.1.12",
     "playwright": "1.64.1",
     "typescript": "catalog:",
-    "vite": "^8.3.4",
+    "vite": "^8.3.5",
     "vitest": "catalog:"
   },
   "engines": {
