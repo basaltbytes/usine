@@ -2,7 +2,7 @@
   "name": "@usine/orchestrator",
   "version": "0.3.0",
   "description": "The embeddable usine composition: the full engine as an Effect layer, startable in-process.",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/basaltbytes/usine.git",

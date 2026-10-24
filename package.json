@@ -2,7 +2,7 @@
   "name": "usine",
   "private": true,
   "description": "An agent-agnostic software factory: an engine where loops — trigger → agent-run automations authored as files in git — run against many repos from one headless orchestrator.",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/basaltbytes/usine.git"

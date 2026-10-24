@@ -2,7 +2,7 @@
   "name": "@usine/engine",
   "version": "0.4.0",
   "description": "The usine run engine: event ledger, dedup/supersede/revoke, run scheduling and restart recovery, SQLite store.",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/basaltbytes/usine.git",

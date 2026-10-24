@@ -50,3 +50,7 @@ pnpm format    # oxfmt
 [Changesets](https://github.com/changesets/changesets) handles releases: add a changeset for each user-visible change; CI opens a release PR, and merging it publishes. 0.x APIs change without notice.
 
 If the `usine` npm org is unavailable, ADR 0012 moves every package to the `@usine-dev` scope. The unscoped `usine` name belongs to an unrelated, unmaintained package.
+
+## License
+
+usine is licensed under the [GNU Affero General Public License v3.0](./LICENSE). You can run it, change it, and embed the `@usine/*` packages in your own software. If you offer usine, or software that includes it, to others over a network, you have to publish the complete source of that software under the same license. Versions published before 2026-10-24 remain under the MIT license.

@@ -2,7 +2,7 @@
   "name": "@usine/executor",
   "version": "0.3.0",
   "description": "The usine scoped Worker contract with local, exe.dev, and SSH adapters.",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/basaltbytes/usine.git",
