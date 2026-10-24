@@ -51,6 +51,8 @@ const INSTALLATION_TOKEN = "ghs_installationTokenForTests0123456789";
 const ANTHROPIC_KEY = "sk-ant-api03-keyForTests0123456789";
 const SUBSCRIPTION_TOKEN = "sk-ant-oat01-subscriptionForTests0123456789";
 const OPENAI_KEY = "sk-proj-keyForTests0123456789";
+const ASSET_URL =
+  "https://release-assets.githubusercontent.com/github-production-release-asset/42/asset?sp=r&sig=signature-for-tests";
 
 interface Sent {
   readonly method: string;
@@ -59,20 +61,36 @@ interface Sent {
   readonly body: string;
 }
 
-/** The requests the fake upstream received. */
-class Upstream extends Context.Service<Upstream, { readonly sent: Ref.Ref<ReadonlyArray<Sent>> }>()(
-  "test/Upstream",
-) {
-  static readonly layer = Layer.effect(
-    Upstream,
-    Effect.map(Ref.make<ReadonlyArray<Sent>>([]), (sent) => ({ sent })),
-  );
+/** Returns the fake upstream's response to a request for `url`. */
+type Answer = (url: URL) => Response;
+
+const ok: Answer = () =>
+  new Response("upstream body", { status: 200, headers: { "x-upstream": "yes" } });
+
+/** Answers each URL in `locations` with a redirect to its value, and other URLs with `ok`. */
+const redirecting =
+  (status: number, locations: Readonly<Record<string, string>>): Answer =>
+  (url) => {
+    const location = locations[url.toString()];
+    return location === undefined ? ok(url) : new Response("", { status, headers: { location } });
+  };
+
+/** The requests the fake upstream received, and its answer to each. */
+class Upstream extends Context.Service<
+  Upstream,
+  { readonly sent: Ref.Ref<ReadonlyArray<Sent>>; readonly answer: Answer }
+>()("test/Upstream") {
+  static readonly answering = (answer: Answer) =>
+    Layer.effect(
+      Upstream,
+      Effect.map(Ref.make<ReadonlyArray<Sent>>([]), (sent) => ({ sent, answer })),
+    );
 }
 
 const fakeClient = Layer.effect(
   HttpClient.HttpClient,
   Effect.gen(function* () {
-    const { sent } = yield* Upstream;
+    const { sent, answer } = yield* Upstream;
     return HttpClient.make((request, url) =>
       Effect.gen(function* () {
         const body =
@@ -83,10 +101,7 @@ const fakeClient = Layer.effect(
           ...all,
           { method: request.method, url: url.toString(), headers: request.headers, body },
         ]);
-        return HttpClientResponse.fromWeb(
-          request,
-          new Response("upstream body", { status: 200, headers: { "x-upstream": "yes" } }),
-        );
+        return HttpClientResponse.fromWeb(request, answer(url));
       }),
     );
   }),
@@ -99,11 +114,11 @@ const captureLogs = Logger.layer([
   }),
 ]);
 
-const gateway = (providers: LlmProviders) =>
+const gateway = (providers: LlmProviders, answer: Answer = ok) =>
   GatewayProxy.layer.pipe(
     Layer.provideMerge(gatewayServices),
     Layer.provide(fakeClient),
-    Layer.provideMerge(Upstream.layer),
+    Layer.provideMerge(Upstream.answering(answer)),
     Layer.provideMerge(settingsLayer(providers)),
     Layer.provideMerge(captureLogs),
   );
@@ -236,6 +251,14 @@ describe("GatewayProxy", () => {
         assert.deepStrictEqual(
           refusal(
             yield* send("http://git.gw.test/acme/other.git/info/refs", {
+              "x-usine-gateway-token": caller,
+            }),
+          ),
+          [403, "repository-mismatch"],
+        );
+        assert.deepStrictEqual(
+          refusal(
+            yield* send("http://git.gw.test/acme/other/releases/download/v1.0.0/tool.tar.gz", {
               "x-usine-gateway-token": caller,
             }),
           ),
@@ -395,6 +418,120 @@ describe("GatewayProxy", () => {
               }),
             ),
           }),
+        ),
+      ),
+  );
+
+  it.effect(
+    "a release download sends the installation token to github.com only, and passes its redirect to the asset host back unchanged",
+    () =>
+      Effect.gen(function* () {
+        lines.length = 0;
+        const caller = yield* attach(installation);
+        const response = yield* send(
+          "http://git.gw.test/acme/demo/releases/download/v1.2.0/tool-linux-amd64.tar.gz",
+          { "x-usine-gateway-token": caller },
+        );
+        assert.strictEqual(response.status, 302);
+        assert.strictEqual(response.headers.get("location"), ASSET_URL);
+        const requests = yield* sent;
+        assert.deepStrictEqual(
+          requests.map(({ url }) => url),
+          ["https://github.com/acme/demo/releases/download/v1.2.0/tool-linux-amd64.tar.gz"],
+        );
+        const [request] = requests;
+        assert(request !== undefined);
+        assert.deepStrictEqual(
+          Headers.get(request.headers, "authorization"),
+          Option.some(`Basic ${Encoding.encodeBase64(`x-access-token:${INSTALLATION_TOKEN}`)}`),
+        );
+        const served = lines.find((line) => line.includes("Served a GitHub release download"));
+        assert(served !== undefined, lines.join("\n"));
+        for (const field of [
+          '"repository":"acme/demo"',
+          '"status":302',
+          '"target":"release-assets.githubusercontent.com"',
+        ])
+          assert.include(served, field);
+        for (const value of [caller, INSTALLATION_TOKEN, "signature-for-tests"])
+          assert.isFalse(
+            lines.some((line) => line.includes(value)),
+            `a log line contains ${value.slice(0, 8)}`,
+          );
+      }).pipe(
+        Effect.provide(
+          gateway(
+            NO_PROVIDERS,
+            redirecting(302, {
+              "https://github.com/acme/demo/releases/download/v1.2.0/tool-linux-amd64.tar.gz":
+                ASSET_URL,
+            }),
+          ),
+        ),
+      ),
+  );
+
+  it.effect(
+    "redirects to github.com and api.github.com point at git.<domain>, which still refuses a renamed repository's new name",
+    () =>
+      Effect.gen(function* () {
+        lines.length = 0;
+        const caller = yield* attach(installation);
+        const location = (path: string) =>
+          Effect.map(
+            send(`http://git.gw.test${path}`, { "x-usine-gateway-token": caller }),
+            (response) => [response.status, response.headers.get("location")],
+          );
+        assert.deepStrictEqual(yield* location("/api/v3/repos/acme/demo/pulls?state=open"), [
+          301,
+          "http://git.gw.test/api/v3/repositories/42/pulls?state=open",
+        ]);
+        assert.deepStrictEqual(yield* location("/acme/demo/releases/latest/download/tool.tar.gz"), [
+          301,
+          "http://git.gw.test/acme/demo/releases/download/v1.2.0/tool.tar.gz",
+        ]);
+        assert.deepStrictEqual(
+          yield* location("/acme/demo.git/info/refs?service=git-upload-pack"),
+          [301, "http://git.gw.test/acme/renamed.git/info/refs?service=git-upload-pack"],
+        );
+        assert.deepStrictEqual(yield* location("/api/v3/repositories/42/pulls?state=open"), [
+          200,
+          null,
+        ]);
+        const followed = yield* send(
+          "http://git.gw.test/acme/renamed.git/info/refs?service=git-upload-pack",
+          { "x-usine-gateway-token": caller },
+        );
+        assert.deepStrictEqual(
+          [followed.status, followed.headers.get(REFUSAL_HEADER)],
+          [403, "repository-mismatch"],
+        );
+        assert.strictEqual(
+          (yield* sent).at(-1)?.url,
+          "https://api.github.com/repositories/42/pulls?state=open",
+        );
+        const rewrite = lines.find((line) => line.includes('"from":"api.github.com"'));
+        assert(rewrite !== undefined, lines.join("\n"));
+        for (const field of [
+          "Rewrote a GitHub Location header to the gateway",
+          '"repository":"acme/demo"',
+          '"status":301',
+          '"path":"/api/v3/repositories/42/pulls"',
+        ])
+          assert.include(rewrite, field);
+      }).pipe(
+        Effect.provide(
+          gateway(
+            NO_PROVIDERS,
+            redirecting(301, {
+              "https://api.github.com/repos/acme/demo/pulls?state=open":
+                "https://api.github.com/repositories/42/pulls?state=open",
+              "https://github.com/acme/demo/releases/latest/download/tool.tar.gz":
+                "https://github.com/acme/demo/releases/download/v1.2.0/tool.tar.gz",
+              "https://github.com/acme/demo.git/info/refs?service=git-upload-pack":
+                "https://github.com/acme/renamed.git/info/refs?service=git-upload-pack",
+            }),
+          ),
         ),
       ),
   );
