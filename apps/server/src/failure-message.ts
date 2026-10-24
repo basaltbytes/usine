@@ -116,7 +116,7 @@ export const failureMessage = (failure: CliFailure): string =>
     EnginePersistenceError: ({ operation, cause }) =>
       `usine up stopped: runtime store error: could not ${operation}${because(cause)}. Check .usine/runtime.sqlite and its folder.`,
     DurableHarnessError: ({ operation, message }) =>
-      `usine up stopped: durable storage error: could not ${operation} (${clause(message)}). Check .usine/durable.sqlite and its folder.`,
+      `usine up did not start: durable storage error: could not ${operation} (${clause(message)}). Check .usine/durable.sqlite and its folder, then run usine up again.`,
     AttemptCancellationError: ({ attemptId, cause }) =>
       `usine up stopped: attempt ${attemptId} could not be canceled${because(cause)}.`,
     RunOperationRejectedError: ({ runId, operation, state }) =>

@@ -1,6 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
-import { StorageRejected } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { ModelId } from "@usine/core/agent/brain";
 import { TextOutput } from "@usine/core/agent/session";
@@ -46,8 +45,8 @@ import { SUBAGENT_TOOL } from "../src/attempt/subagent.ts";
 import {
   DurableHarness,
   durableError,
+  DurableStorageFailed,
   layer as durableHarnessLayer,
-  StuckStepReports,
 } from "../src/harness.ts";
 import {
   answer,
@@ -1087,50 +1086,114 @@ describe("durable AttemptRuntime", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.live("reopens a Session poisoned by a failed commit and finishes the Attempt", () =>
-    Effect.gen(function* () {
+  it.live(
+    "fails the running Attempt after a storage error and runs the next Attempt on a reopened harness",
+    () => {
+      const logs = capturedLogs();
+      return Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        let opened = 0;
+        let failNextCommit = false;
+        const openStorage = Effect.tryPromise({
+          try: async () => {
+            opened += 1;
+            const storage = await openNodeSqliteStorage(database);
+            const commit = storage.commit.bind(storage);
+            storage.commit = (writes, context) => {
+              if (!failNextCommit) return commit(writes, context);
+              failNextCommit = false;
+              return Promise.reject(new Error("disk I/O error"));
+            };
+            return storage;
+          },
+          catch: (cause) => durableError("open the durable storage", cause),
+        });
+        const services = attemptRuntimeLayer.pipe(
+          Layer.provideMerge(
+            durableHarnessLayer({
+              ...fauxParent([delegate("Fix the flaky test"), answer("The next attempt finished.")]),
+              openStorage,
+            }),
+          ),
+          Layer.provideMerge(stubChildBackendLayer),
+        );
+        yield* Effect.gen(function* () {
+          const runtime = yield* AttemptRuntime;
+          const failed = attemptRequest("run/step/6");
+          const execution = yield* Effect.forkChild(runtime.execute(failed, recordingSink().sink));
+          const child = yield* (yield* StubChildren).next;
+          failNextCommit = true;
+          yield* child.emit(new TextOutput({ session: child.request.session, text: "Working." }));
+          yield* child.interrupted.pipe(Effect.timeout("5 seconds"));
+          const failure = yield* Fiber.join(execution).pipe(Effect.flip);
+          if (failure._tag !== "InfraFailure") return assert.fail(`Got ${failure._tag}`);
+          assert.match(
+            failure.message,
+            /^Durable storage failed during the attempt: disk I\/O error$/u,
+          );
+          assert.instanceOf(failure.cause, DurableStorageFailed);
+
+          const next = attemptRequest("run/step/7");
+          const recording = recordingSink();
+          const report = yield* runtime.execute(next, recording.sink);
+          assert.strictEqual(report.message, "The next attempt finished.");
+          assert.strictEqual(opened, 2);
+          assertAdmitted(next.spec.attemptId, recording.outbound());
+          assert.isFalse(yield* runtime.isLive(failed.spec.attemptId));
+          assert.lengthOf(
+            logs.matching(/Aborting the task of an Attempt that a storage failure ended/u),
+            1,
+          );
+          assert.lengthOf(logs.matching(/Reopened the durable harness/u), 1);
+        }).pipe(Effect.provide(services));
+      }).pipe(Effect.scoped, Effect.provide(logs.layer));
+    },
+  );
+
+  it.live("stops the harness when the storage fails again on reopening", () => {
+    const logs = capturedLogs();
+    return Effect.gen(function* () {
       const database = yield* temporaryDatabase;
-      let opened = 0;
-      let failNextCommit = false;
+      let failCommits = false;
       const openStorage = Effect.tryPromise({
         try: async () => {
-          opened += 1;
           const storage = await openNodeSqliteStorage(database);
           const commit = storage.commit.bind(storage);
-          storage.commit = (writes, context) => {
-            if (!failNextCommit) return commit(writes, context);
-            failNextCommit = false;
-            return Promise.reject(new Error("disk I/O error"));
-          };
+          storage.commit = (writes, context) =>
+            failCommits ? Promise.reject(new Error("disk I/O error")) : commit(writes, context);
           return storage;
         },
         catch: (cause) => durableError("open the durable storage", cause),
       });
       const services = attemptRuntimeLayer.pipe(
         Layer.provideMerge(
-          durableHarnessLayer({
-            ...fauxParent([delegate("Fix the flaky test"), answer("Recovered after the reopen.")]),
-            openStorage,
-          }),
+          durableHarnessLayer({ ...fauxParent([delegate("Fix the flaky test")]), openStorage }),
         ),
         Layer.provideMerge(stubChildBackendLayer),
       );
       yield* Effect.gen(function* () {
         const runtime = yield* AttemptRuntime;
-        const request = attemptRequest("run/step/6");
-        const recording = recordingSink();
-        const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
+        const execution = yield* Effect.forkChild(
+          runtime.execute(attemptRequest("run/step/16"), recordingSink().sink),
+        );
         const child = yield* (yield* StubChildren).next;
-        failNextCommit = true;
+        failCommits = true;
         yield* child.emit(new TextOutput({ session: child.request.session, text: "Working." }));
-        yield* child.interrupted.pipe(Effect.timeout("5 seconds"));
-        const report = yield* Fiber.join(execution);
-        assert.strictEqual(report.message, "Recovered after the reopen.");
-        assert.strictEqual(opened, 2);
-        assertAdmitted(request.spec.attemptId, recording.outbound());
+        const failure = yield* Fiber.join(execution).pipe(Effect.flip);
+        assert.strictEqual(failure._tag, "InfraFailure");
+
+        const next = yield* runtime
+          .execute(attemptRequest("run/step/17"), recordingSink().sink)
+          .pipe(Effect.flip);
+        assert.strictEqual(next._tag, "InfraFailure");
+        assert.strictEqual(
+          next.message,
+          "The durable harness stopped after repeated storage errors: disk I/O error. Restart the orchestrator.",
+        );
+        assert.lengthOf(logs.matching(/Stopped the durable harness/u), 1);
       }).pipe(Effect.provide(services));
-    }).pipe(Effect.scoped),
-  );
+    }).pipe(Effect.scoped, Effect.provide(logs.layer));
+  });
 
   it.live(
     "closing the runtime while a child runs reports no failure and leaves the task to resume",
@@ -1174,7 +1237,7 @@ describe("durable AttemptRuntime", () => {
   );
 
   it.live(
-    "stops a harness whose step pi-durable cannot settle and fails the Attempt with the cause",
+    "refuses to start when the storage cannot replace a document that no longer reads back",
     () => {
       const logs = capturedLogs();
       return Effect.gen(function* () {
@@ -1209,7 +1272,7 @@ describe("durable AttemptRuntime", () => {
             const commit = storage.commit.bind(storage);
             storage.commit = (writes, context) =>
               writes.some(({ type }) => type === "document.retire")
-                ? Promise.reject(new StorageRejected("the storage is read-only"))
+                ? Promise.reject(new Error("the storage is read-only"))
                 : commit(writes, context);
             return storage;
           },
@@ -1221,15 +1284,14 @@ describe("durable AttemptRuntime", () => {
           ),
           Layer.provideMerge(stubChildBackendLayer),
         );
-        const failure = yield* Effect.gen(function* () {
-          const runtime = yield* AttemptRuntime;
-          return yield* runtime.execute(request, recording.sink).pipe(Effect.flip);
-        }).pipe(Effect.provide(services), Effect.provideService(StuckStepReports, 20));
-        assert.strictEqual(failure._tag, "InfraFailure");
-        assert.match(failure.message, /unresolvable path/u);
-        assert.lengthOf(logs.matching(/Could not repair the durable storage/u), 2);
-        assert.lengthOf(logs.matching(/Stopped the durable harness/u), 1);
-        assert.isAtMost(logs.matching(REPORTED).length, 4);
+        const error = yield* Layer.build(services).pipe(Effect.scoped, Effect.flip);
+        assert.strictEqual(error._tag, "DurableHarnessError");
+        assert.strictEqual(error.operation, "resume the durable tasks");
+        assert.strictEqual(error.message, "the storage is read-only");
+        assert.instanceOf(error.cause, DurableStorageFailed);
+        assert.lengthOf(logs.matching(/Could not repair the durable storage/u), 1);
+        assert.lengthOf(logs.matching(/failed before its tasks resumed/u), 1);
+        assert.lengthOf(logs.matching(/Reopening the durable harness/u), 0);
       }).pipe(Effect.scoped, Effect.provide(logs.layer));
     },
   );
@@ -1240,7 +1302,7 @@ describe("durable AttemptRuntime", () => {
       const logs = capturedLogs();
       return Effect.gen(function* () {
         const database = yield* temporaryDatabase;
-        const poisoned = attemptRequest("run/step/14");
+        const broken = attemptRequest("run/step/14");
         const healthy = attemptRequest("run/step/15");
         const recording = recordingSink();
         const parentOf = yield* Effect.scoped(
@@ -1249,7 +1311,7 @@ describe("durable AttemptRuntime", () => {
               layer({ database, parent: [delegate("First part"), delegate("Second part")] }),
             );
             const runtime = Context.get(services, AttemptRuntime);
-            const executions = yield* Effect.forEach([poisoned, healthy], (request) =>
+            const executions = yield* Effect.forEach([broken, healthy], (request) =>
               Effect.forkChild(runtime.execute(request, recording.sink)),
             );
             const children = Context.get(services, StubChildren);
@@ -1257,15 +1319,15 @@ describe("durable AttemptRuntime", () => {
             yield* children.next;
             yield* Effect.forEach(executions, Fiber.interrupt);
             const record = yield* Context.get(services, DurableHarness).use(
-              "read the poisoned Attempt",
+              "read the broken Attempt",
               (harness, context) =>
-                harness.snapshot(AttemptRecordDoc, poisoned.spec.attemptId, context),
+                harness.snapshot(AttemptRecordDoc, broken.spec.attemptId, context),
             );
             return record?.parentConversation ?? null;
           }),
         );
         assert(parentOf !== null);
-        // The poisoned parent's live state can't be read.
+        // The broken parent's live state can't be read.
         let unreadable: number | undefined;
         const openStorage = Effect.tryPromise({
           try: async () => {
@@ -1303,7 +1365,7 @@ describe("durable AttemptRuntime", () => {
           const runtime = yield* AttemptRuntime;
           return yield* Effect.all(
             [
-              runtime.execute(poisoned, recording.sink).pipe(Effect.flip),
+              runtime.execute(broken, recording.sink).pipe(Effect.flip),
               runtime.execute(healthy, recording.sink),
             ],
             { concurrency: "unbounded" },
@@ -1314,8 +1376,7 @@ describe("durable AttemptRuntime", () => {
         assert.match(failure.message, /pi\.live: unresolvable path/u);
         assert.strictEqual(report.message, "Finished the second part after the restart.");
         assert.lengthOf(logs.matching(/Replaced the unreadable documents/u), 1);
-        assert.lengthOf(logs.matching(/Stopped the durable harness/u), 0);
-        assert.lengthOf(logs.matching(/keeps retrying a step/u), 0);
+        assert.lengthOf(logs.matching(/A storage error failed the durable harness/u), 0);
       }).pipe(Effect.scoped, Effect.provide(logs.layer));
     },
   );
@@ -1440,6 +1501,34 @@ describe("durable AttemptRuntime", () => {
         ),
       );
     }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "gives the parent the child's report, not its streamed text, as the subagent result",
+    () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        const relay: ParentStep = (context) => {
+          const result = [...context.messages].reverse().find(({ role }) => role === "toolResult");
+          const parts = result?.role === "toolResult" ? result.content : [];
+          return answer(
+            parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join(""),
+          );
+        };
+        const report = yield* Effect.gen(function* () {
+          const runtime = yield* AttemptRuntime;
+          const execution = yield* Effect.forkChild(
+            runtime.execute(attemptRequest("run/step/19"), recordingSink().sink),
+          );
+          const child = yield* (yield* StubChildren).next;
+          yield* child.emit(new TextOutput({ session: child.request.session, text: "Reading." }));
+          yield* child.reply("Fixed the flaky test.");
+          return yield* Fiber.join(execution);
+        }).pipe(
+          Effect.provide(layer({ database, parent: [delegate("Fix the flaky test"), relay] })),
+        );
+        assert.strictEqual(report.message, "Fixed the flaky test.");
+      }).pipe(Effect.scoped),
   );
 
   it.live(

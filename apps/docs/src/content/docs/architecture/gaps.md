@@ -28,13 +28,11 @@ Open issues from `gh issue list --repo basaltbytes/usine --state open --limit 20
 ## Run engine and durable layer
 
 - [#178][]: a reattach loses the runaway guard's elapsed time and finished-session tokens.
-- [#179][]: usine detects a poisoned pi-durable session by wrapping storage and matching an error message.
 - [#181][]: Pi child grep and find tools inherit the orchestrator's environment.
 - [#182][]: the durable Pi parent runs without Pi's HTTP dispatcher settings.
 - [#185][]: the durable Pi parent's system prompt is only the usine section.
 - [#187][]: a crash between an append and the progress commit can lose one envelope without a parent entry.
 - [#195][]: a task that finishes as its relay fails stays live after `stopTask` cancels it.
-- [#217][]: `DurableHarness` must handle pi-durable's `SessionFailed` before an upgrade past 1.1.0.
 
 ## Harnesses and workers
 
@@ -85,7 +83,6 @@ Open issues from `gh issue list --repo basaltbytes/usine --state open --limit 20
 [#154]: https://github.com/basaltbytes/usine/issues/154
 [#158]: https://github.com/basaltbytes/usine/issues/158
 [#178]: https://github.com/basaltbytes/usine/issues/178
-[#179]: https://github.com/basaltbytes/usine/issues/179
 [#181]: https://github.com/basaltbytes/usine/issues/181
 [#182]: https://github.com/basaltbytes/usine/issues/182
 [#185]: https://github.com/basaltbytes/usine/issues/185
@@ -95,7 +92,6 @@ Open issues from `gh issue list --repo basaltbytes/usine --state open --limit 20
 [#199]: https://github.com/basaltbytes/usine/issues/199
 [#200]: https://github.com/basaltbytes/usine/issues/200
 [#201]: https://github.com/basaltbytes/usine/issues/201
-[#217]: https://github.com/basaltbytes/usine/issues/217
 [#223]: https://github.com/basaltbytes/usine/issues/223
 [#226]: https://github.com/basaltbytes/usine/issues/226
 [#228]: https://github.com/basaltbytes/usine/issues/228
