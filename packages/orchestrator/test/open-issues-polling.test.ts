@@ -41,6 +41,7 @@ import {
   alwaysHoldsLayer,
   inertLabelReconcilerLayer,
   pollingTestLayer,
+  unmovedBaseRefHead,
 } from "./support/polling.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
@@ -177,6 +178,7 @@ describe("PollingTriggers open-issue check", () => {
                 : new RepositoryNotModified({ cursor, nextPollAt: Option.none() }),
             ),
           snapshot: () => Effect.succeed(issue28),
+          baseRefHead: unmovedBaseRefHead,
           missingIssues: (_, numbers) =>
             Effect.sync(() => {
               asked.push(numbers);
@@ -231,6 +233,7 @@ describe("PollingTriggers open-issue check", () => {
         changes: (_, cursor) =>
           Effect.succeed(new RepositoryNotModified({ cursor, nextPollAt: Option.none() })),
         snapshot: () => Effect.die("no Item changed"),
+        baseRefHead: unmovedBaseRefHead,
         missingIssues: () =>
           Effect.suspend(() => {
             requests += 1;

@@ -19,6 +19,7 @@ import {
 } from "@usine/engine/repository-label-projection";
 import { ExpressionEngine } from "@usine/expression/expression-engine";
 import {
+  BaseRefHead,
   ChangedPullRequest,
   type ChangedItem,
   EntityTag,
@@ -31,6 +32,7 @@ import {
   DateTime,
   Duration,
   Effect,
+  Equal,
   Layer,
   Option,
   Ref,
@@ -62,6 +64,7 @@ import { evaluateItem, revokeMissingItem } from "./loop-evaluation.ts";
 import { markItemGone, observeItem, synchronizeLabels } from "./repository-sync.ts";
 import { ItemHints, type ItemHint } from "./hints.ts";
 import { checkOpenIssues, NO_OPEN_ISSUE_CHECK, OPEN_ISSUE_CHECK_INTERVAL } from "./open-issues.ts";
+import { OpenPullRequest, openPullRequest, openPullRequestRefresh } from "./open-pull-requests.ts";
 
 /** The number of repositories polled in parallel, kept low for GitHub's per-token limits. */
 const REPOSITORY_CONCURRENCY = 4;
@@ -75,12 +78,10 @@ class StoredPollCursor extends Schema.Class<StoredPollCursor>(
   "@usine/orchestrator/StoredPollCursor",
 )({
   boardVersion: Schema.Literal(5),
-  openPullRequests: Schema.Array(
-    Schema.Struct({
-      number: ChangedPullRequest.fields.number,
-      updatedAt: Schema.DateTimeUtcFromString,
-    }),
-  ),
+  openPullRequests: Schema.Array(OpenPullRequest),
+  // A cursor written before polling recorded base branch heads has none, so every base branch
+  // counts as moved on its first poll.
+  baseRefHeads: Schema.Array(BaseRefHead).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
   cursor: PollCursor,
   labelEntityTag: Schema.OptionFromNullOr(EntityTag),
   watches: Schema.Array(WatchKey).check(Schema.isUnique()),
@@ -197,6 +198,7 @@ export class PollingTriggers extends Context.Service<
         new StoredPollCursor({
           boardVersion: 5,
           openPullRequests: [],
+          baseRefHeads: [],
           cursor: PollCursor.empty,
           labelEntityTag: Option.none(),
           watches,
@@ -282,32 +284,35 @@ export class PollingTriggers extends Context.Service<
           )
             ? []
             : stored.failingItems;
-          // Mergeability can change without an updated_at or ETag change, so open PRs stay in the
-          // cursor and are refreshed on every poll, even on 304. Cursor version 5 rebuilds this set
-          // on upgrade.
+          const detectedItems = detected._tag === "RepositoryChanges" ? detected.items : [];
+          const detectedNumbers = new Set(detectedItems.map(({ number }) => number));
+          // Mergeability changes when the base branch moves, without an updated_at or ETag change
+          // on the pull request, so open pull requests stay in the cursor (ADR 0007).
+          const refresh = yield* openPullRequestRefresh(
+            watched.repository.name,
+            stored.openPullRequests,
+            stored.baseRefHeads,
+            new Set([...detectedNumbers, ...retrying.map(({ number }) => number)]),
+          );
           const items = new Map<number, ChangedItem>([
             ...retrying.map((failing) => [failing.number, changedItem(failing)] as const),
-            ...stored.openPullRequests.map(
-              (item) => [item.number, new ChangedPullRequest(item)] as const,
+            ...refresh.refreshed.map(
+              ({ number, updatedAt }) =>
+                [number, new ChangedPullRequest({ number, updatedAt })] as const,
             ),
           ]);
+          for (const item of detectedItems) items.set(item.number, item);
           if (detected._tag === "RepositoryChanges") {
-            for (const item of detected.items) items.set(item.number, item);
             yield* Effect.logInfo("Repository changed", {
               repository: watched.repository.name,
               changedItems: detected.items.length,
               backlog: detected.backlog,
             });
           }
-          const detectedNumbers = new Set(
-            (detected._tag === "RepositoryChanges" ? detected.items : []).map(
-              ({ number }) => number,
-            ),
-          );
           // Items fetched only because the cursor kept them: refreshed open pull requests and Items
           // whose Loops failed before this process or instance.
           const cursorOnly = new Set(
-            [...stored.openPullRequests, ...retrying]
+            [...refresh.refreshed, ...retrying]
               .map(({ number }) => number)
               .filter((number) => !detectedNumbers.has(number)),
           );
@@ -325,6 +330,7 @@ export class PollingTriggers extends Context.Service<
             repository: watched.repository.name,
             detection: detected._tag,
             openPullRequests: stored.openPullRequests.length,
+            refreshedPullRequests: refresh.refreshed.length,
             items: items.size,
           });
           const recorded = new Map<number, FailingItem>(
@@ -402,16 +408,25 @@ export class PollingTriggers extends Context.Service<
             ...stored.failingItems.filter(({ number }) => !items.has(number)),
             ...observed.flatMap(({ failing }) => Option.toArray(failing)),
           ].sort((left, right) => left.number - right.number);
+          // An open pull request the cycle did not fetch keeps its entry.
+          const openPullRequests = [
+            ...stored.openPullRequests.filter(({ number }) => !items.has(number)),
+            ...observed.flatMap(({ item, observation }) =>
+              Option.toArray(openPullRequest(item, observation.snapshot)),
+            ),
+          ];
+          const baseRefHeads = refresh.baseRefHeads.filter(({ baseRefName }) =>
+            openPullRequests.some((pullRequest) =>
+              Option.contains(pullRequest.baseRefName, baseRefName),
+            ),
+          );
           const nextCursor = new StoredPollCursor({
             boardVersion: 5,
             cursor: detected.cursor,
             labelEntityTag: preflight.labelEntityTag,
             watches: watched.watches,
-            openPullRequests: observed.flatMap(({ item, observation }) =>
-              item._tag === "ChangedPullRequest" && observation.projection.payload.state === "OPEN"
-                ? [{ number: item.number, updatedAt: item.updatedAt }]
-                : [],
-            ),
+            openPullRequests,
+            baseRefHeads,
             failingItems,
           });
           // Advancing the cursor is the commit point: every changed Item was fetched, evaluated,
@@ -420,7 +435,8 @@ export class PollingTriggers extends Context.Service<
           if (
             detected._tag === "RepositoryChanges" ||
             items.size > 0 ||
-            preflight.entityTagChanged
+            preflight.entityTagChanged ||
+            !Equal.equals(baseRefHeads, stored.baseRefHeads)
           ) {
             yield* writeCursor(watched, nextCursor);
           }

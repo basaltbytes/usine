@@ -12,10 +12,47 @@ import {
 } from "@usine/engine/repository-label-projection";
 import { ExpressionEngine } from "@usine/expression/expression-engine";
 import { GitHubLabelWriter } from "@usine/github/label-writer";
-import { GitHubPolling } from "@usine/github/polling";
+import { CommitSha } from "@usine/core/repository";
+import { BaseRefHead, type BaseRefName, EntityTag, GitHubPolling } from "@usine/github/polling";
 import { Effect, Layer, Option, Schema } from "effect";
 import { LabelReconciler } from "../../src/label-reconciler.ts";
 import { PollingTriggers } from "../../src/polling-triggers.ts";
+
+const baseRefHeadAt = (baseRefName: BaseRefName, revision: number) =>
+  new BaseRefHead({
+    baseRefName,
+    sha: CommitSha.make(revision.toString(16).padStart(40, "0")),
+    entityTag: Option.some(EntityTag.make(`W/"${revision}"`)),
+  });
+
+/** A `GitHubPolling.baseRefHead` whose branches never move. */
+export const unmovedBaseRefHead: GitHubPolling["Service"]["baseRefHead"] = (
+  _repository,
+  baseRefName,
+  known,
+) => Effect.succeed(Option.getOrElse(known, () => baseRefHeadAt(baseRefName, 0)));
+
+/**
+ * Returns base branches whose heads all move on `move`. A `baseRefHead` read returns the known head
+ * while it is current, as GitHub does with a 304, and adds the branch to `reads`.
+ */
+export const baseBranches = () => {
+  let revision = 0;
+  const reads: Array<BaseRefName> = [];
+  const baseRefHead: GitHubPolling["Service"]["baseRefHead"] = (_repository, baseRefName, known) =>
+    Effect.sync(() => {
+      reads.push(baseRefName);
+      const head = baseRefHeadAt(baseRefName, revision);
+      return Option.isSome(known) && known.value.sha === head.sha ? known.value : head;
+    });
+  return {
+    baseRefHead,
+    reads,
+    move: () => {
+      revision += 1;
+    },
+  };
+};
 
 export const itemProjectionWriterLayer = Layer.succeed(ItemProjectionWriter)({
   upsert: () => Effect.succeed(true),

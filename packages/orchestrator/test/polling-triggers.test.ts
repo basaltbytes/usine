@@ -1,6 +1,7 @@
 import { noCycleBudgets } from "./support/polling.ts";
 import { fixedInstanceLayer } from "./support/current-instance.ts";
 import { reloadableInstanceLayer, writeInstanceFiles } from "./support/instance-folder.ts";
+import { createHash } from "node:crypto";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { ModelId } from "@usine/core/agent/brain";
@@ -90,6 +91,8 @@ import {
   pollingTestLayer,
   repositoryLabelProjectionReaderLayer,
   repositoryLabelProjectionWriterLayer,
+  baseBranches,
+  unmovedBaseRefHead,
 } from "./support/polling.ts";
 
 const watchedRepository = RepositoryName.make("basaltbytes/usine");
@@ -226,7 +229,7 @@ const runtimeLayer = (
 };
 
 describe("PollingTriggers", () => {
-  it.live("refreshes open PR mergeability after restart despite unchanged issue detection", () =>
+  it.live("opens a conflict Run within one poll after a sibling merge moves the base branch", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const directory = InstanceDirectory.make(
@@ -240,56 +243,69 @@ describe("PollingTriggers", () => {
         }),
       });
       const instance = instanceWith([loop]);
-      let mergeable = "UNKNOWN";
-      let state = "OPEN";
-      let snapshots = 0;
+      const base = baseBranches();
+      const remote = new Map([
+        [28, { state: "OPEN", mergeable: "MERGEABLE", headRefOid: "a".repeat(40) }],
+        [29, { state: "OPEN", mergeable: "MERGEABLE", headRefOid: "b".repeat(40) }],
+      ]);
+      let detected = [28, 29];
+      let detections = 0;
+      const fetched: Array<number> = [];
+      const fetchedDuring = Effect.fn("test.fetchedDuring")(function* (
+        poll: Effect.Effect<PollCycle, EnginePersistenceError>,
+      ) {
+        fetched.length = 0;
+        const cycle = yield* poll;
+        assert.deepStrictEqual(cycle.failures, []);
+        return { cycle, fetched: [...fetched].sort() };
+      });
       const github: GitHubPolling["Service"] = {
+        baseRefHead: base.baseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels: () => Effect.succeed(emptyLabelCatalog),
-        changes: (repository, cursor) =>
-          Effect.succeed(
-            repository === watchedRepository && Option.isNone(cursor.entityTag)
-              ? new RepositoryChanges({
-                  cursor: new PollCursor({
-                    entityTag: Option.some(EntityTag.make('W/"unchanged"')),
-                    watermark: Option.some(DateTime.makeUnsafe("2026-08-30T20:00:00Z")),
-                  }),
-                  items: [
-                    new ChangedPullRequest({
-                      number: 28,
-                      updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z"),
-                    }),
-                  ],
-                  backlog: false,
-                  nextPollAt: Option.none(),
-                })
-              : new RepositoryNotModified({ cursor, nextPollAt: Option.none() }),
-          ),
-        snapshot: () =>
+        changes: (_repository, cursor) =>
           Effect.sync(() => {
-            snapshots += 1;
+            const numbers = detected;
+            detected = [];
+            if (numbers.length === 0) {
+              return new RepositoryNotModified({ cursor, nextPollAt: Option.none() });
+            }
+            detections += 1;
+            return new RepositoryChanges({
+              cursor: new PollCursor({
+                entityTag: Option.some(EntityTag.make(`W/"changes-${detections}"`)),
+                watermark: Option.some(DateTime.makeUnsafe("2026-08-30T20:00:00Z")),
+              }),
+              items: numbers.map(
+                (number) =>
+                  new ChangedPullRequest({
+                    number,
+                    updatedAt: DateTime.makeUnsafe(`2026-08-30T20:00:0${detections}Z`),
+                  }),
+              ),
+              backlog: false,
+              nextPollAt: Option.none(),
+            });
+          }),
+        snapshot: (_repository, item) =>
+          Effect.sync(() => {
+            fetched.push(item.number);
+            const pullRequest = remote.get(item.number) ?? assert.fail("unknown pull request");
             return new PullRequestSnapshot({
               contentHash: ContentHash.make(
-                (state === "CLOSED"
-                  ? "d"
-                  : mergeable === "UNKNOWN"
-                    ? "a"
-                    : mergeable === "CONFLICTING"
-                      ? "b"
-                      : "c"
-                ).repeat(64),
+                createHash("sha256")
+                  .update(JSON.stringify([item.number, pullRequest]))
+                  .digest("hex"),
               ),
               payload: Schema.decodeUnknownSync(PullRequestPayload)({
-                ...issuePayload([]),
-                state,
-                mergeable,
+                ...issuePayload([], item.number),
+                ...pullRequest,
                 mergeStateStatus: "UNKNOWN",
                 isDraft: false,
-                merged: false,
+                merged: pullRequest.state === "MERGED",
                 mergedAt: null,
                 baseRefName: "main",
-                headRefName: "feature",
-                headRefOid: "a".repeat(40),
+                headRefName: `feature-${item.number}`,
                 additions: 1,
                 deletions: 0,
                 changedFiles: 1,
@@ -303,47 +319,68 @@ describe("PollingTriggers", () => {
             });
           }),
       };
+      const update = (number: number, fields: { state?: string; mergeable?: string }) => {
+        const current = remote.get(number) ?? assert.fail("unknown pull request");
+        remote.set(number, { ...current, ...fields });
+      };
       yield* Effect.gen(function* () {
         const polling = yield* PollingTriggers;
-        const initial = yield* polling.poll(instance);
-        assert.deepStrictEqual(initial.failures, []);
-        assert.strictEqual(initial.submissions.length, 0);
-        assert.strictEqual(snapshots, 1);
+        const initial = yield* fetchedDuring(polling.poll(instance));
+        assert.deepStrictEqual(initial.fetched, [28, 29]);
+        // The first read of the base branch head can't prove the branch stood still since the
+        // last fetch, so both pull requests are fetched again once.
+        assert.deepStrictEqual((yield* fetchedDuring(polling.poll(instance))).fetched, [28, 29]);
+        assert.deepStrictEqual((yield* fetchedDuring(polling.poll(instance))).fetched, []);
       }).pipe(Effect.provide(runtimeLayer(directory, github)));
 
-      // Rebuild the entire runtime: the open PR set must be durable.
+      // Rebuild the entire runtime: the open pull requests and base heads must be durable.
       yield* Effect.gen(function* () {
         const polling = yield* PollingTriggers;
         const engine = yield* RunEngine;
         const items = yield* ItemProjectionReader;
-        mergeable = "CONFLICTING";
-        const conflict = yield* polling.poll(instance);
-        assert.deepStrictEqual(conflict.failures, []);
-        assert.strictEqual(conflict.submissions.length, 1);
-        const run = claimedRun(conflict);
-        yield* waitForState(engine, run, "Waiting");
-        assert.strictEqual(
-          (yield* items.list(watchedRepository, { limit: 10 }))[0]?.payload.mergeable,
-          "CONFLICTING",
-        );
-        const unchanged = yield* polling.poll(instance);
-        assert.strictEqual(claimedRun(unchanged), run);
+        const mergeableOf = Effect.fn("test.mergeableOf")(function* (number: number) {
+          const projections = yield* items.list(watchedRepository, { limit: 10 });
+          return projections.find((projection) => projection.number === number)?.payload.mergeable;
+        });
+
+        // Merging #29 moves main; GitHub recomputes #28's mergeability lazily.
+        update(29, { state: "MERGED" });
+        update(28, { mergeable: "UNKNOWN" });
+        base.move();
+        detected = [29];
+        const merged = yield* fetchedDuring(polling.poll(instance));
+        assert.deepStrictEqual(merged.fetched, [28, 29]);
+        assert.strictEqual(merged.cycle.submissions.length, 0);
+
+        update(28, { mergeable: "CONFLICTING" });
+        const conflict = yield* fetchedDuring(polling.poll(instance));
+        assert.deepStrictEqual(conflict.fetched, [28]);
+        assert.strictEqual(conflict.cycle.submissions.length, 1);
         // A refresh is not a detected change: idle polls must not look busy.
-        assert.strictEqual(unchanged.changedItems, 0);
-        mergeable = "MERGEABLE";
-        const fixed = yield* polling.poll(instance);
-        assert.strictEqual(fixed.submissions.length, 0);
-        assert.strictEqual(fixed.revokedRuns, 1);
+        assert.strictEqual(conflict.cycle.changedItems, 0);
+        const run = claimedRun(conflict.cycle);
+        yield* waitForState(engine, run, "Waiting");
+        assert.strictEqual(yield* mergeableOf(28), "CONFLICTING");
+
+        const settled = yield* fetchedDuring(polling.poll(instance));
+        assert.deepStrictEqual(settled.fetched, []);
+        assert.strictEqual(settled.cycle.submissions.length, 0);
+
+        // A push to the branch resolves the conflict and updates the pull request.
+        update(28, { mergeable: "MERGEABLE" });
+        detected = [28];
+        const fixed = yield* fetchedDuring(polling.poll(instance));
+        assert.deepStrictEqual(fixed.fetched, [28]);
+        assert.strictEqual(fixed.cycle.revokedRuns, 1);
         yield* waitForState(engine, run, "Canceled");
-        assert.strictEqual(
-          (yield* items.list(watchedRepository, { limit: 10 }))[0]?.payload.mergeable,
-          "MERGEABLE",
-        );
-        state = "CLOSED";
-        yield* polling.poll(instance);
-        assert.strictEqual(snapshots, 5);
-        yield* polling.poll(instance);
-        assert.strictEqual(snapshots, 5);
+        assert.strictEqual(yield* mergeableOf(28), "MERGEABLE");
+
+        update(28, { state: "CLOSED" });
+        detected = [28];
+        assert.deepStrictEqual((yield* fetchedDuring(polling.poll(instance))).fetched, [28]);
+        const reads = base.reads.length;
+        assert.deepStrictEqual((yield* fetchedDuring(polling.poll(instance))).fetched, []);
+        assert.strictEqual(base.reads.length, reads);
       }).pipe(Effect.provide(runtimeLayer(directory, github)));
     }).pipe(Effect.provide(NodeServices.layer)),
   );
@@ -363,6 +400,7 @@ describe("PollingTriggers", () => {
       let gone = false;
       let fetches = 0;
       const github: GitHubPolling["Service"] = {
+        baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels: () => Effect.succeed(emptyLabelCatalog),
         changes: (repository, cursor) =>
@@ -473,6 +511,7 @@ describe("PollingTriggers", () => {
       const remote = { head: "a", labels: ["review-passed"] };
       let snapshots = 0;
       const github: GitHubPolling["Service"] = {
+        baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels: () => Effect.succeed(emptyLabelCatalog),
         changes: (repository, cursor) =>
@@ -591,6 +630,7 @@ describe("PollingTriggers", () => {
     () => {
       let changeRequests = 0;
       const github: GitHubPolling["Service"] = {
+        baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         changes: (_repository, cursor) =>
           Effect.gen(function* () {
@@ -633,6 +673,7 @@ describe("PollingTriggers", () => {
   it.effect("keeps a GitHub rate-limit backoff when a reload arrives during it", () => {
     let changeRequests = 0;
     const github: GitHubPolling["Service"] = {
+      baseRefHead: unmovedBaseRefHead,
       missingIssues: () => Effect.succeed([]),
       changes: () =>
         Effect.suspend(() => {
@@ -675,6 +716,7 @@ describe("PollingTriggers", () => {
     () => {
       const polled: Array<string> = [];
       const github: GitHubPolling["Service"] = {
+        baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         changes: (repository, cursor) =>
           Effect.sync(() => {
@@ -725,6 +767,7 @@ describe("PollingTriggers", () => {
         const loop = issueLoop("paused-issues");
         const payload = issuePayload(["ready"]);
         const github: GitHubPolling["Service"] = {
+          baseRefHead: unmovedBaseRefHead,
           missingIssues: () => Effect.succeed([]),
           changes: (_repository, cursor) =>
             Effect.succeed(
@@ -774,6 +817,7 @@ describe("PollingTriggers", () => {
 
   it.effect("turns a rate-limited label catalog into a backoff, not a failed cycle", () => {
     const github: GitHubPolling["Service"] = {
+      baseRefHead: unmovedBaseRefHead,
       missingIssues: () => Effect.succeed([]),
       changes: (_repository, cursor) =>
         Effect.succeed(new RepositoryNotModified({ cursor, nextPollAt: Option.none() })),
@@ -823,6 +867,7 @@ describe("PollingTriggers", () => {
             ? Ref.update(ref, (values) => [...values, value])
             : Effect.void;
       const github: GitHubPolling["Service"] = {
+        baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         changes: (repository, cursor) =>
           Effect.gen(function* () {
@@ -942,6 +987,7 @@ describe("PollingTriggers", () => {
           updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z"),
         });
         const github: GitHubPolling["Service"] = {
+          baseRefHead: unmovedBaseRefHead,
           missingIssues: () => Effect.succeed([]),
           changes: (repository, cursor) =>
             Effect.gen(function* () {
@@ -1142,6 +1188,7 @@ describe("PollingTriggers", () => {
     });
     let failing = true;
     const github: GitHubPolling["Service"] = {
+      baseRefHead: unmovedBaseRefHead,
       missingIssues: () => Effect.succeed([]),
       changes: (repository, cursor) =>
         repository === "basaltbytes/failing" && failing
@@ -1267,6 +1314,7 @@ describe("PollingTriggers", () => {
       const allowRevoke = yield* Deferred.make<void, EnginePersistenceError>();
       let phase: "baseline" | "interrupted" | "recovered" = "baseline";
       const github: GitHubPolling["Service"] = {
+        baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels: () => Effect.succeed(emptyLabelCatalog),
         changes: (repository, cursor) =>
@@ -1449,6 +1497,7 @@ describe("PollingTriggers", () => {
           : Effect.succeed(`Rendered ${loop.name}.`),
     });
     const github: GitHubPolling["Service"] = {
+      baseRefHead: unmovedBaseRefHead,
       missingIssues: () => Effect.succeed([]),
       changes: (_repository, cursor) =>
         Effect.succeed(
@@ -1542,6 +1591,7 @@ describe("PollingTriggers", () => {
           `${(repository.endsWith("one") ? "a" : "b").repeat(32)}${String(number).repeat(16)}`,
         );
       const github: GitHubPolling["Service"] = {
+        baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         changes: (_repository, cursor) =>
           Effect.succeed(
@@ -1602,6 +1652,7 @@ describe("PollingTriggers", () => {
         const open = new Set([28]);
         const updatedAt = DateTime.makeUnsafe("2026-08-30T20:00:00Z");
         const github: GitHubPolling["Service"] = {
+          baseRefHead: unmovedBaseRefHead,
           missingIssues: () => Effect.succeed([]),
           labels: () => Effect.succeed(emptyLabelCatalog),
           changes: (_repository, cursor) =>

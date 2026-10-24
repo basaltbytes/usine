@@ -17,7 +17,7 @@ import { Clock, DateTime, Deferred, Effect, Fiber, Option, Schema } from "effect
 import { TestClock } from "effect/testing";
 import { PollingTriggers } from "../src/polling-triggers.ts";
 import { fixedInstance } from "./support/current-instance.ts";
-import { pollingTestLayer } from "./support/polling.ts";
+import { pollingTestLayer, unmovedBaseRefHead } from "./support/polling.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const instance = new LoadedInstance({
@@ -64,6 +64,7 @@ describe("Polling self-write Hints", () => {
   it.effect("extends an in-flight wait when another writer reports a later retry deadline", () => {
     let snapshots = 0;
     const github: GitHubPolling["Service"] = {
+      baseRefHead: unmovedBaseRefHead,
       missingIssues: () => Effect.succeed([]),
       labels,
       changes: (_repository, cursor) =>
@@ -97,6 +98,7 @@ describe("Polling self-write Hints", () => {
     let requests = 0;
     let snapshots = 0;
     const github: GitHubPolling["Service"] = {
+      baseRefHead: unmovedBaseRefHead,
       missingIssues: () => Effect.succeed([]),
       labels,
       changes: (_repository, cursor) =>
@@ -141,6 +143,7 @@ describe("Polling self-write Hints", () => {
       let snapshots = 0;
       const until = DateTime.makeUnsafe(90_000);
       const github: GitHubPolling["Service"] = {
+        baseRefHead: unmovedBaseRefHead,
         missingIssues: () => Effect.succeed([]),
         labels,
         changes: (_repository, cursor) =>
@@ -192,6 +195,7 @@ describe("Polling self-write Hints", () => {
         let requests = 0;
         let snapshots = 0;
         const github: GitHubPolling["Service"] = {
+          baseRefHead: unmovedBaseRefHead,
           missingIssues: () => Effect.succeed([]),
           labels,
           changes: (_repository, cursor) =>

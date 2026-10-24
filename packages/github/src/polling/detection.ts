@@ -1,8 +1,20 @@
+import { CommitSha } from "@usine/core/repository";
 import { Effect, Option, Schema } from "effect";
 
-/** GitHub's opaque HTTP validator for a conditional repository or label-catalog request. */
+/** GitHub's opaque HTTP validator for a conditional repository, label-catalog, or branch request. */
 export const EntityTag = Schema.NonEmptyString.pipe(Schema.brand("GitHubEntityTag"));
 export type EntityTag = typeof EntityTag.Type;
+
+/** The name of the branch a pull request merges into, without the `refs/heads/` prefix. */
+export const BaseRefName = Schema.NonEmptyString.pipe(Schema.brand("GitHubBaseRefName"));
+export type BaseRefName = typeof BaseRefName.Type;
+
+/** The commit at the tip of a base branch, with the ETag for the next conditional read. */
+export class BaseRefHead extends Schema.Class<BaseRefHead>("@usine/github/BaseRefHead")({
+  baseRefName: BaseRefName,
+  sha: CommitSha,
+  entityTag: Schema.OptionFromNullOr(EntityTag),
+}) {}
 
 /** A REST cursor used only for efficiency; losing it is safe because Event deduplication is permanent (ADR 0007). */
 export class PollCursor extends Schema.Class<PollCursor>("@usine/github/PollCursor")({

@@ -23,6 +23,7 @@ import { TestClock } from "effect/testing";
 import { CurrentInstance } from "../src/current-instance/current-instance.ts";
 import { triggerConditionLayer } from "../src/trigger-condition.ts";
 import { fixedInstanceLayer } from "./support/current-instance.ts";
+import { unmovedBaseRefHead } from "./support/polling.ts";
 
 const config = Schema.decodeUnknownSync(UsineConfig)({
   version: 1,
@@ -99,6 +100,7 @@ const layerWith = (
   );
 
 const failingGitHub: GitHubPolling["Service"] = {
+  baseRefHead: unmovedBaseRefHead,
   missingIssues: () => Effect.succeed([]),
   changes: () => Effect.die("unused"),
   labels: () => Effect.die("unused"),
