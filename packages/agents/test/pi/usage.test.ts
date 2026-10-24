@@ -3,10 +3,10 @@ import { Option, Schema } from "effect";
 import {
   addUsage,
   claudeTokenMeter,
-  CodexTokenUsage,
   codexThreadTokens,
   piMessageUsage,
 } from "../../src/pi/usage.ts";
+import { CodexTokenUsage } from "../../src/protocol/codex.ts";
 
 describe("Claude query tokens", () => {
   it("counts output plus uncached input, reconciling repeated blocks and cumulative results", () => {

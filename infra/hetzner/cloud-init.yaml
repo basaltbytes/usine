@@ -75,7 +75,7 @@ write_files:
       apt-get update
       DEBIAN_FRONTEND=noninteractive apt-get install -y gh nodejs
       # Codex must be one of supportedCodexVersions in @usine/agents/preflight; packages/agents/test/preflight.test.ts checks it.
-      # Claude Code must match the claudeCodeVersion in the package.json of the @anthropic-ai/claude-agent-sdk version that @usine/agents depends on.
+      # Claude Code must match the Claude Agent SDK that @usine/agents depends on; the same test file checks it.
       npm install -g pnpm@11.20.0 @anthropic-ai/claude-code@2.1.308 @openai/codex@0.159.2
       # Applies the overcommit setting of /etc/sysctl.d now, not at the next boot.
       sysctl --system
