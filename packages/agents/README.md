@@ -46,7 +46,7 @@ Logs record the verified authentication method and pool. On completion or interr
 - `LocalProcess`: on this machine, with `ChildRequest.environment` as the whole environment.
 - `RemoteShell`: one `ssh <args> <destination> -- <remote command>`, which enters the worktree, exports the request's environment over the machine's own, writes its pid to `<worktree>.child-<n>.pid`, and runs the harness. The SSH client gets only `RemoteShell.sshEnvironment`.
 
-Executors run `CHILD_KILL_SCRIPT` remotely to stop every child in those pid files before keeping or removing a worktree. Claude Code runs remotely through `spawnClaudeCodeProcess`, Codex over the same SSH command. Pi children run tools in this process and fail on `RemoteShell` with `AgentResultError`.
+Executors run `CHILD_KILL_SCRIPT` remotely to stop every child in those pid files before keeping or removing a worktree. Claude Code runs remotely through `spawnClaudeCodeProcess`, Codex over the same SSH command. Pi children run tools in this process and fail on `RemoteShell` with `AgentResultError`. They get only Pi's default tools, `read`, `bash`, `edit`, and `write`, whatever the global Pi `defaultTools` setting adds, and `bash` runs with exactly `ChildRequest.environment`.
 
 The worktree is repo-controlled input: Pi ignores the project's `.pi/` settings, extensions, prompt templates, skills, and themes; Claude omits project setting sources; Codex marks the worktree untrusted. AGENTS instructions still apply. The executor isolates the worker.
 

@@ -274,6 +274,7 @@ describe("worker harness readiness", () => {
         _tag: "Started",
         model: ModelId.make("provider/model"),
         pool,
+        tools: [],
         session: {
           messages: [],
           subscribe: () => () => {},
