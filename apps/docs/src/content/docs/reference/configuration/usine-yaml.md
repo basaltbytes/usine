@@ -64,13 +64,13 @@ repos:
 
 settings:
   poll_interval: 60 # seconds between poll cycles
-  max_children: 4 # child sessions per Attempt
+  max_children: 4 # child sessions per attempt
   max_attempt_minutes: 180 # omit for no wall-clock ceiling
   max_attempt_tokens: 20000000 # omit for no token ceiling
   parent_model: openai-codex/gpt-5.6-terra
   parent_effort: medium
 
-# Where Attempts run. Omit the key for one local Worker named `local`.
+# Where attempts run. Omit the key for one local worker named `local`.
 workers:
   - name: worker-1
     kind: ssh

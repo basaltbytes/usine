@@ -18,7 +18,7 @@
     "knip": "knip",
     "changeset": "changeset",
     "changeset:version": "changeset version && pnpm install --lockfile-only",
-    "changeset:publish": "pnpm build && pnpm -r publish --no-git-checks && changeset tag && git push origin --tags"
+    "changeset:publish": "pnpm build && pnpm -r publish --no-git-checks && changeset git-tag"
   },
   "devDependencies": {
     "@changesets/cli": "catalog:",
