@@ -121,9 +121,9 @@ flowchart LR
   subgraph net["Private network 10.42.0.0/16"]
     W["Worker, no public address"]
   end
-  O -->|"SSH with ProxyJump"| SSHD
+  O -->|"SSH over the tailnet, with ProxyJump"| SSHD
   SSHD -->|SSH| W
-  O -->|"SSH forward to 7070, opened by usine"| ADMIN
+  O -->|"SSH forward to 7070 over the tailnet, opened by usine"| ADMIN
   W -->|"git and gh with the caller token"| RP
   W -->|"HTTPS tunnels to allowlisted hosts"| FP
   W -->|"name lookups"| DNS
@@ -136,7 +136,7 @@ The scripts are in `infra/hetzner/gateway/`, and its `README.md` describes every
 
 <Steps>
 
-1. Create the private network, the gateway VM, and its firewall. `ORCHESTRATOR_CIDR` is the only address allowed on the gateway's SSH port. `SSH_KEY` is the name of an SSH key in the Hetzner project; register the worker key as `usine-worker` if needed. The next commands connect as `root@<gateway>` without a key option, so first load the key into your SSH agent:
+1. Create the private network, the gateway VM, and its firewall. `ORCHESTRATOR_CIDR` is the only address allowed on the gateway's public SSH port, until step 3 removes that rule. `SSH_KEY` is the name of an SSH key in the Hetzner project; register the worker key as `usine-worker` if needed. The next commands connect as `root@<gateway>` without a key option, so first load the key into your SSH agent:
 
    ```sh title="usine checkout"
    ssh-add ~/.ssh/usine_worker
@@ -145,11 +145,40 @@ The scripts are in `infra/hetzner/gateway/`, and its `README.md` describes every
      ./infra/hetzner/gateway/gateway.sh create
    ```
 
-2. Wait for cloud-init on the gateway, whose address `gateway.sh create` printed (here `203.0.113.30`), and install and start the gateway service from npm (`@usine/gateway` 0.1.0 or later). `-i` sets the key for `install`'s `ssh` and `scp`:
+2. Wait for cloud-init on the gateway, whose address `gateway.sh create` printed (here `203.0.113.30`), and log the gateway in to the [Tailscale](https://tailscale.com/) tailnet of the orchestrator machine. cloud-init installs Tailscale but doesn't log it in:
 
    ```sh title="usine checkout"
    ssh root@203.0.113.30 cloud-init status --wait
-   ./infra/hetzner/gateway/gateway.sh install -i ~/.ssh/usine_worker @usine/gateway
+   ./infra/hetzner/gateway/gateway.sh tailnet-up
+   ```
+
+   `tailnet-up` runs `tailscale up` over SSH, which prints a login URL to open in your browser. Then it prints the gateway's tailnet address, here `100.64.0.10`. To log in without the browser, set `TAILSCALE_AUTH_KEY` to an [auth key](https://tailscale.com/kb/1085/auth-keys); the script sends it on SSH's standard input, never on a command line.
+
+   By default, the gateway's node key expires after 180 days, and the gateway then leaves the tailnet. In the Tailscale admin console, disable key expiry for the gateway's machine, or log in with a tagged auth key: tagged devices have key expiry disabled by default.
+
+3. Add the gateway to the SSH configuration of the user who runs `usine up`, with its tailnet address as `HostName` and its public address as `HostKeyAlias`, so that `ssh` checks the host key recorded in step 2. The executor uses the gateway as a jump host, and opens its own forward to the admin API on a port that the kernel picks. Don't add a `LocalForward` to the gateway's entry: it would apply to the executor's forward too, which then exits whenever that port is in use.
+
+   ```text title="~/.ssh/config"
+   Host usine-gateway
+     HostName 100.64.0.10
+     HostKeyAlias 203.0.113.30
+     User root
+     IdentityFile ~/.ssh/usine_worker
+   ```
+
+   Check the entry, then remove the public SSH rule:
+
+   ```sh title="usine checkout"
+   ssh usine-gateway true
+   hcloud firewall delete-rule usine-gateway --direction in --protocol tcp --port 22 --source-ips 203.0.113.10/32
+   ```
+
+   If the tailnet path stops working, add the rule back with `hcloud firewall add-rule`, or log in on the gateway's Hetzner Cloud Console. The gateway's `README.md` gives both commands.
+
+4. Install and start the gateway service from npm (`@usine/gateway` 0.1.0 or later). `GATEWAY_SSH` sets the gateway's SSH destination for `install`:
+
+   ```sh title="usine checkout"
+   GATEWAY_SSH=usine-gateway ./infra/hetzner/gateway/gateway.sh install @usine/gateway
    ```
 
    To install a build of your checkout instead, pack it with `@usine/core` and install both tarballs. At this commit, they're `usine-core-0.3.0.tgz` and `usine-gateway-0.0.0.tgz`:
@@ -157,12 +186,12 @@ The scripts are in `infra/hetzner/gateway/`, and its `README.md` describes every
    ```sh title="usine checkout"
    pnpm build
    pnpm --filter @usine/core --filter @usine/gateway pack --pack-destination .
-   ./infra/hetzner/gateway/gateway.sh install -i ~/.ssh/usine_worker ./usine-core-0.3.0.tgz ./usine-gateway-0.0.0.tgz
+   GATEWAY_SSH=usine-gateway ./infra/hetzner/gateway/gateway.sh install ./usine-core-0.3.0.tgz ./usine-gateway-0.0.0.tgz
    ```
 
    On first boot, the VM generates its admin token and caller key in `/etc/usine-gateway/secrets.env`, readable by root and the `usine-gateway` group. To let the gateway call Anthropic with its own key, add `ANTHROPIC_API_KEY` to that file and run `systemctl reload usine-gateway`. See [`usine-gateway`](/reference/configuration/cli/#usine-gateway) for what a reload and a restart change.
 
-3. Create the worker on the private network, without public addresses. `worker-user-data` adds `infra/hetzner/gateway/worker-cloud-init.yaml` to `infra/hetzner/cloud-init.yaml`. It points the worker's resolver, apt, environment, and gh's socket at the gateway, makes sshd accept the caller token variables, and allows connections only to the gateway. A `cx33` has the 8 GB that a worker needs.
+5. Create the worker on the private network, without public addresses. `worker-user-data` adds `infra/hetzner/gateway/worker-cloud-init.yaml` to `infra/hetzner/cloud-init.yaml`. It points the worker's resolver, apt, environment, and gh's socket at the gateway, makes sshd accept the caller token variables, and allows connections only to the gateway. A `cx33` has the 8 GB that a worker needs.
 
    ```sh title="usine checkout"
    ./infra/hetzner/gateway/gateway.sh worker-user-data ~/.ssh/usine_worker.pub > worker.mime
@@ -174,25 +203,20 @@ The scripts are in `infra/hetzner/gateway/`, and its `README.md` describes every
    `hcloud server describe worker-one` shows its private address, here `10.42.0.3`. Setup takes about four minutes. Follow it through the gateway, which also records the host key:
 
    ```sh title="Orchestrator machine"
-   ssh -J root@203.0.113.30 usine@10.42.0.3 cloud-init status --wait
+   ssh -J usine-gateway usine@10.42.0.3 cloud-init status --wait
    ```
 
-4. Log in to the harnesses on the worker, through the gateway's forward proxy:
+6. Log in to the harnesses on the worker, through the gateway's forward proxy:
 
    ```sh title="Orchestrator machine"
-   ssh -t -J root@203.0.113.30 usine@10.42.0.3
+   ssh -t -J usine-gateway usine@10.42.0.3
    claude auth login
    codex login --device-auth
    ```
 
-5. Add both hosts to the SSH configuration of the user who runs `usine up`. The executor uses the gateway as a jump host, and opens its own forward to the admin API on a port that the kernel picks. Don't add a `LocalForward` to the gateway's entry: it would apply to the executor's forward too, which then exits whenever that port is in use.
+7. Add the worker to the same SSH configuration, with the gateway as its jump host:
 
    ```text title="~/.ssh/config"
-   Host usine-gateway
-     HostName 203.0.113.30
-     User root
-     IdentityFile ~/.ssh/usine_worker
-
    Host worker-one
      HostName 10.42.0.3
      User usine
@@ -200,13 +224,13 @@ The scripts are in `infra/hetzner/gateway/`, and its `README.md` describes every
      IdentityFile ~/.ssh/usine_worker
    ```
 
-6. In the instance folder, copy the admin token into a file that only you can read:
+8. In the instance folder, copy the admin token into a file that only you can read:
 
    ```sh title="Instance folder"
-   (umask 077; ssh root@203.0.113.30 "sed -n 's/^USINE_GATEWAY_ADMIN_TOKEN=//p' /etc/usine-gateway/secrets.env" > .usine/gateway-admin-token)
+   (umask 077; ssh usine-gateway "sed -n 's/^USINE_GATEWAY_ADMIN_TOKEN=//p' /etc/usine-gateway/secrets.env" > .usine/gateway-admin-token)
    ```
 
-7. Add a [`gateway`](/reference/configuration/usine-yaml/#workersgateway) to the worker in `usine.yaml`, with the `Host` aliases as destinations, the gateway's `DOMAIN`, and the name of the variable that will contain the admin token:
+9. Add a [`gateway`](/reference/configuration/usine-yaml/#workersgateway) to the worker in `usine.yaml`, with the `Host` aliases as destinations, the gateway's `DOMAIN`, and the name of the variable that will contain the admin token:
 
    ```yaml title="usine.yaml"
    workers:
@@ -222,17 +246,17 @@ The scripts are in `infra/hetzner/gateway/`, and its `README.md` describes every
 
    If the gateway has `ANTHROPIC_API_KEY`, add `llm_providers: [anthropic]` under `gateway`, so that Claude Code children use the gateway's key instead of a login on the worker. Then remove `api.anthropic.com` and `platform.claude.com` from the gateway's `/etc/usine-gateway/egress-allowlist` and restart the service, so that no tunnel can send the caller token past the gateway.
 
-8. Start the orchestrator with the token in its environment:
+10. Start the orchestrator with the token in its environment:
 
-   ```sh title="Instance folder"
-   USINE_GATEWAY_ADMIN_TOKEN=$(cat .usine/gateway-admin-token) usine up
-   ```
+    ```sh title="Instance folder"
+    USINE_GATEWAY_ADMIN_TOKEN=$(cat .usine/gateway-admin-token) usine up
+    ```
 
-   If the variable isn't set, `usine up` stops and gives its name. If the admin API forward doesn't open, preflight gives the `ssh` command that shows why. If the forward proxy refuses a login host, preflight gives the host to add to `/etc/usine-gateway/egress-allowlist`.
+    If the variable isn't set, `usine up` stops and gives its name. If the admin API forward doesn't open, preflight gives the `ssh` command that shows why. If the forward proxy refuses a login host, preflight gives the host to add to `/etc/usine-gateway/egress-allowlist`.
 
 </Steps>
 
-To read the gateway's log, run `ssh root@203.0.113.30 journalctl -u usine-gateway -o cat`. Changes to the infra files don't reach a running gateway or worker until you apply them on that machine by hand ([#264](https://github.com/basaltbytes/usine/issues/264)).
+To read the gateway's log, run `ssh usine-gateway journalctl -u usine-gateway -o cat`. Changes to the infra files don't reach a running gateway or worker until you apply them on that machine by hand ([#264](https://github.com/basaltbytes/usine/issues/264)).
 
 ## Remove a worker
 

@@ -4,8 +4,8 @@ These files create the gateway host of [#223](https://github.com/basaltbytes/usi
 
 | File | Contents |
 | --- | --- |
-| `gateway.sh` | Creates and deletes the network, gateway VM, and firewall with `hcloud`; installs `@usine/gateway` from npm or packed tarballs; renders a worker's cloud-init. |
-| `gateway-cloud-init.yaml` | The gateway VM: nftables, dnsmasq, chrony, bastion sshd settings, Node.js, and the `usine-gateway` service. |
+| `gateway.sh` | Creates and deletes the network, gateway VM, and firewall with `hcloud`; logs the gateway in to a tailnet; installs `@usine/gateway` from npm or packed tarballs; renders a worker's cloud-init. |
+| `gateway-cloud-init.yaml` | The gateway VM: nftables, dnsmasq, chrony, bastion sshd settings, Tailscale, Node.js, and the `usine-gateway` service. |
 | `gateway-nftables.conf` | The gateway's firewall rules. |
 | `egress-allowlist` | The hosts that workers can reach through the forward proxy: package hosts and the harness login hosts. |
 | `worker-cloud-init.yaml` | What a worker VM needs behind the gateway; `gateway.sh worker-user-data` sends it after the worker file of `../cloud-init.yaml`. |
@@ -13,7 +13,7 @@ These files create the gateway host of [#223](https://github.com/basaltbytes/usi
 
 ## Traffic paths
 
-The orchestrator reaches a worker over SSH through the gateway: `ssh -J root@<gateway> <user>@10.42.0.x`. The Hetzner firewall admits only the orchestrator's address to port 22. The gateway's sshd allows only local forwarding, and nftables refuses outbound SSH outside the private network, so the bastion leads only to workers.
+The orchestrator reaches a worker over SSH through the gateway: `ssh -J root@<gateway> <user>@10.42.0.x`. It reaches the gateway over a tailnet, or over the public address while the Hetzner firewall admits the orchestrator's address to port 22 (see [Join the gateway to a tailnet](#join-the-gateway-to-a-tailnet)). The gateway's sshd allows only local forwarding, and nftables refuses outbound SSH outside the private network, so the bastion leads only to workers.
 
 The executor reaches the admin API on loopback port 7070 through its own forward, `ssh -N -L 127.0.0.1:<port>:127.0.0.1:7070 <gateway>` on a kernel-picked port, opened at `usine up` and reopened whenever it closes. It attaches each attempt's installation token there, and gives the returned caller token to the children over the worker's SSH connection.
 
@@ -65,7 +65,7 @@ On [#240](https://github.com/basaltbytes/usine/issues/240): all four hosts are b
 
 ## Create a gateway
 
-You need `hcloud` with an active context, an SSH key in the project, and the orchestrator's address. `SSH_KEY` takes comma-separated names or ids.
+You need `hcloud` with an active context, an SSH key in the project, and the orchestrator's public address, which the firewall admits to SSH until you [join the gateway to a tailnet](#join-the-gateway-to-a-tailnet). `SSH_KEY` takes comma-separated names or ids.
 
 ```sh
 ORCHESTRATOR_CIDR=203.0.113.7/32 SSH_KEY=my-key ./gateway.sh create
@@ -76,6 +76,12 @@ ssh root@<gateway> cloud-init status --wait
 
 ```sh
 ./gateway.sh install -i ~/.ssh/usine_worker @usine/gateway
+```
+
+`install` and `tailnet-up` connect to root at the public address that `hcloud server ip` gives. `GATEWAY_SSH` sets another SSH destination, such as the gateway's `Host` alias once it uses the tailnet:
+
+```sh
+GATEWAY_SSH=usine-gateway ./gateway.sh install @usine/gateway
 ```
 
 For an unreleased build, pack it in a usine checkout with the `@usine/core` it depends on, whose published version can lag:
@@ -102,6 +108,56 @@ ssh root@<gateway> 'echo ANTHROPIC_API_KEY=sk-ant-... >> /etc/usine-gateway/secr
 `NAME`, `LOCATION`, `SERVER_TYPE`, `IMAGE`, `NETWORK_CIDR`, `SUBNET_CIDR`, `GATEWAY_IP`, `DOMAIN`, and `LABEL` override the defaults at the top of `gateway.sh`. Logs are one JSON object per line: `journalctl -u usine-gateway -o cat`.
 
 On an existing gateway whose `/etc/dnsmasq.d/usine-gateway.conf` lacks a `local=/<domain>/` line, add it and run `systemctl restart dnsmasq`; without it, Codex on a worker can't resolve the forward proxy ([#260](https://github.com/basaltbytes/usine/issues/260)).
+
+## Join the gateway to a tailnet
+
+The Hetzner firewall admits SSH from `ORCHESTRATOR_CIDR` only, so the orchestrator can't reach the gateway after its own public address changes ([#492](https://github.com/basaltbytes/usine/issues/492)). On the orchestrator machine's [Tailscale](https://tailscale.com/) tailnet, it reaches the gateway from any network, and the public SSH rule can go. cloud-init installs Tailscale from its stable apt repository, with the repository's signing key in `gateway-cloud-init.yaml`, but doesn't log it in.
+
+1. Log the gateway in. `tailnet-up` runs `tailscale up` over SSH, which prints a login URL to open in your browser, and then prints the gateway's tailnet address:
+
+   ```sh
+   ./gateway.sh tailnet-up -i ~/.ssh/usine_worker
+   ```
+
+   With an [auth key](https://tailscale.com/kb/1085/auth-keys) in `TAILSCALE_AUTH_KEY`, it logs in without the browser. The key goes to `tailscale up` on SSH's standard input, never on a command line:
+
+   ```sh
+   TAILSCALE_AUTH_KEY=tskey-auth-... ./gateway.sh tailnet-up -i ~/.ssh/usine_worker
+   ```
+
+   `tailnet-up` passes `--netfilter-mode=off`, because the `flush ruleset` in `gateway-nftables.conf` would delete Tailscale's rules at every nftables reload, and `--accept-dns=false`, so the gateway keeps Hetzner's resolvers. nftables accepts SSH on every interface, `tailscale0` included, and the gateway's other services only from the private network. It refuses connections from the gateway into the tailnet, and the tailnet's access rules decide which devices can reach the gateway on port 22.
+
+2. Keep the gateway's node key from expiring, which by default happens after 180 days and takes the gateway off the tailnet. In the Tailscale admin console, disable key expiry for the gateway's machine, or log in with a tagged auth key: tagged devices have key expiry disabled by default.
+
+3. Point the gateway's `Host` entry in the orchestrator user's SSH configuration at the tailnet address. `HostKeyAlias` makes `ssh` check the host key that `known_hosts` has for the public address:
+
+   ```
+   Host usine-gateway
+     HostName 100.64.0.10
+     HostKeyAlias 203.0.113.30
+     User root
+     IdentityFile ~/.ssh/usine_worker
+   ```
+
+   Workers keep `ProxyJump usine-gateway`, so they're reachable from any network too. Check the entry with `ssh usine-gateway true`.
+
+4. Remove the public SSH rule, with the `ORCHESTRATOR_CIDR` that `create` used:
+
+   ```sh
+   hcloud firewall delete-rule usine-gateway --direction in --protocol tcp --port 22 --source-ips 203.0.113.7/32
+   ```
+
+The gateway accepts no inbound UDP. Tailscale still connects directly from most networks, because the Hetzner firewall and nftables both admit replies to the gateway's own packets; from behind a hard NAT, it relays through a DERP server. `tailscale status` on the orchestrator machine shows which.
+
+If the tailnet path stops working, for example after the node key expires, add the rule back with your current address and connect as `root@203.0.113.30`:
+
+```sh
+hcloud firewall add-rule usine-gateway --direction in --protocol tcp --port 22 --source-ips 198.51.100.4/32 --description "SSH from the orchestrator"
+```
+
+Without SSH, give root a password with `hcloud server reset-password usine-gateway`, which prints it, and log in as root on the server's Hetzner Cloud Console. Run `passwd -l root` when you're done.
+
+On an existing gateway joined to a tailnet by hand, run `tailscale set --accept-dns=false` first. Then add `oifname "tailscale0" ct state new reject` to the output chain in `/etc/nftables.conf` and run `nft -f /etc/nftables.conf`. With the tailnet's DNS on, the gateway's resolver is 100.100.100.100 on `tailscale0`, and that rule would block it.
 
 ## Change the allowlist or an API key
 
@@ -163,11 +219,12 @@ Both use the forward proxy (`HTTPS_PROXY` in `/etc/environment`). `claude auth s
 
 ## Add the worker to `usine.yaml`
 
-Add both hosts to the orchestrator user's SSH configuration; the gateway is the worker's bastion and the route to the admin API:
+Add both hosts to the orchestrator user's SSH configuration; the gateway is the worker's bastion and the route to the admin API. The gateway's entry uses its tailnet address (see [Join the gateway to a tailnet](#join-the-gateway-to-a-tailnet)):
 
 ```
 Host usine-gateway
-  HostName 203.0.113.7
+  HostName 100.64.0.10
+  HostKeyAlias 203.0.113.30
   User root
   IdentityFile ~/.ssh/usine_worker
 
