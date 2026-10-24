@@ -1,11 +1,11 @@
 import {
   type ASTNode,
   Environment as CelEnvironment,
+  type EnvironmentOptions,
   ParseError as CelParseError,
   type ParseResult,
   TypeError as CelTypeError,
   type TypeCheckResult,
-  parse,
 } from "@marcbachmann/cel-js";
 import { Effect, Layer, Option, Predicate, Result, Schema } from "effect";
 import { type Environment, TypeReference } from "./environment.ts";
@@ -18,6 +18,14 @@ import {
 } from "./expression-engine.ts";
 
 const decodeTypeReference = Schema.decodeUnknownSync(TypeReference);
+
+const ENVIRONMENT_OPTIONS = {
+  unlistedVariablesAreDyn: false,
+  enableOptionalTypes: true,
+} as const satisfies EnvironmentOptions;
+
+/** Parser for {@link relatedStringLiterals}, with the checking options so that it accepts `.?`. */
+const parser = new CelEnvironment(ENVIRONMENT_OPTIONS);
 
 type VendorCheckError = CelParseError | CelTypeError;
 
@@ -225,7 +233,7 @@ const relatedStringLiterals = Effect.fn("ExpressionEngine.relatedStringLiterals"
 ) {
   if (memberPath.length === 0) return [];
   const ast = yield* Effect.try({
-    try: () => parse(source).ast,
+    try: () => parser.parse(source).ast,
     catch: (cause) =>
       cause instanceof CelParseError
         ? checkFailure(source, cause)
@@ -247,7 +255,7 @@ type EnvironmentPurpose = "check" | "evaluate";
  * Both register `T == null`; cel-js derives `!=` and the reversed operand order from it.
  */
 const makeEnvironment = (descriptor: Environment, purpose: EnvironmentPurpose): CelEnvironment => {
-  const environment = new CelEnvironment({ unlistedVariablesAreDyn: false });
+  const environment = new CelEnvironment(ENVIRONMENT_OPTIONS);
   const nullableTypes = new Set<TypeReference>();
   for (const objectType of descriptor.types) {
     environment.registerType(objectType.name, {
@@ -576,6 +584,10 @@ const makeExpressionEngine = () => {
 /**
  * Provides {@link ExpressionEngine} with `@marcbachmann/cel-js` 8.0.0
  * ([ADR 0004](../../../docs/adr/0004-loop-files-markdown-cel-frontmatter.md)).
+ *
+ * Expressions can use CEL optional values, such as `item.?milestone.?title.orValue("none")`. A
+ * nullable field that holds `null` counts as present, so `item.?milestone` holds `null` and
+ * `item.?milestone.?title` is empty.
  *
  * Before evaluation, converts JSON integers to `bigint` wherever the {@link Environment}
  * declares `int`, at any depth, and sets absent nullable fields to `null`. Values inside a

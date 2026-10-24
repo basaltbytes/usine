@@ -54,19 +54,23 @@ const nullableEnvironment = new Environment({
         new ObjectField({ name: "reviewDecision", type: typeReference("string"), nullable: true }),
         new ObjectField({ name: "milestone", type: typeReference("Milestone"), nullable: true }),
         new ObjectField({ name: "reviewers", type: typeReference("list<Reviewer>") }),
+        new ObjectField({ name: "annotations", type: typeReference("map<string,string>") }),
       ],
     }),
   ],
   variables: [new Variable({ name: "item", type: typeReference("PullRequest") })],
 });
 
-const withNulls = { item: { number: 7, reviewDecision: null, milestone: null, reviewers: [{}] } };
+const withNulls = {
+  item: { number: 7, reviewDecision: null, milestone: null, reviewers: [{}], annotations: {} },
+};
 const withValues = {
   item: {
     number: 7,
     reviewDecision: "APPROVED",
     milestone: { title: "v1" },
     reviewers: [{ login: "octocat" }],
+    annotations: { team: "core" },
   },
 };
 
@@ -128,6 +132,25 @@ describe("ExpressionEngine", () => {
         .checkScalar(source("item.milestone"), nullableEnvironment)
         .pipe(Effect.flip);
       expect(object.message).toBe("Expected a scalar value, got Milestone");
+    }).pipe(Effect.provide(MarcbachmannCelLayer)),
+  );
+
+  it.effect("falls back through optional selection on a missing milestone or map key", () =>
+    Effect.gen(function* () {
+      const engine = yield* ExpressionEngine;
+      const withoutKeys = { item: { number: 7, reviewers: [], annotations: {} } };
+      const cases = [
+        ['item.?milestone.?title.orValue("none")', "none", "v1"],
+        ['item.annotations.?team.orValue("none")', "none", "core"],
+      ] as const;
+      for (const [expression, missing, present] of cases) {
+        expect(
+          yield* Effect.forEach([withNulls, withoutKeys, withValues], (context) =>
+            engine.evaluateScalar(source(expression), nullableEnvironment, context),
+          ),
+          expression,
+        ).toEqual([missing, missing, present]);
+      }
     }).pipe(Effect.provide(MarcbachmannCelLayer)),
   );
 
@@ -245,6 +268,14 @@ describe("ExpressionEngine", () => {
         ["item", "labels"],
       );
       expect(membership).toEqual(["ready", "review"]);
+
+      const optionalSelection = yield* engine.relatedStringLiterals(
+        source(
+          'item.?milestone.?title.orValue("none") == "v1" && item.labels.nodes.exists(label, label.name == "ready")',
+        ),
+        ["item", "labels"],
+      );
+      expect(optionalSelection).toEqual(["ready"]);
     }).pipe(Effect.provide(MarcbachmannCelLayer)),
   );
 
