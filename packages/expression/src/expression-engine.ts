@@ -79,8 +79,8 @@ export type Scalar = typeof Scalar.Type;
 export interface ExpressionEngineService {
   /**
    * Returns the string literals compared with the `name` field of values under `memberPath`,
-   * following macro bindings and collection transformations. Accepts the syntax that the checks
-   * accept, including optional selection (`.?`).
+   * following macro bindings and collection transformations. Accepts the same syntax as
+   * `checkBoolean` and `checkScalar`, including optional selection (`.?`).
    */
   readonly relatedStringLiterals: (
     source: Source,

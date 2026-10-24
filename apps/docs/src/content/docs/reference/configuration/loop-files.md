@@ -201,7 +201,7 @@ Labels on this issue: {{ item.labels.nodes.map(label, label.name).join(", ") }}
 
 ### Render failures
 
-An interpolation that type-checks can still fail at render time, for example on a [null field](/reference/configuration/expressions/#fields-that-can-be-null). Test the object with `!= null`, or select through it with `.?` and give a fallback with `orValue` (see [Optional values](/reference/configuration/expressions/#optional-values)). Both lines render `none` on an issue without a milestone:
+An interpolation that type-checks can still fail at render time, for example on a [null field](/reference/configuration/expressions/#fields-that-can-be-null). Test the object with `!= null`, or use [optional selection](/reference/configuration/expressions/#optional-values) with an `orValue` fallback. Both lines render `none` on an issue without a milestone:
 
 ```markdown title="loops/plan-milestone.md"
 Milestone: {{ item.milestone != null ? item.milestone.title : "none" }}

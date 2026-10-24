@@ -110,10 +110,10 @@ The fields marked nullable above are nullable in the CEL environment ([`payload-
 - Comparing it with a value gives `false`: `item.reviewDecision == "APPROVED"` is `false` if the branch requires no review.
 - Comparing it with `null`, in either order, tests for a value: `item.milestone != null`, `null == item.author`.
 - Reading a field of a null object fails the evaluation: `item.milestone.title == "v1"` fails with `No such key: title` on an issue without a milestone. Test the object first: `item.milestone != null && item.milestone.title == "v1"`. CEL's `&&` returns `false` if either side is `false`, even if the other side fails.
-- Selecting through it with `.?` gives an empty optional instead of failing, and `orValue` supplies the fallback: `item.?milestone.?title.orValue("none")` is `"none"` on an issue without a milestone. A null field still counts as present, so `item.?reviewDecision.orValue("NONE")` is `null` if the branch requires no review. See [Optional values](#optional-values).
+- Selecting a field of a null object with `.?` gives an empty optional instead of failing: `item.?milestone.?title.orValue("none")` is `"none"` on an issue without a milestone. The null field itself counts as present, so `item.?reviewDecision.orValue("NONE")` is `null` if the branch requires no review. See [Optional values](#optional-values).
 - `has(item.milestone.title)` is `false`, but `has(item.milestone)` is `true`, because the field exists. Test the value with `!= null`.
 
-Fields of a nullable object keep their types, so a misspelled `item.milestone.titel` still quarantines the loop. Field names after `.?` aren't checked. See [Optional values](#optional-values).
+Fields of a nullable object keep their types, so a misspelled `item.milestone.titel` still quarantines the loop. Field names after `.?` aren't checked.
 
 ```yaml title="loops/plan-milestone.md"
 trigger:
@@ -179,22 +179,22 @@ Subtracting two timestamps gives a duration, and durations compare. No function 
 
 ### Optional values
 
-`.?` and `[?]` select a value that might be missing and give an optional instead of failing ([`ENVIRONMENT_OPTIONS`](https://github.com/basaltbytes/usine/blob/main/packages/expression/src/marcbachmann-cel.ts)). Every selection after a `.?` in the same chain gives an optional too.
+`.?` and `[?]` select a value that might be missing. Instead of failing, they give an optional, which either holds a value or is empty ([`ENVIRONMENT_OPTIONS`](https://github.com/basaltbytes/usine/blob/main/packages/expression/src/marcbachmann-cel.ts)). Every selection after a `.?` in the same chain also gives an optional.
 
 | Syntax | Result |
 | --- | --- |
-| `object.?field` | The field, or no value if `object` is null or has no such key. |
-| `map.?key`, `map[?key]` | The entry, or no value if the key is absent. |
-| `list[?index]` | The item, or no value if the index is out of range: `item.labels.nodes[?0].?name.orValue("none")`. |
-| `o.orValue(fallback)` | The value, or `fallback` if there is none. `fallback` must have the value's type. |
-| `o.or(other)` | `o` if it has a value, otherwise the optional `other`. |
-| `o.hasValue()` | Whether `o` has a value. |
-| `o.value()` | The value. Evaluation fails if there is none. |
-| `optional.of(x)`, `optional.none()` | An optional with or without a value. |
+| `object.?field` | The field's value, or an empty optional if `object` is null or has no such field. |
+| `map.?key`, `map[?key]` | The value at `key`, or an empty optional if the key is absent. |
+| `list[?index]` | The element at `index`, or an empty optional if the index is out of range: `item.labels.nodes[?0].?name.orValue("none")`. |
+| `o.orValue(fallback)` | The value of `o`, or `fallback` if `o` is empty. `fallback` must have the value's type. |
+| `o.or(other)` | `o` if it holds a value, otherwise the optional `other`. |
+| `o.hasValue()` | `true` if `o` holds a value. |
+| `o.value()` | The value of `o`. Evaluation fails if `o` is empty. |
+| `optional.of(x)`, `optional.none()` | An optional that holds `x`, and an empty optional. |
 
-An `if` must still produce a `bool` and an interpolation a scalar, so end a chain with `orValue` or `hasValue()`. `{{ item.?milestone.?title }}` fails validation with `Expected a scalar value, got optional<string>`.
+An `if` must still produce a `bool`, and an interpolation a scalar, so end the chain with `orValue` or `hasValue()`. `{{ item.?milestone.?title }}` fails validation with `Expected a scalar value, got optional<string>`.
 
-cel-js doesn't check field names after `.?`, so `item.?milestone.?titel.orValue("none") == "v1"` loads and is always `false`. In an `if`, where such a typo silently changes which items match, prefer the `!= null` form, which keeps field names checked.
+cel-js doesn't check field names after `.?`, so `item.?milestone.?titel.orValue("none") == "v1"` loads and is always `false`. In an interpolation, the same typo fails validation with `Expected a scalar value, got dyn`. In an `if`, prefer the `!= null` form, which keeps field names checked.
 
 ## Label declarations
 
