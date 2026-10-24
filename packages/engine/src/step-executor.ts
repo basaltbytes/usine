@@ -83,7 +83,8 @@ export class StepExecutor extends Context.Service<
     ) => Effect.Effect<void, E | AttemptFailure>;
     /**
      * Stops the Attempt's work, including a parent task that survived a restart. Fails if the parent
-     * task can't be confirmed stopped.
+     * task can't be confirmed stopped. The engine also calls it after `execute` fails, and keeps
+     * the Attempt's Worker slot while it fails (#512).
      */
     readonly interrupt: (attemptId: AttemptId) => Effect.Effect<void, AttemptFailure>;
     /** Sends a non-terminal operator action to a live session of the Attempt. */

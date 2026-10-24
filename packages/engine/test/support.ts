@@ -1,8 +1,8 @@
 import { NodeServices } from "@effect/platform-node";
 import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
-import { AttemptTask } from "@usine/core/attempt";
-import type { AttemptFailure } from "@usine/core/attempt/failure";
+import { type AttemptId, AttemptTask } from "@usine/core/attempt";
+import { type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
 import { Event, DedupKey, EventId } from "@usine/core/event";
 import { InstanceDirectory } from "@usine/core/instance";
 import { ItemKey } from "@usine/core/item";
@@ -14,7 +14,7 @@ import { ApprovalSource } from "@usine/core/run/approval";
 import { StepName } from "@usine/core/step";
 import { StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
-import { DateTime, Effect, FileSystem, Layer, Option, Ref } from "effect";
+import { DateTime, Effect, FileSystem, Layer, Option, Ref, TxRef } from "effect";
 import { layer, localSqliteLayer } from "../src/database/local-sqlite.ts";
 import type { RunEngine } from "../src/engine/engine.ts";
 import { Submission } from "../src/engine/submission.ts";
@@ -71,6 +71,58 @@ export const executorLayer = (plans: Ref.Ref<ReadonlyArray<AttemptPlan>>) =>
         ),
       ),
   });
+
+/**
+ * Returns a `StepExecutor` whose Worker `local` has one slot, counted in `leased` as the scheduler
+ * counts it; `occupy` takes a slot even past it. Each Attempt runs the next of `plans`. Every
+ * `interrupt` call is added to `stops`, and fails while `unstoppable` is true, as when the parent
+ * task can't be confirmed stopped.
+ */
+export const oneSlotExecutor = Effect.fn("test.oneSlotExecutor")(function* (
+  plans: ReadonlyArray<AttemptPlan>,
+) {
+  const local = WorkerName.make("local");
+  const leased = yield* TxRef.make(0);
+  const unstoppable = yield* Ref.make(false);
+  const stops = yield* Ref.make<ReadonlyArray<AttemptId>>([]);
+  const remaining = yield* Ref.make(plans);
+  const lease = () => ({ worker: local, release: TxRef.update(leased, (count) => count - 1) });
+  const executor = Layer.succeed(StepExecutor)({
+    workers: Effect.succeed([local]),
+    isLive: () => Effect.succeed(false),
+    outcome: () => Effect.succeed(Option.none()),
+    recover: () => Effect.void,
+    intervene: () => Effect.void,
+    interrupt: (attemptId) =>
+      Effect.gen(function* () {
+        yield* Ref.update(stops, (ids) => [...ids, attemptId]);
+        if (yield* Ref.get(unstoppable))
+          return yield* new InfraFailure({
+            message: "Could not cancel the parent task",
+            cause: "storage unavailable",
+          });
+      }),
+    occupy: () => TxRef.update(leased, (count) => count + 1).pipe(Effect.map(lease)),
+    reserve: () =>
+      Effect.tx(
+        Effect.gen(function* () {
+          if ((yield* TxRef.get(leased)) >= 1) return yield* Effect.txRetry;
+          yield* TxRef.update(leased, (count) => count + 1);
+        }),
+      ).pipe(Effect.map(lease)),
+    execute: (_, io) =>
+      io.checkoutAcquired.pipe(
+        Effect.andThen(
+          Ref.modify(remaining, ([next, ...rest]) => [next, rest] as const).pipe(
+            Effect.flatMap(
+              (plan) => plan ?? Effect.die("The test StepExecutor ran out of scripted attempts"),
+            ),
+          ),
+        ),
+      ),
+  });
+  return { leased, unstoppable, stops, executor };
+});
 
 export const submission = (options: {
   readonly number: number;

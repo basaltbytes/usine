@@ -311,8 +311,8 @@ export class RunEngine extends Context.Service<
     ) => Effect.Effect<void, RunEngineError>;
     /**
      * Starts a fiber for every open Run without one, except Runs waiting for approval, and opens the
-     * queued Events that no closed Run continued, and retries the parent task stops that a cancel
-     * or startup couldn't confirm. Runs at startup and every `ReconcileInterval`.
+     * queued Events that no closed Run continued, and retries the parent task stops that a cancel,
+     * a failed Attempt, or startup couldn't confirm. Runs at startup and every `ReconcileInterval`.
      */
     readonly reconcile: () => Effect.Effect<void, RunEngineError>;
     /**

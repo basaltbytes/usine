@@ -135,6 +135,8 @@ The engine retries automatically only after an `InfraFailure`, such as an unreac
 | `RunawayFailure`            | The attempt reached `max_attempt_minutes` or `max_attempt_tokens`.                                         |
 | `ChildSessionBudgetFailure` | The parent tried to start more children than `max_children` allows.                                       |
 
+When an attempt fails, usine stops its parent task. If usine can't confirm the stop, the attempt keeps its slot on the worker, as after a [cancel](#cancel-a-run): no other attempt, including the run's automatic retry, starts in that slot, and **Needs attention** shows **\<loop\>: parent task not stopped** until a retried stop succeeds.
+
 **Retry** starts a new attempt, as many times as you want. When an attempt doesn't succeed, usine commits its changes and pushes the worktree to `usine/salvage/<run>/<attempt number>`, a branch that usine never deletes. If the push fails, the worktree stays on the worker and the attempt shows its path.
 
 The next attempt fetches the run's revision again (for an issue run, the current default branch), rebases the newest salvage onto it, and gives the salvage branch in its prompt. A salvage without changes is dropped. If a salvage conflicts, the attempt starts from the base, and its first line, **Attempt started**, gives the salvage branch.
@@ -217,7 +219,7 @@ For a Claude Code or Codex child, the terminal icon in the outline shows the ses
 | **Loop file not loaded**               | A loop file failed to load and opens no runs. Fix the file and reload the configuration.                             |
 | **Agent file not loaded**              | An agent file failed to load and isn't in the roster. Fix the file and reload the configuration.                    |
 | **Worker not configured**              | Attempts are recorded on a worker that `usine.yaml` no longer declares. See [Restarts](#restarts).                   |
-| **\<loop\>: parent task not stopped**  | A closed attempt's parent task may still run, so the attempt keeps a slot on its worker. See [Cancel a run](#cancel-a-run). |
+| **\<loop\>: parent task not stopped**  | A closed attempt's parent task may still run, so the attempt keeps a slot on its worker. See [Cancel a run](#cancel-a-run) and [Retry a failed run](#retry-a-failed-run). |
 
 Entries about an issue that is closed or a pull request that is closed or merged leave on their own:
 
@@ -260,7 +262,7 @@ If an attempt isn't reattached:
 
 Canceling a run whose attempt waits for its reattach salvages and removes the worktree, unless usine has taken it over again. If usine can't confirm that the parent task stopped, it keeps the worktree and the slot and retries the stop at each reconcile, also after the next `usine up`.
 
-At each start, usine also reconciles checkouts that earlier attempts left on declared workers: it salvages failed and canceled attempts and removes succeeded ones, after it stops the parent task of a canceled attempt that still runs. If it can't confirm that stop, it keeps the worktree and a slot, logs `Could not confirm that the parent task of a closed Attempt stopped`, lists the attempt in **Needs attention**, and retries at each reconcile.
+At each start, usine also reconciles checkouts that earlier attempts left on declared workers: it salvages failed and canceled attempts and removes succeeded ones, after it stops the parent task of a closed attempt that still runs. If it can't confirm that stop, it keeps the worktree and a slot, logs `Could not confirm that the parent task of a closed Attempt stopped`, lists the attempt in **Needs attention**, and retries at each reconcile.
 
 usine skips attempts on a worker that `usine.yaml` no longer declares, for example after you replace `local` with an SSH worker. It logs one warning per start with their count, shows **Worker not configured** in **Needs attention**, and leaves their checkouts. Their runs wait until you declare the worker again or cancel them. Declare the worker again and restart `usine up`, or select **Discard leftovers**, then **Confirm discard**, to stop tracking them without changing the worker. Remove the checkouts yourself. A worker that you declare again reconciles only attempts recorded after the discard. After a reload removes a worker, the entry says how many attempts still run, such as `2 attempts still running on it. Discard the leftovers after they end`, and refuses a discard until they end.
 
