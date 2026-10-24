@@ -170,7 +170,7 @@ The scripts are in `infra/hetzner/gateway/`, and its `README.md` describes every
 
    ```sh title="usine checkout"
    ssh usine-gateway true
-   hcloud firewall delete-rule usine-gateway --direction in --protocol tcp --port 22 --source-ips 203.0.113.10/32
+   hcloud firewall delete-rule usine-gateway --direction in --protocol tcp --port 22 --source-ips 203.0.113.10/32 --description "SSH from the orchestrator"
    ```
 
    If the tailnet path stops working, add the rule back with `hcloud firewall add-rule`, or log in on the gateway's Hetzner Cloud Console. The gateway's `README.md` gives both commands.
