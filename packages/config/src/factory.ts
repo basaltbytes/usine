@@ -157,6 +157,25 @@ export const Webhooks = Schema.Union([
 
 export type Webhooks = typeof Webhooks.Type;
 
+const HttpUrl = Schema.URLFromString.check(
+  Schema.makeFilter((url: URL) => url.protocol === "http:" || url.protocol === "https:", {
+    message: "Expected an http or https URL",
+  }),
+);
+
+/** Span export over OTLP/HTTP (ADR 0028). */
+export class Tracing extends Schema.Class<Tracing>("@usine/config/Tracing")({
+  /**
+   * The collector's OTLP/HTTP traces endpoint, used as given, such as
+   * `http://localhost:4318/v1/traces`.
+   */
+  otlpUrl: HttpUrl,
+  /** The `service.name` resource attribute of every exported span. */
+  serviceName: nonBlankString("Expected a non-blank service name").pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed("usine")),
+  ),
+}) {}
+
 const SettingsFromYaml = Settings.pipe(
   Schema.encodeKeys({
     pollInterval: "poll_interval",
@@ -196,4 +215,7 @@ export class UsineConfig extends Schema.Class<UsineConfig>("@usine/config/UsineC
   ),
   webhooks: Webhooks.pipe(Schema.withDecodingDefaultKey(Effect.succeed({ mode: "off" }))),
   operator: Schema.OptionFromOptionalKey(OperatorLogin),
+  tracing: Schema.OptionFromOptionalKey(
+    Tracing.pipe(Schema.encodeKeys({ otlpUrl: "otlp_url", serviceName: "service_name" })),
+  ),
 }) {}

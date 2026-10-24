@@ -73,10 +73,10 @@ A reload applies a worker's new `max_concurrent_attempts`, a new `local` or `ssh
 usine refuses the reload and changes nothing in these cases:
 
 - `usine.yaml` is invalid or a folder is missing (`FactoryConfigError`).
-- The `webhooks` block differs from the running one, or a `workers` change applies only at startup (`RestartRequiredError`, which includes the field name).
+- The `webhooks` or `tracing` block differs from the running one, or a `workers` change applies only at startup (`RestartRequiredError`, which includes the field name).
 - A worker that the reload adds, a worker that it gives more slots, or an agent's harness, model, and effort that no running agent uses fails [preflight](/reference/configuration/agent-files/#preflight) on a worker (`ReloadPreflightError`). Fix the worker or the agent file, and reload again.
 
-The `webhooks` block, those `workers` changes, and the GitHub App credentials apply only when `usine up` starts.
+The `webhooks` and `tracing` blocks, those `workers` changes, and the GitHub App credentials apply only when `usine up` starts.
 
 ```sh title="Instance folder"
 kill -HUP "$(cat .usine/instance.pid)"

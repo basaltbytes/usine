@@ -158,8 +158,8 @@ export class CurrentInstance extends Context.Service<
     readonly changes: Stream.Stream<LoadedInstance>;
     /**
      * Reloads the instance folder, one reload at a time, and returns what changed. Fails and keeps
-     * the running snapshot on an invalid `usine.yaml`, a changed `webhooks` block, or a rejected
-     * `workers` change.
+     * the running snapshot on an invalid `usine.yaml`, a changed `webhooks` or `tracing` block, or
+     * a rejected `workers` change.
      */
     readonly reload: Effect.Effect<InstanceReload, InstanceReloadError>;
     /**

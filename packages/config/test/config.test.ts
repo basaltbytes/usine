@@ -77,6 +77,43 @@ describe("ConfigParser", () => {
     }).pipe(Effect.provide(parserLayer)),
   );
 
+  it.effect("parses the tracing block, defaults service_name, and rejects other URLs", () =>
+    Effect.gen(function* () {
+      const parser = yield* ConfigParser;
+      const parse = (tracing: ReadonlyArray<string>) =>
+        parser.parseUsineYaml(
+          InstancePath.make("usine.yaml"),
+          ["version: 1", "repos: []", ...tracing].join("\n"),
+        );
+
+      expect(Option.isNone((yield* parse([])).tracing)).toBe(true);
+      const defaulted = Option.getOrNull(
+        (yield* parse(["tracing:", "  otlp_url: http://localhost:4318/v1/traces"])).tracing,
+      );
+      expect(defaulted?.otlpUrl.href).toBe("http://localhost:4318/v1/traces");
+      expect(defaulted?.serviceName).toBe("usine");
+      const named = Option.getOrNull(
+        (yield* parse([
+          "tracing:",
+          "  otlp_url: https://collector.internal/v1/traces",
+          "  service_name: usine-eu",
+        ])).tracing,
+      );
+      expect(named?.serviceName).toBe("usine-eu");
+
+      for (const tracing of [
+        ["tracing: {}"],
+        ["tracing:", "  otlp_url: localhost:4318"],
+        ["tracing:", "  otlp_url: grpc://localhost:4317"],
+        ["tracing:", "  otlp_url: http://localhost:4318/v1/traces", '  service_name: " "'],
+        ["tracing:", "  otlpUrl: http://localhost:4318/v1/traces"],
+      ]) {
+        const failure = yield* parse(tracing).pipe(Effect.flip);
+        expect(failure.stage).toBe("schema");
+      }
+    }).pipe(Effect.provide(parserLayer)),
+  );
+
   it.effect("parses an ssh Worker's address and refuses it on other kinds", () =>
     Effect.gen(function* () {
       const parser = yield* ConfigParser;

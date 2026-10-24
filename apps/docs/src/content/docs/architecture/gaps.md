@@ -69,7 +69,6 @@ Open issues from `gh issue list --repo basaltbytes/usine --state open --limit 20
 
 - [#226][]: the reviewer agent pushed a fix commit to a pull request branch, which `review-pr` forbids ([Dogfood instance loops](/architecture/loops-shipped/)).
 - [#242][]: a `finish-pr` commit on the local worker has the operator, not the App, as author.
-- [#279][]: `apps/server` installs no tracer: `Effect.fn` spans aren't exported, and only console logs exist.
 - [#115][]: v2 task-source port, with local Markdown files as the first non-GitHub source.
 - [#56][]: a seed issue for tests, not a gap.
 
@@ -119,4 +118,3 @@ Open issues from `gh issue list --repo basaltbytes/usine --state open --limit 20
 [#266]: https://github.com/basaltbytes/usine/issues/266
 [#270]: https://github.com/basaltbytes/usine/issues/270
 [#277]: https://github.com/basaltbytes/usine/issues/277
-[#279]: https://github.com/basaltbytes/usine/issues/279
