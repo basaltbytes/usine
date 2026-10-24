@@ -202,6 +202,8 @@ A lane with a `label` source accepts board moves, which add its labels and remov
 
 Without `lanes`, the board shows one read-only lane per repository label, sorted by name ([`effectiveLanes`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/board/projection.ts#L50)).
 
+Lane order also ranks runs that wait for a worker slot: a run whose item was in a later lane when its trigger matched, by rule 2, goes first ([queue order](/reference/configuration/loop-files/#priority)). The proposed lanes of a repository without `lanes` don't rank runs.
+
 An undeclared `label` source still loads, and usine logs `Board Lane references an undeclared GitHub label`.
 
 ```yaml title="usine.yaml"
@@ -243,7 +245,7 @@ Every kind takes these keys:
 | `kind` | `local`, `ssh`, `exe.dev` | required | Selects the worker adapter and the other keys that it accepts. |
 | `max_concurrent_attempts` | integer ≥ 1 | `1` | The number of attempts that the worker runs at the same time. See the memory check below. |
 
-Runs take worker slots in the order that their events arrived, from the first worker in this list with a free slot ([`stepExecutorLayer`](https://github.com/basaltbytes/usine/blob/main/packages/orchestrator/src/scheduler.ts)). At startup, a failed preflight on any worker stops `usine up`.
+A run takes a slot of the first worker in this list with a free slot ([`stepExecutorLayer`](https://github.com/basaltbytes/usine/blob/main/packages/orchestrator/src/scheduler.ts)). Waiting runs take free slots in [queue order](/reference/configuration/loop-files/#priority): runs in later [lanes](#reposlanes) first, then in the order that their events arrived. At startup, a failed preflight on any worker stops `usine up`.
 
 A [reload](/reference/configuration/cli/#reload) applies these `workers` changes without stopping running attempts:
 

@@ -391,6 +391,7 @@ export class RunDriver extends Context.Service<
         }
         const lease = yield* restore(
           executor.reserve(
+            runId,
             submission,
             Option.map(reattached, ({ worker }) => worker),
           ),

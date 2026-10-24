@@ -92,7 +92,7 @@ describe("Desk", () => {
       "Failed 3h ago: Agent failure",
       "Canceled 9h ago, unchanged since",
       "review-fix paused",
-      "Waiting for a free worker slot",
+      "Waiting for a free worker slot, behind 2 runs",
       "Waiting for the next poll",
     ]) {
       assert.include(visible, sentence);

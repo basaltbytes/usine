@@ -17,7 +17,7 @@ import {
   UndeclaredLaneLabelWarning,
   UndeclaredTriggerLabelWarning,
 } from "./instance/diagnostics.ts";
-import { LoopFile, loopPath, PromptTemplate } from "./loop.ts";
+import { LoopFile, loopPath, LoopPriority, PromptTemplate } from "./loop.ts";
 import { AgentPersona, AgentName } from "@usine/core/agent";
 import { IssueTrigger, PullRequestTrigger, ScheduleTrigger } from "./trigger.ts";
 import { UsineConfig } from "./factory.ts";
@@ -60,6 +60,7 @@ class LoopFrontmatter extends Schema.Class<LoopFrontmatter>("@usine/config/LoopF
   agent: AgentName,
   maxCycles: LoopFile.fields.maxCycles,
   permissions: LoopFile.fields.permissions,
+  priority: Schema.OptionFromOptionalKey(LoopPriority),
 }) {}
 
 const AuthoredLoopFrontmatter = LoopFrontmatter.pipe(
@@ -274,6 +275,7 @@ const makeParseLoopFile = (engine: ExpressionEngine["Service"]) =>
           approval: frontmatter.approval,
           maxCycles: frontmatter.maxCycles,
           permissions: frontmatter.permissions,
+          priority: frontmatter.priority,
           step: frontmatter.step,
           agent: frontmatter.agent,
           body,

@@ -98,3 +98,22 @@ This replaces the last paragraph of the #394 amendment. `harvestFacts` and `harv
 The engine reads windows from its run tables (`RunStore.attemptWindows`). The executor passes `Sink.windows` to the harvest, or `RecoverySink.windows` when startup reconciliation harvests a failed attempt. The harvest reads windows after GitHub lists the comments: a later attempt of the agent on the item overlaps this one even if it starts during the harvest, and the engine records its start before its agent can post, so a read after listing has the window of every posting attempt, and an earlier read could miss one. Nor can the RunSpec, built at preparation, contain them.
 
 The same read gives this attempt's end. The engine closes a canceled attempt, recording `endedAt`, before stopping the executor, which harvests while it stops. A same-agent attempt that starts after that end doesn't overlap, so only the canceled attempt's own window excludes comments the newer one posts during the shutdown; the log counts these as `outside`. If windows can't be read, the harvest can't attribute comments: a finished attempt's harvest fails as for a failing `git` command, and an unsuccessful attempt records no comment.
+
+## Amendment (2026-10-24, #470): a free slot goes to the run furthest along the pipeline
+
+Slots went to runs in event order, after reservations that name a worker (#177). With a label pipeline, that order starves the later stages. On 2026-10-21, the operator approved six `start-dev` runs on a worker with two slots. The two pull requests that the first runs opened waited about two hours for review, because each freed slot went to the next `start-dev` run, whose event arrived earlier. Work in progress piled up, and merges, which free the operator's attention and reduce conflicts, came last.
+
+A free slot now goes to the first waiting run in this order (`leaseOrder` in `packages/orchestrator/src/lease-order.ts`):
+
+1. A reservation that names a worker, as before.
+2. A run of a loop whose file sets `priority`, higher first.
+3. A run with a lane position, later lane first. The position is the first lane, in the repository's `lanes` order, with a label source among the item's labels in the run's event. It's the lane that the board keeps the run's card in while the run runs (ADR 0024, 2026-10-21).
+4. Any other run, such as a schedule run or a run in a repository without `lanes`.
+
+Event order ranks runs at the same position.
+
+Lanes are the default source because the operator already orders the pipeline in `usine.yaml`, so the common case needs no new setting. The position comes from the event's labels, not the trigger expression: an `if` also names the labels it excludes (`review-pr` excludes `review-passed` and `ready-to-merge`), so it doesn't say which lane a loop serves. A repository without `lanes` gives no position, because its board's proposed lanes are in name order, not pipeline order.
+
+`priority` ranks above every lane instead of on the lane numbers, so a value means the same in every repository, whatever its lane count. To order loops by hand, set `priority` on each of them.
+
+The scheduler reads the position when a run starts waiting, from the current loop file and lanes, so a reload doesn't reorder runs that already wait. `StepExecutor.reserve` takes the run ID, so the lease log and the Overview can name the run. `WorkerStatus.queue` lists the waiting runs in lease order, and the Overview's line for a queued run gives the number of runs ahead of it.

@@ -309,7 +309,7 @@ describe("Tasks list model", () => {
     // The desk lists the closed, unchanged plan Run before the Run waiting for a worker.
     const stalled = [
       stall("plan", issue, new ClosedUnchangedView({ run: plan })),
-      stall("implement", pullRequest, new QueuedForWorkerView({ run: implement })),
+      stall("implement", pullRequest, new QueuedForWorkerView({ run: implement, ahead: null })),
     ];
     const row = taskRows(lanes(queued), stalled).find(({ task }) => task.number === 31);
     assert(row?.status._tag === "Stalled");

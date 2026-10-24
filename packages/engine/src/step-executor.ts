@@ -6,7 +6,7 @@ import { SalvagePushed } from "@usine/core/attempt/salvage";
 import { Event } from "@usine/core/event";
 import { LoopPermissions } from "@usine/core/loop";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
-import { Run } from "@usine/core/run";
+import { Run, type RunId } from "@usine/core/run";
 import { Step } from "@usine/core/step";
 import { Schema, Context, Effect, type Option, type Result } from "effect";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
@@ -92,10 +92,11 @@ export class StepExecutor extends Context.Service<
       intervention: AttemptChannel.Intervention,
     ) => Effect.Effect<void, AttemptFailure>;
     /**
-     * Waits for a Worker slot and returns its lease, which the caller releases. If `worker` is set,
-     * waits for a slot on that Worker only (#177).
+     * Waits for a Worker slot for the next Attempt of `runId` and returns its lease, which the
+     * caller releases. If `worker` is set, waits for a slot on that Worker only (#177).
      */
     readonly reserve: (
+      runId: RunId,
       submission: Submission,
       worker: Option.Option<WorkerName>,
     ) => Effect.Effect<WorkerLease, AttemptFailure>;

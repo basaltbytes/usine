@@ -414,7 +414,7 @@ describe("engine restart", () => {
                     intervene: () => Effect.void,
                     interrupt: () => Effect.void,
                     occupy: () => Effect.die("no open Attempt survives into the first runtime"),
-                    reserve: ({ itemKey }) =>
+                    reserve: (_, { itemKey }) =>
                       Effect.succeed({
                         worker: itemKey === onLocal.itemKey ? local : spare,
                         release: Effect.void,
@@ -498,7 +498,7 @@ describe("engine restart", () => {
             intervene: () => Effect.void,
             interrupt: () => Effect.void,
             occupy: (worker) => counted(worker, 1).pipe(Effect.as(leaseOn(worker))),
-            reserve: (_, worker) => freeSlot(worker).pipe(Effect.map(leaseOn)),
+            reserve: (_, __, worker) => freeSlot(worker).pipe(Effect.map(leaseOn)),
             execute: (execution, io) =>
               Effect.gen(function* () {
                 yield* io.checkoutAcquired;

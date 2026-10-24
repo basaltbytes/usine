@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import { AgentFile } from "@usine/config/agent";
 import { UsineConfig } from "@usine/config/factory";
+import { LaneName } from "@usine/config/board";
 import { LoadedInstance } from "@usine/config/instance";
 import { LoopFile, PromptTemplate } from "@usine/config/loop";
 import { IssueTrigger } from "@usine/config/trigger";
@@ -55,7 +56,7 @@ import { OperatorObservation } from "../src/operator/operator.ts";
 import { PollCycle, PollingTriggers, RepositoryPoll } from "../src/polling-triggers.ts";
 import { gitHubItemKey } from "../src/polling/repository-sync.ts";
 import { ScheduleTriggers } from "../src/schedule-triggers.ts";
-import { WorkerStatus } from "../src/worker-status.ts";
+import { type QueuedRun, WorkerStatus } from "../src/worker-status.ts";
 import {
   emptyCycleBudgets,
   loopControlLayer,
@@ -394,10 +395,21 @@ const deskLayer = (polls: ReadonlyArray<RepositoryPoll>) => {
     latest: Effect.succeed(Option.none()),
   });
   const passed = (clock: string) => ({ _tag: "Passed" as const, checkedAt: time(clock) });
+  const queued = (runId: string, number: number): QueuedRun => ({
+    runId: RunId.make(runId),
+    loop: LoopName.make("review"),
+    itemKey: itemKey(number),
+    position: { _tag: "Lane", lane: LaneName.make("Review"), number: 3 },
+  });
   const slots = Layer.succeed(WorkerStatus)({
     slots: Effect.succeed([
       { worker: WorkerName.make("local"), capacity: 2, leased: 1 },
       { worker: WorkerName.make("spare"), capacity: 1, leased: 0 },
+    ]),
+    queue: Effect.succeed([
+      queued("review-20", 20),
+      queued("review-21", 21),
+      queued("queued-4", 4),
     ]),
     preflights: Effect.succeed([
       {
@@ -471,6 +483,9 @@ describe("Operator desk", () => {
       assert.strictEqual(runOf(1), RunId.make("canceled-1"));
       assert.strictEqual(runOf(2), RunId.make("blocked-2"));
       assert.strictEqual(runOf(3), RunId.make("waiting-3"));
+      const queuedReason = desk.notMoving.find(({ item }) => item.number === 4)?.reason;
+      assert(queuedReason?._tag === "QueuedForWorker");
+      assert.strictEqual(queuedReason.ahead, 2, "two queued Runs take a slot first");
       const budget = desk.notMoving.find(({ item }) => item.number === 5)?.reason;
       assert(budget?._tag === "CycleBudgetUsedUp");
       assert.strictEqual(budget.ask.id, ask.id);

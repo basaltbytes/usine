@@ -126,7 +126,7 @@ The event key covers the loop, canonical repo, and scheduled time. An in-memory 
 
 ## Worker scheduling
 
-`stepExecutorLayer(config, brains, options)` (`/scheduler`, platform-free) takes the roster's `BrainSpec` values. At startup it checks every worker against the roster and the instance's agents, gives each `max_concurrent_attempts` slots, and assigns a free slot of the first worker in `usine.yaml` order to the run whose event arrived first. Runs stay pending while all slots are taken.
+`stepExecutorLayer(config, brains, options)` (`/scheduler`, platform-free) takes the roster's `BrainSpec` values. At startup it checks every worker against the roster and the instance's agents, gives each `max_concurrent_attempts` slots, and assigns a free slot of the first worker in `usine.yaml` order to the first waiting run in `leaseOrder` (`lease-order.ts`): a reservation naming a worker, then a run of a loop with `priority`, higher first, then a run by the lane its trigger matched, later lane first, then any other run, each group in event order. The position is read from the current loop file and the repository's `lanes` when the run starts waiting. Runs stay pending while all slots are taken. Each lease logs the run, its position and its source, and how many waiting runs with earlier events it passed.
 
 A reservation naming a worker, as a reattaching run's does, takes only that worker's slot, before unnamed ones; it waits while that worker is full, and later runs can take other workers. For an undeclared worker, it logs a warning and waits for a reload that declares it. `occupy` takes a slot at once for an attempt already running, as at engine startup, even with none free, logging a warning; the worker then takes no new attempt until enough end, and each extra slot retires with its attempt. An unknown worker gets no slot, with a warning.
 
@@ -139,7 +139,7 @@ The layer registers with `CurrentInstance`, so a reload changes workers without 
 
 Other workers are preflighted with the brains the reload adds; any failed preflight refuses the reload. Resizes, additions, removals, and retired slots are logged with counts. Attempts read `max_children`, the runaway ceilings, and the parent effort from `CurrentInstance` at start, so reloads apply to the next attempt. The layer rejects worker kinds its executor can't run. Capability failures during preparation become non-retryable `AgentFailure` outcomes, like missing model credentials.
 
-The layer also provides `WorkerStatus` (`/worker-status`): each worker's slots and how many are taken, and the last preflight of each worker's own prerequisites and of each harness, with time and result. It records the startup preflight and every reload's, refused ones included. The local, SSH, and exe.dev compositions pass it on; `WorkerStatus.idle` stands in where no worker runs attempts.
+The layer also provides `WorkerStatus` (`/worker-status`): each worker's slots and how many are taken, the waiting runs in lease order, and the last preflight of each worker's own prerequisites and of each harness, with time and result. It records the startup preflight and every reload's, refused ones included. The local, SSH, and exe.dev compositions pass it on; `WorkerStatus.idle` stands in where no worker runs attempts.
 
 ## Compositions
 
