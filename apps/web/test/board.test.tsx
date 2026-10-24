@@ -24,7 +24,7 @@ import {
   BoardView,
   ChildSessionBudgetFailureView,
   ClosedUnchangedView,
-  HeldForOperatorView,
+  SuppressedForOperatorView,
   LoopPausedView,
   LoopView,
   QuestionFailureView,
@@ -198,7 +198,7 @@ describe("Board Run failure copy", () => {
         }),
       ),
       {
-        title: "ChildSessionBudgetFailure",
+        title: "review: child session budget exhausted",
         detail: message,
         repository,
         runId,
@@ -349,8 +349,8 @@ describe("Board card stall note", () => {
       failure: new QuestionFailureView({ question: "Which lanes stay on the Board?" }),
     }),
   });
-  const heldRun = runOnItem("Failed", [question]);
-  const held = itemWithRun("Failed", [question]);
+  const suppressingRun = runOnItem("Failed", [question]);
+  const suppressed = itemWithRun("Failed", [question]);
   const canceledLink = issueLink(18, "Cache the label catalog");
   const canceledRun = new RunView({
     ...runOnItem("Succeeded", [attempt(1, null)]),
@@ -361,7 +361,7 @@ describe("Board card stall note", () => {
     canRunAgain: true,
   });
   const canceled = new BoardTaskView({
-    ...held,
+    ...suppressed,
     ...canceledLink,
     items: [canceledLink],
     runs: [canceledRun],
@@ -370,7 +370,7 @@ describe("Board card stall note", () => {
   });
   const pausedLink = issueLink(19, "Review the harvest of PR comments");
   const paused = new BoardTaskView({
-    ...held,
+    ...suppressed,
     ...pausedLink,
     items: [pausedLink],
     runs: [],
@@ -397,7 +397,7 @@ describe("Board card stall note", () => {
                       name: LaneName.make("Backlog"),
                       sources: [],
                       origin: "authored",
-                      items: [held, canceled, paused],
+                      items: [suppressed, canceled, paused],
                     }),
                   ],
                 }),
@@ -409,7 +409,7 @@ describe("Board card stall note", () => {
                 repository,
                 loop: LoopName.make("review"),
                 item: issueLink(33, "Board lanes"),
-                reason: new HeldForOperatorView({ run: heldRun }),
+                reason: new SuppressedForOperatorView({ run: suppressingRun }),
               }),
               new StalledItemView({
                 repository,
@@ -431,7 +431,7 @@ describe("Board card stall note", () => {
       </QueryClientProvider>,
     );
 
-  it("answers a held Run's question from its failure note, and runs a canceled one again from the reason", () => {
+  it("answers a suppressing Run's question from its failure note, and runs a canceled one again from the reason", () => {
     const markup = render(false);
     assert.include(markup, "Which lanes stay on the Board?");
     assert.include(markup, "Mark answered");

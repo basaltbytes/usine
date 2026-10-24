@@ -249,7 +249,7 @@ describe("ConfigParser", () => {
         )
         .pipe(Effect.flip);
       expect(lanes.stage).toBe("schema");
-      expect(lanes.message).toContain("every lane source to be mapped once");
+      expect(lanes.message).toContain("each lane source in only one lane");
 
       const selector = yield* parser
         .parseLoopFile(
@@ -432,7 +432,7 @@ describe("ConfigParser", () => {
         )
         .pipe(Effect.flip);
       expect(duplicate.stage).toBe("schema");
-      expect(duplicate.message).toContain("every lane source to be mapped once");
+      expect(duplicate.message).toContain("each lane source in only one lane");
     }).pipe(Effect.provide(parserLayer)),
   );
 
@@ -511,7 +511,7 @@ describe("ConfigParser", () => {
         const failure = yield* parse(`  on: issue\n  if: ${value}\n`).pipe(Effect.flip);
         expect(failure.stage).toBe("schema");
         expect(failure.message).toContain(
-          "Expected a CEL expression: quote the value so YAML reads it as a string",
+          "Expected a CEL expression. Quote the value so that YAML reads it as a string.",
         );
       }
     }).pipe(Effect.provide(parserLayer)),
@@ -704,7 +704,7 @@ describe("ConfigParser", () => {
         .pipe(Effect.flip);
 
       expect(failure.stage).toBe("expression");
-      expect(failure.message).toContain("Unclosed prompt interpolation");
+      expect(failure.message).toContain("The prompt has an unclosed {{ at character");
     }).pipe(Effect.provide(parserLayer)),
   );
 });
@@ -732,7 +732,8 @@ describe("InstanceFolder", () => {
         {
           file: "loops/unknown-agent.md",
           stage: "reference",
-          message: "Unknown agent: ghost",
+          message:
+            'Unknown agent "ghost": agents/ghost.md is missing or invalid. Fix the agent file, or set agent to an existing agent.',
           expression: undefined,
         },
       ]);
@@ -758,7 +759,9 @@ describe("InstanceFolder", () => {
       expect(Option.getOrNull(loaded.quarantinedLoops[0]?.error.expression ?? Option.none())).toBe(
         'item.labels.nodes.exists(label, label.nmae == "ready")',
       );
-      expect(loaded.quarantinedLoops[1]?.error.message).toBe("Unknown agent: ghost");
+      expect(loaded.quarantinedLoops[1]?.error.message).toBe(
+        'Unknown agent "ghost": agents/ghost.md is missing or invalid. Fix the agent file, or set agent to an existing agent.',
+      );
       expect(loaded.agents.map(({ name }) => name)).toEqual(["developer", "reviewer"]);
       expect(loaded.invalidAgents.map(({ file }) => file)).toEqual(["agents/intern.md"]);
       expect(loaded.invalidAgents[0]?.error.stage).toBe("schema");

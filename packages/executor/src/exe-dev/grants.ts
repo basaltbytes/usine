@@ -72,7 +72,7 @@ export const credentialGrantsFor = Effect.fn("ExeDevExecutor.credentialGrantsFor
                   new CredentialUnavailableError({
                     repository,
                     reason: "unreachable",
-                    message: `Could not attach exe.dev GitHub integration ${integration}`,
+                    message: `Can't attach exe.dev GitHub integration "${integration}"`,
                     cause,
                   }),
               ),

@@ -30,13 +30,13 @@ export const CLI_USAGE = `Usage:
 Options:
   -p, --port <port>            Listen on this port (default: 7331)
   --allow-volatile-instance    Start even when the instance folder is in a temporary directory
-  -o, --output <path>          Write Run evidence here (default: run-<encoded-runId>.json)
-  -h, --help                   Print this usage
-  -v, --version                Print the pinned @usine/server version
+  -o, --output <path>          Write the run evidence to this file (default: run-<encoded-runId>.json)
+  -h, --help                   Print this help
+  -v, --version                Print the installed @usine/server version
 
 Environment:
-  USINE_PORT                     Listen on this port when --port is absent
-  USINE_ALLOW_VOLATILE_INSTANCE  Same as --allow-volatile-instance when set to 1`;
+  USINE_PORT                     Listen on this port if --port is not set
+  USINE_ALLOW_VOLATILE_INSTANCE  Set to 1 for the same effect as --allow-volatile-instance`;
 
 export class CliUsageError extends Schema.TaggedError<CliUsageError>("@usine/server/CliUsageError")(
   "CliUsageError",

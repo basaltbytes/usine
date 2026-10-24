@@ -312,7 +312,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
     intervention: AttemptChannel.Intervention,
     inputSequence: AttemptChannel.Sequence,
   ) {
-    if (Option.isNone(hub.parent)) return yield* refuse("The parent has not started yet");
+    if (Option.isNone(hub.parent)) return yield* refuse("The parent hasn't started yet");
     const parent = hub.parent.value;
     const parentId = parentSessionId(hub.attemptId);
     const action = intervention.action;
@@ -426,7 +426,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
         yield* Effect.logWarning("Operator input addressed an Attempt with no live channel", {
           action: intervention.action._tag,
         });
-        return yield* new AgentFailure({ message: "This Attempt no longer has a live channel" });
+        return yield* new AgentFailure({ message: "This attempt no longer has a live channel" });
       }
       const hub = found.value;
       yield* hub.routing.withPermits(1)(

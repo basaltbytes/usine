@@ -203,21 +203,21 @@ export class GitHubItemHistory extends Context.Service<
           if (Option.isNone(data.repository))
             return yield* invalidResponse(
               "fetch-item-timeline",
-              `repository ${repository} came back null: deleted, renamed, or access lost`,
+              `repository "${repository}" is null: deleted, renamed, or no longer accessible`,
             );
           const found = data.repository.value.issueOrPullRequest;
           if (Option.isNone(found))
             return yield* new GitHubItemNotFoundError({
               operation: "fetch-item-timeline",
               item,
-              message: `GitHub has no issue or pull request ${item} in ${repository}: deleted, transferred, or access lost`,
+              message: `Issue or pull request ${repository}#${item} was not found on GitHub. It was deleted or transferred, or the GitHub App can no longer read it.`,
             });
           const { pageInfo, nodes } = found.value.timelineItems;
           if (!pageInfo.hasNextPage) return { nodes, next: Option.none<string>() };
           if (pageInfo.endCursor === null)
             return yield* invalidResponse(
               "fetch-item-timeline",
-              "GitHub reported another timeline page without a cursor",
+              "GitHub returned hasNextPage for the timeline without an endCursor",
             );
           return { nodes, next: Option.some(pageInfo.endCursor) };
         });
@@ -242,7 +242,7 @@ export class GitHubItemHistory extends Context.Service<
           if (Option.isSome(next))
             return yield* invalidResponse(
               "fetch-item-timeline",
-              `the timeline of ${repository}#${item} since ${sinceIso} exceeded ${MAX_TIMELINE_PAGES} pages`,
+              `the timeline of ${repository}#${item} since ${sinceIso} has more than ${MAX_TIMELINE_PAGES} pages`,
             );
           const changes = nodes.flatMap((node) => (node === null ? [] : appChange(appSlug, node)));
           yield* Effect.logDebug("Read the App's changes from an Item timeline", {

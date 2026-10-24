@@ -67,7 +67,7 @@ describe("Loops page", () => {
     const page = text(markup);
     assert.include(page, "2 loops, 1 paused, 1 not loaded");
     assert.isBelow(page.indexOf("ghost"), page.indexOf("start-dev"));
-    assert.include(page, "Unknown agent: ghost");
+    assert.include(page, 'Unknown agent "ghost": agents/ghost.md is missing or invalid');
     assert.include(page, "Not loaded");
     assert.include(page, 'item.labels.nodes.exists(label, label.name == "ready")');
     assert.include(markup, 'href="/configuration/loops/start-dev"');
@@ -111,12 +111,12 @@ describe("Loops page", () => {
       'if: item.labels.nodes.exists(label, label.name == "ready") && item.assignees.totalCount == 0',
     );
     assert.include(page, "No selector: every registered repository");
-    assert.include(page, "The condition uses urgent");
+    assert.include(page, "Condition uses an undeclared label: urgent");
     assert.include(markup, 'href="/configuration/agents/developer"');
     assert.include(page, "codex · gpt-5.6-sol · high");
     assert.include(markup, 'href="/configuration/repositories/basaltbytes/site"');
     assert.include(page, "Required");
-    assert.include(page, "3 Runs per item before a reset");
+    assert.include(page, "3 runs per item before a reset");
     assert.include(page, "Write: push and merge");
     assert.include(page, "implement");
     assert.include(page, "4 outlined expressions filled in from each item");
@@ -143,8 +143,8 @@ describe("Loops page", () => {
         <LoopDetail name="ghost" configuration={configurationFixture()} pause={null} />
       )),
     );
-    assert.include(page, "References something missing from the configuration");
-    assert.include(page, "Unknown agent: ghost");
+    assert.include(page, "Unknown agent, repository, or tag");
+    assert.include(page, 'Unknown agent "ghost": agents/ghost.md is missing or invalid');
     assert.include(page, "No runs until the file loads.");
     assert.include(page, "Fix loops/ghost.md , then reload the configuration.");
   });
@@ -155,7 +155,7 @@ describe("Loops page", () => {
         <LoopDetail name="nope" configuration={configurationFixture()} pause={null} />
       )),
     );
-    assert.include(page, "No loop by this name");
+    assert.include(page, "Loop not found");
   });
 
   it("finds the expressions of a prompt template", () => {
@@ -192,8 +192,8 @@ describe("Agents page", () => {
     const page = text(
       await render(() => <AgentDetail name="broken" configuration={configurationFixture()} />),
     );
-    assert.include(page, "The frontmatter is not valid YAML");
-    assert.include(page, "every loop that uses this agent is quarantined");
+    assert.include(page, "Frontmatter is not valid YAML");
+    assert.include(page, "Loops that use this agent are not loaded.");
   });
 
   it("says how to add an Agent when there is none", async () => {
@@ -218,9 +218,9 @@ describe("Workers page", () => {
       await render(() => <WorkerDetail name="local" configuration={configurationFixture()} />),
     );
     assert.include(page, "1 of 2 slots in use");
-    assert.include(page, "Machine, Git, memory, Gateway, and credentials");
+    assert.include(page, "Machine, Git, memory, gateway, and credentials");
     assert.include(page, "Failed: harness login");
-    assert.include(page, "Claude Code is not logged in on Worker local");
+    assert.include(page, "Claude Code needs a subscription login");
     assert.include(page, "Codex");
   });
 
@@ -273,7 +273,7 @@ describe("Repositories page", () => {
         <RepositoryDetail owner="basaltbytes" name="site" configuration={configurationFixture()} />
       )),
     );
-    assert.include(page, "declares no lanes for this repository");
+    assert.include(page, "has no lanes for this repository");
   });
 
   it("says how to register a repository when there is none", async () => {

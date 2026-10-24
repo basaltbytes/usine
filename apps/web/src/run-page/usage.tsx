@@ -120,7 +120,7 @@ export const UsageFact = ({
     Tokens
     <Popover>
       <PopoverTrigger
-        aria-label={`Tokens: ${count.format(usage.tokens)}. Show them per pool and session`}
+        aria-label={`Tokens: ${count.format(usage.tokens)}. Show per pool and session`}
         className="rounded-sm font-mono text-xs text-primary tabular-nums underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/70"
       >
         {tokensLabel(usage.tokens)}

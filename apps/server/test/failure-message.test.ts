@@ -36,18 +36,18 @@ describe("CLI failure messages", () => {
       new WorkerCapabilityError({
         worker: WorkerName.make("eu-one"),
         capability: "machine",
-        message: "Could not connect to SSH Worker eu-one at usine@10.0.0.2",
+        message: 'Can\'t connect to SSH worker "eu-one" at usine@10.0.0.2',
         cause: new Error("Permission denied (publickey).\nsecond line"),
       }),
     );
     assert.strictEqual(
       message,
-      "usine up did not start: Worker eu-one failed its machine check: Could not connect to SSH Worker eu-one at usine@10.0.0.2 (Permission denied (publickey)). Fix the Worker or its entry under workers in usine.yaml, then run usine up again.",
+      'usine up did not start: worker "eu-one" failed its machine check: Can\'t connect to SSH worker "eu-one" at usine@10.0.0.2 (Permission denied (publickey)). Fix the worker or its entry under workers in usine.yaml, then run usine up again.',
     );
   });
 
   it("does not repeat a cause the message already states", () => {
-    const reason = "Claude Code is not logged in. Run claude login on the Worker.";
+    const reason = "Claude Code is not logged in. Run claude login on the worker.";
     const message = failureMessage(
       new WorkerCapabilityError({
         worker: WorkerName.make("local"),
@@ -58,7 +58,7 @@ describe("CLI failure messages", () => {
     );
     assert.include(
       message,
-      "Worker local failed its harness-login check: Claude Code is not logged in. Run claude login on the Worker. Fix the Worker",
+      'worker "local" failed its harness-login check: Claude Code is not logged in. Run claude login on the worker. Fix the worker',
     );
   });
 
@@ -67,11 +67,11 @@ describe("CLI failure messages", () => {
       failureMessage(
         new ExecutorOperationError({
           operation: "preflight",
-          message: "Worker local: The harness probe timed out",
+          message: 'worker "local": The harness probe timed out',
           cause: new Error("timeout"),
         }),
       ),
-      "usine up stopped: Worker preflight failed: Worker local: The harness probe timed out (timeout).",
+      'usine up stopped: worker preflight failed: worker "local": The harness probe timed out (timeout).',
     );
   });
 
@@ -83,7 +83,7 @@ describe("CLI failure messages", () => {
           cause: new Error("SQLITE_CANTOPEN: unable to open database file"),
         }),
       ),
-      "usine up stopped: the runtime store could not initialize local database (SQLITE_CANTOPEN: unable to open database file). Check .usine/runtime.sqlite and its folder.",
+      "usine up stopped: runtime store error: could not initialize local database (SQLITE_CANTOPEN: unable to open database file). Check .usine/runtime.sqlite and its folder.",
     );
   });
 });

@@ -267,7 +267,7 @@ describe("Run evidence export", { timeout: 30_000 }, () => {
     const exported = runCli(directory, ["export-run", saved.snapshot.run.id, "--output", output]);
 
     assert.strictEqual(exported.status, 1);
-    assert.match(exported.stderr, /write evidence/i);
+    assert.match(exported.stderr, /write the evidence/i);
     assert.include(exported.stderr, output);
     assert.strictEqual(await readFile(output, "utf8"), "Previously exported evidence");
   });
@@ -296,7 +296,7 @@ describe("Run evidence export", { timeout: 30_000 }, () => {
     ]);
 
     assert.strictEqual(exported.status, 1);
-    assert.match(exported.stderr, /write evidence/i);
+    assert.match(exported.stderr, /write the evidence/i);
     await expect(stat(parent)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
@@ -304,7 +304,7 @@ describe("Run evidence export", { timeout: 30_000 }, () => {
     const exported = runCli(directory, ["export-run", "missing"]);
 
     assert.strictEqual(exported.status, 1);
-    assert.match(exported.stderr, /read evidence/i);
+    assert.match(exported.stderr, /read the evidence/i);
     await expect(stat(join(directory, ".usine"))).rejects.toMatchObject({ code: "ENOENT" });
     await expect(stat(join(directory, "run-missing.json"))).rejects.toMatchObject({
       code: "ENOENT",
@@ -325,7 +325,7 @@ describe("Run evidence export", { timeout: 30_000 }, () => {
     const exported = runCli(directory, ["export-run", "missing"]);
 
     assert.strictEqual(exported.status, 1);
-    assert.match(exported.stderr, /read evidence/i);
+    assert.match(exported.stderr, /read the evidence/i);
     assert.deepStrictEqual(await readFile(filename), original);
     await expect(stat(join(directory, "run-missing.json"))).rejects.toMatchObject({
       code: "ENOENT",
@@ -342,7 +342,7 @@ describe("Run evidence export", { timeout: 30_000 }, () => {
       const exported = runCli(directory, ["export-run", "missing"]);
 
       assert.strictEqual(exported.status, 1);
-      assert.match(exported.stderr, /read evidence/i);
+      assert.match(exported.stderr, /read the evidence/i);
       await expect(stat(join(directory, "run-missing.json"))).rejects.toMatchObject({
         code: "ENOENT",
       });

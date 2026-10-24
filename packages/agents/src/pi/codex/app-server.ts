@@ -195,7 +195,7 @@ const makeCodexAppServer = Effect.gen(function* () {
           Effect.mapError((cause) =>
             cause instanceof SessionOperationError
               ? cause
-              : operationError(operation, request, "Could not write to Codex app-server", cause),
+              : operationError(operation, request, "Can't write to Codex app-server", cause),
           ),
         );
 
@@ -244,7 +244,7 @@ const makeCodexAppServer = Effect.gen(function* () {
                 operationError(
                   found.value.operation,
                   request,
-                  `Codex app-server rejected ${decoded.error.message}`,
+                  `Codex app-server returned an error: ${decoded.error.message}`,
                   decoded.error,
                 ),
               );
@@ -309,7 +309,7 @@ const makeCodexAppServer = Effect.gen(function* () {
           failAll(
             error instanceof SessionOperationError
               ? error
-              : operationError("stream", request, "Could not read Codex app-server output", error),
+              : operationError("stream", request, "Can't read Codex app-server output", error),
           ),
         ),
         Effect.forkScoped,
@@ -331,7 +331,7 @@ const makeCodexAppServer = Effect.gen(function* () {
         ),
         Effect.catch((cause) =>
           failAll(
-            operationError("stream", request, "Could not read Codex app-server diagnostics", cause),
+            operationError("stream", request, "Can't read Codex app-server diagnostics", cause),
           ),
         ),
         Effect.forkScoped,
@@ -354,7 +354,7 @@ const makeCodexAppServer = Effect.gen(function* () {
           ),
         ),
         Effect.catch((cause) =>
-          failAll(operationError("stream", request, "Could not monitor Codex app-server", cause)),
+          failAll(operationError("stream", request, "Can't monitor Codex app-server", cause)),
         ),
         Effect.forkScoped,
       );
@@ -370,7 +370,7 @@ const makeCodexAppServer = Effect.gen(function* () {
               operationError(
                 entry.operation,
                 request,
-                "Codex app-server closed before answering the request",
+                "Codex app-server closed before it responded to the request",
                 cause,
               ),
             );
@@ -393,7 +393,7 @@ const makeCodexAppServer = Effect.gen(function* () {
               operationError(
                 "interrupt",
                 request,
-                "Codex app-server did not shut down cleanly",
+                "Codex app-server didn't shut down cleanly",
                 cause,
               ),
             ),
@@ -468,7 +468,7 @@ const makeCodexAppServer = Effect.gen(function* () {
                     operationError(
                       operation,
                       request,
-                      `Codex app-server did not answer ${method} within ${RPC_TIMEOUT}`,
+                      `Codex app-server didn't respond to ${method} within ${RPC_TIMEOUT}`,
                       new Error("request timed out"),
                     ),
                   ),

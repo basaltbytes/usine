@@ -45,7 +45,7 @@ describe("Worker engine selection", () => {
       assert(failure._tag === "WorkerCapabilityError", failure._tag);
       assert.strictEqual(
         failure.message,
-        "Could not connect to SSH Worker eu-one at usine@127.0.0.1",
+        'Can\'t connect to SSH worker "eu-one" at usine@127.0.0.1',
       );
     }),
   );
@@ -66,7 +66,7 @@ describe("Worker engine selection", () => {
       assert.strictEqual(failure.capability, "gateway");
       assert.strictEqual(
         failure.message,
-        "SSH Worker eu-one's Gateway admin token is missing: set USINE_TEST_UNSET_GATEWAY_ADMIN_TOKEN in the orchestrator's environment",
+        'The gateway admin token for SSH worker "eu-one" is missing. Set USINE_TEST_UNSET_GATEWAY_ADMIN_TOKEN in the orchestrator\'s environment.',
       );
     }),
   );

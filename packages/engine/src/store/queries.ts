@@ -798,11 +798,11 @@ export const queriesFor = (database: RunDatabaseClient) => {
     const routes = yield* eventRouteByRun(runId);
     const current = routes[0];
     if (current === undefined) return Option.none<QueuedEvents>();
-    const hold = yield* loopItemQueries(database).hold(current.loop, current.itemKey);
-    if (Option.isSome(hold)) {
-      yield* Effect.logInfo("Queued Events wait while an operator hold keeps the Item", {
+    const suppression = yield* loopItemQueries(database).suppression(current.loop, current.itemKey);
+    if (Option.isSome(suppression)) {
+      yield* Effect.logInfo("Queued Events wait while a suppression keeps the Item", {
         runId,
-        heldBy: hold.value.runId,
+        suppressedBy: suppression.value.runId,
         loop: current.loop,
         itemKey: current.itemKey,
       });
@@ -845,7 +845,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
   });
 
   // The newest closed Run of each Item that has a current queued Event and no open Run, excluding
-  // Items waiting for a cycle-budget reset or under an operator hold.
+  // Items waiting for a cycle-budget reset or under a suppression.
   const pendingContinuations = Effect.fn("RunStoreQueries.pendingContinuations")(function* () {
     const items = yield* database
       .selectDistinct({ loop: triggerEvents.loopName, itemKey: triggerEvents.itemKey })
@@ -865,7 +865,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
           isNull(runs.runId),
           isNull(ignoredEvents.eventId),
           isNull(itemCycleBudgets.askJson),
-          isNull(loopItems.heldByRunId),
+          isNull(loopItems.suppressedByRunId),
           cycleQueries(database).currentEvent,
         ),
       )

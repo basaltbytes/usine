@@ -58,7 +58,7 @@ const makeReader = Effect.gen(function* () {
       return (yield* decodeRows(rows, { onExcessProperty: "error" })).map(
         (row) => new ItemProjection(row),
       );
-    }, persistence("list Item projections")),
+    }, persistence("list item projections")),
     openIssues: Effect.fn("ItemProjectionReader.openIssues")(function* (
       repository: RepositoryName,
     ) {
@@ -131,7 +131,7 @@ const makeWriter = Effect.gen(function* () {
         contentHash: item.contentHash,
       });
       return true;
-    }, persistence("write Item projection")),
+    }, persistence("write item projection")),
     markGone: Effect.fn("ItemProjectionWriter.markGone")(function* (
       itemKey: ItemKey,
       goneAt: DateTime.Utc,
@@ -152,7 +152,7 @@ const makeWriter = Effect.gen(function* () {
         goneAt: DateTime.formatIso(goneAt),
       });
       return true;
-    }, persistence("mark Item projection gone")),
+    }, persistence("mark item projection gone")),
   } as const;
 });
 

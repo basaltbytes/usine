@@ -49,7 +49,7 @@ An expected startup failure prints one line with the file, setting, or worker at
 
 ### Setup mode
 
-If the credentials are missing or invalid, usine starts in setup mode instead of the runtime. It logs `GitHub App credentials are absent; pollers are idle`, prints `usine is waiting for GitHub App setup at http://127.0.0.1:<port>`, and opens that page in the browser. The page shows **GitHub App credentials are missing**, the error, and the two ways to supply the credentials.
+If the credentials are missing or invalid, usine starts in setup mode instead of the runtime. It logs `GitHub App credentials are absent; pollers are idle`, prints `usine is running in setup mode at http://127.0.0.1:<port>`, and opens that page in the browser. The page shows **GitHub App not set up**, the error, and the two ways to supply the credentials.
 
 In setup mode, usine doesn't poll GitHub or fire schedules. You can read projects, runs, and transcripts, and reload the configuration. Every other action, such as approve, retry, cancel, pause, or a board move, fails with `BackendUnavailableError`. usine reads the credentials only at startup, so restart `usine up` after you add them.
 

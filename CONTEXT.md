@@ -133,6 +133,10 @@ _Avoid_: preempt, replace
 To cancel a run with no started attempt because its item no longer matches the trigger.
 _Avoid_: cancel, expire
 
+**Suppression**:
+The state in which a loop opens no run for an item's current state, because an attempt ended with a question or blocker. A later different item state, a retry, or resolving the run's failure lifts it.
+_Avoid_: hold, pause
+
 **Pause**:
 A loop flag that stops new runs from the loop's triggers. The orchestrator stores it, not the loop file.
 _Avoid_: disable, stop

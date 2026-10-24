@@ -90,7 +90,7 @@ export const deriveProjectAccess = (
     return match === undefined
       ? new ProjectNotInstalledError({
           repository,
-          message: `The GitHub App installation does not cover ${repository}`,
+          message: `The GitHub App installation has no access to "${repository}"`,
         })
       : new CoveredProject({
           installationId: installation.id,

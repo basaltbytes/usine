@@ -89,8 +89,8 @@ export const triggerEvents = snakeCase.table(
 
 /**
  * The Event a trigger last submitted for each Loop and Item, or `null` after a non-matching
- * sighting. After an Attempt stops with a question or blocker, `heldEventId` is the Item's
- * state after the stop, which opens no Run (#241, #341).
+ * sighting. After an Attempt stops with a question or blocker, `suppressedByRunId` is its Run and
+ * `suppressedEventId` is the Item's state after the stop, which opens no Run (#241, #341).
  */
 export const loopItems = snakeCase.table(
   "usine_loop_items",
@@ -100,10 +100,10 @@ export const loopItems = snakeCase.table(
     observedEventId: text()
       .$type<EventId>()
       .references(() => events.eventId),
-    heldByRunId: text()
+    suppressedByRunId: text()
       .$type<RunId>()
       .references(() => runs.runId),
-    heldEventId: text()
+    suppressedEventId: text()
       .$type<EventId>()
       .references(() => events.eventId),
   },

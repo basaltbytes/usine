@@ -24,7 +24,7 @@ export const attemptWindowQueries = (database: RunDatabaseClient) => {
       .where(eq(attempts.attemptId, attemptId))
       .execute()
       .pipe(Effect.flatMap(decodeAttemptRows));
-    if (own === undefined) return yield* Effect.die(new Error(`No Attempt ${attemptId} recorded`));
+    if (own === undefined) return yield* Effect.die(new Error(`No attempt ${attemptId} recorded`));
     const ownWindow = windowOf(attemptFromRow(own));
     if (Option.isNone(ownWindow)) {
       yield* Effect.logDebug(

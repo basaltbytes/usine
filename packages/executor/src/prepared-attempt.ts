@@ -124,7 +124,7 @@ export const preparedAttemptsFor = (
                 yield* Effect.logWarning("Attempt was already launched or released", { attemptId });
                 return yield* new InfraFailure({
                   message: `Attempt ${attemptId} was already launched or released`,
-                  cause: new Error("prepared Attempt is no longer available"),
+                  cause: new Error("prepared attempt is no longer available"),
                 });
               }
               // If the seed can't be read, records salvage and releases the checkout without launching, so

@@ -69,7 +69,7 @@ const checkFailure = (source: Source, error: VendorCheckError | undefined): Expr
     ? new ExpressionCheckError({
         source,
         code: "check_failed",
-        message: "CEL check failed without an error detail",
+        message: "The CEL check failed and returned no error details",
         position: Option.none(),
       })
     : new ExpressionCheckError({

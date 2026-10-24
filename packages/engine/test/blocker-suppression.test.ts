@@ -25,7 +25,7 @@ const hasNoRun = (engine: RunEngine["Service"], sighting: ReturnType<typeof subm
   });
 
 describe("Attempts that end with a blocker", () => {
-  it.live("holds the Item after a blocker until its content changes again", () =>
+  it.live("suppresses the Item after a blocker until its content changes again", () =>
     withInstance((directory) =>
       Effect.gen(function* () {
         const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
@@ -49,9 +49,9 @@ describe("Attempts that end with a blocker", () => {
           // The Agent recorded its blocker on the Item, so the Item's content changed.
           const posted = submission({ number: 2, item: "blocked-item" });
           for (let poll = 0; poll < 3; poll += 1) {
-            const held = yield* engine.submit(posted);
-            assert(held._tag === "Held");
-            assert.strictEqual(held.runId, blocked.runId);
+            const suppressed = yield* engine.submit(posted);
+            assert(suppressed._tag === "Suppressed");
+            assert.strictEqual(suppressed.runId, blocked.runId);
           }
           assert(yield* hasNoRun(engine, posted));
 
@@ -83,7 +83,7 @@ describe("Attempts that end with a blocker", () => {
             ({ run }) => run.state._tag === "Failed",
           );
           const posted = submission({ number: 5, item: "resolved-blocker" });
-          assert.strictEqual((yield* engine.submit(posted))._tag, "Held");
+          assert.strictEqual((yield* engine.submit(posted))._tag, "Suppressed");
           const attempt = failed.attempts[0];
           assert(attempt !== undefined);
           yield* engine.resolveFailure(blocked.runId, attempt.id);
@@ -97,7 +97,7 @@ describe("Attempts that end with a blocker", () => {
     ),
   );
 
-  it.live("does not hold the Item after an Agent failure that is not a blocker", () =>
+  it.live("does not suppress the Item after an Agent failure that is not a blocker", () =>
     withInstance((directory) =>
       Effect.gen(function* () {
         const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([

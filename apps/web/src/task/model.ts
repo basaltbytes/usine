@@ -117,7 +117,7 @@ type TaskStatus =
    * paused, or the failure is resolved. `stall` is the first stall in desk order.
    */
   | { readonly _tag: "Idle"; readonly stall: StalledItemView }
-  /** Nothing is open or stalled, and a failed Run or a Hold on one of the Items needs the
+  /** Nothing is open or stalled, and a failed Run or a suppression of one of the Items needs the
    * operator, as on the Board card. */
   | { readonly _tag: "NeedsAttention" }
   /** The current Item is merged or closed and no Run is open. */
@@ -143,7 +143,7 @@ const keepsInFlight = ({ reason }: StalledItemView): boolean =>
   Match.valueTags(reason, {
     AwaitingApproval: () => true,
     QueuedForWorker: () => true,
-    HeldForOperator: () => true,
+    SuppressedForOperator: () => true,
     CycleBudgetUsedUp: () => true,
     RunFailed: ({ run }) => run.canResolveFailure,
     ClosedUnchanged: () => false,
@@ -240,7 +240,8 @@ const HEADING_COUNTS = ["in flight", "needs attention", "done"] as const;
 
 /**
  * Returns the heading count that a row adds to; `null` for a Task that shows its last Run's outcome,
- * and for an idle Task unless a failed Run or a Hold on one of its Items needs the operator.
+ * and for an idle Task unless a failed Run or a suppression of one of its Items needs the
+ * operator.
  */
 const countedAs = ({ task, status }: TaskRow): (typeof HEADING_COUNTS)[number] | null => {
   switch (status._tag) {

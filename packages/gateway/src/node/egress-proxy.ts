@@ -380,7 +380,7 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
           statusLine(
             502,
             "Bad Gateway",
-            "usine gateway: the reverse proxy could not be reached.\n",
+            "usine gateway: the reverse proxy is unreachable.\n",
             Option.none(),
           ),
         );
@@ -499,7 +499,9 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
     );
     if (Option.isNone(url)) {
       response.writeHead(400, { "content-type": "text/plain; charset=utf-8" });
-      response.end("usine gateway: the forward proxy takes CONNECT, or an absolute http:// URL.\n");
+      response.end(
+        "usine gateway: the forward proxy accepts only CONNECT or an absolute http:// URL.\n",
+      );
       return yield* Effect.logWarning("Gateway refused a request", {
         reason: "not-a-proxy-request",
         client: from,
@@ -615,7 +617,7 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
     }
     if (!response.headersSent) {
       response.writeHead(502, { "content-type": "text/plain; charset=utf-8" });
-      response.end(`usine gateway: ${host} could not be reached.\n`);
+      response.end(`usine gateway: ${host} is unreachable.\n`);
     }
     yield* Effect.logError("An allowed egress host could not be reached", {
       host,

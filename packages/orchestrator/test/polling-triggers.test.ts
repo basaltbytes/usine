@@ -1149,7 +1149,7 @@ describe("PollingTriggers", () => {
               new GitHubApiError({
                 operation: "poll-repository-changes",
                 status: Option.some(500),
-                message: "GitHub rejected the request with status 500",
+                message: "GitHub returned HTTP status 500",
               }),
             )
           : Effect.succeed(
@@ -1378,7 +1378,7 @@ describe("PollingTriggers", () => {
         yield* Deferred.fail(
           allowRevoke,
           new EnginePersistenceError({
-            operation: "revoke Run",
+            operation: "revoke run",
             cause: "storage unavailable",
           }),
         );

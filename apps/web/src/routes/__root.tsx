@@ -160,7 +160,7 @@ const Shell = () => {
           {data._tag === "NeedsSetup" && (
             <Alert className="rounded-none border-x-0 border-t-0 bg-transparent px-4 py-4 md:px-5">
               <WarningIcon weight="fill" className="text-needs-you" />
-              <AlertTitle className="text-md">GitHub App credentials are missing</AlertTitle>
+              <AlertTitle className="text-md">GitHub App not set up</AlertTitle>
               <AlertDescription className="max-w-prose">
                 <p>
                   {data.errorTag}. Set <code>USINE_GITHUB_APP_ID</code> and{" "}

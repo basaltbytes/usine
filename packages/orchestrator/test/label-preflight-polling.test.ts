@@ -124,7 +124,7 @@ describe("PollingTriggers label preflight", () => {
           new GitHubApiError({
             operation: "list-repository-labels",
             status: Option.some(502),
-            message: "GitHub rejected the request with status 502",
+            message: "GitHub returned HTTP status 502",
           }),
         ),
       changes: (_repository, cursor) =>
@@ -365,7 +365,7 @@ describe("PollingTriggers label preflight", () => {
               new GitHubApiError({
                 operation: "create-repository-label",
                 status: Option.some(500),
-                message: "GitHub rejected the request with status 500",
+                message: "GitHub returned HTTP status 500",
               }),
             ),
           ),

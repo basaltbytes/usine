@@ -523,7 +523,7 @@ const makeClaudeChild = Effect.gen(function* () {
         return yield* new UnknownModelError({
           harness: "claude",
           model: request.session.brain.model,
-          message: `Claude does not expose model ${request.session.brain.model}`,
+          message: `Claude has no model "${request.session.brain.model}"`,
         });
       }
       input.offer(userMessage(request.prompt));
@@ -656,7 +656,7 @@ const makeClaudeChild = Effect.gen(function* () {
           Effect.try({
             try: () => input.offer(userMessage(message)),
             catch: (cause) =>
-              operationError("steer", request, "Could not send a message to Claude", cause),
+              operationError("steer", request, "Can't send a message to Claude", cause),
           }).pipe(Effect.as(activity === "idle" ? ("read" as const) : ("queued" as const))),
         pause: Effect.void,
         beforeFinish: Effect.void,
@@ -848,7 +848,7 @@ const makeClaudeChild = Effect.gen(function* () {
           Effect.andThen(
             Effect.try({
               try: () => input.offer(userMessage(message)),
-              catch: (cause) => operationError("steer", request, "Could not steer Claude", cause),
+              catch: (cause) => operationError("steer", request, "Can't steer Claude", cause),
             }),
           ),
         ),
@@ -859,8 +859,7 @@ const makeClaudeChild = Effect.gen(function* () {
         Effect.andThen(
           Effect.tryPromise({
             try: () => query.interrupt(),
-            catch: (cause) =>
-              operationError("interrupt", request, "Could not interrupt Claude", cause),
+            catch: (cause) => operationError("interrupt", request, "Can't interrupt Claude", cause),
           }),
         ),
         Effect.tap(() => Effect.sync(() => input.end())),

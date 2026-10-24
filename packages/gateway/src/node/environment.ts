@@ -80,7 +80,7 @@ export const llmProviders = Effect.gen(function* () {
   if (Option.isSome(anthropicKey) && Option.isSome(subscription))
     return yield* new ConflictingAnthropicCredentials({
       message:
-        "Set ANTHROPIC_API_KEY or USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN, not both: the gateway sends one Anthropic credential.",
+        "ANTHROPIC_API_KEY and USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN are both set, and the gateway sends only one Anthropic credential. Unset one of them.",
     });
   const anthropicCredential = Option.orElse(
     Option.map(anthropicKey, (key) => new AnthropicApiKey({ key })),

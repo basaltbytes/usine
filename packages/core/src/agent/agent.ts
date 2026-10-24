@@ -4,7 +4,7 @@ import { BrainSpec, Effort, ModelId } from "./brain.ts";
 /** The kebab-case name of an Agent, taken from its filename. */
 export const AgentName = Schema.String.check(
   Schema.isPattern(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u, {
-    message: "Expected a kebab-case Agent name",
+    message: "Expected a kebab-case agent name",
   }),
 ).pipe(Schema.brand("AgentName"));
 
@@ -18,7 +18,7 @@ export const githubSignature = (agent: AgentName): string => `— usine agent: $
 
 /** The Agent's standing Markdown instructions. */
 export const AgentPersona = Schema.String.check(
-  Schema.isPattern(/\S/u, { message: "Expected a non-blank Agent persona" }),
+  Schema.isPattern(/\S/u, { message: "Expected a non-blank agent persona" }),
 ).pipe(Schema.brand("AgentPersona"));
 export type AgentPersona = typeof AgentPersona.Type;
 

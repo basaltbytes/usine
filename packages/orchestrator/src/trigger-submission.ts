@@ -46,7 +46,7 @@ export const resolveTriggerLoop = Effect.fn("TriggerRouting.resolveLoop")(functi
     return yield* new LoopAgentResolutionError({
       loop: loop.name,
       agent: loop.agent,
-      message: `Loop ${loop.name} references missing Agent ${loop.agent}`,
+      message: `Loop "${loop.name}" references agent "${loop.agent}", which is not in the roster`,
     });
   }
   const agent = loaded.agent;
@@ -120,14 +120,14 @@ export const triggerSubmission = (options: TriggerSubmissionOptions): Submission
   });
 
 /**
- * Returns the log fields for a submission outcome: the Run ID for a claim or hold, the reason for
- * an ignore.
+ * Returns the log fields for a submission outcome: the Run ID for a claim or suppression, the
+ * reason for an ignore.
  */
 export const submissionLogFields = (submission: SubmissionResult): Record<string, string> =>
   Match.valueTags(submission, {
     Claimed: ({ runId }) => ({ runId }),
     Queued: () => ({}),
-    Held: ({ runId }) => ({ heldBy: runId }),
+    Suppressed: ({ runId }) => ({ suppressedBy: runId }),
     Ignored: ({ reason }) => ({ reason }),
     CycleBlocked: ({ ask }) => ({ askId: ask.id, reason: "cycle-budget-exhausted" }),
   });

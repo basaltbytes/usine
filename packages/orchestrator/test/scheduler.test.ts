@@ -70,7 +70,7 @@ describe("Worker scheduler startup", () => {
       ).pipe(Effect.flip, Effect.scoped);
       assert(failure._tag === "ExecutorOperationError", failure._tag);
       assert.strictEqual(failure.operation, "preflight");
-      assert.strictEqual(failure.message, "Worker local: The harness probe timed out");
+      assert.strictEqual(failure.message, 'worker "local": The harness probe timed out');
     }),
   );
 });
@@ -558,7 +558,7 @@ describe("Worker scheduler on reload", () => {
           assert(failure._tag === "ReloadPreflightError", failure._tag);
           assert.deepStrictEqual(failure.workers, [WorkerName.make("gpu")]);
           assert.deepStrictEqual(failure.agents, []);
-          assert.include(failure.message, "Worker gpu, which the reload adds or gives more slots");
+          assert.include(failure.message, 'worker "gpu" (added or given more slots by the reload)');
           assert.include(failure.message, "less than 1.5 GiB per Attempt");
           assert.strictEqual(yield* instances.get, running);
           assert.deepStrictEqual(yield* scheduler.workers, [local]);
@@ -593,8 +593,8 @@ describe("Worker scheduler on reload", () => {
           const renamed = yield* Effect.flip(instances.reload);
           assert(renamed._tag === "RestartRequiredError", renamed._tag);
           assert.deepStrictEqual(renamed.fields, ["workers.spare.name"]);
-          assert.include(renamed.message, "Worker spare is renamed to extra");
-          assert.include(renamed.message, "restart usine up");
+          assert.include(renamed.message, 'worker "spare" was renamed to "extra"');
+          assert.include(renamed.message, "Restart usine up");
 
           yield* writeInstanceFiles(root, [
             ["usine.yaml", usineYaml(`${localWorkers([["local", 1]])}${sshWorker("spare", 1)}`)],
@@ -602,7 +602,7 @@ describe("Worker scheduler on reload", () => {
           const rekinded = yield* Effect.flip(instances.reload);
           assert(rekinded._tag === "RestartRequiredError", rekinded._tag);
           assert.deepStrictEqual(rekinded.fields, ["workers.spare.kind"]);
-          assert.include(rekinded.message, "Worker spare changed its kind from local to ssh");
+          assert.include(rekinded.message, 'worker "spare" changed kind from local to ssh');
           assert.strictEqual(yield* instances.get, running);
         }).pipe(Effect.scoped),
     ),
@@ -621,7 +621,7 @@ describe("Worker scheduler on reload", () => {
         const repointed = yield* Effect.flip(instances.reload);
         assert(repointed._tag === "RestartRequiredError", repointed._tag);
         assert.deepStrictEqual(repointed.fields, ["workers.build-1.destination"]);
-        assert.include(repointed.message, "Worker build-1 changed its destination");
+        assert.include(repointed.message, 'worker "build-1" changed destination');
 
         preflighted.length = 0;
         yield* writeInstanceFiles(root, [["usine.yaml", usineYaml(sshWorker("build-1", 3))]]);
@@ -759,7 +759,7 @@ describe("SSH Workers on reload", () => {
           assert.strictEqual(failure.cause.capability, "gateway");
           assert.strictEqual(
             failure.cause.message,
-            "SSH Worker build-2's Gateway admin token is missing: USINE_TEST_GATEWAY_TWO_TOKEN is not set in the orchestrator's environment. A running process does not see variables set after it started, so set USINE_TEST_GATEWAY_TWO_TOKEN and restart usine up, or set admin_token_env to a variable usine up already has",
+            'The gateway admin token for SSH worker "build-2" is missing: USINE_TEST_GATEWAY_TWO_TOKEN is not set in the orchestrator\'s environment. usine up reads only the variables that were set when it started. Set USINE_TEST_GATEWAY_TWO_TOKEN and restart usine up, or set admin_token_env to a variable that usine up already has.',
           );
           const refusal = reloadRefusal(failure, failure.message);
           assert(refusal instanceof ReloadPreflightRefusal);

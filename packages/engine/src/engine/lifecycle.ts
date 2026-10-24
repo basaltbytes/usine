@@ -260,9 +260,9 @@ export const resightEvent = (settled: Settlement, itemCameBack: boolean): Sighti
  * The state that keeps a Loop from opening Runs for an Item after an Attempt stopped for the
  * operator: the stopped Run, and the Item's state after the stop once seen (#241, #341).
  */
-export interface OperatorHold {
+export interface Suppression {
   readonly runId: RunId;
-  readonly heldEventId: Option.Option<EventId>;
+  readonly suppressedEventId: Option.Option<EventId>;
 }
 
 /** The kind of operator stop: a question or a blocker. */
@@ -281,20 +281,24 @@ export const operatorStop = (decision: FinishDecision): Option.Option<OperatorSt
   }
 };
 
-type HoldDecision =
-  | { readonly _tag: "Hold" }
-  | { readonly _tag: "HoldAt" }
-  | { readonly _tag: "Release" };
+type SuppressionDecision =
+  | { readonly _tag: "Suppress" }
+  | { readonly _tag: "SuppressFrom" }
+  | { readonly _tag: "Lift" };
 
 /**
- * Returns what an unclaimed Event does during an operator hold. The first Event after the stop,
- * which usually contains the Agent's own comment, becomes the held state (`HoldAt`); a different
- * later Event releases the hold.
+ * Returns what an unclaimed Event does during a suppression. The first Event after the stop,
+ * which usually contains the Agent's own comment, becomes the suppressed state (`SuppressFrom`);
+ * a different later Event lifts the suppression.
  */
-export const holdEvent = (hold: OperatorHold, eventId: EventId): HoldDecision =>
-  Option.match(hold.heldEventId, {
-    onNone: (): HoldDecision => ({ _tag: "HoldAt" }),
-    onSome: (held): HoldDecision => (held === eventId ? { _tag: "Hold" } : { _tag: "Release" }),
+export const suppressionDecision = (
+  suppression: Suppression,
+  eventId: EventId,
+): SuppressionDecision =>
+  Option.match(suppression.suppressedEventId, {
+    onNone: (): SuppressionDecision => ({ _tag: "SuppressFrom" }),
+    onSome: (suppressed): SuppressionDecision =>
+      suppressed === eventId ? { _tag: "Suppress" } : { _tag: "Lift" },
   });
 
 type ClaimDecision =

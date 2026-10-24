@@ -428,7 +428,7 @@ describe("Pi child backend", () => {
           ),
         );
         assert(error instanceof AgentResultError);
-        assert.match(error.message, /^Pi children run only on local Workers/u);
+        assert.match(error.message, /^Pi children run only on local workers/u);
         assert.strictEqual(toAttemptFailure(error)._tag, "AgentFailure");
         assert.strictEqual(started, false);
       }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(sdk)),

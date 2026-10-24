@@ -36,10 +36,10 @@ export const backup = Effect.fn("Cli.backup")(function* (output: string) {
         : Effect.void,
     ),
   );
-  yield* Console.log(`Backed up runtime store to ${destination}`);
+  yield* Console.log(`Backed up the runtime store to ${destination}`);
   yield* Console.log(
     copied
-      ? `Backed up durable storage to ${durable}`
-      : "The instance has no durable storage (.usine/durable.sqlite) to back up",
+      ? `Backed up the durable storage to ${durable}`
+      : "No durable storage to back up: .usine/durable.sqlite does not exist",
   );
 });

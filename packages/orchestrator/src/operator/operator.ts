@@ -372,7 +372,7 @@ const makeOperatorObservation = Effect.gen(function* () {
       } else if (run.canResolveFailure) {
         const attempt = run.attempts.at(-1);
         if (attempt?.outcome?._tag !== "Failed") {
-          return yield* Effect.die(new Error(`Failed Run ${run.id} has no failed Attempt`));
+          return yield* Effect.die(new Error(`Failed run ${run.id} has no failed attempt`));
         }
         needsYou.push(
           new RunFailureNeed({
@@ -703,7 +703,7 @@ const makeOperator = Effect.gen(function* () {
     if (file === undefined)
       return yield* new RosterAgentNotFoundError({
         agent: edit.agent,
-        message: `Agent ${edit.agent} is not in the roster`,
+        message: `Agent "${edit.agent}" is not in the roster`,
       });
     const agent = file.agent;
     yield* runs.retry(
@@ -737,7 +737,7 @@ const makeOperator = Effect.gen(function* () {
       });
       return yield* new LoopNotFoundError({
         loop: current.run.loop,
-        message: `Loop ${current.run.loop} is not loaded, so Run ${runId} cannot run again`,
+        message: `Run ${runId} cannot run again: loop "${current.run.loop}" is not loaded.`,
       });
     }
     const file = instance.agents.find(({ name }) => name === edit.agent);
@@ -748,7 +748,7 @@ const makeOperator = Effect.gen(function* () {
       });
       return yield* new RosterAgentNotFoundError({
         agent: edit.agent,
-        message: `Agent ${edit.agent} is not in the roster`,
+        message: `Agent "${edit.agent}" is not in the roster`,
       });
     }
     const agent = file.agent;
@@ -1151,7 +1151,7 @@ export {
   ProviderRetryingView,
   ConnectivityWarningView,
   RunningAttemptView,
-  HeldForOperatorView,
+  SuppressedForOperatorView,
   ClosedUnchangedView,
   RunFailedView,
   LoopPausedView,

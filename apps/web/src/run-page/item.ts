@@ -87,7 +87,7 @@ export const eventPreview = (loop: string, payload: Schema.Json): string =>
     onNone: () => `Opened by ${loop}`,
     onSome: ({ kind, number, state, labels }) =>
       `${loop} matched ${kind.toLowerCase()} #${number}: ${state.toLowerCase()}${
-        labels.length === 0 ? "" : `, labelled ${labels.join(", ")}`
+        labels.length === 0 ? "" : `, labeled ${labels.join(", ")}`
       }`,
   });
 

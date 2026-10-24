@@ -78,7 +78,7 @@ describe("Desk", () => {
     );
     assert.strictEqual(
       text(render(<NotMoving stalled={[]} now={now} readOnly={false} polled={false} />)),
-      "No poll has finished yet",
+      "Not checked yet",
     );
   });
 

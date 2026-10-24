@@ -66,7 +66,7 @@ Keys are snake_case. Unknown keys at any level and duplicate keys are errors.
 
 The trigger classes are [`IssueTrigger`, `PullRequestTrigger`, and `ScheduleTrigger`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/trigger.ts#L27).
 
-`if` is a string. An unquoted `true` or `false` counts as the CEL literal, so `if: true` selects every item. Quote any other value that YAML doesn't read as a string, such as a number, or the parser rejects it with `Expected a CEL expression: quote the value so YAML reads it as a string`. Split a long condition with a folded block scalar (`>-`).
+`if` is a string. An unquoted `true` or `false` counts as the CEL literal, so `if: true` selects every item. Quote any other value that YAML doesn't read as a string, such as a number, or the parser rejects it with `Expected a CEL expression. Quote the value so that YAML reads it as a string.`. Split a long condition with a folded block scalar (`>-`).
 
 #### `on: issue` and `on: pr`
 
@@ -144,7 +144,7 @@ A non-empty string that sets the name of the run's single step ([`StepName`](htt
 
 ### `agent`
 
-The kebab-case name of an [agent file](/reference/configuration/agent-files/). The agent must be in the roster. usine quarantines a loop that references a missing or invalid agent file, with the message `Unknown agent: <name>`.
+The kebab-case name of an [agent file](/reference/configuration/agent-files/). The agent must be in the roster. usine quarantines a loop that references a missing or invalid agent file, with the message `Unknown agent "<name>": agents/<name>.md is missing or invalid. Fix the agent file, or set agent to an existing agent.`
 
 ### `max_cycles`
 
@@ -231,15 +231,15 @@ usine validates each loop file separately. A file that fails a check is quaranti
 
 | Stage | Checks | Example message |
 | --- | --- | --- |
-| `schema` | The file name ends in `.md` and is kebab-case. | `Expected a kebab-case filename identity` |
+| `schema` | The file name ends in `.md` and is kebab-case. | `Expected a kebab-case file name` |
 | `read` | The file can be read. | |
 | `frontmatter` | Opening and closing `---` lines. | `Expected the file to start with a YAML frontmatter delimiter (---)` |
 | `yaml` | YAML syntax, no duplicate keys, no parser warnings. | |
 | `schema` | Frontmatter keys and values, including a valid `cron` and IANA `tz`, and a non-blank body. | `Expected no excess property at ["trigger"]["cron"]` |
 | `expression` | `if` type-checks as a boolean, and each interpolation is closed and type-checks as a scalar. | `No such key: nmae` |
-| `reference` | The agent is in the roster, and the selected repositories and tags exist in `usine.yaml`. | `Unknown selector tags: mobile` |
+| `reference` | The agent is in the roster, and the selected repositories and tags exist in `usine.yaml`. | `Unknown tags in selector.tags: "mobile". Add them to a repository's tags in usine.yaml.` |
 
-At startup and at each reload, usine logs each quarantined loop as a warning, `Loop quarantined; it opens no Runs until its file is fixed`, with its file, stage, and message, and lists it in **Needs attention** as **Loop quarantined**. Fix the file and [reload](/reference/configuration/cli/#reload).
+At startup and at each reload, usine logs each quarantined loop as a warning, `Loop quarantined; it opens no Runs until its file is fixed`, with its file, stage, and message, and lists it in **Needs attention** as **Loop file not loaded**. Fix the file and [reload](/reference/configuration/cli/#reload).
 
 Two checks only log a warning: a label name in `if` ([label declarations](/reference/configuration/expressions/#label-declarations)) or in a [lane](/reference/configuration/usine-yaml/#reposlanes) that `usine.yaml` doesn't declare.
 

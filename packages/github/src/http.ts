@@ -25,8 +25,8 @@ export const transportError = (operation: GitHubOperation, error: HttpClientErro
     status: error.response === undefined ? Option.none() : Option.some(error.response.status),
     message:
       error.response === undefined
-        ? "The request to GitHub could not be sent"
-        : `GitHub rejected the request with status ${error.response.status}`,
+        ? "Could not send the request to GitHub"
+        : `GitHub returned HTTP status ${error.response.status}`,
   });
 
 const ErrorBody = Schema.Struct({ message: Schema.NonEmptyString });
@@ -64,7 +64,7 @@ export const withGitHubReason = (
 export const invalidResponse = (operation: GitHubOperation, detail: string) =>
   new InvalidGitHubResponseError({
     operation,
-    message: "GitHub returned a response that does not match its API contract",
+    message: "GitHub returned a response in an unexpected format",
     detail,
   });
 
@@ -120,11 +120,11 @@ export const statusError = (
     ? new GitHubRateLimitError({
         operation,
         retryAt: retryAt.value,
-        message: "GitHub asked the poller to wait before retrying",
+        message: "GitHub API rate limit exceeded",
       })
     : new GitHubApiError({
         operation,
         status: Option.some(response.status),
-        message: `GitHub rejected the request with status ${response.status}`,
+        message: `GitHub returned HTTP status ${response.status}`,
       });
 };

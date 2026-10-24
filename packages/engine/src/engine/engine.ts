@@ -158,7 +158,7 @@ const makeRunEngine = Effect.gen(function* () {
       return yield* new RunInterventionRejectedError({
         runId,
         attemptId,
-        message: "This Attempt is no longer running",
+        message: "This attempt is no longer running",
       });
     }
     yield* stepExecutor.intervene(attemptId, intervention).pipe(
@@ -168,9 +168,9 @@ const makeRunEngine = Effect.gen(function* () {
             runId,
             attemptId,
             message: Match.valueTags(error, {
-              RunawayFailure: () => "The Attempt reached its runaway limit",
-              ChildSessionBudgetFailure: () => "The Attempt reached its child-session budget",
-              QuestionFailure: () => "The Attempt ended with a question for the operator",
+              RunawayFailure: () => "The attempt reached its runaway limit",
+              ChildSessionBudgetFailure: () => "The attempt reached its child-session budget",
+              QuestionFailure: () => "The attempt ended with a question for the operator",
               BlockedFailure: ({ message }) => message,
               InfraFailure: ({ message }) => message,
               DefectFailure: ({ message }) => message,
@@ -388,7 +388,7 @@ export {
   Submission,
   Claimed,
   Queued,
-  Held,
+  Suppressed,
   Ignored,
   CycleBlocked,
   IgnoreReason,

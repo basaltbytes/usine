@@ -166,7 +166,7 @@ describe("Run evidence reader", () => {
 
 describe("Loop sightings", () => {
   it.live(
-    "name the Run that owns the Item's state, following a reopening, and the Run that holds it",
+    "name the Run that owns the Item's state, following a reopening, and the Run that suppresses it",
     () =>
       withInstance((directory) =>
         Effect.gen(function* () {
@@ -178,15 +178,17 @@ describe("Loop sightings", () => {
             const reader = yield* RunReader;
             const sightingsOf = (item: string) => reader.sightings([ItemKey.make(item)]);
 
-            const blocked = yield* engine.submit(supportSubmission({ number: 1, item: "held" }));
+            const blocked = yield* engine.submit(
+              supportSubmission({ number: 1, item: "suppressed" }),
+            );
             assert(blocked._tag === "Claimed");
             yield* waitFor(engine, blocked.runId, ({ run }) => run.state._tag === "Failed");
-            const [held, ...others] = yield* sightingsOf("held");
+            const [suppressed, ...others] = yield* sightingsOf("suppressed");
             assert.deepStrictEqual(others, []);
-            assert.strictEqual(held?.loop, LoopName.make("review"));
-            assert.deepStrictEqual(held?.event, Option.some(EventId.make("event-1")));
-            assert.deepStrictEqual(held?.run, Option.some(blocked.runId));
-            assert.deepStrictEqual(held?.heldBy, Option.some(blocked.runId));
+            assert.strictEqual(suppressed?.loop, LoopName.make("review"));
+            assert.deepStrictEqual(suppressed?.event, Option.some(EventId.make("event-1")));
+            assert.deepStrictEqual(suppressed?.run, Option.some(blocked.runId));
+            assert.deepStrictEqual(suppressed?.suppressedBy, Option.some(blocked.runId));
 
             // A canceled Run keeps its Event until the Item comes back to that state,
             // which opens the Event again under a reopening of its own.
@@ -209,7 +211,7 @@ describe("Loop sightings", () => {
             assert(reopened !== undefined && Option.isSome(reopened.event));
             assert.notStrictEqual(reopened.event.value, EventId.make("event-2"));
             assert.deepStrictEqual(reopened.run, Option.some(back.runId));
-            assert.deepStrictEqual(reopened.heldBy, Option.none());
+            assert.deepStrictEqual(reopened.suppressedBy, Option.none());
 
             // A sighting that does not match records no Event.
             yield* engine.revoke(LoopName.make("review"), ItemKey.make("reopened"));

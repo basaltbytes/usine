@@ -30,7 +30,6 @@ import {
   CycleBudgetUsedUpView,
   DeskView,
   FailedAttemptView,
-  HeldForOperatorView,
   LoopPausedView,
   LoopView,
   FailedCheckView,
@@ -47,6 +46,7 @@ import {
   RunView,
   StalledItemView,
   SucceededAttemptView,
+  SuppressedForOperatorView,
   WorkerSilentView,
   WorkerSlotsView,
   WorkerView,
@@ -286,7 +286,7 @@ export const deskFixture = (now: number) => {
     ],
     notMoving: [
       stalled("start-dev", approval, new AwaitingApprovalView({ run: waitingRun })),
-      stalled("start-dev", question, new HeldForOperatorView({ run: questionRun })),
+      stalled("start-dev", question, new SuppressedForOperatorView({ run: questionRun })),
       stalled("start-dev", budget, new CycleBudgetUsedUpView({ ask })),
       stalled("start-dev", failed, new RunFailedView({ run: failedRun })),
       ...canceledRuns.map((canceledRun, index) =>

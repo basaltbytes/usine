@@ -103,7 +103,7 @@ export const exportRun = Effect.fn("Cli.exportRun")(
       ),
     );
     yield* writeRunEvidence(evidence, destination);
-    yield* Console.log(`Exported Run ${runId} to ${destination}`);
+    yield* Console.log(`Exported run ${runId} to ${destination}`);
   },
   Effect.tapError((error) =>
     Effect.logWarning(

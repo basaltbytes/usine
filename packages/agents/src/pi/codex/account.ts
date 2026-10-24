@@ -26,7 +26,7 @@ export const codexPoolUnavailable = (model: ModelId) =>
     harness: "codex",
     model,
     pool: "chatgptPlan",
-    message: "Codex children require a ChatGPT login; run codex login on the Worker",
+    message: "Codex children need a ChatGPT login. Run codex login on the worker.",
   });
 
 /** Verifies the Codex account before any model request. Fails with `PoolUnavailableError` for unknown, missing, or API-key authentication (ADR 0013). */

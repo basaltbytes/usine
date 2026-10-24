@@ -85,7 +85,7 @@ export const gitHubCredentialLayer: Layer.Layer<
         return yield* new CredentialUnavailableError({
           repository,
           reason: "refused",
-          message: `GitHub App installation does not cover ${repository}`,
+          message: `The GitHub App installation has no access to "${repository}"`,
           cause: new Error("no project access after refresh"),
         });
       }
@@ -103,7 +103,7 @@ export const gitHubCredentialLayer: Layer.Layer<
                 new CredentialUnavailableError({
                   repository,
                   reason: reasonOf(cause),
-                  message: `Could not mint a worker token for ${repository}: ${cause.message}`,
+                  message: `Could not create a worker token for "${repository}": ${cause.message}`,
                   cause,
                 }),
             ),

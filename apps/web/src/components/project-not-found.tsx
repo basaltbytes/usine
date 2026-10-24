@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 export const ProjectNotFound = () => (
   <BootScreen
     title="Project not found"
-    description="This repository is not registered with the running usine."
+    description="This repository is not under repos in usine.yaml."
     tone="error"
     inPanel
   >

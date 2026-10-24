@@ -41,7 +41,7 @@ export const capabilityLabel = {
   memory: "memory",
   "harness-login": "harness login",
   credentials: "credentials",
-  gateway: "Gateway",
+  gateway: "gateway",
 } satisfies Record<Capability, string>;
 
 /** Returns the missing capability of a failed check, for example `harness login`, or `check failed` if the check itself failed. */
@@ -97,11 +97,11 @@ export const loopCounts = (configuration: ConfigurationView): string => {
 export const reloadRefusalLead = (error: OperatorHttpError["error"] | undefined): string | null => {
   switch (error) {
     case "FactoryConfigError":
-      return "usine.yaml, or the loops or agents folder, could not be loaded.";
+      return "Could not load usine.yaml, the loops folder, or the agents folder.";
     case "RestartRequiredError":
-      return "This change applies only when usine up restarts.";
+      return "These changes require a restart of usine up.";
     case "ReloadPreflightError":
-      return "A worker failed preflight for what the reload adds.";
+      return "A worker failed preflight for the added configuration.";
     default:
       return null;
   }

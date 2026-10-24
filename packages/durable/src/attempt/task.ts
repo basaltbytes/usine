@@ -82,7 +82,7 @@ const commit = (
 
 /**
  * Returns the failure for a child's stored report if the parent didn't relay one. A harness failure
- * maps to `AgentFailure`, which doesn't put the Item on hold.
+ * maps to `AgentFailure`, which doesn't suppress the Item.
  */
 const childReportFailure = ({
   message,
@@ -264,7 +264,7 @@ export const attemptTask = (
       yield* call("wait for operator guidance", async (signal) => {
         const scoped = withAbortSignal(signal, context);
         const watch = await runtime.watchDoc(HoldDoc, task.id, scoped);
-        if (watch === undefined) throw new Error("The Attempt task has no Hold document");
+        if (watch === undefined) throw new Error("The attempt task has no Hold document");
         return firstAccepted(watch, (hold) => hold.guidance.length > 0 || released(hold), scoped);
       });
       let resumed = Option.none<"Guidance" | "Release">();

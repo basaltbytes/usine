@@ -295,7 +295,10 @@ const make = Effect.fn("DurableHarness.make")(function* (options: DurableHarness
 
   function stop(target: Opened, cause: unknown) {
     stopped = Option.some(
-      new Error(`pi-durable keeps retrying a step that fails with: ${messageOf(cause)}`, { cause }),
+      new Error(
+        `pi-durable keeps retrying a step that fails with: ${messageOf(cause)}. Restart the orchestrator.`,
+        { cause },
+      ),
     );
     fork(
       Effect.logError(

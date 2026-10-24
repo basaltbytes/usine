@@ -6,13 +6,13 @@ import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import { Array as EffectArray, Effect, Option, Schema } from "effect";
 import type { RunDatabaseClient } from "../database/database.ts";
 import { loopItems, runs, triggerEvents } from "../database/schema.ts";
-import type { OperatorHold, PreviousSighting } from "../engine/lifecycle.ts";
+import type { PreviousSighting, Suppression } from "../engine/lifecycle.ts";
 import { LoopSighting } from "../run-reader/model.ts";
 
 const LoopItemRow = Schema.Struct({
   observedEventId: Schema.NullOr(EventId),
-  heldByRunId: Schema.NullOr(RunId),
-  heldEventId: Schema.NullOr(EventId),
+  suppressedByRunId: Schema.NullOr(RunId),
+  suppressedEventId: Schema.NullOr(EventId),
 });
 const decodeLoopItems = Schema.decodeUnknownEffect(Schema.Array(LoopItemRow));
 const decodeSightingRows = Schema.decodeUnknownEffect(
@@ -21,7 +21,7 @@ const decodeSightingRows = Schema.decodeUnknownEffect(
       loop: LoopName,
       itemKey: ItemKey,
       observedEventId: Schema.NullOr(EventId),
-      heldByRunId: Schema.NullOr(RunId),
+      suppressedByRunId: Schema.NullOr(RunId),
     }),
   ),
 );
@@ -32,7 +32,7 @@ const decodeOwnerRows = Schema.decodeUnknownEffect(
   Schema.Array(Schema.Struct({ eventId: EventId, runId: RunId })),
 );
 
-/** Returns the Loop sighting and operator hold queries that run on the caller's transaction. */
+/** Returns the Loop sighting and suppression queries that run on the caller's transaction. */
 export const loopItemQueries = (database: RunDatabaseClient) => {
   const where = (loop: LoopName, itemKey: ItemKey) =>
     and(eq(loopItems.loopName, loop), eq(loopItems.itemKey, itemKey));
@@ -42,8 +42,8 @@ export const loopItemQueries = (database: RunDatabaseClient) => {
       yield* database
         .select({
           observedEventId: loopItems.observedEventId,
-          heldByRunId: loopItems.heldByRunId,
-          heldEventId: loopItems.heldEventId,
+          suppressedByRunId: loopItems.suppressedByRunId,
+          suppressedEventId: loopItems.suppressedEventId,
         })
         .from(loopItems)
         .where(where(loop, itemKey))
@@ -72,33 +72,36 @@ export const loopItemQueries = (database: RunDatabaseClient) => {
     return before;
   });
 
-  /** Records a non-matching sighting and ends any operator hold; does nothing if the Loop has no row. */
+  /** Records a non-matching sighting and lifts any suppression; does nothing if the Loop has no row. */
   const unmatched = Effect.fn("LoopItems.unmatched")(function* (loop: LoopName, itemKey: ItemKey) {
     yield* database
       .update(loopItems)
-      .set({ observedEventId: null, heldByRunId: null, heldEventId: null })
+      .set({ observedEventId: null, suppressedByRunId: null, suppressedEventId: null })
       .where(where(loop, itemKey))
       .execute();
   });
 
-  /** Returns the Loop's operator hold on the Item, or `None`. */
-  const hold = Effect.fn("LoopItems.hold")(function* (loop: LoopName, itemKey: ItemKey) {
-    return Option.flatMap(yield* row(loop, itemKey), ({ heldByRunId, heldEventId }) =>
-      heldByRunId === null
-        ? Option.none<OperatorHold>()
-        : Option.some<OperatorHold>({
-            runId: heldByRunId,
-            heldEventId: Option.fromNullishOr(heldEventId),
+  /** Returns the Loop's suppression of the Item, or `None`. */
+  const suppression = Effect.fn("LoopItems.suppression")(function* (
+    loop: LoopName,
+    itemKey: ItemKey,
+  ) {
+    return Option.flatMap(yield* row(loop, itemKey), ({ suppressedByRunId, suppressedEventId }) =>
+      suppressedByRunId === null
+        ? Option.none<Suppression>()
+        : Option.some<Suppression>({
+            runId: suppressedByRunId,
+            suppressedEventId: Option.fromNullishOr(suppressedEventId),
           }),
     );
   });
 
   /**
-   * Starts the operator hold of `runId` unless the Loop's last sighting was a non-match, and
+   * Starts the suppression of `runId` unless the Loop's last sighting was a non-match, and
    * returns whether it started. `opened` is recorded as the sighting if the Loop has no row;
    * `queued` is the newest queued Event, already the state after the stop.
    */
-  const startHold = Effect.fn("LoopItems.startHold")(function* (
+  const startSuppression = Effect.fn("LoopItems.startSuppression")(function* (
     loop: LoopName,
     itemKey: ItemKey,
     runId: RunId,
@@ -107,48 +110,54 @@ export const loopItemQueries = (database: RunDatabaseClient) => {
   ) {
     const current = yield* row(loop, itemKey);
     if (Option.exists(current, ({ observedEventId }) => observedEventId === null)) return false;
-    const heldEventId = Option.getOrNull(queued);
+    const suppressedEventId = Option.getOrNull(queued);
     yield* database
       .insert(loopItems)
-      .values({ loopName: loop, itemKey, observedEventId: opened, heldByRunId: runId, heldEventId })
+      .values({
+        loopName: loop,
+        itemKey,
+        observedEventId: opened,
+        suppressedByRunId: runId,
+        suppressedEventId,
+      })
       .onConflictDoUpdate({
         target: [loopItems.loopName, loopItems.itemKey],
-        set: { heldByRunId: runId, heldEventId },
+        set: { suppressedByRunId: runId, suppressedEventId },
       })
       .execute();
     return true;
   });
 
   /** Records `eventId` as the Item's state after the stop. */
-  const holdAt = Effect.fn("LoopItems.holdAt")(function* (
+  const suppressFrom = Effect.fn("LoopItems.suppressFrom")(function* (
     loop: LoopName,
     itemKey: ItemKey,
     eventId: EventId,
   ) {
     yield* database
       .update(loopItems)
-      .set({ heldEventId: eventId })
-      .where(and(where(loop, itemKey), isNotNull(loopItems.heldByRunId)))
+      .set({ suppressedEventId: eventId })
+      .where(and(where(loop, itemKey), isNotNull(loopItems.suppressedByRunId)))
       .execute();
   });
 
-  const release = Effect.fn("LoopItems.release")(function* (loop: LoopName, itemKey: ItemKey) {
+  const lift = Effect.fn("LoopItems.lift")(function* (loop: LoopName, itemKey: ItemKey) {
     yield* database
       .update(loopItems)
-      .set({ heldByRunId: null, heldEventId: null })
+      .set({ suppressedByRunId: null, suppressedEventId: null })
       .where(where(loop, itemKey))
       .execute();
   });
 
-  /** Ends the operator hold of `runId` on any Loop and returns whether there was one. */
-  const releaseRun = Effect.fn("LoopItems.releaseRun")(function* (runId: RunId) {
-    const released = yield* database
+  /** Lifts the suppression of `runId` on any Loop and returns whether there was one. */
+  const liftRun = Effect.fn("LoopItems.liftRun")(function* (runId: RunId) {
+    const lifted = yield* database
       .update(loopItems)
-      .set({ heldByRunId: null, heldEventId: null })
-      .where(eq(loopItems.heldByRunId, runId))
+      .set({ suppressedByRunId: null, suppressedEventId: null })
+      .where(eq(loopItems.suppressedByRunId, runId))
       .returning({ loopName: loopItems.loopName })
       .execute();
-    return released.length > 0;
+    return lifted.length > 0;
   });
 
   /**
@@ -165,7 +174,7 @@ export const loopItemQueries = (database: RunDatabaseClient) => {
           loop: loopItems.loopName,
           itemKey: loopItems.itemKey,
           observedEventId: loopItems.observedEventId,
-          heldByRunId: loopItems.heldByRunId,
+          suppressedByRunId: loopItems.suppressedByRunId,
         })
         .from(loopItems)
         .where(inArray(loopItems.itemKey, chunk))
@@ -203,14 +212,14 @@ export const loopItemQueries = (database: RunDatabaseClient) => {
         .flat()
         .map(({ eventId, runId }) => [eventId, runId] as const),
     );
-    return rows.map(({ loop, itemKey, observedEventId, heldByRunId }) => {
+    return rows.map(({ loop, itemKey, observedEventId, suppressedByRunId }) => {
       const event = Option.map(Option.fromNullishOr(observedEventId), current);
       return new LoopSighting({
         loop,
         itemKey,
         event,
         run: Option.flatMap(event, (eventId) => Option.fromNullishOr(owners.get(eventId))),
-        heldBy: Option.fromNullishOr(heldByRunId),
+        suppressedBy: Option.fromNullishOr(suppressedByRunId),
       });
     });
   });
@@ -218,11 +227,11 @@ export const loopItemQueries = (database: RunDatabaseClient) => {
   return {
     sighted,
     unmatched,
-    hold,
-    startHold,
-    holdAt,
-    release,
-    releaseRun,
+    suppression,
+    startSuppression,
+    suppressFrom,
+    lift,
+    liftRun,
     sightings,
   } as const;
 };

@@ -400,7 +400,7 @@ describe("exe.dev preparation", () => {
           )
           .pipe(Effect.exit);
         assert(Exit.isFailure(exit));
-        assert(Cause.pretty(exit.cause).includes("exe.dev has no VM named decommissioned"));
+        assert(Cause.pretty(exit.cause).includes('exe.dev has no VM named "decommissioned"'));
       }
       assert.strictEqual(ssh.state.commands.length, 1);
     }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));

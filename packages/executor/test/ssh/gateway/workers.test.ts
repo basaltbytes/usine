@@ -107,7 +107,7 @@ describe("SSH Workers added and removed while the executor runs", () => {
         const gone = yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip);
         assert(gone._tag === "WorkerCapabilityError", gone._tag);
         assert.strictEqual(gone.capability, "machine");
-        assert.strictEqual(gone.message, "No SSH Worker named eu-one is configured");
+        assert.strictEqual(gone.message, 'No SSH worker named "eu-one" is configured');
 
         const logged = logs.lines.join("\n");
         assert.include(
@@ -141,7 +141,7 @@ describe("SSH Workers added and removed while the executor runs", () => {
         assert.strictEqual(refused.capability, "machine");
         assert.strictEqual(
           refused.message,
-          "SSH Worker eu-one still has its earlier settings, which its running Attempts use; reload again once they end",
+          'Can\'t change the settings of SSH worker "eu-one" while its attempts run. Reload again after they end.',
         );
         yield* (yield* Executor).preflight(WORKER, [], 1);
         assert.strictEqual(machine.state.forwards.length, 1);

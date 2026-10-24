@@ -2,7 +2,7 @@ import { Schema } from "effect";
 
 export const WorkerName = Schema.String.check(
   Schema.isPattern(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u, {
-    message: "Expected a kebab-case Worker name",
+    message: "Expected a kebab-case worker name",
   }),
 ).pipe(Schema.brand("WorkerName"));
 

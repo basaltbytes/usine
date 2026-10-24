@@ -16,7 +16,7 @@ export const stallNamesLoop = ({ reason }: StalledItemView): boolean =>
 export const stallSentence = ({ loop, reason }: StalledItemView, now: number): string =>
   Match.valueTags(reason, {
     AwaitingApproval: () => "Waiting for approval",
-    HeldForOperator: ({ run }) =>
+    SuppressedForOperator: ({ run }) =>
       isQuestion(run) ? "Question from the agent" : "Blocked by the agent",
     CycleBudgetUsedUp: ({ ask }) => `Cycle budget used, ${ask.limit} rounds`,
     RunFailed: ({ run }) => {

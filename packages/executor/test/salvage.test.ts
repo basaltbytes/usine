@@ -176,7 +176,7 @@ describe("salvageWorktree", () => {
       yield* TestClock.adjust("2 minutes");
       const { result } = yield* Fiber.join(fiber);
       assert(Option.isSome(result) && result.value._tag === "Retained");
-      assert.include(result.value.message, "git push did not finish");
+      assert.include(result.value.message, "git push didn't finish");
     }),
   );
 });

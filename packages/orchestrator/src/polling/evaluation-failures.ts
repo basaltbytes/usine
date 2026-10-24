@@ -75,7 +75,7 @@ export const failingItemPollFailures = (
       new RepositoryPollFailure({
         repository,
         errorTag: failure.errorTag,
-        message: `Loop ${failure.loop}: ${failedPart(failure)} failed on ${
+        message: `Loop "${failure.loop}": ${failedPart(failure)} failed on ${
           failing.stream === "issue" ? "issue" : "pull request"
         } #${failing.number}: ${failure.message}`,
       }),
