@@ -2,7 +2,7 @@
   "name": "@usine/expression",
   "version": "0.3.0",
   "description": "CEL expression seam for usine: check and evaluate the selection expressions loop files use.",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/basaltbytes/usine.git",

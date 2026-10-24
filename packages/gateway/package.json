@@ -2,7 +2,7 @@
   "name": "@usine/gateway",
   "version": "0.1.0",
   "description": "The usine gateway: a credential-injecting proxy for GitHub and LLM providers, and an egress allowlist, in front of Worker VMs.",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/basaltbytes/usine.git",

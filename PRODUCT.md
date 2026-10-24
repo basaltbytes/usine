@@ -26,7 +26,7 @@ Success: the operator hands off issue-to-PR work and looks only where a run need
 
 - **Loops are the operator's files in git.** Each loop and agent is a Markdown file in the instance repo that the UI reads and writes; no behavior exists only in a database.
 - **Agent-agnostic.** One orchestrator runs Claude Code, Codex, and Pi children under a Pi parent, with the operator's harness logins.
-- **Self-hosted.** The orchestrator runs on the operator's machine; attempts run on the local worker, exe.dev VMs, or SSH workers behind a gateway. Each instance pins its engine version in `package.json`. MIT licensed.
+- **Self-hosted.** The orchestrator runs on the operator's machine; attempts run on the local worker, exe.dev VMs, or SSH workers behind a gateway. Each instance pins its engine version in `package.json`. Licensed under the GNU AGPL-3.0.
 
 ## Operating Context
 
