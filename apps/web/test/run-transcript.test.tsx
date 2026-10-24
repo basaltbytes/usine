@@ -29,8 +29,13 @@ import { TranscriptSequence } from "@usine/engine/transcript";
 import {
   AgentFailureView,
   AttemptView,
+  BoardMovedView,
   CanceledAttemptView,
   ColdTranscriptRequest,
+  CommentedView,
+  LabelAddedView,
+  LabelRemovedView,
+  LabelView,
   FailedTranscriptView,
   RunDetailView,
   RunView,
@@ -38,9 +43,9 @@ import {
   TailTranscriptRequest,
   TranscriptEventView,
   TranscriptPageCursor,
+  LocalWorkerAccess,
 } from "@usine/orchestrator/operator";
 import { QueryClient } from "@tanstack/react-query";
-import type { ReactNode } from "react";
 import { renderToStaticMarkup as renderMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
 import {
@@ -52,18 +57,15 @@ import {
 } from "../src/run-transcript/cache.ts";
 import { projectTranscript, type TranscriptTool } from "../src/run-transcript/model.ts";
 import { Transcript } from "../src/run-transcript/transcript.tsx";
-import { SessionActivity } from "../src/run-transcript/activity.tsx";
+import { CurrentActivity } from "../src/run-transcript/activity.tsx";
+import { readerDocument } from "../src/run-transcript/document/model.ts";
+import { withGitHubChanges } from "../src/run-transcript/document/github-changes.ts";
+import { LaneName } from "@usine/config/board";
+import { GitHubLabelName } from "@usine/config/label";
 import { TranscriptDisclosureProvider } from "../src/run-transcript/grouping/disclosure.tsx";
 import { MessageScrollerProvider } from "../src/components/ui/message-scroller.tsx";
 import { presentTool, type ToolSection } from "../src/run-transcript/tool/presentation.ts";
 import { fetchRunDetail } from "../src/run-transcript/fetch.ts";
-
-const renderToStaticMarkup = (node: ReactNode) =>
-  renderMarkup(
-    <TranscriptDisclosureProvider>
-      <MessageScrollerProvider>{node}</MessageScrollerProvider>
-    </TranscriptDisclosureProvider>,
-  );
 
 const attemptId = AttemptId.make("attempt-31");
 const brain = new BrainSpec({
@@ -79,9 +81,11 @@ const liveAttempt = new AttemptView({
   id: attemptId,
   number: AttemptNumber.make(1),
   worker: WorkerName.make("local"),
+  workerAccess: new LocalWorkerAccess(),
   brain,
   startedAt: "2026-09-01T12:00:00.000Z",
   outcome: null,
+  endedAt: null,
   salvage: null,
 });
 const parent = new ParentSession({
@@ -182,20 +186,89 @@ const rateLimits = (sequence: number, usedPercent: number) =>
     }),
   });
 
+const history = { cursors: [], loading: false, error: null, load: () => {} };
+
+/** Renders the reader for `events`, with the bursts that contain the `open` tool calls expanded. */
+const reader = (
+  events: ReadonlyArray<TranscriptEventView>,
+  attempts: ReadonlyArray<AttemptView> = [liveAttempt],
+  open: ReadonlyArray<string> = [],
+) =>
+  renderMarkup(
+    <TranscriptDisclosureProvider
+      initialState={new Map(open.map((key) => [key, { open: false, groupOpen: true }]))}
+    >
+      <MessageScrollerProvider>
+        <Transcript
+          document={readerDocument(projectTranscript(events, attempts), attempts, events)}
+          runTask="Review the task"
+          history={history}
+        />
+      </MessageScrollerProvider>
+    </TranscriptDisclosureProvider>,
+  );
+
 describe("run transcript", () => {
-  it("keeps rate-limit updates out of the feed and folds them into one meter per pool", () => {
+  it("keeps rate-limit updates out of the feed and shows one reading per pool with its Attempt", () => {
     const events = [event(1, "Parent update"), rateLimits(2, 25), rateLimits(3, 31)];
-    const markup = renderToStaticMarkup(
-      <Transcript
-        runId={RunId.make("run-31")}
-        projection={projectTranscript(events, [liveAttempt])}
-        filter="all"
-      />,
-    );
+    const markup = reader(events);
     assert.ok(!markup.includes("rate limits"));
-    assert.deepStrictEqual(poolMeters(events), [
-      { pool: "chatgptPlan", primaryUsedPercent: 31, secondaryUsedPercent: null },
-    ]);
+    assert.include(markup, "ChatGPT plan");
+    assert.include(markup, "31% used");
+    assert.notInclude(markup, "25%");
+    assert.deepStrictEqual(
+      poolMeters(events).map(({ pool, windows }) => ({
+        pool,
+        used: windows.map(({ usedPercent }) => usedPercent),
+      })),
+      [{ pool: "chatgptPlan", used: [31] }],
+    );
+  });
+
+  it("shows an Agent's GitHub change as one line, labels in their GitHub colors and the comment linked, and the operator's Board move as theirs", () => {
+    const events = [event(1, "Removing the claim and handing over for review.")];
+    const label = (name: string, color: string) =>
+      new LabelView({ name: GitHubLabelName.make(name), color, description: null });
+    const comment = "https://github.com/basaltbytes/usine/issues/247#issuecomment-6216970836";
+    const document = withGitHubChanges(
+      readerDocument(projectTranscript(events, [liveAttempt]), [liveAttempt], events),
+      new Map([
+        [
+          attemptId,
+          [
+            new LabelRemovedView({
+              at: "2026-09-01T12:00:02.000Z",
+              label: label("agent-in-progress", "fbca04"),
+            }),
+            new LabelAddedView({
+              at: "2026-09-01T12:00:02.000Z",
+              label: label("ready-for-review", "0e8a16"),
+            }),
+            new BoardMovedView({
+              at: "2026-09-01T12:00:04.250Z",
+              fromLane: LaneName.make("Review"),
+              toLane: LaneName.make("Findings"),
+            }),
+            new CommentedView({ at: "2026-09-01T12:00:07.000Z", url: comment }),
+          ],
+        ],
+      ]),
+      new Set(),
+    );
+    const markup = renderMarkup(
+      <TranscriptDisclosureProvider initialState={new Map()}>
+        <MessageScrollerProvider>
+          <Transcript document={document} runTask="Review the task" history={history} />
+        </MessageScrollerProvider>
+      </TranscriptDisclosureProvider>,
+    );
+    const text = markup.replace(/<[^>]+>/gu, "");
+    assert.include(text, "Removed agent-in-progress, added ready-for-review");
+    assert.include(text, "You moved it from Review to Findings on the board");
+    assert.include(text, "Commented on #247");
+    assert.include(markup, "border-color:#fbca0466");
+    assert.include(markup, "border-color:#0e8a1666");
+    assert.include(markup, `href="${comment}"`);
   });
 
   it("keeps a finished child's handoff when its launch is outside the loaded page", () => {
@@ -223,46 +296,43 @@ describe("run transcript", () => {
     assert(Option.isNone(legacySession.harnessSession));
   });
 
-  it("renders parent activity inline and groups each child session one level deep", () => {
-    const events = [
-      event(1, "**Parent update**"),
-      event(2, "Child update", "child"),
-      event(3, "Another child update", "child"),
-      event(4, "Channel notice", "channel"),
-    ];
-    const markup = renderToStaticMarkup(
-      <Transcript
-        runId={RunId.make("run-31")}
-        projection={projectTranscript(events, [liveAttempt])}
-        filter="all"
-      />,
+  it("reads parent and child messages inline in order, naming each speaker once per turn", () => {
+    const markup = reader(
+      [
+        event(1, "**Parent update**"),
+        event(2, "Child update", "child"),
+        event(3, "Another child update", "child"),
+        event(4, "Channel notice", "channel"),
+      ],
+      [new AttemptView({ ...liveAttempt, outcome: new SucceededAttemptView() })],
     );
     assert.include(markup, "<strong>Parent update</strong>");
-    assert.include(markup, "agent-child-session activity · Working");
-    assert.ok(markup.indexOf("Parent update") < markup.indexOf("activity"));
-    assert.ok(markup.indexOf("activity") < markup.indexOf("Attempt started"));
+    assert.ok(markup.indexOf("Parent update") < markup.indexOf("Child update"));
+    assert.ok(markup.indexOf("Child update") < markup.indexOf("Another child update"));
+    assert.lengthOf(markup.match(/>agent-child-session</gu) ?? [], 1);
+    assert.notInclude(markup, "Attempt started");
+    assert.include(markup, "gpt-5");
   });
 
-  it("keeps concurrent child sessions distinct, each anchored at its own first event", () => {
-    const markup = renderToStaticMarkup(
-      <Transcript
-        runId={RunId.make("run-31")}
-        filter="all"
-        projection={projectTranscript(
-          [
-            event(1, "First child says hello", "child", "child-a"),
-            event(2, "Parent update"),
-            event(3, "Second child says hello", "child", "child-b"),
-          ],
-          [liveAttempt],
-        )}
-      />,
+  it("keeps concurrent child sessions distinct, each named where its turn starts", () => {
+    const markup = reader([
+      event(1, "First child says hello", "child", "child-a"),
+      event(2, "Parent update"),
+      event(3, "Second child says hello", "child", "child-b"),
+    ]);
+    const order = [
+      ">agent-child-a<",
+      "First child says hello",
+      ">Parent<",
+      "Parent update",
+      ">agent-child-b<",
+      "Second child says hello",
+    ].map((text) => markup.indexOf(text));
+    assert.notInclude(order, -1);
+    assert.deepEqual(
+      order,
+      [...order].sort((left, right) => left - right),
     );
-
-    assert.include(markup, "agent-child-a activity · Working");
-    assert.include(markup, "agent-child-b activity · Working");
-    assert.ok(markup.indexOf("agent-child-a activity") < markup.indexOf("Parent update"));
-    assert.ok(markup.indexOf("Parent update") < markup.indexOf("agent-child-b activity"));
   });
 
   it("updates a tool call in place while retaining full input, output, and elapsed time", () => {
@@ -295,13 +365,7 @@ describe("run transcript", () => {
       Option.some(input),
     );
     assert.deepStrictEqual(call.state.output, output);
-    const markup = renderToStaticMarkup(
-      <Transcript
-        runId={RunId.make("run-31")}
-        projection={projectTranscript([started, finished], [liveAttempt])}
-        filter="all"
-      />,
-    );
+    const markup = reader([started, finished], [liveAttempt], [call.key]);
     assert.include(markup, "Command: pnpm test · Completed");
     assert.include(markup, "pnpm test");
     assert.notInclude(markup, "Run the suite");
@@ -318,13 +382,7 @@ describe("run transcript", () => {
     assert(call !== undefined && call.state._tag === "Error");
     assert.deepStrictEqual(call.start, Option.none());
     assert.deepStrictEqual(call.state.output, output);
-    const markup = renderToStaticMarkup(
-      <Transcript
-        runId={RunId.make("run-31")}
-        projection={projectTranscript([finished], [liveAttempt])}
-        filter="tools"
-      />,
-    );
+    const markup = reader([finished], [liveAttempt], [call.key]);
     assert.include(markup, "Read file: File details unavailable · Error");
   });
 
@@ -352,13 +410,18 @@ describe("run transcript", () => {
       calls.map(({ state }) => state._tag),
       ["Stopped", "Running"],
     );
-    const summary = renderToStaticMarkup(
-      <SessionActivity events={events} attempts={[failed, retried]} />,
+    const document = readerDocument(projection, [failed, retried], events);
+    assert.deepStrictEqual(
+      document.chapters.map(({ live }) => live),
+      [false, true],
     );
-    assert.include(summary, "Attempt 2");
-    assert.include(summary, "Awaiting parent activity");
-    assert.include(summary, "1 live");
-    assert.notInclude(summary, "stopped");
+    const second = document.chapters[1];
+    assert(second !== undefined);
+    const activity = renderMarkup(<CurrentActivity chapter={second} />);
+    assert.include(activity, "reviewer");
+    assert.include(activity, "Reading file");
+    assert.include(activity, "README.md");
+    assert.notInclude(activity, "Stopped");
   });
 
   it.each([
@@ -383,19 +446,10 @@ describe("run transcript", () => {
       const projection = projectTranscript(events, [liveAttempt]);
       assert.strictEqual(projection.sessions[0]?.status, "Stopped");
       assert.strictEqual(tools(events)[0]?.state._tag, "Stopped");
-      const markup = renderToStaticMarkup(
-        <Transcript
-          runId={RunId.make("run-31")}
-          projection={projectTranscript(events, [liveAttempt])}
-          filter="all"
-        />,
-      );
-      assert.include(markup, "reviewer activity · Stopped");
-      const summary = renderToStaticMarkup(
-        <SessionActivity events={[record(2, terminal)]} attempts={[liveAttempt]} />,
-      );
-      assert.include(summary, "Ended");
-      assert.notInclude(summary, "Awaiting parent activity");
+      assert.isFalse(readerDocument(projection, [liveAttempt], events).chapters[0]?.live);
+      const markup = reader(events);
+      assert.notInclude(markup, "Current activity");
+      assert.notInclude(markup, "running");
     },
   );
 
@@ -410,17 +464,12 @@ describe("run transcript", () => {
     const projection = projectTranscript(events, [liveAttempt]);
     assert.strictEqual(projection.sessions[0]?.status, "Finished");
     assert.strictEqual(tools(events)[0]?.state._tag, "Stopped");
-    const markup = renderToStaticMarkup(
-      <Transcript
-        runId={RunId.make("run-31")}
-        projection={projectTranscript(events, [liveAttempt])}
-        filter="all"
-      />,
-    );
-    assert.include(markup, "reviewer activity · Finished");
+    const markup = reader(events);
+    assert.notInclude(markup, "Succeeded");
+    assert.notInclude(markup, "running");
   });
 
-  it("filters prose and tools while keeping Attempt notices and child status visible", () => {
+  it("names the Attempt's models in its metadata line instead of a start row, and keeps every session's prose", () => {
     const events = [
       record(1, new AttemptChannel.Started({ parentModel: brain.model })),
       sessionEvent(2, new TextOutput({ session: parent, text: "A useful explanation" })),
@@ -435,29 +484,14 @@ describe("run transcript", () => {
       ),
       sessionEvent(4, new TextOutput({ session: child, text: "Child explanation" })),
     ];
-    const messages = renderToStaticMarkup(
-      <Transcript
-        runId={RunId.make("run-31")}
-        projection={projectTranscript(events, [liveAttempt])}
-        filter="messages"
-      />,
-    );
-    const toolRows = renderToStaticMarkup(
-      <Transcript
-        runId={RunId.make("run-31")}
-        projection={projectTranscript(events, [liveAttempt])}
-        filter="tools"
-      />,
-    );
-    assert.include(messages, "A useful explanation");
-    assert.notInclude(messages, "Read file: README.md · Running");
-    assert.include(toolRows, "Read file: README.md · Running");
-    assert.notInclude(toolRows, "A useful explanation");
-    for (const markup of [messages, toolRows]) {
-      assert.include(markup, "Attempt started");
-      assert.include(markup, brain.model);
-      assert.include(markup, "reviewer activity · Working");
-    }
+    const markup = reader(events);
+    assert.include(markup, "A useful explanation");
+    assert.include(markup, "Child explanation");
+    assert.include(markup, "Parent on Codex,");
+    assert.include(markup, "Child reviewer on Codex,");
+    assert.include(markup, brain.model);
+    assert.notInclude(markup, "Attempt started");
+    assert.match(markup, /Read README\.md<span[^>]*>, (?:<!-- -->)?1(?:<!-- -->)? running/u);
   });
 
   it("merges transcript tails by sequence without replaying an existing event", () => {
@@ -569,14 +603,18 @@ describe("run transcript", () => {
         state: "Running",
         loopPaused: false,
         openedAt: liveAttempt.startedAt,
+        closedAt: null,
         task: "Build it",
         attempts: [liveAttempt],
+        approval: null,
+        runAgain: null,
         resultMessage: null,
         pullRequestUrl: null,
         canApprove: false,
         canRetry: false,
         canResolveFailure: false,
         canCancel: true,
+        canRunAgain: false,
       }),
       eventDedupKey: "issue:31",
       eventPayload: { number: 31 },
@@ -589,6 +627,7 @@ describe("run transcript", () => {
         ...stale.run,
         state: "Succeeded",
         attempts: [new AttemptView({ ...liveAttempt, outcome: new SucceededAttemptView() })],
+        approval: null,
         resultMessage: "Delivered",
         canCancel: false,
       }),
@@ -623,22 +662,26 @@ describe("run transcript", () => {
         state: "Succeeded",
         loopPaused: false,
         openedAt: liveAttempt.startedAt,
+        closedAt: liveAttempt.startedAt,
         task: "Build it",
         attempts: [new AttemptView({ ...liveAttempt, outcome: new SucceededAttemptView() })],
+        approval: null,
+        runAgain: null,
         resultMessage: "All work complete",
         pullRequestUrl: null,
         canApprove: false,
         canRetry: false,
         canResolveFailure: false,
         canCancel: false,
+        canRunAgain: false,
       }),
       eventDedupKey: "issue:31",
       eventPayload: { number: 31 },
       transcript: [],
       earlierTranscript: [],
     });
-    // This operator boundary has a smaller page size than production; readers
-    // must follow cursors rather than infer completion from a particular limit.
+    // This fake API pages smaller than production, so the reader must follow cursors instead of
+    // assuming a page size.
     const read = async (request: ColdTranscriptRequest | TailTranscriptRequest) => {
       const after = request._tag === "TailTranscriptRequest" ? request.after : 0;
       return new RunDetailView({
@@ -659,6 +702,7 @@ describe("run transcript", () => {
         ...detail.run,
         state: "Running",
         attempts: [liveAttempt],
+        approval: null,
         resultMessage: null,
         canCancel: true,
       }),

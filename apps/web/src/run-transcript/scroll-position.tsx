@@ -2,9 +2,9 @@ import { Component, type ReactNode, type RefObject } from "react";
 
 interface Props {
   readonly viewportRef: RefObject<HTMLDivElement | null>;
-  /** Changes when transcript rows grow or change. */
+  /** A value that changes whenever transcript rows change size or content. */
   readonly revision: number;
-  /** Hidden tabs retain their last visible row until the viewport is shown again. */
+  /** Whether the viewport is shown; while `false`, the last visible row is kept. */
   readonly active: boolean;
   readonly children: ReactNode;
 }
@@ -16,24 +16,32 @@ interface ReadingPosition {
   readonly offset: number;
 }
 
-/** Finds the deepest visible transcript surface, so child and result growth preserve context. */
-export const visibleTranscriptRow = (viewport: HTMLDivElement): HTMLElement | undefined => {
-  const top = viewport.getBoundingClientRect().top + viewport.clientTop;
-  const bottom = top + viewport.clientHeight;
+/** The minimum visible height, in pixels, of a preferred anchor row. */
+export const VISIBLE_ROW_EDGE = 24;
+
+const deepestRow = (
+  viewport: HTMLDivElement,
+  from: number,
+  bottom: number,
+): HTMLElement | undefined => {
   let element: HTMLElement | undefined;
   for (const row of viewport.querySelectorAll<HTMLElement>("[data-transcript-id]")) {
     const bounds = row.getBoundingClientRect();
-    if (bounds.height === 0 || bounds.bottom <= top || bounds.top >= bottom) continue;
+    if (bounds.height === 0 || bounds.bottom <= from || bounds.top >= bottom) continue;
     if (element !== undefined && !element.contains(row)) break;
     element = row;
   }
   return element;
 };
 
-/**
- * Keeps a visible transcript row in place while the operator reads earlier activity.
- * Rows marked with data-transcript-id provide anchors, including events inside child sessions.
- */
+/** Returns the deepest visible transcript row, preferring rows with more than `VISIBLE_ROW_EDGE` pixels in view. */
+export const visibleTranscriptRow = (viewport: HTMLDivElement): HTMLElement | undefined => {
+  const top = viewport.getBoundingClientRect().top + viewport.clientTop;
+  const bottom = top + viewport.clientHeight;
+  return deepestRow(viewport, top + VISIBLE_ROW_EDGE, bottom) ?? deepestRow(viewport, top, bottom);
+};
+
+/** Keeps a visible transcript row in place as content changes; anchors are elements with `data-transcript-id`. */
 export class PreserveReadingPosition extends Component<
   Props,
   Record<string, never>,
@@ -79,8 +87,7 @@ export class PreserveReadingPosition extends Component<
     const readingPosition = this.pendingPosition;
     this.pendingPosition = null;
     if (viewport !== readingPosition.viewport) return;
-    // Completing a call can move it into a group. Its durable identity also
-    // identifies the replacement panel after React reparents that tool.
+    // A completed call can move into a group; its ID still matches the element React remounts.
     const element = viewport.contains(readingPosition.element)
       ? readingPosition.element
       : Array.from(viewport.querySelectorAll<HTMLElement>("[data-transcript-id]")).find(

@@ -1,7 +1,8 @@
+import type { ClaudeLoginLock } from "@usine/agents/runtime";
 import { RepositoryName, safeSegment } from "@usine/core/repository";
 import type { WorkerName } from "@usine/core/worker";
 import type { AttemptRuntime } from "@usine/durable/attempt-runtime";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Option } from "effect";
 import type { ChildProcessSpawner } from "effect/unstable/process";
 import { CredentialUnavailableError, Executor } from "../executor.ts";
 import type { RemoteAccess, RemoteGrant, RemoteMachine } from "../remote/machine.ts";
@@ -11,13 +12,12 @@ import { credentialGrantsFor } from "./grants.ts";
 import type { ExeDevExecutorOptions } from "./model.ts";
 import { preflightFor } from "./preflight.ts";
 
-/** exe.dev injects the GitHub credential for requests to this host at its edge. */
+/** The host for which the exe.dev edge injects the GitHub credential. */
 const EDGE_GITHUB_HOST = "github.int.exe.xyz";
 
 /**
- * What every child and harvesting command exports on the VM. Nothing secret
- * passes through this process: the VM's own environment and exe.dev's edge
- * supply the credential (ADR 0011), so there is nothing to scrub either.
+ * Returns the environment for every child and harvesting command on the VM. It contains no
+ * secrets; the exe.dev edge injects the credential (ADR 0011).
  */
 const edgeAccess = (machine: RemoteMachine): RemoteAccess => ({
   shell: machine.shell,
@@ -62,11 +62,12 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
       if (integration === undefined)
         return yield* new CredentialUnavailableError({
           repository,
+          reason: "refused",
           message: `No exe.dev GitHub integration is configured for ${repository}`,
           cause: new Error("repository integration missing"),
         });
       return {
-        acquire: (attemptId, worker, machine) =>
+        acquire: (attemptId, worker, _permissions, machine) =>
           credentialGrants
             .acquire(attemptId, worker, repository, integration)
             .pipe(Effect.as(edgeAccess(machine))),
@@ -82,24 +83,29 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
       preflight: machines.preflight,
       harnessProbe: (machine) => machines.harnessProbe(machine.shell),
       repositoryUrl: (_machine, repository) => `https://${EDGE_GITHUB_HOST}/${repository}.git`,
+      // exe.dev Workers have no Gateway; every harness uses its own login.
+      gatewayCredential: () => Effect.succeedNone,
       grantFor,
+      readOnlyAccessGap: Option.some(
+        "An exe.dev GitHub integration has the access of exe.dev's GitHub App, which can't be limited to read-only",
+      ),
       reclaim: () => Effect.void,
-      // The grace covers an SSH round trip plus the agent flushing its final
-      // events, not just a local pipe.
       interruptGrace: options.interruptGrace ?? "10 seconds",
     });
   });
 
 /**
- * Runs Attempts on exe.dev Workers: each Attempt's Pi parent is a durable task
- * in this process (`AttemptRuntime`), and its children run on the Worker's VM
- * over SSH. An orchestrator restart reattaches a live Attempt to its VM
- * checkout. Requires Node; worker contracts are platform-free.
+ * The executor for exe.dev Workers. Each Attempt's Pi parent is a durable task in this process
+ * (`AttemptRuntime`), and its children run on the Worker's VM over SSH. A live Attempt
+ * reattaches to its checkout after an orchestrator restart. Requires Node.
  */
 export const layer = (
   options: ExeDevExecutorOptions,
-): Layer.Layer<Executor, never, AttemptRuntime | ChildProcessSpawner.ChildProcessSpawner> =>
-  Layer.effect(Executor, makeExeDevExecutor(options));
+): Layer.Layer<
+  Executor,
+  never,
+  AttemptRuntime | ClaudeLoginLock | ChildProcessSpawner.ChildProcessSpawner
+> => Layer.effect(Executor, makeExeDevExecutor(options));
 
 export {
   CredentialGrantMinutes,

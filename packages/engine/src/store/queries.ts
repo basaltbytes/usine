@@ -6,13 +6,16 @@ import { Attempt, AttemptId, AttemptContext, AttemptNumber } from "@usine/core/a
 
 import { AttemptOutcome } from "@usine/core/attempt/outcome";
 import { AttemptSalvage, salvageRefFor } from "@usine/core/attempt/salvage";
+import type { OperatorRetryStart } from "@usine/core/attempt/start";
 import { Event, DedupKey, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
-import { LoopName } from "@usine/core/loop";
+import { LoopName, LoopPermissions } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
+import type { RunAgain } from "@usine/core/run/again";
+import type { ApprovalSource } from "@usine/core/run/approval";
 import { StepName } from "@usine/core/step";
 import * as RunState from "@usine/core/run/state";
-import { StepResult } from "@usine/core/step/result";
+import { type Comment, StepResult } from "@usine/core/step/result";
 import {
   and,
   asc,
@@ -23,6 +26,7 @@ import {
   ne,
   notInArray,
   sql,
+  type SQL,
   type SQLWrapper,
 } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
@@ -34,7 +38,9 @@ import {
   events,
   ignoredEvents,
   itemCycleBudgets,
+  loopItems,
   projectionRevision,
+  runAgainEvents,
   runs,
   steps,
   triggerEvents,
@@ -45,31 +51,41 @@ import { Submission } from "../engine/submission.ts";
 import { cycleQueries } from "../cycle-budget/queries.ts";
 import {
   type RunRow,
+  approvalFromRow,
   attemptFromRow,
   decodeAttemptRows,
   decodeDiscards,
+  decodeNextStarts,
   decodeEventRoutes,
   decodeProjectionRevision,
+  decodeReopenedEvents,
+  decodeReopenings,
+  decodeRunEventRows,
   decodeRunIds,
   decodeRunRows,
   encodeAgent,
+  encodeAttemptStart,
   encodeBrainSpec,
   encodeDateTime,
   encodeOutcome,
+  encodeComments,
   encodeSalvage,
   encodePayload,
   encodeRunState,
   encodeStepResult,
   eventFromRow,
+  runAgainFromRow,
+  runEventFromRow,
   runFromRow,
   runSummaryFromRow,
   stepFromRow,
   submissionFromRow,
 } from "./codec.ts";
 
+import { loopItemQueries } from "./loop-items.ts";
 import { transcriptQueries } from "./transcript.ts";
 
-/** The newest queued submission and the exact Events observed alongside it. */
+/** The newest queued submission and the Events read with it. */
 export interface QueuedEvents {
   readonly submission: Submission;
   readonly eventIds: ReadonlyArray<EventId>;
@@ -88,6 +104,7 @@ const eventRouteSelection = {
   loop: triggerEvents.loopName,
   step: triggerEvents.stepName,
   approval: triggerEvents.approval,
+  permissions: triggerEvents.permissions,
   cycleLimit: triggerEvents.cycleLimit,
   cycleGeneration: triggerEvents.cycleGeneration,
   repository: triggerEvents.repository,
@@ -97,6 +114,8 @@ const eventRouteSelection = {
   parentModel: triggerEvents.parentModel,
 } as const;
 
+const approvalEvents = alias(events, "approval_event");
+
 const runSelection = {
   itemKey: triggerEvents.itemKey,
   runId: runs.runId,
@@ -105,6 +124,7 @@ const runSelection = {
   state: runs.stateJson,
   resolvedFailureAttemptId: runs.resolvedFailureAttemptId,
   openedAt: runs.openedAt,
+  closedAt: runs.closedAt,
   repository: runs.repository,
   revision: runs.revision,
   task: runs.task,
@@ -112,9 +132,14 @@ const runSelection = {
   parentModel: runs.parentModel,
   stepName: steps.stepName,
   result: steps.result,
+  approvedAt: approvalEvents.receivedAt,
+  approvalChannel: approvals.channel,
+  approver: approvals.approver,
+  againFrom: runAgainEvents.fromRunId,
+  againRequestedBy: runAgainEvents.requestedBy,
 } as const;
 
-const attemptSelection = {
+export const attemptSelection = {
   attemptId: attempts.attemptId,
   runId: attempts.runId,
   stepName: attempts.stepName,
@@ -127,10 +152,13 @@ const attemptSelection = {
   parentModel: attempts.parentModel,
   startedAt: attempts.startedAt,
   outcome: attempts.outcomeJson,
+  endedAt: attempts.endedAt,
   salvage: attempts.salvageJson,
+  start: attempts.startJson,
+  reattachedAt: attempts.reattachedAt,
+  comments: attempts.commentsJson,
 } as const;
 
-// The state partitions are owned by @usine/core; these predicates only borrow their tags.
 const storedStateTag = sql`json_extract(${runs.stateJson}, '$._tag')`;
 const openState = inArray(storedStateTag, [...RunState.OPEN_STATE_TAGS]);
 const unstartedState = inArray(storedStateTag, [...RunState.UNSTARTED_STATE_TAGS]);
@@ -140,7 +168,7 @@ const storedAgent = (agent: Agent): Schema.Json =>
   Schema.decodeUnknownSync(Schema.Json)(encodeAgent(agent));
 
 export const queriesFor = (database: RunDatabaseClient) => {
-  // Keep `.execute()` explicit (ADR 0020).
+  // `.execute()` stays explicit (ADR 0020).
   const eventRouteByDedup = Effect.fn("RunStoreQueries.eventRouteByDedup")(function* (
     dedupKey: DedupKey,
   ) {
@@ -164,48 +192,69 @@ export const queriesFor = (database: RunDatabaseClient) => {
     return yield* decodeEventRoutes(rows);
   });
 
-  const runRows = Effect.fn("RunStoreQueries.runRows")(function* (runId: RunId) {
-    const rows = yield* database
+  const selectRuns = () =>
+    database
       .select(runSelection)
       .from(runs)
       .innerJoin(triggerEvents, eq(triggerEvents.eventId, runs.eventId))
       .innerJoin(steps, eq(steps.runId, runs.runId))
-      .where(eq(runs.runId, runId))
-      .execute();
+      .leftJoin(approvals, eq(approvals.runId, runs.runId))
+      .leftJoin(approvalEvents, eq(approvalEvents.eventId, approvals.eventId))
+      .leftJoin(runAgainEvents, eq(runAgainEvents.eventId, runs.eventId));
+
+  const runRows = Effect.fn("RunStoreQueries.runRows")(function* (runId: RunId) {
+    const rows = yield* selectRuns().where(eq(runs.runId, runId)).execute();
     return yield* decodeRunRows(rows);
   });
 
+  /** Returns the Attempts that match `filters` and whose leftovers weren't discarded. */
+  const recoveries = (...filters: ReadonlyArray<SQL>) =>
+    Effect.gen(function* () {
+      const rows = yield* database
+        .select({
+          attemptId: attempts.attemptId,
+          worker: attempts.workerName,
+          repository: runs.repository,
+          runId: attempts.runId,
+          number: attempts.attemptNumber,
+          permissions: triggerEvents.permissions,
+          outcome: sql<string>`coalesce(json_extract(${attempts.outcomeJson}, '$._tag'), '')`,
+        })
+        .from(attempts)
+        .innerJoin(runs, eq(runs.runId, attempts.runId))
+        .innerJoin(triggerEvents, eq(triggerEvents.eventId, runs.eventId))
+        .where(and(isNull(attempts.leftoversDiscardedAt), ...filters))
+        .execute();
+      const decoded = yield* Schema.decodeUnknownEffect(
+        Schema.Array(
+          Schema.Struct({
+            attemptId: AttemptId,
+            worker: WorkerName,
+            repository: RepositoryName,
+            runId: RunId,
+            number: AttemptNumber,
+            permissions: LoopPermissions,
+            outcome: Schema.String,
+          }),
+        ),
+      )(rows);
+      return decoded.map(({ runId, number, outcome, ...attempt }) => ({
+        ...attempt,
+        ref: salvageRefFor(runId, number),
+        succeeded: outcome === "Succeeded",
+        open: outcome === "",
+      }));
+    });
+
   const salvageCandidates = Effect.fn("RunStoreQueries.salvageCandidates")(function* () {
-    const rows = yield* database
-      .select({
-        attemptId: attempts.attemptId,
-        worker: attempts.workerName,
-        repository: runs.repository,
-        runId: attempts.runId,
-        number: attempts.attemptNumber,
-        outcome: sql<string>`coalesce(json_extract(${attempts.outcomeJson}, '$._tag'), '')`,
-      })
-      .from(attempts)
-      .innerJoin(runs, eq(runs.runId, attempts.runId))
-      .execute();
-    const decoded = yield* Schema.decodeUnknownEffect(
-      Schema.Array(
-        Schema.Struct({
-          attemptId: AttemptId,
-          worker: WorkerName,
-          repository: RepositoryName,
-          runId: RunId,
-          number: AttemptNumber,
-          outcome: Schema.String,
-        }),
-      ),
-    )(rows);
-    return decoded.map(({ runId, number, outcome, ...attempt }) => ({
-      ...attempt,
-      ref: salvageRefFor(runId, number),
-      succeeded: outcome === "Succeeded",
-      open: outcome === "",
-    }));
+    return yield* recoveries();
+  });
+
+  const salvageCandidate = Effect.fn("RunStoreQueries.salvageCandidate")(function* (
+    attemptId: AttemptId,
+  ) {
+    yield* Effect.annotateCurrentSpan({ attemptId });
+    return EffectArray.head(yield* recoveries(eq(attempts.attemptId, attemptId)));
   });
 
   const attemptRows = Effect.fn("RunStoreQueries.attemptRows")(function* (runId: RunId) {
@@ -236,11 +285,15 @@ export const queriesFor = (database: RunDatabaseClient) => {
       step: stepFromRow(storedRun),
       attempts: storedAttempts.map(attemptFromRow),
       resolvedFailureAttemptId: Option.fromNullishOr(storedRun.resolvedFailureAttemptId),
+      closedAt: Option.fromNullishOr(storedRun.closedAt),
+      approval: approvalFromRow(storedRun),
+      runAgain: runAgainFromRow(storedRun),
       repository: storedRun.repository,
       revision: storedRun.revision,
       task: storedRun.task,
       agent: storedRun.agent,
       parentModel: Option.fromNullishOr(storedRun.parentModel),
+      permissions: route.permissions,
     });
   });
 
@@ -248,8 +301,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     storedRuns: ReadonlyArray<RunRow>,
   ) {
     const runIds = storedRuns.map(({ runId }) => runId);
-    // Keep history queries below adapter bind-parameter limits, even for a
-    // long-lived Task with many Runs.
+    // Chunks keep each read below the driver's bind-parameter limit.
     const storedAttempts = (yield* Effect.forEach(EffectArray.chunksOf(runIds, 100), (ids) =>
       database
         .select(attemptSelection)
@@ -272,11 +324,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     const storedRuns = (yield* Effect.forEach(
       EffectArray.chunksOf([...new Set(itemKeys)], 100),
       (keys) =>
-        database
-          .select(runSelection)
-          .from(runs)
-          .innerJoin(triggerEvents, eq(triggerEvents.eventId, runs.eventId))
-          .innerJoin(steps, eq(steps.runId, runs.runId))
+        selectRuns()
           .where(inArray(triggerEvents.itemKey, keys))
           .execute()
           .pipe(Effect.flatMap(decodeRunRows)),
@@ -286,24 +334,15 @@ export const queriesFor = (database: RunDatabaseClient) => {
     return yield* summariesWithAttempts(storedRuns);
   });
 
-  // Every open Run plus the newest `closedLimit` settled ones, so an old
-  // Waiting run never falls out of the operator's view while history stays bounded.
+  // Every open Run plus the newest `closedLimit` closed ones, so an old waiting Run stays listed.
   const runSummaries = Effect.fn("RunStoreQueries.runSummaries")(function* (closedLimit: number) {
     const [openRuns, closedRuns] = yield* Effect.all([
-      database
-        .select(runSelection)
-        .from(runs)
-        .innerJoin(triggerEvents, eq(triggerEvents.eventId, runs.eventId))
-        .innerJoin(steps, eq(steps.runId, runs.runId))
+      selectRuns()
         .where(openState)
         .orderBy(desc(runs.openedAt), desc(runs.runId))
         .execute()
         .pipe(Effect.flatMap(decodeRunRows)),
-      database
-        .select(runSelection)
-        .from(runs)
-        .innerJoin(triggerEvents, eq(triggerEvents.eventId, runs.eventId))
-        .innerJoin(steps, eq(steps.runId, runs.runId))
+      selectRuns()
         .where(notInArray(storedStateTag, [...RunState.OPEN_STATE_TAGS]))
         .orderBy(desc(runs.openedAt), desc(runs.runId))
         .limit(closedLimit)
@@ -312,6 +351,40 @@ export const queriesFor = (database: RunDatabaseClient) => {
     ]);
     const storedRuns = [...openRuns, ...closedRuns].sort(newestRunFirst);
     return yield* summariesWithAttempts(storedRuns);
+  });
+
+  const runEvents = Effect.fn("RunStoreQueries.runEvents")(function* (
+    runIds: ReadonlyArray<RunId>,
+  ) {
+    // Chunks keep each read below the driver's bind-parameter limit.
+    const rows = yield* Effect.forEach(EffectArray.chunksOf([...new Set(runIds)], 100), (ids) =>
+      database
+        .select({
+          runId: runs.runId,
+          eventId: events.eventId,
+          dedupKey: events.dedupKey,
+          payload: events.payloadJson,
+          receivedAt: events.receivedAt,
+        })
+        .from(runs)
+        .innerJoin(events, eq(events.eventId, runs.eventId))
+        .where(inArray(runs.runId, ids))
+        .execute()
+        .pipe(Effect.flatMap(decodeRunEventRows)),
+    );
+    return rows.flat().map(runEventFromRow);
+  });
+
+  const closedRunSummaries = Effect.fn("RunStoreQueries.closedRunSummaries")(function* (
+    limit: number,
+  ) {
+    const closedRuns = yield* selectRuns()
+      .where(notInArray(storedStateTag, [...RunState.OPEN_STATE_TAGS]))
+      .orderBy(desc(runs.closedAt), desc(runs.runId))
+      .limit(limit)
+      .execute()
+      .pipe(Effect.flatMap(decodeRunRows));
+    return yield* summariesWithAttempts(closedRuns);
   });
 
   const revision = Effect.fn("RunStoreQueries.projectionRevision")(function* () {
@@ -326,13 +399,16 @@ export const queriesFor = (database: RunDatabaseClient) => {
     return Option.fromNullishOr(rows[0]?.revision);
   });
 
+  // A closed state sets `closedAt` to `at` or now; an open state clears it.
   const updateState = Effect.fn("RunStoreQueries.updateState")(function* (
     runId: RunId,
     state: RunState.RunState,
+    at?: DateTime.Utc,
   ) {
+    const closedAt = RunState.isOpen(state) ? null : encodeDateTime(at ?? (yield* DateTime.now));
     const updated = yield* database
       .update(runs)
-      .set({ stateJson: encodeRunState(state) })
+      .set({ stateJson: encodeRunState(state), closedAt })
       .where(eq(runs.runId, runId))
       .returning({ runId: runs.runId })
       .execute();
@@ -369,8 +445,45 @@ export const queriesFor = (database: RunDatabaseClient) => {
         parentModel: Option.getOrNull(attempt.parentModel),
         startedAt: encodeDateTime(attempt.startedAt),
         outcomeJson: null,
+        endedAt: null,
         salvageJson: null,
+        startJson: Option.match(attempt.start, { onNone: () => null, onSome: encodeAttemptStart }),
       })
+      .execute();
+  });
+
+  const recordReattach = Effect.fn("RunStoreQueries.recordReattach")(function* (
+    attemptId: AttemptId,
+    reattachedAt: DateTime.Utc,
+  ) {
+    yield* Effect.annotateCurrentSpan({ attemptId });
+    yield* database
+      .update(attempts)
+      .set({ reattachedAt: encodeDateTime(reattachedAt) })
+      .where(eq(attempts.attemptId, attemptId))
+      .execute();
+  });
+
+  /** Returns the operator retry for the Run's next Attempt, or `None`. */
+  const nextStart = Effect.fn("RunStoreQueries.nextStart")(function* (runId: RunId) {
+    const rows = yield* database
+      .select({ nextStart: runs.nextStartJson })
+      .from(runs)
+      .where(eq(runs.runId, runId))
+      .execute();
+    return Option.fromNullishOr((yield* decodeNextStarts(rows))[0]?.nextStart);
+  });
+
+  const setNextStart = Effect.fn("RunStoreQueries.setNextStart")(function* (
+    runId: RunId,
+    start: Option.Option<OperatorRetryStart>,
+  ) {
+    yield* database
+      .update(runs)
+      .set({
+        nextStartJson: Option.match(start, { onNone: () => null, onSome: encodeAttemptStart }),
+      })
+      .where(eq(runs.runId, runId))
       .execute();
   });
 
@@ -386,13 +499,26 @@ export const queriesFor = (database: RunDatabaseClient) => {
       .execute();
   });
 
+  const recordComments = Effect.fn("RunStoreQueries.recordComments")(function* (
+    attemptId: AttemptId,
+    comments: ReadonlyArray<Comment>,
+  ) {
+    yield* Effect.annotateCurrentSpan({ attemptId, comments: comments.length });
+    yield* database
+      .update(attempts)
+      .set({ commentsJson: encodeComments(comments) })
+      .where(eq(attempts.attemptId, attemptId))
+      .execute();
+  });
+
   const closeAttempt = Effect.fn("RunStoreQueries.closeAttempt")(function* (
     attemptId: AttemptId,
     outcome: AttemptOutcome,
+    endedAt: DateTime.Utc,
   ) {
     yield* database
       .update(attempts)
-      .set({ outcomeJson: encodeOutcome(outcome) })
+      .set({ outcomeJson: encodeOutcome(outcome), endedAt: encodeDateTime(endedAt) })
       .where(and(eq(attempts.attemptId, attemptId), isNull(attempts.outcomeJson)))
       .execute();
   });
@@ -454,6 +580,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
   const recordApproval = Effect.fn("RunStoreQueries.recordApproval")(function* (
     runId: RunId,
     approval: Event,
+    source: ApprovalSource,
   ) {
     yield* database
       .insert(events)
@@ -465,7 +592,15 @@ export const queriesFor = (database: RunDatabaseClient) => {
       })
       .onConflictDoNothing()
       .execute();
-    yield* database.insert(approvals).values({ runId, eventId: approval.id }).execute();
+    yield* database
+      .insert(approvals)
+      .values({
+        runId,
+        eventId: approval.id,
+        channel: source.channel,
+        approver: Option.getOrNull(source.approver),
+      })
+      .execute();
   });
 
   const createRun = Effect.fn("RunStoreQueries.createRun")(function* (
@@ -558,8 +693,65 @@ export const queriesFor = (database: RunDatabaseClient) => {
     );
   });
 
+  /** Returns the newest reopening of `eventId` (#267), with its reopening number. */
+  const newestReopening = Effect.fn("RunStoreQueries.newestReopening")(function* (
+    eventId: EventId,
+  ) {
+    const rows = yield* decodeReopenings(
+      yield* database
+        .select({ ...eventRouteSelection, reopening: triggerEvents.reopening })
+        .from(events)
+        .innerJoin(triggerEvents, eq(triggerEvents.eventId, events.eventId))
+        .where(eq(triggerEvents.reopensEventId, eventId))
+        .orderBy(desc(triggerEvents.reopening))
+        .limit(1)
+        .execute(),
+    );
+    return Option.map(Option.fromNullishOr(rows[0]), (row) => ({
+      submission: submissionFromRow(row),
+      reopening: row.reopening,
+    }));
+  });
+
+  /** Returns the trigger Event that `eventId` reopens or runs again, or `None` for a trigger's own Event. */
+  const reopenedEvent = Effect.fn("RunStoreQueries.reopenedEvent")(function* (eventId: EventId) {
+    const reopened = alias(events, "reopened_event");
+    const rows = yield* decodeReopenedEvents(
+      yield* database
+        .select({ eventId: reopened.eventId, dedupKey: reopened.dedupKey })
+        .from(triggerEvents)
+        .innerJoin(reopened, eq(reopened.eventId, triggerEvents.reopensEventId))
+        .where(eq(triggerEvents.eventId, eventId))
+        .execute(),
+    );
+    return Option.fromNullishOr(rows[0]);
+  });
+
+  /** Records that `eventId` came from running a closed Run again, and the requesting login. */
+  const recordRunAgain = Effect.fn("RunStoreQueries.recordRunAgain")(function* (
+    eventId: EventId,
+    again: RunAgain,
+  ) {
+    yield* database
+      .insert(runAgainEvents)
+      .values({
+        eventId,
+        fromRunId: again.from,
+        requestedBy: Option.getOrNull(again.requestedBy),
+      })
+      .execute();
+  });
+
+  /**
+   * Records a trigger Event and its route once, and returns the route as first recorded.
+   * `reopens` is the earlier Event that this one reopens.
+   */
   const recordTriggerEvent = Effect.fn("RunStoreQueries.recordTriggerEvent")(function* (
     submission: Submission,
+    reopens: Option.Option<{
+      readonly eventId: EventId;
+      readonly reopening: number;
+    }> = Option.none(),
   ) {
     yield* database
       .insert(events)
@@ -582,6 +774,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
           loopName: submission.loop,
           stepName: submission.step,
           approval: submission.approval,
+          permissions: submission.permissions,
           cycleLimit: Option.getOrNull(submission.cycleLimit),
           cycleGeneration: submission.cycleGeneration,
           repository: submission.repository,
@@ -589,6 +782,11 @@ export const queriesFor = (database: RunDatabaseClient) => {
           task: submission.task,
           agentJson: storedAgent(submission.agent),
           parentModel: Option.getOrNull(submission.parentModel),
+          reopensEventId: Option.getOrNull(Option.map(reopens, ({ eventId }) => eventId)),
+          reopening: Option.match(reopens, {
+            onNone: () => 0,
+            onSome: ({ reopening }) => reopening,
+          }),
         })
         .execute();
       return submission;
@@ -600,6 +798,16 @@ export const queriesFor = (database: RunDatabaseClient) => {
     const routes = yield* eventRouteByRun(runId);
     const current = routes[0];
     if (current === undefined) return Option.none<QueuedEvents>();
+    const suppression = yield* loopItemQueries(database).suppression(current.loop, current.itemKey);
+    if (Option.isSome(suppression)) {
+      yield* Effect.logInfo("Queued Events wait while a suppression keeps the Item", {
+        runId,
+        suppressedBy: suppression.value.runId,
+        loop: current.loop,
+        itemKey: current.itemKey,
+      });
+      return Option.none<QueuedEvents>();
+    }
     const queuedRows = yield* database
       .select(eventRouteSelection)
       .from(events)
@@ -636,10 +844,8 @@ export const queriesFor = (database: RunDatabaseClient) => {
     return (yield* decodeRunIds(rows)).map(({ runId }) => runId);
   });
 
-  // The newest Run of each Item that has a current queued Event and no open
-  // Run: the Run closed before its continuation opened or revoked that Event.
-  // An Item awaiting a cycle-budget reset is left out, since none of its
-  // queued Events can open a Run before the reset supersedes them.
+  // The newest closed Run of each Item that has a current queued Event and no open Run, excluding
+  // Items waiting for a cycle-budget reset or under a suppression.
   const pendingContinuations = Effect.fn("RunStoreQueries.pendingContinuations")(function* () {
     const items = yield* database
       .selectDistinct({ loop: triggerEvents.loopName, itemKey: triggerEvents.itemKey })
@@ -647,11 +853,19 @@ export const queriesFor = (database: RunDatabaseClient) => {
       .leftJoin(runs, eq(runs.eventId, triggerEvents.eventId))
       .leftJoin(ignoredEvents, eq(ignoredEvents.eventId, triggerEvents.eventId))
       .leftJoin(itemCycleBudgets, eq(itemCycleBudgets.itemKey, triggerEvents.itemKey))
+      .leftJoin(
+        loopItems,
+        and(
+          eq(loopItems.loopName, triggerEvents.loopName),
+          eq(loopItems.itemKey, triggerEvents.itemKey),
+        ),
+      )
       .where(
         and(
           isNull(runs.runId),
           isNull(ignoredEvents.eventId),
           isNull(itemCycleBudgets.askJson),
+          isNull(loopItems.suppressedByRunId),
           cycleQueries(database).currentEvent,
         ),
       )
@@ -733,10 +947,16 @@ export const queriesFor = (database: RunDatabaseClient) => {
 
   return {
     salvageCandidates,
+    salvageCandidate,
     cycles: cycleQueries(database),
+    loopItems: loopItemQueries(database),
     ...transcriptQueries(database),
     addAttempt,
+    recordReattach,
+    nextStart,
+    setNextStart,
     recordSalvage,
+    recordComments,
     amend,
     markIntervened,
     approvalExists,
@@ -745,7 +965,10 @@ export const queriesFor = (database: RunDatabaseClient) => {
     createRun,
     eventRouteByRun,
     ignoredEvent,
+    newestReopening,
     nextQueued,
+    reopenedEvent,
+    recordRunAgain,
     pendingContinuations,
     recordTriggerEvent,
     runIdsToDrive,
@@ -754,7 +977,9 @@ export const queriesFor = (database: RunDatabaseClient) => {
     revokeQueued,
     revokeUnstarted,
     runSummaries,
+    closedRunSummaries,
     itemRunSummaries,
+    runEvents,
     runForEvent,
     snapshot,
     updateStepResult,

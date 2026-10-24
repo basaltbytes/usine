@@ -49,7 +49,7 @@ const unsupportedEffort = Effect.fn("Pi.unsupportedEffort")(function* (
     harness: "pi",
     model: started.model,
     effort: started.effort,
-    message: `Pi model ${started.model} does not support effort ${started.effort}; supported: ${started.supported.join(", ")}`,
+    message: `Pi model "${started.model}" doesn't support effort ${started.effort}. Supported efforts: ${started.supported.join(", ")}`,
   });
 });
 
@@ -73,7 +73,7 @@ const makePiChild = Effect.gen(function* () {
         return yield* new AgentResultError({
           sessionId: Option.some(request.session.id),
           message:
-            "Pi children run only on local Workers: their tools run in the orchestrator process, not on the Worker",
+            "Pi children run only on local workers: their tools run in the orchestrator process, not on the worker",
         });
       }
       yield* Effect.logInfo("Launching Pi child session");
@@ -99,7 +99,7 @@ const makePiChild = Effect.gen(function* () {
               return yield* new UnknownModelError({
                 harness: "pi",
                 model: request.session.brain.model,
-                message: `Pi does not expose model ${request.session.brain.model}`,
+                message: `Pi has no model "${request.session.brain.model}"`,
               });
             }
             if (started._tag === "UnsupportedEffort") {
@@ -114,7 +114,7 @@ const makePiChild = Effect.gen(function* () {
                 harness: "pi",
                 model: started.model,
                 pool: "apiKeys",
-                message: `Pi child model ${started.model} must use an API key`,
+                message: `Pi child model "${started.model}" must use an API key`,
               });
             }
             if (started._tag === "UnsupportedAuthentication") {
@@ -127,7 +127,7 @@ const makePiChild = Effect.gen(function* () {
                 harness: "pi",
                 model: started.model,
                 pool: "apiKeys",
-                message: `Pi child model ${started.model} must use an API key`,
+                message: `Pi child model "${started.model}" must use an API key`,
               });
             }
             if (started.pool !== "apiKeys") {
@@ -140,7 +140,7 @@ const makePiChild = Effect.gen(function* () {
                 harness: "pi",
                 model: started.model,
                 pool: "apiKeys",
-                message: `Pi child model ${started.model} must use an API key`,
+                message: `Pi child model "${started.model}" must use an API key`,
               });
             }
             const session = new ChildSession({
@@ -152,6 +152,7 @@ const makePiChild = Effect.gen(function* () {
                 model: started.model,
                 effort: request.session.brain.effort,
               }),
+              gatewayCredential: request.session.gatewayCredential,
             });
             const channel = yield* sessionChannel({
               label: "Pi child session",
@@ -159,7 +160,6 @@ const makePiChild = Effect.gen(function* () {
             });
             yield* channel.emit(new SessionStarted({ session }));
             const subscription = yield* subscribePiSession(started.session, session, channel);
-            // After setup succeeds, the ambient scope closes both the subscription and the SDK session.
             yield* Effect.addFinalizer(() =>
               Effect.sync(subscription.unsubscribe).pipe(
                 Effect.andThen(Effect.sync(acquired.dispose)),
@@ -188,5 +188,4 @@ const makePiChild = Effect.gen(function* () {
   return PiChildBackend.of({ launch });
 });
 
-/** Provides Pi coding sessions for tasks delegated by a parent. */
 export const piChildBackendLayer = Layer.effect(PiChildBackend, makePiChild);

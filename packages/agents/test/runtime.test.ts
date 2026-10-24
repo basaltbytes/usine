@@ -8,9 +8,12 @@ import {
   ParentSession,
 } from "@usine/core/agent/session";
 import { AgentName } from "@usine/core/agent";
+import { WorkerName } from "@usine/core/worker";
 import { Option, Schema } from "effect";
 import { RemoteShell } from "../src/child-host/child-host.ts";
 import {
+  AgentBlockedError,
+  AgentQuestionError,
   AgentResultError,
   ChildRequest,
   ChildSessionBudgetExceededError,
@@ -34,6 +37,7 @@ describe("agent runtime contract", () => {
       }),
     });
     const request = new ChildRequest({
+      worker: WorkerName.make("worker-1"),
       environment: { HOME: "/home/worker", PATH: "/usr/bin:/bin" },
       session: new ChildSession({
         id: AgentSessionId.make("child-1"),
@@ -76,7 +80,7 @@ describe("agent runtime contract", () => {
       new UnknownModelError({
         harness: "claude",
         model: ModelId.make("claude-never-existed"),
-        message: "Claude does not expose model claude-never-existed",
+        message: 'Claude has no model "claude-never-existed"',
       }),
       new PoolUnavailableError({
         harness: "pi",
@@ -88,12 +92,28 @@ describe("agent runtime contract", () => {
         harness: "codex",
         model: ModelId.make("gpt-5.6-terra"),
         effort: "max",
-        message: "Codex model gpt-5.6-terra does not support effort max",
+        message: 'Codex model "gpt-5.6-terra" doesn\'t support effort max',
       }),
       new AgentResultError({ sessionId, message: "ran out of turns" }),
     ];
     for (const error of terminal) {
       assert.strictEqual(toAttemptFailure(error)._tag, "AgentFailure");
+    }
+
+    const blocked = toAttemptFailure(
+      new AgentBlockedError({ sessionId, message: "The baseline gate fails on main." }),
+    );
+    assert.strictEqual(blocked._tag, "BlockedFailure");
+    if (blocked._tag === "BlockedFailure") {
+      assert.strictEqual(blocked.message, "The baseline gate fails on main.");
+    }
+
+    const asked = toAttemptFailure(
+      new AgentQuestionError({ sessionId, message: "Which transport should egress use?" }),
+    );
+    assert.strictEqual(asked._tag, "QuestionFailure");
+    if (asked._tag === "QuestionFailure") {
+      assert.strictEqual(asked.question, "Which transport should egress use?");
     }
 
     const budget = toAttemptFailure(

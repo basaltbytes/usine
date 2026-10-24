@@ -5,6 +5,7 @@ import { AgentName, AgentPersona } from "@usine/core/agent";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { StepName } from "@usine/core/step";
+import { WorkerName } from "@usine/core/worker";
 import { AgentFile } from "@usine/config/agent";
 import { IssueTrigger } from "@usine/config/trigger";
 import { LoadedInstance } from "@usine/config/instance";
@@ -118,11 +119,13 @@ const makeInstance = (repository: RepositoryName, label: string): LoadedInstance
 
 const runtimeLayer = (directory: InstanceDirectory, app: GitHubApp["Service"]) => {
   const executor = Layer.succeed(StepExecutor)({
+    workers: Effect.succeed([WorkerName.make("local")]),
     isLive: () => Effect.succeed(false),
     outcome: () => Effect.succeed(Option.none()),
     recover: () => Effect.void,
     intervene: () => Effect.void,
     interrupt: () => Effect.void,
+    occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
     reserve: () => Effect.die("the approval-gated integration run must not reserve a worker"),
     execute: () => Effect.die("the approval-gated integration run must not execute"),
   });
@@ -267,8 +270,8 @@ describe("live GitHub polling", () => {
                   Effect.gen(function* () {
                     const afterRestart = yield* polling.poll(instance);
                     const restartedRun = runIdFrom(afterRestart.submissions);
-                    // The same holds across a restart: the durable ledger, not
-                    // the lost in-memory state, prevents a second run.
+                    // The same applies across a restart: the durable ledger, not the lost in-memory
+                    // state, prevents a second Run.
                     assert(
                       Option.isNone(restartedRun) || restartedRun.value === first.runId,
                       "a restart must not open a second run for the same state",

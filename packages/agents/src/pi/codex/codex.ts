@@ -2,6 +2,9 @@ import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import {
   ChildSession,
   PoolRateLimitsUpdated,
+  ProviderRecovered,
+  ProviderRetries,
+  ProviderRetrying,
   RateLimitsSnapshot,
   SessionStarted,
   HarnessSession,
@@ -22,9 +25,14 @@ import {
   AgentMessageItem,
   ToolItem,
   TurnCompleted,
+  UserMessageItem,
+  userMessageText,
   RateLimitsUpdated,
+  ErrorNotification,
+  TurnActivity,
   decodeResponse,
   decodeNotification,
+  providerRetryMessage,
   toolName,
   rateLimitWindow,
 } from "./codec.ts";
@@ -44,7 +52,7 @@ import { codexPoolUnavailable, initializeCodex, verifyCodexAccount } from "./acc
 
 export { CodexAppServer, codexAppServerLive, type CodexConnection } from "./app-server.ts";
 
-/** Server pushes with no session event shape; they still reach the operator's logs. */
+/** The server notification methods with no session event equivalent; they are only logged. */
 const DIAGNOSTIC_METHODS: ReadonlySet<string> = new Set([
   "error",
   "warning",
@@ -53,6 +61,9 @@ const DIAGNOSTIC_METHODS: ReadonlySet<string> = new Set([
   "guardianWarning",
   "model/rerouted",
 ]);
+
+const decodeRetry = Schema.decodeUnknownOption(ErrorNotification);
+const isTurnActivity = Schema.is(TurnActivity);
 
 const makeCodexChild = Effect.gen(function* () {
   const appServer = yield* CodexAppServer;
@@ -102,7 +113,7 @@ const makeCodexChild = Effect.gen(function* () {
         return yield* new UnknownModelError({
           harness: "codex",
           model: requestedModel,
-          message: `Codex does not expose model ${requestedModel}`,
+          message: `Codex has no model "${requestedModel}"`,
         });
       }
       const effort = request.session.brain.effort === "off" ? "none" : request.session.brain.effort;
@@ -121,7 +132,7 @@ const makeCodexChild = Effect.gen(function* () {
           harness: "codex",
           model: requestedModel,
           effort: request.session.brain.effort,
-          message: `Codex model ${requestedModel} does not support effort ${effort}`,
+          message: `Codex model "${requestedModel}" doesn't support effort ${effort}`,
         });
       }
 
@@ -156,6 +167,7 @@ const makeCodexChild = Effect.gen(function* () {
           model: ModelId.make(thread.model),
           effort: request.session.brain.effort,
         }),
+        gatewayCredential: request.session.gatewayCredential,
       });
       const channel = yield* sessionChannel({
         label: "Codex child session",
@@ -186,6 +198,9 @@ const makeCodexChild = Effect.gen(function* () {
       const pendingMessages: string[] = [];
       let lastText: string | undefined;
       let finalText: string | undefined;
+      // Provider retries reported for the current turn, and whether the last retry is unresolved.
+      let retries = 0;
+      let retrying = false;
       const startTurn = Effect.fn("CodexChildBackend.startTurn")(function* (message: string) {
         yield* Effect.annotateCurrentSpan({ sessionId: session.id });
         const response = yield* connection.request(
@@ -204,6 +219,43 @@ const makeCodexChild = Effect.gen(function* () {
         turnActive = true;
         lastText = undefined;
         finalText = undefined;
+        retries = 0;
+        retrying = false;
+      });
+      const reportRetry = Effect.fn("CodexChildBackend.reportRetry")(function* (
+        notification: typeof ErrorNotification.Type,
+      ) {
+        yield* Effect.annotateCurrentSpan({ sessionId: session.id, turnId });
+        if (notification.turnId !== turnId) {
+          return yield* Effect.logDebug("Skipping a provider retry of another Codex turn", {
+            sessionId: session.id,
+            turnId: notification.turnId,
+          });
+        }
+        retries += 1;
+        retrying = true;
+        const message = providerRetryMessage(notification.error);
+        yield* Effect.logWarning("Codex child cannot reach its provider and will retry", {
+          sessionId: session.id,
+          turnId,
+          retries,
+          message,
+        });
+        yield* channel.emit(
+          new ProviderRetrying({ session, message, retries: ProviderRetries.make(retries) }),
+        );
+      });
+      const reportRecovery = Effect.fn("CodexChildBackend.reportRecovery")(function* () {
+        yield* Effect.annotateCurrentSpan({ sessionId: session.id, turnId });
+        retrying = false;
+        yield* Effect.logInfo("Codex child reached its provider again", {
+          sessionId: session.id,
+          turnId,
+          retries,
+        });
+        yield* channel.emit(
+          new ProviderRecovered({ session, retries: ProviderRetries.make(retries) }),
+        );
       });
       const interruptTurn = Effect.fn("CodexChildBackend.interruptTurn")(function* () {
         yield* Effect.annotateCurrentSpan({ sessionId: session.id });
@@ -223,9 +275,13 @@ const makeCodexChild = Effect.gen(function* () {
         yield* Effect.annotateCurrentSpan({ sessionId: session.id });
         if (interrupting) {
           pendingMessages.push(message);
-          return;
+          return "queued" as const;
         }
-        if (!turnActive) return yield* startTurn(message);
+        if (!turnActive) {
+          yield* startTurn(message);
+          return "read" as const;
+        }
+        // Codex records steered input as a user message once the running turn reads it.
         yield* connection.request(
           "steer",
           "turn/steer",
@@ -235,6 +291,7 @@ const makeCodexChild = Effect.gen(function* () {
             input: [{ type: "text", text: message, text_elements: [] }],
           }),
         );
+        return "queued" as const;
       });
       const conversation = yield* sessionConversation({
         session,
@@ -260,6 +317,13 @@ const makeCodexChild = Effect.gen(function* () {
       const consume = connection.notifications.pipe(
         Stream.runForEach(({ method, params }) =>
           Effect.gen(function* () {
+            if (method === "error") {
+              const retry = decodeRetry(params);
+              if (Option.isSome(retry) && retry.value.willRetry)
+                return yield* reportRetry(retry.value);
+            } else if (retrying && isTurnActivity(params) && params.turnId === turnId) {
+              yield* reportRecovery();
+            }
             if (method === "thread/tokenUsage/updated") {
               const usage = yield* decodeNotification(
                 CodexTokenUsage,
@@ -285,6 +349,11 @@ const makeCodexChild = Effect.gen(function* () {
                 params,
               );
               if (Option.isNone(notification)) return;
+              const item = notification.value.item;
+              if (Schema.is(UserMessageItem)(item)) {
+                const text = userMessageText(item);
+                return yield* conversation.read((queued) => queued.indexOf(text) + 1);
+              }
               if (notification.value.turnId !== turnId) {
                 return yield* Effect.logDebug("Skipping a Codex item from another turn", {
                   sessionId: session.id,
@@ -396,6 +465,7 @@ const makeCodexChild = Effect.gen(function* () {
                   turnId: completed.turn.id,
                 });
               }
+              if (retrying && completed.turn.status === "completed") yield* reportRecovery();
               turnActive = false;
               const wasInterrupted = interrupting;
               interrupting = false;
@@ -409,6 +479,7 @@ const makeCodexChild = Effect.gen(function* () {
                 const nextMessage = pendingMessages.shift();
                 if (nextMessage !== undefined) {
                   yield* startTurn(nextMessage);
+                  yield* conversation.read((queued) => queued.indexOf(nextMessage) + 1);
                   for (const message of pendingMessages.splice(0)) yield* steer(message);
                   return;
                 }
@@ -433,7 +504,7 @@ const makeCodexChild = Effect.gen(function* () {
                 sessionId: session.id,
               });
             }
-            // Streaming deltas repeat content that the completed items deliver.
+            // Streaming deltas duplicate the content of completed items.
             if (method.toLowerCase().includes("delta")) return;
             yield* Effect.logDebug("Ignoring an unhandled Codex notification", {
               method,
@@ -467,7 +538,7 @@ const makeCodexChild = Effect.gen(function* () {
         events: Stream.fromQueue(channel.events),
         interrupt,
         result: Deferred.await(channel.result),
-        steer,
+        steer: (message: string) => steer(message).pipe(Effect.asVoid),
         intervene: conversation.intervene,
       } satisfies RunningSession;
     },
@@ -475,5 +546,4 @@ const makeCodexChild = Effect.gen(function* () {
   return CodexChildBackend.of({ launch });
 });
 
-/** Provides Codex coding sessions for tasks delegated by a parent. */
 export const codexChildBackendLayer = Layer.effect(CodexChildBackend, makeCodexChild);

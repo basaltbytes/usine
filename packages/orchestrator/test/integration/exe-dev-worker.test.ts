@@ -18,7 +18,10 @@ import { TranscriptAllQuery } from "@usine/engine/transcript";
 import { Config, DateTime, Effect, FileSystem, Layer, Option, Schema } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { layer as exeDevLayer } from "../../src/exe-dev.ts";
+import { fixedConfigLayer } from "../support/current-instance.ts";
+import { testAppLayer } from "../support/github-app.ts";
 import { alwaysHoldsLayer } from "../support/polling.ts";
+import { claudeLoginLockLayer } from "@usine/executor";
 
 const VmList = Schema.Struct({
   vms: Schema.Array(
@@ -103,6 +106,9 @@ describe("live exe.dev Worker", () => {
       }).pipe(
         Layer.provide(alwaysHoldsLayer),
         Layer.provide(durableAttemptRuntimeLayer(instanceDirectory)),
+        Layer.provide(claudeLoginLockLayer),
+        Layer.provide(fixedConfigLayer(config)),
+        Layer.provide(testAppLayer),
       );
 
       yield* Effect.gen(function* () {

@@ -18,7 +18,7 @@ const host = new RemoteShell({
   destination: "worker.exe.xyz",
 });
 
-/** The one remote command line the SSH client carries after `--`. */
+/** Returns the single remote command line passed to ssh after `--`. */
 const remoteLine = (invocation: HostInvocation): string => {
   const [option, value, destination, separator, line, ...rest] = sshArguments(host, invocation);
   assert.deepStrictEqual(

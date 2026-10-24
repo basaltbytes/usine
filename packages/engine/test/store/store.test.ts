@@ -1,6 +1,7 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 
+import { Agent, AgentName } from "@usine/core/agent";
 import {
   AgentSessionId,
   ChildSession,
@@ -11,7 +12,7 @@ import {
   SessionIdle,
   TextOutput,
 } from "@usine/core/agent/session";
-import { AttemptId, AttemptTask } from "@usine/core/attempt";
+import { type Attempt, AttemptId, AttemptTask } from "@usine/core/attempt";
 import { SalvagePushed, SalvageRef, SalvageRetained } from "@usine/core/attempt/salvage";
 import { CommitSha } from "@usine/core/repository";
 import * as AttemptChannel from "@usine/core/attempt/channel";
@@ -20,12 +21,15 @@ import { Event, DedupKey, EventId } from "@usine/core/event";
 import { ItemKey, ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
+import { OperatorLogin } from "@usine/core/operator";
 import { RunId } from "@usine/core/run";
+import { ApprovalSource, RunApproval } from "@usine/core/run/approval";
 import { StepName } from "@usine/core/step";
-import { StepResult } from "@usine/core/step/result";
+import { Comment, StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
 
 import { DateTime, Effect, FileSystem, Layer, Option, Result, Schema } from "effect";
+import { TestClock } from "effect/testing";
 import { SqlClient } from "effect/unstable/sql";
 
 import { localSqliteLayer } from "../../src/database/local-sqlite.ts";
@@ -136,7 +140,12 @@ describe("run store", () => {
             assert.deepStrictEqual(summaries[0]?.resolvedFailureAttemptId, Option.some(first.id));
             const history = yield* reader.forItems([lifecycleSubmission.itemKey]);
             assert.deepStrictEqual(history[0]?.resolvedFailureAttemptId, Option.some(first.id));
+            // The Run closed when its failed Attempt ended; the retry reopens it.
+            assert.isTrue(Option.isSome(first.endedAt));
+            assert.deepStrictEqual(after.snapshot.closedAt, first.endedAt);
+            assert.deepStrictEqual(history[0]?.closedAt, first.endedAt);
             yield* store.retry(runId);
+            assert.isTrue(Option.isNone((yield* store.snapshot(runId)).closedAt));
             const started = yield* store.beginAttempt(
               runId,
               WorkerName.make("local"),
@@ -161,6 +170,90 @@ describe("run store", () => {
           }).pipe(Effect.provide(services)),
         );
       }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.live("lists the settled Runs that closed last, whenever they opened", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const directory = InstanceDirectory.make(
+        yield* fs.makeTempDirectoryScoped({ prefix: "usine-closed-runs-" }),
+      );
+      yield* Effect.gen(function* () {
+        const store = yield* RunStore;
+        const reader = yield* RunReader;
+        const claim = (name: string) => {
+          const runId = RunId.make(name);
+          return store
+            .recordAndClaim(
+              new Submission({
+                ...lifecycleSubmission,
+                event: new Event({
+                  ...lifecycleSubmission.event,
+                  id: EventId.make(name),
+                  dedupKey: DedupKey.make(`${name}/revision`),
+                }),
+                itemKey: ItemKey.make(name),
+              }),
+              runId,
+            )
+            .pipe(
+              Effect.as(runId),
+              Effect.tap(() => Effect.sleep("5 millis")),
+            );
+        };
+        const begin = (runId: RunId) =>
+          store
+            .beginAttempt(runId, WorkerName.make("local"), Option.none())
+            .pipe(
+              Effect.flatMap((started) =>
+                started._tag === "AttemptStarted"
+                  ? Effect.succeed(started.execution.attempt)
+                  : Effect.die(`Run ${runId} did not start`),
+              ),
+            );
+        const finish = (attempt: Attempt) =>
+          store
+            .finishAttempt(attempt, Result.succeed(new StepResult({ message: "Done", facts: [] })))
+            .pipe(Effect.tap(() => Effect.sleep("5 millis")));
+
+        // The Run that opened first closes last, as a Run retried hours later does.
+        const old = yield* claim("opened-first");
+        const oldAttempt = yield* begin(old);
+        const middle = yield* claim("opened-second");
+        yield* finish(yield* begin(middle));
+        const newest = yield* claim("opened-third");
+        yield* finish(yield* begin(newest));
+        yield* finish(oldAttempt);
+
+        assert.deepStrictEqual(
+          (yield* reader.closed({ limit: 2 })).map(({ run }) => run.id),
+          [old, newest],
+        );
+        // Ordered by opening, the same window misses the Run that closed last.
+        assert.deepStrictEqual(
+          (yield* reader.list({ closedLimit: 2 })).map(({ run }) => run.id),
+          [newest, middle],
+        );
+
+        // A Run canceled before any Attempt closes at the cancel time, not at its open time.
+        const waited = yield* claim("waited-for-approval");
+        yield* finish(yield* begin(yield* claim("finished-meanwhile")));
+        yield* store.cancel(waited);
+        const canceled = yield* store.snapshot(waited);
+        assert.strictEqual(canceled.attempts.length, 0);
+        assert.isTrue(
+          Option.exists(
+            canceled.closedAt,
+            (closedAt) =>
+              DateTime.toEpochMillis(closedAt) > DateTime.toEpochMillis(canceled.run.openedAt),
+          ),
+        );
+        assert.strictEqual((yield* reader.closed({ limit: 1 }))[0]?.run.id, waited);
+      }).pipe(
+        Effect.provide(Layer.mergeAll(RunStore.layer, RunReader.layer)),
+        Effect.provide(localSqliteLayer(directory)),
+      );
+    }).pipe(Effect.provide(NodeServices.layer)),
   );
 
   it.live(
@@ -345,7 +438,7 @@ describe("run store", () => {
             );
           yield* emit(1, "before the restart");
           yield* emit(2, "last before the restart");
-          // The restarted Run's fiber asks again for the open Attempt's parent task, still live.
+          // The restarted Run's fiber checks again whether the open Attempt's parent task is live.
           const reattached = yield* store.beginAttempt(
             runId,
             WorkerName.make("local"),
@@ -538,6 +631,99 @@ describe("run store", () => {
       ),
   );
 
+  it.live("records when an Attempt ends, whether it fails or its Run is canceled", () =>
+    withRunStore(
+      Effect.gen(function* () {
+        const store = yield* RunStore;
+        const runId = RunId.make("attempt-end-times");
+        yield* store.recordAndClaim(lifecycleSubmission, runId);
+        const first = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+        assert(first._tag === "AttemptStarted");
+        assert.deepStrictEqual((yield* store.snapshot(runId)).attempts[0]?.endedAt, Option.none());
+        yield* store.finishAttempt(
+          first.execution.attempt,
+          Result.fail(new AgentFailure({ message: "Checks failed" })),
+        );
+        yield* store.retry(runId);
+        const second = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+        assert(second._tag === "AttemptStarted");
+        assert.deepStrictEqual((yield* store.snapshot(runId)).attempts[1]?.endedAt, Option.none());
+        yield* store.cancel(runId);
+        const attempts = (yield* store.snapshot(runId)).attempts;
+        assert.deepStrictEqual(
+          attempts.map(({ outcome }) => Option.map(outcome, ({ _tag }) => _tag)),
+          [Option.some("Failed"), Option.some("Canceled")],
+        );
+        for (const attempt of attempts) {
+          assert(Option.isSome(attempt.endedAt));
+          assert(DateTime.isGreaterThanOrEqualTo(attempt.endedAt.value, attempt.startedAt));
+        }
+      }),
+    ),
+  );
+
+  it.live(
+    "keeps the Loop's permissions with the Event, so each Attempt and its recovery use them",
+    () =>
+      withRunStore(
+        Effect.gen(function* () {
+          const store = yield* RunStore;
+          const readRun = RunId.make("read-only-review");
+          yield* store.recordAndClaim(
+            new Submission({ ...lifecycleSubmission, permissions: "read" }),
+            readRun,
+          );
+          const writeRun = RunId.make("default-write");
+          yield* store.recordAndClaim(
+            new Submission({
+              ...lifecycleSubmission,
+              event: new Event({
+                ...lifecycleSubmission.event,
+                id: EventId.make("default-write"),
+                dedupKey: DedupKey.make("default/write"),
+              }),
+              itemKey: ItemKey.make("default-write-item"),
+            }),
+            writeRun,
+          );
+          const first = yield* store.beginAttempt(readRun, WorkerName.make("local"), Option.none());
+          assert(first._tag === "AttemptStarted");
+          assert.strictEqual(first.execution.permissions, "read");
+          yield* store.finishAttempt(
+            first.execution.attempt,
+            Result.fail(new AgentFailure({ message: "Checks failed" })),
+          );
+          yield* store.retry(readRun);
+          const retried = yield* store.beginAttempt(
+            readRun,
+            WorkerName.make("local"),
+            Option.none(),
+          );
+          assert(retried._tag === "AttemptStarted");
+          assert.strictEqual(retried.execution.permissions, "read");
+          assert.strictEqual((yield* store.snapshot(readRun)).permissions, "read");
+
+          const written = yield* store.beginAttempt(
+            writeRun,
+            WorkerName.make("local"),
+            Option.none(),
+          );
+          assert(written._tag === "AttemptStarted");
+          assert.strictEqual(written.execution.permissions, "write");
+
+          const candidates = yield* store.salvageCandidates;
+          assert.deepStrictEqual(
+            new Map(candidates.map(({ attemptId, permissions }) => [attemptId, permissions])),
+            new Map([
+              [first.execution.attempt.id, "read"],
+              [retried.execution.attempt.id, "read"],
+              [written.execution.attempt.id, "write"],
+            ]),
+          );
+        }),
+      ),
+  );
+
   it.live("keeps a canceled Run closed when its recovered Attempt reports late", () =>
     withRunStore(
       Effect.gen(function* () {
@@ -603,7 +789,7 @@ describe("run store", () => {
     ),
   );
 
-  it.live("an approved Run is Queued until its attempt starts", () =>
+  it.live("an approved Run records its source once and is Queued until its attempt starts", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const directory = InstanceDirectory.make(
@@ -634,23 +820,45 @@ describe("run store", () => {
       });
       const runId = RunId.make("queued-run");
 
+      // A UI approval without a configured operator login records only its channel.
+      const unnamed = new ApprovalSource({ channel: "ui", approver: Option.none() });
+      const recorded = Option.some(
+        new RunApproval({ approvedAt: approval.receivedAt, source: Option.some(unnamed) }),
+      );
+
       yield* Effect.gen(function* () {
         const store = yield* RunStore;
+        const reader = yield* RunReader;
         const state = () => store.snapshot(runId).pipe(Effect.map(({ run }) => run.state._tag));
         yield* store.recordAndClaim(submission, runId);
         yield* store.parkForApproval(runId);
         assert.strictEqual(yield* state(), "Waiting");
 
-        yield* store.approve(runId, approval);
+        yield* store.approve(runId, approval, unnamed);
         assert.strictEqual(yield* state(), "Queued");
         // Re-delivery of the same approval is a no-op, not a rejection.
-        yield* store.approve(runId, approval);
+        yield* store.approve(
+          runId,
+          approval,
+          new ApprovalSource({
+            channel: "github-ask",
+            approver: Option.some(OperatorLogin.make("Philippe")),
+          }),
+        );
         assert.strictEqual(yield* state(), "Queued");
+        assert.deepStrictEqual((yield* store.snapshot(runId)).approval, recorded);
+        const [listed] = yield* reader.list({ closedLimit: 10 });
+        assert.deepStrictEqual(listed?.approval, recorded);
+        const [history] = yield* reader.forItems([submission.itemKey]);
+        assert.deepStrictEqual(history?.approval, recorded);
 
         const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
         assert.strictEqual(started._tag, "AttemptStarted");
         assert.strictEqual(yield* state(), "Running");
-      }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
+      }).pipe(
+        Effect.provide(Layer.mergeAll(RunStore.layer, RunReader.layer)),
+        Effect.provide(localSqliteLayer(directory)),
+      );
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
@@ -736,6 +944,104 @@ describe("Item projections", () => {
       }).pipe(Effect.provide(services));
     }).pipe(Effect.provide(NodeServices.layer)),
   );
+
+  it.live("records an Item GitHub no longer has as gone until a poll observes it again", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const directory = InstanceDirectory.make(
+        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-item-projection-gone-" }),
+      );
+      const repository = RepositoryName.make("basaltbytes/usine");
+      const item = new ItemProjection({
+        itemKey: ItemKey.make("github:basaltbytes/usine:28"),
+        repository,
+        source: ItemProjectionSource.make("pr"),
+        number: ItemNumber.make(28),
+        contentHash: ItemContentHash.make("content-28"),
+        payload: { number: 28, state: "OPEN" },
+      });
+      const goneAt = DateTime.makeUnsafe("2026-10-19T12:00:00Z");
+      const services = Layer.mergeAll(
+        ItemProjectionReader.layer,
+        ItemProjectionWriter.layer,
+        RunReader.layer,
+      ).pipe(Layer.provide(localSqliteLayer(directory)));
+
+      yield* Effect.gen(function* () {
+        const reader = yield* ItemProjectionReader;
+        const writer = yield* ItemProjectionWriter;
+        const runs = yield* RunReader;
+        assert.strictEqual(yield* writer.markGone(item.itemKey, goneAt), false);
+        yield* writer.upsert(item);
+        const before = yield* runs.revision();
+
+        assert.strictEqual(yield* writer.markGone(item.itemKey, goneAt), true);
+        const gone = new ItemProjection({ ...item, goneAt: Option.some(goneAt) });
+        assert.deepStrictEqual(yield* reader.list(repository, { limit: 10 }), [gone]);
+        assert(Option.isSome(before));
+        assert.deepStrictEqual(yield* runs.revision(), Option.some(before.value + 1));
+        assert.strictEqual(
+          yield* writer.markGone(item.itemKey, DateTime.makeUnsafe("2026-10-19T13:00:00Z")),
+          false,
+        );
+        assert.deepStrictEqual(yield* reader.list(repository, { limit: 10 }), [gone]);
+
+        // The same content observed again means GitHub has the Item after all.
+        assert.strictEqual(yield* writer.upsert(item), true);
+        assert.deepStrictEqual(yield* reader.list(repository, { limit: 10 }), [item]);
+      }).pipe(Effect.provide(services));
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.live("lists the open issues of one repository that are not marked gone", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const directory = InstanceDirectory.make(
+        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-item-projection-open-" }),
+      );
+      const repository = RepositoryName.make("basaltbytes/usine");
+      const projection = (
+        source: "issue" | "pr",
+        number: number,
+        state: string,
+        owner: RepositoryName = repository,
+      ) =>
+        new ItemProjection({
+          itemKey: ItemKey.make(`github:${owner}:${number}`),
+          repository: owner,
+          source: ItemProjectionSource.make(source),
+          number: ItemNumber.make(number),
+          contentHash: ItemContentHash.make(`content-${number}`),
+          payload: { number, state },
+        });
+      const services = Layer.mergeAll(ItemProjectionReader.layer, ItemProjectionWriter.layer).pipe(
+        Layer.provide(localSqliteLayer(directory)),
+      );
+
+      yield* Effect.gen(function* () {
+        const reader = yield* ItemProjectionReader;
+        const writer = yield* ItemProjectionWriter;
+        for (const stored of [
+          projection("issue", 28, "OPEN"),
+          projection("issue", 12, "OPEN"),
+          projection("issue", 29, "CLOSED"),
+          projection("pr", 30, "OPEN"),
+          projection("issue", 31, "OPEN"),
+          projection("issue", 32, "OPEN", RepositoryName.make("basaltbytes/other")),
+        ]) {
+          yield* writer.upsert(stored);
+        }
+        yield* writer.markGone(
+          ItemKey.make(`github:${repository}:31`),
+          DateTime.makeUnsafe("2026-10-20T12:00:00Z"),
+        );
+        assert.deepStrictEqual(yield* reader.openIssues(repository), [
+          ItemNumber.make(12),
+          ItemNumber.make(28),
+        ]);
+      }).pipe(Effect.provide(services));
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
 });
 
 describe("repository label projections", () => {
@@ -813,8 +1119,7 @@ describe("cursor store", () => {
         const restored = yield* store.read(key, TestCursor);
         assert(Option.isSome(restored));
         assert.deepStrictEqual(restored.value, { etag: "second" });
-        // A stored value that no longer decodes must read as absent, never
-        // fail: losing a cursor is always safe.
+        // A stored value that no longer decodes reads as `None` instead of failing.
         assert(Option.isNone(yield* store.read(key, StricterCursor)));
       }).pipe(Effect.provide(CursorStore.layer), Effect.provide(database));
     }).pipe(Effect.provide(NodeServices.layer)),
@@ -936,6 +1241,137 @@ describe("cursor store", () => {
               [fresh.execution.attempt.id]: true,
             },
           );
+        }),
+      ),
+  );
+
+  it.live("records the comments an Attempt posted before it failed, on that Attempt", () =>
+    withRunStore(
+      Effect.gen(function* () {
+        const store = yield* RunStore;
+        const runId = RunId.make("commented");
+        yield* store.recordAndClaim(lifecycleSubmission, runId);
+        const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+        assert(started._tag === "AttemptStarted");
+        const review = new Comment({
+          url: new URL("https://github.com/basaltbytes/usine/pull/71#pullrequestreview-9"),
+          kind: "review",
+          at: Option.some(DateTime.makeUnsafe("2026-10-20T10:00:00.000Z")),
+        });
+        yield* store.recordComments(started.execution.attempt.id, [review]);
+        yield* store.finishAttempt(
+          started.execution.attempt,
+          Result.fail(new AgentFailure({ message: "Checks failed" })),
+        );
+        yield* store.retry(runId);
+        const retried = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+        assert(retried._tag === "AttemptStarted");
+
+        const attempts = (yield* store.snapshot(runId)).attempts;
+        assert.deepStrictEqual(attempts[0]?.comments, [review]);
+        // An Attempt without recorded comments, like every Attempt from before they were stored, reads as empty.
+        assert.deepStrictEqual(attempts[1]?.comments, []);
+        assert(Option.isNone((yield* store.snapshot(runId)).step.result));
+      }),
+    ),
+  );
+
+  // Two Loops' Runs of one Agent on one Item sign their comments the same way (#429).
+  it.effect(
+    "gives an Attempt its own window and the windows of its Agent's other Attempts on its Item that overlap it",
+    () =>
+      withRunStore(
+        Effect.gen(function* () {
+          const store = yield* RunStore;
+          const worker = WorkerName.make("local");
+          const claim = (name: string, loop: string, item: string, agent = testAgent) =>
+            store
+              .recordAndClaim(
+                new Submission({
+                  ...lifecycleSubmission,
+                  event: new Event({
+                    ...lifecycleSubmission.event,
+                    id: EventId.make(name),
+                    dedupKey: DedupKey.make(`${name}/revision`),
+                  }),
+                  loop: LoopName.make(loop),
+                  itemKey: ItemKey.make(item),
+                  agent,
+                }),
+                RunId.make(name),
+              )
+              .pipe(Effect.as(RunId.make(name)));
+          const begin = (runId: RunId) =>
+            store
+              .beginAttempt(runId, worker, Option.none())
+              .pipe(
+                Effect.flatMap((started) =>
+                  started._tag === "AttemptStarted"
+                    ? Effect.succeed(started.execution.attempt)
+                    : Effect.die(`Run ${runId} did not start`),
+                ),
+              );
+          const fail = (attempt: Attempt) =>
+            store.finishAttempt(
+              attempt,
+              Result.fail(new AgentFailure({ message: "Checks failed" })),
+            );
+          // Each window as its Attempt ID and whether it has ended.
+          const windows = (attempt: Attempt) =>
+            store.attemptWindows(attempt.id).pipe(
+              Effect.map(({ own, overlapping }) => ({
+                own: Option.map(own, ({ attemptId, endedAt }) => [
+                  attemptId,
+                  Option.isSome(endedAt),
+                ]),
+                overlapping: overlapping.map(({ attemptId, endedAt }) => [
+                  attemptId,
+                  Option.isSome(endedAt),
+                ]),
+              })),
+            );
+
+          const fix = yield* claim("fix", "fix", "pull-71");
+          const ended = yield* begin(fix);
+          yield* fail(ended);
+          // Another Agent signs differently, so its Attempts are never listed.
+          yield* begin(
+            yield* claim(
+              "review",
+              "review",
+              "pull-71",
+              new Agent({ ...testAgent, name: AgentName.make("reviewer") }),
+            ),
+          );
+          yield* TestClock.adjust("2 seconds");
+          yield* store.retry(fix);
+          const retried = yield* begin(fix);
+          const triage = yield* begin(yield* claim("triage", "triage", "pull-71"));
+          yield* begin(yield* claim("elsewhere", "fix", "issue-12"));
+
+          // The first fix Attempt ended a second before either started.
+          assert.deepStrictEqual(yield* windows(retried), {
+            own: Option.some([retried.id, false]),
+            overlapping: [[triage.id, false]],
+          });
+          assert.deepStrictEqual(yield* windows(triage), {
+            own: Option.some([triage.id, false]),
+            overlapping: [[retried.id, false]],
+          });
+          assert.deepStrictEqual(yield* windows(ended), {
+            own: Option.some([ended.id, true]),
+            overlapping: [],
+          });
+          yield* TestClock.adjust("1 second");
+          yield* fail(triage);
+          assert.deepStrictEqual(yield* windows(retried), {
+            own: Option.some([retried.id, false]),
+            overlapping: [[triage.id, true]],
+          });
+          assert.deepStrictEqual(yield* windows(triage), {
+            own: Option.some([triage.id, true]),
+            overlapping: [[retried.id, false]],
+          });
         }),
       ),
   );

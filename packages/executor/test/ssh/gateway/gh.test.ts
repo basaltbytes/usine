@@ -16,8 +16,8 @@ it("authenticates gh pagination and GitHub URLs through the Gateway socket", asy
     !ghOnPath,
     "gh is not on PATH; this test runs the real gh binary, version 2.83.2 or later",
   );
-  // A short socket path also fits macOS's Unix socket limit. No real credentials
-  // or external requests: the socket serves synthetic GitHub responses only.
+  // A short path fits the macOS Unix socket path limit. The socket serves only synthetic GitHub
+  // responses.
   const directory = await mkdtemp("/tmp/usine-gh-");
   const socket = join(directory, "http.sock");
   const caller = "ugw1.test-claims.test-signature";

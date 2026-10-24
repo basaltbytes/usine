@@ -1,6 +1,6 @@
 import { RepositoryName } from "@usine/core/repository";
-import { WorkerName } from "@usine/core/worker";
-import { Schema } from "effect";
+import { GatewayCredentialKind, WorkerName } from "@usine/core/worker";
+import { Option, Schema } from "effect";
 import {
   HttpApi,
   HttpApiEndpoint,
@@ -17,11 +17,18 @@ import {
   AttachmentId,
 } from "../attachment/attachment.ts";
 import { CallerToken } from "../caller/caller.ts";
+import {
+  type AnthropicProvider,
+  credentialKind,
+  LlmProviderName,
+  type LlmProviders,
+  type OpenAiProvider,
+} from "../llm/llm.ts";
 
 export { AttachmentId, InstallationCredential } from "../attachment/attachment.ts";
 export { CallerToken, GATEWAY_TOKEN_HEADER } from "../caller/caller.ts";
 
-/** What the executor attaches: one Attempt's credential for one Worker and repository, until it expires. */
+/** A request to attach one Attempt's credential for one Worker and repository until it expires. */
 export class AttachRequest extends Schema.Class<AttachRequest>("@usine/gateway/AttachRequest")({
   worker: WorkerName,
   repository: RepositoryName,
@@ -29,7 +36,7 @@ export class AttachRequest extends Schema.Class<AttachRequest>("@usine/gateway/A
   expiresAt: Schema.DateTimeUtc,
 }) {}
 
-/** An attachment as the admin API reports it: everything but the token itself. */
+/** An attachment without its token. */
 export class AttachmentSummary extends Schema.Class<AttachmentSummary>(
   "@usine/gateway/AttachmentSummary",
 )({
@@ -51,29 +58,58 @@ export class AttachmentSummary extends Schema.Class<AttachmentSummary>(
 }
 
 /**
- * The answer to an attach or a renewal: the attachment, and the caller token
- * the Worker VM presents for it. A renewal of the same attachment id answers
- * with the same token.
+ * The response to an attach or renew: the attachment and the Worker VM's caller token.
+ * Renewing the same attachment ID returns the same token.
  */
 export class Attached extends Schema.Class<Attached>("@usine/gateway/Attached")({
   attachment: AttachmentSummary,
   callerToken: CallerToken,
 }) {}
 
-/** The answer to a detach: whether the attachment existed. */
+/** The response to a detach. `detached` is whether the attachment existed. */
 export class Detached extends Schema.Class<Detached>("@usine/gateway/Detached")({
   detached: Schema.Boolean,
 }) {}
 
-/** The attachments in force. */
 export class AttachmentList extends Schema.Class<AttachmentList>("@usine/gateway/AttachmentList")({
   attachments: Schema.Array(AttachmentSummary),
 }) {}
 
+/** An LLM provider the Gateway has a credential for, with the credential kind but not the credential. */
+export class LlmProviderSummary extends Schema.Class<LlmProviderSummary>(
+  "@usine/gateway/LlmProviderSummary",
+)({
+  provider: LlmProviderName,
+  credential: GatewayCredentialKind,
+}) {}
+
+/** The LLM providers the Gateway forwards to, with each credential kind. Providers without a credential aren't listed. */
+export class LlmProviderList extends Schema.Class<LlmProviderList>(
+  "@usine/gateway/LlmProviderList",
+)({
+  providers: Schema.Array(LlmProviderSummary),
+}) {
+  static fromProviders({ anthropic, openai }: LlmProviders): LlmProviderList {
+    const listed = (
+      provider: LlmProviderName,
+      configured: Option.Option<AnthropicProvider | OpenAiProvider>,
+    ) =>
+      Option.toArray(
+        Option.map(
+          configured,
+          (held) => new LlmProviderSummary({ provider, credential: credentialKind(held) }),
+        ),
+      );
+    return new LlmProviderList({
+      providers: [...listed("anthropic", anthropic), ...listed("openai", openai)],
+    });
+  }
+}
+
 /**
- * Requires the gateway's admin token as a bearer token on every admin
- * request; a missing or different token is answered with 401. Clients add the
- * header themselves, for example with `HttpClientRequest.bearerToken`.
+ * Middleware that requires the admin token as a bearer token on every admin request, and
+ * responds with 401 otherwise. Clients add the header themselves, for example with
+ * `HttpClientRequest.bearerToken`.
  */
 export class AdminAuthorization extends HttpApiMiddleware.Service<AdminAuthorization>()(
   "@usine/gateway/AdminAuthorization",
@@ -83,11 +119,10 @@ export class AdminAuthorization extends HttpApiMiddleware.Service<AdminAuthoriza
 const strict = { parseOptions: { onExcessProperty: "error" } } as const;
 
 /**
- * The API the executor calls to attach a GitHub credential to a Worker VM for
- * one repository at the start of an Attempt, renew it with the same id before
- * the token expires, and detach it at cleanup. Attachments are in memory:
- * after a gateway restart the executor's next renewal stores the attachment
- * again under its id, so the Attempt's caller token stays valid.
+ * The admin API the executor uses to attach, renew, and detach a Worker VM's GitHub credential
+ * for an Attempt, and to read the Gateway's LLM provider credential kinds (ADR 0013).
+ * Attachments are in memory; after a Gateway restart, the executor's next renewal re-creates
+ * each one under the same ID, so caller tokens stay valid.
  */
 export const GatewayAdminApi = HttpApi.make("GatewayAdminApi").add(
   HttpApiGroup.make("attachments")
@@ -112,5 +147,8 @@ export const GatewayAdminApi = HttpApi.make("GatewayAdminApi").add(
       }),
       HttpApiEndpoint.get("list", "/v1/attachments", { success: AttachmentList }),
     )
+    .middleware(AdminAuthorization),
+  HttpApiGroup.make("llm")
+    .add(HttpApiEndpoint.get("providers", "/v1/providers", { success: LlmProviderList }))
     .middleware(AdminAuthorization),
 );

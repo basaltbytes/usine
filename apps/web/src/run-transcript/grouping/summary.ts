@@ -1,8 +1,8 @@
+import type { Burst } from "../document/model.ts";
 import { presentTool, type ToolActivity } from "../tool/presentation.ts";
-import type { ToolGroup } from "./model.ts";
 
-// Recognize only complete, familiar invocations. Unrecognized arguments, shell
-// composition and wrappers remain generic; "ran tests" describes an invocation, never its verdict.
+// Returns `tests` or `build` only for known complete invocations; other arguments, shell
+// composition, and wrappers return `command`.
 const commandPurpose = (command: string | undefined): "tests" | "build" | "command" => {
   const invocation = command?.trim().replace(/[ \t]+/gu, " ") ?? "";
   const script =
@@ -30,13 +30,11 @@ const activityKey = (activity: ToolActivity): string => {
   }
 };
 
-// Compare complete recorded paths, even across operations, before shortening them.
-// A shared basename gets enough parent directories to distinguish it. If that
-// cannot fit, the summary uses a distinct-file count instead of ambiguous names.
+// A file name in a summary is the shortest path suffix that is unique among all recorded paths. If
+// it does not fit in `FILE_SUBJECT_LIMIT` characters, the summary shows a file count instead.
 const FILE_SUBJECT_LIMIT = 56;
 const compactPath = (path: string, paths: ReadonlyArray<string>): string | undefined => {
-  // Only complete suffixes within the display budget can become labels. Keeping
-  // one extra character avoids accepting a directory cut off at the window edge.
+  // The extra character detects a directory name cut off at the start of the window.
   const parts = path.slice(-(FILE_SUBJECT_LIMIT + 1)).split("/");
   for (let depth = 1; depth < parts.length; depth++) {
     const suffix = parts.slice(-depth).join("/");
@@ -76,8 +74,7 @@ const fileSummary = (
     names.push(name);
   }
   const subject = names.join(", ");
-  // Keep untrusted file text bounded and single-line. Complete paths remain in
-  // the tool details; unknown command text and other payload fields never enter summaries.
+  // File names come from untrusted payloads, so only short names with safe characters are shown.
   const readable = names.every(
     (name) => name.trim() !== "" && !/[^\p{L}\p{N} ._@()+/-]/u.test(name),
   );
@@ -109,9 +106,9 @@ const activitySummary = (
   }
 };
 
-/** Summarizes recorded actions in first-seen order, with at most two descriptions and a remaining-call count. */
-export const groupSummary = (group: ToolGroup): string => {
-  const activities = group.tools.map((tool) => presentTool(tool).activity);
+/** Returns at most two descriptions in first-seen order, followed by the count of remaining calls. */
+export const burstSummary = (burst: Pick<Burst, "tools">): string => {
+  const activities = burst.tools.map((tool) => presentTool(tool).activity);
   const paths = [
     ...new Set(activities.flatMap((activity) => (activity._tag === "Files" ? activity.paths : []))),
   ];

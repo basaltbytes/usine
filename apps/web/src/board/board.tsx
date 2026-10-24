@@ -2,54 +2,36 @@ import {
   type CollisionDetection,
   DndContext,
   type DragEndEvent,
+  type DragOverEvent,
   DragOverlay,
   type DragStartEvent,
+  type KeyboardCoordinateGetter,
   KeyboardSensor,
   PointerSensor,
   pointerWithin,
   rectIntersection,
   type UniqueIdentifier,
-  useDroppable,
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import {
-  SortableContext,
-  sortableKeyboardCoordinates,
-  useSortable,
-  verticalListSortingStrategy,
-} from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
-import { ArrowUpRightIcon, CaretDownIcon } from "@phosphor-icons/react";
+import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
+import { ArrowUpRightIcon } from "@phosphor-icons/react";
 import { RunId } from "@usine/core/run";
 import type {
-  BoardTaskView,
+  BoardLaneId,
   BoardLaneView,
-  LabelView,
+  BoardTaskView,
+  LoopView,
   ProjectView,
   RunView,
+  StalledItemView,
 } from "@usine/orchestrator/operator";
 import { useState } from "react";
 import { ErrorAlert } from "@/components/error-alert";
-import { LabelBadge } from "@/components/label-badge";
-import { TaskHistory } from "@/components/task-history";
+import { PageHeading } from "@/components/page";
 import { NeedsYouBadge, StatusBadge } from "@/components/status-badge";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -58,32 +40,21 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { cn } from "@/lib/utils";
+import { taskStall } from "../task/model.ts";
+import { DraggedCard, type LabelCatalog } from "./card.tsx";
+import { BoardColumn } from "./column.tsx";
+import { laneFlows } from "./flow.tsx";
 import { type BoardMoveProgress, useBoardMoves } from "./moves.ts";
-import { failureMessage } from "../operator-copy.ts";
 
-export const itemFailure = (item: BoardTaskView): string | null => {
-  const failedRun =
-    [...item.runs].reverse().find(({ canResolveFailure }) => canResolveFailure) ??
-    (item.run?.canResolveFailure ? item.run : null);
-  if (failedRun === null) return null;
-  const attempts = failedRun.attempts;
-  for (let index = attempts.length - 1; index >= 0; index -= 1) {
-    const outcome = attempts[index]?.outcome;
-    if (outcome?._tag === "Failed") return failureMessage(outcome.failure);
-  }
-  return null;
-};
-
-/** The fallback lane collects every unrouted Item and comes first, so a drag into an
- * authored lane does not cross every column. Authored and proposed lanes keep their
- * configured order. */
+/** Returns writable lanes first, then read-only lanes, each in configured order, with the fallback
+ * lane last. */
 export const orderLanes = (lanes: ReadonlyArray<BoardLaneView>): ReadonlyArray<BoardLaneView> => [
+  ...lanes.filter(({ _tag }) => _tag === "WritableBoardLane"),
+  ...lanes.filter(({ _tag, origin }) => _tag !== "WritableBoardLane" && origin !== "fallback"),
   ...lanes.filter(({ origin }) => origin === "fallback"),
-  ...lanes.filter(({ origin }) => origin !== "fallback"),
 ];
 
-/** A drop lands on a lane or on one of its cards; either way the lane is the target. */
+/** Returns the lane of a drop target, which is either a lane or one of its cards. */
 export const laneUnder = (
   over: UniqueIdentifier,
   lanes: ReadonlyArray<BoardLaneView>,
@@ -91,14 +62,45 @@ export const laneUnder = (
   lanes.find((lane) => lane.id === over) ??
   lanes.find((lane) => lane.items.some(({ itemKey }) => itemKey === over));
 
-/** The lane under the pointer wins; corner distance would hand a tall empty lane's drop to the
- * cards of the lane next to it. Intersection is the fallback for keyboard moves. */
+/** Uses the lane under the pointer, or under the dragged card's top-left corner for a keyboard drag,
+ * then falls back to intersection. Corner distance isn't used because it assigns a drop on a tall
+ * empty lane to the next lane's cards. */
 const dropCollision: CollisionDetection = (args) => {
   const within = pointerWithin(args);
-  return within.length > 0 ? within : rectIntersection(args);
+  if (within.length > 0) return within;
+  if (args.pointerCoordinates === null) {
+    const corner = pointerWithin({
+      ...args,
+      pointerCoordinates: { x: args.collisionRect.left + 1, y: args.collisionRect.top + 1 },
+    });
+    if (corner.length > 0) return corner;
+  }
+  return rectIntersection(args);
 };
 
-/** Shows a move in its target lane while the label write and the next poll are in flight. */
+/** Returns a keyboard coordinate getter: Left and Right move a drag to the top of the nearest lane
+ * on that side that accepts drops; Up and Down move it between cards. */
+const laneKeyboardCoordinates =
+  (lanes: ReadonlyArray<BoardLaneView>): KeyboardCoordinateGetter =>
+  (event, args) => {
+    const right = event.code === "ArrowRight";
+    if (!right && event.code !== "ArrowLeft") return sortableKeyboardCoordinates(event, args);
+    event.preventDefault();
+    const { collisionRect, droppableRects, droppableContainers } = args.context;
+    if (collisionRect === null) return undefined;
+    const ids = new Set<UniqueIdentifier>(lanes.map(({ id }) => id));
+    const [next] = droppableContainers
+      .getEnabled()
+      .flatMap(({ id }) => {
+        const rect = droppableRects.get(id);
+        return rect !== undefined && ids.has(id) ? [rect] : [];
+      })
+      .filter(({ left }) => (right ? left > collisionRect.left : left < collisionRect.left))
+      .sort((a, b) => (right ? a.left - b.left : b.left - a.left));
+    return next === undefined ? undefined : { x: next.left, y: next.top };
+  };
+
+/** Returns `lanes` with the moved card in its target lane, for display while the move is pending. */
 const applyMove = (
   lanes: ReadonlyArray<BoardLaneView>,
   move: BoardMoveProgress,
@@ -108,8 +110,7 @@ const applyMove = (
   const laneLabels = new Set(
     lanes.flatMap((lane) => (lane._tag === "WritableBoardLane" ? lane.labels : [])),
   );
-  // Placement and progress explain the pending destination; stale source-lane
-  // chips would contradict it. Other labels still come from the live snapshot.
+  // Removes the stale lane labels from the moved card; other labels come from the live snapshot.
   const card = { ...moved, labels: moved.labels.filter((label) => !laneLabels.has(label)) };
   return lanes.map((lane) => {
     const items = lane.items.filter(({ itemKey }) => itemKey !== move.itemKey);
@@ -117,250 +118,7 @@ const applyMove = (
   });
 };
 
-type LabelCatalog = ReadonlyMap<string, LabelView>;
-
-/** The keyboard and assistive-technology path for a lane move; drag stays the fast path. */
-interface MoveMenu {
-  readonly targets: ReadonlyArray<BoardLaneView>;
-  readonly disabled: boolean;
-  readonly onMove: (item: BoardTaskView, lane: BoardLaneView) => void;
-  readonly phase?: BoardMoveProgress["phase"] | undefined;
-}
-
-const CardBody = ({
-  item,
-  catalog,
-  openRun,
-  move,
-}: {
-  readonly item: BoardTaskView;
-  readonly catalog: LabelCatalog;
-  readonly openRun: (runId: RunId) => void;
-  readonly move?: MoveMenu;
-}) => {
-  const failure = itemFailure(item);
-  const run = item.run;
-  const visibleRuns = item.runs.filter((run) => run.canApprove || run.canResolveFailure);
-  const moveTargets = move?.targets ?? [];
-  const titleClass =
-    "h-auto justify-start p-0 text-left text-xs/relaxed font-medium whitespace-normal text-card-foreground hover:text-primary";
-  return (
-    <>
-      <CardHeader className="gap-0.5">
-        <CardDescription className="font-mono">
-          {item.items.map((member) => (
-            <a
-              key={member.itemKey}
-              href={member.url}
-              target="_blank"
-              rel="noreferrer"
-              draggable={false}
-              className="mr-2 hover:text-primary"
-              title={member.title}
-            >
-              {member.kind === "pr" ? "PR" : "Issue"} #{member.number}
-            </a>
-          ))}
-        </CardDescription>
-        <CardTitle className="font-sans text-xs/relaxed">
-          {run === null ? (
-            <Button
-              variant="link"
-              className={titleClass}
-              nativeButton={false}
-              render={<a href={item.url} target="_blank" rel="noreferrer" draggable={false} />}
-            >
-              {item.title}
-            </Button>
-          ) : (
-            <Button variant="link" className={titleClass} onClick={() => openRun(run.id)}>
-              {item.title}
-            </Button>
-          )}
-        </CardTitle>
-      </CardHeader>
-      {(item.labels.length > 0 ||
-        item.runs.length > 0 ||
-        item.needsYou ||
-        item.conflicting ||
-        failure !== null ||
-        move?.phase !== undefined ||
-        moveTargets.length > 0) && (
-        <CardContent className="flex flex-col items-start gap-2">
-          {item.labels.length > 0 && (
-            <div className="flex flex-wrap gap-1">
-              {item.labels.map((label) => (
-                <LabelBadge key={label} name={label} label={catalog.get(label)} />
-              ))}
-            </div>
-          )}
-          <TaskHistory runs={item.runs} openRun={openRun} />
-          {move?.phase !== undefined && (
-            <p role="status" className="text-muted-foreground">
-              {move.phase === "saving" ? "Moving…" : "Saved on GitHub · syncing…"}
-            </p>
-          )}
-          {item.needsYou && <NeedsYouBadge />}
-          {item.conflicting && (
-            <Badge variant="outline" className="border-destructive/40 font-mono text-destructive">
-              Conflicts with base
-            </Badge>
-          )}
-          {failure !== null && <p className="text-destructive wrap-anywhere">{failure}</p>}
-          {visibleRuns.some(({ state }) => state === "Waiting") && (
-            <p className="text-needs-you">A Run in this task is waiting for approval.</p>
-          )}
-          {item.runs.some(({ state }) => state === "Queued") && (
-            <p className="text-muted-foreground">Approved. Waiting for a free worker slot.</p>
-          )}
-          {move !== undefined && moveTargets.length > 0 && (
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                disabled={move.disabled}
-                render={<Button variant="ghost" size="sm" className="-ml-2" />}
-                aria-label={`Move ${item.kind === "pr" ? "PR" : "issue"} #${item.number} to a lane`}
-              >
-                Move {item.kind === "pr" ? "PR" : "issue"} #{item.number} to
-                <CaretDownIcon aria-hidden="true" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start">
-                {moveTargets.map((lane) => (
-                  <DropdownMenuItem key={lane.id} onClick={() => move.onMove(item, lane)}>
-                    {lane.name}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-        </CardContent>
-      )}
-    </>
-  );
-};
-
-const cardClass = (needsYou: boolean) => cn("gap-2.5", needsYou && "ring-needs-you/50");
-
-const BoardCard = ({
-  item,
-  catalog,
-  disabled,
-  openRun,
-  move,
-}: {
-  readonly item: BoardTaskView;
-  readonly catalog: LabelCatalog;
-  readonly disabled: boolean;
-  readonly openRun: (runId: RunId) => void;
-  readonly move: MoveMenu;
-}) => {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: item.itemKey,
-    disabled,
-  });
-  return (
-    <Card
-      ref={setNodeRef}
-      size="sm"
-      style={{ transform: CSS.Translate.toString(transform), transition }}
-      className={cn(
-        cardClass(item.needsYou),
-        !disabled && "cursor-grab touch-none",
-        isDragging && "opacity-40",
-      )}
-      {...(!disabled && attributes)}
-      {...(!disabled && listeners)}
-    >
-      <CardBody item={item} catalog={catalog} openRun={openRun} move={move} />
-    </Card>
-  );
-};
-
-const BoardLane = ({
-  lane,
-  lanes,
-  catalog,
-  dragging,
-  pending,
-  moves,
-  openRun,
-  onMove,
-}: {
-  readonly lane: BoardLaneView;
-  readonly lanes: ReadonlyArray<BoardLaneView>;
-  readonly catalog: LabelCatalog;
-  readonly dragging: boolean;
-  readonly pending: boolean;
-  readonly moves: ReadonlyArray<BoardMoveProgress>;
-  readonly openRun: (runId: RunId) => void;
-  readonly onMove: (item: BoardTaskView, lane: BoardLaneView) => void;
-}) => {
-  const move: MoveMenu = {
-    targets: lanes.filter((other) => other._tag === "WritableBoardLane" && other.id !== lane.id),
-    disabled: pending,
-    onMove,
-  };
-  const writable = lane._tag === "WritableBoardLane";
-  const { setNodeRef, isOver } = useDroppable({ id: lane.id, disabled: !writable || pending });
-  return (
-    <Card
-      ref={setNodeRef}
-      size="sm"
-      aria-label={`${lane.name} lane`}
-      className={cn(
-        "w-72 shrink-0 bg-muted/30 transition-shadow",
-        dragging && writable && "ring-run-active/50",
-        isOver && writable && "ring-run-active",
-      )}
-    >
-      <CardHeader>
-        <CardTitle className="wrap-anywhere">{lane.name}</CardTitle>
-        <CardDescription>
-          {lane.items.length} task{lane.items.length === 1 ? "" : "s"}
-        </CardDescription>
-        {lane.sources.length > 0 && (
-          <CardAction className="flex flex-wrap justify-end gap-1">
-            {lane.sources.map((source) =>
-              "label" in source ? (
-                <LabelBadge
-                  key={`label:${source.label}`}
-                  name={source.label}
-                  label={catalog.get(source.label)}
-                />
-              ) : (
-                <Badge variant="secondary" className="font-mono" key={`state:${source.state}`}>
-                  {source.state}
-                </Badge>
-              ),
-            )}
-          </CardAction>
-        )}
-      </CardHeader>
-      <CardContent className="flex min-h-40 flex-col gap-2">
-        <SortableContext
-          items={lane.items.map(({ itemKey }) => itemKey)}
-          strategy={verticalListSortingStrategy}
-        >
-          {lane.items.length === 0 && <p className="text-muted-foreground">No tasks.</p>}
-          {lane.items.map((item) => {
-            const phase = moves.find(({ itemKey }) => itemKey === item.itemKey)?.phase;
-            return (
-              <BoardCard
-                key={item.itemKey}
-                item={item}
-                catalog={catalog}
-                disabled={pending || phase !== undefined || move.targets.length === 0}
-                openRun={openRun}
-                move={{ ...move, disabled: pending || phase !== undefined, phase }}
-              />
-            );
-          })}
-        </SortableContext>
-      </CardContent>
-    </Card>
-  );
-};
-
-/** Runs whose Item has no card, such as schedule Runs and quarantined Items, so they stay reachable. */
+/** Returns the Runs whose Item has no card, such as schedule Runs and Runs on quarantined Items. */
 export const runsWithoutCard = (project: ProjectView): ReadonlyArray<RunView> => {
   const carded = new Set(
     project.board.lanes.flatMap(({ items }) =>
@@ -377,11 +135,12 @@ const UncardedRuns = ({
   readonly runs: ReadonlyArray<RunView>;
   readonly openRun: (runId: RunId) => void;
 }) => (
-  <Card className="max-w-5xl">
+  // Sticks to the left edge of the Board's scroll area and is no wider than the scroll container.
+  <Card className="sticky left-4 w-[min(64rem,calc(100cqw-2rem))] md:left-5 md:w-[min(64rem,calc(100cqw-2.5rem))]">
     <CardHeader>
       <CardTitle>Runs without a card</CardTitle>
       <CardDescription>
-        {runs.length} run{runs.length === 1 ? "" : "s"} whose Item has no card on this board
+        {runs.length} run{runs.length === 1 ? "" : "s"} with no card on this board
       </CardDescription>
     </CardHeader>
     <CardContent>
@@ -398,9 +157,9 @@ const UncardedRuns = ({
         <TableBody>
           {runs.map((run) => (
             <TableRow key={run.id} className="cursor-pointer" onClick={() => openRun(run.id)}>
-              <TableCell className="font-mono font-medium">{run.loop}</TableCell>
-              <TableCell className="font-mono">{run.agent}</TableCell>
-              <TableCell className="max-w-64 truncate font-mono">{run.itemKey}</TableCell>
+              <TableCell className="font-medium">{run.loop}</TableCell>
+              <TableCell>{run.agent}</TableCell>
+              <TableCell className="max-w-64 truncate font-mono text-xs">{run.itemKey}</TableCell>
               <TableCell>
                 <StatusBadge state={run.state} />
               </TableCell>
@@ -425,90 +184,135 @@ const UncardedRuns = ({
   </Card>
 );
 
+interface DragSource {
+  readonly item: BoardTaskView;
+  readonly lane: BoardLaneView;
+}
+
+/**
+ * `stalled` is the desk's list of stalled Items, whose reasons are shown on their cards; `disabled`
+ * turns off moves and actions during setup.
+ */
 export const ProjectBoard = ({
   project,
+  loops,
+  stalled,
   disabled,
   openRun,
 }: {
   readonly project: ProjectView;
+  readonly loops: ReadonlyArray<LoopView>;
+  readonly stalled: ReadonlyArray<StalledItemView>;
   readonly disabled: boolean;
   readonly openRun: (runId: RunId) => void;
 }) => {
-  const [active, setActive] = useState<BoardTaskView | null>(null);
+  const [active, setActive] = useState<DragSource | null>(null);
+  const [over, setOver] = useState<BoardLaneId | null>(null);
   const { moves, moveItem, isPending, error } = useBoardMoves(project);
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  );
   const uncarded = runsWithoutCard(project);
   const lanes = moves.reduce(applyMove, orderLanes(project.board.lanes));
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: laneKeyboardCoordinates(lanes) }),
+  );
+  const flows = laneFlows(lanes, loops);
+  const itemCount = lanes.reduce((total, lane) => total + lane.items.length, 0);
+  const stallOf = (task: BoardTaskView): StalledItemView | null => taskStall(stalled, task);
   const catalog: LabelCatalog = new Map(project.labels.map((label) => [label.name, label]));
   const pending = disabled || isPending;
-  const onDragStart = ({ active: dragged }: DragStartEvent) => {
-    const item = lanes.flatMap(({ items }) => items).find(({ itemKey }) => itemKey === dragged.id);
-    setActive(item ?? null);
-  };
-  const onDragEnd = ({ over }: DragEndEvent) => {
+  const endDrag = () => {
     setActive(null);
-    if (over === null || active === null) return;
-    const target = laneUnder(over.id, lanes);
-    if (target !== undefined) moveItem(active, target);
+    setOver(null);
+  };
+  const onDragStart = ({ active: dragged }: DragStartEvent) => {
+    const lane = lanes.find(({ items }) => items.some(({ itemKey }) => itemKey === dragged.id));
+    const item = lane?.items.find(({ itemKey }) => itemKey === dragged.id);
+    setActive(lane === undefined || item === undefined ? null : { item, lane });
+  };
+  const onDragOver = ({ over: target }: DragOverEvent) =>
+    setOver(target === null ? null : (laneUnder(target.id, lanes)?.id ?? null));
+  const onDragEnd = ({ over: target }: DragEndEvent) => {
+    endDrag();
+    if (target === null || active === null) return;
+    const lane = laneUnder(target.id, lanes);
+    if (lane !== undefined) moveItem(active.item, lane);
   };
   return (
-    <main className="flex flex-col gap-4 px-4 py-6 sm:px-6">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="font-heading text-xl font-medium wrap-anywhere">{project.repository}</h1>
+    <div className="flex min-h-96 flex-1 flex-col gap-4 pt-5">
+      <PageHeading
+        title={project.repository}
+        counts={`${lanes.length} lane${lanes.length === 1 ? "" : "s"}, ${itemCount} item${itemCount === 1 ? "" : "s"}`}
+        className="px-4 md:px-5"
+      >
         {project.status === "needs-you" && <NeedsYouBadge />}
-      </header>
+      </PageHeading>
       {project.board.lanes.some(({ origin }) => origin === "proposed") && (
-        <p className="max-w-3xl text-muted-foreground">
-          Proposed lanes are read-only. To enable moves, configure this project’s lanes in{" "}
-          <code>repos[].lanes</code> in <code>usine.yaml</code> with the labels the Board may
-          exchange, then restart <code>usine up</code>.
+        <p className="mx-4 max-w-3xl text-muted-foreground md:mx-5">
+          Proposed lanes are read-only. To enable moves, add lanes with labels for this project
+          under <code>repos[].lanes</code> in <code>usine.yaml</code>, then reload the configuration
+          from Configuration &gt; Loops.
         </p>
       )}
       {project.board.failures.length > 0 && (
         <ErrorAlert
-          className="max-w-3xl"
-          title={`${project.board.failures.length} Item projection${project.board.failures.length === 1 ? " was" : "s were"} quarantined`}
+          className="mx-4 max-w-3xl md:mx-5"
+          title={`${project.board.failures.length} ${project.board.failures.length === 1 ? "item" : "items"} not shown on the board`}
           message={project.board.failures.map((failure) => failure.message).join("\n")}
         />
       )}
+      {error !== null && <ErrorAlert className="mx-4 max-w-3xl md:mx-5" message={error.message} />}
       <DndContext
         sensors={sensors}
         collisionDetection={dropCollision}
         onDragStart={onDragStart}
+        onDragOver={onDragOver}
         onDragEnd={onDragEnd}
-        onDragCancel={() => setActive(null)}
+        onDragCancel={endDrag}
       >
         <div
-          className="flex gap-3 overflow-x-auto pb-3 overscroll-x-contain scrollbar-thin"
+          className="@container min-h-0 flex-1 overflow-auto overscroll-contain"
           aria-label={`${project.repository} project board`}
         >
-          {lanes.map((lane) => (
-            <BoardLane
-              key={lane.id}
-              lane={lane}
-              lanes={lanes}
-              catalog={catalog}
-              dragging={active !== null}
-              pending={pending}
-              moves={moves}
-              openRun={openRun}
-              onMove={moveItem}
-            />
-          ))}
+          <div className="flex w-max min-w-full flex-col gap-6 px-4 pb-4 md:px-5">
+            <div className="flex gap-3">
+              {lanes.map((lane) => (
+                <BoardColumn
+                  key={lane.id}
+                  lane={lane}
+                  lanes={lanes}
+                  flow={flows.get(lane.id)}
+                  catalog={catalog}
+                  targeted={
+                    active !== null &&
+                    over === lane.id &&
+                    lane.id !== active.lane.id &&
+                    lane._tag === "WritableBoardLane"
+                  }
+                  pending={pending}
+                  readOnly={disabled}
+                  moves={moves}
+                  stallOf={stallOf}
+                  openRun={openRun}
+                  onMove={moveItem}
+                  repository={project.repository}
+                />
+              ))}
+            </div>
+            {uncarded.length > 0 && <UncardedRuns runs={uncarded} openRun={openRun} />}
+          </div>
         </div>
         <DragOverlay>
           {active !== null && (
-            <Card size="sm" className={cn(cardClass(active.needsYou), "cursor-grabbing shadow-lg")}>
-              <CardBody item={active} catalog={catalog} openRun={openRun} />
-            </Card>
+            <DraggedCard
+              item={active.item}
+              lane={active.lane}
+              catalog={catalog}
+              repository={project.repository}
+              stall={stallOf(active.item)}
+            />
           )}
         </DragOverlay>
       </DndContext>
-      {error !== null && <ErrorAlert className="max-w-3xl" message={error.message} />}
-      {uncarded.length > 0 && <UncardedRuns runs={uncarded} openRun={openRun} />}
-    </main>
+    </div>
   );
 };

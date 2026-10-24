@@ -9,35 +9,38 @@ import {
   ChildSessionCount,
 } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
+import { WorkerName } from "@usine/core/worker";
 import {
   AgentFailure,
   AttemptFailure,
+  BlockedFailure,
   ChildSessionBudgetFailure,
   InfraFailure,
+  QuestionFailure,
 } from "@usine/core/attempt/failure";
-import { Context, Effect, Match, Schema, Scope, Stream } from "effect";
+import { Context, Effect, Match, Option, Schema, Scope, Stream } from "effect";
 import { ChildHost } from "./child-host/child-host.ts";
 
-/** The checkout directory one Attempt runs in. */
+/** The checkout directory of an Attempt. */
 export const WorkingDirectory = Schema.NonEmptyString.pipe(Schema.brand("AgentWorkingDirectory"));
 export type WorkingDirectory = typeof WorkingDirectory.Type;
 
-/** Work delegated to one child, with its assigned identity and the checkout it shares with the parent. */
+/** A task delegated to one child, with its session and the checkout it shares with the parent. */
 export class ChildRequest extends Schema.Class<ChildRequest>("@usine/agents/ChildRequest")({
   session: ChildSession,
-  /** The checkout, on the machine `host` names. */
+  /** The checkout directory on `host`. */
   cwd: WorkingDirectory,
   prompt: Schema.NonEmptyString,
   /**
-   * The complete environment of the child's process and every command it runs:
-   * the Worker's allowlisted variables plus the Attempt's credential
-   * configuration. Nothing is inherited from the process that launches the
-   * child (ADR 0011). On a `RemoteShell` host they are exported on top of the
-   * remote machine's own environment, which holds no orchestrator secret.
+   * The complete environment of the child process and its commands: the Worker's allowlisted
+   * variables plus the Attempt's credential configuration, with nothing inherited from the launching
+   * process (ADR 0011). On a `RemoteShell` host, the variables are exported on top of the remote
+   * environment, which contains no orchestrator secret.
    */
   environment: Schema.Record(Schema.String, Schema.String),
-  /** Where the child's process runs. */
   host: ChildHost,
+  /** The Worker that `host` runs on; Claude children on one Worker share its Claude login. */
+  worker: WorkerName,
 }) {}
 
 /** The final message a parent or child session returns. */
@@ -45,7 +48,7 @@ export class SessionResult extends Schema.Class<SessionResult>("@usine/agents/Se
   message: Schema.NonEmptyString,
 }) {}
 
-/** The rostered model id is well-formed but the SDK's registry does not list it. */
+/** An error for a well-formed rostered model ID that the SDK's registry does not list. */
 export class UnknownModelError extends Schema.TaggedError<UnknownModelError>(
   "@usine/agents/UnknownModelError",
 )("UnknownModelError", {
@@ -54,7 +57,7 @@ export class UnknownModelError extends Schema.TaggedError<UnknownModelError>(
   message: Schema.NonEmptyString,
 }) {}
 
-/** The credential cannot spend from the billing pool this session needs. */
+/** An error for a credential that cannot use the billing pool the session needs. */
 export class PoolUnavailableError extends Schema.TaggedError<PoolUnavailableError>(
   "@usine/agents/PoolUnavailableError",
 )("PoolUnavailableError", {
@@ -64,7 +67,7 @@ export class PoolUnavailableError extends Schema.TaggedError<PoolUnavailableErro
   message: Schema.NonEmptyString,
 }) {}
 
-/** The model exists but does not support the rostered reasoning effort. */
+/** An error for a model that does not support the rostered reasoning effort. */
 export class UnsupportedEffortError extends Schema.TaggedError<UnsupportedEffortError>(
   "@usine/agents/UnsupportedEffortError",
 )("UnsupportedEffortError", {
@@ -75,12 +78,25 @@ export class UnsupportedEffortError extends Schema.TaggedError<UnsupportedEffort
 }) {}
 
 /**
- * The reserved opening of a final answer that reports an unresolved blocker.
- * Text after the marker is the blocker; the session fails with `AgentResultError`.
+ * The reserved prefix of a final answer that reports an unresolved blocker. The session fails with
+ * `AgentBlockedError`, whose message is the text after the marker.
  */
 export const BLOCKED_MARKER = "[usine:blocked]";
 
-/** The session finished and reported that the work itself failed. */
+/**
+ * The reserved prefix of a final answer that asks the operator for a decision. The session fails
+ * with `AgentQuestionError`, whose message is the text after the marker.
+ */
+export const QUESTION_MARKER = "[usine:question]";
+
+/**
+ * The reserved prefix of a report that relays a harness failure, such as a child's failed Codex
+ * turn, to the parent. The session fails with `AgentResultError`, which ends the Attempt with
+ * `AgentFailure`.
+ */
+export const FAILED_MARKER = "[usine:failed]";
+
+/** An error for a session that finished and reported that the work failed. */
 export class AgentResultError extends Schema.TaggedError<AgentResultError>(
   "@usine/agents/AgentResultError",
 )("AgentResultError", {
@@ -88,7 +104,23 @@ export class AgentResultError extends Schema.TaggedError<AgentResultError>(
   message: Schema.NonEmptyString,
 }) {}
 
-/** The Pi parent asked for one more child than this Attempt's budget allows. */
+/** An error for a session that finished with the blocker marker; `message` is the blocker text. */
+export class AgentBlockedError extends Schema.TaggedError<AgentBlockedError>(
+  "@usine/agents/AgentBlockedError",
+)("AgentBlockedError", {
+  sessionId: Schema.OptionFromNullOr(AgentSessionId),
+  message: Schema.NonEmptyString,
+}) {}
+
+/** An error for a session that finished with a question for the operator; `message` is the question. */
+export class AgentQuestionError extends Schema.TaggedError<AgentQuestionError>(
+  "@usine/agents/AgentQuestionError",
+)("AgentQuestionError", {
+  sessionId: Schema.OptionFromNullOr(AgentSessionId),
+  message: Schema.NonEmptyString,
+}) {}
+
+/** An error for a Pi parent that requested more children than the Attempt's budget allows. */
 export class ChildSessionBudgetExceededError extends Schema.TaggedError<ChildSessionBudgetExceededError>(
   "@usine/agents/ChildSessionBudgetExceededError",
 )("ChildSessionBudgetExceededError", {
@@ -101,7 +133,7 @@ export const SESSION_OPERATIONS = ["launch", "stream", "steer", "interrupt"] as 
 export const SessionOperation = Schema.Literals(SESSION_OPERATIONS);
 export type SessionOperation = typeof SessionOperation.Type;
 
-/** The SDK or its process failed after the model and harness were validated. */
+/** An error for an SDK or process failure after the model and harness were validated. */
 export class SessionOperationError extends Schema.TaggedError<SessionOperationError>(
   "@usine/agents/SessionOperationError",
 )("SessionOperationError", {
@@ -111,21 +143,80 @@ export class SessionOperationError extends Schema.TaggedError<SessionOperationEr
   cause: Schema.Defect(),
 }) {}
 
-/** A session could not start, continue, or finish its work; the failure determines whether retry needs an operator. */
+/** Any error that stops a session from starting, continuing, or finishing; the error type determines whether a retry needs the operator. */
 export const AgentSessionError = Schema.Union([
   UnknownModelError,
   PoolUnavailableError,
   UnsupportedEffortError,
   AgentResultError,
+  AgentBlockedError,
+  AgentQuestionError,
   ChildSessionBudgetExceededError,
   SessionOperationError,
 ]);
 export type AgentSessionError = typeof AgentSessionError.Type;
 
 /**
- * Maps session errors onto the retry taxonomy: an SDK or process failure is
- * retryable infrastructure, while a bad roster spec or the agent failing its
- * own work waits for the operator (ADR 0002).
+ * A report that a session ends with: a blocker or question marked in its final answer, or a failure
+ * reported by its harness. A child relays each report to the parent with the same marker.
+ */
+export type AgentReport = AgentResultError | AgentBlockedError | AgentQuestionError;
+
+/**
+ * Returns the report of a final answer that starts with `[usine:blocked]`, `[usine:question]`, or
+ * `[usine:failed]`; the details can follow on the same line or the next. Returns `None` if the answer
+ * does not start with a marker.
+ */
+export const reportedOutcome = (
+  sessionId: Option.Option<AgentSessionId>,
+  answer: string,
+): Option.Option<AgentReport> => {
+  const trimmed = answer.trim();
+  if (trimmed.startsWith(QUESTION_MARKER)) {
+    return Option.some(
+      new AgentQuestionError({
+        sessionId,
+        message:
+          trimmed.slice(QUESTION_MARKER.length).trim() ||
+          "Agent asked the operator a question without writing it.",
+      }),
+    );
+  }
+  if (trimmed.startsWith(BLOCKED_MARKER)) {
+    return Option.some(
+      new AgentBlockedError({
+        sessionId,
+        message:
+          trimmed.slice(BLOCKED_MARKER.length).trim() ||
+          "Agent reported an unresolved blocker without details.",
+      }),
+    );
+  }
+  if (trimmed.startsWith(FAILED_MARKER)) {
+    return Option.some(
+      new AgentResultError({
+        sessionId,
+        message:
+          trimmed.slice(FAILED_MARKER.length).trim() || "Agent reported a failure without details.",
+      }),
+    );
+  }
+  return Option.none();
+};
+
+/** Returns the final answer that relays `report`, starting with its marker. */
+export const reportText = (report: AgentReport): string => {
+  const marker = Match.valueTags(report, {
+    AgentResultError: () => FAILED_MARKER,
+    AgentBlockedError: () => BLOCKED_MARKER,
+    AgentQuestionError: () => QUESTION_MARKER,
+  });
+  return `${marker}\n${report.message}`;
+};
+
+/**
+ * Maps a session error to an Attempt failure: SDK and process failures are retryable infrastructure
+ * failures; roster errors and Agent-reported failures wait for the operator (ADR 0002).
  */
 export const toAttemptFailure = (error: AgentSessionError): AttemptFailure =>
   Match.valueTags(error, {
@@ -135,51 +226,80 @@ export const toAttemptFailure = (error: AgentSessionError): AttemptFailure =>
     PoolUnavailableError: ({ message }) => new AgentFailure({ message }),
     UnsupportedEffortError: ({ message }) => new AgentFailure({ message }),
     AgentResultError: ({ message }) => new AgentFailure({ message }),
+    AgentBlockedError: ({ message }) => new BlockedFailure({ message }),
+    AgentQuestionError: ({ message }) => new QuestionFailure({ question: message }),
     ChildSessionBudgetExceededError: ({ attemptedChildren, maxChildren }) =>
       new ChildSessionBudgetFailure({ attemptedChildren, maxChildren }),
   });
 
-/** A live parent or child session whose activity can be observed while its work continues. */
+/** A running parent or child session. */
 export interface RunningSession {
   readonly session: AgentSession;
-  /** Activity to record in the Attempt transcript while waiting for the result. */
+  /** The session activity to record in the Attempt transcript. */
   readonly events: Stream.Stream<AgentSessionEvent, AgentSessionError>;
-  /** Waits for the final message or the failure that ends this session's work. */
+  /** Waits for the session's final message, or fails with the error that ended it. */
   readonly result: Effect.Effect<SessionResult, AgentSessionError>;
   /** Adds operator guidance to the running session without creating a new Attempt. */
   readonly steer: (message: string) => Effect.Effect<void, AgentSessionError>;
-  /** Requests that this session stop its current work. */
+  /** Requests that the session stop its current work. */
   readonly interrupt: Effect.Effect<void, AgentSessionError>;
-  /** Applies a nonterminal operator action; child messages hold completion until release. */
+  /**
+   * Applies a nonterminal operator action; after a child message, the session does not complete
+   * until release. If the harness reads the message only at its next boundary, returns `queued` and
+   * calls `onDelivery` once: with the session state when it is read, or `None` if the session stops
+   * first.
+   */
   readonly intervene: (
     action: AttemptChannel.OperatorAction,
+    onDelivery: OnDelivery,
   ) => Effect.Effect<AttemptChannel.InterventionState, AgentSessionError>;
 }
 
-/** Launches coding sessions for tasks delegated by an Attempt's parent. */
+/** A callback, called once for a queued operator message with the session state when it was read, or `None` if the session stopped first. */
+export type OnDelivery = (
+  delivered: Option.Option<AttemptChannel.InterventionState>,
+) => Effect.Effect<void>;
+
+/** A backend that launches child sessions for tasks delegated by an Attempt's parent. */
 export interface ChildBackendService {
-  /** Starts the assigned child and returns its controls; its result is awaited separately. */
+  /** Starts the child and returns its controls; `result` is awaited separately. */
   readonly launch: (
     request: ChildRequest,
   ) => Effect.Effect<RunningSession, AgentSessionError, Scope.Scope>;
 }
 
-/** Runs the coding work delegated by an Attempt's parent. */
+/** The service that runs tasks delegated by an Attempt's parent. */
 export class ChildBackend extends Context.Service<ChildBackend, ChildBackendService>()(
   "@usine/agents/ChildBackend",
 ) {}
 
-/** Runs delegated coding work with Claude Code. */
+/**
+ * A per-Worker lock for Claude commands that can refresh the Worker's shared Claude login: the
+ * preflight login check and the start of a Claude child. Claude Code ends a process that finds
+ * another process refreshing the login (#453). Provide one instance to both the executor and the
+ * Attempt runtime.
+ */
+export class ClaudeLoginLock extends Context.Service<
+  ClaudeLoginLock,
+  {
+    /** Runs `effect` with `worker`'s lock, after waiting for any other effect that has the lock. */
+    readonly withLock: (
+      worker: WorkerName,
+    ) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
+  }
+>()("@usine/agents/ClaudeLoginLock") {}
+
+/** The child backend for Claude Code. */
 export class ClaudeChildBackend extends Context.Service<ClaudeChildBackend, ChildBackendService>()(
   "@usine/agents/ClaudeChildBackend",
 ) {}
 
-/** Runs delegated coding work with Codex. */
+/** The child backend for Codex. */
 export class CodexChildBackend extends Context.Service<CodexChildBackend, ChildBackendService>()(
   "@usine/agents/CodexChildBackend",
 ) {}
 
-/** Runs delegated coding work with Pi. */
+/** The child backend for Pi. */
 export class PiChildBackend extends Context.Service<PiChildBackend, ChildBackendService>()(
   "@usine/agents/PiChildBackend",
 ) {}

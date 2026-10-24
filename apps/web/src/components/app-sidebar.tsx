@@ -1,5 +1,4 @@
-import { CircleIcon, KanbanIcon, SlidersHorizontalIcon, WarningIcon } from "@phosphor-icons/react";
-import { Link } from "@tanstack/react-router";
+import { Link, useMatchRoute } from "@tanstack/react-router";
 import type { RepositoryName } from "@usine/core/repository";
 import type { ProjectView } from "@usine/orchestrator/operator";
 import {
@@ -19,35 +18,48 @@ import {
   SidebarMenuSubItem,
 } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
+import { ConfigurationMenu } from "../configuration/layout.tsx";
 import { projectParams } from "../overview.ts";
 
-export type OperatorView = "projects" | "configuration";
+/** `tasks` covers the Tasks list and Task pages; `project` covers other Project pages, such as a
+ * Run page. */
+export type OperatorView = "desk" | "board" | "tasks" | "project" | "configuration";
+
+export const useOperatorView = (): OperatorView => {
+  const matchRoute = useMatchRoute();
+  if (matchRoute({ to: "/configuration", fuzzy: true }) !== false) return "configuration";
+  if (matchRoute({ to: "/" }) !== false) return "desk";
+  if (matchRoute({ to: "/projects/$owner/$name/tasks", fuzzy: true }) !== false) return "tasks";
+  if (matchRoute({ to: "/projects/$owner/$name" }) !== false) return "board";
+  return "project";
+};
 
 export const AppSidebar = ({
   projects,
   view,
   project,
   needsYou,
+  needsYouTotal,
   live,
 }: {
   readonly projects: ReadonlyArray<ProjectView>;
   readonly view: OperatorView;
   readonly project: RepositoryName | undefined;
-  readonly needsYou: number;
+  /** Needs you entry count per Project. */
+  readonly needsYou: ReadonlyMap<RepositoryName, number>;
+  /** Total Needs you entries, including those without a Project. */
+  readonly needsYouTotal: number;
   readonly live: boolean;
 }) => (
   <Sidebar variant="inset">
-    <SidebarHeader>
+    <SidebarHeader className="px-2 pt-2 pb-3">
       <SidebarMenu>
         <SidebarMenuItem>
-          <SidebarMenuButton size="lg" render={<Link to="/" />}>
-            <span
-              className="grid size-8 shrink-0 place-items-center rounded-md bg-primary font-heading text-sm font-semibold text-primary-foreground"
-              aria-hidden="true"
-            >
-              U
-            </span>
-            <span className="font-heading text-sm font-medium">Usine</span>
+          <SidebarMenuButton
+            render={<Link to="/" />}
+            className="text-md font-semibold tracking-tight text-foreground"
+          >
+            usine
           </SidebarMenuButton>
         </SidebarMenuItem>
       </SidebarMenu>
@@ -58,73 +70,87 @@ export const AppSidebar = ({
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton
-                isActive={view === "projects" && project === undefined}
+                isActive={view === "desk"}
+                className={cn(needsYouTotal > 0 && "pr-8")}
                 render={<Link to="/" />}
               >
-                <KanbanIcon aria-hidden="true" />
-                <span>Projects</span>
+                <span>Overview</span>
               </SidebarMenuButton>
-              {needsYou > 0 && (
-                <SidebarMenuBadge className="font-mono text-needs-you">{needsYou}</SidebarMenuBadge>
-              )}
-              {projects.length > 0 && (
-                <SidebarMenuSub>
-                  {projects.map((entry) => (
-                    <SidebarMenuSubItem key={entry.repository}>
-                      <SidebarMenuSubButton
-                        isActive={project === entry.repository}
-                        render={
-                          <Link
-                            to="/projects/$owner/$name"
-                            params={projectParams(entry.repository)}
-                          />
-                        }
-                      >
-                        <span className="truncate">{entry.repository}</span>
-                        {entry.status === "needs-you" && (
-                          <WarningIcon
-                            weight="fill"
-                            className="ml-auto text-needs-you"
-                            aria-label="Needs you"
-                          />
-                        )}
-                      </SidebarMenuSubButton>
-                    </SidebarMenuSubItem>
-                  ))}
-                </SidebarMenuSub>
+              {needsYouTotal > 0 && (
+                <SidebarMenuBadge className="text-needs-you peer-data-active/menu-button:text-needs-you">
+                  {needsYouTotal}
+                  <span className="sr-only"> need attention</span>
+                </SidebarMenuBadge>
               )}
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarGroupContent>
       </SidebarGroup>
-      <SidebarGroup>
-        <SidebarGroupLabel>Configuration</SidebarGroupLabel>
+      <SidebarGroup className="pt-3">
+        <SidebarGroupLabel>Projects</SidebarGroupLabel>
         <SidebarGroupContent>
           <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                isActive={view === "configuration"}
-                render={<Link to="/configuration/loops" />}
-              >
-                <SlidersHorizontalIcon aria-hidden="true" />
-                <span>Loops</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
+            {projects.map((entry) => {
+              const count = needsYou.get(entry.repository) ?? 0;
+              const params = projectParams(entry.repository);
+              const current = project === entry.repository;
+              return (
+                <SidebarMenuItem key={entry.repository}>
+                  {/* On Board and Tasks pages that row is active; on other Project pages, such as
+                      a Run page, the Project row is active. */}
+                  <SidebarMenuButton
+                    isActive={current && view === "project"}
+                    className={cn(count > 0 && "pr-8")}
+                    render={<Link to="/projects/$owner/$name" params={params} />}
+                  >
+                    <span>{entry.repository}</span>
+                  </SidebarMenuButton>
+                  {count > 0 && (
+                    <SidebarMenuBadge className="text-needs-you peer-data-active/menu-button:text-needs-you">
+                      {count}
+                      <span className="sr-only"> need attention</span>
+                    </SidebarMenuBadge>
+                  )}
+                  <SidebarMenuSub>
+                    <SidebarMenuSubItem>
+                      <SidebarMenuSubButton
+                        isActive={current && view === "board"}
+                        render={<Link to="/projects/$owner/$name" params={params} />}
+                      >
+                        <span>Board</span>
+                      </SidebarMenuSubButton>
+                    </SidebarMenuSubItem>
+                    <SidebarMenuSubItem>
+                      <SidebarMenuSubButton
+                        isActive={current && view === "tasks"}
+                        render={<Link to="/projects/$owner/$name/tasks" params={params} />}
+                      >
+                        <span>Tasks</span>
+                      </SidebarMenuSubButton>
+                    </SidebarMenuSubItem>
+                  </SidebarMenuSub>
+                </SidebarMenuItem>
+              );
+            })}
           </SidebarMenu>
+        </SidebarGroupContent>
+      </SidebarGroup>
+      <SidebarGroup className="pt-3">
+        <SidebarGroupLabel>Configuration</SidebarGroupLabel>
+        <SidebarGroupContent>
+          <ConfigurationMenu inSection={view === "configuration"} />
         </SidebarGroupContent>
       </SidebarGroup>
     </SidebarContent>
-    <SidebarFooter>
-      {/* Reports the trigger streams, not the server: idle pollers must never read as a running factory. */}
-      <div
-        className={cn(
-          "flex items-center gap-2 px-2 py-1 font-mono text-[0.625rem]",
-          live ? "text-run-succeeded" : "text-muted-foreground",
-        )}
-      >
-        <CircleIcon weight="fill" className="size-2" aria-hidden="true" />
+    <SidebarFooter className="px-4 pb-3">
+      {/* Shows trigger stream state, not server state, so idle pollers are not shown as running. */}
+      <p className="flex items-center gap-2 text-xs text-muted-foreground">
+        <span
+          aria-hidden="true"
+          className={cn("size-1.5 rounded-full", live ? "bg-run-succeeded" : "bg-faint")}
+        />
         {live ? "live" : "idle"}
-      </div>
+      </p>
     </SidebarFooter>
   </Sidebar>
 );

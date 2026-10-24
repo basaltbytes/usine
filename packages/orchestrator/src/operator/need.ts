@@ -3,14 +3,15 @@ import { LoopName } from "@usine/core/loop";
 import { CycleBudgetAsk } from "@usine/core/cycle-budget";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
+import { WorkerName } from "@usine/core/worker";
 import { Schema } from "effect";
 import { LabelPreflightFinding } from "../label-reconciler.ts";
 import { RepositoryPollFailure } from "../polling-triggers.ts";
 import { ScheduleFailure } from "../schedule-triggers.ts";
 import { FailureView } from "./attempt.ts";
-import { BoardProjectionError } from "./board.ts";
+import { BoardItemLink, BoardProjectionError } from "./board.ts";
 
-/** An operator approval is required before this Run can proceed. */
+/** A Run that needs operator approval before it can proceed. */
 export class ApprovalNeed extends Schema.TaggedClass<ApprovalNeed>(
   "@usine/orchestrator/ApprovalNeed",
 )("ApprovalNeed", {
@@ -18,9 +19,17 @@ export class ApprovalNeed extends Schema.TaggedClass<ApprovalNeed>(
   repository: RepositoryName,
   runId: RunId,
   loop: LoopName,
+  /**
+   * The Run's Item as its Board card shows it, or null if no card on the Board has that Item, such
+   * as for a schedule Run.
+   */
+  item: Schema.NullOr(BoardItemLink),
 }) {}
 
-/** A failed Run requires an operator decision, with its displayable failure details. */
+/**
+ * A failed Run that needs an operator decision. After a `QuestionFailure` or `BlockedFailure`, the
+ * Item's next state opens no Run of the Loop (ADR 0017).
+ */
 export class RunFailureNeed extends Schema.TaggedClass<RunFailureNeed>(
   "@usine/orchestrator/RunFailureNeed",
 )("RunFailureNeed", {
@@ -31,7 +40,7 @@ export class RunFailureNeed extends Schema.TaggedClass<RunFailureNeed>(
   failure: FailureView,
 }) {}
 
-/** Repository polling failed and needs operator attention. */
+/** A repository poll failure that needs operator attention. */
 export class PollFailureNeed extends Schema.TaggedClass<PollFailureNeed>(
   "@usine/orchestrator/PollFailureNeed",
 )("PollFailureNeed", {
@@ -39,7 +48,7 @@ export class PollFailureNeed extends Schema.TaggedClass<PollFailureNeed>(
   failure: RepositoryPollFailure,
 }) {}
 
-/** A declared repository label could not be provisioned or confirmed. */
+/** A declared repository label that couldn't be created or confirmed. */
 export class PreflightFindingNeed extends Schema.TaggedClass<PreflightFindingNeed>(
   "@usine/orchestrator/PreflightFindingNeed",
 )("PreflightFindingNeed", {
@@ -47,7 +56,7 @@ export class PreflightFindingNeed extends Schema.TaggedClass<PreflightFindingNee
   finding: LabelPreflightFinding,
 }) {}
 
-/** An Item could not be displayed on its Board and needs operator attention. */
+/** An Item that couldn't be shown on its Board. */
 export class BoardProjectionNeed extends Schema.TaggedClass<BoardProjectionNeed>(
   "@usine/orchestrator/BoardProjectionNeed",
 )("BoardProjectionNeed", {
@@ -55,7 +64,7 @@ export class BoardProjectionNeed extends Schema.TaggedClass<BoardProjectionNeed>
   failure: BoardProjectionError,
 }) {}
 
-/** A scheduled Loop could not evaluate or submit its work. */
+/** A schedule Loop that couldn't evaluate or submit its work. */
 export class ScheduleFailureNeed extends Schema.TaggedClass<ScheduleFailureNeed>(
   "@usine/orchestrator/ScheduleFailureNeed",
 )("ScheduleFailureNeed", {
@@ -64,10 +73,8 @@ export class ScheduleFailureNeed extends Schema.TaggedClass<ScheduleFailureNeed>
 }) {}
 
 /**
- * An authored file failed to load at startup and was left out: a quarantined
- * Loop opens no Runs, and an invalid Agent is not in the roster. `error` names
- * the file, the parse stage, and the reason. Fixing the file takes effect at
- * the next `usine up`.
+ * An authored file that failed to load at startup and was left out: a quarantined Loop opens no
+ * Runs, and an invalid Agent isn't in the roster. A fix takes effect at the next `usine up`.
  */
 export class ConfigFileNeed extends Schema.TaggedClass<ConfigFileNeed>(
   "@usine/orchestrator/ConfigFileNeed",
@@ -77,7 +84,29 @@ export class ConfigFileNeed extends Schema.TaggedClass<ConfigFileNeed>(
   error: ConfigFileError,
 }) {}
 
-/** An Item stopped opening Runs and requires an explicit reset of its shared cycle budget. */
+/**
+ * Attempts recorded on a Worker that `usine.yaml` no longer declares, which startup doesn't
+ * reconcile. Discarding their leftovers fails while `running` is above 0.
+ */
+export class UnconfiguredWorkerNeed extends Schema.TaggedClass<UnconfiguredWorkerNeed>(
+  "@usine/orchestrator/UnconfiguredWorkerNeed",
+)(
+  "UnconfiguredWorkerNeed",
+  Schema.Struct({
+    id: Schema.String,
+    worker: WorkerName,
+    /** The number of Attempts recorded on the Worker that startup would otherwise reconcile. */
+    attempts: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+    /** The number of `attempts` with no recorded outcome yet. */
+    running: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  }).check(
+    Schema.makeFilter(({ attempts, running }) => running <= attempts, {
+      message: "Expected no more open attempts than attempts",
+    }),
+  ),
+) {}
+
+/** An Item that stopped opening Runs until the operator resets its cycle budget. */
 export class CycleBudgetNeed extends Schema.TaggedClass<CycleBudgetNeed>("CycleBudgetNeed")(
   "CycleBudgetNeed",
   {
@@ -88,7 +117,7 @@ export class CycleBudgetNeed extends Schema.TaggedClass<CycleBudgetNeed>("CycleB
   },
 ) {}
 
-/** One reason the factory asks for operator attention in the overview. */
+/** One reason the overview asks for operator attention. */
 export const NeedView = Schema.Union([
   CycleBudgetNeed,
   ApprovalNeed,
@@ -98,5 +127,6 @@ export const NeedView = Schema.Union([
   PreflightFindingNeed,
   ScheduleFailureNeed,
   ConfigFileNeed,
+  UnconfiguredWorkerNeed,
 ]);
 export type NeedView = typeof NeedView.Type;

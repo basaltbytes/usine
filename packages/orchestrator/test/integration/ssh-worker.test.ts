@@ -16,20 +16,37 @@ import { StepName } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
 import { type StubParent, stubAttemptRuntime, StubStorage } from "@usine/durable/testing";
 import { RunEngine, Submission } from "@usine/engine/engine";
-import { CredentialProvider, CredentialUnavailableError, Executor } from "@usine/executor";
+import {
+  claudeLoginLockLayer,
+  CredentialProvider,
+  CredentialUnavailableError,
+  Executor,
+} from "@usine/executor";
 import { layer as sshExecutorLayer } from "@usine/executor/ssh";
 import { GatewayAdminApi } from "@usine/gateway/admin";
 import { GitHubApp } from "@usine/github/github-app";
 import { localSecretsLayer } from "@usine/github/local-secrets";
-import { Config, DateTime, Effect, FileSystem, Layer, Option, Schema, Stream } from "effect";
+import {
+  Config,
+  DateTime,
+  Effect,
+  FileSystem,
+  Layer,
+  Option,
+  Schedule,
+  Schema,
+  Stream,
+} from "effect";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { HttpApiClient } from "effect/unstable/httpapi";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { gitHubCredentialLayer } from "../../src/credentials.ts";
 import { layer as sshLayer, sshWorkerAddressesOf } from "../../src/ssh.ts";
+import { fixedConfigLayer } from "../support/current-instance.ts";
 import { alwaysHoldsLayer } from "../support/polling.ts";
 
-// The machine is named by the environment; without it there is nothing to run against.
+// `USINE_SSH_INTEGRATION_DESTINATION` sets the machine; without it, there is nothing to run
+// against.
 const destination = process.env.USINE_SSH_INTEGRATION_DESTINATION;
 const WORKER = WorkerName.make("ssh-integration");
 const PLAIN_SSH = [
@@ -72,7 +89,7 @@ const configFor = (values: Effect.Success<typeof settings>) =>
     ],
   });
 
-/** The shared SSH options, with a separate known-hosts file when one is given. */
+/** Returns the shared SSH options, with a separate known-hosts file if one is set. */
 const sshFor = (values: Effect.Success<typeof settings>) => ({
   command: "ssh",
   args: [
@@ -134,7 +151,7 @@ const succeeds = Effect.fn("SshIntegration.succeeds")(function* (
   return result.stdout;
 });
 
-/** What the scripted parent saw on the machine while the Attempt ran. */
+/** What the scripted parent observed on the machine during the Attempt. */
 interface Observed {
   host?: RemoteShell;
   worktree?: string;
@@ -169,9 +186,8 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
           yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-ssh-integration-" }),
         );
         const observed: Observed = {};
-        // Does what a child does on the machine: uses gh and git with the
-        // Attempt's credential, commits, and leaves a long-running process
-        // whose SSH client this parent then drops.
+        // Acts as a child on the machine: uses gh and git with the Attempt's credential, commits,
+        // and leaves a long-running process whose SSH client the parent then drops.
         const parent: StubParent = ({ request }) =>
           Effect.gen(function* () {
             const host = request.host;
@@ -255,9 +271,12 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
           harnessReadiness: () => (brain) =>
             Effect.succeed(new HarnessReady({ harness: brain.harness })),
         }).pipe(
-          Layer.provide(gitHubCredentialLayer(config).pipe(Layer.provide(app))),
+          Layer.provide(gitHubCredentialLayer.pipe(Layer.provide(app))),
           Layer.provide(alwaysHoldsLayer),
           Layer.provide(stubAttemptRuntime(new StubStorage(), parent)),
+          Layer.provide(claudeLoginLockLayer),
+          Layer.provide(fixedConfigLayer(config)),
+          Layer.provide(app),
         );
 
         yield* Effect.gen(function* () {
@@ -359,6 +378,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
             Effect.fail(
               new CredentialUnavailableError({
                 repository,
+                reason: "refused",
                 message: "Preflight issues no credential",
                 cause: new Error("unused"),
               }),
@@ -370,18 +390,19 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
         }).pipe(
           Layer.provide(unused),
           Layer.provide(stubAttemptRuntime(new StubStorage())),
+          Layer.provide(claudeLoginLockLayer),
           Layer.provide(NodeServices.layer),
           Layer.provide(FetchHttpClient.layer),
         );
         yield* Effect.gen(function* () {
           const ssh = yield* Executor;
-          yield* ssh.preflight(WORKER, []);
+          yield* ssh.preflight(WORKER, [], 1);
           for (const checked of [
             brain("claude", "claude-sonnet-4-6"),
             brain("codex", "gpt-5.6-sol"),
           ]) {
-            const outcome = yield* ssh.preflight(WORKER, [checked]).pipe(Effect.result);
-            // A Worker nobody logged in to yet has the harness but not its login.
+            const outcome = yield* ssh.preflight(WORKER, [checked], 1).pipe(Effect.result);
+            // A Worker that nobody logged in to yet has the harness but not its login.
             if (outcome._tag === "Failure") {
               assert(outcome.failure._tag === "WorkerCapabilityError", outcome.failure.message);
               assert.strictEqual(
@@ -401,7 +422,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
   );
 });
 
-// A Worker behind a Gateway is named by these; without them the Gateway case is skipped.
+// These variables set the Worker behind a Gateway; without them, the Gateway case is skipped.
 const gatewayDestination = process.env.USINE_GATEWAY_INTEGRATION_DESTINATION;
 const GATEWAY_WORKER = WorkerName.make("gateway-integration");
 
@@ -412,15 +433,18 @@ const gatewaySettings = Effect.all({
     Config.withDefault("/home/usine/.usine"),
   ),
   domain: Config.string("USINE_GATEWAY_INTEGRATION_DOMAIN").pipe(Config.withDefault("gw.internal")),
-  adminUrl: Config.string("USINE_GATEWAY_INTEGRATION_ADMIN_URL").pipe(
-    Config.withDefault("http://127.0.0.1:7070"),
+  gateway: Config.string("USINE_GATEWAY_INTEGRATION_GATEWAY").pipe(
+    Config.withDefault("usine-gateway"),
   ),
   repository: Config.string("USINE_GATEWAY_INTEGRATION_REPO"),
   revision: Config.string("USINE_GATEWAY_INTEGRATION_REVISION").pipe(Config.withDefault("main")),
   credentialsDirectory: Config.string("USINE_GITHUB_INTEGRATION_INSTANCE_DIRECTORY"),
 });
 
-/** The Worker behind the Gateway, with no `llm_providers`: its harnesses use their logins on the machine. */
+/**
+ * Returns the config of the Worker behind the Gateway, with no `llm_providers`, so its harnesses
+ * use their logins on the machine.
+ */
 const gatewayConfigFor = (values: Effect.Success<typeof gatewaySettings>) =>
   Schema.decodeUnknownSync(UsineConfig)({
     version: 1,
@@ -433,14 +457,17 @@ const gatewayConfigFor = (values: Effect.Success<typeof gatewaySettings>) =>
         root: values.root,
         gateway: {
           domain: values.domain,
-          admin_url: values.adminUrl,
+          destination: values.gateway,
           admin_token_env: "USINE_GATEWAY_INTEGRATION_ADMIN_TOKEN",
         },
       },
     ],
   });
 
-/** The shared SSH options, with the SSH configuration that names the Worker and its bastion when one is given. */
+/**
+ * Returns the shared SSH options, with the SSH configuration for the Worker and its bastion if one
+ * is set.
+ */
 const gatewaySshFor = (values: Effect.Success<typeof gatewaySettings>) => ({
   command: "ssh",
   args: [
@@ -452,7 +479,49 @@ const gatewaySshFor = (values: Effect.Success<typeof gatewaySettings>) => ({
   ],
 });
 
-/** What the scripted parent saw on a Worker behind a Gateway. */
+/**
+ * The local port of the test's own admin API forward, used to check the Gateway after the Attempt.
+ */
+const CHECK_PORT = 17070;
+
+/**
+ * Lists the Gateway's attachments through a forward that the test opens with the Worker's SSH
+ * options, separate from the executor's.
+ */
+const gatewayAttachments = Effect.fn("GatewayIntegration.attachments")(function* (
+  values: Effect.Success<typeof gatewaySettings>,
+) {
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  yield* spawner.spawn(
+    ChildProcess.make(
+      "ssh",
+      [
+        ...gatewaySshFor(values).args,
+        "-N",
+        "-o",
+        "ExitOnForwardFailure=yes",
+        "-L",
+        `127.0.0.1:${String(CHECK_PORT)}:127.0.0.1:7070`,
+        values.gateway,
+      ],
+      { detached: false, forceKillAfter: "5 seconds", stdin: "ignore" },
+    ),
+  );
+  const admin = yield* HttpApiClient.make(GatewayAdminApi, {
+    baseUrl: `http://127.0.0.1:${String(CHECK_PORT)}`,
+    transformClient: HttpClient.mapRequest(
+      HttpClientRequest.bearerToken(
+        yield* Config.redacted("USINE_GATEWAY_INTEGRATION_ADMIN_TOKEN"),
+      ),
+    ),
+  });
+  // The forward listens once its SSH connection is up.
+  return yield* admin.attachments
+    .list()
+    .pipe(Effect.retry({ schedule: Schedule.spaced("1 second"), times: 20 }));
+});
+
+/** What the scripted parent observed on a Worker behind a Gateway. */
 interface ObservedBehindGateway {
   host?: RemoteShell;
   callerTokenFormat?: string;
@@ -479,12 +548,9 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
           yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-gateway-integration-" }),
         );
         const observed: ObservedBehindGateway = {};
-        // Does what a child does on the machine, with only the Attempt's
-        // child host and environment: git through the Gateway (fetch, push to
-        // the gateway remote, delete through a github.com URL), gh through
-        // its socket, a package registry through the forward proxy, an AAAA
-        // lookup of the proxy's name, and a scan of the machine for GitHub
-        // tokens.
+        // Acts as a child on the machine with only the Attempt's child host and environment: git
+        // and gh through the Gateway, a package registry through the forward proxy, an AAAA lookup
+        // of the proxy's name, and a scan for GitHub tokens.
         const parent: StubParent = ({ request }) =>
           Effect.gen(function* () {
             const host = request.host;
@@ -583,9 +649,12 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
           harnessReadiness: () => (brain) =>
             Effect.succeed(new HarnessReady({ harness: brain.harness })),
         }).pipe(
-          Layer.provide(gitHubCredentialLayer(config).pipe(Layer.provide(app))),
+          Layer.provide(gitHubCredentialLayer.pipe(Layer.provide(app))),
           Layer.provide(alwaysHoldsLayer),
           Layer.provide(stubAttemptRuntime(new StubStorage(), parent)),
+          Layer.provide(claudeLoginLockLayer),
+          Layer.provide(fixedConfigLayer(config)),
+          Layer.provide(app),
         );
 
         yield* Effect.gen(function* () {
@@ -642,15 +711,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
           assert(host !== undefined);
           assert.notInclude(host.ssh.args.join(" "), "ugw1.");
 
-          const admin = yield* HttpApiClient.make(GatewayAdminApi, {
-            baseUrl: values.adminUrl,
-            transformClient: HttpClient.mapRequest(
-              HttpClientRequest.bearerToken(
-                yield* Config.redacted("USINE_GATEWAY_INTEGRATION_ADMIN_TOKEN"),
-              ),
-            ),
-          });
-          const { attachments } = yield* admin.attachments.list();
+          const { attachments } = yield* gatewayAttachments(values);
           assert.deepStrictEqual(
             attachments.filter(({ worker }) => worker === GATEWAY_WORKER),
             [],
@@ -672,6 +733,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
             Effect.fail(
               new CredentialUnavailableError({
                 repository,
+                reason: "refused",
                 message: "Preflight issues no credential",
                 cause: new Error("unused"),
               }),
@@ -683,6 +745,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
         }).pipe(
           Layer.provide(unused),
           Layer.provide(stubAttemptRuntime(new StubStorage())),
+          Layer.provide(claudeLoginLockLayer),
           Layer.provide(NodeServices.layer),
           Layer.provide(FetchHttpClient.layer),
         );
@@ -692,8 +755,8 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
             brain("claude", "claude-sonnet-4-6"),
             brain("codex", "gpt-5.6-sol"),
           ]) {
-            const outcome = yield* ssh.preflight(GATEWAY_WORKER, [checked]).pipe(Effect.result);
-            // A Worker nobody logged in to yet has the harness but not its login.
+            const outcome = yield* ssh.preflight(GATEWAY_WORKER, [checked], 1).pipe(Effect.result);
+            // A Worker that nobody logged in to yet has the harness but not its login.
             if (outcome._tag === "Failure") {
               assert(outcome.failure._tag === "WorkerCapabilityError", outcome.failure.message);
               assert.strictEqual(

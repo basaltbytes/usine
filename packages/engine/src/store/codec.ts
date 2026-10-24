@@ -5,19 +5,23 @@ import { Attempt, AttemptNumber, AttemptTask, AttemptId } from "@usine/core/atte
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptOutcome } from "@usine/core/attempt/outcome";
 import { AttemptSalvage } from "@usine/core/attempt/salvage";
+import { AttemptStart, OperatorRetryStart } from "@usine/core/attempt/start";
 import { Event, DedupKey, EventId } from "@usine/core/event";
-import { ApprovalRequirement, LoopName } from "@usine/core/loop";
+import { ApprovalRequirement, LoopName, LoopPermissions } from "@usine/core/loop";
 import { ItemKey } from "@usine/core/item";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
+import { OperatorLogin } from "@usine/core/operator";
 import { RunId, Run } from "@usine/core/run";
+import { RunAgain } from "@usine/core/run/again";
+import { ApprovalChannel, ApprovalSource, RunApproval } from "@usine/core/run/approval";
 import { StepName, Step } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
 import * as RunState from "@usine/core/run/state";
-import { StepResult } from "@usine/core/step/result";
+import { Comment, StepResult } from "@usine/core/step/result";
 import { Effect, Option, Schema } from "effect";
 import { EnginePersistenceError, RunStoreError } from "../engine/error.ts";
 import { IgnoreReason, Submission } from "../engine/submission.ts";
-import { ProjectionRevision, RunSummary } from "../run-reader/model.ts";
+import { ProjectionRevision, RunEvent, RunSummary } from "../run-reader/model.ts";
 import { TranscriptEntry, TranscriptSequence } from "../transcript.ts";
 
 export const EventRouteRow = Schema.Struct({
@@ -29,6 +33,7 @@ export const EventRouteRow = Schema.Struct({
   loop: LoopName,
   step: StepName,
   approval: ApprovalRequirement,
+  permissions: LoopPermissions,
   cycleLimit: Schema.NullOr(CycleLimit),
   cycleGeneration: CycleGeneration,
   repository: RepositoryName,
@@ -52,8 +57,14 @@ export const RunRow = Schema.Struct({
   state: RunState.RunState,
   resolvedFailureAttemptId: Schema.NullOr(AttemptId),
   openedAt: Schema.DateTimeUtcFromString,
+  closedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
   stepName: StepName,
   result: Schema.NullOr(StepResult),
+  approvedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
+  approvalChannel: Schema.NullOr(ApprovalChannel),
+  approver: Schema.NullOr(OperatorLogin),
+  againFrom: Schema.NullOr(RunId),
+  againRequestedBy: Schema.NullOr(OperatorLogin),
 });
 export type RunRow = typeof RunRow.Type;
 
@@ -70,7 +81,11 @@ export const AttemptRow = Schema.Struct({
   parentModel: Schema.NullOr(ModelId),
   startedAt: Schema.DateTimeUtcFromString,
   outcome: Schema.NullOr(AttemptOutcome),
+  endedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
   salvage: Schema.NullOr(AttemptSalvage),
+  start: Schema.NullOr(AttemptStart),
+  reattachedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
+  comments: Schema.NullOr(Schema.Array(Comment)),
 });
 export type AttemptRow = typeof AttemptRow.Type;
 
@@ -88,8 +103,22 @@ const DiscardRow = Schema.Struct({ reason: IgnoreReason });
 
 const ProjectionRevisionRow = Schema.Struct({ revision: ProjectionRevision });
 
+const RunEventRow = Schema.Struct({
+  runId: RunId,
+  eventId: EventId,
+  dedupKey: DedupKey,
+  payload: Schema.Json,
+  receivedAt: Schema.DateTimeUtcFromString,
+});
+
+const ReopeningRow = Schema.Struct({ ...EventRouteRow.fields, reopening: Schema.Int });
+const ReopenedEventRow = Schema.Struct({ eventId: EventId, dedupKey: DedupKey });
+
 export const decodeEventRoutes = Schema.decodeUnknownEffect(Schema.Array(EventRouteRow));
+export const decodeReopenings = Schema.decodeUnknownEffect(Schema.Array(ReopeningRow));
+export const decodeReopenedEvents = Schema.decodeUnknownEffect(Schema.Array(ReopenedEventRow));
 export const decodeRunRows = Schema.decodeUnknownEffect(Schema.Array(RunRow));
+export const decodeRunEventRows = Schema.decodeUnknownEffect(Schema.Array(RunEventRow));
 export const decodeAttemptRows = Schema.decodeUnknownEffect(Schema.Array(AttemptRow));
 export const decodeRunIds = Schema.decodeUnknownEffect(Schema.Array(RunIdRow));
 export const decodeDiscards = Schema.decodeUnknownEffect(Schema.Array(DiscardRow));
@@ -103,6 +132,11 @@ export const encodeDateTime = Schema.encodeSync(Schema.DateTimeUtcFromString);
 export const encodeRunState = Schema.encodeSync(RunState.RunState);
 export const encodeOutcome = Schema.encodeSync(AttemptOutcome);
 export const encodeSalvage = Schema.encodeSync(AttemptSalvage);
+export const encodeComments = Schema.encodeSync(Schema.Array(Comment));
+export const encodeAttemptStart = Schema.encodeSync(AttemptStart);
+export const decodeNextStarts = Schema.decodeUnknownEffect(
+  Schema.Array(Schema.Struct({ nextStart: Schema.NullOr(OperatorRetryStart) })),
+);
 export const encodeStepResult = Schema.encodeSync(StepResult);
 export const encodeEnvelope = Schema.encodeSync(AttemptChannel.Envelope);
 export const encodeAgent = Schema.encodeSync(Agent);
@@ -117,13 +151,19 @@ export const persistence =
       isRunStoreError(error) ? error : new EnginePersistenceError({ operation, cause: error }),
     );
 
-export const eventFromRow = (row: EventRouteRow): Event =>
+/** The Event columns shared by route rows and Run Event rows. */
+type EventColumns = Pick<EventRouteRow, "eventId" | "dedupKey" | "payload" | "receivedAt">;
+
+export const eventFromRow = (row: EventColumns): Event =>
   new Event({
     id: row.eventId,
     dedupKey: row.dedupKey,
     payload: row.payload,
     receivedAt: row.receivedAt,
   });
+
+export const runEventFromRow = (row: typeof RunEventRow.Type): RunEvent =>
+  new RunEvent({ runId: row.runId, event: eventFromRow(row) });
 
 export const submissionFromRow = (row: EventRouteRow): Submission =>
   new Submission({
@@ -132,6 +172,7 @@ export const submissionFromRow = (row: EventRouteRow): Submission =>
     loop: row.loop,
     step: row.step,
     approval: row.approval,
+    permissions: row.permissions,
     cycleLimit: Option.fromNullishOr(row.cycleLimit),
     cycleGeneration: row.cycleGeneration,
     repository: row.repository,
@@ -149,6 +190,26 @@ export const runFromRow = (row: RunRow): Run =>
     state: row.state,
     openedAt: row.openedAt,
   });
+
+export const approvalFromRow = (row: RunRow): Option.Option<RunApproval> =>
+  Option.map(
+    Option.fromNullishOr(row.approvedAt),
+    (approvedAt) =>
+      new RunApproval({
+        approvedAt,
+        source: Option.map(
+          Option.fromNullishOr(row.approvalChannel),
+          (channel) =>
+            new ApprovalSource({ channel, approver: Option.fromNullishOr(row.approver) }),
+        ),
+      }),
+  );
+
+export const runAgainFromRow = (row: RunRow): Option.Option<RunAgain> =>
+  Option.map(
+    Option.fromNullishOr(row.againFrom),
+    (from) => new RunAgain({ from, requestedBy: Option.fromNullishOr(row.againRequestedBy) }),
+  );
 
 export const stepFromRow = (row: RunRow): Step =>
   new Step({
@@ -171,7 +232,11 @@ export const attemptFromRow = (row: AttemptRow): Attempt =>
     parentModel: Option.fromNullishOr(row.parentModel),
     startedAt: row.startedAt,
     outcome: Option.fromNullishOr(row.outcome),
+    endedAt: Option.fromNullishOr(row.endedAt),
     salvage: Option.fromNullishOr(row.salvage),
+    start: Option.fromNullishOr(row.start),
+    reattachedAt: Option.fromNullishOr(row.reattachedAt),
+    comments: row.comments ?? [],
   });
 
 export const runSummaryFromRow = (
@@ -184,6 +249,9 @@ export const runSummaryFromRow = (
     step: stepFromRow(row),
     attempts: storedAttempts.map(attemptFromRow),
     resolvedFailureAttemptId: Option.fromNullishOr(row.resolvedFailureAttemptId),
+    closedAt: Option.fromNullishOr(row.closedAt),
+    approval: approvalFromRow(row),
+    runAgain: runAgainFromRow(row),
     repository: row.repository,
     task: row.task,
     agent: row.agent,

@@ -20,7 +20,7 @@ const remote = new RemoteShell({
   destination: "worker.exe.xyz",
 });
 const overSsh = (line: string) => `ssh -o BatchMode=yes worker.exe.xyz -- ${line}`;
-/** The environment local checks must run with instead of the test process's own. */
+/** The environment for local checks, used instead of the test process's environment. */
 const workerEnvironment = { PATH: "/usr/bin:/bin" };
 const encoder = new TextEncoder();
 
@@ -176,42 +176,80 @@ describe("worker harness readiness", () => {
     }),
   );
 
-  for (const auth of [
-    { loggedIn: false, authMethod: "none", apiProvider: "firstParty" },
-    { loggedIn: true, authMethod: "api_key", apiProvider: "firstParty" },
-    { loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty" },
+  const subscriptionLogin =
+    "Claude Code needs a subscription login. Run claude auth login on the worker.";
+  // Claude Code 2.1.296 prints its status and exits 1 when not logged in.
+  for (const status of [
+    { auth: { loggedIn: false, authMethod: "none", apiProvider: "firstParty" }, exitCode: 1 },
+    { auth: { loggedIn: false, authMethod: "none", apiProvider: "firstParty" }, exitCode: 0 },
+    { auth: { loggedIn: true, authMethod: "api_key", apiProvider: "firstParty" }, exitCode: 0 },
+    { auth: { loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty" }, exitCode: 0 },
   ]) {
-    it.effect(`checks Claude ${auth.authMethod} login without probing Codex or Pi`, () => {
-      const server = account(Effect.succeed(null));
-      return Effect.gen(function* () {
-        if (auth.authMethod === "claude.ai") {
-          assert.deepStrictEqual(
-            yield* verifyHarness(brain("claude"), local, workerEnvironment),
-            new HarnessReady({ harness: "claude" }),
-          );
-        } else {
+    it.effect(
+      `checks Claude ${status.auth.authMethod} login exiting ${status.exitCode} without probing Codex or Pi`,
+      () => {
+        const server = account(Effect.succeed(null));
+        return Effect.gen(function* () {
+          if (status.auth.authMethod === "claude.ai") {
+            assert.deepStrictEqual(
+              yield* verifyHarness(brain("claude"), local, workerEnvironment),
+              new HarnessReady({ harness: "claude" }),
+            );
+          } else {
+            const error = yield* verifyHarness(brain("claude"), local, workerEnvironment).pipe(
+              Effect.flip,
+            );
+            assert(error instanceof HarnessUnavailableError);
+            assert.strictEqual(error.capability, "login");
+            assert.strictEqual(error.message, subscriptionLogin);
+          }
+          assert.strictEqual(server.opened(), 0);
+        }).pipe(
+          Effect.provide(
+            commands({
+              "claude --version": { stdout: "2.1.296 (Claude Code)", exitCode: 0 },
+              "claude auth status --json": {
+                stdout: JSON.stringify(status.auth),
+                exitCode: status.exitCode,
+              },
+            }),
+          ),
+          Effect.provide(server.layer),
+          Effect.provide(unusedPi),
+        );
+      },
+    );
+  }
+
+  for (const status of [
+    { stdout: "", exitCode: 1 },
+    { stdout: "not a status", exitCode: 1 },
+    { stdout: JSON.stringify({ loggedIn: false }), exitCode: 2 },
+  ])
+    it.effect(
+      `reports a Claude login check exiting ${status.exitCode} with ${status.stdout === "" ? "no output" : "unexpected output"} as a failed command`,
+      () =>
+        Effect.gen(function* () {
           const error = yield* verifyHarness(brain("claude"), local, workerEnvironment).pipe(
             Effect.flip,
           );
           assert(error instanceof HarnessUnavailableError);
           assert.strictEqual(error.capability, "login");
-        }
-        assert.strictEqual(server.opened(), 0);
-      }).pipe(
-        Effect.provide(
-          commands({
-            "claude --version": { stdout: "2.1.263 (Claude Code)", exitCode: 0 },
-            "claude auth status --json": {
-              stdout: JSON.stringify(auth),
-              exitCode: auth.loggedIn ? 0 : 1,
-            },
-          }),
+          assert.strictEqual(
+            error.message,
+            "claude auth status --json failed. Check the claude installation and login on the worker.",
+          );
+        }).pipe(
+          Effect.provide(
+            commands({
+              "claude --version": { stdout: "2.1.296 (Claude Code)", exitCode: 0 },
+              "claude auth status --json": status,
+            }),
+          ),
+          Effect.provide(account(Effect.succeed(null)).layer),
+          Effect.provide(unusedPi),
         ),
-        Effect.provide(server.layer),
-        Effect.provide(unusedPi),
-      );
-    });
-  }
+    );
 
   for (const pool of ["apiKeys", "chatgptPlan"] as const) {
     it.effect(`checks Pi ${pool} authentication and disposes its unprompted SDK session`, () => {
@@ -299,7 +337,7 @@ describe("worker harness readiness", () => {
     Effect.gen(function* () {
       const error = yield* verifyHarness(brain("pi"), remote, {}).pipe(Effect.flip);
       assert(error instanceof HarnessUnavailableError);
-      assert.strictEqual(error.message, "Pi children run only on local Workers");
+      assert.strictEqual(error.message, "Pi children run only on local workers");
     }).pipe(
       Effect.provide(commands({})),
       Effect.provide(account(Effect.succeed(null)).layer),

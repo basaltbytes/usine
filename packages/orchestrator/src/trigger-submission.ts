@@ -6,14 +6,17 @@ import { Agent, resolveParentModel, AgentName } from "@usine/core/agent";
 import { ModelId } from "@usine/core/agent/brain";
 import { AttemptTask } from "@usine/core/attempt";
 import { Event, DedupKey, EventId } from "@usine/core/event";
-import { CycleGeneration } from "@usine/core/cycle-budget";
+import { CycleGeneration, type CycleLimit } from "@usine/core/cycle-budget";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryRevision } from "@usine/core/repository";
 import { Submission, type SubmissionResult } from "@usine/engine/engine";
 import { type DateTime, Effect, Match, Option, Result, Schema } from "effect";
 
-/** Issue and schedule Attempts resolve the remote's default branch at prepare time. */
+/**
+ * The revision for issue and schedule Attempts, which resolve the remote's default branch at
+ * prepare time.
+ */
 export const DEFAULT_BRANCH_REVISION = RepositoryRevision.make("HEAD");
 
 export interface ResolvedLoop {
@@ -22,7 +25,7 @@ export interface ResolvedLoop {
   readonly parentModel: Option.Option<ModelId>;
 }
 
-/** The agent a loaded loop names is no longer in the roster. */
+/** The Agent of a loaded Loop is no longer in the roster. */
 export class LoopAgentResolutionError extends Schema.TaggedError<LoopAgentResolutionError>(
   "@usine/orchestrator/LoopAgentResolutionError",
 )("LoopAgentResolutionError", {
@@ -31,7 +34,7 @@ export class LoopAgentResolutionError extends Schema.TaggedError<LoopAgentResolu
   message: Schema.NonEmptyString,
 }) {}
 
-/** Resolves one loop's roster agent and effective parent model. */
+/** Resolves one Loop's roster Agent and effective parent model. */
 export const resolveTriggerLoop = Effect.fn("TriggerRouting.resolveLoop")(function* (
   instance: LoadedInstance,
   loop: LoopFile,
@@ -43,7 +46,7 @@ export const resolveTriggerLoop = Effect.fn("TriggerRouting.resolveLoop")(functi
     return yield* new LoopAgentResolutionError({
       loop: loop.name,
       agent: loop.agent,
-      message: `Loop ${loop.name} references missing Agent ${loop.agent}`,
+      message: `Loop "${loop.name}" references agent "${loop.agent}", which is not in the roster`,
     });
   }
   const agent = loaded.agent;
@@ -54,12 +57,7 @@ export const resolveTriggerLoop = Effect.fn("TriggerRouting.resolveLoop")(functi
   } satisfies ResolvedLoop;
 });
 
-/**
- * Resolves every loaded loop's agent. `InstanceFolder.load` already quarantines
- * loops that name unknown agents, so a miss here means a hand-assembled
- * instance drifted: the loop is skipped with a log each cycle and its siblings
- * keep running.
- */
+/** Resolves every loaded Loop's Agent, skipping and logging each Loop whose Agent is missing. */
 export const resolveTriggerLoops = Effect.fn("TriggerRouting.resolveLoops")(function* (
   instance: LoadedInstance,
 ) {
@@ -94,7 +92,11 @@ interface TriggerSubmissionOptions {
   readonly parentModel: Option.Option<ModelId>;
 }
 
-/** Builds the Submission every trigger stream hands to the engine. */
+/** Returns the Loop's `max_cycles`, or `None` for a schedule Loop, whose Runs no budget counts. */
+export const cycleLimitOf = (loop: LoopFile): Option.Option<CycleLimit> =>
+  loop.trigger.on === "schedule" ? Option.none() : Option.some(loop.maxCycles);
+
+/** Builds the Submission that every trigger stream sends to the engine. */
 export const triggerSubmission = (options: TriggerSubmissionOptions): Submission =>
   new Submission({
     event: new Event({
@@ -108,8 +110,8 @@ export const triggerSubmission = (options: TriggerSubmissionOptions): Submission
     loop: options.loop.name,
     step: options.loop.step,
     approval: options.loop.approval,
-    cycleLimit:
-      options.loop.trigger.on === "schedule" ? Option.none() : Option.some(options.loop.maxCycles),
+    permissions: options.loop.permissions,
+    cycleLimit: cycleLimitOf(options.loop),
     repository: options.repository.name,
     revision: options.revision,
     task: options.task,
@@ -117,16 +119,20 @@ export const triggerSubmission = (options: TriggerSubmissionOptions): Submission
     parentModel: options.parentModel,
   });
 
-/** The log fields for a submission outcome: the run id for a claim, the reason for an ignore. */
+/**
+ * Returns the log fields for a submission outcome: the Run ID for a claim or suppression, the
+ * reason for an ignore.
+ */
 export const submissionLogFields = (submission: SubmissionResult): Record<string, string> =>
   Match.valueTags(submission, {
     Claimed: ({ runId }) => ({ runId }),
     Queued: () => ({}),
+    Suppressed: ({ runId }) => ({ suppressedBy: runId }),
     Ignored: ({ reason }) => ({ reason }),
     CycleBlocked: ({ ask }) => ({ askId: ask.id, reason: "cycle-budget-exhausted" }),
   });
 
-/** Log fields for a config failure met while triggering. */
+/** Returns the log fields for a config failure during triggering. */
 export const configFileErrorLogFields = (error: ConfigFileError) =>
   Option.match(error.expression, {
     onNone: () => ({ configFile: error.file, configStage: error.stage }),

@@ -7,28 +7,49 @@ import { Intervention } from "@usine/core/attempt/channel";
 import type { LoadedInstance } from "@usine/config/instance";
 import { Event, DedupKey, EventId } from "@usine/core/event";
 import { CycleBudgetAskId } from "@usine/core/cycle-budget";
+import { BoardMoveRecord, BoardMoves } from "@usine/engine/board-moves";
 import { CycleBudgets, type CycleBudgetResetRejectedError } from "@usine/engine/cycle-budget";
 import { LoopName } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
+import { ApprovalSource } from "@usine/core/run/approval";
+import type { WorkerName } from "@usine/core/worker";
+import type { ItemKey, ItemNumber } from "@usine/core/item";
+import type { RepositoryName } from "@usine/core/repository";
 import {
+  RetryRequest,
+  RunAgainRequest,
+  type RunAgainResult,
   RunEngine,
   type EnginePersistenceError,
+  type LeftoversDiscardRejectedError,
   type RunEngineError,
   RunOperationRejectedError,
   type RunStoreError,
 } from "@usine/engine/engine";
 import { ItemProjectionReader } from "@usine/engine/item-projection";
 import { LoopControl, type LoopRuntimeState } from "@usine/engine/loop-control";
-import { type ProjectionRevision, RunReader } from "@usine/engine/run-reader";
+import { type ProjectionRevision, RunReader, type RunSummary } from "@usine/engine/run-reader";
 import { RepositoryLabelProjectionReader } from "@usine/engine/repository-label-projection";
 import { GitHubItemWriter } from "@usine/github/item-writer";
 import type { GitHubAppError } from "@usine/github/github-app";
 import { ChangedIssue, ChangedPullRequest } from "@usine/github/polling";
-import { Context, DateTime, Effect, Exit, Layer, Option, Schema, SynchronizedRef } from "effect";
+import {
+  Context,
+  DateTime,
+  Effect,
+  Exit,
+  Layer,
+  Match,
+  Option,
+  Schema,
+  SynchronizedRef,
+} from "effect";
 import { labelMutationForBoardMove, projectBoard } from "../board/projection.ts";
 import type { LabelPreflightFinding } from "../label-reconciler.ts";
+import { LoopMatches } from "../loop-matches.ts";
 import { GitHubItemKey, PollingTriggers, type RepositoryPollFailure } from "../polling-triggers.ts";
 import { ScheduleTriggers, type ScheduleFailure } from "../schedule-triggers.ts";
+import { cycleLimitOf } from "../trigger-submission.ts";
 import {
   ApprovalNeed,
   ConfigFileNeed,
@@ -38,6 +59,7 @@ import {
   PreflightFindingNeed,
   RunFailureNeed,
   ScheduleFailureNeed,
+  UnconfiguredWorkerNeed,
   type NeedView,
 } from "./need.ts";
 import {
@@ -50,7 +72,11 @@ import {
   type BoardMove,
   type BoardProjectNotFoundError,
   BoardProjectNotFoundError as BoardProjectNotFound,
+  BoardTaskView,
+  BoardView,
   LabelView,
+  ReadOnlyBoardLaneView,
+  WritableBoardLaneView,
 } from "./board.ts";
 import {
   ColdTranscriptRequest,
@@ -61,10 +87,26 @@ import { LoopView, ProjectView, ReadyOverview, type ProjectStatus } from "./over
 import {
   RunDetailView,
   EditAndRetry,
+  LoopNotFoundError,
   SessionIntervention,
   RosterAgentNotFoundError,
 } from "./run.ts";
-import { readTranscript, runView } from "./projection.ts";
+import {
+  readRunningEvents,
+  readTranscript,
+  readUnrecordedEnds,
+  runDuration,
+  runView,
+  workerAccesses,
+} from "./projection.ts";
+import { RunUsageReader, type RunUsageView, taskUsage } from "./usage.ts";
+import {
+  RunGitHubChanges,
+  type RunGitHubChangesError,
+  type RunGitHubChangesView,
+} from "./github-changes.ts";
+import { TaskReader, type TaskReadError, type TaskView } from "./task.ts";
+import { type DeskView, OperatorDesk } from "./desk.ts";
 
 export type BoardMoveError =
   | BoardItemNotFoundError
@@ -72,25 +114,71 @@ export type BoardMoveError =
   | BoardLaneReadOnlyError
   | BoardProjectNotFoundError
   | EnginePersistenceError
+  | RunStoreError
   | GitHubAppError;
 export type OperatorError =
+  | LoopNotFoundError
   | RosterAgentNotFoundError
   | RunEngineError
+  | LeftoversDiscardRejectedError
   | TranscriptAttemptNotFoundError
   | BoardMoveError
-  | CycleBudgetResetRejectedError;
+  | CycleBudgetResetRejectedError
+  | RunGitHubChangesError;
 export type OperatorObservationError = RunStoreError | TranscriptAttemptNotFoundError;
 
-/** How many settled Runs the overview keeps beside the open ones. */
+/** The number of closed Runs the overview keeps next to the open ones. */
 const OVERVIEW_CLOSED_RUNS = 100;
 
-/** How many newest Items a Board shows; older ones drop off. */
+/** The number of newest Items a Board shows. */
 const OVERVIEW_BOARD_ITEMS = 500;
+
+/**
+ * Each Board Run's usage at projection time, and the Runs whose Attempt was running then. Token
+ * reports don't change the projection revision, so a cached overview rereads these Runs' usage.
+ */
+interface BoardUsage {
+  readonly runs: ReadonlyMap<RunId, RunUsageView>;
+  readonly working: ReadonlyArray<RunSummary>;
+}
 
 interface CachedOverview {
   readonly token: string;
   readonly overview: ReadyOverview;
+  readonly usage: BoardUsage;
 }
+
+/**
+ * Returns `overview` with the usage of every card that contains a `changed` Run recomputed from
+ * `usage`.
+ */
+const withRunUsage = (
+  overview: ReadyOverview,
+  changed: ReadonlySet<RunId>,
+  usage: ReadonlyMap<RunId, RunUsageView>,
+): ReadyOverview =>
+  new ReadyOverview({
+    ...overview,
+    projects: overview.projects.map(
+      (project) =>
+        new ProjectView({
+          ...project,
+          board: new BoardView({
+            ...project.board,
+            lanes: project.board.lanes.map((lane) => {
+              const items = lane.items.map((task) =>
+                task.runs.some(({ id }) => changed.has(id))
+                  ? new BoardTaskView({ ...task, usage: taskUsage(task.runs, usage) })
+                  : task,
+              );
+              return lane._tag === "WritableBoardLane"
+                ? new WritableBoardLaneView({ ...lane, items })
+                : new ReadOnlyBoardLaneView({ ...lane, items });
+            }),
+          }),
+        }),
+    ),
+  });
 
 const makeOperatorObservation = Effect.gen(function* () {
   const budgets = yield* CycleBudgets;
@@ -100,7 +188,9 @@ const makeOperatorObservation = Effect.gen(function* () {
   const repositoryLabels = yield* RepositoryLabelProjectionReader;
   const polling = yield* PollingTriggers;
   const schedules = yield* ScheduleTriggers;
+  const loopMatches = yield* LoopMatches;
   const cache = yield* SynchronizedRef.make(Option.none<CachedOverview>());
+  const usageReader = yield* RunUsageReader;
 
   const projectOverview = Effect.fn("Operator.projectOverview")(function* (
     instance: LoadedInstance,
@@ -109,23 +199,25 @@ const makeOperatorObservation = Effect.gen(function* () {
     scheduleFailures: ReadonlyArray<ScheduleFailure>,
     revision: Option.Option<ProjectionRevision>,
   ) {
-    const [snapshots, states, cycleAsks] = yield* Effect.all(
+    const [snapshots, states, cycleAsks, workerAttempts] = yield* Effect.all(
       [
         reader.list({ closedLimit: OVERVIEW_CLOSED_RUNS }),
         controls.states,
         budgets.asks(),
+        reader.attemptsByWorker(),
       ] as const,
       { concurrency: "unbounded" },
     );
     const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
-    const views = snapshots.map((snapshot) => runView(snapshot, paused));
+    const access = workerAccesses(instance.config.workers);
+    const views = snapshots.map((snapshot) => runView(snapshot, paused, access));
     const runsByRepository = new Map<string, Array<(typeof views)[number]>>();
     for (const view of views) {
       const projectRuns = runsByRepository.get(view.repository) ?? [];
       projectRuns.push(view);
       runsByRepository.set(view.repository, projectRuns);
     }
-    const projects = yield* Effect.forEach(
+    const projected = yield* Effect.forEach(
       instance.config.repos,
       (repository) =>
         Effect.gen(function* () {
@@ -140,15 +232,46 @@ const makeOperatorObservation = Effect.gen(function* () {
             ] as const,
             { concurrency: "unbounded" },
           );
-          const history = yield* reader.forItems(boardItems.map(({ itemKey }) => itemKey));
+          const [history, matches] = yield* Effect.all(
+            [
+              reader.forItems(boardItems.map(({ itemKey }) => itemKey)),
+              loopMatches.matching(instance, repository, boardItems),
+            ] as const,
+            { concurrency: "unbounded" },
+          );
+          const itemLoops = new Map<ItemKey, Array<LoopName>>();
+          for (const { loop, item } of matches) {
+            itemLoops.set(item.itemKey, [...(itemLoops.get(item.itemKey) ?? []), loop.name]);
+          }
           const merged = new Map((runsByRepository.get(name) ?? []).map((run) => [run.id, run]));
           for (const saved of history) {
-            const view = runView(saved, paused);
+            const view = runView(saved, paused, access);
             merged.set(view.id, view);
           }
           const projectRuns = [...merged.values()].sort(
             (a, b) => b.openedAt.localeCompare(a.openedAt) || b.id.localeCompare(a.id),
           );
+          // The reader keeps ended Attempts' reports, so only running Attempts are read again. A
+          // running Run's Event gives the lane its card stays in while its Agent changes labels.
+          const [usages, runEvents] = yield* Effect.all(
+            [
+              Effect.forEach(
+                history,
+                (summary) =>
+                  usageReader
+                    .read(summary)
+                    .pipe(Effect.map((usage) => [summary.run.id, usage] as const)),
+                { concurrency: 4 },
+              ),
+              readRunningEvents(reader, history),
+            ] as const,
+            { concurrency: "unbounded" },
+          );
+          const runUsage = new Map(usages);
+          yield* Effect.logDebug("Read the usage of the Board's Runs", {
+            repository: name,
+            runs: runUsage.size,
+          });
           const catalog = Option.match(labelProjection, {
             onNone: () => [],
             onSome: ({ labels }) => labels,
@@ -159,6 +282,12 @@ const makeOperatorObservation = Effect.gen(function* () {
             boardItems,
             projectRuns,
             cycleAsks.map(({ itemKey }) => itemKey),
+            itemLoops,
+            runUsage,
+            runEvents,
+          );
+          const working = history.filter(({ attempts }) =>
+            attempts.some(({ outcome }) => Option.isNone(outcome)),
           );
           const status: ProjectStatus =
             cycleAsks.some((ask) => ask.repository === name) ||
@@ -169,7 +298,7 @@ const makeOperatorObservation = Effect.gen(function* () {
               : projectRuns.some((run) => run.canCancel)
                 ? "active"
                 : "clear";
-          return new ProjectView({
+          const project = new ProjectView({
             repository: name,
             status,
             runs: projectRuns,
@@ -184,9 +313,15 @@ const makeOperatorObservation = Effect.gen(function* () {
             ),
             preflightFindings: projectFindings,
           });
+          return { project, runUsage, working } as const;
         }),
       { concurrency: 4 },
     );
+    const projects = projected.map(({ project }) => project);
+    const usage: BoardUsage = {
+      runs: new Map(projected.flatMap(({ runUsage }) => [...runUsage])),
+      working: projected.flatMap(({ working }) => working),
+    };
     const loops = instance.loops.map(
       (loop) =>
         new LoopView({
@@ -216,6 +351,13 @@ const makeOperatorObservation = Effect.gen(function* () {
     }
     const allRuns = new Map(views.map((run) => [run.id, run]));
     for (const project of projects) for (const run of project.runs) allRuns.set(run.id, run);
+    const cardedItems = new Map(
+      projects.flatMap(({ board }) =>
+        board.lanes.flatMap(({ items }) =>
+          items.flatMap((task) => task.items.map((item) => [item.itemKey, item] as const)),
+        ),
+      ),
+    );
     for (const run of allRuns.values()) {
       if (run.state === "Waiting") {
         needsYou.push(
@@ -224,12 +366,13 @@ const makeOperatorObservation = Effect.gen(function* () {
             repository: run.repository,
             runId: run.id,
             loop: run.loop,
+            item: cardedItems.get(run.itemKey) ?? null,
           }),
         );
       } else if (run.canResolveFailure) {
         const attempt = run.attempts.at(-1);
         if (attempt?.outcome?._tag !== "Failed") {
-          return yield* Effect.die(new Error(`Failed Run ${run.id} has no failed Attempt`));
+          return yield* Effect.die(new Error(`Failed run ${run.id} has no failed attempt`));
         }
         needsYou.push(
           new RunFailureNeed({
@@ -282,13 +425,59 @@ const makeOperatorObservation = Effect.gen(function* () {
     for (const { file, error } of instance.quarantinedLoops) {
       needsYou.push(new ConfigFileNeed({ id: `config-file:${file}`, kind: "loop", error }));
     }
-    const projected = new ReadyOverview({ projects, loops, needsYou });
+    const configuredWorkers = new Set(instance.config.workers.map(({ name }) => name));
+    for (const { worker, attempts, running } of workerAttempts) {
+      if (configuredWorkers.has(worker)) continue;
+      needsYou.push(
+        new UnconfiguredWorkerNeed({
+          id: `unconfigured-worker:${worker}`,
+          worker,
+          attempts,
+          running,
+        }),
+      );
+    }
+    const overview = new ReadyOverview({ projects, loops, needsYou });
     yield* Effect.logDebug("Refreshed operator overview", {
       revision,
       runs: views.length,
       needsYou: needsYou.length,
+      runsAtWork: usage.working.length,
     });
-    return projected;
+    return { overview, usage } as const;
+  });
+
+  // Each session keeps its highest report, so a Run's usage changes only with more tokens or
+  // another session.
+  const refreshWorkingUsage = Effect.fn("Operator.refreshWorkingUsage")(function* (
+    cached: CachedOverview,
+  ) {
+    if (cached.usage.working.length === 0) return cached;
+    const read = yield* Effect.forEach(
+      cached.usage.working,
+      (summary) =>
+        usageReader.read(summary).pipe(Effect.map((usage) => [summary.run.id, usage] as const)),
+      { concurrency: 4 },
+    );
+    const changed = new Set(
+      read.flatMap(([runId, usage]) => {
+        const before = cached.usage.runs.get(runId);
+        return before?.tokens === usage.tokens && before.sessions.length === usage.sessions.length
+          ? []
+          : [runId];
+      }),
+    );
+    if (changed.size === 0) return cached;
+    const runs = new Map([...cached.usage.runs, ...read]);
+    yield* Effect.logDebug("Refreshed the usage of Runs at work on the cached overview", {
+      runsAtWork: read.length,
+      changed: changed.size,
+    });
+    return {
+      ...cached,
+      overview: withRunUsage(cached.overview, changed, runs),
+      usage: { ...cached.usage, runs },
+    };
   });
 
   const overview = Effect.fn("Operator.overview")((instance: LoadedInstance) =>
@@ -310,13 +499,24 @@ const makeOperatorObservation = Effect.gen(function* () {
           onNone: () => [],
           onSome: ({ failures }) => failures,
         });
-        // Without the invalidation singleton staleness cannot be detected, so the
-        // cache is bypassed.
+        // Without the invalidation singleton, staleness can't be detected, so the cache is
+        // bypassed.
         const token = Option.map(revision, (value) =>
           JSON.stringify([
             value,
-            instance.config.repos.map(({ name, lanes }) => [name, lanes]),
-            instance.loops.map(({ name, agent, trigger }) => [name, agent, trigger.on]),
+            instance.config.repos.map(({ name, tags, lanes }) => [name, tags, lanes]),
+            [...workerAccesses(instance.config.workers)],
+            instance.loops.map(({ name, agent, trigger, selector }) => [
+              name,
+              agent,
+              trigger,
+              selector,
+            ]),
+            [...instance.invalidAgents, ...instance.quarantinedLoops].map(({ file, error }) => [
+              file,
+              error.stage,
+              error.message,
+            ]),
             pollFailures,
             preflightFindings,
             scheduleFailures,
@@ -326,7 +526,7 @@ const makeOperatorObservation = Effect.gen(function* () {
           yield* Effect.logWarning(
             "Projection revision singleton is missing; the overview cache is bypassed",
           );
-          const projected = yield* projectOverview(
+          const { overview: projected } = yield* projectOverview(
             instance,
             pollFailures,
             preflightFindings,
@@ -339,7 +539,8 @@ const makeOperatorObservation = Effect.gen(function* () {
           yield* Effect.logDebug("Reusing unchanged operator overview", {
             revision,
           });
-          return [cached.value.overview, cached] as const;
+          const current = yield* refreshWorkingUsage(cached.value);
+          return [current.overview, Option.some(current)] as const;
         }
         const projected = yield* projectOverview(
           instance,
@@ -348,12 +549,13 @@ const makeOperatorObservation = Effect.gen(function* () {
           scheduleFailures,
           revision,
         );
-        return [projected, Option.some({ token: token.value, overview: projected })] as const;
+        return [projected.overview, Option.some({ token: token.value, ...projected })] as const;
       }),
     ),
   );
 
   const detail = Effect.fn("Operator.detail")(function* (
+    instance: LoadedInstance,
     runId: RunId,
     request: TranscriptRequest = new ColdTranscriptRequest(),
   ) {
@@ -363,7 +565,7 @@ const makeOperatorObservation = Effect.gen(function* () {
       { concurrency: "unbounded" },
     );
     const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
-    const [transcript, sessionState] = yield* Effect.all(
+    const [transcript, sessionState, usage, unrecordedEnds] = yield* Effect.all(
       [
         readTranscript(reader, snapshot, request),
         Effect.forEach(
@@ -371,38 +573,73 @@ const makeOperatorObservation = Effect.gen(function* () {
           (attempt) => reader.transcript(new TranscriptSessionsQuery({ attemptId: attempt.id })),
           { concurrency: "unbounded" },
         ),
+        usageReader.read(snapshot),
+        readUnrecordedEnds(reader, snapshot),
       ],
       { concurrency: "unbounded" },
     );
     return new RunDetailView({
-      run: runView(snapshot, paused),
+      run: runView(snapshot, paused, workerAccesses(instance.config.workers)),
       eventDedupKey: snapshot.event.dedupKey,
       eventPayload: snapshot.event.payload,
       transcript: transcript.events,
       sessionState: sessionState.flat().map(transcriptEvent),
       earlierTranscript: transcript.earlier,
+      worker: snapshot.attempts.at(-1)?.worker ?? null,
+      duration: runDuration(snapshot.attempts, unrecordedEnds),
+      usage,
     });
   });
 
-  return { detail, overview } as const;
+  const tasks = yield* TaskReader;
+  const { desk } = yield* OperatorDesk;
+
+  return { detail, overview, task: tasks.read, desk } as const;
 });
 
-/** The read-only operator surface. It needs no trigger execution to build. */
+/** The read-only operator surface, which needs no trigger execution. */
 export class OperatorObservation extends Context.Service<
   OperatorObservation,
   {
-    /** Builds the supplied instance's Projects, Boards, Runs, and items needing operator attention. */
+    /**
+     * Builds the instance's Projects, Boards, Runs, and items needing operator attention. The
+     * result is cached until the projection revision or instance changes, except for running
+     * Attempts' token usage.
+     */
     readonly overview: (
       instance: LoadedInstance,
     ) => Effect.Effect<ReadyOverview, OperatorObservationError>;
-    /** Reads one Run and a bounded transcript page; `request` selects the latest, newer, or earlier activity. */
+    /**
+     * Reads one Run and a bounded transcript page, where `request` selects the latest, newer, or
+     * earlier activity.
+     */
     readonly detail: (
+      instance: LoadedInstance,
       runId: RunId,
       request?: TranscriptRequest,
     ) => Effect.Effect<RunDetailView, OperatorObservationError>;
+
+    /**
+     * Reads the Task that contains Item `item` of `repository`, with its Items, saved Runs, and
+     * harvested comments. Fails if the Item isn't among the Board's newest Items.
+     */
+    readonly task: (
+      instance: LoadedInstance,
+      repository: RepositoryName,
+      item: ItemNumber,
+    ) => Effect.Effect<TaskView, TaskReadError>;
+    /**
+     * Builds the instance's desk: running Attempts, matched Items with no running Attempt, recently
+     * closed Runs, Worker slots and preflights, and poll times.
+     */
+    readonly desk: (instance: LoadedInstance) => Effect.Effect<DeskView, OperatorObservationError>;
   }
 >()("@usine/orchestrator/OperatorObservation") {
-  static readonly layer = Layer.effect(OperatorObservation, makeOperatorObservation);
+  static readonly layer = Layer.effect(OperatorObservation, makeOperatorObservation).pipe(
+    Layer.provide(
+      Layer.mergeAll(TaskReader.layer, OperatorDesk.layer, LoopMatches.layer, RunUsageReader.layer),
+    ),
+  );
 }
 
 const makeOperator = Effect.gen(function* () {
@@ -413,9 +650,12 @@ const makeOperator = Effect.gen(function* () {
   const items = yield* ItemProjectionReader;
   const repositoryLabels = yield* RepositoryLabelProjectionReader;
   const github = yield* GitHubItemWriter;
+  const reader = yield* RunReader;
+  const boardMoves = yield* BoardMoves;
   const polling = yield* PollingTriggers;
+  const githubChanges = yield* RunGitHubChanges;
 
-  const approve = Effect.fn("Operator.approve")(function* (runId: RunId) {
+  const approve = Effect.fn("Operator.approve")(function* (instance: LoadedInstance, runId: RunId) {
     yield* Effect.annotateCurrentSpan({ runId });
     const current = yield* runs.inspect(runId);
     if (current.run.state._tag !== "Waiting") {
@@ -439,13 +679,17 @@ const makeOperator = Effect.gen(function* () {
         payload: { runId, decision: "approved" },
         receivedAt,
       }),
+      new ApprovalSource({ channel: "ui", approver: instance.config.operator }),
     );
     yield* Effect.logInfo("Operator approved Run", { runId });
   });
 
-  const retry = Effect.fn("Operator.retry")(function* (runId: RunId) {
+  const retry = Effect.fn("Operator.retry")(function* (instance: LoadedInstance, runId: RunId) {
     yield* Effect.annotateCurrentSpan({ runId });
-    yield* runs.retry(runId);
+    yield* runs.retry(
+      runId,
+      new RetryRequest({ requestedBy: instance.config.operator, amendment: Option.none() }),
+    );
     yield* Effect.logInfo("Operator retried Run", { runId });
   });
 
@@ -459,20 +703,78 @@ const makeOperator = Effect.gen(function* () {
     if (file === undefined)
       return yield* new RosterAgentNotFoundError({
         agent: edit.agent,
-        message: `Agent ${edit.agent} is not in the roster`,
+        message: `Agent "${edit.agent}" is not in the roster`,
       });
     const agent = file.agent;
     yield* runs.retry(
       runId,
-      Option.some(
-        new AttemptContext({
+      new RetryRequest({
+        requestedBy: instance.config.operator,
+        amendment: Option.some(
+          new AttemptContext({
+            task: edit.task,
+            agent,
+            parentModel: resolveParentModel(agent, instance.config.settings.parentModel),
+          }),
+        ),
+      }),
+    );
+    yield* Effect.logInfo("Operator amended and retried Run", { runId, agent: agent.name });
+  });
+
+  const runAgain = Effect.fn("Operator.runAgain")(function* (
+    instance: LoadedInstance,
+    runId: RunId,
+    edit: EditAndRetry,
+  ) {
+    yield* Effect.annotateCurrentSpan({ runId, agent: edit.agent });
+    const current = yield* runs.inspect(runId);
+    const loop = instance.loops.find(({ name }) => name === current.run.loop);
+    if (loop === undefined) {
+      yield* Effect.logInfo("Run again rejected; the Run's Loop is not loaded", {
+        runId,
+        loop: current.run.loop,
+      });
+      return yield* new LoopNotFoundError({
+        loop: current.run.loop,
+        message: `Run ${runId} cannot run again: loop "${current.run.loop}" is not loaded.`,
+      });
+    }
+    const file = instance.agents.find(({ name }) => name === edit.agent);
+    if (file === undefined) {
+      yield* Effect.logInfo("Run again rejected; the Agent is not in the roster", {
+        runId,
+        agent: edit.agent,
+      });
+      return yield* new RosterAgentNotFoundError({
+        agent: edit.agent,
+        message: `Agent "${edit.agent}" is not in the roster`,
+      });
+    }
+    const agent = file.agent;
+    const result = yield* runs.runAgain(
+      runId,
+      new RunAgainRequest({
+        step: loop.step,
+        approval: loop.approval,
+        cycleLimit: cycleLimitOf(loop),
+        permissions: loop.permissions,
+        context: new AttemptContext({
           task: edit.task,
           agent,
           parentModel: resolveParentModel(agent, instance.config.settings.parentModel),
         }),
-      ),
+        requestedBy: instance.config.operator,
+      }),
     );
-    yield* Effect.logInfo("Operator amended and retried Run", { runId, agent: agent.name });
+    yield* Effect.logInfo(
+      "Operator ran a Run again",
+      Match.valueTags(result, {
+        Claimed: ({ runId: openedRunId }) => ({ runId, agent: agent.name, openedRunId }),
+        CycleBlocked: ({ ask }) => ({ runId, agent: agent.name, askId: ask.id }),
+      }),
+    );
+    return result;
   });
 
   const intervene = Effect.fn("Operator.intervene")(function* (
@@ -529,6 +831,10 @@ const makeOperator = Effect.gen(function* () {
         ] as const,
         { concurrency: "unbounded" },
       );
+      // Place each card as the Board does, so the move records the lane that the card left.
+      const summaries = yield* reader.forItems(storedItems.map(({ itemKey }) => itemKey));
+      const runEvents = yield* readRunningEvents(reader, summaries);
+      const access = workerAccesses(instance.config.workers);
       const board = yield* projectBoard(
         repository,
         Option.match(labelProjection, {
@@ -536,7 +842,12 @@ const makeOperator = Effect.gen(function* () {
           onSome: ({ labels }) => labels.map(({ name }) => name),
         }),
         storedItems,
+        // Placement reads no pause state, so these views leave every Loop unpaused.
+        summaries.map((summary) => runView(summary, new Set(), access)),
         [],
+        new Map(),
+        new Map(),
+        runEvents,
       );
       const source = board.lanes.find(({ items: laneItems }) =>
         laneItems.some(({ items }) => items.some(({ number }) => number === move.item)),
@@ -553,7 +864,20 @@ const makeOperator = Effect.gen(function* () {
         return yield* new BoardLaneReadOnly({ repository: move.repository, lane: move.toLane });
       }
       const mutation = labelMutationForBoardMove(board, target);
-      const changed = { number: move.item, updatedAt: yield* DateTime.now };
+      const movedAt = yield* DateTime.now;
+      // Recorded before the write, so the Run reader never attributes the swap to an Agent.
+      yield* boardMoves.record(
+        new BoardMoveRecord({
+          repository: move.repository,
+          itemKey: movedItem.itemKey,
+          at: movedAt,
+          fromLane: source.name,
+          toLane: target.name,
+          added: mutation.add,
+          removed: mutation.remove,
+        }),
+      );
+      const changed = { number: move.item, updatedAt: movedAt };
       const item =
         movedItem.source === "pr" ? new ChangedPullRequest(changed) : new ChangedIssue(changed);
       const applied = yield* github.updateLabels(move.repository, move.item, mutation).pipe(
@@ -607,59 +931,102 @@ const makeOperator = Effect.gen(function* () {
     ...observation,
     approve,
     cancel,
+    discardLeftovers: (worker: WorkerName) => runs.discardLeftovers(worker).pipe(Effect.asVoid),
     moveBoardItem,
+    githubChanges: githubChanges.read,
     pause,
     retry,
     resolveFailure: runs.resolveFailure,
     editAndRetry,
+    runAgain,
     intervene,
     unpause,
     resetCycleBudget,
   } as const;
 });
 
-/** The operator's view of the factory and actions for approving, retrying, canceling, and directing work. */
+/**
+ * The operator's factory view and actions for approving, retrying, canceling, and directing work.
+ */
 export class Operator extends Context.Service<
   Operator,
   OperatorObservation["Service"] & {
-    /** Answers the Item's current cycle Ask; polling refreshes its state before more Runs open. */
+    /**
+     * Answers the Item's current cycle-budget Ask. Polling refreshes its state before more Runs
+     * open.
+     */
     readonly resetCycleBudget: (askId: CycleBudgetAskId) => Effect.Effect<void, OperatorError>;
-    /** Records approval for a waiting Run; execution still waits for Worker capacity. */
-    readonly approve: (runId: RunId) => Effect.Effect<void, OperatorError>;
-    /** Resolves attention for the failed Attempt displayed to the operator; stale requests are rejected. */
+    /**
+     * Records the operator's approval of a waiting Run, attributed to the operator login in
+     * `usine.yaml` if one is set. Execution still waits for Worker capacity.
+     */
+    readonly approve: (
+      instance: LoadedInstance,
+      runId: RunId,
+    ) => Effect.Effect<void, OperatorError>;
+    /** Resolves attention for the displayed failed Attempt. Rejects stale requests. */
     readonly resolveFailure: (
       runId: RunId,
       attemptId: AttemptId,
     ) => Effect.Effect<void, OperatorError>;
-    /** Requests a new Attempt for a failed Run using its effective task and Agent. */
-    readonly retry: (runId: RunId) => Effect.Effect<void, OperatorError>;
-    /** Atomically amends a failed Run before requesting its next Attempt. */
+    /** Requests a new Attempt for a failed Run with its effective task and Agent. */
+    readonly retry: (instance: LoadedInstance, runId: RunId) => Effect.Effect<void, OperatorError>;
+    /** Amends a failed Run and requests its next Attempt atomically. */
     readonly editAndRetry: (
       instance: LoadedInstance,
       runId: RunId,
       edit: EditAndRetry,
     ) => Effect.Effect<void, OperatorError>;
-    /** Delivers an attributed action through a live session's Attempt channel. */
+    /**
+     * Opens a new Run for the Item state of a succeeded or canceled Run, with the edited task and
+     * Agent and the Loop file's current settings. Returns the new Run, or the cycle-budget Ask that
+     * the Item opened instead.
+     */
+    readonly runAgain: (
+      instance: LoadedInstance,
+      runId: RunId,
+      edit: EditAndRetry,
+    ) => Effect.Effect<RunAgainResult, OperatorError>;
+    /** Sends an attributed action through a live session's Attempt channel. */
     readonly intervene: (
       instance: LoadedInstance,
       runId: RunId,
       input: SessionIntervention,
     ) => Effect.Effect<void, OperatorError>;
-    /** Cancels an open Run and interrupts its current Attempt; an already closed Run is unchanged. */
+    /**
+     * Cancels an open Run and interrupts its current Attempt. Does nothing if the Run is already
+     * closed.
+     */
     readonly cancel: (runId: RunId) => Effect.Effect<void, OperatorError>;
-    /** Swaps lane labels on GitHub and hints an authoritative refresh of its Board position and Loop matches. */
+    /**
+     * Answers an `UnconfiguredWorkerNeed` so startup stops reconciling the Attempts recorded on
+     * `worker`. Fails with `LeftoversDiscardRejectedError` if `usine.yaml` declares the Worker or
+     * it still runs Attempts.
+     */
+    readonly discardLeftovers: (worker: WorkerName) => Effect.Effect<void, OperatorError>;
+    /**
+     * Records the move, swaps lane labels on GitHub, and hints a refresh of the Item's Board
+     * position and Loop matches. If the move can't be recorded, nothing is sent to GitHub.
+     */
     readonly moveBoardItem: (
       instance: LoadedInstance,
       move: BoardMove,
     ) => Effect.Effect<void, BoardMoveError>;
-    /** Pauses new work for a Loop while its existing Runs continue. */
+    /**
+     * Reads the changes on the Run's GitHub Item during each Attempt from the Item's timeline: the
+     * Agent's label, comment, and review changes, and the operator's Board moves.
+     */
+    readonly githubChanges: (
+      runId: RunId,
+    ) => Effect.Effect<RunGitHubChangesView, RunGitHubChangesError>;
+    /** Pauses new work for a Loop; its existing Runs continue. */
     readonly pause: (loop: LoopName) => Effect.Effect<LoopRuntimeState, EnginePersistenceError>;
-    /** Allows the Loop's triggers to open new Runs again. */
+    /** Lets the Loop's triggers open new Runs again. */
     readonly unpause: (loop: LoopName) => Effect.Effect<LoopRuntimeState, EnginePersistenceError>;
   }
 >()("@usine/orchestrator/Operator") {
   static readonly layer = Layer.effect(Operator, makeOperator).pipe(
-    Layer.provide(OperatorObservation.layer),
+    Layer.provide(Layer.merge(OperatorObservation.layer, RunGitHubChanges.layer)),
   );
 }
 
@@ -672,17 +1039,40 @@ export {
   FactoryOverview,
 } from "./overview.ts";
 export {
+  LabelAddedView,
+  LabelRemovedView,
+  CommentedView,
+  ReviewedView,
+  BoardMovedView,
+  GitHubChangeView,
+  AttemptGitHubChangesView,
+  RunGitHubChangesView,
+} from "./github-changes.ts";
+export {
+  ApprovalView,
   RunStateTag,
   RunView,
+  RunDurationView,
   RunDetailView,
   EditAndRetry,
+  LoopNotFoundError,
   SessionIntervention,
   RosterAgentNotFoundError,
 } from "./run.ts";
 export {
+  UsageCostView,
+  SessionUsageView,
+  PoolUsageView,
+  RunUsageView,
+  TaskPoolUsageView,
+  TaskUsageView,
+} from "./usage.ts";
+export {
   InfraFailureView,
   DefectFailureView,
   AgentFailureView,
+  BlockedFailureView,
+  QuestionFailureView,
   RunawayFailureView,
   ChildSessionBudgetFailureView,
   FailureView,
@@ -690,12 +1080,16 @@ export {
   FailedAttemptView,
   CanceledAttemptView,
   AttemptOutcomeView,
+  LocalWorkerAccess,
+  SshWorkerAccess,
+  WorkerAccess,
   AttemptView,
 } from "./attempt.ts";
 export {
   BoardLaneId,
   BoardLaneOrigin,
   BoardItemLink,
+  BoardPullRequestView,
   BoardTaskView,
   WritableBoardLaneView,
   ReadOnlyBoardLaneView,
@@ -710,6 +1104,13 @@ export {
   BoardLaneReadOnlyError,
 } from "./board.ts";
 export {
+  TaskItemView,
+  TaskLaneView,
+  TaskCommentView,
+  TaskView,
+  type TaskReadError,
+} from "./task.ts";
+export {
   ApprovalNeed,
   CycleBudgetNeed,
   RunFailureNeed,
@@ -718,8 +1119,53 @@ export {
   BoardProjectionNeed,
   ScheduleFailureNeed,
   ConfigFileNeed,
+  UnconfiguredWorkerNeed,
   NeedView,
 } from "./need.ts";
+export {
+  LoopSelectorView,
+  LoopFileView,
+  QuarantinedLoopView,
+  AgentFileView,
+  InvalidAgentView,
+  GatewayView,
+  WorkerSlotsView,
+  PassedCheckView,
+  FailedCheckView,
+  PreflightCheckView,
+  HarnessPreflightView,
+  WorkerConfigurationView,
+  RemovedWorkerView,
+  LabelStateView,
+  LabelLaneSourceView,
+  StateLaneSourceView,
+  LaneSourceView,
+  LaneConfigurationView,
+  RepositoryConfigurationView,
+  SettingsView,
+  ConfigurationView,
+  OperatorConfiguration,
+} from "./configuration.ts";
+export {
+  WorkerSilentView,
+  ProviderRetryingView,
+  ConnectivityWarningView,
+  RunningAttemptView,
+  SuppressedForOperatorView,
+  ClosedUnchangedView,
+  RunFailedView,
+  LoopPausedView,
+  CycleBudgetUsedUpView,
+  AwaitingApprovalView,
+  QueuedForWorkerView,
+  AwaitingPollView,
+  StallReasonView,
+  StalledItemView,
+  ClosedRunView,
+  WorkerView,
+  RepositoryPollView,
+  DeskView,
+} from "./desk.ts";
 export {
   FailedTranscriptView,
   TranscriptPayload,

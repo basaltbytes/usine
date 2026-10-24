@@ -2,8 +2,7 @@ import { NodeServices } from "@effect/platform-node";
 import { UsineConfig } from "@usine/config/factory";
 import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
-import type { AttemptId } from "@usine/core/attempt";
-import { AttemptTask } from "@usine/core/attempt";
+import { type AttemptId, AttemptTask, AttemptWindow, AttemptWindows } from "@usine/core/attempt";
 import { Event, DedupKey, EventId } from "@usine/core/event";
 import { InstanceDirectory } from "@usine/core/instance";
 import { ItemKey } from "@usine/core/item";
@@ -15,18 +14,34 @@ import { RunEngine, Submission } from "@usine/engine/engine";
 import { TranscriptAllQuery } from "@usine/engine/transcript";
 import { HarnessReady } from "@usine/core/agent/capability";
 import type { AttemptRuntime } from "@usine/durable/attempt-runtime";
-import { CredentialProvider, WorkerCredential } from "@usine/executor";
+import { claudeLoginLockLayer, CredentialProvider, WorkerCredential } from "@usine/executor";
 import type { HarnessProbe, LocalExecutorOptions } from "@usine/executor/local";
 import { DateTime, Effect, FileSystem, Layer, Option, Path, Redacted, Schema } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { layer as localLayer } from "../../src/local.ts";
 import { stubAttemptRuntime, StubStorage } from "@usine/durable/testing";
+import { fixedConfigLayer } from "../support/current-instance.ts";
+import { testAppLayer } from "../support/github-app.ts";
 import { alwaysHoldsLayer } from "../support/polling.ts";
 
+/**
+ * Returns windows where `attemptId` is the only Attempt of its Agent on the Item, open since before
+ * any test time, so the harvest keeps every signed comment.
+ */
+export const aloneOnItem = (attemptId: AttemptId) =>
+  Effect.succeed(
+    new AttemptWindows({
+      own: Option.some(
+        new AttemptWindow({ attemptId, startedAt: DateTime.makeUnsafe(0), endedAt: Option.none() }),
+      ),
+      overlapping: [],
+    }),
+  );
+
 export const TOKEN = "one-attempt-test-token";
-// Each live transition crosses real git worktree and child-process boundaries.
-// The 10-second poll horizon absorbs slow CI hosts, and the 10 ms cadence still
-// reports the last durable state when a transition stalls.
+// Each live transition crosses real git worktree and child-process boundaries. The 10-second poll
+// horizon allows for slow CI hosts, and the 10 ms interval still reports the last durable state
+// when a transition stalls.
 export const STATE_POLL_ATTEMPTS = 1_000;
 // The capacity test completes three sequential Attempt lifecycles, so its
 // per-test ceiling must cover more than one state-poll horizon plus cleanup.
@@ -158,7 +173,10 @@ export const waitForStarted = Effect.fn("test.waitForStarted")(function* (
   return yield* Effect.die(`Attempt ${attemptId} never reported Started`);
 });
 
-/** Waits for the first Attempt's salvage record; the executor writes it after the Run's state has settled. */
+/**
+ * Waits for the first Attempt's salvage record, which the executor writes after the Run's state is
+ * final.
+ */
 export const waitForSalvage = Effect.fn("test.waitForSalvage")(function* (
   engine: RunEngine["Service"],
   runId: RunId,
@@ -171,14 +189,17 @@ export const waitForSalvage = Effect.fn("test.waitForSalvage")(function* (
   return yield* Effect.die(`Run ${runId} recorded no salvage`);
 });
 
-/** How a test runtime differs from the default: its parent tasks, credentials, or executor settings. */
+/** Overrides for a test runtime: parent tasks, credentials, or executor settings. */
 export interface LocalRuntimeOptions {
   readonly attemptRuntime?: Layer.Layer<AttemptRuntime>;
   readonly credentials?: Layer.Layer<CredentialProvider>;
   readonly executor?: Omit<LocalExecutorOptions, "instanceDirectory">;
 }
 
-/** The orchestrator layer for one local Worker over `remote`; every call builds a fresh runtime. */
+/**
+ * Returns the orchestrator layer for one local Worker over `remote`, building a new runtime on each
+ * call.
+ */
 export const localRuntime = (
   instance: InstanceDirectory,
   remote: string,
@@ -192,7 +213,10 @@ export const localRuntime = (
   }).pipe(
     Layer.provide(options.credentials ?? credentialLayer),
     Layer.provide(options.attemptRuntime ?? stubAttemptRuntime(new StubStorage())),
+    Layer.provide(claudeLoginLockLayer),
     Layer.provide(alwaysHoldsLayer),
+    Layer.provide(fixedConfigLayer(config)),
+    Layer.provide(testAppLayer),
   );
 
 export const withLocalEngine = <A, E, R>(

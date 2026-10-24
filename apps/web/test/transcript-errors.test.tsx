@@ -9,7 +9,6 @@ const error = (sequence: number): TranscriptUpdate => ({
   sequence: TranscriptSequence.make(sequence),
   latestSequence: TranscriptSequence.make(sequence),
   isError: true,
-  childKey: null,
   isTool: false,
 });
 

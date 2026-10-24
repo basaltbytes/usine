@@ -1,20 +1,31 @@
 import { canonicalContent } from "./content.ts";
+import { ItemNumber } from "@usine/core/item";
 import { RepositoryName, splitRepositoryName } from "@usine/core/repository";
-import { Clock, Context, Crypto, DateTime, Effect, Layer, Option, Schema } from "effect";
+import {
+  Array as Arr,
+  Clock,
+  Context,
+  Crypto,
+  DateTime,
+  Effect,
+  Layer,
+  Option,
+  Schema,
+} from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 import { GitHubApp } from "../github-app.ts";
+import { queryGraphql } from "../graphql.ts";
 import {
   API_ROOT,
   authorized,
   invalidResponse,
   pollIntervalMillis,
   rateLimitResetMillis,
-  rateLimitRetryEpoch,
   retryAfterMillis,
   statusError,
   transportError,
 } from "../http.ts";
-import { GitHubRateLimitError, type GitHubAppError, type GitHubOperation } from "../error.ts";
+import { GitHubItemNotFoundError, type GitHubAppError, type GitHubOperation } from "../error.ts";
 import {
   ChangedIssue,
   ChangedPullRequest,
@@ -40,16 +51,16 @@ import {
   RepositoryLabelsNotModified,
   RepositoryLabelName,
 } from "./labels.ts";
-import { ISSUE_PAYLOAD_QUERY, PULL_REQUEST_PAYLOAD_QUERY } from "./queries.ts";
+import { ISSUE_PAYLOAD_QUERY, PULL_REQUEST_PAYLOAD_QUERY, issuesPresentQuery } from "./queries.ts";
 
 const WATERMARK_OVERLAP_MS = 5_000;
 const RATE_LIMIT_PRESSURE_THRESHOLD = 100;
-/** Caps one cycle's REST walk. The watermark resumes the remainder next cycle. */
+/** The maximum REST pages per cycle; the watermark resumes the rest next cycle. */
 const MAX_CHANGE_PAGES = 10;
-/** Caps one repository's label walk so a pathological catalog cannot run unbounded. */
+/** The maximum label pages per repository. */
 const MAX_LABEL_PAGES = 100;
-/** GraphQL rate limiting sometimes omits reset headers. Wait at least this long then. */
-const GRAPHQL_RATE_LIMIT_FALLBACK_MS = 60_000;
+/** The number of issue numbers per `missingIssues` GraphQL request. */
+const ISSUES_PER_PRESENCE_CHECK = 50;
 
 const RestChangedItem = Schema.Struct({
   number: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
@@ -72,19 +83,6 @@ const catalogLabel = ({
 }: (typeof RestRepositoryLabels.Type)[number]): RepositoryLabel =>
   new RepositoryLabel({ name, color, description: Option.fromNullishOr(description) });
 
-/** The GraphQL transport envelope. `errors` arrives on HTTP 200 and must be read. */
-const GraphqlEnvelope = Schema.Struct({
-  data: Schema.optionalKey(Schema.Unknown),
-  errors: Schema.optionalKey(
-    Schema.Array(
-      Schema.Struct({
-        message: Schema.String,
-        type: Schema.optionalKey(Schema.String),
-      }),
-    ),
-  ),
-});
-
 const IssueData = Schema.Struct({
   repository: Schema.OptionFromNullOr(
     Schema.Struct({ issue: Schema.OptionFromNullOr(IssuePayload) }),
@@ -95,6 +93,18 @@ const PullRequestData = Schema.Struct({
     Schema.Struct({ pullRequest: Schema.OptionFromNullOr(PullRequestPayload) }),
   ),
 });
+const IssuePresence = Schema.NullOr(Schema.Struct({ number: Schema.Int }));
+/** The response schema for `issuesPresentQuery(count)`; every alias from `i0` to `i<count - 1>` must be present. */
+const issuesPresentData = (count: number) =>
+  Schema.Struct({
+    repository: Schema.OptionFromNullOr(
+      Schema.Struct(
+        Object.fromEntries(
+          Array.from({ length: count }, (_, index) => [`i${index}`, IssuePresence] as const),
+        ),
+      ),
+    ),
+  });
 
 type Headers = HttpClientResponse.HttpClientResponse["headers"];
 
@@ -128,7 +138,7 @@ const nextPollAt = (headers: Headers, now: number) =>
     rateLimitResetMillis(headers, RATE_LIMIT_PRESSURE_THRESHOLD),
   ]);
 
-/** The `rel="next"` URL from a Link header when GitHub has more pages. */
+/** Returns the `rel="next"` URL from a Link header, if GitHub has more pages. */
 const nextPageUrl = (link: string | undefined): Option.Option<string> => {
   if (link === undefined) return Option.none();
   const match = /<(?<url>[^>]+)>;\s*rel="next"/u.exec(link);
@@ -181,25 +191,38 @@ const newerWatermark = (cursor: PollCursor, items: ReadonlyArray<ChangedItem>) =
   return epochs.length === 0 ? Option.none<DateTime.Utc>() : dateTimeAt(Math.max(...epochs));
 };
 
-/** Finds changed GitHub Items and fetches the snapshots used to select work for Loops. */
+/** The service that finds changed GitHub Items and fetches their snapshots for Loop selection. */
 export class GitHubPolling extends Context.Service<
   GitHubPolling,
   {
-    /** Finds issue and PR updates since the saved cursor; persist the returned cursor after processing the detected Items. */
+    /** Returns issue and PR updates since the saved cursor. Persist the returned cursor after processing the detected Items. */
     readonly changes: (
       repository: RepositoryName,
       cursor: PollCursor,
     ) => Effect.Effect<ChangeDetection, GitHubAppError>;
-    /** Reads the repository's label catalog, or confirms the catalog named by `entityTag` is unchanged. */
+    /** Returns the repository's label catalog, or confirms that the catalog with `entityTag` is unchanged. */
     readonly labels: (
       repository: RepositoryName,
       entityTag: Option.Option<EntityTag>,
     ) => Effect.Effect<RepositoryLabelCatalog | RepositoryLabelsNotModified, GitHubAppError>;
-    /** Fetches an Item's selection and prompt payload together with its timestamp-independent content hash. */
+    /**
+     * Returns an Item's selection and prompt payload with its content hash. Fails with
+     * `GitHubItemNotFoundError` if the repository responds but has no such Item.
+     */
     readonly snapshot: (
       repository: RepositoryName,
       item: ChangedItem,
-    ) => Effect.Effect<PayloadSnapshot, GitHubAppError>;
+    ) => Effect.Effect<PayloadSnapshot, GitHubAppError | GitHubItemNotFoundError>;
+    /**
+     * Returns the issue numbers in `numbers` that the repository no longer has (deleted,
+     * transferred, or not readable by the App). Sends sequential GraphQL requests of 50 numbers,
+     * and none for an empty list. Fails with `InvalidGitHubResponseError` if the repository is
+     * null.
+     */
+    readonly missingIssues: (
+      repository: RepositoryName,
+      numbers: ReadonlyArray<ItemNumber>,
+    ) => Effect.Effect<ReadonlyArray<ItemNumber>, GitHubAppError>;
   }
 >()("@usine/github/GitHubPolling") {
   static readonly layer: Layer.Layer<
@@ -260,7 +283,7 @@ export class GitHubPolling extends Context.Service<
         };
       });
 
-      /** Walks the label pages after an already-fetched first page, under the label page cap. */
+      /** Fetches the label pages after the first page, up to the label page cap. */
       const remainingLabelPages = Effect.fn("GitHubPolling.remainingLabelPages")(function* (
         operation: GitHubOperation,
         firstPage: {
@@ -280,7 +303,7 @@ export class GitHubPolling extends Context.Service<
         if (Option.isSome(next)) {
           return yield* invalidResponse(
             operation,
-            `GitHub label list exceeded ${MAX_LABEL_PAGES} pages`,
+            `the GitHub label list has more than ${MAX_LABEL_PAGES} pages`,
           );
         }
         return catalog.sort((left, right) => left.name.localeCompare(right.name));
@@ -359,8 +382,8 @@ export class GitHubPolling extends Context.Service<
           Effect.mapError((error) => invalidResponse("poll-repository-changes", error.message)),
         );
         const items = toChangedItems(decoded);
-        // The ETag is efficiency only: a page without one costs conditional requests next cycle, never correctness.
-        // Only the first page's tag matches the canonical URL the next cycle re-requests.
+        // The ETag is only for efficiency: a page without one costs unconditional requests next cycle.
+        // Only the first page's tag matches the canonical URL requested next cycle.
         const entityTag = Schema.decodeUnknownOption(EntityTag)(response.headers.etag);
         if (Option.isNone(entityTag)) {
           yield* Effect.logWarning("GitHub omitted the changes ETag; next poll is unconditional", {
@@ -405,37 +428,13 @@ export class GitHubPolling extends Context.Service<
       ) {
         const token = yield* app.installationToken();
         const { name, owner } = splitRepositoryName(repository);
-        const request = HttpClientRequest.post(`${API_ROOT}/graphql`).pipe(
-          HttpClientRequest.bodyJsonUnsafe({ query, variables: { owner, name, number } }),
-          authorized(token.value),
-        );
-        const response = yield* execute(operation, request);
-        const now = yield* Clock.currentTimeMillis;
-        if (response.status !== 200) return yield* statusError(operation, response, now);
-        const envelope = yield* HttpClientResponse.schemaBodyJson(GraphqlEnvelope)(response).pipe(
-          Effect.mapError((error) => invalidResponse(operation, error.message)),
-        );
-        // GraphQL reports failures on HTTP 200. Rate limiting becomes a typed wait, and anything else keeps its messages for diagnosis.
-        if (envelope.errors !== undefined && envelope.errors.length > 0) {
-          const rateLimited = envelope.errors.some((error) => error.type === "RATE_LIMITED");
-          if (rateLimited) {
-            const retryAt = Option.getOrElse(
-              rateLimitRetryEpoch(response.headers, now),
-              () => now + GRAPHQL_RATE_LIMIT_FALLBACK_MS,
-            );
-            return yield* new GitHubRateLimitError({
-              operation,
-              retryAt: DateTime.makeUnsafe(retryAt),
-              message: "GitHub GraphQL asked the poller to wait before retrying",
-            });
-          }
-          return yield* invalidResponse(
-            operation,
-            `GraphQL errors: ${envelope.errors.map((error) => error.message).join("; ")}`,
-          );
-        }
-        return yield* Schema.decodeUnknownEffect(dataSchema)(envelope.data).pipe(
-          Effect.mapError((error) => invalidResponse(operation, error.message)),
+        return yield* queryGraphql(
+          http,
+          token,
+          operation,
+          query,
+          { owner, name, number },
+          dataSchema,
         );
       });
 
@@ -443,8 +442,19 @@ export class GitHubPolling extends Context.Service<
         (
           repository: RepositoryName,
           item: ChangedItem,
-        ): Effect.Effect<PayloadSnapshot, GitHubAppError> =>
+        ): Effect.Effect<PayloadSnapshot, GitHubAppError | GitHubItemNotFoundError> =>
           Effect.gen(function* () {
+            const repositoryGone = (operation: GitHubOperation) =>
+              invalidResponse(
+                operation,
+                `repository "${repository}" is null: deleted, renamed, or no longer accessible`,
+              );
+            const itemGone = (operation: GitHubOperation, kind: string) =>
+              new GitHubItemNotFoundError({
+                operation,
+                item: item.number,
+                message: `GitHub ${kind} ${repository}#${item.number} was not found. It was deleted or transferred, or the GitHub App can no longer read it.`,
+              });
             const completeLabels = Effect.fn("GitHubPolling.completeItemLabels")(function* (
               payload: IssuePayload | PullRequestPayload,
             ) {
@@ -472,13 +482,10 @@ export class GitHubPolling extends Context.Service<
                 ISSUE_PAYLOAD_QUERY,
                 IssueData,
               );
-              const payload = Option.flatMap(data.repository, ({ issue }) => issue);
-              if (Option.isNone(payload)) {
-                return yield* invalidResponse(
-                  "fetch-issue-snapshot",
-                  `issue ${item.number} came back null — deleted, transferred, or access lost`,
-                );
-              }
+              if (Option.isNone(data.repository))
+                return yield* repositoryGone("fetch-issue-snapshot");
+              const payload = data.repository.value.issue;
+              if (Option.isNone(payload)) return yield* itemGone("fetch-issue-snapshot", "issue");
               const completePayload = {
                 ...payload.value,
                 labels: yield* completeLabels(payload.value),
@@ -496,13 +503,11 @@ export class GitHubPolling extends Context.Service<
               PULL_REQUEST_PAYLOAD_QUERY,
               PullRequestData,
             );
-            const payload = Option.flatMap(data.repository, ({ pullRequest }) => pullRequest);
-            if (Option.isNone(payload)) {
-              return yield* invalidResponse(
-                "fetch-pull-request-snapshot",
-                `pull request ${item.number} came back null — deleted or access lost`,
-              );
-            }
+            if (Option.isNone(data.repository))
+              return yield* repositoryGone("fetch-pull-request-snapshot");
+            const payload = data.repository.value.pullRequest;
+            if (Option.isNone(payload))
+              return yield* itemGone("fetch-pull-request-snapshot", "pull request");
             const completePayload = {
               ...payload.value,
               labels: yield* completeLabels(payload.value),
@@ -514,7 +519,43 @@ export class GitHubPolling extends Context.Service<
           }),
       );
 
-      return { changes, labels, snapshot };
+      const missingIssues = Effect.fn("GitHubPolling.missingIssues")(function* (
+        repository: RepositoryName,
+        numbers: ReadonlyArray<ItemNumber>,
+      ) {
+        yield* Effect.annotateCurrentSpan({ repository, issues: numbers.length });
+        const { name, owner } = splitRepositoryName(repository);
+        const missing = yield* Effect.forEach(
+          Arr.chunksOf(numbers, ISSUES_PER_PRESENCE_CHECK),
+          (chunk) =>
+            Effect.gen(function* () {
+              const token = yield* app.installationToken();
+              const data = yield* queryGraphql(
+                http,
+                token,
+                "find-missing-issues",
+                issuesPresentQuery(chunk.length),
+                {
+                  owner,
+                  name,
+                  ...Object.fromEntries(chunk.map((number, index) => [`n${index}`, number])),
+                },
+                issuesPresentData(chunk.length),
+              );
+              if (Option.isNone(data.repository)) {
+                return yield* invalidResponse(
+                  "find-missing-issues",
+                  `repository "${repository}" is null: deleted, renamed, or no longer accessible`,
+                );
+              }
+              const issues = data.repository.value;
+              return chunk.filter((_, index) => issues[`i${index}`] === null);
+            }),
+        );
+        return missing.flat();
+      });
+
+      return { changes, labels, snapshot, missingIssues };
     }),
   );
 }
@@ -537,6 +578,7 @@ export {
   RepositoryLabelsNotModified,
   RepositoryLabelDetection,
 } from "./labels.ts";
+export { GitHubItemNotFoundError } from "../error.ts";
 export {
   ContentHash,
   IssuePayload,
@@ -549,7 +591,7 @@ export {
 const makeContentHash = (crypto: Crypto.Crypto) =>
   Effect.fn("GitHubPolling.contentHash")(function* (payload: Schema.Json) {
     const encoded = new TextEncoder().encode(JSON.stringify(canonicalContent(payload)));
-    // An in-memory SHA-256 digest fails only on a broken platform, so a failure here is a defect.
+    // An in-memory SHA-256 digest fails only on a broken platform, so a failure is a defect.
     const digest = yield* crypto.digest("SHA-256", encoded).pipe(Effect.orDie);
     return ContentHash.make(
       Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join(""),

@@ -1,53 +1,90 @@
 # @usine/orchestrator
 
-`@usine/orchestrator` connects loaded loop files to GitHub polling, the durable run engine, and configured workers for [usine](https://github.com/basaltbytes/usine).
+Connects loaded loop files to GitHub polling, the durable run engine, and the configured workers for [usine](https://github.com/basaltbytes/usine). [Operator surfaces](https://docs.usine.dev/architecture/operator-surfaces/) and [Run lifecycle](https://docs.usine.dev/architecture/run-lifecycle/) describe the behavior in depth.
 
-Its platform-free entry points provide `PollingTriggers` at `/polling-triggers`, `ScheduleTriggers` at `/schedule-triggers`, `Orchestrator` at `/orchestrator`, and `Operator` with its request and response types at `/operator`. `Orchestrator.run(instance)` runs both trigger streams; `Operator` provides run and Board observation, structured protocol transcript pages, label-backed Board moves, approve/retry/cancel, and database-backed Loop pause/unpause. Transcript payloads, Attempt brains/outcomes, and items needing attention remain typed data. Captured executor defects appear as `DefectFailure` with a safe message; original causes stay out of operator responses. Consuming apps own their wording and presentation. `OperatorObservation` exposes the same read-only projection without constructing execution services. The latest polling and schedule failures remain visible through `Operator.overview(instance)` after their sibling work continues. Concurrent overview reads with the same durable revision share one projection computation.
+The platform-free entry points are `PollingTriggers` (`/polling-triggers`), `ScheduleTriggers` (`/schedule-triggers`), `Orchestrator` (`/orchestrator`), and `Operator` with its request and response types (`/operator`). `Orchestrator.run` runs both trigger streams over the factory's `CurrentInstance`.
 
-`Operator.overview(instance)` joins the latest 500 polled Items into Task cards in each repository's authored lanes. Explicit same-repository issue closing links and saved Run PR results join an issue to a PR. Repositories without configured lanes receive proposals from the repository label catalog, including unused labels and repositories with no Items. Items that match no source appear in a read-only `Unmapped` lane, and label matches take precedence over state sources. Each card retains every saved Run on its member Items, oldest first. The newest open Run determines the current Item; between Runs an open PR, then the latest settled PR, takes over from the issue. Its labels and state determine the lane, so removing the issue's trigger label does not strand a task whose PR is under review. See ADR 0024. A malformed Item projection is quarantined and reported in the Board and needs-you strip while valid siblings remain visible. Failed declared-label creation also appears as a repository preflight finding without blocking trigger work.
+0.x APIs can change between minor releases. Supply `effect` at the workspace's pinned version.
 
-`Operator.moveBoardItem(instance, move)` accepts authored label-backed lanes, adds the target lane labels, and removes only labels owned by the authored map. Proposed lanes are read-only; direct move requests return `BoardLaneReadOnlyError`. GitHub labels outside the authored map remain unchanged even when the Item snapshot is stale or its label connection is truncated. Configure `repos[].lanes` in `usine.yaml` and restart the orchestrator to enable moves; see the [lane configuration example](../config/README.md). Every attempted GitHub label write queues an Item Hint, including an uncertain or partially applied failure: the running poller fetches the current GitHub snapshot, projects its Board position, and evaluates its Loops immediately unless GitHub has requested backoff.
+## Operator
 
-`Operator.detail` accepts distinct cold, live-tail, and earlier-page requests. A cold read keeps the newest 500 rows per Attempt and returns an earlier cursor for every truncated Attempt; clients can page each cursor backward until the entire transcript is reachable without ballooning the first drawer response. A live-tail response returns at most 500 rows across the Run and advances its cursor from the last returned row.
+`Operator` provides run and board observation, transcript pages, label-backed board moves, approve, retry, cancel, and loop pause. It returns typed data, and consuming apps own the wording. Captured executor defects appear as `DefectFailure` with a safe message, without the original cause. `OperatorObservation` gives the same read-only projection without execution services.
+
+`OperatorConfiguration.view(instance)` returns the instance folder as already parsed: each loop, agent, worker, registered repo with its lanes, and the settings; every quarantined loop and invalid agent with its error; each loop's pause; each worker's slots and last preflight per harness (from `WorkerStatus`); and each repo's labels as polling last read them. A gateway's admin token appears only as its variable name.
+
+`Operator.overview(instance)` keeps the latest polling and schedule failures visible after sibling work continues. Concurrent reads at one durable revision share a computation.
+
+### Overview and board
+
+The overview joins the latest 500 polled items into task cards in each repo's authored lanes. Same-repo issue-closing links and saved run PR results join an issue to a PR. Repos without lanes get proposals from the label catalog, including unused labels and repos without items. Items matching no source go to a read-only `Unmapped` lane; label matches beat state sources. Each card keeps every saved run on its items, oldest first.
+
+The newest open run sets the current item; between runs, an open PR, then the latest settled PR, replaces the issue. Its labels and state pick the lane, so a task whose PR is in review stays put when the issue loses its trigger label. While the newest open run is `Running` on an open item, the card goes to the first label lane matching the labels in that run's event payload (`RunReader.events`), until the run ends; if none matches, the current item decides. `Operator.task` places tasks the same way, and `Operator.moveBoardItem` records the lane the card left (ADR 0024).
+
+A card also has `pullRequest` (the open PR, else the newest merged one) and `usage` from `RunUsageReader`: ended attempt time, working attempts' starts, and tokens and dollars per billing pool over its runs' sessions. A pool's dollars are its priced sessions'; `unpriced` marks a session in a priced pool without a price yet, such as a Claude session before its first result, so the cost is a lower bound. The overview is kept until the revision or instance changes; token reports change neither, so each read re-reads working attempts' reports and re-sums cards whose runs used more.
+
+A malformed item projection is quarantined and reported on the board and the needs-attention strip; valid items stay visible. A failed declared-label creation is a repo preflight finding and doesn't block triggers.
+
+`Operator.moveBoardItem(instance, move)` accepts authored label-backed lanes, adds the target lane's labels, and removes only labels the authored map owns, even with a stale snapshot or truncated label connection. Proposed lanes are read-only (`BoardLaneReadOnlyError`); define [`repos[].lanes`](https://docs.usine.dev/reference/configuration/usine-yaml/) and reload to enable moves. Every attempted label write, including an uncertain or partial failure, queues an item hint: the poller fetches the snapshot, places it, and evaluates its loops at once unless GitHub requested backoff.
+
+### Run detail
+
+`Operator.detail` takes distinct cold, live-tail, and earlier-page requests. A cold read keeps the newest 500 rows per attempt, with an earlier cursor per truncated attempt for paging back. A live tail returns at most 500 rows across the run and advances its cursor from the last row. Each response also has:
+
+- the newest attempt's worker;
+- `RunDurationView`: ended attempts' time, the running one's start, and how many ended without a recorded end or transcript row;
+- `RunUsageView`: each session's highest token report, summed per session, pool, and run, priced where the pool has a dollar rate, as an estimate on the Claude plan and never on the ChatGPT plan (ADR 0013). Pools come from `sessionPool` (`@usine/core/agent/session`), so a Claude Code child on its gateway's API key counts in API keys at the model's rate. Ended attempts' reports are kept in memory until restart, so polling reads only the attempt in flight.
+
+Each `AttemptView` has `start`, the last reattach time, and `workerAccess`: `LocalWorkerAccess`, `SshWorkerAccess` with `destination` and `port` from `usine.yaml` (exe.dev reads as `<name>.exe.xyz`), or null if the worker is no longer declared. `detail`, like the overview, task, and desk reads, takes the loaded instance. `Operator.retry` and `Operator.editAndRetry` pass the instance's `operator` login to the next attempt.
+
+### Task
+
+`Operator.task(instance, repository, item)` returns the `TaskView` containing `item`, found from any member and named by its originating item (the earliest issue, else the earliest PR). It uses the board projection over the repo's 500 newest items, and `RunReader.forItems` for every saved run, outside the overview's window. It has the lane and current item; each item's state, labels, and base conflict; runs newest first; and the runs' comments and reviews, newest first per run: a succeeded attempt's `Comment` facts and a failed or canceled attempt's recorded comments, each with GitHub's post time (if recorded) and the attempt's end. An item outside the window fails with `BoardItemNotFoundError`. API: `GET /api/projects/:owner/:repository/tasks/:item`.
+
+### GitHub changes
+
+`Operator.githubChanges(runId)` returns `RunGitHubChangesView`: per attempt, the labels added and removed, comments, and submitted reviews on the run's item, oldest first. It reads the timeline through `GitHubItemHistory`, keeps the App's changes, and gives each to the attempt at work when GitHub recorded it, from its start second to its end (or now). An attempt that ended before end times were recorded ends at its last transcript row. All agents write as one App, so a change during two runs' overlapping attempts belongs to neither and is logged.
+
+Board moves use the same App, so `moveBoardItem` records each move in `BoardMoves` (`@usine/engine/board-moves`) before sending labels, and doesn't send a move it can't record. A timeline label change that the move sent the same way, recorded from 1 second before to 10 seconds after the move's second, belongs to the move: it leaves the attempt's list, and the move appears as `BoardMoved` with its lanes in the attempt at work then. A move with no label recorded, such as a refused write, doesn't appear. Moves from before recording existed still read as the agent's.
+
+One read asks GitHub once, from the earliest uncached attempt's start. Attempts are cached in memory a minute after they end, so a finished run asks GitHub nothing until a restart. Schedule runs have no item and list no attempts. API: `GET /api/runs/:runId/github-changes`; a gone item returns 404 `GitHubItemNotFoundError`.
+
+### Cycle budgets, run again, and failure resolution
+
+Cycle exhaustion is a `CycleBudgetNeed` in the overview and marks the card as needing attention. `Operator.resetCycleBudget` answers the exact ask, at `POST /api/cycle-budgets/reset` with `{ "askId": "…" }`; a stale or differently answered ask returns 409. Polling then restarts the repo cursor, fetches current items, and evaluates active loops before opening runs, retrying a failed refresh. Each item fetch captures its budget generation, resets supersede in-flight observations, and new events use the current loop configuration. GitHub delivery of these asks is [#36](https://github.com/basaltbytes/usine/issues/36).
+
+`Operator.runAgain(instance, runId, edit)` opens a new run for a succeeded or canceled run's item state, with the edit's task and roster agent and the loaded loop's step, approval, and cycle limit, as the `operator` login. It returns `Claimed` or `CycleBlocked` with the ask, and fails with `LoopNotFoundError` if the loop isn't loaded. API: `POST /api/runs/:runId/run-again` with `{ "task": "...", "agent": "..." }`. `RunView.canRunAgain` says when it applies; `RunView.runAgain` names the original run.
+
+`Operator.resolveFailure(runId, attemptId)` clears attention for the current failed attempt, at `POST /api/runs/:runId/resolve-failure` with `{ "attemptId": "..." }`. The failure stays in history with retry available; Needs attention, project status, and board attention reflect it, and a later failure asks again. For a question (`QuestionFailureView`) or blocker (`BlockedFailureView`), it lifts the loop's suppression of the item and gives the newest queued event its turn.
 
 ## Operator HTTP
 
-Import `FactoryOverview`, `RunView`, `RunDetailView`, Board views, operator needs,
-and transcript request types from `@usine/orchestrator/operator`. The `Operator`
-service and its HTTP contract use the same schemas for these views and requests.
+Import `FactoryOverview`, `RunView`, `RunDetailView`, board views, operator needs, and transcript request types from `/operator`. The `Operator` service and its HTTP contract share these schemas.
 
-`@usine/orchestrator/operator/http` exports `OperatorApi`, the shared HTTP contract
-for operator observation and interventions. Use Effect's `HttpApiClient.make` with
-an `HttpClient` layer to call it, or `HttpApiBuilder.group` to implement its
-`operator` group. Server implementations provide `OperatorHttpPolicy` to enforce
-origin checks and translate request failures; `apps/server` provides the local
-server implementation.
+`/operator/http` exports `OperatorApi`, the HTTP contract for observation and interventions. Call it with Effect's `HttpApiClient.make` and an `HttpClient` layer, or implement its `operator` group with `HttpApiBuilder.group`. Servers provide `OperatorHttpPolicy` for origin checks and failure translation; `apps/server` is the local server.
 
-The generated client accepts the same `ColdTranscriptRequest`,
-`TailTranscriptRequest`, and `EarlierTranscriptRequest` values as `Operator.detail`.
-It encodes their exclusive query parameters and decodes responses through the
-shared read-model schemas. `OperatorHttpError` preserves the failure's `error`
-discriminator, operator-readable `message`, and associated `status`. The wire
-response remains `{ error, message }`. Successful actions return `{ ok: true }`;
-clients observe subsequent Run or Board progress through the read endpoints.
+The generated client takes `Operator.detail`'s `ColdTranscriptRequest`, `TailTranscriptRequest`, and `EarlierTranscriptRequest`, encodes their exclusive query parameters, and decodes with the shared schemas. `OperatorHttpError` keeps the failure's `error` discriminator, readable `message`, and `status`; the wire response is `{ error, message }`. Successful actions return `{ ok: true }`; clients follow progress through the read endpoints.
 
 ## Polling triggers
 
-`PollingTriggers.poll(instance)` performs one cycle; `PollingTriggers.run(instance)` repeats cycles using the instance's factory-wide `poll_interval` and waits longer when GitHub reports rate-limit pressure. Per-repository failures are isolated and reported on the cycle — one failing repository never stops its siblings. `PollingTriggers.hint(repository, item)` queues a bounded, coalesced self-write nudge. The running poller serializes Hint snapshots with regular cycles and uses the same projection and Event dedup path. Hints leave REST cursors, the normal conditional-poll cadence, and the last complete cycle’s findings intact; dropped or failed Hints are repaired by the polling backstop. GitHub request backoff, including deadlines reported by a failed writer, also delays Hint fetches. The original write outcome still reaches its caller.
+`PollingTriggers.poll(instance)` runs one cycle. `PollingTriggers.run(instances)` repeats them every `poll_interval`, longer under rate-limit pressure, reading `instances.get` before each cycle and hint. A reload on `instances.changes` starts the next cycle at once, or when GitHub asked, if later. Repo failures are isolated and reported on the cycle.
 
-Each cycle first refreshes the complete label catalog in every managed repository and reconciles the factory-wide declarations from `usine.yaml`. Usine creates missing labels before change detection or Item evaluation. It leaves existing labels untouched and logs color or description drift. Creation failures become preflight findings, and the cycle continues into triggers. The updated catalog remains the Board's source for lane colors.
+`PollingTriggers.hint(repository, item)` queues a bounded, coalesced self-write nudge, serialized with cycles through the same projection and dedup path. Hints leave REST cursors, the poll cadence, and the last full cycle's findings unchanged, and polling repairs dropped or failed ones. GitHub backoff, including a failed writer's deadline, delays hints too. The write's own outcome still reaches its caller.
 
-After label preflight, the cycle asks `GitHubPolling` for changed items, fetches one payload snapshot per changed item, updates the durable Item projection, and evaluates each stream-matching loop's CEL `if:` expression against that snapshot. A match renders every `{{ CEL expression }}` in the loop body, resolves the named agent and effective parent model, then stores that immutable execution context with the Event. The Event identity covers the loop, canonical repository, item number, and timestamp-free content hash. An unmatch revokes pending or approval-waiting work for that loop and item. Repositories without matching loops are still polled for their Board projection.
+Each cycle first refreshes every repo's label catalog, which supplies lane colors, and creates labels declared in `usine.yaml` that are missing. It never touches existing labels, and logs color or description drift. Creation failures become preflight findings, and the cycle continues.
 
-A loop whose `if:` or prompt fails to evaluate on an item affects only that loop and item: the other loops and items continue and the cursor advances. The cursor records the failing item, so every cycle reports the failure with the loop and item until the loop evaluates on it, and the error is logged once per loop, item, and content hash. The first cycle of a new process fetches the failing items again, so a loop fixed before a restart evaluates them without waiting for a change.
+It then gets changed items from `GitHubPolling`, fetches one snapshot each, updates the projection, and evaluates each stream-matching loop's CEL `if:`. A match renders every `{{ CEL expression }}` in the loop body, resolves the agent and parent model, and stores that immutable context with the event, whose identity covers the loop, canonical repo, item number, and timestamp-free content hash. An unmatch revokes the loop's pending or approval-waiting work on the item. Repos without matching loops are still polled for the board.
 
-Polling cursors live in the engine's `CursorStore`. When a loop starts watching a repository or its trigger expression changes, the orchestrator discards that repository's efficiency cursor and performs a cold poll, while the permanent Event ledger absorbs repeated state.
+Change detection never lists deleted or transferred issues, so at most every 10 minutes per repo, the cycle checks every stored open issue with `GitHubPolling.missingIssues`. Missing ones are marked gone, leaving the open lanes, and their pending or approval-waiting work is revoked. A failed check is logged and reported, and retried 10 minutes later.
 
-Before opening a queued Event's Run, the orchestrator re-checks its trigger against the Item's current GitHub state. The re-check has a five-second limit. A failed or timed-out check logs a warning and lets the queued Event proceed; subsequent polling can revoke a Run whose Item no longer matches.
+An `if:` or prompt that fails on an item affects only that loop and item, and the cursor advances. The cursor records the failing item, so each cycle reports it until the loop evaluates, logging the error once per loop, item, and content hash. The first cycle after a restart or instance change fetches failing items again, so a fix applies without waiting for a change.
 
-PR-triggered Attempts fetch and check out the immutable `headRefOid` saved in their Event payload. A later push creates a new Event with its new head commit. Issue and schedule Attempts use the repository's default branch.
+Cursors live in the engine's `CursorStore`. When a loop starts watching a repo or its trigger changes, the orchestrator drops that repo's cursor and polls cold; the event ledger absorbs repeats.
 
-`PollingTriggers.layer` requires `CursorStore`, `LoopControl`, `RunEngine`, `ConfigParser`, `ExpressionEngine`, `GitHubPolling`, the repository-label projection reader/writer, and `LabelReconciler`. `LabelReconciler.layer` in turn requires `GitHubLabelWriter`. The engine's local SQLite layer supplies the engine services:
+Before a queued event's run opens, the orchestrator re-checks its trigger against the item's GitHub state, with a five-second limit. A failed or timed-out check logs a warning and lets the event proceed; later polling can revoke the run. If GitHub no longer has the item, the engine revokes its queued events and marks it gone.
+
+PR-triggered attempts check out the immutable `headRefOid` saved in their event payload; a later push is a new event. Issue and schedule attempts use the default branch.
+
+`PollingTriggers.layer` needs `CursorStore`, `LoopControl`, `RunEngine`, `ConfigParser`, `ExpressionEngine`, `GitHubPolling`, the item and repo-label projection readers and writers, and `LabelReconciler`, whose layer needs `GitHubLabelWriter`. The engine's local SQLite layer supplies the engine services:
 
 ```ts
 import { Layer } from "effect"
@@ -65,21 +102,44 @@ export const triggersLayer = PollingTriggers.layer.pipe(
 )
 ```
 
-Call `poll` when another scheduler owns timing. Use `run` for the built-in endless polling loop.
+Call `poll` if another scheduler owns timing; `run` is the built-in endless loop.
 
 ## Schedule triggers
 
-`ScheduleTriggers.tick(instance)` evaluates the most recent due Tick for every `on: schedule` loop and fans it out to the repositories selected by that loop. Each selected repository receives one Event whose payload is `item.tick = { scheduledAt, scheduledAtLocal, cron, tz }`; `scheduledAt` is the UTC time the Tick was due, `scheduledAtLocal` the same instant in the loop's `tz:`, while the Event's `receivedAt` records when the orchestrator observed it.
+`ScheduleTriggers.tick(instance)` evaluates the latest due tick of every `on: schedule` loop and fans it out to the loop's selected repos. Each repo gets one event with the payload `item.tick = { scheduledAt, scheduledAtLocal, cron, tz }`: `scheduledAt` is the UTC due time, `scheduledAtLocal` the same instant in the loop's `tz:`, and the event's `receivedAt` is when the orchestrator saw it.
 
-The Event key covers the loop, canonical repository, and scheduled time. An in-memory fired-tick memory skips already-submitted boundaries, so calling `tick` repeatedly costs nothing, and waking after downtime (or a restart, which clears that memory) emits only the latest missed Tick. A cron whose boundaries cannot be computed at an instant — effect's Cron can fail inside a DST spring-forward gap — fails only that schedule for that cycle and is reported on the returned `ScheduleCycle`. The repository is the schedule stream's Item, so a later Tick follows the same supersede rules as issue and pull-request state. Schedule Runs go through the unchanged `RunEngine`, approval gate, worker scheduler, executor, and agent layer. Because they have no GitHub issue or pull request to comment on, their blocking moments remain UI-only.
+The event key covers the loop, canonical repo, and scheduled time. An in-memory record of fired ticks makes repeated `tick` calls free; after downtime, a restart, or a reload, only the latest missed tick fires. A cron whose boundaries can't be computed at an instant (Effect's Cron can fail inside a DST spring-forward gap) fails only that schedule for that cycle, reported on the returned `ScheduleCycle`. The repo is the schedule stream's item, so a later tick follows the supersede rules of issue and PR state. Schedule runs use the same engine, approval gate, scheduler, executor, and agent layer; with no issue or PR to comment on, they block only in the UI.
 
-`ScheduleTriggers.run(instance)` evaluates once at startup for catch-up, then sleeps until the earliest next Tick. Its layer requires `RunEngine`, `ConfigParser`, and `ExpressionEngine`.
+`ScheduleTriggers.run(instances)` evaluates once at startup to catch up, then sleeps until the next tick, at most a minute, reading `instances.get` before each tick. A reload on `instances.changes` ends the sleep, so added or changed schedule loops are evaluated at once. Its layer needs `RunEngine`, `ConfigParser`, and `ExpressionEngine`.
+
+## Instance reload
+
+`CurrentInstance` (`/current-instance`) is the running instance snapshot. `CurrentInstance.layer(directory, initial)` starts from the one `usine up` loaded, and needs `InstanceFolder` (`@usine/config/instance-folder`). Polling, schedules, queued-event re-checks, App project discovery, attempt settings, and the operator backend read `get` when they act.
+
+`reload` loads the folder again with the same per-file quarantine and replaces the snapshot. It returns an `InstanceReload` that names the loops, agents, labels, repos, and workers added, removed, or changed, and the files left out. An invalid `usine.yaml` fails with `FactoryConfigError`, and a changed `webhooks` block with `RestartRequiredError`, whose `fields` and message name the change; both keep the running snapshot. `changes` streams the snapshot, then each one an accepted reload installs.
+
+`registerWorkers(workers)` passes each later reload to the workers first. They refuse a `workers` change they can't apply (`RestartRequiredError`), preflight added workers, slots, and brains, refuse a failed preflight (`ReloadPreflightError`), and apply the new `workers` block after the snapshot is replaced. `stepExecutorLayer` registers itself; until then, as in setup mode, a reload refuses any `workers` change and preflights nothing. A run keeps the agent, task, and parent model it opened with.
 
 ## Worker scheduling
 
-`@usine/orchestrator/scheduler` exports the platform-free `stepExecutorLayer`. `stepExecutorLayer(config, brains)` accepts the roster’s `BrainSpec` values. At startup it verifies every configured worker against that roster, creates one capacity slot per `max_concurrent_attempts`, and assigns slots by Event receipt time. Runs stay pending while every slot is occupied. Each Attempt receives the configured `max_children` child-session budget. The layer rejects worker kinds that its supplied executor cannot run. Worker capability failures during preparation become non-retryable `AgentFailure` outcomes, like unavailable model credentials.
+`stepExecutorLayer(config, brains, options)` (`/scheduler`, platform-free) takes the roster's `BrainSpec` values. At startup it checks every worker against the roster and the instance's agents, gives each `max_concurrent_attempts` slots, and assigns a free slot of the first worker in `usine.yaml` order to the run whose event arrived first. Runs stay pending while all slots are taken.
 
-`@usine/orchestrator/local` composes the scheduler with the Node local executor and the engine's local SQLite adapter. It requires a caller-owned `CredentialProvider`; use `gitHubCredentialLayer` with `@usine/github`, or supply another provider that mints one repository credential per Attempt.
+A reservation naming a worker, as a reattaching run's does, takes only that worker's slot, before unnamed ones; it waits while that worker is full, and later runs can take other workers. For an undeclared worker, it logs a warning and waits for a reload that declares it. `occupy` takes a slot at once for an attempt already running, as at engine startup, even with none free, logging a warning; the worker then takes no new attempt until enough end, and each extra slot retires with its attempt. An unknown worker gets no slot, with a warning.
+
+The layer registers with `CurrentInstance`, so a reload changes workers without touching running attempts:
+
+- A worker with the same name, kind, and settings and a higher `max_concurrent_attempts` is preflighted with the new count and every rostered brain, and its new slots take waiting runs at once. With a lower count, it takes new attempts only while it runs fewer than the new count, and each extra slot retires with its attempt.
+- A new worker of the executor's kind is preflighted with every brain and takes attempts once it passes. With `options.workers`, as the SSH composition sets, it joins the executor before preflight and leaves if the reload is refused.
+- A removed worker takes no new attempt and stays in `StepExecutor.workers` until its last attempt ends; only then can its leftovers be discarded. Until then, its `UnconfiguredWorkerNeed` counts its running attempts as `running`, and `Operator.discardLeftovers` fails with `LeftoversDiscardRejectedError`. With `options.workers`, it then leaves the executor too.
+- A changed kind or other setting, a renamed worker, or a worker the executor can't run fails the reload with `RestartRequiredError` naming the field, such as `workers.build-1.destination`.
+
+Other workers are preflighted with the brains the reload adds; any failed preflight refuses the reload. Resizes, additions, removals, and retired slots are logged with counts. Attempts read `max_children`, the runaway ceilings, and the parent effort from `CurrentInstance` at start, so reloads apply to the next attempt. The layer rejects worker kinds its executor can't run. Capability failures during preparation become non-retryable `AgentFailure` outcomes, like missing model credentials.
+
+The layer also provides `WorkerStatus` (`/worker-status`): each worker's slots and how many are taken, and the last preflight of each worker's own prerequisites and of each harness, with time and result. It records the startup preflight and every reload's, refused ones included. The local, SSH, and exe.dev compositions pass it on; `WorkerStatus.idle` stands in where no worker runs attempts.
+
+## Compositions
+
+`/local` composes the scheduler with the Node local executor and the engine's local SQLite adapter. It needs a caller-owned `CredentialProvider`: `gitHubCredentialLayer` with `@usine/github`, or another provider that mints one repo credential per attempt.
 
 ```ts
 import { layer as localLayer } from "@usine/orchestrator/local"
@@ -89,11 +149,15 @@ const EngineLive = localLayer(instanceDirectory, config, brains, {
 })
 ```
 
-Provide `CredentialProvider` to `EngineLive`, then request `RunEngine` from the resulting Effect layer. The local composition caches repositories under `<instance>/.usine/workers/<worker>/repos` and removes Attempt worktrees after completion or cancellation.
+Provide `CredentialProvider` and `CurrentInstance` to `EngineLive`, then request `RunEngine`. Repos are cached under `<instance>/.usine/workers/<worker>/repos`; worktrees are removed after completion or cancel.
 
-For the whole application, `@usine/orchestrator/runtime`'s `runtimeLayer(instanceDirectory, instance)` additionally composes GitHub polling, schedule triggers, CEL parsing, `Orchestrator`, and `Operator`. It selects the Worker composition from the kind of the Workers in `usine.yaml`: the SSH one when every Worker is `ssh`, the local one otherwise, which refuses any other kind at startup. It derives worker preflight requirements from `instance.agents` and requires only `GitHubCredentials`; the server or another host owns how those credentials are loaded. `operatorObservationLayer(instanceDirectory)` is the read-only Node composition for setup and maintenance surfaces: it reads durable Runs and Loop runtime state while trigger execution remains idle.
+All three compositions run each attempt's Pi parent in the orchestrator as a durable task (`@usine/durable`). `layer` needs the `AttemptRuntime` and the `ClaudeLoginLock` shared by its Claude children and the worker's preflight, and builds the runtime before the engine, so tasks are resumed before run recovery and a restart reattaches live attempts. Stored v3–v6 transcripts stay readable.
 
-For SSH Workers, `@usine/orchestrator/ssh` composes the scheduler with the SSH executor. Like the local composition it requires a `CredentialProvider`, which mints the token each Attempt writes on its Worker's machine or attaches to its Worker's Gateway. `sshWorkersOf(config)` returns the SSH Workers `usine.yaml` declares, and `sshWorkerAddressesOf(config)` turns them into the executor's addresses, reading each Gateway's admin token from the environment variable its `admin_token_env` names; an unset variable fails with a `gateway` capability error that names it. Gateway admin APIs are called with `fetch`.
+`runtimeLayer(instanceDirectory)` (`/runtime`) composes the whole application, adding GitHub polling, schedule triggers, CEL parsing, `Orchestrator`, and `Operator`. It uses the SSH composition if every worker is `ssh`, otherwise the local one, which refuses other kinds at startup. One `ClaudeLoginLock` serves both the attempt runtime and the worker composition. Preflight requirements come from the instance's agents at build time. It needs `GitHubCredentials` and `CurrentInstance`, which the host loads. `operatorObservationLayer(instanceDirectory)` is the read-only Node composition for setup and maintenance: it provides `OperatorObservation` and `OperatorConfiguration` from durable runs and loop state, with triggers idle and no worker running attempts.
+
+`/ssh` composes the scheduler with the SSH executor, and also needs a `CredentialProvider` for the token each attempt writes on its machine or attaches to its gateway. `sshWorkersOf(config)` returns the declared SSH workers; `sshWorkerAddressesOf(config)` turns them into executor addresses, reading each gateway's admin token from its `admin_token_env` variable, and fails with a `gateway` capability error naming an unset one. Admin APIs are called with `fetch` through the executor's forward to each gateway's `destination`.
+
+`sshStepExecutorLayer(config, brains)` lets a reload resize, add, and remove SSH workers through `SshWorkers`. An added worker joins the executor before preflight, and its gateway's token is read then; an unset variable refuses the reload with `ReloadPreflightError` naming it, since a running process doesn't see variables set after it started. A removed worker leaves the executor once its last attempt ends, and its gateway's forward closes if no other worker uses it.
 
 ```ts
 import { layer as sshLayer, sshWorkerAddressesOf } from "@usine/orchestrator/ssh"
@@ -106,7 +170,7 @@ const EngineLive = Layer.unwrap(
 )
 ```
 
-The live SSH check runs one Attempt end to end on a real machine, with a scripted parent whose commands use the machine's gh and git with the minted token, and preflights Claude Code and Codex there. It skips unless `USINE_SSH_INTEGRATION_DESTINATION` is set, and needs a GitHub App instance directory whose installation covers the repository:
+The live SSH test runs one attempt on a real machine, with a scripted parent using the machine's gh and git with the minted token, and preflights Claude Code and Codex there, printing `ready` or why a login is missing. It runs only if `USINE_SSH_INTEGRATION_DESTINATION` is set, and needs an instance directory whose App installation covers the repo:
 
 ```sh
 export USINE_SSH_INTEGRATION_DESTINATION=usine@203.0.113.7
@@ -118,21 +182,21 @@ export USINE_GITHUB_INTEGRATION_INSTANCE_DIRECTORY=/path/to/instance
 pnpm --filter @usine/orchestrator test:ssh
 ```
 
-The same file has a live check for a Worker behind a Gateway (`infra/hetzner/gateway`). It runs one Attempt whose scripted child fetches through the Gateway, calls `gh api`, pushes a branch named `usine-gateway-test/<uuid>` and deletes it again through a `https://github.com/` URL, reaches the npm registry through the forward proxy, and looks for GitHub tokens on the machine; afterwards it checks that the Gateway holds no attachment for the Worker. The repository must accept pushes from the App. It skips unless `USINE_GATEWAY_INTEGRATION_DESTINATION` is set, and expects the admin API forward to be open:
+The same file tests a worker behind a gateway (`infra/hetzner/gateway`). The scripted child fetches through the gateway, calls `gh api`, pushes and deletes a `usine-gateway-test/<uuid>` branch through a `https://github.com/` URL, reaches the npm registry through the forward proxy, and looks for GitHub tokens on the machine; the test then checks that the gateway has no attachment for the worker. The repo must accept the App's pushes. It runs only if `USINE_GATEWAY_INTEGRATION_DESTINATION` is set. Besides the executor's own forward, the post-attempt check opens one on local port 17070:
 
 ```sh
 export USINE_GATEWAY_INTEGRATION_DESTINATION=worker-one                # a Host with ProxyJump through the gateway
 export USINE_GATEWAY_INTEGRATION_SSH_CONFIG=/path/to/ssh_config        # optional
 export USINE_GATEWAY_INTEGRATION_ROOT=/home/usine/.usine               # the default
 export USINE_GATEWAY_INTEGRATION_DOMAIN=gw.internal                    # the default
-export USINE_GATEWAY_INTEGRATION_ADMIN_URL=http://127.0.0.1:7070       # the default
+export USINE_GATEWAY_INTEGRATION_GATEWAY=usine-gateway                 # the default: the Gateway's SSH destination
 export USINE_GATEWAY_INTEGRATION_ADMIN_TOKEN=...                       # from /etc/usine-gateway/secrets.env
 export USINE_GATEWAY_INTEGRATION_REPO=owner/repo
 export USINE_GITHUB_INTEGRATION_INSTANCE_DIRECTORY=/path/to/instance
 pnpm --filter @usine/orchestrator test:ssh
 ```
 
-For an exe.dev Worker, use the `@usine/orchestrator/exe-dev` composition. It keeps the engine and SQLite runtime local while the unchanged Worker contract runs on the named VM:
+For exe.dev, `/exe-dev` keeps the engine and SQLite runtime local and runs the worker contract on the named VM:
 
 ```ts
 import { RepositoryName } from "@usine/core/repository"
@@ -150,9 +214,9 @@ const EngineLive = exeDevLayer(instanceDirectory, config, brains, {
 })
 ```
 
-The GitHub integration grant is a renewal window, not an Attempt bound. The executor attaches it for `credentialGrantMinutes` (65 by default), renews it at half that length for as long as the Attempt runs, and retries a failed renewal every minute; `max_attempt_minutes` plays no part in it. When `max_attempt_minutes` is set, the scheduler bounds every launch at it: a hung parent or dead link is interrupted through the normal cancel handshake and reported as a typed infrastructure failure.
+The integration grant is a renewal window, not an attempt bound: it lasts `credentialGrantMinutes` (65 by default), renews at half that while the attempt runs, and retries a failed renewal every minute, whatever `max_attempt_minutes` is. If `max_attempt_minutes` is set, the scheduler bounds every launch at it: a hung parent or dead link is interrupted through the normal cancel and reported as a typed infrastructure failure.
 
-The live exe.dev check requires an existing baked VM and its GitHub integration:
+The live exe.dev test needs an existing baked VM and its GitHub integration:
 
 ```sh
 export USINE_EXE_DEV_INTEGRATION_WORKER=worker-name
@@ -162,9 +226,9 @@ export USINE_EXE_DEV_INTEGRATION_GITHUB_INTEGRATION=integration-name
 pnpm --filter @usine/orchestrator test:exe-dev
 ```
 
-## Live GitHub check
+## Live GitHub tests
 
-The opt-in integration test needs a disposable issue in a repository covered by the configured GitHub App. It creates a uniquely named repository label, applies it to the issue, checks the resulting Event and restart deduplication, then deletes the label.
+The opt-in integration test needs a disposable issue in a repo that the configured App covers. It creates a uniquely named label, applies it to the issue, checks the resulting event and restart deduplication, then deletes the label.
 
 ```sh
 export USINE_GITHUB_INTEGRATION_INSTANCE_DIRECTORY=/path/to/instance
@@ -173,7 +237,7 @@ export USINE_GITHUB_INTEGRATION_ISSUE_NUMBER=123
 pnpm --filter @usine/orchestrator test:integration
 ```
 
-The agent contract test also starts the local worker with the production durable parent runtime. The Pi parent delegates to Claude Code, which reads the issue with `gh` and posts one signed comment as the App bot. Build the workspace first, provide working Pi and Claude credentials in the worker user's home directory, then run:
+The agent contract test starts the local worker with the production durable parent runtime. The Pi parent delegates to Claude Code, which reads the issue with `gh` and posts one signed comment as the App bot. Build the workspace, provide working Pi and Claude credentials in the worker user's home directory, then run:
 
 ```sh
 pnpm build
@@ -183,14 +247,4 @@ export USINE_AGENT_INTEGRATION_CHILD_MODEL=claude-model-id
 pnpm --filter @usine/orchestrator test:integration:agent
 ```
 
-The test removes its kick and result comments during cleanup.
-
-Everything here is 0.x, so APIs can change between minor releases. Supply `effect` at the version pinned by the usine workspace.
-
-Item cycle exhaustion appears as a `CycleBudgetNeed` in the overview and marks the Item’s Board card as needing attention. `Operator.resetCycleBudget` records an answer to the exact Ask; polling restarts the repository cursor, fetches current Items, and evaluates active Loops before opening further Runs. A failed refresh is retried. Each Item fetch captures its budget generation; resets supersede in-flight observations and fresh Events use the current Loop configuration. GitHub delivery of these Asks is tracked separately in [#36](https://github.com/basaltbytes/usine/issues/36).
-
-The operator HTTP API exposes `POST /api/cycle-budgets/reset` with `{ "askId": "…" }`. A stale or differently answered Ask returns HTTP 409.
-
-Local, exe.dev, and SSH Workers all run each Attempt's Pi parent in the orchestrator process as a durable task (`@usine/durable`); `layer` requires the `AttemptRuntime` and builds it before the engine, so durable storage is open and its tasks resumed before Run recovery. An orchestrator restart reattaches a live Attempt instead of failing it. Stored v3–v6 transcripts remain readable.
-
-`Operator.resolveFailure(runId, attemptId)` clears attention for the current failed Attempt. The operator API exposes it as `POST /api/runs/:runId/resolve-failure` with `{ "attemptId": "..." }`. Resolved failures remain in Run history with retry available. Needs you, Project status, and Board attention reflect resolution; a later failed Attempt requests attention again.
+Cleanup removes its kick and result comments.

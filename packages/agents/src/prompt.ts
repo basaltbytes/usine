@@ -1,31 +1,30 @@
-import type { AgentPersona, AgentName } from "@usine/core/agent";
+import { githubSignature, type AgentPersona, type AgentName } from "@usine/core/agent";
 import type { AttemptTask } from "@usine/core/attempt";
 import type { SalvagePushed } from "@usine/core/attempt/salvage";
 import type { RepositoryName } from "@usine/core/repository";
 import { Option, type Schema } from "effect";
-import { BLOCKED_MARKER } from "./runtime.ts";
+import { BLOCKED_MARKER, QUESTION_MARKER } from "./runtime.ts";
 
-/** The recorded trigger context, Agent instructions, and effective task presented to the parent. */
+/** The trigger context, Agent instructions, and task for the parent prompt. */
 export interface PromptParts {
   readonly repository: RepositoryName;
   readonly payload: Schema.Json;
   readonly agent: AgentName;
   readonly persona: AgentPersona;
   readonly task: AttemptTask;
-  /** The previous Attempt's salvage checked out in the workspace, when the Run is retrying. */
+  /** The previous Attempt's salvage checked out in the workspace, if the Run is retrying. */
   readonly resume: Option.Option<SalvagePushed>;
+  /** The previous Attempt's salvage that conflicts with the current revision and is not in the workspace. */
+  readonly conflictingSalvage: Option.Option<SalvagePushed>;
 }
 
-/** The Agent's standing instructions and the focused task the parent delegates to a child. */
+/** The Agent instructions and delegated task for a child prompt. */
 export interface ChildPromptParts {
   readonly agent: AgentName;
   readonly persona: AgentPersona;
-  /** Free text authored by the parent model, not the rendered loop task. */
+  /** Free text written by the parent model, not the rendered Loop task. */
   readonly task: string;
 }
-
-/** The attribution line every GitHub comment or review written by an Agent ends with. */
-export const githubSignature = (agent: AgentName): string => `— usine agent: ${agent}`;
 
 const completionInstructions: ReadonlyArray<string> = [
   "# Task completion",
@@ -34,6 +33,7 @@ const completionInstructions: ReadonlyArray<string> = [
   "Do not end a turn promising to resume after a background notification. Your final answer returns control to the caller and may end the Attempt and remove its worktree. Push all commits that must survive before returning.",
   "A running command or pending CI check is unfinished work, not a blocker. Keep waiting and complete the task. For a genuine blocker, record the exact blocker on the issue or pull request and report which work remains incomplete.",
   `For an unresolved blocker, start your final answer with exactly ${BLOCKED_MARKER} on its own line, followed by the exact blocker and incomplete work. This reserved marker reports a failed Attempt. A child's report that starts with the marker fails the Attempt: return it verbatim as your own final answer. Use an ordinary final answer only after completing the task.`,
+  `When the work needs a decision that only the operator can make, post the question on the task's issue or pull request when it has one, then start your final answer with exactly ${QUESTION_MARKER} on its own line, followed by the question and the options you see. This reserved marker ends the Attempt and asks the operator; usine does not run this task again on the same Item until the operator answers or the Item changes. Return a child's report that starts with this marker verbatim as your own final answer.`,
 ];
 
 const githubInstructions = (agent: AgentName): ReadonlyArray<string> => [
@@ -46,21 +46,28 @@ const githubInstructions = (agent: AgentName): ReadonlyArray<string> => [
   githubSignature(agent),
 ];
 
-const resumeLines = (resume: Option.Option<SalvagePushed>): ReadonlyArray<string> =>
-  Option.match(resume, {
+const resumeLines = (parts: PromptParts): ReadonlyArray<string> => [
+  ...Option.match(parts.resume, {
     onNone: () => [],
     onSome: ({ ref, commit }) => [
       `Resumes from: ${ref} at ${commit}, the previous Attempt's unfinished work, checked out at HEAD. Its last commit is an automatic work-in-progress snapshot. Continue from this state instead of starting over.`,
     ],
-  });
+  }),
+  ...Option.match(parts.conflictingSalvage, {
+    onNone: () => [],
+    onSome: ({ ref, commit }) => [
+      `Previous work: ${ref} at ${commit}, the previous Attempt's unfinished work, conflicts with the current revision, so the checkout starts without it. Fetch that branch to reuse parts of it.`,
+    ],
+  }),
+];
 
-/** Builds the parent's instructions from the saved payload, effective task, and Agent persona, including GitHub attribution. */
+/** Returns the parent's instructions, including GitHub attribution. */
 export const assemblePrompt = (parts: PromptParts): string =>
   [
     "# Run context",
     "",
     `Repository: ${parts.repository}`,
-    ...resumeLines(parts.resume),
+    ...resumeLines(parts),
     "",
     "Payload snapshot:",
     "```json",
@@ -80,7 +87,7 @@ export const assemblePrompt = (parts: PromptParts): string =>
     ...githubInstructions(parts.agent),
   ].join("\n");
 
-/** Builds a child's instructions from the delegated task and Agent persona, including GitHub attribution. */
+/** Returns a child's instructions, including GitHub attribution. */
 export const assembleChildPrompt = (parts: ChildPromptParts): string =>
   [
     "# Agent persona",

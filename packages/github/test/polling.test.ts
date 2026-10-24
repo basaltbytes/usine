@@ -1,10 +1,12 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
+import { ItemNumber } from "@usine/core/item";
 import { RepositoryName } from "@usine/core/repository";
 import { Clock, DateTime, Effect, Layer, Option, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 import { GitHubApp } from "../src/github-app.ts";
 import {
+  AppSlug,
   Installation,
   InstallationId,
   InstallationToken,
@@ -23,7 +25,13 @@ const token = new InstallationToken({
 
 const appLayer = Layer.succeed(GitHubApp)({
   installation: () =>
-    Effect.succeed(new Installation({ id: InstallationId.make(77), accountLogin: "basaltbytes" })),
+    Effect.succeed(
+      new Installation({
+        id: InstallationId.make(77),
+        accountLogin: "basaltbytes",
+        appSlug: AppSlug.make("usine-basaltbytes"),
+      }),
+    ),
   installationToken: () => Effect.succeed(token),
   projectAccess: () => Effect.die("not used by polling tests"),
   workerToken: () => Effect.die("not used by polling tests"),
@@ -260,7 +268,7 @@ describe("GitHubPolling", () => {
 
     return Effect.gen(function* () {
       const polling = yield* GitHubPolling;
-      // The cursor is efficiency only (ADR 0007). A page without an ETag degrades to unconditional polling and never fails the cycle.
+      // The cursor is only for efficiency (ADR 0007); a page without an ETag falls back to unconditional polling and never fails the cycle.
       const detected = yield* polling.changes(repository, PollCursor.empty);
       assert.strictEqual(detected._tag, "RepositoryChanges");
       if (detected._tag !== "RepositoryChanges") return;
@@ -459,6 +467,94 @@ describe("GitHubPolling", () => {
     }).pipe(Effect.provide(pollingLayer(client)));
   });
 
+  it.effect("reports a pull request the repository no longer has as not found", () => {
+    const answers = [
+      {
+        data: { repository: { pullRequest: null } },
+        errors: [
+          {
+            type: "NOT_FOUND",
+            message: "Could not resolve to a PullRequest with the number of 51.",
+          },
+        ],
+      },
+      { data: { repository: { pullRequest: null } } },
+      { data: { repository: null } },
+    ];
+    const client = HttpClient.make((request) =>
+      Effect.sync(() => response(request, answers.shift() ?? null)),
+    );
+
+    return Effect.gen(function* () {
+      const polling = yield* GitHubPolling;
+      const fetch = polling
+        .snapshot(
+          repository,
+          new ChangedPullRequest({
+            number: 51,
+            updatedAt: DateTime.makeUnsafe("2026-08-30T19:00:00Z"),
+          }),
+        )
+        .pipe(Effect.flip);
+      assert.strictEqual((yield* fetch)._tag, "GitHubItemNotFoundError");
+      assert.strictEqual((yield* fetch)._tag, "GitHubItemNotFoundError");
+      // A null repository says nothing about the Item.
+      assert.strictEqual((yield* fetch)._tag, "InvalidGitHubResponseError");
+    }).pipe(Effect.provide(pollingLayer(client)));
+  });
+
+  it.effect("asks about 60 issues in two requests and returns the ones that come back null", () => {
+    const PresenceRequest = Schema.Struct({
+      query: Schema.String,
+      variables: Schema.Record(Schema.String, Schema.Union([Schema.String, Schema.Int])),
+    });
+    const gone = new Set([7, 55]);
+    const asked: Array<ReadonlyArray<number>> = [];
+    const client = HttpClient.make((request) =>
+      Effect.sync(() => {
+        assert.strictEqual(request.body._tag, "Uint8Array");
+        if (request.body._tag !== "Uint8Array") return assert.fail("missing JSON body");
+        const { query, variables } = Schema.decodeUnknownSync(PresenceRequest)(
+          JSON.parse(new TextDecoder().decode(request.body.body)),
+        );
+        const numbers = Object.entries(variables).flatMap(([name, value]) =>
+          /^n\d+$/u.test(name) ? [Schema.decodeUnknownSync(Schema.Int)(value)] : [],
+        );
+        asked.push(numbers);
+        assert.include(query, `i${numbers.length - 1}: issue(number: $n${numbers.length - 1})`);
+        return response(request, {
+          data: {
+            repository: Object.fromEntries(
+              numbers.map((number, index) => [`i${index}`, gone.has(number) ? null : { number }]),
+            ),
+          },
+          errors: numbers
+            .filter((number) => gone.has(number))
+            .map((number) => ({
+              type: "NOT_FOUND",
+              message: `Could not resolve to an Issue with the number of ${number}.`,
+            })),
+        });
+      }),
+    );
+
+    return Effect.gen(function* () {
+      const polling = yield* GitHubPolling;
+      const numbers = Array.from({ length: 60 }, (_, index) => ItemNumber.make(index + 1));
+      assert.deepStrictEqual(yield* polling.missingIssues(repository, numbers), [
+        ItemNumber.make(7),
+        ItemNumber.make(55),
+      ]);
+      assert.deepStrictEqual(
+        asked.map((chunk) => chunk.length),
+        [50, 10],
+      );
+      assert.deepStrictEqual(asked.flat(), numbers);
+      assert.deepStrictEqual(yield* polling.missingIssues(repository, []), []);
+      assert.strictEqual(asked.length, 2);
+    }).pipe(Effect.provide(pollingLayer(client)));
+  });
+
   it.effect("hashes canonical issue content without any timestamp fields", () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = [];
     const firstVersion = issuePayload({
@@ -588,7 +684,7 @@ describe("GitHubPolling", () => {
       const fromEmpties = yield* polling.snapshot(repository, changed);
       assert.strictEqual(fromNulls._tag, "PullRequestSnapshot");
       if (fromNulls._tag !== "PullRequestSnapshot") return;
-      // A null connection is the same information as an empty one. The payload stays non-null and both shapes hash to the same Event identity.
+      // A null connection is equivalent to an empty one; the payload stays non-null and both hash to the same Event identity.
       assert.deepStrictEqual(fromNulls.payload.labels, { totalCount: 0, nodes: [] });
       assert.deepStrictEqual(fromNulls.payload.reviews, { totalCount: 0, nodes: [] });
       assert.strictEqual(fromNulls.contentHash, fromEmpties.contentHash);

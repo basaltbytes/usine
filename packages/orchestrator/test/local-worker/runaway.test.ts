@@ -17,8 +17,11 @@ import { TestClock } from "effect/testing";
 import { layer as localLayer } from "../../src/local.ts";
 import { stepExecutorLayer } from "../../src/scheduler.ts";
 import { type StubParent, stubAttemptRuntime, StubStorage } from "@usine/durable/testing";
+import { fixedConfigLayer } from "../support/current-instance.ts";
+import { testAppLayer } from "../support/github-app.ts";
 import { alwaysHoldsLayer } from "../support/polling.ts";
 import {
+  aloneOnItem,
   LIVE_TEST_TIMEOUT,
   config,
   credentialLayer,
@@ -28,8 +31,9 @@ import {
   testAgent,
   waitFor,
 } from "./support.ts";
+import { claudeLoginLockLayer } from "@usine/executor";
 
-/** One fresh Attempt of a Run, as the engine hands it to the StepExecutor. */
+/** Returns a new Attempt of a Run, as the engine passes it to the StepExecutor. */
 const freshExecution = (runId: RunId, attemptId: AttemptId) => {
   const selected = submission(5);
   return new StepExecution({
@@ -46,6 +50,7 @@ const freshExecution = (runId: RunId, attemptId: AttemptId) => {
       parentModel: Option.none(),
       startedAt: selected.event.receivedAt,
       outcome: Option.none(),
+      endedAt: Option.none(),
       salvage: Option.none(),
     }),
     event: selected.event,
@@ -62,6 +67,7 @@ const freshExecution = (runId: RunId, attemptId: AttemptId) => {
     task: selected.task,
     agent: selected.agent,
     parentModel: selected.parentModel,
+    permissions: selected.permissions,
     resume: Option.none(),
   });
 };
@@ -93,7 +99,10 @@ describe("local worker runaway guard", () => {
         }).pipe(
           Layer.provide(credentialLayer),
           Layer.provide(stubAttemptRuntime(storage, spender)),
+          Layer.provide(claudeLoginLockLayer),
           Layer.provide(alwaysHoldsLayer),
+          Layer.provide(fixedConfigLayer(ceiling)),
+          Layer.provide(testAppLayer),
         );
         yield* Effect.gen(function* () {
           const engine = yield* RunEngine;
@@ -127,7 +136,11 @@ describe("local worker runaway guard", () => {
           instanceDirectory: InstanceDirectory.make(root),
           repositoryUrl: () => remote,
           harnessReadiness: harnessReady,
-        }).pipe(Layer.provide(credentialLayer), Layer.provide(stubAttemptRuntime(storage, idle)));
+        }).pipe(
+          Layer.provide(credentialLayer),
+          Layer.provide(stubAttemptRuntime(storage, idle)),
+          Layer.provide(claudeLoginLockLayer),
+        );
         const ceiling = new UsineConfig({
           ...config,
           settings: new Settings({ ...config.settings, maxAttemptMinutes: Option.some(1) }),
@@ -139,10 +152,14 @@ describe("local worker runaway guard", () => {
             .execute(freshExecution(RunId.make("wall-clock-run"), attemptId), {
               append: () => Effect.void,
               salvage: () => Effect.void,
+              comments: () => Effect.void,
+              transcript: Effect.succeed([]),
+              windows: aloneOnItem(attemptId),
+              checkoutAcquired: Effect.void,
             })
             .pipe(Effect.forkChild);
           yield* Deferred.await(started);
-          // One second at a time, so the guard arms its next timer after the warning.
+          // Advance one second at a time, so the guard sets its next timer after the warning.
           for (let second = 0; second < 90 && running.pollUnsafe() === undefined; second += 1) {
             yield* TestClock.adjust("1 second");
           }
@@ -154,7 +171,15 @@ describe("local worker runaway guard", () => {
             yield* fileSystem.readDirectory(`${root}/.usine/workers/local/attempts`),
             [],
           );
-        }).pipe(Effect.provide(stepExecutorLayer(ceiling, []).pipe(Layer.provide(executor))));
+        }).pipe(
+          Effect.provide(
+            stepExecutorLayer(ceiling, []).pipe(
+              Layer.provide(executor),
+              Layer.provide(fixedConfigLayer(ceiling)),
+              Layer.provide(testAppLayer),
+            ),
+          ),
+        );
       }).pipe(Effect.provide(NodeServices.layer)),
     LIVE_TEST_TIMEOUT,
   );

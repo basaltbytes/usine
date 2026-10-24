@@ -1,19 +1,31 @@
-import { GatewayDomain, type GatewayLlmProvider } from "@usine/core/worker";
+import {
+  GatewayAdminPort,
+  GatewayDomain,
+  type GatewayLlmProvider,
+  SshDestination,
+  type WorkerName,
+} from "@usine/core/worker";
 import {
   AdminToken,
   adminRoutes,
+  AnthropicApiKey,
+  AnthropicProvider,
   Attachments,
   CallerKey,
   CallerTokens,
   GatewaySettings,
   gatewayServices,
   GITHUB_ORIGINS,
+  type LlmProviders,
   parseEgressAllowlist,
+  type SettingsInForce,
+  UpstreamBase,
 } from "@usine/gateway";
-import { Effect, Layer, Option, Redacted, Result, Schema } from "effect";
+import { type Duration, Effect, Latch, Layer, Option, Redacted, Result, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import {
   HttpClient,
+  HttpClientError,
   HttpRouter,
   HttpServer,
   HttpServerRequest,
@@ -25,29 +37,34 @@ import { ADDRESS, executorLayer, type fakeMachine, type mintingProvider } from "
 
 const DOMAIN = GatewayDomain.make("gw.test");
 const ADMIN_TOKEN = "admin-token-for-executor-tests-0123456789";
-const ADMIN_URL = new URL("http://127.0.0.1:7070");
+/** The Gateway's SSH destination, a Host alias. */
+const GATEWAY = SshDestination.make("usine-gateway");
 
 /**
- * The test Worker's address behind the Gateway at `gw.test`, presenting
- * `adminToken`. The Gateway holds the Anthropic credential unless
- * `llmProviders` says otherwise, since the test agent's brain is Claude Code.
+ * Returns the test Worker's address behind the Gateway at `gw.test`, with `adminToken`. By
+ * default the Gateway has the Anthropic credential because the test brain is Claude Code.
+ * `name` and `gateway` select another Worker or another SSH destination for the same Gateway.
  */
 export const gatewayAddress = (
   options: {
     readonly llmProviders?: ReadonlyArray<GatewayLlmProvider>;
     readonly adminToken?: string;
+    readonly name?: WorkerName;
+    readonly gateway?: SshDestination;
   } = {},
 ): SshWorkerAddress => ({
   ...ADDRESS,
+  name: options.name ?? ADDRESS.name,
   gateway: Option.some({
     domain: DOMAIN,
-    adminUrl: ADMIN_URL,
+    destination: options.gateway ?? GATEWAY,
+    adminPort: GatewayAdminPort.make(7070),
     adminToken: Redacted.make(options.adminToken ?? ADMIN_TOKEN),
     llmProviders: options.llmProviders ?? ["anthropic"],
   }),
 });
 
-/** An attach or renewal body as the executor sent it, before the Gateway decoded it. */
+/** An attach or renew request body as sent by the executor, before decoding. */
 const SentAttachRequest = Schema.Struct({
   worker: Schema.String,
   repository: Schema.String,
@@ -58,13 +75,15 @@ const SentAttachRequest = Schema.Struct({
   expiresAt: Schema.String,
 });
 
-/** One request the executor sent to the admin API. */
 interface AdminCall {
   readonly method: string;
   readonly path: string;
   readonly body: Option.Option<typeof SentAttachRequest.Type>;
-  /** How many commands the machine had run when the request was sent, to order the two. */
+  /** The number of commands the machine had run when the request was sent. */
   readonly machineCalls: number;
+  readonly port: number;
+  /** Whether a live forward on that port delivered the request to the admin API. */
+  readonly delivered: boolean;
 }
 
 const decoder = new TextDecoder();
@@ -75,19 +94,54 @@ const bodyOf = (body: { readonly _tag: string }): AdminCall["body"] =>
     ? decodeAttachRequest(decoder.decode(body.body))
     : Option.none();
 
+/** The default Gateway LLM providers: an Anthropic API key, matching `gatewayAddress`. */
+const GATEWAY_PROVIDERS: LlmProviders = {
+  anthropic: Option.some(
+    new AnthropicProvider({
+      upstream: UpstreamBase.make("https://api.anthropic.com"),
+      credential: new AnthropicApiKey({ key: Redacted.make("sk-ant-api03-for-executor-tests") }),
+    }),
+  ),
+  openai: Option.none(),
+};
+
 /**
- * A Gateway's real admin API and attachment store, served in memory: each
- * request runs the Gateway's own handlers in the caller's fiber, so the test
- * clock applies to expiries. `calls` records what the executor sent, and a
- * detach of an attachment in `refusedDetaches` is answered with a server error.
+ * Returns a Gateway's real admin API and attachment store, served in memory. Handlers run in
+ * the caller's fiber, so the test clock applies to expiries. A request is handled
+ * only through a live forward of `machine` on its port; otherwise it fails as a refused
+ * connection.
+ *
+ * - `calls` records each request the executor sent.
+ * - A detach of an attachment in `refusedDetaches` returns a server error.
+ * - While `answering` is false, requests get no response.
+ * - While `reportsProviders` is false, the provider list returns 404.
+ * - `settled` waits until no admin request is in flight.
  */
-export const fakeGateway = (machine: ReturnType<typeof fakeMachine>) => {
+export const fakeGateway = (
+  machine: ReturnType<typeof fakeMachine>,
+  providers: LlmProviders = GATEWAY_PROVIDERS,
+) => {
   const calls: Array<AdminCall> = [];
-  const switches = { refusedDetaches: new Set<string>() };
+  const switches = { refusedDetaches: new Set<string>(), answering: true, reportsProviders: true };
+  let inFlight = 0;
+  const idle = Latch.makeUnsafe(true);
+  const tracked = <A, E, R>(request: Effect.Effect<A, E, R>) =>
+    Effect.acquireUseRelease(
+      Effect.sync(() => {
+        inFlight += 1;
+        idle.closeUnsafe();
+      }),
+      () => request,
+      () =>
+        Effect.sync(() => {
+          inFlight -= 1;
+          if (inFlight === 0) idle.openUnsafe();
+        }),
+    );
   const settings = Layer.succeed(GatewaySettings)({
     domain: DOMAIN,
     github: GITHUB_ORIGINS,
-    providers: { anthropic: Option.none(), openai: Option.none() },
+    providers,
     egress: Result.getOrThrow(parseEgressAllowlist("")),
     adminToken: Schema.decodeSync(AdminToken)(ADMIN_TOKEN),
     callerKey: Schema.decodeSync(CallerKey)("caller-key-for-executor-tests-0123456789"),
@@ -97,22 +151,45 @@ export const fakeGateway = (machine: ReturnType<typeof fakeMachine>) => {
     HttpClient.HttpClient,
     Effect.gen(function* () {
       const handler = yield* HttpRouter.toHttpEffect(adminRoutes);
-      const services = yield* Effect.context<Attachments | CallerTokens>();
+      const services = yield* Effect.context<Attachments | CallerTokens | SettingsInForce>();
       return HttpClient.make((request) =>
         Effect.gen(function* () {
-          const path = new URL(request.url).pathname;
+          const url = new URL(request.url);
+          const path = url.pathname;
+          const port = Number(url.port);
+          const forward = machine.state.forwards.find(
+            (candidate) => candidate.port === port && candidate.live,
+          );
+          const delivered = forward?.carries === true && switches.answering;
           calls.push({
             method: request.method,
             path,
             body: bodyOf(request.body),
             machineCalls: machine.state.calls.length,
+            port,
+            delivered,
           });
+          if (!delivered)
+            return yield* new HttpClientError.HttpClientError({
+              reason: new HttpClientError.TransportError({
+                request,
+                description:
+                  forward?.carries === true
+                    ? "socket hang up"
+                    : `connect ECONNREFUSED 127.0.0.1:${String(port)}`,
+              }),
+            });
           const detached = path.slice("/v1/attachments/".length);
           if (request.method === "DELETE" && switches.refusedDetaches.has(detached))
             return HttpServerResponse.toClientResponse(
               HttpServerResponse.text("refused by the test", { status: 500 }),
               { request },
             );
+          // A Gateway without the route returns an empty 404.
+          if (path === "/v1/providers" && !switches.reportsProviders)
+            return HttpServerResponse.toClientResponse(HttpServerResponse.empty({ status: 404 }), {
+              request,
+            });
           const response = yield* handler.pipe(
             Effect.provideService(
               HttpServerRequest.HttpServerRequest,
@@ -121,16 +198,16 @@ export const fakeGateway = (machine: ReturnType<typeof fakeMachine>) => {
             Effect.orDie,
           );
           return HttpServerResponse.toClientResponse(response, { request });
-        }).pipe(Effect.scoped, Effect.provide(services)),
+        }).pipe(Effect.scoped, Effect.provide(services), tracked),
       );
     }),
   ).pipe(Layer.provideMerge(services), Layer.provide(HttpServer.layerServices));
-  return { calls, switches, layer: client };
+  return { calls, switches, layer: client, settled: idle.await };
 };
 
 /**
- * The SSH executor for the test Worker behind the in-memory Gateway, which
- * the layer also provides so a test can read its attachment store.
+ * Returns the SSH executor for the test Worker behind the in-memory Gateway. The layer also
+ * provides the Gateway so a test can read its attachment store.
  */
 export const gatewayRuntime = (
   machine: ReturnType<typeof fakeMachine>,
@@ -154,25 +231,44 @@ export const gatewayRuntime = (
   ).pipe(Layer.provideMerge(gateway.layer));
 
 /**
- * Moves the test clock forward in ten-second steps with a short real pause
- * after each. The Gateway's handlers wait on real cryptography, so an admin
- * request in flight needs real time to finish before its 30-second timeout
- * comes due on the test clock.
+ * Advances the test clock in ten-second steps, waiting after each until `gateway` has
+ * responded to every admin request. Handlers use real cryptography, so a woken request must
+ * finish before later steps trigger its 30-second timeout.
  */
-export const advance = Effect.fn("GatewayTest.advance")(function* (minutes: number) {
+export const advance = Effect.fn("GatewayTest.advance")(function* (
+  gateway: ReturnType<typeof fakeGateway>,
+  minutes: number,
+) {
   for (let step = 0; step < minutes * 6; step += 1) {
     yield* TestClock.adjust("10 seconds");
-    yield* TestClock.withLive(Effect.sleep("2 millis"));
+    yield* gateway.settled;
   }
 });
 
-/** The attachments the in-memory Gateway holds. */
+/**
+ * Waits in real time until `holds` succeeds, advancing the test clock by `step` after each
+ * wait if given. The executor picks forward ports with real I/O, which the test clock doesn't
+ * drive.
+ */
+export const eventually = Effect.fn("GatewayTest.eventually")(function* (
+  holds: () => boolean,
+  step?: Duration.Input,
+) {
+  for (let turn = 0; turn < 400; turn += 1) {
+    if (holds()) return;
+    yield* Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, 5)));
+    if (step !== undefined) yield* TestClock.adjust(step);
+  }
+  return yield* Effect.die(new Error("The awaited condition never held"));
+});
+
+/** Returns the in-memory Gateway's attachments. */
 export const attachmentsInForce = Effect.gen(function* () {
   const store = yield* Attachments;
   return yield* store.list();
 });
 
-/** What the Gateway reads from a caller token it issued. */
+/** Returns the claims the Gateway decodes from a caller token it issued. */
 export const claimsOf = Effect.fn("GatewayTest.claimsOf")(function* (token: string) {
   const tokens = yield* CallerTokens;
   return yield* tokens.verify(Redacted.make(token));

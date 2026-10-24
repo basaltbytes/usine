@@ -1,29 +1,14 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { AttemptId } from "@usine/core/attempt";
+import { ArrowsOutSimpleIcon } from "@phosphor-icons/react";
+import { useSuspenseQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import type { RunId } from "@usine/core/run";
-import {
-  ColdTranscriptRequest,
-  EarlierTranscriptRequest,
-  TailTranscriptRequest,
-  RunDetailView,
-  type TranscriptPageCursor,
-} from "@usine/orchestrator/operator";
-import { useState } from "react";
+import type { RunDetailView } from "@usine/orchestrator/operator";
+import { Option } from "effect";
+import { useMemo, useState } from "react";
 import { ErrorAlert } from "@/components/error-alert";
-import { Markdown } from "@/components/markdown";
-import { RunLinks } from "@/components/run-links";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { StatusBadge } from "@/components/status-badge";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Item,
-  ItemContent,
-  ItemDescription,
-  ItemGroup,
-  ItemHeader,
-  ItemTitle,
-} from "@/components/ui/item";
+import { buttonVariants } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import {
   Sheet,
   SheetContent,
@@ -31,25 +16,94 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { api } from "./api.ts";
-import { brainLine, failureMessage, salvageMessage } from "./operator-copy.ts";
-import {
-  mergeTranscript,
-  mergeEarlierTranscript,
-  poolMeters,
-  RUN_DETAIL_CACHE_STRUCTURAL_SHARING,
-} from "./run-transcript/cache.ts";
-import { Conversation } from "./run-transcript/conversation.tsx";
-import { fetchRunDetail } from "./run-transcript/fetch.ts";
-import { EditAndRetry } from "./run-intervention/edit-and-retry.tsx";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { clockLabel, queuedMessageLabel, timestampLabel } from "./operator-copy.ts";
+import { overviewQuery, projectParams } from "./overview.ts";
+import { RunFacts, RunTitle, WorkFacts } from "./run-page/header.tsx";
+import { runItem } from "./run-page/item.ts";
+import { RunActions } from "./run-intervention/actions.tsx";
+import { EditAndRetry, type EditIntent, editApplies } from "./run-intervention/edit-and-retry.tsx";
+import { useOpenRun } from "./open-run.ts";
+import { CurrentActivity } from "./run-transcript/activity.tsx";
+import { readerDocument, type AttemptEnd } from "./run-transcript/document/model.ts";
+import { previewText } from "./run-transcript/document/text.ts";
+import { projectTranscript } from "./run-transcript/model.ts";
+import { Outcome } from "./run-transcript/outcome.tsx";
+import { useRunDetail } from "./run-transcript/query.ts";
 
-const timeAgo = (value: string): string => {
-  const elapsed = Math.max(0, Date.now() - Date.parse(value));
-  if (elapsed < 60_000) return "now";
-  if (elapsed < 3_600_000) return `${Math.floor(elapsed / 60_000)}m`;
-  if (elapsed < 86_400_000) return `${Math.floor(elapsed / 3_600_000)}h`;
-  return `${Math.floor(elapsed / 86_400_000)}d`;
+const LiveSummary = ({ detail }: { readonly detail: RunDetailView }) => {
+  const document = useMemo(
+    () =>
+      readerDocument(
+        projectTranscript(detail.transcript, detail.run.attempts, detail.sessionState),
+        detail.run.attempts,
+        detail.transcript,
+      ),
+    [detail.transcript, detail.sessionState, detail.run.attempts],
+  );
+  const chapter = [...document.chapters].reverse().find(({ live }) => live);
+  const message = document.chapters
+    .flatMap(({ rows }) => rows)
+    .reverse()
+    .find((row) => row._tag === "Message");
+  return (
+    <div className="space-y-4">
+      {chapter === undefined ? (
+        <p className="text-muted-foreground">Attempt starting</p>
+      ) : (
+        <CurrentActivity chapter={chapter} />
+      )}
+      {message?._tag === "Message" && (
+        <section aria-label="Latest message" className="space-y-1">
+          <p className="flex items-baseline gap-2 text-xs">
+            <span className="font-medium">{message.speaker.name}</span>
+            <time
+              dateTime={message.receivedAt}
+              title={timestampLabel(message.receivedAt)}
+              className="font-mono tabular-nums text-muted-foreground"
+            >
+              {clockLabel(message.receivedAt)}
+            </time>
+          </p>
+          <p className="line-clamp-6 text-md wrap-anywhere">{previewText(message.text)}</p>
+          {message.queued !== null && (
+            <p className="text-xs text-muted-foreground">{queuedMessageLabel(message.queued)}</p>
+          )}
+        </section>
+      )}
+    </div>
+  );
+};
+
+const finalEnd = (run: RunDetailView["run"]): Option.Option<AttemptEnd> => {
+  const attempt = run.attempts.at(-1);
+  const salvage = attempt?.salvage ?? null;
+  if (run.state === "Succeeded")
+    return Option.some({ _tag: "Succeeded", message: Option.fromNullishOr(run.resultMessage) });
+  if (run.state === "Canceled") return Option.some({ _tag: "Canceled", salvage });
+  if (run.state === "Failed" && attempt?.outcome?._tag === "Failed")
+    return Option.some({ _tag: "Failed", failure: attempt.outcome.failure, salvage });
+  return Option.none();
+};
+
+export const RunSummary = ({ detail }: { readonly detail: RunDetailView }) => {
+  const run = detail.run;
+  switch (run.state) {
+    case "Pending":
+      return <p className="text-muted-foreground">Opened, not scheduled yet</p>;
+    case "Waiting":
+      return <p className="text-muted-foreground">Waiting for approval</p>;
+    case "Queued":
+      return <p className="text-muted-foreground">Approved, waiting for a free worker</p>;
+    case "Running":
+      return <LiveSummary detail={detail} />;
+    case "Succeeded":
+    case "Failed":
+    case "Canceled":
+      return Option.match(finalEnd(run), {
+        onNone: () => <p className="text-muted-foreground">No attempt started</p>,
+        onSome: (end) => <Outcome end={end} />,
+      });
+  }
 };
 
 export const RunDrawer = ({
@@ -58,73 +112,19 @@ export const RunDrawer = ({
   close,
 }: {
   readonly runId: RunId;
-  /** False keeps the last Run mounted while the Sheet plays its exit transition. */
+  /** If `false`, the last Run stays mounted until the Sheet's exit transition ends. */
   readonly open: boolean;
   readonly close: () => void;
 }) => {
-  const queryClient = useQueryClient();
-  const [confirmCancel, setConfirmCancel] = useState(false);
-  const [activeTab, setActiveTab] = useState("conversation");
-  const [editing, setEditing] = useState(false);
-  const detail = useQuery<RunDetailView>({
-    queryKey: ["run", runId],
-    queryFn: async () => {
-      const key = ["run", runId] as const;
-      const previous = queryClient.getQueryData<RunDetailView>(key);
-      const cursor = previous?.transcript.at(-1)?.sequence;
-      const next = await fetchRunDetail(
-        cursor === undefined
-          ? new ColdTranscriptRequest()
-          : new TailTranscriptRequest({ after: cursor }),
-        (query) => api((client) => client.detail({ params: { runId }, query })),
-      );
-      const current = queryClient.getQueryData<RunDetailView>(key);
-      if (cursor === undefined || current === undefined) return next;
-      return new RunDetailView({
-        ...next,
-        transcript: mergeTranscript(current.transcript, next.transcript),
-        earlierTranscript: current.earlierTranscript,
-      });
-    },
-    structuralSharing: RUN_DETAIL_CACHE_STRUCTURAL_SHARING,
-    enabled: open,
-    refetchInterval: (query) => (query.state.data?.run.canCancel === true ? 1_000 : false),
-  });
-  const mutation = useMutation({
-    mutationFn: (
-      request:
-        | { readonly action: "approve" | "retry" | "cancel" }
-        | { readonly action: "resolveFailure"; readonly attemptId: AttemptId },
-    ) =>
-      api((client) =>
-        request.action === "resolveFailure"
-          ? client.resolveFailure({ params: { runId }, payload: { attemptId: request.attemptId } })
-          : client[request.action]({ params: { runId } }),
-      ),
-    onSuccess: async () => {
-      setConfirmCancel(false);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["overview"] }),
-        queryClient.invalidateQueries({ queryKey: ["run", runId] }),
-      ]);
-    },
-  });
-  const earlierMutation = useMutation({
-    mutationFn: (cursor: TranscriptPageCursor) =>
-      api((client) =>
-        client.detail({ params: { runId }, query: new EarlierTranscriptRequest(cursor) }),
-      ),
-    onSuccess: (page, cursor) => {
-      const key = ["run", runId] as const;
-      queryClient.setQueryData<RunDetailView>(key, (previous) =>
-        previous === undefined ? previous : mergeEarlierTranscript(previous, page, cursor),
-      );
-    },
-  });
+  const { data: overview } = useSuspenseQuery(overviewQuery());
+  const detail = useRunDetail(runId, open);
+  const [editing, setEditing] = useState<EditIntent | null>(null);
+  const openRun = useOpenRun();
   const run = detail.data?.run;
-  const latestAttempt = run?.attempts.at(-1);
-  const earlier = detail.data?.earlierTranscript.at(-1);
-  const meters = poolMeters(detail.data?.transcript ?? []);
+  const item =
+    detail.data === undefined
+      ? Option.none()
+      : runItem(detail.data.run, overview, detail.data.eventPayload);
   return (
     <Sheet
       open={open}
@@ -135,214 +135,80 @@ export const RunDrawer = ({
       <SheetContent
         side="right"
         aria-label="Run detail"
-        className="gap-0 data-[side=right]:w-full data-[side=right]:sm:max-w-3xl"
+        className="gap-0 data-[side=right]:w-full data-[side=right]:sm:max-w-md"
       >
-        <SheetHeader className="shrink-0 gap-2 border-b px-4 py-4 pr-12 sm:px-6 sm:pr-14">
-          <div className="flex flex-wrap items-center gap-2">
-            <SheetTitle>{run?.loop ?? "Loading…"}</SheetTitle>
-            {run !== undefined && <StatusBadge state={run.state} />}
-            {run?.loopPaused && <Badge variant="outline">Loop paused</Badge>}
-          </div>
-          <SheetDescription className="font-mono wrap-anywhere">
-            {run?.repository ?? "Loading Run details…"}
-          </SheetDescription>
-          {run !== undefined && <RunLinks run={run} />}
-        </SheetHeader>
-        {detail.isError && <ErrorAlert className="mx-4 my-3" message={detail.error.message} />}
-        {run !== undefined && detail.data !== undefined && (
-          <>
-            {(run.canApprove || run.canRetry || run.canCancel) && (
-              <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-4 py-2 sm:px-6">
-                <span className="mr-auto text-muted-foreground">
-                  {run.state === "Queued" ? "Waiting for a free worker" : run.agent}
-                </span>
-                {run.canApprove && (
-                  <Button
-                    size="sm"
-                    disabled={mutation.isPending}
-                    onClick={() => mutation.mutate({ action: "approve" })}
-                  >
-                    Approve
-                  </Button>
+        <SheetHeader className="shrink-0 gap-3 border-b px-5 pt-5 pb-4 pr-20">
+          {run === undefined || detail.data === undefined ? (
+            <>
+              <SheetTitle>Loading…</SheetTitle>
+              <SheetDescription>Loading run…</SheetDescription>
+            </>
+          ) : (
+            <>
+              <RunTitle
+                run={run}
+                item={item}
+                shared={open}
+                heading={(title) => (
+                  <SheetTitle className="text-lg font-semibold wrap-anywhere">{title}</SheetTitle>
                 )}
-                {run.canResolveFailure && latestAttempt !== undefined && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={mutation.isPending}
-                    onClick={() =>
-                      mutation.mutate({ action: "resolveFailure", attemptId: latestAttempt.id })
-                    }
-                  >
-                    Mark resolved
-                  </Button>
-                )}
-                {run.canRetry && (
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    disabled={mutation.isPending}
-                    onClick={() => mutation.mutate({ action: "retry" })}
-                  >
-                    Retry
-                  </Button>
-                )}
-                {run.canCancel && (
-                  <Button
-                    size="sm"
-                    variant={confirmCancel ? "destructive" : "outline"}
-                    disabled={mutation.isPending}
-                    onClick={() =>
-                      confirmCancel ? mutation.mutate({ action: "cancel" }) : setConfirmCancel(true)
-                    }
-                  >
-                    {confirmCancel ? "Confirm cancel" : "Cancel Run"}
-                  </Button>
-                )}
-                {run.canRetry && (
-                  <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
-                    Edit and retry
-                  </Button>
-                )}
-                {confirmCancel && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={mutation.isPending}
-                    onClick={() => setConfirmCancel(false)}
-                  >
-                    Keep running
-                  </Button>
-                )}
+              />
+              <SheetDescription className="sr-only">
+                Run {run.id} of {run.loop} on {run.repository}
+              </SheetDescription>
+              <div className="space-y-1">
+                <RunFacts run={run} item={item} shared={open} className="gap-x-4" />
+                <WorkFacts detail={detail.data} showUsage={false} className="gap-x-4" />
               </div>
-            )}
-            {mutation.isError && (
-              <ErrorAlert className="mx-4 my-3" message={mutation.error.message} />
-            )}
-            {editing && run.canRetry && (
-              <EditAndRetry key={run.id} run={run} close={() => setEditing(false)} />
-            )}
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="min-h-0 flex-1 gap-0">
-              <TabsList
-                variant="line"
-                className="w-full shrink-0 justify-start gap-2 border-b px-4 sm:px-6"
-                aria-label="Run views"
-              >
-                <TabsTrigger value="conversation" className="flex-none">
-                  Conversation
-                </TabsTrigger>
-                <TabsTrigger value="task" className="flex-none">
-                  Task
-                </TabsTrigger>
-                <TabsTrigger value="event" className="flex-none">
-                  Event
-                </TabsTrigger>
-                <TabsTrigger value="attempts" className="flex-none">
-                  Attempts ({run.attempts.length})
-                </TabsTrigger>
-              </TabsList>
-              <TabsContent
-                value="conversation"
-                keepMounted
-                className="flex min-h-0 flex-col data-[hidden]:hidden"
-              >
-                <Conversation
-                  key={runId}
-                  runId={runId}
-                  events={detail.data.transcript}
-                  sessionState={detail.data.sessionState}
-                  attempts={run.attempts}
-                  earlier={earlier}
-                  loadEarlier={() => {
-                    if (earlier !== undefined) earlierMutation.mutate(earlier);
-                  }}
-                  loadingEarlier={earlierMutation.isPending}
-                  earlierError={earlierMutation.isError ? earlierMutation.error.message : null}
-                  state={run.state}
-                  active={open && activeTab === "conversation"}
+              <RunActions run={run} onEdit={setEditing} openRun={openRun} />
+            </>
+          )}
+        </SheetHeader>
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4">
+          {detail.isError && <ErrorAlert message={detail.error.message} />}
+          {run !== undefined && editing !== null && editApplies(run, editing) && (
+            <EditAndRetry
+              key={`${run.id}:${editing}`}
+              run={run}
+              intent={editing}
+              close={() => setEditing(null)}
+              openRun={openRun}
+            />
+          )}
+          {detail.data !== undefined && <RunSummary detail={detail.data} />}
+          {run !== undefined && (
+            <Link
+              to="/projects/$owner/$name/runs/$run"
+              params={{ ...projectParams(run.repository), run: run.id }}
+              search={{}}
+              viewTransition
+              className={buttonVariants({ variant: "outline" })}
+            >
+              Open run page
+            </Link>
+          )}
+        </div>
+        {run !== undefined && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Link
+                  to="/projects/$owner/$name/runs/$run"
+                  params={{ ...projectParams(run.repository), run: run.id }}
+                  search={{}}
+                  viewTransition
+                  aria-label="Open run page"
+                  className={cn(
+                    buttonVariants({ variant: "ghost", size: "icon-sm" }),
+                    "absolute top-4 right-11",
+                  )}
                 />
-              </TabsContent>
-              <TabsContent value="task" className="min-h-0 overflow-y-auto p-4 sm:p-6">
-                <h3 className="mb-3 font-heading text-sm">Task</h3>
-                <Markdown className="max-w-prose">{run.task}</Markdown>
-              </TabsContent>
-              <TabsContent value="event" className="min-h-0 overflow-y-auto p-4 sm:p-6">
-                <h3 className="mb-3 font-heading text-sm">Triggering Event</h3>
-                <p className="mb-3 font-mono text-muted-foreground wrap-anywhere">
-                  {detail.data.eventDedupKey}
-                </p>
-                <pre className="font-mono text-xs/relaxed whitespace-pre-wrap wrap-anywhere">
-                  {JSON.stringify(detail.data.eventPayload, null, 2)}
-                </pre>
-              </TabsContent>
-              <TabsContent value="attempts" className="min-h-0 overflow-y-auto p-4 sm:p-6">
-                <p className="mb-4 font-mono text-muted-foreground wrap-anywhere">Run {run.id}</p>
-                {meters.length > 0 && (
-                  <div className="mb-4 space-y-2">
-                    <h3 className="font-heading text-sm">Account rate windows</h3>
-                    <div className="flex flex-wrap gap-2">
-                      {meters.map((meter) => (
-                        <Badge key={meter.pool} variant="outline" className="font-mono">
-                          {meter.pool}
-                          {meter.primaryUsedPercent !== null &&
-                            ` · primary ${meter.primaryUsedPercent}% used`}
-                          {meter.secondaryUsedPercent !== null &&
-                            ` · secondary ${meter.secondaryUsedPercent}% used`}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {run.attempts.length === 0 && (
-                  <p className="text-muted-foreground">No attempt has started.</p>
-                )}
-                <ItemGroup className="gap-2">
-                  {run.attempts.map((attempt) => (
-                    <Item variant="muted" size="sm" key={attempt.id}>
-                      <ItemHeader>
-                        <ItemTitle>Attempt {attempt.number}</ItemTitle>
-                        <StatusBadge state={attempt.outcome?._tag ?? "Running"} />
-                      </ItemHeader>
-                      <ItemContent>
-                        <ItemDescription className="font-mono">
-                          {attempt.agent} · {attempt.worker} · {brainLine(attempt.brain)} ·{" "}
-                          {timeAgo(attempt.startedAt)}
-                        </ItemDescription>
-                        {attempt.operatorIntervened && (
-                          <Badge variant="outline">Operator intervened</Badge>
-                        )}
-                        <Collapsible>
-                          <CollapsibleTrigger render={<Button size="sm" variant="ghost" />}>
-                            Task used by this attempt
-                          </CollapsibleTrigger>
-                          <CollapsibleContent>
-                            <Markdown>{attempt.task}</Markdown>
-                          </CollapsibleContent>
-                        </Collapsible>
-                        {attempt.outcome?._tag === "Failed" && (
-                          <p className="text-destructive wrap-anywhere">
-                            <strong>{attempt.outcome.failure._tag}</strong>
-                            {` — ${failureMessage(attempt.outcome.failure)}`}
-                          </p>
-                        )}
-                        {attempt.salvage !== null && (
-                          <p className="font-mono text-muted-foreground wrap-anywhere">
-                            {salvageMessage(attempt.salvage)}
-                          </p>
-                        )}
-                      </ItemContent>
-                    </Item>
-                  ))}
-                </ItemGroup>
-                {run.resultMessage !== null && (
-                  <section className="mt-6">
-                    <h3 className="mb-3 font-heading text-sm">Result</h3>
-                    <Markdown className="max-w-prose">{run.resultMessage}</Markdown>
-                  </section>
-                )}
-              </TabsContent>
-            </Tabs>
-          </>
+              }
+            >
+              <ArrowsOutSimpleIcon aria-hidden="true" />
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Open run page</TooltipContent>
+          </Tooltip>
         )}
       </SheetContent>
     </Sheet>

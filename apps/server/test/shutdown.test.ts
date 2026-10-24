@@ -21,7 +21,8 @@ const signalScenario = (
       fileURLToPath(new URL("./fixtures/shutdown.mjs", import.meta.url)),
       mode,
     ],
-    { encoding: "utf8", timeout: SCENARIO_TIMEOUT_MS },
+    // The fixture handles SIGTERM, so a hung scenario only stops on SIGKILL.
+    { encoding: "utf8", timeout: SCENARIO_TIMEOUT_MS, killSignal: "SIGKILL" },
   );
   assert.strictEqual(result.error, undefined);
   assert.strictEqual(result.signal, null);

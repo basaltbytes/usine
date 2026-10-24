@@ -16,6 +16,7 @@ import {
 import { Clock, DateTime, Deferred, Effect, Fiber, Option, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { PollingTriggers } from "../src/polling-triggers.ts";
+import { fixedInstance } from "./support/current-instance.ts";
 import { pollingTestLayer } from "./support/polling.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
@@ -63,6 +64,7 @@ describe("Polling self-write Hints", () => {
   it.effect("extends an in-flight wait when another writer reports a later retry deadline", () => {
     let snapshots = 0;
     const github: GitHubPolling["Service"] = {
+      missingIssues: () => Effect.succeed([]),
       labels,
       changes: (_repository, cursor) =>
         Effect.succeed(new RepositoryNotModified({ cursor, nextPollAt: Option.none() })),
@@ -74,7 +76,7 @@ describe("Polling self-write Hints", () => {
     };
     return Effect.gen(function* () {
       const polling = yield* PollingTriggers;
-      const fiber = yield* polling.run(instance).pipe(Effect.forkChild);
+      const fiber = yield* polling.run(fixedInstance(instance)).pipe(Effect.forkChild);
       yield* TestClock.adjust("1 millis");
       yield* polling.hint(repository, changed, Option.some(DateTime.makeUnsafe(90_000)));
       yield* TestClock.adjust("40 seconds");
@@ -95,6 +97,7 @@ describe("Polling self-write Hints", () => {
     let requests = 0;
     let snapshots = 0;
     const github: GitHubPolling["Service"] = {
+      missingIssues: () => Effect.succeed([]),
       labels,
       changes: (_repository, cursor) =>
         Effect.gen(function* () {
@@ -115,7 +118,7 @@ describe("Polling self-write Hints", () => {
     return Effect.gen(function* () {
       const polling = yield* PollingTriggers;
       for (let index = 0; index < 20; index += 1) yield* polling.hint(repository, changed);
-      const fiber = yield* polling.run(instance).pipe(Effect.forkChild);
+      const fiber = yield* polling.run(fixedInstance(instance)).pipe(Effect.forkChild);
       yield* TestClock.adjust("1 millis");
       assert.strictEqual(snapshots, 1);
       assert.strictEqual(requests, 1);
@@ -138,6 +141,7 @@ describe("Polling self-write Hints", () => {
       let snapshots = 0;
       const until = DateTime.makeUnsafe(90_000);
       const github: GitHubPolling["Service"] = {
+        missingIssues: () => Effect.succeed([]),
         labels,
         changes: (_repository, cursor) =>
           Effect.suspend(() => {
@@ -166,7 +170,7 @@ describe("Polling self-write Hints", () => {
       };
       return Effect.gen(function* () {
         const polling = yield* PollingTriggers;
-        const fiber = yield* polling.run(instance).pipe(Effect.forkChild);
+        const fiber = yield* polling.run(fixedInstance(instance)).pipe(Effect.forkChild);
         yield* TestClock.adjust("1 millis");
         yield* polling.hint(repository, changed);
         yield* TestClock.adjust("89998 millis");
@@ -188,6 +192,7 @@ describe("Polling self-write Hints", () => {
         let requests = 0;
         let snapshots = 0;
         const github: GitHubPolling["Service"] = {
+          missingIssues: () => Effect.succeed([]),
           labels,
           changes: (_repository, cursor) =>
             Effect.sync(() => {
@@ -218,7 +223,7 @@ describe("Polling self-write Hints", () => {
         };
         yield* Effect.gen(function* () {
           const polling = yield* PollingTriggers;
-          const background = yield* polling.run(instance).pipe(Effect.forkChild);
+          const background = yield* polling.run(fixedInstance(instance)).pipe(Effect.forkChild);
           yield* TestClock.adjust("1 millis");
           yield* polling.hint(repository, changed);
           yield* Deferred.await(snapshotStarted);

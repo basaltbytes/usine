@@ -99,7 +99,8 @@ describe("ConfigParser", () => {
         "    root: /srv/usine",
         "    gateway:",
         "      domain: gw.internal",
-        "      admin_url: http://127.0.0.1:7070",
+        "      destination: usine-gateway",
+        "      admin_port: 7071",
         "      admin_token_env: USINE_GATEWAY_ADMIN_TOKEN",
         "      llm_providers: [anthropic]",
       ]);
@@ -116,7 +117,8 @@ describe("ConfigParser", () => {
       expect(Option.isNone(second.identityFile) && Option.isNone(second.port)).toBe(true);
       const gateway = Option.getOrNull(second.gateway);
       expect(gateway?.domain).toBe("gw.internal");
-      expect(gateway?.adminUrl.href).toBe("http://127.0.0.1:7070/");
+      expect(gateway?.destination).toBe("usine-gateway");
+      expect(gateway?.adminPort).toBe(7071);
       expect(gateway?.adminTokenEnv).toBe("USINE_GATEWAY_ADMIN_TOKEN");
       expect(gateway?.llmProviders).toEqual(["anthropic"]);
 
@@ -130,24 +132,22 @@ describe("ConfigParser", () => {
       ];
       const valid = [
         "domain: gw.internal",
-        "admin_url: http://127.0.0.1:7070",
+        "destination: root@203.0.113.30",
         "admin_token_env: GATEWAY_TOKEN",
       ];
-      const withoutProviders = yield* parse(gatewayOf(valid));
-      const [only] = withoutProviders.workers;
+      const withDefaults = yield* parse(gatewayOf(valid));
+      const [only] = withDefaults.workers;
       expect(
-        only?.kind === "ssh" && Option.map(only.gateway, ({ llmProviders }) => llmProviders),
-      ).toEqual(Option.some([]));
+        only?.kind === "ssh" &&
+          Option.map(only.gateway, ({ adminPort, llmProviders }) => ({ adminPort, llmProviders })),
+      ).toEqual(Option.some({ adminPort: 7070, llmProviders: [] }));
 
       for (const workers of [
         gatewayOf([...valid, "llm_providers: [openai]"]),
         gatewayOf(["domain: GW.internal", ...valid.slice(1)]),
-        gatewayOf([valid[0] ?? "", "admin_url: ftp://127.0.0.1", valid[2] ?? ""]),
-        gatewayOf([
-          valid[0] ?? "",
-          "admin_url: http://admin:secret@127.0.0.1:7070",
-          valid[2] ?? "",
-        ]),
+        gatewayOf([valid[0] ?? "", "destination: -oProxyCommand=sh", valid[2] ?? ""]),
+        gatewayOf([valid[0] ?? "", valid[2] ?? ""]),
+        gatewayOf([...valid, "admin_port: 0"]),
         gatewayOf([...valid.slice(0, 2), "admin_token_env: sk-ant-0123"]),
         gatewayOf([...valid, "admin_token: secret"]),
         ["  - name: here", "    kind: local", "    root: /srv/usine"],
@@ -249,7 +249,7 @@ describe("ConfigParser", () => {
         )
         .pipe(Effect.flip);
       expect(lanes.stage).toBe("schema");
-      expect(lanes.message).toContain("every lane source to be mapped once");
+      expect(lanes.message).toContain("each lane source in only one lane");
 
       const selector = yield* parser
         .parseLoopFile(
@@ -432,7 +432,7 @@ describe("ConfigParser", () => {
         )
         .pipe(Effect.flip);
       expect(duplicate.stage).toBe("schema");
-      expect(duplicate.message).toContain("every lane source to be mapped once");
+      expect(duplicate.message).toContain("each lane source in only one lane");
     }).pipe(Effect.provide(parserLayer)),
   );
 
@@ -447,6 +447,28 @@ describe("ConfigParser", () => {
       expect((yield* parse("max_cycles: 5\n")).maxCycles).toBe(5);
       for (const invalid of ["max_cycles: 0\n", "max_cycles: 1.5\n", "maxCycles: 5\n"]) {
         expect((yield* parse(invalid).pipe(Effect.flip)).stage).toBe("schema");
+      }
+    }).pipe(Effect.provide(parserLayer)),
+  );
+
+  it.effect("defaults Loop permissions to write and accepts only read or write", () =>
+    Effect.gen(function* () {
+      const parser = yield* ConfigParser;
+      const source = (field: string) =>
+        `---\ntrigger:\n  on: pr\n  if: 'true'\nagent: reviewer\n${field}---\nReview the Item.`;
+      const parse = (field: string) =>
+        parser.parseLoopFile(InstancePath.make("loops/review.md"), source(field));
+      expect((yield* parse("")).permissions).toBe("write");
+      expect((yield* parse("permissions: read\n")).permissions).toBe("read");
+      expect((yield* parse("permissions: write\n")).permissions).toBe("write");
+      for (const invalid of [
+        "permissions: admin\n",
+        "permissions: { contents: read }\n",
+        "permission: read\n",
+      ]) {
+        const failure = yield* parse(invalid).pipe(Effect.flip);
+        expect(failure.stage).toBe("schema");
+        expect(failure.message).toContain("permission");
       }
     }).pipe(Effect.provide(parserLayer)),
   );
@@ -489,7 +511,7 @@ describe("ConfigParser", () => {
         const failure = yield* parse(`  on: issue\n  if: ${value}\n`).pipe(Effect.flip);
         expect(failure.stage).toBe("schema");
         expect(failure.message).toContain(
-          "Expected a CEL expression: quote the value so YAML reads it as a string",
+          "Expected a CEL expression. Quote the value so that YAML reads it as a string.",
         );
       }
     }).pipe(Effect.provide(parserLayer)),
@@ -682,7 +704,7 @@ describe("ConfigParser", () => {
         .pipe(Effect.flip);
 
       expect(failure.stage).toBe("expression");
-      expect(failure.message).toContain("Unclosed prompt interpolation");
+      expect(failure.message).toContain("The prompt has an unclosed {{ at character");
     }).pipe(Effect.provide(parserLayer)),
   );
 });
@@ -710,7 +732,8 @@ describe("InstanceFolder", () => {
         {
           file: "loops/unknown-agent.md",
           stage: "reference",
-          message: "Unknown agent: ghost",
+          message:
+            'Unknown agent "ghost": agents/ghost.md is missing or invalid. Fix the agent file, or set agent to an existing agent.',
           expression: undefined,
         },
       ]);
@@ -736,7 +759,9 @@ describe("InstanceFolder", () => {
       expect(Option.getOrNull(loaded.quarantinedLoops[0]?.error.expression ?? Option.none())).toBe(
         'item.labels.nodes.exists(label, label.nmae == "ready")',
       );
-      expect(loaded.quarantinedLoops[1]?.error.message).toBe("Unknown agent: ghost");
+      expect(loaded.quarantinedLoops[1]?.error.message).toBe(
+        'Unknown agent "ghost": agents/ghost.md is missing or invalid. Fix the agent file, or set agent to an existing agent.',
+      );
       expect(loaded.agents.map(({ name }) => name)).toEqual(["developer", "reviewer"]);
       expect(loaded.invalidAgents.map(({ file }) => file)).toEqual(["agents/intern.md"]);
       expect(loaded.invalidAgents[0]?.error.stage).toBe("schema");

@@ -6,3 +6,12 @@ coverage/
 .usine/
 .astro/
 apps/docs/src/content/docs/reference/api/
+
+# Impeccable scratch output
+**/.impeccable/mocks/
+**/.impeccable/review/
+**/.impeccable/build/
+**/.impeccable/config.local.json
+
+# Impeccable platform binaries (downloaded per machine)
+**/skills/impeccable/scripts/bin/

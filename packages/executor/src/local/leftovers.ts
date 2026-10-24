@@ -3,8 +3,8 @@ import { Effect, FileSystem, Path } from "effect";
 import { listedOncePerWorker } from "../leftovers.ts";
 
 /**
- * Lists the checkout paths left under each local Worker's `attempts` directory,
- * once per Worker for this executor. A Worker that never ran an Attempt has none.
+ * Lists checkout paths under each local Worker's `attempts` directory, once per Worker per
+ * executor. Returns an empty set if the directory doesn't exist.
  */
 export const workerLeftoversFor = Effect.fn("LocalExecutor.workerLeftoversFor")(function* (
   workersRoot: string,

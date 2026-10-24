@@ -11,9 +11,7 @@ import {
 } from "../remote/commands.ts";
 
 export interface ExeDevCommands {
-  /** The shared remote command runner every VM command goes through. */
   readonly shared: RemoteCommands;
-  /** The child host that runs an Attempt's children on this VM through the same SSH client. */
   readonly childHost: (sshDest: SshDestination) => RemoteShell;
   readonly lobby: (
     operation: ExecutorOperation,
@@ -45,9 +43,8 @@ export const commandsFor = Effect.fn("ExeDevExecutor.commandsFor")(function* (
   const ssh = configuredSsh ?? DEFAULT_SSH;
   const childHost = (sshDest: SshDestination) => shared.shellFor(ssh, sshDest);
 
-  // Lobby arguments pass unquoted through OpenSSH's argv join, so every value
-  // must be a brand-validated token (WorkerName, IntegrationName,
-  // CredentialGrantMinutes), never free-form text.
+  // OpenSSH joins lobby arguments without quoting, so each value must be a brand-validated
+  // token (WorkerName, IntegrationName, CredentialGrantMinutes), never free-form text.
   const lobby = (
     operation: ExecutorOperation,
     args: ReadonlyArray<string>,

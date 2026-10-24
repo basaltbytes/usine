@@ -1,21 +1,34 @@
-import type { LoadedInstance } from "@usine/config/instance";
 import { LoopName } from "@usine/core/loop";
 import { CycleBudgetAskId } from "@usine/core/cycle-budget";
 import { AttemptId } from "@usine/core/attempt";
 import { RunId } from "@usine/core/run";
 import { AgentName } from "@usine/core/agent";
+import type { RunAgainResult } from "@usine/engine/engine";
+import type {
+  CurrentInstance,
+  InstanceReload,
+  InstanceReloadError,
+} from "@usine/orchestrator/current-instance";
+import type { WorkerName } from "@usine/core/worker";
 import {
   type BoardMove,
+  type ConfigurationView,
+  type DeskView,
   type FactoryOverview,
   NeedsSetupOverview,
   type RunDetailView,
+  type RunGitHubChangesView,
   type TranscriptRequest,
   type Operator,
+  type OperatorConfiguration,
   type OperatorError,
   type OperatorObservation,
   type EditAndRetry,
   type SessionIntervention,
+  type TaskView,
 } from "@usine/orchestrator/operator";
+import type { ItemNumber } from "@usine/core/item";
+import type { RepositoryName } from "@usine/core/repository";
 import { Context, Effect, Layer, Schema } from "effect";
 
 export class BackendUnavailableError extends Schema.TaggedError<BackendUnavailableError>(
@@ -24,7 +37,7 @@ export class BackendUnavailableError extends Schema.TaggedError<BackendUnavailab
   message: Schema.String,
 }) {}
 
-export type BackendError = OperatorError | BackendUnavailableError;
+export type BackendError = OperatorError | BackendUnavailableError | InstanceReloadError;
 
 export class FactoryBackend extends Context.Service<
   FactoryBackend,
@@ -34,6 +47,7 @@ export class FactoryBackend extends Context.Service<
       runId: RunId,
       request: TranscriptRequest,
     ) => Effect.Effect<RunDetailView, BackendError>;
+    readonly githubChanges: (runId: RunId) => Effect.Effect<RunGitHubChangesView, BackendError>;
     readonly approve: (runId: RunId) => Effect.Effect<void, BackendError>;
     readonly resetCycleBudget: (askId: CycleBudgetAskId) => Effect.Effect<void, BackendError>;
     readonly resolveFailure: (
@@ -43,67 +57,115 @@ export class FactoryBackend extends Context.Service<
     readonly retry: (runId: RunId) => Effect.Effect<void, BackendError>;
     readonly agents: Effect.Effect<ReadonlyArray<AgentName>, BackendError>;
     readonly editAndRetry: (runId: RunId, edit: EditAndRetry) => Effect.Effect<void, BackendError>;
+    readonly runAgain: (
+      runId: RunId,
+      edit: EditAndRetry,
+    ) => Effect.Effect<RunAgainResult, BackendError>;
     readonly intervene: (
       runId: RunId,
       input: SessionIntervention,
     ) => Effect.Effect<void, BackendError>;
     readonly cancel: (runId: RunId) => Effect.Effect<void, BackendError>;
+    readonly discardLeftovers: (worker: WorkerName) => Effect.Effect<void, BackendError>;
     readonly moveBoardItem: (move: BoardMove) => Effect.Effect<void, BackendError>;
     readonly pause: (loop: LoopName) => Effect.Effect<void, BackendError>;
     readonly unpause: (loop: LoopName) => Effect.Effect<void, BackendError>;
+    readonly reload: Effect.Effect<InstanceReload, BackendError>;
+
+    readonly task: (
+      repository: RepositoryName,
+      item: ItemNumber,
+    ) => Effect.Effect<TaskView, BackendError>;
+    readonly configuration: Effect.Effect<ConfigurationView, BackendError>;
+    readonly desk: Effect.Effect<DeskView, BackendError>;
   }
 >()("@usine/server/FactoryBackend") {}
 
+type BackendInstance = Pick<CurrentInstance["Service"], "get" | "reload">;
+
+const rosterOf = (instances: BackendInstance) =>
+  Effect.map(instances.get, ({ agents }) => agents.map(({ name }) => name));
+
+/** Provides the backend of a running factory, which reads the current instance on each request. */
 export const liveBackendLayer = (
-  instance: LoadedInstance,
+  instances: BackendInstance,
   operator: Operator["Service"],
+  configuration: OperatorConfiguration["Service"],
 ): Layer.Layer<FactoryBackend> =>
   Layer.succeed(FactoryBackend)({
-    overview: operator.overview(instance),
-    detail: operator.detail,
-    approve: operator.approve,
+    overview: Effect.flatMap(instances.get, operator.overview),
+    detail: (runId, request) =>
+      Effect.flatMap(instances.get, (instance) => operator.detail(instance, runId, request)),
+    githubChanges: operator.githubChanges,
+    approve: (runId) =>
+      Effect.flatMap(instances.get, (instance) => operator.approve(instance, runId)),
     resetCycleBudget: operator.resetCycleBudget,
-    retry: operator.retry,
+    retry: (runId) => Effect.flatMap(instances.get, (instance) => operator.retry(instance, runId)),
     resolveFailure: operator.resolveFailure,
-    agents: Effect.succeed(instance.agents.map(({ name }) => name)),
-    editAndRetry: (runId, edit) => operator.editAndRetry(instance, runId, edit),
-    intervene: (runId, input) => operator.intervene(instance, runId, input),
+    agents: rosterOf(instances),
+    editAndRetry: (runId, edit) =>
+      Effect.flatMap(instances.get, (instance) => operator.editAndRetry(instance, runId, edit)),
+    runAgain: (runId, edit) =>
+      Effect.flatMap(instances.get, (instance) => operator.runAgain(instance, runId, edit)),
+    intervene: (runId, input) =>
+      Effect.flatMap(instances.get, (instance) => operator.intervene(instance, runId, input)),
     cancel: operator.cancel,
-    moveBoardItem: (move) => operator.moveBoardItem(instance, move),
+    discardLeftovers: operator.discardLeftovers,
+    moveBoardItem: (move) =>
+      Effect.flatMap(instances.get, (instance) => operator.moveBoardItem(instance, move)),
     pause: (loop) => operator.pause(loop).pipe(Effect.asVoid),
     unpause: (loop) => operator.unpause(loop).pipe(Effect.asVoid),
+    reload: instances.reload,
+
+    task: (repository, item) =>
+      Effect.flatMap(instances.get, (instance) => operator.task(instance, repository, item)),
+    configuration: Effect.flatMap(instances.get, configuration.view),
+    desk: Effect.flatMap(instances.get, operator.desk),
   });
 
+/**
+ * Provides the setup-mode backend, where only the overview, configuration, and reload work. Other
+ * operations fail with `BackendUnavailableError`.
+ */
 export const needsSetupBackendLayer = (
-  instance: LoadedInstance,
+  instances: BackendInstance,
   errorTag: string,
   observation: OperatorObservation["Service"],
+  configuration: OperatorConfiguration["Service"],
 ): Layer.Layer<FactoryBackend> => {
   const unavailable = new BackendUnavailableError({
-    message: "GitHub App setup is required before operator actions are available.",
+    message: "The GitHub App is not set up. Set it up to use operator actions.",
   });
-  const overview = observation
-    .overview(instance)
-    .pipe(
-      Effect.map(
-        ({ projects, loops, needsYou }) =>
-          new NeedsSetupOverview({ errorTag, projects, loops, needsYou }),
-      ),
-    );
+  const overview = Effect.flatMap(instances.get, observation.overview).pipe(
+    Effect.map(
+      ({ projects, loops, needsYou }) =>
+        new NeedsSetupOverview({ errorTag, projects, loops, needsYou }),
+    ),
+  );
   const fail = () => Effect.fail(unavailable);
   return Layer.succeed(FactoryBackend)({
     overview,
-    detail: observation.detail,
+    detail: (runId, request) =>
+      Effect.flatMap(instances.get, (instance) => observation.detail(instance, runId, request)),
+    githubChanges: fail,
     approve: fail,
     resetCycleBudget: fail,
     retry: fail,
     resolveFailure: fail,
-    agents: Effect.succeed(instance.agents.map(({ name }) => name)),
+    agents: rosterOf(instances),
     editAndRetry: fail,
+    runAgain: fail,
     intervene: fail,
     cancel: fail,
+    discardLeftovers: fail,
     moveBoardItem: fail,
     pause: fail,
     unpause: fail,
+    reload: instances.reload,
+
+    task: (repository, item) =>
+      Effect.flatMap(instances.get, (instance) => observation.task(instance, repository, item)),
+    configuration: Effect.flatMap(instances.get, configuration.view),
+    desk: Effect.flatMap(instances.get, observation.desk),
   });
 };

@@ -1,13 +1,8 @@
 /**
- * Conformance gate for the hand-written app-server protocol view.
- *
- * `src/protocol/codex.ts` re-declares the request shapes usine sends because
- * the generated upstream package only resolves under bundler-style module
- * resolution (its internal imports are extensionless). This file is compiled
- * by `tsconfig.conformance.json` under that resolution and is the one place
- * the exact-pinned baseline package is read, so `pnpm check` fails here when the
- * view drifts from its generated wire types. Additional supported CLI builds
- * require a separate generated-type review and the live adapter contracts.
+ * Type check of `src/protocol/codex.ts` against the pinned `@pwrdrvr/codex-app-server-protocol`
+ * package. `tsconfig.conformance.json` compiles it with bundler module resolution, which that
+ * package requires because its internal imports are extensionless; `pnpm check` fails here if the
+ * types drift.
  */
 import type { InitializeParams } from "@pwrdrvr/codex-app-server-protocol";
 import type {

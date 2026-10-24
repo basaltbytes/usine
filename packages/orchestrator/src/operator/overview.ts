@@ -7,7 +7,7 @@ import { RunView } from "./run.ts";
 import { BoardView, LabelView } from "./board.ts";
 import { NeedView } from "./need.ts";
 
-/** The Project's summary indicator for activity or required operator attention. */
+/** The Project's summary status: clear, active, or needs operator attention. */
 export const ProjectStatus = Schema.Literals(["clear", "active", "needs-you"]);
 export type ProjectStatus = typeof ProjectStatus.Type;
 
@@ -19,11 +19,11 @@ export class ProjectView extends Schema.Class<ProjectView>("@usine/orchestrator/
   board: BoardView,
   /** The repository's label catalog, used to color badges on cards and lanes. */
   labels: Schema.Array(LabelView),
-  /** Failures from provisioning this Project's declared labels; they do not block the Board. */
+  /** Failures from creating this Project's declared labels, which don't block the Board. */
   preflightFindings: Schema.Array(LabelPreflightFinding),
 }) {}
 
-/** A Loop's authored trigger and Agent together with its runtime pause state. */
+/** A Loop's trigger and Agent with its runtime pause state. */
 export class LoopView extends Schema.Class<LoopView>("@usine/orchestrator/LoopView")({
   name: LoopName,
   trigger: Schema.String,
@@ -40,7 +40,7 @@ export class ReadyOverview extends Schema.TaggedClass<ReadyOverview>(
   needsYou: Schema.Array(NeedView),
 }) {}
 
-/** An overview available during setup, including the error that prevents normal operation. */
+/** The overview during setup, with the error that prevents normal operation. */
 export class NeedsSetupOverview extends Schema.TaggedClass<NeedsSetupOverview>(
   "@usine/orchestrator/NeedsSetupOverview",
 )("NeedsSetup", {
@@ -50,6 +50,6 @@ export class NeedsSetupOverview extends Schema.TaggedClass<NeedsSetupOverview>(
   needsYou: Schema.Array(NeedView),
 }) {}
 
-/** The operator overview, distinguished by whether factory setup is complete. */
+/** The operator overview, depending on whether factory setup is complete. */
 export const FactoryOverview = Schema.Union([ReadyOverview, NeedsSetupOverview]);
 export type FactoryOverview = typeof FactoryOverview.Type;

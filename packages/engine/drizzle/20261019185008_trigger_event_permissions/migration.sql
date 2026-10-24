@@ -1,0 +1,1 @@
+ALTER TABLE `usine_trigger_events` ADD `permissions` text DEFAULT 'write' NOT NULL;

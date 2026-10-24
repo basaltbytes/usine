@@ -1,18 +1,31 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { Settings, UsineConfig } from "@usine/config/factory";
+import { githubSignature } from "@usine/core/agent";
 import { HarnessUnavailableError } from "@usine/core/agent/capability";
 import { ChildSessionBudget } from "@usine/core/agent/session";
 import { Attempt, AttemptNumber, AttemptTask, AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { InfraFailure } from "@usine/core/attempt/failure";
 import { SalvageRef } from "@usine/core/attempt/salvage";
+import { Event } from "@usine/core/event";
+import { LoopName } from "@usine/core/loop";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import * as RunState from "@usine/core/run/state";
 import { Run, RunId } from "@usine/core/run";
 import { Step } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
-import { CheckoutRequest, CredentialProvider, Executor, ExecutorError } from "@usine/executor";
+import {
+  claudeLoginLockLayer,
+  CheckoutRequest,
+  CredentialProvider,
+  CredentialUnavailableError,
+  type CredentialUnavailableReason,
+  Executor,
+  ExecutorError,
+  ExecutorOperationError,
+} from "@usine/executor";
+import { GitHubApp, InstallationDiscoveryError } from "@usine/github/github-app";
 import { InstanceDirectory } from "@usine/core/instance";
 import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
 import { StepExecution, StepExecutor } from "@usine/engine/step-executor";
@@ -39,6 +52,7 @@ import {
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { fileURLToPath } from "node:url";
 import { type HarnessProbe, layer as localExecutorLayer } from "@usine/executor/local";
+import { AttemptReport } from "@usine/durable/attempt-runtime";
 import { layer as localLayer } from "../../src/local.ts";
 import {
   completes,
@@ -47,9 +61,12 @@ import {
   StubStorage,
   worksFor,
 } from "@usine/durable/testing";
+import { fixedConfigLayer } from "../support/current-instance.ts";
+import { testAppLayer } from "../support/github-app.ts";
 import { alwaysHoldsLayer } from "../support/polling.ts";
 import { runView } from "../../src/operator/projection.ts";
 import {
+  aloneOnItem,
   LIVE_TEST_TIMEOUT,
   STATE_POLL_ATTEMPTS,
   TOKEN,
@@ -67,7 +84,8 @@ import {
   workerCredential,
 } from "./support.ts";
 
-const PULL_REQUEST_GH = fileURLToPath(new URL("../fixtures/pull-request.mjs", import.meta.url));
+const GITHUB_GH = fileURLToPath(new URL("../fixtures/github.mjs", import.meta.url));
+const REVIEW_URL = "https://github.com/acme/demo/pull/71#pullrequestreview-81";
 
 const harnessUnavailable: HarnessProbe = (brain) =>
   Effect.succeed(
@@ -78,13 +96,34 @@ const harnessUnavailable: HarnessProbe = (brain) =>
     }),
   );
 
-/** A parent that commits (unless it only updates its PR) and records the PR the fake `gh` reports. */
+/** Fails every mint for the Attempt's repository with `reason` and `message`. */
+const failingCredentials = (reason: CredentialUnavailableReason, message: string) =>
+  Layer.succeed(CredentialProvider)({
+    issue: (repository) =>
+      Effect.fail(
+        new CredentialUnavailableError({ repository, reason, message, cause: new Error(message) }),
+      ),
+  });
+
+/** Returns the tag and message of each Attempt's failure, in Attempt order. */
+const attemptFailures = (attempts: ReadonlyArray<Attempt>) =>
+  attempts.map((attempt) =>
+    Option.match(attempt.outcome, {
+      onNone: () => ["open"],
+      onSome: (outcome) =>
+        outcome._tag === "Failed"
+          ? [outcome.failure._tag, "message" in outcome.failure ? outcome.failure.message : ""]
+          : [outcome._tag],
+    }),
+  );
+
+/** A parent that commits and pushes (unless it only updates its PR) and records the PR the fake `gh` reports. */
 const pullRequestParent =
   (operation: "create" | "update"): StubParent =>
   ({ request }) =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
-      if (operation === "create")
+      if (operation === "create") {
         yield* run(
           "git",
           [
@@ -99,6 +138,12 @@ const pullRequestParent =
           ],
           request.cwd,
         );
+        yield* run(
+          "git",
+          ["push", "origin", "HEAD:refs/heads/usine/implement-the-issue"],
+          request.cwd,
+        );
+      }
       const head = (yield* output("git", ["rev-parse", "HEAD"], request.cwd)).trim();
       yield* fileSystem.writeFileString(
         `${request.cwd}/.test-pull-request.json`,
@@ -111,9 +156,33 @@ const pullRequestParent =
       return `Completed: ${request.spec.task}`;
     }).pipe(Effect.provide(NodeServices.layer), Effect.orDie);
 
-/** The local composition with `gh` answered by the pull request fixture, as `../../src/local.ts` builds it. */
-const withPullRequestEngine = <A, E, R>(
-  operation: "create" | "update",
+/** A parent whose last turn answered the operator, after it posted the review on pull request 71 that the fake `gh` reports. */
+const reviewedParent: StubParent = ({ request }) =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    yield* fileSystem.writeFileString(
+      `${request.cwd}/.test-review.json`,
+      JSON.stringify({
+        id: 81,
+        html_url: REVIEW_URL,
+        body: `No findings.\n\n${githubSignature(request.spec.agent.name)}`,
+        user: { login: "usine-test[bot]" },
+        state: "COMMENTED",
+        submitted_at: DateTime.formatIso(yield* DateTime.now),
+      }),
+    );
+    return new AttemptReport({
+      message: "Posted the review on pull request 71.",
+      answeredOperator: true,
+    });
+  }).pipe(Effect.provide(NodeServices.layer), Effect.orDie);
+
+/**
+ * Runs `use` on the local composition, built as in `../../src/local.ts`, with `gh` answered by the
+ * GitHub fixture.
+ */
+const withGitHubEngine = <A, E, R>(
+  parent: StubParent,
   lookup: "answers" | "fails",
   use: (options: {
     readonly engine: RunEngine["Service"];
@@ -131,7 +200,7 @@ const withPullRequestEngine = <A, E, R>(
         ? spawner.spawn(
             ChildProcess.make(
               process.execPath,
-              [PULL_REQUEST_GH, ...command.args, ...(lookup === "fails" ? ["--lookup-fails"] : [])],
+              [GITHUB_GH, ...command.args, ...(lookup === "fails" ? ["--lookup-fails"] : [])],
               command.options,
             ),
           )
@@ -143,12 +212,19 @@ const withPullRequestEngine = <A, E, R>(
       harnessReadiness: harnessReady,
     }).pipe(
       Layer.provide(credentialLayer),
-      Layer.provide(stubAttemptRuntime(new StubStorage(), pullRequestParent(operation))),
+      Layer.provide(stubAttemptRuntime(new StubStorage(), parent)),
+      Layer.provide(claudeLoginLockLayer),
       Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, github)),
       Layer.provide(NodeServices.layer),
     );
     const engine = localEngineLayer(instance).pipe(
-      Layer.provide(stepExecutorLayer(config, []).pipe(Layer.provide(executor))),
+      Layer.provide(
+        stepExecutorLayer(config, []).pipe(
+          Layer.provide(executor),
+          Layer.provide(fixedConfigLayer(config)),
+          Layer.provide(testAppLayer),
+        ),
+      ),
       Layer.provide(alwaysHoldsLayer),
     );
     return yield* Effect.gen(function* () {
@@ -170,7 +246,10 @@ describe("local worker", () => {
         }).pipe(
           Layer.provide(credentialLayer),
           Layer.provide(stubAttemptRuntime(new StubStorage())),
+          Layer.provide(claudeLoginLockLayer),
           Layer.provide(alwaysHoldsLayer),
+          Layer.provide(fixedConfigLayer(config)),
+          Layer.provide(testAppLayer),
         );
         const error = yield* Effect.void.pipe(Effect.provide(runtime), Effect.flip);
         assert.strictEqual(error._tag, "WorkerCapabilityError");
@@ -204,9 +283,53 @@ describe("local worker", () => {
   );
 
   it.live(
+    "fails once, without an automatic retry, when GitHub refuses the Attempt's token",
+    () => {
+      const refusal =
+        'Could not create a worker token for "acme/demo": GitHub returned HTTP status 422: The permissions requested are not granted to this installation.';
+      return withLocalEngine(
+        { credentials: failingCredentials("refused", refusal) },
+        ({ engine, instance }) =>
+          Effect.gen(function* () {
+            const accepted = yield* engine.submit(submission(1));
+            assert(accepted._tag === "Claimed");
+            const snapshot = yield* waitFor(engine, accepted.runId, "Failed");
+            assert.deepStrictEqual(attemptFailures(snapshot.attempts), [["AgentFailure", refusal]]);
+            const fs = yield* FileSystem.FileSystem;
+            assert(!(yield* fs.exists(`${instance}/.usine/workers/local/attempts`)));
+          }),
+      );
+    },
+    LIVE_TEST_TIMEOUT,
+  );
+
+  it.live(
+    "retries as an infrastructure failure when GitHub cannot be reached for the token",
+    () => {
+      const outage =
+        'Could not create a worker token for "acme/demo": Could not send the request to GitHub';
+      return withLocalEngine(
+        { credentials: failingCredentials("unreachable", outage) },
+        ({ engine }) =>
+          Effect.gen(function* () {
+            const accepted = yield* engine.submit(submission(1));
+            assert(accepted._tag === "Claimed");
+            const snapshot = yield* waitFor(engine, accepted.runId, "Failed");
+            assert.deepStrictEqual(attemptFailures(snapshot.attempts), [
+              ["InfraFailure", outage],
+              ["InfraFailure", outage],
+              ["InfraFailure", outage],
+            ]);
+          }),
+      );
+    },
+    LIVE_TEST_TIMEOUT,
+  );
+
+  it.live(
     "preserves successful agent work when PR discovery fails",
     () =>
-      withPullRequestEngine("create", "fails", ({ engine }) =>
+      withGitHubEngine(pullRequestParent("create"), "fails", ({ engine }) =>
         Effect.gen(function* () {
           const accepted = yield* engine.submit(submission(1));
           assert.strictEqual(accepted._tag, "Claimed");
@@ -218,7 +341,7 @@ describe("local worker", () => {
             snapshot.step.result.value.facts.map((fact) => fact._tag),
             ["Commit"],
           );
-          assert.strictEqual(runView(snapshot, new Set()).pullRequestUrl, null);
+          assert.strictEqual(runView(snapshot, new Set(), new Map()).pullRequestUrl, null);
         }),
       ),
     LIVE_TEST_TIMEOUT,
@@ -227,7 +350,7 @@ describe("local worker", () => {
   it.live.each(["create", "update"] as const)(
     "persists a PR fact and operator link after an agent %s",
     (operation) =>
-      withPullRequestEngine(operation, "answers", ({ engine, remote }) =>
+      withGitHubEngine(pullRequestParent(operation), "answers", ({ engine, remote }) =>
         Effect.gen(function* () {
           const initial = submission(1);
           const request =
@@ -255,7 +378,7 @@ describe("local worker", () => {
             [71],
           );
           assert.strictEqual(
-            runView(snapshot, new Set()).pullRequestUrl,
+            runView(snapshot, new Set(), new Map()).pullRequestUrl,
             "https://github.com/acme/demo/pull/71",
           );
         }),
@@ -300,13 +423,18 @@ describe("local worker", () => {
             }),
           ),
           Layer.provide(stubAttemptRuntime(new StubStorage())),
+          Layer.provide(claudeLoginLockLayer),
           Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, delayedCleanup)),
         );
         const budgetConfig = new UsineConfig({
           ...config,
           settings: new Settings({ ...config.settings, maxAttemptMinutes: Option.some(1) }),
         });
-        const runtime = stepExecutorLayer(budgetConfig, []).pipe(Layer.provide(executor));
+        const runtime = stepExecutorLayer(budgetConfig, []).pipe(
+          Layer.provide(executor),
+          Layer.provide(fixedConfigLayer(budgetConfig)),
+          Layer.provide(testAppLayer),
+        );
         yield* Effect.gen(function* () {
           const scheduler = yield* StepExecutor;
           const selected = submission(7);
@@ -325,6 +453,7 @@ describe("local worker", () => {
               parentModel: Option.none(),
               startedAt: selected.event.receivedAt,
               outcome: Option.none(),
+              endedAt: Option.none(),
               salvage: Option.none(),
             }),
             event: selected.event,
@@ -341,10 +470,18 @@ describe("local worker", () => {
             task: selected.task,
             agent: selected.agent,
             parentModel: selected.parentModel,
+            permissions: selected.permissions,
             resume: Option.none(),
           });
           const running = yield* scheduler
-            .execute(execution, { append: () => Effect.void, salvage: () => Effect.void })
+            .execute(execution, {
+              append: () => Effect.void,
+              salvage: () => Effect.void,
+              comments: () => Effect.void,
+              transcript: Effect.succeed([]),
+              windows: aloneOnItem(AttemptId.make("cleanup-budget-run/execute/1")),
+              checkoutAcquired: Effect.void,
+            })
             .pipe(Effect.forkChild);
           yield* Deferred.await(cleanupStarted);
           // Agent work is complete; only resource release crosses the one-minute budget.
@@ -418,6 +555,7 @@ describe("local worker", () => {
                       : Effect.succeed(workerCredential(credential)),
                 }),
                 stubAttemptRuntime(new StubStorage()),
+                claudeLoginLockLayer,
                 Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, controlledSpawner),
               ),
             ),
@@ -429,6 +567,8 @@ describe("local worker", () => {
                 attemptId: AttemptId.make(`prepare-${phase}/run/1`),
                 worker: WorkerName.make("local"),
                 repository: RepositoryName.make("acme/demo"),
+                loop: LoopName.make("local-worker"),
+                permissions: "write",
                 revision: RepositoryRevision.make("main"),
                 payload: {},
                 task: AttemptTask.make("Exercise interrupted preparation"),
@@ -494,13 +634,19 @@ describe("local worker", () => {
           instanceDirectory: InstanceDirectory.make(root),
           repositoryUrl: () => remote,
           harnessReadiness: harnessReady,
-        }).pipe(Layer.provide(credentials), Layer.provide(stubAttemptRuntime(new StubStorage())));
+        }).pipe(
+          Layer.provide(credentials),
+          Layer.provide(stubAttemptRuntime(new StubStorage())),
+          Layer.provide(claudeLoginLockLayer),
+        );
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
           const request = new CheckoutRequest({
             attemptId: AttemptId.make("unlaunched/run/1"),
             worker: WorkerName.make("local"),
             repository: RepositoryName.make("acme/demo"),
+            loop: LoopName.make("local-worker"),
+            permissions: "write",
             revision: RepositoryRevision.make(prHead),
             payload: {},
             task: AttemptTask.make("Prepare without launching"),
@@ -547,7 +693,13 @@ describe("local worker", () => {
           assert.strictEqual(issued.length, 2);
           for (const token of issued) assert.throws(() => Redacted.value(token));
           const reused = yield* prepared
-            .launch({ append: () => Effect.void, salvage: () => Effect.void })
+            .launch({
+              append: () => Effect.void,
+              salvage: () => Effect.void,
+              comments: () => Effect.void,
+              transcript: Effect.succeed([]),
+              windows: aloneOnItem(AttemptId.make("unlaunched/run/2")),
+            })
             .pipe(Effect.flip);
           assert.strictEqual(reused._tag, "InfraFailure");
         }).pipe(Effect.provide(runtime));
@@ -608,7 +760,10 @@ describe("local worker", () => {
         }).pipe(
           Layer.provide(credentialLayer),
           Layer.provide(stubAttemptRuntime(new StubStorage())),
+          Layer.provide(claudeLoginLockLayer),
           Layer.provide(alwaysHoldsLayer),
+          Layer.provide(fixedConfigLayer(config)),
+          Layer.provide(testAppLayer),
         );
         yield* Effect.gen(function* () {
           yield* RunEngine;
@@ -664,8 +819,8 @@ describe("local worker", () => {
               const path = yield* Path.Path;
               const [environment] = environments;
               assert(environment !== undefined && environments.length === 1);
-              // Nothing from the orchestrator's own environment beyond the
-              // allowlist, which keeps the App private key out (ADR 0011).
+              // Nothing from the orchestrator's environment beyond the allowlist, which excludes
+              // the App private key (ADR 0011).
               const allowed = new Set([
                 "HOME",
                 "LANG",
@@ -696,6 +851,188 @@ describe("local worker", () => {
             }),
         );
       }),
+    LIVE_TEST_TIMEOUT,
+  );
+
+  it.live(
+    "fails the Run when the parent ended on its answer to the operator and delivered nothing",
+    () =>
+      withLocalEngine(
+        {
+          attemptRuntime: stubAttemptRuntime(new StubStorage(), () =>
+            Effect.succeed(
+              new AttemptReport({
+                message: "The delegated attempt returned no technical failure details.",
+                answeredOperator: true,
+              }),
+            ),
+          ),
+        },
+        ({ engine }) =>
+          Effect.gen(function* () {
+            const accepted = yield* engine.submit(submission(8));
+            assert(accepted._tag === "Claimed");
+            const snapshot = yield* waitFor(engine, accepted.runId, "Failed");
+            const outcome = snapshot.attempts[0]?.outcome;
+            assert(outcome !== undefined && Option.isSome(outcome));
+            assert(outcome.value._tag === "Failed");
+            assert.strictEqual(outcome.value.failure._tag, "AgentFailure");
+            assert.include(
+              outcome.value.failure._tag === "AgentFailure" ? outcome.value.failure.message : "",
+              "The delegated attempt returned no technical failure details.",
+            );
+          }),
+      ),
+    LIVE_TEST_TIMEOUT,
+  );
+
+  it.effect(
+    "gives an exe.dev Attempt exe.dev's integration bot, and an Attempt no bot login when the App cannot be read, and acquires no checkout when preparation fails",
+    () =>
+      Effect.gen(function* () {
+        const unreadableApp = Layer.succeed(GitHubApp)({
+          installation: () =>
+            Effect.fail(
+              new InstallationDiscoveryError({
+                reason: "missing",
+                message:
+                  "The GitHub App is not installed on any account. Install it on the account that owns the repositories.",
+              }),
+            ),
+          installationToken: () => Effect.die("unused"),
+          projectAccess: () => Effect.die("unused"),
+          workerToken: () => Effect.die("unused"),
+        });
+        const cases = [
+          ["exe.dev", testAppLayer, "exe-dev-github-integration[bot]"],
+          ["local", unreadableApp, null],
+        ] as const;
+        for (const [kind, app, expected] of cases) {
+          const requested: Array<CheckoutRequest> = [];
+          const acquired: Array<AttemptId> = [];
+          const executor = Layer.succeed(Executor)({
+            kind,
+            recover: () => Effect.die("unused"),
+            isLive: () => Effect.die("unused"),
+            outcome: () => Effect.die("unused"),
+            preflight: () => Effect.void,
+            prepare: (request) => {
+              requested.push(request);
+              return Effect.fail(
+                new ExecutorOperationError({
+                  operation: "prepare",
+                  message: "The test stops after the request",
+                  cause: new Error("stop"),
+                }),
+              );
+            },
+            cancel: () => Effect.die("unused"),
+            intervene: () => Effect.die("unused"),
+          });
+          const single = Schema.decodeUnknownSync(UsineConfig)({
+            version: 1,
+            repos: [{ name: "acme/demo" }],
+            workers: [{ name: "worker", kind, max_concurrent_attempts: 1 }],
+          });
+          yield* Effect.gen(function* () {
+            const selected = submission(9);
+            const runId = RunId.make(`bot-login-${kind}`);
+            yield* (yield* StepExecutor)
+              .execute(
+                new StepExecution({
+                  attempt: new Attempt({
+                    task: selected.task,
+                    agent: selected.agent.name,
+                    operatorIntervened: false,
+                    id: AttemptId.make(`bot-login-${kind}/execute/1`),
+                    runId,
+                    stepName: selected.step,
+                    worker: WorkerName.make("worker"),
+                    number: AttemptNumber.make(1),
+                    brain: testAgent.brain,
+                    parentModel: Option.none(),
+                    startedAt: selected.event.receivedAt,
+                    outcome: Option.none(),
+                    endedAt: Option.none(),
+                    salvage: Option.none(),
+                  }),
+                  event: selected.event,
+                  run: new Run({
+                    id: runId,
+                    eventId: selected.event.id,
+                    loop: selected.loop,
+                    state: RunState.start(new RunState.Pending()),
+                    openedAt: selected.event.receivedAt,
+                  }),
+                  step: new Step({ runId, name: selected.step, result: Option.none() }),
+                  repository: selected.repository,
+                  revision: selected.revision,
+                  task: selected.task,
+                  agent: selected.agent,
+                  parentModel: selected.parentModel,
+                  permissions: selected.permissions,
+                  resume: Option.none(),
+                }),
+                {
+                  append: () => Effect.void,
+                  salvage: () => Effect.void,
+                  comments: () => Effect.void,
+                  transcript: Effect.succeed([]),
+                  windows: aloneOnItem(AttemptId.make(`bot-login-${kind}/execute/1`)),
+                  checkoutAcquired: Effect.sync(() => {
+                    acquired.push(AttemptId.make(`bot-login-${kind}/execute/1`));
+                  }),
+                },
+              )
+              .pipe(Effect.flip);
+          }).pipe(
+            Effect.provide(
+              stepExecutorLayer(single, []).pipe(
+                Layer.provide(executor),
+                Layer.provide(fixedConfigLayer(single)),
+                Layer.provide(app),
+              ),
+            ),
+          );
+          assert.deepStrictEqual(
+            requested.map(({ botLogin }) =>
+              Option.getOrNull(Option.map(botLogin, (login): string => login)),
+            ),
+            [expected],
+          );
+          // The engine reconciles a checkout kept for a reattachment until preparation acquires it
+          // (#180).
+          assert.deepStrictEqual(acquired, []);
+        }
+      }),
+  );
+
+  it.live(
+    "succeeds the Run when the parent ended on its answer to the operator after posting a review as the App's bot",
+    () =>
+      withGitHubEngine(reviewedParent, "answers", ({ engine }) =>
+        Effect.gen(function* () {
+          const initial = submission(1);
+          const accepted = yield* engine.submit(
+            new Submission({
+              ...initial,
+              event: new Event({
+                ...initial.event,
+                payload: { number: 71, url: "https://github.com/acme/demo/pull/71" },
+              }),
+            }),
+          );
+          assert(accepted._tag === "Claimed");
+          const snapshot = yield* waitFor(engine, accepted.runId, "Succeeded");
+          assert(Option.isSome(snapshot.step.result));
+          assert.deepStrictEqual(
+            snapshot.step.result.value.facts.map((fact) =>
+              fact._tag === "Comment" ? [fact.kind, fact.url.href] : [fact._tag],
+            ),
+            [["review", REVIEW_URL]],
+          );
+        }),
+      ),
     LIVE_TEST_TIMEOUT,
   );
 

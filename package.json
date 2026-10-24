@@ -10,7 +10,8 @@
   "scripts": {
     "build": "turbo run build",
     "check": "turbo run check",
-    "test": "turbo run test",
+    "check:packed-install": "node scripts/check-packed-install.mjs",
+    "test": "turbo run test --concurrency=1",
     "lint": "oxlint",
     "format": "oxfmt",
     "format:check": "oxfmt --check",

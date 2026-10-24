@@ -6,11 +6,34 @@ import type { ChildHost } from "../child-host/child-host.ts";
 import { hostCommand } from "../child-host/command.ts";
 import { SessionOperationError } from "../runtime.ts";
 
-/** OpenSSH exits with 255 when it cannot reach the remote machine or run the command there. */
+/** The exit code OpenSSH returns if it cannot connect or run the remote command. */
 const SSH_FAILURE = 255;
 
-/** Runs a bounded readiness command on `host` without retaining its potentially sensitive diagnostics. */
-export const probeCommand = Effect.fn("HarnessPreflight.command")(function* (
+/** The trimmed stdout and exit code of a readiness command. */
+interface ProbeOutput {
+  readonly stdout: string;
+  readonly exitCode: number;
+}
+
+/** Returns the error for a readiness command that exited non-zero; the message includes the command but not its output. */
+export const probeFailed = (
+  harness: Harness,
+  capability: HarnessCapability,
+  command: string,
+  args: ReadonlyArray<string>,
+) =>
+  new HarnessUnavailableError({
+    harness,
+    capability,
+    message: `${command} ${args.join(" ")} failed. Check the ${harness} installation and login on the worker.`,
+  });
+
+/**
+ * Runs a readiness command on `host` with a 30-second timeout and returns its trimmed stdout and
+ * exit code; stderr is discarded. If the remote host is unreachable or the command times out, fails
+ * with `SessionOperationError`.
+ */
+export const probeOutput = Effect.fn("HarnessPreflight.command")(function* (
   host: ChildHost,
   environment: Readonly<Record<string, string>>,
   harness: Harness,
@@ -41,16 +64,10 @@ export const probeCommand = Effect.fn("HarnessPreflight.command")(function* (
         return yield* new SessionOperationError({
           operation: "launch",
           sessionId: Option.none(),
-          message: `Could not reach ${host.destination} to run ${command}`,
+          message: `Can't reach ${host.destination} to run ${command}`,
           cause: new Error(`${host.ssh.command} exited with code ${SSH_FAILURE}`),
         });
-      if (exitCode !== 0)
-        return yield* new HarnessUnavailableError({
-          harness,
-          capability,
-          message: `${command} ${args.join(" ")} failed; check the Worker's ${harness} installation and login`,
-        });
-      return stdout.trim();
+      return { stdout: stdout.trim(), exitCode } satisfies ProbeOutput;
     }),
   ).pipe(
     Effect.timeout("30 seconds"),
@@ -59,7 +76,7 @@ export const probeCommand = Effect.fn("HarnessPreflight.command")(function* (
         new HarnessUnavailableError({
           harness,
           capability,
-          message: `Worker cannot execute ${command}`,
+          message: `The worker can't run ${command}`,
         }),
       TimeoutError: (cause) =>
         new SessionOperationError({
@@ -71,3 +88,20 @@ export const probeCommand = Effect.fn("HarnessPreflight.command")(function* (
     }),
   );
 });
+
+/** Runs a readiness command and returns its trimmed stdout. Fails with `HarnessUnavailableError` if the command exits non-zero. */
+export const probeCommand = (
+  host: ChildHost,
+  environment: Readonly<Record<string, string>>,
+  harness: Harness,
+  capability: HarnessCapability,
+  command: string,
+  args: ReadonlyArray<string>,
+) =>
+  probeOutput(host, environment, harness, capability, command, args).pipe(
+    Effect.flatMap(({ stdout, exitCode }) =>
+      exitCode === 0
+        ? Effect.succeed(stdout)
+        : Effect.fail(probeFailed(harness, capability, command, args)),
+    ),
+  );

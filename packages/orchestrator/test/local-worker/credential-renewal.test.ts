@@ -4,9 +4,16 @@ import { ChildSessionBudget } from "@usine/core/agent/session";
 import { AttemptId, AttemptTask } from "@usine/core/attempt";
 import { SalvageRef } from "@usine/core/attempt/salvage";
 import { InstanceDirectory } from "@usine/core/instance";
+import { LoopName } from "@usine/core/loop";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
-import { CheckoutRequest, CredentialProvider, Executor, WorkerCredential } from "@usine/executor";
+import {
+  claudeLoginLockLayer,
+  CheckoutRequest,
+  CredentialProvider,
+  Executor,
+  WorkerCredential,
+} from "@usine/executor";
 import { layer as localExecutorLayer } from "@usine/executor/local";
 import {
   Clock,
@@ -36,10 +43,8 @@ it.effect(
       let minted = 0;
       let renewalFiber: number | undefined;
       let rearmed = false;
-      // The renewal loop arms its next timer only after publishing, so a timer
-      // armed after the clock moved starts from the later time and misses the next
-      // renewal. Move the clock only once the fiber that minted the latest
-      // credential waits on it again.
+      // Move the clock only once the fiber that minted the latest credential waits on it again,
+      // since the renewal loop sets its next timer only after publishing.
       const testClock = yield* TestClock.testClockWith(Effect.succeed);
       const clock: TestClock.TestClock = {
         ...testClock,
@@ -82,6 +87,7 @@ it.effect(
       }).pipe(
         Layer.provide(credentials),
         Layer.provide(stubAttemptRuntime(new StubStorage())),
+        Layer.provide(claudeLoginLockLayer),
         Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, capturing)),
       );
       yield* Effect.gen(function* () {
@@ -93,6 +99,8 @@ it.effect(
               attemptId: AttemptId.make("renew/work/1"),
               worker: WorkerName.make("local"),
               repository: RepositoryName.make("acme/demo"),
+              loop: LoopName.make("local-worker"),
+              permissions: "write",
               revision: RepositoryRevision.make("main"),
               payload: {},
               task: AttemptTask.make("Work"),

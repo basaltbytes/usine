@@ -48,10 +48,12 @@ const parent = new ParentSession({ id: AgentSessionId.make("parent"), agent: age
 const result = new StepResult({ message: "Evidence retained", facts: [] });
 
 const executor = Layer.succeed(StepExecutor)({
+  workers: Effect.succeed([WorkerName.make("local")]),
   isLive: () => Effect.succeed(false),
   outcome: () => Effect.succeed(Option.none()),
   recover: () => Effect.void,
   intervene: () => Effect.void,
+  occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
   reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
   interrupt: () => Effect.void,
   execute: (execution, io) =>
@@ -140,7 +142,9 @@ const seed = (directory: string) =>
     Effect.provide(
       layer(InstanceDirectory.make(directory)).pipe(
         Layer.provide(executor),
-        Layer.provide(Layer.succeed(TriggerCondition)({ holds: () => Effect.succeed(true) })),
+        Layer.provide(
+          Layer.succeed(TriggerCondition)({ recheck: () => Effect.succeed("matches") }),
+        ),
       ),
     ),
   );
@@ -263,7 +267,7 @@ describe("Run evidence export", { timeout: 30_000 }, () => {
     const exported = runCli(directory, ["export-run", saved.snapshot.run.id, "--output", output]);
 
     assert.strictEqual(exported.status, 1);
-    assert.match(exported.stderr, /write evidence/i);
+    assert.match(exported.stderr, /write the evidence/i);
     assert.include(exported.stderr, output);
     assert.strictEqual(await readFile(output, "utf8"), "Previously exported evidence");
   });
@@ -292,7 +296,7 @@ describe("Run evidence export", { timeout: 30_000 }, () => {
     ]);
 
     assert.strictEqual(exported.status, 1);
-    assert.match(exported.stderr, /write evidence/i);
+    assert.match(exported.stderr, /write the evidence/i);
     await expect(stat(parent)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
@@ -300,7 +304,7 @@ describe("Run evidence export", { timeout: 30_000 }, () => {
     const exported = runCli(directory, ["export-run", "missing"]);
 
     assert.strictEqual(exported.status, 1);
-    assert.match(exported.stderr, /read evidence/i);
+    assert.match(exported.stderr, /read the evidence/i);
     await expect(stat(join(directory, ".usine"))).rejects.toMatchObject({ code: "ENOENT" });
     await expect(stat(join(directory, "run-missing.json"))).rejects.toMatchObject({
       code: "ENOENT",
@@ -321,7 +325,7 @@ describe("Run evidence export", { timeout: 30_000 }, () => {
     const exported = runCli(directory, ["export-run", "missing"]);
 
     assert.strictEqual(exported.status, 1);
-    assert.match(exported.stderr, /read evidence/i);
+    assert.match(exported.stderr, /read the evidence/i);
     assert.deepStrictEqual(await readFile(filename), original);
     await expect(stat(join(directory, "run-missing.json"))).rejects.toMatchObject({
       code: "ENOENT",
@@ -338,7 +342,7 @@ describe("Run evidence export", { timeout: 30_000 }, () => {
       const exported = runCli(directory, ["export-run", "missing"]);
 
       assert.strictEqual(exported.status, 1);
-      assert.match(exported.stderr, /read evidence/i);
+      assert.match(exported.stderr, /read the evidence/i);
       await expect(stat(join(directory, "run-missing.json"))).rejects.toMatchObject({
         code: "ENOENT",
       });

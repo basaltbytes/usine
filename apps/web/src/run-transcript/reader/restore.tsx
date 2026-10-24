@@ -3,9 +3,9 @@ import type { TranscriptPageCursor } from "@usine/orchestrator/operator";
 import { useMessageScroller } from "@/components/ui/message-scroller";
 import { isGroupOpen, useTranscriptDisclosure } from "../grouping/disclosure.tsx";
 import { locateReadingAnchor, type ReadingRow } from "./anchor.ts";
+import { VISIBLE_ROW_EDGE } from "../scroll-position.tsx";
 import type { ReadingAnchor } from "./memory.ts";
 
-/** History uses the drawer's existing request/cache seam, including its failure and retry UI. */
 export interface ReaderHistory {
   readonly earlier: TranscriptPageCursor | undefined;
   readonly loading: boolean;
@@ -13,7 +13,7 @@ export interface ReaderHistory {
   readonly load: () => void;
 }
 
-/** Restores only after ancestor disclosures mount; explicit reader navigation cancels the target. */
+/** Restores the scroll position after ancestor disclosures have mounted; a navigation by the reader cancels the restore. */
 export const RestoreReader = ({
   target,
   rows,
@@ -76,38 +76,50 @@ export const RestoreReader = ({
         return;
       }
     }
+    let settle: number | undefined;
     let completion: number | undefined;
     const frame = requestAnimationFrame(() => {
       const viewport = viewportRef.current;
       if (viewport === null || viewport.clientHeight === 0) return;
+      // Scrolls the saved row to its saved offset; returns false when the row is not laid out.
+      const align = (row: ReadingRow, saved: number): boolean => {
+        const element = Array.from(
+          viewport.querySelectorAll<HTMLElement>("[data-transcript-id]"),
+        ).find((candidate) => candidate.getAttribute("data-transcript-id") === row.elementId);
+        if (element === undefined || element.getBoundingClientRect().height === 0) return false;
+        const bounds = element.getBoundingClientRect();
+        const offset = Math.min(
+          viewport.clientHeight - VISIBLE_ROW_EDGE,
+          Math.max(VISIBLE_ROW_EDGE - bounds.height, saved),
+        );
+        const delta =
+          bounds.top - viewport.getBoundingClientRect().top - viewport.clientTop - offset;
+        if (Math.abs(delta) > 1) viewport.scrollTop += delta;
+        return true;
+      };
       if (location._tag === "Empty") scrollToStart({ behavior: "instant" });
       else {
         if (!scrollToMessage(location.row.messageId, { align: "start", behavior: "instant" }))
           return;
-        const element = Array.from(
-          viewport.querySelectorAll<HTMLElement>("[data-transcript-id]"),
-        ).find((row) => row.getAttribute("data-transcript-id") === location.row.elementId);
-        if (element === undefined || element.getBoundingClientRect().height === 0) return;
-        const bounds = element.getBoundingClientRect();
-        const offset = Math.min(
-          viewport.clientHeight - 24,
-          Math.max(24 - bounds.height, location.offset),
-        );
-        viewport.scrollTop +=
-          bounds.top - viewport.getBoundingClientRect().top - viewport.clientTop - offset;
+        if (!align(location.row, location.offset)) return;
       }
       if (location._tag === "Empty" || location.fallback)
         setNotice(
           history.earlier !== undefined
-            ? "Your saved place is outside the loaded history. Showing nearby activity; use Load earlier to continue back."
-            : "Your saved row is no longer available. Showing the nearest remaining activity.",
+            ? "Saved place not in the loaded history, showing nearby activity"
+            : "Saved row no longer available, showing the nearest activity",
         );
-      // Let the registry publish the restored scrollability before permitting capture.
-      // Restoration never acknowledges unread activity, including a fallback at the bottom.
-      completion = requestAnimationFrame(onRestored);
+      // Rows scrolled into view get their measured heights on the next frame, so the row is aligned
+      // again, and capture waits until the registry updates scrollability. Restoring does not
+      // acknowledge unread activity.
+      settle = requestAnimationFrame(() => {
+        if (location._tag === "Row") align(location.row, location.offset);
+        completion = requestAnimationFrame(onRestored);
+      });
     });
     return () => {
       cancelAnimationFrame(frame);
+      if (settle !== undefined) cancelAnimationFrame(settle);
       if (completion !== undefined) cancelAnimationFrame(completion);
     };
   }, [

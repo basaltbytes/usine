@@ -3,7 +3,7 @@ import type { LaneItemState } from "@usine/config/board";
 import { ItemKey, ItemNumber } from "@usine/core/item";
 import type { ItemProjection } from "@usine/engine/item-projection";
 import { IssuePayload, PullRequestPayload } from "@usine/github/polling";
-import { Effect, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 import { BoardProjectionError } from "../operator/board.ts";
 
 export interface ProjectedItem {
@@ -15,11 +15,24 @@ export interface ProjectedItem {
   readonly state: LaneItemState;
   readonly linkedPullRequests: ReadonlyArray<string>;
   readonly labels: ReadonlyArray<GitHubLabelName>;
-  /** True when GitHub reports the pull request branch as conflicting with its base. */
+  /** Whether GitHub reports the pull request branch as conflicting with its base. */
   readonly conflicting: boolean;
 }
 
 const labelsFrom = Schema.decodeUnknownEffect(Schema.Array(GitHubLabelName));
+
+// Only the labels are read, so a payload stored before later fields were added still decodes.
+const IssueLabels = Schema.Struct({ labels: IssuePayload.fields.labels });
+const PullRequestLabels = Schema.Struct({ labels: PullRequestPayload.fields.labels });
+
+/**
+ * Returns the labels in an Item `payload` of `kind`, such as the payload of a Run's Event. Fails if
+ * the payload has no labels of that shape.
+ */
+export const payloadLabels = (kind: ProjectedItem["kind"], payload: Schema.Json) =>
+  Schema.decodeUnknownEffect(kind === "issue" ? IssueLabels : PullRequestLabels)(payload).pipe(
+    Effect.flatMap(({ labels }) => labelsFrom(labels.nodes.map(({ name }) => name))),
+  );
 
 const projectionError = (item: ItemProjection, message: string) =>
   new BoardProjectionError({
@@ -28,10 +41,12 @@ const projectionError = (item: ItemProjection, message: string) =>
     message,
   });
 
+/** Returns the Board's view of one stored Item. An Item gone from GitHub counts as closed. */
 export const projectedItem = (
   item: ItemProjection,
 ): Effect.Effect<ProjectedItem, BoardProjectionError> =>
   Effect.gen(function* () {
+    const gone = Option.isSome(item.goneAt);
     if (item.source === "issue") {
       const payload = yield* Schema.decodeUnknownEffect(IssuePayload)(item.payload).pipe(
         Effect.mapError((error) => projectionError(item, error.message)),
@@ -42,7 +57,7 @@ export const projectedItem = (
         number: ItemNumber.make(item.number),
         title: payload.title,
         url: payload.url,
-        state: payload.state === "OPEN" ? "issue-open" : "issue-closed",
+        state: payload.state === "OPEN" && !gone ? "issue-open" : "issue-closed",
         linkedPullRequests: payload.closedByPullRequestsReferences.nodes.map(({ url }) => url),
         labels: yield* labelsFrom(payload.labels.nodes.map(({ name }) => name)).pipe(
           Effect.mapError((error) => projectionError(item, error.message)),
@@ -56,7 +71,7 @@ export const projectedItem = (
       );
       const state: LaneItemState = payload.merged
         ? "pr-merged"
-        : payload.state === "OPEN"
+        : payload.state === "OPEN" && !gone
           ? "pr-open"
           : "pr-closed";
       return {
@@ -73,5 +88,5 @@ export const projectedItem = (
         conflicting: state === "pr-open" && payload.mergeable === "CONFLICTING",
       };
     }
-    return yield* projectionError(item, `Unsupported Item projection source: ${item.source}`);
+    return yield* projectionError(item, `Unsupported item projection source: ${item.source}`);
   });

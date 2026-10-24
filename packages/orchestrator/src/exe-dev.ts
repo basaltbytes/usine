@@ -8,11 +8,9 @@ import { Layer } from "effect";
 import { stepExecutorLayer } from "./scheduler.ts";
 
 /**
- * The full engine composition for a local orchestrator driving exe.dev
- * Workers; brains are the instance roster checked at startup. The caller
- * provides the `TriggerCondition` that re-checks queued Events and the
- * `AttemptRuntime` that runs each Attempt's Pi parent in this process, built
- * before the engine so durable storage is resumed before Run recovery.
+ * Provides the full engine and `WorkerStatus` for exe.dev Workers. Requires `GitHubApp`,
+ * `TriggerCondition`, `AttemptRuntime` (built before the engine), `ClaudeLoginLock`, and
+ * `CurrentInstance`.
  */
 export const layer = (
   instanceDirectory: InstanceDirectory,
@@ -22,5 +20,5 @@ export const layer = (
 ) => {
   const executor = exeDevExecutorLayer(options).pipe(Layer.provide(NodeServices.layer));
   const stepExecutor = stepExecutorLayer(config, brains).pipe(Layer.provide(executor));
-  return localEngineLayer(instanceDirectory).pipe(Layer.provide(stepExecutor));
+  return localEngineLayer(instanceDirectory).pipe(Layer.provideMerge(stepExecutor));
 };

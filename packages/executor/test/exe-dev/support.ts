@@ -1,9 +1,11 @@
 import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget } from "@usine/core/agent/session";
-import { AttemptTask, AttemptId } from "@usine/core/attempt";
+import { AttemptTask, AttemptId, AttemptWindow, AttemptWindows } from "@usine/core/attempt";
+import type * as AttemptChannel from "@usine/core/attempt/channel";
 import { InfraFailure } from "@usine/core/attempt/failure";
 import { SalvageRef } from "@usine/core/attempt/salvage";
+import { LoopName } from "@usine/core/loop";
 import { RepositoryName, CommitSha, RepositoryRevision } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
 import type { AttemptRuntime } from "@usine/durable/attempt-runtime";
@@ -13,18 +15,48 @@ import {
   stubAttemptRuntime,
   StubStorage,
 } from "@usine/durable/testing";
-import { CheckoutRequest } from "../../src/executor.ts";
+import { CheckoutRequest, claudeLoginLockLayer } from "../../src/executor.ts";
 import { layer as exeDevLayer } from "../../src/exe-dev/exe-dev.ts";
 import { GitHubIntegration, IntegrationName } from "../../src/exe-dev/model.ts";
-import { Deferred, Effect, Layer, Option, Ref, Sink, Stream } from "effect";
+import { DateTime, Deferred, Effect, Layer, Option, Ref, Sink, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import type { StandardCommand } from "effect/unstable/process/ChildProcess";
 
 export const ATTEMPT_ID = AttemptId.make("remote-run/execute/1");
+
+/**
+ * Returns the windows of `attemptId` alone on its Run's Item: its own window, open since before
+ * any test time, and no other Attempt of its Agent, so the harvest keeps every signed comment.
+ */
+export const aloneOnItem = (attemptId: AttemptId = ATTEMPT_ID) =>
+  Effect.succeed(
+    new AttemptWindows({
+      own: Option.some(
+        new AttemptWindow({ attemptId, startedAt: DateTime.makeUnsafe(0), endedAt: Option.none() }),
+      ),
+      overlapping: [],
+    }),
+  );
+/** Returns a sink that stores every envelope, like the transcript, and reads them back. */
+export const recording = () => {
+  const transcript: Array<[AttemptChannel.Direction, AttemptChannel.Envelope]> = [];
+  const sink: AttemptChannel.Sink = {
+    salvage: () => Effect.void,
+    comments: () => Effect.void,
+    transcript: Effect.sync(() => transcript.map(([, envelope]) => envelope)),
+    windows: aloneOnItem(),
+    append: (direction, envelope) =>
+      Effect.sync(() => {
+        transcript.push([direction, envelope]);
+      }),
+  };
+  return { transcript, sink };
+};
+
 export const WORKER = WorkerName.make("remote-one");
 const REPOSITORY = RepositoryName.make("acme/demo");
-// The brand already rejects whitespace and a leading dash; the characters it
-// still allows ($, ;, quotes) must die at the shell-quoting boundary.
+// The brand rejects whitespace and a leading dash; the characters it allows ($, ;, quotes) must
+// be neutralized by shell quoting.
 const REVISION = RepositoryRevision.make("main;$(touch$IFS/tmp/usine-injected)");
 const COMMIT = CommitSha.make("0123456789abcdef0123456789abcdef01234567");
 export const SALVAGE_COMMIT = CommitSha.make("fedcba9876543210fedcba9876543210fedcba98");
@@ -59,22 +91,26 @@ type SweepMode = "valid" | "invalid-path";
 
 interface FakeSshState {
   readonly commands: Array<StandardCommand>;
-  /** When set, the next `rm -rf` on the Attempt worktree exits non-zero. */
+  /** Whether the next `rm -rf` on the Attempt worktree exits non-zero. */
   failWorktreeRm: boolean;
   /** Whether the VM's Claude Code reports a subscription login. */
   claudeLoggedIn: boolean;
-  /** The simulated remote operation parks until its SSH client is killed. */
+  /** The remote operation that hangs until its SSH client is killed. */
   hangPreparation: "none" | "preflight" | "clone" | "fetch" | "attach" | "promotion" | "checkout";
   parked: boolean;
   failAttach: boolean;
   failStop: boolean;
   cacheExists: boolean;
-  /** The Attempt's worktree was removed from the VM behind the executor's back. */
+  /** Whether the Attempt's worktree was removed from the VM outside the executor. */
   worktreeGone: boolean;
-  /** What the salvage finds in the worktree after an unsuccessful Attempt. */
+  /** The worktree state that salvage finds after an unsuccessful Attempt. */
   salvage: "clean" | "dirty" | "push-fails" | "inspect-fails" | "add-fails" | "commit-fails";
   salvageCommitted: boolean;
   resumeFailure?: "lookup" | "fetch" | "decode";
+  /** GitHub's `--slurp` pages for the conversation comments of Item 42. */
+  issueComments: string;
+  /** Called each time `gh` lists Item 42's conversation comments, before it responds. */
+  onIssueComments: () => void;
 }
 
 const oneShotHandle = (stdout: string, exitCode: number, stderr = "") => {
@@ -117,13 +153,13 @@ const hangingHandle = Effect.gen(function* () {
   });
 });
 
-/** The single remote command line an SSH invocation carries after `--`. */
+/** Returns the remote command line after `--` in an SSH invocation. */
 export const remoteLine = (command: StandardCommand): string => {
   const separator = command.args.indexOf("--");
   return separator < 0 ? "" : (command.args[separator + 1] ?? "");
 };
 
-/** Fakes the local SSH client: the exe.dev lobby and every command on the Worker's VM. */
+/** Returns a fake local SSH client for the exe.dev lobby and the commands on the Worker's VM. */
 export const fakeSsh = (sweepMode: SweepMode = "valid") => {
   const state: FakeSshState = {
     commands: [],
@@ -137,6 +173,8 @@ export const fakeSsh = (sweepMode: SweepMode = "valid") => {
     worktreeGone: false,
     salvage: "clean",
     salvageCommitted: false,
+    issueComments: "[[]]",
+    onIssueComments: () => {},
   };
   const service = ChildProcessSpawner.make(
     Effect.fn("FakeSsh.spawn")(function* (command) {
@@ -186,6 +224,8 @@ export const fakeSsh = (sweepMode: SweepMode = "valid") => {
       if (line === "exec 'git' '--version'") {
         return oneShotHandle("git version 2.50.1\n", 0);
       }
+      if (line === "exec 'cat' '/proc/meminfo'")
+        return oneShotHandle("MemTotal:        8074035 kB\nSwapTotal:       2097148 kB\n", 0);
       if (line === "exec 'claude' '--version'") return oneShotHandle("2.1.296 (Claude Code)\n", 0);
       if (line === "exec 'claude' 'auth' 'status' '--json'") {
         return oneShotHandle(
@@ -198,6 +238,10 @@ export const fakeSsh = (sweepMode: SweepMode = "valid") => {
         );
       }
       if (line.startsWith("exec 'sh' '-c'")) return oneShotHandle("no-children\n", 0);
+      if (line.includes("&& exec 'gh' 'api' 'repos/acme/demo/issues/42/comments?")) {
+        state.onIssueComments();
+        return oneShotHandle(state.issueComments, 0);
+      }
       // Harvest: no new commits and an unchanged detached HEAD.
       if (line.startsWith("cd ") && line.includes("&& exec 'git' 'log'"))
         return oneShotHandle("", 0);
@@ -208,7 +252,7 @@ export const fakeSsh = (sweepMode: SweepMode = "valid") => {
       if (line.startsWith("exec 'find' ") && line.includes("/attempts'")) {
         if (sweepMode !== "valid") return oneShotHandle("/tmp/not-a-worker-child\0", 0);
         const attemptsRoot = "/home/exedev/.usine/workers/remote-one/attempts";
-        // The Attempt's checkout is listed exactly when `test -d` would find it.
+        // Lists the Attempt's checkout only when `test -d` would find it.
         const listed = state.cacheExists
           ? [`${attemptsRoot}/abandoned-attempt`, `${attemptsRoot}/remote-run_execute_1`]
           : [`${attemptsRoot}/abandoned-attempt`];
@@ -223,6 +267,11 @@ export const fakeSsh = (sweepMode: SweepMode = "valid") => {
           state.cacheExists && !(state.worktreeGone && line.includes(WORKTREE)) ? 0 : 1,
         );
       if (line.startsWith("exec 'git' '-C' ")) {
+        if (line.includes("'--absolute-git-dir'"))
+          return oneShotHandle(
+            "/home/exedev/.usine/workers/remote-one/repos/acme_demo.git/worktrees/remote-run_execute_1\n",
+            0,
+          );
         if (line.includes("'rev-parse'")) {
           return oneShotHandle(`${state.salvageCommitted ? SALVAGE_COMMIT : COMMIT}\n`, 0);
         }
@@ -270,6 +319,8 @@ export const request = new CheckoutRequest({
   attemptId: ATTEMPT_ID,
   worker: WORKER,
   repository: REPOSITORY,
+  loop: LoopName.make("implement"),
+  permissions: "write",
   revision: REVISION,
   payload: { issue: { number: 42 } },
   task: TASK,
@@ -283,24 +334,27 @@ export const request = new CheckoutRequest({
   resume: Option.none(),
 });
 
-/** Fails the Attempt the way a crashed parent does. */
+/** A parent that fails the Attempt like a crash. */
 export const fails: StubParent = () =>
   Effect.fail(new InfraFailure({ message: "The parent stopped", cause: new Error("crash") }));
 
 /**
- * The exe.dev executor over the fake SSH client, with each Attempt's parent
- * scripted by `parent` on `storage`. Build it again on the same storage to
- * simulate an orchestrator restart.
+ * Returns the exe.dev executor over the fake SSH client, with each parent scripted by `parent`
+ * on `storage`. Rebuilding it on the same storage simulates an orchestrator restart.
  */
 export const runtime = (
   sshLayer: Layer.Layer<ChildProcessSpawner.ChildProcessSpawner>,
   parent: StubParent = completes,
   storage: StubStorage = new StubStorage(),
-  /** Wraps the stub runtime, for tests that hold one of its durable operations open. */
+  /** Wraps the stub runtime, for tests that block one of its durable operations. */
   wrap: (stub: Layer.Layer<AttemptRuntime>) => Layer.Layer<AttemptRuntime> = (stub) => stub,
 ) =>
   exeDevLayer({
     githubIntegrations: [integration],
     // The cancellation tests advance the TestClock by exactly this much.
     interruptGrace: "2 seconds",
-  }).pipe(Layer.provide(sshLayer), Layer.provide(wrap(stubAttemptRuntime(storage, parent))));
+  }).pipe(
+    Layer.provide(sshLayer),
+    Layer.provide(wrap(stubAttemptRuntime(storage, parent))),
+    Layer.provide(claudeLoginLockLayer),
+  );

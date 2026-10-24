@@ -5,7 +5,7 @@ import { Effect, Option, Schema } from "effect";
 const identity = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1024));
 const timestamp = Schema.Number.check(Schema.isFinite(), Schema.isGreaterThanOrEqualTo(0));
 
-/** A durable conversation row and its position relative to the viewport's top edge. */
+/** A transcript row and its offset in pixels from the top of the viewport. */
 export const ReadingAnchor = Schema.Struct({
   _tag: Schema.Literal("Anchor"),
   key: identity,
@@ -15,16 +15,15 @@ export const ReadingAnchor = Schema.Struct({
 });
 export type ReadingAnchor = typeof ReadingAnchor.Type;
 
-/** Following latest is an intention, independent of the current transcript's height. */
+/** The saved reader position: `Latest` to follow new events, or an anchor. */
 export const ReaderPosition = Schema.Union([
   Schema.Struct({ _tag: Schema.Literal("Latest") }),
   ReadingAnchor,
 ]);
 export type ReaderPosition = typeof ReaderPosition.Type;
 
-/** Browser-only reader preferences; no transcript content or tool payload is retained. */
+/** The reader state saved in the browser; it contains no transcript content or tool payloads. */
 export const ReaderBookmark = Schema.Struct({
-  filter: Schema.Literals(["all", "messages", "tools"]),
   disclosures: Schema.Array(
     Schema.Struct({ key: identity, open: Schema.Boolean, groupOpen: Schema.Boolean }),
   ).check(Schema.isMaxLength(200)),
@@ -34,9 +33,11 @@ export const ReaderBookmark = Schema.Struct({
 export type ReaderBookmark = typeof ReaderBookmark.Type;
 
 const record = Schema.Struct({ runId: identity, savedAt: timestamp, bookmark: ReaderBookmark });
+// Version 1 archives, which also stored the conversation filter, decode as absent and are
+// overwritten on the next write.
 const archive = Schema.fromJsonString(
   Schema.Struct({
-    version: Schema.Literal(1),
+    version: Schema.Literal(2),
     runs: Schema.Array(record).check(Schema.isMaxLength(20)),
   }),
 );
@@ -47,9 +48,8 @@ const maximumAge = 30 * 24 * 60 * 60 * 1000;
 const maximumSize = 512_000;
 
 /**
- * Stores at most 20 recent Runs for 30 days in this browser origin. Storage denial,
- * corrupt data and quota failures leave the conversation usable without persistence.
- * The storage getter is deferred because even accessing localStorage can throw.
+ * Stores reader state for up to 20 recent Runs for 30 days. If storage is denied, corrupt, or full,
+ * skips persistence; `storage` is a getter because accessing `localStorage` can throw.
  */
 export const readerMemory = (storage: () => Pick<Storage, "getItem" | "setItem">) => {
   const readArchive = () => {
@@ -94,10 +94,10 @@ export const readerMemory = (storage: () => Pick<Storage, "getItem" | "setItem">
           runs.push({ runId, savedAt: now, bookmark });
           runs.sort((a, b) => b.savedAt - a.savedAt);
           runs.splice(20);
-          let serialized = encode({ version: 1, runs });
+          let serialized = encode({ version: 2, runs });
           while (serialized.length > maximumSize && runs.length > 1) {
             runs.pop();
-            serialized = encode({ version: 1, runs });
+            serialized = encode({ version: 2, runs });
           }
           storage().setItem(storageKey, serialized);
         },

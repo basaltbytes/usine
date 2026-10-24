@@ -7,8 +7,10 @@ import { Event, DedupKey, EventId } from "@usine/core/event";
 import { InstanceDirectory } from "@usine/core/instance";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
+import { OperatorLogin } from "@usine/core/operator";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import type { RunId } from "@usine/core/run";
+import { ApprovalSource } from "@usine/core/run/approval";
 import { StepName } from "@usine/core/step";
 import { StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
@@ -18,7 +20,7 @@ import type { RunEngine } from "../src/engine/engine.ts";
 import { Submission } from "../src/engine/submission.ts";
 import { StepExecutor } from "../src/step-executor.ts";
 import { RunStore } from "../src/store/store.ts";
-import { TriggerCondition } from "../src/trigger-condition.ts";
+import { TriggerCondition, type TriggerRecheck } from "../src/trigger-condition.ts";
 
 export const stepResult = (message: string) => new StepResult({ message, facts: [] });
 export const testAgent = new Agent({
@@ -35,27 +37,29 @@ export const testAgent = new Agent({
 
 export type AttemptPlan = Effect.Effect<StepResult, AttemptFailure>;
 
-/** A `TriggerCondition` that gives every queued Event the same answer. */
-export const conditionLayer = (holds: Effect.Effect<boolean>) =>
-  Layer.succeed(TriggerCondition)({ holds: () => holds });
+/** Returns a `TriggerCondition` layer that gives every queued Event the same answer. */
+export const conditionLayer = (recheck: Effect.Effect<TriggerRecheck>) =>
+  Layer.succeed(TriggerCondition)({ recheck: () => recheck });
 
 /**
- * The local engine over a scripted `StepExecutor`. Queued Events keep their
- * trigger unless the test supplies its own `TriggerCondition`.
+ * Returns the local engine over a scripted `StepExecutor`. Queued Events still match unless the
+ * test provides a `TriggerCondition`.
  */
 export const engineLayer = (
   directory: InstanceDirectory,
   executor: Layer.Layer<StepExecutor>,
-  condition: Layer.Layer<TriggerCondition> = conditionLayer(Effect.succeed(true)),
+  condition: Layer.Layer<TriggerCondition> = conditionLayer(Effect.succeed("matches")),
 ) => layer(directory).pipe(Layer.provide(executor), Layer.provide(condition));
 
 export const executorLayer = (plans: Ref.Ref<ReadonlyArray<AttemptPlan>>) =>
   Layer.succeed(StepExecutor)({
+    workers: Effect.succeed([WorkerName.make("local")]),
     isLive: () => Effect.succeed(false),
     outcome: () => Effect.succeed(Option.none()),
     recover: () => Effect.void,
     intervene: () => Effect.void,
     interrupt: () => Effect.void,
+    occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
     reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
     execute: () =>
       Ref.modify(plans, (remaining) => {
@@ -92,6 +96,12 @@ export const submission = (options: {
     parentModel: Option.none(),
   });
 };
+
+/** A web UI approval by the operator login from `usine.yaml`. */
+export const uiApproval = new ApprovalSource({
+  channel: "ui",
+  approver: Option.some(OperatorLogin.make("operator")),
+});
 
 export const approvalEvent = (number: number) => {
   const second = String(number).padStart(2, "0");
@@ -131,8 +141,8 @@ export const withInstance = <A, E, R>(
   }).pipe(Effect.provide(NodeServices.layer));
 
 /**
- * Writes, through the store alone, what a process committed before it
- * stopped, so a test can then start the engine on the same instance.
+ * Writes state through the store only, as a process would before stopping, so a test can then
+ * start the engine on the same instance.
  */
 export const committedBeforeCrash = <A, E>(
   directory: InstanceDirectory,

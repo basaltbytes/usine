@@ -7,6 +7,7 @@ import {
   OperatorApi,
   OperatorHttpError,
   OperatorHttpPolicy,
+  reloadRefusal,
 } from "@usine/orchestrator/operator/http";
 import { Effect, Layer, Schema, type Types } from "effect";
 import { Headers, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
@@ -21,25 +22,35 @@ const operatorFailure = (error: BackendError) => {
         return `Run ${error.runId} was not found.`;
       case "RunOperationRejectedError":
         if (error.operation === "resolveFailure")
-          return "This failure is no longer current. Refresh the Run before marking it resolved.";
-        return `Cannot ${error.operation} Run ${error.runId} while it is ${error.state}.`;
+          return "This failure is no longer the current one. Refresh the run, then mark it resolved.";
+        if (error.operation === "runAgain")
+          return `Run ${error.runId} is ${error.state.toLowerCase()}. Only a succeeded or canceled run can run again.`;
+        return `Cannot ${error.operation} run ${error.runId} while it is ${error.state.toLowerCase()}.`;
       case "CycleBudgetResetRejectedError":
-        return `Cycle budget Ask ${error.askId} is no longer awaiting this answer.`;
+        return `Cycle budget ask ${error.askId} is no longer open.`;
       case "TranscriptAttemptNotFoundError":
-        return `Attempt ${error.attemptId} does not belong to Run ${error.runId}.`;
+        return `Attempt ${error.attemptId} does not belong to run ${error.runId}.`;
+      case "LeftoversDiscardRejectedError":
+        // No running Attempt: the Worker is back in usine.yaml, or its last Attempt is ending.
+        if (error.running === 0)
+          return `Could not discard the leftovers on worker "${error.worker}": it is in usine.yaml, or an attempt on it is ending.`;
+        return `${error.running} ${error.running === 1 ? "attempt is" : "attempts are"} still running on worker "${error.worker}". Discard its leftovers after they end.`;
       case "BackendUnavailableError":
       case "RunRetryBlockedError":
       case "RunInterventionRejectedError":
       case "RosterAgentNotFoundError":
+      case "LoopNotFoundError":
         return error.message;
       case "BoardProjectNotFoundError":
-        return `Project ${error.repository} was not found.`;
+        return `Project "${error.repository}" was not found.`;
       case "BoardItemNotFoundError":
-        return `Item ${error.repository}#${error.item} was not found on the Board.`;
+        return `Item ${error.repository}#${error.item} was not found on the board.`;
       case "BoardLaneNotFoundError":
-        return `Board Lane ${error.lane} was not found.`;
+        return `Lane "${error.lane}" was not found on the board.`;
+      case "GitHubItemNotFoundError":
+        return error.message;
       case "BoardLaneReadOnlyError":
-        return `Board Lane ${error.lane} is read-only. Configure label-backed lanes in usine.yaml to enable moves.`;
+        return `Lane "${error.lane}" is read-only. To move items, configure label-backed lanes in usine.yaml.`;
       case "InstallationDiscoveryError":
       case "AppPermissionError":
         return error.message;
@@ -49,9 +60,16 @@ const operatorFailure = (error: BackendError) => {
       case "GitHubRateLimitError":
         return error.message;
       case "EnginePersistenceError":
-        return `Runtime persistence failed while trying to ${error.operation}.`;
+        return `Runtime store error: could not ${error.operation}.`;
       case "AttemptCancellationError":
         return `Attempt ${error.attemptId} could not be canceled.`;
+      case "FactoryConfigError":
+        return error.stage === "read"
+          ? `Could not read ${error.file}: ${error.message.replace(/\.$/u, "")}. The running configuration is unchanged.`
+          : `${error.file} is invalid (${error.stage}): ${error.message.replace(/\.$/u, "")}. The running configuration is unchanged.`;
+      case "RestartRequiredError":
+      case "ReloadPreflightError":
+        return error.message;
     }
   })();
   return new OperatorHttpError({ error: error._tag, message });
@@ -60,11 +78,8 @@ const operatorFailure = (error: BackendError) => {
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
 
 /**
- * Cross-site request forgery guard. Browsers attach `Origin` to every
- * cross-origin request, including the simple POSTs this API accepts, so a
- * present non-loopback origin can only be another site driving the operator's
- * browser and its request is refused before the handler runs. Requests without
- * the header (curl, same-origin GETs) pass through.
+ * Whether the request has a non-loopback `Origin`, which marks a cross-site request. Requests
+ * without `Origin` (curl, same-origin GETs) are allowed.
  */
 const crossSiteOrigin = (request: HttpServerRequest.HttpServerRequest): boolean => {
   const origin = request.headers.origin;
@@ -86,11 +101,11 @@ const policy = Layer.succeed(OperatorHttpPolicy)((handler, { endpoint }) =>
       });
       return yield* new OperatorHttpError({
         error: "CrossSiteRequestError",
-        message: "Cross-site requests are refused.",
+        message: "Cross-site requests are not allowed.",
       });
     }
-    // The operator API has always accepted JSON regardless of Content-Type,
-    // including simple browser POSTs. Keep that convention behind the origin guard.
+    // JSON is accepted regardless of Content-Type, including simple browser POSTs;
+    // `crossSiteOrigin` guards against CSRF.
     const decoded =
       endpoint.payload.size === 0
         ? handler
@@ -130,12 +145,26 @@ const fromBackend = <A>(
   use: (backend: FactoryBackend["Service"]) => Effect.Effect<A, BackendError>,
 ) => Effect.flatMap(FactoryBackend, use).pipe(Effect.mapError(operatorFailure));
 
+const projectRepository = (params: { readonly owner: string; readonly repository: string }) =>
+  Schema.decodeUnknownEffect(RepositoryName)(`${params.owner}/${params.repository}`).pipe(
+    Effect.mapError(
+      (error) =>
+        new OperatorHttpError({
+          error: "SchemaError",
+          message: `Invalid request: ${error.message}`,
+        }),
+    ),
+  );
+
 const handlers = HttpApiBuilder.group(OperatorApi, "operator", (routes) =>
   routes
     .handle("overview", () => fromBackend((backend) => backend.overview))
     .handle("agents", () => fromBackend((backend) => backend.agents))
     .handle("editAndRetry", ({ params, payload }) =>
       fromBackend((backend) => backend.editAndRetry(params.runId, payload)).pipe(acknowledge),
+    )
+    .handle("runAgain", ({ params, payload }) =>
+      fromBackend((backend) => backend.runAgain(params.runId, payload)),
     )
     .handle("intervene", ({ params, payload }) =>
       fromBackend((backend) => backend.intervene(params.runId, payload)).pipe(acknowledge),
@@ -145,6 +174,9 @@ const handlers = HttpApiBuilder.group(OperatorApi, "operator", (routes) =>
     )
     .handle("detail", ({ params, query }) =>
       fromBackend((backend) => backend.detail(params.runId, query)),
+    )
+    .handle("githubChanges", ({ params }) =>
+      fromBackend((backend) => backend.githubChanges(params.runId)),
     )
     .handle("approve", ({ params }) =>
       fromBackend((backend) => backend.approve(params.runId)).pipe(acknowledge),
@@ -160,20 +192,13 @@ const handlers = HttpApiBuilder.group(OperatorApi, "operator", (routes) =>
     .handle("cancel", ({ params }) =>
       fromBackend((backend) => backend.cancel(params.runId)).pipe(acknowledge),
     )
+    .handle("discardLeftovers", ({ params }) =>
+      fromBackend((backend) => backend.discardLeftovers(params.worker)).pipe(acknowledge),
+    )
     .handle(
       "moveBoardItem",
       Effect.fn("Http.boardMove")(function* ({ params, payload }) {
-        const repository = yield* Schema.decodeUnknownEffect(RepositoryName)(
-          `${params.owner}/${params.repository}`,
-        ).pipe(
-          Effect.mapError(
-            (error) =>
-              new OperatorHttpError({
-                error: "SchemaError",
-                message: `Invalid request: ${error.message}`,
-              }),
-          ),
-        );
+        const repository = yield* projectRepository(params);
         yield* Effect.annotateCurrentSpan({ repository, item: params.item, lane: payload.toLane });
         return yield* fromBackend((backend) =>
           backend.moveBoardItem(
@@ -187,7 +212,32 @@ const handlers = HttpApiBuilder.group(OperatorApi, "operator", (routes) =>
     )
     .handle("unpause", ({ params }) =>
       fromBackend((backend) => backend.unpause(params.loop)).pipe(acknowledge),
-    ),
+    )
+    .handle("reload", () =>
+      Effect.flatMap(FactoryBackend, (backend) => backend.reload).pipe(
+        Effect.mapError((error) => {
+          const failure = operatorFailure(error);
+          switch (error._tag) {
+            case "FactoryConfigError":
+            case "RestartRequiredError":
+            case "ReloadPreflightError":
+              return reloadRefusal(error, failure.message);
+            default:
+              return failure;
+          }
+        }),
+      ),
+    )
+    .handle(
+      "task",
+      Effect.fn("Http.task")(function* ({ params }) {
+        const repository = yield* projectRepository(params);
+        yield* Effect.annotateCurrentSpan({ repository, item: params.item });
+        return yield* fromBackend((backend) => backend.task(repository, params.item));
+      }),
+    )
+    .handle("configuration", () => fromBackend((backend) => backend.configuration))
+    .handle("desk", () => fromBackend((backend) => backend.desk)),
 );
 
 export const apiRoutes = HttpApiBuilder.layer(OperatorApi).pipe(

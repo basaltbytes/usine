@@ -5,21 +5,37 @@ import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptContext, AttemptId, AttemptTask } from "@usine/core/attempt";
 import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
+import {
+  StartedByEditAndRetry,
+  StartedByEvent,
+  StartedByInfraRetry,
+  StartedByRetry,
+} from "@usine/core/attempt/start";
 import { Event, EventId } from "@usine/core/event";
 import type { InstanceDirectory } from "@usine/core/instance";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
+import { OperatorLogin } from "@usine/core/operator";
+import { ApprovalSource, RunApproval } from "@usine/core/run/approval";
 import { WorkerName } from "@usine/core/worker";
 import { Deferred, Effect, Fiber, Layer, Logger, Option, Ref } from "effect";
 import { RunDatabase, type RunDatabaseClient } from "../src/database/database.ts";
 import { localSqliteLayer } from "../src/database/local-sqlite.ts";
-import { layerWithDatabase, ReconcileInterval, RunEngine } from "../src/engine/engine.ts";
+import {
+  layerWithDatabase,
+  LeftoversDiscardRejectedError,
+  ReconcileInterval,
+  RetryRequest,
+  RunEngine,
+} from "../src/engine/engine.ts";
 import { LoopControl } from "../src/loop-control/loop-control.ts";
 import { RunReader } from "../src/run-reader/run-reader.ts";
 import { StepExecutor } from "../src/step-executor.ts";
+import type { TriggerRecheck } from "../src/trigger-condition.ts";
 import { runIdFor, Submission } from "../src/engine/submission.ts";
 import {
   approvalEvent,
+  uiApproval,
   type AttemptPlan,
   conditionLayer,
   engineLayer,
@@ -57,11 +73,13 @@ describe("durable run engine", () => {
             parentModel: Option.some(ModelId.make("openai/changed-parent")),
           });
           const executor = Layer.succeed(StepExecutor)({
+            workers: Effect.succeed([WorkerName.make("local")]),
             isLive: () => Effect.succeed(false),
             outcome: () => Effect.succeed(Option.none()),
             recover: () => Effect.void,
             intervene: () => Effect.void,
             interrupt: () => Effect.void,
+            occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
             reserve: () =>
               Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
             execute: (execution) =>
@@ -89,13 +107,31 @@ describe("durable run engine", () => {
             assert.strictEqual(accepted._tag, "Claimed");
             if (accepted._tag !== "Claimed") return;
             yield* waitFor(engine, accepted.runId, ({ run }) => run.state._tag === "Failed");
-            yield* engine.retry(accepted.runId, Option.some(amended));
+            yield* engine.retry(
+              accepted.runId,
+              new RetryRequest({
+                requestedBy: Option.some(OperatorLogin.make("PhilDL")),
+                amendment: Option.some(amended),
+              }),
+            );
             const finished = yield* waitFor(
               engine,
               accepted.runId,
               ({ run }) => run.state._tag === "Succeeded",
             );
             assert.strictEqual(executed.length, 3);
+            assert.deepStrictEqual(
+              finished.attempts.map(({ start }) => start),
+              [
+                Option.some(new StartedByEvent()),
+                Option.some(
+                  new StartedByEditAndRetry({
+                    operator: Option.some(OperatorLogin.make("PhilDL")),
+                  }),
+                ),
+                Option.some(new StartedByInfraRetry()),
+              ],
+            );
             assert.deepStrictEqual(
               executed.slice(1),
               [amended, amended].map(({ task, agent, parentModel }) => ({
@@ -124,9 +160,11 @@ describe("durable run engine", () => {
         const delivered: Array<AttemptId> = [];
         const started = yield* Deferred.make<void>();
         const executor = Layer.succeed(StepExecutor)({
+          workers: Effect.succeed([WorkerName.make("local")]),
           isLive: () => Effect.succeed(false),
           outcome: () => Effect.succeed(Option.none()),
           recover: () => Effect.void,
+          occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
           reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
           execute: () => Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
           interrupt: () => Effect.void,
@@ -231,8 +269,7 @@ describe("durable run engine", () => {
             Option.getOrUndefined(listed[0]?.step.result ?? Option.none())?.message,
             "listed result",
           );
-          // The closed window bounds settled history, but an open Run, here the
-          // older Waiting one, must never fall out of the operator's view.
+          // `closedLimit` bounds closed Runs only, so the older waiting Run is still listed.
           const bounded = yield* reader.list({ closedLimit: 0 });
           assert.deepStrictEqual(
             bounded.map(({ run }) => run.id),
@@ -258,46 +295,60 @@ describe("durable run engine", () => {
     ),
   );
 
-  it.live("deduplicates permanently and opens an approval gate only once", () =>
-    withInstance((directory) =>
-      Effect.gen(function* () {
-        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
-          Effect.succeed(stepResult("approved result")),
-        ]);
-        const runtime = engineLayer(directory, executorLayer(plans));
+  it.live(
+    "deduplicates permanently and opens an approval gate only once, recording its source",
+    () =>
+      withInstance((directory) =>
+        Effect.gen(function* () {
+          const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
+            Effect.succeed(stepResult("approved result")),
+          ]);
+          const runtime = engineLayer(directory, executorLayer(plans));
 
-        yield* Effect.gen(function* () {
-          const engine = yield* RunEngine;
-          const event = submission({ number: 2, approval: "required" });
-          const first = yield* engine.submit(event);
-          const duplicate = yield* engine.submit(event);
-          assert.strictEqual(first._tag, "Claimed");
-          assert.strictEqual(duplicate._tag, "Claimed");
-          if (first._tag !== "Claimed" || duplicate._tag !== "Claimed") return;
-          assert.strictEqual(duplicate.runId, first.runId);
+          yield* Effect.gen(function* () {
+            const engine = yield* RunEngine;
+            const event = submission({ number: 2, approval: "required" });
+            const first = yield* engine.submit(event);
+            const duplicate = yield* engine.submit(event);
+            assert.strictEqual(first._tag, "Claimed");
+            assert.strictEqual(duplicate._tag, "Claimed");
+            if (first._tag !== "Claimed" || duplicate._tag !== "Claimed") return;
+            assert.strictEqual(duplicate.runId, first.runId);
 
-          const waiting = yield* waitFor(
-            engine,
-            first.runId,
-            ({ run }) => run.state._tag === "Waiting",
-          );
-          assert.strictEqual(waiting.attempts.length, 0);
+            const waiting = yield* waitFor(
+              engine,
+              first.runId,
+              ({ run }) => run.state._tag === "Waiting",
+            );
+            assert.strictEqual(waiting.attempts.length, 0);
+            assert(Option.isNone(waiting.approval));
 
-          const approval = approvalEvent(2);
-          yield* engine.approve(first.runId, approval);
-          const finished = yield* waitFor(
-            engine,
-            first.runId,
-            ({ run }) => run.state._tag === "Succeeded",
-          );
-          assert.strictEqual(finished.attempts.length, 1);
+            const approval = approvalEvent(2);
+            const askAnswer = new ApprovalSource({
+              channel: "github-ask",
+              approver: Option.some(OperatorLogin.make("Philippe")),
+            });
+            yield* engine.approve(first.runId, approval, askAnswer);
+            const finished = yield* waitFor(
+              engine,
+              first.runId,
+              ({ run }) => run.state._tag === "Succeeded",
+            );
+            assert.strictEqual(finished.attempts.length, 1);
+            const recorded = Option.some(
+              new RunApproval({ approvedAt: approval.receivedAt, source: Option.some(askAnswer) }),
+            );
+            assert.deepStrictEqual(finished.approval, recorded);
 
-          // Re-delivery of the same approval Event is an idempotent join.
-          yield* engine.approve(first.runId, approval);
-          assert.strictEqual((yield* engine.inspect(first.runId)).attempts.length, 1);
-        }).pipe(Effect.provide(runtime));
-      }),
-    ),
+            // Redelivering the same approval Event changes nothing, and a later approval from
+            // another channel doesn't change the approver.
+            yield* engine.approve(first.runId, approval, uiApproval);
+            const rejoined = yield* engine.inspect(first.runId);
+            assert.strictEqual(rejoined.attempts.length, 1);
+            assert.deepStrictEqual(rejoined.approval, recorded);
+          }).pipe(Effect.provide(runtime));
+        }),
+      ),
   );
 
   it.live("auto-retries only typed infrastructure failures", () =>
@@ -353,7 +404,7 @@ describe("durable run engine", () => {
           assert.strictEqual(accepted._tag, "Claimed");
           if (accepted._tag !== "Claimed") return;
 
-          // A defect must neither strand an open Attempt nor repeat agent work automatically.
+          // A defect neither leaves an Attempt open nor retries agent work automatically.
           const finished = yield* waitFor(
             engine,
             accepted.runId,
@@ -421,6 +472,14 @@ describe("durable run engine", () => {
             ({ run }) => run.state._tag === "Succeeded",
           );
           assert.strictEqual(finished.attempts.length, 4);
+          assert.deepStrictEqual(
+            finished.attempts.map(({ start }) => Option.map(start, ({ _tag }) => _tag)),
+            ["Event", "InfraRetry", "InfraRetry", "OperatorRetry"].map(Option.some),
+          );
+          assert.deepStrictEqual(
+            finished.attempts[3]?.start,
+            Option.some(new StartedByRetry({ operator: Option.none() })),
+          );
         }).pipe(Effect.provide(runtime));
       }),
     ),
@@ -469,7 +528,7 @@ describe("durable run engine", () => {
       Effect.gen(function* () {
         const finish = yield* Deferred.make<void>();
         const checking = yield* Deferred.make<void>();
-        const answer = yield* Deferred.make<boolean>();
+        const answer = yield* Deferred.make<TriggerRecheck>();
         const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
           Deferred.await(finish).pipe(
             Effect.andThen(new AgentFailure({ message: "needs the operator" })),
@@ -496,7 +555,7 @@ describe("durable run engine", () => {
           const retrying = yield* Effect.forkChild(engine.retry(failing.runId), {
             startImmediately: true,
           });
-          yield* Deferred.succeed(answer, false);
+          yield* Deferred.succeed(answer, "no-longer-matches");
           yield* Fiber.join(retrying);
           const finished = yield* waitFor(
             engine,
@@ -628,6 +687,39 @@ describe("durable run engine", () => {
     ),
   );
 
+  it.live("counts the Attempts a Worker still runs and refuses to discard their leftovers", () =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
+          Effect.succeed(stepResult("ended on local")),
+          Effect.never,
+        ]);
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const reader = yield* RunReader;
+          const ended = yield* engine.submit(submission({ number: 12, item: "ended-on-local" }));
+          assert(ended._tag === "Claimed");
+          yield* waitFor(engine, ended.runId, ({ run }) => run.state._tag === "Succeeded");
+          const running = yield* engine.submit(submission({ number: 13, item: "runs-on-local" }));
+          assert(running._tag === "Claimed");
+          yield* waitFor(engine, running.runId, ({ attempts }) => attempts.length === 1);
+
+          const counts = Effect.map(reader.attemptsByWorker(), (counted) =>
+            counted.map(({ worker, attempts, running }) => [worker, attempts, running]),
+          );
+          assert.deepStrictEqual(yield* counts, [["local", 2, 1]]);
+          // `local` is in `StepExecutor.workers`, like a removed Worker until its last Attempt ends.
+          const local = WorkerName.make("local");
+          assert.deepStrictEqual(
+            yield* Effect.flip(engine.discardLeftovers(local)),
+            new LeftoversDiscardRejectedError({ worker: local, running: 1 }),
+          );
+          assert.deepStrictEqual(yield* counts, [["local", 2, 1]]);
+        }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
+      }),
+    ),
+  );
+
   it.live("cancels a running Run and gives the Event queued behind it one turn", () =>
     withInstance((directory) =>
       Effect.gen(function* () {
@@ -648,7 +740,7 @@ describe("durable run engine", () => {
           }),
         ).pipe(Layer.provide(executorLayer(plans)));
         const condition = conditionLayer(
-          Ref.update(checks, (count) => count + 1).pipe(Effect.as(true)),
+          Ref.update(checks, (count) => count + 1).pipe(Effect.as("matches" as const)),
         );
         yield* Effect.gen(function* () {
           const engine = yield* RunEngine;
@@ -676,14 +768,15 @@ describe("durable run engine", () => {
       Effect.gen(function* () {
         const reserveEntered = yield* Deferred.make<void>();
         const reserveLeft = yield* Deferred.make<void>();
-        // A 0-capacity scheduler parks the run in `reserve` forever; only a
-        // cancel that reaches the parked reservation ends it.
+        // With 0 capacity, the Run waits in `reserve` forever; only a cancel ends the wait.
         const executor = Layer.succeed(StepExecutor)({
+          workers: Effect.succeed([WorkerName.make("local")]),
           isLive: () => Effect.succeed(false),
           outcome: () => Effect.succeed(Option.none()),
           recover: () => Effect.void,
           intervene: () => Effect.void,
           interrupt: () => Effect.void,
+          occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
           reserve: () =>
             Deferred.succeed(reserveEntered, undefined).pipe(
               Effect.andThen(Effect.never),
@@ -719,7 +812,7 @@ describe("durable run engine", () => {
           const original = submission({ number: 1 });
           const first = yield* engine.submit(original);
           assert(first._tag === "Claimed");
-          // The id earlier versions gave this Event, so existing Runs keep theirs.
+          // The ID that earlier versions assigned to this Event, so existing Runs keep their IDs.
           assert.strictEqual(first.runId, "c33a338a9aaafa7490fa315fbf02a437");
           assert.strictEqual(yield* runIdFor(original), first.runId);
           const resubmitted = yield* engine.submit(
@@ -749,7 +842,9 @@ describe("durable run engine", () => {
           assert(parked._tag === "Claimed");
           yield* waitFor(engine, parked.runId, ({ run }) => run.state._tag === "Waiting");
           yield* engine.cancel(parked.runId);
-          const rejected = yield* Effect.flip(engine.approve(parked.runId, approvalEvent(50)));
+          const rejected = yield* Effect.flip(
+            engine.approve(parked.runId, approvalEvent(50), uiApproval),
+          );
           assert.strictEqual(rejected._tag, "RunOperationRejectedError");
           const canceled = yield* engine.inspect(parked.runId);
           assert.strictEqual(canceled.run.state._tag, "Canceled");
@@ -761,12 +856,12 @@ describe("durable run engine", () => {
   );
 });
 
-/** How many of the database's next transactions fail before they start. */
+/** The number of upcoming transactions that fail before they start. */
 interface Failures {
   left: number;
 }
 
-/** The instance's database, whose transactions fail while `failures` has some left, as on a transient SQLite error. */
+/** Returns the instance's database, with transactions that fail while `failures.left` is positive. */
 const flakyDatabase = (directory: InstanceDirectory, failures: Failures) =>
   Layer.effect(
     RunDatabase,
@@ -789,7 +884,7 @@ const flakyDatabase = (directory: InstanceDirectory, failures: Failures) =>
     }),
   ).pipe(Layer.provide(localSqliteLayer(directory)));
 
-/** The engine on `flakyDatabase`, with `executor` and every queued Event's trigger holding. */
+/** Returns the engine on `flakyDatabase` with `executor`; every queued Event's trigger still matches. */
 const flakyEngineLayer = (
   directory: InstanceDirectory,
   failures: Failures,
@@ -797,7 +892,7 @@ const flakyEngineLayer = (
 ) =>
   layerWithDatabase(flakyDatabase(directory, failures)).pipe(
     Layer.provide(executor),
-    Layer.provide(conditionLayer(Effect.succeed(true))),
+    Layer.provide(conditionLayer(Effect.succeed("matches"))),
     Layer.provide(NodeServices.layer),
   );
 
@@ -843,14 +938,14 @@ describe("store failures in a Run's fiber", () => {
             const scripted = yield* StepExecutor;
             return StepExecutor.of({
               ...scripted,
-              reserve: (request: Submission) =>
+              reserve: (request: Submission, worker: Option.Option<WorkerName>) =>
                 Ref.getAndUpdate(reserved, (count) => count + 1).pipe(
                   Effect.tap((count) =>
                     Effect.sync(() => {
                       if (count === 0) failures.left = Number.POSITIVE_INFINITY;
                     }),
                   ),
-                  Effect.andThen(scripted.reserve(request)),
+                  Effect.andThen(scripted.reserve(request, worker)),
                 ),
             });
           }),

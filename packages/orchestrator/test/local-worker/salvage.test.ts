@@ -5,14 +5,16 @@ import { InfraFailure } from "@usine/core/attempt/failure";
 import { AttemptId, AttemptTask } from "@usine/core/attempt";
 import { SalvagePushed, SalvageRef } from "@usine/core/attempt/salvage";
 import { InstanceDirectory } from "@usine/core/instance";
+import { LoopName } from "@usine/core/loop";
 import { CommitSha, RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
 import { RunEngine } from "@usine/engine/engine";
-import { CheckoutRequest, Executor } from "@usine/executor";
+import { claudeLoginLockLayer, CheckoutRequest, Executor } from "@usine/executor";
 import { layer as localExecutorLayer } from "@usine/executor/local";
 import { Cause, Effect, Exit, FileSystem, Layer, Option, Path } from "effect";
 import { stubAttemptRuntime, StubStorage, worksFor } from "@usine/durable/testing";
 import {
+  aloneOnItem,
   LIVE_TEST_TIMEOUT,
   STATE_POLL_ATTEMPTS,
   TOKEN,
@@ -99,11 +101,9 @@ describe("local worker salvage", () => {
         const remote = yield* makeRemote(root);
         const seed = `${root}/seed`;
         const base = (yield* output("git", ["rev-parse", "HEAD"], seed)).trim();
-        yield* run(
-          "git",
-          ["commit", "--allow-empty", "-m", "wip(usine): salvage attempt r/1"],
-          seed,
-        );
+        yield* fileSystem.writeFileString(`${seed}/progress.md`, "half done\n");
+        yield* run("git", ["add", "progress.md"], seed);
+        yield* run("git", ["commit", "-m", "wip(usine): salvage attempt r/1"], seed);
         const salvageCommit = CommitSha.make(
           (yield* output("git", ["rev-parse", "HEAD"], seed)).trim(),
         );
@@ -116,6 +116,7 @@ describe("local worker salvage", () => {
         }).pipe(
           Layer.provide(credentialLayer),
           Layer.provide(stubAttemptRuntime(new StubStorage())),
+          Layer.provide(claudeLoginLockLayer),
         );
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
@@ -123,6 +124,8 @@ describe("local worker salvage", () => {
             attemptId: AttemptId.make("r/run/2"),
             worker: WorkerName.make("local"),
             repository: RepositoryName.make("acme/demo"),
+            loop: LoopName.make("local-worker"),
+            permissions: "write",
             revision: RepositoryRevision.make("main"),
             payload: {},
             task: AttemptTask.make("Continue the work"),
@@ -167,6 +170,9 @@ describe("local worker salvage", () => {
                     Effect.fail(
                       new InfraFailure({ message: "channel unavailable", cause: "outage" }),
                     ),
+                  comments: () => Effect.void,
+                  transcript: Effect.succeed([]),
+                  windows: aloneOnItem(failedRecordRequest.attemptId),
                   salvage: () =>
                     Effect.gen(function* () {
                       assert(yield* fileSystem.exists(worktree).pipe(Effect.orDie));
@@ -190,15 +196,20 @@ describe("local worker salvage", () => {
               worker: request.worker,
               repository: request.repository,
               ref: request.salvageRef,
+              permissions: "write",
               succeeded: false,
               open: false,
             },
-            (salvage) =>
-              Effect.gen(function* () {
-                assert(yield* fileSystem.exists(retained));
-                assert(salvage._tag === "Pushed");
-                recorded.push(salvage);
-              }),
+            {
+              salvage: (salvage) =>
+                Effect.gen(function* () {
+                  assert(yield* fileSystem.exists(retained));
+                  assert(salvage._tag === "Pushed");
+                  recorded.push(salvage);
+                }),
+              comments: () => Effect.void,
+              windows: aloneOnItem(failedRecordRequest.attemptId),
+            },
           );
           const recovered = recorded[0];
           assert(recovered !== undefined);
@@ -231,6 +242,128 @@ describe("local worker salvage", () => {
                 (yield* output("git", ["rev-parse", "HEAD"], prepared.workspace.worktree)).trim(),
                 base,
               );
+            }),
+          );
+        }).pipe(Effect.provide(runtime));
+      }).pipe(Effect.provide(NodeServices.layer)),
+    LIVE_TEST_TIMEOUT,
+  );
+
+  it.live(
+    "starts a retry from the current default branch and applies the previous salvage onto it",
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-local-rebase-" });
+        const remote = yield* makeRemote(root);
+        const seed = `${root}/seed`;
+        const git = (args: ReadonlyArray<string>) => run("git", args, seed);
+        const head = (cwd: string) =>
+          output("git", ["rev-parse", "HEAD"], cwd).pipe(
+            Effect.map((sha) => CommitSha.make(sha.trim())),
+          );
+        const commitFile = (file: string, content: string, message: string) =>
+          Effect.gen(function* () {
+            yield* fileSystem.writeFileString(`${seed}/${file}`, content);
+            yield* git(["add", file]);
+            yield* git(["commit", "-m", message]);
+            return yield* head(seed);
+          });
+        const salvage = (number: number, commit: CommitSha) =>
+          Effect.gen(function* () {
+            const ref = SalvageRef.make(`usine/salvage/r/${number}`);
+            yield* git(["push", "origin", `${commit}:refs/heads/${ref}`]);
+            return new SalvagePushed({ ref, commit });
+          });
+        const firstBase = yield* head(seed);
+        yield* git(["checkout", "-b", "attempt-1"]);
+        const worked = yield* salvage(
+          1,
+          yield* commitFile("progress.md", "half done\n", "wip(usine): salvage attempt r/1"),
+        );
+        yield* git(["checkout", "-b", "attempt-2", firstBase]);
+        const conflicting = yield* salvage(
+          2,
+          yield* commitFile("README.md", "# edited by the Attempt\n", "wip(usine): salvage r/2"),
+        );
+        yield* git(["checkout", "-b", "attempt-3", firstBase]);
+        yield* git(["commit", "--allow-empty", "-m", "wip(usine): salvage attempt r/3"]);
+        const empty = yield* salvage(3, yield* head(seed));
+        // A fix is committed on the default branch after the first Attempt started.
+        yield* git(["checkout", "main"]);
+        const tip = yield* commitFile("README.md", "# fixed on main\n", "fix: unblock the run");
+        yield* git(["push", "origin", "main"]);
+
+        const runtime = localExecutorLayer({
+          instanceDirectory: InstanceDirectory.make(root),
+          repositoryUrl: () => remote,
+          harnessReadiness: harnessReady,
+        }).pipe(
+          Layer.provide(credentialLayer),
+          Layer.provide(stubAttemptRuntime(new StubStorage())),
+          Layer.provide(claudeLoginLockLayer),
+        );
+        const request = (number: number, resume: SalvagePushed) =>
+          new CheckoutRequest({
+            attemptId: AttemptId.make(`r/run/${number}`),
+            worker: WorkerName.make("local"),
+            repository: RepositoryName.make("acme/demo"),
+            loop: LoopName.make("local-worker"),
+            permissions: "write",
+            revision: RepositoryRevision.make("main"),
+            payload: {},
+            task: AttemptTask.make("Continue the work"),
+            agent: testAgent,
+            parentModel: Option.none(),
+            maxChildren: ChildSessionBudget.make(4),
+            maxAttemptMinutes: Option.none(),
+            maxAttemptTokens: Option.none(),
+            parentEffort: "high",
+            salvageRef: SalvageRef.make(`usine/salvage/r/${number}`),
+            resume: Option.some(resume),
+          });
+        yield* Effect.gen(function* () {
+          const executor = yield* Executor;
+          const read = (worktree: string, file: string) =>
+            fileSystem.readFileString(`${worktree}/${file}`);
+
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              const { spec, worktree } = (yield* executor.prepare(request(4, worked))).workspace;
+              assert.strictEqual(spec.baseCommit, tip);
+              assert.deepStrictEqual(spec.resume, Option.some(worked));
+              assert(Option.isNone(spec.conflictingSalvage));
+              assert.strictEqual(
+                (yield* output("git", ["rev-parse", "HEAD^"], worktree)).trim(),
+                tip,
+              );
+              assert.strictEqual(yield* read(worktree, "progress.md"), "half done\n");
+              assert.strictEqual(yield* read(worktree, "README.md"), "# fixed on main\n");
+            }),
+          );
+
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              const { spec, worktree } = (yield* executor.prepare(request(5, conflicting)))
+                .workspace;
+              assert.strictEqual(spec.baseCommit, tip);
+              assert(Option.isNone(spec.resume));
+              assert.deepStrictEqual(spec.conflictingSalvage, Option.some(conflicting));
+              assert.strictEqual(yield* head(worktree), tip);
+              assert.strictEqual(yield* read(worktree, "README.md"), "# fixed on main\n");
+              assert.strictEqual(
+                (yield* output("git", ["--git-dir", remote, "rev-parse", conflicting.ref])).trim(),
+                conflicting.commit,
+              );
+            }),
+          );
+
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              const { spec, worktree } = (yield* executor.prepare(request(6, empty))).workspace;
+              assert(Option.isNone(spec.resume));
+              assert(Option.isNone(spec.conflictingSalvage));
+              assert.strictEqual(yield* head(worktree), tip);
             }),
           );
         }).pipe(Effect.provide(runtime));
@@ -272,15 +405,15 @@ describe("local worker salvage", () => {
           yield* engine.cancel(accepted.runId);
           const salvage = yield* waitForSalvage(engine, accepted.runId);
           assert(salvage._tag === "Retained");
-          // The remote's own words reach the record, not only git's exit code,
-          // and the token they echoed does not.
+          // The remote's own message is in the record, not only git's exit code, and the token it
+          // echoed isn't.
           assert.include(salvage.message, "access revoked for [REDACTED]");
           assert.notInclude(salvage.message, TOKEN);
           assert(yield* fileSystem.exists(worktree));
           return { runId: accepted.runId, worktree };
         }).pipe(Effect.provide(runtime()));
-        // A second startup during the outage must also retain the only copy, and
-        // its reconcile rewrites the record with the reason that push failed too.
+        // A second startup during the outage must also keep the only copy, and its reconcile
+        // updates the record with the reason that push failed too.
         yield* Effect.gen(function* () {
           const engine = yield* RunEngine;
           const salvage = (yield* engine.inspect(saved.runId)).attempts[0]?.salvage;

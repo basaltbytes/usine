@@ -40,11 +40,7 @@ export interface PiSession {
 
 export interface PiStartOptions {
   readonly cwd: string;
-  /**
-   * The complete environment of every command the session's bash tool runs.
-   * None inherits this process's environment, which suits preflight because
-   * it runs no repository command.
-   */
+  /** The complete environment of every command the bash tool runs; `None` inherits this process's environment. */
   readonly environment: Option.Option<Readonly<Record<string, string>>>;
   readonly extensions: ReadonlyArray<InlineExtension>;
   readonly model: ModelId;
@@ -76,10 +72,7 @@ export type PiStartResult =
       readonly session: PiSession;
     };
 
-/**
- * The bash tool of a session whose commands run with exactly `environment`,
- * replacing what the tool would inherit; Pi's own `PI_*` variables are not added.
- */
+/** Returns a bash tool whose commands run with exactly `environment`; Pi's `PI_*` variables are not added. */
 export const environmentBashTool = (
   cwd: string,
   environment: Readonly<Record<string, string>>,
@@ -90,7 +83,7 @@ export const environmentBashTool = (
   );
 };
 
-/** Opens a Pi session with the selected model and its repository tools. */
+/** The service that starts a Pi session with the selected model and its repository tools. */
 export class PiSdk extends Context.Service<
   PiSdk,
   { readonly start: (options: PiStartOptions) => Promise<PiStartResult> }
@@ -104,9 +97,8 @@ export const piSdkLive = Layer.succeed(PiSdk)({
     const selected = modelRuntime.getModel(parts.provider, parts.modelId);
     if (selected === undefined) return { _tag: "UnknownModel" };
     const agentDir = getAgentDir();
-    // The worktree is repository-controlled input, so its `.pi/` settings,
-    // SYSTEM.md, extensions, and skills never load. Inline extension
-    // factories, such as the pause gate, register regardless.
+    // The worktree is untrusted, so its `.pi/` settings, SYSTEM.md, extensions, and skills are not
+    // loaded; inline extension factories, such as the pause gate, still register.
     const settingsManager = SettingsManager.create(options.cwd, agentDir, {
       projectTrusted: false,
     });
@@ -179,14 +171,13 @@ export const piSdkLive = Layer.succeed(PiSdk)({
 
 export interface AcquiredPiStart {
   readonly result: PiStartResult;
-  /** Safe to call twice: failed setup and the ambient scope may both request cleanup. */
+  /** Disposes the session; idempotent, because both failed setup and the enclosing scope can call it. */
   readonly dispose: () => void;
 }
 
 /**
- * Runs SDK startup so an interruption cannot leak a session. A result that
- * loses the race with interruption is disposed in its Promise continuation;
- * one already handed to `use` is disposed by `onExit`.
+ * Runs SDK startup so an interruption cannot leak a session: a result that arrives after the
+ * interruption is disposed when its Promise settles, and one passed to `use` is disposed on exit.
  */
 export const usePiStart = <A, E, R, E2>(
   start: (signal: AbortSignal) => Promise<PiStartResult>,

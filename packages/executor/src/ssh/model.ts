@@ -1,5 +1,7 @@
 import type { SshCommand } from "@usine/agents/child-host";
 import type {
+  GatewayAdminPort,
+  GatewayCredentialKind,
   GatewayDomain,
   GatewayLlmProvider,
   SshDestination,
@@ -8,64 +10,70 @@ import type {
   WorkerName,
   WorkerRoot,
 } from "@usine/core/worker";
-import type { Effect, Option, Redacted } from "effect";
+import type { Effect, Option, Redacted, Ref } from "effect";
 import type { HarnessProbe } from "../harness-preflight.ts";
 import type { RemoteMachine } from "../remote/machine.ts";
 import type { GatewayAdmin } from "./gateway/admin.ts";
+import type { GatewayForward } from "./gateway/forward.ts";
 
-/**
- * The Gateway in front of an SSH Worker's machine on a private network
- * (ADR 0027): the executor attaches each Attempt's token to it, and the
- * Attempt's children reach GitHub and the listed LLM providers through it.
- */
+/** The Gateway in front of an SSH Worker's machine on a private network (ADR 0027). */
 export interface SshWorkerGateway {
-  /** The Gateway's private DNS domain: GitHub at `git.<domain>`, LLM providers at `llm.<domain>`, the forward proxy at `<domain>:3128`. */
+  /** The Gateway's private DNS domain. GitHub is at `git.<domain>`, LLM providers at `llm.<domain>`, and the forward proxy at `<domain>:3128`. */
   readonly domain: GatewayDomain;
-  /** The Gateway's admin API as this process reaches it, usually a local forward through the SSH connection to the Gateway. */
-  readonly adminUrl: URL;
-  /** The admin API's bearer token. */
+  /** The `ssh` destination for the Gateway: `user@host` or a Host alias. The admin API forward connects through it. */
+  readonly destination: SshDestination;
+  /** The admin API port on the Gateway's loopback interface. */
+  readonly adminPort: GatewayAdminPort;
+  /** The admin API bearer token. */
   readonly adminToken: Redacted.Redacted<string>;
-  /** The LLM providers whose credential the Gateway holds. A harness whose provider is not listed uses its login on the machine and reaches the provider through the forward proxy. */
+  /** The LLM providers the Gateway has credentials for. A harness whose provider isn't listed uses its own login through the forward proxy. */
   readonly llmProviders: ReadonlyArray<GatewayLlmProvider>;
 }
 
-/** How the orchestrator connects to one SSH Worker's machine, and where the Worker keeps its state there. */
 export interface SshWorkerAddress {
+  /**
+   * The Worker's name in `usine.yaml`; its state is in `workers/<name>` under `root`. A request
+   * for a Worker without an address fails with a `machine` capability error.
+   */
   readonly name: WorkerName;
-  /** What the local `ssh` client connects to: `user@host`, or a Host alias from the SSH configuration. */
+  /** The `ssh` destination: `user@host` or a Host alias. */
   readonly destination: SshDestination;
-  /** The private key the client authenticates with; the SSH agent and configuration decide when absent. */
+  /** The private key for authentication. If `None`, the SSH agent and configuration are used. */
   readonly identityFile: Option.Option<SshIdentityFile>;
-  /** The SSH server's port; the SSH configuration decides when absent. */
+  /** The SSH server port. If `None`, the SSH configuration's port is used. */
   readonly port: Option.Option<SshPort>;
-  /** The directory under which the Worker keeps `workers/<name>` on the machine. */
+  /** The machine directory that contains `workers/<name>`. */
   readonly root: WorkerRoot;
-  /** The Gateway in front of the machine; without one, each Attempt's token is written on the machine (ADR 0026). */
+  /** The Gateway in front of the machine. If `None`, each Attempt's token is written on the machine (ADR 0026). */
   readonly gateway: Option.Option<SshWorkerGateway>;
 }
 
-/** The machines and SSH settings for the configured SSH Workers. */
 export interface SshExecutorOptions {
-  /** Every SSH Worker this executor runs Attempts on, each with its own machine. */
   readonly workers: ReadonlyArray<SshWorkerAddress>;
-  /** Local SSH executable and the options placed before each Worker's port and identity file; defaults to `ssh` in batch mode with keepalives. */
+  /** The local SSH command and the options placed before each Worker's port and identity file. Defaults to `ssh` in batch mode with keepalives. */
   readonly ssh?: SshCommand;
-  /** Grace for the parent task's cancellation, then for the Attempt to settle; each wait is bounded separately. Defaults to 10 seconds. */
+  /** The timeout for the parent task's cancellation, then separately for the Attempt to finish. Defaults to 10 seconds. */
   readonly interruptGrace?: Parameters<typeof Effect.timeoutOption>[1];
-  /** Probes one rostered brain's binary and login on a Worker's machine; defaults to the `@usine/agents/preflight` checks over SSH, which start no prompt. Behind a Gateway, the Gateway's checks for the brain still apply. */
+  /** Probes a brain's binary and login on a Worker's machine. Defaults to the `@usine/agents/preflight` checks over SSH, which send no prompt. Behind a Gateway, the Gateway checks also apply. */
   readonly harnessReadiness?: (machine: SshMachine) => HarnessProbe;
 }
 
-/** A Gateway in front of a machine, with the admin API client the executor attaches through. */
 export interface MachineGateway {
   readonly settings: SshWorkerGateway;
+  readonly forward: GatewayForward;
   readonly admin: GatewayAdmin;
+  /**
+   * The Anthropic credential kind the Gateway uses for Claude Code, from the last preflight.
+   * `None` before the first preflight, if `llmProviders` doesn't include `anthropic`, or if the
+   * Gateway is too old to report it.
+   */
+  readonly anthropicCredential: Ref.Ref<Option.Option<GatewayCredentialKind>>;
+  /** Whether a preflight already warned that the Gateway is too old to report its Anthropic credential kind. */
+  readonly warnedOfUnreportedCredential: Ref.Ref<boolean>;
 }
 
-/** An SSH Worker's machine with the child host that every command and child on it runs through. */
 export interface SshMachine extends RemoteMachine {
-  /** The Worker's address in `usine.yaml`, for preflight to check its root. */
+  /** The Worker's address from `usine.yaml`; preflight checks its root. */
   readonly address: SshWorkerAddress;
-  /** The Gateway in front of the machine, when the Worker has one. */
   readonly gateway: Option.Option<MachineGateway>;
 }

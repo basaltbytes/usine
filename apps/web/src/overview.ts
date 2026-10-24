@@ -1,18 +1,31 @@
 import type { Query } from "@tanstack/react-query";
 import { RepositoryName, splitRepositoryName } from "@usine/core/repository";
-import type { FactoryOverview } from "@usine/orchestrator/operator";
+import type { FactoryOverview, NeedView } from "@usine/orchestrator/operator";
 import { api } from "./api.ts";
+import { needCopy } from "./operator-copy.ts";
 
-/** Path params for /projects/$owner/$name in the shape the route declares. */
+/** Returns the path params for `/projects/$owner/$name`. */
 export const projectParams = (repository: RepositoryName) => ({
   ...splitRepositoryName(repository),
   repository,
 });
 
+/** Returns the count of Needs you entries per Project; entries without a Project are omitted. */
+export const needsYouByProject = (
+  needs: ReadonlyArray<NeedView>,
+): ReadonlyMap<RepositoryName, number> => {
+  const counts = new Map<RepositoryName, number>();
+  for (const need of needs) {
+    const repository = needCopy(need).repository;
+    if (repository !== null) counts.set(repository, (counts.get(repository) ?? 0) + 1);
+  }
+  return counts;
+};
+
 const ACTIVE_OVERVIEW_REFRESH_MS = 2_000;
 const IDLE_OVERVIEW_REFRESH_MS = 15_000;
 
-/** The one overview query every route reads; the root loader primes it. */
+/** Returns the overview query, which every route uses; the root loader prefetches it. */
 export const overviewQuery = () => ({
   queryKey: ["overview"] as const,
   queryFn: () => api((client) => client.overview()),

@@ -11,28 +11,37 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 
-/** Full-viewport placeholder for the loading, unreachable, and not-found states shown before a screen can render. */
+/** Renders the loading, unreachable, or not-found screen in the viewport, or in the work panel below Needs you if `inPanel` is set. */
 export const BootScreen = ({
   title,
   description,
   tone = "loading",
+  inPanel = false,
   children,
 }: {
   readonly title: string;
   readonly description: string;
   readonly tone?: "loading" | "error";
+  readonly inPanel?: boolean;
   readonly children?: ReactNode;
 }) => (
-  <main className="grid min-h-svh place-items-center p-6">
-    <Empty className="max-w-md">
-      <EmptyHeader>
-        <EmptyMedia variant="icon" className={cn(tone === "error" && "text-destructive")}>
+  <main className={cn("grid place-items-center p-6", inPanel ? "flex-1" : "min-h-svh")}>
+    <Empty className="max-w-md p-0">
+      <EmptyHeader className="gap-2">
+        <EmptyMedia
+          className={cn(
+            "mb-1 [&_svg]:size-5",
+            tone === "error" ? "text-destructive" : "text-muted-foreground",
+          )}
+        >
           {tone === "loading" ? <Spinner /> : <WarningCircleIcon weight="fill" />}
         </EmptyMedia>
-        <EmptyTitle>{title}</EmptyTitle>
-        <EmptyDescription className="wrap-anywhere">{description}</EmptyDescription>
+        <EmptyTitle className="text-md font-semibold tracking-normal">{title}</EmptyTitle>
+        <EmptyDescription className="text-sm text-muted-foreground wrap-anywhere">
+          {description}
+        </EmptyDescription>
       </EmptyHeader>
-      {children !== undefined && <EmptyContent>{children}</EmptyContent>}
+      {children !== undefined && <EmptyContent className="mt-1">{children}</EmptyContent>}
     </Empty>
   </main>
 );

@@ -1,34 +1,33 @@
-import { Schema } from "effect";
+import { DateTime, Effect, Option, Schema } from "effect";
 import { Agent, AgentName } from "../agent/agent.ts";
 import { BrainSpec, ModelId } from "../agent/brain.ts";
 import { RunId } from "../run/run.ts";
+import { Comment } from "../step/result.ts";
 import { StepName } from "../step/step.ts";
 import { WorkerName } from "../worker.ts";
 import { AttemptFailure, isAutoRetryableFailure } from "./failure.ts";
 import { AttemptOutcome } from "./outcome.ts";
 import { AttemptSalvage } from "./salvage.ts";
+import { AttemptStart } from "./start.ts";
 
-/** Identity of one execution try; each retry receives a new identity under the same Run and Step. */
+/** The ID of an Attempt; each retry gets a new ID under the same Run and Step. */
 export const AttemptId = Schema.NonEmptyString.pipe(Schema.brand("AttemptId"));
 
 export type AttemptId = typeof AttemptId.Type;
 
-/**
- * 1-based position of a try under its step. Retries are attempt N+1 under the
- * same step, and the auto-retry cap counts total attempts.
- */
+/** The 1-based position of the Attempt in its Step. */
 export const AttemptNumber = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pipe(
   Schema.brand("AttemptNumber"),
 );
 export type AttemptNumber = typeof AttemptNumber.Type;
 
-/** Task text given to the agent after loop interpolation or an operator's edit-and-retry amendment. */
+/** The task text for the agent: the interpolated loop prompt or the operator's edit-and-retry text. */
 export const AttemptTask = Schema.String.check(
   Schema.isPattern(/\S/u, { message: "Expected non-blank task text" }),
 ).pipe(Schema.brand("AttemptTask"));
 export type AttemptTask = typeof AttemptTask.Type;
 
-/** The effective task and roster Agent an operator assigns to a Run's later Attempts. */
+/** The task and Agent that an operator sets for a Run's later Attempts. */
 export class AttemptContext extends Schema.Class<AttemptContext>("AttemptContext")({
   task: AttemptTask,
   agent: Agent,
@@ -36,9 +35,15 @@ export class AttemptContext extends Schema.Class<AttemptContext>("AttemptContext
 }) {}
 
 /**
- * One try of a step on a worker. `outcome` is none while the attempt is in flight.
- * `salvage` records what the executor preserved of the workspace after an
- * unsuccessful end; the next attempt of the same Run resumes from a pushed salvage.
+ * One try of a Step on a Worker.
+ *
+ * - `outcome`: `None` while the Attempt runs.
+ * - `endedAt`: the time the outcome was recorded; `None` while running and for older records.
+ * - `salvage`: what the executor kept of the workspace after an unsuccessful end.
+ * - `start`: the reason the Attempt started; `None` for older records.
+ * - `reattachedAt`: the last time an orchestrator restart reattached the Attempt.
+ * - `comments`: the comments and reviews posted by an unsuccessful Attempt; a successful
+ *   Attempt's are in the Step result.
  */
 export class Attempt extends Schema.Class<Attempt>("Attempt")({
   id: AttemptId,
@@ -53,13 +58,75 @@ export class Attempt extends Schema.Class<Attempt>("Attempt")({
   parentModel: Schema.OptionFromNullOr(ModelId),
   startedAt: Schema.DateTimeUtc,
   outcome: Schema.Option(AttemptOutcome),
+  endedAt: Schema.Option(Schema.DateTimeUtc),
   salvage: Schema.Option(AttemptSalvage),
+  start: Schema.Option(AttemptStart).pipe(
+    Schema.withConstructorDefault(Effect.succeed(Option.none<AttemptStart>())),
+  ),
+  reattachedAt: Schema.Option(Schema.DateTimeUtc).pipe(
+    Schema.withConstructorDefault(Effect.succeed(Option.none())),
+  ),
+  comments: Schema.Array(Comment).pipe(Schema.withConstructorDefault(Effect.succeed([]))),
 }) {}
 
 /**
- * The auto-retry law: only an infra failure retries, and only while the attempt
- * number is below `maxAutoAttempts` (ADR 0002).
- * `number` is the failed try's position; `maxAutoAttempts` includes the first try.
+ * The time span of an Attempt, open while `endedAt` is `None`, used to attribute GitHub writes
+ * by Attempts that share one App login.
+ */
+export class AttemptWindow extends Schema.Class<AttemptWindow>("AttemptWindow")({
+  attemptId: AttemptId,
+  startedAt: Schema.DateTimeUtc,
+  endedAt: Schema.Option(Schema.DateTimeUtc),
+}) {}
+
+/** Returns the Attempt's window, or `None` if it ended before end times were recorded. */
+export const windowOf = (attempt: Attempt): Option.Option<AttemptWindow> =>
+  Option.isSome(attempt.outcome) && Option.isNone(attempt.endedAt)
+    ? Option.none()
+    : Option.some(
+        new AttemptWindow({
+          attemptId: attempt.id,
+          startedAt: attempt.startedAt,
+          endedAt: attempt.endedAt,
+        }),
+      );
+
+/** Returns the window start truncated to the second, the precision of GitHub timestamps. */
+const opening = (window: AttemptWindow) => {
+  const start = DateTime.toEpochMillis(window.startedAt);
+  return start - (start % 1_000);
+};
+
+/** Returns whether `window` is open or ended at or after `millis`. */
+const reaches = (window: AttemptWindow, millis: number) =>
+  Option.match(window.endedAt, {
+    onNone: () => true,
+    onSome: (end) => millis <= DateTime.toEpochMillis(end),
+  });
+
+/** Returns whether the GitHub timestamp `at` is inside `window`. */
+export const windowHolds = (window: AttemptWindow, at: DateTime.Utc): boolean => {
+  const time = DateTime.toEpochMillis(at);
+  return opening(window) <= time && reaches(window, time);
+};
+
+/** Returns whether a GitHub timestamp can be inside both windows. */
+export const windowsOverlap = (left: AttemptWindow, right: AttemptWindow): boolean =>
+  reaches(left, opening(right)) && reaches(right, opening(left));
+
+/**
+ * The windows used to attribute writes on a Run's Item to one Attempt. A write belongs to the
+ * Attempt only if its time is inside `own` and outside every `overlapping` window, which are the
+ * same Agent's other Attempts on the Item.
+ */
+export class AttemptWindows extends Schema.Class<AttemptWindows>("AttemptWindows")({
+  own: Schema.Option(AttemptWindow),
+  overlapping: Schema.Array(AttemptWindow),
+}) {}
+
+/**
+ * Returns whether `failure` is retryable and the failed Attempt's `number` is below
+ * `maxAutoAttempts`, which counts the first try (ADR 0002).
  */
 export const shouldAutoRetry = (options: {
   readonly failure: AttemptFailure;

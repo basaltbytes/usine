@@ -5,9 +5,17 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 import { DedupKey, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
 import { CycleLimit, CycleBudgetAskId } from "@usine/core/cycle-budget";
-import { LoopName, APPROVAL_REQUIREMENTS, type ApprovalRequirement } from "@usine/core/loop";
+import {
+  LoopName,
+  APPROVAL_REQUIREMENTS,
+  type ApprovalRequirement,
+  LOOP_PERMISSIONS,
+  type LoopPermissions,
+} from "@usine/core/loop";
+import { OperatorLogin } from "@usine/core/operator";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
+import { APPROVAL_CHANNELS, type ApprovalChannel } from "@usine/core/run/approval";
 import { StepName } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
 import { sql } from "drizzle-orm";
@@ -45,17 +53,26 @@ export const triggerEvents = snakeCase.table(
     loopName: text().$type<LoopName>().notNull(),
     stepName: text().$type<StepName>().notNull(),
     approval: text({ enum: APPROVAL_REQUIREMENTS }).$type<ApprovalRequirement>().notNull(),
+    // The Loop's permissions at match time, used by every Attempt of the Run.
+    permissions: text({ enum: LOOP_PERMISSIONS })
+      .$type<LoopPermissions>()
+      .notNull()
+      .default("write"),
     cycleLimit: integer().$type<CycleLimit>(),
-    // Item allowance observed before fetching this Event's trigger input.
+    // The Item's cycle generation, read before fetching the trigger input.
     cycleGeneration: integer().notNull().default(0),
-    // The execution context as submitted, part of the immutable Event fact. A
-    // queued Event is claimed later from these columns, while execution reads
-    // the Run's own copy below.
+    // The submitted execution context, never updated. A queued Event is claimed from these
+    // columns; execution reads the Run's copy.
     repository: text().$type<RepositoryName>().notNull(),
     revision: text().$type<RepositoryRevision>().notNull(),
     task: text().$type<AttemptTask>().notNull(),
     agentJson: text({ mode: "json" }).$type<unknown>().notNull(),
     parentModel: text().$type<ModelId>(),
+    // The Event that this one reopens after its Run was canceled (#267).
+    reopensEventId: text()
+      .$type<EventId>()
+      .references(() => events.eventId),
+    reopening: integer().notNull().default(0),
   },
   (table) => [
     check("usine_trigger_events_approval", sql`${table.approval} in ('none', 'required')`),
@@ -66,7 +83,31 @@ export const triggerEvents = snakeCase.table(
     check("usine_trigger_events_agent_json_valid", sql`json_valid(${table.agentJson})`),
     index("usine_trigger_events_item").on(table.loopName, table.itemKey),
     index("usine_trigger_events_item_history").on(table.itemKey),
+    uniqueIndex("usine_trigger_event_reopening").on(table.reopensEventId, table.reopening),
   ],
+);
+
+/**
+ * The Event a trigger last submitted for each Loop and Item, or `null` after a non-matching
+ * sighting. After an Attempt stops with a question or blocker, `suppressedByRunId` is its Run and
+ * `suppressedEventId` is the Item's state after the stop, which opens no Run (#241, #341).
+ */
+export const loopItems = snakeCase.table(
+  "usine_loop_items",
+  {
+    loopName: text().$type<LoopName>().notNull(),
+    itemKey: text().$type<ItemKey>().notNull(),
+    observedEventId: text()
+      .$type<EventId>()
+      .references(() => events.eventId),
+    suppressedByRunId: text()
+      .$type<RunId>()
+      .references(() => runs.runId),
+    suppressedEventId: text()
+      .$type<EventId>()
+      .references(() => events.eventId),
+  },
+  (table) => [primaryKey({ columns: [table.loopName, table.itemKey] })],
 );
 
 export const itemCycleBudgets = snakeCase.table(
@@ -133,13 +174,20 @@ export const runs = snakeCase.table(
     stateJson: text({ mode: "json" }).$type<unknown>().notNull(),
     resolvedFailureAttemptId: text().$type<AttemptId>(),
     openedAt: text().notNull(),
-    // The Run's effective context, seeded from the claiming submission.
-    // Edit-and-retry amends these columns; the Event columns never change (ADR 0018).
+    /**
+     * The time the Run last closed, or `null` while open; a retry clears it. Older closed Runs
+     * have their last Attempt's end time.
+     */
+    closedAt: text(),
+    // The Run's effective context, copied from the claiming submission. Edit-and-retry updates
+    // these columns; the Event's columns never change (ADR 0018).
     repository: text().$type<RepositoryName>().notNull(),
     revision: text().$type<RepositoryRevision>().notNull(),
     task: text().$type<AttemptTask>().notNull(),
     agentJson: text({ mode: "json" }).$type<unknown>().notNull(),
     parentModel: text().$type<ModelId>(),
+    /** The operator retry for the Run's next Attempt; cleared when that Attempt starts. */
+    nextStartJson: text({ mode: "json" }).$type<unknown>(),
   },
   (table) => [
     check("usine_runs_state_json_valid", sql`json_valid(${table.stateJson})`),
@@ -181,7 +229,17 @@ export const attempts = snakeCase.table(
     parentModel: text().$type<ModelId>(),
     startedAt: text().notNull(),
     outcomeJson: text({ mode: "json" }).$type<unknown>(),
+    /** The time the outcome was recorded; `null` while running and for older Attempts. */
+    endedAt: text(),
     salvageJson: text({ mode: "json" }).$type<unknown>(),
+    /** The time the operator discarded the Attempt's leftovers on a removed Worker; startup reconciliation then skips it. */
+    leftoversDiscardedAt: text(),
+    /** The reason the Attempt started; `null` for older Attempts. */
+    startJson: text({ mode: "json" }).$type<unknown>(),
+    /** The last time an orchestrator restart reattached the Attempt, or `null`. */
+    reattachedAt: text(),
+    /** The comments and reviews posted by an unsuccessful Attempt, or `null` if none were recorded. */
+    commentsJson: text({ mode: "json" }).$type<unknown>(),
   },
   (table) => [
     check("usine_attempts_number", sql`${table.attemptNumber} >= 1`),
@@ -234,16 +292,47 @@ export const attemptTranscripts = snakeCase.table(
   ],
 );
 
-export const approvals = snakeCase.table("usine_approvals", {
-  runId: text()
-    .$type<RunId>()
-    .primaryKey()
-    .references(() => runs.runId),
+/**
+ * The approval Event each approved Run consumed, with its source. Older rows have no `channel`
+ * or `approver`; a UI approval without a configured operator login has no `approver`.
+ */
+export const approvals = snakeCase.table(
+  "usine_approvals",
+  {
+    runId: text()
+      .$type<RunId>()
+      .primaryKey()
+      .references(() => runs.runId),
+    eventId: text()
+      .$type<EventId>()
+      .notNull()
+      .unique()
+      .references(() => events.eventId),
+    channel: text({ enum: APPROVAL_CHANNELS }).$type<ApprovalChannel>(),
+    approver: text().$type<OperatorLogin>(),
+  },
+  (table) => [
+    check(
+      "usine_approvals_source",
+      sql`(${table.channel} is null and ${table.approver} is null) or ${table.channel} = 'ui' or (${table.channel} = 'github-ask' and ${table.approver} is not null)`,
+    ),
+  ],
+);
+
+/**
+ * The Events recorded by running a closed Run again (#152), with the original Run and the
+ * requesting login, which is `null` if `usine.yaml` sets no operator login.
+ */
+export const runAgainEvents = snakeCase.table("usine_run_again_events", {
   eventId: text()
     .$type<EventId>()
+    .primaryKey()
+    .references(() => triggerEvents.eventId),
+  fromRunId: text()
+    .$type<RunId>()
     .notNull()
-    .unique()
-    .references(() => events.eventId),
+    .references(() => runs.runId),
+  requestedBy: text().$type<OperatorLogin>(),
 });
 
 export const ignoredEvents = snakeCase.table(
@@ -260,7 +349,7 @@ export const ignoredEvents = snakeCase.table(
   ],
 );
 
-/** Cursors that only save work; each owner validates its own value. */
+/** Cursors whose loss only repeats work; each owner validates its value. */
 export const cursors = snakeCase.table(
   "usine_cursors",
   {
@@ -270,7 +359,7 @@ export const cursors = snakeCase.table(
   (table) => [check("usine_cursors_value_json_valid", sql`json_valid(${table.valueJson})`)],
 );
 
-/** The latest payload seen for each Item, for operator reads. */
+/** The latest payload of each Item, and the time a poll found it missing on GitHub. */
 export const itemProjections = snakeCase.table(
   "usine_item_projections",
   {
@@ -280,6 +369,7 @@ export const itemProjections = snakeCase.table(
     itemNumber: integer({ mode: "number" }).notNull(),
     contentHash: text().notNull(),
     payloadJson: text({ mode: "json" }).$type<unknown>().notNull(),
+    goneAt: text(),
   },
   (table) => [
     check("usine_item_projections_number", sql`${table.itemNumber} >= 1`),
@@ -303,13 +393,33 @@ export const repositoryLabelProjections = snakeCase.table(
   ],
 );
 
-/** Operator-owned runtime toggles, kept apart from authored loop files (ADR 0009). */
+/** The label changes of operator Board moves, each recorded before it's sent to GitHub. */
+export const boardMoves = snakeCase.table(
+  "usine_board_moves",
+  {
+    moveId: integer({ mode: "number" }).primaryKey({ autoIncrement: true }),
+    repository: text().$type<RepositoryName>().notNull(),
+    itemKey: text().$type<ItemKey>().notNull(),
+    movedAt: text().notNull(),
+    fromLane: text().notNull(),
+    toLane: text().notNull(),
+    addedJson: text({ mode: "json" }).$type<unknown>().notNull(),
+    removedJson: text({ mode: "json" }).$type<unknown>().notNull(),
+  },
+  (table) => [
+    check("usine_board_moves_added_json_valid", sql`json_valid(${table.addedJson})`),
+    check("usine_board_moves_removed_json_valid", sql`json_valid(${table.removedJson})`),
+    index("usine_board_moves_item").on(table.itemKey, table.movedAt),
+  ],
+);
+
+/** Operator runtime toggles, separate from Loop files (ADR 0009). */
 export const loopRuntime = snakeCase.table("usine_loop_runtime", {
   loopName: text().$type<LoopName>().primaryKey(),
   paused: integer({ mode: "boolean" }).notNull(),
 });
 
-/** Single row whose version invalidates cached operator projections. */
+/** A single row whose version invalidates cached operator projections. */
 export const projectionRevision = snakeCase.table(
   "usine_projection_revision",
   {

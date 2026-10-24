@@ -30,7 +30,9 @@ const formatIssue = SchemaIssue.makeFormatterDefault();
 
 // YAML reads an unquoted `if: true` as a boolean; it decodes to the same CEL literal.
 const ConditionFromYaml = Schema.Union([Schema.String, Schema.Boolean])
-  .annotate({ message: "Expected a CEL expression: quote the value so YAML reads it as a string" })
+  .annotate({
+    message: "Expected a CEL expression. Quote the value so that YAML reads it as a string.",
+  })
   .pipe(
     Schema.decodeTo(Source, {
       decode: SchemaGetter.transform((condition: string | boolean) => String(condition)),
@@ -57,6 +59,7 @@ class LoopFrontmatter extends Schema.Class<LoopFrontmatter>("@usine/config/LoopF
   step: StepName.pipe(Schema.withDecodingDefaultKey(Effect.succeed("run"))),
   agent: AgentName,
   maxCycles: LoopFile.fields.maxCycles,
+  permissions: LoopFile.fields.permissions,
 }) {}
 
 const AuthoredLoopFrontmatter = LoopFrontmatter.pipe(
@@ -67,9 +70,13 @@ class AgentFrontmatter extends Schema.Class<AgentFrontmatter>("@usine/config/Age
   harness: Harness,
   model: ModelId,
   effort: Effort,
-  parent_model: Schema.OptionFromOptionalKey(ModelId),
-  parent_effort: Schema.OptionFromOptionalKey(Effort),
+  parentModel: Schema.OptionFromOptionalKey(ModelId),
+  parentEffort: Schema.OptionFromOptionalKey(Effort),
 }) {}
+
+const AuthoredAgentFrontmatter = AgentFrontmatter.pipe(
+  Schema.encodeKeys({ parentModel: "parent_model", parentEffort: "parent_effort" }),
+);
 
 interface Interpolation {
   readonly source: Source;
@@ -161,7 +168,7 @@ const interpolations = (
           file,
           stage: "expression",
           expression: Option.none(),
-          message: `Unclosed prompt interpolation at character ${start}`,
+          message: `The prompt has an unclosed {{ at character ${start}. Close it with }}.`,
         });
       }
       const expression = body.slice(start + 2, end).trim();
@@ -216,7 +223,7 @@ const parseAgentFile = Effect.fn("ConfigParser.parseAgentFile")(
       const name = yield* agentName(file);
       const markdown = yield* splitMarkdown(file, source);
       const yaml = yield* parseYaml(file, markdown.yaml);
-      const frontmatter = yield* Schema.decodeUnknownEffect(AgentFrontmatter)(yaml, {
+      const frontmatter = yield* Schema.decodeUnknownEffect(AuthoredAgentFrontmatter)(yaml, {
         onExcessProperty: "error",
       }).pipe(Effect.mapError((error) => schemaError(file, error)));
       const persona = yield* Schema.decodeUnknownEffect(AgentPersona)(markdown.body).pipe(
@@ -227,8 +234,8 @@ const parseAgentFile = Effect.fn("ConfigParser.parseAgentFile")(
         harness: frontmatter.harness,
         model: frontmatter.model,
         effort: frontmatter.effort,
-        parentModel: frontmatter.parent_model,
-        parentEffort: frontmatter.parent_effort,
+        parentModel: frontmatter.parentModel,
+        parentEffort: frontmatter.parentEffort,
         persona,
       });
     }),
@@ -266,6 +273,7 @@ const makeParseLoopFile = (engine: ExpressionEngine["Service"]) =>
           selector: frontmatter.selector,
           approval: frontmatter.approval,
           maxCycles: frontmatter.maxCycles,
+          permissions: frontmatter.permissions,
           step: frontmatter.step,
           agent: frontmatter.agent,
           body,
@@ -309,31 +317,31 @@ const makeConfigWarnings = (engine: ExpressionEngine["Service"]) =>
     return warnings;
   });
 
-/** Parses supplied instance-file contents and checks the expressions that select Items and render task prompts. */
+/** The service that parses instance file contents and checks their CEL expressions. */
 export class ConfigParser extends Context.Service<
   ConfigParser,
   {
-    /** Reads registry and factory settings from `source`; `file` identifies the source in diagnostics. */
+    /** Parses `usine.yaml` contents; `file` is used only in diagnostics. */
     readonly parseUsineYaml: (
       file: InstancePath,
       source: string,
     ) => Effect.Effect<UsineConfig, ConfigFileError>;
-    /** Reads an Agent's brain and standing instructions; `file` supplies its filename-derived identity. */
+    /** Parses an Agent file, taking the Agent name from `file`. */
     readonly parseAgentFile: (
       file: InstancePath,
       source: string,
     ) => Effect.Effect<AgentFile, ConfigFileError>;
-    /** Reads a Loop and checks its selection and prompt expressions; `file` supplies its identity. */
+    /** Parses a Loop file and checks its `if` and prompt expressions, taking the Loop name from `file`. */
     readonly parseLoopFile: (
       file: InstancePath,
       source: string,
     ) => Effect.Effect<LoopFile, ConfigFileError>;
-    /** Reports undeclared labels used by Board lanes or Loop conditions without rejecting otherwise valid configuration. */
+    /** Returns warnings for undeclared labels used by Board lanes or Loop conditions. */
     readonly configWarnings: (
       config: UsineConfig,
       loops: ReadonlyArray<LoopFile>,
     ) => Effect.Effect<ReadonlyArray<ConfigWarning>, ExpressionCheckError>;
-    /** Renders the Loop's `{{ ... }}` expressions using `context.item` for the trigger payload and `context.repo` for the repository. */
+    /** Evaluates the Loop's `{{ ... }}` expressions with `context.item` as the trigger payload and `context.repo` as the repository. */
     readonly renderPrompt: (
       loop: LoopFile,
       context: Schema.JsonObject,

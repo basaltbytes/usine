@@ -6,7 +6,10 @@ import { stubAttemptRuntime, StubStorage } from "@usine/durable/testing";
 import { Effect, FileSystem, Layer, Schema } from "effect";
 import { workerEngineLayer } from "../src/worker-engine.ts";
 import { credentialLayer } from "./local-worker/support.ts";
+import { fixedConfigLayer } from "./support/current-instance.ts";
+import { testAppLayer } from "./support/github-app.ts";
 import { alwaysHoldsLayer } from "./support/polling.ts";
+import { claudeLoginLockLayer } from "@usine/executor";
 
 // Nothing listens on port 1, so the SSH executor's preflight fails at once.
 const unreachable = {
@@ -27,7 +30,10 @@ const startupFailure = (workers: (typeof UsineConfig.Encoded)["workers"]) =>
       workerEngineLayer(directory, config, []).pipe(
         Layer.provide(credentialLayer),
         Layer.provide(stubAttemptRuntime(new StubStorage())),
+        Layer.provide(claudeLoginLockLayer),
         Layer.provide(alwaysHoldsLayer),
+        Layer.provide(fixedConfigLayer(config)),
+        Layer.provide(testAppLayer),
       ),
     ).pipe(Effect.flip);
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
@@ -39,7 +45,7 @@ describe("Worker engine selection", () => {
       assert(failure._tag === "WorkerCapabilityError", failure._tag);
       assert.strictEqual(
         failure.message,
-        "Could not connect to SSH Worker eu-one at usine@127.0.0.1",
+        'Can\'t connect to SSH worker "eu-one" at usine@127.0.0.1',
       );
     }),
   );
@@ -51,7 +57,7 @@ describe("Worker engine selection", () => {
           ...unreachable,
           gateway: {
             domain: "gw.internal",
-            admin_url: "http://127.0.0.1:1",
+            destination: "usine@127.0.0.1",
             admin_token_env: "USINE_TEST_UNSET_GATEWAY_ADMIN_TOKEN",
           },
         },
@@ -60,7 +66,7 @@ describe("Worker engine selection", () => {
       assert.strictEqual(failure.capability, "gateway");
       assert.strictEqual(
         failure.message,
-        "SSH Worker eu-one's Gateway admin token is missing: set USINE_TEST_UNSET_GATEWAY_ADMIN_TOKEN in the orchestrator's environment",
+        'The gateway admin token for SSH worker "eu-one" is missing. Set USINE_TEST_UNSET_GATEWAY_ADMIN_TOKEN in the orchestrator\'s environment.',
       );
     }),
   );

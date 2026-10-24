@@ -8,7 +8,8 @@ import { RunEngine, RunEngineShutdown } from "@usine/engine/engine";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { GitHubCredentials } from "@usine/github/github-app";
 import { loadLocalCredentials } from "@usine/github/local-secrets";
-import { Operator, OperatorObservation } from "@usine/orchestrator/operator";
+import { CurrentInstance } from "@usine/orchestrator/current-instance";
+import { Operator, OperatorConfiguration, OperatorObservation } from "@usine/orchestrator/operator";
 import { Orchestrator } from "@usine/orchestrator/orchestrator";
 import { operatorObservationLayer, runtimeLayer } from "@usine/orchestrator/runtime";
 import {
@@ -36,18 +37,23 @@ import {
 } from "./cli.ts";
 import { serverLayer } from "./http.ts";
 import { holdInstance } from "./instance-lock.ts";
+import { reloadOnHangup } from "./reload-signal.ts";
 import { withGracefulShutdown } from "./shutdown.ts";
 
-const loadInstance = (directory: InstanceDirectory) => {
-  const parser = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
-  const folder = InstanceFolder.layer.pipe(
-    Layer.provide(parser),
-    Layer.provide(NodeServices.layer),
+const instanceFolderLayer = InstanceFolder.layer.pipe(
+  Layer.provide(ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer))),
+  Layer.provide(NodeServices.layer),
+);
+
+/** Loads the instance folder and keeps it reloadable. Fails if `usine.yaml` is invalid. */
+const loadInstance = Effect.fn("Server.loadInstance")(function* (directory: InstanceDirectory) {
+  const context = yield* Layer.build(instanceFolderLayer);
+  const initial = yield* Context.get(context, InstanceFolder).load(directory);
+  const current = yield* Layer.build(
+    CurrentInstance.layer(directory, initial).pipe(Layer.provide(Layer.succeedContext(context))),
   );
-  return Effect.flatMap(InstanceFolder, (service) => service.load(directory)).pipe(
-    Effect.provide(folder),
-  );
-};
+  return Context.get(current, CurrentInstance);
+});
 
 const serve = Effect.fn("Server.serve")(function* (options: {
   readonly backend: ReturnType<typeof liveBackendLayer>;
@@ -62,7 +68,7 @@ const serve = Effect.fn("Server.serve")(function* (options: {
   );
   yield* Console.log(
     options.openSetupPage
-      ? `usine is waiting for GitHub App setup at ${options.url}`
+      ? `usine is running in setup mode at ${options.url}`
       : `usine is running at ${options.url}`,
   );
   if (options.openSetupPage) {
@@ -108,10 +114,11 @@ export const up = (port: Port, allowVolatileInstance: boolean) =>
       yield* refuseVolatileInstance(directory, allowVolatileInstance).pipe(
         Effect.provide(NodeServices.layer),
       );
-      // Taken before any store opens and released after every store has closed.
+      // Acquired before any store opens and released after every store closes.
       yield* holdInstance(directory).pipe(Effect.provide(NodeServices.layer));
       yield* refuseTakenPort(port).pipe(Effect.provide(NodeServices.layer));
-      const instance = yield* loadInstance(directory);
+      const instances = yield* loadInstance(directory);
+      yield* reloadOnHangup(instances);
       const credentials = yield* loadLocalCredentials(directory).pipe(
         Effect.provide(NodeServices.layer),
         Effect.result,
@@ -128,17 +135,19 @@ export const up = (port: Port, allowVolatileInstance: boolean) =>
         });
         const observationContext = yield* Layer.build(operatorObservationLayer(directory));
         const backend = needsSetupBackendLayer(
-          instance,
+          instances,
           error._tag,
           Context.get(observationContext, OperatorObservation),
+          Context.get(observationContext, OperatorConfiguration),
         );
         return yield* serve({ backend, webRoot, port, url, openSetupPage: true });
       }
 
       const shutdown = yield* Deferred.make<void>();
       const startup = Effect.gen(function* () {
-        const runtime = runtimeLayer(directory, instance).pipe(
+        const runtime = runtimeLayer(directory).pipe(
           Layer.provide(Layer.succeed(GitHubCredentials, credentials.success)),
+          Layer.provide(Layer.succeed(CurrentInstance, instances)),
         );
         const context = yield* Layer.build(runtime).pipe(
           Effect.provideService(RunEngineShutdown, shutdown),
@@ -150,13 +159,17 @@ export const up = (port: Port, allowVolatileInstance: boolean) =>
           drain: engine.drain(),
           running: Effect.raceFirst(
             serve({
-              backend: liveBackendLayer(instance, operator),
+              backend: liveBackendLayer(
+                instances,
+                operator,
+                Context.get(context, OperatorConfiguration),
+              ),
               webRoot,
               port,
               url,
               openSetupPage: false,
             }),
-            orchestrator.run(instance).pipe(
+            orchestrator.run.pipe(
               Effect.tapCause((cause) =>
                 Cause.hasInterruptsOnly(cause)
                   ? Effect.void
@@ -171,10 +184,12 @@ export const up = (port: Port, allowVolatileInstance: boolean) =>
       return yield* withGracefulShutdown(
         startup,
         shutdown,
-        Option.match(instance.config.settings.maxAttemptMinutes, {
-          onNone: () => Duration.infinity,
-          onSome: Duration.minutes,
-        }),
+        Effect.map(instances.get, ({ config }) =>
+          Option.match(config.settings.maxAttemptMinutes, {
+            onNone: () => Duration.infinity,
+            onSome: Duration.minutes,
+          }),
+        ),
       );
     }),
   );

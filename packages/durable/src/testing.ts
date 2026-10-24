@@ -10,10 +10,15 @@ import {
 import type { ModelRef } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import {
+  AgentBlockedError,
+  AgentQuestionError,
+  type AgentReport,
   AgentResultError,
   type AgentSessionError,
   ChildBackend,
   type ChildRequest,
+  type OnDelivery,
+  reportText,
   type RunningSession,
   SessionResult,
 } from "@usine/agents/runtime";
@@ -32,12 +37,12 @@ import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentFailure, type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
 import { StepResult } from "@usine/core/step/result";
-import { BLOCKED_MARKER } from "@usine/agents/runtime";
 import {
   type Cause,
   Context,
   DateTime,
   Deferred,
+  Duration,
   Effect,
   Layer,
   Option,
@@ -53,6 +58,7 @@ import {
   ResultRecorded,
   StoredRequest,
 } from "./attempt-runtime.ts";
+import { keepNotice } from "./attempt/hubs.ts";
 import { layer as attemptRuntimeLayer } from "./attempt/runtime.ts";
 import { SUBAGENT_TOOL } from "./attempt/subagent.ts";
 import {
@@ -61,20 +67,22 @@ import {
   layer as durableHarnessLayer,
 } from "./harness.ts";
 
-/** One scripted answer of the parent's model, or a function of the request that returns one. */
 export type ParentStep = FauxResponseStep;
 
-/** The parent model the testing layer serves; name it in `RunSpec.parentModel` or leave that empty. */
+/** The model ID that the testing layer serves. */
 export const PARENT_MODEL = ModelId.make("faux/faux-1");
 
-/** The parent delegates `task` to one child through the `subagent` tool. */
+/** Returns a parent turn that calls the `subagent` tool with `task`. */
 export const delegate = (task: string): AssistantMessage =>
   fauxAssistantMessage([fauxToolCall(SUBAGENT_TOOL, { task })], { stopReason: "toolUse" });
 
-/** The parent gives its final answer. */
+/** Returns a parent turn whose final answer is `text`. */
 export const answer = (text: string): AssistantMessage => fauxAssistantMessage([fauxText(text)]);
 
-/** pi-ai model access that answers the parent's requests with `steps`, in order; it accepts every reasoning effort up to `high`. */
+/**
+ * Returns pi-ai model access that answers requests with `steps` in order, at any reasoning effort
+ * up to `high`.
+ */
 export const fauxParent = (
   steps: ReadonlyArray<ParentStep>,
 ): Pick<DurableHarnessOptions, "models" | "defaultModel"> => {
@@ -86,38 +94,67 @@ export const fauxParent = (
   return { models, defaultModel: Option.some(defaultModel) };
 };
 
-/** One child the stub backend launched; the test decides when and how it finishes. */
+/** A child launched by the stub backend and finished by the test. */
 export interface StubChild {
   readonly request: ChildRequest;
-  /** Adds one event to the child's stream. */
   readonly emit: (event: AgentSessionEvent) => Effect.Effect<void>;
-  /** Finishes with `message` as the child's report; under a Hold the report waits for the release. */
+  /**
+   * Reads the queued operator messages, then finishes with `message` as the report. Under a Hold,
+   * the report is delayed until release.
+   */
   readonly reply: (message: string) => Effect.Effect<void>;
+  /** Reads the queued operator messages, as a harness does at a turn boundary. */
+  readonly readQueued: Effect.Effect<void>;
   /** Finishes with a blocked report, which fails the Attempt unless the parent relays it. */
   readonly block: (message: string) => Effect.Effect<void>;
-  /** Completes once the parent's tool call interrupted the child (abort, cancel, or shutdown). */
+  /**
+   * Finishes by asking the operator `question`, which fails the Attempt unless the parent relays
+   * it.
+   */
+  readonly ask: (question: string) => Effect.Effect<void>;
+  /**
+   * Finishes with a harness failure, which fails the Attempt with `AgentFailure` unless the parent
+   * reports otherwise.
+   */
+  readonly fail: (message: string) => Effect.Effect<void>;
+  /** Completes when the parent's tool call interrupts the child (abort, cancel, or shutdown). */
   readonly interrupted: Effect.Effect<void>;
-  /** The operator actions delivered to this child so far. */
   readonly interventions: Effect.Effect<ReadonlyArray<AttemptChannel.OperatorAction>>;
 }
 
-/** The children the stub backend launched, in launch order. */
+/** The children launched by the stub backend, in launch order. */
 export class StubChildren extends Context.Service<
   StubChildren,
   {
-    /** Waits for the next child the parent launches. */
     readonly next: Effect.Effect<StubChild>;
   }
 >()("@usine/durable/testing/StubChildren") {}
 
 const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: ChildRequest) {
   const session = request.session;
-  const events = yield* Queue.make<AgentSessionEvent, AgentResultError | Cause.Done>();
+  const events = yield* Queue.make<AgentSessionEvent, AgentReport | Cause.Done>();
   const result = yield* Deferred.make<SessionResult, AgentSessionError>();
   const interrupted = yield* Deferred.make<void>();
   const interventions: Array<AttemptChannel.OperatorAction> = [];
   let held = false;
+  let paused = false;
   let pending = Option.none<string>();
+  const queued: Array<OnDelivery> = [];
+
+  const stateNow = (isQueued: boolean) =>
+    new AttemptChannel.InterventionState({ held, paused, queued: isQueued });
+  const readQueued = Effect.suspend(() =>
+    Effect.forEach(queued.splice(0), (onDelivery) => onDelivery(Option.some(stateNow(false))), {
+      discard: true,
+    }),
+  );
+  yield* Effect.addFinalizer(() =>
+    Effect.suspend(() =>
+      Effect.forEach(queued.splice(0), (onDelivery) => onDelivery(Option.none()), {
+        discard: true,
+      }),
+    ),
+  );
 
   const emit = (event: AgentSessionEvent) => Queue.offer(events, event).pipe(Effect.asVoid);
   const finish = (message: string) =>
@@ -128,31 +165,49 @@ const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: Chil
       yield* Deferred.succeed(result, new SessionResult({ message }));
     });
   const reply = (message: string) =>
-    Effect.suspend(() => {
-      if (!held) return finish(message);
-      pending = Option.some(message);
-      return emit(new SessionIdle({ session }));
-    });
-  const block = (message: string) =>
+    readQueued.pipe(
+      Effect.andThen(
+        Effect.suspend(() => {
+          if (!held) return finish(message);
+          pending = Option.some(message);
+          return emit(new SessionIdle({ session }));
+        }),
+      ),
+    );
+  const report = (error: AgentReport) =>
     Effect.gen(function* () {
-      const error = new AgentResultError({ sessionId: Option.some(session.id), message });
-      yield* emit(new TextOutput({ session, text: `${BLOCKED_MARKER}\n${message}` }));
+      yield* readQueued;
+      yield* emit(new TextOutput({ session, text: reportText(error) }));
       yield* Queue.fail(events, error);
       yield* Deferred.fail(result, error);
     });
-  const intervene = (action: AttemptChannel.OperatorAction) =>
+  const block = (message: string) =>
+    report(new AgentBlockedError({ sessionId: Option.some(session.id), message }));
+  const ask = (question: string) =>
+    report(new AgentQuestionError({ sessionId: Option.some(session.id), message: question }));
+  const fail = (message: string) =>
+    report(new AgentResultError({ sessionId: Option.some(session.id), message }));
+  // A message to an idle or paused child starts its next turn; a working child queues it.
+  const intervene = (action: AttemptChannel.OperatorAction, onDelivery: OnDelivery) =>
     Effect.gen(function* () {
       interventions.push(action);
-      if (action._tag === "OperatorMessage") {
-        held = true;
-        yield* emit(new SessionResumed({ session }));
-      } else if (action._tag === "Steer") {
+      if (action._tag === "OperatorMessage" || action._tag === "Steer") {
+        if (action._tag === "OperatorMessage") held = true;
+        const stopped = Option.isSome(pending) || paused;
+        paused = false;
+        if (!stopped) {
+          queued.push(onDelivery);
+          return stateNow(true);
+        }
+        pending = Option.none();
         yield* emit(new SessionResumed({ session }));
       } else if (action._tag === "Release") {
         held = false;
         if (Option.isSome(pending)) yield* finish(pending.value);
+      } else {
+        paused = true;
       }
-      return new AttemptChannel.InterventionState({ held, paused: action._tag === "Interrupt" });
+      return stateNow(false);
     });
 
   yield* emit(new SessionStarted({ session }));
@@ -171,14 +226,17 @@ const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: Chil
     request,
     emit,
     reply,
+    readQueued,
     block,
+    ask,
+    fail,
     interrupted: Deferred.await(interrupted),
     interventions: Effect.sync(() => [...interventions]),
   };
   return { running, child };
 });
 
-/** A `ChildBackend` whose children run only as the test scripts them through `StubChildren`. */
+/** A `ChildBackend` whose children the test drives through `StubChildren`. */
 export const stubChildBackendLayer: Layer.Layer<ChildBackend | StubChildren> = Layer.effectContext(
   Effect.gen(function* () {
     const launched = yield* Queue.unbounded<StubChild>();
@@ -195,19 +253,14 @@ export const stubChildBackendLayer: Layer.Layer<ChildBackend | StubChildren> = L
   }),
 );
 
-/** What the testing layer runs on. */
 export interface DurableTestingOptions {
-  /** The SQLite file; build another layer on the same file to simulate an orchestrator restart. */
+  /** The SQLite file path. To simulate a restart, build another layer on the same file. */
   readonly database: string;
-  /** The parent model's answers, one per model request, in order. */
+  /** The parent model's answers, one per request. */
   readonly parent: ReadonlyArray<ParentStep>;
 }
 
-/**
- * The durable Attempt runtime on a SQLite file with a scripted parent model
- * and stub children, for driving whole Attempts in tests without a model or a
- * harness binary.
- */
+/** Returns a durable Attempt runtime with a scripted parent model and stub children. */
 export const layer = (options: DurableTestingOptions) =>
   attemptRuntimeLayer.pipe(
     Layer.provideMerge(
@@ -226,19 +279,22 @@ export const layer = (options: DurableTestingOptions) =>
     Layer.provideMerge(stubChildBackendLayer),
   );
 
-/** What a scripted stub parent can do while `execute` runs it. */
 export interface StubParentContext {
+  /**
+   * The request passed to this `execute` call, which differs from the stored request on reattach.
+   */
   readonly request: AttemptRequest;
-  /** Records one outbound envelope with the task's next sequence. */
+  /** Records an outbound envelope with the task's next sequence number. */
   readonly emit: (payload: AttemptChannel.OutboundPayload) => Effect.Effect<void, AttemptFailure>;
-  /** The parent session the stub reports events for. */
   readonly session: ParentSession;
-  /** Whether this `execute` call reattached a task a previous runtime started. */
+  /** Whether this call reattached a task started by a previous runtime. */
   readonly reattached: boolean;
 }
 
-/** A stub parent's work after Started; its result is the parent's final message. */
-export type StubParent = (context: StubParentContext) => Effect.Effect<string, AttemptFailure>;
+/** The stub parent's work after `Started`, returning the final message or a full report. */
+export type StubParent = (
+  context: StubParentContext,
+) => Effect.Effect<string | AttemptReport, AttemptFailure>;
 
 type StubTaskState =
   | { readonly _tag: "live" }
@@ -252,35 +308,27 @@ interface StubTask {
   inbound: number;
 }
 
-/**
- * The durable storage behind stub runtimes: tasks and their sequence counters
- * survive a runtime being closed and built again, as pi-durable storage
- * survives an orchestrator restart.
- */
+/** Stub runtime storage that persists across runtime rebuilds, to simulate a restart. */
 export class StubStorage {
+  /** The stub tasks by Attempt ID, with their creating request and state. */
   readonly tasks = new Map<AttemptId, StubTask>();
+  /** The time stored by `recordUnsupervised`, by Attempt ID. */
+  readonly unsupervised = new Map<AttemptId, Duration.Duration>();
 }
 
-/** Completes at once with `Completed: <task>`. */
+/** Completes immediately with `Completed: <task>`. */
 export const completes: StubParent = ({ request }) =>
   Effect.succeed(`Completed: ${request.spec.task}`);
 
-/** Works for `millis` before completing. */
+/** Waits `millis` milliseconds, then completes like `completes`. */
 export const worksFor =
   (millis: number): StubParent =>
   (context) =>
     Effect.sleep(`${millis} millis`).pipe(Effect.andThen(completes(context)));
 
 /**
- * An in-memory `AttemptRuntime` over `storage`, for executor and engine tests
- * that need no parent model. It records Started, the parent's session events,
- * intervention receipts, and a Final without facts (the executor harvests
- * those) through the Attempt's sink, numbering them per task so a reattached
- * `execute` continues the sequence. Only a completed parent leaves the live
- * state: interrupting `execute` (a stopped process) or a failing parent leaves
- * the task live until someone cancels it, so tests see whether the executor
- * stopped it. A completed task keeps its report, which a later `execute`
- * returns and `finished` reports until `recordResult` replaces it.
+ * Returns an in-memory `AttemptRuntime` over `storage` for tests that need no parent model. An
+ * interrupted `execute` or a failing parent leaves the task live until it is canceled.
  */
 export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = completes) =>
   Layer.effect(
@@ -288,8 +336,20 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
     Effect.sync(() => {
       const attached = new Map<
         AttemptId,
-        { readonly io: AttemptChannel.Sink; readonly canceled: Deferred.Deferred<void> }
+        {
+          readonly io: AttemptChannel.Sink;
+          readonly canceled: Deferred.Deferred<void>;
+          started: boolean;
+        }
       >();
+      const early = new Map<AttemptId, ReadonlyArray<AttemptChannel.WorkerNotice>>();
+      /** Deferreds that complete when an `execute` call relays the Attempt. */
+      const relayed = new Map<AttemptId, Deferred.Deferred<void>>();
+      const relayedFor = (attemptId: AttemptId) => {
+        const kept = relayed.get(attemptId) ?? Deferred.makeUnsafe<void>();
+        relayed.set(attemptId, kept);
+        return kept;
+      };
       const envelope = (task: StubTask, payload: AttemptChannel.OutboundPayload) =>
         Effect.map(
           DateTime.now,
@@ -321,7 +381,9 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
           };
           storage.tasks.set(attemptId, task);
           const canceled = yield* Deferred.make<void>();
-          attached.set(attemptId, { io, canceled });
+          const active = { io, canceled, started: false };
+          attached.set(attemptId, active);
+          Deferred.doneUnsafe(relayedFor(attemptId), Effect.void);
           const session = new ParentSession({
             id: AgentSessionId.make(`parent:${attemptId}`),
             agent: request.spec.agent.name,
@@ -344,7 +406,14 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
           } else {
             yield* event(new TextOutput({ session, text: "Resumed after a restart" }));
           }
-          const message = yield* parent({
+          // Notices sent while the buffered ones are recorded are buffered too, so loop until none
+          // is left.
+          for (let kept = early.get(attemptId); kept !== undefined; kept = early.get(attemptId)) {
+            early.delete(attemptId);
+            for (const notice of kept) yield* emit(notice);
+          }
+          active.started = true;
+          const finished = yield* parent({
             request,
             emit,
             session,
@@ -358,12 +427,28 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
               ),
             ),
           );
+          const report =
+            finished instanceof AttemptReport ? finished : new AttemptReport({ message: finished });
           yield* event(new SessionFinished({ session }));
-          yield* emit(new AttemptChannel.Final({ result: new StepResult({ message, facts: [] }) }));
-          const report = new AttemptReport({ message });
+          yield* emit(
+            new AttemptChannel.Final({
+              result: new StepResult({ message: report.message, facts: [] }),
+            }),
+          );
           task.state = { _tag: "finished", report, result: Option.none() };
           return report;
-        }).pipe(Effect.ensuring(Effect.sync(() => attached.delete(request.spec.attemptId))));
+        }).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              const attemptId = request.spec.attemptId;
+              attached.delete(attemptId);
+              // Drop only a completed Deferred, so a later `attached` waits for the next `execute`
+              // call and a pending one keeps waiting.
+              const kept = relayed.get(attemptId);
+              if (kept !== undefined && Deferred.isDoneUnsafe(kept)) relayed.delete(attemptId);
+            }),
+          ),
+        );
 
       return AttemptRuntime.of({
         execute,
@@ -385,6 +470,13 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
             const state = storage.tasks.get(attemptId)?.state;
             if (state?._tag === "finished") state.result = Option.some(result);
           }),
+        recordUnsupervised: (attemptId, unsupervised) =>
+          Effect.sync(() => {
+            const kept = storage.unsupervised.get(attemptId) ?? Duration.zero;
+            storage.unsupervised.set(attemptId, Duration.max(kept, unsupervised));
+          }),
+        unsupervised: (attemptId) =>
+          Effect.sync(() => Option.fromNullishOr(storage.unsupervised.get(attemptId))),
         request: (attemptId) =>
           Effect.sync(() =>
             Option.map(
@@ -401,12 +493,23 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
             const active = attached.get(attemptId);
             if (active !== undefined) yield* Deferred.succeed(active.canceled, undefined);
           }),
+        notify: (attemptId, notice) =>
+          Effect.gen(function* () {
+            const task = storage.tasks.get(attemptId);
+            const active = attached.get(attemptId);
+            if (task === undefined || active === undefined || !active.started) {
+              early.set(attemptId, keepNotice(early.get(attemptId) ?? [], notice));
+              return;
+            }
+            yield* active.io.append("outbound", yield* envelope(task, notice));
+          }).pipe(Effect.orDie),
+        attached: (attemptId) => Effect.suspend(() => Deferred.await(relayedFor(attemptId))),
         intervene: (attemptId, intervention) =>
           Effect.gen(function* () {
             const task = storage.tasks.get(attemptId);
             const active = attached.get(attemptId);
             if (task === undefined || active === undefined)
-              return yield* new AgentFailure({ message: "This Attempt has no live parent" });
+              return yield* new AgentFailure({ message: "This attempt has no live parent" });
             const inputSequence = AttemptChannel.Sequence.make(++task.inbound);
             yield* active.io.append(
               "inbound",

@@ -45,9 +45,8 @@ export const credentialGrantsFor = Effect.fn("ExeDevExecutor.credentialGrantsFor
       Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
           const current = (yield* Ref.get(counts)).get(key) ?? 0;
-          // Own a reference before attempting the attachment: a failed SSH reply
-          // may still mean the edge accepted it. This reservation is released once
-          // by this scope, and never borrows a sibling's reference on interruption.
+          // Counts the reference before attaching, because a failed SSH reply can still mean the edge
+          // accepted the attachment. This scope's finalizer releases it exactly once.
           yield* Ref.update(counts, (currentCounts) =>
             new Map(currentCounts).set(key, current + 1),
           );
@@ -72,7 +71,8 @@ export const credentialGrantsFor = Effect.fn("ExeDevExecutor.credentialGrantsFor
                 (cause) =>
                   new CredentialUnavailableError({
                     repository,
-                    message: `Could not attach exe.dev GitHub integration ${integration}`,
+                    reason: "unreachable",
+                    message: `Can't attach exe.dev GitHub integration "${integration}"`,
                     cause,
                   }),
               ),
@@ -89,11 +89,8 @@ export const credentialGrantsFor = Effect.fn("ExeDevExecutor.credentialGrantsFor
         }),
       ),
     );
-    // Renew each live reference at half its time-box, for as long as the
-    // Attempt lives; no ceiling bounds this loop. A failed renewal is retried
-    // every minute rather than at the next half-life, which would coincide with
-    // expiry. The renewal fiber is released before its reference; checkout
-    // cleanup runs before both.
+    // Renews at half the grant length until the scope closes and retries a failed renewal every
+    // minute. Finalizers stop this fiber before releasing the reference, after checkout cleanup.
     const renew = Effect.fn("ExeDevExecutor.renewGrant")(function* () {
       yield* Effect.annotateCurrentSpan({ attemptId, worker, repository, integration });
       yield* locks.withLock(key)(attach);

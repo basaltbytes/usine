@@ -3,7 +3,7 @@ import type { AgentSession, AgentSessionEvent, HarnessSession } from "@usine/cor
 import type { AttemptId } from "@usine/core/attempt";
 import type { TranscriptEventView } from "@usine/orchestrator/operator";
 
-/** Attributed delivery receipt, including refusal details when the session rejected the input. */
+/** A delivery receipt for an operator input, at the first receipt's position with the newest payload. */
 export type InterventionRecord = TranscriptEventView & {
   readonly payload: Extract<
     TranscriptEventView["payload"],
@@ -24,7 +24,7 @@ interface RecordedSessionEvent {
   >;
 }
 
-/** Session state observes all lifecycle records; conversation contents observe only the loaded page. */
+/** One session's state and events; state comes from all session records, `events` only from the loaded page. */
 export interface SessionEvents {
   readonly attemptId: AttemptId;
   readonly session: AgentSession;
@@ -39,7 +39,7 @@ export interface SessionEvents {
   readonly interventions: Array<InterventionRecord>;
 }
 
-/** Joins paged activity and current supervision once, without rendering metadata as historical rows. */
+/** Groups records by session; records outside the loaded page update only the state fields. */
 export const indexSessions = (
   events: ReadonlyArray<TranscriptEventView>,
   sessionState: ReadonlyArray<TranscriptEventView>,
@@ -90,16 +90,27 @@ export const indexSessions = (
       });
   }
   const unmatched: Array<InterventionRecord> = [];
+  const inputKey = (attemptId: AttemptId, payload: InterventionRecord["payload"]) =>
+    JSON.stringify([attemptId, payload.inputSequence]);
+  const newest = new Map<string, InterventionRecord["payload"]>();
+  for (const { attemptId, payload } of records)
+    if (payload._tag === "InterventionApplied" || payload._tag === "InterventionRejected")
+      newest.set(inputKey(attemptId, payload), payload);
+  const shown = new Set<string>();
   for (const record of records) {
     const payload = record.payload;
     if (payload._tag !== "InterventionApplied" && payload._tag !== "InterventionRejected") continue;
+    const input = inputKey(record.attemptId, payload);
+    const receipt = { ...record, payload: newest.get(input) ?? payload };
     const target = payload.intervention.target;
     const group =
       target._tag === "Parent"
         ? parents.get(record.attemptId)
         : groups.get(key(record.attemptId, target.sessionId));
+    const first = loaded.has(record.sequence) && !shown.has(input);
+    if (first) shown.add(input);
     if (group === undefined) {
-      if (loaded.has(record.sequence)) unmatched.push({ ...record, payload });
+      if (first) unmatched.push(receipt);
       continue;
     }
     if (record.sequence > group.latestSequence) group.latestSequence = record.sequence;
@@ -107,7 +118,7 @@ export const indexSessions = (
       group.held = payload.state.held;
       group.paused = payload.state.paused;
     }
-    if (loaded.has(record.sequence)) group.interventions.push({ ...record, payload });
+    if (first) group.interventions.push(receipt);
   }
   return { groups, unmatched };
 };

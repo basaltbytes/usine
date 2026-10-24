@@ -72,6 +72,7 @@ describe("cycle reset polling", () => {
           }),
       };
       const github: GitHubPolling["Service"] = {
+        missingIssues: () => Effect.succeed([]),
         labels: () =>
           Effect.succeed(new RepositoryLabelCatalog({ labels: [], entityTag: Option.none() })),
         snapshot: () => Effect.die("no Items on this page"),
@@ -178,6 +179,7 @@ it.live(
         closedByPullRequestsReferences: { totalCount: 0, nodes: [] },
       });
       const github: GitHubPolling["Service"] = {
+        missingIssues: () => Effect.succeed([]),
         labels: () =>
           Effect.succeed(new RepositoryLabelCatalog({ labels: [], entityTag: Option.none() })),
         changes: () =>
@@ -204,10 +206,12 @@ it.live(
           ),
       };
       const executor = Layer.succeed(StepExecutor)({
+        workers: Effect.succeed([WorkerName.make("local")]),
         isLive: () => Effect.succeed(false),
         outcome: () => Effect.succeed(Option.none()),
         recover: () => Effect.void,
         intervene: () => Effect.void,
+        occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
         reserve: () => Effect.succeed({ worker: WorkerName.make("test"), release: Effect.void }),
         interrupt: () => Effect.void,
         execute: () => Effect.succeed(new StepResult({ message: "Reviewed", facts: [] })),

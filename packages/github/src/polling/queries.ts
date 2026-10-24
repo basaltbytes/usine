@@ -125,3 +125,18 @@ export const PULL_REQUEST_PAYLOAD_QUERY = `
     }
   }
 `;
+
+/**
+ * Returns a query for `count` issues of one repository by number: alias `i<k>` reads the issue
+ * numbered `$n<k>`. A missing issue is null under its alias.
+ */
+export const issuesPresentQuery = (count: number): string => {
+  const indexes = Array.from({ length: count }, (_, index) => index);
+  return `
+  query UsineIssuesPresent($owner: String!, $name: String!, ${indexes.map((index) => `$n${index}: Int!`).join(", ")}) {
+    repository(owner: $owner, name: $name) {
+      ${indexes.map((index) => `i${index}: issue(number: $n${index}) { number }`).join("\n      ")}
+    }
+  }
+`;
+};

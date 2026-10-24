@@ -2,11 +2,13 @@ import {
   type ASTNode,
   Environment as CelEnvironment,
   ParseError as CelParseError,
+  type ParseResult,
   TypeError as CelTypeError,
+  type TypeCheckResult,
   parse,
 } from "@marcbachmann/cel-js";
-import { Effect, Layer, Option, Schema } from "effect";
-import { type Environment, type ObjectType, TypeReference } from "./environment.ts";
+import { Effect, Layer, Option, Predicate, Result, Schema } from "effect";
+import { type Environment, TypeReference } from "./environment.ts";
 import {
   ExpressionEngine,
   ExpressionCheckError,
@@ -55,7 +57,7 @@ const checkFailure = (source: Source, error: VendorCheckError | undefined): Expr
     ? new ExpressionCheckError({
         source,
         code: "check_failed",
-        message: "CEL check failed without an error detail",
+        message: "The CEL check failed and returned no error details",
         position: Option.none(),
       })
     : new ExpressionCheckError({
@@ -110,7 +112,7 @@ const MACROS_WITH_BINDINGS: ReadonlySet<string> = new Set([
 
 type MacroBindings = ReadonlyMap<string, ReadonlyArray<string>>;
 
-/** The member path a node reads from, followed back through macro bindings and collection transformations. */
+/** Returns the member path that a node reads, resolved through macro bindings and `filter`/`map` receivers, or `undefined`. */
 const lineagePathOf = (
   node: ASTNode,
   bindings: MacroBindings,
@@ -137,12 +139,7 @@ const lineagePathOf = (
 const startsWithPath = (path: ReadonlyArray<string>, prefix: ReadonlyArray<string>): boolean =>
   prefix.every((part, index) => path[index] === part);
 
-/**
- * The string literals an operand can evaluate to. Only result positions count:
- * a conditional contributes its branches and not its test, a list its
- * elements. `item.state == "OPEN" ? "ready" : "review"` yields the two labels
- * and not the state.
- */
+/** Returns the string literals an operand can evaluate to: a literal, both branches of `?:`, and list elements. */
 const resultStringLiterals = (node: ASTNode): ReadonlyArray<string> => {
   switch (node.op) {
     case "value":
@@ -190,7 +187,7 @@ const comparisonLiterals = (
   }
 };
 
-/** Collects the literals compared against `name` on members bound by macros over the watched collection. */
+/** Returns the literals compared with `name` on values under `memberPath`, including through macro variables. */
 const scanRelatedLiterals = (
   node: ASTNode,
   memberPath: ReadonlyArray<string>,
@@ -245,9 +242,9 @@ const relatedStringLiterals = Effect.fn("ExpressionEngine.relatedStringLiterals"
 type EnvironmentPurpose = "check" | "evaluate";
 
 /**
- * cel-js rejects `null` in a typed field and cannot index `dyn<T>`, so checking
- * keeps a nullable field's type and evaluation declares it `dyn`. Both register
- * `T == null`, from which cel-js derives `!=` and the reversed operand order.
+ * Creates the cel-js environment for checking or evaluating `descriptor`. Because cel-js rejects
+ * `null` in a typed field and can't index `dyn<T>`, evaluation declares nullable fields as `dyn`.
+ * Both register `T == null`; cel-js derives `!=` and the reversed operand order from it.
  */
 const makeEnvironment = (descriptor: Environment, purpose: EnvironmentPurpose): CelEnvironment => {
   const environment = new CelEnvironment({ unlistedVariablesAreDyn: false });
@@ -275,55 +272,182 @@ const makeEnvironment = (descriptor: Environment, purpose: EnvironmentPurpose): 
   return environment;
 };
 
-const normalizeValue = (
-  value: Schema.Json,
-  type: TypeReference,
-  objectTypes: ReadonlyMap<string, ObjectType>,
-): RuntimeValue => {
-  if (
-    (type === "int" || type === "uint") &&
-    Schema.is(Schema.Number)(value) &&
-    Number.isInteger(value)
-  ) {
-    return BigInt(value);
+/** Returns whether `value` is a JSON object, checking only the top level because the context is already `Schema.Json` (#464). */
+const isJsonObject = (value: Schema.Json): value is Schema.JsonObject => Predicate.isObject(value);
+
+type Normalize = (value: Schema.Json) => RuntimeValue;
+
+/** The identity normalizer, compared by reference to skip types that need no normalization. */
+const unchanged: Normalize = (value) => value;
+
+interface NormalizedObject {
+  [key: string]: RuntimeValue;
+}
+
+/** Sets `name` as an own property, including `__proto__`. */
+const setField = (target: NormalizedObject, name: string, value: RuntimeValue) => {
+  if (name === "__proto__") {
+    Object.defineProperty(target, name, {
+      value,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  } else {
+    target[name] = value;
   }
-  if (type.startsWith("list<") && type.endsWith(">") && Array.isArray(value)) {
-    const itemType = decodeTypeReference(type.slice(5, -1));
-    return value.map((item) => normalizeValue(item, itemType, objectTypes));
+};
+
+/**
+ * Returns the context normalizer for `descriptor`, which converts `int` and `uint` numbers to
+ * `bigint` and sets absent nullable fields to `null`, recursing into `list<T>` items and declared
+ * object fields. Returns unchanged values as is, and shallow-copies changed objects.
+ */
+const contextNormalizer = (
+  descriptor: Environment,
+): ((context: Schema.JsonObject) => RuntimeObject) => {
+  const objectTypes = new Map(descriptor.types.map((type) => [type.name, type]));
+  const compiled = new Map<TypeReference, Normalize>();
+  // Can't recurse forever: the Environment declares each type before any type that references it.
+  const normalizerOf = (type: TypeReference): Normalize => {
+    const existing = compiled.get(type);
+    if (existing !== undefined) return existing;
+    const normalize = compile(type);
+    compiled.set(type, normalize);
+    return normalize;
+  };
+  const compile = (type: TypeReference): Normalize => {
+    if (type === "int" || type === "uint") {
+      return (value) =>
+        Predicate.isNumber(value) && Number.isInteger(value) ? BigInt(value) : value;
+    }
+    if (type.startsWith("list<") && type.endsWith(">")) {
+      const normalizeItem = normalizerOf(decodeTypeReference(type.slice(5, -1)));
+      if (normalizeItem === unchanged) return unchanged;
+      return (value) => (Array.isArray(value) ? value.map(normalizeItem) : value);
+    }
+    const objectType = objectTypes.get(type);
+    if (objectType === undefined) return unchanged;
+    const fields = objectType.fields.flatMap(({ name, type: fieldType }) => {
+      const normalize = normalizerOf(fieldType);
+      return normalize === unchanged ? [] : [[name, normalize] as const];
+    });
+    const nullable = objectType.fields.filter((field) => field.nullable).map(({ name }) => name);
+    if (fields.length === 0 && nullable.length === 0) return unchanged;
+    return (value) => {
+      if (!isJsonObject(value)) return value;
+      const normalized: NormalizedObject = { ...value };
+      for (const [name, normalize] of fields) {
+        const fieldValue = value[name];
+        if (fieldValue !== undefined && Object.hasOwn(value, name)) {
+          setField(normalized, name, normalize(fieldValue));
+        }
+      }
+      for (const name of nullable) {
+        if (!Object.hasOwn(value, name)) setField(normalized, name, null);
+      }
+      return normalized;
+    };
+  };
+  const variables = new Map(
+    descriptor.variables.map((variable) => [variable.name, normalizerOf(variable.type)]),
+  );
+  return (context) => {
+    const normalized: NormalizedObject = { ...context };
+    for (const [name, normalize] of variables) {
+      const value = context[name];
+      if (value !== undefined && Object.hasOwn(context, name)) {
+        setField(normalized, name, normalize(value));
+      }
+    }
+    return normalized;
+  };
+};
+
+/** The maximum number of cached check results, and of parse results, per environment. */
+const KEPT_EXPRESSIONS = 256;
+
+/** Stores `value` under `key` and returns it, evicting the oldest entry if the map is full. */
+const keep = <A>(kept: Map<Source, A>, key: Source, value: A): A => {
+  if (kept.size >= KEPT_EXPRESSIONS) {
+    const oldest = kept.keys().next();
+    if (oldest.done !== true) kept.delete(oldest.value);
   }
-  const objectType = objectTypes.get(type);
-  if (objectType !== undefined && Schema.is(Schema.JsonObject)(value)) {
-    const absentNullable = objectType.fields
-      .filter((field) => field.nullable && !Object.hasOwn(value, field.name))
-      .map((field) => [field.name, null] as const);
-    return Object.fromEntries([
-      ...Object.entries(value).map(([key, fieldValue]) => {
-        const field = objectType.fields.find(({ name }) => name === key);
-        return [
-          key,
-          field === undefined ? fieldValue : normalizeValue(fieldValue, field.type, objectTypes),
-        ] as const;
-      }),
-      ...absentNullable,
-    ]);
-  }
+  kept.set(key, value);
   return value;
 };
 
-const normalizeContext = (context: Schema.JsonObject, descriptor: Environment): RuntimeObject => {
-  const objectTypes = new Map(descriptor.types.map((type) => [type.name, type]));
-  return Object.fromEntries(
-    Object.entries(context).map(([key, value]) => {
-      const variable = descriptor.variables.find(({ name }) => name === key);
-      return [
-        key,
-        variable === undefined ? value : normalizeValue(value, variable.type, objectTypes),
-      ];
-    }),
-  );
+/** The per-descriptor cache of cel-js environments and check and parse results. */
+interface DescriptorRuntime {
+  readonly normalize: (context: Schema.JsonObject) => RuntimeObject;
+  check: Option.Option<CelEnvironment>;
+  evaluate: Option.Option<CelEnvironment>;
+  readonly checked: Map<Source, TypeCheckResult>;
+  readonly parsed: Map<Source, ParseResult>;
+}
+
+/** Functions that check and evaluate expressions; both rethrow cel-js errors. */
+interface CelRuntimes {
+  readonly check: (descriptor: Environment, source: Source) => TypeCheckResult;
+  readonly evaluate: (
+    descriptor: Environment,
+    source: Source,
+    context: Schema.JsonObject,
+  ) => RuntimeValue;
+}
+
+/**
+ * Creates a cache of cel-js environments, check results, and parse results, keyed by descriptor
+ * in a `WeakMap` (#464). Doesn't cache a build or parse that throws, and keeps the
+ * {@link KEPT_EXPRESSIONS} newest entries per cache. A cached parse result retains the last
+ * evaluated context until the next evaluation.
+ */
+const celRuntimes = (): CelRuntimes => {
+  const runtimes = new WeakMap<Environment, DescriptorRuntime>();
+  const runtimeOf = (descriptor: Environment): DescriptorRuntime => {
+    const existing = runtimes.get(descriptor);
+    if (existing !== undefined) return existing;
+    const runtime: DescriptorRuntime = {
+      normalize: contextNormalizer(descriptor),
+      check: Option.none(),
+      evaluate: Option.none(),
+      checked: new Map(),
+      parsed: new Map(),
+    };
+    runtimes.set(descriptor, runtime);
+    return runtime;
+  };
+  const environmentOf = (
+    runtime: DescriptorRuntime,
+    descriptor: Environment,
+    purpose: EnvironmentPurpose,
+  ): CelEnvironment =>
+    Option.getOrElse(runtime[purpose], () => {
+      const environment = makeEnvironment(descriptor, purpose);
+      runtime[purpose] = Option.some(environment);
+      return environment;
+    });
+  return {
+    check: (descriptor, source) => {
+      const runtime = runtimeOf(descriptor);
+      return (
+        runtime.checked.get(source) ??
+        keep(runtime.checked, source, environmentOf(runtime, descriptor, "check").check(source))
+      );
+    },
+    evaluate: (descriptor, source, context) => {
+      const runtime = runtimeOf(descriptor);
+      const parsed =
+        runtime.parsed.get(source) ??
+        keep(runtime.parsed, source, environmentOf(runtime, descriptor, "evaluate").parse(source));
+      // SAFETY: CEL returns values of the context's types, and callers decode the result type.
+      return parsed(runtime.normalize(context)) as RuntimeValue;
+    },
+  };
 };
 
 const checkExpected = (
+  runtimes: CelRuntimes,
   source: Source,
   environment: Environment,
   accepts: (resultType: string) => boolean,
@@ -331,7 +455,7 @@ const checkExpected = (
 ): Effect.Effect<void, ExpressionCheckError> =>
   Effect.gen(function* () {
     const result = yield* Effect.try({
-      try: () => makeEnvironment(environment, "check").check(source),
+      try: () => runtimes.check(environment, source),
       catch: (cause) =>
         new ExpressionCheckError({
           source,
@@ -352,19 +476,14 @@ const checkExpected = (
     }
   });
 
-const evaluateRaw = (
+const evaluated = (
+  runtimes: CelRuntimes,
   source: Source,
   environment: Environment,
   context: Schema.JsonObject,
-): Effect.Effect<RuntimeValue, ExpressionEvaluationError> =>
-  Effect.try({
-    try: () =>
-      // SAFETY: CEL evaluates to the same value vocabulary the context is built
-      // from, and every caller decodes the expected result type before use.
-      makeEnvironment(environment, "evaluate").evaluate(
-        source,
-        normalizeContext(context, environment),
-      ) as RuntimeValue,
+): Result.Result<RuntimeValue, ExpressionEvaluationError> =>
+  Result.try({
+    try: () => runtimes.evaluate(environment, source, context),
     catch: (cause) =>
       new ExpressionEvaluationError({
         source,
@@ -378,51 +497,92 @@ const unexpectedResult = (source: Source, expected: string) => () =>
     message: `CEL evaluation returned a value that is not ${expected}`,
   });
 
-const checkBoolean = Effect.fn("ExpressionEngine.checkBoolean")(
-  (source: Source, environment: Environment): Effect.Effect<void, ExpressionCheckError> =>
-    checkExpected(source, environment, (resultType) => resultType === "bool", "bool"),
-);
-
-const checkScalar = Effect.fn("ExpressionEngine.checkScalar")(
-  (source: Source, environment: Environment): Effect.Effect<void, ExpressionCheckError> =>
-    checkExpected(
-      source,
-      environment,
-      (resultType) => acceptedScalarTypes.has(resultType),
-      "a scalar value",
-    ),
-);
-
-const decodeBoolean = Schema.decodeUnknownEffect(Schema.Boolean);
+const isBooleanType = (resultType: string): boolean => resultType === "bool";
 const decodeScalar = Schema.decodeUnknownEffect(Scalar);
 
-const evaluateBoolean = Effect.fn("ExpressionEngine.evaluateBoolean")(function* (
-  source: Source,
-  environment: Environment,
-  context: Schema.JsonObject,
-) {
-  yield* checkBoolean(source, environment);
-  const value = yield* evaluateRaw(source, environment, context);
-  return yield* decodeBoolean(value).pipe(Effect.mapError(unexpectedResult(source, "a boolean")));
-});
+const makeExpressionEngine = () => {
+  const runtimes = celRuntimes();
 
-const evaluateScalar = Effect.fn("ExpressionEngine.evaluateScalar")(function* (
-  source: Source,
-  environment: Environment,
-  context: Schema.JsonObject,
-) {
-  yield* checkScalar(source, environment);
-  const value = yield* evaluateRaw(source, environment, context);
-  return yield* decodeScalar(value).pipe(
-    Effect.mapError(unexpectedResult(source, "a scalar value")),
+  const checkBoolean = Effect.fn("ExpressionEngine.checkBoolean")(
+    (source: Source, environment: Environment): Effect.Effect<void, ExpressionCheckError> =>
+      checkExpected(runtimes, source, environment, isBooleanType, "bool"),
   );
-});
 
-/** The ExpressionEngine implementation on @marcbachmann/cel-js. */
-export const MarcbachmannCelLayer = Layer.succeed(ExpressionEngine, {
-  relatedStringLiterals,
-  checkBoolean,
-  checkScalar,
-  evaluateBoolean,
-  evaluateScalar,
-});
+  const checkScalar = Effect.fn("ExpressionEngine.checkScalar")(
+    (source: Source, environment: Environment): Effect.Effect<void, ExpressionCheckError> =>
+      checkExpected(
+        runtimes,
+        source,
+        environment,
+        (resultType) => acceptedScalarTypes.has(resultType),
+        "a scalar value",
+      ),
+  );
+
+  /** Evaluates an already checked condition on `context`. Fails if the result isn't a boolean. */
+  const booleanOn = (
+    source: Source,
+    environment: Environment,
+    context: Schema.JsonObject,
+  ): Result.Result<boolean, ExpressionEvaluationError> =>
+    Result.flatMap(evaluated(runtimes, source, environment, context), (value) =>
+      Predicate.isBoolean(value)
+        ? Result.succeed(value)
+        : Result.fail(unexpectedResult(source, "a boolean")()),
+    );
+
+  const evaluateBoolean = Effect.fn("ExpressionEngine.evaluateBoolean")(function* (
+    source: Source,
+    environment: Environment,
+    context: Schema.JsonObject,
+  ) {
+    yield* checkBoolean(source, environment);
+    return yield* Effect.fromResult(booleanOn(source, environment, context));
+  });
+
+  // One span and one check for all contexts; per-context Effects cost several times more (#464).
+  const evaluateBooleanEach = Effect.fn("ExpressionEngine.evaluateBooleanEach")(function* (
+    source: Source,
+    environment: Environment,
+    contexts: ReadonlyArray<Schema.JsonObject>,
+  ) {
+    yield* Effect.annotateCurrentSpan({ contexts: contexts.length });
+    yield* checkBoolean(source, environment);
+    return contexts.map((context) => booleanOn(source, environment, context));
+  });
+
+  const evaluateScalar = Effect.fn("ExpressionEngine.evaluateScalar")(function* (
+    source: Source,
+    environment: Environment,
+    context: Schema.JsonObject,
+  ) {
+    yield* checkScalar(source, environment);
+    const value = yield* Effect.fromResult(evaluated(runtimes, source, environment, context));
+    return yield* decodeScalar(value).pipe(
+      Effect.mapError(unexpectedResult(source, "a scalar value")),
+    );
+  });
+
+  return ExpressionEngine.of({
+    relatedStringLiterals,
+    checkBoolean,
+    checkScalar,
+    evaluateBoolean,
+    evaluateBooleanEach,
+    evaluateScalar,
+  });
+};
+
+/**
+ * Provides {@link ExpressionEngine} with `@marcbachmann/cel-js` 8.0.0
+ * ([ADR 0004](../../../docs/adr/0004-loop-files-markdown-cel-frontmatter.md)).
+ *
+ * Before evaluation, converts JSON integers to `bigint` wherever the {@link Environment}
+ * declares `int`, at any depth, and sets absent nullable fields to `null`. Values inside a
+ * `map<K,V>` aren't converted, so declare integer map values as `double`.
+ *
+ * `uint` isn't supported in `context`; declare such values as `int`. An expression that reads a
+ * non-nullable `uint` value type-checks but fails evaluation. On a nullable field, comparing with a
+ * `uint` literal works but `uint` arithmetic fails. A `uint` result fails `evaluateScalar`.
+ */
+export const MarcbachmannCelLayer = Layer.sync(ExpressionEngine)(makeExpressionEngine);

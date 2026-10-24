@@ -1,18 +1,28 @@
 import type { ItemKey } from "@usine/core/item";
+import type { LoopName } from "@usine/core/loop";
 import { canonicalRepositoryName, type RepositoryName } from "@usine/core/repository";
+import type { RunId } from "@usine/core/run";
 import { Array as EffectArray, Option, Order, Schema } from "effect";
-import { BoardItemLink, BoardTaskView } from "../operator/board.ts";
+import { BoardItemLink, BoardPullRequestView, BoardTaskView } from "../operator/board.ts";
 import type { RunView } from "../operator/run.ts";
+import { type RunUsageView, taskUsage } from "../operator/usage.ts";
 import type { ProjectedItem } from "./items.ts";
 
 const decodeUrl = Schema.decodeUnknownOption(Schema.URLFromString);
 
-// Each transient node owns its Runs and links directly to other known Items.
-// Traversal therefore needs no second key lookup or missing-neighbor fallback.
+// Each node links directly to its Runs and to the other known Items, so traversal needs no second
+// key lookup.
 interface TaskItem {
   readonly item: ProjectedItem;
   readonly runs: ReadonlyArray<RunView>;
   readonly related: Set<TaskItem>;
+}
+
+/** A Task card and the running Run that sets its lane. */
+export interface TaskCard {
+  readonly view: BoardTaskView;
+  /** The Task's newest open Run once an Attempt has started, on the card's current Item. */
+  readonly running: RunView | undefined;
 }
 
 const itemLink = (item: ProjectedItem) =>
@@ -24,13 +34,18 @@ const itemLink = (item: ProjectedItem) =>
     url: item.url,
   });
 
-/** Joins explicit issue/PR relationships into Task cards without creating stored Task identities (ADR 0024). */
+/**
+ * Joins explicit issue and pull request relationships into Task cards, without stored Task
+ * identities (ADR 0024). Each card includes its running Run, which sets its Board lane.
+ */
 export const taskCards = (
   repository: RepositoryName,
   items: ReadonlyArray<ProjectedItem>,
   runs: ReadonlyArray<RunView>,
   cycleBlockedItems: ReadonlyArray<ItemKey>,
-): ReadonlyArray<BoardTaskView> => {
+  itemLoops: ReadonlyMap<ItemKey, ReadonlyArray<LoopName>>,
+  runUsage: ReadonlyMap<RunId, RunUsageView>,
+): ReadonlyArray<TaskCard> => {
   const runsByItem = EffectArray.groupBy(runs, ({ itemKey }) => itemKey);
   const nodes = items.map((item): TaskItem => ({
     item,
@@ -66,7 +81,7 @@ export const taskCards = (
   }
 
   const visited = new Set<TaskItem>();
-  const cards: Array<BoardTaskView> = [];
+  const cards: Array<TaskCard> = [];
   for (const seed of nodes) {
     if (visited.has(seed)) continue;
     visited.add(seed);
@@ -99,23 +114,33 @@ export const taskCards = (
       );
     // An open Run controls the lane. Between stages, a PR takes over from its issue.
     const current = active?.item ?? prs[0]?.item ?? origin.item;
+    // Open pull requests sort first, so the first open or merged one is the open one or, without
+    // one, the newest merged one.
+    const [pullRequest = null] = prs.flatMap(({ item: { number, url, state } }) =>
+      state === "pr-open" || state === "pr-merged"
+        ? [new BoardPullRequestView({ number, url, state })]
+        : [],
+    );
     const preferred =
       history.find(({ run }) => run.canApprove || run.canResolveFailure) ?? active ?? history[0];
-    cards.push(
-      new BoardTaskView({
-        ...itemLink(current),
-        title: origin.item.title,
-        state: current.state,
-        labels: current.labels,
-        items: ordered.map(({ item }) => itemLink(item)),
-        runs: history.map(({ run }) => run).reverse(),
-        run: preferred?.run ?? null,
-        needsYou:
-          history.some(({ run }) => run.canApprove || run.canResolveFailure) ||
-          members.some(({ item }) => blocked.has(item.itemKey)),
-        conflicting: current.conflicting,
-      }),
-    );
+    const runs = history.map(({ run }) => run).reverse();
+    const view = new BoardTaskView({
+      ...itemLink(current),
+      title: origin.item.title,
+      state: current.state,
+      labels: current.labels,
+      items: ordered.map(({ item }) => itemLink(item)),
+      pullRequest,
+      runs,
+      run: preferred?.run ?? null,
+      needsYou:
+        history.some(({ run }) => run.canApprove || run.canResolveFailure) ||
+        members.some(({ item }) => blocked.has(item.itemKey)),
+      conflicting: current.conflicting,
+      loops: [...new Set(ordered.flatMap(({ item }) => itemLoops.get(item.itemKey) ?? []))],
+      usage: taskUsage(runs, runUsage),
+    });
+    cards.push({ view, running: active?.run.state === "Running" ? active.run : undefined });
   }
   return cards;
 };

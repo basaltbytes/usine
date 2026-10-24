@@ -17,10 +17,12 @@ import { TriggerCondition } from "@usine/engine/trigger-condition";
 import { Source } from "@usine/expression/expression-engine";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { GitHubApiError } from "@usine/github/github-app";
-import { GitHubPolling } from "@usine/github/polling";
-import { DateTime, Deferred, Effect, Fiber, Layer, Option, Schema } from "effect";
+import { GitHubItemNotFoundError, GitHubPolling } from "@usine/github/polling";
+import { DateTime, Deferred, Effect, Fiber, Layer, Option, Schema, SubscriptionRef } from "effect";
 import { TestClock } from "effect/testing";
+import { CurrentInstance } from "../src/current-instance/current-instance.ts";
 import { triggerConditionLayer } from "../src/trigger-condition.ts";
+import { fixedInstanceLayer } from "./support/current-instance.ts";
 
 const config = Schema.decodeUnknownSync(UsineConfig)({
   version: 1,
@@ -86,13 +88,18 @@ const submissionFor = (loop: LoopName, itemKey: string) =>
     parentModel: Option.none(),
   });
 
-const layerWith = (github: GitHubPolling["Service"]) =>
-  triggerConditionLayer(instance).pipe(
+const layerWith = (
+  github: GitHubPolling["Service"],
+  current: Layer.Layer<CurrentInstance> = fixedInstanceLayer(instance),
+) =>
+  triggerConditionLayer.pipe(
     Layer.provide(Layer.succeed(GitHubPolling, github)),
     Layer.provide(MarcbachmannCelLayer),
+    Layer.provide(current),
   );
 
 const failingGitHub: GitHubPolling["Service"] = {
+  missingIssues: () => Effect.succeed([]),
   changes: () => Effect.die("unused"),
   labels: () => Effect.die("unused"),
   snapshot: () =>
@@ -100,7 +107,7 @@ const failingGitHub: GitHubPolling["Service"] = {
       new GitHubApiError({
         operation: "fetch-issue-snapshot",
         status: Option.some(502),
-        message: "GitHub rejected the request with status 502",
+        message: "GitHub returned HTTP status 502",
       }),
     ),
 };
@@ -109,11 +116,35 @@ describe("TriggerCondition", () => {
   it.effect("keeps the queued Event's turn when the fresh snapshot cannot be fetched", () =>
     Effect.gen(function* () {
       const condition = yield* TriggerCondition;
-      const holds = yield* condition.holds(
+      const recheck = yield* condition.recheck(
         submissionFor(issueLoop.name, '["github","basaltbytes/usine",28]'),
       );
-      assert.strictEqual(holds, true);
+      assert.strictEqual(recheck, "matches");
     }).pipe(Effect.provide(layerWith(failingGitHub))),
+  );
+
+  it.effect("reports the Item gone when GitHub no longer has it", () =>
+    Effect.gen(function* () {
+      const condition = yield* TriggerCondition;
+      const recheck = yield* condition.recheck(
+        submissionFor(issueLoop.name, '["github","basaltbytes/usine",28]'),
+      );
+      assert.strictEqual(recheck, "item-gone");
+    }).pipe(
+      Effect.provide(
+        layerWith({
+          ...failingGitHub,
+          snapshot: (repository, item) =>
+            Effect.fail(
+              new GitHubItemNotFoundError({
+                operation: "fetch-issue-snapshot",
+                item: item.number,
+                message: `GitHub has no issue ${item.number} in ${repository}`,
+              }),
+            ),
+        }),
+      ),
+    ),
   );
 
   it.effect("interrupts a hung snapshot and keeps the queued Event's turn after five seconds", () =>
@@ -130,7 +161,7 @@ describe("TriggerCondition", () => {
       };
       const fiber = yield* Effect.gen(function* () {
         const condition = yield* TriggerCondition;
-        return yield* condition.holds(
+        return yield* condition.recheck(
           submissionFor(issueLoop.name, '["github","basaltbytes/usine",28]'),
         );
       }).pipe(Effect.provide(layerWith(github)), Effect.forkChild);
@@ -139,7 +170,7 @@ describe("TriggerCondition", () => {
       yield* TestClock.adjust("4 seconds");
       assert.isUndefined(fiber.pollUnsafe());
       yield* TestClock.adjust("1 second");
-      assert.strictEqual(yield* Fiber.join(fiber), true);
+      assert.strictEqual(yield* Fiber.join(fiber), "matches");
       assert.isTrue(yield* Deferred.isDone(interrupted));
     }),
   );
@@ -147,20 +178,44 @@ describe("TriggerCondition", () => {
   it.effect("never re-fetches for a schedule Tick, which has no standing condition", () =>
     Effect.gen(function* () {
       const condition = yield* TriggerCondition;
-      const holds = yield* condition.holds(
+      const recheck = yield* condition.recheck(
         submissionFor(scheduleLoop.name, '["github","basaltbytes/usine"]'),
       );
-      assert.strictEqual(holds, true);
+      assert.strictEqual(recheck, "matches");
     }).pipe(Effect.provide(layerWith(failingGitHub))),
+  );
+
+  it.effect(
+    "re-checks against the current instance, so a reload that removes a Loop drops its Events",
+    () =>
+      Effect.gen(function* () {
+        const current = yield* SubscriptionRef.make(instance);
+        const reloadable = Layer.succeed(CurrentInstance)({
+          get: SubscriptionRef.get(current),
+          changes: SubscriptionRef.changes(current),
+          reload: Effect.die("the test swaps the instance itself"),
+          registerWorkers: () => Effect.void,
+        });
+        const submission = submissionFor(scheduleLoop.name, '["github","basaltbytes/usine"]');
+        yield* Effect.gen(function* () {
+          const condition = yield* TriggerCondition;
+          assert.strictEqual(yield* condition.recheck(submission), "matches");
+          yield* SubscriptionRef.set(
+            current,
+            new LoadedInstance({ ...instance, loops: [issueLoop] }),
+          );
+          assert.strictEqual(yield* condition.recheck(submission), "no-longer-matches");
+        }).pipe(Effect.provide(layerWith(failingGitHub, reloadable)));
+      }),
   );
 
   it.effect("drops a queued Event whose Loop is no longer loaded", () =>
     Effect.gen(function* () {
       const condition = yield* TriggerCondition;
-      const holds = yield* condition.holds(
+      const recheck = yield* condition.recheck(
         submissionFor(LoopName.make("retired"), '["github","basaltbytes/usine",28]'),
       );
-      assert.strictEqual(holds, false);
+      assert.strictEqual(recheck, "no-longer-matches");
     }).pipe(Effect.provide(layerWith(failingGitHub))),
   );
 });

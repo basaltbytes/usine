@@ -23,12 +23,12 @@ import { ATTEMPT_TASK } from "./task.ts";
 const call = <A>(operation: string, run: () => Promise<A>) =>
   Effect.tryPromise({ try: run, catch: (cause) => durableError(operation, cause) });
 
-/** One of the pi-durable documents a conversation's generations and tools read: how to read it and how to start it over. */
+/** A pi-durable document that a conversation's generations and tools read. */
 interface ConversationDocument {
   readonly kind: string;
-  /** Rejects when the stored document does not read back. */
+  /** Rejects if the stored document can't be read. */
   readonly read: (harness: Harness, conversationId: ConversationId) => Promise<void>;
-  /** Retires the stored document without reading it and creates it again with its initial value. */
+  /** Retires the stored document without reading it and recreates it with its initial value. */
   readonly replace: (tx: Tx, conversationId: ConversationId) => Promise<void>;
 }
 
@@ -58,7 +58,7 @@ const messageOf = (cause: unknown): string =>
 
 type LiveTask = TaskRecord<JsonValue, JsonValue, JsonValue>;
 
-/** The conversation's documents that no longer read back, with the reason each one fails. */
+/** Returns the conversation's documents that cannot be read, with each failure reason. */
 const unreadableDocuments = Effect.fn("AttemptRepair.unreadableDocuments")(function* (
   harness: Harness,
   conversationId: ConversationId,
@@ -75,7 +75,10 @@ const unreadableDocuments = Effect.fn("AttemptRepair.unreadableDocuments")(funct
   return unreadable;
 });
 
-/** The Attempt whose `usine.attempt` task owns the conversation, if one does. */
+/**
+ * Returns the Attempt of the conversation's owner task, or `None` if that task isn't a
+ * `usine.attempt` task.
+ */
 const owningAttempt = Effect.fn("AttemptRepair.owningAttempt")(function* (
   harness: Harness,
   conversationId: ConversationId,
@@ -93,8 +96,8 @@ const owningAttempt = Effect.fn("AttemptRepair.owningAttempt")(function* (
 });
 
 /**
- * Replaces the unreadable documents of the live tasks' conversations in one
- * commit, and records the reason on the Attempt that owns each conversation.
+ * Replaces the unreadable documents of the live tasks' conversations in one commit and sets
+ * `storageFailure` on each affected Attempt record.
  */
 const replaceUnreadable = Effect.fn("AttemptRepair.replaceUnreadable")(function* (
   harness: Harness,
@@ -115,7 +118,7 @@ const replaceUnreadable = Effect.fn("AttemptRepair.replaceUnreadable")(function*
       conversationId,
       documents: unreadable.map(({ document }) => document),
       attempt: yield* owningAttempt(harness, conversationId),
-      cause: `The parent conversation ${conversationId} could not be read back from durable storage (${reasons.join("; ")})`,
+      cause: `Can't read the parent conversation ${conversationId} from durable storage: ${reasons.join("; ")}`,
     });
   }
   if (repairs.length === 0) {
@@ -151,7 +154,7 @@ const replaceUnreadable = Effect.fn("AttemptRepair.replaceUnreadable")(function*
   }
 });
 
-/** Aborts each live `usine.attempt` task whose Attempt record names a storage failure. */
+/** Aborts each live `usine.attempt` task whose Attempt record has a `storageFailure`. */
 const abortFailedAttempts = Effect.fn("AttemptRepair.abortFailedAttempts")(function* (
   harness: Harness,
   tasks: ReadonlyArray<LiveTask>,
@@ -173,11 +176,8 @@ const abortFailedAttempts = Effect.fn("AttemptRepair.abortFailedAttempts")(funct
 });
 
 /**
- * Runs before the harness resumes its tasks. A document pi-durable cannot read
- * back stops every step that needs it, so instead of letting that stop the
- * whole harness, this replaces the unreadable documents of each live task's
- * conversation and fails only the Attempt that owns the conversation: its
- * record keeps the reason and its task is aborted, which records the failure.
+ * Replaces the unreadable documents of each live task's conversation and aborts the affected
+ * Attempt's task with the reason. Runs before the harness resumes its tasks.
  */
 export const repairUnreadableConversations = (harness: Harness): Effect.Effect<void> =>
   Effect.gen(function* () {

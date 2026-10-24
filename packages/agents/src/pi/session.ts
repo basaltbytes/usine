@@ -2,6 +2,9 @@ import {
   AgentSession,
   AgentSessionEvent,
   AgentSessionId,
+  ProviderRecovered,
+  ProviderRetries,
+  ProviderRetrying,
   SessionFinished,
   SessionTokensUpdated,
   TokenCount,
@@ -10,57 +13,30 @@ import {
   ToolStarted,
 } from "@usine/core/agent/session";
 import { Cause, Deferred, Effect, Option, Queue, Ref, Schema } from "effect";
-import { piMessageTokens } from "./usage.ts";
-import {
-  type AgentSessionError,
-  AgentResultError,
-  BLOCKED_MARKER,
-  SessionResult,
-} from "../runtime.ts";
+import { addUsage, piMessageUsage, type SessionUsage } from "./usage.ts";
+import { type AgentSessionError, reportedOutcome, SessionResult } from "../runtime.ts";
 import type { PiMessage, PiSession, PiSessionEvent } from "./sdk.ts";
 
 export interface SessionChannelOptions {
-  /** Adapter name printed in the terminal log lines. */
+  /** The adapter name in log lines. */
   readonly label: string;
   readonly sessionId: AgentSessionId;
 }
 
 /**
- * Shared session state: one event queue, one result, and a latch so exactly
- * one terminal transition wins. Cleanups registered through `onTerminal` run
- * on that transition.
+ * The state of one session: an event queue, a result, and a latch that allows one terminal
+ * transition. Cleanups registered with `onTerminal` run on that transition.
  */
 export interface SessionChannel {
   readonly events: Queue.Queue<AgentSessionEvent, AgentSessionError | Cause.Done>;
   readonly result: Deferred.Deferred<SessionResult, AgentSessionError>;
   readonly isTerminal: Effect.Effect<boolean>;
   readonly onTerminal: (cleanup: () => void) => void;
-  /** Queues one event; after the terminal transition the event is logged and dropped. */
+  /** Queues an event; after the terminal transition, logs and drops it. */
   readonly emit: (event: AgentSessionEvent) => Effect.Effect<void>;
   readonly fail: (error: AgentSessionError) => Effect.Effect<void>;
   readonly finish: (session: AgentSession, message: string) => Effect.Effect<void>;
 }
-
-/**
- * Only an answer that opens with the reserved marker is an outcome signal,
- * whether its details follow on the same line or the next; ordinary prose and
- * later mentions are unchanged.
- */
-const reportedBlocker = (
-  session: AgentSession,
-  message: string,
-): Option.Option<AgentResultError> => {
-  const answer = message.trim();
-  if (!answer.startsWith(BLOCKED_MARKER)) return Option.none();
-  return Option.some(
-    new AgentResultError({
-      sessionId: Option.some(session.id),
-      message:
-        answer.slice(BLOCKED_MARKER.length).trim() ||
-        "Agent reported an unresolved blocker without details.",
-    }),
-  );
-};
 
 export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
   options: SessionChannelOptions,
@@ -103,7 +79,7 @@ export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
     message: string,
   ) {
     yield* Effect.annotateCurrentSpan({ sessionId: session.id });
-    const own = reportedBlocker(session, message);
+    const own = reportedOutcome(Option.some(session.id), message);
     if (Option.isSome(own)) return yield* fail(own.value);
     if (yield* Ref.getAndSet(terminal, true)) return;
     yield* Queue.offer(events, new SessionFinished({ session }));
@@ -167,6 +143,23 @@ const messageText = (message: PiMessage): string | undefined => {
   return text || undefined;
 };
 
+const PiUserMessage = Schema.Struct({
+  role: Schema.Literal("user"),
+  content: Schema.Union([Schema.String, Schema.Array(Schema.Json)]),
+});
+
+/** Returns the text of a user message as Pi compares it with its queued messages, or `None` for other messages. */
+export const piUserMessageText = (message: PiMessage): Option.Option<string> => {
+  if (!Schema.is(PiUserMessage)(message)) return Option.none();
+  if (Schema.is(Schema.String)(message.content)) return Option.some(message.content);
+  return Option.some(
+    message.content
+      .filter(Schema.is(PiTextBlock))
+      .map(({ text }) => text)
+      .join(""),
+  );
+};
+
 export const lastPiMessageText = (messages: ReadonlyArray<PiMessage>): string | undefined => {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
@@ -206,10 +199,8 @@ const sessionEventFrom = (
 };
 
 /**
- * Subscribes the Pi SDK's synchronous listener to one session channel.
- * Normalized events reach the queue on the SDK's own tick so none can trail
- * the prompt's resolution; operational events with no normalized shape (retry
- * backoffs, compactions) are logged so a silent wait stays explainable.
+ * Subscribes to `piSession` and queues normalized events synchronously, so none arrive after the
+ * prompt resolves. Provider retries are counted per turn and reset on `agent_settled`.
  */
 export const subscribePiSession = (
   piSession: PiSession,
@@ -220,47 +211,70 @@ export const subscribePiSession = (
     const context = yield* Effect.context<never>();
     const log = Effect.runForkWith(context);
     let lastText: string | undefined;
-    let totalTokens = 0;
-    const unsubscribe = piSession.subscribe((event) => {
-      if (event.type === "message_end") {
-        const usage = piMessageTokens(event.message);
-        if (Option.isSome(usage)) {
-          totalTokens += usage.value;
-          if (
-            !Queue.offerUnsafe(
-              channel.events,
-              new SessionTokensUpdated({ session, totalTokens: TokenCount.make(totalTokens) }),
-            )
-          ) {
-            log(
-              Effect.logWarning("Dropped Pi usage after the terminal transition", {
-                sessionId: session.id,
-              }),
-            );
-          }
-        }
-      }
-      if (event.type === "auto_retry_start") {
+    let total: SessionUsage = { totalTokens: TokenCount.make(0), costUsd: Option.none() };
+    // Provider retries reported in the current turn, and whether the last retry is unresolved.
+    let retries = 0;
+    let retrying = false;
+    const offer = (sessionEvent: AgentSessionEvent) => {
+      if (!Queue.offerUnsafe(channel.events, sessionEvent)) {
         log(
-          Effect.logWarning("Pi session is backing off before a retry", {
-            attempt: event.attempt,
-            delayMillis: event.delayMs,
-            errorMessage: event.errorMessage,
-            maxAttempts: event.maxAttempts,
+          Effect.logWarning("Dropped a Pi session event after the terminal transition", {
+            event: sessionEvent._tag,
             sessionId: session.id,
           }),
         );
+      }
+    };
+    const unsubscribe = piSession.subscribe((event) => {
+      if (event.type === "message_end") {
+        const usage = piMessageUsage(event.message);
+        if (Option.isSome(usage)) {
+          total = addUsage(total, usage.value);
+          offer(new SessionTokensUpdated({ session, ...total }));
+        }
+      }
+      if (event.type === "auto_retry_start") {
+        retries += 1;
+        retrying = true;
+        const message = event.errorMessage || "Unknown error";
+        log(
+          Effect.logWarning("Pi session cannot reach its provider and will retry", {
+            attempt: event.attempt,
+            delayMillis: event.delayMs,
+            maxAttempts: event.maxAttempts,
+            message,
+            retries,
+            sessionId: session.id,
+          }),
+        );
+        offer(new ProviderRetrying({ session, message, retries: ProviderRetries.make(retries) }));
         return;
       }
       if (event.type === "auto_retry_end") {
+        if (event.success && retrying) {
+          retrying = false;
+          log(
+            Effect.logInfo("Pi session reached its provider again", {
+              retries,
+              sessionId: session.id,
+            }),
+          );
+          offer(new ProviderRecovered({ session, retries: ProviderRetries.make(retries) }));
+          return;
+        }
         log(
-          Effect.logInfo("Pi session finished retrying", {
+          Effect.logInfo("Pi session stopped retrying its provider", {
             attempt: event.attempt,
             finalError: event.finalError,
             sessionId: session.id,
             success: event.success,
           }),
         );
+        return;
+      }
+      if (event.type === "agent_settled") {
+        retries = 0;
+        retrying = false;
         return;
       }
       if (event.type === "compaction_start" || event.type === "compaction_end") {
@@ -276,14 +290,7 @@ export const subscribePiSession = (
       const sessionEvent = sessionEventFrom(event, session);
       if (sessionEvent === undefined) return;
       if (sessionEvent._tag === "TextOutput") lastText = sessionEvent.text;
-      if (!Queue.offerUnsafe(channel.events, sessionEvent)) {
-        log(
-          Effect.logWarning("Dropped a Pi session event after the terminal transition", {
-            event: sessionEvent._tag,
-            sessionId: session.id,
-          }),
-        );
-      }
+      offer(sessionEvent);
     });
     channel.onTerminal(unsubscribe);
     return { lastText: () => lastText, unsubscribe };

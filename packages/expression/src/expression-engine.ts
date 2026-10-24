@@ -1,7 +1,10 @@
-import { Context, type Effect, Schema } from "effect";
+import { Context, type Effect, type Result, Schema } from "effect";
 import type { Environment } from "./environment.ts";
 
-/** Non-blank CEL source text. */
+/**
+ * The text of a CEL expression, such as a Loop's `if:` condition or a `{{ }}` interpolation.
+ * Decoding rejects blank text; {@link ExpressionEngine} checks syntax and types.
+ */
 export const Source = Schema.String.check(
   Schema.isPattern(/\S/u, { message: "Expected a non-blank CEL expression" }),
 ).pipe(Schema.brand("ExpressionSource"));
@@ -9,7 +12,15 @@ export type Source = typeof Source.Type;
 
 const Position = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
-/** Whether checking failed during parsing, type resolution, or result-type validation. */
+/**
+ * - `parse_error`: the source is not valid CEL syntax.
+ * - `type_error`: the source references an unknown variable or field, or combines
+ *   incompatible types.
+ * - `unexpected_result_type`: the result type is wrong for the operation, such as a non-`bool`
+ *   selection condition.
+ * - `check_failed`: the CEL implementation rejected the {@link Environment} itself, such as an
+ *   undeclared type name, or failed without a detail.
+ */
 export const CheckErrorCode = Schema.Literals([
   "check_failed",
   "parse_error",
@@ -18,29 +29,44 @@ export const CheckErrorCode = Schema.Literals([
 ]);
 export type CheckErrorCode = typeof CheckErrorCode.Type;
 
-/** The expression failed to parse, to type-check, or to produce the expected result type. */
+/** An error from checking an expression against an {@link Environment}; checking never reads a payload. */
 export class ExpressionCheckError extends Schema.TaggedError<ExpressionCheckError>(
   "@usine/expression/ExpressionCheckError",
 )("ExpressionCheckError", {
   source: Source,
   code: CheckErrorCode,
+  /**
+   * A human-readable description, possibly multi-line with a marked excerpt of `source`. The
+   * wording isn't stable; branch on `code`.
+   */
   message: Schema.NonEmptyString,
+  /**
+   * The zero-based offset in `source` where the failure starts. Always `None` for
+   * `unexpected_result_type` and `check_failed`.
+   */
   position: Schema.Option(Position),
 }) {}
 
-/** Evaluation failed on an expression that had already checked. */
+/**
+ * An error from evaluating a checked expression, such as a missing `context` key, a value of the
+ * wrong type, division by zero, or an out-of-range list index.
+ */
 export class ExpressionEvaluationError extends Schema.TaggedError<ExpressionEvaluationError>(
   "@usine/expression/ExpressionEvaluationError",
 )("ExpressionEvaluationError", {
   source: Source,
+  /** A human-readable description, possibly multi-line with a marked excerpt of `source`. The wording isn't stable. */
   message: Schema.NonEmptyString,
 }) {}
 
-/** The failures callers can receive when checking or evaluating a CEL expression. */
 export const ExpressionError = Schema.Union([ExpressionCheckError, ExpressionEvaluationError]);
 export type ExpressionError = typeof ExpressionError.Type;
 
-/** Values prompt interpolation can render. CEL ints stay bigint. */
+/**
+ * The result of a prompt interpolation; CEL `int` is a `bigint` and `double` is a `number`. A
+ * `uint` result passes `checkScalar`, but `evaluateScalar` fails with
+ * {@link ExpressionEvaluationError}; wrap it in `string(...)` or `double(...)`.
+ */
 export const Scalar = Schema.Union([
   Schema.String,
   Schema.Number,
@@ -50,34 +76,44 @@ export const Scalar = Schema.Union([
 ]);
 export type Scalar = typeof Scalar.Type;
 
-/** Checks and evaluates the expressions used to select Items and fill Loop task templates. */
 export interface ExpressionEngineService {
   /**
-   * The string literals the expression compares against the `name` field of
-   * values reached from `memberPath`, following macro bindings and collection
-   * transformations. Config validation uses it to spot undeclared labels.
+   * Returns the string literals compared with the `name` field of values under `memberPath`,
+   * following macro bindings and collection transformations.
    */
   readonly relatedStringLiterals: (
     source: Source,
     memberPath: ReadonlyArray<string>,
   ) => Effect.Effect<ReadonlyArray<string>, ExpressionCheckError>;
-  /** Checks whether the expression can select Items, without evaluating a payload. */
+  /** Checks that the expression has type `bool`. */
   readonly checkBoolean: (
     source: Source,
     environment: Environment,
   ) => Effect.Effect<void, ExpressionCheckError>;
-  /** Checks whether the expression can produce one value for prompt interpolation. */
+  /** Checks that the expression can be a prompt interpolation. */
   readonly checkScalar: (
     source: Source,
     environment: Environment,
   ) => Effect.Effect<void, ExpressionCheckError>;
-  /** Checks and evaluates a selection condition; `context` supplies values for the environment's root variables. */
+  /** Checks and evaluates a selection condition against `context`. */
   readonly evaluateBoolean: (
     source: Source,
     environment: Environment,
     context: Schema.JsonObject,
   ) => Effect.Effect<boolean, ExpressionError>;
-  /** Checks and evaluates a prompt interpolation; `context` supplies values for the environment's root variables. */
+  /**
+   * Checks the condition once and evaluates it against each of `contexts`, returning one
+   * `Result` per context in order. Fails with `ExpressionCheckError` if the check fails.
+   */
+  readonly evaluateBooleanEach: (
+    source: Source,
+    environment: Environment,
+    contexts: ReadonlyArray<Schema.JsonObject>,
+  ) => Effect.Effect<
+    ReadonlyArray<Result.Result<boolean, ExpressionEvaluationError>>,
+    ExpressionCheckError
+  >;
+  /** Checks and evaluates a prompt interpolation against `context`. */
   readonly evaluateScalar: (
     source: Source,
     environment: Environment,
@@ -85,7 +121,7 @@ export interface ExpressionEngineService {
   ) => Effect.Effect<Scalar, ExpressionError>;
 }
 
-/** Evaluates Loop conditions and prompt expressions against their declared payload context. */
+/** The CEL expression service, provided by `MarcbachmannCelLayer` from `@usine/expression/marcbachmann-cel`. */
 export class ExpressionEngine extends Context.Service<ExpressionEngine, ExpressionEngineService>()(
   "@usine/expression/ExpressionEngine",
 ) {}

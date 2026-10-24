@@ -17,9 +17,12 @@ export class LabelPreflightFinding extends Schema.Class<LabelPreflightFinding>(
 export interface LabelReconciliation {
   readonly labels: ReadonlyArray<StoredRepositoryLabel>;
   readonly findings: ReadonlyArray<LabelPreflightFinding>;
-  /** True when a label was created, so the poll cursor must drop its catalog ETag. */
+  /** Whether a label was created, so the poll cursor must drop its catalog ETag. */
   readonly catalogChanged: boolean;
-  /** When a creation rate limit asks the next cycle to wait; this cycle's triggers still run. */
+  /**
+   * The time a creation rate limit asks the next cycle to wait until. This cycle's triggers still
+   * run.
+   */
   readonly nextPollAt: Option.Option<DateTime.Utc>;
 }
 

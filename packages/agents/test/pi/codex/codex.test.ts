@@ -8,19 +8,27 @@ import {
   Effect,
   Fiber,
   Layer,
+  Logger,
   Option,
   Queue,
   Result,
   Schema,
   Stream,
 } from "effect";
-import { Interrupt, OperatorMessage, Release } from "@usine/core/attempt/channel";
+import {
+  Interrupt,
+  type InterventionState,
+  OperatorMessage,
+  Release,
+} from "@usine/core/attempt/channel";
+import { WorkerName } from "@usine/core/worker";
 import { TestClock } from "effect/testing";
 import { type ChildHost, LocalProcess, RemoteShell } from "../../../src/child-host/child-host.ts";
 import {
   AgentResultError,
   ChildRequest,
   CodexChildBackend,
+  type OnDelivery,
   PoolUnavailableError,
   toAttemptFailure,
   SessionOperationError,
@@ -36,12 +44,15 @@ import {
 } from "../../../src/pi/codex/app-server.ts";
 import { codexChildBackendLayer } from "../../../src/pi/codex/codex.ts";
 
+const noDelivery: OnDelivery = () => Effect.void;
+
 const request = (
   model = "gpt-5.6-terra",
   effort: Effort = "off",
   host: ChildHost = new LocalProcess(),
 ) =>
   new ChildRequest({
+    worker: WorkerName.make("worker-1"),
     environment: { HOME: "/home/worker", PATH: "/usr/bin:/bin" },
     host,
     session: new ChildSession({
@@ -166,9 +177,9 @@ describe("Codex child backend", () => {
               ),
             ),
           );
-          const refused = yield* Effect.flip(running.intervene(new Interrupt()));
+          const refused = yield* Effect.flip(running.intervene(new Interrupt(), noDelivery));
           assert.strictEqual(refused._tag, "SessionOperationError");
-          yield* running.intervene(new Interrupt());
+          yield* running.intervene(new Interrupt(), noDelivery);
           assert.strictEqual(calls.filter(({ method }) => method === "turn/interrupt").length, 2);
           yield* Queue.offer(notifications, {
             method: "turn/completed",
@@ -177,7 +188,10 @@ describe("Codex child backend", () => {
           yield* Queue.take(idle);
           assert.strictEqual(result.pollUnsafe(), undefined);
           assert.strictEqual(closes, 0);
-          yield* running.intervene(new OperatorMessage({ message: "Continue with my correction" }));
+          yield* running.intervene(
+            new OperatorMessage({ message: "Continue with my correction" }),
+            noDelivery,
+          );
           assert.strictEqual(turns, 2);
           yield* Queue.offer(notifications, {
             method: "item/completed",
@@ -193,13 +207,69 @@ describe("Codex child backend", () => {
           });
           yield* Queue.take(idle);
           assert.strictEqual(result.pollUnsafe(), undefined);
-          yield* running.intervene(new Release());
+          yield* running.intervene(new Release(), noDelivery);
           assert.strictEqual((yield* Fiber.join(result)).message, "Corrected result");
           assert.strictEqual(closes, 1);
           assert.strictEqual(calls.filter(({ method }) => method === "thread/start").length, 1);
         }).pipe(Effect.provide(codexChildBackendLayer), Effect.provide(server));
       }).pipe(Effect.scoped),
   );
+  it.effect("reports a message steered into a running turn read once Codex records it", () =>
+    Effect.gen(function* () {
+      const notifications = yield* Queue.make<CodexNotification, Cause.Done>();
+      const calls: Array<{ readonly method: string; readonly params: Schema.Json }> = [];
+      const responses: Readonly<Record<string, Schema.Json>> = successfulResponses([
+        { id: "gpt-5.6-terra", model: "gpt-5.6-terra" },
+      ]);
+      const server = Layer.succeed(CodexAppServer)({
+        open: () =>
+          Effect.succeed({
+            notifications: Stream.fromQueue(notifications),
+            notify: () => Effect.void,
+            close: Queue.end(notifications),
+            request: (_operation, method, params) =>
+              Effect.sync(() => {
+                calls.push({ method, params });
+                return responses[method] ?? {};
+              }),
+          }),
+      });
+      yield* Effect.gen(function* () {
+        const running = yield* (yield* CodexChildBackend).launch(request());
+        const reads: Array<Option.Option<InterventionState>> = [];
+        const state = yield* running.intervene(
+          new OperatorMessage({ message: "Run the linter too." }),
+          (delivered) =>
+            Effect.sync(() => {
+              reads.push(delivered);
+            }),
+        );
+        assert.deepStrictEqual([state.held, state.queued], [true, true]);
+        assert.strictEqual(calls.filter(({ method }) => method === "turn/steer").length, 1);
+        yield* Queue.offer(notifications, {
+          method: "item/started",
+          params: {
+            threadId: "thread-1",
+            turnId: "turn-1",
+            item: {
+              type: "userMessage",
+              id: "steered",
+              clientId: null,
+              content: [{ type: "text", text: "Run the linter too.", text_elements: [] }],
+            },
+          },
+        });
+        for (let spin = 0; reads.length === 0; spin += 1) {
+          if (spin > 1_000) return assert.fail("the read was never reported");
+          yield* Effect.yieldNow;
+        }
+        const [read] = reads;
+        assert(read !== undefined && Option.isSome(read));
+        assert.deepStrictEqual([read.value.held, read.value.queued], [true, false]);
+      }).pipe(Effect.provide(codexChildBackendLayer), Effect.provide(server));
+    }).pipe(Effect.scoped),
+  );
+
   for (const status of ["completed", "interrupted"] as const) {
     it.effect(`waits for shutdown before publishing ${status} work`, () =>
       Effect.gen(function* () {
@@ -379,6 +449,106 @@ describe("Codex child backend", () => {
     );
   });
 
+  it.effect(
+    "reports each provider reconnect of a turn and the recovery when the turn resumes",
+    () => {
+      // App-server notifications from a Worker whose gateway could not resolve chatgpt.com (#266).
+      const reconnect = (message: string, additionalDetails: string, turnId = "turn-1") => ({
+        method: "error",
+        params: {
+          error: { message, codexErrorInfo: null, additionalDetails },
+          willRetry: true,
+          threadId: "thread-1",
+          turnId,
+        },
+      });
+      const notifications: ReadonlyArray<CodexNotification> = [
+        reconnect("Reconnecting... 1/5", "request timed out"),
+        reconnect(
+          "Reconnecting... waiting for network",
+          "Connection failed: error sending request",
+        ),
+        reconnect("Reconnecting... 1/5", "request timed out", "turn-0"),
+        {
+          method: "error",
+          params: {
+            error: {
+              message: "Usage limit reached",
+              codexErrorInfo: null,
+              additionalDetails: null,
+            },
+            willRetry: false,
+            threadId: "thread-1",
+            turnId: "turn-1",
+          },
+        },
+        {
+          method: "item/agentMessage/delta",
+          params: { threadId: "thread-1", turnId: "turn-1", itemId: "m-1", delta: "Do" },
+        },
+        {
+          method: "item/completed",
+          params: {
+            threadId: "thread-1",
+            turnId: "turn-1",
+            item: { type: "agentMessage", id: "m-1", text: "Done." },
+          },
+        },
+        {
+          method: "turn/completed",
+          params: { turn: { id: "turn-1", status: "completed", error: null } },
+        },
+      ];
+      const warnings: Array<string> = [];
+      const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+        if (logLevel === "Warn") warnings.push(JSON.stringify(message));
+      });
+      const server = connectionLayer(
+        successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
+        notifications,
+      );
+      return Effect.scoped(
+        Effect.gen(function* () {
+          const running = yield* (yield* CodexChildBackend).launch(request());
+          const [events, result] = yield* Effect.all([
+            Stream.runCollect(running.events),
+            running.result,
+          ]);
+          assert.strictEqual(result.message, "Done.");
+          assert.deepStrictEqual(
+            events.map((event) => event._tag),
+            [
+              "SessionStarted",
+              "ProviderRetrying",
+              "ProviderRetrying",
+              "ProviderRecovered",
+              "TextOutput",
+              "SessionFinished",
+            ],
+          );
+          const reports = events.filter((event) => event._tag === "ProviderRetrying");
+          assert.deepStrictEqual(
+            reports.map(({ message, retries }) => [message, retries]),
+            [
+              ["Reconnecting... 1/5 (request timed out)", 1],
+              ["Reconnecting... waiting for network (Connection failed: error sending request)", 2],
+            ],
+          );
+          const recovered = events.find((event) => event._tag === "ProviderRecovered");
+          assert(recovered?._tag === "ProviderRecovered");
+          assert.strictEqual(recovered.retries, 2);
+          const reconnects = warnings.filter((line) => line.includes("cannot reach its provider"));
+          assert.lengthOf(reconnects, 2, "one warning per reconnect of the current turn");
+          assert.include(reconnects[1], '"retries":2');
+        }).pipe(
+          Effect.provide(codexChildBackendLayer),
+          Effect.provide(server),
+          Effect.provide(Logger.layer([logger])),
+        ),
+      );
+    },
+  );
+
   it.effect("opens the app server on the child's remote host", () => {
     const host = new RemoteShell({
       ssh: { command: "ssh", args: [] },
@@ -465,14 +635,14 @@ describe("Codex child backend", () => {
 
   it.effect("tolerates sparse rate windows, undecodable items, and unknown notifications", () => {
     const notifications: ReadonlyArray<CodexNotification> = [
-      // Sparse rolling update: only the load figure of one window is present.
+      // Partial rate-limit update: only one window's load figure is present.
       {
         method: "account/rateLimits/updated",
         params: { rateLimits: { primary: { usedPercent: 91 } } },
       },
-      // Undecodable item payload: logged and skipped, never fatal.
+      // Undecodable item payload: logged and skipped, not fatal.
       { method: "item/completed", params: { nonsense: true } },
-      // Server pushes with no normalized shape.
+      // Server notifications with no normalized form.
       { method: "error", params: { error: { message: "transient" }, willRetry: true } },
       { method: "thread/tokenUsage/updated", params: { tokens: 12 } },
       {

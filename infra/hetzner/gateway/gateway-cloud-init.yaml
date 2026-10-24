@@ -1,13 +1,15 @@
 #cloud-config
-# The usine gateway VM: SSH bastion, DNS resolver for Workers, the gateway
-# service (credential-injecting reverse proxy, forward proxy, admin API), and
-# nftables. gateway.sh replaces the @@NAME@@ placeholders before the VM is
-# created. No secret is in this file: the VM generates its own admin token and
-# caller key, and API keys are copied in over SSH.
+# The usine gateway VM: SSH bastion, DNS resolver and time server for
+# Workers, the gateway service (credential-injecting reverse proxy, forward
+# proxy, admin API), and nftables. gateway.sh replaces the @@NAME@@
+# placeholders before the VM is created. No secret is in this file: the VM
+# generates its own admin token and caller key, and API keys are copied in
+# over SSH.
 
 package_update: true
 packages:
   - ca-certificates
+  - chrony
   - curl
   - dnsmasq
   - nftables
@@ -50,6 +52,15 @@ write_files:
       address=/@@DOMAIN@@/@@GATEWAY_IP@@
       local=/@@DOMAIN@@/
 
+  # chrony reads this file next to its own chrony.conf, which keeps the Debian pool as a time source.
+  - path: /etc/chrony/conf.d/usine-gateway.conf
+    permissions: "0644"
+    content: |
+      server ntp1.hetzner.de iburst
+      server ntp2.hetzner.com iburst
+      server ntp3.hetzner.net iburst
+      allow @@NETWORK_CIDR@@
+
   # Written before the package is installed, so dnsmasq never becomes the gateway's own resolver through resolvconf.
   - path: /etc/default/dnsmasq
     permissions: "0644"
@@ -87,9 +98,9 @@ write_files:
       [Service]
       User=usine-gateway
       Group=usine-gateway
-      EnvironmentFile=/etc/usine-gateway/settings.env
-      EnvironmentFile=/etc/usine-gateway/secrets.env
+      Environment=USINE_GATEWAY_ENVIRONMENT_FILES=/etc/usine-gateway/settings.env:/etc/usine-gateway/secrets.env
       ExecStart=/usr/local/bin/usine-gateway
+      ExecReload=kill -HUP $MAINPID
       AmbientCapabilities=CAP_NET_BIND_SERVICE
       CapabilityBoundingSet=CAP_NET_BIND_SERVICE
       NoNewPrivileges=yes
@@ -106,7 +117,7 @@ write_files:
     permissions: "0755"
     content: |
       #!/bin/sh
-      # Installs or upgrades the gateway from tarballs made with pnpm pack, then restarts it.
+      # Installs or upgrades the gateway from npm package specs or tarballs made with pnpm pack, then restarts it.
       # One tree for all of them, so @usine/gateway and @usine/core share one copy of effect.
       set -eu
       npm install --prefix /opt/usine-gateway --omit=dev "$@"
@@ -125,16 +136,18 @@ write_files:
         printf 'USINE_GATEWAY_ADMIN_TOKEN=%s\nUSINE_GATEWAY_CALLER_KEY=%s\n' \
           "$(openssl rand -hex 32)" "$(openssl rand -hex 32)" > /etc/usine-gateway/secrets.env
       fi
+      chgrp usine-gateway /etc/usine-gateway/secrets.env
+      chmod 0640 /etc/usine-gateway/secrets.env
       umask 022
       sysctl --system > /dev/null
       systemctl enable --now nftables
       systemctl restart dnsmasq
       if [ -e /run/resolvconf/interface/lo.dnsmasq ]; then resolvconf -d lo.dnsmasq; fi
       systemctl reload ssh
-      version=v22.23.2
+      version=v24.22.1
       case "$(uname -m)" in
-        x86_64) arch=x64 sum=d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307 ;;
-        aarch64) arch=arm64 sum=fff4078c5def658577f92c88db7db3bc0072924bfb93fe52c1e744a54e94abb8 ;;
+        x86_64) arch=x64 sum=6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6 ;;
+        aarch64) arch=arm64 sum=dbabf7a1cbf947e6059ffad2c27b80041db97dea1e553b62afdee7f13fca336e ;;
         *) echo "unsupported architecture $(uname -m)" >&2; exit 1 ;;
       esac
       archive=$(mktemp)

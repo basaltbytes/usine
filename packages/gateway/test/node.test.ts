@@ -4,12 +4,14 @@ import {
   DateTime,
   Deferred,
   Effect,
+  Exit,
   Layer,
   Logger,
   Option,
   Predicate,
   Redacted,
   Schedule,
+  Scope,
   Tracer,
 } from "effect";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
@@ -21,7 +23,7 @@ import { serveEgressProxy } from "../src/node/egress-proxy.ts";
 import { GatewayAddresses, gatewayLayer, type Listener } from "../src/node/node.ts";
 import { UpstreamBase } from "../src/upstream.ts";
 import { ADMIN_TOKEN_VALUE, NO_PROVIDERS, REPOSITORY, WORKER, settingsLayer } from "./fixtures.ts";
-import { rawThroughTunnel, tlsThroughTunnel } from "./tunnel.ts";
+import { abandonedTunnel, rawThroughTunnel, silentTunnel, tlsThroughTunnel } from "./tunnel.ts";
 
 const LOOPBACK = { host: "127.0.0.1", port: 0 };
 
@@ -30,15 +32,15 @@ const gateway = gatewayLayer({ proxy: LOOPBACK, egress: LOOPBACK, admin: LOOPBAC
   Layer.provideMerge(FetchHttpClient.layer),
 );
 
-const refusals: Array<string> = [];
+/** The Gateway's log lines with their levels, for tests that provide `gatewayRecordingLogs`. */
+const gatewayLines: Array<string> = [];
 
-const gatewayRecordingRefusals = gateway.pipe(
+const gatewayRecordingLogs = gateway.pipe(
   Layer.provide(
     Logger.layer(
       [
-        Logger.make(({ message }) => {
-          const line = JSON.stringify(message);
-          if (line.includes("Gateway refused a request")) refusals.push(line);
+        Logger.make(({ logLevel, message }) => {
+          gatewayLines.push(JSON.stringify({ level: logLevel, message }));
         }),
       ],
       { mergeWithExisting: true },
@@ -46,7 +48,7 @@ const gatewayRecordingRefusals = gateway.pipe(
   ),
 );
 
-/** The first of `lines` containing `needle`, waiting for it briefly since the proxy logs after it closes a connection. */
+/** Returns the first line in `lines` containing `needle`, waiting briefly because the proxy logs after closing a connection. */
 const logged = (lines: ReadonlyArray<string>, needle: string) =>
   Effect.suspend(() => {
     const line = lines.find((candidate) => candidate.includes(needle));
@@ -55,17 +57,16 @@ const logged = (lines: ReadonlyArray<string>, needle: string) =>
       : Effect.succeed(line);
   }).pipe(Effect.retry({ schedule: Schedule.spaced("20 millis"), times: 100 }));
 
-/** The refusal logged with `reason`. */
-const refusalLogged = (reason: string) => logged(refusals, `"reason":"${reason}"`);
+/** Returns the refusal logged with `reason`. */
+const refusalLogged = (reason: string) => logged(gatewayLines, `"reason":"${reason}"`);
 
-/** What the forward proxy needs on its own, without the reverse proxy and admin API. */
+/** The services the forward proxy needs without the reverse proxy and admin API. */
 const egressServices = CallerTokens.layer.pipe(Layer.provideMerge(settingsLayer(NO_PROVIDERS)));
 
 /**
- * A local upstream answering with `handler`, and a forward proxy whose
- * gateway destination is that upstream, so a request for
- * `http://git.gw.test/...` relays to it. `messages` collects the proxy's log
- * lines.
+ * Starts a local upstream that responds with `handler`, and a forward proxy whose Gateway
+ * destination is that upstream, so `http://git.gw.test/...` relays to it. `messages` collects
+ * the proxy's log lines.
  */
 const relayToUpstream = (handler: RequestListener) =>
   Effect.gen(function* () {
@@ -94,7 +95,7 @@ const relayToUpstream = (handler: RequestListener) =>
     return { proxy, messages };
   });
 
-/** A body chunk an upstream keeps sending until its connection is destroyed. */
+/** A body chunk an upstream sends repeatedly until its connection is destroyed. */
 const CHUNK = Buffer.alloc(64 * 1024);
 
 const admin = (token: string) =>
@@ -106,7 +107,7 @@ const admin = (token: string) =>
     });
   });
 
-/** Sends `CONNECT authority` to the forward proxy and resolves with the status and refusal reason. */
+/** Sends `CONNECT authority` to the forward proxy and returns the status and refusal reason. */
 const connect = (proxy: Listener, authority: string) =>
   Effect.callback<{ status: number; reason: string | undefined }>((resume) => {
     const outgoing = request({
@@ -124,7 +125,7 @@ const connect = (proxy: Listener, authority: string) =>
     outgoing.end();
   });
 
-/** Sends an absolute-form `GET url` to the forward proxy, as `HTTP_PROXY` clients do, and resolves with the status and refusal reason. */
+/** Sends an absolute-form `GET url` to the forward proxy, like `HTTP_PROXY` clients, and returns the status and refusal reason. */
 const relayed = (proxy: Listener, url: string) =>
   Effect.callback<{ status: number; reason: string | undefined }>((resume) => {
     const outgoing = request(
@@ -200,7 +201,7 @@ describe("the Node gateway", () => {
       ]);
       const upstream = createServer((_request, response) => {
         response.writeHead(200);
-        // Wait until the Worker has received the first chunk before truncating.
+        // Waits until the Worker has received the first chunk before truncating.
         response.write("partial");
       });
       yield* Effect.acquireRelease(
@@ -297,15 +298,17 @@ describe("the Node gateway", () => {
 
   it.live("the admin API refuses a wrong admin token and an expired attachment", () =>
     Effect.gen(function* () {
+      gatewayLines.length = 0;
       const intruder = yield* admin("not-the-admin-token-0123456789abcdef");
       const refused = yield* Effect.flip(intruder.attachments.list());
       assert.strictEqual(refused._tag, "Unauthorized");
+      assert.include(yield* refusalLogged("bad-admin-token"), '"endpoint":"list"');
       const client = yield* admin(ADMIN_TOKEN_VALUE);
       const expired = yield* Effect.flip(
         client.attachments.attach({ payload: yield* attachment(-1) }),
       );
       assert.strictEqual(expired._tag, "AttachmentAlreadyExpired");
-    }).pipe(Effect.provide(gateway)),
+    }).pipe(Effect.provide(gatewayRecordingLogs)),
   );
 
   it.live(
@@ -334,7 +337,7 @@ describe("the Node gateway", () => {
 
   it.live("a tunnel carries only a TLS connection that asks for the CONNECT host itself", () =>
     Effect.gen(function* () {
-      refusals.length = 0;
+      gatewayLines.length = 0;
       const { egress } = yield* GatewayAddresses;
       // An allowed CONNECT host, then a ClientHello for another tenant of its CDN address.
       assert.strictEqual(
@@ -364,7 +367,31 @@ describe("the Node gateway", () => {
         "refused",
       );
       yield* refusalLogged("private-address");
-    }).pipe(Effect.provide(gatewayRecordingRefusals)),
+    }).pipe(Effect.provide(gatewayRecordingLogs)),
+  );
+
+  it.live("logs a tunnel the client closes before sending anything as abandoned, not refused", () =>
+    Effect.gen(function* () {
+      gatewayLines.length = 0;
+      const { egress } = yield* GatewayAddresses;
+      assert.strictEqual(yield* abandonedTunnel(egress, "registry.npmjs.org:443"), "closed");
+      const abandoned = yield* logged(gatewayLines, "The client abandoned a tunnel");
+      assert.include(abandoned, '"level":"Info"');
+      assert.include(abandoned, '"host":"registry.npmjs.org"');
+      assert.isFalse(gatewayLines.some((line) => line.includes("Gateway refused")));
+    }).pipe(Effect.provide(gatewayRecordingLogs)),
+  );
+
+  it.live("closes while a tunnel waits for its ClientHello", () =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.make();
+      const proxy = yield* serveEgressProxy(LOOPBACK, LOOPBACK).pipe(Scope.provide(scope));
+      yield* Effect.acquireRelease(silentTunnel(proxy, "registry.npmjs.org:443"), (socket) =>
+        Effect.sync(() => socket.destroy()),
+      );
+      const closed = yield* Scope.close(scope, Exit.void).pipe(Effect.timeoutOption("1 second"));
+      assert.isTrue(Option.isSome(closed), "the proxy did not close within a second");
+    }).pipe(Effect.scoped, Effect.provide(egressServices)),
   );
 
   it.live("closes the downstream and logs a failure when an upstream body is truncated", () =>
@@ -377,7 +404,7 @@ describe("the Node gateway", () => {
         const outgoing = request(
           { host: proxy.host, port: proxy.port, path: "http://git.gw.test/partial" },
           (response) => {
-            // A truncated response emits an error before close; assert the incomplete body below.
+            // A truncated response emits an error before close; the incomplete body is asserted below.
             response.on("error", () => {});
             response.once("close", () => resume(Effect.succeed(response.complete)));
             response.resume();
@@ -398,7 +425,7 @@ describe("the Node gateway", () => {
       const { proxy, messages } = yield* relayToUpstream((_request, response) => {
         response.writeHead(200);
         response.once("close", () => Deferred.doneUnsafe(upstreamClosed, Effect.void));
-        // Only the connection's destruction ends this body; a paused relay stalls it on backpressure instead.
+        // Only destroying the connection ends this body; a paused relay stalls on backpressure instead.
         const fill = (): void => {
           if (response.write(CHUNK)) setImmediate(fill);
           else response.once("drain", fill);
@@ -471,7 +498,7 @@ describe("the Node gateway", () => {
           status: 200,
           reason: undefined,
         });
-        // The reverse proxy answers, so the request got there; it carries no caller token.
+        // The reverse proxy responded, which shows the request arrived; it has no caller token.
         assert.deepStrictEqual(
           yield* relayed(egress, "http://git.gw.test/acme/demo.git/info/refs"),
           {

@@ -4,13 +4,15 @@ import { AttemptId } from "@usine/core/attempt";
 
 import { type AttemptSalvage, SalvagePushed, SalvageRef } from "@usine/core/attempt/salvage";
 import { InfraFailure } from "@usine/core/attempt/failure";
+import { LoopName } from "@usine/core/loop";
 import { WorkerName } from "@usine/core/worker";
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
 
 import { TestClock } from "effect/testing";
-import { Cause, Deferred, Effect, Exit, Fiber, Logger, Option, Scope } from "effect";
+import { Cause, Effect, Exit, Fiber, Logger, Option, Scope } from "effect";
 
 import {
+  aloneOnItem,
   ATTEMPT_ID,
   WORKER,
   SALVAGE_COMMIT,
@@ -31,11 +33,14 @@ describe("exe.dev preparation", () => {
       const recorded: Array<AttemptSalvage> = [];
       return Effect.gen(function* () {
         const executor = yield* Executor;
-        yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+        yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
         const prepared = yield* executor.prepare(request);
         const failure = yield* prepared
           .launch({
             append: () => Effect.void,
+            comments: () => Effect.void,
+            transcript: Effect.succeed([]),
+            windows: aloneOnItem(),
             salvage: (value) =>
               Effect.sync(() => {
                 assert(
@@ -52,8 +57,8 @@ describe("exe.dev preparation", () => {
         const lines = ssh.state.commands.map(remoteLine);
         const push = lines.findIndex((line) => line.includes("'push' '--force'"));
         assert(push >= 0, "the salvage push never ran");
-        // Preparation removes any stale directory first; only a removal after
-        // the push is cleanup.
+        // Preparation first removes any stale directory; only a removal after the push counts as
+        // cleanup.
         const removal = lines.findIndex(
           (line, index) =>
             index > push &&
@@ -80,6 +85,34 @@ describe("exe.dev preparation", () => {
     },
   );
 
+  it.effect(
+    "refuses a read Loop's Attempt before attaching the integration, which cannot grant read-only access",
+    () => {
+      const ssh = fakeSsh();
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const failure = yield* executor
+          .prepare(
+            new CheckoutRequest({
+              ...request,
+              loop: LoopName.make("review-pr"),
+              permissions: "read",
+            }),
+          )
+          .pipe(Effect.flip);
+        assert(failure._tag === "WorkerCapabilityError");
+        assert.strictEqual(failure.worker, WORKER);
+        assert.strictEqual(failure.capability, "credentials");
+        assert.include(failure.message, "remote-one");
+        assert.include(failure.message, "review-pr");
+        assert.include(failure.message, "read-only");
+        const commandLine = ssh.state.commands.map(({ args }) => args.join(" ")).join("\n");
+        assert.notInclude(commandLine, "integrations attach");
+        assert.notInclude(commandLine, "'clone'");
+      }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
+    },
+  );
+
   it.effect("retains pushed work when durable salvage recording fails", () => {
     const ssh = fakeSsh();
     ssh.state.salvage = "dirty";
@@ -91,6 +124,9 @@ describe("exe.dev preparation", () => {
       const exit = yield* Effect.exit(
         prepared.launch({
           append: () => Effect.void,
+          comments: () => Effect.void,
+          transcript: Effect.succeed([]),
+          windows: aloneOnItem(),
           salvage: () => Effect.fail(recordFailure),
         }),
       );
@@ -147,6 +183,9 @@ describe("exe.dev preparation", () => {
         yield* prepared
           .launch({
             append: () => Effect.void,
+            comments: () => Effect.void,
+            transcript: Effect.succeed([]),
+            windows: aloneOnItem(),
             salvage: (value) =>
               Effect.sync(() => {
                 recorded.push(value);
@@ -171,7 +210,13 @@ describe("exe.dev preparation", () => {
       const prepared = yield* executor.prepare(request);
       yield* TestClock.adjust("3 hours");
       assert(ssh.state.commands.filter(({ args }) => args.includes("attach")).length > 3);
-      yield* prepared.launch({ append: () => Effect.void, salvage: () => Effect.void });
+      yield* prepared.launch({
+        append: () => Effect.void,
+        salvage: () => Effect.void,
+        comments: () => Effect.void,
+        transcript: Effect.succeed([]),
+        windows: aloneOnItem(),
+      });
       const released = ssh.state.commands.length;
       yield* TestClock.adjust("2 hours");
       assert.strictEqual(ssh.state.commands.length, released);
@@ -215,18 +260,23 @@ describe("exe.dev preparation", () => {
             repository: request.repository,
             worker: WORKER,
             ref: request.salvageRef,
+            permissions: "write",
             succeeded: false,
             open: false,
           },
-          (salvage) =>
-            Effect.sync(() => {
-              assert.strictEqual(salvage._tag, "Pushed");
-              assert(
-                !ssh.state.commands.some((command) =>
-                  remoteLine(command).includes("'worktree' 'remove'"),
-                ),
-              );
-            }),
+          {
+            salvage: (salvage) =>
+              Effect.sync(() => {
+                assert.strictEqual(salvage._tag, "Pushed");
+                assert(
+                  !ssh.state.commands.some((command) =>
+                    remoteLine(command).includes("'worktree' 'remove'"),
+                  ),
+                );
+              }),
+            comments: () => Effect.die("A closed Attempt records no comment at recovery"),
+            windows: aloneOnItem(),
+          },
         );
         const lines = ssh.state.commands.map(remoteLine);
         const stop = lines.findIndex((line) => line.startsWith("exec 'sh' '-c'"));
@@ -236,40 +286,6 @@ describe("exe.dev preparation", () => {
     },
   );
 
-  it.effect("leaves the checkout of a live open Attempt for its reattachment", () => {
-    const ssh = fakeSsh();
-    ssh.state.cacheExists = true;
-    const started = Deferred.makeUnsafe<void>();
-    return Effect.gen(function* () {
-      const executor = yield* Executor;
-      const prepared = yield* executor.prepare(request);
-      yield* prepared
-        .launch({ append: () => Effect.void, salvage: () => Effect.void })
-        .pipe(Effect.forkChild);
-      yield* Deferred.await(started);
-      const before = ssh.state.commands.length;
-      yield* executor.recover(
-        {
-          attemptId: request.attemptId,
-          repository: request.repository,
-          worker: WORKER,
-          ref: request.salvageRef,
-          succeeded: false,
-          open: true,
-        },
-        () => Effect.void,
-      );
-      assert.strictEqual(ssh.state.commands.length, before);
-    }).pipe(
-      Effect.scoped,
-      Effect.provide(
-        runtime(ssh.layer, () =>
-          Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
-        ),
-      ),
-    );
-  });
-
   it.effect(
     "removes the checkout retained by a failed remote stop on a succeeded Attempt without salvage",
     () => {
@@ -277,13 +293,16 @@ describe("exe.dev preparation", () => {
       ssh.state.salvage = "dirty";
       return Effect.gen(function* () {
         const executor = yield* Executor;
-        yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+        yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
         const owner = yield* Scope.make();
         const prepared = yield* executor.prepare(request).pipe(Scope.provide(owner));
         ssh.state.failStop = true;
         const result = yield* prepared.launch({
           append: () => Effect.void,
           salvage: () => Effect.void,
+          comments: () => Effect.void,
+          transcript: Effect.succeed([]),
+          windows: aloneOnItem(),
         });
         assert.strictEqual(result.message, `Completed: ${request.task}`);
         yield* Scope.close(owner, Exit.void);
@@ -296,10 +315,15 @@ describe("exe.dev preparation", () => {
             repository: request.repository,
             worker: WORKER,
             ref: request.salvageRef,
+            permissions: "write",
             succeeded: true,
             open: false,
           },
-          (salvage) => Effect.sync(() => void recorded.push(salvage)),
+          {
+            salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
+            comments: () => Effect.void,
+            windows: aloneOnItem(),
+          },
         );
         const remote = ssh.state.commands.slice(reconciled).map(remoteLine);
         assert.strictEqual(recorded.length, 0);
@@ -318,7 +342,7 @@ describe("exe.dev preparation", () => {
     return Effect.gen(function* () {
       const executor = yield* Executor;
       const recorded: Array<AttemptSalvage> = [];
-      // Reconciliation visits the whole Attempt history, succeeded or not.
+      // Reconciliation runs for every Attempt, succeeded or not.
       for (const [index, succeeded] of [true, false, true, true].entries()) {
         yield* executor.recover(
           {
@@ -326,10 +350,15 @@ describe("exe.dev preparation", () => {
             repository: request.repository,
             worker: WORKER,
             ref: SalvageRef.make(`usine/salvage/finished-run/${index + 1}`),
+            permissions: "write",
             succeeded,
             open: false,
           },
-          (salvage) => Effect.sync(() => void recorded.push(salvage)),
+          {
+            salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
+            comments: () => Effect.void,
+            windows: aloneOnItem(),
+          },
         );
       }
       const remote = ssh.state.commands.map(remoteLine);
@@ -359,14 +388,19 @@ describe("exe.dev preparation", () => {
               repository: request.repository,
               worker: WorkerName.make("decommissioned"),
               ref: SalvageRef.make(`usine/salvage/orphaned-run/${index}`),
+              permissions: "write",
               succeeded: index !== 2,
               open: false,
             },
-            () => Effect.void,
+            {
+              salvage: () => Effect.void,
+              comments: () => Effect.void,
+              windows: aloneOnItem(),
+            },
           )
           .pipe(Effect.exit);
         assert(Exit.isFailure(exit));
-        assert(Cause.pretty(exit.cause).includes("exe.dev has no VM named decommissioned"));
+        assert(Cause.pretty(exit.cause).includes('exe.dev has no VM named "decommissioned"'));
       }
       assert.strictEqual(ssh.state.commands.length, 1);
     }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
@@ -376,7 +410,7 @@ describe("exe.dev preparation", () => {
     const ssh = fakeSsh();
     return Effect.gen(function* () {
       const executor = yield* Executor;
-      yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
       for (const command of ssh.state.commands) {
         const line = remoteLine(command);
         for (const mutating of [
@@ -402,9 +436,8 @@ describe("exe.dev preparation", () => {
     const ssh = fakeSsh("invalid-path");
     return Effect.gen(function* () {
       const executor = yield* Executor;
-      yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
-      // The sweep failure is isolated: prepare proceeds, and the path outside
-      // the Worker root is never touched.
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
+      // The sweep failure doesn't block prepare, and the path outside the Worker root isn't touched.
       const prepared = yield* executor.prepare(request);
       assert.strictEqual(prepared.workspace.spec.attemptId, ATTEMPT_ID);
       assert.deepStrictEqual(prepared.workspace.spec.payload, request.payload);
@@ -424,7 +457,7 @@ describe("exe.dev preparation", () => {
     });
     return Effect.gen(function* () {
       const executor = yield* Executor;
-      yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
       const firstScope = yield* Scope.make();
       const secondScope = yield* Scope.make();
       const prepared = yield* executor.prepare(request).pipe(Scope.provide(firstScope));
@@ -440,6 +473,9 @@ describe("exe.dev preparation", () => {
       const result = yield* prepared.launch({
         append: () => Effect.void,
         salvage: () => Effect.void,
+        comments: () => Effect.void,
+        transcript: Effect.succeed([]),
+        windows: aloneOnItem(),
       });
       assert.strictEqual(result.message, `Completed: ${request.task}`);
       assert(JSON.stringify(errors).includes("worktree-directory"));
@@ -472,7 +508,7 @@ describe("exe.dev preparation", () => {
       });
       return Effect.gen(function* () {
         const executor = yield* Executor;
-        yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+        yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
         const owner = yield* Scope.make();
         const prepared = yield* executor.prepare(request).pipe(Scope.provide(owner));
         ssh.state.failStop = true;
@@ -480,6 +516,9 @@ describe("exe.dev preparation", () => {
         const result = yield* prepared.launch({
           append: () => Effect.void,
           salvage: () => Effect.void,
+          comments: () => Effect.void,
+          transcript: Effect.succeed([]),
+          windows: aloneOnItem(),
         });
         assert.strictEqual(result.message, `Completed: ${request.task}`);
         const issued = ssh.state.commands.slice(beforeLaunch);
@@ -508,12 +547,11 @@ describe("exe.dev preparation", () => {
       `cancels preparation during ${phase} before launching and releases acquired resources`,
       () => {
         const ssh = fakeSsh();
-        // Partial preparation has never started a child and must roll back
-        // without requiring a working remote stop.
+        // Partial preparation never started a child, so rollback must not need a working remote stop.
         ssh.state.failStop = true;
         return Effect.gen(function* () {
           const executor = yield* Executor;
-          yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+          yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
           ssh.state.hangPreparation = phase;
           const fiber = yield* Effect.forkChild(executor.prepare(request));
           while (!ssh.state.parked) yield* Effect.yieldNow;
@@ -558,7 +596,13 @@ describe("exe.dev preparation", () => {
       yield* executor.cancel(ATTEMPT_ID);
       yield* executor.cancel(ATTEMPT_ID);
       const error = yield* prepared
-        .launch({ append: () => Effect.void, salvage: () => Effect.void })
+        .launch({
+          append: () => Effect.void,
+          salvage: () => Effect.void,
+          comments: () => Effect.void,
+          transcript: Effect.succeed([]),
+          windows: aloneOnItem(),
+        })
         .pipe(Effect.flip);
       assert.strictEqual(error._tag, "InfraFailure");
       assert.strictEqual(
@@ -573,14 +617,20 @@ describe("exe.dev preparation", () => {
     const detaches = () => ssh.state.commands.filter(({ args }) => args.includes("detach")).length;
     return Effect.gen(function* () {
       const executor = yield* Executor;
-      yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
       ssh.state.hangPreparation = "checkout";
       const attempt = Effect.gen(function* () {
         const prepared = yield* executor.prepare(request);
-        return yield* prepared.launch({ append: () => Effect.void, salvage: () => Effect.void });
+        return yield* prepared.launch({
+          append: () => Effect.void,
+          salvage: () => Effect.void,
+          comments: () => Effect.void,
+          transcript: Effect.succeed([]),
+          windows: aloneOnItem(),
+        });
       }).pipe(Effect.scoped);
-      // The grant detaches last, so its count at the owner's exit shows whether
-      // the owner returned while the canceling fiber was still cleaning up.
+      // The grant detaches last, so its count at the owner's exit shows whether the owner returned
+      // before the canceling fiber finished cleanup.
       const released = yield* attempt.pipe(Effect.exit, Effect.map(detaches), Effect.forkChild);
       while (!ssh.state.parked) yield* Effect.yieldNow;
       const canceling = yield* Effect.forkChild(executor.cancel(ATTEMPT_ID));
@@ -595,7 +645,7 @@ describe("exe.dev preparation", () => {
     ssh.state.hangPreparation = "clone";
     return Effect.gen(function* () {
       const executor = yield* Executor;
-      yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
       const first = yield* executor.prepare(request).pipe(Effect.scoped, Effect.forkChild);
       while (!ssh.state.commands.some((command) => remoteLine(command).includes("'clone'"))) {
         yield* Effect.yieldNow;
@@ -608,7 +658,7 @@ describe("exe.dev preparation", () => {
           }),
         )
         .pipe(Effect.scoped, Effect.forkChild);
-      // Let the second prepare reach the held repository lock.
+      // Lets the second prepare wait on the held repository lock.
       for (let turn = 0; turn < 20; turn += 1) yield* Effect.yieldNow;
       yield* executor.cancel(AttemptId.make("remote-run/execute/2"));
       const exit = yield* Fiber.await(waiting);
@@ -633,7 +683,7 @@ describe("exe.dev preparation", () => {
     });
     return Effect.gen(function* () {
       const executor = yield* Executor;
-      yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
       const first = yield* Scope.make();
       const second = yield* Scope.make();
       yield* executor.prepare(request).pipe(Scope.provide(first));
@@ -654,7 +704,7 @@ describe("exe.dev preparation", () => {
     const ssh = fakeSsh();
     return Effect.gen(function* () {
       const executor = yield* Executor;
-      yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
       const owner = yield* Scope.make();
       yield* executor.prepare(request).pipe(Scope.provide(owner));
       ssh.state.failAttach = true;

@@ -2,15 +2,40 @@ import { assert, describe, it } from "@effect/vitest";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { StorageRejected } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
+import { ModelId } from "@usine/core/agent/brain";
 import { TextOutput } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { InfraFailure, RunawayFailure } from "@usine/core/attempt/failure";
-import { StepResult } from "@usine/core/step/result";
+import {
+  AgentFailure,
+  BlockedFailure,
+  InfraFailure,
+  QuestionFailure,
+  RunawayFailure,
+} from "@usine/core/attempt/failure";
+import { CommitSha } from "@usine/core/repository";
+import type { GatewayCredentialKind } from "@usine/core/worker";
+import { Commit, StepResult } from "@usine/core/step/result";
 import { LocalProcess, RemoteShell } from "@usine/agents/child-host";
-import { Context, Effect, Exit, Fiber, Layer, Logger, Option } from "effect";
+import { ChildBackend } from "@usine/agents/runtime";
+import {
+  Context,
+  DateTime,
+  Deferred,
+  Duration,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Logger,
+  Option,
+  Ref,
+  Result,
+} from "effect";
 import {
   AttemptReport,
+  AttemptRequest,
   AttemptRuntime,
+  harvestedResult,
   ParentFailed,
   ParentReported,
   ResultRecorded,
@@ -42,7 +67,7 @@ import {
   workerEnvironment,
 } from "./support.ts";
 
-/** Keeps every log line as its level and JSON-encoded message. */
+/** Captures each log line as its level and JSON-encoded message. */
 const capturedLogs = () => {
   const lines: Array<{ readonly level: string; readonly text: string }> = [];
   const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
@@ -56,6 +81,21 @@ const capturedLogs = () => {
 
 const REPORTED = /pi-durable reported/u;
 
+/** Returns each operator input's receipts in order, as `[action, input sequence, receipt kind]`. */
+const receipts = (envelopes: ReadonlyArray<AttemptChannel.OutboundEnvelope>) =>
+  envelopes.flatMap(({ payload }) => {
+    if (payload._tag === "InterventionRejected")
+      return [[payload.intervention.action._tag, payload.inputSequence, "rejected"]];
+    if (payload._tag !== "InterventionApplied") return [];
+    return [
+      [
+        payload.intervention.action._tag,
+        payload.inputSequence,
+        payload.state.queued ? "queued" : "delivered",
+      ],
+    ];
+  });
+
 describe("durable AttemptRuntime", () => {
   it.live("relays one whole Attempt and reports the parent's final answer", () =>
     Effect.gen(function* () {
@@ -65,7 +105,15 @@ describe("durable AttemptRuntime", () => {
         const children = yield* StubChildren;
         const request = attemptRequest("run/step/1");
         const recording = recordingSink();
+        const lastAnsweredAt = DateTime.makeUnsafe("2026-10-15T19:42:00Z");
+        const silent = new AttemptChannel.WorkerUnresponsive({
+          worker: request.worker,
+          lastAnsweredAt,
+          reason: "Connection timed out during banner exchange",
+        });
         assert.isFalse(yield* runtime.isLive(request.spec.attemptId));
+        // Sent before `execute` starts, so the notice is buffered until the parent starts.
+        yield* runtime.notify(request.spec.attemptId, silent);
         const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
         const child = yield* children.next;
         assert.deepStrictEqual(child.request.environment, workerEnvironment);
@@ -73,24 +121,45 @@ describe("durable AttemptRuntime", () => {
         assert.deepStrictEqual(child.request.host, new LocalProcess());
         assert.match(child.request.prompt, /Fix the flaky test/u);
         assert.isTrue(yield* runtime.isLive(request.spec.attemptId));
+        assert.isTrue(Option.isNone(yield* runtime.unsupervised(request.spec.attemptId)));
+        yield* runtime.recordUnsupervised(request.spec.attemptId, Duration.seconds(42));
+        // A shorter time (an earlier record committed late) must not replace the stored one.
+        yield* runtime.recordUnsupervised(request.spec.attemptId, Duration.seconds(30));
+        yield* runtime.notify(
+          request.spec.attemptId,
+          new AttemptChannel.WorkerResponsive({ worker: request.worker, lastAnsweredAt }),
+        );
         yield* child.reply("Child fixed the test.");
         const report = yield* Fiber.join(execution);
         assert.strictEqual(report.message, "Fixed the flaky test and opened a pull request.");
         assert.isFalse(yield* runtime.isLive(request.spec.attemptId));
         const outbound = recording.outbound();
         assertAdmitted(request.spec.attemptId, outbound);
-        assert.deepStrictEqual(trace(outbound), [
+        assert.deepStrictEqual(
+          trace(outbound).filter((tag) => tag.startsWith("Worker")),
+          ["WorkerUnresponsive", "WorkerResponsive"],
+          "the notice sent before the Attempt started and the one sent while it runs, each once",
+        );
+        assert.deepStrictEqual(trace(outbound).slice(0, 3), [
           "Started",
           "parent.SessionStarted",
-          "parent.ToolStarted:subagent",
-          "child.SessionStarted",
-          "child.TextOutput",
-          "child.SessionFinished",
-          "parent.ToolFinished:subagent",
-          "parent.TextOutput",
-          "parent.SessionFinished",
-          "Final",
+          "WorkerUnresponsive",
         ]);
+        assert.deepStrictEqual(
+          trace(outbound).filter((tag) => !tag.startsWith("Worker")),
+          [
+            "Started",
+            "parent.SessionStarted",
+            "parent.ToolStarted:subagent",
+            "child.SessionStarted",
+            "child.TextOutput",
+            "child.SessionFinished",
+            "parent.ToolFinished:subagent",
+            "parent.TextOutput",
+            "parent.SessionFinished",
+            "Final",
+          ],
+        );
         assert.isTrue(
           outbound.some(
             ({ payload }) =>
@@ -108,15 +177,24 @@ describe("durable AttemptRuntime", () => {
           }),
         ),
       );
-      // A restarted orchestrator still reads the report, then the harvested result once recorded.
+      // After a restart, the report, the harvested result, and the unsupervised time are still
+      // readable.
       const attemptId = attemptRequest("run/step/1").spec.attemptId;
       const harvested = new StepResult({ message: "Fixed it.", facts: [] });
       const finished = yield* Effect.gen(function* () {
         const runtime = yield* AttemptRuntime;
         const reported = yield* runtime.finished(attemptId);
         yield* runtime.recordResult(attemptId, harvested);
-        return { reported, recorded: yield* runtime.finished(attemptId) };
+        return {
+          reported,
+          recorded: yield* runtime.finished(attemptId),
+          unsupervised: yield* runtime.unsupervised(attemptId),
+        };
       }).pipe(Effect.provide(layer({ database, parent: [] })));
+      assert.deepStrictEqual(
+        Option.map(finished.unsupervised, Duration.toMillis),
+        Option.some(42_000),
+      );
       assert.deepStrictEqual(
         finished.reported,
         Option.some(
@@ -131,6 +209,87 @@ describe("durable AttemptRuntime", () => {
         finished.recorded,
         Option.some(new ResultRecorded({ result: harvested })),
       );
+    }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "keeps the latest Worker notice sent before the Attempt starts, after the WorkerUnresponsive it answers",
+    () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        yield* Effect.gen(function* () {
+          const runtime = yield* AttemptRuntime;
+          const request = attemptRequest("run/step/40");
+          const recording = recordingSink();
+          const lastAnsweredAt = DateTime.makeUnsafe("2026-10-15T19:42:00Z");
+          const silent = (reason: string) =>
+            new AttemptChannel.WorkerUnresponsive({
+              worker: request.worker,
+              lastAnsweredAt,
+              reason,
+            });
+          const answering = new AttemptChannel.WorkerResponsive({
+            worker: request.worker,
+            lastAnsweredAt,
+          });
+          for (const notice of [silent("first"), answering, silent("second"), answering])
+            yield* runtime.notify(request.spec.attemptId, notice);
+          yield* runtime.execute(request, recording.sink);
+          const outbound = recording.outbound();
+          assertAdmitted(request.spec.attemptId, outbound);
+          assert.deepStrictEqual(trace(outbound), [
+            "Started",
+            "parent.SessionStarted",
+            "WorkerUnresponsive",
+            "WorkerResponsive",
+            "parent.TextOutput",
+            "parent.SessionFinished",
+            "Final",
+          ]);
+          assert.deepStrictEqual(
+            outbound.flatMap(({ payload }) =>
+              payload._tag === "WorkerUnresponsive" || payload._tag === "WorkerResponsive"
+                ? [payload]
+                : [],
+            ),
+            [silent("second"), answering],
+          );
+        }).pipe(Effect.provide(layer({ database, parent: [answer("Nothing to fix.")] })));
+      }).pipe(Effect.scoped),
+  );
+
+  it.live("drops the Worker notices kept for a parent that never starts", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const logs = capturedLogs();
+      yield* Effect.gen(function* () {
+        const runtime = yield* AttemptRuntime;
+        const base = attemptRequest("run/step/41");
+        const request = new AttemptRequest({
+          ...base,
+          spec: new AttemptChannel.RunSpec({
+            ...base.spec,
+            parentModel: Option.some(ModelId.make("faux/missing")),
+          }),
+        });
+        const recording = recordingSink();
+        yield* runtime.notify(
+          request.spec.attemptId,
+          new AttemptChannel.WorkerUnresponsive({
+            worker: request.worker,
+            lastAnsweredAt: DateTime.makeUnsafe("2026-10-15T19:42:00Z"),
+            reason: "Connection timed out during banner exchange",
+          }),
+        );
+        yield* runtime.execute(request, recording.sink).pipe(Effect.flip);
+        const outbound = recording.outbound();
+        assertAdmitted(request.spec.attemptId, outbound);
+        assert.deepStrictEqual(trace(outbound), ["Failed"]);
+        assert.lengthOf(
+          logs.matching(/Dropped the Worker notices kept for a parent that never started/u),
+          1,
+        );
+      }).pipe(Effect.provide(layer({ database, parent: [] })), Effect.provide(logs.layer));
     }).pipe(Effect.scoped),
   );
 
@@ -230,7 +389,7 @@ describe("durable AttemptRuntime", () => {
         const recording = recordingSink();
         const appended: Array<AttemptChannel.OutboundEnvelope> = [];
         let crashed = false;
-        // The crash comes after the parent entry's last envelope is appended, before its commit.
+        // Crashes after the parent entry's last envelope is appended and before its commit.
         const sink: AttemptChannel.Sink = {
           append: (direction, envelope) =>
             Effect.gen(function* () {
@@ -244,6 +403,9 @@ describe("durable AttemptRuntime", () => {
               return yield* new InfraFailure({ message: "The orchestrator stopped", cause: null });
             }),
           salvage: () => Effect.void,
+          comments: () => Effect.void,
+          transcript: Effect.die("The durable runtime never reads the Attempt transcript"),
+          windows: Effect.die("The durable runtime never reads the Attempt windows"),
         };
         const stopped = yield* runtime.execute(request, sink).pipe(Effect.flip);
         assert.strictEqual(stopped._tag, "InfraFailure");
@@ -303,52 +465,429 @@ describe("durable AttemptRuntime", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.live("applies a steer to a busy parent at its next turn", () =>
-    Effect.gen(function* () {
-      const database = yield* temporaryDatabase;
-      const seen: Array<string> = [];
-      const steered: ParentStep = (context) => {
-        for (const message of context.messages) {
-          if (message.role !== "user") continue;
-          seen.push(JSON.stringify(message.content));
-        }
-        return answer("Used pnpm as asked.");
-      };
-      yield* Effect.gen(function* () {
-        const runtime = yield* AttemptRuntime;
-        const request = attemptRequest("run/step/3");
-        const recording = recordingSink();
-        const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
-        const child = yield* (yield* StubChildren).next;
-        yield* runtime.intervene(
-          request.spec.attemptId,
-          new AttemptChannel.Intervention({
-            operator: "philippe",
-            target: new AttemptChannel.ParentTarget(),
-            action: new AttemptChannel.Steer({ message: "Use pnpm, not npm." }),
-          }),
+  it.live(
+    "reports a steer to a delegating parent queued until the child returns, then delivered",
+    () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        const seen: Array<string> = [];
+        const steered: ParentStep = (context) => {
+          for (const message of context.messages) {
+            if (message.role !== "user") continue;
+            seen.push(JSON.stringify(message.content));
+          }
+          return answer("Used pnpm as asked.");
+        };
+        yield* Effect.gen(function* () {
+          const runtime = yield* AttemptRuntime;
+          const request = attemptRequest("run/step/3");
+          const recording = recordingSink();
+          const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
+          const child = yield* (yield* StubChildren).next;
+          yield* runtime.intervene(
+            request.spec.attemptId,
+            new AttemptChannel.Intervention({
+              operator: "philippe",
+              target: new AttemptChannel.ParentTarget(),
+              action: new AttemptChannel.Steer({ message: "Use pnpm, not npm." }),
+            }),
+          );
+          assert.deepStrictEqual(receipts(recording.outbound()), [["Steer", 1, "queued"]]);
+          yield* child.reply("Child done.");
+          const report = yield* Fiber.join(execution);
+          assert.strictEqual(report.message, "Used pnpm as asked.");
+          assert.include(seen.at(-1), "Use pnpm, not npm.");
+          const inbound = recording.inbound();
+          assert.deepStrictEqual(
+            inbound.map(({ sequence, payload }) => [sequence, payload._tag]),
+            [[1, "Steer"]],
+          );
+          assert.deepStrictEqual(receipts(recording.outbound()), [
+            ["Steer", 1, "queued"],
+            ["Steer", 1, "delivered"],
+          ]);
+          // The parent never stopped, so no `SessionResumed` is sent.
+          assert.notInclude(trace(recording.outbound()), "parent.SessionResumed");
+          // The last turn only answered the steer, so it isn't the task's result.
+          assert.isTrue(report.answeredOperator);
+          assertAdmitted(request.spec.attemptId, recording.outbound());
+        }).pipe(
+          Effect.provide(layer({ database, parent: [delegate("Fix the flaky test"), steered] })),
         );
-        yield* child.reply("Child done.");
-        const report = yield* Fiber.join(execution);
-        assert.strictEqual(report.message, "Used pnpm as asked.");
-        assert.include(seen.at(-1), "Use pnpm, not npm.");
-        const inbound = recording.inbound();
-        assert.deepStrictEqual(
-          inbound.map(({ sequence, payload }) => [sequence, payload._tag]),
-          [[1, "Steer"]],
-        );
-        const applied = recording
-          .outbound()
-          .flatMap(({ payload }) => (payload._tag === "InterventionApplied" ? [payload] : []));
-        assert.strictEqual(applied.length, 1);
-        assert.strictEqual(applied[0]?.inputSequence, 1);
-        assert.isFalse(applied[0]?.state.paused);
-        assertAdmitted(request.spec.attemptId, recording.outbound());
-      }).pipe(
-        Effect.provide(layer({ database, parent: [delegate("Fix the flaky test"), steered] })),
-      );
-    }).pipe(Effect.scoped),
+      }).pipe(Effect.scoped),
   );
+
+  it.live(
+    "completes `attached` once an execute call relays the Attempt's channel, which input sent before cannot reach",
+    () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        yield* Effect.gen(function* () {
+          const runtime = yield* AttemptRuntime;
+          const request = attemptRequest("run/step/33");
+          const attemptId = request.spec.attemptId;
+          const recording = recordingSink();
+          const steer = new AttemptChannel.Intervention({
+            operator: "engine",
+            target: new AttemptChannel.ParentTarget(),
+            action: new AttemptChannel.Steer({ message: "Commit and push your work now." }),
+          });
+          // Waits before the Attempt has a task in this process, like a reattached runaway guard
+          // (#178).
+          const relayed = yield* Effect.forkChild(runtime.attached(attemptId));
+          const early = yield* runtime.intervene(attemptId, steer).pipe(Effect.flip);
+          assert.strictEqual(early.message, "This attempt no longer has a live channel");
+          assert.strictEqual(relayed.pollUnsafe(), undefined);
+          const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
+          yield* Fiber.join(relayed).pipe(Effect.timeout("5 seconds"));
+          const child = yield* (yield* StubChildren).next;
+          // Completes immediately while the channel is relayed.
+          yield* runtime.attached(attemptId).pipe(Effect.timeout("1 second"));
+          yield* runtime.intervene(attemptId, steer);
+          yield* child.reply("Child done.");
+          yield* Fiber.join(execution);
+          assert.deepStrictEqual(
+            recording.inbound().map(({ sequence, payload }) => [sequence, payload._tag]),
+            [[1, "Steer"]],
+          );
+          assert.deepStrictEqual(receipts(recording.outbound()), [
+            ["Steer", 1, "queued"],
+            ["Steer", 1, "delivered"],
+          ]);
+          // The channel detached when `execute` returned, so a new wait is for the next call.
+          const next = yield* Effect.forkChild(runtime.attached(attemptId));
+          yield* Effect.sleep("50 millis");
+          assert.strictEqual(next.pollUnsafe(), undefined);
+          yield* Fiber.interrupt(next);
+        }).pipe(
+          Effect.provide(
+            layer({
+              database,
+              parent: [delegate("Fix the flaky test"), answer("Committed and pushed.")],
+            }),
+          ),
+        );
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "reports a message to a working child queued until the child reads it, then delivered",
+    () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        yield* Effect.gen(function* () {
+          const runtime = yield* AttemptRuntime;
+          const request = attemptRequest("run/step/31");
+          const recording = recordingSink();
+          const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
+          const child = yield* (yield* StubChildren).next;
+          const operator = (action: AttemptChannel.OperatorAction) =>
+            runtime.intervene(
+              request.spec.attemptId,
+              new AttemptChannel.Intervention({
+                operator: "philippe",
+                target: new AttemptChannel.ChildTarget({ sessionId: child.request.session.id }),
+                action,
+              }),
+            );
+          yield* operator(new AttemptChannel.OperatorMessage({ message: "Use pnpm, not npm." }));
+          assert.deepStrictEqual(receipts(recording.outbound()), [
+            ["OperatorMessage", 1, "queued"],
+          ]);
+          yield* child.readQueued;
+          yield* Effect.gen(function* () {
+            while (receipts(recording.outbound()).length < 2) yield* Effect.sleep("20 millis");
+          }).pipe(Effect.timeout("5 seconds"));
+          yield* operator(new AttemptChannel.Release());
+          yield* child.reply("Switched the scripts to pnpm.");
+          const report = yield* Fiber.join(execution);
+          assert.strictEqual(report.message, "The child switched to pnpm.");
+          const outbound = recording.outbound();
+          assertAdmitted(request.spec.attemptId, outbound);
+          assert.deepStrictEqual(receipts(outbound), [
+            ["OperatorMessage", 1, "queued"],
+            ["OperatorMessage", 1, "delivered"],
+            ["Release", 2, "delivered"],
+          ]);
+          assert.deepStrictEqual(
+            outbound.flatMap(({ payload }) =>
+              payload._tag === "InterventionApplied" ? [payload.state.held] : [],
+            ),
+            [true, true, false],
+          );
+          // The child never stopped, so no `SessionResumed` is sent.
+          assert.notInclude(trace(outbound), "child.SessionResumed");
+          const record = yield* (yield* DurableHarness).use("read the record", (harness, context) =>
+            harness.snapshot(AttemptRecordDoc, request.spec.attemptId, context),
+          );
+          assert.deepStrictEqual(record?.queuedInputs ?? [], []);
+        }).pipe(
+          Effect.provide(
+            layer({
+              database,
+              parent: [delegate("Fix the flaky test"), answer("The child switched to pnpm.")],
+            }),
+          ),
+        );
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "reports a message to a working child rejected when the child stops before reading it",
+    () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        yield* Effect.gen(function* () {
+          const runtime = yield* AttemptRuntime;
+          const request = attemptRequest("run/step/32");
+          const recording = recordingSink();
+          const operator = (
+            target: AttemptChannel.SessionTarget,
+            action: AttemptChannel.OperatorAction,
+          ) =>
+            runtime.intervene(
+              request.spec.attemptId,
+              new AttemptChannel.Intervention({ operator: "philippe", target, action }),
+            );
+          const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
+          const child = yield* (yield* StubChildren).next;
+          yield* operator(
+            new AttemptChannel.ChildTarget({ sessionId: child.request.session.id }),
+            new AttemptChannel.Steer({ message: "Skip the docs." }),
+          );
+          const parent = new AttemptChannel.ParentTarget();
+          yield* operator(parent, new AttemptChannel.Interrupt());
+          yield* child.interrupted.pipe(Effect.timeout("5 seconds"));
+          const steerReceipts = () =>
+            receipts(recording.outbound()).filter(([action]) => action === "Steer");
+          yield* Effect.gen(function* () {
+            while (steerReceipts().length < 2) yield* Effect.sleep("20 millis");
+          }).pipe(Effect.timeout("5 seconds"));
+          yield* operator(parent, new AttemptChannel.Release());
+          const report = yield* Fiber.join(execution);
+          assert.strictEqual(report.message, "Continued after the release.");
+          assertAdmitted(request.spec.attemptId, recording.outbound());
+          assert.deepStrictEqual(steerReceipts(), [
+            ["Steer", 1, "queued"],
+            ["Steer", 1, "rejected"],
+          ]);
+          const record = yield* (yield* DurableHarness).use("read the record", (harness, context) =>
+            harness.snapshot(AttemptRecordDoc, request.spec.attemptId, context),
+          );
+          assert.deepStrictEqual(record?.queuedInputs ?? [], []);
+        }).pipe(
+          Effect.provide(
+            layer({
+              database,
+              parent: [delegate("Fix the flaky test"), answer("Continued after the release.")],
+            }),
+          ),
+        );
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "holds a parent the operator messaged while it delegated, then continues the task once released",
+    () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        const resumedWith: Array<string> = [];
+        const afterRelease: ParentStep = (context) => {
+          const last = context.messages.at(-1);
+          if (last?.role === "user") resumedWith.push(JSON.stringify(last.content));
+          return delegate("Open the pull request");
+        };
+        yield* Effect.gen(function* () {
+          const runtime = yield* AttemptRuntime;
+          const children = yield* StubChildren;
+          const request = attemptRequest("run/step/12");
+          const recording = recordingSink();
+          const operator = (action: AttemptChannel.OperatorAction) =>
+            runtime.intervene(
+              request.spec.attemptId,
+              new AttemptChannel.Intervention({
+                operator: "philippe",
+                target: new AttemptChannel.ParentTarget(),
+                action,
+              }),
+            );
+          const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
+          const fixer = yield* children.next;
+          yield* operator(new AttemptChannel.OperatorMessage({ message: "What failed earlier?" }));
+          yield* fixer.reply("Fixed the flaky test.");
+          yield* Effect.gen(function* () {
+            while (!trace(recording.outbound()).includes("parent.SessionIdle"))
+              yield* Effect.sleep("20 millis");
+          }).pipe(Effect.timeout("5 seconds"));
+          // The parent answered the operator; under the Hold that answer does not end the Attempt.
+          yield* Effect.sleep("300 millis");
+          assert.isUndefined(execution.pollUnsafe());
+          assert.isTrue(yield* runtime.isLive(request.spec.attemptId));
+          yield* operator(new AttemptChannel.Release());
+          yield* (yield* children.next).reply("Opened pull request 7.");
+          const report = yield* Fiber.join(execution);
+          assert.strictEqual(report.message, "Opened the pull request.");
+          assert.isFalse(report.answeredOperator);
+          assert.deepStrictEqual(resumedWith.length, 1);
+          assert.include(resumedWith[0], "Continue the task");
+          const outbound = recording.outbound();
+          assertAdmitted(request.spec.attemptId, outbound);
+          assert.deepStrictEqual(receipts(outbound), [
+            ["OperatorMessage", 1, "queued"],
+            ["OperatorMessage", 1, "delivered"],
+            ["Release", 2, "delivered"],
+          ]);
+          assert.deepStrictEqual(
+            outbound.flatMap(({ payload }) =>
+              payload._tag === "InterventionApplied" ? [payload.state.held] : [],
+            ),
+            [true, true, false],
+          );
+          assert.deepStrictEqual(
+            trace(outbound).filter((step) => step.startsWith("parent.Session")),
+            [
+              "parent.SessionStarted",
+              "parent.SessionIdle",
+              "parent.SessionResumed",
+              "parent.SessionFinished",
+            ],
+          );
+        }).pipe(
+          Effect.provide(
+            layer({
+              database,
+              parent: [
+                delegate("Fix the flaky test"),
+                answer("The first run hit a flaky timeout; the child fixed it."),
+                afterRelease,
+                answer("Opened the pull request."),
+              ],
+            }),
+          ),
+        );
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "succeeds an Attempt whose released parent answered the release guidance with nothing harvested",
+    () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        yield* Effect.gen(function* () {
+          const runtime = yield* AttemptRuntime;
+          const children = yield* StubChildren;
+          const request = attemptRequest("run/step/13");
+          const recording = recordingSink();
+          const operator = (action: AttemptChannel.OperatorAction) =>
+            runtime.intervene(
+              request.spec.attemptId,
+              new AttemptChannel.Intervention({
+                operator: "philippe",
+                target: new AttemptChannel.ParentTarget(),
+                action,
+              }),
+            );
+          const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
+          const reviewer = yield* children.next;
+          yield* operator(new AttemptChannel.OperatorMessage({ message: "Is the review ready?" }));
+          yield* reviewer.reply("Drafted three findings.");
+          yield* Effect.gen(function* () {
+            while (!trace(recording.outbound()).includes("parent.SessionIdle"))
+              yield* Effect.sleep("20 millis");
+          }).pipe(Effect.timeout("5 seconds"));
+          yield* operator(new AttemptChannel.Release());
+          const report = yield* Fiber.join(execution);
+          assert.isFalse(report.answeredOperator);
+          assert.deepStrictEqual(
+            harvestedResult(report, []),
+            Result.succeed(new StepResult({ message: report.message, facts: [] })),
+          );
+        }).pipe(
+          Effect.provide(
+            layer({
+              database,
+              parent: [
+                delegate("Review pull request 176"),
+                answer("The child drafted three findings; I will post them."),
+                answer("Posted the review with three findings on pull request 176."),
+              ],
+            }),
+          ),
+        );
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "reports a released parent that answered an operator message sent after the release as answering the operator",
+    () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        yield* Effect.gen(function* () {
+          const runtime = yield* AttemptRuntime;
+          const children = yield* StubChildren;
+          const request = attemptRequest("run/step/17");
+          const recording = recordingSink();
+          const operator = (action: AttemptChannel.OperatorAction) =>
+            runtime.intervene(
+              request.spec.attemptId,
+              new AttemptChannel.Intervention({
+                operator: "philippe",
+                target: new AttemptChannel.ParentTarget(),
+                action,
+              }),
+            );
+          const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
+          const reviewer = yield* children.next;
+          yield* operator(new AttemptChannel.OperatorMessage({ message: "Is the review ready?" }));
+          yield* reviewer.reply("Drafted three findings.");
+          yield* Effect.gen(function* () {
+            while (!trace(recording.outbound()).includes("parent.SessionIdle"))
+              yield* Effect.sleep("20 millis");
+          }).pipe(Effect.timeout("5 seconds"));
+          yield* operator(new AttemptChannel.Release());
+          const poster = yield* children.next;
+          yield* operator(
+            new AttemptChannel.OperatorMessage({ message: "Which findings did you post?" }),
+          );
+          // Released while the parent delegates, so its next answer ends the Attempt.
+          yield* operator(new AttemptChannel.Release());
+          yield* poster.reply("Posted the review.");
+          const report = yield* Fiber.join(execution);
+          assert.strictEqual(report.message, "Posted all three findings.");
+          assert.isTrue(report.answeredOperator);
+        }).pipe(
+          Effect.provide(
+            layer({
+              database,
+              parent: [
+                delegate("Review pull request 176"),
+                answer("The child drafted three findings; I will post them."),
+                delegate("Post the three findings as a review on pull request 176"),
+                answer("Posted all three findings."),
+              ],
+            }),
+          ),
+        );
+      }).pipe(Effect.scoped),
+  );
+
+  it("fails an Attempt whose parent ended on its answer to the operator with nothing delivered", () => {
+    const report = new AttemptReport({
+      message: "The child returned no details.",
+      answeredOperator: true,
+    });
+    const failed = harvestedResult(report, []);
+    assert(Result.isFailure(failed));
+    assert.include(failed.failure.message, "The child returned no details.");
+    const commit = new Commit({
+      sha: CommitSha.make("0123456789abcdef0123456789abcdef01234567"),
+      summary: "Fix the flaky test",
+    });
+    assert.deepStrictEqual(
+      harvestedResult(report, [commit]),
+      Result.succeed(new StepResult({ message: report.message, facts: [commit] })),
+    );
+  });
 
   it.live("holds an interrupted parent until the operator releases it", () =>
     Effect.gen(function* () {
@@ -368,6 +907,7 @@ describe("durable AttemptRuntime", () => {
           );
         const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
         const child = yield* (yield* StubChildren).next;
+        yield* operator(new AttemptChannel.OperatorMessage({ message: "Skip the docs." }));
         yield* operator(new AttemptChannel.Interrupt());
         yield* child.interrupted.pipe(Effect.timeout("5 seconds"));
         yield* Effect.sleep("300 millis");
@@ -378,8 +918,16 @@ describe("durable AttemptRuntime", () => {
         assert.strictEqual(report.message, "Continued after the release.");
         const outbound = recording.outbound();
         assertAdmitted(request.spec.attemptId, outbound);
+        // The pause withdrew the queued message, so its second receipt is a rejection.
+        assert.deepStrictEqual(receipts(outbound), [
+          ["OperatorMessage", 1, "queued"],
+          ["OperatorMessage", 1, "rejected"],
+          ["Interrupt", 2, "delivered"],
+          ["Release", 3, "delivered"],
+        ]);
         const states = outbound.flatMap(({ payload }) =>
-          payload._tag === "InterventionApplied"
+          payload._tag === "InterventionApplied" &&
+          payload.intervention.action._tag !== "OperatorMessage"
             ? [[payload.intervention.action._tag, payload.state.paused]]
             : [],
         );
@@ -402,28 +950,49 @@ describe("durable AttemptRuntime", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.live("gives every child the child host its execute call supplies", () =>
-    Effect.gen(function* () {
-      const database = yield* temporaryDatabase;
-      const host = new RemoteShell({
-        ssh: { command: "ssh", args: ["-o", "BatchMode=yes"] },
-        sshEnvironment: { SSH_AUTH_SOCK: "/tmp/agent.sock" },
-        destination: "worker.exe.xyz",
-      });
-      yield* Effect.gen(function* () {
-        const runtime = yield* AttemptRuntime;
-        const request = attemptRequest("run/step/11", 3, host);
-        const execution = yield* Effect.forkChild(runtime.execute(request, recordingSink().sink));
-        const child = yield* (yield* StubChildren).next;
-        assert.deepStrictEqual(child.request.host, host);
-        yield* child.reply("Done.");
-        yield* Fiber.join(execution);
-      }).pipe(
-        Effect.provide(
-          layer({ database, parent: [delegate("Fix the flaky test"), answer("Done.")] }),
-        ),
-      );
-    }).pipe(Effect.scoped),
+  it.live(
+    "gives every child the child host its execute call supplies, and records on each child's session the Gateway credential in force when it starts",
+    () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        const host = new RemoteShell({
+          ssh: { command: "ssh", args: ["-o", "BatchMode=yes"] },
+          sshEnvironment: { SSH_AUTH_SOCK: "/tmp/agent.sock" },
+          destination: "worker.exe.xyz",
+        });
+        // Gateway credential kind recorded by the Worker's preflight.
+        const recorded = yield* Ref.make(Option.some<GatewayCredentialKind>("api-key"));
+        yield* Effect.gen(function* () {
+          const runtime = yield* AttemptRuntime;
+          const request = new AttemptRequest({
+            ...attemptRequest("run/step/11", 3, host),
+            gatewayCredential: Ref.get(recorded),
+          });
+          const execution = yield* Effect.forkChild(runtime.execute(request, recordingSink().sink));
+          const children = yield* StubChildren;
+          const first = yield* children.next;
+          assert.deepStrictEqual(first.request.host, host);
+          assert.deepStrictEqual(first.request.session.gatewayCredential, Option.some("api-key"));
+          // A preflight during the Attempt records a subscription token on the Gateway.
+          yield* Ref.set(recorded, Option.some("subscription"));
+          yield* first.reply("First part done.");
+          const second = yield* children.next;
+          assert.deepStrictEqual(second.request.host, host);
+          assert.deepStrictEqual(
+            second.request.session.gatewayCredential,
+            Option.some("subscription"),
+          );
+          yield* second.reply("Second part done.");
+          yield* Fiber.join(execution);
+        }).pipe(
+          Effect.provide(
+            layer({
+              database,
+              parent: [delegate("First part"), delegate("Second part"), answer("Done.")],
+            }),
+          ),
+        );
+      }).pipe(Effect.scoped),
   );
 
   it.live("cancels an Attempt bottom-up and settles its execute call", () =>
@@ -452,13 +1021,51 @@ describe("durable AttemptRuntime", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.live("abandons a child launch that has not returned when the Attempt is canceled", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const launching = yield* Deferred.make<void>();
+      const abandoned = yield* Deferred.make<void>();
+      // A launch that hasn't opened its harness, like a Claude child in a retry delay after losing
+      // the login refresh lock.
+      const backend = Layer.succeed(ChildBackend)({
+        launch: () =>
+          Deferred.succeed(launching, undefined).pipe(
+            Effect.andThen(Effect.never),
+            Effect.onInterrupt(() => Deferred.succeed(abandoned, undefined)),
+          ),
+      });
+      const services = attemptRuntimeLayer.pipe(
+        Layer.provideMerge(
+          durableHarnessLayer({
+            ...fauxParent([delegate("Fix the flaky test")]),
+            openStorage: Effect.tryPromise({
+              try: () => openNodeSqliteStorage(database),
+              catch: (cause) => durableError("open the durable storage", cause),
+            }),
+          }),
+        ),
+        Layer.provideMerge(backend),
+      );
+      yield* Effect.gen(function* () {
+        const runtime = yield* AttemptRuntime;
+        const request = attemptRequest("run/step/42");
+        const execution = yield* Effect.forkChild(runtime.execute(request, recordingSink().sink));
+        yield* Deferred.await(launching).pipe(Effect.timeout("5 seconds"));
+        yield* runtime.cancel(request.spec.attemptId);
+        yield* Deferred.await(abandoned).pipe(Effect.timeout("5 seconds"));
+        assert(Exit.isFailure(yield* Fiber.await(execution)));
+      }).pipe(Effect.provide(services));
+    }).pipe(Effect.scoped),
+  );
+
   it.live("leaves no live Attempt once the executor canceled it after a failed relay", () =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;
       yield* Effect.gen(function* () {
         const runtime = yield* AttemptRuntime;
         const request = attemptRequest("run/step/10");
-        // The sink fails the relay before its terminal envelope, as the runaway guard does at a ceiling.
+        // Fails the relay before the terminal envelope, as the runaway guard does at a ceiling.
         const sink: AttemptChannel.Sink = {
           append: (_direction, envelope) =>
             envelope._tag === "OutboundEnvelope" &&
@@ -467,6 +1074,9 @@ describe("durable AttemptRuntime", () => {
               ? Effect.fail(new RunawayFailure({ ceiling: "tokens" }))
               : Effect.void,
           salvage: () => Effect.void,
+          comments: () => Effect.void,
+          transcript: Effect.die("The durable runtime never reads the Attempt transcript"),
+          windows: Effect.die("The durable runtime never reads the Attempt windows"),
         };
         const failure = yield* runtime.execute(request, sink).pipe(Effect.flip);
         assert.strictEqual(failure._tag, "RunawayFailure");
@@ -535,7 +1145,7 @@ describe("durable AttemptRuntime", () => {
             const services = yield* Layer.build(
               layer({ database, parent: [delegate("Fix the flaky test")] }),
             );
-            // Detached like an Attempt fiber the orchestrator stops only after its runtime closes.
+            // Detached, like an Attempt fiber that the orchestrator stops after its runtime closes.
             const execution = yield* Effect.forkDetach(
               Context.get(services, AttemptRuntime).execute(request, recording.sink),
             );
@@ -583,8 +1193,8 @@ describe("durable AttemptRuntime", () => {
             yield* Fiber.interrupt(execution);
           }),
         );
-        // The parent's live state no longer reads back, as when a delta in its chain does not
-        // apply, and the storage refuses the commit that would replace it.
+        // The parent's live state can't be read, and the storage rejects the commit that would
+        // replace it.
         const openStorage = Effect.tryPromise({
           try: async () => {
             const storage = await openNodeSqliteStorage(database);
@@ -655,7 +1265,7 @@ describe("durable AttemptRuntime", () => {
           }),
         );
         assert(parentOf !== null);
-        // The poisoned parent's live state no longer reads back, as when a delta in its chain does not apply.
+        // The poisoned parent's live state can't be read.
         let unreadable: number | undefined;
         const openStorage = Effect.tryPromise({
           try: async () => {
@@ -736,6 +1346,76 @@ describe("durable AttemptRuntime", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.live("ends the Attempt with the operator question a child asked", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      yield* Effect.gen(function* () {
+        const runtime = yield* AttemptRuntime;
+        const request = attemptRequest("run/step/9");
+        const recording = recordingSink();
+        const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
+        yield* (yield* (yield* StubChildren).next).ask("HTTP CONNECT or SOCKS for egress?");
+        const failure = yield* Fiber.join(execution).pipe(Effect.flip);
+        assert.deepStrictEqual(
+          failure,
+          new QuestionFailure({ question: "HTTP CONNECT or SOCKS for egress?" }),
+        );
+        assertAdmitted(request.spec.attemptId, recording.outbound());
+      }).pipe(
+        Effect.provide(
+          layer({
+            database,
+            parent: [delegate("Fix the P0 finding"), answer("The child needs a decision.")],
+          }),
+        ),
+      );
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("ends the Attempt with the parent's own operator question", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      yield* Effect.gen(function* () {
+        const runtime = yield* AttemptRuntime;
+        const request = attemptRequest("run/step/10");
+        const failure = yield* runtime.execute(request, recordingSink().sink).pipe(Effect.flip);
+        assert.deepStrictEqual(
+          failure,
+          new QuestionFailure({ question: "Should the migration keep the old column?" }),
+        );
+      }).pipe(
+        Effect.provide(
+          layer({
+            database,
+            parent: [answer("[usine:question]\nShould the migration keep the old column?")],
+          }),
+        ),
+      );
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("ends the Attempt with the parent's own blocker", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      yield* Effect.gen(function* () {
+        const runtime = yield* AttemptRuntime;
+        const request = attemptRequest("run/step/16");
+        const failure = yield* runtime.execute(request, recordingSink().sink).pipe(Effect.flip);
+        assert.deepStrictEqual(
+          failure,
+          new BlockedFailure({ message: "The baseline gate fails on main." }),
+        );
+      }).pipe(
+        Effect.provide(
+          layer({
+            database,
+            parent: [answer("[usine:blocked]\nThe baseline gate fails on main.")],
+          }),
+        ),
+      );
+    }).pipe(Effect.scoped),
+  );
+
   it.live("fails the Attempt with a child's blocker the parent did not relay", () =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;
@@ -746,10 +1426,9 @@ describe("durable AttemptRuntime", () => {
         const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
         yield* (yield* (yield* StubChildren).next).block("Publishing permission denied.");
         const failure = yield* Fiber.join(execution).pipe(Effect.flip);
-        assert.strictEqual(failure._tag, "AgentFailure");
-        assert.strictEqual(
-          failure._tag === "AgentFailure" ? failure.message : "",
-          "Publishing permission denied.",
+        assert.deepStrictEqual(
+          failure,
+          new BlockedFailure({ message: "Publishing permission denied." }),
         );
         assertAdmitted(request.spec.attemptId, recording.outbound());
       }).pipe(
@@ -761,5 +1440,42 @@ describe("durable AttemptRuntime", () => {
         ),
       );
     }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "ends the Attempt with AgentFailure for a child's harness failure, relayed verbatim or not",
+    () =>
+      Effect.gen(function* () {
+        // The parent returns its last subagent result verbatim as its report.
+        const relay: ParentStep = (context) => {
+          const result = [...context.messages].reverse().find(({ role }) => role === "toolResult");
+          const parts = result?.role === "toolResult" ? result.content : [];
+          return answer(
+            parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join(""),
+          );
+        };
+        for (const [attempt, parentAnswer] of [
+          ["run/step/17", relay],
+          ["run/step/18", answer("The child's harness failed.")],
+        ] as const) {
+          const database = yield* temporaryDatabase;
+          yield* Effect.gen(function* () {
+            const runtime = yield* AttemptRuntime;
+            const execution = yield* Effect.forkChild(
+              runtime.execute(attemptRequest(attempt), recordingSink().sink),
+            );
+            yield* (yield* (yield* StubChildren).next).fail("Codex turn failed: stream closed.");
+            const failure = yield* Fiber.join(execution).pipe(Effect.flip);
+            assert.deepStrictEqual(
+              failure,
+              new AgentFailure({ message: "Codex turn failed: stream closed." }),
+            );
+          }).pipe(
+            Effect.provide(
+              layer({ database, parent: [delegate("Run the Codex turn"), parentAnswer] }),
+            ),
+          );
+        }
+      }).pipe(Effect.scoped),
   );
 });

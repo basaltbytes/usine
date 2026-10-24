@@ -1,31 +1,30 @@
-# Webhook delivery ships in v1 as hints; polling stays the only correctness source
+# Webhook delivery as hints; polling stays the correctness source
 
-v1 adds push-based delivery as a **Hint**: a droppable `(repo, optional item)` nudge that schedules the existing change-detection / slice fetch sooner — never a new event path. Hints create no Events; the fetch they accelerate feeds the same content-hash ledger, and the 60s backstop poll (ADR 0007) runs unchanged, so a dropped hint costs freshness and a doubled hint dedups to nothing. Self-write hints are always on: after any usine write to GitHub (board-drag label swap, agent comment), the engine hints itself — the trigger surface feels instant without webhooks. The two webhook modes sit behind one authored knob, `webhooks.mode` in `usine.yaml` (default `off`): **`deliveries`** JWT-polls the App's webhook-delivery log on an engine-fixed ~10s cadence — summary fields (`repository_id`, `event`) route repo-level hints without payload fetches, the cursor persists in the runtime store, `ping` and unregistered repos are ignored, the redelivery API is unused; **`endpoint`** serves `POST /webhooks/github` on the orchestrator's existing HTTP server, HMAC-SHA256-verified (`X-Hub-Signature-256`), taking item-level hints from payloads, with `webhooks.public_url` required and usine itself `PATCH`ing the App's hook URL on every mode/config change. Bootstrap always creates the App webhook **active** — placeholder URL on a dead `.invalid` host, generous slice-relevant events (issues, issue_comment, pull_request, pull_request_review, pull_request_review_comment, push, check_suite) — and captures `webhook_secret` into `.usine/` at manifest conversion even while the mode is off, because the active flag and event subscription have no API: set at creation, or eat a manual App-settings excursion later.
+v1 adds push delivery as **hints**: droppable `(repo, optional item)` requests that schedule the existing change detection or slice fetch sooner, never a new event path. Hints create no events: fetches use the same content-hash ledger, and the 60s backstop poll (ADR 0007) is unchanged, so dropped hints cost freshness and duplicates dedup away. After every usine write to GitHub (board label swap, agent comment), the engine hints itself, so the trigger surface responds instantly without webhooks.
 
-## Considered Options
+`webhooks.mode` in `usine.yaml` (default `off`) selects a webhook mode:
 
-- **No webhooks in v1** (ADR 0007's original posture) — but the hint seam must exist anyway for self-writes, and each webhook mode is a thin source behind it; deferring bought little once correctness stopped being at stake.
-- **Webhooks as an event source** — deliveries minting Events directly would make delivery loss/duplication a correctness problem (GitHub never auto-redelivers; retention is 3 days). Ruled out at charting; everything here inherits it.
-- **Default `deliveries`** — sub-10s latency everywhere, zero config; rejected for `off` because the perpetually-failing placeholder webhook is stable per docs but the no-nag/no-auto-disable behavior is absence-of-evidence, not a guarantee. Opt-in keeps the default posture exactly ADR 0007.
-- **Bootstrap hook inactive until a mode needs it** — cleanest GitHub state, but flipping `active` (and widening events) later is a manual settings-UI step and the manifest conversion may return no `webhook_secret` to capture; every later mode change would risk a ceremony re-run.
-- **Auto-relaxing the backstop cadence while hints are healthy** — saves rate limit at fleet scale but adds a health heuristic with a silent-death blind spot; `poll_interval` stays untouched, relaxation stays additive engine behavior per ADR 0007.
+- **`deliveries`** JWT-polls the App's delivery log about every 10s (engine-fixed). Summary fields (`repository_id`, `event`) route repo-level hints without fetching payloads. The cursor persists in the runtime store; `ping` and unregistered repos are ignored; redelivery is unused.
+- **`endpoint`** serves HMAC-SHA256-verified (`X-Hub-Signature-256`) `POST /webhooks/github` on the orchestrator's HTTP server, taking item-level hints from payloads. It requires `webhooks.public_url`; usine `PATCH`es the App's hook URL on each mode or config change.
+
+Bootstrap always creates the App webhook **active**, with a dead `.invalid` placeholder URL and generous slice-relevant events (issues, issue_comment, pull_request, pull_request_review, pull_request_review_comment, push, check_suite), and saves `webhook_secret` to `.usine/` at manifest conversion even with the mode off: only manual App settings can change the active flag or events later.
+
+## Considered options
+
+- **No webhooks in v1** (ADR 0007's position): the hint seam exists for self-writes anyway, with each mode a thin source behind it, so deferring saved little.
+- **Webhooks as an event source**: would make delivery loss or duplication a correctness problem (GitHub never redelivers automatically; retention is 3 days). Ruled out at charting.
+- **`deliveries` by default**: sub-10s latency with zero config, but while the docs say an always-failing placeholder persists, its lack of warnings or auto-disable is only observed. Opt-in keeps ADR 0007's default.
+- **Inactive bootstrap hook until needed**: cleanest GitHub state, but activating it and adding events later is manual, and conversion may return no `webhook_secret`, so mode changes risk redoing setup.
+- **Relaxing the backstop while hints are healthy**: saves rate limit at scale but adds a health heuristic blind to silent failure. `poll_interval` stays; relaxing can come later.
 
 ## Consequences
 
-- **Revises [ADR 0007](./0007-polling-triggers-content-hashed-events.md)**: v1 does ship webhook delivery — as hints that only move a fetch earlier; polling remains the sole correctness source and the dedup ledger the sole event gate.
-- **Hint** enters the glossary; the seam is one interface with three sources (self-writes, delivery-log polling, endpoint), so later sources (daemon workers, forge events) are additive.
-- Bootstrap (issue #23) gains `hook_attributes` in the manifest and secret capture alongside the private key.
-- UI: Configuration shows the mode and last-hint-received; the needs-you strip warns when endpoint mode has never received a delivery (wrong `public_url` or failed `PATCH`) — display + warn only, engine behavior never consults hint health.
-- Facts this leans on (researched 2026-08-20): deliveries are recorded only for an active webhook, including 100%-failing ones; delivery retention 3 days; `PATCH /app/hook/config` changes URL/secret but not `active`; no documented auto-disable, failure throttling, or reachability validation; ~10s JWT polling is trivially within all documented limits.
+- **Revises [ADR 0007](./0007-polling-triggers-content-hashed-events.md)**: v1 has webhook delivery, as hints; the dedup ledger stays the only event gate.
+- **Hint** joins the glossary. The seam is one interface over three sources (self-writes, delivery-log polling, endpoint); later sources (daemon workers, forge events) are additive.
+- Bootstrap (#23) adds manifest `hook_attributes` and saves the secret with the private key.
+- UI: Configuration shows the mode and last hint, and the needs-you strip warns if endpoint mode never received a delivery (wrong `public_url` or failed `PATCH`). The engine never reads hint health.
+- Facts as of 2026-08-20: only active webhooks, always-failing ones included, record deliveries; retention is 3 days; `PATCH /app/hook/config` changes URL and secret, not `active`; nothing documents auto-disable, failure throttling, or reachability checks; ~10s JWT polling is well within limits.
 
 ## Board self-write implementation
 
-Board label writes enqueue bounded, coalesced Item Hints in the poller even when
-a write fails or is interrupted, since GitHub may have applied part of the swap.
-The original outcome is preserved, and writer rate limits extend Hint backoff. Its single
-owner serializes each authoritative snapshot and Loop evaluation with normal
-repository cycles, using the existing projection and content-hash ledger. A Hint
-does not advance a REST cursor or overwrite the last complete cycle's findings.
-The normal conditional-poll cadence remains unchanged; separate request-backoff
-metadata also delays Hint snapshots. Failed or dropped Hints rely on the poll
-backstop. Webhook sources and other GitHub write sources remain separate work.
+Board label writes queue bounded, coalesced item hints in the poller, even after a failed or interrupted write, since GitHub may have applied part of the swap. The original outcome stands; writer rate limits extend hint backoff. The poller serializes each authoritative snapshot and loop evaluation with normal cycles, through the existing projection and ledger. Hints never advance a REST cursor or overwrite the last full cycle's findings; request backoff delays hint snapshots too.

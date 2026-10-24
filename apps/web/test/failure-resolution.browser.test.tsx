@@ -3,7 +3,7 @@ import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/rea
 import { AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
-import { ItemKey } from "@usine/core/item";
+import { ItemKey, ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
@@ -12,6 +12,7 @@ import {
   AgentFailureView,
   ApprovalNeed,
   AttemptView,
+  BoardItemLink,
   BoardView,
   FactoryOverview,
   FailedAttemptView,
@@ -20,6 +21,7 @@ import {
   RunDetailView,
   RunFailureNeed,
   RunView,
+  LocalWorkerAccess,
 } from "@usine/orchestrator/operator";
 import { Schema } from "effect";
 import { flushSync } from "react-dom";
@@ -41,7 +43,7 @@ declare module "vitest/browser" {
   }
 }
 
-it("resolves a failure from Needs you while retaining unrelated attention, failed history, and retry, and shows why a retry is refused", async () => {
+it("resolves a failure from Needs attention while retaining unrelated attention, failed history, and retry, and shows why a retry is refused", async () => {
   const repository = RepositoryName.make("resolution/project");
   const runId = RunId.make("resolution-run");
   const attemptId = AttemptId.make("resolution-attempt");
@@ -57,25 +59,31 @@ it("resolves a failure from Needs you while retaining unrelated attention, faile
     state: "Failed",
     loopPaused: false,
     openedAt: "2026-09-17T00:00:00Z",
+    closedAt: "2026-09-17T00:20:00Z",
     task: "Complete the issue",
     attempts: [
       new AttemptView({
         id: attemptId,
         number: AttemptNumber.make(1),
         worker: WorkerName.make("local"),
+        workerAccess: new LocalWorkerAccess(),
         brain: new BrainSpec({ harness: "codex", model: ModelId.make("test"), effort: "high" }),
         task: AttemptTask.make("Complete the issue"),
         agent,
         operatorIntervened: false,
         startedAt: "2026-09-17T00:00:00Z",
         outcome: new FailedAttemptView({ failure }),
+        endedAt: "2026-09-17T00:20:00Z",
         salvage: null,
       }),
     ],
+    approval: null,
+    runAgain: null,
     resultMessage: null,
     pullRequestUrl: null,
     canApprove: false,
     canCancel: false,
+    canRunAgain: false,
     canRetry: true,
     canResolveFailure: true,
   });
@@ -84,6 +92,13 @@ it("resolves a failure from Needs you while retaining unrelated attention, faile
     repository: RepositoryName.make("another/project"),
     runId: RunId.make("other-run"),
     loop,
+    item: new BoardItemLink({
+      itemKey: ItemKey.make("github:another/project:7"),
+      kind: "issue",
+      number: ItemNumber.make(7),
+      title: "Write the release notes",
+      url: "https://github.com/another/project/issues/7",
+    }),
   });
   const before = new ReadyOverview({
     projects: [
@@ -141,7 +156,9 @@ it("resolves a failure from Needs you while retaining unrelated attention, faile
         </QueryClientProvider>,
       ),
     );
-    await page.getByRole("button", { name: /AgentFailure.*Work was completed separately/ }).click();
+    await page
+      .getByRole("button", { name: /implement: agent failure.*Work was completed separately/ })
+      .click();
     await page.getByRole("button", { name: "Mark resolved", exact: true }).click();
     await expect
       .element(page.getByRole("button", { name: "Mark resolved", exact: true }))
@@ -150,21 +167,38 @@ it("resolves a failure from Needs you while retaining unrelated attention, faile
     await page.getByRole("button", { name: "Retry", exact: true }).click();
     await expect
       .element(
-        page.getByText("Run newer-run of Loop implement is open on the same Item", {
+        page.getByText('run newer-run of loop "implement" is open on the same item', {
           exact: false,
         }),
       )
       .toBeVisible();
-    await page.getByRole("tab", { name: "Attempts (1)" }).click();
+    const drawer = page.getByRole("dialog");
+    await expect.element(drawer.getByText("Agent failure", { exact: true })).toBeVisible();
     await expect
-      .element(page.getByText("Work was completed separately", { exact: false }))
+      .element(drawer.getByText("Work was completed separately", { exact: false }))
       .toBeVisible();
+    // The labelled button in the body and the expand icon next to Close both link to the Run page.
+    const toPage = drawer.getByRole("link", { name: "Open run page" });
+    await expect.poll(() => toPage.elements().length).toBe(2);
+    expect(new Set(toPage.elements().map((link) => link.getAttribute("href")))).toEqual(
+      new Set(["/projects/resolution/project/runs/resolution-run"]),
+    );
     await page.getByRole("button", { name: "Close", exact: true }).click();
-    const needs = page.getByRole("region", { name: "Items needing intervention" });
+    const needs = page.getByRole("region", { name: "Needs attention" });
     await expect
-      .element(needs.getByRole("button", { name: /AgentFailure/ }))
+      .element(needs.getByRole("button", { name: /implement: agent failure/ }))
       .not.toBeInTheDocument();
-    await expect.element(needs.getByRole("button", { name: /Approval required/ })).toBeVisible();
+    await expect
+      .element(
+        needs.getByRole("button", {
+          name: /implement: approval needed.*#7 Write the release notes/,
+        }),
+      )
+      .toBeVisible();
+    await expect.element(needs.getByRole("button", { name: "Approve", exact: true })).toBeVisible();
+    await expect
+      .element(needs.getByRole("button", { name: "Cancel run", exact: true }))
+      .toBeVisible();
     expect(queryClient.getQueryData<ReadyOverview>(["overview"])?.projects[0]?.status).toBe(
       "clear",
     );

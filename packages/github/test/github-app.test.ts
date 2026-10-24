@@ -3,7 +3,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { RepositoryName } from "@usine/core/repository";
 import { Clock, DateTime, Effect, Layer, Option, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
-import { GitHubApp } from "../src/github-app.ts";
+import { GitHubApp, isRefusal } from "../src/github-app.ts";
 import { AppCredentials, AppId, GitHubCredentials, PrivateKey } from "../src/credentials.ts";
 import { CoveredProject, REQUIRED_REPOSITORY_PERMISSIONS } from "../src/access.ts";
 import { InstallationId, RepositoryId } from "../src/installation.ts";
@@ -31,6 +31,7 @@ const JwtClaims = Schema.Struct({
 });
 const installation = {
   id: 77,
+  app_slug: "usine-basaltbytes",
   account: { login: "basaltbytes" },
   permissions,
   suspended_at: null,
@@ -113,6 +114,8 @@ describe("GitHubApp", () => {
         assert.strictEqual(wide.scope._tag, "InstallationWide");
         assert.strictEqual(Redacted.value(wide.value), "installation-secret");
         assert(!String(wide).includes("installation-secret"));
+        // The slug is the App's bot login, which attributes timeline changes to the factory.
+        assert.strictEqual((yield* app.installation()).appSlug, "usine-basaltbytes");
 
         const access = yield* app.projectAccess([
           RepositoryName.make("BasaltBytes/Usine"),
@@ -123,12 +126,12 @@ describe("GitHubApp", () => {
         const covered = access[0];
         assert(covered instanceof CoveredProject);
 
-        const worker = yield* app.workerToken(covered);
+        const worker = yield* app.workerToken(covered, "write");
         assert.strictEqual(worker.scope._tag, "SingleRepository");
         assert.strictEqual(Redacted.value(worker.value), "worker-secret");
-        yield* app.workerToken(covered);
+        yield* app.workerToken(covered, "write");
 
-        // One lease serves both orchestrator calls. Each worker call mints afresh.
+        // Both orchestrator calls share one lease; each Worker call mints a new token.
         const discoveries = requests.filter((request) =>
           request.url.endsWith("/app/installations?per_page=2"),
         );
@@ -179,6 +182,55 @@ describe("GitHubApp", () => {
     },
   );
 
+  it.live("mints a worker token that can push only for a write Loop", () => {
+    const expiresAt = new Date(Date.now() + 50 * 60 * 1_000).toISOString();
+    const bodies: Array<typeof TokenRequestBody.Type> = [];
+    const client = HttpClient.make((request) =>
+      Effect.sync(() => {
+        bodies.push(requestJson(request));
+        return jsonResponse(request, {
+          token: "worker-secret",
+          expires_at: expiresAt,
+          repositories: [{ id: 99, full_name: "basaltbytes/usine" }],
+        });
+      }),
+    );
+    const project = new CoveredProject({
+      installationId: InstallationId.make(77),
+      repository: RepositoryName.make("basaltbytes/usine"),
+      repositoryId: RepositoryId.make(99),
+    });
+
+    return Effect.gen(function* () {
+      const app = yield* GitHubApp;
+      const read = yield* app.workerToken(project, "read");
+      const write = yield* app.workerToken(project, "write");
+      assert(read.scope._tag === "SingleRepository" && write.scope._tag === "SingleRepository");
+      assert.strictEqual(read.scope.permissions, "read");
+      assert.strictEqual(write.scope.permissions, "write");
+      // A read Loop still posts reviews and comments, so only contents drops to read.
+      assert.deepStrictEqual(
+        bodies.map(({ permissions }) => permissions),
+        [
+          {
+            checks: "read",
+            contents: "read",
+            issues: "write",
+            metadata: "read",
+            pull_requests: "write",
+          },
+          {
+            checks: "read",
+            contents: "write",
+            issues: "write",
+            metadata: "read",
+            pull_requests: "write",
+          },
+        ],
+      );
+    }).pipe(Effect.provide(appLayer(client)));
+  });
+
   it.live("renews the shared lease once its token is about to expire", () => {
     const expiresAt = new Date(Date.now() + 3 * 60 * 1_000).toISOString();
     let mints = 0;
@@ -225,6 +277,7 @@ describe("GitHubApp", () => {
             repository: RepositoryName.make("basaltbytes/usine"),
             repositoryId: RepositoryId.make(99),
           }),
+          "write",
         )
         .pipe(Effect.flip);
       assert.strictEqual(failure._tag, "InvalidGitHubResponseError");
@@ -251,6 +304,7 @@ describe("GitHubApp", () => {
           repository: RepositoryName.make("basaltbytes/usine"),
           repositoryId: RepositoryId.make(99),
         }),
+        "write",
       );
       const shared = yield* app.installationToken();
       assert.strictEqual(DateTime.toEpochMillis(worker.expiresAt), now + 60 * 60_000);
@@ -279,12 +333,72 @@ describe("GitHubApp", () => {
             repository: RepositoryName.make("basaltbytes/usine"),
             repositoryId: RepositoryId.make(99),
           }),
+          "write",
         )
         .pipe(Effect.flip);
       assert.strictEqual(failure._tag, "InvalidGitHubResponseError");
       if (failure._tag === "InvalidGitHubResponseError") {
         assert.match(failure.message, /one-hour lifetime/u);
       }
+    }).pipe(Effect.provide(appLayer(client)));
+  });
+
+  it.live("keeps GitHub's reason for a refused mint and tells a refusal from an outage", () => {
+    const answers: Array<Response> = [
+      new Response(
+        JSON.stringify({
+          message: "The permissions requested are not granted to this installation.",
+        }),
+        { status: 422, headers: { "content-type": "application/json" } },
+      ),
+      new Response("upstream timeout", { status: 503 }),
+      new Response(JSON.stringify({ message: "API rate limit exceeded" }), {
+        status: 429,
+        headers: { "content-type": "application/json", "retry-after": "60" },
+      }),
+    ];
+    const client = HttpClient.make((request) =>
+      Effect.sync(() => {
+        const answer = answers.shift();
+        if (answer === undefined) return assert.fail("unexpected request");
+        return HttpClientResponse.fromWeb(request, answer);
+      }),
+    );
+    const project = new CoveredProject({
+      installationId: InstallationId.make(77),
+      repository: RepositoryName.make("basaltbytes/usine"),
+      repositoryId: RepositoryId.make(99),
+    });
+
+    return Effect.gen(function* () {
+      const app = yield* GitHubApp;
+      const refused = yield* app.workerToken(project, "write").pipe(Effect.flip);
+      assert.strictEqual(
+        refused.message,
+        "GitHub returned HTTP status 422: The permissions requested are not granted to this installation.",
+      );
+      assert.isTrue(isRefusal(refused));
+      const outage = yield* app.workerToken(project, "write").pipe(Effect.flip);
+      assert.strictEqual(outage.message, "GitHub returned HTTP status 503");
+      assert.isFalse(isRefusal(outage));
+      const limited = yield* app.workerToken(project, "write").pipe(Effect.flip);
+      assert.strictEqual(limited._tag, "GitHubRateLimitError");
+      assert.isFalse(isRefusal(limited));
+    }).pipe(Effect.provide(appLayer(client)));
+  });
+
+  it.live("counts a suspended installation as a refusal", () => {
+    const client = HttpClient.make((request) =>
+      Effect.succeed(
+        jsonResponse(request, [{ ...installation, suspended_at: "2026-10-01T00:00:00Z" }]),
+      ),
+    );
+
+    return Effect.gen(function* () {
+      const app = yield* GitHubApp;
+      const failure = yield* app.installation().pipe(Effect.flip);
+      assert.strictEqual(failure._tag, "InstallationDiscoveryError");
+      assert.isTrue(isRefusal(failure));
     }).pipe(Effect.provide(appLayer(client)));
   });
 
@@ -307,6 +421,7 @@ describe("GitHubApp", () => {
       if (failure._tag === "AppPermissionError") {
         assert.deepStrictEqual(failure.missing, ["contents:write"]);
       }
+      assert.isTrue(isRefusal(failure));
     }).pipe(Effect.provide(appLayer(client)));
   });
 });

@@ -3,7 +3,7 @@ import { ConfigParser } from "@usine/config/parser";
 import { CursorStore } from "@usine/engine/cursor";
 import { CycleBudgets } from "@usine/engine/cycle-budget";
 import { RunEngine } from "@usine/engine/engine";
-import { ItemProjectionWriter } from "@usine/engine/item-projection";
+import { ItemProjectionReader, ItemProjectionWriter } from "@usine/engine/item-projection";
 import { LoopControl, type LoopRuntimeState } from "@usine/engine/loop-control";
 import { TriggerCondition } from "@usine/engine/trigger-condition";
 import {
@@ -19,11 +19,19 @@ import { PollingTriggers } from "../../src/polling-triggers.ts";
 
 export const itemProjectionWriterLayer = Layer.succeed(ItemProjectionWriter)({
   upsert: () => Effect.succeed(true),
+  markGone: () => Effect.succeed(true),
 });
 
-/** A queued Event always keeps its turn: the engine's pre-check behavior. */
+const noItemProjections: ItemProjectionReader["Service"] = {
+  list: () => Effect.succeed([]),
+  openIssues: () => Effect.succeed([]),
+};
+
+export const itemProjectionReaderLayer = Layer.succeed(ItemProjectionReader)(noItemProjections);
+
+/** A `TriggerCondition` whose recheck always returns `matches`. */
 export const alwaysHoldsLayer = Layer.succeed(TriggerCondition)({
-  holds: () => Effect.succeed(true),
+  recheck: () => Effect.succeed("matches"),
 });
 
 export const emptyCycleBudgets: CycleBudgets["Service"] = {
@@ -53,7 +61,7 @@ const forgetfulCursorStore: CursorStore["Service"] = {
   write: () => Effect.void,
 };
 
-/** An in-memory cursor store that also exposes what each poll persisted. */
+/** Returns an in-memory cursor store that also exposes what each poll persisted. */
 export const memoryCursorStore = () => {
   const stored = new Map<string, Schema.Json>();
   const store: CursorStore["Service"] = {
@@ -94,6 +102,7 @@ export const pollingTestLayer = (
   labelProjections: RepositoryLabelProjectionReader["Service"] = noRepositoryLabelProjections,
   cursorStore: CursorStore["Service"] = forgetfulCursorStore,
   cycleBudgets: CycleBudgets["Service"] = emptyCycleBudgets,
+  itemProjections: ItemProjectionReader["Service"] = noItemProjections,
 ) => {
   const cursors = Layer.succeed(CursorStore)(cursorStore);
   const expressions = Layer.succeed(ExpressionEngine)({
@@ -101,6 +110,7 @@ export const pollingTestLayer = (
     checkBoolean: () => Effect.die("unused"),
     checkScalar: () => Effect.die("unused"),
     evaluateBoolean: () => Effect.die("unused"),
+    evaluateBooleanEach: () => Effect.die("unused"),
     evaluateScalar: () => Effect.die("unused"),
   });
   const runs = Layer.succeed(RunEngine)({
@@ -108,10 +118,12 @@ export const pollingTestLayer = (
     intervene: () => Effect.void,
     approve: () => Effect.die("unused"),
     cancel: () => Effect.die("unused"),
+    discardLeftovers: () => Effect.die("unused"),
     inspect: () => Effect.die("unused"),
     reconcile: () => Effect.die("unused"),
     drain: () => Effect.void,
     retry: () => Effect.die("unused"),
+    runAgain: () => Effect.die("unused"),
     revoke: () => Effect.die("unused"),
     submit: () => Effect.die("unused"),
     transcript: () => Effect.die("unused"),
@@ -124,6 +136,7 @@ export const pollingTestLayer = (
     cursors,
     expressions,
     itemProjectionWriterLayer,
+    Layer.succeed(ItemProjectionReader)(itemProjections),
     repositoryLabelProjectionWriterLayer,
     Layer.succeed(RepositoryLabelProjectionReader)(labelProjections),
     reconciler,

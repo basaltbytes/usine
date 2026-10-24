@@ -6,14 +6,18 @@ import {
   ParentSession,
   SessionFinished,
   SessionIdle,
+  SessionStarted,
   TextOutput,
   ToolFinished,
   ToolStarted,
   type AgentSession,
   type AgentSessionEvent,
 } from "@usine/core/agent/session";
+import { ItemKey } from "@usine/core/item";
+import { LoopName } from "@usine/core/loop";
+import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
-import { AttemptId } from "@usine/core/attempt";
+import { AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
 import {
   Sequence,
   SessionEvent,
@@ -23,20 +27,25 @@ import {
   InterventionState,
   ChildTarget,
   OperatorMessage,
+  ParentTarget,
 } from "@usine/core/attempt/channel";
 import { TranscriptSequence } from "@usine/engine/transcript";
-import { TranscriptEventView } from "@usine/orchestrator/operator";
+import { WorkerName } from "@usine/core/worker";
+import {
+  AttemptView,
+  LocalWorkerAccess,
+  RunView,
+  TranscriptEventView,
+} from "@usine/orchestrator/operator";
 import type { Schema } from "effect";
 import { renderToStaticMarkup } from "react-dom/server";
 import { assert, it } from "vitest";
 import { MessageScrollerProvider } from "../src/components/ui/message-scroller.tsx";
-import { projectTranscript } from "../src/run-transcript/model.ts";
+import { Outline } from "../src/run-page/outline.tsx";
+import { readerDocument, type Burst } from "../src/run-transcript/document/model.ts";
+import { burstSummary } from "../src/run-transcript/grouping/summary.ts";
+import { projectTranscript, type TranscriptTool } from "../src/run-transcript/model.ts";
 import { Transcript } from "../src/run-transcript/transcript.tsx";
-import {
-  groupSummary,
-  groupTranscript,
-  type ToolGroup,
-} from "../src/run-transcript/grouping/model.ts";
 import {
   changeDisclosure,
   isGroupOpen,
@@ -77,9 +86,22 @@ const started = (sequence: number, callId: string) =>
     sequence,
     new ToolStarted({ session: parent, callId, tool: "read", input: { path: "src/index.ts" } }),
   );
-const groups = (events: ReadonlyArray<TranscriptEventView>): ReadonlyArray<ToolGroup> =>
-  groupTranscript(projectTranscript(events, [])).filter((item) => item._tag === "ToolGroup");
-const keys = (group: ToolGroup) => group.tools.map((tool) => tool.key);
+const document = (events: ReadonlyArray<TranscriptEventView>) =>
+  readerDocument(projectTranscript(events, []), [], events);
+const groups = (events: ReadonlyArray<TranscriptEventView>): ReadonlyArray<Burst> =>
+  document(events)
+    .chapters.flatMap((chapter) => chapter.rows)
+    .filter((row): row is Burst => row._tag === "Burst");
+const keys = (group: Burst) => group.tools.map((tool) => tool.key);
+const history = { cursors: [], loading: false, error: null, load: () => {} };
+const render = (events: ReadonlyArray<TranscriptEventView>) =>
+  renderToStaticMarkup(
+    <TranscriptDisclosureProvider>
+      <MessageScrollerProvider>
+        <Transcript document={document(events)} runTask="Task" history={history} />
+      </MessageScrollerProvider>
+    </TranscriptDisclosureProvider>,
+  );
 const completed = (
   sequence: number,
   tool: string,
@@ -95,13 +117,17 @@ const completed = (
     ),
   ];
 };
+// Summarizes all calls, delegations included, as a single burst.
 const summary = (events: ReadonlyArray<TranscriptEventView>) => {
-  const group = groups(events)[0];
-  assert.isDefined(group);
-  return groupSummary(group);
+  const [first, ...rest] = projectTranscript(events, [])
+    .sessions.flatMap(({ entries }) => entries)
+    .filter((entry): entry is TranscriptTool => entry._tag === "Tool")
+    .sort((left, right) => left.sequence - right.sequence);
+  assert.isDefined(first);
+  return burstSummary({ tools: [first, ...rest] });
 };
 
-it("summarizes adjacent completed work while keeping prose and a single call visible", () => {
+it("folds the calls between two messages into one line that says what ran", () => {
   const events = [
     ...completed(1, "edit", {
       path: "src/conversation.tsx",
@@ -111,28 +137,53 @@ it("summarizes adjacent completed work while keeping prose and a single call vis
     record(5, new TextOutput({ session: parent, text: "The checks need attention." })),
     finished(6, "after-message", "shell"),
   ];
-  const html = renderToStaticMarkup(
-    <TranscriptDisclosureProvider>
-      <MessageScrollerProvider>
-        <Transcript
-          runId={RunId.make("run-31")}
-          projection={projectTranscript(events, [])}
-          filter="all"
-        />
-      </MessageScrollerProvider>
-    </TranscriptDisclosureProvider>,
-  );
+  const html = render(events);
 
-  // This one exact example verifies the compact separator and sentence casing.
+  // The only exact-string check, for the separator and sentence casing.
   assert.include(html, "Edited conversation.tsx · ran tests");
   assert.notMatch(summary(events), /\b(?:passed|succeeded|successful)\b/iu);
-  assert.include(html, "2 completed tools");
+  assert.include(html, "2 tool calls");
   assert.include(html, "The checks need attention.");
-  assert.include(html, 'aria-label="Command: Command details unavailable · Completed"');
+  assert.include(html, "Ran 1 command");
+  assert.notInclude(html, 'aria-label="Command: Command details unavailable · Completed"');
   assert.ok(html.indexOf("Edited conversation.tsx") < html.indexOf("The checks need attention."));
+  assert.ok(html.indexOf("The checks need attention.") < html.indexOf("Ran 1 command"));
+  assert.deepEqual(
+    groups(events).map((group) => group.tools.length),
+    [2, 1],
+  );
 });
 
-it("does not join successful calls across prose hidden by the tools filter", () => {
+it("times a burst from its first start to its last result and counts failed and running calls", () => {
+  const events = [
+    ...completed(1, "Bash", { command: "pnpm lint" }),
+    record(
+      3,
+      new ToolStarted({ session: parent, callId: "gate", tool: "Bash", input: { command: "x" } }),
+    ),
+    record(
+      28,
+      new ToolFinished({
+        session: parent,
+        callId: "gate",
+        tool: "Bash",
+        output: "no",
+        isError: true,
+      }),
+    ),
+    record(
+      29,
+      new ToolStarted({ session: parent, callId: "live", tool: "Bash", input: { command: "y" } }),
+    ),
+  ];
+  const html = render(events);
+  assert.include(html, "Ran 3 commands");
+  assert.match(html, /, (?:<!-- -->)?1(?:<!-- -->)? failed/u);
+  assert.match(html, /, (?:<!-- -->)?1(?:<!-- -->)? running/u);
+  assert.include(html, ">27s<");
+});
+
+it("does not join calls across a message", () => {
   const events = [
     finished(1, "a"),
     finished(2, "b"),
@@ -140,17 +191,7 @@ it("does not join successful calls across prose hidden by the tools filter", () 
     finished(4, "c"),
     finished(5, "d"),
   ];
-  const html = renderToStaticMarkup(
-    <TranscriptDisclosureProvider>
-      <MessageScrollerProvider>
-        <Transcript
-          runId={RunId.make("run-31")}
-          projection={projectTranscript(events, [])}
-          filter="tools"
-        />
-      </MessageScrollerProvider>
-    </TranscriptDisclosureProvider>,
-  );
+  const html = render(events);
 
   assert.lengthOf(html.match(/2 file reads/gu) ?? [], 2);
   assert.notInclude(html, "4 file reads");
@@ -169,68 +210,59 @@ it("keeps completed calls within their parent session, child session and Attempt
     brain,
   });
   const retry = AttemptId.make("retry");
-  const projection = groupTranscript(
-    projectTranscript(
-      [
-        finished(1, "a"),
-        finished(2, "b"),
-        finished(3, "a", "read", secondParent),
-        finished(4, "b", "read", secondParent),
-        finished(5, "a", "read", parent, retry),
-        finished(6, "b", "read", parent, retry),
-        finished(7, "a", "read", child),
-        finished(8, "b", "read", child),
-      ],
-      [],
-    ),
-  );
-  const parentGroups = projection.filter((item) => item._tag === "ToolGroup");
-  assert.lengthOf(parentGroups, 3);
+  const events = [
+    finished(1, "a"),
+    finished(2, "b"),
+    finished(3, "a", "read", secondParent),
+    finished(4, "b", "read", secondParent),
+    finished(5, "a", "read", child),
+    finished(6, "b", "read", child),
+    finished(7, "a", "read", parent, retry),
+    finished(8, "b", "read", parent, retry),
+  ];
+  const bursts = groups(events);
   assert.deepEqual(
-    parentGroups.map((group) => group.tools.length),
-    [2, 2, 2],
+    bursts.map((group) => group.tools.length),
+    [2, 2, 2, 2],
   );
-  assert.equal(new Set(parentGroups.flatMap(keys)).size, 6);
-  const childGroup = projection.find((item) => item._tag === "Session");
-  assert.isDefined(childGroup);
-  assert.equal(childGroup.session.id, child.id);
-  assert.equal(childGroup.entries[0]?._tag, "ToolGroup");
+  assert.equal(new Set(bursts.flatMap(keys)).size, 8);
+  assert.deepEqual(
+    bursts.map((group) => group.speaker.name),
+    ["Parent", "Parent", "reviewer", "Parent"],
+  );
+  assert.lengthOf(document(events).chapters, 2);
 });
 
 it("groups failed commands with the adjacent completed commands and preserves their errors", () => {
-  const projection = groupTranscript(
-    projectTranscript(
-      [
-        finished(1, "before", "shell"),
-        record(
-          2,
-          new ToolFinished({
-            session: parent,
-            callId: "failed",
-            tool: "shell",
-            output: "Access denied",
-            isError: true,
-          }),
-        ),
-        finished(3, "after", "shell"),
-      ],
-      [],
+  const projection = groups([
+    finished(1, "before", "shell"),
+    record(
+      2,
+      new ToolFinished({
+        session: parent,
+        callId: "failed",
+        tool: "shell",
+        output: "Access denied",
+        isError: true,
+      }),
     ),
-  );
+    finished(3, "after", "shell"),
+  ]);
   assert.lengthOf(projection, 1);
   const group = projection[0];
-  assert.equal(group?._tag, "ToolGroup");
-  if (group?._tag !== "ToolGroup") return;
-  assert.equal(groupSummary(group), "Ran 3 commands");
+  assert.isDefined(group);
+  assert.equal(burstSummary(group), "Ran 3 commands");
   assert.deepEqual(
     group.tools.map(({ state }) => state._tag),
     ["Finished", "Error", "Finished"],
   );
-  assert.equal(group.tools[1].state.output, "Access denied");
+  const failed = group.tools[1]?.state;
+  assert(failed?._tag === "Error");
+  assert.equal(failed.output, "Access denied");
 });
 
 it.each(["Running", "Stopped"] as const)(
-  "keeps %s calls exposed between completed groups",
+  "folds %s calls into the burst between two messages",
   (state) => {
     const events = [
       finished(1, "a"),
@@ -240,26 +272,24 @@ it.each(["Running", "Stopped"] as const)(
       finished(5, "d"),
     ];
     if (state === "Stopped") events.push(record(6, new SessionFinished({ session: parent })));
-    const projection = groupTranscript(projectTranscript(events, []));
-    const standalone = projection.filter((item) => item._tag === "Tool");
+    const bursts = groups(events);
 
-    assert.lengthOf(standalone, 1);
-    assert.equal(standalone[0]?.state._tag, state);
     assert.deepEqual(
-      projection.filter((item) => item._tag === "ToolGroup").map((group) => group.tools.length),
-      [2, 2],
+      bursts.map((group) => group.tools.length),
+      [5],
     );
+    assert.equal(bursts[0]?.tools[2]?.state._tag, state);
   },
 );
 
-it("keeps an inspected running call expanded when its completion joins a group", () => {
+it("keeps an inspected running call expanded when it completes and more calls join its burst", () => {
   const initial = [finished(1, "a"), finished(2, "b"), started(3, "live")];
   const tool = projectTranscript(initial, []).items.find(
     (item) => item._tag === "Tool" && item.state._tag === "Running",
   );
   assert.isDefined(tool);
   const choice = changeDisclosure(new Map(), { _tag: "Item", key: tool.key, open: true });
-  const completed = groups([...initial, finished(4, "live")])[0];
+  const completed = groups([...initial, finished(4, "live"), finished(5, "c")])[0];
   assert.isDefined(completed);
 
   assert.isTrue(isGroupOpen(choice, keys(completed)));
@@ -369,9 +399,9 @@ it("enriches summaries when older starts arrive without changing tool identities
   ];
   const cold = groups(recent)[0];
   assert.isDefined(cold);
-  assert.match(groupSummary(cold), /\bread\b/iu);
-  assert.match(groupSummary(cold), /\bcommands?\b/iu);
-  assert.notMatch(groupSummary(cold), /\btests?\b/iu);
+  assert.match(burstSummary(cold), /\bread\b/iu);
+  assert.match(burstSummary(cold), /\bcommands?\b/iu);
+  assert.notMatch(burstSummary(cold), /\btests?\b/iu);
   const earlier = [
     record(
       1,
@@ -394,8 +424,8 @@ it("enriches summaries when older starts arrive without changing tool identities
   ];
   const loaded = groups([...earlier, ...recent])[0];
   assert.isDefined(loaded);
-  assert.include(groupSummary(loaded), "model.ts");
-  assert.match(groupSummary(loaded), /\btests?\b/iu);
+  assert.include(burstSummary(loaded), "model.ts");
+  assert.match(burstSummary(loaded), /\btests?\b/iu);
   assert.equal(loaded.key, cold.key);
   assert.deepEqual(keys(loaded), keys(cold));
 });
@@ -493,13 +523,15 @@ it("summarizes a large file change by distinct-file count while preserving every
   ])[0];
   assert.isDefined(group);
 
-  const text = groupSummary(group);
+  const text = burstSummary(group);
   assert.match(text, /\b5000 files\b/iu);
   assert.match(text, /\btests?\b/iu);
   assert.isBelow(text.length, 100);
   assert.notInclude(text, "private-source");
   assert.lengthOf(group.tools, 2);
-  assert.deepEqual(group.tools[0].state.output, output);
+  const change = group.tools[0].state;
+  assert(change._tag === "Finished");
+  assert.deepEqual(change.output, output);
 });
 
 it("uses a file count when deeply nested colliding paths cannot be distinguished in a compact label", () => {
@@ -560,7 +592,7 @@ it("attaches paged input to its child using unpaged session identity without rep
   const entry = session.entries[0];
   assert(entry?._tag === "Notice");
   assert.strictEqual(entry.detail, "Keep this correction\n\nHarness unavailable");
-  assert.strictEqual(entry.isError, true);
+  assert.strictEqual(entry.tone, "failed");
   const unmatched = projectTranscript([receipt], []).items[0];
   assert(unmatched?._tag === "Notice");
   assert.include(unmatched.label, child.id);
@@ -590,22 +622,155 @@ it("renders a held child from session state when its activity is outside the loa
     }),
   });
   const page = [record(20, new TextOutput({ session: parent, text: "Waiting on the child." }))];
-  const render = (sessionState: ReadonlyArray<TranscriptEventView>) =>
+  const running = new AttemptView({
+    id: attempt,
+    number: AttemptNumber.make(1),
+    worker: WorkerName.make("local"),
+    workerAccess: new LocalWorkerAccess(),
+    brain,
+    task: AttemptTask.make("Task"),
+    agent: parent.agent,
+    operatorIntervened: false,
+    startedAt: "2026-09-12",
+    outcome: null,
+    endedAt: null,
+    salvage: null,
+  });
+  const run = new RunView({
+    id: RunId.make("run-31"),
+    itemKey: ItemKey.make("item"),
+    loop: LoopName.make("implement"),
+    repository: RepositoryName.make("basaltbytes/usine"),
+    agent: parent.agent,
+    state: "Running",
+    loopPaused: false,
+    openedAt: "2026-09-12",
+    closedAt: null,
+    task: "Task",
+    attempts: [running],
+    approval: null,
+    runAgain: null,
+    resultMessage: null,
+    pullRequestUrl: null,
+    canApprove: false,
+    canRetry: false,
+    canResolveFailure: false,
+    canCancel: true,
+    canRunAgain: false,
+  });
+  const outline = (sessionState: ReadonlyArray<TranscriptEventView>) =>
     renderToStaticMarkup(
-      <TranscriptDisclosureProvider>
-        <MessageScrollerProvider>
-          <Transcript
-            runId={RunId.make("run-31")}
-            projection={projectTranscript(page, [], sessionState)}
-            filter="all"
-          />
-        </MessageScrollerProvider>
-      </TranscriptDisclosureProvider>,
+      <Outline
+        run={run}
+        eventPreview="Event"
+        document={readerDocument(projectTranscript(page, [running], sessionState), [running], page)}
+        selection={{ _tag: "Attempt", attemptId: attempt, sessionKey: null }}
+        reading={null}
+        composerSession={null}
+        onSelect={() => {}}
+        onCheckpoint={() => {}}
+        errors={null}
+      />,
     );
 
-  assert.include(
-    render([held, record(4, new SessionIdle({ session: child }))]),
-    "developer activity · Held · waiting for you",
+  const reachable = outline([held, record(4, new SessionIdle({ session: child }))]);
+  assert.include(reachable, "Held, waiting for input");
+  assert.include(reachable, 'aria-label="Resume details for developer"');
+  assert.notInclude(outline([]), "Held, waiting for input");
+  assert.notInclude(outline([]), "Resume details for developer");
+});
+
+it("shows an operator message to a delegating parent once, queued until the parent reads it or stops", () => {
+  const intervention = new Intervention({
+    operator: "Philippe",
+    target: new ParentTarget(),
+    action: new OperatorMessage({ message: "What failed earlier?" }),
+  });
+  const receipt = (sequence: number, payload: InterventionApplied | InterventionRejected) =>
+    new TranscriptEventView({
+      sequence: TranscriptSequence.make(sequence),
+      attemptId: attempt,
+      receivedAt: new Date(Date.UTC(2026, 8, 6, 12, 0, sequence)).toISOString(),
+      direction: "outbound",
+      payload,
+    });
+  const applied = (sequence: number, queued: boolean) =>
+    receipt(
+      sequence,
+      new InterventionApplied({
+        inputSequence: Sequence.make(1),
+        intervention,
+        state: new InterventionState({ held: true, paused: false, queued }),
+      }),
+    );
+  const delegating = [
+    record(1, new TextOutput({ session: parent, text: "Delegating the fix." })),
+    applied(2, true),
+  ];
+  const operatorRows = (events: ReadonlyArray<TranscriptEventView>) =>
+    document(events)
+      .chapters.flatMap((chapter) => chapter.rows)
+      .flatMap((row) =>
+        row._tag === "Message" && row.speaker.name === "Philippe"
+          ? [[Number(row.sequence), row.queued, row.undelivered]]
+          : [],
+      );
+
+  assert.deepStrictEqual(operatorRows(delegating), [[2, "parent", false]]);
+  assert.deepStrictEqual(operatorRows([...delegating, applied(5, false)]), [[2, null, false]]);
+  const stopped = receipt(
+    5,
+    new InterventionRejected({
+      inputSequence: Sequence.make(1),
+      intervention,
+      message: "The parent stopped before it read this message.",
+    }),
   );
-  assert.notInclude(render([]), "developer activity");
+  assert.deepStrictEqual(operatorRows([...delegating, stopped]), [[2, null, true]]);
+});
+
+it("shows a message to a working child queued in the child's section until the child reads it", () => {
+  const child = new ChildSession({
+    id: AgentSessionId.make("working-child"),
+    parentId: parent.id,
+    agent: parent.agent,
+    brain,
+  });
+  const intervention = new Intervention({
+    operator: "Philippe",
+    target: new ChildTarget({ sessionId: child.id }),
+    action: new OperatorMessage({ message: "Use pnpm, not npm." }),
+  });
+  const applied = (sequence: number, queued: boolean) =>
+    new TranscriptEventView({
+      sequence: TranscriptSequence.make(sequence),
+      attemptId: attempt,
+      receivedAt: new Date(Date.UTC(2026, 8, 6, 12, 0, sequence)).toISOString(),
+      direction: "outbound",
+      payload: new InterventionApplied({
+        inputSequence: Sequence.make(1),
+        intervention,
+        state: new InterventionState({ held: true, paused: false, queued }),
+      }),
+    });
+  const working = [
+    record(1, new SessionStarted({ session: child })),
+    record(2, new TextOutput({ session: child, text: "Running the tests." })),
+    applied(3, true),
+  ];
+  const queuedOf = (events: ReadonlyArray<TranscriptEventView>) => {
+    const session = projectTranscript(events, []).sessions.find(
+      (candidate) => candidate.session.id === child.id,
+    );
+    assert(session !== undefined);
+    assert.isTrue(session.held);
+    return session.entries.flatMap((entry) =>
+      entry._tag === "Notice" && entry.origin._tag === "Operator" ? [entry.queued] : [],
+    );
+  };
+
+  assert.deepStrictEqual(queuedOf(working), ["child"]);
+  assert.include(render(working), "Queued until the current child step ends");
+  assert.deepStrictEqual(queuedOf([...working, applied(6, false)]), [null]);
+  assert.notInclude(render([...working, applied(6, false)]), "Queued until");
 });

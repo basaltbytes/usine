@@ -1,33 +1,109 @@
 # @usine/engine
 
-The durable run engine for [usine](https://github.com/basaltbytes/usine). It turns a synthetic Event into a Run with one named Step and a durable Attempt history.
+The durable run engine for [usine](https://github.com/basaltbytes/usine). It turns a synthetic event into a run with one named step and a durable attempt history. [Run lifecycle](https://docs.usine.dev/architecture/run-lifecycle/) covers these rules in depth.
 
-The default adapter stores usine's Event ledger and Run records in `<instance>/.usine/runtime.sqlite`. A Run's id is a hash of its Event's dedup key, so submitting the same dedup key joins the original Run, including after a restart.
+The default adapter stores the event ledger and run records in `<instance>/.usine/runtime.sqlite`. A run's id is a hash of its event's dedup key, so submitting the same key again joins the original run, also after a restart.
 
-`CursorStore` keeps typed keys with JSON values in that database. Trigger adapters use it for efficiency-only cursors such as GitHub watermarks and ETags; deleting a cursor causes a safe replay because the Event ledger remains the source of deduplication.
+0.x APIs can change. Supply `effect` at the workspace's pinned version.
 
-`LoopControl` keeps runtime pause state in the same database. Pausing or unpausing a Loop never edits its authored Markdown file. `RunReader.list()` returns lightweight durable Run summaries newest first for observe-and-intervene surfaces, without loading Event payloads or issuing one snapshot read per Run. `RunReader.forItems(itemKeys)` reads every saved Run and its Attempts for the selected Items, independently of the recent-history window. `RunReader.revision()` lets callers reuse an unchanged projection without rescanning history.
+## Stores and readers
 
-`ItemProjectionReader` and `ItemProjectionWriter` store the latest issue and pull-request snapshots already fetched by trigger polling. Board consumers can read that projection after a restart without making a second GitHub query; `ItemProjectionReader.list` returns the newest Items first, bounded by the caller's `limit`. Item writes update the shared projection revision only when the content hash changes.
+- `CursorStore` stores typed keys with JSON values, for efficiency-only trigger cursors such as GitHub watermarks and ETags. Deleting one safely replays events; the ledger deduplicates.
+- `LoopControl` stores loop pause state; pausing never edits the loop file.
+- `ItemProjectionReader` and `ItemProjectionWriter` store the latest issue and pull request snapshots from polling, which the board reads after a restart without querying GitHub. `list` returns the newest items first, up to `limit`; `openIssues` returns the numbers of open issues not marked gone. Writes change the projection revision only if the content hash changes.
+- `RepositoryLabelProjectionReader` and `RepositoryLabelProjectionWriter` store each repo's full label catalog from polling, so repos without items still get proposed lanes. Writes change the revision only if the label set changes.
+- `BoardMoves` (`/board-moves`) stores each board move: repo, item, send time, source and destination lanes, and labels added and removed. The orchestrator records a move before sending its labels, so the factory app's label change for the operator isn't taken for an agent's. `onItem(itemKey, since)` returns an item's moves from `since`, oldest first. Moves don't change the revision.
 
-`RepositoryLabelProjectionReader` and `RepositoryLabelProjectionWriter` store the complete label catalog observed during repository polling. Repositories with no Items can still receive proposed Board lanes, and the catalog remains available after a restart. Catalog writes update the projection revision only when the label set changes.
+`RunReader`:
+
+- `list()`: lightweight run summaries, newest first, without event payloads or a snapshot read per run.
+- `closed({ limit })`: the runs that closed last, by their last attempt's end.
+- `forItems(itemKeys)`: every saved run and its attempts for those items, outside the recent-history window.
+- `events(runIds)`: in one batch, the event that opened each run. Its payload is the item as the trigger saw it, before the agent changed it.
+- `evidence(runId)`: the run snapshot and all its transcript entries, in append order and unpaged, from one transaction, consistent while attempts complete or append.
+- `attemptsByWorker()`: per worker, the attempts that startup still visits, and how many are open.
+- `revision()`: lets callers reuse an unchanged projection.
 
 ## Runtime rules
 
-- Approval-gated Runs wait for an approval Event before their first Attempt.
-- Infrastructure failures retry automatically, with a cap of three Attempts. Agent, defect, and guard failures wait for an operator retry.
-- A newer Event supersedes a pending, waiting, or queued Run. A running Attempt finishes first, then the engine opens only the newest queued Event for that Item. Before that Event opens, `TriggerCondition` (`@usine/engine/trigger-condition`, supplied by the deployment) re-evaluates the Loop's trigger against the Item's current state: an Event whose trigger no longer holds is recorded as ignored (revoked) and never opens a Run, so a Run that changes its own Item before it flips the labels gating its trigger does not spawn a second Run.
-- Revoke stops pending, waiting, and queued Runs. Operator cancellation can also stop a running Attempt.
-- Each open Run has one fiber in the engine's process, and the run tables are the only durable state. At startup, and then every `ReconcileInterval` (three minutes unless provided otherwise), the engine starts a fiber for every open Run that has none, except a Run waiting for its approval, and opens the newest queued Event of an Item whose Run closed before that Event got its turn. If the process stopped during an Attempt, the engine asks `StepExecutor.isLive` whether the Attempt's parent task outlived the restart. A live Attempt is reattached: it keeps its identity and number, spends no retry, and `StepExecution.reattach` tells the executor to take over its checkout. When the parent task already finished and `StepExecutor.outcome` returns the result it stored, the engine finishes the Attempt with that result, as if the process had not stopped. Otherwise the engine records that Attempt as an infrastructure failure and resumes as N+1.
-- A defect escaping `StepExecutor` is saved as `DefectFailure`, preserving its original cause and requiring an operator retry. A store operation that fails to persist is repeated four times with exponential backoff before it counts as failed. If the engine itself fails while driving a Run (a defect, or a write the store still could not make), that Run's fiber logs the cause and stops; the next reconcile or a restart starts it again from the tables.
-- Attempt channel envelopes are stored in an append-only transcript. A redelivered envelope (same Attempt, direction, and channel sequence, as a reattached parent may send after a restart) keeps the first stored copy. Stored protocol-v3 through v6 envelopes remain readable after the live channel upgrades to v7. Normalized parent and child session events retain their session identity. `RunEngine.transcript` accepts distinct `TranscriptAllQuery`, `TranscriptTailQuery`, and `TranscriptPageQuery` variants, so full diagnostics, bounded live tails, and bounded backward pages cannot be confused. Tail and page queries require a positive row limit. A protocol-v4 `Started` frame writes the SDK-selected parent model onto the Attempt.
-- The submitted agent, rendered task, payload snapshot, effective parent model, and per-Attempt child brain survive restarts in the run ledger.
+### Approval and retries
 
-The engine's [lifecycle decisions](src/engine/lifecycle.ts) determine Attempt completion, interrupted-Attempt recovery, cancellation, operator retry, and whether a new Event can replace a Run. `RunStore` reads the current records and applies each decision in one transaction, including the Step result. Normal completion and restart recovery share the three-Attempt retry cap. Late executor results cannot settle a replacement Attempt. Approval, retry, cancellation, supersede, and revoke commit through the store and then start or stop the Run's fiber; [ADR 0003](../../docs/adr/0003-durable-execution-on-effect-workflow.md) records why the engine drives Runs itself.
+- Approval-gated runs wait for an approval event before their first attempt.
+- Infrastructure failures retry automatically, up to three attempts. Agent, defect, and guard failures wait for an operator retry. A defect escaping `StepExecutor` is saved as `DefectFailure` with its original cause.
+- `RunEngine.retry(runId, request)` takes a `RetryRequest`: the operator login and the task and agent that an edit-and-retry changes.
+- `Attempt.start` records why each attempt started: the event, an operator retry or edit-and-retry with its login, an infrastructure retry, or a restart. A reattached attempt keeps its reason and records `reattachedAt`.
+
+### Supersede, revoke, and reopening
+
+- A newer event supersedes a pending, waiting, or queued run. A running attempt finishes first; then only the item's newest queued event opens.
+- Before it opens, `TriggerCondition` (`/trigger-condition`, supplied by the deployment) re-evaluates the loop's trigger on the item's current state. If it no longer matches, the event is recorded as ignored (revoked) and opens no run. If the item's source no longer has the item, the events are revoked and `ItemProjectionWriter.markGone` marks it gone, so the board stops showing it as open.
+- Revoke stops pending, waiting, and queued runs; operator cancel also stops a running attempt.
+- The engine records what each loop last saw of an item: a submitted event, or a non-matching sighting. A canceled, superseded, or revoked run keeps its event while the item stays the same, and so does a queued event that a revoke ignored. If the loop saw the item not matching or changed, and it then matches again, the event reopens with the dedup key `["reopened", n, <original key>]`, so the new run gets its own id.
+- Succeeded and failed runs always keep their event. A queued event superseded by a newer one stays ignored.
+
+### Run again
+
+`RunEngine.runAgain(runId, request)` opens a new run for the item state of a succeeded or canceled run, with the request's task, agent, step, approval requirement, and cycle limit. Its dedup key, `["operator-run-again", n, <trigger key>]`, is numbered with the trigger event's reopenings, so a later sighting of the unchanged item joins it. The cycle budget can block it (`CycleBlocked`), and the approval gate applies. It fails with `RunOperationRejectedError` for other states and `RunRetryBlockedError` while the loop has another open run on the item. `RunSnapshot.runAgain` names the original run and who asked.
+
+### Questions, blockers, and resolution
+
+An attempt ending with `QuestionFailure` or `BlockedFailure` starts a suppression of the item for its loop. The loop's next event, usually the agent's own comment, returns `Suppressed` and opens no run; queued events wait. An event with other content, a non-matching sighting, an operator retry, or `RunEngine.resolveFailure` lifts the suppression, and resolving gives the newest queued event its turn.
+
+`RunEngine.resolveFailure(runId, attemptId)` stores the resolution of the current failed attempt. Repeats are safe; another attempt or a run no longer failed is rejected. Snapshots and summaries include `resolvedFailureAttemptId`, and resolution updates the revision. Outcomes, attempts, transcripts, and retry stay as they were.
+
+### Run fibers and restarts
+
+Each open run has one fiber, and the run tables are the only durable state. At startup and every `ReconcileInterval` (three minutes by default), the engine starts a fiber for each open run without one, except runs waiting for approval, and opens the newest queued event of an item whose run closed first. A failed store operation is retried four times with exponential backoff. If the engine fails while driving a run (a defect, or a write that still fails), the fiber logs the cause and stops until the next reconcile or restart.
+
+After a stop during an attempt, the engine asks `StepExecutor.isLive` whether its parent task survived:
+
+- Live: the engine reattaches the attempt, with its identity, number, and worker, using no retry. `StepExecution.reattach` tells the executor to take over the checkout.
+- Finished, and `StepExecutor.outcome` returns the stored result: the engine finishes the attempt with it.
+- Otherwise: the attempt fails as an infrastructure failure, and the run continues with attempt N+1.
+
+At startup, before any fiber starts, `StepExecutor.occupy` takes a slot on the worker of each open attempt whose checkout the engine keeps, so no new attempt takes it while the run calls `isLive`. The reattached attempt runs in that slot until it ends. If the run doesn't reattach, the reattachment fails before `ExecutionSink.checkoutAcquired`, or the operator cancels first, the slot stays taken until `StepExecutor.interrupt` confirms that the parent task stopped. A reattaching run without such a slot passes the worker to `StepExecutor.reserve`, then calls `isLive` again.
+
+Also at startup, the engine passes every stored attempt on a worker in `StepExecutor.workers` to `StepExecutor.recover`, which records its salvage and reconciles its checkout. It first stops the parent task of each closed attempt. An open attempt whose parent task is live, or whose liveness can't be read, keeps its checkout for the run.
+
+The engine handles that checkout's recovery until the reattaching execution runs `ExecutionSink.checkoutAcquired`, which `StepExecutor.execute` runs once preparation has the checkout, never on a failed preparation. If the run closes the attempt first (the task stopped before the run reserved a worker, liveness can't be read, the reattachment failed, or the operator canceled), the engine stops the parent task with `interrupt` and passes the still-open attempt to `recover`, which reconciles regardless of `isLive`. The next attempt resumes from that salvage.
+
+If `interrupt` can't confirm the stop, the checkout and slot stay, the fiber stops before the next attempt and logs `Could not confirm that the parent task of an Attempt its Run does not reattach stopped`, and each reconcile tries again: it reattaches if the task is live, or retries the stop. This applies after another restart too.
+
+Attempts on a worker that `StepExecutor.workers` doesn't list aren't reconciled. `RunEngine.discardLeftovers(worker)` stops tracking them and changes nothing on the worker. For a listed worker (declared, or removed with attempts still running), it fails with `LeftoversDiscardRejectedError`, which names the worker and counts its open attempts.
+
+### Transcripts
+
+Attempt channel envelopes go to an append-only transcript. A redelivered envelope (same attempt, direction, and channel sequence, as a reattached parent can send) keeps the first copy. Envelopes from protocol v3 to v6 still read under v7. Parent and child session events keep their session identity. A protocol v4 `Started` writes the SDK-selected parent model to the attempt.
+
+`RunEngine.transcript` takes distinct query types: `TranscriptAllQuery`, `TranscriptTailQuery` and `TranscriptPageQuery` (bounded, with a positive row limit), and `TranscriptUsageQuery`, which returns each session's highest `SessionTokensUpdated` report. Session queries keep each session's launch record with its latest state, so harness session ids and worker paths stay available after completion and outside the loaded page.
+
+The run ledger keeps the submitted agent, rendered task, payload snapshot, effective parent model, and each attempt's child brain across restarts.
+
+### Attempt windows
+
+The sink given to `StepExecutor.execute`, and the `RecoverySink` given to `StepExecutor.recover`, read as `windows` the attempt's own window on the item and the agent's overlapping windows there (`RunStore.attemptWindows`). The harvest reads them after GitHub lists the comments, so attempts started meanwhile count, as does an end recorded when a cancel closed the attempt before the executor stopped. It keeps only comments inside the own window and no other ([ADR 0006](../../docs/adr/0006-executor-contract-run-host-attempt-channel.md), #429). An attempt that ended before end times were recorded has no window: its harvest keeps no comment, and it overlaps no other attempt.
+
+The sink also reads back the attempt's current-protocol envelopes in append order as `transcript` (`TranscriptAllQuery`), so a reattaching executor resumes its runaway guard.
+
+### Lifecycle decisions
+
+The [lifecycle decisions](src/engine/lifecycle.ts) decide attempt completion, interrupted-attempt recovery, cancellation, operator retry, and whether a new event can replace a run. `RunStore` applies each decision and its step result in one transaction. Completion and restart recovery share the three-attempt cap, and a late executor result can't settle a replacement attempt. Approval, retry, cancel, supersede, and revoke commit through the store, then start or stop the fiber. [ADR 0003](../../docs/adr/0003-durable-execution-on-effect-workflow.md) records why the engine drives runs itself.
+
+## Cycle budgets
+
+`CycleBudgets` (`/cycle-budget`) stores item-level exhaustion asks and idempotent reset events. `Submission.cycleLimit` defaults to three; schedule adapters pass `None`. Admission reserves the allowance in a transaction, or returns `CycleBlocked` if the item needs a reset. Retries don't count again, and canceled runs without attempts give their reservation back. On upgrade, existing history and queued events get the default budget.
+
+A reset records a fresh polling request. Trigger adapters read `CycleBudgets.generation(itemKey)` before fetching and put it in `Submission.cycleGeneration` and the event identity. Admission supersedes older observations, including in-flight polls and queued events, and new polling creates an event with current settings. Labels, restarts, and loop changes never clear an ask. See [ADR 0022](../../docs/adr/0022-item-cycle-budgets-and-comment-reviews.md).
+
+## Drain and shutdown
+
+`RunEngine.drain()` closes attempt admission for good and waits for admitted attempts to store their outcomes. Reservations, approval gates, and retries resume after a restart; interrupting the wait leaves admission closed. The host sets a deadline and closes its runtime scope afterward ([ADR 0023](../../docs/adr/0023-graceful-attempt-drain.md)).
+
+To handle shutdown during startup, provide `RunEngineShutdown` (`/engine`): a fresh `Deferred<void>` allocated before building the runtime. Completing it closes admission at once, recovered work included. After startup, `drain()` waits for admitted outcomes. The server installs this before building its runtime.
 
 ## Composition
 
-Every subpath is platform-free except the Node local adapter at `@usine/engine/local-sqlite`. Its `layer` supplies local SQLite, the migrations, and startup recovery. Provide a `StepExecutor` implementation at the composition root:
+All subpaths are platform-free except the Node adapter `@usine/engine/local-sqlite`, whose `layer` provides SQLite, migrations, and startup recovery. Provide a `StepExecutor` at the composition root:
 
 ```ts
 import { Effect, Layer, Option } from "effect"
@@ -57,9 +133,9 @@ const StepExecutorLive = Layer.succeed(StepExecutor)({
   interrupt: () => Effect.void,
 })
 
-// Re-checks a queued Event's trigger before its Run opens; this one always holds.
+// Re-checks a queued Event's trigger before its Run opens; this one always matches.
 const TriggerConditionLive = Layer.succeed(TriggerCondition)({
-  holds: () => Effect.succeed(true),
+  recheck: () => Effect.succeed("matches"),
 })
 
 const EngineLive = layer(InstanceDirectory.make("/path/to/instance")).pipe(
@@ -76,34 +152,16 @@ const program = Effect.gen(function* () {
 })
 ```
 
-`@usine/engine/engine` provides `RunEngine`, `Submission`, submission results, and typed engine errors. `@usine/engine/run-reader` provides `RunReader` and its snapshot, summary, and evidence types; `/transcript` provides transcript entries, sequence values, and query variants. Import projection contracts from `/item-projection` and `/repository-label-projection`, and loop pause state with `LoopControl` from `/loop-control`.
+`/engine` exports `RunEngine`, `Submission`, submission results, and typed errors; `/run-reader` exports `RunReader` and its snapshot, summary, run event, and evidence types; `/transcript` exports entries, sequences, and queries. Projection contracts are in `/item-projection` and `/repository-label-projection`, and `LoopControl` is in `/loop-control`.
 
-`RunReader.evidence(runId)` reads the Run snapshot and every transcript entry for its Attempts in one database transaction. The returned `RunEvidence` stays consistent when an Attempt completes or appends output during the read. Transcript entries use append order with no page limit.
+`runReaderLayer(instanceDirectory)` (`/local-sqlite`) provides only `RunReader`, on a read-only connection, for maintenance commands. It needs an existing database and never creates tables, migrates, or changes the journal mode. A missing, unreadable, or incompatible database fails with `EnginePersistenceError`.
 
-For local maintenance commands, `runReaderLayer(instanceDirectory)` from `@usine/engine/local-sqlite` provides only `RunReader` using a read-only SQLite connection. It requires an existing runtime database and does not initialize tables, migrate the schema, or change the journal mode. A missing, unreadable, or incompatible database fails through `EnginePersistenceError`.
+`backup(instanceDirectory, destination)` (`/local-sqlite`) copies every runtime table and committed WAL data while other connections stay open. It opens the source read-only, without migrations. The destination must be a new file in an existing directory that supports hard links; the copy is complete, owner-only, and never overwrites a file. `RuntimeStoreBackupError` gives the failed operation (`open`, `stage`, `copy`, or `publish`), both paths, and the underlying message or code. Logs report failures, or the pages copied. If interrupted, the adapter waits for Node's backup to finish before closing and deleting temporary files.
 
-`backup(instanceDirectory, destination)` from `@usine/engine/local-sqlite` copies every runtime table and committed WAL data while other connections remain active. It opens the source read-only, without migrations. The destination must be a new file in an existing directory that supports hard links; the adapter saves a complete owner-only copy without overwriting existing files.
+`layerWithDatabase` (`/engine`) takes another SQLite-compatible layer providing `RunDatabase` (`/database`) with atomic transactions, plus the platform `Crypto` layer that hashes dedup keys into run ids. Cloudflare D1 doesn't work with Drizzle RC.4, because its Effect driver can't run the store's transactions.
 
-`RuntimeStoreBackupError` includes the failed operation (`open`, `stage`, `copy`, or `publish`), both paths, and the underlying error message or code. Structured logs report failures and the number of pages copied on success. If interrupted, the adapter waits for Node's backup to finish before closing its connection and deleting temporary files.
-
-`layerWithDatabase` from `@usine/engine/engine` accepts another SQLite-compatible database layer. That layer provides `RunDatabase` from `@usine/engine/database` with atomic transactions; the deployment also supplies its platform `Crypto` layer, which hashes dedup keys into Run ids. Cloudflare D1 is not supported by Drizzle RC.4 for this use yet because its Effect driver cannot execute the store's transactions.
-
-The Drizzle schema is the source of truth for usine tables. After changing it, generate and review a migration with:
+The Drizzle schema defines usine's tables. After changing it, generate and review a migration:
 
 ```sh
 pnpm --filter @usine/engine db:generate --name <migration_name>
 ```
-
-Everything is 0.x, so APIs may change. Supply `effect` at the version pinned by the usine workspace.
-
-`CycleBudgets` at `@usine/engine/cycle-budget` persists Item-level exhaustion Asks and explicit, idempotent reset Events. `Submission.cycleLimit` defaults to three; schedule adapters supply `None`. Run admission reserves the allowance transactionally and returns `CycleBlocked` when the Item needs a reset. Attempt retries do not charge again, and canceled Runs without Attempts return their reservation. Existing history and queued Item Events acquire the default budget on upgrade.
-
-Reset records a fresh polling request. Trigger adapters capture `CycleBudgets.generation(itemKey)` before fetching input and include it in both `Submission.cycleGeneration` and the Event identity. Older observations are superseded at admission, including in-flight polls and queued Events; fresh polling creates a new Event with current execution settings. Labels, restarts, and Loop configuration changes never clear an Ask. See [ADR 0022](../../docs/adr/0022-item-cycle-budgets-and-comment-reviews.md).
-
-`RunEngine.drain()` permanently closes Attempt admission for that runtime and waits for admitted Attempts to persist their outcomes. Worker reservations, approval gates, and subsequent retries resume after restarting the runtime. Interrupting the drain wait keeps admission closed. The host supplies a shutdown deadline and closes its runtime scope after the wait; see [ADR 0023](../../docs/adr/0023-graceful-attempt-drain.md).
-
-Hosts that handle shutdown during startup can provide `RunEngineShutdown` from `/engine`: a fresh `Deferred<void>` allocated before building the runtime. Completing it immediately closes Attempt admission, including recovered work. After startup completes, `RunEngine.drain()` waits for the admitted outcomes. The server installs this protection before building its runtime.
-
-Stored protocol-v5 envelopes remain readable after upgrading the live channel to v6. Session transcript queries retain each session's launch record alongside its latest lifecycle state, so saved harness session ids and worker paths remain available after completion and outside the loaded history page.
-
-`RunEngine.resolveFailure(runId, attemptId)` persists resolution for the current failed Attempt. Repeated requests for that same failure are safe; requests for a different Attempt or a Run that is no longer failed are rejected. `RunReader` snapshots and summaries include `resolvedFailureAttemptId`, and resolution updates the projection revision. Run outcomes, Attempts, transcripts, and retry availability remain unchanged.

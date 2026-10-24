@@ -6,7 +6,7 @@ import { InstanceDirectory } from "@usine/core/instance";
 import { RepositoryName } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
 import { Effect, FileSystem, Layer, Result } from "effect";
-import { CredentialProvider, Executor } from "@usine/executor";
+import { claudeLoginLockLayer, CredentialProvider, Executor } from "@usine/executor";
 import { layer } from "@usine/executor/local";
 import { stubAttemptRuntime, StubStorage } from "@usine/durable/testing";
 
@@ -15,9 +15,16 @@ const attempt = (worker: string, number: number) => ({
   worker: WorkerName.make(worker),
   repository: RepositoryName.make("acme/demo"),
   ref: SalvageRef.make(`usine/salvage/closed/${number}`),
+  permissions: "write" as const,
   succeeded: number % 2 === 0,
   open: false,
 });
+
+const ignored = {
+  salvage: () => Effect.void,
+  comments: () => Effect.void,
+  windows: Effect.die("A closed Attempt's comments are never harvested"),
+};
 
 const credentials = Layer.succeed(CredentialProvider)({
   issue: () => Effect.die("Absent checkouts must not acquire credentials"),
@@ -27,6 +34,7 @@ const executorLayer = (root: string, fileSystem: FileSystem.FileSystem) =>
   layer({ instanceDirectory: InstanceDirectory.make(root) }).pipe(
     Layer.provide(credentials),
     Layer.provide(stubAttemptRuntime(new StubStorage())),
+    Layer.provide(claudeLoginLockLayer),
     Layer.provide(Layer.succeed(FileSystem.FileSystem)(fileSystem)),
   );
 
@@ -59,7 +67,11 @@ describe("local checkout reconciliation", () => {
         yield* Effect.forEach(
           Array.from({ length: 1000 }, (_, index) => index),
           (index) =>
-            executor.recover(attempt("local", index), () => Effect.die("Unexpected salvage")),
+            executor.recover(attempt("local", index), {
+              salvage: () => Effect.die("Unexpected salvage"),
+              comments: () => Effect.die("Unexpected comments"),
+              windows: Effect.die("Unexpected windows read"),
+            }),
           { concurrency: 8, discard: true },
         );
       }).pipe(Effect.provide(executorLayer(root, observed)));
@@ -88,23 +100,19 @@ describe("local checkout reconciliation", () => {
       });
       yield* Effect.gen(function* () {
         const executor = yield* Executor;
-        const first = yield* Effect.result(
-          executor.recover(attempt("broken", 1), () => Effect.void),
-        );
+        const first = yield* Effect.result(executor.recover(attempt("broken", 1), ignored));
         assert(Result.isFailure(first));
         assert.strictEqual(first.failure._tag, "ExecutorOperationError");
         yield* fs.remove(attempts);
         yield* fs.makeDirectory(attempts);
-        const second = yield* Effect.result(
-          executor.recover(attempt("broken", 2), () => Effect.void),
-        );
+        const second = yield* Effect.result(executor.recover(attempt("broken", 2), ignored));
         assert(Result.isFailure(second));
-        yield* executor.recover(attempt("healthy", 3), () => Effect.void);
+        yield* executor.recover(attempt("healthy", 3), ignored);
         assert.strictEqual(reads, 1);
       }).pipe(Effect.provide(executorLayer(root, observed)));
       yield* Effect.gen(function* () {
         const executor = yield* Executor;
-        yield* executor.recover(attempt("broken", 1), () => Effect.void);
+        yield* executor.recover(attempt("broken", 1), ignored);
       }).pipe(Effect.provide(executorLayer(root, observed)));
       assert.strictEqual(reads, 2);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),

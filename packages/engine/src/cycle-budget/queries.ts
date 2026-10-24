@@ -27,10 +27,10 @@ const decodeBudget = Schema.decodeUnknownEffect(Schema.Array(BudgetRow), {
   onExcessProperty: "error",
 });
 
-/** Transaction-local admission and reservation operations shared with the Run store. */
+/** Returns the admission and reservation queries that run inside a Run store transaction. */
 export const cycleQueries = (database: RunDatabaseClient) => {
-  // Apply the same immutable observation generation at admission and before
-  // queue ordering, so stale Events cannot hide eligible work after a reset.
+  // Admission and queue ordering use the same generation filter, so stale Events can't hide
+  // eligible work after a reset.
   const currentEvent = eq(
     triggerEvents.cycleGeneration,
     sql`coalesce((

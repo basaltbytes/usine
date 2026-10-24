@@ -1,4 +1,5 @@
 import type { AttemptId } from "@usine/core/attempt";
+import type { LoopPermissions } from "@usine/core/loop";
 import { type RepositoryName, safeSegment } from "@usine/core/repository";
 import type { WorkerName } from "@usine/core/worker";
 import { Cache, Effect, Redacted } from "effect";
@@ -15,12 +16,10 @@ import { renewableCredential } from "../renewable-credential.ts";
 import type { SshMachine } from "./model.ts";
 
 /**
- * Writes the Attempt's credential directory `$3` inside the credentials root
- * `$2`: the token from the first line of standard input, gh's `hosts.yml`
- * from the rest of it, and gh's `config.yml` from `$1`. Both directories get
- * mode 700 even when they already exist. The token arrives on standard input,
- * so it never appears in a process's arguments or environment on the machine,
- * and renames keep readers from seeing a partly written file.
+ * A script that writes the Attempt's credential directory `$3` inside the credentials root
+ * `$2`: the token from the first stdin line, gh's `hosts.yml` from the rest, and gh's
+ * `config.yml` from `$1`. Sets mode 700 on both directories. Reading the token from stdin keeps
+ * it out of arguments and the environment; each file is written then renamed.
  */
 const WRITE_CREDENTIAL_SCRIPT = String.raw`
 set -e
@@ -35,18 +34,13 @@ mv "$3/token.next" "$3/token"
 mv "$3/hosts.next" "$3/hosts.yml"
 `.trim();
 
-/** Where an SSH Worker keeps the credential directory of each Attempt it runs. */
 const credentialsRoot = (machine: SshMachine): string => `${machine.workerDirectory}/credentials`;
 
 /**
- * Gives each Attempt the single-repository token the orchestrator mints, in a
- * directory beside the Worker's checkouts that only the SSH user can read,
- * renewed before it expires and removed when the Attempt's scope closes.
- * Every Attempt on the Worker runs as that user, so each can read the others'
- * tokens while they run (ADR 0026). `reclaim` removes every credential an
- * earlier process left on the Worker, once per process, and runs before the
- * Worker's first Attempt: no Attempt can still use one, because a reattached
- * Attempt is given a fresh credential.
+ * Writes each Attempt's token to a directory next to the Worker's checkouts that only the SSH
+ * user can read, renews it before expiry, and removes it when the Attempt's scope closes. All
+ * Attempts on the Worker can read each other's tokens (ADR 0026). `reclaim` removes credentials
+ * left by an earlier process, once per process.
  */
 export const sshCredentialsFor = Effect.fn("SshExecutor.credentialsFor")(function* (
   commands: RemoteCommands,
@@ -66,8 +60,8 @@ export const sshCredentialsFor = Effect.fn("SshExecutor.credentialsFor")(functio
       host,
     });
   });
-  // A failed removal is logged and remembered: the tokens it leaves expire
-  // within the hour, and the next start removes them.
+  // A failed removal is logged and cached, not retried: the remaining tokens expire within an
+  // hour and the next start removes them.
   const reclaimed = yield* Cache.make({
     capacity: Number.POSITIVE_INFINITY,
     lookup: (worker: WorkerName) =>
@@ -104,8 +98,7 @@ export const sshCredentialsFor = Effect.fn("SshExecutor.credentialsFor")(functio
         )
         .pipe(Effect.ensuring(Effect.sync(() => Redacted.wipeUnsafe(payload))));
     },
-    // Scope closure waits for a write in flight, so the removal that follows
-    // it cannot be overtaken by a late renewal.
+    // Scope closure waits for an in-flight write, so a late renewal cannot run after the removal.
     Effect.uninterruptible,
   );
 
@@ -113,11 +106,12 @@ export const sshCredentialsFor = Effect.fn("SshExecutor.credentialsFor")(functio
     attemptId: AttemptId,
     worker: WorkerName,
     repository: RepositoryName,
+    permissions: LoopPermissions,
     machine: SshMachine,
     operation: ExecutorOperation,
   ) {
     const host = machine.shell.destination;
-    yield* Effect.annotateCurrentSpan({ attemptId, worker, repository, host });
+    yield* Effect.annotateCurrentSpan({ attemptId, worker, repository, permissions, host });
     const directory = `${credentialsRoot(machine)}/${safeSegment(attemptId)}`;
     yield* Effect.addFinalizer(() =>
       commands.run("cleanup", machine.shell, "rm", ["-rf", directory]).pipe(
@@ -137,8 +131,12 @@ export const sshCredentialsFor = Effect.fn("SshExecutor.credentialsFor")(functio
         Effect.ignore,
       ),
     );
-    const credential = yield* renewableCredential(provider.issue, repository, attemptId, (issued) =>
-      write(operation, machine, directory, issued),
+    const credential = yield* renewableCredential(
+      provider.issue,
+      repository,
+      attemptId,
+      permissions,
+      (issued) => write(operation, machine, directory, issued),
     );
     const environment = credentialEnvironment(directory);
     return {

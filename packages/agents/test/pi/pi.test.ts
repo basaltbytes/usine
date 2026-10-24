@@ -8,7 +8,8 @@ import { AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { Effect, Fiber, Layer, Option, Queue, Stream } from "effect";
+import { WorkerName } from "@usine/core/worker";
+import { Effect, Fiber, Layer, Logger, Option, Queue, Stream } from "effect";
 import {
   AgentResultError,
   ChildRequest,
@@ -18,18 +19,21 @@ import {
   toAttemptFailure,
   UnknownModelError,
   WorkingDirectory,
-} from "@usine/agents/runtime";
-import { LocalProcess, RemoteShell } from "@usine/agents/child-host";
+  type OnDelivery,
+} from "../../src/runtime.ts";
+import { LocalProcess, RemoteShell } from "../../src/child-host/child-host.ts";
+import { piChildBackendLayer } from "../../src/pi/pi.ts";
 import {
+  environmentBashTool,
   PiSdk,
-  piChildBackendLayer,
   type PiSession,
   type PiSessionEvent,
   type PiStartOptions,
   type PiStartResult,
-} from "@usine/agents/pi";
-import { environmentBashTool } from "../../src/pi/sdk.ts";
+} from "../../src/pi/sdk.ts";
 import { resolvePiPool } from "../../src/pi/authentication.ts";
+
+const noDelivery: OnDelivery = () => Effect.void;
 
 describe("Pi pool resolution", () => {
   it("maps ChatGPT subscription authentication to the ChatGPT pool", () => {
@@ -97,6 +101,7 @@ const delayedPiStart = () => {
 
 describe("Pi child backend", () => {
   const childRequest = new ChildRequest({
+    worker: WorkerName.make("worker-1"),
     environment: { HOME: "/home/worker", PATH: "/usr/bin:/bin" },
     host: new LocalProcess(),
     session: new ChildSession({
@@ -154,6 +159,7 @@ describe("Pi child backend", () => {
         const first = yield* Queue.take(turns);
         const state = yield* running.intervene(
           new AttemptChannel.OperatorMessage({ message: "Wait for my review" }),
+          noDelivery,
         );
         assert.strictEqual(state.held, true);
         first.complete();
@@ -161,22 +167,85 @@ describe("Pi child backend", () => {
         assert.strictEqual(result.pollUnsafe(), undefined);
         yield* running.intervene(
           new AttemptChannel.OperatorMessage({ message: "Now fix the edge case" }),
+          noDelivery,
         );
         const second = yield* Queue.take(turns);
         assert.strictEqual(second.text, "Now fix the edge case");
         second.complete();
         yield* Queue.take(idle);
         assert.strictEqual(result.pollUnsafe(), undefined);
-        yield* running.intervene(new AttemptChannel.Release());
+        yield* running.intervene(new AttemptChannel.Release(), noDelivery);
         assert.strictEqual((yield* Fiber.join(result)).message, "Pi session completed");
         assert.strictEqual(opens, 1);
       }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(sdk));
     }).pipe(Effect.scoped),
   );
 
+  it.effect("reports a message to a working Pi child read once Pi starts it in the turn", () =>
+    Effect.gen(function* () {
+      const listeners: Array<(event: PiSessionEvent) => void> = [];
+      const steered: Array<string> = [];
+      const sdk = Layer.succeed(PiSdk)({
+        start: () =>
+          Promise.resolve({
+            _tag: "Started",
+            model: childRequest.session.brain.model,
+            pool: "apiKeys",
+            session: {
+              messages: [],
+              dispose: () => {},
+              abort: () => Promise.resolve(),
+              subscribe: (listener) => {
+                listeners.push(listener);
+                return () => {};
+              },
+              steer: (text) => {
+                steered.push(text);
+                return Promise.resolve("queued" as const);
+              },
+              prompt: () => new Promise<void>(() => {}),
+            },
+          }),
+      });
+      yield* Effect.gen(function* () {
+        const running = yield* (yield* PiChildBackend).launch(childRequest);
+        const reads: Array<Option.Option<AttemptChannel.InterventionState>> = [];
+        const state = yield* running.intervene(
+          new AttemptChannel.OperatorMessage({ message: "Use pnpm, not npm." }),
+          (delivered) =>
+            Effect.sync(() => {
+              reads.push(delivered);
+            }),
+        );
+        assert.deepStrictEqual([state.held, state.queued], [true, true]);
+        assert.deepStrictEqual(steered, ["Use pnpm, not npm."]);
+        assert.deepStrictEqual(reads, []);
+        for (const listener of listeners)
+          listener({
+            type: "message_start",
+            message: {
+              role: "user",
+              content: [{ type: "text", text: "Use pnpm, not npm." }],
+              timestamp: 0,
+            },
+          });
+        for (let spin = 0; reads.length === 0; spin += 1) {
+          if (spin > 1_000) return assert.fail("the read was never reported");
+          yield* Effect.yieldNow;
+        }
+        const [read] = reads;
+        assert(read !== undefined && Option.isSome(read));
+        assert.deepStrictEqual([read.value.held, read.value.queued], [true, false]);
+      }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(sdk));
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("normalizes session events and forwards input and controls", () => {
     let options: PiStartOptions | undefined;
-    let listener: ((event: PiSessionEvent) => void) | undefined;
+    const listeners: Array<(event: PiSessionEvent) => void> = [];
+    const publish = (event: PiSessionEvent) => {
+      for (const listener of listeners) listener(event);
+    };
     let prompt = "";
     let steer = "";
     let interrupted = false;
@@ -189,17 +258,10 @@ describe("Pi child backend", () => {
       messages: [],
       prompt: (value) => {
         prompt = value;
-        // Operational SDK events with no normalized shape are logged and
-        // skipped; they must never enter the queue or break the bridge.
-        listener?.({
-          type: "auto_retry_start",
-          attempt: 1,
-          maxAttempts: 3,
-          delayMs: 250,
-          errorMessage: "overloaded",
-        });
-        listener?.({ type: "auto_retry_end", success: true, attempt: 1 });
-        listener?.({
+        // SDK events with no normalized form are logged and skipped; they must not enter the queue
+        // or stop the bridge.
+        publish({ type: "compaction_start", reason: "threshold" });
+        publish({
           type: "message_end",
           message: fauxAssistantMessage("Pi child done."),
         });
@@ -210,7 +272,7 @@ describe("Pi child backend", () => {
         return Promise.resolve();
       },
       subscribe: (found) => {
-        listener = found;
+        listeners.push(found);
         return () => undefined;
       },
     };
@@ -256,6 +318,93 @@ describe("Pi child backend", () => {
     );
   });
 
+  it.effect("reports each provider retry of a turn and the recovery when Pi gets an answer", () => {
+    const listeners: Array<(event: PiSessionEvent) => void> = [];
+    const publish = (event: PiSessionEvent) => {
+      for (const listener of listeners) listener(event);
+    };
+    const retry = (attempt: number, errorMessage: string): PiSessionEvent => ({
+      type: "auto_retry_start",
+      attempt,
+      maxAttempts: 3,
+      delayMs: 2_000,
+      errorMessage,
+    });
+    const session: PiSession = {
+      abort: () => Promise.resolve(),
+      dispose: () => undefined,
+      messages: [],
+      prompt: () => {
+        publish(retry(1, "terminated"));
+        publish(retry(2, "429 Too Many Requests"));
+        publish({ type: "message_end", message: fauxAssistantMessage("Pi child done.") });
+        publish({ type: "auto_retry_end", success: true, attempt: 2 });
+        publish({ type: "agent_settled", aborted: false });
+        // Retry numbering restarts at 1 on the next turn; a retry that Pi abandons has no recovery.
+        publish(retry(1, "terminated"));
+        publish({ type: "auto_retry_end", success: false, attempt: 1, finalError: "terminated" });
+        publish({ type: "agent_settled", aborted: false });
+        return Promise.resolve();
+      },
+      steer: () => Promise.resolve(),
+      subscribe: (found) => {
+        listeners.push(found);
+        return () => undefined;
+      },
+    };
+    const sdk = Layer.succeed(PiSdk)({
+      start: () =>
+        Promise.resolve({
+          _tag: "Started",
+          model: childRequest.session.brain.model,
+          pool: "apiKeys",
+          session,
+        }),
+    });
+    const warnings: Array<string> = [];
+    const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+      if (logLevel === "Warn") warnings.push(JSON.stringify(message));
+    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const running = yield* (yield* PiChildBackend).launch(childRequest);
+        const [events] = yield* Effect.all([Stream.runCollect(running.events), running.result]);
+        assert.deepStrictEqual(
+          events.map((event) => event._tag),
+          [
+            "SessionStarted",
+            "ProviderRetrying",
+            "ProviderRetrying",
+            "SessionTokensUpdated",
+            "TextOutput",
+            "ProviderRecovered",
+            "ProviderRetrying",
+            "SessionFinished",
+          ],
+        );
+        assert.deepStrictEqual(
+          events.flatMap((event) =>
+            event._tag === "ProviderRetrying" ? [[event.message, event.retries]] : [],
+          ),
+          [
+            ["terminated", 1],
+            ["429 Too Many Requests", 2],
+            ["terminated", 1],
+          ],
+        );
+        const recovered = events.find((event) => event._tag === "ProviderRecovered");
+        assert(recovered?._tag === "ProviderRecovered");
+        assert.strictEqual(recovered.retries, 2);
+        const retries = warnings.filter((line) => line.includes("cannot reach its provider"));
+        assert.lengthOf(retries, 3, "one warning per provider retry");
+      }).pipe(
+        Effect.provide(piChildBackendLayer),
+        Effect.provide(sdk),
+        Effect.provide(Logger.layer([logger])),
+      ),
+    );
+  });
+
   it.effect("refuses a remote host before starting the Pi SDK", () => {
     let started = false;
     const sdk = Layer.succeed(PiSdk)({
@@ -279,7 +428,7 @@ describe("Pi child backend", () => {
           ),
         );
         assert(error instanceof AgentResultError);
-        assert.match(error.message, /^Pi children run only on local Workers/u);
+        assert.match(error.message, /^Pi children run only on local workers/u);
         assert.strictEqual(toAttemptFailure(error)._tag, "AgentFailure");
         assert.strictEqual(started, false);
       }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(sdk)),

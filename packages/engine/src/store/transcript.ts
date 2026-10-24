@@ -15,12 +15,11 @@ import {
   transcriptEntryFromRow,
 } from "./codec.ts";
 
-/** Owns durable transcript writes and bounded history/session reads on the caller's transaction. */
+/** Returns the transcript queries that run on the caller's transaction. */
 export const transcriptQueries = (database: RunDatabaseClient) => {
   /**
-   * Appends one envelope and reports whether it was new. A redelivered envelope,
-   * such as one a reattached parent task sends again after a restart, keeps the
-   * first stored copy; the per-direction channel sequence is its identity.
+   * Appends an envelope and returns whether it was new. A redelivered envelope with the same
+   * direction and sequence keeps the first stored copy.
    */
   const appendTranscript = Effect.fn("RunStoreQueries.appendTranscript")(function* (
     direction: AttemptChannel.Direction,
@@ -68,10 +67,35 @@ export const transcriptQueries = (database: RunDatabaseClient) => {
             .groupBy(
               sql`coalesce(json_extract(${attemptTranscripts.envelope}, '$.payload.event.session.id'), json_extract(${attemptTranscripts.envelope}, '$.payload.intervention.target.sessionId'), '@parent')`,
               sql`json_extract(${attemptTranscripts.envelope}, '$.payload._tag')`,
-              // Keep launch metadata alongside the latest lifecycle state, even after completion.
+              // Keeps launch metadata next to the latest lifecycle state, even after completion.
               sql`json_extract(${attemptTranscripts.envelope}, '$.payload.event._tag') = 'SessionStarted'`,
             ),
         ),
+      TranscriptUsageQuery: ({ attemptId }) => {
+        // SQLite returns a bare column from the row with the group's max().
+        const highest = database
+          .select({
+            sequence: attemptTranscripts.sequence,
+            tokens:
+              sql<number>`max(json_extract(${attemptTranscripts.envelope}, '$.payload.event.totalTokens'))`.as(
+                "tokens",
+              ),
+          })
+          .from(attemptTranscripts)
+          .where(
+            and(
+              eq(attemptTranscripts.attemptId, attemptId),
+              sql`json_extract(${attemptTranscripts.envelope}, '$.payload._tag') = 'SessionEvent'`,
+              sql`json_extract(${attemptTranscripts.envelope}, '$.payload.event._tag') = 'SessionTokensUpdated'`,
+            ),
+          )
+          .groupBy(sql`json_extract(${attemptTranscripts.envelope}, '$.payload.event.session.id')`)
+          .as("highest");
+        return inArray(
+          attemptTranscripts.sequence,
+          database.select({ sequence: highest.sequence }).from(highest),
+        );
+      },
       TranscriptAllQuery: ({ attemptId }) => eq(attemptTranscripts.attemptId, attemptId),
       TranscriptTailQuery: ({ attemptId, after }) =>
         and(eq(attemptTranscripts.attemptId, attemptId), gt(attemptTranscripts.sequence, after)),
@@ -95,17 +119,17 @@ export const transcriptQueries = (database: RunDatabaseClient) => {
       })
       .from(attemptTranscripts)
       .where(cursor);
-    // A limited read walks the tail index backwards for the newest N rows and
-    // re-sorts ascending, so callers always receive append order.
+    // A page query reads the newest rows backwards, then sorts them into append order.
     const rows = yield* Match.valueTags(query, {
       TranscriptSessionsQuery: () => selection.orderBy(asc(attemptTranscripts.sequence)).execute(),
+      TranscriptUsageQuery: () => selection.orderBy(asc(attemptTranscripts.sequence)).execute(),
       TranscriptAllQuery: () => selection.orderBy(asc(attemptTranscripts.sequence)).execute(),
       TranscriptTailQuery: ({ limit }) =>
         selection.orderBy(asc(attemptTranscripts.sequence)).limit(limit).execute(),
       TranscriptPageQuery: ({ limit }) =>
         selection.orderBy(desc(attemptTranscripts.sequence)).limit(limit).execute(),
     });
-    // Transcript rows are usine-owned, so an unknown key is corruption.
+    // An unknown key in a transcript row is corruption.
     return (yield* decodeTranscriptRows(rows, { onExcessProperty: "error" }))
       .map(transcriptEntryFromRow)
       .sort((left, right) => left.sequence - right.sequence);

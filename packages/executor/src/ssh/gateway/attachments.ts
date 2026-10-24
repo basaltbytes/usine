@@ -1,4 +1,5 @@
 import type { AttemptId } from "@usine/core/attempt";
+import type { LoopPermissions } from "@usine/core/loop";
 import type { RepositoryName } from "@usine/core/repository";
 import type { WorkerName } from "@usine/core/worker";
 import { AttachRequest, type AttachmentId, InstallationCredential } from "@usine/gateway/admin";
@@ -17,10 +18,8 @@ import type { MachineGateway, SshMachine } from "../model.ts";
 import { gatewayEnvironment, ghGatewayConfig } from "./environment.ts";
 
 /**
- * Writes gh's configuration for the Gateway into the directory `$1`: `$2`
- * becomes `config.yml` and `$3` becomes `hosts.yml`. Each file is written
- * under a name of its own and renamed, so concurrent Attempts never read a
- * partial file.
+ * A script that writes `$2` and `$3` as `config.yml` and `hosts.yml` in directory `$1`. Each
+ * file is written to a temporary name and renamed.
  */
 const WRITE_GH_CONFIG_SCRIPT = String.raw`
 set -e
@@ -31,29 +30,22 @@ mv "$1/config.yml.$$" "$1/config.yml"
 mv "$1/hosts.yml.$$" "$1/hosts.yml"
 `.trim();
 
-/** How often a live Attempt stores its attachment again, which bounds the outage a Gateway restart causes. */
+/** The interval for re-storing a live Attempt's attachment, which bounds the outage after a Gateway restart. */
 const RESTORE_INTERVAL = "2 minutes";
 
-/** An Attempt's attachment, and the token it carries now. */
 interface CurrentAttachment {
   readonly id: AttachmentId;
   readonly credential: WorkerCredential;
 }
 
-/** Where a Worker behind a Gateway keeps gh's configuration; it contains no token. */
+/** Returns gh's configuration directory on a Worker behind a Gateway. The directory contains no token. */
 const ghConfigDirectory = (machine: SshMachine): string => `${machine.workerDirectory}/gh`;
 
 /**
- * Gives each Attempt on a Worker behind a Gateway access to its repository
- * without a token on the machine (ADR 0027): the orchestrator mints the
- * single-repository token, attaches it to the Gateway for the Worker and the
- * repository, renews the same attachment before the token expires, stores
- * it again every two minutes in case the Gateway restarted, and detaches it
- * when the Attempt's scope closes. The Attempt's children
- * present the caller token the Gateway answered with, which reaches the
- * machine through the SSH connection only. The first use of each Worker in
- * this process detaches whatever attachments an earlier process left for it:
- * no Attempt can still use one, because a reattached Attempt attaches again.
+ * Grants each Attempt repository access through the Gateway without a token on the machine
+ * (ADR 0027). Attaches the token, renews it before expiry, re-stores it every two minutes, and
+ * detaches it when the scope closes. On first use of a Worker, detaches attachments left by an
+ * earlier process.
  */
 export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFor")(function* (
   commands: RemoteCommands,
@@ -79,7 +71,7 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
         worker,
         domain: settings.domain,
       });
-    // Each leftover is detached on its own, so one refusal leaves the others detached.
+    // Detaches each leftover separately so one failure doesn't stop the others.
     yield* Effect.forEach(
       leftovers,
       ({ id, repository }) =>
@@ -103,8 +95,7 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
       { discard: true },
     );
   });
-  // A failed listing is logged and remembered: the attachments it leaves
-  // expire with their tokens within the hour.
+  // Caches a failed listing; the leftover attachments expire with their tokens within an hour.
   const reclaimed = yield* Cache.make({
     capacity: Number.POSITIVE_INFINITY,
     lookup: (worker: WorkerName) =>
@@ -124,12 +115,13 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
     attemptId: AttemptId,
     worker: WorkerName,
     repository: RepositoryName,
+    permissions: LoopPermissions,
     machine: SshMachine,
     gateway: MachineGateway,
     operation: ExecutorOperation,
   ) {
     const { admin, settings } = gateway;
-    const fields = { attemptId, worker, repository, domain: settings.domain };
+    const fields = { attemptId, worker, repository, permissions, domain: settings.domain };
     yield* Effect.annotateCurrentSpan(fields);
     const config = ghGatewayConfig(settings.domain);
     yield* commands.run(operation, machine.shell, "sh", [
@@ -142,7 +134,7 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
     ]);
 
     const attached = yield* Ref.make(Option.none<CurrentAttachment>());
-    // Publishing and re-storing take turns, so the Gateway never ends up with an older token.
+    // Serializes publish and restore so the Gateway never gets an older token.
     const turn = yield* Semaphore.make(1);
     yield* Effect.addFinalizer(() =>
       Ref.get(attached).pipe(
@@ -190,7 +182,12 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
         }).pipe(
           Effect.mapError(
             (cause) =>
-              new CredentialUnavailableError({ repository, message: cause.message, cause }),
+              new CredentialUnavailableError({
+                repository,
+                reason: "unreachable",
+                message: cause.message,
+                cause,
+              }),
           ),
         );
         yield* Ref.set(attached, Option.some({ id: answer.attachment.id, credential }));
@@ -207,14 +204,13 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
         );
         return answer.callerToken;
       },
-      // Scope closure waits for an attach in flight, so the detach that
-      // follows it knows the attachment's id.
+      // Scope closure waits for an in-flight attach, so the detach has the attachment ID.
       turn.withPermits(1),
       Effect.uninterruptible,
     );
 
-    // The Gateway keeps attachments in memory: after it restarts, this puts
-    // the Attempt's attachment back under the same id with the current token.
+    // The Gateway stores attachments in memory. After a restart, re-creates the attachment with
+    // the same ID and the current token.
     const restore = Effect.fn("SshExecutor.restoreAttachment")(
       function* () {
         yield* Effect.annotateCurrentSpan(fields);
@@ -232,10 +228,15 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
       Effect.uninterruptible,
     );
 
-    const credential = yield* renewableCredential(provider.issue, repository, attemptId, publish);
+    const credential = yield* renewableCredential(
+      provider.issue,
+      repository,
+      attemptId,
+      permissions,
+      publish,
+    );
     const callerToken = credential.published;
-    // Forked after renewal, so scope closure stops it before the token is
-    // wiped and before the detach.
+    // Forked after renewal so scope closure stops it before the token is wiped and detached.
     yield* Effect.forever(
       Effect.sleep(RESTORE_INTERVAL).pipe(
         Effect.andThen(restore()),

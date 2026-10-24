@@ -8,9 +8,8 @@ import { mergeTranscript } from "./cache.ts";
 type DetailRequest = ColdTranscriptRequest | TailTranscriptRequest;
 
 /**
- * Reads a Run update through the operator client. Terminal tails are drained to
- * an empty page so stopping live polling cannot strand newer transcript events.
- * Cold history retains its earlier-page cursors; running tails remain one poll.
+ * Fetches a Run detail page. For a tail request on a Run that can no longer be canceled, reads pages
+ * until one is empty, so no events are missed after polling stops.
  */
 export const fetchRunDetail = async (
   request: DetailRequest,

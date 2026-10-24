@@ -4,9 +4,9 @@ import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ToolExecutionApi } from "@earendil-works/pi-durable";
 import { assembleChildPrompt } from "@usine/agents/prompt";
 import {
-  BLOCKED_MARKER,
   ChildRequest,
   ChildSessionBudgetExceededError,
+  reportText,
   type RunningSession,
   WorkingDirectory,
 } from "@usine/agents/runtime";
@@ -17,8 +17,9 @@ import {
   ChildSessionBudget,
   ChildSessionCount,
   SessionFinished,
+  sessionPool,
 } from "@usine/core/agent/session";
-import { Deferred, Effect, Exit, Fiber, Option, Result, Stream } from "effect";
+import { Deferred, Effect, Exit, Fiber, Match, Option, Result, Stream } from "effect";
 import { durableError } from "../harness.ts";
 import { AttemptRecordDoc, HoldDoc } from "./documents.ts";
 import type { AttemptHub } from "./hubs.ts";
@@ -27,7 +28,7 @@ import { storedRequestOf } from "./request.ts";
 import type { ExtensionServices } from "./services.ts";
 import { firstAccepted } from "./watch.ts";
 
-/** The parent's only tool. */
+/** The name of the parent's only tool. */
 export const SUBAGENT_TOOL = "subagent";
 
 type SpawnDetails = { childSessionId: string };
@@ -59,7 +60,7 @@ const aborted = (context: ChordContext, sessionId: AgentSessionId): Effect.Effec
       }),
   });
 
-/** Keeps the child addressable by id for operator input while its scope is open. */
+/** Registers the child in `hub.children` until the scope closes. */
 const register = (hub: AttemptHub, child: RunningSession) =>
   Effect.acquireRelease(
     Effect.sync(() => {
@@ -69,10 +70,9 @@ const register = (hub: AttemptHub, child: RunningSession) =>
   );
 
 /**
- * Builds the `subagent` tool: one call delegates one focused task to a child
- * of the Agent's harness, in the Attempt's checkout, and returns its report. A
- * child is not replay-safe: after a restart the call settles as interrupted
- * with the output committed so far, and the parent may spawn a new child.
+ * Builds the `subagent` tool, which runs one task in a child of the Agent's harness and returns the
+ * child's report. After a restart, a running call ends as interrupted, because children aren't
+ * replay-safe.
  */
 export const subagentTool = (services: ExtensionServices) => {
   const spawn = Effect.fn("Subagent.spawn")(function* (
@@ -90,7 +90,7 @@ export const subagentTool = (services: ExtensionServices) => {
     );
     if (owner === undefined) {
       return yield* Effect.die(
-        new Error("The subagent tool runs only in an Attempt's parent conversation"),
+        new Error("The subagent tool runs only in an attempt's parent conversation"),
       );
     }
     const stored = yield* storedRequestOf(owner.input);
@@ -139,17 +139,20 @@ export const subagentTool = (services: ExtensionServices) => {
       );
     }
     const request = yield* Deferred.await(hub.attached);
+    // Read when each child starts, so a preflight that ran after the Attempt launched applies.
     const session = new ChildSession({
       id: AgentSessionId.make(`${parentId}:child:${attemptedChildren}`),
       parentId,
       agent: spec.agent.name,
       brain: spec.agent.brain,
+      gatewayCredential: yield* request.gatewayCredential,
     });
     const childRequest = new ChildRequest({
       session,
       cwd: WorkingDirectory.make(request.cwd),
       environment: request.environment,
       host: request.host,
+      worker: request.worker,
       prompt: assembleChildPrompt({
         agent: spec.agent.name,
         persona: spec.agent.persona,
@@ -161,9 +164,24 @@ export const subagentTool = (services: ExtensionServices) => {
       attemptedChildren,
       maxChildren: spec.maxChildren,
       sessionId: session.id,
+      pool: sessionPool(session),
       taskExcerpt: excerpt,
     });
-    const child = yield* services.backend.launch(childRequest);
+    // Annotate logs with the Attempt because this tool runs outside the Attempt's fiber. An abort
+    // interrupts a launch that is still waiting through retry delays.
+    const child = yield* Effect.raceFirst(
+      services.backend
+        .launch(childRequest)
+        .pipe(Effect.annotateLogs({ attemptId: spec.attemptId, worker: request.worker })),
+      aborted(context, session.id).pipe(
+        Effect.tap(() =>
+          Effect.logInfo("Abandoning the child launch of an aborted tool call", {
+            sessionId: session.id,
+          }),
+        ),
+        Effect.andThen(Effect.interrupt),
+      ),
+    );
     yield* register(hub, child);
     yield* Effect.addFinalizer((exit) =>
       Exit.isFailure(exit)
@@ -171,7 +189,7 @@ export const subagentTool = (services: ExtensionServices) => {
             sessionId: session.id,
           }).pipe(
             Effect.andThen(
-              services.hubs.child(hub, new SessionFinished({ session: child.session })),
+              services.hubs.event(hub, new SessionFinished({ session: child.session })),
             ),
           )
         : Effect.void,
@@ -180,7 +198,7 @@ export const subagentTool = (services: ExtensionServices) => {
       api.details({ childSessionId: session.id }, context),
     );
     const forward = (event: AgentSessionEvent) =>
-      services.hubs.child(hub, event).pipe(
+      services.hubs.event(hub, event).pipe(
         Effect.andThen(
           event._tag === "TextOutput"
             ? Effect.try({
@@ -198,16 +216,22 @@ export const subagentTool = (services: ExtensionServices) => {
             : Effect.void,
         ),
       );
-    // The child's result carries the same AgentResultError that ends its stream.
+    // These errors end the stream with the same report the child's result contains, so they are
+    // ignored here.
     const forwarding = yield* child.events.pipe(
       Stream.runForEach(forward),
-      Effect.catchTag("AgentResultError", () => Effect.void),
+      Effect.catchTag(
+        ["AgentResultError", "AgentBlockedError", "AgentQuestionError"],
+        () => Effect.void,
+      ),
       Effect.forkScoped,
     );
     const outcome = yield* Effect.raceFirst(
       child.result.pipe(
         Effect.map(Result.succeed),
-        Effect.catchTag("AgentResultError", (error) => Effect.succeed(Result.fail(error))),
+        Effect.catchTag(["AgentResultError", "AgentBlockedError", "AgentQuestionError"], (report) =>
+          Effect.succeed(Result.fail(report)),
+        ),
       ),
       aborted(context, session.id).pipe(
         Effect.tap(() =>
@@ -227,26 +251,32 @@ export const subagentTool = (services: ExtensionServices) => {
       await firstAccepted(watch, (hold) => !hold.held.includes(session.id), scoped);
     });
     const text = yield* Result.match(outcome, {
-      onFailure: (error) =>
+      onFailure: (report) =>
         Effect.gen(function* () {
-          yield* Effect.logInfo("Child session returned a blocked report to the Pi parent", {
-            sessionId: session.id,
+          const kind = Match.valueTags(report, {
+            AgentResultError: () => "failed" as const,
+            AgentBlockedError: () => "blocked" as const,
+            AgentQuestionError: () => "question" as const,
           });
-          const first = yield* call("record the child's blocker", () =>
+          yield* Effect.logInfo("Child session returned a reserved report to the Pi parent", {
+            sessionId: session.id,
+            kind,
+          });
+          const first = yield* call("record the child's report", () =>
             api.commit(async (tx) => {
               const record = await tx.doc(AttemptRecordDoc, spec.attemptId, null);
               if (record.childBlocker !== null) return false;
-              record.childBlocker = { sessionId: session.id, message: error.message };
+              record.childBlocker = { sessionId: session.id, message: report.message, kind };
               return true;
             }, context),
           );
           if (!first) {
-            yield* Effect.logInfo("Kept the Attempt's first child blocker ahead of this one", {
+            yield* Effect.logInfo("Kept the Attempt's first child report ahead of this one", {
               sessionId: session.id,
             });
           }
-          yield* services.hubs.child(hub, new SessionFinished({ session: child.session }));
-          return `${BLOCKED_MARKER}\n${error.message}`;
+          yield* services.hubs.event(hub, new SessionFinished({ session: child.session }));
+          return reportText(report);
         }),
       onSuccess: (result) =>
         Effect.logInfo("Child session returned to the Pi parent", { sessionId: session.id }).pipe(

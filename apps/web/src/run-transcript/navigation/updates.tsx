@@ -1,29 +1,22 @@
 import { ArrowDownIcon } from "@phosphor-icons/react";
 import { useEffect, useLayoutEffect } from "react";
 import { Button } from "@/components/ui/button";
-import {
-  MessageScrollerButton,
-  useMessageScroller,
-  useMessageScrollerScrollable,
-} from "@/components/ui/message-scroller";
-import type { TranscriptFilter } from "../model.ts";
+import { useMessageScroller, useMessageScrollerScrollable } from "@/components/ui/message-scroller";
 
-/** Observes the visible conversation while the unread ledger survives filter remounts. */
 export const UpdateNavigation = ({
   count,
   active,
-  filter,
   pendingLatest,
-  revealingError,
+  revealing,
   onObserve,
   onLatest,
   onReachedLatest,
 }: {
   readonly count: number;
   readonly active: boolean;
-  readonly filter: TranscriptFilter;
   readonly pendingLatest: boolean;
-  readonly revealingError: boolean;
+  /** Whether a navigation request is scrolling the reader; an "at latest" observation during it does not acknowledge updates. */
+  readonly revealing: boolean;
   readonly onObserve: (atLatest: boolean) => void;
   readonly onLatest: () => void;
   readonly onReachedLatest: () => void;
@@ -31,36 +24,28 @@ export const UpdateNavigation = ({
   const { end } = useMessageScrollerScrollable();
   const { scrollToEnd } = useMessageScroller();
   useEffect(() => {
-    onObserve(active && filter === "all" && !end && !revealingError);
-  }, [active, filter, end, revealingError, onObserve]);
+    onObserve(active && !end && !revealing);
+  }, [active, end, revealing, onObserve]);
   useLayoutEffect(() => {
-    if (pendingLatest && filter === "all" && scrollToEnd({ behavior: "instant" }))
-      onReachedLatest();
-  }, [pendingLatest, filter, scrollToEnd, onReachedLatest]);
+    if (pendingLatest && scrollToEnd({ behavior: "instant" })) onReachedLatest();
+  }, [pendingLatest, scrollToEnd, onReachedLatest]);
 
-  if (count > 0)
-    return (
-      <Button
-        variant="secondary"
-        size="sm"
-        className="absolute bottom-4 inset-s-1/2 -translate-x-1/2 gap-1.5 border border-border shadow-sm"
-        onClick={onLatest}
-      >
-        <ArrowDownIcon aria-hidden="true" />
-        {count} new {count === 1 ? "update" : "updates"}
-      </Button>
-    );
+  // A separate row below the reader, so the control does not cover the outcome or salvage line.
   return (
-    <MessageScrollerButton
-      size="sm"
-      className="gap-1.5 shadow-sm"
-      aria-label="Jump to latest"
-      onClick={(event) => {
-        event.preventDefault();
-        onLatest();
-      }}
-    >
-      <ArrowDownIcon aria-hidden="true" /> Jump to latest
-    </MessageScrollerButton>
+    <div className="flex h-10 shrink-0 items-center justify-center">
+      {count > 0 ? (
+        <Button variant="secondary" size="sm" className="gap-1.5" onClick={onLatest}>
+          <ArrowDownIcon aria-hidden="true" />
+          {count} new {count === 1 ? "update" : "updates"}
+        </Button>
+      ) : (
+        end && (
+          <Button variant="ghost" size="sm" className="gap-1.5" onClick={onLatest}>
+            <ArrowDownIcon aria-hidden="true" />
+            Jump to latest
+          </Button>
+        )
+      )}
+    </div>
   );
 };

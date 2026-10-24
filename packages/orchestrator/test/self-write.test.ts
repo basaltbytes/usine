@@ -13,11 +13,14 @@ import { ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { StepName } from "@usine/core/step";
+import { WorkerName } from "@usine/core/worker";
+import { BoardMoves } from "@usine/engine/board-moves";
 import { RunReader } from "@usine/engine/run-reader";
 import { StepExecutor } from "@usine/engine/step-executor";
 import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { Source } from "@usine/expression/expression-engine";
+import { GitHubItemHistory } from "@usine/github/item-history";
 import { GitHubItemWriter } from "@usine/github/item-writer";
 import {
   GitHubApiError,
@@ -47,7 +50,10 @@ import {
 import { BoardLaneId, BoardMove } from "../src/operator/board.ts";
 import { Operator } from "../src/operator/operator.ts";
 import { PollingTriggers } from "../src/polling-triggers.ts";
+import { gitHubItemKey } from "../src/polling/repository-sync.ts";
 import { ScheduleTriggers } from "../src/schedule-triggers.ts";
+import { WorkerStatus } from "../src/worker-status.ts";
+import { fixedInstance } from "./support/current-instance.ts";
 import { alwaysHoldsLayer, inertLabelReconcilerLayer } from "./support/polling.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
@@ -132,6 +138,7 @@ describe("Board self-writes", () => {
           let writeFailure: Option.Option<GitHubAppError> = Option.none();
           let changeRequests = 0;
           const github: GitHubPolling["Service"] = {
+            missingIssues: () => Effect.succeed([]),
             changes: (_repository, cursor) =>
               Effect.gen(function* () {
                 changeRequests += 1;
@@ -188,11 +195,13 @@ describe("Board self-writes", () => {
               }),
           });
           const executor = Layer.succeed(StepExecutor)({
+            workers: Effect.succeed([WorkerName.make("local")]),
             isLive: () => Effect.succeed(false),
             outcome: () => Effect.succeed(Option.none()),
             recover: () => Effect.void,
             intervene: () => Effect.void,
             interrupt: () => Effect.void,
+            occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
             reserve: () => Effect.die("approval must precede worker reservation"),
             execute: () => Effect.die("approval must precede an Attempt"),
           });
@@ -204,9 +213,13 @@ describe("Board self-writes", () => {
             engine,
             writer,
             MarcbachmannCelLayer,
+            WorkerStatus.idle,
             ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer)),
             inertLabelReconcilerLayer,
             Layer.succeed(GitHubPolling, github),
+            Layer.succeed(GitHubItemHistory)({
+              appChanges: () => Effect.die("Board moves read no Item history"),
+            }),
             Layer.succeed(ScheduleTriggers)({
               latest: Effect.succeed(Option.none()),
               run: () => Effect.never,
@@ -219,7 +232,7 @@ describe("Board self-writes", () => {
             const polling = yield* PollingTriggers;
             const operator = yield* Operator;
             const reader = yield* RunReader;
-            const fiber = yield* polling.run(instance).pipe(Effect.forkChild);
+            const fiber = yield* polling.run(fixedInstance(instance)).pipe(Effect.forkChild);
             yield* awaitCondition(polling.latest, Option.isSome);
             assert.strictEqual(changeRequests, 1);
             const move = new BoardMove({
@@ -238,6 +251,20 @@ describe("Board self-writes", () => {
               );
             });
             yield* applyMove;
+            const recorded = yield* (yield* BoardMoves).onItem(
+              gitHubItemKey(repository, 74),
+              DateTime.makeUnsafe(0),
+            );
+            assert.deepStrictEqual(
+              recorded.map(({ fromLane, toLane, added, removed }) => ({
+                fromLane,
+                toLane,
+                added,
+                removed,
+              })),
+              [{ fromLane: "Backlog", toLane: "Ready", added: ["ready"], removed: ["backlog"] }],
+              "the move is recorded whatever its label write did",
+            );
             const overview = yield* awaitCondition(operator.overview(instance), (value) =>
               value.projects.some((project) => project.runs.some((run) => run.state === "Waiting")),
             );

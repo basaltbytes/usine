@@ -1,4 +1,4 @@
-import { DateTime, Option, Redacted } from "effect";
+import { DateTime, Effect, Option, Redacted, Schema } from "effect";
 import { HttpClientRequest, type HttpClientResponse } from "effect/unstable/http";
 import type { HttpClientError } from "effect/unstable/http/HttpClientError";
 import {
@@ -25,14 +25,46 @@ export const transportError = (operation: GitHubOperation, error: HttpClientErro
     status: error.response === undefined ? Option.none() : Option.some(error.response.status),
     message:
       error.response === undefined
-        ? "The request to GitHub could not be sent"
-        : `GitHub rejected the request with status ${error.response.status}`,
+        ? "Could not send the request to GitHub"
+        : `GitHub returned HTTP status ${error.response.status}`,
   });
+
+const ErrorBody = Schema.Struct({ message: Schema.NonEmptyString });
+const decodeErrorBody = Schema.decodeUnknownOption(ErrorBody);
+
+/**
+ * Returns `failure` with the `message` field of GitHub's error response appended, for example
+ * `The permissions requested are not granted to this installation.`. Returns `failure`
+ * unchanged if the body has no such field.
+ */
+export const withGitHubReason = (
+  failure: GitHubApiError,
+  response: HttpClientResponse.HttpClientResponse,
+): Effect.Effect<GitHubApiError> =>
+  response.json.pipe(
+    Effect.map((body) =>
+      Option.match(decodeErrorBody(body), {
+        onNone: () => failure,
+        onSome: ({ message }) =>
+          new GitHubApiError({
+            operation: failure.operation,
+            status: failure.status,
+            message: `${failure.message}: ${message}`,
+          }),
+      }),
+    ),
+    Effect.catch((error) =>
+      Effect.logDebug("GitHub's error response has no JSON body to read a reason from", {
+        operation: failure.operation,
+        message: error.message,
+      }).pipe(Effect.as(failure)),
+    ),
+  );
 
 export const invalidResponse = (operation: GitHubOperation, detail: string) =>
   new InvalidGitHubResponseError({
     operation,
-    message: "GitHub returned a response that does not match its API contract",
+    message: "GitHub returned a response in an unexpected format",
     detail,
   });
 
@@ -73,11 +105,11 @@ const latestEpoch = (candidates: ReadonlyArray<Option.Option<number>>): Option.O
   return epochs.length === 0 ? Option.none() : Option.some(Math.max(...epochs));
 };
 
-/** The epoch when GitHub allows the next request, from `retry-after` and an exhausted primary rate-limit budget. */
+/** Returns the epoch milliseconds when GitHub allows the next request, from `retry-after` or an exhausted primary rate limit. */
 export const rateLimitRetryEpoch = (headers: Headers, now: number): Option.Option<number> =>
   latestEpoch([retryAfterMillis(headers["retry-after"], now), rateLimitResetMillis(headers, 0)]);
 
-/** Turns a non-2xx GitHub response into a typed error. A rate-limit status with a known retry time becomes a wait, not a failure. */
+/** Returns the typed error for a non-2xx GitHub response: `GitHubRateLimitError` for a 403 or 429 with a known retry time, otherwise `GitHubApiError`. */
 export const statusError = (
   operation: GitHubOperation,
   response: HttpClientResponse.HttpClientResponse,
@@ -88,11 +120,11 @@ export const statusError = (
     ? new GitHubRateLimitError({
         operation,
         retryAt: retryAt.value,
-        message: "GitHub asked the poller to wait before retrying",
+        message: "GitHub API rate limit exceeded",
       })
     : new GitHubApiError({
         operation,
         status: Option.some(response.status),
-        message: `GitHub rejected the request with status ${response.status}`,
+        message: `GitHub returned HTTP status ${response.status}`,
       });
 };

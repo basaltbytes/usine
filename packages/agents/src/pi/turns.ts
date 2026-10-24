@@ -1,12 +1,12 @@
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 import { ChildSession } from "@usine/core/agent/session";
-import { Effect, Fiber } from "effect";
+import { Effect, Fiber, Option } from "effect";
 import { type AgentSessionError, type RunningSession } from "../runtime.ts";
-import { sessionConversation } from "./conversation.ts";
+import { type MessageTaken, sessionConversation } from "./conversation.ts";
 import type { PiSession } from "./sdk.ts";
-import { lastPiMessageText, type SessionChannel } from "./session.ts";
+import { lastPiMessageText, piUserMessageText, type SessionChannel } from "./session.ts";
 
-/** Holds Pi tool calls and provider requests at their next boundary while an operator pause lasts. */
+/** Creates a gate that blocks Pi tool calls and provider requests at their next boundary while an operator pause is active. */
 export const piPauseGate = Effect.gen(function* () {
   const context = yield* Effect.context<never>();
   const scope = yield* Effect.scope;
@@ -29,7 +29,7 @@ export const piPauseGate = Effect.gen(function* () {
   };
 });
 
-/** Runs successive Pi turns in one SDK session while the conversation owns completion. */
+/** Runs successive Pi turns in one SDK session; the conversation decides when the session completes. */
 export const piTurns = Effect.fn("PiTurns.start")(function* (options: {
   readonly session: ChildSession;
   readonly sdk: PiSession;
@@ -43,6 +43,7 @@ export const piTurns = Effect.fn("PiTurns.start")(function* (options: {
   readonly gate: Effect.Success<typeof piPauseGate>;
 }) {
   const scope = yield* Effect.scope;
+  const context = yield* Effect.context<never>();
   const startTurn = (message: string): Effect.Effect<void> =>
     Effect.tryPromise({
       try: () => options.sdk.prompt(message),
@@ -57,23 +58,37 @@ export const piTurns = Effect.fn("PiTurns.start")(function* (options: {
       Effect.forkIn(scope),
       Effect.asVoid,
     );
-  const steer = (message: string) =>
+  // Pi delivers a steering message after the running tool calls return, before its next model request.
+  const queueSteer = (message: string) =>
     Effect.tryPromise({
       try: () => options.sdk.steer(message),
       catch: (cause) => options.error("steer", cause),
-    }).pipe(Effect.asVoid);
+    }).pipe(
+      Effect.map((disposition): MessageTaken => (disposition === "handled" ? "read" : "queued")),
+    );
   const conversation = yield* sessionConversation({
     session: options.session,
     channel: options.channel,
-    send: (message, activity) => (activity === "idle" ? startTurn(message) : steer(message)),
+    send: (message, activity) =>
+      activity === "idle"
+        ? startTurn(message).pipe(Effect.as("read" as const))
+        : queueSteer(message),
     pause: Effect.void,
     beforeFinish: Effect.void,
   });
+  // Pi removes a steering message from its queue when the message starts in the conversation.
+  const unsubscribe = options.sdk.subscribe((event) => {
+    if (event.type !== "message_start") return;
+    const text = piUserMessageText(event.message);
+    if (Option.isSome(text))
+      Effect.runForkWith(context)(conversation.read((queued) => queued.indexOf(text.value) + 1));
+  });
+  yield* Effect.addFinalizer(() => Effect.sync(unsubscribe));
   options.gate.set(conversation.awaitUnpaused);
   yield* startTurn(options.prompt);
   return {
     intervene: conversation.intervene,
-    steer,
+    steer: (message: string) => queueSteer(message).pipe(Effect.asVoid),
     interrupt: Effect.tryPromise({
       try: () => options.sdk.abort(),
       catch: (cause) => options.error("interrupt", cause),

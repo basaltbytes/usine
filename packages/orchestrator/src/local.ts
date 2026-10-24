@@ -8,11 +8,8 @@ import { Layer } from "effect";
 import { stepExecutorLayer } from "./scheduler.ts";
 
 /**
- * The full engine composition for local Workers. Supply the roster’s brains for
- * startup preflight and provide the credential provider, the `TriggerCondition`
- * that re-checks queued Events, and the `AttemptRuntime` that runs each
- * Attempt's Pi parent in this process. The runtime is built first, so durable
- * storage is open and its tasks resumed before the engine recovers Runs.
+ * Provides the full engine and `WorkerStatus` for local Workers. Requires the credential provider,
+ * `GitHubApp`, `TriggerCondition`, `AttemptRuntime`, `ClaudeLoginLock`, and `CurrentInstance`.
  */
 export const layer = (
   instanceDirectory: InstanceDirectory,
@@ -24,5 +21,5 @@ export const layer = (
     Layer.provide(NodeServices.layer),
   );
   const stepExecutor = stepExecutorLayer(config, brains).pipe(Layer.provide(executor));
-  return localEngineLayer(instanceDirectory).pipe(Layer.provide(stepExecutor));
+  return localEngineLayer(instanceDirectory).pipe(Layer.provideMerge(stepExecutor));
 };

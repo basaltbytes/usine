@@ -1,8 +1,9 @@
+import type { LoopPermissions } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { Schema } from "effect";
 import { InstallationId, RepositoryId, Installation } from "./installation.ts";
 
-/** Repository grants required for polling, label updates, and agent-authored changes. */
+/** The repository permissions required for polling, label updates, and agent-authored changes. */
 export const REQUIRED_REPOSITORY_PERMISSIONS = {
   checks: "read",
   contents: "write",
@@ -13,10 +14,37 @@ export const REQUIRED_REPOSITORY_PERMISSIONS = {
 
 export type RequiredRepositoryPermission = keyof typeof REQUIRED_REPOSITORY_PERMISSIONS;
 
+/**
+ * The repository permissions of an Attempt's token for each Loop permission level (ADR 0011).
+ * A `read` token can read code and post reviews and comments (`pull_requests` and `issues` are
+ * `write`), but can't push, merge, or update a branch, which need `contents: write`. Names and
+ * levels follow the installation token API:
+ * https://docs.github.com/en/rest/authentication/permissions-required-for-github-apps
+ */
+export const WORKER_TOKEN_PERMISSIONS = {
+  write: {
+    checks: "read",
+    contents: "write",
+    issues: "write",
+    metadata: "read",
+    pull_requests: "write",
+  },
+  read: {
+    checks: "read",
+    contents: "read",
+    issues: "write",
+    metadata: "read",
+    pull_requests: "write",
+  },
+} as const satisfies Record<
+  LoopPermissions,
+  Readonly<Record<RequiredRepositoryPermission, "read" | "write">>
+>;
+
 const grants = (actual: string | undefined, required: "read" | "write"): boolean =>
   actual === required || (required === "read" && actual === "write");
 
-/** The required repository permissions an installation grant does not satisfy, as `name:level` strings. */
+/** Returns the required repository permissions that `granted` doesn't satisfy, as `name:level` strings. */
 export const missingPermissions = (
   granted: Readonly<Record<string, string>>,
 ): ReadonlyArray<string> =>
@@ -24,7 +52,7 @@ export const missingPermissions = (
     grants(granted[permission], required) ? [] : [`${permission}:${required}`],
   );
 
-/** A registered repository covered by the discovered GitHub App installation. */
+/** A registered repository covered by the GitHub App installation. */
 export class CoveredProject extends Schema.TaggedClass<CoveredProject>(
   "@usine/github/ProjectAccess/CoveredProject",
 )("CoveredProject", {
@@ -33,7 +61,7 @@ export class CoveredProject extends Schema.TaggedClass<CoveredProject>(
   repositoryId: RepositoryId,
 }) {}
 
-/** A registry repository the installation does not cover. Raised per project, so covered siblings still load. */
+/** The error for a registry repository the installation doesn't cover. Reported per project, so covered projects still load. */
 export class ProjectNotInstalledError extends Schema.TaggedError<ProjectNotInstalledError>(
   "@usine/github/ProjectNotInstalledError",
 )("ProjectNotInstalledError", {
@@ -41,17 +69,16 @@ export class ProjectNotInstalledError extends Schema.TaggedError<ProjectNotInsta
   message: Schema.NonEmptyString,
 }) {}
 
-/** The installation coverage result for one registered repository. */
+/** The installation coverage of one registered repository. */
 export const ProjectAccess = Schema.Union([CoveredProject, ProjectNotInstalledError]);
 export type ProjectAccess = typeof ProjectAccess.Type;
 
-/** A repository reported by GitHub for an installation, identified by its numeric id and full name. */
 export interface InstalledRepository {
   readonly id: RepositoryId;
   readonly name: RepositoryName;
 }
 
-/** Checks each registry repository against the installation's repositories and returns one `ProjectAccess` per project. */
+/** Returns one `ProjectAccess` per registry repository by checking it against the installation's repositories. */
 export const deriveProjectAccess = (
   installation: Installation,
   registry: ReadonlyArray<RepositoryName>,
@@ -63,7 +90,7 @@ export const deriveProjectAccess = (
     return match === undefined
       ? new ProjectNotInstalledError({
           repository,
-          message: `The GitHub App installation does not cover ${repository}`,
+          message: `The GitHub App installation has no access to "${repository}"`,
         })
       : new CoveredProject({
           installationId: installation.id,
@@ -73,7 +100,7 @@ export const deriveProjectAccess = (
   });
 };
 
-/** The installation lacks required repository grants; missing entries use name:level form. */
+/** The error when the installation lacks required repository permissions; `missing` uses `name:level` form. */
 export class AppPermissionError extends Schema.TaggedError<AppPermissionError>(
   "@usine/github/AppPermissionError",
 )("AppPermissionError", {

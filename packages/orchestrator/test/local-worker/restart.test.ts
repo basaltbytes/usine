@@ -6,7 +6,7 @@ import { backup as backupDurableStorage } from "@usine/durable/backup";
 import { RunEngine } from "@usine/engine/engine";
 import { backup as backupRuntimeStore } from "@usine/engine/local-sqlite";
 import { TranscriptAllQuery } from "@usine/engine/transcript";
-import { CredentialProvider, WorkerCredential } from "@usine/executor";
+import { claudeLoginLockLayer, CredentialProvider, WorkerCredential } from "@usine/executor";
 import {
   Clock,
   Context,
@@ -29,6 +29,8 @@ import {
   StubChildren,
 } from "@usine/durable/testing";
 import { layer as localLayer } from "../../src/local.ts";
+import { fixedConfigLayer } from "../support/current-instance.ts";
+import { testAppLayer } from "../support/github-app.ts";
 import { alwaysHoldsLayer } from "../support/polling.ts";
 import {
   LIVE_TEST_TIMEOUT,
@@ -43,7 +45,10 @@ import {
   waitFor,
 } from "./support.ts";
 
-/** The local composition over the durable testing runtime on `database`, with the parent model answering `steps`. */
+/**
+ * Returns the local composition over the durable testing runtime on `database`, with the parent
+ * model answering `steps`.
+ */
 const durableRuntime = (
   instance: InstanceDirectory,
   remote: string,
@@ -58,7 +63,10 @@ const durableRuntime = (
   }).pipe(
     Layer.provide(credentials),
     Layer.provideMerge(durableTestingLayer({ database, parent: steps })),
+    Layer.provide(claudeLoginLockLayer),
     Layer.provide(alwaysHoldsLayer),
+    Layer.provide(fixedConfigLayer(config)),
+    Layer.provide(testAppLayer),
   );
 
 const commitInWorktree = (worktree: string, message: string) =>
@@ -228,8 +236,8 @@ describe("local worker restart", () => {
         const instance = InstanceDirectory.make(root);
         const remote = yield* makeRemote(root);
         const database = `${root}/durable.sqlite`;
-        // Credentials close to expiry renew before every harvesting command; once the
-        // child has replied, the first renewal holds the harvest until the process stops.
+        // Credentials close to expiry renew before every harvesting command; once the child has
+        // replied, the first renewal blocks the harvest until the process stops.
         const holdRenewals = yield* Ref.make(false);
         const harvesting = yield* Deferred.make<void>();
         const holdingCredentials = Layer.succeed(CredentialProvider)({

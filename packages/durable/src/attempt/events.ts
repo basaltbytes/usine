@@ -11,6 +11,7 @@ import {
   TokenCount,
   ToolFinished,
   ToolStarted,
+  UsdAmount,
 } from "@usine/core/agent/session";
 import { Option, Schema } from "effect";
 
@@ -38,7 +39,7 @@ const decodeToolResult = Schema.decodeUnknownOption(ToolResultMessage);
 const isTextBlock = Schema.is(TextBlock);
 const isToolCallBlock = Schema.is(ToolCallBlock);
 
-/** The trimmed text of an assistant entry, when it has any. */
+/** Returns the trimmed text of an assistant entry, or `None` if it has no text. */
 export const assistantText = (entry: EntryRecord): Option.Option<string> =>
   Option.flatMap(decodeAssistant(entry.model?.[0]), (message) => {
     const text = message.content
@@ -50,10 +51,8 @@ export const assistantText = (entry: EntryRecord): Option.Option<string> =>
   });
 
 /**
- * The session events one committed parent entry stands for, in the order the
- * Pi SDK emitted them: an assistant entry's text, then one start per tool
- * call; a tool result's output. Other entries (user input, prompt changes,
- * compaction summaries) are not session events.
+ * Returns the session events for one committed parent entry, in Pi SDK emission order. User input,
+ * prompt changes, and compaction summaries produce no events.
  */
 export const entryEvents = (
   entry: EntryRecord,
@@ -104,27 +103,43 @@ export const entryEvents = (
 };
 
 const Count = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+const Dollars = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0));
 const UsageLedger = Schema.Struct({
   models: Schema.Record(
     Schema.String,
-    Schema.Struct({ input: Count, output: Count, cacheWrite: Count }),
+    Schema.Struct({
+      input: Count,
+      output: Count,
+      cacheWrite: Count,
+      cost: Schema.optionalKey(Schema.Struct({ total: Dollars })),
+    }),
   ),
 });
 const decodeUsage = Schema.decodeUnknownOption(UsageLedger);
 
+/** A conversation's token count and cost. `costUsd` is `None` if no model was priced. */
+interface LedgerUsage {
+  readonly totalTokens: TokenCount;
+  readonly costUsd: Option.Option<UsdAmount>;
+}
+
 /**
- * A conversation's consumption from its `pi.usage` ledger: output plus uncached
- * input, where a cache write is new context and a cache read is not, summed
- * over every model it called.
+ * Sums a conversation's `pi.usage` ledger over every model. Tokens are output plus uncached input,
+ * where cache writes count and cache reads don't.
  */
-export const usageTokens = (usage: Readonly<UsageState> | undefined): TokenCount =>
-  TokenCount.make(
-    Option.match(decodeUsage(usage), {
-      onNone: () => 0,
-      onSome: ({ models }) =>
-        Object.values(models).reduce(
-          (total, model) => total + model.output + model.input + model.cacheWrite,
-          0,
-        ),
-    }),
-  );
+export const ledgerUsage = (usage: Readonly<UsageState> | undefined): LedgerUsage => {
+  const models = Option.match(decodeUsage(usage), {
+    onNone: () => [],
+    onSome: ({ models }) => Object.values(models),
+  });
+  const priced = models.flatMap(({ cost }) => (cost === undefined ? [] : [cost.total]));
+  return {
+    totalTokens: TokenCount.make(
+      models.reduce((total, model) => total + model.output + model.input + model.cacheWrite, 0),
+    ),
+    costUsd:
+      priced.length === 0
+        ? Option.none()
+        : Option.some(UsdAmount.make(priced.reduce((total, value) => total + value, 0))),
+  };
+};

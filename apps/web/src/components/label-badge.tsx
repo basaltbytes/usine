@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 const channel = (hex: string, offset: number): number =>
   parseInt(hex.slice(offset, offset + 2), 16);
 
-/** Relative luminance of a six-digit hex color, 0 for black and 1 for white. */
+/** Returns the relative luminance of a six-digit hex color, from 0 (black) to 1 (white). */
 export const luminance = (hex: string): number => {
   const linear = (value: number) => {
     const scaled = value / 255;
@@ -17,8 +17,7 @@ export const luminance = (hex: string): number => {
   );
 };
 
-/** GitHub picks label colors for a white page, so on the dark theme dark labels are lifted toward
- * white to keep the text readable while the tint keeps the hue. */
+/** Returns the dark-theme text color for a GitHub label; dark colors are lightened toward white, keeping the hue. */
 export const labelTextColor = (hex: string): string => {
   const lift = Math.max(0, 0.55 - luminance(hex)) / 0.55;
   if (lift === 0) return `#${hex}`;
@@ -30,14 +29,22 @@ export const labelTextColor = (hex: string): string => {
 export const LabelBadge = ({
   name,
   label,
+  className,
 }: {
   readonly name: string;
   readonly label: LabelView | undefined;
+  readonly className?: string;
 }) => {
-  if (label === undefined || label.color === null) return <Badge variant="outline">{name}</Badge>;
+  if (label === undefined || label.color === null)
+    return (
+      <Badge variant="outline" className={className}>
+        {name}
+      </Badge>
+    );
   return (
     <Badge
       variant="outline"
+      className={className}
       title={label.description ?? undefined}
       style={{
         color: labelTextColor(label.color),

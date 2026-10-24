@@ -42,11 +42,13 @@ write_files:
       AllowUsers usine
   # Children run over non-interactive SSH, which reads this file and no shell profile.
   # Playwright does not read PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH; a project's test config passes it on, as usine's apps/web does.
+  # All Attempts on the machine share the Turborepo cache, as they share pnpm's default store under the usine user's home.
   - path: /etc/environment
     append: true
     content: |
       DISABLE_AUTOUPDATER=1
       PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
+      TURBO_CACHE_DIR=/home/usine/.cache/turbo
 
   # Oxc reserves a 6 GiB virtual buffer at start, which the kernel's heuristic refuses on a machine with less memory plus swap (#270).
   - path: /etc/sysctl.d/90-usine-worker.conf
@@ -73,10 +75,10 @@ write_files:
       apt-get update
       DEBIAN_FRONTEND=noninteractive apt-get install -y gh nodejs
       # Codex is pinned to a version usine's protocol conformance gate supports.
-      npm install -g pnpm@11.20.0 @anthropic-ai/claude-code@2.1.296 @openai/codex@0.153.4
+      npm install -g pnpm@11.20.0 @anthropic-ai/claude-code@2.1.303 @openai/codex@0.153.4
       # Applies the overcommit setting of /etc/sysctl.d now, not at the next boot.
       sysctl --system
-      install -d -o usine -g usine -m 0700 /home/usine/.usine
+      install -d -o usine -g usine -m 0700 /home/usine/.usine /home/usine/.cache /home/usine/.cache/turbo
       systemctl restart ssh
 
 runcmd:

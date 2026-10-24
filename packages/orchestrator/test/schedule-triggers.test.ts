@@ -4,6 +4,7 @@ import { ModelId } from "@usine/core/agent/brain";
 import { AgentName, AgentPersona } from "@usine/core/agent";
 import { RunId } from "@usine/core/run";
 import { StepName } from "@usine/core/step";
+import { WorkerName } from "@usine/core/worker";
 import { AgentFile } from "@usine/config/agent";
 import { ConfigFileError, InstancePath } from "@usine/config/file";
 import { Cron as CronExpression, ScheduleTrigger, TimeZone } from "@usine/config/trigger";
@@ -32,8 +33,10 @@ import {
   Ref,
   Schema,
   Scope,
+  SubscriptionRef,
 } from "effect";
 import { TestClock } from "effect/testing";
+import { fixedInstance } from "./support/current-instance.ts";
 import { alwaysHoldsLayer } from "./support/polling.ts";
 import {
   ScheduleCronFailure,
@@ -125,10 +128,12 @@ const fakeLayer = (
     intervene: () => Effect.void,
     approve: () => Effect.die("unused"),
     cancel: () => Effect.die("unused"),
+    discardLeftovers: () => Effect.die("unused"),
     inspect: () => Effect.die("unused"),
     reconcile: () => Effect.die("unused"),
     drain: () => Effect.void,
     retry: () => Effect.die("unused"),
+    runAgain: () => Effect.die("unused"),
     revoke: () => Effect.die("unused"),
     submit: (submission) =>
       Option.contains(failRepository, submission.repository)
@@ -172,11 +177,13 @@ const waitForWaiting = Effect.fn("test.waitForWaiting")(function* (
 
 const runtimeLayer = (directory: InstanceDirectory) => {
   const executor = Layer.succeed(StepExecutor)({
+    workers: Effect.succeed([WorkerName.make("local")]),
     isLive: () => Effect.succeed(false),
     outcome: () => Effect.succeed(Option.none()),
     recover: () => Effect.void,
     intervene: () => Effect.void,
     interrupt: () => Effect.void,
+    occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
     reserve: () => Effect.die("an approval-gated test run must not reserve a worker"),
     execute: () => Effect.die("an approval-gated test run must not start an Attempt"),
   });
@@ -321,7 +328,7 @@ describe("ScheduleTriggers", () => {
 
       yield* Effect.gen(function* () {
         const schedules = yield* ScheduleTriggers;
-        const fiber = yield* Effect.forkChild(schedules.run(instance));
+        const fiber = yield* Effect.forkChild(schedules.run(fixedInstance(instance)));
         // Wait on the observable outcome, not on a scheduler-op budget.
         for (let spin = 0; (yield* Ref.get(submissions)).length === 0; spin += 1) {
           if (spin > 1_000) return yield* Effect.die("the first cycle never submitted");
@@ -347,6 +354,47 @@ describe("ScheduleTriggers", () => {
               tick: {
                 scheduledAt: "2026-08-31T10:01:00.000Z",
                 scheduledAtLocal: "2026-08-31T10:01:00.000+00:00[UTC]",
+                cron: "* * * * *",
+                tz: "UTC",
+              },
+            },
+          ],
+        );
+        yield* Fiber.interrupt(fiber);
+      }).pipe(Effect.provide(fakeLayer(submissions)));
+    }),
+  );
+
+  it.effect("evaluates a schedule Loop that a reload adds without waiting for the sleep", () =>
+    Effect.gen(function* () {
+      const config = configWith([{ name: "basaltbytes/usine" }]);
+      const loop = scheduleLoop(config, { cron: "* * * * *" });
+      const submissions = yield* Ref.make<ReadonlyArray<Submission>>([]);
+      yield* TestClock.setTime(Date.parse("2026-08-31T10:00:30.000Z"));
+
+      yield* Effect.gen(function* () {
+        const schedules = yield* ScheduleTriggers;
+        const current = yield* SubscriptionRef.make(instanceWith(config, []));
+        const fiber = yield* Effect.forkChild(
+          schedules.run({
+            get: SubscriptionRef.get(current),
+            changes: SubscriptionRef.changes(current),
+          }),
+        );
+        yield* TestClock.adjust("1 second");
+        assert.strictEqual((yield* Ref.get(submissions)).length, 0);
+        yield* SubscriptionRef.set(current, instanceWith(config, [loop]));
+        for (let spin = 0; (yield* Ref.get(submissions)).length === 0; spin += 1) {
+          if (spin > 1_000) return yield* Effect.die("the reloaded Loop was never evaluated");
+          yield* Effect.yieldNow;
+        }
+        assert.deepStrictEqual(
+          (yield* Ref.get(submissions)).map(({ event }) => event.payload),
+          [
+            {
+              tick: {
+                scheduledAt: "2026-08-31T10:00:00.000Z",
+                scheduledAtLocal: "2026-08-31T10:00:00.000+00:00[UTC]",
                 cron: "* * * * *",
                 tz: "UTC",
               },
@@ -476,13 +524,27 @@ describe("ScheduleTriggers", () => {
 
         yield* TestClock.adjust("60 seconds");
         const second = yield* schedules.tick(instance);
-        // The daily loop's 09:00 tick already fired: no duplicate submit, no
-        // duplicate log line, and the cycle says so.
+        // The daily Loop's 09:00 Tick already fired: no duplicate submission or log line, and the
+        // cycle reports it.
         assert.strictEqual(second.submissions.length, 1);
         assert.strictEqual(second.alreadyFired, 1);
         assert.deepStrictEqual(
           (yield* Ref.get(submissions)).map(({ loop }) => loop),
           ["minutely", "daily", "minutely"],
+        );
+
+        // A reload that moves the daily boundary earlier forgets the fired
+        // Ticks, as a restart does, so the moved schedule's latest Tick fires.
+        const reloaded = instanceWith(config, [
+          minutely,
+          scheduleLoop(config, { cron: "30 8 * * *", name: "daily" }),
+        ]);
+        yield* TestClock.adjust("60 seconds");
+        const third = yield* schedules.tick(reloaded);
+        assert.strictEqual(third.alreadyFired, 0);
+        assert.deepStrictEqual(
+          (yield* Ref.get(submissions)).map(({ loop }) => loop),
+          ["minutely", "daily", "minutely", "minutely", "daily"],
         );
       }).pipe(Effect.provide(fakeLayer(submissions)));
     }),

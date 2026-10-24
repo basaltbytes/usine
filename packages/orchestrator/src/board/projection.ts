@@ -1,5 +1,6 @@
 import { canonicalLabelName, GitHubLabelName } from "@usine/config/label";
 import {
+  isSettledItemState,
   LabelLaneSource,
   Lane,
   type LaneItemState,
@@ -7,10 +8,13 @@ import {
   type LaneSource,
 } from "@usine/config/board";
 import type { ManagedRepo } from "@usine/config/factory";
+import type { Event } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
+import type { LoopName } from "@usine/core/loop";
+import type { RunId } from "@usine/core/run";
 import type { ItemProjection } from "@usine/engine/item-projection";
 import { ItemLabelMutation } from "@usine/github/item-writer";
-import { Effect, Result } from "effect";
+import { Effect, Option, Result } from "effect";
 import {
   BoardTaskView,
   BoardLaneId,
@@ -20,7 +24,8 @@ import {
   WritableBoardLaneView,
 } from "../operator/board.ts";
 import { type RunView } from "../operator/run.ts";
-import { projectedItem, type ProjectedItem } from "./items.ts";
+import type { RunUsageView } from "../operator/usage.ts";
+import { payloadLabels, projectedItem, type ProjectedItem } from "./items.ts";
 import { taskCards } from "./tasks.ts";
 
 interface LaneDefinition {
@@ -58,14 +63,9 @@ const effectiveLanes = (
 const laneId = (definition: LaneDefinition): BoardLaneId =>
   BoardLaneId.make(`${definition.origin}:${definition.lane.name}`);
 
-const SETTLED_STATES: ReadonlyArray<LaneItemState> = ["pr-merged", "pr-closed", "issue-closed"];
-
-const isSettled = (item: Pick<ProjectedItem, "state" | "labels">): boolean =>
-  SETTLED_STATES.includes(item.state);
-
 // GitHub matches label names ignoring case, as the label declarations do.
 const labelLaneFor = (
-  item: Pick<ProjectedItem, "state" | "labels">,
+  item: Pick<ProjectedItem, "labels">,
   lanes: ReadonlyArray<LaneDefinition>,
 ): LaneDefinition | undefined => {
   const itemLabels = new Set(item.labels.map(canonicalLabelName));
@@ -84,10 +84,61 @@ const laneFor = (
   item: Pick<ProjectedItem, "state" | "labels">,
   lanes: ReadonlyArray<LaneDefinition>,
 ): LaneDefinition | undefined =>
-  isSettled(item)
+  isSettledItemState(item.state)
     ? stateLaneFor(item, lanes)
     : (labelLaneFor(item, lanes) ?? stateLaneFor(item, lanes));
 
+/**
+ * Returns the label lane that matched when `running` was triggered, from its Event's labels, or
+ * `undefined` if the current Item is closed or merged or no lane can be read from the Event.
+ */
+const triggerLaneFor = Effect.fn("Board.triggerLane")(function* (
+  repository: ManagedRepo,
+  view: BoardTaskView,
+  running: RunView,
+  lanes: ReadonlyArray<LaneDefinition>,
+  runEvents: ReadonlyMap<RunId, Event>,
+) {
+  const fields = {
+    repository: repository.name,
+    itemKey: view.itemKey,
+    runId: running.id,
+    loop: running.loop,
+  };
+  yield* Effect.annotateCurrentSpan(fields);
+  if (isSettledItemState(view.state)) return undefined;
+  const event = runEvents.get(running.id);
+  if (event === undefined) {
+    yield* Effect.logDebug(
+      "No Event read for the card's running Run; placing it by its Item's labels",
+      fields,
+    );
+    return undefined;
+  }
+  const labels = yield* payloadLabels(view.kind, event.payload).pipe(
+    Effect.map(Option.some),
+    Effect.catch((error) =>
+      Effect.logWarning(
+        "The running Run's Event has no labels to read; placing its card by its Item's labels",
+        { ...fields, eventId: event.id, errorTag: error._tag, message: error.message },
+      ).pipe(Effect.as(Option.none())),
+    ),
+  );
+  if (Option.isNone(labels)) return undefined;
+  const lane = labelLaneFor({ labels: labels.value }, lanes);
+  yield* Effect.logDebug(
+    lane === undefined
+      ? "No lane label when the card's running Run was triggered; placing it by its Item's labels"
+      : "Keeping the card in the lane its running Run was triggered from",
+    { ...fields, lane: lane?.lane.name ?? "none" },
+  );
+  return lane;
+});
+
+/**
+ * Groups the repository's stored Items into Task cards and the cards into lanes. A card with a
+ * running Run stays in the lane its trigger matched, read from `runEvents`.
+ */
 export const projectBoard = Effect.fn("Board.project")(
   (
     repository: ManagedRepo,
@@ -95,6 +146,9 @@ export const projectBoard = Effect.fn("Board.project")(
     storedItems: ReadonlyArray<ItemProjection>,
     runs: ReadonlyArray<RunView>,
     cycleBlockedItems: ReadonlyArray<ItemKey> = [],
+    itemLoops: ReadonlyMap<ItemKey, ReadonlyArray<LoopName>> = new Map(),
+    runUsage: ReadonlyMap<RunId, RunUsageView> = new Map(),
+    runEvents: ReadonlyMap<RunId, Event> = new Map(),
   ): Effect.Effect<BoardView> =>
     Effect.gen(function* () {
       yield* Effect.annotateCurrentSpan({ repository: repository.name });
@@ -117,20 +171,26 @@ export const projectBoard = Effect.fn("Board.project")(
         });
       }
       const lanes = effectiveLanes(repository, repositoryLabels);
-      const cards = taskCards(repository.name, items, runs, cycleBlockedItems);
+      const cards = taskCards(repository.name, items, runs, cycleBlockedItems, itemLoops, runUsage);
       yield* Effect.logDebug("Projected Task cards from linked Items", {
         repository: repository.name,
         items: items.length,
         tasks: cards.length,
         runs: runs.length,
+        watchedTasks: cards.filter(({ view }) => view.loops.length > 0).length,
+        runningTasks: cards.filter(({ running }) => running !== undefined).length,
       });
       const grouped = new Map<BoardLaneId, Array<BoardTaskView>>();
       for (const definition of lanes) grouped.set(laneId(definition), []);
       const unmatched: Array<BoardTaskView> = [];
-      for (const card of cards) {
-        const definition = laneFor(card, lanes);
-        if (definition === undefined) unmatched.push(card);
-        else grouped.get(laneId(definition))?.push(card);
+      for (const { view, running } of cards) {
+        const triggerLane =
+          running === undefined
+            ? undefined
+            : yield* triggerLaneFor(repository, view, running, lanes, runEvents);
+        const definition = triggerLane ?? laneFor(view, lanes);
+        if (definition === undefined) unmatched.push(view);
+        else grouped.get(laneId(definition))?.push(view);
       }
       const sortItems = (values: Array<BoardTaskView>) =>
         values.sort((left, right) => right.number - left.number);

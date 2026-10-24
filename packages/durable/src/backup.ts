@@ -4,13 +4,21 @@ import type { InstanceDirectory } from "@usine/core/instance";
 import { Effect, FileSystem, Option, Path, type PlatformError, Schema } from "effect";
 import { durableStoragePath } from "./storage-path.ts";
 
-/** A failed durable storage backup, with both paths because a copy error can come from either file. */
+/**
+ * A failed durable storage backup, with both paths because a copy error can come from either file.
+ */
 export class DurableStorageBackupError extends Schema.TaggedError<DurableStorageBackupError>(
   "@usine/durable/DurableStorageBackupError",
 )("DurableStorageBackupError", {
+  /**
+   * The failed step: `open` (the storage file), `stage` (the temporary copy), `copy` (SQLite's
+   * backup), or `publish` (the hard link to `destination`, which fails if the file exists).
+   */
   operation: Schema.Literals(["open", "stage", "copy", "publish"]),
+  /** The path of `.usine/durable.sqlite` in the instance directory. */
   source: Schema.String,
   destination: Schema.String,
+  /** A short operator-facing description of the failure. */
   reason: Schema.String,
   cause: Schema.Defect(),
 }) {}
@@ -30,13 +38,8 @@ const sqliteReason = (cause: unknown): string =>
   cause instanceof Error && cause.message.length > 0 ? cause.message : String(cause);
 
 /**
- * Copies the instance's `.usine/durable.sqlite` to `destination` while the
- * orchestrator runs, through SQLite's backup API on a read-only connection, so
- * the copy holds every committed transaction, including those still in the
- * WAL. The copy is written beside the destination, then hard-linked into place,
- * so an existing file is never overwritten; the destination directory must
- * exist and support hard links. Returns false, writing nothing, when the
- * instance has no durable storage yet.
+ * Copies `.usine/durable.sqlite`, including its WAL, to `destination` without overwriting an
+ * existing file. Returns `false` if the instance has no durable storage.
  */
 export const backup = Effect.fn("DurableStorage.backup")(
   function* (instanceDirectory: InstanceDirectory, destination: string) {
@@ -83,7 +86,8 @@ export const backup = Effect.fn("DurableStorage.backup")(
         yield* fileSystem
           .writeFile(staged, new Uint8Array(), { mode: 0o600 })
           .pipe(Effect.mapError(failed("stage", platformReason)));
-        // The copy cannot be canceled; it finishes before the connection closes and staging is removed.
+        // The backup cannot be canceled; it completes before the connection is closed and the
+        // staged file removed.
         const pages = yield* Effect.acquireUseRelease(
           Effect.try({
             try: () => new DatabaseSync(source, { readOnly: true, timeout: 5_000 }),

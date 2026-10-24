@@ -11,12 +11,12 @@ import { SessionOperationError, WorkingDirectory } from "../runtime.ts";
 import { CodexAppServer, codexAppServerLive } from "../pi/codex/app-server.ts";
 import { initializeCodex, verifyCodexAccount } from "../pi/codex/account.ts";
 import { PiSdk, piSdkLive, usePiStart } from "../pi/sdk.ts";
-import { probeCommand } from "./command.ts";
+import { probeCommand, probeFailed, probeOutput } from "./command.ts";
 
-/** Baseline Codex CLI version used by the pinned app-server protocol conformance gate. */
+/** The Codex CLI version of the pinned app-server protocol package used by the conformance check. */
 export const CODEX_CLI_VERSION = "0.144.0";
 
-// Additional exact builds require generated-type review and the live contracts.
+// Each additional version needs a review of its generated types and a run of the live contracts.
 const supportedCodexVersions = [CODEX_CLI_VERSION, "0.153.4"];
 
 const ClaudeAuthentication = Schema.Struct({
@@ -24,13 +24,15 @@ const ClaudeAuthentication = Schema.Struct({
   authMethod: Schema.String,
   apiProvider: Schema.String,
 });
+const decodeClaudeAuthentication = Schema.decodeUnknownOption(
+  Schema.fromJsonString(ClaudeAuthentication),
+);
+const CLAUDE_AUTH_STATUS = ["auth", "status", "--json"];
 
 /**
- * Verifies a rostered brain where `host` runs children, through supplied
- * process and SDK services; starts no prompt. Every check process sees
- * `environment` as a child would: as its complete environment on this
- * machine, or exported on top of a remote host's own (ADR 0011). Pi children
- * run their tools in this process, so a remote host cannot run them.
+ * Checks `brain` on `host` without starting a prompt; each check process gets `environment` as its
+ * complete local environment, or on top of the remote host's environment (ADR 0011). Fails with
+ * `HarnessUnavailableError` for Pi on a remote host.
  */
 export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
   function* (brain: BrainSpec, host: ChildHost, environment: Readonly<Record<string, string>>) {
@@ -54,7 +56,7 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
           return yield* new HarnessUnavailableError({
             harness: "codex",
             capability: "version",
-            message: `Worker has ${/^codex-cli [0-9]+\.[0-9]+\.[0-9]+$/u.test(version) ? version : "an unrecognized Codex version"}; supported Codex CLI versions: ${supportedCodexVersions.join(", ")}`,
+            message: `The worker has ${/^codex-cli [0-9]+\.[0-9]+\.[0-9]+$/u.test(version) ? version : "an unrecognized Codex version"}. Install a supported Codex CLI version: ${supportedCodexVersions.join(", ")}.`,
           });
         yield* Effect.scoped(
           Effect.gen(function* () {
@@ -73,13 +75,32 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
       }
       case "claude": {
         yield* probe("binary", "claude", ["--version"]);
-        const response = yield* probe("login", "claude", ["auth", "status", "--json"]);
-        const auth = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(ClaudeAuthentication))(
-          response,
-        ).pipe(Effect.mapError(() => loginError("Claude returned an unrecognized login status")));
-        if (!auth.loggedIn || auth.authMethod !== "claude.ai" || auth.apiProvider !== "firstParty")
+        const status = yield* probeOutput(
+          host,
+          environment,
+          "claude",
+          "login",
+          "claude",
+          CLAUDE_AUTH_STATUS,
+        );
+        // Claude prints the same status and exits 1 when not logged in.
+        const auth =
+          status.exitCode === 0 || status.exitCode === 1
+            ? decodeClaudeAuthentication(status.stdout)
+            : Option.none();
+        if (Option.isNone(auth))
+          return yield* status.exitCode === 0
+            ? loginError("Claude returned an unrecognized login status")
+            : probeFailed("claude", "login", "claude", CLAUDE_AUTH_STATUS);
+        const { loggedIn, authMethod, apiProvider } = auth.value;
+        if (
+          status.exitCode !== 0 ||
+          !loggedIn ||
+          authMethod !== "claude.ai" ||
+          apiProvider !== "firstParty"
+        )
           return yield* loginError(
-            "Claude requires a subscription login; run claude auth login on the Worker",
+            "Claude Code needs a subscription login. Run claude auth login on the worker.",
           );
         break;
       }
@@ -88,9 +109,9 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
           return yield* new HarnessUnavailableError({
             harness: "pi",
             capability: "binary",
-            message: "Pi children run only on local Workers",
+            message: "Pi children run only on local workers",
           });
-        // Pi is the SDK installed with this process, not a separate CLI binary.
+        // Pi runs from the SDK installed with this process, not from a CLI binary.
         const sdk = yield* PiSdk;
         yield* usePiStart(
           (signal) =>
@@ -106,7 +127,7 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
             new SessionOperationError({
               operation: "launch",
               sessionId: Option.none(),
-              message: `Pi could not check authentication for ${brain.model}`,
+              message: `Can't check Pi authentication for "${brain.model}"`,
               cause,
             }),
           (acquired) =>
@@ -115,7 +136,7 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
               yield* Effect.sync(acquired.dispose);
               if (result._tag !== "Started" || result.pool !== "apiKeys")
                 return yield* loginError(
-                  `Pi child model ${brain.model} requires an available model, supported effort, and API-key authentication`,
+                  `Pi child model "${brain.model}" is unavailable, doesn't support effort ${brain.effort}, or doesn't use an API key`,
                 );
             }),
         );
@@ -153,7 +174,7 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
     ),
 );
 
-/** Checks only the requested brain where `host` runs children, with `environment` and the worker user's configuration, without running a prompt or logging in. */
+/** Checks only `brain` on `host`, with `environment` and the Worker user's configuration; does not run a prompt or log in. */
 export const preflight = (
   brain: BrainSpec,
   host: ChildHost,

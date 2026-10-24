@@ -18,6 +18,7 @@ import { AttemptTask, AttemptId } from "../src/attempt/attempt.ts";
 import * as AttemptChannel from "../src/attempt/channel.ts";
 import { AgentFailure, ChildSessionBudgetFailure } from "../src/attempt/failure.ts";
 import { RepositoryName, CommitSha, RepositoryRevision } from "../src/repository.ts";
+import { BotLogin } from "../src/worker.ts";
 import { Comment, Commit, PullRequest, StepResult } from "../src/step/result.ts";
 
 const agent = new Agent({
@@ -47,6 +48,8 @@ const spec = new AttemptChannel.RunSpec({
   maxChildren: ChildSessionBudget.make(4),
   parentEffort: "high",
   resume: Option.none(),
+  preparedAt: Option.some(DateTime.makeUnsafe("2026-08-30T11:59:00Z")),
+  botLogin: Option.some(BotLogin.make("usine-basaltbytes[bot]")),
 });
 
 describe("attempt channel", () => {
@@ -65,7 +68,11 @@ describe("attempt channel", () => {
               summary: "Implement executor",
             }),
             new PullRequest({ number: 71, url: new URL("https://github.com/acme/demo/pull/71") }),
-            new Comment({ url: new URL("https://github.com/acme/demo/pull/71#issuecomment-1") }),
+            new Comment({
+              url: new URL("https://github.com/acme/demo/pull/71#issuecomment-1"),
+              kind: "issue-comment",
+              at: Option.some(DateTime.makeUnsafe("2026-08-30T11:58:00Z")),
+            }),
           ],
         }),
       }),
@@ -77,6 +84,13 @@ describe("attempt channel", () => {
     });
 
     assert.deepStrictEqual(decoded, envelope);
+  });
+
+  it("decodes a Comment fact stored without its time as none", () => {
+    const stored = { _tag: "Comment", url: "https://github.com/acme/demo/pull/71", kind: "review" };
+    const comment = Schema.decodeUnknownSync(Comment)(stored);
+    assert.isTrue(Option.isNone(comment.at));
+    assert.deepStrictEqual(Schema.encodeSync(Comment)(comment), stored);
   });
 
   it("round-trips a child-session budget failure through JSON", () => {
@@ -225,6 +239,15 @@ describe("attempt channel", () => {
     });
     const legacy = Schema.encodeSync(SessionStarted)(new SessionStarted({ session }));
     assert(Option.isNone(Schema.decodeUnknownSync(SessionStarted)(legacy).harnessSession));
+    const storedSpec = Schema.decodeUnknownSync(AttemptChannel.RunSpec)(
+      Object.fromEntries(
+        Object.entries(Schema.encodeSync(AttemptChannel.RunSpec)(spec)).filter(
+          ([key]) => key !== "preparedAt" && key !== "botLogin",
+        ),
+      ),
+    );
+    assert(Option.isNone(storedSpec.preparedAt));
+    assert(Option.isNone(storedSpec.botLogin));
     const started = new SessionStarted({
       session,
       harnessSession: Option.some(
@@ -287,7 +310,7 @@ describe("attempt channel", () => {
     it("rejects a frame for another Attempt", () => {
       const outcome = admitAll([outbound(1, started, AttemptId.make("attempt-2"))]);
       assert(Result.isFailure(outcome));
-      assert.match(outcome.failure.message, /another Attempt/u);
+      assert.match(outcome.failure.message, /another attempt/u);
     });
 
     it("rejects a non-contiguous sequence", () => {
@@ -299,7 +322,7 @@ describe("attempt channel", () => {
     it("rejects a first frame that is not Started", () => {
       const outcome = admitAll([outbound(1, sessionEvent)]);
       assert(Result.isFailure(outcome));
-      assert.match(outcome.failure.message, /begin with a Started or Failed/u);
+      assert.match(outcome.failure.message, /start with a Started or Failed/u);
     });
 
     it("admits a launch failure as the first and terminal frame", () => {
@@ -328,7 +351,7 @@ describe("attempt channel", () => {
         outbound(3, sessionEvent),
       ]);
       assert(Result.isFailure(outcome));
-      assert.match(outcome.failure.message, /after its terminal envelope/u);
+      assert.match(outcome.failure.message, /after the terminal envelope/u);
     });
   });
 });

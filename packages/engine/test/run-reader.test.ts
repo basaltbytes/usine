@@ -5,23 +5,32 @@ import { Agent, AgentName, AgentPersona } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptTask } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import type { AttemptFailure } from "@usine/core/attempt/failure";
+import { BlockedFailure, type AttemptFailure } from "@usine/core/attempt/failure";
 import { DedupKey, Event, EventId } from "@usine/core/event";
 import { InstanceDirectory } from "@usine/core/instance";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
+import { RunId } from "@usine/core/run";
 import { StepName } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
 import { EffectLogger } from "drizzle-orm/effect-core";
 import * as SQLiteDrizzle from "drizzle-orm/effect-sqlite-node";
-import { DateTime, Effect, FileSystem, Layer, Option, Path, Queue } from "effect";
+import { DateTime, Effect, FileSystem, Layer, Option, Path, Queue, Ref } from "effect";
 import { RunDatabase } from "../src/database/database.ts";
 import { layer } from "../src/database/local-sqlite.ts";
 import { RunEngine, Submission } from "../src/engine/engine.ts";
-import { RunReader } from "../src/run-reader/run-reader.ts";
+import { RunReader, WorkerAttempts } from "../src/run-reader/run-reader.ts";
 import { StepExecutor } from "../src/step-executor.ts";
 import { TriggerCondition } from "../src/trigger-condition.ts";
+import {
+  type AttemptPlan,
+  engineLayer,
+  executorLayer,
+  submission as supportSubmission,
+  waitFor,
+  withInstance,
+} from "./support.ts";
 
 describe("Run evidence reader", () => {
   it.live("keeps the Attempt's selected model consistent with its transcript while it starts", () =>
@@ -35,10 +44,12 @@ describe("Run evidence reader", () => {
       const model = ModelId.make("evidence-model");
       const starts = yield* Queue.unbounded<Effect.Effect<void, AttemptFailure>>();
       const executor = Layer.succeed(StepExecutor)({
+        workers: Effect.succeed([WorkerName.make("local")]),
         isLive: () => Effect.succeed(false),
         outcome: () => Effect.succeed(Option.none()),
         recover: () => Effect.void,
         intervene: () => Effect.void,
+        occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
         reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
         interrupt: () => Effect.void,
         execute: (execution, io) =>
@@ -58,7 +69,9 @@ describe("Run evidence reader", () => {
       });
       const writer = layer(directory).pipe(
         Layer.provide(executor),
-        Layer.provide(Layer.succeed(TriggerCondition)({ holds: () => Effect.succeed(true) })),
+        Layer.provide(
+          Layer.succeed(TriggerCondition)({ recheck: () => Effect.succeed("matches") }),
+        ),
       );
       yield* Effect.gen(function* () {
         const engine = yield* RunEngine;
@@ -79,9 +92,8 @@ describe("Run evidence reader", () => {
           parentModel: Option.none(),
         };
         const observedStarts = new Set<boolean>();
-        // Try the Started arrival at every database-operation boundary. The
-        // logger schedules arrivals without inspecting SQL or fixing its shape;
-        // the first unreached boundary ends the sweep as query structure changes.
+        // Delivers `Started` at each database operation boundary in turn. The sweep ends at the
+        // first boundary not reached, so it doesn't depend on the query structure.
         for (let boundary = 1; ; boundary += 1) {
           const submitted = yield* engine.submit(
             new Submission({
@@ -150,4 +162,110 @@ describe("Run evidence reader", () => {
       }).pipe(Effect.provide(writer));
     }).pipe(Effect.provide(NodeServices.layer)),
   );
+});
+
+describe("Loop sightings", () => {
+  it.live(
+    "name the Run that owns the Item's state, following a reopening, and the Run that suppresses it",
+    () =>
+      withInstance((directory) =>
+        Effect.gen(function* () {
+          const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
+            new BlockedFailure({ message: "The baseline gate fails on main." }),
+          ]);
+          yield* Effect.gen(function* () {
+            const engine = yield* RunEngine;
+            const reader = yield* RunReader;
+            const sightingsOf = (item: string) => reader.sightings([ItemKey.make(item)]);
+
+            const blocked = yield* engine.submit(
+              supportSubmission({ number: 1, item: "suppressed" }),
+            );
+            assert(blocked._tag === "Claimed");
+            yield* waitFor(engine, blocked.runId, ({ run }) => run.state._tag === "Failed");
+            const [suppressed, ...others] = yield* sightingsOf("suppressed");
+            assert.deepStrictEqual(others, []);
+            assert.strictEqual(suppressed?.loop, LoopName.make("review"));
+            assert.deepStrictEqual(suppressed?.event, Option.some(EventId.make("event-1")));
+            assert.deepStrictEqual(suppressed?.run, Option.some(blocked.runId));
+            assert.deepStrictEqual(suppressed?.suppressedBy, Option.some(blocked.runId));
+
+            // A canceled Run keeps its Event until the Item comes back to that state,
+            // which opens the Event again under a reopening of its own.
+            const first = yield* engine.submit(
+              supportSubmission({ number: 2, item: "reopened", approval: "required" }),
+            );
+            assert(first._tag === "Claimed");
+            yield* engine.cancel(first.runId);
+            const [canceled] = yield* sightingsOf("reopened");
+            assert.deepStrictEqual(canceled?.run, Option.some(first.runId));
+            yield* engine.submit(
+              supportSubmission({ number: 3, item: "reopened", approval: "required" }),
+            );
+            const back = yield* engine.submit(
+              supportSubmission({ number: 2, item: "reopened", approval: "required" }),
+            );
+            assert(back._tag === "Claimed");
+            assert.notStrictEqual(back.runId, first.runId);
+            const [reopened] = yield* sightingsOf("reopened");
+            assert(reopened !== undefined && Option.isSome(reopened.event));
+            assert.notStrictEqual(reopened.event.value, EventId.make("event-2"));
+            assert.deepStrictEqual(reopened.run, Option.some(back.runId));
+            assert.deepStrictEqual(reopened.suppressedBy, Option.none());
+
+            // A sighting that does not match records no Event.
+            yield* engine.revoke(LoopName.make("review"), ItemKey.make("reopened"));
+            const [unmatched] = yield* sightingsOf("reopened");
+            assert.deepStrictEqual(unmatched?.event, Option.none());
+            assert.deepStrictEqual(unmatched?.run, Option.none());
+            assert.deepStrictEqual(yield* sightingsOf("never-seen"), []);
+          }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
+        }),
+      ),
+  );
+});
+
+describe("Run Events", () => {
+  it.live("read the Event each Run was opened for, once per Run, leaving out unknown Runs", () =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([]);
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const reader = yield* RunReader;
+          const first = yield* engine.submit(
+            supportSubmission({ number: 1, item: "first", approval: "required" }),
+          );
+          const second = yield* engine.submit(
+            supportSubmission({ number: 2, item: "second", approval: "required" }),
+          );
+          assert(first._tag === "Claimed" && second._tag === "Claimed");
+
+          const read = yield* reader.events([
+            second.runId,
+            RunId.make("run-that-does-not-exist"),
+            first.runId,
+            second.runId,
+          ]);
+          const byRun = new Map(read.map(({ runId, event }) => [runId, event]));
+          assert.strictEqual(read.length, 2);
+          assert.deepStrictEqual(byRun.get(first.runId)?.id, EventId.make("event-1"));
+          assert.deepStrictEqual(byRun.get(first.runId)?.payload, { revision: 1 });
+          assert.deepStrictEqual(byRun.get(second.runId)?.id, EventId.make("event-2"));
+          assert.deepStrictEqual(byRun.get(second.runId)?.payload, { revision: 2 });
+          assert.deepStrictEqual(yield* reader.events([]), []);
+        }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
+      }),
+    ),
+  );
+});
+
+describe("Attempts by Worker", () => {
+  it("counts a Worker whose every Attempt still runs, and refuses more open Attempts than Attempts", () => {
+    // A Worker removed by a reload, with its only Attempt still running. If the schema rejected
+    // this count, every overview would fail until that Attempt ends.
+    const local = WorkerName.make("local");
+    assert.doesNotThrow(() => new WorkerAttempts({ worker: local, attempts: 1, running: 1 }));
+    assert.throws(() => new WorkerAttempts({ worker: local, attempts: 1, running: 2 }));
+  });
 });

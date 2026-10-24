@@ -1,13 +1,26 @@
 import type { ChildHost } from "@usine/agents/child-host";
 import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { AgentFailure, type AttemptFailure, RunawayFailure } from "@usine/core/attempt/failure";
-import type { AttemptRecovery } from "@usine/core/attempt/salvage";
-import { StepResult, type StepResultFact } from "@usine/core/step/result";
-import { type AttemptReport, AttemptRequest, AttemptRuntime } from "@usine/durable/attempt-runtime";
+import {
+  AgentFailure,
+  type AttemptFailure,
+  InfraFailure,
+  RunawayFailure,
+} from "@usine/core/attempt/failure";
+import type { AttemptRecovery, RecoverySink } from "@usine/core/attempt/salvage";
+import type { GatewayCredentialKind } from "@usine/core/worker";
+import type { AttemptWindowsRead, HarvestSpec } from "@usine/core/step/harvest";
+import type { Comment, StepResult, StepResultFact } from "@usine/core/step/result";
+import {
+  type AttemptReport,
+  AttemptRequest,
+  AttemptRuntime,
+  harvestedResult,
+} from "@usine/durable/attempt-runtime";
 import {
   Cause,
   Deferred,
+  Duration,
   Effect,
   Exit,
   Fiber,
@@ -23,60 +36,98 @@ import {
   type ExecutorError,
   ExecutorOperationError,
 } from "./executor.ts";
+import { guardSeed } from "./guard.ts";
 import { type AcquiredAttempt, type AttemptStop, preparedAttemptsFor } from "./prepared-attempt.ts";
 
 interface ActiveAttempt {
   readonly worker: AttemptWorkspace["worker"];
-  /** The launch's scope: intervention delivery outlives its caller inside it. */
+  /** The launch scope. Intervention deliveries fork into it so their caller can't interrupt them. */
   readonly scope: Scope.Scope;
-  /** Why the Attempt is stopping; the first reason wins. */
+  /** The reason the Attempt is stopping; only the first is kept. */
   readonly stopping: Ref.Ref<Option.Option<AttemptStop>>;
-  /** The running `execute` call, interrupted when a stop's grace runs out. */
+  /** The running `execute` fiber, interrupted when a stop's grace period expires. */
   readonly execution: Ref.Ref<Option.Option<Fiber.Fiber<AttemptReport, AttemptFailure>>>;
-  /** The run has ended: the session takes no more operator input and no further stop; only its release remains. */
+  /** Completes when the run ends. After that, `stop` does nothing and `intervene` fails with `AgentFailure`. */
   readonly settled: Deferred.Deferred<void>;
 }
 
-/** What launch needs from the Attempt's checkout: where its children run, the environment its work runs in, the harvest once the parent finishes, and how to keep it for a reattachment. */
 export interface DurableCheckout {
-  /** The machine that holds the checkout, where the parent's children run. */
+  /** The host with the checkout, where the children run. */
   readonly host: ChildHost;
-  /** The only environment the parent's children and the harvesting commands see (ADR 0011). */
+  /** The complete environment for the children and harvesting commands (ADR 0011). */
   readonly environment: Record<string, string>;
-  /** Collects the commits and pull requests the checkout holds. */
-  readonly harvest: Effect.Effect<ReadonlyArray<StepResultFact>, AttemptFailure>;
-  /** Preserves the checkout when a restart needs to reattach the parent or repeat an unrecorded harvest. */
+  /**
+   * Returns the credential kind the Gateway injects for the children, from the Worker's latest
+   * preflight. Returns `None` if the children use their harness's own login.
+   */
+  readonly gatewayCredential: Effect.Effect<Option.Option<GatewayCredentialKind>>;
+  /**
+   * Returns the checkout's commits and pull requests, and the comments the Attempt posted on its
+   * Item within its own window and outside the windows of the Agent's other Attempts. Reads
+   * `windows` after GitHub lists the comments, and fails if they can't be read.
+   */
+  readonly harvest: (
+    windows: AttemptWindowsRead<AttemptFailure>,
+  ) => Effect.Effect<ReadonlyArray<StepResultFact>, AttemptFailure>;
+  /**
+   * Returns only the comments, filtered as in `harvest`, for an unsuccessful Attempt. Returns none
+   * if GitHub fails or the windows can't be read.
+   */
+  readonly harvestComments: (
+    windows: AttemptWindowsRead<AttemptFailure>,
+  ) => Effect.Effect<ReadonlyArray<Comment>>;
+  /** Keeps the checkout on disk so a restart can reattach the parent or repeat an unrecorded harvest. */
   readonly keepForReattach: Effect.Effect<void>;
 }
 
+/**
+ * A function that returns the comments the Attempt described by `spec` posted on its Item, read
+ * from its checkout with a new credential and filtered by `windows`. Fails only if the
+ * credential can't be acquired.
+ */
+export type PostedCommentsHarvest = <W>(
+  spec: HarvestSpec,
+  windows: AttemptWindowsRead<W>,
+) => Effect.Effect<ReadonlyArray<Comment>, ExecutorError>;
+
 export interface DurableSessionOptions {
-  /** Bounds each cancellation stage: the parent task's abort, then the Attempt settling. */
+  /** The timeout for each cancellation stage: the parent task's abort, then the Attempt's end. */
   readonly interruptGrace: Parameters<typeof Effect.timeoutOption>[1];
 }
 
 const cancelError = (attemptId: AttemptId, cause: unknown) =>
   new ExecutorOperationError({
     operation: "cancel",
-    message: `Could not cancel Attempt ${attemptId}`,
+    message: `Can't cancel attempt ${attemptId}`,
     cause,
   });
 
 /**
- * Runs Attempts whose Pi parent is a durable task in this process
- * (`AttemptRuntime`), for every Worker kind: the executors supply the
- * checkout, and everything about the parent task lives here. Interrupting a
- * launch that was not stopped first is this process stopping: the parent
- * task stays live in durable storage and the checkout stays on disk for the
- * reattachment after restart. Every other way an Attempt ends leaves no live
- * parent task behind.
+ * Returns the session that runs Attempts whose Pi parent is a durable task in this process
+ * (`AttemptRuntime`), for every Worker kind. If a launch is interrupted without a stop, the
+ * parent task stays live and the checkout stays on disk for reattachment after restart; every
+ * other ending stops the parent task.
  */
 export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
   options: DurableSessionOptions,
 ) {
   const runtime = yield* AttemptRuntime;
   const attempts = new Map<AttemptId, ActiveAttempt>();
+  /** Completed by each launch after it adds its Attempt to `attempts`. */
+  const registrations = new Map<AttemptId, Deferred.Deferred<void>>();
+  const registration = (attemptId: AttemptId) => {
+    const existing = registrations.get(attemptId);
+    if (existing !== undefined) return existing;
+    const created = Deferred.makeUnsafe<void>();
+    registrations.set(attemptId, created);
+    return created;
+  };
 
-  /** Cancels the Attempt's parent task if durable storage still holds it live; failures are logged, never raised. */
+  /**
+   * Cancels the Attempt's parent task if durable storage reports it live. Fails with a `cancel`
+   * `ExecutorOperationError` if liveness can't be read, or the cancel fails or exceeds
+   * `interruptGrace`.
+   */
   const stopTask = Effect.fn("DurableSession.stopTask")(function* (
     attemptId: AttemptId,
     reason: string,
@@ -90,7 +141,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
         errorTag: live.failure._tag,
         message: live.failure.message,
       });
-      return;
+      return yield* cancelError(attemptId, live.failure);
     }
     if (!live.success) {
       yield* Effect.logDebug("The Attempt's parent task is not live; nothing to stop", {
@@ -103,18 +154,64 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
     const canceled = yield* runtime
       .cancel(attemptId)
       .pipe(Effect.timeoutOption(options.interruptGrace), Effect.result);
-    if (Result.isFailure(canceled))
+    if (Result.isFailure(canceled)) {
       yield* Effect.logWarning("The Attempt's parent task could not be canceled", {
         attemptId,
         reason,
         errorTag: canceled.failure._tag,
         message: canceled.failure.message,
       });
-    else if (Option.isNone(canceled.success))
+      return yield* cancelError(attemptId, canceled.failure);
+    }
+    if (Option.isNone(canceled.success)) {
       yield* Effect.logWarning("Canceling the Attempt's parent task exceeded the interrupt grace", {
         attemptId,
         reason,
       });
+      return yield* cancelError(
+        attemptId,
+        new Error("canceling the parent task exceeded the interrupt grace"),
+      );
+    }
+  });
+
+  /** Calls `record` with `comments`; failures are logged, not raised. */
+  const recordComments = Effect.fn("DurableSession.recordComments")(function* <E>(
+    attemptId: AttemptId,
+    comments: ReadonlyArray<Comment>,
+    record: (comments: ReadonlyArray<Comment>) => Effect.Effect<void, E>,
+  ) {
+    yield* Effect.annotateCurrentSpan({ attemptId, comments: comments.length });
+    if (comments.length === 0) {
+      yield* Effect.logDebug("The Attempt posted no comment on its Item before it ended", {
+        attemptId,
+      });
+      return;
+    }
+    yield* record(comments).pipe(
+      Effect.tapError((error) =>
+        Effect.logWarning("Could not record the comments the Attempt posted before it ended", {
+          attemptId,
+          comments: comments.length,
+          message: String(error),
+        }),
+      ),
+      Effect.ignore,
+    );
+  });
+
+  /**
+   * Records the comments and reviews an unsuccessful Attempt posted on its Run's Item, after its
+   * parent task stops. A canceled Attempt's window ends when the orchestrator closes it, so later
+   * comments are excluded. Failures are logged without changing the Attempt's result.
+   */
+  const recordPostedComments = Effect.fn("DurableSession.recordPostedComments")(function* (
+    attemptId: AttemptId,
+    checkout: DurableCheckout,
+    io: AttemptChannel.Sink,
+  ) {
+    yield* Effect.annotateCurrentSpan({ attemptId });
+    yield* recordComments(attemptId, yield* checkout.harvestComments(io.windows), io.comments);
   });
 
   const launch = Effect.fn("DurableSession.launch")(function* (
@@ -136,11 +233,13 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
         execution,
         settled,
       });
+      yield* Deferred.succeed(registration(attemptId), undefined);
       yield* Effect.logInfo("Running the Attempt's parent task", {
         attemptId,
         worker: prepared.worker,
         worktree: prepared.worktree,
         childHost: checkout.host._tag,
+        gatewayCredential: Option.getOrElse(yield* checkout.gatewayCredential, () => "none"),
       });
       const running = yield* runtime
         .execute(
@@ -150,6 +249,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
             cwd: prepared.worktree,
             host: checkout.host,
             environment: checkout.environment,
+            gatewayCredential: checkout.gatewayCredential,
           }),
           io,
         )
@@ -164,12 +264,25 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
         Exit.isFailure(executed) &&
         Cause.hasInterruptsOnly(executed.cause)
       )
-        return yield* new AgentFailure({ message: "The Attempt's parent task was canceled" });
+        return yield* new AgentFailure({ message: "The attempt's parent task was canceled" });
       const report = yield* executed;
-      const result = new StepResult({ message: report.message, facts: yield* checkout.harvest });
+      // Reads the windows after GitHub lists the comments, because a later Attempt of the same Agent
+      // can overlap this one and a cancel can close this window first (#429). A failed read fails
+      // the Attempt.
+      const facts = yield* checkout.harvest(io.windows);
+      const harvested = harvestedResult(report, facts);
+      if (Result.isFailure(harvested)) {
+        yield* Effect.logWarning(
+          "The parent's last turn answered the operator and the checkout holds no facts; the Attempt fails",
+          { attemptId },
+        );
+        return yield* harvested.failure;
+      }
+      const result = harvested.success;
       yield* Effect.logInfo("The Attempt's parent task finished", {
         attemptId,
         facts: result.facts.length,
+        answeredOperator: report.answeredOperator,
       });
       yield* runtime.recordResult(attemptId, result).pipe(
         Effect.tapError((error) =>
@@ -185,8 +298,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
     return yield* Effect.scoped(run).pipe(
       Effect.onExit((exit) =>
         Effect.gen(function* () {
-          // Settle first: from here `stop` and `intervene` see an ended run, so
-          // `stopping` is final when the branches below read it.
+          // Complete `settled` first so `stopping` cannot change while the branches below read it.
           yield* Deferred.succeed(settled, undefined);
           if (Exit.isFailure(exit)) {
             const stop = yield* Ref.get(stopping);
@@ -197,6 +309,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
               );
               yield* checkout.keepForReattach;
             } else {
+              // stopTask logs its own failure; the Attempt's result is unchanged.
               yield* stopTask(
                 attemptId,
                 Option.match(stop, {
@@ -204,7 +317,8 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
                   onSome: (reason) =>
                     reason._tag === "Cancel" ? "the Attempt was canceled" : "a ceiling tripped",
                 }),
-              );
+              ).pipe(Effect.ignore);
+              yield* recordPostedComments(attemptId, checkout, io);
             }
           }
         }),
@@ -213,11 +327,10 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
   });
 
   /**
-   * Stops a launched Attempt for `reason` and reports whether one was running
-   * here: cancels its parent task, then waits for the Attempt to settle within
-   * the grace before interrupting it. The launch fails with the first reason.
-   * A run that has already ended has nothing to stop; its session stays
-   * registered until its resources are released, which the caller waits for.
+   * Stops a launched Attempt for `reason` and returns whether one was running here. Cancels the
+   * parent task, then waits up to `interruptGrace` before interrupting the Attempt; the launch
+   * fails with the first reason. For a run that already ended, does nothing, and the caller waits
+   * for its resources to be released.
    */
   const stop = Effect.fn("DurableSession.stop")(function* (
     attemptId: AttemptId,
@@ -325,7 +438,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
       Option.isSome(yield* Ref.get(active.stopping))
     )
       return yield* new AgentFailure({
-        message: "This Attempt has no live session in this orchestrator",
+        message: "This attempt has no live session in this orchestrator",
       });
     yield* runtime.intervene(attemptId, intervention).pipe(
       Effect.tap(() =>
@@ -341,18 +454,104 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
           errorTag: error._tag,
         }),
       ),
-      // Delivery belongs to the Attempt, so a disconnected HTTP caller cannot cut it short.
+      // Forks into the Attempt's scope so a disconnected HTTP caller doesn't interrupt delivery.
       Effect.forkIn(active.scope),
       Effect.flatMap(Fiber.join),
     );
   });
 
-  const prepared = yield* preparedAttemptsFor(stop, intervene);
+  /**
+   * Sends the runaway guard's warning steer through `intervene` after `execute` attaches to the
+   * Attempt's channel. The guard starts before `execute` reads durable storage, so sending
+   * immediately would drop a warning restored on reattachment (#178).
+   */
+  const warnParent = Effect.fn("DurableSession.warnParent")(function* (
+    attemptId: AttemptId,
+    intervention: AttemptChannel.Intervention,
+  ) {
+    yield* Effect.annotateCurrentSpan({ attemptId });
+    yield* runtime.attached(attemptId);
+    yield* intervene(attemptId, intervention);
+  });
 
   /**
-   * Owns an executor's preparation of `request` through `preparedAttemptsFor`.
-   * A reattachment that cannot be prepared has its parent task canceled, so
-   * the task never runs unobserved and the engine retries on a fresh Attempt.
+   * Wraps `read`, one `part` of the guard's restored state. If `read` fails after the store's
+   * retries, stops the parent task and fails the reattachment with an `InfraFailure` for `part`,
+   * because restarting that part would reset the Attempt's allowance (#178).
+   */
+  const seedPart =
+    (attemptId: AttemptId, part: string) =>
+    <A>(read: Effect.Effect<A, AttemptFailure>): Effect.Effect<A, InfraFailure> =>
+      read.pipe(
+        Effect.catch((error) =>
+          Effect.gen(function* () {
+            yield* Effect.logError(
+              `Could not read the reattached Attempt's ${part}; the reattachment fails instead of starting its runaway guard over`,
+              { attemptId, part, errorTag: error._tag, message: error.message },
+            );
+            yield* stopTask(attemptId, `its runaway guard cannot read the Attempt's ${part}`).pipe(
+              Effect.ignore,
+            );
+            return yield* new InfraFailure({
+              message: `Can't read the ${part} of the reattached attempt, which the runaway guard needs to resume`,
+              cause: error,
+            });
+          }),
+        ),
+      );
+
+  /**
+   * Returns the initial runaway guard state for `request`, empty for a new Attempt. On
+   * reattachment, reads the transcript if any ceiling is set and the unsupervised time if
+   * `maxAttemptMinutes` is set. Fails with an `InfraFailure` after stopping the parent task if a
+   * read fails.
+   */
+  const guardSeedFor = Effect.fn("DurableSession.guardSeed")(function* (
+    request: CheckoutRequest,
+    io: AttemptChannel.Sink,
+  ) {
+    const attemptId = request.attemptId;
+    const wallClock = Option.isSome(request.maxAttemptMinutes);
+    const armed = wallClock || Option.isSome(request.maxAttemptTokens);
+    yield* Effect.annotateCurrentSpan({ attemptId, reattach: request.reattach, armed });
+    if (!request.reattach) return guardSeed([], Duration.zero);
+    if (!armed) {
+      yield* Effect.logDebug("The reattached Attempt arms no ceiling; its guard resumes nothing", {
+        attemptId,
+      });
+      return guardSeed([], Duration.zero);
+    }
+    const transcript = yield* io.transcript.pipe(seedPart(attemptId, "transcript"));
+    const recorded = wallClock
+      ? yield* runtime.unsupervised(attemptId).pipe(seedPart(attemptId, "unsupervised time"))
+      : Option.none<Duration.Duration>();
+    const seed = guardSeed(
+      transcript,
+      Option.getOrElse(recorded, () => Duration.zero),
+    );
+    yield* Effect.logInfo("Resuming the reattached Attempt's ceilings", {
+      attemptId,
+      envelopes: transcript.length,
+      tokens: [...seed.tokens.values()].reduce((sum, value) => sum + value, 0),
+      unsupervisedRecorded: Option.isSome(recorded),
+      unsupervisedMinutes: Math.round(Duration.toMillis(seed.unsupervised) / 6_000) / 10,
+      parentHeld: seed.parentHeld,
+      warned: [...seed.warned],
+    });
+    return seed;
+  });
+
+  const prepared = yield* preparedAttemptsFor(
+    stop,
+    warnParent,
+    (attemptId) => Deferred.await(registration(attemptId)),
+    guardSeedFor,
+    runtime.recordUnsupervised,
+  );
+
+  /**
+   * Wraps an executor's `acquire` with `preparedAttemptsFor`. If a reattachment can't be prepared,
+   * cancels its parent task so the engine retries on a new Attempt.
    */
   const prepare = (
     acquire: Effect.Effect<AcquiredAttempt, ExecutorError, Scope.Scope>,
@@ -360,13 +559,12 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
   ) =>
     prepared
       .prepare(
-        // The first finalizer of the resources scope runs last, so the session
-        // stays registered until checkout and credential cleanup finish. Removing
-        // it when the launch settled let a second cancel close the scope while
-        // the launch was still returning (#197).
+        // Added first so it runs last: the session stays registered until checkout and credential
+        // cleanup finish (#197).
         Effect.addFinalizer(() =>
           Effect.sync(() => {
             attempts.delete(request.attemptId);
+            registrations.delete(request.attemptId);
           }),
         ).pipe(Effect.andThen(acquire)),
         request,
@@ -374,14 +572,17 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
       .pipe(
         Effect.tapError(() =>
           request.reattach
-            ? stopTask(request.attemptId, "its reattachment could not be prepared")
+            ? // stopTask logs its own failure; the preparation error is returned.
+              stopTask(request.attemptId, "its reattachment could not be prepared").pipe(
+                Effect.ignore,
+              )
             : Effect.void,
         ),
       );
 
   /**
-   * Cancels the Attempt at any stage, then a live parent task this process
-   * never launched, such as one still awaiting its reattachment after a restart.
+   * Cancels the Attempt at any stage, then stops a live parent task this process didn't launch,
+   * for example one awaiting reattachment. Fails if that task can't be confirmed stopped.
    */
   const cancel = Effect.fn("DurableSession.cancel")(function* (attemptId: AttemptId) {
     yield* Effect.annotateCurrentSpan({ attemptId });
@@ -390,8 +591,8 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
   });
 
   /**
-   * Whether a restart reattaches the open Attempt: its parent task still runs,
-   * or it reported success and its checkout was not harvested into a recorded result yet.
+   * Returns whether the open Attempt's parent task is running or reported success without a
+   * recorded harvest. If true, a restart reattaches it.
    */
   const isLive = Effect.fn("DurableSession.isLive")(function* (attemptId: AttemptId) {
     yield* Effect.annotateCurrentSpan({ attemptId });
@@ -410,7 +611,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
     return unharvested;
   });
 
-  /** The result an Attempt's finished parent task left in durable storage: the recorded harvest, or the parent's failure. */
+  /** Returns the stored result of a finished parent task: the recorded harvest or the parent's failure. */
   const outcome = Effect.fn("DurableSession.outcome")(function* (attemptId: AttemptId) {
     yield* Effect.annotateCurrentSpan({ attemptId });
     const finished = yield* runtime.finished(attemptId);
@@ -434,37 +635,92 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
   });
 
   /**
-   * Whether startup recovery must leave `attempt`'s checkout for its
-   * reattachment: true when the Attempt is open and `isLive` says a restart
-   * reattaches it. A closed Attempt's parent task is canceled here, since
-   * nothing reattaches it.
+   * Stops `attempt`'s parent task before recovery reconciles its checkout, even if `isLive` returns
+   * true. An unharvested report stays unharvested while the checkout is salvaged (#180). Fails if
+   * the task can't be confirmed stopped.
    */
-  const awaitsReattach = Effect.fn("DurableSession.awaitsReattach")(function* (
+  const stopForRecovery = Effect.fn("DurableSession.stopForRecovery")(function* (
     attempt: AttemptRecovery,
   ) {
     yield* Effect.annotateCurrentSpan({ attemptId: attempt.attemptId, worker: attempt.worker });
-    if (!attempt.open) {
-      yield* stopTask(attempt.attemptId, "its Attempt is closed");
-      return false;
-    }
-    const live = yield* isLive(attempt.attemptId).pipe(
-      Effect.tapError((error) =>
-        Effect.logWarning(
-          "Could not read whether an open Attempt's parent task is live; reconciling its checkout",
-          { attemptId: attempt.attemptId, worker: attempt.worker, message: error.message },
-        ),
-      ),
-      Effect.orElseSucceed(() => false),
+    yield* stopTask(
+      attempt.attemptId,
+      attempt.open ? "its Run does not reattach the Attempt" : "its Attempt is closed",
     );
-    if (live)
-      yield* Effect.logInfo("Leaving the checkout of a live Attempt for its reattachment", {
-        attemptId: attempt.attemptId,
-        worker: attempt.worker,
-      });
-    return live;
   });
 
-  /** The request a reattached Attempt's parent task was created with; a missing one fails the reattachment. */
+  /**
+   * During startup reconciliation, records the comments and reviews an open Attempt posted on its
+   * Run's Item if durable storage has its parent's failure. `harvest` is `None` if the checkout is
+   * gone. Does nothing for other Attempts; failures are logged, not raised.
+   */
+  const recoverPostedComments = Effect.fn("DurableSession.recoverPostedComments")(function* <E>(
+    attempt: AttemptRecovery,
+    harvest: Option.Option<PostedCommentsHarvest>,
+    record: Pick<RecoverySink<E>, "comments" | "windows">,
+  ) {
+    if (!attempt.open) return;
+    const { attemptId, worker } = attempt;
+    yield* Effect.annotateCurrentSpan({ attemptId, worker });
+    const finished = yield* runtime.finished(attemptId).pipe(Effect.result);
+    if (Result.isFailure(finished)) {
+      yield* Effect.logWarning(
+        "Could not read how the open Attempt's parent task ended; the comments it posted are not recorded",
+        { attemptId, worker, errorTag: finished.failure._tag, message: finished.failure.message },
+      );
+      return;
+    }
+    if (!Option.exists(finished.success, ({ _tag }) => _tag === "ParentFailed")) {
+      yield* Effect.logDebug(
+        "Durable storage holds no failure of the open Attempt's parent task; reconciliation records no comment",
+        {
+          attemptId,
+          worker,
+          finished: Option.match(finished.success, {
+            onNone: () => "none",
+            onSome: ({ _tag }) => _tag,
+          }),
+        },
+      );
+      return;
+    }
+    if (Option.isNone(harvest)) {
+      yield* Effect.logWarning(
+        "The open Attempt's parent task failed and its checkout is gone; the comments it posted are not recorded",
+        { attemptId, worker },
+      );
+      return;
+    }
+    const stored = yield* runtime.request(attemptId).pipe(Effect.result);
+    if (Result.isFailure(stored) || Option.isNone(stored.success)) {
+      yield* Effect.logWarning(
+        "The open Attempt's parent task failed and its durable request cannot be read; the comments it posted are not recorded",
+        {
+          attemptId,
+          worker,
+          message: Result.isFailure(stored) ? stored.failure.message : "no durable request",
+        },
+      );
+      return;
+    }
+    yield* Effect.logInfo(
+      "The open Attempt's parent task failed before this process recorded it; harvesting the comments it posted from its checkout",
+      { attemptId, worker },
+    );
+    const comments = yield* harvest
+      .value(stored.success.value.spec, record.windows)
+      .pipe(Effect.result);
+    if (Result.isFailure(comments)) {
+      yield* Effect.logWarning(
+        "Could not acquire a credential to harvest the open Attempt's comments; the comments it posted are not recorded",
+        { attemptId, worker, errorTag: comments.failure._tag, message: comments.failure.message },
+      );
+      return;
+    }
+    yield* recordComments(attemptId, comments.success, record.comments);
+  });
+
+  /** Returns the request the reattached Attempt's parent task was created with. Fails with a `prepare` `ExecutorOperationError` if it's missing or unreadable. */
   const storedRequest = Effect.fn("DurableSession.storedRequest")(function* (attemptId: AttemptId) {
     yield* Effect.annotateCurrentSpan({ attemptId });
     const stored = yield* runtime.request(attemptId).pipe(
@@ -472,7 +728,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
         (cause) =>
           new ExecutorOperationError({
             operation: "prepare",
-            message: "Could not read the reattached Attempt's durable request",
+            message: "Can't read the durable request of the reattached attempt",
             cause,
           }),
       ),
@@ -480,7 +736,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
     if (Option.isNone(stored))
       return yield* new ExecutorOperationError({
         operation: "prepare",
-        message: "The reattached Attempt has no durable request",
+        message: "The reattached attempt has no durable request",
         cause: new Error(attemptId),
       });
     return stored.value;
@@ -493,7 +749,8 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
     intervene,
     isLive,
     outcome,
-    awaitsReattach,
+    stopForRecovery,
+    recoverPostedComments,
     storedRequest,
   } as const;
 });

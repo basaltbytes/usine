@@ -22,13 +22,12 @@ import {
   withGitHubCredential,
 } from "../github/github.ts";
 import { configuredProvider, llmTarget, withProviderCredential } from "../llm/llm.ts";
-import { GatewaySettings, gatewayHosts } from "../settings.ts";
+import { GatewaySettings, gatewayHosts, SettingsInForce } from "../settings.ts";
 import { endToEndHeaders, forwardRequest } from "./forward.ts";
 
 /**
- * Why the gateway refused a request. Every refusal is logged at warning
- * level with this reason, the host, and the Worker when the caller token
- * names one, and the response carries it in `x-usine-gateway-refusal`.
+ * The reason the Gateway refused a request. Each refusal is logged at warning level with the
+ * reason, host, and Worker (if known), and returned in `x-usine-gateway-refusal`.
  */
 export const RefusalReason = Schema.Literals([
   "unknown-host",
@@ -42,7 +41,7 @@ export const RefusalReason = Schema.Literals([
 ]);
 export type RefusalReason = typeof RefusalReason.Type;
 
-/** The header a refused response names its reason in. */
+/** The response header that contains the refusal reason. */
 export const REFUSAL_HEADER = "x-usine-gateway-refusal";
 
 const REFUSAL_STATUS = {
@@ -56,29 +55,29 @@ const REFUSAL_STATUS = {
   "provider-not-configured": 503,
 } as const satisfies Record<RefusalReason, number>;
 
-/** A refusal, with the caller's claims once its token has been verified. */
+/** A refusal, with the caller's claims once its token is verified. */
 class Refused extends Data.TaggedError("Refused")<{
   readonly reason: RefusalReason;
   readonly message: string;
   readonly caller: Option.Option<CallerClaims>;
 }> {}
 
-/** A refusal before the caller token was verified. */
+/** Returns a refusal for a request whose caller token isn't verified yet. */
 const refused = (reason: RefusalReason, message: string) =>
   new Refused({ reason, message, caller: Option.none() });
 
-/** A refusal of a verified caller. */
+/** Returns a refusal for a verified caller. */
 const refusedCaller = (claims: CallerClaims, reason: RefusalReason, message: string) =>
   new Refused({ reason, message, caller: Option.some(claims) });
 
-/** Where a request is going: the host it named, without a port, and its path and query. */
+/** A request's host without its port, and its path and query. */
 interface RequestTarget {
   readonly host: string;
   readonly pathname: string;
   readonly search: string;
 }
 
-/** Reads the target from an origin-form request and its `Host`, or from an absolute-form request URL. */
+/** Returns the target from an origin-form request and its `Host`, or from an absolute-form URL. */
 const requestTarget = (
   request: HttpServerRequest.HttpServerRequest,
 ): Option.Option<RequestTarget> => {
@@ -96,16 +95,15 @@ const requestTarget = (
 };
 
 /**
- * The reverse proxy Worker VMs reach on the private network. `git.<domain>`
- * serves GitHub with the attached installation token and `llm.<domain>`
- * serves the LLM providers with the gateway's API keys; every request
- * presents a caller token whose attachment is in force. Any other host is
- * refused: the forward proxy serves the allowlisted ones.
+ * The reverse proxy for Worker VMs on the private network. `git.<domain>` serves GitHub with
+ * the attached installation token, and `llm.<domain>` serves the LLM providers with the
+ * current credentials. Every request must have a caller token for an active attachment; other
+ * hosts are refused.
  */
 export class GatewayProxy extends Context.Service<
   GatewayProxy,
   {
-    /** Forwards one Worker request with the attached credential, or refuses it and logs why. */
+    /** Forwards one Worker request with the attached credential, or refuses and logs it. */
     readonly handle: Effect.Effect<
       HttpServerResponse.HttpServerResponse,
       never,
@@ -117,6 +115,7 @@ export class GatewayProxy extends Context.Service<
     GatewayProxy,
     Effect.gen(function* () {
       const settings = yield* GatewaySettings;
+      const inForce = yield* SettingsInForce;
       const attachments = yield* Attachments;
       const callers = yield* CallerTokens;
       const client = yield* HttpClient.HttpClient;
@@ -134,7 +133,7 @@ export class GatewayProxy extends Context.Service<
             Effect.mapError(({ reason }) =>
               refused(
                 "invalid-caller-token",
-                `The gateway did not issue this caller token (${reason}).`,
+                `The gateway didn't issue this caller token (${reason}).`,
               ),
             ),
           );
@@ -146,7 +145,7 @@ export class GatewayProxy extends Context.Service<
         const stale = refusedCaller(
           claims,
           "stale-caller-token",
-          `The caller token belongs to attachment ${claims.attachment} of ${claims.repository} on Worker ${claims.worker}, which is no longer attached.`,
+          `The caller token belongs to attachment ${claims.attachment} of ${claims.repository} on worker "${claims.worker}", which is no longer attached.`,
         );
         const lookup = yield* attachments.find(claims.attachment);
         return yield* Match.valueTags(lookup, {
@@ -161,7 +160,7 @@ export class GatewayProxy extends Context.Service<
               refusedCaller(
                 claims,
                 "attachment-expired",
-                `The attachment of ${claims.repository} to Worker ${claims.worker} has expired.`,
+                `The attachment of ${claims.repository} to worker "${claims.worker}" has expired.`,
               ),
             ),
           MissingAttachment: () => Effect.fail(stale),
@@ -179,7 +178,7 @@ export class GatewayProxy extends Context.Service<
           return yield* refusedCaller(
             claims,
             "unsupported-path",
-            `The gateway serves git smart HTTP and the GitHub API, not ${target.pathname}.`,
+            `The gateway serves Git smart HTTP and the GitHub API, not ${target.pathname}.`,
           );
         const named = route.value.repository;
         if (
@@ -215,7 +214,8 @@ export class GatewayProxy extends Context.Service<
             "unsupported-path",
             `The gateway serves /anthropic and /openai on ${hosts.llm}, not ${target.pathname}.`,
           );
-        const provider = configuredProvider(settings.providers, destination.value.provider);
+        const { providers } = yield* inForce.current;
+        const provider = configuredProvider(providers, destination.value.provider);
         if (Option.isNone(provider))
           return yield* refusedCaller(
             claims,
@@ -242,7 +242,7 @@ export class GatewayProxy extends Context.Service<
         return Effect.fail(
           refused(
             "unknown-host",
-            `The gateway serves ${hosts.git} and ${hosts.llm}, not ${target.host}; other hosts go through the forward proxy.`,
+            `The gateway serves ${hosts.git} and ${hosts.llm}, not ${target.host}. Send requests for other hosts through the forward proxy.`,
           ),
         );
       };
@@ -251,7 +251,7 @@ export class GatewayProxy extends Context.Service<
         const request = yield* HttpServerRequest.HttpServerRequest;
         const target = requestTarget(request);
         if (Option.isNone(target)) {
-          const error = refused("unknown-host", "The request names no host.");
+          const error = refused("unknown-host", "The request has no host.");
           yield* Effect.logWarning("Gateway refused a request", {
             reason: error.reason,
             method: request.method,
@@ -335,7 +335,7 @@ const upstreamFailure = (
     Effect.as(
       HttpServerResponse.jsonUnsafe(
         {
-          message: "usine gateway: the upstream could not be reached.",
+          message: "usine gateway: the upstream is unreachable.",
           reason: "upstream-unreachable",
         },
         { status: 502 },

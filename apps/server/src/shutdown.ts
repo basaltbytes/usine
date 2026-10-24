@@ -21,7 +21,10 @@ const observeSignals = (requested: Deferred.Deferred<void>, forced: Deferred.Def
       }),
   );
 
-/** Protects startup and running work with a bounded drain before runtime resources close. */
+/**
+ * Runs `startup` and its work, and on shutdown drains them within `deadline` before runtime
+ * resources close. Reads `deadline` when the drain starts.
+ */
 export const withGracefulShutdown = <A, E, R, E2, R2>(
   startup: Effect.Effect<
     {
@@ -32,14 +35,14 @@ export const withGracefulShutdown = <A, E, R, E2, R2>(
     R2
   >,
   requested: Deferred.Deferred<void>,
-  deadline: Duration.Duration,
+  deadline: Effect.Effect<Duration.Duration>,
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
       const forced = yield* Deferred.make<void>();
       yield* observeSignals(requested, forced);
-      // Acquired before the forks: their shutdown completes while runtime
-      // resources (database, executor, HTTP) are still available.
+      // Acquired before the forks, so their shutdown completes while runtime resources (database,
+      // executor, HTTP) are still available.
       const runtimeScope = yield* Effect.acquireRelease(Scope.make(), (scope, exit) =>
         Scope.close(scope, exit),
       );
@@ -59,8 +62,9 @@ export const withGracefulShutdown = <A, E, R, E2, R2>(
         Effect.onInterrupt(() =>
           Effect.gen(function* () {
             yield* Deferred.succeed(requested, undefined);
+            const limit = yield* deadline;
             yield* Effect.logInfo("Orchestrator shutdown started", {
-              deadlineMilliseconds: Duration.toMillis(deadline),
+              deadlineMilliseconds: Duration.toMillis(limit),
             });
             const stopping = yield* Effect.forkScoped(
               Fiber.interrupt(running).pipe(Effect.interruptible),
@@ -78,7 +82,7 @@ export const withGracefulShutdown = <A, E, R, E2, R2>(
             const outcome = yield* Effect.raceFirst(
               Effect.all([drain, Fiber.join(stopping)], { concurrency: "unbounded" }).pipe(
                 // An infinite deadline never elapses; only the second signal ends the drain.
-                Effect.timeoutOption(deadline),
+                Effect.timeoutOption(limit),
                 Effect.map((result) =>
                   Option.isSome(result) ? ("drained" as const) : ("deadline" as const),
                 ),

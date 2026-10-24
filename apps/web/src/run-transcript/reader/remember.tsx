@@ -2,15 +2,13 @@ import type { RunId } from "@usine/core/run";
 import type { TranscriptSequence } from "@usine/engine/transcript";
 import { useEffect, useLayoutEffect, useRef, type RefObject } from "react";
 import { useTranscriptDisclosure } from "../grouping/disclosure.tsx";
-import type { TranscriptFilter } from "../model.ts";
 import { visibleTranscriptRow } from "../scroll-position.tsx";
 import type { ReadingRow } from "./anchor.ts";
 import { readerMemory, type ReaderBookmark, type ReaderPosition } from "./memory.ts";
 
-/** Debounces browser writes while capturing scrolling immediately; flushes on close and page exit. */
+/** Captures the scroll position on every scroll and debounces the browser storage writes; flushes on close and on page exit. */
 export const RememberReader = ({
   runId,
-  filter,
   readThrough,
   rows,
   viewportRef,
@@ -20,7 +18,6 @@ export const RememberReader = ({
   initialPosition,
 }: {
   readonly runId: RunId;
-  readonly filter: TranscriptFilter;
   readonly readThrough: TranscriptSequence | null;
   readonly rows: ReadonlyArray<ReadingRow>;
   readonly viewportRef: RefObject<HTMLDivElement | null>;
@@ -55,7 +52,6 @@ export const RememberReader = ({
           viewport.clientTop,
       };
     bookmark.current = {
-      filter,
       readThrough,
       position: position.current,
       disclosures: [...state].slice(-200).map(([key, choice]) => ({ key, ...choice })),
@@ -67,8 +63,7 @@ export const RememberReader = ({
     capture();
   });
   useLayoutEffect(() => {
-    // React clears the viewport ref during deletion before this sibling's cleanup.
-    // Retain its DOM handle for the last measurement while the containing tree still exists.
+    // React clears the viewport ref before this cleanup runs, so the element is captured here.
     const viewport = viewportRef.current;
     return () => latestCapture.current(viewport);
   }, [active, runId, viewportRef]);
@@ -111,6 +106,6 @@ export const RememberReader = ({
       }, 500);
     });
     return () => cancelAnimationFrame(frame);
-  }, [runId, filter, readThrough, rows, state, active, restoring, allowLatest]);
+  }, [runId, readThrough, rows, state, active, restoring, allowLatest]);
   return null;
 };

@@ -6,8 +6,13 @@ import { AttemptTask } from "@usine/core/attempt";
 import { DedupKey } from "@usine/core/event";
 import { CommitSha, RepositoryRevision, canonicalRepositoryName } from "@usine/core/repository";
 import { RunEngine, type SubmissionResult } from "@usine/engine/engine";
-import type { ObservedItem } from "./repository-sync.ts";
-import { ExpressionEngine } from "@usine/expression/expression-engine";
+import { gitHubItemKey, type ObservedItem } from "./repository-sync.ts";
+import {
+  type ExpressionCheckError,
+  ExpressionEngine,
+  type ExpressionError,
+  type ExpressionEvaluationError,
+} from "@usine/expression/expression-engine";
 import { InvalidGitHubResponseError } from "@usine/github/github-app";
 import { DateTime, Effect, Option, Result, Schema } from "effect";
 import {
@@ -21,7 +26,7 @@ import { LoopEvaluationFailure } from "./evaluation-failures.ts";
 interface ItemCycle {
   readonly submissions: ReadonlyArray<SubmissionResult>;
   readonly revokedRuns: number;
-  /** Loops that could not evaluate the Item; the Item's other Loops still ran. */
+  /** Loops that couldn't evaluate the Item; the Item's other Loops still ran. */
   readonly failures: ReadonlyArray<LoopEvaluationFailure>;
 }
 
@@ -36,18 +41,55 @@ const eventKey = (
       canonicalRepositoryName(repository.name),
       item.number,
       item.contentHash,
-      // Preserve pre-budget identities while making every reset a fresh Event
-      // with the current rendered task, Agent and authored limit.
+      // Keep pre-budget identities, and make every reset a new Event with the current rendered
+      // task, Agent, and limit.
       ...(cycleGeneration === 0 ? [] : [cycleGeneration]),
     ]),
   );
 
 /**
- * Evaluates an already projected Item against its repository's active Loops,
- * renders matching prompts, and submits or revokes Runs. A Loop whose `if:` or
- * prompt fails comes back as a failure while the other Loops still run; the
- * caller logs and records it. Run failures stop the repository before its
- * cursor commits. Schedule Ticks have separate evaluation semantics.
+ * Whether `loop`'s trigger `if:` matches one Item of `repository`, given the Item's payload slice.
+ */
+const evaluateTrigger = (
+  loop: LoopFile,
+  repository: ManagedRepo,
+  payload: Schema.JsonObject,
+): Effect.Effect<boolean, ExpressionError, ExpressionEngine> =>
+  Effect.gen(function* () {
+    const expressions = yield* ExpressionEngine;
+    return yield* expressions.evaluateBoolean(loop.trigger.if, environmentFor(loop.trigger.on), {
+      repo: repositoryContext(repository),
+      item: payload,
+    });
+  });
+
+/**
+ * Whether `loop`'s trigger `if:` matches each of `payloads`, checking the expression once. Results
+ * follow the order of `payloads`, each with its own evaluation failure; a check failure fails the
+ * whole call.
+ */
+export const evaluateTriggerOnEach = (
+  loop: LoopFile,
+  repository: ManagedRepo,
+  payloads: ReadonlyArray<Schema.JsonObject>,
+): Effect.Effect<
+  ReadonlyArray<Result.Result<boolean, ExpressionEvaluationError>>,
+  ExpressionCheckError,
+  ExpressionEngine
+> =>
+  Effect.gen(function* () {
+    const expressions = yield* ExpressionEngine;
+    const repo = repositoryContext(repository);
+    return yield* expressions.evaluateBooleanEach(
+      loop.trigger.if,
+      environmentFor(loop.trigger.on),
+      payloads.map((item) => ({ repo, item })),
+    );
+  });
+
+/**
+ * Evaluates a projected Item against its repository's active Loops and submits or revokes Runs.
+ * Returns `if:` and prompt failures per Loop; fails on Run errors.
  */
 export const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* (
   repository: ManagedRepo,
@@ -60,7 +102,6 @@ export const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* 
     item: item.number,
   });
   const config = yield* ConfigParser;
-  const expressions = yield* ExpressionEngine;
   const runs = yield* RunEngine;
   const loops = resolved.filter(({ loop }) => loop.trigger.on === item.source);
   const payload = item.payload;
@@ -84,7 +125,7 @@ export const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* 
                 new InvalidGitHubResponseError({
                   operation: "fetch-pull-request-snapshot",
                   message: "The pull request payload has no valid head commit",
-                  detail: `PR ${item.number} requires a full headRefOid`,
+                  detail: `pull request #${item.number} has no full headRefOid`,
                 }),
             ),
           ),
@@ -94,11 +135,8 @@ export const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* 
   let revokedRuns = 0;
   for (const { agent, loop, parentModel } of loops) {
     yield* Effect.annotateCurrentSpan({ loop: loop.name, agent: agent.name });
-    const matches = yield* Effect.result(
-      expressions.evaluateBoolean(loop.trigger.if, environmentFor(loop.trigger.on), context),
-    );
-    // A failed `if:` says nothing about whether the Item matches, so its queued
-    // Runs stay as they are.
+    const matches = yield* Effect.result(evaluateTrigger(loop, repository, payload));
+    // A failed `if:` gives no answer about the match, so the Item's queued Runs stay as they are.
     if (Result.isFailure(matches)) {
       failures.push(
         new LoopEvaluationFailure({
@@ -175,4 +213,34 @@ export const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* 
     submissions.push(submitted);
   }
   return { submissions, revokedRuns, failures } satisfies ItemCycle;
+});
+
+/**
+ * Revokes the unstarted Runs of the deleted issue or pull request `number` for each active Loop on
+ * `stream`, and returns how many it revoked. Running Attempts continue.
+ */
+export const revokeMissingItem = Effect.fn("PollingTriggers.revokeMissingItem")(function* (
+  repository: ManagedRepo,
+  resolved: ReadonlyArray<ResolvedLoop>,
+  stream: "issue" | "pr",
+  number: number,
+) {
+  yield* Effect.annotateCurrentSpan({ repository: repository.name, item: number });
+  const runs = yield* RunEngine;
+  const itemKey = gitHubItemKey(repository.name, number);
+  let revokedRuns = 0;
+  for (const { agent, loop } of resolved.filter(({ loop }) => loop.trigger.on === stream)) {
+    const revoked = yield* runs.revoke(loop.name, itemKey);
+    revokedRuns += revoked.length;
+    if (revoked.length > 0) {
+      yield* Effect.logInfo("Item is gone from GitHub; revoked its unstarted runs", {
+        repository: repository.name,
+        loop: loop.name,
+        agent: agent.name,
+        item: number,
+        runIds: revoked.join(", "),
+      });
+    }
+  }
+  return revokedRuns;
 });

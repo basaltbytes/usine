@@ -1,56 +1,221 @@
 # @usine/web
 
-The usine web UI, served by `@usine/server`. Internal — never published.
+The usine web UI, served by `@usine/server`. Internal; never published.
 
-The first screen lists registered projects and marks those with Items that need intervention. A project opens as a horizontal Board whose authored or proposed lanes group the latest GitHub issues and pull requests. Task cards join explicitly linked issues and PRs, with links to every member, a chronological Run history, and Run and Attempt counts. Each history entry opens its Run drawer; approvals and errors remain visible. Run rows and the drawer header link to each Item and to any pull request the Run produced. Authored label-backed lanes accept drag-and-drop moves, and the move menu names the current issue or PR whose labels will change; proposed, state-only, and unmatched lanes are read-only destinations. Cards offer moves only when another writable lane exists. Boards with proposed lanes explain how to enable moves by configuring `repos[].lanes` in `usine.yaml` and restarting `usine up`.
+## Needs attention
 
-A moved card stays in its destination while the label write and GitHub refresh finish. Progress distinguishes saving from a saved move awaiting synchronization; old lane labels are hidden during that wait. Other cards remain available, and navigating between Projects preserves accepted moves. An unrelated label update does not undo a move, while newer lane or Item state takes over normally. The Board checks for updates every second while moves are pending so confirmation and approval prompts appear promptly. Failed writes show their error and refresh authoritative state. The Board scrolls within the space beside the sidebar; both ends remain reachable on desktop and narrow screens.
+Peach-tinted entries in two columns at the top of every screen except the overview, where they're the first block; absent when empty. Each entry has a title, project, detail line, and actions; an entry about a run opens its drawer. On the run page, entries take one line each, with the full detail in a tooltip. The sidebar shows the total beside **Overview** and a count per project.
 
-Opening a Run shows its conversation first, with Task, Event, and Attempts in separate tabs. Parent messages stay inline; each child session has a collapsible conversation and current activity status. Tool starts and finishes share one expandable row that identifies the command, file, search, or delegated task. Expanded tools use flat disclosure rows with indented details. Commands show terminal output, file reads show source, and edits show their patch or before-and-after text in distinct copyable panels. Other tools show labeled parameters and readable results; Raw details exposes the complete input and output. Everything, Messages, and Tools filters change the view without discarding history. Incoming activity follows the latest message until the reader scrolls away; Jump to latest resumes following. Load earlier preserves the reading position and remains available until every Attempt's full history is reachable. Account rate-window meters live in Attempts, separate from the conversation. Attempt failures include the typed reason, including executor defects that require an explicit retry, and an exhausted child-session budget shows both the configured and attempted counts in the drawer and Needs you. The separate Configuration view contains database-backed Loop pause controls. Needs-setup mode states that newly supplied GitHub App credentials require restarting `usine up` because the running process reads them only at startup.
+Entries:
 
-The app uses React, TypeScript, TanStack Query, TanStack Router, Tailwind CSS, shadcn components on Base UI with Phosphor icons, and shadcn/typeset over react-markdown for prose. Its visual system follows ADR 0015: dark-only, Catppuccin Mocha foreground and accents over the shadcn preset's neutrals, Geist for text and Geist Mono for headings and identifiers, flat ruled sections, and semantic run-state colors.
+- **Approval**: the loop and the item's number and title, with **Approve** and **Cancel run**. While any screen sends an action on the run, the buttons are disabled and name it, such as `Approving…`. The entry leaves when the action succeeds, before the overview refreshes. A refusal because the run changed state, for example after approval from the drawer, shows only in the drawer and run page; the entry leaves with the refresh.
+- **\<loop\>: blocked** or **Question from \<loop\>**, with the agent's blocker or question. **Mark resolved** (**Mark answered** for a question, in its drawer and run page) lets the run's loop act on the item's newest state.
+- **Failed run**. **Mark resolved**, in its drawer (from **Needs attention** or **Run history**) or run page, clears the warning and its project and board attention, across reloads and restarts, and keeps the outcome, attempt details, transcript, and retry controls. A later failed attempt raises it again.
+- **Cycle budget used up** on an item, with the loops and their counts. **Reset cycle budget** records an explicit answer and refreshes the overview; the runtime fetches current trigger input before opening more work.
+- **Child-session budget used up**, with the configured and attempted counts, also shown in the drawer and reader.
+- **Loop file not loaded** or **Agent file not loaded**: a file that failed to load at startup or reload, with the reason, until fixed and reloaded.
+- **Worker not configured**: a worker no longer in `usine.yaml` that has recorded attempts, with their count and the full detail, actions below. Startup doesn't reconcile them. Declare the worker again and restart `usine up`, or choose **Discard leftovers** and **Confirm discard** to stop tracking them, which removes nothing from the worker. While attempts a reload left there still run, the entry says how many (`2 attempts still running on it. Discard the leftovers after they end`), and **Discard leftovers** appears after the last ends. A refused discard, for example because the worker is declared again, shows the reason.
 
-Adjacent completed tools, including failed calls, have expandable action summaries, such as “Edited conversation.tsx · ran tests.” Groups show an error count when needed; error navigation opens the group and the failed call together. File summaries count distinct recorded paths and distinguish shared basenames with parent directories. Recognized test and build invocations describe what ran; their results remain in the tool details. Long or varied groups use compact counts, and loading earlier inputs fills in missing file and command details.
+## Overview
 
-## Intervening in a Run
+The first screen, at `/`:
 
-Send guidance from the parent conversation or a child's expanded activity. **Pause session** waits at the next tool boundary; sending a message resumes it. **Cancel Run** stops the entire Attempt.
+- **Needs attention**, or `Nothing needs attention` with the time of the last finished poll.
+- **Running**: one row per attempt in flight: item, loop, agent, worker, start time, last activity, and open connectivity warnings in yellow.
+- **Stalled**: one row per item a loop's trigger matches with no running attempt, with a reason such as `Canceled 2d ago, unchanged since` and the one applicable action: **Approve**, **Mark answered**, **Mark resolved**, **Reset cycle budget**, **Retry**, **Run again**, or **Resume**. Below `md`, the loop, reason, and action stack under the item.
+- **Recent runs**: the last 10 closed runs, with outcome and pull request.
+- One line with each worker's slots in use and last preflight.
 
-Messaging a child places a Hold. The child can answer and accept more turns in the same conversation, while the parent continues waiting for its result. **Release child** lets the result return when the child is idle. Each child has its own Hold, and a paused parent does not prevent messaging its children. Held children remain reachable even when their last activity is outside the loaded transcript page. Holds pause the Attempt's elapsed-time budget; reported tokens continue counting toward `settings.max_attempt_tokens` when that ceiling is set. A failed or canceled Attempt shows the salvage branch its unfinished work was pushed to, or the retained worktree path when the push failed.
+A row about a run opens its run page. Empty blocks say what they would list, and loading blocks show skeleton rows. With no project registered, the overview points to `repos` in `usine.yaml` and offers **Reload configuration**.
 
-Failed Runs offer **Edit and retry** with a task editor and roster agent picker. The selected agent supplies its persona and model settings. The new task and agent apply to later Attempts, including automatic infrastructure retries. Attempts show the task and agent they actually used and whether they received an operator intervention. Messages and delivery receipts identify the configured operator in the transcript; the triggering Event remains unchanged.
+## Sidebar
+
+Lists the projects, each with **Board** and **Tasks** under it. The open page's row is highlighted; a project's own row opens its board.
+
+## Board
+
+A project opens as a horizontal board whose authored or proposed lanes group the latest GitHub issues and pull requests, all in one row, with every task the overview returns. It scrolls both ways below the project heading, with both ends reachable on any screen width.
+
+### Lanes
+
+Writable lanes come first in configured order, then read-only lanes, then the unmatched lane (Unmapped). Unmapped and lanes with only closed items (Done) start folded into narrow rails with name and count; a rail opens into a lane, and the lane heading folds it back.
+
+The lane heading shows the name, card count, and the labels (in GitHub colors) and item states that route items there, and stays in view while cards scroll. An empty lane is a dashed outline with `No tasks`. During a drag, the lane under the pointer gets a muted background; with the keyboard, Left and Right move the dragged card one lane.
+
+Between two adjacent authored label-backed lanes, an arrow at the end of the left lane's heading points to the next lane and names the loops whose trigger currently matches one of its tasks, open run or not, with `paused` after paused ones. It's blue if one has a queued or running run on the lane's tasks, peach if all their open runs wait for approval, and unlabeled if no loop matches.
+
+Only authored label-backed lanes accept moves, and only if another writable lane exists; proposed, state-only, and unmatched lanes are read-only. A board with proposed lanes explains how to enable moves: configure `repos[].lanes` in `usine.yaml` and reload the configuration.
+
+### Task cards
+
+A card joins explicitly linked issues and PRs. It shows:
+
+- Each member's number and kind (`PR` for a pull request), the title on at most two lines, and up to three labels besides the lane's own, with a count of the rest.
+- For an open run, or a failed run that still needs the operator: a dot in the state's color (pulsing while `Running`), then the loop, state, time, and agent. The time counts from the run's opening while `Waiting` or `Queued`, the current attempt's start while `Running`, and the failure once `Failed`; the tooltip gives the full timestamp and start point. Succeeded and canceled runs show only on the task page, in the drawer, and in **Run history**.
+- Under that line: failures, with **Retry** if retryable or **Mark answered** or **Mark resolved** for a question or blocker; merge conflicts; run action and **Run again** progress, including that no run opened because the cycle budget is used up; and move progress.
+- For a stalled task, the overview's reason (from `GET /api/desk`), after the loop if no run line shows it, and the one action that unblocks it, such as **Approve** or **Run again**.
+
+Clicking a card opens its task page. The card menu lists only actions that apply: each member on GitHub; **Open run** for the run shown; **Run history** if the task has other runs; **Approve** for a `Waiting` run; **Retry** for a `Failed` one; **Cancel run**, after confirmation, for an open run; **Run again** with the loop's name if the latest run succeeded or was canceled, which opens the new run's drawer even if the card changes lanes first; and **Move to** with the other writable lanes, absent if there are none and while a move is saving.
+
+The menu button names the current issue or PR, whose labels a move changes. It shows on hover, on focus, and while the menu is open, and always on touch screens.
+
+### Card moves
+
+A moved card stays in its destination while the label write and GitHub refresh finish, showing saving, then saved and waiting for sync, with the old lane labels hidden. Other cards stay usable, and accepted moves persist across project switches. An unrelated label update doesn't undo a move; a newer lane or item state replaces it. While moves are pending, the board polls every second, so confirmation and approval prompts appear quickly. A failed write shows its error and reloads the board.
+
+## Tasks list
+
+At `/projects/<owner>/<name>/tasks`: the board's tasks with at least one run, finished ones included; other tasks appear only on the board and GitHub. With no runs at all, it shows `No runs yet`. A row opens the task page.
+
+Columns:
+
+- **Task**: the originating item's number and the task's title.
+- **Status**, then ` · ` and when the last run was last active, such as `Done · 28m ago`.
+- **Runs**: the loops in first-run order, each with its last run's state mark, then the run count.
+- **Pull request**, with its state, such as `#425 merged` or `#427 open`.
+- **Elapsed time** (the attempts' time, counting while one runs, such as `48 min`), **Tokens** (`1.2M`), and **Estimated cost** (priced dollars, `$20.55`): bare figures under their headers.
+
+A muted `*` marks a figure lower than the real one: elapsed time while some attempts lack timing (`0s*`, reason in the tooltip), or cost while some usage is unpriced, such as a Claude session before its first result (reason at the top of the hover card). Hovering tokens or cost shows tokens per billing pool, summed over the runs.
+
+The status is the first that applies:
+
+1. `Running`, with the loop.
+2. `Waiting for approval`.
+3. The stall reason of a pending or queued run, as on the overview.
+4. `Done`, if the current item is merged or closed and no run is open.
+5. A stalled task's reason.
+6. `Needs attention`, if a failed run or a suppression needs the operator.
+7. The last run's outcome, such as `Failed`.
+
+A stall reason includes its own time, such as `Canceled 3d ago, unchanged since`, and gets no second one.
+
+Tasks in flight come first (running, waiting for approval, pending, queued, stalled), each by when its run opened, newest first. A stalled task is in flight while an open run, an agent's question or blocker, a used-up cycle budget, or an unresolved failure blocks one of its loops; its status names that stall. Other tasks follow by when their last run closed, newest first; a run canceled before any attempt counts from the cancel. This includes stalled tasks not blocked that way (last run closed on an unchanged item, item waiting for the next poll, loop paused, or failure resolved), which keep the stall reason as status.
+
+The heading counts tasks without zeros, such as `2 in flight, 1 needs attention, 2 done`; a stalled task not in flight counts as needing attention only while a failed run or a suppression needs the operator. The line below totals the listed tasks, such as `197 runs, 12 h 8 min* elapsed, 127.5M tokens, $134.34* estimated`, omitting the cost if nothing is priced and showing a `*` only while a listed task's figure has one, with the reason in its tooltip.
+
+Columns follow the table's width, not the window's; [`DESIGN.md`](DESIGN.md#layout) gives the breakpoints and column sizing. On a phone, the table never scrolls sideways.
+
+## Task page
+
+At `/projects/<owner>/<name>/tasks/<number>`, where the number is the originating item's: the earliest issue, or else the earliest pull request. Any member's number opens the page under that address. An item outside the board's 500 newest shows `Task not found`.
+
+The header has the originating item's number (linked to GitHub) and the task title; below them, the current item's state (with its number if it's a pull request), lane, labels besides the lane's own, and **Needs attention** if it applies. **Move to** is at the right while another writable lane exists and no move is saving.
+
+Sections:
+
+- **Runs**: every run on the task's items, newest first: state, loop, item (if several), agent, attempts, attempt duration, open time, and the resulting pull request. Under the loop: a failed run's typed reason and message, who ran it again, and who approved it. Below 1280px, the other facts fold under the loop; below 640px, the state does too. A row opens its run page and shows **Approve** for a waiting run or **Retry** for a failed run that still needs the operator. The row menu has the other actions that apply, with **Cancel run** confirmed; **Edit and retry** and **Edit and run again** open the editor under the row.
+- **Pull requests**: state and conflicts with the base, each linked to GitHub.
+- **Comments and reviews**: what the runs' attempts posted, whatever their outcome, with item, run, and posting time (or attempt end, if recorded before posting times were), each linked to GitHub.
+
+Empty sections say how they fill. The page refreshes every 2 seconds while a run can be canceled, every 15 seconds otherwise, and when the overview refreshes after a run action or move.
+
+## Run drawer
+
+A run opened from a card menu, **Needs attention**, **Run history**, or **Run again** on the task page shows in a drawer over the current screen:
+
+- The item's number and title (linked), and the run's state.
+- Its pull request, linked (or the item, if it's a pull request and the run produced none), or `No pull request`.
+- The loop and agent.
+- Once an attempt has started: the newest attempt's worker and the **Duration** of all attempts, counting while one runs.
+- The actions that apply.
+- An outcome paragraph: a succeeded run's result; a failed run's typed reason, message, and salvage; what a waiting or queued run waits for; or a running run's current activity and latest message.
+
+**Open run page**, or the expand icon beside **Close**, opens the run page; with view transitions and without reduced motion, the title and state animate from the drawer into the page.
+
+## Run page
+
+At `/projects/<owner>/<name>/runs/<run>`: the whole run under the drawer's header, whose worker and duration line adds the **Tokens** the sessions used. The total opens a breakdown per billing pool and per session under each attempt, priced by the harness for pools with a dollar rate: API keys, and the Claude plan as an estimate. The ChatGPT plan says it has no dollar rate.
+
+**Run again**, on a succeeded or canceled run (or in the card menu for the task's latest run), opens a new run of its loop on the same item content with the run's task and agent; **Edit and run again** lets you change them first. The drawer or page then shows the new run, whose event says who ran it again, when, and from which run, linked by short id in the event document and on the task page. If the item's cycle budget is used up, no run opens and the actions say so. For **Edit and retry**, see [Intervening in a run](#intervening-in-a-run).
+
+### Outline
+
+The outline lists the task and the event with two-line previews, then each attempt with its outcome mark, start reason, start time, and duration, counting while it runs. Start reasons are the event, an operator retry, an edit and retry, a retry after an infrastructure failure, or a restart, marked if the restart reattached it.
+
+An approved run of a gated loop adds a line to the event entry and the event in the reader, such as “Approved by octocat · 15 Oct 19:30 · from the UI”, or “from GitHub” for a 👍 on the ask. It omits the name if `usine.yaml` sets no `operator`, and shows only “Approved” and the time for runs approved before usine recorded approvers.
+
+The attempt being read expands to its sessions (parent and children, with live status, hold state, and working time), then its checkpoints in order. Consecutive messages of one session fold into one entry, such as “developer, 14 messages”, listing each message by its first sentence, cut to a clause or whole words. Blockers, questions, operator messages, worker and provider notices, and the outcome are separate entries named by speaker; a blocker or the final failure is red, and a warning yellow.
+
+Scrolling the reader expands the attempt in view and marks the checkpoint at the reading line. Selecting the task or event shows it in the reader (the event with **Raw details** for its payload); selecting an attempt, session, or checkpoint scrolls to it. Below 1024px, the outline is a disclosure above the reader, and a finished run opens at its outcome's time line.
+
+Under the outline, a red count with previous and next controls steps through loaded errors: failed attempts' outcomes, blockers, questions, operator input a session refused, and open connectivity warnings. A quieter count, such as “12 recovered”, steps through tool calls that failed while the agent continued, expanding the fold and call.
+
+**Resume details**, beside a Claude or Codex child, shows its saved session id, worktree, and **Resume this session**, a command to paste in your terminal:
+
+- For a local worker, it changes into the worktree and resumes the session.
+- For an SSH worker, it runs that over `ssh -t` to the worker's `destination`, with `-p` if `usine.yaml` sets `port`, quoted again for the remote shell; the worktree line names the worker.
+- For a worker that `usine.yaml` no longer declares, it uses the local form and says so.
+
+**Copy command** copies the wrapped command as one line. Resuming needs the attempt's harness login and its worktree, which attempt cleanup removes. Older transcripts and Pi children say no harness session was saved.
+
+### Reader
+
+Each attempt is one document. Its first line names the worker, parent model, each child's harness, model, and effort, the account rate-window readings, and whether the operator intervened. Messages from the parent, children, and operator follow at a 72-character measure, with time and speaker in a narrow column.
+
+Calls between two messages fold into one line that says what ran, such as “Ran 5 commands · 25s” or “Edited conversation.tsx · ran tests.”, counting failed and running calls. File summaries count distinct paths and add parent directories to tell apart same-named files. Recognized test and build commands say what ran; results are in the tool details. Long or varied folds use compact counts, and loading earlier inputs fills in missing details.
+
+An expanded fold shows each call as one row, start and finish together, naming the command, file, search, or delegated task. Commands show terminal output, reads show source, and edits show a patch or before-and-after text, each in a copyable panel; other tools show labeled parameters and readable results. **Raw details** has the complete input and output.
+
+A label change, comment, or review the agent made on the run's item is a line under the fold of the calls that made it: “Removed agent-in-progress, added ready-for-review”, with labels in GitHub colors, or “Commented on #247” or “Reviewed #320”, linked to the comment or review. They come from the item's GitHub timeline (the App's changes during that attempt), not from commands, so a command that changed nothing adds no line. The run page reads them on open, when an attempt starts or ends, and every 30 seconds while one runs; if GitHub can't be read, a notice at the top says so.
+
+Your board moves during an attempt go through the same App, but usine records each move before sending it, so the reader shows it as yours, like a timed operator note: “You moved it from Review to Findings on the Board”. Moves from before usine recorded them show as the agent's label change.
+
+A delegation shows the task the parent gave. The attempt ends with its outcome: the failure note with its typed reason (including executor defects that need an explicit retry) and the salvage line, or the result. The parent's copy of a child's message, a final message the outcome repeats, a comment it links, and a label change it states in the same words, such as “removed `agent-in-progress`”, appear only in the outcome.
+
+A live attempt shows its current activity under the last message, and the reader follows new activity until you scroll away; **Jump to latest**, in its own band at the bottom, resumes following. An attempt with unloaded history offers **Load earlier**, which keeps the reading position.
+
+## Configuration
+
+The instance folder as the orchestrator parsed it, read-only, in five full-panel pages: **Loops**, **Agents**, **Workers**, **Repositories**, and **Settings**. List rows open detail pages with the file's long parts beside a rail of short facts (rail first on phones).
+
+- **Loop**: trigger and selector as written, the agent with its brain, the selected repositories, approval, cycle limit, permissions, step, and the prompt as Markdown with each `{{ }}` expression outlined. The database-backed **Pause** or **Resume** control is in the heading and on each list row.
+- **Agent**: the persona and where its parent model and effort come from.
+- **Worker**: connection and gateway settings (never the admin token), slots in use, and the last preflight of its own prerequisites and of each harness.
+- **Repository**: its lanes in board order with each label as GitHub has it, the labels usine creates there, and the loops that select it.
+- **Settings**: `settings`, `operator`, and the webhooks mode, with what each value does.
+
+A loop or agent file that didn't load comes first in its list; its page shows the parse stage, the message, and how to recover.
+
+**Reload configuration**, in every page heading of the section, reloads the instance folder; the changes, skipped files, or refusal reason stay under the heading until dismissed or until you leave the section. **Pause** and **Resume** are absent in setup mode. Needs-setup mode states that new GitHub App credentials require restarting `usine up`, because the process reads them only at startup.
+
+## Intervening in a run
+
+A live attempt has a composer at the bottom of the reader for the parent, or for a child selected in the outline. **Pause session** waits for the next tool boundary; sending a message resumes. **Cancel run** asks for confirmation, then stops the whole attempt.
+
+Messaging a child places a hold: the child can answer and take more turns in the same conversation while the parent waits for its result. **Release child** lets the result return once the child is idle. Each child has its own hold, a paused parent doesn't block messaging its children, and held children stay reachable even if their last activity isn't in the loaded transcript page. Holds pause the attempt's elapsed-time budget, but reported tokens still count toward `settings.max_attempt_tokens` if set. A failed or canceled attempt shows the salvage branch with its unfinished work, or the retained worktree path if the push failed.
+
+Failed runs offer **Edit and retry**, with a task editor and a roster agent picker; the agent supplies its persona and model settings. The new task and agent apply to later attempts, including automatic infrastructure retries. Each attempt shows the task and agent it used and whether the operator intervened. Transcript messages and delivery receipts name the configured operator; the triggering event is unchanged.
 
 ## Returning to a conversation
 
-Each Run remembers its filter, inspected groups, tools and child sessions, and reading place in this browser. Closing and reopening the drawer, or refreshing the page, returns to the same transcript row and position within it. A reader who leaves at latest continues following incoming activity. Wheel, touch, keyboard scrolling and conversation navigation take precedence over a pending restore.
+The reader saves each run's expanded folds and tools and its reading place in this browser. Reopening or refreshing the run page, or reselecting the attempt after viewing the task or event, returns to the same row and position; a reader left at the latest activity keeps following. Wheel, touch, keyboard scrolling, and outline navigation override a pending restore.
 
-The drawer loads up to 20 earlier pages automatically to recover a saved row. If the row is unavailable, a request fails, or recovery reaches that limit, a notice explains that the drawer is showing the nearest available activity. Load earlier remains available. Restoring a place, including this nearest-row recovery, preserves unread activity. The update count includes each loaded row changed since the last acknowledged tail once, including a tool result arriving after its start was read. Earlier pages can reveal additional unread rows. Jump to latest, or scrolling to latest in Everything, acknowledges those updates; error navigation and the Messages and Tools views preserve them.
+To recover a saved row, the run page loads up to 20 earlier pages. If the row is unavailable, a request fails, or the limit is reached, a notice says the reader shows the nearest activity, and **Load earlier** stays available. Restoring a place, fallback included, keeps unread activity unread. The update count includes, once, each loaded row changed since the last acknowledged tail, such as a tool result that arrives after its start was read; earlier pages can reveal more. **Jump to latest**, or scrolling to the latest activity, acknowledges them; error and outline navigation don't.
 
-Bookmarks expire after 30 days. This browser origin retains up to 20 Runs, the most recent 200 disclosure choices per Run, and at most 512,000 characters of bookmark data. Stored fields contain identities, preferences, a row-relative position and the acknowledged transcript sequence. Transcript text and tool payloads remain in the transcript store. If browser storage is disabled or full, the conversation remains usable; returning to a saved place requires available storage. See [ADR 0025](../../docs/adr/0025-run-conversation-reader-bookmarks.md).
+Bookmarks expire after 30 days. Each browser origin keeps up to 20 runs, the 200 most recent disclosure choices per run, and at most 512,000 characters of bookmark data: identities, preferences, a row-relative position, and the acknowledged transcript sequence, but no transcript text or tool payloads. If browser storage is disabled or full, the conversation still works, but can't restore a saved place. See [ADR 0025](../../docs/adr/0025-run-conversation-reader-bookmarks.md).
 
 ## Conversation browser tests
 
-Install the pinned Chromium browser once with `pnpm --filter @usine/web exec playwright install chromium`, then run `pnpm --filter @usine/web test`. The suite runs unit tests in Node and interaction tests in Chromium using the real MessageScroller, Base UI disclosures, sidebar, and browser layout. Board move tests use the actual HTTP client with controlled HTTP responses to replay stale refreshes, failures, concurrent card moves, and navigation during a request. CI installs Chromium and its operating-system dependencies before running the suite. A machine with its own Chromium, such as a Worker built by [`infra/hetzner/cloud-init.yaml`](../../infra/hetzner/cloud-init.yaml), sets `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to the browser's path instead; `vitest.config.ts` passes it to Playwright as `executablePath`, and `turbo.json` lists it in the `test` task's `env` so that `pnpm test` from the repository root sees it.
+Install the pinned Chromium once with `pnpm --filter @usine/web exec playwright install chromium`, then run `pnpm --filter @usine/web test`. Unit tests run in Node, and interaction tests in Chromium with the real MessageScroller, Base UI disclosures, sidebar, and layout. Board move tests replay stale refreshes, failures, concurrent card moves, and navigation during a request through the real HTTP client with controlled responses. CI installs Chromium and its OS dependencies first.
+
+If the machine has its own Chromium, such as a worker built by [`infra/hetzner/cloud-init.yaml`](../../infra/hetzner/cloud-init.yaml), set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to its path instead. `vitest.config.ts` passes it to Playwright as `executablePath`, and `turbo.json` lists it in the `test` task's `env`, so `pnpm test` from the repository root sees it.
+
+## Stack
+
+React, TypeScript, TanStack Query, TanStack Router, Tailwind CSS, shadcn components on Base UI with Phosphor icons, and shadcn/typeset over react-markdown for prose. The visual system (ADR 0015) is dark-only on Catppuccin Mocha; [`DESIGN.md`](DESIGN.md) defines its colors, type, and components.
 
 ## How to add UI
 
-The registry is the component library; the theme is the only place colors and type live.
+The registry is the component library, and the theme is the only place for colors and type.
 
-- **Use a registry component first.** Everything under `src/components/ui/` came from `pnpm dlx shadcn@latest add <name>` (run inside `apps/web`; `components.json` holds the preset). Compose those primitives (`Item`, `Card`, `Badge`, `Sheet`, `Message`, `Collapsible`, `Empty`, …) in screen files. Before writing a new element, check whether a registry component already covers it; the full set is installed.
-- **Extend with tokens, not hex.** Colors, fonts, and radii are CSS variables in `src/index.css`, exposed to Tailwind through the `@theme inline` block. A new semantic color is a new token pair there (`:root` and `.dark`) plus one `--color-*` line; screens then use utilities such as `text-run-active`. Never write a literal color in a component.
-- **Never hand-roll a parallel component.** No `styles.css`, no ad-hoc button or badge classes. A composition shared by several screens (for example `src/components/status-badge.tsx`) wraps a registry primitive and lives in `src/components/`, next to `ui/`, so the distinction between vendored and composed stays visible.
-- **Registry files are ours to edit.** Fix a type or a11y issue in place. They are exempt from the `usine/*` lint rules (see the `.oxlintrc.json` override) because upstream does not follow them, and `knip` treats them as entry files so unused components are not reported.
-- **Conversation tools use AI Elements.** `src/components/ai-elements/` adapts the upstream Tool, CodeBlock, and Terminal components to Base UI, Phosphor icons, and the app's tokens; its README records provenance and adaptations. Compose these panels with readable tool content. Complete transport payloads belong under Raw details. shadcn MessageScroller owns conversation scrolling; every direct content row uses a stable `MessageScrollerItem` identity.
-- **Markdown goes through `Markdown`.** `src/components/markdown.tsx` renders agent and operator prose with react-markdown inside a `typeset typeset-chat` container; `src/typeset.css` is the unmodified download from https://ui.shadcn.com/typeset.css and the `.typeset-chat` preset in `src/index.css` defines its settings. Source and patches use CodeBlock; command output uses Terminal.
-- **A rebuilt bundle needs no restart.** `@usine/server` reads `index.html` and `assets/*` from `apps/server/dist/web` on every request, so after `pnpm build` a page reload serves the new bundle. Only instance config and GitHub credentials are read at startup.
-- **Screens are file routes.** `src/routes/` is the TanStack Router routes directory (`__root.tsx` shell, `index.tsx` projects, `projects/$owner/$name.tsx` board, `configuration/loops.tsx`); the Vite plugin regenerates `src/route-tree.gen.ts`, which is committed and excluded from lint and format. Route files export only `Route`; shared pieces live outside `src/routes/`. The run drawer is a root search param (`?run=`) so it overlays any screen.
-- **Navigation lives in `src/components/app-sidebar.tsx`**, composed from the `sidebar` registry component; screens render inside `SidebarInset` under a breadcrumb header.
-- **Keep the scale.** Body text is `text-xs/relaxed`, titles `text-sm`, screen headings `text-xl` in `font-heading`; identifiers and ids use `font-mono`. Sentence case everywhere; no uppercase labels.
-
-An exhausted Item cycle budget appears in Needs you with the participating Loops and counts. **Reset cycle budget** records an explicit answer and refreshes the overview. The runtime fetches current trigger input before opening further work.
-
-Expand a Claude or Codex child's activity to see its saved harness session id, worker worktree path, and copyable resume command. Run the command on the same worker under the same harness account. Resuming requires both the saved session files and the worktree; Attempt cleanup removes the worktree after completion. Older transcripts and Pi children show that no saved harness session was recorded.
-
-A Loop or Agent file that failed to load at startup appears in Needs you as **Loop quarantined** or **Agent file not loaded**, with the file and the reason. It stays there until the file is fixed and `usine up` restarts.
-
-Choose **Mark resolved** in a failed Run’s drawer to clear its Needs you warning and related Project and Board attention. Open the drawer from Needs you or Run history. Resolution persists across reloads and restarts; the failed outcome, Attempt details, transcript, and retry controls remain available. A later failed Attempt requests attention again.
+- **Use a registry component first.** Everything under `src/components/ui/` came from `pnpm dlx shadcn@latest add <name>` (run inside `apps/web`; `components.json` has the preset). Compose those primitives (`Item`, `Card`, `Badge`, `Sheet`, `Message`, `Collapsible`, `Empty`, …) in screen files. The full set is installed: check it before writing a new element.
+- **Extend with tokens, not hex.** Colors, fonts, and radii are CSS variables in `src/index.css`, exposed to Tailwind through the `@theme inline` block. A new semantic color is a token pair there (`:root` and `.dark`) plus one `--color-*` line; screens then use utilities such as `text-run-active`. Never write a literal color in a component.
+- **Never hand-roll a parallel component.** No `styles.css`, no ad-hoc button or badge classes. A composition shared by several screens (for example `src/components/status-badge.tsx`) wraps a registry primitive in `src/components/`, next to `ui/`, keeping vendored and composed components apart.
+- **Edit registry files in place** to fix type or a11y issues. They're exempt from the `usine/*` lint rules (`.oxlintrc.json` override), since upstream doesn't follow them, and `knip` treats them as entry files, so unused components aren't reported.
+- **Use AI Elements for conversation tools.** `src/components/ai-elements/` adapts the upstream Tool, CodeBlock, and Terminal components to Base UI, Phosphor icons, and the app's tokens (its README records provenance and changes). Fill these panels with readable tool content; complete transport payloads go under **Raw details**. shadcn MessageScroller handles conversation scrolling; every direct content row has a stable `MessageScrollerItem` identity.
+- **Render Markdown with `Markdown`.** `src/components/markdown.tsx` renders agent and operator prose with react-markdown in a `typeset typeset-chat` container. `src/typeset.css` is the unmodified download from https://ui.shadcn.com/typeset.css; the `.typeset-chat` preset in `src/index.css` sets its options. Source and patches use CodeBlock, command output Terminal.
+- **Screens are file routes** in `src/routes/`, the TanStack Router routes directory: `__root.tsx` (shell), `index.tsx` (overview, from `src/desk/`), `projects/$owner/$name.tsx` (project layout), `projects/$owner/$name/index.tsx` (board), `projects/$owner/$name/runs/$run.tsx` (run page), `projects/$owner/$name/tasks/index.tsx` (tasks list), `projects/$owner/$name/tasks/$number.tsx` (task page), and `configuration/route.tsx` (the configuration section around `loops/`, `agents/`, `workers/`, `repositories/`, and `settings.tsx`, with screens in `src/configuration/`). The Vite plugin regenerates `src/route-tree.gen.ts`, which is committed and excluded from lint and format. Route files export only `Route`; shared pieces go outside `src/routes/`. The run drawer is a root search param (`?run=`), so it overlays any screen. Route params are lowercase so file names stay kebab-case.
+- **A rebuilt bundle needs no restart.** `@usine/server` reads `index.html` and `assets/*` from `apps/server/dist/web` on every request, so after `pnpm build`, reload the page. GitHub credentials, the `webhooks` block of `usine.yaml`, and some `workers` changes are read only at startup; the rest of the instance folder reloads from any configuration page.
+- **Navigation is in `src/components/app-sidebar.tsx`**, built from the `sidebar` registry component. Screens render inside `SidebarInset` under a breadcrumb header; the panel has the viewport's height, and content below the header scrolls inside it.
+- **Pick the page width.** `Page` takes `width="prose"` (default; content stops at 768px) for prose and short lists, or `width="full"` for tables and side-by-side layouts such as the configuration section.
+- **Keep the scale.** `src/index.css` defines the only five sizes: `text-xs` (12px), `text-sm` (13px, the default), `text-md` (14px), `text-lg` (16px), and `text-xl` (20px); [`DESIGN.md`](DESIGN.md#hierarchy) assigns their uses. Other size utilities generate no CSS; arbitrary sizes are off the scale. Headings are Inter semibold; `font-mono` is only for ids, item numbers, times, and code; counts and times use `tabular-nums`. Use sentence case everywhere, with no uppercase labels.

@@ -1,188 +1,209 @@
 # Usine
 
-An agent-agnostic software factory: an engine on which users define loops that watch software-work state (GitHub issues, PRs) and act on it by running coding agents. The engine provides the building blocks; the loops are user-defined, not built in.
+usine runs coding agents against GitHub issues and pull requests, using loops that the operator defines in files.
 
 ## Language
 
+In UI copy and documentation, write glossary terms as lowercase common nouns. Capitalize them only in headings and code identifiers. For UI copy, follow the Voice section of `apps/web/DESIGN.md`.
+
 **Loop**:
-A user-defined automation: a trigger, a selection of matched items, and an agent action per item. Authored as a file in the instance repo — the file is the source of truth, its filename is the loop's name, and the UI round-trips through it.
-_Avoid_: workflow (reserved for a possible future multi-step graph), schedule, task, cron
+A file in the instance repo that defines a trigger and the agent run to start for each matched item. The filename is the loop name.
+_Avoid_: workflow, schedule, task, cron
 
 **Instance repo**:
-The operator-owned git repo the orchestrator is pointed at — holds every loop file, the registry, and factory settings. Separate from the usine engine; managed repos carry no factory files.
+The git repo that contains the loops, agents, registry, and settings of an instance.
 _Avoid_: config repo, factory repo
 
 **Registry**:
-The declaration, inside the instance repo, of which repos the factory manages, with optional tags for selection.
+The list of managed repos in the instance repo, with optional tags.
 _Avoid_: repo list, inventory
 
 **Managed repo**:
-A repo declared in the registry — what loops watch and act on. The factory needs no write access to it for configuration. The registry-level mechanism beneath a Project.
+A repo that the registry declares and that loops run against.
 _Avoid_: target repo
 
 **Project**:
-A managed repo as the operator sees it — the repo plus its board, runs, and factory activity. The home surface lists the factory's projects.
-_Avoid_: repo (for the operator-facing surface; the registry declares managed repos, the operator works in projects)
+The UI page for one managed repo, with its board, runs, and activity.
+_Avoid_: repo (in the UI)
 
 **Board**:
-A project's kanban view — its tasks grouped into lanes, with their Run histories on the cards. A task's current Item determines its lane. Dragging a card writes the label swap to that Item on GitHub, so the board doubles as a trigger surface.
-_Avoid_: kanban (the form, not the name), pipeline
+The kanban view of a project's tasks, grouped into lanes. Dragging a card changes the labels of the task's current item on GitHub.
+_Avoid_: kanban, pipeline
+
+**Overview**:
+The page at `/` that lists, across all projects, items that need attention, running attempts, stalled items, recent runs, and worker slots. In code and in the API, it's called the desk (`/api/desk`).
+_Avoid_: desk (in the UI), home, dashboard
 
 **Task**:
-A piece of work as the operator sees it, joining explicitly linked issues and pull requests within one Project and the Runs on those Items. Its current Item is the one with the newest open Run, otherwise its latest open PR, latest settled PR, or originating issue.
-_Avoid_: Run (one execution of a Loop), Item (one issue or PR); the lower-case `task` field is the rendered prompt given to an Agent
+A group of linked issues and pull requests in one project, with their runs.
+_Avoid_: run, item
+
+**Current item**:
+The item of a task that the board places in a lane: the item with the newest open run, or else the latest open PR, the latest closed PR, or the originating issue.
 
 **Lane**:
-One column of a board, mapping one or more GitHub labels or state sources. Configured per repo; defaults are proposed from the repo's existing labels, two-way synced — usine never deletes a label.
+A board column that maps to one or more GitHub labels or item states.
 _Avoid_: column, status, stage
 
 **Selector**:
-A loop's optional narrowing of which managed repos it applies to, by name or tag; without one, a loop applies to every managed repo.
-_Avoid_: filter (the trigger's selection expression matches items within a trigger; a selector selects repos)
+A repo name or tag that limits the managed repos a loop applies to. A loop without a selector applies to all managed repos.
+_Avoid_: filter
 
 **Trigger**:
-The standing condition that fires a loop — a watched stream narrowed by a selection expression over item payloads, or a schedule. What it produces when it fires is an Event.
-_Avoid_: event (that's one deduplicated match, not the condition), watcher, filter (the selection expression plays the filter role; there is no separate filter construct)
+The condition that starts a loop: a stream with a selection expression, or a schedule.
+_Avoid_: event, watcher, filter
 
 **Stream**:
-The class of software-work state a trigger watches — issues or pull requests in managed repos, or the clock for schedules. A trigger names exactly one; the catalog — `issue`, `pr`, `schedule` — is engine-owned and deliberately small.
+The kind of state that a trigger evaluates: `issue`, `pr`, or `schedule`.
 _Avoid_: source, feed, event type
 
 **Tick**:
-One scheduled firing instant of a schedule trigger, identified by the time it was scheduled for — not when it actually ran. After downtime, only the latest missed tick fires.
+One scheduled time of a schedule trigger. After downtime, only the latest missed tick fires.
 _Avoid_: cron job, firing, interval
 
 **Payload slice**:
-The defined portion of GitHub's object graph fetched as an item's payload for one stream — GitHub's shapes and names throughout, the slice choosing only which graph edges come along. Selection expressions and prompt interpolation both range over it.
+The fields of GitHub's object graph that the engine fetches for an item of a given stream. Selection expressions and prompt templates read from it.
 _Avoid_: event shape, custom schema
 
 **Event**:
-One deduplicated fact the engine may react to, carrying a dedup key and payload — a trigger matching GitHub state, or an operator approval. The dedup key is derived by the engine per trigger type from the event's content — timestamps aside, the same state is the same Event, forever — never authored in the loop file.
+A deduplicated input to the engine: a trigger match, an approval, or a run-again request. The engine derives its dedup key from its content.
 _Avoid_: firing, occurrence, message
 
 **Hint**:
-A droppable nudge telling the engine to fetch a repo's or an item's state sooner than the next poll — produced by usine's own GitHub writes and, when enabled, by webhook deliveries. Latency only, never a correctness source: polling remains the backstop that sees every change, and the dedup ledger absorbs double-sees.
-_Avoid_: webhook event (a delivery is one hint source, not the concept), push, notification
+An optional request to fetch a repo or item before the next poll. Hints reduce latency; polling still detects every change.
+_Avoid_: webhook event, push, notification
 
 **Item**:
-The piece of software-work state a loop acts on — an issue or PR in a managed repo, identified apart from its changing content. Coarser than an Event: many Events can concern one Item.
-_Avoid_: matched item (long form), target, resource
+An issue or pull request in a managed repo.
+_Avoid_: matched item, target, resource
 
 **Lifecycle**:
-How one piece of work moves through the engine — a deduplicated Event opens a Run, the Run's named Step is tried as Attempts, and exactly one closed state ends it.
-_Avoid_: run model (ADR 0002's name for the same arc), workflow, state machine (the closing mechanism, not the journey)
+The sequence for one event: open a run, try its step as one or more attempts, and close the run.
+_Avoid_: run model, workflow, state machine
 
 **Run**:
-The work a loop owes one Event — at most one open per dedup key, ever. Open states: pending, waiting, queued, running; closed: succeeded, failed, canceled.
+The work for one event of a loop. Only one run per dedup key can be open. Open states are `pending`, `waiting`, `queued`, and `running`; closed states are `succeeded`, `failed`, and `canceled`.
 _Avoid_: execution, job, workflow run
 
 **Step**:
-A named unit inside a run whose stored result is addressable by name; exactly one per run in v1 (the agent action). The loop file names it, and the name is its identity — renaming makes a new step.
-_Avoid_: stage, node, activity (a workflow-engine term, not the domain concept)
+A named unit of a run with a stored result. In v1, each run has one step: the agent action.
+_Avoid_: stage, node, activity
 
 **Attempt**:
-One try of a step on a worker. Retries are new attempts under the same step, never new runs; only typed infra errors retry automatically, capped — agent failures wait for the operator.
-_Avoid_: retry (the act; the record is an attempt)
+One try of a step on a worker. A retry creates a new attempt in the same run.
+_Avoid_: retry
+
+**Attempt window**:
+The time from an attempt's start to its recorded outcome. The run reader uses it to assign GitHub writes to an attempt.
+_Avoid_: session, lease
 
 **Reattach**:
-The orchestrator continuing an open Attempt after a restart when its Pi parent's durable task is still live, preserving the Attempt's identity, number, and worktree without spending a retry. Applies to every Worker; a reattachment whose worktree is gone fails, and the next Attempt starts fresh.
-_Avoid_: retry (starts a new Attempt), takeover (operator intervention in a live session)
+To resume an open attempt after an orchestrator restart, if its Pi parent's durable task is still live.
+_Avoid_: retry, takeover
 
 **Approval**:
-An operator's go-ahead for a run gated by its loop — recorded as an Event the waiting run consumes, not a flag.
+An event that lets a run of a gated loop leave the `waiting` state. It records the operator login and the channel (web UI or 👍 on the ask).
 _Avoid_: confirmation, sign-off
 
 **Ask**:
-The factory's request for an operator answer on a blocked run, posted where the operator will see it. Two shapes: yes/no — approve, retry, restart, or cancel, closed by a reaction — and question — an agent's clarification request, answered in prose by a reply addressing the factory. A question parks its live attempt until the answer arrives; only the operator's own login can answer either shape.
-_Avoid_: notification (how an ask travels, not what it is), prompt, request, question (one shape of ask, not the concept)
+A request for an operator answer on a blocked run: either yes/no, answered with a reaction, or a question, answered with a reply.
+_Avoid_: notification, prompt, request, question
 
 **Takeover**:
-The operator stepping into a live session of a running attempt — operator messages join the session as user turns, Pi parent and harness children alike. Taking over a child places a Hold. Lives in the transcript, never the Event ledger.
-_Avoid_: attach (the mechanism, not the concept), remote control, child takeover (long form)
+Sending operator messages to a running attempt's session as user turns. A takeover places a hold.
+_Avoid_: attach, remote control, child takeover
 
 **Hold**:
-The per-child state a takeover creates — an idle held child defers returning its result to the awaiting parent until the operator releases it. Implicit on the first operator message to the child, ended by an explicit release; several children can be held at once.
-_Avoid_: claim, lock, pause (the loop-level switch)
+A session state that stops an idle child from returning its result, and stops an idle Pi parent from ending the attempt, until the operator releases it.
+_Avoid_: claim, lock, pause
 
 **Edit-and-retry**:
-The operator amending a failed run before retrying it — the task text (the interpolated loop-body result), the agent, or both. Sticky: the amendment rewrites the run's effective context and every later attempt runs it until amended again; each attempt records what it actually ran.
+Retrying a failed run with a changed task text, agent, or both. The change applies to all later attempts.
 _Avoid_: modify-and-rerun, edit-and-restart
 
+**Run again**:
+An operator event that opens a new run for the item state of a succeeded or canceled run.
+_Avoid_: rerun, retry, restart
+
 **Supersede**:
-What a newer Event does to the same Item's open run before any attempt starts: cancels it (reason recorded) and takes its place. A running attempt always finishes — the newer state is judged again once it ends. Engine behavior, never a loop-file setting.
+To cancel an item's open run because a newer event for the item arrived before any attempt started, and open a run for the newer event.
 _Avoid_: preempt, replace
 
 **Revoke**:
-The engine canceling a run no attempt has started because its Item no longer matches the loop's trigger. Never touches a running attempt; distinct from operator cancel and from supersede.
-_Avoid_: cancel (the operator's act), expire
+To cancel a run with no started attempt because its item no longer matches the trigger.
+_Avoid_: cancel, expire
+
+**Suppression**:
+The state in which a loop opens no run for an item's current state, because an attempt ended with a question or blocker. A later different item state, a retry, or resolving the run's failure lifts it.
+_Avoid_: hold, pause
 
 **Pause**:
-The operator's loop-level switch: a paused loop opens no new runs. Runtime state in the orchestrator, never written to the loop file; existing runs are untouched. Loops created in the UI are born paused — unpausing is the arming act; a loop arriving by git is born unpaused.
-_Avoid_: disable (deleting/renaming the file is how a loop retires), stop
+A loop flag that stops new runs from the loop's triggers. The orchestrator stores it, not the loop file.
+_Avoid_: disable, stop
 
 **Orchestrator**:
-The long-running headless server that evaluates triggers, schedules work, holds state, and serves the UI. Runs locally or in the cloud; where it runs never changes what it is.
+The headless server that evaluates triggers, schedules attempts, stores state, and serves the UI.
 _Avoid_: daemon, app, backend
 
 **Worker**:
-The place an Attempt's children run: a machine with the Attempt's checkout. Local processes first; remote Workers (an exe.dev VM, or any Linux machine the orchestrator connects to over SSH) behind the same seam. Every Attempt's Pi parent runs in the orchestrator, whatever the Worker.
-_Avoid_: runner, sandbox, executor (the seam may be named executor in code, but the concept is Worker)
+A machine that runs an attempt's harness children in a checkout: local, an exe.dev VM, or an SSH host. The Pi parent always runs in the orchestrator.
+_Avoid_: runner, sandbox, executor
 
 **Run host**:
-No longer exists. The one-shot usine process that hosted an Attempt's Pi parent on a Worker until the parent moved into the orchestrator (ADR 0006).
+Removed in ADR 0006.
 
 **Attempt channel**:
-The attempt-scoped messages that carry one Attempt's activity: normalized events flowing out of its parent and children, and session-addressed operator input (steer, interrupt, takeover messages) flowing in. The parent's durable task relays them inside the orchestrator; where the children run never changes the messages.
-_Avoid_: stream (reserved for what a trigger watches), pipe, socket
+The messages of one attempt: session events from its parent and children, and operator input to a session.
+_Avoid_: stream, pipe, socket
 
 **Transcript**:
-The persisted flow of one Attempt's activity, its Attempt channel messages, which the run drawer replays live or after the fact. The orchestrator stores this durable record beyond the Attempt's lifetime.
+The stored attempt channel messages of one attempt.
 _Avoid_: log, session history, output
 
 **Preflight**:
-The executor's verify-only readiness check of a Worker: toolchain, each rostered harness and its login where the Worker runs children, and attached credentials, failing with typed capability errors. It never installs; making a Worker ready is out-of-band.
-_Avoid_: bootstrap, provisioning (that's the out-of-band act), health check
+A read-only check that a worker can run attempts. It fails with typed capability errors and never installs anything.
+_Avoid_: bootstrap, provisioning, health check
 
 **Gateway**:
-The host in front of Worker VMs that have no public address: their SSH bastion and resolver, the proxy that adds the GitHub credential, and any LLM credential it holds, to their requests, and the forward proxy to an allowlist of package hosts and the hosts of the harness logins on the Workers. A Worker behind it has no GitHub token and reaches nothing else (ADR 0027).
-_Avoid_: edge, NAT, firewall (it is one of the gateway's parts)
+A host that gives worker VMs without a public address SSH access, DNS, time, credential injection for GitHub and LLM requests, and an allowlisted forward proxy (ADR 0027).
+_Avoid_: edge, NAT, firewall
 
 **Attachment**:
-One Attempt's installation token, given to the Gateway by the executor for one Worker and one repository, in force until the token expires or the Attempt's cleanup detaches it.
-_Avoid_: grant (exe.dev's term for its own), integration, binding
+An attempt's installation token, registered on the gateway for one worker and one repo until it expires or is detached.
+_Avoid_: grant, integration, binding
 
 **Caller token**:
-What an Attempt's children send to the Gateway in place of a credential. It names its Attachment, the Worker, and the repository, and is honored only while that Attachment is in force.
-_Avoid_: API key, placeholder (the role it plays for a harness, not what it is)
+The token that an attempt's children send to the gateway instead of a credential. The gateway accepts it while its attachment is valid.
+_Avoid_: API key, placeholder
 
 **Agent**:
-A named member of the factory's team — a persona with standing instructions plus the brain spec that runs it (harness, model, reasoning effort). Defined as a file in the instance repo, filename as identity; every loop names the agent that owns its runs.
-_Avoid_: profile, bot, teammate, persona (the body text is the persona; the entity is the Agent)
+A file in the instance repo that defines standing instructions and a brain spec (harness, model, reasoning effort). The filename is the agent name.
+_Avoid_: profile, bot, teammate, persona
 
 **Harness**:
-The coding-agent runtime an agent's brain spec names — Claude Code, Codex CLI, or Pi — driven as a child of the run's Pi parent session. Swapping an agent's harness is editing that one field, never rewriting the agent or its loops.
-_Avoid_: backend, adapter (the usine code that drives a harness, not the concept), runner, agent (a named team member, not the runtime)
+The coding-agent CLI in an agent's brain spec: Claude Code, Codex CLI, or Pi.
+_Avoid_: backend, adapter, runner, agent
 
 **Pool**:
-The billing source an attempt's usage draws from — API keys (API-key-authenticated Pi sessions), the Claude plan (Claude Code children), or the ChatGPT plan (Codex children and subscription-authenticated Pi parents). Each pool keeps its native meter; a pool is not a harness — two harnesses can share one pool.
-_Avoid_: budget (an amount, not a source), account, quota
+The billing source for an attempt's usage: API keys, the Claude plan, or the ChatGPT plan.
+_Avoid_: budget, account, quota
 
 **Runaway guard**:
-The per-attempt ceiling — wall-clock and consumed tokens — that interrupts an attempt burning without progress. Each ceiling is opt-in in `usine.yaml` and absent by default; an armed ceiling warns the parent session once at 80% before tripping. The wall-clock pauses while an ask or a hold is open: waiting on — or supervised by — the operator is never runaway; the token ceiling stays armed throughout. Tripping it fails the attempt with its own error class, which never auto-retries; only the operator restarts a runaway.
-_Avoid_: budget, timeout (the wall-clock half only), kill switch
+Optional per-attempt limits on wall-clock time and tokens, set in `usine.yaml`. Exceeding a limit fails the attempt without an automatic retry.
+_Avoid_: budget, timeout, kill switch
 
 **Salvage**:
-What the executor preserves of an Attempt's worktree when the Attempt ends without success: uncommitted changes committed as a work-in-progress snapshot and HEAD pushed to `usine/salvage/<run>/<attempt>`, recorded on the Attempt. The next Attempt of the same Run starts from a pushed salvage. A salvage whose push failed keeps the worktree on the Worker and records its path instead.
+The branch `usine/salvage/<run>/<attempt>` that the executor pushes with the work of an attempt that didn't succeed. The run's next attempt starts from it.
 _Avoid_: backup, checkpoint, recovery branch
 
 **Child-session budget**:
-The maximum number of child sessions a parent may spawn during one Attempt. It counts sequential and concurrent spawns; the next spawn fails the Attempt and requires operator action.
+The maximum number of child sessions that a parent can start in one attempt.
 _Avoid_: child concurrency, concurrent-children cap
 
 **Cycle budget**:
-The number of rounds an Item's Loops may perform before the operator must reset it. A round permits each participating Loop one Run; retries remain within that Run. Exhaustion opens an Item-level Ask and stops further unattended work on the Item.
+The number of rounds that loops can run on one item before the operator must reset it.
 _Avoid_: review count, retry limit, token budget
 
 **Block**:
-A standalone piece of the engine, published on its own so a factory can be assembled from parts — usine's orchestrator is the first composition, not the only intended one.
-_Avoid_: module (any code unit; a block is published), component, plugin
+A separately published engine package.
+_Avoid_: module, component, plugin

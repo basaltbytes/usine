@@ -6,26 +6,26 @@ import {
   SalvagePushed,
 } from "@usine/core/attempt/salvage";
 import { RepositoryName, CommitSha, safeSegment } from "@usine/core/repository";
-import { Deferred, Effect, Exit, Option, Ref, Result, Schema } from "effect";
+import { DateTime, Deferred, Effect, Exit, Option, Ref, Result, Schema } from "effect";
 import {
   ExecutorOperationError,
   AttemptWorkspace,
   WorktreePath,
   type CheckoutRequest,
 } from "./executor.ts";
-import { salvageWorktree } from "./salvage.ts";
+import { PRE_PUSH_HOOKS_DIRECTORY, prePushHook } from "./pre-push-hook.ts";
+import { failureMessage, SALVAGE_GIT_CONFIG, salvageWorktree } from "./salvage.ts";
 
 const CACHE_DIRECTORY_SUFFIX = ".git";
 
-/** The bare cache directory name for a repository under `repos/`, shared by every adapter. */
+/** Returns the bare cache directory name for `repository` under `repos/`. */
 export const cacheDirectoryName = (repository: RepositoryName): string =>
   `${safeSegment(repository)}${CACHE_DIRECTORY_SUFFIX}`;
 
 /**
- * Whether a `repos/` entry is one of our bare caches, decided by the name we
- * mint rather than by probing contents: a `HEAD` lookup fails with ENOTDIR on
- * a stray file, and a `.cloning` leftover or a tool's scratch directory must
- * never reach `git worktree prune`.
+ * Returns whether a `repos/` entry is a bare cache, by name only. Probing `HEAD` fails with
+ * ENOTDIR on a stray file, and a `.cloning` leftover or another tool's directory must never be
+ * passed to `git worktree prune`.
  */
 export const isCacheDirectoryName = (entry: string): boolean =>
   entry.length > CACHE_DIRECTORY_SUFFIX.length && entry.endsWith(CACHE_DIRECTORY_SUFFIX);
@@ -38,17 +38,19 @@ interface WorkspaceLayout {
   readonly worktree: string;
 }
 
-/** The adapter-specific primitives; everything else about provisioning is shared. */
+/** Executor-specific operations for the shared provisioning code. */
 export interface WorkspaceOps<E> {
   readonly ensureRoots: Effect.Effect<void, E>;
   readonly removePath: (operation: "prepare" | "cleanup", target: string) => Effect.Effect<void, E>;
   readonly cacheExists: Effect.Effect<boolean, E>;
-  /** Atomically promote the finished staging clone to the cache path. */
+  /** Atomically moves the finished staging clone to the cache path. */
   readonly promoteStaging: Effect.Effect<void, E>;
   readonly git: (
     operation: "prepare" | "cleanup",
     args: ReadonlyArray<string>,
   ) => Effect.Effect<string, E>;
+  /** Writes `content` to `path` on the Worker's machine, creating its directory, and makes it executable. */
+  readonly writeExecutable: (path: string, content: string) => Effect.Effect<void, E>;
 }
 
 export interface ProvisionOptions<E> {
@@ -59,18 +61,22 @@ export interface ProvisionOptions<E> {
   readonly ops: WorkspaceOps<E>;
 }
 
-/** A checked-out Attempt workspace and, once its scope has closed, what the salvage step preserved. */
 export interface ProvisionedWorktree {
   readonly workspace: AttemptWorkspace;
-  /** Waits for the workspace scope to close; none after a successful Attempt or a clean worktree. */
+  /** Waits for the workspace scope to close and returns the salvage, or `None` after a successful Attempt or a clean worktree. */
   readonly salvaged: Effect.Effect<Option.Option<AttemptSalvage>, AttemptFailure>;
-  /** Installs durable recording before launch; cleanup keeps unrecorded salvage on disk. */
+  /** Sets the salvage sink; call before launch. If salvage isn't recorded, cleanup keeps the worktree on disk. */
   readonly recordSalvage: (record: AttemptChannel.Sink["salvage"]) => Effect.Effect<void>;
   /**
-   * Leaves the checkout untouched when the scope closes: a restart needs it
-   * to reattach the parent task or repeat a harvest whose result was not stored.
+   * Skips checkout removal when the scope closes, so a restart can reattach the parent task or
+   * repeat a harvest whose result was not stored.
    */
   readonly keepForReattach: Effect.Effect<void>;
+  /**
+   * The hooks directory for the children's git (`withGitHooks`), set only for a
+   * `permissions: read` Loop. If `None`, the repository's own hooks apply.
+   */
+  readonly gitHooks: Option.Option<string>;
 }
 
 interface ReleaseOptions<E> {
@@ -80,7 +86,7 @@ interface ReleaseOptions<E> {
   readonly ops: Pick<WorkspaceOps<E>, "cacheExists" | "git" | "removePath">;
 }
 
-/** Runs one cleanup step, logging and dropping its failure so the remaining steps still release their resources. */
+/** Returns a function that runs one cleanup step and logs and ignores its failure, so later steps still run. */
 const cleanupFor =
   <E>(options: Pick<ReleaseOptions<E>, "request" | "host" | "layout">) =>
   <A>(resource: string, effect: Effect.Effect<A, E>) =>
@@ -99,10 +105,9 @@ const cleanupFor =
     );
 
 /**
- * Registers the one finalizer that owns an Attempt checkout's exit: closing the
- * scope with anything but a success exit salvages a checked-out worktree before
- * removing it, and a worktree whose salvage did not preserve all work stays on
- * disk. `checkedOut` holds the checkout's base once a worktree exists.
+ * Registers the checkout's finalizer. On a non-success exit, salvages a checked-out worktree
+ * before removing it; a worktree with unpreserved work stays on disk. `checkedOut` contains the
+ * base commit once a worktree exists.
  */
 const registerRelease = Effect.fn("Executor.registerRelease")(function* <E extends Error>(
   options: ReleaseOptions<E>,
@@ -113,7 +118,7 @@ const registerRelease = Effect.fn("Executor.registerRelease")(function* <E exten
   const recorder = yield* Ref.make(Option.none<AttemptChannel.Sink["salvage"]>());
   const cleanup = cleanupFor(options);
   const kept = yield* Ref.make(false);
-  // A successful launch can still require its checkout if durable result recording failed.
+  // `kept` is checked even after a successful launch: a failed result write keeps the checkout.
   yield* Effect.addFinalizer(
     Effect.fn("Executor.releaseWorktree")(function* (exit) {
       yield* Effect.annotateCurrentSpan({
@@ -135,15 +140,26 @@ const registerRelease = Effect.fn("Executor.registerRelease")(function* <E exten
       const baseCommit = yield* Ref.get(checkedOut);
       const salvage =
         Option.isSome(baseCommit) && !Exit.isSuccess(exit)
-          ? yield* salvageWorktree({
-              attemptId: request.attemptId,
-              worker: request.worker,
-              host: options.host,
-              worktree: layout.worktree,
-              baseCommit,
-              ref: request.salvageRef,
-              git: (args) => ops.git("cleanup", args),
-            })
+          ? request.permissions === "read"
+            ? yield* Effect.logInfo(
+                "The Attempt's Loop has read permissions, so its checkout is removed without salvage",
+                {
+                  attemptId: request.attemptId,
+                  worker: request.worker,
+                  loop: request.loop,
+                  host: options.host,
+                  worktree: layout.worktree,
+                },
+              ).pipe(Effect.as(Option.none<AttemptSalvage>()))
+            : yield* salvageWorktree({
+                attemptId: request.attemptId,
+                worker: request.worker,
+                host: options.host,
+                worktree: layout.worktree,
+                baseCommit,
+                ref: request.salvageRef,
+                git: (args) => ops.git("cleanup", args),
+              })
           : Option.none<AttemptSalvage>();
       if (Option.isSome(salvage)) {
         const record = yield* Ref.get(recorder);
@@ -223,12 +239,156 @@ const registerRelease = Effect.fn("Executor.registerRelease")(function* <E exten
 });
 
 /**
- * The clone-to-worktree sequence every Executor shares: clone into a staging
- * sibling and promote it on success, so an interrupted clone never leaves a
- * half-initialized cache that later fetches would poison; then fetch the
- * requested revision and check out a detached worktree at the resolved commit,
- * or at the previous Attempt's salvage when the request resumes one. The
- * checkout's release finalizer is registered before the first mutation.
+ * For a `permissions: read` Loop, writes `prePushHook` to a hooks directory inside the
+ * checkout's git directory and returns the directory. Returns `None` for `write`.
+ */
+const installPrePushHook = Effect.fn("Executor.installPrePushHook")(function* <E>(options: {
+  readonly request: CheckoutRequest;
+  readonly host: string;
+  readonly layout: Pick<WorkspaceLayout, "worktree">;
+  readonly ops: Pick<WorkspaceOps<E>, "git" | "writeExecutable">;
+}) {
+  const { layout, ops, request } = options;
+  const fields = {
+    attemptId: request.attemptId,
+    worker: request.worker,
+    loop: request.loop,
+    permissions: request.permissions,
+    host: options.host,
+  };
+  yield* Effect.annotateCurrentSpan(fields);
+  if (request.permissions === "write") {
+    yield* Effect.logDebug(
+      "The Attempt's Loop may push; its checkout keeps git's own hooks",
+      fields,
+    );
+    return Option.none<string>();
+  }
+  const gitDirectory = (yield* ops.git("prepare", [
+    "-C",
+    layout.worktree,
+    "rev-parse",
+    "--absolute-git-dir",
+  ])).trim();
+  const hooks = `${gitDirectory}/${PRE_PUSH_HOOKS_DIRECTORY}`;
+  yield* ops.writeExecutable(`${hooks}/pre-push`, prePushHook(request.loop));
+  yield* Effect.logInfo(
+    "The Attempt's Loop has read permissions; its checkout's pre-push hook explains a refused push",
+    { ...fields, hooks },
+  );
+  return Option.some(hooks);
+});
+
+interface SalvageCheckout {
+  /** The salvage applied on top of the base commit. */
+  readonly resume: Option.Option<SalvagePushed>;
+  /** The salvage that conflicts with the base commit and wasn't applied. */
+  readonly conflicting: Option.Option<SalvagePushed>;
+}
+
+const withoutSalvage: SalvageCheckout = { resume: Option.none(), conflicting: Option.none() };
+
+/**
+ * Creates the Attempt's detached worktree at `base`, with the previous Attempt's salvage rebased
+ * on top if the request resumes one (#282). A salvage with no changes beyond `base` is dropped;
+ * one that doesn't rebase cleanly isn't applied.
+ */
+const checkOutWorktree = Effect.fn("Executor.checkOutWorktree")(function* <E extends Error>(
+  options: ProvisionOptions<E>,
+  base: CommitSha,
+  salvage: Option.Option<SalvagePushed>,
+) {
+  const { layout, ops, request } = options;
+  const inCache = (args: ReadonlyArray<string>) =>
+    ops.git("prepare", ["--git-dir", layout.cache, ...args]);
+  const add = (commit: string) => inCache(["worktree", "add", "--detach", layout.worktree, commit]);
+  if (Option.isNone(salvage)) {
+    yield* add(base);
+    return withoutSalvage;
+  }
+  const { ref, commit } = salvage.value;
+  const fields = {
+    attemptId: request.attemptId,
+    worker: request.worker,
+    host: options.host,
+    ref,
+    commit,
+    base,
+  };
+  const setAside = (reason: string, message: string) =>
+    Effect.gen(function* () {
+      yield* Effect.logWarning(reason, { ...fields, message });
+      yield* add(base);
+      return { resume: Option.none(), conflicting: salvage } satisfies SalvageCheckout;
+    });
+  const forkPoint = yield* inCache(["merge-base", base, commit]).pipe(
+    Effect.map((output) => output.trim()),
+    Effect.result,
+  );
+  if (Result.isFailure(forkPoint)) {
+    return yield* setAside(
+      "The previous salvage shares no history with the revision; the Attempt starts from the revision and the salvage stays on its branch",
+      failureMessage(forkPoint.failure),
+    );
+  }
+  const changed = (yield* inCache(["diff", "--name-only", forkPoint.success, commit])).trim();
+  if (changed === "") {
+    yield* Effect.logInfo(
+      "The previous salvage holds no changes beyond the revision; the Attempt starts from the revision",
+      fields,
+    );
+    yield* add(base);
+    return withoutSalvage;
+  }
+  yield* add(commit);
+  if (forkPoint.success === base) {
+    yield* Effect.logInfo("Resuming the Attempt from the previous salvage", fields);
+    return { resume: salvage, conflicting: Option.none() } satisfies SalvageCheckout;
+  }
+  const rebased = yield* ops
+    .git("prepare", [
+      "-C",
+      layout.worktree,
+      ...SALVAGE_GIT_CONFIG,
+      "rebase",
+      "--no-verify",
+      "--onto",
+      base,
+      forkPoint.success,
+    ])
+    .pipe(Effect.result);
+  if (Result.isFailure(rebased)) {
+    yield* inCache(["worktree", "remove", "--force", layout.worktree]);
+    return yield* setAside(
+      "The previous salvage does not rebase onto the revision; the Attempt starts from the revision and the salvage stays on its branch",
+      failureMessage(rebased.failure),
+    );
+  }
+  const rebasedHead = (yield* ops.git("prepare", [
+    "-C",
+    layout.worktree,
+    "rev-parse",
+    "HEAD",
+  ])).trim();
+  if (rebasedHead === base) {
+    yield* Effect.logInfo(
+      "The revision already holds the previous salvage's changes; the Attempt starts from the revision",
+      fields,
+    );
+    return withoutSalvage;
+  }
+  yield* Effect.logInfo(
+    "Resuming the Attempt from the previous salvage, rebased onto the revision",
+    { ...fields, forkPoint: forkPoint.success, rebasedHead },
+  );
+  return { resume: salvage, conflicting: Option.none() } satisfies SalvageCheckout;
+});
+
+/**
+ * Clones into a staging directory and promotes it on success, fetches the requested revision,
+ * and checks out a detached worktree at the resolved commit, applying the previous Attempt's
+ * salvage if the request resumes one. Registers the release finalizer before the first
+ * filesystem change.
  */
 export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(function* <
   E extends Error,
@@ -240,8 +400,8 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
     host: options.host,
     repository: request.repository,
   });
-  // Register before any filesystem mutation. This also covers failed worktree
-  // creation, which can leave both a directory and a bare-cache registration.
+  // Registered first so a failed worktree creation, which can leave a directory and a
+  // bare-cache registration, is also cleaned up.
   const release = yield* registerRelease(options);
   const cleanup = cleanupFor(options);
   yield* ops.ensureRoots;
@@ -256,8 +416,8 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
       options.url,
     ]);
   } else {
-    // Staging belongs to this locked clone only. Release it before unlocking,
-    // including interruption between clone completion and cache promotion.
+    // Removes the staging clone before releasing the lock, including on interruption between
+    // clone and promotion.
     yield* Effect.scoped(
       Effect.gen(function* () {
         yield* Effect.addFinalizer(() =>
@@ -295,22 +455,16 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
       (cause) =>
         new ExecutorOperationError({
           operation: "prepare",
-          message: "git returned an invalid object id",
+          message: "Git returned an invalid object ID",
           cause,
         }),
     ),
   );
-  const resume = yield* fetchSalvage(options, request.resume);
-  yield* ops.git("prepare", [
-    "--git-dir",
-    layout.cache,
-    "worktree",
-    "add",
-    "--detach",
-    layout.worktree,
-    Option.match(resume, { onNone: () => baseCommit, onSome: ({ commit }) => commit }),
-  ]);
+  const salvage = yield* fetchSalvage(options, request.resume);
+  const checkout = yield* checkOutWorktree(options, baseCommit, salvage);
   yield* Ref.set(release.checkedOut, Option.some(baseCommit));
+  const gitHooks = yield* installPrePushHook(options);
+  const preparedAt = yield* DateTime.now;
   return {
     workspace: new AttemptWorkspace({
       worker: request.worker,
@@ -325,25 +479,30 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
         parentModel: request.parentModel,
         maxChildren: request.maxChildren,
         parentEffort: request.parentEffort,
-        resume,
+        resume: checkout.resume,
+        conflictingSalvage: checkout.conflicting,
+        preparedAt: Option.some(preparedAt),
+        botLogin: request.botLogin,
       }),
       worktree: WorktreePath.make(layout.worktree),
     }),
     salvaged: release.salvaged,
     recordSalvage: release.recordSalvage,
     keepForReattach: release.keepForReattach,
+    gitHooks,
   } satisfies ProvisionedWorktree;
 });
 
 export interface ReattachOptions<E> extends ReleaseOptions<E> {
-  /** The RunSpec the Attempt's parent started with, read back from its durable request. */
+  readonly ops: Pick<WorkspaceOps<E>, "cacheExists" | "git" | "removePath" | "writeExecutable">;
+  /** The RunSpec from the parent's durable request. */
   readonly spec: AttemptChannel.RunSpec;
 }
 
 /**
- * Takes over the checkout an Attempt still holds after an orchestrator restart,
- * for its reattachment: nothing is cloned, fetched, or checked out, and the
- * same release as a fresh checkout salvages and removes it when the Attempt ends.
+ * Reuses an Attempt's checkout after an orchestrator restart without cloning, fetching, or
+ * checking out. The same release as a new checkout salvages and removes it when the Attempt
+ * ends.
  */
 export const reattachWorktree = Effect.fn("Executor.reattachWorktree")(function* <E extends Error>(
   options: ReattachOptions<E>,
@@ -357,6 +516,7 @@ export const reattachWorktree = Effect.fn("Executor.reattachWorktree")(function*
   });
   const release = yield* registerRelease(options);
   yield* Ref.set(release.checkedOut, Option.some(spec.baseCommit));
+  const gitHooks = yield* installPrePushHook(options);
   return {
     workspace: new AttemptWorkspace({
       worker: request.worker,
@@ -366,6 +526,7 @@ export const reattachWorktree = Effect.fn("Executor.reattachWorktree")(function*
     salvaged: release.salvaged,
     recordSalvage: release.recordSalvage,
     keepForReattach: release.keepForReattach,
+    gitHooks,
   } satisfies ProvisionedWorktree;
 });
 
@@ -379,11 +540,9 @@ export interface RecoveryOptions<E> {
 }
 
 /**
- * Reconciles a checkout an earlier process left behind: salvages it without a
- * known base, records the outcome, and removes the worktree only once its work
- * is published. A retained worktree stays for the next reconciliation. A
- * succeeded Attempt already delivered its result, so its checkout is removed
- * without salvage.
+ * Reconciles a checkout left by an earlier process: salvages it without a known base, records
+ * the result, and removes the worktree only after its work is pushed. Checkouts of succeeded
+ * Attempts and of `permissions: read` Loops are removed without salvage.
  */
 export const recoverWorktree = Effect.fn("Executor.recoverWorktree")(function* <
   E extends Error,
@@ -394,13 +553,14 @@ export const recoverWorktree = Effect.fn("Executor.recoverWorktree")(function* <
 ) {
   const { attempt, host, worktree } = options;
   yield* Effect.annotateCurrentSpan({ ...attempt, host, worktree });
-  if (attempt.succeeded) {
+  if (attempt.succeeded || attempt.permissions === "read") {
     yield* options.git(["--git-dir", options.cache, "worktree", "remove", "--force", worktree]);
-    yield* Effect.logInfo("Released the checkout of a succeeded Attempt", {
-      ...attempt,
-      host,
-      worktree,
-    });
+    yield* Effect.logInfo(
+      attempt.succeeded
+        ? "Released the checkout of a succeeded Attempt"
+        : "Released the checkout of an Attempt whose Loop has read permissions, without salvage",
+      { ...attempt, host, worktree },
+    );
     return;
   }
   const salvage = yield* salvageWorktree({
@@ -418,9 +578,8 @@ export const recoverWorktree = Effect.fn("Executor.recoverWorktree")(function* <
 });
 
 /**
- * Fetches the previous Attempt's salvage ref into the cache. A ref that no
- * longer exists starts the Attempt from its base revision, with a warning, so
- * an operator can still retry after deleting the branch.
+ * Fetches the previous Attempt's salvage ref into the cache. If the ref no longer exists, logs
+ * a warning and the Attempt starts from its base revision.
  */
 const fetchSalvage = Effect.fn("Executor.fetchSalvage")(function* <E>(
   options: ProvisionOptions<E>,
@@ -468,7 +627,7 @@ const fetchSalvage = Effect.fn("Executor.fetchSalvage")(function* <E>(
             (cause) =>
               new ExecutorOperationError({
                 operation: "prepare",
-                message: "git returned an invalid salvage object id",
+                message: "Git returned an invalid salvage object ID",
                 cause,
               }),
           ),
@@ -482,9 +641,6 @@ const fetchSalvage = Effect.fn("Executor.fetchSalvage")(function* <E>(
       current: fetched,
     });
   }
-  yield* Effect.logInfo("Resuming the Attempt from the previous salvage", {
-    ...fields,
-    commit: fetched,
-  });
+  yield* Effect.logInfo("Fetched the previous Attempt's salvage", { ...fields, commit: fetched });
   return Option.some(new SalvagePushed({ ref: resume.value.ref, commit: fetched }));
 });

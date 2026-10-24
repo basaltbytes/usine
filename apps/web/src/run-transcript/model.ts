@@ -1,32 +1,69 @@
-import type { AgentSession, HarnessSession } from "@usine/core/agent/session";
+import type {
+  AgentSession,
+  AgentSessionEvent,
+  HarnessSession,
+  ProviderRecovered,
+  ProviderRetrying,
+} from "@usine/core/agent/session";
 import type { AttemptId } from "@usine/core/attempt";
 import type { AttemptView, TranscriptEventView } from "@usine/orchestrator/operator";
-import { Match, Option, type Schema } from "effect";
-import { brainLine, failureMessage } from "../operator-copy.ts";
+import { DateTime, Match, Option, type Schema } from "effect";
+import {
+  brainLine,
+  clockLabel,
+  conflictingSalvageMessage,
+  durationLabel,
+  failureMessage,
+} from "../operator-copy.ts";
 import { indexSessions, type SessionEvents, type InterventionRecord } from "./sessions.ts";
 
-/** Conversation filters hide prose or tool calls while preserving lifecycle notices. */
-export type TranscriptFilter = "all" | "messages" | "tools";
+/** The display tone of a notice; `warning` means work may not be progressing. */
+export type NoticeTone = "plain" | "warning" | "failed";
 
 interface NoticeContent {
   readonly kind: "message" | "status";
   readonly label: string;
   readonly detail: string;
   readonly format: "markdown" | "plain";
-  readonly isError: boolean;
+  readonly tone: NoticeTone;
 }
 
 interface TranscriptPosition {
   readonly key: string;
+  readonly attemptId: AttemptId;
   readonly sequence: TranscriptEventView["sequence"];
-  /** Newest durable event represented by this row, independently of its position. */
+  /** The sequence of the newest event in this row, which can differ from `sequence`. */
   readonly latestSequence: TranscriptEventView["sequence"];
   readonly receivedAt: string;
 }
 
-/** Prose or a lifecycle notice retained in the conversation. */
+/** The source of a notice: a session event, a provider retry or recovery, an operator input receipt, or an Attempt envelope. */
+type NoticeOrigin =
+  | {
+      readonly _tag: "Session";
+      readonly session: AgentSession;
+      readonly event: Exclude<
+        AgentSessionEvent["_tag"],
+        "ToolStarted" | "ToolFinished" | "ProviderRetrying" | "ProviderRecovered"
+      >;
+    }
+  | {
+      readonly _tag: "Provider";
+      readonly session: AgentSession;
+      readonly event: ProviderRetrying | ProviderRecovered;
+    }
+  | { readonly _tag: "Operator"; readonly operator: string }
+  | { readonly _tag: "Envelope"; readonly payload: TranscriptEventView["payload"] };
+
+/** The session that queued an operator input until its current step ends. */
+export type QueuedFor = "parent" | "child";
+
+/** A message or lifecycle notice in the conversation. */
 export interface TranscriptNotice extends TranscriptPosition, NoticeContent {
   readonly _tag: "Notice";
+  readonly origin: NoticeOrigin;
+  /** The session that queued this operator input until its current step ends, or `null`. */
+  readonly queued: QueuedFor | null;
 }
 
 interface ToolStart {
@@ -42,7 +79,7 @@ type ToolState =
       readonly output: Schema.Json;
     };
 
-/** One tool call, paired within its Attempt and session, including an unpaged start when available. */
+/** A tool call matched within its Attempt and session; `start` can come from outside the loaded page. */
 export interface TranscriptTool extends TranscriptPosition {
   readonly _tag: "Tool";
   readonly name: string;
@@ -50,16 +87,15 @@ export interface TranscriptTool extends TranscriptPosition {
   readonly state: ToolState;
 }
 
-/** A child's contents cannot contain another child section (ADR 0008). */
+/** An entry in a conversation; a child section cannot contain another child section (ADR 0008). */
 export type TranscriptEntry = TranscriptNotice | TranscriptTool;
 
-/** Session completion is distinct from the enclosing Attempt's success or failure. */
+/** The status of a session, independent of its Attempt's success or failure. */
 type SessionStatus = "Live" | "Finished" | "Stopped";
 
-/** One session's observed activity, scoped to its Attempt so retries never share state. */
+/** One session's activity, scoped to its Attempt so that retries do not share state. */
 export interface TranscriptSession extends TranscriptPosition {
   readonly _tag: "Session";
-  readonly attemptId: AttemptId;
   readonly session: AgentSession;
   readonly harnessSession: Option.Option<HarnessSession>;
   readonly status: SessionStatus;
@@ -69,7 +105,7 @@ export interface TranscriptSession extends TranscriptPosition {
   readonly entries: ReadonlyArray<TranscriptEntry>;
 }
 
-/** A flat parent conversation with one section per child session. */
+/** The parent conversation as a flat list, with one section per child session. */
 export interface TranscriptProjection {
   readonly items: ReadonlyArray<TranscriptEntry | TranscriptSession>;
   readonly sessions: ReadonlyArray<TranscriptSession>;
@@ -77,18 +113,24 @@ export interface TranscriptProjection {
 }
 
 const position = (
-  event: Pick<TranscriptEventView, "sequence" | "receivedAt">,
+  event: Pick<TranscriptEventView, "sequence" | "receivedAt" | "attemptId">,
 ): TranscriptPosition => ({
   key: `event:${event.sequence}`,
+  attemptId: event.attemptId,
   sequence: event.sequence,
   latestSequence: event.sequence,
   receivedAt: event.receivedAt,
 });
 
 const notice = (
-  event: Pick<TranscriptEventView, "sequence" | "receivedAt">,
+  event: Pick<TranscriptEventView, "sequence" | "receivedAt" | "attemptId">,
   content: NoticeContent,
-): TranscriptNotice => ({ _tag: "Notice", ...position(event), ...content });
+  origin: NoticeOrigin,
+): TranscriptNotice => ({ _tag: "Notice", ...position(event), ...content, origin, queued: null });
+
+/** Returns a retry count as text, for example `1 retry` or `27 retries`. */
+export const retriesLabel = (retries: number): string =>
+  `${retries} ${retries === 1 ? "retry" : "retries"}`;
 
 const sessionEntries = (
   group: SessionEvents,
@@ -98,13 +140,14 @@ const sessionEntries = (
   const tools = new Map<string, TranscriptTool>();
   for (const record of group.events) {
     const event = record.event;
+    const at = { ...record, attemptId: group.attemptId };
     if (event._tag === "ToolStarted" || event._tag === "ToolFinished") {
       const key = JSON.stringify([group.attemptId, group.session.id, event.callId]);
       const previous = tools.get(key);
       const start = previous?.start ?? Option.none<ToolStart>();
       tools.set(key, {
         _tag: "Tool",
-        ...position(record),
+        ...position(at),
         key,
         sequence: previous?.sequence ?? record.sequence,
         receivedAt: previous?.receivedAt ?? record.receivedAt,
@@ -124,72 +167,110 @@ const sessionEntries = (
       });
       continue;
     }
+    if (event._tag === "ProviderRetrying" || event._tag === "ProviderRecovered") {
+      entries.push(
+        notice(
+          at,
+          event._tag === "ProviderRetrying"
+            ? {
+                kind: "status",
+                label: `${group.session.agent}: provider unreachable`,
+                detail: event.message,
+                format: "plain",
+                tone: "warning",
+              }
+            : {
+                kind: "status",
+                label: `${group.session.agent}: provider reachable again`,
+                detail: `After ${retriesLabel(event.retries)}`,
+                format: "plain",
+                tone: "plain",
+              },
+          { _tag: "Provider", session: group.session, event },
+        ),
+      );
+      continue;
+    }
     const content = Match.valueTags(event, {
-      TextOutput: ({ text }) => ({
-        kind: "message" as const,
+      TextOutput: ({ text }): NoticeContent => ({
+        kind: "message",
         label: group.session.agent,
         detail: text,
-        format: "markdown" as const,
-        isError: false,
+        format: "markdown",
+        tone: "plain",
       }),
-      SessionStarted: () => ({
-        kind: "status" as const,
+      SessionStarted: (): NoticeContent => ({
+        kind: "status",
         label: `${group.session.agent} started`,
         detail: brainLine(group.session.brain),
-        format: "plain" as const,
-        isError: false,
+        format: "plain",
+        tone: "plain",
       }),
-      SessionIdle: () => ({
-        kind: "status" as const,
-        label: `${group.session.agent} is waiting`,
-        detail: "The session remains open for operator input.",
-        format: "plain" as const,
-        isError: false,
+      SessionIdle: (): NoticeContent => ({
+        kind: "status",
+        label: `${group.session.agent} idle`,
+        detail: "Session open for operator input",
+        format: "plain",
+        tone: "plain",
       }),
-      SessionResumed: () => ({
-        kind: "status" as const,
+      SessionResumed: (): NoticeContent => ({
+        kind: "status",
         label: `${group.session.agent} resumed`,
         detail: "",
-        format: "plain" as const,
-        isError: false,
+        format: "plain",
+        tone: "plain",
       }),
-      SessionFinished: () => ({
-        kind: "status" as const,
+      SessionFinished: (): NoticeContent => ({
+        kind: "status",
         label: `${group.session.agent} finished`,
         detail: "",
-        format: "plain" as const,
-        isError: false,
+        format: "plain",
+        tone: "plain",
       }),
     });
-    entries.push(notice(record, content));
+    entries.push(
+      notice(at, content, { _tag: "Session", session: group.session, event: event._tag }),
+    );
   }
   return [...entries, ...tools.values()].sort((left, right) => left.sequence - right.sequence);
 };
 
 const interventionNotice = (record: InterventionRecord): TranscriptNotice => {
-  const { action, operator } = record.payload.intervention;
+  const { action, operator, target } = record.payload.intervention;
   const rejected = record.payload._tag === "InterventionRejected";
   const message = action._tag === "OperatorMessage" || action._tag === "Steer";
-  return notice(record, {
-    kind: message ? "message" : "status",
-    label: rejected
-      ? `${operator} · not delivered`
-      : message
-        ? operator
-        : action._tag === "Release"
-          ? `${operator} released the child`
-          : `${operator} paused the session`,
-    detail: rejected
-      ? `${message ? `${action.message}\n\n` : ""}${record.payload.message}`
-      : message
-        ? action.message
-        : "",
-    format: message ? "markdown" : "plain",
-    isError: rejected,
-  });
+  const queued: QueuedFor | null =
+    record.payload._tag === "InterventionApplied" && record.payload.state.queued
+      ? target._tag === "Parent"
+        ? "parent"
+        : "child"
+      : null;
+  const released = `${operator} released the ${target._tag === "Parent" ? "parent" : "child"}`;
+  const entry = notice(
+    record,
+    {
+      kind: message ? "message" : "status",
+      label: rejected
+        ? `${operator} · not delivered`
+        : message
+          ? operator
+          : action._tag === "Release"
+            ? released
+            : `${operator} paused the session`,
+      detail: rejected
+        ? `${message ? `${action.message}\n\n` : ""}${record.payload.message}`
+        : message
+          ? action.message
+          : "",
+      format: message ? "markdown" : "plain",
+      tone: rejected ? "failed" : "plain",
+    },
+    { _tag: "Operator", operator },
+  );
+  return { ...entry, queued };
 };
 
-/** Folds durable transcript events into conversation rows without reading time or changing stored data. */
+/** Returns the conversation rows for `events`, without reading the clock. */
 export const projectTranscript = (
   events: ReadonlyArray<TranscriptEventView>,
   attempts: ReadonlyArray<AttemptView>,
@@ -198,7 +279,7 @@ export const projectTranscript = (
   const terminalAttempts = new Set(
     attempts.filter(({ outcome }) => outcome !== null).map(({ id }) => id),
   );
-  // Terminal state can be supplied by either the Attempt row or its final frame.
+  // Terminal state comes from either the Attempt row or its final frame.
   for (const { attemptId, payload } of events) {
     if (payload._tag === "Final" || payload._tag === "Failed" || payload._tag === "Interrupted")
       terminalAttempts.add(attemptId);
@@ -210,7 +291,7 @@ export const projectTranscript = (
     if (payload._tag === "InterventionApplied" || payload._tag === "InterventionRejected") {
       continue;
     }
-    // New inputs are rendered from their delivery receipt, including the correct session and attribution.
+    // Operator inputs are rendered from their delivery receipt, which has session and attribution.
     if (
       record.direction === "inbound" &&
       record.operator !== undefined &&
@@ -222,70 +303,90 @@ export const projectTranscript = (
       notice(
         record,
         Match.valueTags(payload, {
-          Started: ({ parentModel }): NoticeContent => ({
+          Started: ({ parentModel, conflictingSalvage }): NoticeContent => ({
             kind: "status",
             label: "Attempt started",
-            detail: parentModel,
+            detail: Option.match(conflictingSalvage, {
+              onNone: () => parentModel,
+              onSome: (salvage) => `${parentModel}. ${conflictingSalvageMessage(salvage)}`,
+            }),
             format: "plain",
-            isError: false,
+            tone: "plain",
           }),
           Final: ({ result }): NoticeContent => ({
             kind: "status",
             label: "Attempt finished",
             detail: result.message,
             format: "markdown",
-            isError: false,
+            tone: "plain",
           }),
           Failed: ({ failure }): NoticeContent => ({
             kind: "status",
             label: "Attempt failed",
             detail: failureMessage(failure),
             format: "plain",
-            isError: true,
+            tone: "failed",
           }),
           Cancel: (): NoticeContent => ({
             kind: "status",
             label: "Cancel requested",
-            detail: "The Attempt is stopping.",
+            detail: "Attempt stopping",
             format: "plain",
-            isError: false,
+            tone: "plain",
           }),
           Interrupted: (): NoticeContent => ({
             kind: "status",
             label: "Interrupted",
-            detail: "The Attempt's parent acknowledged the interrupt.",
+            detail: "Acknowledged by the parent session",
             format: "plain",
-            isError: false,
+            tone: "plain",
           }),
           Steer: ({ message }): NoticeContent => ({
             kind: "message",
             label: "Operator",
             detail: message,
             format: "markdown",
-            isError: false,
+            tone: "plain",
           }),
           Interrupt: (): NoticeContent => ({
             kind: "status",
             label: "Interrupt requested",
-            detail: "The operator asked the Attempt to stop.",
+            detail: "Sent by the operator",
             format: "plain",
-            isError: false,
+            tone: "plain",
           }),
           OperatorMessage: ({ message }): NoticeContent => ({
             kind: "message",
             label: "Operator",
             detail: message,
             format: "markdown",
-            isError: false,
+            tone: "plain",
           }),
           Release: (): NoticeContent => ({
             kind: "status",
             label: "Released",
-            detail: "The operator released the held child.",
+            detail: "Held child released by the operator",
             format: "plain",
-            isError: false,
+            tone: "plain",
+          }),
+          WorkerUnresponsive: ({ worker, lastAnsweredAt, reason }): NoticeContent => ({
+            kind: "status",
+            label: `${worker} silent since ${clockLabel(DateTime.formatIso(lastAnsweredAt))}`,
+            detail: reason,
+            format: "plain",
+            tone: "warning",
+          }),
+          WorkerResponsive: ({ worker, lastAnsweredAt }): NoticeContent => ({
+            kind: "status",
+            label: `${worker} answering again`,
+            detail: `Silent for ${durationLabel(
+              Date.parse(record.receivedAt) - DateTime.toEpochMillis(lastAnsweredAt),
+            )}`,
+            format: "plain",
+            tone: "plain",
           }),
         }),
+        { _tag: "Envelope", payload },
       ),
     );
   }
@@ -296,7 +397,6 @@ export const projectTranscript = (
       ...position(group.first),
       key,
       latestSequence: group.latestSequence,
-      attemptId: group.attemptId,
       session: group.session,
       harnessSession: group.harnessSession,
       status: group.status,
@@ -331,16 +431,12 @@ export const projectTranscript = (
   };
 };
 
-/** Applies a conversation filter after pairing tools, so their results and lifecycle remain intact. */
-export const matchesFilter = (entry: TranscriptEntry, filter: TranscriptFilter): boolean =>
-  entry._tag === "Tool" ? filter !== "messages" : entry.kind === "status" || filter !== "tools";
-
-/** Describes observed session activity without assuming unrecorded thinking or success. */
+/** Returns a label for the session's recorded activity, without inferring unrecorded thinking or success. */
 export const sessionActivityLabel = (session: TranscriptSession): string => {
   if (session.status !== "Live") return session.status;
-  if (session.paused) return "Paused · send a message to resume";
-  if (session.held) return session.idle ? "Held · waiting for you" : "Held · working";
-  if (session.idle) return "Waiting for operator input";
+  if (session.paused) return "Paused";
+  if (session.held) return session.idle ? "Held, waiting for input" : "Held, working";
+  if (session.idle) return "Waiting for input";
   const tool = [...session.entries]
     .reverse()
     .find((entry) => entry._tag === "Tool" && entry.state._tag === "Running");

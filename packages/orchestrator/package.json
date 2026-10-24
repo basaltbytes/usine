@@ -23,6 +23,10 @@
       "types": "./dist/credentials.d.ts",
       "default": "./dist/credentials.js"
     },
+    "./current-instance": {
+      "types": "./dist/current-instance/current-instance.d.ts",
+      "default": "./dist/current-instance/current-instance.js"
+    },
     "./exe-dev": {
       "types": "./dist/exe-dev.d.ts",
       "default": "./dist/exe-dev.js"
@@ -63,6 +67,10 @@
       "types": "./dist/ssh.d.ts",
       "default": "./dist/ssh.js"
     },
+    "./worker-status": {
+      "types": "./dist/worker-status.d.ts",
+      "default": "./dist/worker-status.js"
+    },
     "./operator": {
       "types": "./dist/operator/operator.d.ts",
       "default": "./dist/operator/operator.js"
@@ -82,10 +90,11 @@
     "test:integration": "vitest run test/integration/polling-triggers.test.ts",
     "test:integration:agent": "vitest run test/integration/agent-run.test.ts",
     "test:exe-dev": "vitest run test/integration/exe-dev-worker.test.ts",
-    "test:ssh": "vitest run test/integration/ssh-worker.test.ts"
+    "test:ssh": "vitest run --disable-console-intercept test/integration/ssh-worker.test.ts"
   },
   "dependencies": {
     "@effect/platform-node": "catalog:",
+    "@effect/platform-node-shared": "catalog:",
     "@usine/config": "workspace:*",
     "@usine/core": "workspace:*",
     "@usine/durable": "workspace:*",

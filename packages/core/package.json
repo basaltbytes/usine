@@ -51,6 +51,10 @@
       "types": "./dist/attempt/salvage.d.ts",
       "default": "./dist/attempt/salvage.js"
     },
+    "./attempt/start": {
+      "types": "./dist/attempt/start.d.ts",
+      "default": "./dist/attempt/start.js"
+    },
     "./event": {
       "types": "./dist/event.d.ts",
       "default": "./dist/event.js"
@@ -67,6 +71,10 @@
       "types": "./dist/loop.d.ts",
       "default": "./dist/loop.js"
     },
+    "./operator": {
+      "types": "./dist/operator.d.ts",
+      "default": "./dist/operator.js"
+    },
     "./repository": {
       "types": "./dist/repository.d.ts",
       "default": "./dist/repository.js"
@@ -78,6 +86,14 @@
     "./run/state": {
       "types": "./dist/run/state.d.ts",
       "default": "./dist/run/state.js"
+    },
+    "./run/approval": {
+      "types": "./dist/run/approval.d.ts",
+      "default": "./dist/run/approval.js"
+    },
+    "./run/again": {
+      "types": "./dist/run/again.d.ts",
+      "default": "./dist/run/again.js"
     },
     "./step": {
       "types": "./dist/step/step.d.ts",

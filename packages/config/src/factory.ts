@@ -1,7 +1,9 @@
 import { Effort, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget } from "@usine/core/agent/session";
+import { OperatorLogin } from "@usine/core/operator";
 import { RepositoryName } from "@usine/core/repository";
 import {
+  GatewayAdminPort,
   GatewayDomain,
   GatewayLlmProvider,
   SshDestination,
@@ -15,21 +17,12 @@ import { nonBlankString, uniqueRepositoryNames } from "./checks.ts";
 import { LaneSource, Lane } from "./board.ts";
 import { canonicalLabelName, DeclaredLabel } from "./label.ts";
 
-/** A factory-defined repository grouping that Loops can select by tag. */
+/** A repository tag that Loop selectors match. */
 export const RegistryTag = nonBlankString("Expected a non-blank registry tag").pipe(
   Schema.brand("RegistryTag"),
 );
 
 export type RegistryTag = typeof RegistryTag.Type;
-
-/** GitHub login identifying the human operator for this factory. */
-export const OperatorLogin = Schema.String.check(
-  Schema.isPattern(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/u, {
-    message: "Expected a GitHub login",
-  }),
-).pipe(Schema.brand("OperatorLogin"));
-
-export type OperatorLogin = typeof OperatorLogin.Type;
 
 const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 
@@ -46,7 +39,7 @@ const uniqueLaneSources = Schema.makeFilter<ReadonlyArray<Lane>>(
     const keys = lanes.flatMap(({ sources }) => sources.map(laneSourceKey));
     return new Set(keys).size === keys.length;
   },
-  { message: "Expected every lane source to be mapped once" },
+  { message: "Expected each lane source in only one lane" },
 );
 
 const Lanes = Schema.Array(Lane).check(uniqueNames, uniqueLaneSources);
@@ -58,7 +51,6 @@ const uniqueLabelNames = Schema.makeFilter<ReadonlyArray<DeclaredLabel>>(
 
 const DeclaredLabels = Schema.Array(DeclaredLabel).check(uniqueLabelNames);
 
-/** A repository the factory manages, with its selector tags and configured Board lanes. */
 export class ManagedRepo extends Schema.Class<ManagedRepo>("@usine/config/ManagedRepo")({
   name: RepositoryName,
   tags: Schema.Array(RegistryTag)
@@ -69,50 +61,42 @@ export class ManagedRepo extends Schema.Class<ManagedRepo>("@usine/config/Manage
 
 const MaxConcurrentAttempts = PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(1)));
 
-/** The orchestrator's own machine as a Worker, with the number of Attempts it may run at the same time. */
+/** A Worker that runs Attempts on the orchestrator's machine. */
 export class LocalWorker extends Schema.Class<LocalWorker>("@usine/config/LocalWorker")({
   name: WorkerName,
   kind: Schema.Literal("local"),
   maxConcurrentAttempts: MaxConcurrentAttempts,
 }) {}
 
-/** An exe.dev VM named after the Worker, with the number of Attempts it may run at the same time. */
+/** A Worker on the exe.dev VM with the same name. */
 export class ExeDevWorker extends Schema.Class<ExeDevWorker>("@usine/config/ExeDevWorker")({
   name: WorkerName,
   kind: Schema.Literal("exe.dev"),
   maxConcurrentAttempts: MaxConcurrentAttempts,
 }) {}
 
-/** The name of an environment variable of the orchestrator's process. */
 const EnvironmentVariableName = Schema.String.check(
   Schema.isPattern(/^[A-Za-z_][A-Za-z0-9_]*$/u, {
     message: "Expected an environment variable name",
   }),
 ).pipe(Schema.brand("EnvironmentVariableName"));
 
-// A user name or password in the URL would be a credential in the file and in every message that names the URL.
-const isHttpUrlWithoutCredentials = Schema.makeFilter<URL>(
-  (url) =>
-    (url.protocol === "http:" || url.protocol === "https:") &&
-    url.username === "" &&
-    url.password === "",
-  { message: "Expected an http or https URL without a user name or password" },
-);
-
 /**
- * The Gateway in front of an SSH Worker's machine on a private network
- * (ADR 0027). `domain` is the Gateway's private DNS domain. `adminUrl` is its
- * admin API as the orchestrator reaches it, usually a local forward through
- * the SSH connection to the Gateway. The admin token is read at startup from
- * the orchestrator's environment variable `adminTokenEnv`, so it is never in
- * the file. `llmProviders` names the providers whose credential the Gateway
- * holds. A harness whose provider is not listed uses the operator's login on
- * the Worker and reaches the provider through the Gateway's forward proxy;
- * Codex always does.
+ * The Gateway in front of an SSH Worker's machine on a private network (ADR 0027).
+ *
+ * - `domain`: the Gateway's private DNS domain.
+ * - `destination`: the Gateway's `ssh` destination, usually the Host alias in the Worker's
+ *   `ProxyJump`. The executor forwards through it to the admin API at `adminPort` on the
+ *   Gateway's loopback interface.
+ * - `adminTokenEnv`: the orchestrator environment variable with the admin token, read when
+ *   `usine up` starts or a reload adds the Worker.
+ * - `llmProviders`: the providers whose credential the Gateway injects. Harnesses for other
+ *   providers, and Codex, use the operator's login on the Worker through the forward proxy.
  */
 export class WorkerGateway extends Schema.Class<WorkerGateway>("@usine/config/WorkerGateway")({
   domain: GatewayDomain,
-  adminUrl: Schema.URLFromString.check(isHttpUrlWithoutCredentials),
+  destination: SshDestination,
+  adminPort: GatewayAdminPort.pipe(Schema.withDecodingDefaultKey(Effect.succeed(7070))),
   adminTokenEnv: EnvironmentVariableName,
   llmProviders: Schema.Array(GatewayLlmProvider)
     .check(Schema.isUnique())
@@ -120,12 +104,9 @@ export class WorkerGateway extends Schema.Class<WorkerGateway>("@usine/config/Wo
 }) {}
 
 /**
- * A Linux machine the orchestrator connects to over SSH, with the number of
- * Attempts it may run at the same time. The orchestrator's `ssh` client
- * connects to `destination`, on `port` and with `identityFile` when given,
- * and the Worker keeps its state under `<root>/workers/<name>` on the machine.
- * A Worker behind a `gateway` has no GitHub token on its machine: the
- * executor attaches each Attempt's token to the Gateway instead.
+ * A Linux machine reached with `ssh`, with Worker state under `<root>/workers/<name>`. If
+ * `gateway` is set, the machine stores no GitHub token; the executor sends each Attempt's token
+ * to the Gateway.
  */
 export class SshWorker extends Schema.Class<SshWorker>("@usine/config/SshWorker")({
   name: WorkerName,
@@ -138,7 +119,7 @@ export class SshWorker extends Schema.Class<SshWorker>("@usine/config/SshWorker"
   gateway: Schema.OptionFromOptionalKey(
     WorkerGateway.pipe(
       Schema.encodeKeys({
-        adminUrl: "admin_url",
+        adminPort: "admin_port",
         adminTokenEnv: "admin_token_env",
         llmProviders: "llm_providers",
       }),
@@ -146,27 +127,26 @@ export class SshWorker extends Schema.Class<SshWorker>("@usine/config/SshWorker"
   ),
 }) {}
 
-/** A named place to execute Attempts; its kind selects the Worker adapter and the settings that adapter needs. */
+/** A configured Worker; `kind` selects the adapter. */
 export const Worker = Schema.Union([LocalWorker, ExeDevWorker, SshWorker]);
 export type Worker = typeof Worker.Type;
 
-/** Factory-wide polling, Attempt limits, and defaults for the coordinating parent. */
 export class Settings extends Schema.Class<Settings>("@usine/config/Settings")({
-  /** Seconds between routine GitHub polling cycles; defaults to 60. */
+  /** The interval between GitHub polling cycles, in seconds. */
   pollInterval: PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(60))),
-  /** Total child sessions allowed over one Attempt's lifetime, including sequential spawns; defaults to four. */
+  /** The maximum number of child sessions per Attempt, counting sequential spawns. */
   maxChildren: ChildSessionBudget.pipe(Schema.withDecodingDefaultKey(Effect.succeed(4))),
-  /** Wall-clock limit per Attempt in minutes. Absent by default, so the runaway guard sets no time limit. */
+  /** The wall-clock limit per Attempt, in minutes, or `None` for no limit. */
   maxAttemptMinutes: Schema.OptionFromOptionalKey(PositiveInt),
-  /** Token limit per Attempt, counting the parent and every child. Absent by default, so the runaway guard sets no token limit. */
+  /** The token limit per Attempt, counting the parent and every child, or `None` for no limit. */
   maxAttemptTokens: Schema.OptionFromOptionalKey(PositiveInt),
-  /** Parent model used when the Agent has no override; when both are absent, Pi selects the model. */
+  /** The parent model for Agents that set none, or `None` to let Pi select it. */
   parentModel: Schema.OptionFromOptionalKey(ModelId),
-  /** Default parent reasoning effort; if neither Agent nor factory supplies one, the child's effort applies. */
+  /** The parent reasoning effort for Agents that set none, or `None` to use the child's effort. */
   parentEffort: Schema.OptionFromOptionalKey(Effort),
 }) {}
 
-/** How GitHub hints reach the factory to request earlier polling; routine polling remains the backstop. */
+/** The source of GitHub webhook events that trigger an early poll; polling continues in every mode. */
 export const Webhooks = Schema.Union([
   Schema.Struct({ mode: Schema.Literal("off") }),
   Schema.Struct({ mode: Schema.Literal("deliveries") }),
@@ -177,8 +157,6 @@ export const Webhooks = Schema.Union([
 
 export type Webhooks = typeof Webhooks.Type;
 
-// Authored YAML keys are snake_case and domain fields camelCase. The rename
-// happens once here and encodes back for edits.
 const SettingsFromYaml = Settings.pipe(
   Schema.encodeKeys({
     pollInterval: "poll_interval",
@@ -207,7 +185,7 @@ const ManagedRepos = Schema.Array(ManagedRepo).check(
 
 const Workers = Schema.Array(WorkerFromYaml).check(Schema.isNonEmpty(), uniqueNames);
 
-/** The factory's repository registry, Worker capacity, labels, and operating defaults from `usine.yaml`. */
+/** The decoded `usine.yaml`. */
 export class UsineConfig extends Schema.Class<UsineConfig>("@usine/config/UsineConfig")({
   version: Schema.Literal(1),
   labels: DeclaredLabels.pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),

@@ -16,22 +16,24 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { ErrorAlert } from "@/components/error-alert";
 
-/** Sends user turns and pause/release controls to one live session. */
 export const SessionComposer = ({
   runId,
   attemptId,
   target,
   paused,
+  held,
 }: {
   readonly runId: RunId;
   readonly attemptId: AttemptId;
   readonly target: SessionTarget;
   readonly paused: boolean;
+  readonly held: boolean;
 }) => {
   const [message, setMessage] = useState("");
   const id = useId();
   const queryClient = useQueryClient();
   const child = target._tag === "Child";
+  const releasable = child || paused || held;
   const mutation = useMutation({
     mutationFn: (action: OperatorAction) =>
       api((client) =>
@@ -51,7 +53,7 @@ export const SessionComposer = ({
       mutation.mutate(new OperatorMessage({ message }));
   };
   return (
-    <div className="space-y-2 border-t pt-3">
+    <div className="space-y-2">
       <Label htmlFor={id}>{child ? "Message this child" : "Message the parent"}</Label>
       <Textarea
         id={id}
@@ -82,23 +84,22 @@ export const SessionComposer = ({
         >
           Pause session
         </Button>
-        {child && (
+        {releasable && (
           <Button
             size="sm"
             variant="secondary"
             disabled={mutation.isPending}
             onClick={() => mutation.mutate(new Release())}
           >
-            Release child
+            {child ? "Release child" : "Release parent"}
           </Button>
         )}
       </div>
-      {child && (
-        <p className="text-xs text-muted-foreground">
-          Sending a message keeps this child open. Release it when you’re ready for its result to
-          return to the parent.
-        </p>
-      )}
+      <p className="text-xs text-muted-foreground">
+        {child
+          ? "A message places a hold. Release the child to return the result to the parent"
+          : "A message places a hold. Release the parent to continue the task"}
+      </p>
       {mutation.isError && <ErrorAlert message={mutation.error.message} />}
     </div>
   );
