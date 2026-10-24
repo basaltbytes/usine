@@ -76,8 +76,11 @@ const salvage = (script: Scripted) => {
   }).pipe(Effect.map((result) => ({ result, calls })));
 };
 
+/** Returns each call's git command, after `-C <worktree>` and any `-c <config>` options. */
 const commandsOf = (calls: ReadonlyArray<ReadonlyArray<string>>) =>
-  calls.map((args) => args.slice(2).filter((arg) => !arg.startsWith("user.") && arg !== "-c")[0]);
+  calls.map((args) =>
+    args.slice(2).find((arg, index, rest) => arg !== "-c" && rest[index - 1] !== "-c"),
+  );
 
 describe("salvageWorktree", () => {
   it.effect("leaves a clean worktree at its base alone", () =>

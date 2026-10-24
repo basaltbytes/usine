@@ -24,6 +24,7 @@ import { CheckoutRequest, Executor } from "../../../src/executor.ts";
 import { SSH_ENVIRONMENT_ALLOWLIST } from "../../../src/remote/commands.ts";
 import {
   aloneOnItem,
+  COMMIT_AUTHOR,
   GIT_DIRECTORY,
   TEST_AGENT,
   TOKEN_PREFIX,
@@ -575,6 +576,7 @@ describe("SSH Worker behind a Gateway", () => {
           comments: () => Effect.void,
           windows: aloneOnItem(),
         },
+        Effect.succeed(COMMIT_AUTHOR),
       );
       assert.deepStrictEqual(
         (yield* attachmentsInForce).map(({ id }) => id).sort(),

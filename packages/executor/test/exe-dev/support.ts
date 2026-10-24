@@ -266,7 +266,7 @@ export const fakeSsh = (sweepMode: SweepMode = "valid") => {
           "",
           state.cacheExists && !(state.worktreeGone && line.includes(WORKTREE)) ? 0 : 1,
         );
-      if (line.startsWith("exec 'git' '-C' ")) {
+      if (line.includes("exec 'git' '-C' ")) {
         if (line.includes("'--absolute-git-dir'"))
           return oneShotHandle(
             "/home/exedev/.usine/workers/remote-one/repos/acme_demo.git/worktrees/remote-run_execute_1\n",
@@ -320,6 +320,10 @@ export const COMMIT_AUTHOR = new BotAccount({
   login: BotLogin.make("usine-test[bot]"),
   id: BotUserId.make(4242),
 });
+
+/** The exports in a remote git command line that make `COMMIT_AUTHOR` its author and committer. */
+export const BOT_COMMITS =
+  "GIT_AUTHOR_NAME='usine-test[bot]' GIT_AUTHOR_EMAIL='4242+usine-test[bot]@users.noreply.github.com' GIT_COMMITTER_NAME='usine-test[bot]' GIT_COMMITTER_EMAIL='4242+usine-test[bot]@users.noreply.github.com'";
 
 export const request = new CheckoutRequest({
   attemptId: ATTEMPT_ID,

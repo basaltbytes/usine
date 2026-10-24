@@ -12,7 +12,17 @@ import {
 import { Deferred, type Duration, Effect, Fiber, Layer, Option } from "effect";
 import { TestClock } from "effect/testing";
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
-import { ATTEMPT_ID, TEST_AGENT, WORKER, fakeSsh, recording, request, runtime } from "./support.ts";
+import {
+  ATTEMPT_ID,
+  BOT_COMMITS,
+  TEST_AGENT,
+  WORKER,
+  fakeSsh,
+  recording,
+  remoteLine,
+  request,
+  runtime,
+} from "./support.ts";
 
 /**
  * Runs `checkout` in one orchestrator process whose parent runs `first` and then sends
@@ -311,6 +321,13 @@ describe("exe.dev ceilings across a restart", () => {
           );
           assert.strictEqual(storage.tasks.get(ATTEMPT_ID)?.state._tag, "canceled");
           assert.deepStrictEqual(salvaged, ["Pushed canceled"]);
+          // The reattaching request's commitAuthor commits the salvage.
+          assert.include(
+            ssh.state.commands
+              .map(remoteLine)
+              .find((line) => line.includes("'commit' '--quiet'")) ?? "",
+            BOT_COMMITS,
+          );
           assert.strictEqual(steers(), warned, "no warning is sent again");
         });
       },

@@ -14,6 +14,7 @@ import { Cause, Effect, Exit, Fiber, Logger, Option, Scope } from "effect";
 import {
   aloneOnItem,
   ATTEMPT_ID,
+  COMMIT_AUTHOR,
   WORKER,
   SALVAGE_COMMIT,
   TEST_AGENT,
@@ -277,6 +278,7 @@ describe("exe.dev preparation", () => {
             comments: () => Effect.die("A closed Attempt records no comment at recovery"),
             windows: aloneOnItem(),
           },
+          Effect.succeed(COMMIT_AUTHOR),
         );
         const lines = ssh.state.commands.map(remoteLine);
         const stop = lines.findIndex((line) => line.startsWith("exec 'sh' '-c'"));
@@ -324,6 +326,7 @@ describe("exe.dev preparation", () => {
             comments: () => Effect.void,
             windows: aloneOnItem(),
           },
+          Effect.die("A succeeded Attempt has no salvage to commit"),
         );
         const remote = ssh.state.commands.slice(reconciled).map(remoteLine);
         assert.strictEqual(recorded.length, 0);
@@ -359,6 +362,7 @@ describe("exe.dev preparation", () => {
             comments: () => Effect.void,
             windows: aloneOnItem(),
           },
+          Effect.die("An Attempt without a checkout has no salvage to commit"),
         );
       }
       const remote = ssh.state.commands.map(remoteLine);
@@ -397,6 +401,7 @@ describe("exe.dev preparation", () => {
               comments: () => Effect.void,
               windows: aloneOnItem(),
             },
+            Effect.die("An Attempt on a Worker that is gone has no salvage to commit"),
           )
           .pipe(Effect.exit);
         assert(Exit.isFailure(exit));

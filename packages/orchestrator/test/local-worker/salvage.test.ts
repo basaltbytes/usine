@@ -33,6 +33,15 @@ import {
 } from "./support.ts";
 import { testBotAccount } from "../support/github-app.ts";
 
+/** The identity of `testBotAccount` in git's `<name> <email>` form. */
+const BOT = "usine-test[bot] <4242+usine-test[bot]@users.noreply.github.com>";
+
+/** Returns the author and committer of `commit`, read in the repository at `cwd`. */
+const identityOf = (commit: string, cwd: string) =>
+  output("git", ["log", "-1", "--format=%an <%ae>%n%cn <%ce>", commit], cwd).pipe(
+    Effect.map((text) => text.trim().split("\n")),
+  );
+
 describe("local worker salvage", () => {
   it.live(
     "salvages uncommitted work to the salvage ref when a live Attempt is canceled",
@@ -74,6 +83,7 @@ describe("local worker salvage", () => {
               salvaged.commit,
             ])).trim();
             assert.strictEqual(subject, `wip(usine): salvage attempt ${attempt.id}`);
+            assert.deepStrictEqual(yield* identityOf(salvaged.commit, remote), [BOT, BOT]);
             const files = (yield* output("git", [
               "--git-dir",
               remote,
@@ -212,9 +222,11 @@ describe("local worker salvage", () => {
               comments: () => Effect.void,
               windows: aloneOnItem(failedRecordRequest.attemptId),
             },
+            Effect.succeed(testBotAccount),
           );
           const recovered = recorded[0];
           assert(recovered !== undefined);
+          assert.deepStrictEqual(yield* identityOf(recovered.commit, remote), [BOT, BOT]);
           assert.strictEqual(
             (yield* output("git", [
               "--git-dir",
@@ -264,11 +276,16 @@ describe("local worker salvage", () => {
           output("git", ["rev-parse", "HEAD"], cwd).pipe(
             Effect.map((sha) => CommitSha.make(sha.trim())),
           );
-        const commitFile = (file: string, content: string, message: string) =>
+        const commitFile = (
+          file: string,
+          content: string,
+          message: string,
+          ...options: ReadonlyArray<string>
+        ) =>
           Effect.gen(function* () {
             yield* fileSystem.writeFileString(`${seed}/${file}`, content);
             yield* git(["add", file]);
-            yield* git(["commit", "-m", message]);
+            yield* git(["commit", "-m", message, ...options]);
             return yield* head(seed);
           });
         const salvage = (number: number, commit: CommitSha) =>
@@ -279,9 +296,15 @@ describe("local worker salvage", () => {
           });
         const firstBase = yield* head(seed);
         yield* git(["checkout", "-b", "attempt-1"]);
+        // Authored by the bot, like a salvage commit, and committed by the seed's identity.
         const worked = yield* salvage(
           1,
-          yield* commitFile("progress.md", "half done\n", "wip(usine): salvage attempt r/1"),
+          yield* commitFile(
+            "progress.md",
+            "half done\n",
+            "wip(usine): salvage attempt r/1",
+            `--author=${BOT}`,
+          ),
         );
         yield* git(["checkout", "-b", "attempt-2", firstBase]);
         const conflicting = yield* salvage(
@@ -340,6 +363,7 @@ describe("local worker salvage", () => {
                 (yield* output("git", ["rev-parse", "HEAD^"], worktree)).trim(),
                 tip,
               );
+              assert.deepStrictEqual(yield* identityOf("HEAD", worktree), [BOT, BOT]);
               assert.strictEqual(yield* read(worktree, "progress.md"), "half done\n");
               assert.strictEqual(yield* read(worktree, "README.md"), "# fixed on main\n");
             }),
@@ -441,6 +465,7 @@ describe("local worker salvage", () => {
             ])).trim(),
             "recover this work",
           );
+          assert.deepStrictEqual(yield* identityOf(salvage.value.commit, remote), [BOT, BOT]);
           assert(!(yield* fileSystem.exists(saved.worktree)));
         }).pipe(Effect.provide(runtime()));
       }).pipe(Effect.provide(NodeServices.layer)),

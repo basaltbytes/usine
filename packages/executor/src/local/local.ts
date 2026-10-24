@@ -8,6 +8,7 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 import { type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
 import { RepositoryName, safeSegment } from "@usine/core/repository";
 import { InstanceDirectory } from "@usine/core/instance";
+import type { BotAccount } from "@usine/core/worker";
 import {
   type AttemptWindowsRead,
   harvestFacts,
@@ -44,7 +45,7 @@ import {
   type HarnessProbe,
   verifyHarnessReadiness,
 } from "../harness-preflight.ts";
-import { childEnvironment } from "../child-environment.ts";
+import { childEnvironment, commitIdentity } from "../child-environment.ts";
 import { keyedLockFor } from "../keyed-lock.ts";
 import {
   SwapOnDemand,
@@ -138,13 +139,16 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
 
     // Git can print the token in diagnostics, so output is scrubbed before it's put in an error or
     // parsed.
-    const credentialedGit =
-      (credential: Effect.Success<ReturnType<typeof credentials>>) =>
-      (operation: ExecutorOperation, args: ReadonlyArray<string>) =>
+    const credentialedGit = (
+      credential: Effect.Success<ReturnType<typeof credentials>>,
+      author: BotAccount,
+    ) => {
+      const environment = { ...credential.environment, ...commitIdentity(author) };
+      return (operation: ExecutorOperation, args: ReadonlyArray<string>) =>
         Effect.gen(function* () {
           yield* credential.refresh();
           const result = yield* collectCommand(spawner, operation, "git", args, {
-            env: credential.environment,
+            env: environment,
             extendEnv: false,
           });
           return yield* requireSuccess(operation, "local", "git", args, {
@@ -153,6 +157,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
             stderr: credential.scrub(result.stderr),
           });
         });
+    };
 
     // Startup only prunes worktree registrations whose directories are gone; recovery removes
     // checkouts. Unknown leftovers and checkouts awaiting reattachment stay on disk.
@@ -244,9 +249,10 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
           return stdout === "" ? [] : stdout.replace(/\n$/u, "").split("\n");
         });
 
-    const recover = Effect.fn("LocalExecutor.recover")(function* <E>(
+    const recover = Effect.fn("LocalExecutor.recover")(function* <E, A>(
       attempt: AttemptRecovery,
       record: RecoverySink<E>,
+      commitAuthor: Effect.Effect<BotAccount, A>,
     ) {
       yield* Effect.annotateCurrentSpan({ ...attempt, host: "local" });
       yield* session.stopForRecovery(attempt);
@@ -292,6 +298,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
           record.salvage,
         );
       }
+      const author = yield* commitAuthor;
       yield* Effect.scoped(
         Effect.gen(function* () {
           const credential = yield* credentials(
@@ -300,7 +307,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
             attempt.permissions,
             baseEnvironment,
           );
-          const git = credentialedGit(credential);
+          const git = credentialedGit(credential, author);
           yield* recoverWorktree(
             { attempt, host: "local", worktree, cache, git: (args) => git("cleanup", args) },
             record.salvage,
@@ -430,7 +437,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         removePath: remove,
         cacheExists: fileSystem.exists(cache),
         promoteStaging: fileSystem.rename(`${cache}.cloning`, cache),
-        git: credentialedGit(credential),
+        git: credentialedGit(credential, request.commitAuthor),
         writeExecutable: (target, content) =>
           fileSystem
             .makeDirectory(path.dirname(target), { recursive: true })
@@ -506,8 +513,8 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
 
     return Executor.of({
       kind: "local",
-      recover: (attempt, record) =>
-        recover(attempt, record).pipe(
+      recover: (attempt, record, commitAuthor) =>
+        recover(attempt, record, commitAuthor).pipe(
           Effect.catchTag("PlatformError", (cause) =>
             Effect.fail(executorError("cleanup", "Can't reconcile the local salvage", cause)),
           ),
