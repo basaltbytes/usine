@@ -240,12 +240,15 @@ export class Executor extends Context.Service<
      * storage marks it live; if the task can't be confirmed stopped, fails with a `cancel`
      * `ExecutorOperationError` and leaves the checkout. For an open Attempt whose parent task
      * failed before the orchestrator stopped, first records the comments it posted on the Run's
-     * Item.
+     * Item. `commitAuthor` returns the author and committer of the salvage commit, like
+     * `CheckoutRequest.commitAuthor`. It runs only before a salvage, and its failure leaves the
+     * checkout.
      */
-    readonly recover: <E>(
+    readonly recover: <E, A>(
       attempt: AttemptRecovery,
       record: RecoverySink<E>,
-    ) => Effect.Effect<void, E | ExecutorError>;
+      commitAuthor: Effect.Effect<BotAccount, A>,
+    ) => Effect.Effect<void, E | A | ExecutorError>;
     /** The orchestrator doesn't start if a configured Worker has a different kind. */
     readonly kind: WorkerKind;
     /**

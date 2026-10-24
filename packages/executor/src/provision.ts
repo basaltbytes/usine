@@ -14,7 +14,7 @@ import {
   type CheckoutRequest,
 } from "./executor.ts";
 import { PRE_PUSH_HOOKS_DIRECTORY, prePushHook } from "./pre-push-hook.ts";
-import { failureMessage, SALVAGE_GIT_CONFIG, salvageWorktree } from "./salvage.ts";
+import { failureMessage, salvageWorktree } from "./salvage.ts";
 
 const CACHE_DIRECTORY_SUFFIX = ".git";
 
@@ -45,6 +45,10 @@ export interface WorkspaceOps<E> {
   readonly cacheExists: Effect.Effect<boolean, E>;
   /** Atomically moves the finished staging clone to the cache path. */
   readonly promoteStaging: Effect.Effect<void, E>;
+  /**
+   * Runs git with the Attempt's repository credentials and `commitIdentity` for the request's
+   * `commitAuthor`, which authors the salvage commit and commits the rebased salvage.
+   */
   readonly git: (
     operation: "prepare" | "cleanup",
     args: ReadonlyArray<string>,
@@ -349,7 +353,8 @@ const checkOutWorktree = Effect.fn("Executor.checkOutWorktree")(function* <E ext
     .git("prepare", [
       "-C",
       layout.worktree,
-      ...SALVAGE_GIT_CONFIG,
+      "-c",
+      "commit.gpgsign=false",
       "rebase",
       "--no-verify",
       "--onto",
@@ -535,7 +540,10 @@ export interface RecoveryOptions<E> {
   readonly host: string;
   readonly worktree: string;
   readonly cache: string;
-  /** Runs git with the Worker's repository credentials. */
+  /**
+   * Runs git with the Worker's repository credentials. For an Attempt that is salvaged, it also
+   * sets the `commitIdentity` that authors the salvage commit.
+   */
   readonly git: (args: ReadonlyArray<string>) => Effect.Effect<string, E>;
 }
 

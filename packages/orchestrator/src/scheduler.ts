@@ -8,7 +8,7 @@ import { salvageRefFor } from "@usine/core/attempt/salvage";
 import { BotLogin, WorkerName } from "@usine/core/worker";
 import { CheckoutRequest, Executor, ExecutorError, ExecutorOperationError } from "@usine/executor";
 import { StepExecutor, type WorkerLease } from "@usine/engine/step-executor";
-import { GitHubApp, isRefusal } from "@usine/github/github-app";
+import { GitHubApp, type GitHubAppError, isRefusal } from "@usine/github/github-app";
 import {
   Array as EffectArray,
   Context,
@@ -178,6 +178,14 @@ const brainLabel = ({ harness, model, effort }: BrainSpec) => `${harness}/${mode
 
 /** The login that exe.dev Workers write to GitHub as, through exe.dev's integration (ADR 0011). */
 const EXE_DEV_BOT_LOGIN = BotLogin.make("exe-dev-github-integration[bot]");
+
+/** Returns the Attempt's failure for an unreadable bot account. A refusal isn't retried. */
+const botAccountFailure = (error: GitHubAppError) => {
+  const message = `Can't read the GitHub App's bot account, which authors the attempt's commits: ${error.message}`;
+  return isRefusal(error)
+    ? new AgentFailure({ message })
+    : new InfraFailure({ message, cause: error });
+};
 
 /**
  * The Worker set of an executor that connects only to the Workers it was given, such as the SSH
@@ -588,12 +596,7 @@ export const stepExecutorLayer = (
                 { attemptId, errorTag: error._tag, message: error.message },
               ),
             ),
-            Effect.mapError((error) => {
-              const message = `Can't read the GitHub App's bot account, which authors the attempt's commits: ${error.message}`;
-              return isRefusal(error)
-                ? new AgentFailure({ message })
-                : new InfraFailure({ message, cause: error });
-            }),
+            Effect.mapError(botAccountFailure),
           ),
       );
 
@@ -683,7 +686,7 @@ export const stepExecutorLayer = (
         intervene: executor.intervene,
         recover: (attempt, record) =>
           executor
-            .recover(attempt, record)
+            .recover(attempt, record, app.botAccount().pipe(Effect.mapError(botAccountFailure)))
             .pipe(
               Effect.catchIf(Schema.is(ExecutorError), (error) =>
                 Effect.fail(asAttemptFailure(error)),

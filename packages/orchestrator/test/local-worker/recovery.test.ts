@@ -30,6 +30,8 @@ const credentials = Layer.succeed(CredentialProvider)({
   issue: () => Effect.die("Absent checkouts must not acquire credentials"),
 });
 
+const noSalvage = Effect.die("Absent checkouts have no salvage to commit");
+
 const executorLayer = (root: string, fileSystem: FileSystem.FileSystem) =>
   layer({ instanceDirectory: InstanceDirectory.make(root) }).pipe(
     Layer.provide(credentials),
@@ -67,11 +69,15 @@ describe("local checkout reconciliation", () => {
         yield* Effect.forEach(
           Array.from({ length: 1000 }, (_, index) => index),
           (index) =>
-            executor.recover(attempt("local", index), {
-              salvage: () => Effect.die("Unexpected salvage"),
-              comments: () => Effect.die("Unexpected comments"),
-              windows: Effect.die("Unexpected windows read"),
-            }),
+            executor.recover(
+              attempt("local", index),
+              {
+                salvage: () => Effect.die("Unexpected salvage"),
+                comments: () => Effect.die("Unexpected comments"),
+                windows: Effect.die("Unexpected windows read"),
+              },
+              noSalvage,
+            ),
           { concurrency: 8, discard: true },
         );
       }).pipe(Effect.provide(executorLayer(root, observed)));
@@ -100,19 +106,23 @@ describe("local checkout reconciliation", () => {
       });
       yield* Effect.gen(function* () {
         const executor = yield* Executor;
-        const first = yield* Effect.result(executor.recover(attempt("broken", 1), ignored));
+        const first = yield* Effect.result(
+          executor.recover(attempt("broken", 1), ignored, noSalvage),
+        );
         assert(Result.isFailure(first));
         assert.strictEqual(first.failure._tag, "ExecutorOperationError");
         yield* fs.remove(attempts);
         yield* fs.makeDirectory(attempts);
-        const second = yield* Effect.result(executor.recover(attempt("broken", 2), ignored));
+        const second = yield* Effect.result(
+          executor.recover(attempt("broken", 2), ignored, noSalvage),
+        );
         assert(Result.isFailure(second));
-        yield* executor.recover(attempt("healthy", 3), ignored);
+        yield* executor.recover(attempt("healthy", 3), ignored, noSalvage);
         assert.strictEqual(reads, 1);
       }).pipe(Effect.provide(executorLayer(root, observed)));
       yield* Effect.gen(function* () {
         const executor = yield* Executor;
-        yield* executor.recover(attempt("broken", 1), ignored);
+        yield* executor.recover(attempt("broken", 1), ignored, noSalvage);
       }).pipe(Effect.provide(executorLayer(root, observed)));
       assert.strictEqual(reads, 2);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),

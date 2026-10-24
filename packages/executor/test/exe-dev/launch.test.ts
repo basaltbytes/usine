@@ -15,6 +15,7 @@ import { CheckoutRequest, Executor } from "../../src/executor.ts";
 import {
   aloneOnItem,
   ATTEMPT_ID,
+  BOT_COMMITS,
   COMMIT_AUTHOR,
   SSH_ENVIRONMENT_ALLOWLIST,
   TEST_AGENT,
@@ -199,16 +200,24 @@ describe("exe.dev launch", () => {
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
           assert.isTrue(yield* executor.isLive(ATTEMPT_ID), "the report awaits its harvest");
-          yield* executor.recover(openAttempt, {
-            salvage: (salvage) => Effect.sync(() => void salvaged.push(salvage._tag)),
-            comments: () => Effect.die("A parent that reported posted no comment to recover"),
-            windows: aloneOnItem(),
-          });
+          yield* executor.recover(
+            openAttempt,
+            {
+              salvage: (salvage) => Effect.sync(() => void salvaged.push(salvage._tag)),
+              comments: () => Effect.die("A parent that reported posted no comment to recover"),
+              windows: aloneOnItem(),
+            },
+            Effect.succeed(COMMIT_AUTHOR),
+          );
         }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, fails, storage)));
         assert.deepStrictEqual(salvaged, ["Pushed"]);
-        assert(
-          ssh.state.commands.map(remoteLine).some((line) => line.includes("'worktree' 'remove'")),
+        const lines = ssh.state.commands.map(remoteLine);
+        // exe.dev's integration pushes the salvage, but the factory App's bot commits it.
+        assert.include(
+          lines.find((line) => line.includes("'commit' '--quiet'")) ?? "",
+          BOT_COMMITS,
         );
+        assert(lines.some((line) => line.includes("'worktree' 'remove'")));
       });
     },
   );
@@ -225,11 +234,15 @@ describe("exe.dev launch", () => {
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
           assert.isTrue(yield* executor.isLive(ATTEMPT_ID), "the parent task outlived the restart");
-          yield* executor.recover(openAttempt, {
-            salvage: (salvage) => Effect.sync(() => void salvaged.push(salvage._tag)),
-            comments: () => Effect.die("A canceled parent posted no comment to recover"),
-            windows: aloneOnItem(),
-          });
+          yield* executor.recover(
+            openAttempt,
+            {
+              salvage: (salvage) => Effect.sync(() => void salvaged.push(salvage._tag)),
+              comments: () => Effect.die("A canceled parent posted no comment to recover"),
+              windows: aloneOnItem(),
+            },
+            Effect.succeed(COMMIT_AUTHOR),
+          );
           assert.isFalse(yield* executor.isLive(ATTEMPT_ID));
         }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, completes, storage)));
         assert.deepStrictEqual(salvaged, ["Pushed"]);
@@ -261,11 +274,15 @@ describe("exe.dev launch", () => {
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
           const recovered = yield* executor
-            .recover(openAttempt, {
-              salvage: (salvage) => Effect.sync(() => void salvaged.push(salvage._tag)),
-              comments: () => Effect.die("A parent that may still run has no comment recovered"),
-              windows: aloneOnItem(),
-            })
+            .recover(
+              openAttempt,
+              {
+                salvage: (salvage) => Effect.sync(() => void salvaged.push(salvage._tag)),
+                comments: () => Effect.die("A parent that may still run has no comment recovered"),
+                windows: aloneOnItem(),
+              },
+              Effect.die("A parent that may still run has no salvage to commit"),
+            )
             .pipe(Effect.flip);
           assert(recovered._tag === "ExecutorOperationError");
           assert.strictEqual(recovered.operation, "cancel");
@@ -756,16 +773,21 @@ describe("exe.dev launch", () => {
         ssh.state.onIssueComments = () => void opened.push(OTHER_ATTEMPT);
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
-          yield* executor.recover(openAttempt, {
-            salvage: (salvage) => Effect.sync(() => void salvaged.push(salvage._tag)),
-            comments: (comments) =>
-              Effect.sync(
-                () => void recorded.push(...comments.map(({ kind, url }) => `${kind} ${url.href}`)),
+          yield* executor.recover(
+            openAttempt,
+            {
+              salvage: (salvage) => Effect.sync(() => void salvaged.push(salvage._tag)),
+              comments: (comments) =>
+                Effect.sync(
+                  () =>
+                    void recorded.push(...comments.map(({ kind, url }) => `${kind} ${url.href}`)),
+                ),
+              windows: aloneOnItem().pipe(
+                Effect.map(({ own }) => new AttemptWindows({ own, overlapping: [...opened] })),
               ),
-            windows: aloneOnItem().pipe(
-              Effect.map(({ own }) => new AttemptWindows({ own, overlapping: [...opened] })),
-            ),
-          });
+            },
+            Effect.succeed(COMMIT_AUTHOR),
+          );
           // The Run closes the Attempt from the stored failure without launching it again.
           const outcome = yield* executor.outcome(ATTEMPT_ID);
           assert(Option.isSome(outcome) && Result.isFailure(outcome.value));
@@ -805,11 +827,15 @@ describe("exe.dev launch", () => {
         const recorded: Array<unknown> = [];
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
-          yield* executor.recover(openAttempt, {
-            salvage: () => Effect.die("A checkout that is gone has no salvage"),
-            comments: (comments) => Effect.sync(() => void recorded.push(...comments)),
-            windows: aloneOnItem(),
-          });
+          yield* executor.recover(
+            openAttempt,
+            {
+              salvage: () => Effect.die("A checkout that is gone has no salvage"),
+              comments: (comments) => Effect.sync(() => void recorded.push(...comments)),
+              windows: aloneOnItem(),
+            },
+            Effect.die("A checkout that is gone has no salvage to commit"),
+          );
         }).pipe(
           Effect.scoped,
           Effect.provide(runtime(ssh.layer, completes, storage, parentFailed)),

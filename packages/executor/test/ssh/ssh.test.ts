@@ -13,6 +13,7 @@ import { SSH_ENVIRONMENT_ALLOWLIST } from "../../src/remote/commands.ts";
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
 import {
   aloneOnItem,
+  BOT_COMMITS,
   COMMIT_AUTHOR,
   CREDENTIALS,
   DESTINATION,
@@ -250,6 +251,7 @@ describe("SSH Worker", () => {
       assert.strictEqual(failure._tag, "InfraFailure");
       assert.strictEqual(recorded[0]?._tag, "Pushed");
       const lines = machine.state.calls.map(({ line }) => line);
+      assert.include(lines.find((line) => line.includes("'commit' '--quiet'")) ?? "", BOT_COMMITS);
       const push = lines.findIndex((line) => line.includes("'push' '--force'"));
       assert(lines[push]?.includes(`USINE_GITHUB_TOKEN_FILE='${CREDENTIALS}/token'`));
       assert(lines.indexOf(`exec 'rm' '-rf' '${CREDENTIALS}'`) > push);
@@ -330,6 +332,7 @@ describe("SSH Worker", () => {
           comments: () => Effect.void,
           windows: aloneOnItem(),
         },
+        Effect.die("A read Loop's Attempt has no salvage to commit"),
       );
       const lines = machine.state.calls.map(({ line }) => line);
       assert(lines.some((line) => line.includes("'worktree' 'remove'")));
@@ -366,9 +369,14 @@ describe("SSH Worker", () => {
             comments: () => Effect.void,
             windows: aloneOnItem(),
           },
+          Effect.succeed(COMMIT_AUTHOR),
         );
         assert.strictEqual(recorded[0]?._tag, "Pushed");
         const lines = machine.state.calls.map(({ line }) => line);
+        assert.include(
+          lines.find((line) => line.includes("'commit' '--quiet'")) ?? "",
+          BOT_COMMITS,
+        );
         const stale = lines.indexOf(`exec 'rm' '-rf' '${WORKER_ROOT}/credentials'`);
         const listing = lines.findIndex((line) => line.startsWith("exec 'find' "));
         const write = lines.findIndex(writesCredential);

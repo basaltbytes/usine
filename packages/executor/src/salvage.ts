@@ -10,15 +10,6 @@ import type { WorkerName } from "@usine/core/worker";
 import { Effect, Option, Result, Schema } from "effect";
 
 const PUSH_TIMEOUT = "2 minutes";
-/** The git identity for commits usine creates in an Attempt's worktree. */
-export const SALVAGE_GIT_CONFIG = [
-  "-c",
-  "user.name=usine",
-  "-c",
-  "user.email=usine@basaltbytes.dev",
-  "-c",
-  "commit.gpgsign=false",
-];
 
 export interface SalvageOptions<E extends Error> {
   readonly attemptId: AttemptId;
@@ -27,7 +18,10 @@ export interface SalvageOptions<E extends Error> {
   readonly worktree: string;
   readonly baseCommit: Option.Option<CommitSha>;
   readonly ref: SalvageRef;
-  /** Runs git with the Worker's repository credentials; `salvageWorktree` prepends `-C <worktree>`. */
+  /**
+   * Runs git with the Worker's repository credentials and the Attempt's `commitIdentity`, which
+   * authors and commits the salvage commit. `salvageWorktree` prepends `-C <worktree>`.
+   */
   readonly git: (args: ReadonlyArray<string>) => Effect.Effect<string, E>;
 }
 
@@ -87,7 +81,8 @@ export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <
     const committed = yield* git(["add", "--all"]).pipe(
       Effect.andThen(
         git([
-          ...SALVAGE_GIT_CONFIG,
+          "-c",
+          "commit.gpgsign=false",
           "commit",
           "--quiet",
           "--no-verify",

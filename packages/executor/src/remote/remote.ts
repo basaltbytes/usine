@@ -4,6 +4,7 @@ import { type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
 import type { AttemptRecovery, AttemptSalvage, RecoverySink } from "@usine/core/attempt/salvage";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
 import { RepositoryName, safeSegment } from "@usine/core/repository";
+import type { BotAccount } from "@usine/core/worker";
 import {
   type AttemptWindowsRead,
   harvestFacts,
@@ -22,7 +23,7 @@ import {
   WorkerCapabilityError,
 } from "../executor.ts";
 import { verifyHarnessReadiness } from "../harness-preflight.ts";
-import { childEnvironment } from "../child-environment.ts";
+import { childEnvironment, commitIdentity } from "../child-environment.ts";
 import { keyedLockFor } from "../keyed-lock.ts";
 import {
   cacheDirectoryName,
@@ -87,17 +88,22 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       });
     });
 
-    /** Runs git on the machine with the Attempt's repository access, refreshing the credential first if it's about to expire. */
-    const accessGit =
-      (operation: ExecutorOperation, access: RemoteAccess) => (args: ReadonlyArray<string>) =>
+    /**
+     * Runs git on the machine with the Attempt's repository access and `author` as the author and
+     * committer, refreshing the credential first if it's about to expire.
+     */
+    const accessGit = (operation: ExecutorOperation, access: RemoteAccess, author: BotAccount) => {
+      const environment = { ...access.gitEnvironment, ...commitIdentity(author) };
+      return (args: ReadonlyArray<string>) =>
         access.refresh.pipe(
           Effect.andThen(
             commands.run(operation, access.shell, "git", args, {
-              environment: access.gitEnvironment,
+              environment,
               scrub: access.scrub,
             }),
           ),
         );
+    };
 
     const harvestCommand =
       (operation: ExecutorOperation, worktree: string, access: RemoteAccess) =>
@@ -116,9 +122,10 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
             Effect.map((stdout) => (stdout === "" ? [] : stdout.replace(/\n$/u, "").split("\n"))),
           );
 
-    const recover = Effect.fn(span("recover"))(function* <E>(
+    const recover = Effect.fn(span("recover"))(function* <E, A>(
       attempt: AttemptRecovery,
       record: RecoverySink<E>,
+      commitAuthor: Effect.Effect<BotAccount, A>,
     ) {
       yield* Effect.annotateCurrentSpan({ ...attempt });
       yield* session.stopForRecovery(attempt);
@@ -183,6 +190,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         yield* reconcile((args) => commands.run("cleanup", machine.shell, "git", args));
         return;
       }
+      const author = yield* commitAuthor;
       const grant = yield* worker.grantFor(attempt.repository);
       yield* Effect.scoped(
         Effect.gen(function* () {
@@ -194,7 +202,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
             "cleanup",
           );
           yield* stopChildren("cleanup", machine, worktree);
-          yield* reconcile(accessGit("cleanup", access));
+          yield* reconcile(accessGit("cleanup", access, author));
         }),
       );
     });
@@ -280,7 +288,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       promoteStaging: Effect.asVoid(
         commands.run("prepare", machine.shell, "mv", [layout.staging, layout.cache]),
       ),
-      git: (operation, args) => accessGit(operation, access)(args),
+      git: (operation, args) => accessGit(operation, access, request.commitAuthor)(args),
       writeExecutable: (target, content) =>
         Effect.asVoid(
           commands.run("prepare", machine.shell, "sh", [
