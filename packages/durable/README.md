@@ -51,15 +51,17 @@ Children aren't resumed after a restart: the tool call ends as interrupted with 
 
 `cancel(attemptId)` aborts the task bottom-up, waits until it's terminal, and ends `execute` with `Interrupted`. A child whose launch hasn't returned, such as a Claude child waiting to relaunch, starts no process.
 
-## Recovery from a poisoned session or a stuck step
+## Recovery from storage errors
 
-Each time the harness opens, before tasks resume, the runtime reads every live task's `pi.live`, `pi.inbox`, `pi.usage`, `pi.agent`, and `pi.provider` documents. An unreadable document, for example one whose delta chain doesn't apply, stops every step that needs it. In one commit, the runtime retires it unread, recreates it with its initial value, and records the reason on the attempt whose `usine.attempt` task has the conversation. It then aborts that task: the abort applies to the generation and tool tasks first, and the abort handler fails the attempt with an `InfraFailure` giving the reason, which `execute` and a reattachment report. Other attempts keep running.
+pi-durable fails the harness on any storage error, a read included: it aborts the running tasks, which stops their children, closes the harness, and rejects later calls with `SessionFailed`. `DurableHarness` watches the close and reacts by phase:
 
-A pi-durable commit that fails after storage admission poisons the session. `DurableHarness` logs the cause, closes the session, reopens the storage, and resumes. A `DurableHarness.use` call failed by the reopen runs once more.
+- Before `resume` completes, the harness stays closed. Building the layer fails with a `DurableHarnessError` that names the storage error, so `usine up` doesn't start.
+- After that, each `execute` that relays an attempt fails with an `InfraFailure` whose cause is `DurableStorageFailed`. The engine retries the attempt from salvage. The harness reopens the storage as the next generation, aborts those attempts' tasks before the other tasks resume, and repeats a `DurableHarness.use` call that the failure interrupted.
+- If the reopen fails, or the reopened harness fails within a minute, the harness stops. Later calls fail with a `DurableHarnessError` that names the cause, and attempts fail with `InfraFailure` until the orchestrator restarts.
 
-pi-durable reports failures that don't fail their caller through `onReport`. The harness logs a failure's first report, then its repeat count at most every five seconds. 1,000 reports of one failure with no commit adopted means a step that can't succeed. pi-durable retries it in microtasks, with no timer or I/O until the harness closes, so the harness closes from inside the report and reopens the storage. That clears stale scheduler state and repeats the document check.
+Each time the harness opens, before tasks resume, the runtime reads every live task's `pi.live`, `pi.inbox`, `pi.usage`, `pi.agent`, and `pi.provider` documents from the storage directly, because a failed read through the harness fails it. An unreadable document, for example one whose delta chain doesn't apply, stops every step that needs it. In one commit, the runtime retires it unread, recreates it with its initial value, and records the reason on the attempt whose `usine.attempt` task has the conversation. It then aborts that task: the abort applies to the generation and tool tasks first, and the abort handler fails the attempt with an `InfraFailure` giving the reason, which `execute` and a reattachment report. Other attempts keep running. If that commit fails, the harness fails as described above.
 
-If the reopened harness is stuck again within a minute, it stops for good: it logs the cause as an error, later calls fail with a `DurableHarnessError` naming it, and running attempts fail with `InfraFailure`. The next orchestrator start reopens the storage.
+pi-durable reports failures that don't fail their caller through `onReport`. The harness logs a failure's first report, then its repeat count at most every five seconds.
 
 pi-durable has no cross-process locking: tasks and documents from a second writer can't be read back. `usine up` locks the instance folder to prevent this.
 

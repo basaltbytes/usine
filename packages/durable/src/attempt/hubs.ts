@@ -3,9 +3,9 @@ import type { RunningSession } from "@usine/agents/runtime";
 import type { AgentSessionEvent, AgentSessionId } from "@usine/core/agent/session";
 import type { AttemptId } from "@usine/core/attempt";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
-import { Deferred, Effect, Option, Queue, Semaphore } from "effect";
+import { Deferred, Effect, Exit, Option, Queue, Semaphore } from "effect";
 import type { AttemptRequest } from "../attempt-runtime.ts";
-import type { HarnessListener } from "../harness.ts";
+import type { DurableStorageFailed, HarnessListener } from "../harness.ts";
 import { ATTEMPT_RECORD_KIND, type AttemptRecord } from "./documents.ts";
 
 /**
@@ -69,6 +69,14 @@ export interface AttemptHub {
    * detaches.
    */
   attached: Deferred.Deferred<AttemptRequest>;
+  /** Completes with the storage failure that failed the harness while a channel was attached. */
+  readonly storageFailure: Deferred.Deferred<DurableStorageFailed>;
+}
+
+/** An Attempt whose `execute` a storage failure ended, with its task to abort. */
+export interface EndedAttempt {
+  readonly attemptId: AttemptId;
+  readonly taskId: TaskId;
 }
 
 /**
@@ -111,7 +119,15 @@ export interface AttemptHubs {
    * Completes when an `execute` call is relaying the Attempt, even if the hub doesn't exist yet.
    */
   readonly attached: (attemptId: AttemptId) => Effect.Effect<void>;
-  /** Routes commits to hubs and wakes every hub after a reopen or stop. */
+  /**
+   * Returns the Attempts whose `execute` a storage failure ended since the last call, and forgets
+   * them.
+   */
+  readonly takeEnded: () => ReadonlyArray<EndedAttempt>;
+  /**
+   * Routes commits to hubs. After a storage failure, completes `storageFailure` of every hub with an
+   * attached channel.
+   */
   readonly listener: HarnessListener;
 }
 
@@ -127,6 +143,8 @@ export const attemptHubs = Effect.gen(function* () {
    * Deferred.
    */
   const awaited = new Map<string, Deferred.Deferred<AttemptRequest>>();
+  /** The Attempts whose `execute` a storage failure ended, by Attempt ID. */
+  const ended = new Map<AttemptId, EndedAttempt>();
 
   const bindParent = (hub: AttemptHub, parent: ConversationId) => {
     if (Option.isSome(hub.parent)) return;
@@ -145,6 +163,7 @@ export const attemptHubs = Effect.gen(function* () {
         const emission = yield* Semaphore.make(1);
         const routing = yield* Semaphore.make(1);
         const fresh = yield* Deferred.make<AttemptRequest>();
+        const storageFailure = yield* Deferred.make<DurableStorageFailed>();
         // No yield until the hub is registered, so a concurrent `notice` or `attached` sees either
         // the pre-hub buffers or the registered hub.
         const attached = awaited.get(attemptId) ?? fresh;
@@ -160,6 +179,7 @@ export const attemptHubs = Effect.gen(function* () {
           channel: Option.none(),
           early: early.get(attemptId) ?? [],
           attached,
+          storageFailure,
         };
         early.delete(attemptId);
         awaited.delete(attemptId);
@@ -208,11 +228,12 @@ export const attemptHubs = Effect.gen(function* () {
         }
       }
     },
-    onReopen: () => {
-      for (const target of byAttempt.values()) wake(target);
-    },
-    onStop: () => {
-      for (const target of byAttempt.values()) wake(target);
+    onFailure: (failure) => {
+      for (const target of byAttempt.values()) {
+        if (Option.isNone(target.channel)) continue;
+        ended.set(target.attemptId, { attemptId: target.attemptId, taskId: target.taskId });
+        Deferred.doneUnsafe(target.storageFailure, Exit.succeed(failure));
+      }
     },
   };
 
@@ -234,6 +255,11 @@ export const attemptHubs = Effect.gen(function* () {
         return { _tag: "Kept", kept };
       }),
     delivery: (target, delivery) => Queue.offer(target.queue, delivery).pipe(Effect.asVoid),
+    takeEnded: () => {
+      const taken = [...ended.values()];
+      ended.clear();
+      return taken;
+    },
     // Read `attached` at call time: `relayAttempt` replaces it when the channel detaches.
     attached: (attemptId) =>
       Effect.suspend(() => {
