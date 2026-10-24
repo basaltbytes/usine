@@ -1,5 +1,6 @@
 import type { LoopPermissions } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
+import { BotAccount, BotLogin, BotUserId } from "@usine/core/worker";
 import {
   Clock,
   Context,
@@ -73,6 +74,8 @@ const InstallationResponse = Schema.Struct({
 
 const InstallationsResponse = Schema.Array(InstallationResponse);
 
+const UserResponse = Schema.Struct({ login: BotLogin, id: BotUserId });
+
 const RepositoryResponse = Schema.Struct({
   id: RepositoryId,
   name: RepositoryName,
@@ -113,6 +116,11 @@ export class GitHubApp extends Context.Service<
   {
     /** Returns the App installation after checking its required permissions. */
     readonly installation: () => Effect.Effect<Installation, GitHubAppError>;
+    /**
+     * Returns the App's bot account, `<slug>[bot]`, read from GitHub's users API once per App
+     * slug.
+     */
+    readonly botAccount: () => Effect.Effect<BotAccount, GitHubAppError>;
     /** Returns the shared installation-wide token for orchestrator operations, renewing it near expiry. */
     readonly installationToken: () => Effect.Effect<InstallationToken, GitHubAppError>;
     /** Returns the access of every registry repository, with each uncovered Project as its own error. */
@@ -308,10 +316,47 @@ export class GitHubApp extends Context.Service<
         ),
       );
 
+      const botAccountRef = yield* SynchronizedRef.make(
+        Option.none<{ readonly appSlug: AppSlug; readonly account: BotAccount }>(),
+      );
+
+      const botAccount = Effect.fn("GitHubApp.botAccount")(() =>
+        SynchronizedRef.modifyEffect(botAccountRef, (current) =>
+          Effect.gen(function* () {
+            const { installation, token } = yield* lease();
+            const { appSlug } = installation;
+            yield* Effect.annotateCurrentSpan({ appSlug });
+            if (Option.isSome(current) && current.value.appSlug === appSlug) {
+              const kept: [BotAccount, typeof current] = [current.value.account, current];
+              return kept;
+            }
+            const user = yield* fetchJson(
+              "read-bot-account",
+              HttpClientRequest.get(
+                `${API_ROOT}/users/${encodeURIComponent(`${appSlug}[bot]`)}`,
+              ).pipe(authorized(token.value)),
+              UserResponse,
+            );
+            const account = new BotAccount(user);
+            yield* Effect.logInfo("Read the App's bot account", {
+              appSlug,
+              login: account.login,
+              id: account.id,
+            });
+            const stored: [BotAccount, typeof current] = [
+              account,
+              Option.some({ appSlug, account }),
+            ];
+            return stored;
+          }),
+        ),
+      );
+
       return {
         installation: Effect.fn("GitHubApp.installation")(() =>
           Effect.map(lease(), (current) => current.installation),
         ),
+        botAccount,
         installationToken: Effect.fn("GitHubApp.installationToken")(() =>
           Effect.map(lease(), (current) => current.token),
         ),

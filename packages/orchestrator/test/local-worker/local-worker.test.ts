@@ -62,7 +62,7 @@ import {
   worksFor,
 } from "@usine/durable/testing";
 import { fixedConfigLayer } from "../support/current-instance.ts";
-import { testAppLayer } from "../support/github-app.ts";
+import { testAppLayer, testBotAccount } from "../support/github-app.ts";
 import { alwaysHoldsLayer } from "../support/polling.ts";
 import { runView } from "../../src/operator/projection.ts";
 import {
@@ -580,6 +580,7 @@ describe("local worker", () => {
                 parentEffort: "high",
                 salvageRef: SalvageRef.make(`usine/salvage/prepare-${phase}/1`),
                 resume: Option.none(),
+                commitAuthor: testBotAccount,
               }),
             );
             if (phase === "diagnostic") {
@@ -658,6 +659,7 @@ describe("local worker", () => {
             parentEffort: "high",
             salvageRef: SalvageRef.make("usine/salvage/unlaunched/1"),
             resume: Option.none(),
+            commitAuthor: testBotAccount,
           });
           const prepared = yield* Effect.scoped(
             Effect.gen(function* () {
@@ -799,16 +801,36 @@ describe("local worker", () => {
   );
 
   it.live(
-    "gives the parent task only the allowlisted environment, the Attempt credential, and a Worker-scoped Turbo cache",
+    "gives the parent task only the allowlisted environment, the Attempt credential, the App's bot as commit author, and a Worker-scoped Turbo cache",
     () =>
       Effect.gen(function* () {
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
         const environments: Array<Record<string, string>> = [];
+        const identities: Array<string> = [];
+        // Commits like a child, with the Attempt's environment and an operator identity in git config.
+        const commitAsChild = (cwd: string, environment: Record<string, string>) =>
+          spawner
+            .string(
+              ChildProcess.make(
+                "sh",
+                [
+                  "-c",
+                  "git -c user.name=Operator -c user.email=operator@example.invalid -c commit.gpgsign=false commit -q --allow-empty -m child && git log -1 --format='%an <%ae>|%cn <%ce>'",
+                ],
+                { cwd, env: environment, extendEnv: false },
+              ),
+            )
+            .pipe(Effect.orDie);
         yield* withLocalEngine(
           {
             attemptRuntime: stubAttemptRuntime(new StubStorage(), (context) =>
-              Effect.sync(() => environments.push(context.request.environment)).pipe(
-                Effect.andThen(completes(context)),
-              ),
+              Effect.gen(function* () {
+                environments.push(context.request.environment);
+                identities.push(
+                  (yield* commitAsChild(context.request.cwd, context.request.environment)).trim(),
+                );
+                return yield* completes(context);
+              }),
             ),
           },
           ({ engine, instance }) =>
@@ -837,12 +859,18 @@ describe("local worker", () => {
                 "GIT_CONFIG_VALUE_0",
                 "GIT_CONFIG_KEY_1",
                 "GIT_CONFIG_VALUE_1",
+                "GIT_AUTHOR_NAME",
+                "GIT_AUTHOR_EMAIL",
+                "GIT_COMMITTER_NAME",
+                "GIT_COMMITTER_EMAIL",
                 "TURBO_CACHE_DIR",
               ]);
               assert.deepStrictEqual(
                 Object.keys(environment).filter((name) => !allowed.has(name)),
                 [],
               );
+              const bot = "usine-test[bot] <4242+usine-test[bot]@users.noreply.github.com>";
+              assert.deepStrictEqual(identities, [`${bot}|${bot}`]);
               assert.strictEqual(
                 environment.TURBO_CACHE_DIR,
                 path.join(instance, ".usine", "workers", "local", "turbo"),
@@ -850,7 +878,7 @@ describe("local worker", () => {
               assert(!JSON.stringify(environment).includes(TOKEN));
             }),
         );
-      }),
+      }).pipe(Effect.provide(NodeServices.layer)),
     LIVE_TEST_TIMEOUT,
   );
 
@@ -887,27 +915,29 @@ describe("local worker", () => {
   );
 
   it.effect(
-    "gives an exe.dev Attempt exe.dev's integration bot, and an Attempt no bot login when the App cannot be read, and acquires no checkout when preparation fails",
+    "commits as the App's bot on every Worker kind, fails an Attempt whose bot can't be read before preparation, and acquires no checkout when preparation fails",
     () =>
       Effect.gen(function* () {
+        const missing = new InstallationDiscoveryError({
+          reason: "missing",
+          message:
+            "The GitHub App is not installed on any account. Install it on the account that owns the repositories.",
+        });
         const unreadableApp = Layer.succeed(GitHubApp)({
-          installation: () =>
-            Effect.fail(
-              new InstallationDiscoveryError({
-                reason: "missing",
-                message:
-                  "The GitHub App is not installed on any account. Install it on the account that owns the repositories.",
-              }),
-            ),
+          installation: () => Effect.fail(missing),
+          botAccount: () => Effect.fail(missing),
           installationToken: () => Effect.die("unused"),
           projectAccess: () => Effect.die("unused"),
           workerToken: () => Effect.die("unused"),
         });
+        const author = "4242+usine-test[bot]@users.noreply.github.com";
+        // A missing installation is a refusal, which no retry fixes.
         const cases = [
-          ["exe.dev", testAppLayer, "exe-dev-github-integration[bot]"],
-          ["local", unreadableApp, null],
+          ["exe.dev", testAppLayer, [["exe-dev-github-integration[bot]", author]], "InfraFailure"],
+          ["local", testAppLayer, [["usine-test[bot]", author]], "InfraFailure"],
+          ["local", unreadableApp, [], "AgentFailure"],
         ] as const;
-        for (const [kind, app, expected] of cases) {
+        for (const [kind, app, expected, failure] of cases) {
           const requested: Array<CheckoutRequest> = [];
           const acquired: Array<AttemptId> = [];
           const executor = Layer.succeed(Executor)({
@@ -934,10 +964,10 @@ describe("local worker", () => {
             repos: [{ name: "acme/demo" }],
             workers: [{ name: "worker", kind, max_concurrent_attempts: 1 }],
           });
-          yield* Effect.gen(function* () {
+          const failed = yield* Effect.gen(function* () {
             const selected = submission(9);
             const runId = RunId.make(`bot-login-${kind}`);
-            yield* (yield* StepExecutor)
+            return yield* (yield* StepExecutor)
               .execute(
                 new StepExecution({
                   attempt: new Attempt({
@@ -994,12 +1024,14 @@ describe("local worker", () => {
               ),
             ),
           );
-          assert.deepStrictEqual(
-            requested.map(({ botLogin }) =>
+          const writers: ReadonlyArray<ReadonlyArray<string | null>> = requested.map(
+            ({ botLogin, commitAuthor }) => [
               Option.getOrNull(Option.map(botLogin, (login): string => login)),
-            ),
-            [expected],
+              commitAuthor.noreplyEmail,
+            ],
           );
+          assert.deepStrictEqual(writers, expected);
+          assert.strictEqual(failed._tag, failure);
           // The engine reconciles a checkout kept for a reattachment until preparation acquires it
           // (#180).
           assert.deepStrictEqual(acquired, []);

@@ -44,8 +44,8 @@ import {
   type HarnessProbe,
   verifyHarnessReadiness,
 } from "../harness-preflight.ts";
+import { childEnvironment } from "../child-environment.ts";
 import { keyedLockFor } from "../keyed-lock.ts";
-import { withGitHooks } from "../pre-push-hook.ts";
 import {
   SwapOnDemand,
   verifyLinuxMemory,
@@ -477,8 +477,9 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         reattach: request.reattach,
         worktree,
       });
-      const environment = withGitHooks(
+      const environment = childEnvironment(
         attemptEnvironment(prepared.workspace, credential),
+        request.commitAuthor,
         prepared.gitHooks,
       );
       return {

@@ -34,3 +34,9 @@ The token is the boundary on every worker kind, and the local worker's allowlist
 The level is recorded with the event on match, like the agent and task, so a run keeps its opening level.
 
 exe.dev's integration grants the access of exe.dev's own App and can't be narrowed per attempt, so exe.dev workers refuse `read` loop attempts before attaching it, with a `credentials` capability error naming the worker and loop. A push-capable token behind only the hook would make `permissions: read` meaningless there.
+
+## Amendment (2026-10-24, #242): the App's bot account authors every attempt's commits
+
+On 2026-10-14, a finish-pr attempt on the local worker made commit 69d4da0 on PR #238 as the operator. The local worker passes `HOME`, so git read the operator's global config, and nothing else set an identity. An earlier finish-pr commit, b91afd0 on PR #232, had the bot identity only because its agent chose to pass `git -c user.name=... -c user.email=...`. Commits now follow the App identity like every other GitHub action: the scheduler puts the App's bot account in each `CheckoutRequest`, and every worker kind sets `GIT_AUTHOR_*` and `GIT_COMMITTER_*` in the parent's and children's environment, which git prefers to any config. On exe.dev, the integration's bot still pushes, and the App's bot authors.
+
+The address is `<id>+<slug>[bot]@users.noreply.github.com`, the ID-based noreply form that GitHub links to an account even after a rename. The ID is the bot account's, read once from `GET /users/<slug>[bot]`. The App ID is a different number, and as an account ID it can belong to an unrelated user. An attempt whose bot account can't be read fails before preparation, retried unless GitHub refused, because without the variables its commits would take the machine's identity again.

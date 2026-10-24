@@ -37,6 +37,7 @@ import {
   withLocalEngine,
   workerCredential,
 } from "./support.ts";
+import { testBotAccount } from "../support/github-app.ts";
 
 /** What the scripted parent observed in the Attempt's checkout. */
 interface Observed {
@@ -120,6 +121,7 @@ describe("local worker Loop permissions", () => {
             parentEffort: "high",
             salvageRef: SalvageRef.make(`usine/salvage/review/${permissions}`),
             resume: Option.none(),
+            commitAuthor: testBotAccount,
           });
         const remoteBranches = () =>
           output("git", ["--git-dir", remote, "for-each-ref", "--format=%(refname)"]);

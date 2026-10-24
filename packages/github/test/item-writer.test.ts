@@ -30,6 +30,7 @@ const appLayer = Layer.succeed(GitHubApp)({
       }),
     ),
   installationToken: () => Effect.succeed(token),
+  botAccount: () => Effect.die("unused"),
   projectAccess: () => Effect.die("unused"),
   workerToken: () => Effect.die("unused"),
 });

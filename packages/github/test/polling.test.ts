@@ -33,6 +33,7 @@ const appLayer = Layer.succeed(GitHubApp)({
       }),
     ),
   installationToken: () => Effect.succeed(token),
+  botAccount: () => Effect.die("not used by polling tests"),
   projectAccess: () => Effect.die("not used by polling tests"),
   workerToken: () => Effect.die("not used by polling tests"),
 });

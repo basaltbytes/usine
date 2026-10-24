@@ -13,7 +13,10 @@ const PositiveIntFromString = Schema.FiniteFromString.pipe(
 );
 const Comment = Schema.Struct({
   id: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
-  user: Schema.Struct({ login: Schema.NonEmptyString }),
+  user: Schema.Struct({
+    login: Schema.NonEmptyString,
+    id: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+  }),
 });
 
 const fetchJson = Effect.fn("integration.fetchJson")(function* <S extends Schema.Constraint>(
@@ -85,6 +88,7 @@ describe("operator-created GitHub App", () => {
         const workerToken = yield* app.workerToken(project, "read");
         assert.strictEqual(workerToken.scope._tag, "SingleRepository");
 
+        const bot = yield* app.botAccount();
         const token = Redacted.value(workerToken.value);
         yield* Effect.acquireUseRelease(
           fetchJson(
@@ -102,6 +106,9 @@ describe("operator-created GitHub App", () => {
             Effect.sync(() => {
               assert.strictEqual(comment.user.login, settings.botLogin);
               assert.match(comment.user.login, /\[bot\]$/u);
+              // The account that comments is the one whose ID goes in commit addresses.
+              assert.strictEqual(bot.login, comment.user.login);
+              assert.strictEqual(bot.id, comment.user.id);
             }),
           (comment) => deleteComment(repository, comment.id, token),
         );

@@ -36,6 +36,7 @@ describe("GitHub credential provider", () => {
     const app = Layer.succeed(GitHubApp)({
       installation: () => Effect.die("unused"),
       installationToken: () => Effect.die("unused"),
+      botAccount: () => Effect.die("unused"),
       projectAccess: () => Effect.succeed([project]),
       workerToken: (_project, permissions) =>
         Effect.sync(() => {
@@ -78,6 +79,7 @@ describe("GitHub credential provider failures", () => {
         Layer.succeed(GitHubApp)({
           installation: () => Effect.die("unused"),
           installationToken: () => Effect.die("unused"),
+          botAccount: () => Effect.die("unused"),
           projectAccess: () => Effect.succeed(projects),
           workerToken: () => Effect.fail(mint),
         }),

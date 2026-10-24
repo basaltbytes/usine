@@ -22,8 +22,8 @@ import {
   WorkerCapabilityError,
 } from "../executor.ts";
 import { verifyHarnessReadiness } from "../harness-preflight.ts";
+import { childEnvironment } from "../child-environment.ts";
 import { keyedLockFor } from "../keyed-lock.ts";
-import { withGitHooks } from "../pre-push-hook.ts";
 import {
   cacheDirectoryName,
   type ProvisionedWorktree,
@@ -472,7 +472,11 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
               });
               return yield* session.launch(prepared, io, {
                 host: access.shell,
-                environment: withGitHooks(access.environment, provisioned.gitHooks),
+                environment: childEnvironment(
+                  access.environment,
+                  request.commitAuthor,
+                  provisioned.gitHooks,
+                ),
                 gatewayCredential,
                 harvest: (windows) => harvest(prepared, access, windows),
                 harvestComments: (windows) =>

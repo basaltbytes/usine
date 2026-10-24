@@ -8,7 +8,7 @@ import { salvageRefFor } from "@usine/core/attempt/salvage";
 import { BotLogin, WorkerName } from "@usine/core/worker";
 import { CheckoutRequest, Executor, ExecutorError, ExecutorOperationError } from "@usine/executor";
 import { StepExecutor, type WorkerLease } from "@usine/engine/step-executor";
-import { GitHubApp, type Installation } from "@usine/github/github-app";
+import { GitHubApp, isRefusal } from "@usine/github/github-app";
 import {
   Array as EffectArray,
   Context,
@@ -178,7 +178,6 @@ const brainLabel = ({ harness, model, effort }: BrainSpec) => `${harness}/${mode
 
 /** The login that exe.dev Workers write to GitHub as, through exe.dev's integration (ADR 0011). */
 const EXE_DEV_BOT_LOGIN = BotLogin.make("exe-dev-github-integration[bot]");
-const decodeBotLogin = Schema.decodeUnknownOption(BotLogin);
 
 /**
  * The Worker set of an executor that connects only to the Workers it was given, such as the SSH
@@ -570,29 +569,33 @@ export const stepExecutorLayer = (
         },
       );
 
-      // If the login can't be read, harvesting asks GitHub; the Attempt never fails for this.
-      const botLoginFor = Effect.fn("WorkerScheduler.botLogin")(function* (attemptId: AttemptId) {
-        if (executor.kind === "exe.dev") return Option.some(EXE_DEV_BOT_LOGIN);
-        const installation = yield* app.installation().pipe(
-          Effect.map(Option.some),
-          Effect.catch((error) =>
-            Effect.logWarning(
-              "Could not read the App's installation; harvesting will ask GitHub for the login of the Attempt's credential",
-              { attemptId, errorTag: error._tag, message: error.message },
-            ).pipe(Effect.as(Option.none<Installation>())),
+      // Every Worker kind commits as the App's bot account; only exe.dev writes to GitHub through
+      // another bot.
+      const writerFor = Effect.fn("WorkerScheduler.writer")(
+        function* (attemptId: AttemptId) {
+          yield* Effect.annotateCurrentSpan({ attemptId });
+          const commitAuthor = yield* app.botAccount();
+          const botLogin = executor.kind === "exe.dev" ? EXE_DEV_BOT_LOGIN : commitAuthor.login;
+          return { commitAuthor, botLogin };
+        },
+        (effect, attemptId) =>
+          effect.pipe(
+            Effect.tapError((error) =>
+              Effect.logWarning(
+                isRefusal(error)
+                  ? "Could not read the App's bot account, which authors the Attempt's commits; the Attempt fails without an automatic retry"
+                  : "Could not read the App's bot account, which authors the Attempt's commits; the Attempt fails with an infrastructure failure, which is retried",
+                { attemptId, errorTag: error._tag, message: error.message },
+              ),
+            ),
+            Effect.mapError((error) => {
+              const message = `Can't read the GitHub App's bot account, which authors the attempt's commits: ${error.message}`;
+              return isRefusal(error)
+                ? new AgentFailure({ message })
+                : new InfraFailure({ message, cause: error });
+            }),
           ),
-        );
-        if (Option.isNone(installation)) return Option.none<BotLogin>();
-        const { appSlug } = installation.value;
-        // GitHub's REST API names an App's bot `<slug>[bot]`; its GraphQL API drops the suffix.
-        const login = decodeBotLogin(`${appSlug}[bot]`);
-        if (Option.isNone(login))
-          yield* Effect.logWarning(
-            "The App's slug does not form a bot login; harvesting will ask GitHub for the login of the Attempt's credential",
-            { attemptId, appSlug },
-          );
-        return login;
-      });
+      );
 
       const execute: StepExecutor["Service"]["execute"] = Effect.fn("WorkerScheduler.execute")(
         function* (execution, io) {
@@ -605,7 +608,7 @@ export const stepExecutorLayer = (
             reattach: execution.reattach,
           });
           const { settings } = (yield* instances.get).config;
-          const botLogin = yield* botLoginFor(execution.attempt.id);
+          const { commitAuthor, botLogin } = yield* writerFor(execution.attempt.id);
           const prepared = yield* executor
             .prepare(
               new CheckoutRequest({
@@ -626,7 +629,8 @@ export const stepExecutorLayer = (
                 salvageRef: salvageRefFor(execution.run.id, execution.attempt.number),
                 resume: execution.resume,
                 reattach: execution.reattach,
-                botLogin,
+                botLogin: Option.some(botLogin),
+                commitAuthor,
               }),
             )
             .pipe(

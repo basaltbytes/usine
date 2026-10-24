@@ -15,6 +15,7 @@ import { CheckoutRequest, Executor } from "../../src/executor.ts";
 import {
   aloneOnItem,
   ATTEMPT_ID,
+  COMMIT_AUTHOR,
   SSH_ENVIRONMENT_ALLOWLIST,
   TEST_AGENT,
   WORKER,
@@ -309,7 +310,14 @@ describe("exe.dev launch", () => {
         assert(given !== undefined);
         assert.strictEqual(given.cwd, WORKTREE);
         assert.deepStrictEqual(given.spec, prepared.workspace.spec);
-        assert.deepStrictEqual(given.environment, { GH_HOST: "github.int.exe.xyz" });
+        // exe.dev's integration pushes, but the factory App's bot authors and commits.
+        assert.deepStrictEqual(given.environment, {
+          GH_HOST: "github.int.exe.xyz",
+          GIT_AUTHOR_NAME: COMMIT_AUTHOR.login,
+          GIT_AUTHOR_EMAIL: COMMIT_AUTHOR.noreplyEmail,
+          GIT_COMMITTER_NAME: COMMIT_AUTHOR.login,
+          GIT_COMMITTER_EMAIL: COMMIT_AUTHOR.noreplyEmail,
+        });
         assert(given.host instanceof RemoteShell);
         assert.strictEqual(given.host.destination, "remote-one.exe.xyz");
         assert.strictEqual(given.host.ssh.command, "ssh");

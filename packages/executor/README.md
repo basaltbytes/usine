@@ -21,6 +21,8 @@ Preparation stays interruptible during clone, fetch, credential requests, and lo
 
 `CheckoutRequest.maxAttemptMinutes` bounds live execution, excluding preparation and cleanup. Both runaway ceilings are optional: an absent one leaves that half of the guard off, and an armed one steers the parent once at 80%. The clock starts once launch registers the session. The guard delivers its warning apart from its checks, once an `execute` relays the parent's channel (`AttemptRuntime.attached`): no trip waits for delivery, and the append that reaches the token warning returns before the steer is delivered, since the durable runtime records the steer in order with its envelopes.
 
+`CheckoutRequest.commitAuthor` is the GitHub App's bot account. Every worker kind sets it as `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME`, and `GIT_COMMITTER_EMAIL` in the parent's and children's environment, which git prefers to any `user.name` and `user.email` config on the machine. On a remote worker they're exported in each command line, since they aren't secret.
+
 `CheckoutRequest.permissions` is the loop's permission level. A `read` attempt's credential has `contents: read`, so it can't push. An exe.dev worker can't grant that, and refuses the attempt with a `credentials` `WorkerCapabilityError` before attaching the integration. A `read` checkout also gets a pre-push hook that stops `git push` with a message naming the loop, instead of GitHub's 403; `git push --no-verify` skips it, and the token still refuses. A `read` attempt is never salvaged.
 
 ### Salvage
@@ -58,7 +60,7 @@ For each attempt, `@usine/executor/local`:
 - checks Git and the assigned harness before accepting work;
 - updates a per-repo bare cache, then creates a detached worktree at the resolved revision;
 - renews repo credentials before expiry. Git reads an attempt token file and `gh` its private `GH_CONFIG_DIR` on each call, so a salvage push after hours uses the latest credential; startup reconciliation issues a fresh one;
-- runs the Pi parent here through `AttemptRuntime` (`@usine/durable`) with the attempt's environment: allowlisted variables, credential settings, and `TURBO_CACHE_DIR`, never the orchestrator's environment;
+- runs the Pi parent here through `AttemptRuntime` (`@usine/durable`) with the attempt's environment: allowlisted variables, credential settings, `TURBO_CACHE_DIR`, and the request's `commitAuthor` as `GIT_AUTHOR_*` and `GIT_COMMITTER_*`, never the orchestrator's environment;
 - harvests commits and pull requests from the worktree, and the attempt's comments and reviews on the item, with `@usine/core/step/harvest`, running `git` and `gh` in that environment. A failed or canceled attempt (unless this process stopped) gets only its comments harvested, after its parent task stops, through `Sink.comments`. `Sink.windows` reads the attempt windows after GitHub lists the comments, and the harvest keeps comments by the window rule of `@usine/core` (#429). If the windows can't be read, a finished attempt's harvest fails and a failed attempt records no comment;
 - cancels the parent task before forced interruption, then removes the worktree and wipes the credential.
 

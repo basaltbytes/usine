@@ -23,6 +23,26 @@ export const BotLogin = Schema.String.check(
 ).pipe(Schema.brand("BotLogin"));
 export type BotLogin = typeof BotLogin.Type;
 
+/** The user ID of a GitHub App's bot account. It differs from the App ID. */
+export const BotUserId = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pipe(
+  Schema.brand("BotUserId"),
+);
+export type BotUserId = typeof BotUserId.Type;
+
+/**
+ * A GitHub App's bot account. The factory App's account authors and commits every Attempt's
+ * commits on every Worker kind (ADR 0011).
+ */
+export class BotAccount extends Schema.Class<BotAccount>("BotAccount")({
+  login: BotLogin,
+  id: BotUserId,
+}) {
+  /** The ID-based noreply address, which GitHub links to the account even after a rename. */
+  get noreplyEmail(): string {
+    return `${String(this.id)}+${this.login}@users.noreply.github.com`;
+  }
+}
+
 /**
  * The `ssh` destination: a host name, address, or SSH config Host alias, optionally prefixed
  * with `user@`. Rejects values that `ssh` could parse as an option, such as `-oProxyCommand=...`.

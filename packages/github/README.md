@@ -56,6 +56,8 @@ export const githubLayer = GitHubApp.layer.pipe(
 
 `installation()`, `installationToken()`, and `projectAccess()` share one lease: one installation discovery and installation-wide mint, reused until five minutes before expiry, so polling makes no App requests between renewals. `workerToken()` mints on every call, so each attempt gets its own token.
 
+`botAccount()` returns the App's bot account, `<slug>[bot]` and its user ID, which differs from the App ID. It reads `GET /users/<slug>[bot]` with the installation-wide token once per slug. Commits use the account's ID-based noreply address, `<id>+<slug>[bot]@users.noreply.github.com`.
+
 Call `GitHubApp.projectAccess(registry)` before scheduling. Each result is a `CoveredProject`, with the repo ID for scoped minting, or a `ProjectNotInstalledError`. A missing repo doesn't block covered ones.
 
 Pass a `CoveredProject` and the attempt's loop permission level to `GitHubApp.workerToken`. If GitHub's response doesn't confirm that the token covers exactly that repo ID, it fails with `InvalidGitHubResponseError`. `WORKER_TOKEN_PERMISSIONS` lists each level's permissions: a `read` token has `contents: read`, so it can't push, and keeps `pull_requests: write` and `issues: write` for reviews and comments.

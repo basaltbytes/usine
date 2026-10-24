@@ -31,6 +31,7 @@ import {
   waitForStarted,
   withLocalEngine,
 } from "./support.ts";
+import { testBotAccount } from "../support/github-app.ts";
 
 describe("local worker salvage", () => {
   it.live(
@@ -137,6 +138,7 @@ describe("local worker salvage", () => {
             parentEffort: "high",
             salvageRef: SalvageRef.make("usine/salvage/r/2"),
             resume: Option.some(new SalvagePushed({ ref, commit: salvageCommit })),
+            commitAuthor: testBotAccount,
           });
           yield* Effect.scoped(
             Effect.gen(function* () {
@@ -321,6 +323,7 @@ describe("local worker salvage", () => {
             parentEffort: "high",
             salvageRef: SalvageRef.make(`usine/salvage/r/${number}`),
             resume: Option.some(resume),
+            commitAuthor: testBotAccount,
           });
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
