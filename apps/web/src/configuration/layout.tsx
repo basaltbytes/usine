@@ -1,5 +1,12 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { Link, Outlet, useMatchRoute, useParams, useRouter } from "@tanstack/react-router";
+import {
+  type ErrorComponentProps,
+  Link,
+  Outlet,
+  useMatchRoute,
+  useParams,
+  useRouter,
+} from "@tanstack/react-router";
 import { ErrorAlert } from "@/components/error-alert";
 import { Page } from "@/components/page";
 import {
@@ -11,6 +18,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
+import { rejectionMessage } from "../api.ts";
 import { overviewQuery } from "../overview.ts";
 import { usePauseLoop } from "./query.ts";
 import { SectionReloadProvider } from "./reload.tsx";
@@ -64,11 +72,11 @@ export const ConfigurationPending = () => (
   </Page>
 );
 
-export const ConfigurationUnavailable = ({ error }: { readonly error: Error }) => {
+export const ConfigurationUnavailable = ({ error }: ErrorComponentProps) => {
   const router = useRouter();
   return (
     <Page width="full">
-      <ErrorAlert title="Could not load the configuration" message={error.message} />
+      <ErrorAlert title="Could not load the configuration" message={rejectionMessage(error)} />
       <div>
         <Button variant="outline" onClick={() => void router.invalidate()}>
           Try again

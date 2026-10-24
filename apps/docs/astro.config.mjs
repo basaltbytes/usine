@@ -13,6 +13,8 @@ export default defineConfig({
       autoTheme: true,
       enableLog: false,
       mermaidConfig: {
+        layout: "dagre",
+        look: "classic",
         flowchart: { useMaxWidth: false },
         sequence: { useMaxWidth: false, width: 120, actorMargin: 30 },
         state: { useMaxWidth: false },
