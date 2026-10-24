@@ -2,10 +2,11 @@ import { HarnessSessionId } from "@usine/core/agent/session";
 import { Schema } from "effect";
 
 /**
- * Request types sent to the Codex app server, copied from
+ * The Codex app-server wire types: the request types that usine sends, copied from
  * `@pwrdrvr/codex-app-server-protocol@0.159.2` (codex-cli 0.159.2) because that package resolves
- * only under bundler module resolution. `protocol-conformance/check.ts` fails `pnpm check` if these
- * types or the decoders below drift from the package.
+ * only under bundler module resolution, and the decoders for the responses and notifications that
+ * usine reads. `protocol-conformance/check.ts` fails `pnpm check` if either drifts from the
+ * package; it compiles this module without Node types, so nothing here imports a Node module.
  */
 export interface InitializeParams {
   readonly clientInfo: {
