@@ -31,6 +31,7 @@ const appLayer = Layer.succeed(GitHubApp)({
         scope: new InstallationWide(),
       }),
     ),
+  botAccount: () => Effect.die("not used by history tests"),
   projectAccess: () => Effect.die("not used by history tests"),
   workerToken: () => Effect.die("not used by history tests"),
 });

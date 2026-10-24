@@ -30,6 +30,7 @@ import {
 import { TestClock } from "effect/testing";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { stubAttemptRuntime, StubStorage } from "@usine/durable/testing";
+import { testBotAccount } from "../support/github-app.ts";
 import { LIVE_TEST_TIMEOUT, harnessReady, makeRemote, testAgent } from "./support.ts";
 
 it.effect(
@@ -112,6 +113,7 @@ it.effect(
               maxAttemptTokens: Option.none(),
               salvageRef: SalvageRef.make("usine/salvage/renew/1"),
               resume: Option.none(),
+              commitAuthor: testBotAccount,
             }),
           )
           .pipe(Scope.provide(scope));

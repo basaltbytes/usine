@@ -7,7 +7,7 @@ import { InfraFailure } from "@usine/core/attempt/failure";
 import { SalvageRef } from "@usine/core/attempt/salvage";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName, CommitSha, RepositoryRevision } from "@usine/core/repository";
-import { WorkerName } from "@usine/core/worker";
+import { BotAccount, BotLogin, BotUserId, WorkerName } from "@usine/core/worker";
 import type { AttemptRuntime } from "@usine/durable/attempt-runtime";
 import {
   completes,
@@ -315,6 +315,12 @@ export const fakeSsh = (sweepMode: SweepMode = "valid") => {
 
 const integration = new GitHubIntegration({ repository: REPOSITORY, name: INTEGRATION });
 
+/** The bot account that commits in the fixture Attempts. */
+export const COMMIT_AUTHOR = new BotAccount({
+  login: BotLogin.make("usine-test[bot]"),
+  id: BotUserId.make(4242),
+});
+
 export const request = new CheckoutRequest({
   attemptId: ATTEMPT_ID,
   worker: WORKER,
@@ -332,6 +338,7 @@ export const request = new CheckoutRequest({
   parentEffort: "high",
   salvageRef: SalvageRef.make("usine/salvage/remote-run/1"),
   resume: Option.none(),
+  commitAuthor: COMMIT_AUTHOR,
 });
 
 /** A parent that fails the Attempt like a crash. */

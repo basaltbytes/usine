@@ -71,7 +71,7 @@ Everything after the closing `---` line is the persona, and it must not be blank
 
 Use the persona for instructions that apply to every loop of the agent: how it works, what it never does, and how it reports. The loop body has the task for one item. After both, usine adds [fixed instructions](/reference/configuration/loop-files/#agent-prompt) that you can't change, including the signature `— usine agent: <name>` at the end of every GitHub comment, issue, pull request, and review.
 
-Loops can rely on the signature, as the `act-on-findings` example in [More examples](/reference/configuration/loop-files/#more-examples) does. Agents write to GitHub as one bot login, so an attempt counts a comment or review on its item as its own only if the body ends with its agent's signature. Other comments aren't listed with the attempt on the task page, and don't count as its work when the parent's last turn answered the operator.
+Loops can rely on the signature, as the `act-on-findings` example in [More examples](/reference/configuration/loop-files/#more-examples) does. Agents write to GitHub as one bot login, so an attempt counts a comment or review on its item as its own only if the body ends with its agent's signature. Other comments aren't listed with the attempt on the task page, and don't count as its work when the parent's last turn answered the operator. Commits have the GitHub App's bot as author and committer on every worker, whatever git identity the worker's user has configured.
 
 ## Roster
 

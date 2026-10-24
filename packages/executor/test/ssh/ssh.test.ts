@@ -13,6 +13,7 @@ import { SSH_ENVIRONMENT_ALLOWLIST } from "../../src/remote/commands.ts";
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
 import {
   aloneOnItem,
+  COMMIT_AUTHOR,
   CREDENTIALS,
   DESTINATION,
   GIT_DIRECTORY,
@@ -132,6 +133,13 @@ describe("SSH Worker", () => {
         assert.strictEqual(given.environment.GH_CONFIG_DIR, CREDENTIALS);
         assert.strictEqual(given.environment.USINE_GITHUB_TOKEN_FILE, `${CREDENTIALS}/token`);
         assert.strictEqual(given.environment.GIT_CONFIG_KEY_1, "credential.helper");
+        // The App's bot commits, whatever git config the machine's user has.
+        assert.deepInclude(given.environment, {
+          GIT_AUTHOR_NAME: COMMIT_AUTHOR.login,
+          GIT_AUTHOR_EMAIL: COMMIT_AUTHOR.noreplyEmail,
+          GIT_COMMITTER_NAME: COMMIT_AUTHOR.login,
+          GIT_COMMITTER_EMAIL: COMMIT_AUTHOR.noreplyEmail,
+        });
         assert.strictEqual(credentialDuringLaunch, `${TOKEN_PREFIX}1`);
 
         const lines = machine.state.calls.map(({ line }) => line);

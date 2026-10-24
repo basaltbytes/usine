@@ -182,6 +182,47 @@ describe("GitHubApp", () => {
     },
   );
 
+  it.live("reads the App's bot account with the installation token and keeps it once read", () => {
+    const expiresAt = new Date(Date.now() + 50 * 60 * 1_000).toISOString();
+    const lookups: Array<HttpClientRequest.HttpClientRequest> = [];
+    const client = HttpClient.make((request) =>
+      Effect.sync(() => {
+        if (request.url.endsWith("/app/installations?per_page=2"))
+          return jsonResponse(request, [installation]);
+        if (request.url.endsWith("/app/installations/77/access_tokens"))
+          return jsonResponse(request, { token: "installation-secret", expires_at: expiresAt });
+        if (request.url.endsWith("/users/usine-basaltbytes%5Bbot%5D")) {
+          lookups.push(request);
+          return lookups.length === 1
+            ? jsonResponse(request, { message: "Server Error" }, 502)
+            : jsonResponse(request, {
+                login: "usine-basaltbytes[bot]",
+                id: 323694641,
+                type: "Bot",
+              });
+        }
+        return jsonResponse(request, { message: "unexpected request" }, 500);
+      }),
+    );
+
+    return Effect.gen(function* () {
+      const app = yield* GitHubApp;
+      const outage = yield* app.botAccount().pipe(Effect.flip);
+      assert(outage._tag === "GitHubApiError");
+      assert.strictEqual(outage.operation, "read-bot-account");
+      const account = yield* app.botAccount();
+      assert.strictEqual(account.login, "usine-basaltbytes[bot]");
+      // The bot account's ID, not the App's 12345, links commits to the bot.
+      assert.strictEqual(
+        account.noreplyEmail,
+        "323694641+usine-basaltbytes[bot]@users.noreply.github.com",
+      );
+      assert.deepStrictEqual(yield* app.botAccount(), account);
+      assert.strictEqual(lookups.length, 2);
+      assert.strictEqual(lookups[1]?.headers.authorization, "Bearer installation-secret");
+    }).pipe(Effect.provide(appLayer(client)));
+  });
+
   it.live("mints a worker token that can push only for a write Loop", () => {
     const expiresAt = new Date(Date.now() + 50 * 60 * 1_000).toISOString();
     const bodies: Array<typeof TokenRequestBody.Type> = [];

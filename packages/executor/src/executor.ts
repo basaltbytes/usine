@@ -8,7 +8,7 @@ import { AttemptFailure } from "@usine/core/attempt/failure";
 import { LoopName, LoopPermissions } from "@usine/core/loop";
 import { SalvagePushed, SalvageRef } from "@usine/core/attempt/salvage";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
-import { BotLogin, WorkerName, WorkerKind } from "@usine/core/worker";
+import { BotAccount, BotLogin, WorkerName, WorkerKind } from "@usine/core/worker";
 import { StepResult } from "@usine/core/step/result";
 import { Context, Effect, Option, type Result, Schema, Scope } from "effect";
 
@@ -166,6 +166,11 @@ export class CheckoutRequest extends Schema.Class<CheckoutRequest>(
   botLogin: Schema.Option(BotLogin).pipe(
     Schema.withConstructorDefault(Effect.succeed(Option.none<BotLogin>())),
   ),
+  /**
+   * The author and committer of every commit that the Attempt's parent and children make. Their
+   * environment sets it, so no git config on the Worker's machine applies.
+   */
+  commitAuthor: BotAccount,
 }) {}
 
 export const WorktreePath = Schema.NonEmptyString.pipe(Schema.brand("WorktreePath"));

@@ -8,6 +8,9 @@ import { SalvageRef } from "@usine/core/attempt/salvage";
 import { LoopName, type LoopPermissions } from "@usine/core/loop";
 import { RepositoryName, CommitSha, RepositoryRevision } from "@usine/core/repository";
 import {
+  BotAccount,
+  BotLogin,
+  BotUserId,
   SshDestination,
   SshIdentityFile,
   SshPort,
@@ -427,6 +430,12 @@ export const mintingProvider = (lifetimeMillis = 3_600_000) => {
   return { minted, permissions, layer };
 };
 
+/** The bot account that commits in the fixture Attempts. */
+export const COMMIT_AUTHOR = new BotAccount({
+  login: BotLogin.make("usine-test[bot]"),
+  id: BotUserId.make(4242),
+});
+
 export const request = new CheckoutRequest({
   attemptId: ATTEMPT_ID,
   worker: WORKER,
@@ -444,6 +453,7 @@ export const request = new CheckoutRequest({
   parentEffort: "high",
   salvageRef: SalvageRef.make("usine/salvage/remote-run/1"),
   resume: Option.none(),
+  commitAuthor: COMMIT_AUTHOR,
 });
 
 /** A parent that fails the Attempt like a crash. */
