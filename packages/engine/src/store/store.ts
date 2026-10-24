@@ -72,6 +72,11 @@ export class Claim extends Schema.Class<Claim>("@usine/engine/internal/Claim")({
   supersededRun: OptionalRunId,
 }) {}
 
+/** A persisted Attempt that startup reconciliation visits, with the ID of its Run. */
+export interface SalvageCandidate extends AttemptRecovery {
+  readonly runId: RunId;
+}
+
 export class AttemptStarted extends Schema.TaggedClass<AttemptStarted>(
   "@usine/engine/internal/AttemptStarted",
 )("AttemptStarted", {
@@ -1041,11 +1046,11 @@ export class RunStore extends Context.Service<
      */
     readonly attemptWindows: (attemptId: AttemptId) => Effect.Effect<AttemptWindows, RunStoreError>;
     /** The persisted Attempts that startup reconciliation visits, excluding discarded leftovers. */
-    readonly salvageCandidates: Effect.Effect<ReadonlyArray<AttemptRecovery>, RunStoreError>;
+    readonly salvageCandidates: Effect.Effect<ReadonlyArray<SalvageCandidate>, RunStoreError>;
     /** Returns `attemptId` as `salvageCandidates` lists it, or `None` once its leftovers are discarded. */
     readonly salvageCandidate: (
       attemptId: AttemptId,
-    ) => Effect.Effect<Option.Option<AttemptRecovery>, RunStoreError>;
+    ) => Effect.Effect<Option.Option<SalvageCandidate>, RunStoreError>;
     /** Marks the Attempts on `worker` so reconciliation skips them, and returns the number marked. */
     readonly discardLeftovers: (worker: WorkerName) => Effect.Effect<number, RunStoreError>;
     /** Returns the number of Attempts on `worker` without an outcome, excluding discarded leftovers. */

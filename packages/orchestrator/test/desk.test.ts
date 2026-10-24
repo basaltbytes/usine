@@ -44,6 +44,7 @@ import {
   ItemProjectionReader,
   ItemProjectionSource,
 } from "@usine/engine/item-projection";
+import { UnconfirmedStops } from "@usine/engine/engine";
 import { LoopRuntimeState } from "@usine/engine/loop-control";
 import { LoopSighting, RunReader, RunSummary } from "@usine/engine/run-reader";
 import { TranscriptEntry, TranscriptSequence } from "@usine/engine/transcript";
@@ -438,6 +439,7 @@ const deskLayer = (polls: ReadonlyArray<RepositoryPoll>) => {
         loopControlLayer([new LoopRuntimeState({ loop: review.name, paused: true })]),
         repositoryLabelProjectionReaderLayer,
         MarcbachmannCelLayer,
+        UnconfirmedStops.empty,
       ),
     ),
   );

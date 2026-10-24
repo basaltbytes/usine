@@ -16,6 +16,7 @@ import { LoopControl } from "../loop-control/loop-control.ts";
 import { BoardMoves } from "../board-moves/board-moves.ts";
 import { CycleBudgets } from "../cycle-budget/cycle-budget.ts";
 import { layerWithDatabase, type RunEngine } from "../engine/engine.ts";
+import { UnconfirmedStops } from "../engine/unconfirmed-stops.ts";
 import type { InstanceDirectory } from "@usine/core/instance";
 import { EnginePersistenceError, type RunEngineError } from "../engine/error.ts";
 import { RunReader } from "../run-reader/run-reader.ts";
@@ -84,7 +85,8 @@ export const layer = (
   | RepositoryLabelProjectionReader
   | RepositoryLabelProjectionWriter
   | RunEngine
-  | RunReader,
+  | RunReader
+  | UnconfirmedStops,
   RunEngineError,
   StepExecutor | TriggerCondition
 > => layerWithDatabase(localSqliteLayer(instanceDirectory)).pipe(Layer.provide(NodeServices.layer));
@@ -93,7 +95,12 @@ export const layer = (
 export const observationLayer = (
   instanceDirectory: InstanceDirectory,
 ): Layer.Layer<
-  CycleBudgets | ItemProjectionReader | LoopControl | RepositoryLabelProjectionReader | RunReader,
+  | CycleBudgets
+  | ItemProjectionReader
+  | LoopControl
+  | RepositoryLabelProjectionReader
+  | RunReader
+  | UnconfirmedStops,
   RunEngineError
 > => {
   const database = localSqliteLayer(instanceDirectory);
@@ -103,7 +110,7 @@ export const observationLayer = (
     LoopControl.layer,
     RepositoryLabelProjectionReader.layer,
     RunReader.layer,
-  ).pipe(Layer.provide(database));
+  ).pipe(Layer.provide(database), Layer.merge(UnconfirmedStops.empty));
 };
 
 const readableRuntimeStore = Effect.fn("LocalSqlite.readableRuntimeStore")(function* (

@@ -170,6 +170,8 @@ As with a question, the blocker comment opens no run. After you remove the block
 
 Select **Cancel run**, then **Confirm cancel**. usine stops a running attempt, pushes its work to a salvage branch, and closes the run as `Canceled`. Polling the same item content starts nothing.
 
+If usine can't confirm that the attempt's parent task stopped, the cancel returns an error, and the attempt keeps its slot on the worker, so no other attempt starts there in its place. **Needs attention** shows **\<loop\>: parent task not stopped**. usine retries the stop at each reconcile, every three minutes, also after the next `usine up`, and frees the slot once a stop succeeds.
+
 To run the loop on the item again, remove the loop's label, wait until usine sees the item without it (one poll, or immediately after a board move), and add the label again. The same applies to superseded and revoked runs. If you remove and add the label within one poll interval, polling sees no change, so use **Run again**. A `Failed` run keeps its event, so retry it instead.
 
 ## Run again
@@ -215,6 +217,7 @@ For a Claude Code or Codex child, the terminal icon in the outline shows the ses
 | **Loop file not loaded**               | A loop file failed to load and opens no runs. Fix the file and reload the configuration.                             |
 | **Agent file not loaded**              | An agent file failed to load and isn't in the roster. Fix the file and reload the configuration.                    |
 | **Worker not configured**              | Attempts are recorded on a worker that `usine.yaml` no longer declares. See [Restarts](#restarts).                   |
+| **\<loop\>: parent task not stopped**  | A closed attempt's parent task may still run, so the attempt keeps a slot on its worker. See [Cancel a run](#cancel-a-run). |
 
 Entries about an issue that is closed or a pull request that is closed or merged leave on their own:
 
@@ -257,7 +260,7 @@ If an attempt isn't reattached:
 
 Canceling a run whose attempt waits for its reattach salvages and removes the worktree, unless usine has taken it over again. If usine can't confirm that the parent task stopped, it keeps the worktree and the slot and retries the stop at each reconcile, also after the next `usine up`.
 
-At each start, usine also reconciles checkouts that earlier attempts left on declared workers: it salvages failed and canceled attempts and removes succeeded ones, after it stops the parent task of a canceled attempt that still runs. If it can't confirm that stop, it keeps the worktree and a slot, logs `Could not confirm that the parent task of a closed Attempt stopped`, and retries at each reconcile.
+At each start, usine also reconciles checkouts that earlier attempts left on declared workers: it salvages failed and canceled attempts and removes succeeded ones, after it stops the parent task of a canceled attempt that still runs. If it can't confirm that stop, it keeps the worktree and a slot, logs `Could not confirm that the parent task of a closed Attempt stopped`, lists the attempt in **Needs attention**, and retries at each reconcile.
 
 usine skips attempts on a worker that `usine.yaml` no longer declares, for example after you replace `local` with an SSH worker. It logs one warning per start with their count, shows **Worker not configured** in **Needs attention**, and leaves their checkouts. Their runs wait until you declare the worker again or cancel them. Declare the worker again and restart `usine up`, or select **Discard leftovers**, then **Confirm discard**, to stop tracking them without changing the worker. Remove the checkouts yourself. A worker that you declare again reconciles only attempts recorded after the discard. After a reload removes a worker, the entry says how many attempts still run, such as `2 attempts still running on it. Discard the leftovers after they end`, and refuses a discard until they end.
 

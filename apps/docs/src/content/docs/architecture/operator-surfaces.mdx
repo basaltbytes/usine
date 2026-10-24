@@ -146,7 +146,7 @@ Without `target`, an intervention goes to the parent ([run.ts:35][]); for a chil
 
 ### Needs you
 
-The list has nine entry kinds ([need.ts][]): `ApprovalNeed`, `RunFailureNeed`, `PollFailureNeed`, `PreflightFindingNeed`, `BoardProjectionNeed`, `ScheduleFailureNeed`, `CycleBudgetNeed`, `ConfigFileNeed`, and `UnconfiguredWorkerNeed`. An `UnconfiguredWorkerNeed` identifies a worker that `usine.yaml` no longer declares and counts its attempts that startup doesn't reconcile, with the open ones as `running`; while `running` is above 0, it shows how many still run and offers no Discard leftovers. A `RunFailureNeed` for a `QuestionFailure` shows the agent's question under **\<loop\> asks a question**.
+The list has ten entry kinds ([need.ts][]): `ApprovalNeed`, `RunFailureNeed`, `PollFailureNeed`, `PreflightFindingNeed`, `BoardProjectionNeed`, `ScheduleFailureNeed`, `CycleBudgetNeed`, `ConfigFileNeed`, `UnconfiguredWorkerNeed`, and `UnconfirmedStopNeed`. An `UnconfiguredWorkerNeed` identifies a worker that `usine.yaml` no longer declares and counts its attempts that startup doesn't reconcile, with the open ones as `running`; while `running` is above 0, it shows how many still run and offers no Discard leftovers. An `UnconfirmedStopNeed` names a closed attempt, from the engine's `UnconfirmedStops`, whose parent task isn't confirmed stopped, and the worker where it keeps a slot until a retried stop succeeds ([#475](https://github.com/basaltbytes/usine/issues/475)); a change to that list replaces the cached overview. A `RunFailureNeed` for a `QuestionFailure` shows the agent's question under **\<loop\> asks a question**.
 
 ### Desk
 

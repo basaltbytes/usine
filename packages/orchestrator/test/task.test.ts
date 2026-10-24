@@ -23,6 +23,7 @@ import {
   ItemProjectionReader,
   ItemProjectionSource,
 } from "@usine/engine/item-projection";
+import { UnconfirmedStops } from "@usine/engine/engine";
 import { LoopControl } from "@usine/engine/loop-control";
 import { RepositoryLabelProjectionReader } from "@usine/engine/repository-label-projection";
 import { RunEvent, RunReader, RunSummary } from "@usine/engine/run-reader";
@@ -415,6 +416,7 @@ const observation = (
         schedules,
         MarcbachmannCelLayer,
         WorkerStatus.idle,
+        UnconfirmedStops.empty,
       ),
     ),
   );
