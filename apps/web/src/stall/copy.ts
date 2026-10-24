@@ -27,6 +27,11 @@ export const stallSentence = ({ loop, reason }: StalledItemView, now: number): s
     ClosedUnchanged: ({ run }) =>
       `${run.state === "Succeeded" ? "Succeeded" : "Canceled"} ${agoLabel(runActivityAt(run), now)}, unchanged since`,
     LoopPaused: () => `${loop} paused`,
-    QueuedForWorker: () => "Waiting for a free worker slot",
+    QueuedForWorker: ({ ahead }) =>
+      ahead === null
+        ? "Waiting for a free worker slot"
+        : ahead === 0
+          ? "Waiting for a free worker slot, next in queue"
+          : `Waiting for a free worker slot, behind ${ahead} ${ahead === 1 ? "run" : "runs"}`,
     AwaitingPoll: () => "Waiting for the next poll",
   });

@@ -5,8 +5,13 @@ import type { BrainSpec } from "@usine/core/agent/brain";
 import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
 import type { AttemptId } from "@usine/core/attempt";
 import { salvageRefFor } from "@usine/core/attempt/salvage";
+import type { ItemKey } from "@usine/core/item";
+import type { LoopName } from "@usine/core/loop";
+import { canonicalRepositoryName } from "@usine/core/repository";
+import type { RunId } from "@usine/core/run";
 import { BotLogin, WorkerName } from "@usine/core/worker";
 import { CheckoutRequest, Executor, ExecutorError, ExecutorOperationError } from "@usine/executor";
+import type { Submission } from "@usine/engine/engine";
 import { StepExecutor, type WorkerLease } from "@usine/engine/step-executor";
 import { GitHubApp, isRefusal } from "@usine/github/github-app";
 import {
@@ -19,7 +24,6 @@ import {
   Layer,
   Match,
   Option,
-  Order,
   Ref,
   Schema,
   Semaphore,
@@ -38,7 +42,21 @@ import {
   restartRequired,
   type WorkerReload,
 } from "./current-instance/current-instance.ts";
-import { recordPreflight, unchecked, type WorkerPreflight, WorkerStatus } from "./worker-status.ts";
+import { payloadLabels } from "./board/items.ts";
+import {
+  type LeaseCandidate,
+  leaseOrder,
+  passedCount,
+  type PipelinePosition,
+  pipelinePosition,
+} from "./lease-order.ts";
+import {
+  type QueuedRun,
+  recordPreflight,
+  unchecked,
+  type WorkerPreflight,
+  WorkerStatus,
+} from "./worker-status.ts";
 
 export class UnsupportedWorkerError extends Schema.TaggedError<UnsupportedWorkerError>(
   "@usine/orchestrator/UnsupportedWorkerError",
@@ -52,24 +70,27 @@ type ReservationState =
   | { readonly _tag: "Assigned"; readonly lease: WorkerLease }
   | { readonly _tag: "Canceled" };
 
-interface Reservation {
+interface Reservation extends LeaseCandidate {
+  readonly runId: RunId;
+  readonly loop: LoopName;
+  readonly itemKey: ItemKey;
   readonly deferred: Deferred.Deferred<WorkerLease>;
-  /**
-   * If set, the only Worker the lease can come from: the Worker of the Run's reattached Attempt.
-   */
-  readonly worker: Option.Option<WorkerName>;
-  readonly eventTime: number;
-  readonly order: number;
   readonly state: Ref.Ref<ReservationState>;
 }
 
-// Reservations for a specific Worker (Attempts already running there) go first; otherwise, the Run
-// whose Event arrived first goes first.
-const reservationOrder = Order.combineAll([
-  Order.mapInput(Order.Boolean, (reservation: Reservation) => Option.isNone(reservation.worker)),
-  Order.mapInput(Order.Number, (reservation: Reservation) => reservation.eventTime),
-  Order.mapInput(Order.Number, (reservation: Reservation) => reservation.order),
-]);
+const queuedRun = ({ runId, loop, itemKey, position }: Reservation): QueuedRun => ({
+  runId,
+  loop,
+  itemKey,
+  position,
+});
+
+const positionFields = (position: PipelinePosition) =>
+  Match.valueTags(position, {
+    Priority: ({ priority }) => ({ positionSource: "priority", position: priority }),
+    Lane: ({ lane, number }) => ({ positionSource: "lane", position: number, lane }),
+    Unpositioned: () => ({ positionSource: "none" }),
+  });
 
 interface WorkerSlots {
   /** The maximum concurrent Attempts on the Worker, or zero after a reload removed it. */
@@ -208,9 +229,8 @@ export interface StepExecutorOptions {
 const anyWorker: ExecutorWorkers = { add: () => Effect.void, remove: () => Effect.void };
 
 /**
- * Schedules Attempts FIFO over the Workers and adapts the Executor to the engine's `StepExecutor`
- * port. Reservations for a specific Worker go first (#177), and a removed Worker stays until its
- * last Attempt ends.
+ * Schedules Attempts over the Workers in `leaseOrder` and adapts the Executor to the engine's
+ * `StepExecutor` port. A removed Worker stays until its last Attempt ends.
  */
 export const stepExecutorLayer = (
   config: UsineConfig,
@@ -228,7 +248,7 @@ export const stepExecutorLayer = (
       const app = yield* GitHubApp;
       const workers = yield* validateWorkers(executor.kind, config.workers);
       const pool = yield* TxRef.make(slotPoolOf(workers, new Map()));
-      const pending = yield* TxPriorityQueue.empty(reservationOrder);
+      const pending = yield* TxPriorityQueue.empty<Reservation>(leaseOrder);
       const nextOrder = yield* Ref.make(0);
       const preflights = yield* Ref.make(new Map<WorkerName, WorkerPreflight>());
       const executorWorkers = options.workers ?? anyWorker;
@@ -458,32 +478,45 @@ export const stepExecutorLayer = (
       const nextAssignment = Effect.tx(
         Effect.gen(function* () {
           const current = yield* TxRef.get(pool);
-          const next = EffectArray.findFirst(
-            yield* TxPriorityQueue.toArray(pending),
-            (reservation) =>
-              Option.map(workerFor(current, reservation), (worker) => ({ worker, reservation })),
+          const waiting = yield* TxPriorityQueue.toArray(pending);
+          const next = EffectArray.findFirst(waiting, (reservation) =>
+            Option.map(workerFor(current, reservation), (worker) => ({ worker, reservation })),
           );
           if (Option.isNone(next)) return yield* Effect.txRetry;
           const { worker, reservation } = next.value;
-          yield* TxPriorityQueue.removeIf(pending, (waiting) => waiting === reservation);
+          yield* TxPriorityQueue.removeIf(pending, (queued) => queued === reservation);
           yield* TxRef.set(pool, withLeased(current, worker, 1));
-          return next.value;
+          return { worker, reservation, passed: passedCount(waiting, reservation) };
         }),
       );
 
       const dispatch = Effect.forever(
         Effect.gen(function* () {
-          const { worker, reservation } = yield* nextAssignment;
+          const { worker, reservation, passed } = yield* nextAssignment;
           const lease = yield* makeLease(worker);
           const assign = yield* Ref.modify(reservation.state, (state) =>
             state._tag === "Pending"
               ? [true, { _tag: "Assigned", lease } satisfies ReservationState]
               : [false, state],
           );
+          const fields = {
+            runId: reservation.runId,
+            loop: reservation.loop,
+            itemKey: reservation.itemKey,
+            worker,
+          };
           if (assign) {
-            yield* Effect.logDebug("Worker slot assigned", { worker });
+            yield* Effect.logInfo("Worker slot leased in lease order", {
+              ...fields,
+              ...positionFields(reservation.position),
+              passed,
+            });
             yield* Deferred.succeed(reservation.deferred, lease);
           } else {
+            yield* Effect.logDebug(
+              "The Run stopped waiting before its lease; the Worker slot is free again",
+              fields,
+            );
             yield* lease.release;
           }
         }),
@@ -521,22 +554,77 @@ export const stepExecutorLayer = (
         },
       );
 
+      /**
+       * Returns the pipeline position of the Run of `submission`, from the current Loop file and
+       * the lanes of the Run's repository.
+       */
+      const positionOf = Effect.fn("WorkerScheduler.position")(function* (
+        runId: RunId,
+        submission: Submission,
+      ) {
+        yield* Effect.annotateCurrentSpan({ runId, loop: submission.loop });
+        const { config, loops } = yield* instances.get;
+        const loop = loops.find(({ name }) => name === submission.loop);
+        const priority = Option.flatMap(Option.fromNullishOr(loop), ({ priority }) => priority);
+        const lanes =
+          config.repos.find(
+            ({ name }) =>
+              canonicalRepositoryName(name) === canonicalRepositoryName(submission.repository),
+          )?.lanes ?? [];
+        const stream = loop?.trigger.on;
+        // Only issue and pull request Events record Item labels.
+        if (
+          Option.isSome(priority) ||
+          lanes.length === 0 ||
+          stream === undefined ||
+          stream === "schedule"
+        ) {
+          return pipelinePosition(priority, lanes, []);
+        }
+        const labels = yield* payloadLabels(stream, submission.event.payload).pipe(
+          Effect.catch((error) =>
+            Effect.logWarning(
+              "The Run's Event has no labels to read; the Run waits for a worker slot without a lane position",
+              {
+                runId,
+                loop: submission.loop,
+                eventId: submission.event.id,
+                errorTag: error._tag,
+                message: error.message,
+              },
+            ).pipe(Effect.as([])),
+          ),
+        );
+        return pipelinePosition(priority, lanes, labels);
+      });
+
       const reserve: StepExecutor["Service"]["reserve"] = Effect.fn("WorkerScheduler.reserve")(
-        function* (submission, worker) {
-          const run = { loop: submission.loop, itemKey: submission.itemKey };
+        function* (runId, submission, worker) {
+          const run = { runId, loop: submission.loop, itemKey: submission.itemKey };
           yield* Effect.annotateCurrentSpan(run);
           if (Option.isSome(worker)) yield* Effect.annotateCurrentSpan({ worker: worker.value });
           const deferred = yield* Deferred.make<WorkerLease>();
           const state = yield* Ref.make<ReservationState>({ _tag: "Pending" });
           const reservation: Reservation = {
+            ...run,
             deferred,
             worker,
+            position: yield* positionOf(runId, submission),
             eventTime: DateTime.toEpochMillis(submission.event.receivedAt),
             order: yield* Ref.getAndUpdate(nextOrder, (value) => value + 1),
             state,
           };
-          yield* TxPriorityQueue.offer(pending, reservation);
-          const fields = { ...run, queued: yield* TxPriorityQueue.size(pending) };
+          const queue = yield* Effect.tx(
+            TxPriorityQueue.offer(pending, reservation).pipe(
+              Effect.andThen(TxPriorityQueue.toArray(pending)),
+            ),
+          );
+          const fields = {
+            ...run,
+            ...positionFields(reservation.position),
+            queued: queue.length,
+            ahead: queue.indexOf(reservation),
+          };
           if (Option.isNone(worker)) yield* Effect.logInfo("Run waits for a worker slot", fields);
           else if (((yield* TxRef.get(pool)).get(worker.value)?.capacity ?? 0) > 0)
             yield* Effect.logInfo(
@@ -669,6 +757,7 @@ export const stepExecutorLayer = (
             [...current].map(([worker, { capacity, leased }]) => ({ worker, capacity, leased })),
           ),
         ),
+        queue: TxPriorityQueue.toArray(pending).pipe(Effect.map((queued) => queued.map(queuedRun))),
         preflights: Ref.get(preflights).pipe(Effect.map((current) => [...current.values()])),
       });
 

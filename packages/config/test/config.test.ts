@@ -517,6 +517,21 @@ describe("ConfigParser", () => {
     }).pipe(Effect.provide(parserLayer)),
   );
 
+  it.effect("leaves the Loop priority unset by default and accepts only a positive integer", () =>
+    Effect.gen(function* () {
+      const parser = yield* ConfigParser;
+      const source = (field: string) =>
+        `---\ntrigger:\n  on: pr\n  if: 'true'\nagent: reviewer\n${field}---\nReview the Item.`;
+      const parse = (field: string) =>
+        parser.parseLoopFile(InstancePath.make("loops/review.md"), source(field));
+      expect(Option.isNone((yield* parse("")).priority)).toBe(true);
+      expect((yield* parse("priority: 2\n")).priority).toStrictEqual(Option.some(2));
+      for (const invalid of ["priority: 0\n", "priority: 1.5\n", "priority: high\n"]) {
+        expect((yield* parse(invalid).pipe(Effect.flip)).stage).toBe("schema");
+      }
+    }).pipe(Effect.provide(parserLayer)),
+  );
+
   it.effect("exposes pull request mergeability to pr trigger expressions", () =>
     Effect.gen(function* () {
       const parser = yield* ConfigParser;

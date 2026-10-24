@@ -1,8 +1,12 @@
 import type { BrainSpec, Harness } from "@usine/core/agent/brain";
 import { HarnessUnavailableError } from "@usine/core/agent/capability";
+import type { ItemKey } from "@usine/core/item";
+import type { LoopName } from "@usine/core/loop";
+import type { RunId } from "@usine/core/run";
 import type { WorkerName } from "@usine/core/worker";
 import type { ExecutorError, WorkerCapability } from "@usine/executor";
 import { Array as Arr, Context, type DateTime, Effect, Layer, Option, Order, Schema } from "effect";
+import type { PipelinePosition } from "./lease-order.ts";
 
 /** A Worker's current slot usage in the scheduler. */
 export interface WorkerSlots {
@@ -11,6 +15,14 @@ export interface WorkerSlots {
   readonly capacity: number;
   /** The number of Attempts with a slot, which can exceed `capacity` after a reload lowered it. */
   readonly leased: number;
+}
+
+/** A Run that waits for a Worker slot. */
+export interface QueuedRun {
+  readonly runId: RunId;
+  readonly loop: LoopName;
+  readonly itemKey: ItemKey;
+  readonly position: PipelinePosition;
 }
 
 /** A passed preflight check. */
@@ -119,7 +131,7 @@ export const unchecked = (worker: WorkerName): WorkerPreflight => ({
   harnesses: [],
 });
 
-/** The scheduler's current slot usage and last preflight of each Worker. */
+/** The scheduler's current slot usage, queued Runs, and last preflight of each Worker. */
 export class WorkerStatus extends Context.Service<
   WorkerStatus,
   {
@@ -128,6 +140,8 @@ export class WorkerStatus extends Context.Service<
      * Attempt ends.
      */
     readonly slots: Effect.Effect<ReadonlyArray<WorkerSlots>>;
+    /** The Runs that wait for a Worker slot, in the order they take one (`leaseOrder`). */
+    readonly queue: Effect.Effect<ReadonlyArray<QueuedRun>>;
     /**
      * The last preflight of each Worker checked since startup, including a refused reload's
      * preflight.
@@ -135,9 +149,10 @@ export class WorkerStatus extends Context.Service<
     readonly preflights: Effect.Effect<ReadonlyArray<WorkerPreflight>>;
   }
 >()("@usine/orchestrator/WorkerStatus") {
-  /** A status with no Workers and no preflights, as in setup mode. */
+  /** A status with no Workers, no queued Runs, and no preflights, as in setup mode. */
   static readonly idle = Layer.succeed(WorkerStatus)({
     slots: Effect.succeed([]),
+    queue: Effect.succeed([]),
     preflights: Effect.succeed([]),
   });
 }

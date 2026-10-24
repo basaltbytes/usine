@@ -16,6 +16,7 @@ import type { InstanceDirectory } from "@usine/core/instance";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { OperatorLogin } from "@usine/core/operator";
+import type { RunId } from "@usine/core/run";
 import { ApprovalSource, RunApproval } from "@usine/core/run/approval";
 import { WorkerName } from "@usine/core/worker";
 import { Deferred, Effect, Fiber, Layer, Logger, Option, Ref, Schedule, TxRef } from "effect";
@@ -1046,14 +1047,14 @@ describe("store failures in a Run's fiber", () => {
             const scripted = yield* StepExecutor;
             return StepExecutor.of({
               ...scripted,
-              reserve: (request: Submission, worker: Option.Option<WorkerName>) =>
+              reserve: (runId: RunId, request: Submission, worker: Option.Option<WorkerName>) =>
                 Ref.getAndUpdate(reserved, (count) => count + 1).pipe(
                   Effect.tap((count) =>
                     Effect.sync(() => {
                       if (count === 0) failures.left = Number.POSITIVE_INFINITY;
                     }),
                   ),
-                  Effect.andThen(scripted.reserve(request, worker)),
+                  Effect.andThen(scripted.reserve(runId, request, worker)),
                 ),
             });
           }),

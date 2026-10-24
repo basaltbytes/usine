@@ -45,6 +45,8 @@ repos:
 
 Issue and pull request loops accept `max_cycles`, a positive integer (default 3): the number of runs each loop can open on an item between operator resets. The first admission past it blocks runs from every loop on the item. Schedule loops are exempt. See [Write review and fix loops](https://docs.usine.dev/guides/review-fix-loops/).
 
+A loop's optional `priority`, a positive integer (`LoopFile.priority`, `LoopPriority`), ranks its runs for a free worker slot before runs that lane order ranks, higher first. See [Loop files](https://docs.usine.dev/reference/configuration/loop-files/#priority).
+
 ## Load an instance
 
 `InstanceFolder.load` takes an `InstanceDirectory` (`@usine/core/instance`) and returns one atomic `LoadedInstance` snapshot:

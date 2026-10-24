@@ -54,6 +54,7 @@ Keys are snake_case. Unknown keys at any level and duplicate keys are errors.
 | `agent` | string | required | The agent that does the loop's runs: the name of a file in `agents/`, without `.md`. |
 | `max_cycles` | integer ≥ 1 | `3` | The loop's cycle budget per item. |
 | `permissions` | `write`, `read` | `write` | What the loop's attempts can do to their repository. |
+| `priority` | integer ≥ 1 | none | Ranks the loop's runs for a free worker slot above runs that lane order ranks. Higher goes first. |
 
 ### `trigger`
 
@@ -179,6 +180,39 @@ An exe.dev worker uses exe.dev's GitHub integration, which grants the access of 
 ```yaml title="loops/review-pr.md"
 permissions: read
 ```
+
+### `priority`
+
+When every worker slot is taken, runs wait in a queue. A free slot goes to the first waiting run in this order ([`leaseOrder`](https://github.com/basaltbytes/usine/blob/main/packages/orchestrator/src/lease-order.ts)):
+
+1. A run that reattaches an attempt still running on the worker with the free slot.
+2. A run of a loop that sets `priority`, higher first.
+3. A run with a lane position, later lane first. The position is the first lane, in the repository's [`lanes`](/reference/configuration/usine-yaml/#reposlanes) order, with a `label` source that matches a label the item had when the run's trigger matched. It's the lane that the board shows the run's card in while it runs.
+4. Any other run, such as a schedule run or a run in a repository without `lanes`.
+
+Runs at the same position keep the order in which their events arrived.
+
+With lanes ordered as the pipeline runs, later stages go first without any `priority`. In this `usine.yaml`, a `review-pr` run on a pull request labeled `ready-for-review` goes before every `start-dev` run on an issue labeled `ready-for-agent`, even one whose event arrived earlier:
+
+```yaml title="usine.yaml"
+repos:
+  - name: acme/widgets
+    lanes:
+      - name: Ready
+        sources: [{ label: ready-for-agent }]
+      - name: Review
+        sources: [{ label: ready-for-review }]
+      - name: Merge
+        sources: [{ label: ready-to-merge }]
+```
+
+Set `priority` for a loop that lane order doesn't rank, or ranks wrong. A loop with `priority` goes before every lane, so to order loops by hand, set `priority` on each of them.
+
+```yaml title="loops/rebase-pr.md"
+priority: 1
+```
+
+The scheduler reads the loop file and the lanes when a run starts waiting, so a reload doesn't reorder runs that already wait. **Overview** shows a waiting run as `Waiting for a free worker slot, behind 2 runs`. Each lease logs `Worker slot leased in lease order` with the run, the loop, `positionSource` (`priority`, `lane`, or `none`), `position`, and `passed`: the number of waiting runs whose events arrived earlier.
 
 ## Prompt template
 

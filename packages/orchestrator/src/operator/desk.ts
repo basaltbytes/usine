@@ -123,7 +123,14 @@ export class AwaitingApprovalView extends Schema.TaggedClass<AwaitingApprovalVie
 /** `run` waits for a free Worker slot. */
 export class QueuedForWorkerView extends Schema.TaggedClass<QueuedForWorkerView>(
   "@usine/orchestrator/QueuedForWorkerView",
-)("QueuedForWorker", { run: RunView }) {}
+)("QueuedForWorker", {
+  run: RunView,
+  /**
+   * The number of Runs that take a Worker slot before `run`, or null if the scheduler doesn't
+   * queue `run`: it hasn't asked for a slot yet, or this process runs no Attempts.
+   */
+  ahead: Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+}) {}
 
 /** No Event of the Loop has a Run for the Item's current state yet. The next poll acts on it. */
 export class AwaitingPollView extends Schema.TaggedClass<AwaitingPollView>(
@@ -212,6 +219,8 @@ interface StallFacts {
   readonly paused: boolean;
   /** The Item's open cycle-budget Ask. */
   readonly ask: Option.Option<CycleBudgetAsk>;
+  /** The number of Runs ahead of each Run in the scheduler's queue. */
+  readonly ahead: ReadonlyMap<RunView["id"], number>;
 }
 
 /**
@@ -223,6 +232,7 @@ const stallReason = ({
   sighting,
   paused,
   ask,
+  ahead,
 }: StallFacts): Option.Option<StallReasonView> => {
   const open = runs.find(({ state }) => RunState.OPEN_STATE_TAGS.some((tag) => tag === state));
   if (open !== undefined) {
@@ -232,7 +242,9 @@ const stallReason = ({
       case "Waiting":
         return Option.some(new AwaitingApprovalView({ run: open }));
       default:
-        return Option.some(new QueuedForWorkerView({ run: open }));
+        return Option.some(
+          new QueuedForWorkerView({ run: open, ahead: ahead.get(open.id) ?? null }),
+        );
     }
   }
   if (paused) return Option.some(new LoopPausedView());
@@ -401,18 +413,21 @@ const makeDesk = Effect.gen(function* () {
   });
 
   const desk = Effect.fn("Operator.desk")(function* (instance: LoadedInstance) {
-    const [summaries, closed, states, asks, slots, preflights, latestPoll] = yield* Effect.all(
-      [
-        reader.list({ closedLimit: 0 }),
-        reader.closed({ limit: CLOSED_RUNS_READ }),
-        controls.states,
-        budgets.asks(),
-        workerStatus.slots,
-        workerStatus.preflights,
-        polling.latest,
-      ] as const,
-      { concurrency: "unbounded" },
-    );
+    const [summaries, closed, states, asks, slots, queue, preflights, latestPoll] =
+      yield* Effect.all(
+        [
+          reader.list({ closedLimit: 0 }),
+          reader.closed({ limit: CLOSED_RUNS_READ }),
+          controls.states,
+          budgets.asks(),
+          workerStatus.slots,
+          workerStatus.queue,
+          workerStatus.preflights,
+          polling.latest,
+        ] as const,
+        { concurrency: "unbounded" },
+      );
+    const ahead = new Map(queue.map(({ runId }, index) => [runId, index]));
     const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
     const access = workerAccesses(instance.config.workers);
     const repositories = yield* Effect.forEach(
@@ -467,6 +482,7 @@ const makeDesk = Effect.gen(function* () {
         ),
         paused: paused.has(loop.name),
         ask: Option.fromNullishOr(asks.find(({ itemKey }) => itemKey === item.itemKey)),
+        ahead,
       });
       if (Option.isNone(reason)) continue;
       yield* Effect.logDebug("Matched Item is not moving", {
@@ -481,7 +497,7 @@ const makeDesk = Effect.gen(function* () {
           RunFailed: ({ run }) => ({ runId: run.id }),
           ClosedUnchanged: ({ run }) => ({ runId: run.id, state: run.state }),
           LoopPaused: () => ({}),
-          QueuedForWorker: ({ run }) => ({ runId: run.id }),
+          QueuedForWorker: ({ run, ahead }) => ({ runId: run.id, ahead }),
           AwaitingPoll: () => ({}),
         }),
       });

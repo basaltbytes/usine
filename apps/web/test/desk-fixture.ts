@@ -297,7 +297,7 @@ export const deskFixture = (now: number) => {
         ),
       ),
       stalled("review-fix", paused, new LoopPausedView()),
-      stalled("start-dev", queued, new QueuedForWorkerView({ run: queuedRun })),
+      stalled("start-dev", queued, new QueuedForWorkerView({ run: queuedRun, ahead: 2 })),
       stalled("start-dev", fresh, new AwaitingPollView()),
     ],
     lastOutcomes: [...outcomes, ...canceledRuns].map(
