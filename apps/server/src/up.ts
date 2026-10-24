@@ -39,6 +39,7 @@ import { serverLayer } from "./http.ts";
 import { holdInstance } from "./instance-lock.ts";
 import { reloadOnHangup } from "./reload-signal.ts";
 import { withGracefulShutdown } from "./shutdown.ts";
+import { tracingLayer } from "./tracing.ts";
 
 const instanceFolderLayer = InstanceFolder.layer.pipe(
   Layer.provide(ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer))),
@@ -55,7 +56,8 @@ const loadInstance = Effect.fn("Server.loadInstance")(function* (directory: Inst
   return Context.get(current, CurrentInstance);
 });
 
-const serve = Effect.fn("Server.serve")(function* (options: {
+// Untraced: a span around a server that never returns would parent every request span.
+const serve = Effect.fnUntraced(function* (options: {
   readonly backend: ReturnType<typeof liveBackendLayer>;
   readonly webRoot: string;
   readonly port: Port;
@@ -107,6 +109,87 @@ const refuseVolatileInstance = Effect.fn("Server.refuseVolatileInstance")(functi
   );
 });
 
+/** Serves setup mode if the GitHub App credentials are absent, otherwise runs the factory. */
+const start = Effect.fnUntraced(function* (
+  directory: InstanceDirectory,
+  instances: CurrentInstance["Service"],
+  port: Port,
+) {
+  yield* reloadOnHangup(instances);
+  const credentials = yield* loadLocalCredentials(directory).pipe(
+    Effect.provide(NodeServices.layer),
+    Effect.result,
+  );
+  const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "web");
+  const url = `http://127.0.0.1:${port}`;
+
+  if (Result.isFailure(credentials)) {
+    const error = credentials.failure;
+    yield* Effect.logWarning("GitHub App credentials are absent; pollers are idle", {
+      errorTag: error._tag,
+      message: error.message,
+      instanceDirectory: directory,
+    });
+    const observationContext = yield* Layer.build(operatorObservationLayer(directory));
+    const backend = needsSetupBackendLayer(
+      instances,
+      error._tag,
+      Context.get(observationContext, OperatorObservation),
+      Context.get(observationContext, OperatorConfiguration),
+    );
+    return yield* serve({ backend, webRoot, port, url, openSetupPage: true });
+  }
+
+  const shutdown = yield* Deferred.make<void>();
+  const startup = Effect.gen(function* () {
+    const runtime = runtimeLayer(directory).pipe(
+      Layer.provide(Layer.succeed(GitHubCredentials, credentials.success)),
+      Layer.provide(Layer.succeed(CurrentInstance, instances)),
+    );
+    const context = yield* Layer.build(runtime).pipe(
+      Effect.provideService(RunEngineShutdown, shutdown),
+    );
+    const operator = Context.get(context, Operator);
+    const orchestrator = Context.get(context, Orchestrator);
+    const engine = Context.get(context, RunEngine);
+    return {
+      drain: engine.drain(),
+      running: Effect.raceFirst(
+        serve({
+          backend: liveBackendLayer(
+            instances,
+            operator,
+            Context.get(context, OperatorConfiguration),
+          ),
+          webRoot,
+          port,
+          url,
+          openSetupPage: false,
+        }),
+        orchestrator.run.pipe(
+          Effect.tapCause((cause) =>
+            Cause.hasInterruptsOnly(cause)
+              ? Effect.void
+              : Effect.logFatal("Trigger streams stopped; shutting the server down", {
+                  cause,
+                }),
+          ),
+        ),
+      ),
+    };
+  });
+  return yield* withGracefulShutdown(
+    startup,
+    shutdown,
+    Effect.map(instances.get, ({ config }) =>
+      Option.match(config.settings.maxAttemptMinutes, {
+        onNone: () => Duration.infinity,
+        onSome: Duration.minutes,
+      }),
+    ),
+  );
+});
+
 export const up = (port: Port, allowVolatileInstance: boolean) =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -118,78 +201,11 @@ export const up = (port: Port, allowVolatileInstance: boolean) =>
       yield* holdInstance(directory).pipe(Effect.provide(NodeServices.layer));
       yield* refuseTakenPort(port).pipe(Effect.provide(NodeServices.layer));
       const instances = yield* loadInstance(directory);
-      yield* reloadOnHangup(instances);
-      const credentials = yield* loadLocalCredentials(directory).pipe(
+      const { config } = yield* instances.get;
+      // Built before the runtime, so the exporter flushes the runtime's last spans when it closes.
+      const tracer = yield* Layer.build(tracingLayer(config.tracing)).pipe(
         Effect.provide(NodeServices.layer),
-        Effect.result,
       );
-      const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "web");
-      const url = `http://127.0.0.1:${port}`;
-
-      if (Result.isFailure(credentials)) {
-        const error = credentials.failure;
-        yield* Effect.logWarning("GitHub App credentials are absent; pollers are idle", {
-          errorTag: error._tag,
-          message: error.message,
-          instanceDirectory: directory,
-        });
-        const observationContext = yield* Layer.build(operatorObservationLayer(directory));
-        const backend = needsSetupBackendLayer(
-          instances,
-          error._tag,
-          Context.get(observationContext, OperatorObservation),
-          Context.get(observationContext, OperatorConfiguration),
-        );
-        return yield* serve({ backend, webRoot, port, url, openSetupPage: true });
-      }
-
-      const shutdown = yield* Deferred.make<void>();
-      const startup = Effect.gen(function* () {
-        const runtime = runtimeLayer(directory).pipe(
-          Layer.provide(Layer.succeed(GitHubCredentials, credentials.success)),
-          Layer.provide(Layer.succeed(CurrentInstance, instances)),
-        );
-        const context = yield* Layer.build(runtime).pipe(
-          Effect.provideService(RunEngineShutdown, shutdown),
-        );
-        const operator = Context.get(context, Operator);
-        const orchestrator = Context.get(context, Orchestrator);
-        const engine = Context.get(context, RunEngine);
-        return {
-          drain: engine.drain(),
-          running: Effect.raceFirst(
-            serve({
-              backend: liveBackendLayer(
-                instances,
-                operator,
-                Context.get(context, OperatorConfiguration),
-              ),
-              webRoot,
-              port,
-              url,
-              openSetupPage: false,
-            }),
-            orchestrator.run.pipe(
-              Effect.tapCause((cause) =>
-                Cause.hasInterruptsOnly(cause)
-                  ? Effect.void
-                  : Effect.logFatal("Trigger streams stopped; shutting the server down", {
-                      cause,
-                    }),
-              ),
-            ),
-          ),
-        };
-      });
-      return yield* withGracefulShutdown(
-        startup,
-        shutdown,
-        Effect.map(instances.get, ({ config }) =>
-          Option.match(config.settings.maxAttemptMinutes, {
-            onNone: () => Duration.infinity,
-            onSome: Duration.minutes,
-          }),
-        ),
-      );
+      return yield* start(directory, instances, port).pipe(Effect.provideContext(tracer));
     }),
   );

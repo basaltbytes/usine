@@ -187,7 +187,7 @@ The runtime store records every event, so that a loop doesn't act twice on the s
 
 ## Change the configuration
 
-`usine up` doesn't watch its files. After you edit a loop, an agent, or `usine.yaml`, reload the configuration: select **Reload configuration** on any **Configuration** page, run `curl -s -X POST http://127.0.0.1:7331/api/instance/reload`, or run `kill -HUP $(cat .usine/instance.pid)` from the instance folder. Running attempts continue, and new work uses the new configuration. Some `workers` changes and the `webhooks` key need a restart. See [Reload](/reference/configuration/cli/#reload).
+`usine up` doesn't watch its files. After you edit a loop, an agent, or `usine.yaml`, reload the configuration: select **Reload configuration** on any **Configuration** page, run `curl -s -X POST http://127.0.0.1:7331/api/instance/reload`, or run `kill -HUP $(cat .usine/instance.pid)` from the instance folder. Running attempts continue, and new work uses the new configuration. Some `workers` changes and the `webhooks` and `tracing` keys need a restart. See [Reload](/reference/configuration/cli/#reload).
 
 ## Next steps
 

@@ -5,9 +5,9 @@ sidebar:
   order: 1
 ---
 
-`usine.yaml` is at the top of the instance folder, next to `loops/` and `agents/`. It contains the registry of managed repositories, labels, board lanes, settings, and workers.
+`usine.yaml` is at the top of the instance folder, next to `loops/` and `agents/`. It contains the registry of managed repositories, labels, board lanes, settings, workers, and span export.
 
-The orchestrator reads it at startup and at each [reload](/reference/configuration/cli/#reload). A reload applies `labels`, `repos`, `settings`, and `operator` to new work, and resizes, adds, or removes [workers](#workers). Changes to `webhooks` and some `workers` changes need a restart.
+The orchestrator reads it at startup and at each [reload](/reference/configuration/cli/#reload). A reload applies `labels`, `repos`, `settings`, and `operator` to new work, and resizes, adds, or removes [workers](#workers). Changes to `webhooks` and `tracing`, and some `workers` changes, need a restart.
 
 The parser is strict:
 
@@ -91,6 +91,11 @@ workers:
 
 webhooks:
   mode: off
+
+# Span export over OTLP/HTTP. Omit the block to export nothing.
+tracing:
+  otlp_url: http://localhost:4318/v1/traces
+  service_name: usine
 ```
 
 The smallest valid file sets `version` and `repos`, which can be empty:
@@ -133,6 +138,7 @@ A solid arrow is a reference that must resolve: usine quarantines a loop whose a
 | `settings` | [settings](#settings) | `{}` | Polling, attempt limits, and parent defaults. |
 | `workers` | list of [workers](#workers) | one local worker named `local` | Where attempts run. Must not be empty if present. |
 | `webhooks` | [webhooks](#webhooks) | `{ mode: off }` | Parsed and validated. The orchestrator doesn't read it at this commit. |
+| `tracing` | [tracing](#tracing) | none | Where `usine up` exports its spans. Without it, spans aren't exported. |
 
 ## `operator`
 
@@ -334,3 +340,24 @@ Sets the source of GitHub hints ([`Webhooks`](https://github.com/basaltbytes/usi
 | --- | --- | --- | --- |
 | `mode` | `off`, `deliveries`, `endpoint` | `off` | The hint source. |
 | `public_url` | URL | required when `mode` is `endpoint` | Not accepted with the other modes. |
+
+## `tracing`
+
+Exports the spans of the `usine up` process to an OpenTelemetry collector over OTLP/HTTP ([`Tracing`](https://github.com/basaltbytes/usine/blob/main/packages/config/src/factory.ts), [ADR 0028](https://github.com/basaltbytes/usine/blob/main/docs/adr/0028-span-export-otlp-http.md)). Without the block, usine exports no spans.
+
+| Key | Type | Default | Description |
+| --- | --- | --- | --- |
+| `otlp_url` | URL | required | The collector's OTLP/HTTP traces endpoint, such as `http://localhost:4318/v1/traces`. usine posts to it as given, without appending `/v1/traces`. Must start with `http://` or `https://`, and can't have a username, password, or query string. |
+| `service_name` | string | `usine` | The `service.name` resource attribute of every span. Non-blank. Set it to tell instances apart in one collector. |
+
+`usine up` sends spans in protobuf batches every 5 seconds, and the remaining spans when it stops. Spans keep their `Effect.fn` names, such as `PollingTriggers.pollRepository`, and their domain-id attributes, such as `repository`, `runId`, `attemptId`, and `worker`. The HTTP server and the SQLite client add `http.server` and `sql.execute` spans, and logs written inside a span are span events. The resource also has `service.version`, the installed `@usine/server` version, and the attributes in the `OTEL_RESOURCE_ATTRIBUTES` environment variable of `usine up`, such as `deployment.environment=eu`. Harness processes on workers export no spans.
+
+At startup, `usine up` logs `Exporting spans over OTLP` with the URL's origin and path, or `Span export is off`. Each failed export request logs `Span export to the OTLP collector failed` with the same URL, the failure reason, and the HTTP status, if any. A failed export, after up to three retries, drops the buffered spans and pauses export for 60 seconds. A changed `tracing` block takes effect only after a restart; a reload refuses it with `RestartRequiredError`.
+
+usine sends no authentication headers, and `otlp_url` can't hold a token. To export to a hosted backend, run a collector next to `usine up` that holds the backend's credentials. Span attributes include repository names, URLs, instance folder paths, and SQL statements without their parameter values, so export only to a collector that you control.
+
+```yaml title="usine.yaml"
+tracing:
+  otlp_url: http://localhost:4318/v1/traces
+  service_name: usine-eu
+```
