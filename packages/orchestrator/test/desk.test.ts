@@ -201,7 +201,7 @@ const summary = (
 const sighting = (
   item: number,
   run: string | null,
-  heldBy: string | null = null,
+  suppressedBy: string | null = null,
   loop: LoopFile = startDev,
 ) =>
   new LoopSighting({
@@ -209,7 +209,7 @@ const sighting = (
     itemKey: itemKey(item),
     event: Option.some(EventId.make(`event-${run ?? item}`)),
     run: Option.map(Option.fromNullishOr(run), RunId.make),
-    heldBy: Option.map(Option.fromNullishOr(heldBy), RunId.make),
+    suppressedBy: Option.map(Option.fromNullishOr(suppressedBy), RunId.make),
   });
 
 const canceledByOperator = new RunState.Canceled({ reason: new RunState.OperatorCanceled() });
@@ -452,7 +452,7 @@ describe("Operator desk", () => {
         desk.notMoving.map(({ loop, item, reason }) => [item.number, loop, reason._tag]),
         [
           [3, "start-dev", "AwaitingApproval"],
-          [2, "start-dev", "HeldForOperator"],
+          [2, "start-dev", "SuppressedForOperator"],
           [5, "start-dev", "CycleBudgetUsedUp"],
           [6, "start-dev", "RunFailed"],
           [1, "start-dev", "ClosedUnchanged"],
@@ -529,7 +529,7 @@ describe("Operator desk", () => {
             preflight === null ? null : `${preflight._tag} ${preflight.checkedAt}`,
           ]),
           [
-            // A harness that stands failed outranks a newer pass.
+            // A failed harness check outranks a newer pass.
             ["local 1/2", `Failed ${DateTime.formatIso(time("06:00:00"))}`],
             ["spare 0/1", `Passed ${DateTime.formatIso(time("05:30:00"))}`],
             ["fresh 0/1", null],

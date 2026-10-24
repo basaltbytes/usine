@@ -9,17 +9,14 @@ import type { RunSnapshot } from "../run-reader/model.ts";
 import { Claimed, CycleBlocked, Submission } from "./submission.ts";
 
 /**
- * The operator's request to run a succeeded or canceled Run again (#152): the
- * Step, approval requirement, cycle limit, and permission level the Loop file
- * names now, as a polled Event would carry them, the task and Agent the new
- * Run starts with, and the operator login that asked, none while `usine.yaml`
- * names no operator.
+ * An operator request to run a succeeded or canceled Run again with the Loop's current settings
+ * (#152). `requestedBy` is `None` if `usine.yaml` sets no operator login.
  */
 export class RunAgainRequest extends Schema.Class<RunAgainRequest>("@usine/engine/RunAgainRequest")(
   {
     step: StepName,
     approval: ApprovalRequirement,
-    /** None for a schedule Loop, whose Runs no cycle budget counts. */
+    /** The cycle limit, or `None` for a schedule Loop. */
     cycleLimit: Schema.Option(CycleLimit),
     permissions: LoopPermissions,
     context: AttemptContext,
@@ -28,29 +25,28 @@ export class RunAgainRequest extends Schema.Class<RunAgainRequest>("@usine/engin
 ) {}
 
 /**
- * What running a Run again did: `Claimed` names the new Run, and
- * `CycleBlocked` the Ask the Item's used-up cycle budget opened instead.
+ * The result of a run again: `Claimed` with the new Run, or `CycleBlocked` with the Ask opened
+ * because the Item's cycle budget is used up.
  */
 export const RunAgainResult = Schema.Union([Claimed, CycleBlocked]);
 
 export type RunAgainResult = typeof RunAgainResult.Type;
 
-/** Where a run again sits among the Events opened for one trigger Event. */
+/** The position of a run again among the Events opened for one trigger Event. */
 export interface RunAgainIdentity {
-  /** The dedup key of the trigger Event the closed Run's Event is, or reopened. */
+  /** The dedup key of the trigger Event that the closed Run's Event is or reopened. */
   readonly trigger: DedupKey;
-  /** The next of the trigger Event's reopening numbers, shared with reopenings (#267). */
+  /** The trigger Event's next reopening number, shared with reopenings (#267). */
   readonly reopening: number;
-  /** The Item's cycle generation when the operator asked. */
+  /** The Item's cycle generation at the time of the request. */
   readonly generation: CycleGeneration;
   readonly receivedAt: DateTime.Utc;
 }
 
 /**
- * The Event a run again records: the closed Run's Item state and revision with
- * the Loop's current settings and the operator's task and Agent, under the dedup
- * key `["operator-run-again", n, <trigger key>]`. The key never collides with a
- * polled Event, and the new Run's id, hashed from it, is its own.
+ * Returns the Event for a run again, with the closed Run's Item state and revision, the Loop's
+ * current settings, and the operator's task and Agent. Its dedup key,
+ * `["operator-run-again", n, <trigger key>]`, never collides with a polled Event.
  */
 export const runAgainSubmission = (
   ran: RunSnapshot,

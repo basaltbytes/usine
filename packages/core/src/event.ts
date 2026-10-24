@@ -1,22 +1,18 @@
 import { Schema } from "effect";
 
-/** Identity of one recorded fact; repeated sightings are matched through its dedup key. */
+/** The ID of an Event; duplicates are detected by `DedupKey`, not by ID. */
 export const EventId = Schema.NonEmptyString.pipe(Schema.brand("EventId"));
 
 export type EventId = typeof EventId.Type;
 
-/**
- * Idempotency key the engine derives from watched state, timestamps excluded.
- * The same state is the same Event forever, so a loop file never sets it (ADR 0002).
- */
+/** The idempotency key that the engine derives from the watched state, excluding timestamps (ADR 0002). */
 export const DedupKey = Schema.NonEmptyString.pipe(Schema.brand("DedupKey"));
 
 export type DedupKey = typeof DedupKey.Type;
 
 /**
- * One deduplicated fact the engine may react to: a trigger match or an operator
- * approval. Trigger payloads retain the snapshot that selection expressions
- * and prompt interpolation use; retries keep that recorded snapshot.
+ * A trigger match or operator approval. A trigger payload is the snapshot used by selection
+ * expressions and prompt interpolation, and retries reuse it.
  */
 export class Event extends Schema.Class<Event>("Event")({
   id: EventId,

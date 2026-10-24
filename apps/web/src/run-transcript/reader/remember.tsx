@@ -6,7 +6,7 @@ import { visibleTranscriptRow } from "../scroll-position.tsx";
 import type { ReadingRow } from "./anchor.ts";
 import { readerMemory, type ReaderBookmark, type ReaderPosition } from "./memory.ts";
 
-/** Debounces browser writes while capturing scrolling immediately; flushes on close and page exit. */
+/** Captures the scroll position on every scroll and debounces the browser storage writes; flushes on close and on page exit. */
 export const RememberReader = ({
   runId,
   readThrough,
@@ -63,8 +63,7 @@ export const RememberReader = ({
     capture();
   });
   useLayoutEffect(() => {
-    // React clears the viewport ref during deletion before this sibling's cleanup.
-    // Retain its DOM handle for the last measurement while the containing tree still exists.
+    // React clears the viewport ref before this cleanup runs, so the element is captured here.
     const viewport = viewportRef.current;
     return () => latestCapture.current(viewport);
   }, [active, runId, viewportRef]);

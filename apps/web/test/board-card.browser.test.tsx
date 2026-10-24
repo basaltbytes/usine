@@ -57,7 +57,7 @@ const Board = () => {
 };
 
 const lane = (name: string) => page.getByLabelText(`${name} lane`);
-/** Done holds only closed Items, so it opens folded into a rail. */
+/** Opens the Done lane, which starts folded because it has only closed Items. */
 const openDone = () => lane("Done").getByRole("button", { name: "Done 1" }).click();
 const actions = (number: number) =>
   page.getByRole("button", { name: `Actions for issue #${number}`, exact: true });
@@ -75,13 +75,13 @@ const runOf = (id: string): RunView => {
   if (run === undefined) throw new Error(`No Run ${id}`);
   return run;
 };
-/** The Run line of a card: the row holding the Run's state. */
+/** Returns the card row that contains the Run's state. */
 const runLine = (card: HTMLElement, state: string) => {
   const row = page.elementLocator(card).getByText(state, { exact: true }).element().parentElement;
   if (row === null) throw new Error(`No ${state} Run line`);
   return row;
 };
-/** The open menu's items, then the number of separators between its groups. */
+/** Returns the open menu's items and the number of separators between its groups. */
 const menuContents = async () => {
   const menu = page.getByRole("menu");
   await expect.element(menu).toBeVisible();
@@ -153,7 +153,7 @@ it("puts the lanes that accept moves first, Done and Unmapped last, and folds th
     "Unmapped lane",
   ]);
   await expect.element(page.getByText("8 lanes, 10 items", { exact: true })).toBeVisible();
-  // A pull request no Loop matches shows like any other Task.
+  // A pull request that no Loop matches is shown like any other Task.
   await expect.element(lane("Pull requests").getByText(/^Bump vite/u)).toBeVisible();
   const rail = lane("Done").getByRole("button", { name: "Done 1" });
   await expect.element(rail).toHaveAttribute("aria-expanded", "false");
@@ -177,13 +177,13 @@ it("names why a card is stalled, as the overview page does, with the one action 
   const note = canceled.element().querySelector("[data-slot=stall-note]");
   expect(note?.textContent).toMatch(/^implement Canceled \d+h ago, unchanged sinceRun again$/u);
   await expect.element(canceled.getByRole("button", { name: "Run again" })).toBeVisible();
-  // The Run line already names the Loop of a waiting Run.
+  // The Run line of a waiting Run already shows the Loop.
   const waiting = page.elementLocator(cardOf(/^Retry salvage/u));
   expect(waiting.element().querySelector("[data-slot=stall-note] p")?.textContent).toBe(
     "Waiting for approval",
   );
   await expect.element(waiting.getByRole("button", { name: "Approve" })).toBeVisible();
-  // A failed Run keeps its failure note and Retry, without a second note.
+  // A failed Run shows its failure note and Retry, without a stall note.
   const failed = cardOf(/^Pin GitHub Actions/u);
   expect(failed.querySelector("[data-slot=stall-note]")).toBeNull();
 });
@@ -200,7 +200,7 @@ it("shows a card's menu button on hover or focus and while its menu is open", as
   await expect.poll(opacity).toBe("1");
   await userEvent.keyboard("{Enter}");
   await expect.element(page.getByRole("menu")).toBeVisible();
-  // Focus is in the menu now, away from the card and its button.
+  // Focus is now in the menu, not on the card or its button.
   expect(actions(12).element().matches(":focus-within, :hover")).toBe(false);
   await expect.poll(opacity).toBe("1");
 });
@@ -222,7 +222,7 @@ it("shows the number and kind, a title clamped to two lines, and only labels the
   expect(labels(cardOf(/^Document the cycle budget/u))).toEqual(["docs"]);
 });
 
-/** The animation of the state mark that opens a Run line. */
+/** Returns the animation of the state mark at the start of a Run line. */
 const markAnimation = (row: HTMLElement) => {
   const mark = row.querySelector("[data-slot=state-mark]");
   if (mark === null) throw new Error("No state mark on the Run line");
@@ -251,7 +251,7 @@ it("times a running Run from its current Attempt, on one line with a pulsing mar
   expect(time?.dateTime).toBe(startedAt);
   expect(time?.title).toBe(`Running since ${timestampLabel(startedAt)}`);
   expect(time?.title).toMatch(/^Running since \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/u);
-  // Earlier Attempts and their failures stay in the Run drawer.
+  // Earlier Attempts and their failures are shown only in the Run drawer.
   expect(running.textContent).not.toContain("Attempt");
   expect(running.textContent).not.toContain("The Worker restarted");
 });
@@ -278,7 +278,7 @@ it("shows a card whose running Run's Loop removed its lane label in that lane, c
   await expect.element(review.getByRole("heading", { name: "Review 2" })).toBeVisible();
   const card = cardOf(/^Keep a running card/u);
   expect(review.element().contains(card)).toBe(true);
-  // Pull requests, the lane its state alone routes to, keeps its own two cards.
+  // The Pull requests lane, which routes by state only, still has its two cards.
   await expect
     .element(lane("Pull requests").getByRole("heading", { name: "Pull requests 2" }))
     .toBeVisible();
@@ -287,7 +287,7 @@ it("shows a card whose running Run's Loop removed its lane label in that lane, c
   const row = runLine(card, "Running");
   expect(row.textContent).toBe("reviewRunning2mreviewer");
   expect(markAnimation(row)).not.toBe("none");
-  // The card shows the labels its pull request carries now.
+  // The card shows the pull request's current labels.
   expect([...card.querySelectorAll("[data-slot=badge]")].map((badge) => badge.textContent)).toEqual(
     ["ci"],
   );
@@ -305,14 +305,14 @@ it("draws the flow between adjacent authored label lanes, named after the Loops 
   expect(flow("Backlog")?.textContent).toBe("Flows to Ready");
   expect(flow("Ready")?.textContent).toBe("Flows to In progressimplement");
   expect(flow("Ready")?.classList).toContain("text-run-waiting");
-  // implement runs on the Task, but its trigger no longer matches it, so it watches no Item there.
+  // implement runs on the Task, but its trigger no longer matches it, so the lane does not list it.
   expect(flow("In progress")?.textContent).toBe("Flows to Review");
   expect(flow("Review")?.textContent).toBe("Flows to Mergereview paused");
   expect(flow("Review")?.classList).toContain("text-muted-foreground");
   expect(flow("Review")?.getAttribute("title")).toBe(
     "Loops matching this lane: review (paused). Flows to Merge",
   );
-  // Pull requests is read-only, so neither Merge nor it has a next lane to flow into.
+  // Pull requests is read-only, so neither Merge nor Pull requests flows into a next lane.
   expect(flow("Merge")).toBeNull();
   expect(flow("Pull requests")).toBeNull();
 });
@@ -322,7 +322,7 @@ it("leaves canceled and succeeded Runs off the card", async () => {
   for (const card of [cardOf(/^Cache the label catalog/u), cardOf(/^Show the salvage branch/u)]) {
     expect(card.querySelector("time")).toBeNull();
     expect(card.querySelector("[data-slot=state-mark]")).toBeNull();
-    // A stall note may say how the Run ended; the card has no Run line for it.
+    // A stall note can say how the Run ended; the card has no Run line for it.
     const stall = card.querySelector("[data-slot=stall-note]")?.textContent ?? "";
     expect(card.textContent?.replace(stall, "")).not.toMatch(/Canceled|Succeeded/u);
   }
@@ -340,7 +340,7 @@ it("opens the Task page from anywhere on the card body, with or without a Run", 
   await expect
     .poll(() => router.state.location.pathname)
     .toBe("/projects/board-test/repo/tasks/12");
-  // A Task joining an issue and its pull request opens under the issue.
+  // A Task with an issue and its pull request opens at the issue's number.
   await userEvent.click(page.elementLocator(cardOf(/^Redesign the Board columns/u)));
   await expect.poll(() => router.state.location.pathname).toBe("/projects/board-test/repo/tasks/9");
 });
@@ -351,7 +351,7 @@ it("lists only the actions that apply to a card without a Run", async () => {
   await userEvent.keyboard("{Escape}");
   await expect.element(page.getByRole("menu")).not.toBeInTheDocument();
 
-  // A canceled latest Run leaves no Run line, so Run again names its Loop.
+  // If the latest Run was canceled, the card has no Run line, so Run again shows the Loop.
   await actions(18).click();
   expect(await menuContents()).toEqual({
     items: ["Open #18 on GitHub", "Run history", "Run againimplement", "Move to"],
@@ -372,7 +372,7 @@ it("runs a Task's canceled Run again from the card menu, says so on the card, an
   const card = page.elementLocator(cardOf(/^Cache the label catalog/u));
   await runDroppedAgain();
   await expect.element(card.getByText(runAgainProgress, { exact: true })).toBeVisible();
-  // While the request is out, the menu offers no action that a second click could send.
+  // While the request is in flight, the menu offers no action that a second click could send.
   await actions(18).click();
   expect((await menuContents()).items).toEqual(["Open #18 on GitHub", "Run history", "Move to"]);
   await userEvent.keyboard("{Escape}");
@@ -396,11 +396,11 @@ it("keeps a card's Run again through a move to another lane and opens the new Ru
   await page.getByRole("menuitem", { name: "Move to" }).click();
   await page.getByRole("menuitem", { name: "In progress", exact: true }).click();
   await expect.element(page.getByRole("menu")).not.toBeInTheDocument();
-  // The card remounts in its new lane, still waiting for the answer.
+  // The card remounts in its new lane, still waiting for the response.
   await expect.element(lane("In progress").getByText(/^Cache the label catalog/u)).toBeVisible();
   const moved = page.elementLocator(cardOf(/^Cache the label catalog/u));
   await expect.element(moved.getByText(runAgainProgress, { exact: true })).toBeVisible();
-  // Nor does the remounted card offer Run again a second time before the answer arrives.
+  // The remounted card does not offer Run again before the response arrives.
   await actions(18).click();
   expect((await menuContents()).items).not.toContain("Run againimplement");
   await userEvent.keyboard("{Escape}");
@@ -417,7 +417,7 @@ it("keeps a card's Run again through a move to another lane and opens the new Ru
 it("says on the card why Run again opened no Run: a refusal, then a used-up cycle budget", async () => {
   const card = page.elementLocator(cardOf(/^Cache the label catalog/u));
   const refusal =
-    "Cannot run Run run-dropped again: Run run-newer of Loop implement is open on the same Item. Run it again after that Run closes, or cancel it first.";
+    "Cannot run Run run-dropped again: Run run-newer of Loop implement is open on the same Item. Cancel Run run-newer, or try again after it closes.";
   await runDroppedAgain();
   await commands.releaseRunAgain(
     409,

@@ -5,20 +5,18 @@ import { Schema } from "effect";
 const LabelNames = Schema.Array(Schema.NonEmptyString);
 
 /**
- * One Board move the operator made: the lane labels the factory sent to GitHub for
- * the Item, as the App. `at` is taken just before the factory sends the first of
- * them, so GitHub records each change at or after it, give or take the two clocks'
- * skew. A label already on the Item, or already absent, is listed even though
- * GitHub records no change for it.
+ * An operator Board move and the lane labels sent to GitHub for it, including labels that were
+ * already in the requested state. `at` is taken before the first label is sent, so GitHub's
+ * change times are at or after it, within clock skew.
  */
 export class BoardMoveRecord extends Schema.Class<BoardMoveRecord>("@usine/engine/BoardMoveRecord")(
   {
     repository: RepositoryName,
     itemKey: ItemKey,
     at: Schema.DateTimeUtc,
-    /** The lane the card was in, by its name on the Board at the time. */
+    /** The source lane's name on the Board at the time. */
     fromLane: Schema.NonEmptyString,
-    /** The lane the operator moved the card to, by its name on the Board at the time. */
+    /** The target lane's name on the Board at the time. */
     toLane: Schema.NonEmptyString,
     added: LabelNames.check(Schema.isNonEmpty()),
     removed: LabelNames,

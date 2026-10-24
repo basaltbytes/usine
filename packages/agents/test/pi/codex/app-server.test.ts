@@ -123,7 +123,6 @@ const spawnerFor = (
     ),
   );
 
-/** Waits until the transport has written `count` stdin lines. */
 const awaitStdinLines = (process: FakeProcess, count: number) =>
   Effect.gen(function* () {
     while (process.stdinLines.length < count) yield* Effect.yieldNow;
@@ -442,7 +441,7 @@ describe("Codex app-server transport", () => {
           yield* TestClock.adjust("61 seconds");
           const error = yield* Effect.flip(Fiber.join(pending));
           assert(error instanceof SessionOperationError);
-          assert.match(error.message, /did not answer initialize/u);
+          assert.match(error.message, /didn't respond to initialize/u);
         }),
       ).pipe(Effect.provide(codexAppServerLive), Effect.provide(spawnerFor(process)));
     }),

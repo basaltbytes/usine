@@ -3,4 +3,6 @@
 "@usine/orchestrator": patch
 ---
 
-A deleted or transferred issue that the queued-Event re-check finds missing now leaves the Board's open lanes. `TriggerCondition.holds` is replaced by `TriggerCondition.recheck`, which answers a `TriggerRecheck` from `@usine/engine/trigger-condition`: `matches`, `no-longer-matches`, or `item-gone`. The engine revokes the Item's queued Events for both of the last two, and for `item-gone` also marks the Item's projection gone with `ItemProjectionWriter.markGone`. The orchestrator's re-check answers `item-gone` when GitHub reports `GitHubItemNotFoundError`. An adapter that cannot tell answers `matches`, as `true` did before.
+A deleted or transferred issue that the queued-event recheck finds missing leaves the board's open lanes. `TriggerCondition.recheck` replaces `TriggerCondition.holds` and returns a `TriggerRecheck` from `@usine/engine/trigger-condition`: `matches`, `no-longer-matches`, or `item-gone`.
+
+For the last two, the engine revokes the item's queued events, and for `item-gone` it also calls `ItemProjectionWriter.markGone`. An adapter that can't tell returns `matches`, as it returned `true` before.

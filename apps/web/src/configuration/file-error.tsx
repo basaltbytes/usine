@@ -2,16 +2,14 @@ import type { ConfigFileError, FileStage } from "@usine/config/file";
 import { Option } from "effect";
 
 const stageLabel = {
-  read: "The file could not be read",
-  yaml: "The frontmatter is not valid YAML",
-  frontmatter: "The frontmatter block is missing or not closed",
-  schema: "A frontmatter field has an invalid value",
-  expression: "An expression does not check",
-  reference: "References something missing from the configuration",
+  read: "Could not read the file",
+  yaml: "Frontmatter is not valid YAML",
+  frontmatter: "Frontmatter block missing or not closed",
+  schema: "Invalid file name or field value",
+  expression: "Invalid expression",
+  reference: "Unknown agent, repository, or tag",
 } satisfies Record<FileStage, string>;
 
-/** Why an authored file did not load: the parse stage that refused it, the parser's message, and
- * the expression at fault, then what that costs and how to recover. */
 export const FileError = ({
   error,
   consequence,

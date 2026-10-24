@@ -172,7 +172,7 @@ const appChanges: ReadonlyArray<ItemChange> = [
     at: time("2026-10-15T19:55:11Z"),
     label: label("agent-in-progress", "fbca04"),
   }),
-  // Between Attempts: no Attempt was at work.
+  // Between Attempts: no Attempt was running.
   comment("2026-10-16T09:00:00Z", 1),
   new LabelAdded({ at: time("2026-10-16T09:46:55Z"), label: label("agent-in-progress", "fbca04") }),
   // The Agent removes a label seconds before the Board move below also removes it.
@@ -186,11 +186,11 @@ const appChanges: ReadonlyArray<ItemChange> = [
   new LabelAdded({ at: time("2026-10-16T09:47:11Z"), label: label("needs-operator", "d93f0b") }),
   comment("2026-10-16T09:48:00Z", 6212798620),
   comment("2026-10-16T13:03:00Z", 2),
-  // While the review Run's Attempt also worked the Item.
+  // While the review Run's Attempt also worked on the Item.
   comment("2026-10-16T13:05:08Z", 6216129425),
 ];
 
-// The operator moved the card while the second Attempt worked the Item.
+// The operator moved the card while the second Attempt worked on the Item.
 const boardMove = new BoardMoveRecord({
   repository,
   itemKey,
@@ -294,7 +294,7 @@ describe("RunGitHubChanges", () => {
           assert.deepStrictEqual(summary(yield* changes.read(runId)), summary(read));
           assert.deepStrictEqual((yield* Ref.get(requests)).slice(1), ["2026-10-16T13:02:00.000Z"]);
 
-          // A just-ended Attempt is asked about again until GitHub's record has settled.
+          // A recently ended Attempt is read again until GitHub's record is final.
           yield* Ref.set(
             current,
             snapshot([

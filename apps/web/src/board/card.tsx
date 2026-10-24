@@ -39,23 +39,20 @@ import { type CardMoves, CardMenu } from "./card-menu.tsx";
 import type { BoardMoveProgress } from "./moves.ts";
 import { type CardRunAgain, useCardRunAgain } from "./run-again.ts";
 
-/** Repository labels by name, for GitHub colors and descriptions. */
 export type LabelCatalog = ReadonlyMap<string, LabelView>;
 
 const VISIBLE_LABELS = 3;
 
 const OPEN_STATES = new Set<RunView["state"]>(OPEN_STATE_TAGS);
 
-/** The Run a card shows and acts on: an open Run, or a failed one that still needs the operator.
- * Succeeded, canceled, and resolved Runs stay in the drawer and Run history. */
+/** Returns the card's Run: an open Run or a failed Run that needs the operator, else `null`. */
 export const currentRun = (item: BoardTaskView): RunView | null => {
   const run = item.run;
   return run !== null && (OPEN_STATES.has(run.state) || run.canResolveFailure) ? run : null;
 };
 
-/** The instant a card's Run line counts from: when the Run opened while it waits for approval or a
- * Worker, when its current Attempt started while it runs, and when its last Attempt ended once it
- * failed. Null when the records do not hold that instant. */
+/** Returns when the Run opened while it waits, when the current Attempt started while it runs, or
+ * when the last Attempt ended once it failed. Returns `null` if that time is not recorded. */
 export const runLineSince = (run: RunView): string | null => {
   const last = run.attempts.at(-1);
   switch (run.state) {
@@ -73,13 +70,13 @@ export const runLineSince = (run: RunView): string | null => {
   }
 };
 
-/** A failed Run that still requests attention, with the message of its latest failed Attempt. */
+/** A failed Run that needs attention, with the message of its latest failed Attempt. */
 interface RunFailure {
   readonly run: RunView;
   readonly message: string;
 }
 
-/** The newest of the task's Runs whose failure still requests attention, or null when none does. */
+/** Returns the newest Run whose failure needs attention, or `null`. */
 const failedRun = (item: BoardTaskView): RunFailure | null => {
   const run =
     [...item.runs].reverse().find(({ canResolveFailure }) => canResolveFailure) ??
@@ -93,10 +90,10 @@ const failedRun = (item: BoardTaskView): RunFailure | null => {
   return null;
 };
 
-/** The newest failure among the task's Runs that still request attention, or null when none does. */
+/** Returns the failure message of the newest Run that needs attention, or `null`. */
 export const itemFailure = (item: BoardTaskView): string | null => failedRun(item)?.message ?? null;
 
-/** The labels a card shows: its lane's own labels are left out because the column names them. */
+/** Returns the card's labels without the lane's own labels. */
 export const cardLabels = (item: BoardTaskView, lane: BoardLaneView): ReadonlyArray<string> => {
   const own = new Set<string>(lane._tag === "WritableBoardLane" ? lane.labels : []);
   for (const source of lane.sources) if ("label" in source) own.add(source.label);
@@ -153,7 +150,7 @@ const RunLine = ({ run }: { readonly run: RunView }) => {
   );
 };
 
-/** What a card says while a Run action, a Run again, or a move is in flight, if anything is. */
+/** Returns the progress text of a pending Run action, Run again, or move, or `null`. */
 const progressMessage = (
   action: RunActions,
   again: CardRunAgain,
@@ -165,11 +162,11 @@ const progressMessage = (
   return phase === undefined ? null : moveProgressMessage(phase);
 };
 
-// The title's hit area stretches over the whole card, so a click anywhere on it opens the Task page.
+// The title's click area covers the whole card, so clicking anywhere opens the Task page.
 const titleClass =
   "block w-full cursor-pointer text-left outline-none after:absolute after:inset-0 after:rounded-lg";
 
-/** The Task's title, linking to its page under the number of its originating Item. */
+/** Renders the title as a link to the Task page at the originating Item's number. */
 const CardTitle = ({
   item,
   repository,
@@ -189,7 +186,6 @@ const CardTitle = ({
   </h3>
 );
 
-/** The failure that still needs the operator, with the action that answers it. */
 const FailureNote = ({
   failure,
   children,
@@ -223,8 +219,7 @@ const RetryButton = ({
     </Button>
   ) : null;
 
-/** Why the Task is stalled, as the overview page says it, with the one action that moves it again.
- * `named` puts the Loop first when neither a Run line on the card nor the fragment names it. */
+/** `named` prefixes the Loop name when neither the card's Run line nor the stall text includes it. */
 const StallNote = ({
   stalled,
   named,
@@ -264,9 +259,9 @@ const CardFace = ({
   readonly repository: RepositoryName;
   readonly stall: StalledItemView | null;
   readonly readOnly: boolean;
-  /** The card's Run actions, or null on the copy that follows a drag. */
+  /** The card's Run actions, or `null` on the drag overlay copy. */
   readonly action: RunActions | null;
-  /** The card's Run again requests, or null on the copy that follows a drag. */
+  /** The card's Run again requests, or `null` on the drag overlay copy. */
   readonly again: CardRunAgain | null;
   readonly progress: string | null;
 }) => {
@@ -274,17 +269,17 @@ const CardFace = ({
   const run = currentRun(item);
   const actionError = action?.error?.message ?? null;
   const runAgainError = again?.error?.message ?? null;
-  // The failure note already shows a failed or held Run, and a held one takes the stall's action.
+  // If the stall is for the failure note's Run, the note shows it, with a suppression's action.
   const onFailure =
     stall !== null &&
     failure !== null &&
-    (stall.reason._tag === "RunFailed" || stall.reason._tag === "HeldForOperator") &&
+    (stall.reason._tag === "RunFailed" || stall.reason._tag === "SuppressedForOperator") &&
     stall.reason.run.id === failure.run.id;
   const stallAction =
     stall === null || action === null ? null : (
       <StallAction stalled={stall} readOnly={readOnly} appearance="card" />
     );
-  // Waiting and Failed Runs already show why the card needs the operator; a blocked Item does not.
+  // Waiting and Failed Runs explain why the card needs the operator; a blocked Item does not.
   const unexplained =
     item.needsYou && !(run?.canApprove || run?.canResolveFailure) && stall === null;
   return (
@@ -315,7 +310,7 @@ const CardFace = ({
       )}
       {failure !== null && (
         <FailureNote failure={failure}>
-          {onFailure && stall?.reason._tag === "HeldForOperator" ? (
+          {onFailure && stall?.reason._tag === "SuppressedForOperator" ? (
             stallAction
           ) : (
             <RetryButton failure={failure} action={action} />
@@ -353,7 +348,6 @@ const cardClass = (needsYou: boolean) =>
     needsYou && "ring-needs-you/45 hover:ring-needs-you/65",
   );
 
-/** A Task card in its lane: draggable to another lane, with its actions behind one menu button. */
 export const BoardCard = ({
   item,
   lane,
@@ -373,9 +367,9 @@ export const BoardCard = ({
   readonly draggable: boolean;
   readonly phase: BoardMoveProgress["phase"] | undefined;
   readonly moves: CardMoves;
-  /** Why the Task is not moving, as the desk lists it; null when the desk does not list it. */
+  /** The desk's stall entry for the Task, or `null` if it is not stalled. */
   readonly stall: StalledItemView | null;
-  /** Hides the stall's action while the factory needs setup. */
+  /** Whether to hide the stall's action, as during setup. */
   readonly readOnly: boolean;
   readonly openRun: (runId: RunId) => void;
 }) => {
@@ -393,7 +387,7 @@ export const BoardCard = ({
     id: item.itemKey,
     disabled: { draggable: !draggable, droppable: lane._tag !== "WritableBoardLane" },
   });
-  // The menu sits beside the drag activator, not inside it, so pressing it never starts a drag.
+  // The menu is next to the drag activator, not inside it, so pressing it does not start a drag.
   return (
     <div
       ref={setNodeRef}
@@ -435,7 +429,6 @@ export const BoardCard = ({
   );
 };
 
-/** The card under the pointer while it is dragged. */
 export const DraggedCard = ({
   item,
   lane,

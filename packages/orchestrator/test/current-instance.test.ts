@@ -49,7 +49,7 @@ const initialFiles = [
   ["loops/start-dev.md", loopFile("developer")],
 ] as const;
 
-/** Runs `test` against a reloadable instance over a fresh folder holding `initialFiles`. */
+/** Runs `test` against a reloadable instance in a new folder with `initialFiles`. */
 const withFolder = <A, E>(
   test: (
     root: InstanceDirectory,
@@ -71,9 +71,8 @@ const warningsIn = (messages: Array<unknown>) =>
 const unused = () => Effect.die("unused");
 
 /**
- * Starts the Worker scheduler on the current instance with an executor whose
- * preflight records `worker: harness/model` for each brain it checks and fails
- * on a `claude` brain, as on Workers where Claude Code is logged out.
+ * Starts the Worker scheduler with an executor whose preflight records `worker: harness/model` for
+ * each brain and fails on a `claude` brain.
  */
 const startWorkers = (preflighted: Array<string>) =>
   Effect.gen(function* () {
@@ -184,7 +183,7 @@ describe("CurrentInstance", () => {
         assert(failure._tag === "RestartRequiredError", failure._tag);
         assert.deepStrictEqual(failure.blocks, ["workers"]);
         assert.deepStrictEqual(failure.fields, ["workers"]);
-        assert.include(failure.message, "restart usine up");
+        assert.include(failure.message, "Restart usine up");
         assert.strictEqual(yield* instances.get, running);
       }),
     ),
@@ -218,7 +217,12 @@ describe("CurrentInstance", () => {
         assert.deepStrictEqual(report.loops.removed, [LoopName.make("start-dev")]);
         assert.deepStrictEqual(
           report.quarantinedLoops.map(({ file, error }) => [file, error.message]),
-          [["loops/start-dev.md", "Unknown agent: ghost"]],
+          [
+            [
+              "loops/start-dev.md",
+              'Unknown agent "ghost": agents/ghost.md is missing or invalid. Fix the agent file, or set agent to an existing agent.',
+            ],
+          ],
         );
         assert.include(warnings, "Loop quarantined; it opens no Runs until its file is fixed");
         const current = yield* instances.get;

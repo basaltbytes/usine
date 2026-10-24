@@ -1,9 +1,7 @@
 import { cn } from "@/lib/utils";
 
-/** Run, Attempt, Project, Loop, and Item states share one semantic tone scale (ADR 0015). A Loop
- * that is not paused is `live`, like the trigger streams in the sidebar. A Merged Item reads as
- * succeeded and a Closed one as canceled; an Open one keeps the neutral tone, since it says
- * nothing about Runs. */
+/** Returns the tone class for a Run, Attempt, Project, Loop, or Item state (ADR 0015). An unpaused
+ * Loop is `live`; an Open Item uses the default muted tone. */
 const stateTone = (state: string): string => {
   switch (state) {
     case "Succeeded":
@@ -31,7 +29,7 @@ const stateTone = (state: string): string => {
   }
 };
 
-/** A dot in the state's tone; it pulses while the state is `Running`. The state's word sits beside it. */
+/** Renders a dot in the state's tone that pulses while the state is `Running`. */
 export const StateMark = ({
   state,
   className,
@@ -51,7 +49,7 @@ export const StateMark = ({
   />
 );
 
-/** A state's mark and word; `label` replaces the word when the state's key is not its sentence-case name. */
+/** `label` replaces the state name when the state key is not its sentence-case name. */
 export const StatusBadge = ({
   state,
   label = state,

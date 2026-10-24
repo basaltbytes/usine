@@ -2,4 +2,4 @@
 "@usine/orchestrator": patch
 ---
 
-An Attempt whose token GitHub refuses to mint fails once with GitHub's reason instead of being retried as an infrastructure failure; an outage or a rate limit is still retried.
+If GitHub refuses to mint an attempt's token, the attempt fails with GitHub's reason, without a retry; outages and rate limits are retried.

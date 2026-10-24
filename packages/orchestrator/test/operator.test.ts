@@ -297,7 +297,21 @@ const apiParent = sessionOf("api-parent", "pi", "openai/gpt-5.5", "developer");
 const claudeChild = sessionOf("claude-child", "claude", "claude-opus-4-7", "developer");
 const planParent = sessionOf("plan-parent", "pi", "openai-codex/gpt-5.5", "developer");
 const codexChild = sessionOf("codex-child", "codex", "gpt-5.6-sol", "reviewer");
-/** The transcript row `sequence` of `attempt`: `session` reports `tokens` so far, priced at `usd`. */
+/** A Claude Code child on the SSH Worker whose Gateway billed its model requests to an API key. */
+const gatewayClaudeChild = new ChildSession({
+  id: AgentSessionId.make("gateway-claude-child"),
+  parentId: AgentSessionId.make("parent-of-gateway-claude-child"),
+  agent: AgentName.make("developer"),
+  brain: new BrainSpec({
+    harness: "claude",
+    model: ModelId.make("claude-opus-4-7"),
+    effort: "high",
+  }),
+  gatewayCredential: Option.some("api-key"),
+});
+/**
+ * Returns transcript row `sequence` of `attempt`, where `session` reports `tokens` so far at `usd`.
+ */
 const tokenReport = (
   attempt: AttemptId,
   session: ParentSession | ChildSession,
@@ -324,7 +338,10 @@ const tokenReport = (
     }),
     receivedAt: now,
   });
-/** The token reports the usage query returns: each session's reports, highest one included. */
+/**
+ * Returns the token reports that the usage query returns: each session's reports, including the
+ * highest.
+ */
 const usageReports = (
   [
     [attemptId, apiParent, 1_000, 0.5],
@@ -332,6 +349,7 @@ const usageReports = (
     [attemptId, claudeChild, 20_000, 1.25],
     [retryAttemptId, planParent, 800, 0.3],
     [retryAttemptId, codexChild, 5_000, null],
+    [retryAttemptId, gatewayClaudeChild, 3_000, 0.25],
   ] as const
 ).map(([attempt, session, tokens, usd], index) =>
   tokenReport(attempt, session, tokens, usd, 1_000 + index),
@@ -355,9 +373,9 @@ const testLayer = (
     intervene: () => Effect.void,
     runAgain: () => Effect.die("unused"),
   },
-  /** Receives the Attempt of each token-report query, in the order they ran. */
+  /** Receives the Attempt of each token-report query, in order. */
   usageQueries: Array<AttemptId> = [],
-  /** Token reports a test adds as its Attempts work on; the usage query returns them too. */
+  /** Token reports a test adds while its Attempts run; the usage query also returns them. */
   laterReports: ReadonlyArray<TranscriptEntry> = [],
   /** Receives each Board move the operator records, in order. */
   recordedMoves: Array<BoardMoveRecord> = [],
@@ -519,7 +537,7 @@ const testLayer = (
               repository,
               label: GitHubLabelName.make("ready-for-review"),
               errorTag: "GitHubApiError",
-              message: "GitHub rejected the request with status 500",
+              message: "GitHub returned HTTP status 500",
             }),
           ],
           nextPollAt: Option.none(),
@@ -680,7 +698,7 @@ describe("Operator", () => {
       const moved = yield* Ref.make<ItemLabelMutation | null>(null);
       const reads = yield* Ref.make(0);
       const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
-      // Issue #31 carries `ready` now; its Run was triggered while it carried `ready-for-review`.
+      // Issue #31 has `ready` now; its Run was triggered while it had `ready-for-review`.
       const triggered = new Event({
         ...snapshot.event,
         payload: { number: 31, labels: { totalCount: 1, nodes: [{ name: "ready-for-review" }] } },
@@ -768,7 +786,7 @@ describe("Operator", () => {
   });
 
   it.effect(
-    "details the Run's Worker, how each Attempt's Worker is reached, Attempt time, why each Attempt began, and its tokens per session and pool",
+    "details the Run's Worker, how each Attempt's Worker is reached, Attempt time, why each Attempt began, and its tokens per session and pool, with a Claude Code child its Gateway paid with an API key among API keys",
     () =>
       Effect.gen(function* () {
         const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
@@ -844,7 +862,7 @@ describe("Operator", () => {
               ["InfraRetry", "2026-08-31T12:09:00.000Z"],
             ],
           );
-          assert.strictEqual(detail.usage.tokens, 27_300);
+          assert.strictEqual(detail.usage.tokens, 30_300);
           assert.deepStrictEqual(
             detail.usage.pools.map(
               ({ pool, tokens, cost }): readonly [string, number, object | null] => [
@@ -854,36 +872,54 @@ describe("Operator", () => {
               ],
             ),
             [
-              ["apiKeys", 1_500, { usd: 0.75, estimate: false }],
+              ["apiKeys", 4_500, { usd: 1, estimate: false }],
               ["claudePlan", 20_000, { usd: 1.25, estimate: true }],
               ["chatgptPlan", 5_800, null],
             ],
           );
+          // The Claude Code child on the local Worker used the Claude plan login; the one on the
+          // SSH Worker used its Gateway's API key, priced at the model's rate.
           assert.deepStrictEqual(
-            detail.usage.sessions.map(({ attemptId: attempt, session, tokens, cost }) => [
-              attempt,
-              session.id,
-              tokens,
-              cost?.usd ?? null,
-            ]),
+            detail.usage.sessions.map(
+              ({
+                attemptId: attempt,
+                session,
+                pool,
+                tokens,
+                cost,
+              }): readonly [string, string, string, number, object | null] => [
+                attempt,
+                session.id,
+                pool,
+                tokens,
+                cost === null ? null : { ...cost },
+              ],
+            ),
             [
-              [attemptId, "api-parent", 1_500, 0.75],
-              [attemptId, "claude-child", 20_000, 1.25],
-              [retryAttemptId, "plan-parent", 800, null],
-              [retryAttemptId, "codex-child", 5_000, null],
+              [attemptId, "api-parent", "apiKeys", 1_500, { usd: 0.75, estimate: false }],
+              [attemptId, "claude-child", "claudePlan", 20_000, { usd: 1.25, estimate: true }],
+              [retryAttemptId, "plan-parent", "chatgptPlan", 800, null],
+              [retryAttemptId, "codex-child", "chatgptPlan", 5_000, null],
+              [
+                retryAttemptId,
+                "gateway-claude-child",
+                "apiKeys",
+                3_000,
+                { usd: 0.25, estimate: false },
+              ],
             ],
           );
 
-          // The ended Attempt's reports are read once; the running one's on every poll.
+          // The ended Attempt's reports are read once; the running one's on every read.
           const again = yield* (yield* Operator).detail(instance, runId);
-          assert.strictEqual(again.usage.tokens, 27_300);
+          assert.strictEqual(again.usage.tokens, 30_300);
           assert.deepStrictEqual(
             again.run.attempts.map(({ workerAccess }) => workerAccess),
             [new LocalWorkerAccess(), null],
           );
           assert.deepStrictEqual(usageQueries, [attemptId, retryAttemptId, retryAttemptId]);
 
-          // The Board card adds up its Runs the same way, from the same cache.
+          // The Board card sums its Runs the same way, from the same cache.
           const overview = yield* (yield* Operator).overview(declared);
           const card = overview.projects[0]?.board.lanes
             .flatMap(({ items }) => items)
@@ -904,13 +940,13 @@ describe("Operator", () => {
               durationMillis: 300_000,
               runningSince: ["2026-08-31T12:06:00.000Z"],
               unmeasured: 0,
-              tokens: 27_300,
+              tokens: 30_300,
               pools: [
-                ["apiKeys", 1_500, 0.75, false],
+                ["apiKeys", 4_500, 1, false],
                 ["claudePlan", 20_000, 1.25, false],
                 ["chatgptPlan", 5_800, null, false],
               ],
-              cost: { usd: 2, estimate: true },
+              cost: { usd: 2.25, estimate: true },
             },
           );
           assert.deepStrictEqual(usageQueries, [
@@ -920,18 +956,18 @@ describe("Operator", () => {
             retryAttemptId,
           ]);
 
-          // A later token report adds no projection revision. The next read keeps the cached
-          // overview and reads the Attempt at work again, so the card counts the new tokens.
+          // A later token report doesn't change the projection revision, so the next read keeps the
+          // cached overview, rereads the running Attempt, and counts the new tokens.
           laterReports.push(tokenReport(retryAttemptId, codexChild, 9_000, null, 2_000));
           const later = yield* (yield* Operator).overview(declared);
           const laterCard = later.projects[0]?.board.lanes
             .flatMap(({ items }) => items)
             .find(({ runs }) => runs.some(({ id }) => id === runId));
-          assert.strictEqual(laterCard?.usage.tokens, 31_300);
+          assert.strictEqual(laterCard?.usage.tokens, 34_300);
           assert.deepStrictEqual(
             laterCard?.usage.pools.map(({ pool, tokens }) => [pool, tokens]),
             [
-              ["apiKeys", 1_500],
+              ["apiKeys", 4_500],
               ["claudePlan", 20_000],
               ["chatgptPlan", 9_800],
             ],
@@ -1285,7 +1321,7 @@ describe("Operator", () => {
           assert.strictEqual(run.state, "Queued");
           assert.strictEqual(run.canApprove, false);
           assert.strictEqual(run.canCancel, true);
-          // The overview and the detail both say who approved, when, and from where.
+          // The overview and the detail both show who approved, when, and from where.
           const shown = new ApprovalView({
             approvedAt: DateTime.formatIso(now),
             source: askAnswer,
@@ -1349,7 +1385,7 @@ describe("Operator", () => {
           overview.needsYou.map(({ _tag }) => _tag),
           ["ApprovalNeed", "BoardProjectionNeed", "PollFailureNeed", "PreflightFindingNeed"],
         );
-        // The approval names the Item its Run works on, as the card shows it.
+        // The approval links the Item its Run works on, as the card shows it.
         const approval = overview.needsYou[0];
         assert(approval?._tag === "ApprovalNeed");
         assert.deepStrictEqual(
@@ -1428,7 +1464,7 @@ describe("Operator", () => {
         const recorded = approvals[0];
         assert(recorded !== undefined);
         assert.strictEqual(recorded.runId, runId);
-        // The UI has no sign-in, so it approves as the operator `usine.yaml` names.
+        // The UI has no sign-in, so it approves as the operator set in `usine.yaml`.
         assert.deepStrictEqual(
           recorded.source,
           new ApprovalSource({
@@ -1436,8 +1472,8 @@ describe("Operator", () => {
             approver: Option.some(OperatorLogin.make("Philippe")),
           }),
         );
-        // The approval Event the waiting run consumes is recorded whole: a
-        // deterministic identity for idempotent re-approval and a typed payload.
+        // The approval Event is recorded whole: a deterministic identity for idempotent re-approval
+        // and a typed payload.
         assert.strictEqual<string>(recorded.event.id, recorded.event.dedupKey);
         assert.strictEqual<string>(
           recorded.event.dedupKey,
@@ -1637,7 +1673,8 @@ describe("Operator", () => {
         attempts: 1,
         running,
       });
-    // A removed Worker's only Attempt still runs: the entry says so rather than failing the overview.
+    // A removed Worker's only Attempt still runs: the entry reports it instead of failing the
+    // overview.
     assert.doesNotThrow(() => need(1));
     assert.throws(() => need(2));
   });

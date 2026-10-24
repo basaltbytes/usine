@@ -3,9 +3,9 @@ import { homedir } from "node:os";
 import { type ChildHost, type HostInvocation, sshArguments } from "./child-host.ts";
 
 /**
- * The process this machine starts to run `invocation` on `host`. On this
- * machine the command runs directly with exactly `environment`; on a remote
- * shell it is one SSH command whose client sees only `sshEnvironment`.
+ * Returns the local process command that runs `invocation` on `host`: the command itself with
+ * exactly `environment` on a local host, or one SSH command whose client gets only `sshEnvironment`
+ * on a remote host.
  */
 export const hostCommand = (
   host: ChildHost,

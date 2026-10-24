@@ -80,7 +80,7 @@ describe("agent runtime contract", () => {
       new UnknownModelError({
         harness: "claude",
         model: ModelId.make("claude-never-existed"),
-        message: "Claude does not expose model claude-never-existed",
+        message: 'Claude has no model "claude-never-existed"',
       }),
       new PoolUnavailableError({
         harness: "pi",
@@ -92,7 +92,7 @@ describe("agent runtime contract", () => {
         harness: "codex",
         model: ModelId.make("gpt-5.6-terra"),
         effort: "max",
-        message: "Codex model gpt-5.6-terra does not support effort max",
+        message: 'Codex model "gpt-5.6-terra" doesn\'t support effort max',
       }),
       new AgentResultError({ sessionId, message: "ran out of turns" }),
     ];

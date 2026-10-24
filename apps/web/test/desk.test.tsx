@@ -14,7 +14,7 @@ import { deskFixture } from "./desk-fixture.ts";
 const now = Date.parse("2026-10-20T10:00:00.000Z");
 const { desk, empty, overview } = deskFixture(now);
 
-/** Static markup of `node` inside the app's router and query client, as the desk renders it. */
+/** Renders `node` to static HTML inside a router and query client. */
 const render = (node: ReactNode) => {
   const queryClient = new QueryClient();
   const router = createRouter({
@@ -29,7 +29,6 @@ const render = (node: ReactNode) => {
   );
 };
 
-/** The visible text of `html`, tags dropped and whitespace collapsed. */
 const text = (html: string) =>
   html
     .replaceAll(/<[^>]+>/gu, " ")
@@ -79,7 +78,7 @@ describe("Desk", () => {
     );
     assert.strictEqual(
       text(render(<NotMoving stalled={[]} now={now} readOnly={false} polled={false} />)),
-      "No poll has finished yet",
+      "Not checked yet",
     );
   });
 

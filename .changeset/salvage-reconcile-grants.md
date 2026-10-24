@@ -3,4 +3,4 @@
 "@usine/orchestrator": patch
 ---
 
-Retry a failed exe.dev credential grant renewal every minute until it succeeds, instead of waiting for the next half-life, and size the grant window independently of `max_attempt_minutes`. Show the last salvage failure in the run drawer for a retained worktree, which every startup retries until its push succeeds. The recorded failure now carries git's own stderr after the exit code, on the Attempt's salvage and on the startup reconcile alike, and names a stalled push instead of a bare `TimeoutError`.
+Retries a failed exe.dev credential grant renewal every minute until it succeeds, and sizes the grant window independently of `max_attempt_minutes`. The run drawer shows the last salvage failure of a retained worktree, which every startup retries; the recorded failure includes git's stderr and names a stalled push instead of a bare `TimeoutError`.

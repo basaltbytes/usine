@@ -7,9 +7,8 @@ export interface KeyedLock<in K> {
 }
 
 /**
- * One mutex per key. `PartitionedSemaphore` is not this: its `permits` option
- * is one shared pool and the partition key only orders waiters, so
- * `make({ permits: 1 })` serializes every key behind a single global permit.
+ * Returns one mutex per key. `PartitionedSemaphore` doesn't provide this: its `permits` is one
+ * shared pool, so `make({ permits: 1 })` serializes every key.
  */
 export const keyedLockFor = <K>(): Effect.Effect<KeyedLock<K>> =>
   Effect.map(Ref.make(new Map<K, Semaphore.Semaphore>()), (locks) => ({

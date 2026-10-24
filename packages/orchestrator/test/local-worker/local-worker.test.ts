@@ -105,7 +105,7 @@ const failingCredentials = (reason: CredentialUnavailableReason, message: string
       ),
   });
 
-/** The tag and message of each Attempt's failure, in Attempt order. */
+/** Returns the tag and message of each Attempt's failure, in Attempt order. */
 const attemptFailures = (attempts: ReadonlyArray<Attempt>) =>
   attempts.map((attempt) =>
     Option.match(attempt.outcome, {
@@ -177,7 +177,10 @@ const reviewedParent: StubParent = ({ request }) =>
     });
   }).pipe(Effect.provide(NodeServices.layer), Effect.orDie);
 
-/** The local composition with `gh` answered by the GitHub fixture, as `../../src/local.ts` builds it. */
+/**
+ * Runs `use` on the local composition, built as in `../../src/local.ts`, with `gh` answered by the
+ * GitHub fixture.
+ */
 const withGitHubEngine = <A, E, R>(
   parent: StubParent,
   lookup: "answers" | "fails",
@@ -283,7 +286,7 @@ describe("local worker", () => {
     "fails once, without an automatic retry, when GitHub refuses the Attempt's token",
     () => {
       const refusal =
-        "Could not mint a worker token for acme/demo: GitHub rejected the request with status 422: The permissions requested are not granted to this installation.";
+        'Could not create a worker token for "acme/demo": GitHub returned HTTP status 422: The permissions requested are not granted to this installation.';
       return withLocalEngine(
         { credentials: failingCredentials("refused", refusal) },
         ({ engine, instance }) =>
@@ -304,7 +307,7 @@ describe("local worker", () => {
     "retries as an infrastructure failure when GitHub cannot be reached for the token",
     () => {
       const outage =
-        "Could not mint a worker token for acme/demo: The request to GitHub could not be sent";
+        'Could not create a worker token for "acme/demo": Could not send the request to GitHub';
       return withLocalEngine(
         { credentials: failingCredentials("unreachable", outage) },
         ({ engine }) =>
@@ -816,8 +819,8 @@ describe("local worker", () => {
               const path = yield* Path.Path;
               const [environment] = environments;
               assert(environment !== undefined && environments.length === 1);
-              // Nothing from the orchestrator's own environment beyond the
-              // allowlist, which keeps the App private key out (ADR 0011).
+              // Nothing from the orchestrator's environment beyond the allowlist, which excludes
+              // the App private key (ADR 0011).
               const allowed = new Set([
                 "HOME",
                 "LANG",
@@ -892,7 +895,8 @@ describe("local worker", () => {
             Effect.fail(
               new InstallationDiscoveryError({
                 reason: "missing",
-                message: "The GitHub App is not installed on an account",
+                message:
+                  "The GitHub App is not installed on any account. Install it on the account that owns the repositories.",
               }),
             ),
           installationToken: () => Effect.die("unused"),
@@ -996,8 +1000,8 @@ describe("local worker", () => {
             ),
             [expected],
           );
-          // The engine keeps reconciling a checkout a restart kept for a
-          // reattachment until preparation holds it (#180).
+          // The engine reconciles a checkout kept for a reattachment until preparation acquires it
+          // (#180).
           assert.deepStrictEqual(acquired, []);
         }
       }),

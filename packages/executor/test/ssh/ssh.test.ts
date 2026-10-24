@@ -33,7 +33,7 @@ import {
 
 const allowlisted = new Set<string>(SSH_ENVIRONMENT_ALLOWLIST);
 
-/** A second request on the same Worker, with its own Attempt and salvage ref. */
+/** Returns a request on the same Worker with its own Attempt and salvage ref. */
 const requestFor = (attempt: number) =>
   new CheckoutRequest({
     ...request,
@@ -44,10 +44,7 @@ const requestFor = (attempt: number) =>
 const isWorkerNotice = (payload: AttemptChannel.OutboundPayload) =>
   payload._tag === "WorkerUnresponsive" || payload._tag === "WorkerResponsive";
 
-/**
- * Parents for `attemptIds` that signal once they work and finish when told,
- * with a transcript per Attempt.
- */
+/** Returns parents for `attemptIds` that signal when they start and finish when told, with one transcript per Attempt. */
 const workingAttempts = (attemptIds: ReadonlyArray<AttemptId>) =>
   Effect.gen(function* () {
     const outbound = new Map<AttemptId, Array<AttemptChannel.OutboundPayload>>();
@@ -644,7 +641,7 @@ describe("SSH Worker", () => {
             yield* Deferred.succeed(signalsOf(attemptId).done, undefined);
           for (const fiber of [first, late, latest]) yield* Fiber.join(fiber);
         }).pipe(
-          // A failed assertion would otherwise leave cleanup waiting on a stalled machine.
+          // Prevents a failed assertion from leaving cleanup waiting on a stalled machine.
           Effect.ensuring(Effect.sync(() => (machine.state.stalled = false))),
           Effect.scoped,
           Effect.provide(runtime(machine, credentials, parent)),
@@ -691,14 +688,17 @@ describe("SSH Worker", () => {
       const unwritable = yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip);
       assert(unwritable._tag === "WorkerCapabilityError");
       assert.strictEqual(unwritable.capability, "machine");
-      assert.include(unwritable.message, "/srv/usine is not a writable directory");
+      assert.include(
+        unwritable.message,
+        'The root /srv/usine of SSH worker "eu-one" isn\'t a writable directory',
+      );
 
       machine.state.reachable = false;
       const unreachable = yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip);
       assert(unreachable._tag === "WorkerCapabilityError");
       assert.strictEqual(
         unreachable.message,
-        `Could not connect to SSH Worker eu-one at ${DESTINATION}`,
+        `Can't connect to SSH worker "eu-one" at ${DESTINATION}`,
       );
 
       const unknown = yield* executor.preflight(WorkerName.make("eu-two"), [], 1).pipe(Effect.flip);
@@ -731,17 +731,20 @@ describe("SSH Worker", () => {
         const short = yield* executor.preflight(WORKER, [], 5).pipe(Effect.flip);
         assert(short._tag === "WorkerCapabilityError");
         assert.strictEqual(short.capability, "memory");
-        assert.include(short.message, "6.0 GiB of memory for max_concurrent_attempts: 5");
-        assert.include(short.message, "set max_concurrent_attempts to 4 or less");
+        assert.include(
+          short.message,
+          "6.0 GiB of memory, which is 1.2 GiB per attempt with max_concurrent_attempts set to 5",
+        );
+        assert.include(short.message, "Set max_concurrent_attempts to 4 or less");
 
         machine.state.swapGib = 0;
         yield* executor.preflight(WORKER, [], 1);
         const withoutSwap = yield* executor.preflight(WORKER, [], 2).pipe(Effect.flip);
         assert(withoutSwap._tag === "WorkerCapabilityError");
         assert.strictEqual(withoutSwap.capability, "memory");
-        assert.include(withoutSwap.message, "has no swap for max_concurrent_attempts: 2");
+        assert.include(withoutSwap.message, "has no swap, and max_concurrent_attempts is 2");
         const shortWithoutSwap = yield* executor.preflight(WORKER, [], 5).pipe(Effect.flip);
-        assert.include(shortWithoutSwap.message, "set max_concurrent_attempts to 1 or less");
+        assert.include(shortWithoutSwap.message, "Set max_concurrent_attempts to 1 or less");
       }).pipe(Effect.provide(runtime(machine, credentials)), Effect.provide(logs.layer));
     },
   );

@@ -5,14 +5,14 @@ interface Disclosure {
   readonly groupOpen: boolean;
 }
 
-/** Reader choices attach to durable row identities, independently of current grouping or filters. */
+/** The disclosure state, keyed by row key and independent of grouping and filters. */
 export type TranscriptDisclosure = ReadonlyMap<string, Disclosure>;
 
 type DisclosureChange =
   | { readonly _tag: "Item"; readonly key: string; readonly open: boolean }
   | { readonly _tag: "Group"; readonly keys: ReadonlyArray<string>; readonly open: boolean };
 
-/** Applies an explicit reader choice without discarding the choices of hidden group members. */
+/** Applies a reader's open or close choice and keeps the choices of hidden group members. */
 export const changeDisclosure = (
   previous: TranscriptDisclosure,
   change: DisclosureChange,
@@ -34,7 +34,7 @@ export const changeDisclosure = (
   return next;
 };
 
-/** A group remains exposed when an inspected running call finishes or older members arrive. */
+/** Returns whether any member has `groupOpen`, so the group stays open when a running call finishes or older members load. */
 export const isGroupOpen = (state: TranscriptDisclosure, keys: ReadonlyArray<string>): boolean =>
   keys.some((key) => state.get(key)?.groupOpen === true);
 
@@ -44,7 +44,7 @@ const DisclosureContext = createContext<{
   readonly reveal: (change: DisclosureChange) => void;
 } | null>(null);
 
-/** Keep outside the scroller's filter key so reader choices survive filtering and regrouping. */
+/** Provides disclosure state; mount it outside the scroller's filter `key` so the state survives filtering and regrouping. */
 export const TranscriptDisclosureProvider = ({
   children,
   initialState = new Map<string, Disclosure>(),
@@ -69,7 +69,6 @@ export const TranscriptDisclosureProvider = ({
   );
 };
 
-/** Shared disclosure state for transcript rows, tool groups and child sessions. */
 export const useTranscriptDisclosure = () => {
   const context = useContext(DisclosureContext);
   if (context === null) throw new Error("TranscriptDisclosureProvider is required");

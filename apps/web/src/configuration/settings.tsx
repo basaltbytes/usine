@@ -3,10 +3,10 @@ import type { ReactNode } from "react";
 import { ConfigurationPage } from "./section.tsx";
 
 interface Setting {
-  /** The key as `usine.yaml` spells it. */
+  /** The key as written in `usine.yaml`. */
   readonly key: string;
   readonly value: ReactNode;
-  /** What the value does, in a sentence. */
+  /** A one-sentence description of what the value does. */
   readonly effect: string;
 }
 
@@ -33,7 +33,7 @@ const groups = (
       {
         key: "settings.max_children",
         value: mono(settings.maxChildren),
-        effect: "Child sessions one attempt may start; one more fails the attempt.",
+        effect: "Maximum child sessions per attempt. Starting one more fails the attempt.",
       },
       {
         key: "settings.max_attempt_minutes",
@@ -51,7 +51,7 @@ const groups = (
         effect:
           settings.maxAttemptTokens === null
             ? "No token ceiling."
-            : "Tokens, parent and children together, an attempt may use before the runaway guard fails it.",
+            : "Tokens an attempt may use, parent and children combined, before the runaway guard fails it.",
       },
     ],
   ],
@@ -71,7 +71,7 @@ const groups = (
         value: settings.parentEffort === null ? unset("Not set") : mono(settings.parentEffort),
         effect:
           settings.parentEffort === null
-            ? "parent_effort from the agent file, else effort."
+            ? "parent_effort from the agent file, or effort if it is not set."
             : "Parent effort when the agent file sets no parent_effort.",
       },
     ],
@@ -85,7 +85,7 @@ const groups = (
         effect:
           settings.operator === null
             ? "Approvals from the UI record no approver; messages show as local operator."
-            : "The GitHub login recorded on approvals and messages from the UI, and the only login that can answer an Ask.",
+            : "The GitHub login recorded on approvals and messages from the UI, and the only login that can answer an ask on GitHub.",
       },
     ],
   ],
@@ -96,7 +96,7 @@ const groups = (
         key: "webhooks.mode",
         value: mono(settings.webhooks),
         effect:
-          "Parsed and checked, not used: this version gets GitHub changes by polling only. A change applies when usine up restarts.",
+          "Parsed and validated but not used: this version reads GitHub changes by polling only. A change applies after usine up restarts.",
       },
       ...(settings.webhooksPublicUrl === null
         ? []
@@ -111,8 +111,7 @@ const groups = (
   ],
 ];
 
-/** The `settings` and `operator` keys of `usine.yaml` and its webhooks mode, defaults applied,
- * each with what its value does. */
+/** Renders the `settings` and `operator` keys of `usine.yaml` and the webhooks mode, with defaults applied. */
 export const SettingsPage = ({ configuration }: { readonly configuration: ConfigurationView }) => (
   <ConfigurationPage title="Settings">
     <div className="flex max-w-4xl flex-col gap-8 pt-2">

@@ -1,17 +1,17 @@
 ---
 title: usine
-description: usine runs coding agents on the GitHub issues and pull requests of the repositories you register, following Loops that you write as Markdown files.
+description: usine runs coding agents on the GitHub issues and pull requests of the repositories that you register, following loops that you write as Markdown files.
 head:
   - tag: title
     content: usine documentation
 template: splash
 hero:
   layout: banner
-  tagline: A long-running orchestrator polls the repositories you register. When an issue or pull request matches one of your Loops, it opens a Run, and the Loop's Agent works on the Item in a checkout on a Worker, through Claude Code, Codex, or Pi.
+  tagline: When an issue or pull request in your repositories matches one of your loops, usine runs the loop's agent on it through Claude Code, Codex, or Pi.
   actions:
     - text: Run a factory
       link: /guides/
-    - text: Write a Loop
+    - text: Write a loop
       link: /guides/write-a-loop/
       variant: secondary
 ---
@@ -23,9 +23,7 @@ import { ContainerSection } from "lucode-starlight/components";
 
 ## Loop files
 
-Loops and Agents are Markdown files in the operator's instance folder; the engine has no built-in Loop. A Loop's frontmatter sets which issues or pull requests open a Run, whether the operator approves each Run before it starts, and which Agent does the work. Its body is the task the Agent receives.
-
-This is `loops/start-dev.md` from the dogfood instance, which runs usine on its own repository:
+Loops and agents are Markdown files that you write. A loop's frontmatter sets which issues or pull requests open a run, whether you approve each run, and which agent does the work. Its body is the agent's task. This loop runs usine on its own repository:
 
 ```markdown title="loops/start-dev.md" wrap
 ---
@@ -49,13 +47,13 @@ Before editing, remove `ready-for-agent` from the issue and add `agent-in-progre
 If work cannot continue, add a comment to the issue that states the exact blocker. Do not add a workaround that changes the issue's scope.
 ```
 
-The same process serves a web UI on `127.0.0.1`, where the operator approves and steers the work and follows its progress.
+You approve, follow, and steer the work in a local web UI.
 
 </ContainerSection>
 
 <ContainerSection>
 
-## Read next
+## Next steps
 
 <CardGrid>
   <LinkCard
@@ -64,18 +62,18 @@ The same process serves a web UI on `127.0.0.1`, where the operator approves and
     href="/guides/"
   />
   <LinkCard
-    title="Write a Loop"
-    description="Choose which issues or pull requests start work and what the Agent is asked to do."
+    title="Write a loop"
+    description="Choose which issues or pull requests start work and the task that the agent receives."
     href="/guides/write-a-loop/"
   />
   <LinkCard
-    title="Operate Runs"
-    description="Approve, steer, retry, and cancel Runs from the web UI."
+    title="Operate runs"
+    description="Approve, steer, retry, and cancel runs in the web UI."
     href="/guides/operate-runs/"
   />
   <LinkCard
     title="Architecture overview"
-    description="The packages, processes, storage, and Workers, and the path of one change through them."
+    description="The packages, processes, storage, and workers, and the path of one change through them."
     href="/architecture/"
   />
 </CardGrid>

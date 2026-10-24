@@ -14,7 +14,7 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { ErrorAlert } from "@/components/error-alert";
 import { cn } from "@/lib/utils";
 
-/** What the operator edits the task and Agent for: the failed Run's next Attempt, or a new Run of a closed one. */
+/** The target of an edit: the failed Run's next Attempt, or a new Run of a closed Run. */
 export type EditIntent = "retry" | "runAgain";
 
 const editCopy = {
@@ -25,12 +25,12 @@ const editCopy = {
   },
   runAgain: {
     title: "Edit and run again",
-    note: "Opens a new run on this item with this task and agent. This run is unchanged",
+    note: "Opens a new run on this item with this task and agent. This run is unchanged.",
     submit: "Save and run again",
   },
 } as const satisfies Record<EditIntent, { title: string; note: string; submit: string }>;
 
-/** Whether the Run still allows what the edit is for, so a stale form closes on its own. */
+/** Returns whether the Run still allows `intent`. */
 export const editApplies = (run: RunView, intent: EditIntent): boolean =>
   intent === "retry" ? run.canRetry : run.canRunAgain;
 
@@ -49,10 +49,7 @@ const useRetryWith = (run: RunView, close: () => void) => {
   });
 };
 
-/**
- * Edits only the task and roster choice; the server derives persona and brain settings. A retry
- * amends the failed Run; a run again opens the new Run with them and shows it through `openRun`.
- */
+/** Renders an editor for the task and Agent choice. For a run again, calls `openRun` with the new Run. */
 export const EditAndRetry = ({
   run,
   intent,
@@ -63,7 +60,7 @@ export const EditAndRetry = ({
   readonly run: RunView;
   readonly intent: EditIntent;
   readonly close: () => void;
-  /** Shows the Run that running this one again opened. */
+  /** Opens the Run that Run again created. */
   readonly openRun: (runId: RunId) => void;
   readonly className?: string;
 }) => {

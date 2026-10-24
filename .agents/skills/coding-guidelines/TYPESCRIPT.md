@@ -55,7 +55,6 @@ const Evaluation = z.discriminatedUnion("status", [
 
 ## Discipline
 
-- Name exported module-level literal value sets in `SCREAMING_SNAKE_CASE` (`APPROVAL_REQUIREMENTS`, `IGNORED_REASONS`).
 - `schema.parse(...)` / `safeParse(...)` at every edge: HTTP, DB rows, env
   (`Env.parse(process.env)` once at boot), queues, files.
 - Never `as X` past an edge, never `!` in domain code — narrowing lies the runtime

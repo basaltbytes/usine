@@ -35,11 +35,11 @@ const runBackup = (directory: string, output: string) =>
     timeout: 15_000,
   });
 
-// A cold CLI start under a fully parallel `pnpm test` outlasts vitest's 5 s default. The test
-// budget exceeds the spawn budget so a slow CLI fails with the spawn's own diagnostics.
+// A cold CLI start in a parallel `pnpm test` exceeds vitest's 5 s default. The test timeout is
+// above the spawn timeout so a slow CLI fails with the spawn's diagnostics.
 const slowCli = { timeout: 30_000 };
 
-/** Opens `filename` in WAL mode, as the orchestrator does, and keeps `value` in its WAL. */
+/** Opens `filename` in WAL mode and writes `value` without checkpointing it. */
 const openWithUncheckpointedRow = (filename: string, value: number) => {
   const database = new DatabaseSync(filename);
   database.exec("PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0");
@@ -68,7 +68,7 @@ test.for([
     const filename = join(runtime, "runtime.sqlite");
     if (kind !== "missing") {
       await mkdir(runtime);
-      // The durable storage copies first; the failed runtime copy must take it back out.
+      // The durable storage is copied first; the failed runtime copy must remove it again.
       openWithUncheckpointedRow(join(runtime, "durable.sqlite"), 176).close();
     }
     if (kind === "directory") await mkdir(filename);

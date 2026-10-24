@@ -25,24 +25,22 @@ import {
 } from "./environment.ts";
 
 /**
- * Reads the gateway's settings again, from the same environment files and
- * allowlist file as at startup, and replaces the egress allowlist and the
- * LLM providers in force. The attachments, the admin API, the listeners, and
- * open tunnels are left as they are. `usine-gateway` runs it on SIGHUP.
+ * The service that reloads the egress allowlist and LLM providers from the startup environment
+ * and allowlist files. Attachments, the admin API, listeners, and open tunnels are unchanged.
+ * `usine-gateway` runs it on SIGHUP.
  */
 export class GatewayReload extends Context.Service<
   GatewayReload,
   {
     /**
-     * Reloads once, after any reload already running. It does not fail: a
-     * file that cannot be read or parsed keeps what is in force, a setting
-     * that needs a restart is left as it is, and the log says which.
+     * Reloads once, after any reload in progress. Never fails: an unreadable or invalid file keeps
+     * the current settings, restart-only settings are unchanged, and both cases are logged.
      */
     readonly reload: Effect.Effect<void>;
   }
 >()("@usine/gateway/node/GatewayReload") {}
 
-/** Each restart-only setting by its variable, as text to compare. */
+/** Returns each restart-only setting as text, keyed by its variable. */
 const restartValues = ({ domain, adminToken, callerKey, listeners }: RestartSettings) => ({
   USINE_GATEWAY_DOMAIN: domain,
   USINE_GATEWAY_ADMIN_TOKEN: Redacted.value(adminToken),
@@ -55,7 +53,7 @@ const restartValues = ({ domain, adminToken, callerKey, listeners }: RestartSett
   USINE_GATEWAY_ADMIN_PORT: String(listeners.admin.port),
 });
 
-/** Each credential variable with the value it sets, none when unset. */
+/** Returns each credential variable with its value, or `None` if unset. */
 const credentialValues = ({ anthropic, openai }: LlmProviders) => {
   const credential = Option.getOrUndefined(
     Option.map(anthropic, (provider) => provider.credential),
@@ -73,7 +71,7 @@ const credentialValues = ({ anthropic, openai }: LlmProviders) => {
   };
 };
 
-/** The upstream variables whose values changed, for providers with a credential before and after. */
+/** Returns the upstream variables that changed, for providers with a credential before and after. */
 const changedUpstreams = (before: LlmProviders, after: LlmProviders): ReadonlyArray<string> => {
   const differs = (
     was: Option.Option<{ readonly upstream: string }>,
@@ -89,13 +87,13 @@ const changedUpstreams = (before: LlmProviders, after: LlmProviders): ReadonlyAr
   ];
 };
 
-/** The names of the variables whose values differ, never the values. */
+/** Returns the names of the variables whose values differ, never the values. */
 const changedVariables = (
   before: Readonly<Record<string, string | undefined>>,
   after: Readonly<Record<string, string | undefined>>,
 ): ReadonlyArray<string> => Object.keys(before).filter((name) => before[name] !== after[name]);
 
-/** Warns about restart-only settings that changed or no longer parse, since only a restart applies them. */
+/** Logs a warning for restart-only settings that changed or no longer parse. */
 const checkRestartSettings = (started: RestartSettings) =>
   restartSettings.pipe(
     Effect.flatMap((now) => {
@@ -113,10 +111,10 @@ const checkRestartSettings = (started: RestartSettings) =>
     ),
   );
 
-/** The allowlist file's path and what it now holds, or none when it cannot be read or parsed and the previous one stays. */
+/** Returns the allowlist path and its new contents, or `None` if it can't be read or parsed. */
 const nextAllowlist = (previous: EgressAllowlist) =>
   Effect.gen(function* () {
-    // The path has a default, so reading it fails only when the settings source fails, and an in-memory source does not.
+    // The path has a default, so reading it fails only if the settings source fails, which an in-memory source doesn't.
     const path = yield* Effect.orDie(egressAllowlistPath);
     const kept = (fields: Readonly<Record<string, string | number>>) =>
       Effect.logError("Kept the previous egress allowlist", {
@@ -138,7 +136,7 @@ const keptProviders = (error: string) =>
     Effect.as(Option.none<LlmProviders>()),
   );
 
-/** The LLM providers the settings now configure, or none when they are invalid and the previous ones stay. */
+/** The new LLM providers, or `None` if they're invalid. */
 const nextProviders = llmProviders.pipe(
   Effect.map(Option.some),
   Effect.catchTags({
@@ -147,10 +145,7 @@ const nextProviders = llmProviders.pipe(
   }),
 );
 
-/**
- * The reload for a gateway that started with `started`, reading its
- * settings from the environment files over `base` as at startup.
- */
+/** Returns the reload for a Gateway started with `started`, reading settings from the environment files over `base`. */
 export const gatewayReloadLayer = (started: StartupSettings, base: ConfigProvider.ConfigProvider) =>
   Layer.effect(
     GatewayReload,
@@ -219,9 +214,8 @@ export const gatewayReloadLayer = (started: StartupSettings, base: ConfigProvide
   );
 
 /**
- * Runs the reload on every SIGHUP while the layer is in scope, one at a
- * time; signals that arrive during a reload lead to one more. The SIGHUP
- * listener also stops Node from exiting on SIGHUP, its default.
+ * Runs the reload on each SIGHUP while the layer is in scope, one at a time; signals during a
+ * reload trigger one more. The listener also prevents Node's default exit on SIGHUP.
  */
 export const reloadOnHangup = Layer.effectDiscard(
   Effect.gen(function* () {
@@ -236,7 +230,7 @@ export const reloadOnHangup = Layer.effectDiscard(
     );
     const reloadOnce = Effect.logInfo("Reloading the gateway settings on SIGHUP").pipe(
       Effect.andThen(reload),
-      // A defect in one reload is logged, and the next SIGHUP reloads again.
+      // Logs a defect in one reload; the next SIGHUP reloads again.
       Effect.catchCause((cause) =>
         Effect.logError("A reload failed", { cause: Cause.pretty(cause) }),
       ),

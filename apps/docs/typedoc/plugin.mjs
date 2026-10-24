@@ -22,19 +22,19 @@ import {
 } from "./type-rewrites.mjs";
 
 /**
- * A TypeDoc plugin that shapes the API reference:
+ * Registers TypeDoc handlers that change the API reference:
  *
- * - Entry modules are nested under one module per package, so each package gets a page listing
- *   its subpaths and each subpath a page at `<package>/<subpath>`. A package's root export (`.`)
- *   is the package module itself. Pages are titled with the import specifier.
- * - A class built with `Schema.Class`, `Context.Service`, or `HttpApiMiddleware.Service` extends
- *   that builder's type instead of the hidden `X_base` constant TypeScript emits. A schema class's
- *   constructor lists the properties it takes, a service class lists its operations as methods,
- *   and a middleware class lists its configuration.
- * - Branded types show the name of their type alias: `RunId`, not `string & Brand<"RunId">`.
- * - An `HttpApi` constant shows its id and groups, and a table of its endpoints.
- * - A subpath with many members re-exported from other files gets one page per file.
- * - Relative links in comments point at the file on GitHub.
+ * - Nests entry modules under one module per package, so each package has a page that lists its
+ *   subpaths and each subpath has a page at `<package>/<subpath>`. A package's root export (`.`)
+ *   is the package module. Page titles are import specifiers.
+ * - Shows a class built with `Schema.Class`, `Context.Service`, or `HttpApiMiddleware.Service` as
+ *   extending that builder's type instead of the hidden `X_base` constant. A schema class's
+ *   constructor lists its properties, a service class lists its operations as methods, and a
+ *   middleware class lists its configuration.
+ * - Shows branded types by their alias name: `RunId`, not `string & Brand<"RunId">`.
+ * - Shows an `HttpApi` constant's ID and groups, and a table of its endpoints.
+ * - Splits a subpath with many members re-exported from other files into one page per file.
+ * - Points relative links in comments to the file on GitHub.
  *
  * @param {import("typedoc").Application} app
  */
@@ -124,7 +124,7 @@ export function load(app) {
     aliasBrands.clear();
   });
 
-  // URLs are built from the short module names (`core`, `run`) before this event fires.
+  // TypeDoc builds URLs from the short module names (`core`, `run`) before this event.
   app.renderer.on(RendererEvent.BEGIN, ({ project }) => {
     linkRepositoryFilesToGitHub(project);
     for (const { module, title } of titles) module.name = title;

@@ -1,28 +1,26 @@
 ---
-title: Add a Worker
-description: Configure local and SSH Workers in usine.yaml, pass Worker preflight, and run SSH Workers on a private network behind a Gateway.
+title: Add a worker
+description: Configure local and SSH workers in usine.yaml, pass worker preflight, and run SSH workers on a private network behind a gateway.
 sidebar:
   order: 5
 ---
 
 import { Steps } from "@astrojs/starlight/components";
 
-A Worker is the machine where an Attempt's checkout is and where its Claude Code or Codex children run. The Pi parent of every Attempt runs in the orchestrator, whichever Worker the Attempt uses. The `workers` list of `usine.yaml` declares the Workers; without it, the factory has one local Worker named `local` that runs one Attempt at a time.
+A worker is the machine that has an attempt's checkout and runs its Claude Code or Codex children. The Pi parent always runs in the orchestrator. The [`workers`](/reference/configuration/usine-yaml/#workers) list of `usine.yaml` declares the workers.
 
 ## Worker kinds
 
 | `kind`               | Where children run                                           | GitHub credential on the machine                                     |
 | -------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------- |
-| `local`              | as processes on the orchestrator's machine                   | a token file in a private temporary folder, removed with the Attempt |
-| `ssh`                | on a Linux machine, one SSH command per child                | a token file under the Worker's root, removed with the Attempt       |
-| `ssh` with `gateway` | on a Linux machine with no public address, through a Gateway | none: the Gateway adds the token to the machine's GitHub requests    |
+| `local`              | as processes on the orchestrator machine                     | a token file in a private temporary folder, removed with the attempt |
+| `ssh`                | on a Linux machine, one SSH command per child                | a token file under the worker's root, removed with the attempt       |
+| `ssh` with `gateway` | on a Linux machine with no public address, through a gateway | none: the gateway adds the token to the machine's GitHub requests    |
 | `exe.dev`            | not available: `usine up` refuses this kind at this commit   |                                                                      |
 
-All Workers of one `usine.yaml` must have the same kind. When every Worker is `ssh`, `usine up` runs the SSH executor; otherwise it runs the local executor, which refuses any Worker that isn't `local`. A mix of kinds, or any `exe.dev` Worker, stops startup with `UnsupportedWorkerError` ([#228](https://github.com/basaltbytes/usine/issues/228)).
+All workers in one `usine.yaml` must have the same kind. `max_concurrent_attempts` sets how many attempts a worker runs at once, and the worker needs at least 1.5 GiB of memory per attempt, 3 GiB to avoid a warning.
 
-Each Worker has a `name` (kebab-case) and `max_concurrent_attempts`, the number of Attempts it runs at the same time, 1 by default. The Worker's memory must carry that many Attempts; see [Memory per Attempt](#memory-per-attempt). Runs take free slots in the order their Events arrived. [`usine.yaml`](/reference/configuration/usine-yaml/) lists every Worker field.
-
-## Local Workers
+## Local workers
 
 ```yaml title="usine.yaml"
 workers:
@@ -31,43 +29,29 @@ workers:
     max_concurrent_attempts: 2
 ```
 
-A local Worker's state is under `.usine/workers/<name>/` in the instance folder: cached bare clones in `repos/`, one worktree per Attempt in `attempts/`, and a Turborepo cache in `turbo/`. Children run as the user who runs `usine up`, with only `HOME`, `LANG`, `LC_ALL`, `PATH`, `SHELL`, `TMPDIR`, `USER`, the Attempt's credential settings, and `TURBO_CACHE_DIR` in their environment. The harnesses must be on that `PATH` and logged in for that user. Pi children can run only on local Workers.
+A local worker keeps cached bare clones in `.usine/workers/<name>/repos/`, one worktree per attempt in `attempts/`, and a Turborepo cache in `turbo/`. Children run as the user who runs `usine up`, so the harnesses must be on that user's `PATH` and logged in. Their environment contains only `HOME`, `LANG`, `LC_ALL`, `PATH`, `SHELL`, `TMPDIR`, `USER`, the attempt's credential settings, and `TURBO_CACHE_DIR`, which points at `turbo/`. Attempts also share pnpm's default store in the user's home directory. Pi children run only on local workers.
 
-The Worker's Attempts share two caches: the Turborepo cache in `turbo/`, which the executor sets as `TURBO_CACHE_DIR`, and pnpm's store at its default location in that user's home. No other variable of your environment reaches the children, so you set nothing for either cache.
+### Credentials that local attempts can read
 
-### What a local Attempt can reach
+Git and gh use the attempt's own token: git's credential helpers are reset to read the attempt's token file, and gh reads its own `GH_CONFIG_DIR`. But the children run as your Unix user with your `HOME`, so an agent can find and use your own credentials, such as gh's login in `~/.config/gh/hosts.yml`, `~/.git-credentials`, or a key in `~/.ssh`, for example with `GH_CONFIG_DIR=~/.config/gh gh` or a push to a `git@github.com:` URL. [`permissions: read`](/reference/configuration/loop-files/#permissions) doesn't prevent this.
 
-Each attempt gets its own GitHub token: git's credential helpers are reset so that git reads the attempt's token file, and gh reads the token from the attempt's own `GH_CONFIG_DIR`. The children still run as your Unix user, with your home directory as `HOME`, so they can read every file you can. An agent that looks for your own credentials there can find them, such as gh's login in `~/.config/gh/hosts.yml`, `~/.git-credentials`, or a key in `~/.ssh`, and use them, for example with `GH_CONFIG_DIR=~/.config/gh gh` or a push to a `git@github.com:` URL.
-
-The local worker is for agents you trust with your own access. A loop's [`permissions: read`](/reference/configuration/loop-files/#permissions) holds against the agent's tools, which use the attempt's token, but not against your credentials in your home directory. For loops you don't trust that far, use [SSH workers](#ssh-workers), which have no GitHub credential of yours, or [SSH workers behind a gateway](#ssh-workers-behind-a-gateway), which have no GitHub token on disk.
+Use the local worker only for agents that you trust with your own access. For other loops, use [SSH workers](#ssh-workers), which have none of your GitHub credentials, or [SSH workers behind a gateway](#ssh-workers-behind-a-gateway), which have no GitHub token on disk.
 
 ## Preflight
 
-usine checks each Worker without changing it. At startup it checks every Worker for the harness of every Agent in the roster. If a check fails, `usine up` stops with an error that gives the Worker and what is missing. Before each Attempt it checks the Attempt's Agent again on the chosen Worker; a missing harness or login then fails the Attempt with `AgentFailure`, and the Run waits for you to fix the Worker and retry.
+Worker [preflight](/reference/configuration/agent-files/#preflight) never installs anything or logs in. It checks:
 
-| Worker               | Checks                                                                                                                                                                                                                                                                      |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `local`              | `git --version`, the memory for `max_concurrent_attempts`, and each harness with the children's environment ([Write an Agent](/guides/write-an-agent/#preflight)).                                                                                                          |
-| `ssh`                | The SSH connection, a writable `root`, `git --version`, the memory for `max_concurrent_attempts`, and each harness over SSH. A Pi Agent in the roster fails this check.                                                                                                     |
-| `ssh` with `gateway` | The `ssh` checks, then: the admin API accepts the admin token, the Worker's sshd accepts the caller token variables, the Worker can connect to `git.<domain>`, and for each harness that uses its login on the Worker, the login's hosts respond through the forward proxy. |
+| Worker               | Checks                                                                                                                                                                                                                                                                          |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `local`              | `git --version`, the memory for `max_concurrent_attempts`, and each harness with the children's environment ([harness checks](/reference/configuration/agent-files/#preflight)).                                                                                                |
+| `ssh`                | The SSH connection, a writable `root`, `git --version`, the memory for `max_concurrent_attempts`, and each harness over SSH. A Pi agent in the roster fails this check.                                                                                                         |
+| `ssh` with `gateway` | The `ssh` checks, and also: the admin API accepts the admin token, the worker's sshd accepts the caller token variables, the worker can connect to `git.<domain>`, and for each harness that uses its login on the worker, the login's hosts respond through the forward proxy. |
 
-Preflight never installs anything or logs in. You prepare the Worker yourself; on Hetzner Cloud, the scripts below install the toolchain.
+The `memory` check is described under [`workers`](/reference/configuration/usine-yaml/#workers).
 
-### Memory per Attempt
+## SSH workers
 
-The children of an Attempt run the repository's own gates, such as `pnpm install`, `pnpm build`, and `pnpm test`, and these use far more memory than the harnesses. On 2026-10-15 two Attempts at once on a 4 GB Worker without swap thrashed it until sshd stopped answering ([#270](https://github.com/basaltbytes/usine/issues/270)). At startup, preflight divides the Worker's memory by `max_concurrent_attempts`:
-
-| Memory per concurrent Attempt | Preflight                                                          |
-| ----------------------------- | ------------------------------------------------------------------ |
-| 3 GiB or more                 | passes                                                             |
-| 1.5 GiB to 3 GiB              | passes, and logs a warning with a `max_concurrent_attempts` to use |
-| less than 1.5 GiB             | fails the `memory` check, and `usine up` stops                     |
-
-A Worker without swap also fails the `memory` check when `max_concurrent_attempts` is more than 1. SSH Workers and local Workers on Linux report their memory and swap in `/proc/meminfo`. On macOS, preflight reads the physical memory and counts swap as present, because macOS adds swap files as memory runs short. Fix a failure by lowering `max_concurrent_attempts`, as the error suggests, or by adding memory or swap to the machine.
-
-## SSH Workers
-
-An SSH Worker is any Linux machine that the orchestrator's `ssh` client can connect to. The machine needs Git, the harnesses your Agents use on the `PATH` of a non-interactive SSH session, their logins under the SSH user, and a directory the SSH user can write to.
+An SSH worker is a Linux machine with Git, a directory that the SSH user can write to, and your agents' harnesses on the `PATH` of a non-interactive SSH session, logged in for the SSH user.
 
 ```yaml title="usine.yaml"
 workers:
@@ -79,26 +63,19 @@ workers:
     max_concurrent_attempts: 1
 ```
 
-| Field           | Meaning                                                                                                                  |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `destination`   | `user@host`, a host, or a `Host` alias of the SSH configuration of the user who runs `usine up`.                         |
-| `root`          | An absolute directory on the machine. The Worker's clones, worktrees, and credentials are under `<root>/workers/<name>`. |
-| `identity_file` | Optional. A private key, absolute or under `~/`. Without it, the SSH agent and configuration choose the key.             |
-| `port`          | Optional. The SSH port.                                                                                                  |
+[`kind: ssh`](/reference/configuration/usine-yaml/#kind-ssh) describes the fields. `ssh` runs in batch mode, so connect once by hand to record the host key before you start `usine up`. An SSH agent works.
 
-The orchestrator runs `ssh` in batch mode, so the machine's host key must already be in `known_hosts`: connect once by hand before you start `usine up`. The `ssh` client gets only `HOME`, `LANG`, `LC_ALL`, `PATH`, `SHELL`, `SSH_AGENT_PID`, `SSH_AUTH_SOCK`, `TMPDIR`, and `USER` from the orchestrator's environment, so an SSH agent works.
+usine writes each attempt's token to `<root>/workers/<name>/credentials/<attempt>` through standard input, so it doesn't appear on a command line, and removes it when the attempt ends. Attempts on one machine run as the same user and can read each other's tokens ([#231](https://github.com/basaltbytes/usine/issues/231)).
 
-usine writes each Attempt's token to `<root>/workers/<name>/credentials/<attempt>` through standard input, so the token doesn't appear on any command line, and removes it when the Attempt ends. Attempts on one machine run as the same user and can read each other's tokens ([#231](https://github.com/basaltbytes/usine/issues/231)); with a Gateway, the token isn't on the machine at all.
+### Create a worker on Hetzner Cloud
 
-### A Worker on Hetzner Cloud
+The scripts in `infra/hetzner/` create SSH workers with the `hcloud` CLI. `infra/hetzner/cloud-init.yaml` sets up a Debian 13 machine with a `usine` user that accepts SSH by key only, a 2 GB swap file, and `/home/usine/.usine` for the worker's root. It installs Git, gh, Node.js 24, pnpm 11.20.0, Claude Code 2.1.296, Codex 0.153.4, and Chromium. A cx33 or cpx32 has 7.7 GiB of memory, enough for two attempts without a warning.
 
-`infra/hetzner/` in the usine repository creates SSH Workers on Hetzner Cloud with the `hcloud` CLI. `infra/hetzner/cloud-init.yaml` sets up a Debian 13 machine with a `usine` user that accepts SSH by key only, installs Git, gh, Node.js 24, pnpm 11.20.0, Claude Code 2.1.296, Codex 0.153.4, and Chromium, and creates `/home/usine/.usine` for the Worker's root. It also adds a 2 GB swap file, because a Worker needs 8 GB of memory: two Attempts at once thrash a 4 GB machine ([#270](https://github.com/basaltbytes/usine/issues/270)). A cx33 or cpx32 has 7.7 GiB, so it runs two Attempts without a warning.
-
-Every Attempt on the machine runs as the `usine` user and shares two caches. pnpm uses its default store, `/home/usine/.local/share/pnpm/store`. `/etc/environment` sets `TURBO_CACHE_DIR=/home/usine/.cache/turbo`, so a Turborepo task whose inputs match a run of an earlier Attempt restores its outputs instead of running. Each child is a non-interactive SSH session, which gets the variables of `/etc/environment` and reads no shell profile. `TURBO_CACHE_DIR` takes precedence over a `cacheDir` in the repository's `turbo.json`; Turborepo still writes each task's log to `.turbo/` in the package's folder of the worktree.
+Attempts on the machine run as `usine` and share pnpm's default store, `/home/usine/.local/share/pnpm/store`, and the Turborepo cache that `/etc/environment` sets with `TURBO_CACHE_DIR=/home/usine/.cache/turbo`. Children are non-interactive SSH sessions, so they get `/etc/environment` and read no shell profile. `TURBO_CACHE_DIR` overrides a `cacheDir` in the repository's `turbo.json`. Turborepo still writes task logs to `.turbo/` in each package folder of the worktree.
 
 <Steps>
 
-1. Create a key pair for the Worker on the orchestrator's machine, then create the server. The arguments are the Worker name, the location (`fsn1`, `nbg1`, or `hel1`), the IPv4 address the orchestrator connects from, and the public key. The script registers the key with Hetzner, creates a firewall `usine-<name>` that allows SSH only from that address, and prints the server's address. `HCLOUD_SERVER_TYPE` sets the server type, which is `cpx32` by default.
+1. On the orchestrator machine, create a key pair and the server. The script takes the worker name, the location (`fsn1`, `nbg1`, or `hel1`), the orchestrator's IPv4 address, and the public key. It registers the key with Hetzner, creates a firewall `usine-<name>` that allows SSH only from that address, and prints the server's address. `HCLOUD_SERVER_TYPE` sets the server type (default `cpx32`).
 
    ```sh title="usine checkout"
    ssh-keygen -t ed25519 -f ~/.ssh/usine_worker -C usine-worker
@@ -111,7 +88,7 @@ Every Attempt on the machine runs as the `usine` user and shares two caches. pnp
    ssh -i ~/.ssh/usine_worker usine@203.0.113.20 cloud-init status --wait
    ```
 
-3. Log in to each harness the roster uses, as the `usine` user:
+3. As the `usine` user, log in to each harness that the roster uses:
 
    ```sh title="Orchestrator machine"
    ssh -t -i ~/.ssh/usine_worker usine@203.0.113.20
@@ -119,15 +96,15 @@ Every Attempt on the machine runs as the `usine` user and shares two caches. pnp
    codex login --device-auth  # ChatGPT plan: open the URL it prints and enter the code it prints
    ```
 
-4. Add the Worker to `usine.yaml` as above, with its address as the `destination`, and reload the configuration. usine runs Preflight on the Worker before it takes Attempts. Behind a Gateway, the variable that `admin_token_env` names must already be in the environment `usine up` started with; a running process doesn't see variables set after it started, so set it and restart `usine up` if it's missing.
+4. Add the worker to `usine.yaml` with its address as the `destination`, and [reload the configuration](/reference/configuration/cli/#reload). usine runs preflight on the worker before it takes attempts.
 
 </Steps>
 
-## SSH Workers behind a Gateway
+## SSH workers behind a gateway
 
-A Gateway is a VM in front of Workers that have no public address. It's their SSH bastion and their DNS resolver. It's also the proxy that adds the Attempt's GitHub token, and optionally an LLM provider's key, to their requests, and the forward proxy to an allowlist of package hosts and harness login hosts. A Worker behind it has no GitHub token on disk and can't connect to any other host. [ADR 0027](https://github.com/basaltbytes/usine/blob/main/docs/adr/0027-gateway-credential-proxy.md) explains why.
+A gateway is a VM in front of workers that have no public address. It's their SSH bastion and DNS resolver, the proxy that adds the attempt's GitHub token and optionally an LLM provider's key to their requests, and a forward proxy to allowlisted package and harness login hosts. A worker behind it has no GitHub token on disk and can't reach any other host ([ADR 0027](https://github.com/basaltbytes/usine/blob/main/docs/adr/0027-gateway-credential-proxy.md)).
 
-For each Attempt, the executor attaches the Attempt's installation token to the Gateway through the admin API and receives a caller token. The children receive the caller token through the SSH connection, in environment variables that the Worker's sshd accepts, and send it with every request to `git.<domain>` or `llm.<domain>`. The Gateway checks it, replaces it with the real credential, and forwards the request over HTTPS.
+For each attempt, the executor attaches the attempt's installation token to the gateway through the admin API and receives a caller token. The children get the caller token over SSH, in environment variables that the worker's sshd accepts, and send it with every request to `git.<domain>` or `llm.<domain>`. The gateway checks it, replaces it with the real credential, and forwards the request over HTTPS.
 
 ```mermaid
 flowchart LR
@@ -155,11 +132,11 @@ flowchart LR
   FP -->|HTTPS| EXT["package registries and harness login hosts"]
 ```
 
-The files are in `infra/hetzner/gateway/`, and `infra/hetzner/gateway/README.md` describes every traffic path. The defaults are the network `10.42.0.0/16`, the Gateway's private address `10.42.0.2`, and the domain `gw.internal`; `NAME`, `LOCATION`, `SERVER_TYPE`, `NETWORK_CIDR`, `SUBNET_CIDR`, `GATEWAY_IP`, and `DOMAIN` override them.
+The scripts are in `infra/hetzner/gateway/`, and its `README.md` describes every traffic path. The defaults are the network `10.42.0.0/16`, the gateway address `10.42.0.2`, and the domain `gw.internal`. `NAME`, `LOCATION`, `SERVER_TYPE`, `NETWORK_CIDR`, `SUBNET_CIDR`, `GATEWAY_IP`, and `DOMAIN` override them.
 
 <Steps>
 
-1. Create the private network, the Gateway VM, and its firewall. `ORCHESTRATOR_CIDR` is the only address that can connect to the Gateway's SSH port. `SSH_KEY` is the name of an SSH key of the Hetzner project; register the Worker key under the name `usine-worker` if the project doesn't have it yet. The commands below connect as `root@<gateway>` without specifying a key, so load the key into your SSH agent first:
+1. Create the private network, the gateway VM, and its firewall. `ORCHESTRATOR_CIDR` is the only address allowed on the gateway's SSH port. `SSH_KEY` is the name of an SSH key in the Hetzner project; register the worker key as `usine-worker` if needed. The next commands connect as `root@<gateway>` without a key option, so first load the key into your SSH agent:
 
    ```sh title="usine checkout"
    ssh-add ~/.ssh/usine_worker
@@ -168,14 +145,14 @@ The files are in `infra/hetzner/gateway/`, and `infra/hetzner/gateway/README.md`
      ./infra/hetzner/gateway/gateway.sh create
    ```
 
-2. Wait for the Gateway's cloud-init, then install the Gateway service from npm, which also starts it. `@usine/gateway` is on npm from 0.1.0. `gateway.sh create` printed the Gateway's public address, here `203.0.113.30`. `-i` gives `install` the key for its `ssh` and `scp`:
+2. Wait for cloud-init on the gateway, whose address `gateway.sh create` printed (here `203.0.113.30`), and install and start the gateway service from npm (`@usine/gateway` 0.1.0 or later). `-i` sets the key for `install`'s `ssh` and `scp`:
 
    ```sh title="usine checkout"
    ssh root@203.0.113.30 cloud-init status --wait
    ./infra/hetzner/gateway/gateway.sh install -i ~/.ssh/usine_worker @usine/gateway
    ```
 
-   To run a build of your checkout instead, pack it with the `@usine/core` it depends on and install the two tarballs. At this commit, the pack step writes `usine-core-0.3.0.tgz` and `usine-gateway-0.0.0.tgz`:
+   To install a build of your checkout instead, pack it with `@usine/core` and install both tarballs. At this commit, they're `usine-core-0.3.0.tgz` and `usine-gateway-0.0.0.tgz`:
 
    ```sh title="usine checkout"
    pnpm build
@@ -183,9 +160,9 @@ The files are in `infra/hetzner/gateway/`, and `infra/hetzner/gateway/README.md`
    ./infra/hetzner/gateway/gateway.sh install -i ~/.ssh/usine_worker ./usine-core-0.3.0.tgz ./usine-gateway-0.0.0.tgz
    ```
 
-   On first boot the VM generates its admin token and caller key in `/etc/usine-gateway/secrets.env`, readable by root and the `usine-gateway` group. To let the Gateway call Anthropic with its own key, add `ANTHROPIC_API_KEY` to that file and reload the service with `systemctl reload usine-gateway`. A reload keeps the attachments, so running Attempts go on; the journal's `Reloaded the gateway settings` line names the keys that changed. The domain, the listeners, the admin token, and the caller key change only with `systemctl restart usine-gateway`. A restarted Gateway loses its attachments; the executor stores each running Attempt's attachment again within two minutes.
+   On first boot, the VM generates its admin token and caller key in `/etc/usine-gateway/secrets.env`, readable by root and the `usine-gateway` group. To let the gateway call Anthropic with its own key, add `ANTHROPIC_API_KEY` to that file and run `systemctl reload usine-gateway`. See [`usine-gateway`](/reference/configuration/cli/#usine-gateway) for what a reload and a restart change.
 
-3. Create the Worker on the private network, without public addresses. `worker-user-data` combines `infra/hetzner/cloud-init.yaml` with `infra/hetzner/gateway/worker-cloud-init.yaml`, which configures the Worker's resolver, apt, and environment to use the Gateway, forwards gh's socket to it, configures sshd to accept the caller token variables, and allows connections only to the Gateway. The type `cx33` has the 8 GB a Worker needs.
+3. Create the worker on the private network, without public addresses. `worker-user-data` adds `infra/hetzner/gateway/worker-cloud-init.yaml` to `infra/hetzner/cloud-init.yaml`. It points the worker's resolver, apt, environment, and gh's socket at the gateway, makes sshd accept the caller token variables, and allows connections only to the gateway. A `cx33` has the 8 GB that a worker needs.
 
    ```sh title="usine checkout"
    ./infra/hetzner/gateway/gateway.sh worker-user-data ~/.ssh/usine_worker.pub > worker.mime
@@ -194,13 +171,13 @@ The files are in `infra/hetzner/gateway/`, and `infra/hetzner/gateway/README.md`
      --label usine=worker --user-data-from-file worker.mime
    ```
 
-   `hcloud server describe worker-one` shows its private address, here `10.42.0.3`. The Worker takes about four minutes to set up. Follow its progress through the Gateway; this connection also records its host key:
+   `hcloud server describe worker-one` shows its private address, here `10.42.0.3`. Setup takes about four minutes. Follow it through the gateway, which also records the host key:
 
    ```sh title="Orchestrator machine"
    ssh -J root@203.0.113.30 usine@10.42.0.3 cloud-init status --wait
    ```
 
-4. Log in to the harnesses on the Worker. Both logins go through the Gateway's forward proxy.
+4. Log in to the harnesses on the worker, through the gateway's forward proxy:
 
    ```sh title="Orchestrator machine"
    ssh -t -J root@203.0.113.30 usine@10.42.0.3
@@ -208,7 +185,7 @@ The files are in `infra/hetzner/gateway/`, and `infra/hetzner/gateway/README.md`
    codex login --device-auth
    ```
 
-5. Add both hosts to the SSH configuration of the user who runs `usine up`. The executor connects to the Worker through the Gateway as a jump host. It also opens its own forward to the Gateway's admin API, on a local port the kernel picks, and opens it again whenever it closes. Don't add a `LocalForward` to the Gateway's entry: it would also apply to the executor's forward, which then exits whenever that port is taken.
+5. Add both hosts to the SSH configuration of the user who runs `usine up`. The executor uses the gateway as a jump host, and opens its own forward to the admin API on a port that the kernel picks. Don't add a `LocalForward` to the gateway's entry: it would apply to the executor's forward too, which then exits whenever that port is in use.
 
    ```text title="~/.ssh/config"
    Host usine-gateway
@@ -223,13 +200,13 @@ The files are in `infra/hetzner/gateway/`, and `infra/hetzner/gateway/README.md`
      IdentityFile ~/.ssh/usine_worker
    ```
 
-6. Copy the admin token into a file that only you can read, in the instance folder:
+6. In the instance folder, copy the admin token into a file that only you can read:
 
    ```sh title="Instance folder"
    (umask 077; ssh root@203.0.113.30 "sed -n 's/^USINE_GATEWAY_ADMIN_TOKEN=//p' /etc/usine-gateway/secrets.env" > .usine/gateway-admin-token)
    ```
 
-7. Give the Worker a `gateway` in `usine.yaml`. The Worker's `destination` is its `Host` alias, `gateway.domain` the Gateway's `DOMAIN`, `gateway.destination` the Gateway's `Host` alias, and `admin_token_env` the name of the orchestrator's environment variable that contains the admin token. Don't put the token itself in the file. `admin_port` is the admin API's port on the Gateway and defaults to 7070, as on the Gateway.
+7. Add a [`gateway`](/reference/configuration/usine-yaml/#workersgateway) to the worker in `usine.yaml`, with the `Host` aliases as destinations, the gateway's `DOMAIN`, and the name of the variable that will contain the admin token:
 
    ```yaml title="usine.yaml"
    workers:
@@ -243,7 +220,7 @@ The files are in `infra/hetzner/gateway/`, and `infra/hetzner/gateway/README.md`
          admin_token_env: USINE_GATEWAY_ADMIN_TOKEN
    ```
 
-   Add `llm_providers: [anthropic]` under `gateway` when the Gateway has `ANTHROPIC_API_KEY`. Claude Code children then call `llm.gw.internal/anthropic` with the caller token instead of a login on the Worker, and preflight checks only the `claude` binary. Remove the Claude Code hosts, `api.anthropic.com` and `platform.claude.com`, from the Gateway's `/etc/usine-gateway/egress-allowlist` and restart the service, so that no tunnel can send the caller token past the Gateway. Codex always uses its login on the Worker.
+   If the gateway has `ANTHROPIC_API_KEY`, add `llm_providers: [anthropic]` under `gateway`, so that Claude Code children use the gateway's key instead of a login on the worker. Then remove `api.anthropic.com` and `platform.claude.com` from the gateway's `/etc/usine-gateway/egress-allowlist` and restart the service, so that no tunnel can send the caller token past the gateway.
 
 8. Start the orchestrator with the token in its environment:
 
@@ -251,15 +228,15 @@ The files are in `infra/hetzner/gateway/`, and `infra/hetzner/gateway/README.md`
    USINE_GATEWAY_ADMIN_TOKEN=$(cat .usine/gateway-admin-token) usine up
    ```
 
-   If the variable isn't set, `usine up` stops with an error that gives the variable's name. If the forward to the admin API doesn't open, preflight fails with an error that gives the `ssh` command to run to see why. If the forward proxy refuses a login host, preflight fails with an error that gives the host to add to `/etc/usine-gateway/egress-allowlist`.
+   If the variable isn't set, `usine up` stops and gives its name. If the admin API forward doesn't open, preflight gives the `ssh` command that shows why. If the forward proxy refuses a login host, preflight gives the host to add to `/etc/usine-gateway/egress-allowlist`.
 
 </Steps>
 
-The Gateway logs one JSON object per line to the journal: `ssh root@203.0.113.30 journalctl -u usine-gateway -o cat`. The response to a refused request gives the reason in its `x-usine-gateway-refusal` header, and the log records it. Changes to the infra files don't affect a running Gateway or Worker until you make the same changes on that machine by hand ([#264](https://github.com/basaltbytes/usine/issues/264)).
+To read the gateway's log, run `ssh root@203.0.113.30 journalctl -u usine-gateway -o cat`. Changes to the infra files don't reach a running gateway or worker until you apply them on that machine by hand ([#264](https://github.com/basaltbytes/usine/issues/264)).
 
-## Remove a Worker
+## Remove a worker
 
-Remove the Worker from `usine.yaml` and reload the configuration, or restart `usine up`, before you delete the machine. After a reload the Worker starts no new Attempt, but the Attempts it runs continue: wait until they end, which the log reports as `The last Attempt on a removed Worker ended; the Worker leaves the scheduler`. usine then closes the forward to its Gateway's admin API, unless another Worker is behind that Gateway. If an Attempt on it kept its worktree because its salvage push failed, every later start reports a reconciliation error for it ([#268](https://github.com/basaltbytes/usine/issues/268)).
+Remove the worker from `usine.yaml` and reload the configuration, or restart `usine up`. After a reload, wait until its running attempts end and the log shows `The last Attempt on a removed Worker ended; the Worker leaves the scheduler`. Then delete the machine. If an attempt on the worker kept its worktree because its salvage push failed, every later start reports a reconciliation error for it ([#268](https://github.com/basaltbytes/usine/issues/268)).
 
 ```sh title="usine checkout"
 hcloud server delete worker-one

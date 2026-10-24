@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Markdown } from "@/components/markdown";
 
-/** The part of a Markdown syntax tree node the interpolation marks read and write. */
+/** Subset of a Markdown syntax tree node used by the interpolation marks. */
 interface MarkdownNode {
   readonly type: string;
   readonly value?: string;
@@ -11,7 +11,7 @@ interface MarkdownNode {
 
 const INTERPOLATION = /\{\{([\s\S]*?)\}\}/gu;
 
-/** The `{{ }}` expressions of a prompt template, as written between the braces. */
+/** Returns the trimmed text between each `{{` and `}}` in `template`. */
 export const interpolations = (template: string): ReadonlyArray<string> =>
   [...template.matchAll(INTERPOLATION)].map(([, expression = ""]) => expression.trim());
 
@@ -38,7 +38,7 @@ const markInterpolations = (node: MarkdownNode): void => {
   });
 };
 
-// Code spans and blocks keep their braces as written; only prose text is marked.
+// Only text nodes are marked; code spans and code blocks are left as written.
 const remarkInterpolations = () => markInterpolations;
 
 const Interpolation = ({ children }: { readonly children?: ReactNode }) => (
@@ -54,8 +54,7 @@ const Interpolation = ({ children }: { readonly children?: ReactNode }) => (
   </mark>
 );
 
-/** A Loop's prompt template as Markdown, each `{{ }}` expression in prose outlined so it reads
- * apart from the text every Run receives as written. */
+/** Renders a Loop's prompt template as Markdown with each `{{ }}` expression in prose outlined. */
 export const PromptMarkdown = ({ template }: { readonly template: string }) => (
   <Markdown
     className="max-w-[72ch] text-md"

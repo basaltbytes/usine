@@ -8,7 +8,7 @@ import type { Chapter } from "./document/model.ts";
 import { retriesLabel, sessionActivityLabel, type TranscriptSession } from "./model.ts";
 import { presentTool } from "./tool/presentation.ts";
 
-/** Formats elapsed activity time without implying that a quiet session has stalled. */
+/** Returns the elapsed time since `startedAt` as `45s`, `3m 12s`, or `2h 5m`. */
 export const elapsedActivity = (startedAt: string, now: number): string => {
   const seconds = Math.max(0, Math.floor((now - Date.parse(startedAt)) / 1_000));
   if (seconds < 60) return `${seconds}s`;
@@ -18,7 +18,7 @@ export const elapsedActivity = (startedAt: string, now: number): string => {
     : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 };
 
-/** Time elapsed since an instant, refreshed every second. */
+/** Renders the elapsed time since `since`, updated every second. */
 export const Elapsed = ({
   since,
   className,
@@ -32,7 +32,7 @@ export const Elapsed = ({
       dateTime={since}
       aria-live="off"
       className={cn("font-mono tabular-nums", className)}
-      title={`Since ${since}`}
+      title={`Since ${timestampLabel(since)}`}
     >
       {elapsedActivity(since, now)}
     </time>
@@ -45,7 +45,7 @@ interface Activity {
   readonly since: Option.Option<string>;
 }
 
-/** Describes recorded work; terminal sessions never continue to advertise a running tool. */
+/** Returns the session's activity; a session that is not `Live` never reports a running tool. */
 export const describeActivity = (session: TranscriptSession): Activity => {
   if (session.status !== "Live")
     return { label: session.status, detail: "", since: Option.none<string>() };
@@ -71,7 +71,7 @@ export const describeActivity = (session: TranscriptSession): Activity => {
   };
 };
 
-/** The session that best says what a live Attempt is doing: its most recently active live child, else its parent. */
+/** Returns the most recently active live child session, else the parent session. */
 const currentSession = (
   sessions: ReadonlyArray<TranscriptSession>,
 ): TranscriptSession | undefined => {
@@ -82,7 +82,6 @@ const currentSession = (
   return children[0] ?? live.find(({ session }) => session._tag === "ParentSession");
 };
 
-/** A live Attempt's current action, elapsed time, and last activity, as one quiet status line. */
 export const CurrentActivity = ({ chapter }: { readonly chapter: Chapter }) => {
   const now = useNow(1_000);
   const session = currentSession(chapter.sessions);
@@ -110,7 +109,7 @@ export const CurrentActivity = ({ chapter }: { readonly chapter: Chapter }) => {
             <span
               aria-live="off"
               className="ml-auto shrink-0 font-mono tabular-nums text-muted-foreground"
-              title={`Started ${since}`}
+              title={`Started ${timestampLabel(since)}`}
             >
               {elapsedActivity(since, now)}
             </span>
@@ -143,7 +142,6 @@ export const CurrentActivity = ({ chapter }: { readonly chapter: Chapter }) => {
   );
 };
 
-/** One open connectivity problem: what stopped answering, since when, and the harness's own words. */
 const ConnectivityLine = ({
   warning,
   now,

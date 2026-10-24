@@ -13,112 +13,97 @@ import { WorkerName } from "@usine/core/worker";
 import { Schema } from "effect";
 import { TranscriptEntry } from "../transcript.ts";
 
-/** The full durable view of one Run. */
+/** The full durable view of a Run. */
 export class RunSnapshot extends Schema.Class<RunSnapshot>("@usine/engine/RunSnapshot")({
   event: Event,
   itemKey: ItemKey,
   run: Run,
   step: Step,
   attempts: Schema.Array(Attempt),
-  /** The failed Attempt whose attention the operator resolved; outcomes and history stay intact. */
+  /** The failed Attempt that the operator marked as resolved; its outcome is unchanged. */
   resolvedFailureAttemptId: Schema.Option(AttemptId),
   /**
-   * When the Run last closed: it succeeded, failed, or was canceled, even before any Attempt
-   * began. None while it is open. A Run closed before close times were recorded carries the end
-   * of its last Attempt, else that Attempt's start, else when it opened.
+   * The time the Run last closed, or `None` while open. For older Runs, the last Attempt's end or
+   * start, or the Run's open time.
    */
   closedAt: Schema.Option(Schema.DateTimeUtc),
-  /** The approval the Run consumed; none until one arrives, and always none for a Loop with `approval: none`. */
+  /** The approval the Run consumed, or `None` before approval and for Loops with `approval: none`. */
   approval: Schema.Option(RunApproval),
-  /** The closed Run the operator ran again to open this one, and who asked; none for a Run its trigger opened. */
+  /** The run-again origin, or `None` for a Run opened by its trigger. */
   runAgain: Schema.Option(RunAgain),
   repository: RepositoryName,
   revision: RepositoryRevision,
   task: AttemptTask,
   agent: Agent,
   parentModel: Schema.Option(ModelId),
-  /** What the Run's Attempts may do to their repository: the Loop's level when the Run's Event matched. */
+  /** The repository access of the Run's Attempts, from the Loop at match time. */
   permissions: LoopPermissions,
 }) {}
 
-/**
- * A Run and the Event it was opened for: a trigger's match, a reopening, or a Run again. The
- * Event's payload is the Item as the trigger saw it, which can differ from the Item now.
- */
+/** A Run and the Event it was opened for; the payload is the Item as the trigger saw it. */
 export class RunEvent extends Schema.Class<RunEvent>("@usine/engine/RunEvent")({
   runId: RunId,
   event: Event,
 }) {}
 
-/** A Run snapshot and all its saved transcript entries from the same database transaction. */
+/** A Run snapshot and all its transcript entries, read in one transaction. */
 export class RunEvidence extends Schema.Class<RunEvidence>("@usine/engine/RunEvidence")({
   snapshot: RunSnapshot,
   transcript: Schema.Array(TranscriptEntry),
 }) {}
 
-/** The lighter view used when listing Runs for operators. */
+/** The Run view used in operator Run lists. */
 export class RunSummary extends Schema.Class<RunSummary>("@usine/engine/RunSummary")({
   itemKey: ItemKey,
   run: Run,
   step: Step,
   attempts: Schema.Array(Attempt),
-  /** The failed Attempt whose attention the operator resolved; outcomes and history stay intact. */
+  /** The failed Attempt that the operator marked as resolved; its outcome is unchanged. */
   resolvedFailureAttemptId: Schema.Option(AttemptId),
   /**
-   * When the Run last closed: it succeeded, failed, or was canceled, even before any Attempt
-   * began. None while it is open. A Run closed before close times were recorded carries the end
-   * of its last Attempt, else that Attempt's start, else when it opened.
+   * The time the Run last closed, or `None` while open. For older Runs, the last Attempt's end or
+   * start, or the Run's open time.
    */
   closedAt: Schema.Option(Schema.DateTimeUtc),
-  /** The approval the Run consumed; none until one arrives, and always none for a Loop with `approval: none`. */
+  /** The approval the Run consumed, or `None` before approval and for Loops with `approval: none`. */
   approval: Schema.Option(RunApproval),
-  /** The closed Run the operator ran again to open this one, and who asked; none for a Run its trigger opened. */
+  /** The run-again origin, or `None` for a Run opened by its trigger. */
   runAgain: Schema.Option(RunAgain),
   repository: RepositoryName,
   task: AttemptTask,
   agent: Agent,
 }) {}
 
-/**
- * How many Attempts recorded on one Worker startup reconciliation still
- * visits: every Attempt of that Worker whose leftovers the operator has not
- * discarded.
- */
+/** The number of Attempts on a Worker that startup reconciliation still visits, excluding discarded leftovers. */
 export class WorkerAttempts extends Schema.Class<WorkerAttempts>("@usine/engine/WorkerAttempts")(
   Schema.Struct({
     worker: WorkerName,
     attempts: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
-    /** How many of `attempts` are still open: no outcome is recorded for them yet. */
+    /** The number of `attempts` without a recorded outcome. */
     running: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   }).check(
     Schema.makeFilter(({ attempts, running }) => running <= attempts, {
-      message: "Expected no more open Attempts than Attempts",
+      message: "Expected no more open attempts than attempts",
     }),
   ),
 ) {}
 
-/**
- * What one Loop last saw of an Item and what became of it: the Event the
- * Loop's trigger last submitted for the Item's state, the Run that Event
- * opened, and the Run whose Attempt stopped for the operator and holds the
- * Loop on the Item (ADR 0007, ADR 0017).
- */
+/** A Loop's last sighting of an Item and its result (ADR 0007, ADR 0017). */
 export class LoopSighting extends Schema.Class<LoopSighting>("@usine/engine/LoopSighting")({
   loop: LoopName,
   itemKey: ItemKey,
   /**
-   * The Event of the Item's state the Loop last saw match, or the newest Event the
-   * engine opened again or the operator ran again for it; none after a sighting
-   * that did not match.
+   * The last matching Event, or the newest reopening or run-again Event for it; `None` after a
+   * non-matching sighting.
    */
   event: Schema.Option(EventId),
-  /** The Run `event` owns; none while it waits behind a running Attempt or a hold, or after the engine ignored it. */
+  /** The Run of `event`, or `None` while it waits or after it was ignored. */
   run: Schema.Option(RunId),
-  /** The Run whose Attempt asked a question or reported a blocker and holds the Loop on the Item; none without a hold. */
-  heldBy: Schema.Option(RunId),
+  /** The Run that suppresses the Item after a question or blocker, or `None`. */
+  suppressedBy: Schema.Option(RunId),
 }) {}
 
-/** Monotonic version of the operator projection. */
+/** The monotonic version of the operator projection. */
 export const ProjectionRevision = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pipe(
   Schema.brand("ProjectionRevision"),
 );

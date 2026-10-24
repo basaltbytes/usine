@@ -19,7 +19,7 @@ const question = new QuestionFailure({
   question: "Should the egress transport be HTTP CONNECT or a SOCKS proxy?",
 });
 
-/** Whether no Run exists yet for the submission's Event. */
+/** Returns whether no Run exists yet for the submission's Event. */
 const hasNoRun = (engine: RunEngine["Service"], sighting: ReturnType<typeof submission>) =>
   Effect.gen(function* () {
     const missing = yield* Effect.flip(engine.inspect(yield* runIdFor(sighting)));
@@ -27,7 +27,7 @@ const hasNoRun = (engine: RunEngine["Service"], sighting: ReturnType<typeof subm
   });
 
 describe("Attempts that end with an operator question", () => {
-  it.live("holds the Item after a question until its content changes again", () =>
+  it.live("suppresses the Item after a question until its content changes again", () =>
     withInstance((directory) =>
       Effect.gen(function* () {
         const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
@@ -51,9 +51,9 @@ describe("Attempts that end with an operator question", () => {
           // The Agent posted its question, so the Item's content changed under the same head.
           const posted = submission({ number: 2, item: "asking-item" });
           for (let poll = 0; poll < 3; poll += 1) {
-            const held = yield* engine.submit(posted);
-            assert(held._tag === "Held");
-            assert.strictEqual(held.runId, asked.runId);
+            const suppressed = yield* engine.submit(posted);
+            assert(suppressed._tag === "Suppressed");
+            assert.strictEqual(suppressed.runId, asked.runId);
           }
           assert(yield* hasNoRun(engine, posted));
 
@@ -90,8 +90,8 @@ describe("Attempts that end with an operator question", () => {
           yield* waitFor(engine, asked.runId, ({ run }) => run.state._tag === "Failed");
           yield* engine.reconcile();
           assert(yield* hasNoRun(engine, posted));
-          // Polling sees the question's own comment again: it is the state the question holds.
-          assert.strictEqual((yield* engine.submit(posted))._tag, "Held");
+          // Polling sees the question's own comment again, which is the suppressed state.
+          assert.strictEqual((yield* engine.submit(posted))._tag, "Suppressed");
           assert(yield* hasNoRun(engine, posted));
         }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
       }),
@@ -115,7 +115,7 @@ describe("Attempts that end with an operator question", () => {
             ({ run }) => run.state._tag === "Failed",
           );
           const posted = submission({ number: 7, item: "resolved-question" });
-          assert.strictEqual((yield* engine.submit(posted))._tag, "Held");
+          assert.strictEqual((yield* engine.submit(posted))._tag, "Suppressed");
           const attempt = failed.attempts[0];
           assert(attempt !== undefined);
           yield* engine.resolveFailure(asked.runId, attempt.id);
@@ -129,7 +129,7 @@ describe("Attempts that end with an operator question", () => {
     ),
   );
 
-  it.live("stops holding the Item once the Loop sees it not matching", () =>
+  it.live("lifts the suppression once the Loop sees the Item not matching", () =>
     withInstance((directory) =>
       Effect.gen(function* () {
         const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
@@ -142,7 +142,7 @@ describe("Attempts that end with an operator question", () => {
           assert(asked._tag === "Claimed");
           yield* waitFor(engine, asked.runId, ({ run }) => run.state._tag === "Failed");
           const posted = submission({ number: 9, item: "relabeled-question" });
-          assert.strictEqual((yield* engine.submit(posted))._tag, "Held");
+          assert.strictEqual((yield* engine.submit(posted))._tag, "Suppressed");
           // The operator removes the Loop's label and adds it again.
           yield* engine.revoke(LoopName.make("review"), ItemKey.make("relabeled-question"));
           const relabeled = yield* engine.submit(posted);

@@ -43,10 +43,8 @@ it.effect(
       let minted = 0;
       let renewalFiber: number | undefined;
       let rearmed = false;
-      // The renewal loop arms its next timer only after publishing, so a timer
-      // armed after the clock moved starts from the later time and misses the next
-      // renewal. Move the clock only once the fiber that minted the latest
-      // credential waits on it again.
+      // Move the clock only once the fiber that minted the latest credential waits on it again,
+      // since the renewal loop sets its next timer only after publishing.
       const testClock = yield* TestClock.testClockWith(Effect.succeed);
       const clock: TestClock.TestClock = {
         ...testClock,

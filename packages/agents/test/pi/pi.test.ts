@@ -33,7 +33,6 @@ import {
 } from "../../src/pi/sdk.ts";
 import { resolvePiPool } from "../../src/pi/authentication.ts";
 
-/** Ignores whether a queued operator message is read; the test does not observe it. */
 const noDelivery: OnDelivery = () => Effect.void;
 
 describe("Pi pool resolution", () => {
@@ -259,8 +258,8 @@ describe("Pi child backend", () => {
       messages: [],
       prompt: (value) => {
         prompt = value;
-        // Operational SDK events with no normalized shape are logged and
-        // skipped; they must never enter the queue or break the bridge.
+        // SDK events with no normalized form are logged and skipped; they must not enter the queue
+        // or stop the bridge.
         publish({ type: "compaction_start", reason: "threshold" });
         publish({
           type: "message_end",
@@ -341,7 +340,7 @@ describe("Pi child backend", () => {
         publish({ type: "message_end", message: fauxAssistantMessage("Pi child done.") });
         publish({ type: "auto_retry_end", success: true, attempt: 2 });
         publish({ type: "agent_settled", aborted: false });
-        // The next turn counts from 1 again, and a retry Pi gives up on records no recovery.
+        // Retry numbering restarts at 1 on the next turn; a retry that Pi abandons has no recovery.
         publish(retry(1, "terminated"));
         publish({ type: "auto_retry_end", success: false, attempt: 1, finalError: "terminated" });
         publish({ type: "agent_settled", aborted: false });
@@ -429,7 +428,7 @@ describe("Pi child backend", () => {
           ),
         );
         assert(error instanceof AgentResultError);
-        assert.match(error.message, /^Pi children run only on local Workers/u);
+        assert.match(error.message, /^Pi children run only on local workers/u);
         assert.strictEqual(toAttemptFailure(error)._tag, "AgentFailure");
         assert.strictEqual(started, false);
       }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(sdk)),

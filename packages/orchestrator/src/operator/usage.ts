@@ -1,7 +1,7 @@
 import {
   AgentSession,
   BillingPool,
-  brainPool,
+  sessionPool,
   TokenCount,
   UsdAmount,
 } from "@usine/core/agent/session";
@@ -14,85 +14,86 @@ import { Context, Effect, Layer, Option, Schema } from "effect";
 import type { AttemptView } from "./attempt.ts";
 
 /**
- * Dollars a harness priced usage at. `estimate` marks the Claude plan's figure,
- * which the Agent SDK computes from its bundled prices for a subscription that
- * bills no dollars (ADR 0013).
+ * A dollar cost reported by a harness. `estimate` is true for Claude plan figures, which the Agent
+ * SDK computes from bundled prices (ADR 0013).
  */
 export class UsageCostView extends Schema.Class<UsageCostView>("@usine/orchestrator/UsageCostView")(
   { usd: UsdAmount, estimate: Schema.Boolean },
 ) {}
 
-/** One session of one Attempt: what it used, from its highest token report, and the pool that pays. */
+/** One Attempt session's usage from its highest token report, and its billing pool. */
 export class SessionUsageView extends Schema.Class<SessionUsageView>(
   "@usine/orchestrator/SessionUsageView",
 )({
   attemptId: AttemptId,
-  /** The parent or child, with its Agent and brain. */
   session: AgentSession,
   pool: BillingPool,
   tokens: TokenCount,
-  /** Null in the ChatGPT plan, which has no dollar rate, and when the harness priced nothing. */
+  /** Null in the ChatGPT plan, which has no dollar rate, or if the harness priced nothing. */
   cost: Schema.NullOr(UsageCostView),
 }) {}
 
-/** What a Run's sessions drew from one billing pool. */
+/** A Run's usage in one billing pool. */
 export class PoolUsageView extends Schema.Class<PoolUsageView>("@usine/orchestrator/PoolUsageView")(
   {
     pool: BillingPool,
     tokens: TokenCount,
-    /** Null in the ChatGPT plan, and when any of the pool's sessions has no price, so a partial sum never reads as the whole. */
+    /** Null in the ChatGPT plan, or if any session in the pool has no price. */
     cost: Schema.NullOr(UsageCostView),
   },
 ) {}
 
-/** The tokens a Run's Attempts have used so far, per pool and per session, with prices where a pool has a dollar rate. */
+/**
+ * The tokens a Run's Attempts used, per pool and session, with prices where a pool has a dollar
+ * rate.
+ */
 export class RunUsageView extends Schema.Class<RunUsageView>("@usine/orchestrator/RunUsageView")({
   tokens: TokenCount,
-  /** Pools in the order API keys, Claude plan, ChatGPT plan; a pool no session used is absent. */
+  /** In the order API keys, Claude plan, ChatGPT plan; unused pools are absent. */
   pools: Schema.Array(PoolUsageView),
-  /** Sessions in the order their Attempt began and their first report arrived. */
+  /** In order of Attempt start, then first report. */
   sessions: Schema.Array(SessionUsageView),
 }) {}
 
-/** What a Task's Runs drew from one billing pool, added up over every session of every Run. */
+/** A Task's usage in one billing pool, summed over every session of every Run. */
 export class TaskPoolUsageView extends Schema.Class<TaskPoolUsageView>(
   "@usine/orchestrator/TaskPoolUsageView",
 )({
   pool: BillingPool,
   tokens: TokenCount,
   /**
-   * The dollars of the sessions the harness priced; null in the ChatGPT plan, and when no session
-   * in the pool has a price yet.
+   * The cost of the priced sessions, or null in the ChatGPT plan or if no session in the pool has a
+   * price yet.
    */
   cost: Schema.NullOr(UsageCostView),
   /**
-   * Whether a session in a pool with a dollar rate has no price, such as a Claude session before
-   * its first result, so `cost` is a lower bound. Always false in the ChatGPT plan.
+   * Whether a session in a priced pool has no price yet, so `cost` is a lower bound. Always false
+   * in the ChatGPT plan.
    */
   unpriced: Schema.Boolean,
 }) {}
 
 /**
- * What usine's work on a Task took, over every Run on its Items: the Attempts' wall time, and the
- * tokens and dollars their sessions drew per billing pool.
+ * A Task's usage over every Run on its Items: Attempt wall time, and tokens and cost per billing
+ * pool.
  */
 export class TaskUsageView extends Schema.Class<TaskUsageView>("@usine/orchestrator/TaskUsageView")(
   {
-    /** The ended Attempts' wall time added up, each from its start to its recorded end. */
+    /** The summed wall time of ended Attempts, each from start to recorded end. */
     durationMillis: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-    /** When each Attempt at work began; a reader adds the time since then to `durationMillis`. */
+    /** The start times of running Attempts; add the time since each to `durationMillis`. */
     runningSince: Schema.Array(Schema.String),
-    /** Ended Attempts with no recorded end, which `durationMillis` leaves out. */
+    /** The number of ended Attempts with no recorded end, excluded from `durationMillis`. */
     unmeasured: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
     tokens: TokenCount,
     /**
-     * Each pool summed over the Runs, in the order API keys, Claude plan, ChatGPT plan; a pool no
-     * Run used is absent.
+     * Each pool summed over the Runs, in the order API keys, Claude plan, ChatGPT plan; unused
+     * pools are absent.
      */
     pools: Schema.Array(TaskPoolUsageView),
     /**
-     * The priced pools' dollars added up, an estimate when the Claude plan's figure is among them,
-     * and a lower bound when a pool is `unpriced`; null when no pool has a price.
+     * The summed cost of the priced pools, or null if no pool has a price. It's an estimate if it
+     * includes the Claude plan, and a lower bound if a pool is `unpriced`.
      */
     cost: Schema.NullOr(UsageCostView),
   },
@@ -109,10 +110,8 @@ const priced = (pool: BillingPool, usd: Option.Option<UsdAmount>): UsageCostView
       });
 
 /**
- * Sums a Run's token reports: per session its highest report, since each
- * harness reports a cumulative count, then per pool and for the Run, as the
- * runaway guard meters an Attempt. `reports` are each session's highest
- * `SessionTokensUpdated` rows, in Attempt order.
+ * Sums a Run's token reports per pool and for the Run, using each session's highest report because
+ * reports are cumulative.
  */
 const runUsage = (reports: ReadonlyArray<TranscriptEntry>): RunUsageView => {
   const highest = new Map<string, SessionUsageView>();
@@ -123,7 +122,7 @@ const runUsage = (reports: ReadonlyArray<TranscriptEntry>): RunUsageView => {
     const key = `${attemptId} ${session.id}`;
     const previous = highest.get(key);
     if (previous !== undefined && previous.tokens >= totalTokens) continue;
-    const pool = brainPool(session.brain);
+    const pool = sessionPool(session);
     highest.set(
       key,
       new SessionUsageView({
@@ -161,13 +160,8 @@ const runUsage = (reports: ReadonlyArray<TranscriptEntry>): RunUsageView => {
 };
 
 /**
- * Adds up a Task's `runs`: their Attempts' time, and the tokens and dollars in `usage`, what
- * each Run's sessions drew. A Run absent from `usage` adds time but no tokens.
- *
- * Pools add up the Runs' sessions, not the Runs' pools: a Run's pool has no price while any of
- * its sessions has none, and a Claude session has none until its first result. Summing the
- * priced sessions keeps the dollars already spent on the Task while a Run is at work, and
- * `unpriced` says the figure leaves some usage out.
+ * Sums the Attempt time, tokens, and cost of a Task's `runs`. Pools sum sessions rather than Run
+ * pools, so priced sessions count even when another session is unpriced, which sets `unpriced`.
  */
 export const taskUsage = (
   runs: ReadonlyArray<{
@@ -251,13 +245,11 @@ const makeRunUsageReader = Effect.gen(function* () {
   return { read };
 });
 
-/** The parts of a Run snapshot or summary that its usage reads: the Run and its Attempts. */
 type RunUsageSource = Pick<RunSnapshot, "run" | "attempts">;
 
 /**
- * Reads a Run's usage: every Attempt's highest token report per session, summed for the Run.
- * An Attempt with an outcome gets no more reports, so its reports are read once and kept for
- * the life of the process; an Attempt in flight is read on every call.
+ * Reads a Run's usage from each session's highest token report. Caches the reports of Attempts with
+ * an outcome and rereads running Attempts on every call.
  */
 export class RunUsageReader extends Context.Service<
   RunUsageReader,

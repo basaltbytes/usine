@@ -32,30 +32,29 @@ import {
 import { readRunningEvents, runView, workerAccesses } from "./projection.ts";
 import { RunView } from "./run.ts";
 
-/** How many newest Items the Board, and so a Task's membership, considers; older ones drop off. */
+/** The number of newest Items the Board considers for Task membership. */
 const TASK_BOARD_ITEMS = 500;
 
-/** One issue or pull request of a Task, with how it stands on GitHub as the Board card shows it. */
+/** One issue or pull request of a Task, with its GitHub state as the Board card shows it. */
 export class TaskItemView extends Schema.Class<TaskItemView>("@usine/orchestrator/TaskItemView")({
   ...BoardItemLink.fields,
   state: LaneItemState,
   labels: Schema.Array(GitHubLabelName),
-  /** An open pull request whose branch conflicts with its base. */
+  /** Whether the Item is an open pull request whose branch conflicts with its base. */
   conflicting: Schema.Boolean,
 }) {}
 
-/** The Board lane a Task sits in: its current Item's, or the one its running Run was triggered from. */
+/**
+ * The Task's Board lane: its current Item's lane, or the lane its running Run was triggered from.
+ */
 export class TaskLaneView extends Schema.Class<TaskLaneView>("@usine/orchestrator/TaskLaneView")({
   id: BoardLaneId,
   name: LaneName,
 }) {}
 
 /**
- * A comment or review an Attempt posted on its Run's Item: a `Comment` fact of the Run's Step
- * result, or one an Attempt recorded when it ended without success. `postedAt` is when GitHub
- * says it was posted, null for a comment harvested before those times were recorded;
- * `attemptEndedAt` is when the Attempt that recorded it ended, null for an Attempt closed before
- * end times were recorded.
+ * A comment or review an Attempt posted on its Run's Item. `postedAt` and `attemptEndedAt` are null
+ * for records made before those times were stored.
  */
 export class TaskCommentView extends Schema.Class<TaskCommentView>(
   "@usine/orchestrator/TaskCommentView",
@@ -68,21 +67,23 @@ export class TaskCommentView extends Schema.Class<TaskCommentView>(
 }) {}
 
 /**
- * One Task as its page shows it (ADR 0024): its Items, every saved Run on them, and the
- * comments and reviews its Runs posted. The Task has no stored identity; `number` is its
- * originating Item, the earliest issue or, without one, the earliest pull request.
+ * One Task as its page shows it (ADR 0024). Tasks have no stored identity; `number` is the
+ * originating Item: the earliest issue, or else the earliest pull request.
  */
 export class TaskView extends Schema.Class<TaskView>("@usine/orchestrator/TaskView")({
   repository: RepositoryName,
   number: ItemNumber,
   title: Schema.String,
   /**
-   * The Item whose labels and state place the Task in its lane, unless its running Run keeps it in
-   * the lane that Run was triggered from, and whose labels a Board move changes.
+   * The Item whose labels and state set the Task's lane (unless a running Run keeps it in its
+   * trigger lane), and whose labels a Board move changes.
    */
   current: ItemKey,
   lane: TaskLaneView,
-  /** A Run on one of its Items waits for approval or a failure decision, or an Item used up its cycle budget. */
+  /**
+   * Whether a Run on the Task's Items waits for approval or a failure decision, or an Item used up
+   * its cycle budget.
+   */
   needsYou: Schema.Boolean,
   /** Issues first, then pull requests, each by number; the first is the originating Item. */
   items: Schema.NonEmptyArray(TaskItemView),
@@ -97,9 +98,8 @@ export type TaskReadError = RunStoreError | BoardProjectNotFoundError | BoardIte
 const isoOrNull = Option.match({ onNone: () => null, onSome: DateTime.formatIso });
 
 /**
- * The comments and reviews a Run's Attempts posted: a succeeded Attempt's from the Step
- * result's facts, a failed or canceled Attempt's from what the Attempt recorded. Newest first;
- * a comment two Attempts recorded, such as one the later Attempt edited, appears once.
+ * Returns the comments and reviews that a Run's Attempts posted, newest first and without
+ * duplicates.
  */
 const harvestedComments = (summary: RunSummary): ReadonlyArray<TaskCommentView> => {
   const view = (comment: Comment, endedAt: Option.Option<DateTime.Utc>) =>
@@ -270,15 +270,15 @@ const makeTaskReader = Effect.gen(function* () {
 });
 
 /**
- * Reads one Task: its membership and lane come from the Board projection over the Project's
- * newest Items, and its Runs from every saved Run of those Items.
+ * Reads one Task from the Board projection over the Project's newest Items and the saved Runs of
+ * those Items.
  */
 export class TaskReader extends Context.Service<
   TaskReader,
   {
     /**
-     * The Task that holds Item `item` of `repository`, found from any of its Items. Fails when the
-     * repository is not a Project or the Item is not among the Board's newest Items.
+     * Returns the Task that contains Item `item` of `repository`. Fails if the repository isn't a
+     * Project or the Item isn't among the Board's newest Items.
      */
     readonly read: (
       instance: LoadedInstance,

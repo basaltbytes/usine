@@ -30,7 +30,6 @@ import {
   CycleBudgetUsedUpView,
   DeskView,
   FailedAttemptView,
-  HeldForOperatorView,
   LoopPausedView,
   LoopView,
   FailedCheckView,
@@ -47,6 +46,7 @@ import {
   RunView,
   StalledItemView,
   SucceededAttemptView,
+  SuppressedForOperatorView,
   WorkerSilentView,
   WorkerSlotsView,
   WorkerView,
@@ -80,9 +80,8 @@ const link = (number: number, title: string) => {
 type Outcome = AttemptView["outcome"];
 
 /**
- * A desk as the dogfood factory shows it on a working morning: two Attempts in flight, one of
- * them on a silent Worker, matched Items stalled for each reason, and the Runs that closed
- * last. Every time counts back from `now`.
+ * Returns a desk with two running Attempts (one on a silent Worker), a stalled Item for each stall
+ * reason, and recently closed Runs; all times are relative to `now`.
  */
 export const deskFixture = (now: number) => {
   const ago = (minutes: number) => new Date(now - minutes * 60_000).toISOString();
@@ -287,7 +286,7 @@ export const deskFixture = (now: number) => {
     ],
     notMoving: [
       stalled("start-dev", approval, new AwaitingApprovalView({ run: waitingRun })),
-      stalled("start-dev", question, new HeldForOperatorView({ run: questionRun })),
+      stalled("start-dev", question, new SuppressedForOperatorView({ run: questionRun })),
       stalled("start-dev", budget, new CycleBudgetUsedUpView({ ask })),
       stalled("start-dev", failed, new RunFailedView({ run: failedRun })),
       ...canceledRuns.map((canceledRun, index) =>

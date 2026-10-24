@@ -2,27 +2,24 @@ import type { BoardLaneId, BoardLaneView, LoopView, RunView } from "@usine/orche
 import { Fragment } from "react";
 import { cn } from "@/lib/utils";
 
-/** The Run states that put a Loop at work on a Task. */
+/** The Run states in which a Loop counts as working on a Task. */
 const AT_WORK = new Set<RunView["state"]>(["Waiting", "Queued", "Running"]);
 
-/** A Loop whose trigger matches one of a lane's Tasks now, and whether it is paused. */
+/** A Loop whose trigger currently matches one of the lane's Tasks. */
 interface WatchingLoop {
   readonly name: LoopView["name"];
   readonly paused: boolean;
 }
 
-/** The connection from an authored label lane to the next one on the Board, and the Loops that
- * watch the lane: those whose trigger matches one of its Tasks now, with or without an open Run,
- * in the instance's order. `tone` is `active` when one of those Loops has a Queued or Running Run
- * on the lane's Tasks, `waiting` when its open Runs there all wait for approval, else `idle`. */
+/** The link from an authored label lane to the next lane. `tone` is `active` if a Loop has a Queued
+ * or Running Run on the lane's Tasks, `waiting` if all open Runs there wait for approval, else `idle`. */
 export interface LaneFlow {
   readonly next: BoardLaneView;
   readonly loops: ReadonlyArray<WatchingLoop>;
   readonly tone: "active" | "waiting" | "idle";
 }
 
-/** The flow out of each authored label lane whose right-hand neighbour is also one, keyed by
- * lane; `loops` are the instance's Loops with their pause state. */
+/** Returns the flow of each authored label lane whose right neighbor is also an authored label lane. */
 export const laneFlows = (
   lanes: ReadonlyArray<BoardLaneView>,
   loops: ReadonlyArray<LoopView>,
@@ -58,8 +55,7 @@ export const laneFlows = (
 const loopsTitle = (loops: ReadonlyArray<WatchingLoop>): string =>
   loops.map(({ name, paused }) => (paused ? `${name} (paused)` : name)).join(", ");
 
-/** An arrow from the end of a lane's heading across the gap to the next lane, named after the Loops
- * that watch the lane's Tasks; a paused Loop says so. Blank when no Loop watches the lane. */
+/** Renders an arrow to the next lane, labelled with the matching Loops; if no Loop matches, the arrow has no label. */
 export const FlowArrow = ({ flow }: { readonly flow: LaneFlow }) => {
   const named = flow.loops.length > 0;
   return (

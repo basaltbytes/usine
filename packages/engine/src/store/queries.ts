@@ -85,7 +85,7 @@ import {
 import { loopItemQueries } from "./loop-items.ts";
 import { transcriptQueries } from "./transcript.ts";
 
-/** The newest queued submission and the exact Events observed alongside it. */
+/** The newest queued submission and the Events read with it. */
 export interface QueuedEvents {
   readonly submission: Submission;
   readonly eventIds: ReadonlyArray<EventId>;
@@ -159,7 +159,6 @@ export const attemptSelection = {
   comments: attempts.commentsJson,
 } as const;
 
-// The state partitions are owned by @usine/core; these predicates only borrow their tags.
 const storedStateTag = sql`json_extract(${runs.stateJson}, '$._tag')`;
 const openState = inArray(storedStateTag, [...RunState.OPEN_STATE_TAGS]);
 const unstartedState = inArray(storedStateTag, [...RunState.UNSTARTED_STATE_TAGS]);
@@ -169,7 +168,7 @@ const storedAgent = (agent: Agent): Schema.Json =>
   Schema.decodeUnknownSync(Schema.Json)(encodeAgent(agent));
 
 export const queriesFor = (database: RunDatabaseClient) => {
-  // Keep `.execute()` explicit (ADR 0020).
+  // `.execute()` stays explicit (ADR 0020).
   const eventRouteByDedup = Effect.fn("RunStoreQueries.eventRouteByDedup")(function* (
     dedupKey: DedupKey,
   ) {
@@ -208,7 +207,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     return yield* decodeRunRows(rows);
   });
 
-  /** The Attempts whose leftovers were not discarded that `filters` select, as startup reconciliation visits them. */
+  /** Returns the Attempts that match `filters` and whose leftovers weren't discarded. */
   const recoveries = (...filters: ReadonlyArray<SQL>) =>
     Effect.gen(function* () {
       const rows = yield* database
@@ -302,8 +301,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     storedRuns: ReadonlyArray<RunRow>,
   ) {
     const runIds = storedRuns.map(({ runId }) => runId);
-    // Keep history queries below adapter bind-parameter limits, even for a
-    // long-lived Task with many Runs.
+    // Chunks keep each read below the driver's bind-parameter limit.
     const storedAttempts = (yield* Effect.forEach(EffectArray.chunksOf(runIds, 100), (ids) =>
       database
         .select(attemptSelection)
@@ -336,8 +334,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     return yield* summariesWithAttempts(storedRuns);
   });
 
-  // Every open Run plus the newest `closedLimit` settled ones, so an old
-  // Waiting run never falls out of the operator's view while history stays bounded.
+  // Every open Run plus the newest `closedLimit` closed ones, so an old waiting Run stays listed.
   const runSummaries = Effect.fn("RunStoreQueries.runSummaries")(function* (closedLimit: number) {
     const [openRuns, closedRuns] = yield* Effect.all([
       selectRuns()
@@ -359,7 +356,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
   const runEvents = Effect.fn("RunStoreQueries.runEvents")(function* (
     runIds: ReadonlyArray<RunId>,
   ) {
-    // Chunked like the Item histories, to stay below adapter bind-parameter limits.
+    // Chunks keep each read below the driver's bind-parameter limit.
     const rows = yield* Effect.forEach(EffectArray.chunksOf([...new Set(runIds)], 100), (ids) =>
       database
         .select({
@@ -402,7 +399,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     return Option.fromNullishOr(rows[0]?.revision);
   });
 
-  // A closed state stamps when the Run closed, `at` or now; an open one, as a retry's, clears it.
+  // A closed state sets `closedAt` to `at` or now; an open state clears it.
   const updateState = Effect.fn("RunStoreQueries.updateState")(function* (
     runId: RunId,
     state: RunState.RunState,
@@ -467,7 +464,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
       .execute();
   });
 
-  /** The operator retry that begins the Run's next Attempt, if one waits. */
+  /** Returns the operator retry for the Run's next Attempt, or `None`. */
   const nextStart = Effect.fn("RunStoreQueries.nextStart")(function* (runId: RunId) {
     const rows = yield* database
       .select({ nextStart: runs.nextStartJson })
@@ -696,7 +693,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     );
   });
 
-  /** The newest Event the engine opened again for `eventId` (#267), with its reopening number. */
+  /** Returns the newest reopening of `eventId` (#267), with its reopening number. */
   const newestReopening = Effect.fn("RunStoreQueries.newestReopening")(function* (
     eventId: EventId,
   ) {
@@ -716,7 +713,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     }));
   });
 
-  /** The trigger Event that `eventId` opened again, as a reopening or a run again; none for a trigger's own Event. */
+  /** Returns the trigger Event that `eventId` reopens or runs again, or `None` for a trigger's own Event. */
   const reopenedEvent = Effect.fn("RunStoreQueries.reopenedEvent")(function* (eventId: EventId) {
     const reopened = alias(events, "reopened_event");
     const rows = yield* decodeReopenedEvents(
@@ -730,7 +727,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     return Option.fromNullishOr(rows[0]);
   });
 
-  /** Records that the operator recorded `eventId` by running a closed Run again, and who asked. */
+  /** Records that `eventId` came from running a closed Run again, and the requesting login. */
   const recordRunAgain = Effect.fn("RunStoreQueries.recordRunAgain")(function* (
     eventId: EventId,
     again: RunAgain,
@@ -746,8 +743,8 @@ export const queriesFor = (database: RunDatabaseClient) => {
   });
 
   /**
-   * Records a trigger's Event and its route once, and returns the route as first
-   * recorded. `reopens` marks an Event the engine opened again for an earlier one.
+   * Records a trigger Event and its route once, and returns the route as first recorded.
+   * `reopens` is the earlier Event that this one reopens.
    */
   const recordTriggerEvent = Effect.fn("RunStoreQueries.recordTriggerEvent")(function* (
     submission: Submission,
@@ -801,11 +798,11 @@ export const queriesFor = (database: RunDatabaseClient) => {
     const routes = yield* eventRouteByRun(runId);
     const current = routes[0];
     if (current === undefined) return Option.none<QueuedEvents>();
-    const hold = yield* loopItemQueries(database).hold(current.loop, current.itemKey);
-    if (Option.isSome(hold)) {
-      yield* Effect.logInfo("Queued Events wait while an operator hold keeps the Item", {
+    const suppression = yield* loopItemQueries(database).suppression(current.loop, current.itemKey);
+    if (Option.isSome(suppression)) {
+      yield* Effect.logInfo("Queued Events wait while a suppression keeps the Item", {
         runId,
-        heldBy: hold.value.runId,
+        suppressedBy: suppression.value.runId,
         loop: current.loop,
         itemKey: current.itemKey,
       });
@@ -847,11 +844,8 @@ export const queriesFor = (database: RunDatabaseClient) => {
     return (yield* decodeRunIds(rows)).map(({ runId }) => runId);
   });
 
-  // The newest Run of each Item that has a current queued Event and no open
-  // Run: the Run closed before its continuation opened or revoked that Event.
-  // An Item awaiting a cycle-budget reset is left out, since none of its
-  // queued Events can open a Run before the reset supersedes them, and so is
-  // an Item an operator hold keeps.
+  // The newest closed Run of each Item that has a current queued Event and no open Run, excluding
+  // Items waiting for a cycle-budget reset or under a suppression.
   const pendingContinuations = Effect.fn("RunStoreQueries.pendingContinuations")(function* () {
     const items = yield* database
       .selectDistinct({ loop: triggerEvents.loopName, itemKey: triggerEvents.itemKey })
@@ -871,7 +865,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
           isNull(runs.runId),
           isNull(ignoredEvents.eventId),
           isNull(itemCycleBudgets.askJson),
-          isNull(loopItems.heldByRunId),
+          isNull(loopItems.suppressedByRunId),
           cycleQueries(database).currentEvent,
         ),
       )

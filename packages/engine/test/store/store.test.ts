@@ -235,7 +235,7 @@ describe("run store", () => {
           [newest, middle],
         );
 
-        // A Run canceled before any Attempt closes when the cancel lands, not when it opened.
+        // A Run canceled before any Attempt closes at the cancel time, not at its open time.
         const waited = yield* claim("waited-for-approval");
         yield* finish(yield* begin(yield* claim("finished-meanwhile")));
         yield* store.cancel(waited);
@@ -438,7 +438,7 @@ describe("run store", () => {
             );
           yield* emit(1, "before the restart");
           yield* emit(2, "last before the restart");
-          // The restarted Run's fiber asks again for the open Attempt's parent task, still live.
+          // The restarted Run's fiber checks again whether the open Attempt's parent task is live.
           const reattached = yield* store.beginAttempt(
             runId,
             WorkerName.make("local"),
@@ -820,7 +820,7 @@ describe("run store", () => {
       });
       const runId = RunId.make("queued-run");
 
-      // A UI approval while `usine.yaml` names no operator records its channel only.
+      // A UI approval without a configured operator login records only its channel.
       const unnamed = new ApprovalSource({ channel: "ui", approver: Option.none() });
       const recorded = Option.some(
         new RunApproval({ approvedAt: approval.receivedAt, source: Option.some(unnamed) }),
@@ -1119,8 +1119,7 @@ describe("cursor store", () => {
         const restored = yield* store.read(key, TestCursor);
         assert(Option.isSome(restored));
         assert.deepStrictEqual(restored.value, { etag: "second" });
-        // A stored value that no longer decodes must read as absent, never
-        // fail: losing a cursor is always safe.
+        // A stored value that no longer decodes reads as `None` instead of failing.
         assert(Option.isNone(yield* store.read(key, StricterCursor)));
       }).pipe(Effect.provide(CursorStore.layer), Effect.provide(database));
     }).pipe(Effect.provide(NodeServices.layer)),
@@ -1270,14 +1269,14 @@ describe("cursor store", () => {
 
         const attempts = (yield* store.snapshot(runId)).attempts;
         assert.deepStrictEqual(attempts[0]?.comments, [review]);
-        // An Attempt with nothing recorded, like every Attempt before comments were, reads none.
+        // An Attempt without recorded comments, like every Attempt from before they were stored, reads as empty.
         assert.deepStrictEqual(attempts[1]?.comments, []);
         assert(Option.isNone((yield* store.snapshot(runId)).step.result));
       }),
     ),
   );
 
-  // Two Loops' Runs of one Agent on one Item sign their comments alike (#429).
+  // Two Loops' Runs of one Agent on one Item sign their comments the same way (#429).
   it.effect(
     "gives an Attempt its own window and the windows of its Agent's other Attempts on its Item that overlap it",
     () =>
@@ -1317,7 +1316,7 @@ describe("cursor store", () => {
               attempt,
               Result.fail(new AgentFailure({ message: "Checks failed" })),
             );
-          // Each window as its Attempt id and whether it has ended.
+          // Each window as its Attempt ID and whether it has ended.
           const windows = (attempt: Attempt) =>
             store.attemptWindows(attempt.id).pipe(
               Effect.map(({ own, overlapping }) => ({

@@ -1,17 +1,15 @@
 ---
-title: Write a Loop
-description: Write a Loop file that selects issues, pull requests, or schedule ticks and gives each match to an Agent, then connect Loops with labels.
+title: Write a loop
+description: Write a loop file that selects issues, pull requests, or schedule ticks and gives each match to an agent, then connect loops with labels.
 sidebar:
   order: 1
 ---
 
 import { Steps } from "@astrojs/starlight/components";
 
-A Loop is one Markdown file in the instance folder's `loops/` folder. Its YAML frontmatter sets which issues or pull requests start work, on which repositories, whether you approve each Run first, and which Agent does the work. Its body is the task the Agent receives. The file name without `.md` is the Loop's name: it must be kebab-case, renaming the file creates a different Loop, and deleting the file retires the Loop at the next reload or restart. usine has no built-in Loops.
+A loop is a Markdown file in `loops/`. Its frontmatter sets which issues or pull requests start work, on which repositories, whether you approve each run, and which agent does the work. Its body is the agent's task. The file name, in kebab-case, is the loop name. [Loop files](/reference/configuration/loop-files/) lists every key, and [Expressions](/reference/configuration/expressions/) lists every field that an expression can read.
 
-This page starts with a minimal Loop and extends it into two Loops that pass an Item from one to the other. [Loop files](/reference/configuration/loop-files/) lists every key and its validation, and [Expressions](/reference/configuration/expressions/) lists every field an expression can read.
-
-## A minimal Loop
+## Create a minimal loop
 
 ```markdown title="loops/start-dev.md"
 ---
@@ -26,48 +24,35 @@ agent: developer
 Complete issue #{{ item.number }}: {{ item.title }}.
 ```
 
-`trigger` and `agent` are the only required keys. `developer` must be the name of a file in `agents/`, here `agents/developer.md`. Keys you don't set use their defaults: no `selector`, so the Loop applies to every repository in `usine.yaml`; `approval: none`; `step: run`; and `max_cycles: 3`.
-
-When someone adds `ready-for-agent` to an open issue, the next poll detects the change and evaluates `if:` against the issue's current state. The expression is true, so the orchestrator records an Event, opens a Run, renders the body into the Run's task, and starts an Attempt as soon as a Worker has a free slot.
+`trigger` and `agent` are the only required keys. `agent` is the name of a file in `agents/`, here `agents/developer.md`. When someone adds `ready-for-agent` to an open issue, the next poll finds `if:` true, and the orchestrator opens a run with the rendered body as its task. An attempt starts when a worker has a free slot.
 
 ## Triggers
 
-`trigger.on` sets what starts the Loop:
+`trigger.on` sets what starts the loop:
 
-| `on`       | The Loop fires for                                                                       | The Attempt's checkout                            |
+| `on`       | The loop fires for                                                                       | The attempt's checkout                            |
 | ---------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------- |
 | `issue`    | an issue whose content changed while `if:` is true. Pull requests don't count as issues. | the default branch, detached at its latest commit |
 | `pr`       | a pull request whose content changed while `if:` is true                                 | the pull request's head commit, detached          |
-| `schedule` | each tick of `cron`, once per repository the Loop applies to, when `if:` is true         | the default branch, detached at its latest commit |
+| `schedule` | each tick of `cron`, once per repository that the loop applies to, if `if:` is true      | the default branch, detached at its latest commit |
 
-Every `settings.poll_interval` seconds (60 by default), the orchestrator asks GitHub which issues and pull requests of each registered repository changed, fetches each changed one, and evaluates the `if:` of every issue or pr Loop against it. The orchestrator fetches open pull requests again on every poll, because GitHub can change their mergeability without updating them. When you move a card on the Board, usine queues a fetch of that Item instead of waiting for the next poll.
+usine polls every `settings.poll_interval` seconds (default 60). A loop acts once for each version of an item's content: if the same content matches again, no new run opens. When `if:` becomes false, usine revokes the loop's runs on that item that haven't started. A schedule trigger also takes `cron` and `tz`. See [`trigger`](/reference/configuration/loop-files/#trigger).
 
-A Loop acts once for each version of an Item's content. usine identifies the Event that opens a Run by the Loop, the repository, the Item number, and a hash of the Item's payload without its timestamps. If the same content matches again, no new Run opens; a new Run needs a change in the payload, such as a label, a comment, or a new commit on the pull request. When `if:` becomes false, usine cancels the Loop's Runs on that Item that haven't started an Attempt, with the reason revoked. A running Attempt always finishes.
+## Match items with `if:`
 
-A schedule trigger adds two keys: `cron`, a five-field cron expression, and `tz`, an IANA time zone that defaults to `UTC`. When the orchestrator starts after being down, only the latest missed tick fires. Schedule Loops still need `if:`. To fire on every tick, write `if: true`; usine reads the YAML boolean as the CEL literal.
-
-## The `if:` expression
-
-`if:` is a [CEL](https://cel.dev) expression that must evaluate to a boolean. It can use two variables:
-
-- `repo` is the repository: `repo.name` is the full name (`acme/widgets`), `repo.owner` the account (`acme`), and `repo.url` its GitHub URL.
-- `item` is the Item's payload, with GitHub's GraphQL field names. An issue has `number`, `title`, `body`, `state` (`OPEN` or `CLOSED`), `labels`, `assignees`, `comments` (the last 20), `closedByPullRequestsReferences`, and more. A pull request adds `isDraft`, `merged`, `headRefName`, `headRefOid`, `baseRefName`, `mergeable`, `reviews` (the last 20), `reviewThreads`, and `closingIssuesReferences`. For a schedule Loop, `item.tick` has `scheduledAt`, `scheduledAtLocal`, `cron`, and `tz`.
-
-Lists are GraphQL connections with `totalCount` and `nodes`, so CEL's list macros apply to `nodes`:
+`if:` is a [CEL](https://cel.dev) expression that must evaluate to a boolean. It reads `repo` and `item`, the item's payload with GitHub's GraphQL field names ([variables](/reference/configuration/expressions/#variables)). Lists are GraphQL connections with `totalCount` and `nodes`, so CEL's list macros apply to `nodes`:
 
 | Condition                                 | Expression                                                                  |
 | ----------------------------------------- | --------------------------------------------------------------------------- |
-| The Item has a label                      | `item.labels.nodes.exists(label, label.name == "ready-for-agent")`          |
+| The item has a label                      | `item.labels.nodes.exists(label, label.name == "ready-for-agent")`          |
 | No open pull request closes the issue yet | `!item.closedByPullRequestsReferences.nodes.exists(pr, pr.state == "OPEN")` |
 | The pull request is open and not a draft  | `item.state == "OPEN" && !item.isDraft`                                     |
 | GitHub reports a merge conflict           | `item.mergeable == "CONFLICTING"`                                           |
 | Every review thread is resolved           | `item.reviewThreads.nodes.all(thread, thread.isResolved)`                   |
 
-The orchestrator type-checks `if:` and every `{{ }}` expression of the body when it loads the Loop. If an expression reads a field that the payload doesn't have, or `if:` isn't a boolean, the Loop doesn't load.
+If an expression reads a field that the payload doesn't have, or `if:` isn't a boolean, the loop doesn't load. Test nullable fields before you read below them, as in `item.milestone != null && item.milestone.title == "v1"` ([fields that can be null](/reference/configuration/expressions/#fields-that-can-be-null)).
 
-Some fields are null when GitHub has no value for them: `milestone`, `issueType`, `stateReason`, `closedAt`, and `author` on an issue; `mergedAt`, `reviewDecision`, `statusCheckRollup`, and `author` on a pull request; and the `author` of a comment or review written by a deleted account. A comparison such as `item.reviewDecision == "APPROVED"` is false on a null field, and `item.milestone != null` tests for a value. Reading below a null object, as in `item.milestone.title`, makes the evaluation fail, so test the object first: `item.milestone != null && item.milestone.title == "v1"`. An `if:` that fails affects only that Loop on that Item: **Needs attention** shows the failure until the Loop evaluates, and the poll goes on with the other Loops and Items.
-
-## Narrow the repositories
+## Limit the repositories
 
 ```yaml title="loops/start-dev.md"
 selector:
@@ -75,41 +60,31 @@ selector:
   tags: [backend]
 ```
 
-Without a `selector`, a Loop applies to every repository in `usine.yaml`. `repos` lists full repository names as they appear in `usine.yaml`, and `tags` matches the `tags` of `repos` entries. With both, a repository must be listed and have one of the tags. A selector must have at least one of the two keys. If it lists a name or tag that `usine.yaml` doesn't declare, the Loop doesn't load.
+Without a `selector`, a loop applies to every repository in `usine.yaml`. With both keys, a repository must be listed and have one of the tags ([`selector`](/reference/configuration/loop-files/#selector)).
 
-## Approve each Run
+## Require approval
 
-`approval: required` keeps every new Run in `Waiting` until you approve it from the Run drawer. With the default `approval: none`, a Run starts as soon as a Worker is free. If the Item changes while a Run waits for approval and still matches, usine opens a new waiting Run for the new state and cancels the older one as superseded, so the Run you approve always has the newest task.
+`approval: required` keeps every new run in `Waiting` until you [approve it](/guides/operate-runs/#approve-a-run). If the item changes meanwhile, the run that you approve still has the newest task.
 
-## Step and Agent
+## Name the step
 
-`agent` is the name of the Agent file for the Agent that does the Loop's work. `step` is the name of the Run's one Step and defaults to `run`. The Step name appears in Attempt ids (`<run>/<step>/<number>`) and in logs, so a name that describes what the Agent does, such as `implement` or `review`, makes both easier to read.
+`step` is the name of the run's one step (default `run`). It appears in attempt IDs and logs, so describe the work, such as `implement` or `review`.
 
-## The task template
+## Write the task template
 
-The body is Markdown. Each `{{ ... }}` in it is a CEL expression over the same `item` and `repo`, and must produce a string, a number, a boolean, or null; with a list or an object, the Loop doesn't load. The orchestrator renders the body when it records the Event, and the result is the Run's task. Later, you can change the task of a failed Run with **Edit and retry** in the Run drawer.
+The body is Markdown. Each `{{ ... }}` is a CEL expression over `item` and `repo` that must produce a scalar. usine renders the body when it records the event, and adds the repository, the payload, the persona, and fixed rules around it ([agent prompt](/reference/configuration/loop-files/#agent-prompt)). So write only what is specific to the loop.
 
-The task is one part of what the Agent's first session receives. The full prompt contains, in order:
+A pull request run starts detached at the head commit, so a task that pushes must tell the agent to check out `{{ item.headRefName }}` first. usine removes the worktree when the attempt ends, so commits that weren't pushed by a successful attempt are lost.
 
-1. the repository name and, on a retry, the salvage branch the Attempt resumes from;
-2. the Item payload as JSON;
-3. the Agent's persona;
-4. the task;
-5. fixed instructions: run checks in the foreground, push before finishing, start a final answer with `[usine:blocked]` to report a blocker or with `[usine:question]` to ask you for a decision, submit pull request reviews as `COMMENT` only, and end every GitHub comment, issue, pull request, and review with the line `— usine agent: <name>`.
+## Pass an item to the next loop
 
-The task doesn't need to repeat the payload or these rules; it only needs what is specific to the Loop. A pull request Run starts detached at the head commit, so a task that pushes must tell the Agent to check out `{{ item.headRefName }}` first. usine removes the worktree when the Attempt ends, and when the Attempt succeeds, commits that weren't pushed are lost.
+usine changes labels only when you move a card on the board. Loops pass work to each other through labels that the agent changes with `gh`: each loop's `if:` requires one label, and its task removes that label first and adds the next loop's label when done.
 
-If a `{{ }}` expression fails, for example because it reads below a null field, **Needs attention** reports the failure for that Loop and Item only, until the template renders. The repository's other Loops still run and the poll continues. After you fix the Loop and reload the configuration, the first poll evaluates the Item again.
-
-## Pass an Item to the next Loop
-
-usine adds or removes a label on an Item only when you move a card on the Board. Loops pass work to each other through labels that the Agent changes with `gh`, as the task instructs. In this pattern, each Loop's `if:` requires one label, and its task removes that label first and adds the next Loop's label when the work is done.
-
-The task must remove the trigger label first. While the Agent works, new comments, labels, and commits change the Item's content. If the trigger label is still there, `if:` stays true for the new content, a new Event waits behind the running one, and the Loop runs again on the same Item after the current Run ends. The cycle budget stops these repeats after `max_cycles` Runs and asks you what to do in **Needs attention** ([Bounded review and fix Loops](/guides/review-fix-loops/)).
+Remove the trigger label first because the agent's comments and commits change the item. If the label is still there, `if:` stays true, and the loop runs again after the current run ends, until the [cycle budget](/reference/configuration/loop-files/#max_cycles) stops it.
 
 <Steps>
 
-1. Declare the labels in `usine.yaml`. At every poll, usine creates the declared labels that a registered repository doesn't have. It never edits or deletes a label. If a Loop's `if:` or a Board lane uses a label that isn't declared, usine logs a warning at startup.
+1. Declare the labels in [`labels`](/reference/configuration/usine-yaml/#labels). usine creates them in every repository that lacks them.
 
    ```yaml title="usine.yaml"
    labels:
@@ -121,7 +96,7 @@ The task must remove the trigger label first. While the Agent works, new comment
      - name: review-passed
    ```
 
-2. Write the first Loop's task so that it changes the labels. This is `start-dev` from the factory that runs usine on its own repository, with the repository name replaced. It also requires approval, sets a Step name, and checks that no open pull request already closes the issue:
+2. Write the first loop's task so that it changes the labels. This is `start-dev` from the factory that runs usine on its own repository. It also requires approval and skips issues that an open pull request already closes:
 
    ```markdown title="loops/start-dev.md"
    ---
@@ -145,7 +120,7 @@ The task must remove the trigger label first. While the Agent works, new comment
    If work cannot continue, add a comment to the issue that states the exact blocker. Do not add a workaround that changes the issue's scope.
    ```
 
-3. Write the Loop for the next label. `review-pr` selects pull requests with `ready-for-review` and ends by adding either `agent-review-findings` or `review-passed`, the trigger labels of the next Loops:
+3. Write the loop for the next label. `review-pr` ends by adding `agent-review-findings` or `review-passed`, the trigger labels of the next loops:
 
    ```markdown title="loops/review-pr.md"
    ---
@@ -167,7 +142,7 @@ The task must remove the trigger label first. While the Agent works, new comment
    Post the review on GitHub. If you find any actionable issue, explain it with file and line references and add `agent-review-findings`. If there are none, make sure `agent-review-findings` is absent and add `review-passed`. Do not edit the branch or merge the pull request.
    ```
 
-4. Map the labels to Board lanes, so that dragging a card starts a Loop. Moving a card into a lane whose source is a label adds that label, removes the labels of the other label lanes, and queues a fetch of the Item. You can't move a card into a lane whose source is a state, such as `pr-merged`.
+4. Map the labels to [board lanes](/reference/configuration/usine-yaml/#reposlanes), so that dragging a card into a lane sets its label and starts a loop:
 
    ```yaml title="usine.yaml"
    repos:
@@ -189,7 +164,7 @@ The task must remove the trigger label first. While the Agent works, new comment
 
 </Steps>
 
-The two Loops form the flow below. [Bounded review and fix Loops](/guides/review-fix-loops/) adds a fixing Loop and a finishing Loop to it:
+[Write review and fix loops](/guides/review-fix-loops/) adds a fixing loop and a finishing loop to this flow:
 
 ```mermaid
 flowchart LR
@@ -199,7 +174,7 @@ flowchart LR
   C -->|a fixing Loop pushes and relabels| B
 ```
 
-## A schedule Loop
+## Write a schedule loop
 
 ```markdown title="loops/weekly-dependencies.md"
 ---
@@ -217,21 +192,14 @@ agent: developer
 Check {{ repo.name }} for outdated dependencies as of {{ item.tick.scheduledAtLocal }}. Open one pull request that updates them and passes the repository's checks. Do not merge it.
 ```
 
-Quote the `cron` value, because YAML reads a leading `*` as an alias. A schedule Loop fires once per selected repository at each tick, and its Runs have no Item, so the Board lists them under **Runs without a card**. Schedule Loops have no cycle budget.
+Quote the `cron` value, because YAML reads a leading `*` as an alias. The loop fires once per selected repository at each tick, and the board lists its runs under **Runs without a card**.
 
-## Pause a Loop
+## Pause a loop
 
-The **Loops** page under **Configuration** lists every Loop file, the ones that did not load first, with its trigger, condition, Agent, approval, state, and a **Pause** button, or **Resume** once the Loop is paused. Select a Loop to read its file as usine parsed it: the trigger and selector as written, its Agent and repositories, and the prompt with each `{{ }}` expression outlined, or the error that keeps it from loading. **Reload configuration** at the top of every Configuration page loads the Loop and Agent files again after you edit them, and the page shows what changed or why the reload was refused ([Run a factory](/guides/#change-the-configuration)). A paused Loop opens no new Runs, and the Runs it already opened continue. usine keeps the paused flag in the runtime store, so it persists across restarts, and never writes it to the Loop file. When you unpause an issue or pr Loop, the next poll reads the repository's Items from the start, so usine evaluates the Items that changed while the Loop was paused.
+On the **Loops** page under **Configuration**, select **Pause** on a loop, and **Resume** to undo it. The page lists every loop file, with the ones that failed to load first, and shows each one as usine parsed it, with its prompt expressions outlined, or the error that prevents it from loading. `POST /api/loops/<name>/pause` and `POST /api/loops/<name>/unpause` do the same.
 
-The HTTP API has the same switch: `POST /api/loops/<name>/pause` and `POST /api/loops/<name>/unpause`. To retire a Loop permanently, delete or rename its file and reload the configuration.
+A paused loop opens no new runs, and its open runs continue. usine stores the flag in the runtime store, never in the loop file, so it persists across restarts. When you unpause an `issue` or `pr` loop, the next poll reads the repository's items from the start, so the loop sees what changed while it was paused. To remove a loop, delete or rename its file and reload.
 
-## When a Loop does not load
+## Fix a loop that doesn't load
 
-usine leaves out a Loop file that has an error and loads the other Loops. It logs the reason and lists the file in **Needs attention** as **Loop quarantined**, at startup and at each reload. usine leaves out a Loop when:
-
-- the file doesn't start with a `---` line or has no closing `---`;
-- the file name isn't kebab-case;
-- the frontmatter has a key that isn't part of the Loop format, or a value of the wrong type;
-- `if:` doesn't type-check as a boolean, or a `{{ }}` expression doesn't type-check or isn't closed;
-- `cron` isn't a valid five-field expression or `tz` isn't an IANA time zone;
-- `agent` isn't the name of an Agent file that loaded, or `selector` lists a repository or tag that `usine.yaml` doesn't declare.
+If a loop file has an error, usine skips it, loads the other loops, logs the reason, and lists the file in **Needs attention** as **Loop file not loaded**. [Validation and quarantine](/reference/configuration/loop-files/#validation-and-quarantine) lists the checks. Fix the file and [reload the configuration](/guides/#change-the-configuration).

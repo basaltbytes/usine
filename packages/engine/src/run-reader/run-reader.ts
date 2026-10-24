@@ -40,7 +40,7 @@ const makeRunReader = Effect.gen(function* () {
           });
         }),
       )
-      .pipe(persistence("read Run evidence"));
+      .pipe(persistence("read run evidence"));
     yield* Effect.logDebug("Run evidence read", {
       runId,
       attempts: evidence.snapshot.attempts.length,
@@ -58,19 +58,19 @@ const makeRunReader = Effect.gen(function* () {
     queries.revision().pipe(persistence("read projection revision")),
   );
   const forItems = Effect.fn("RunReader.forItems")((itemKeys: ReadonlyArray<ItemKey>) =>
-    queries.itemRunSummaries(itemKeys).pipe(persistence("read Item Run histories")),
+    queries.itemRunSummaries(itemKeys).pipe(persistence("read item run histories")),
   );
   const events = Effect.fn("RunReader.events")((runIds: ReadonlyArray<RunId>) =>
-    queries.runEvents(runIds).pipe(persistence("read the Events of Runs")),
+    queries.runEvents(runIds).pipe(persistence("read the events of runs")),
   );
   const transcript = Effect.fn("RunReader.transcript")((query: TranscriptQuery) =>
-    queries.transcript(query).pipe(persistence("read Attempt transcript")),
+    queries.transcript(query).pipe(persistence("read attempt transcript")),
   );
   const attemptsByWorker = Effect.fn("RunReader.attemptsByWorker")(() =>
-    leftoverQueries(database).attemptCountsByWorker().pipe(persistence("count Attempts by Worker")),
+    leftoverQueries(database).attemptCountsByWorker().pipe(persistence("count attempts by worker")),
   );
   const sightings = Effect.fn("RunReader.sightings")((itemKeys: ReadonlyArray<ItemKey>) =>
-    queries.loopItems.sightings(itemKeys).pipe(persistence("read Loop sightings")),
+    queries.loopItems.sightings(itemKeys).pipe(persistence("read loop sightings")),
   );
 
   return {
@@ -87,53 +87,39 @@ const makeRunReader = Effect.gen(function* () {
   } as const;
 });
 
-/** Reads saved Run state and transcripts without starting or recovering execution. */
+/** The service that reads saved Run state and transcripts without starting or recovering execution. */
 export class RunReader extends Context.Service<
   RunReader,
   {
-    /** Reads a Run's current state, effective task and Agent, Step result, and Attempt history. */
+    /** Returns the Run's state, effective task and Agent, Step result, and Attempt history. */
     readonly inspect: (runId: RunId) => Effect.Effect<RunSnapshot, RunStoreError>;
-    /** Reads one consistent Run snapshot and every saved transcript entry, in append order without a page limit. */
+    /** Returns a Run snapshot and all its transcript entries, in append order, from one transaction. */
     readonly evidence: (runId: RunId) => Effect.Effect<RunEvidence, RunStoreError>;
-    /** Every open Run plus the newest `closedLimit` settled ones, newest first. */
+    /** Returns every open Run plus the newest `closedLimit` closed ones, newest first. */
     readonly list: (options: {
       readonly closedLimit: number;
     }) => Effect.Effect<ReadonlyArray<RunSummary>, RunStoreError>;
-    /**
-     * The `limit` settled Runs that closed last, newest close first, whenever they opened. A
-     * Run closed when its last Attempt ended, or started for one closed before end times were
-     * recorded; a Run canceled before any Attempt closed when it opened.
-     */
+    /** Returns the `limit` most recently closed Runs, by close time, newest first. */
     readonly closed: (options: {
       readonly limit: number;
     }) => Effect.Effect<ReadonlyArray<RunSummary>, RunStoreError>;
-    /** Every saved Run for the supplied Items, newest first, including all their Attempts. */
+    /** Returns every Run for `itemKeys`, newest first, with all their Attempts. */
     readonly forItems: (
       itemKeys: ReadonlyArray<ItemKey>,
     ) => Effect.Effect<ReadonlyArray<RunSummary>, RunStoreError>;
-    /**
-     * The Event each of the supplied Runs was opened for, its payload the Item as the trigger
-     * saw it; in no particular order, once per Run, and without the Runs that do not exist.
-     */
+    /** Returns the Event each existing Run in `runIds` was opened for, once per Run, in no particular order. */
     readonly events: (
       runIds: ReadonlyArray<RunId>,
     ) => Effect.Effect<ReadonlyArray<RunEvent>, RunStoreError>;
-    /** `None` means the invalidation row is absent: treat every cached projection as stale. */
+    /** Returns the projection revision. If the row is absent, returns `None`, and every cached projection is stale. */
     readonly revision: () => Effect.Effect<Option.Option<ProjectionRevision>, RunStoreError>;
-    /** Reads the requested portion of one Attempt's saved transcript in append order. */
+    /** Returns the requested part of an Attempt's transcript, in append order. */
     readonly transcript: (
       query: TranscriptQuery,
     ) => Effect.Effect<ReadonlyArray<TranscriptEntry>, RunStoreError>;
-    /**
-     * The Attempts startup reconciliation visits, counted per Worker and ordered by Worker name,
-     * with how many of them are still open; Workers without any are left out.
-     */
+    /** Returns the Attempts that startup reconciliation visits, counted per Worker, by Worker name. */
     readonly attemptsByWorker: () => Effect.Effect<ReadonlyArray<WorkerAttempts>, RunStoreError>;
-    /**
-     * What each Loop last saw of the supplied Items, one entry per Loop that
-     * has seen an Item: the Event of the state it last saw match, the Run that
-     * Event owns, and the Run whose question or blocker holds it on the Item.
-     */
+    /** Returns each Loop's last sighting of the Items in `itemKeys`, one entry per Loop and Item. */
     readonly sightings: (
       itemKeys: ReadonlyArray<ItemKey>,
     ) => Effect.Effect<ReadonlyArray<LoopSighting>, RunStoreError>;

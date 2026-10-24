@@ -53,24 +53,22 @@ export const triggerEvents = snakeCase.table(
     loopName: text().$type<LoopName>().notNull(),
     stepName: text().$type<StepName>().notNull(),
     approval: text({ enum: APPROVAL_REQUIREMENTS }).$type<ApprovalRequirement>().notNull(),
-    // The Loop's permission level when the Event matched; every Attempt of its Run uses it.
+    // The Loop's permissions at match time, used by every Attempt of the Run.
     permissions: text({ enum: LOOP_PERMISSIONS })
       .$type<LoopPermissions>()
       .notNull()
       .default("write"),
     cycleLimit: integer().$type<CycleLimit>(),
-    // Item allowance observed before fetching this Event's trigger input.
+    // The Item's cycle generation, read before fetching the trigger input.
     cycleGeneration: integer().notNull().default(0),
-    // The execution context as submitted, part of the immutable Event fact. A
-    // queued Event is claimed later from these columns, while execution reads
-    // the Run's own copy below.
+    // The submitted execution context, never updated. A queued Event is claimed from these
+    // columns; execution reads the Run's copy.
     repository: text().$type<RepositoryName>().notNull(),
     revision: text().$type<RepositoryRevision>().notNull(),
     task: text().$type<AttemptTask>().notNull(),
     agentJson: text({ mode: "json" }).$type<unknown>().notNull(),
     parentModel: text().$type<ModelId>(),
-    // Set when the engine opened this Event again for the Event a trigger
-    // submitted, after that Event's Run was canceled (#267).
+    // The Event that this one reopens after its Run was canceled (#267).
     reopensEventId: text()
       .$type<EventId>()
       .references(() => events.eventId),
@@ -90,11 +88,9 @@ export const triggerEvents = snakeCase.table(
 );
 
 /**
- * What each Loop last saw of an Item: the Event a trigger last submitted for it,
- * or none after a sighting that did not match. A Run whose Attempt asked the
- * operator a question or reported a blocker holds the Loop on the Item (#241,
- * #341); `heldEventId` is the Item's state after that stop, which opens no Run
- * either.
+ * The Event a trigger last submitted for each Loop and Item, or `null` after a non-matching
+ * sighting. After an Attempt stops with a question or blocker, `suppressedByRunId` is its Run and
+ * `suppressedEventId` is the Item's state after the stop, which opens no Run (#241, #341).
  */
 export const loopItems = snakeCase.table(
   "usine_loop_items",
@@ -104,10 +100,10 @@ export const loopItems = snakeCase.table(
     observedEventId: text()
       .$type<EventId>()
       .references(() => events.eventId),
-    heldByRunId: text()
+    suppressedByRunId: text()
       .$type<RunId>()
       .references(() => runs.runId),
-    heldEventId: text()
+    suppressedEventId: text()
       .$type<EventId>()
       .references(() => events.eventId),
   },
@@ -179,18 +175,18 @@ export const runs = snakeCase.table(
     resolvedFailureAttemptId: text().$type<AttemptId>(),
     openedAt: text().notNull(),
     /**
-     * When the Run last entered a closed state; null while it is open. A retry reopens the Run
-     * and clears it. Runs closed before this column existed carry the end of their last Attempt.
+     * The time the Run last closed, or `null` while open; a retry clears it. Older closed Runs
+     * have their last Attempt's end time.
      */
     closedAt: text(),
-    // The Run's effective context, seeded from the claiming submission.
-    // Edit-and-retry amends these columns; the Event columns never change (ADR 0018).
+    // The Run's effective context, copied from the claiming submission. Edit-and-retry updates
+    // these columns; the Event's columns never change (ADR 0018).
     repository: text().$type<RepositoryName>().notNull(),
     revision: text().$type<RepositoryRevision>().notNull(),
     task: text().$type<AttemptTask>().notNull(),
     agentJson: text({ mode: "json" }).$type<unknown>().notNull(),
     parentModel: text().$type<ModelId>(),
-    /** The operator retry that begins the Run's next Attempt; cleared once that Attempt begins. */
+    /** The operator retry for the Run's next Attempt; cleared when that Attempt starts. */
     nextStartJson: text({ mode: "json" }).$type<unknown>(),
   },
   (table) => [
@@ -233,16 +229,16 @@ export const attempts = snakeCase.table(
     parentModel: text().$type<ModelId>(),
     startedAt: text().notNull(),
     outcomeJson: text({ mode: "json" }).$type<unknown>(),
-    /** When the outcome was recorded; null while in flight and for Attempts closed before this column existed. */
+    /** The time the outcome was recorded; `null` while running and for older Attempts. */
     endedAt: text(),
     salvageJson: text({ mode: "json" }).$type<unknown>(),
-    /** When the operator discarded what the Attempt left on a Worker that is no longer configured; startup reconciliation skips it from then on. */
+    /** The time the operator discarded the Attempt's leftovers on a removed Worker; startup reconciliation then skips it. */
     leftoversDiscardedAt: text(),
-    /** Why the Attempt began; null for later Attempts begun before this column existed. */
+    /** The reason the Attempt started; `null` for older Attempts. */
     startJson: text({ mode: "json" }).$type<unknown>(),
-    /** When an orchestrator restart last reattached the Attempt; null if none did. */
+    /** The last time an orchestrator restart reattached the Attempt, or `null`. */
     reattachedAt: text(),
-    /** The comments and reviews an Attempt that ended without success posted on its Item; null when none were recorded. */
+    /** The comments and reviews posted by an unsuccessful Attempt, or `null` if none were recorded. */
     commentsJson: text({ mode: "json" }).$type<unknown>(),
   },
   (table) => [
@@ -297,9 +293,8 @@ export const attemptTranscripts = snakeCase.table(
 );
 
 /**
- * The approval Event each approved Run consumed, with its source. Approvals
- * recorded before sources were stored have neither `channel` nor `approver`; a
- * UI approval while `usine.yaml` names no operator has a channel and no approver.
+ * The approval Event each approved Run consumed, with its source. Older rows have no `channel`
+ * or `approver`; a UI approval without a configured operator login has no `approver`.
  */
 export const approvals = snakeCase.table(
   "usine_approvals",
@@ -325,9 +320,8 @@ export const approvals = snakeCase.table(
 );
 
 /**
- * The Events the operator recorded by running a closed Run again (#152): the
- * Run it ran again and the operator login that asked, none while `usine.yaml`
- * names no operator. The Event's own row says when.
+ * The Events recorded by running a closed Run again (#152), with the original Run and the
+ * requesting login, which is `null` if `usine.yaml` sets no operator login.
  */
 export const runAgainEvents = snakeCase.table("usine_run_again_events", {
   eventId: text()
@@ -355,7 +349,7 @@ export const ignoredEvents = snakeCase.table(
   ],
 );
 
-/** Cursors that only save work; each owner validates its own value. */
+/** Cursors whose loss only repeats work; each owner validates its value. */
 export const cursors = snakeCase.table(
   "usine_cursors",
   {
@@ -365,10 +359,7 @@ export const cursors = snakeCase.table(
   (table) => [check("usine_cursors_value_json_valid", sql`json_valid(${table.valueJson})`)],
 );
 
-/**
- * The latest payload seen for each Item, for operator reads, and when a poll
- * found that GitHub no longer has the Item.
- */
+/** The latest payload of each Item, and the time a poll found it missing on GitHub. */
 export const itemProjections = snakeCase.table(
   "usine_item_projections",
   {
@@ -402,7 +393,7 @@ export const repositoryLabelProjections = snakeCase.table(
   ],
 );
 
-/** The label swaps of the operator's Board moves, each recorded before the factory sends it to GitHub. */
+/** The label changes of operator Board moves, each recorded before it's sent to GitHub. */
 export const boardMoves = snakeCase.table(
   "usine_board_moves",
   {
@@ -422,13 +413,13 @@ export const boardMoves = snakeCase.table(
   ],
 );
 
-/** Operator-owned runtime toggles, kept apart from authored loop files (ADR 0009). */
+/** Operator runtime toggles, separate from Loop files (ADR 0009). */
 export const loopRuntime = snakeCase.table("usine_loop_runtime", {
   loopName: text().$type<LoopName>().primaryKey(),
   paused: integer({ mode: "boolean" }).notNull(),
 });
 
-/** Single row whose version invalidates cached operator projections. */
+/** A single row whose version invalidates cached operator projections. */
 export const projectionRevision = snakeCase.table(
   "usine_projection_revision",
   {

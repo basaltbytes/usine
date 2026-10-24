@@ -5,7 +5,7 @@ const RepositoryLabelName = Schema.String.check(
   Schema.isPattern(/\S/u, { message: "Expected a non-blank repository label" }),
 );
 
-/** Six hex digits, as GitHub stores label colors. Absent for catalogs stored before colors were kept. */
+/** A label color as six hex digits, absent in older catalogs. */
 export const RepositoryLabelColor = Schema.String.check(
   Schema.isPattern(/^[0-9a-fA-F]{6}$/u, { message: "Expected a six-digit hex label color" }),
 );
@@ -24,7 +24,7 @@ const uniqueLabelNames = Schema.makeFilter<ReadonlyArray<RepositoryLabel>>(
 );
 const RepositoryLabels = Schema.Array(RepositoryLabel).check(uniqueLabelNames);
 
-/** The latest complete label catalog polling observed for one repository. */
+/** The latest complete label catalog that polling observed for a repository. */
 export class RepositoryLabelProjection extends Schema.Class<RepositoryLabelProjection>(
   "@usine/engine/RepositoryLabelProjection",
 )({

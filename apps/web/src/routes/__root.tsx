@@ -29,13 +29,12 @@ import { NeedsYou } from "../needs-you/needs-you.tsx";
 import { needsYouByProject, overviewQuery, projectParams } from "../overview.ts";
 import { Suspense, lazy, useState } from "react";
 
-// The drawer bundles the transcript, Markdown, and message components, so it
-// loads on first open to keep a project's first paint small.
+// Loaded on first open; it includes the transcript, Markdown, and message components.
 const RunDrawer = lazy(() =>
   import("../run-drawer.tsx").then(({ RunDrawer: drawer }) => ({ default: drawer })),
 );
 
-/** The run drawer overlays any screen, so its run id is kept in the root search. */
+/** `run` is in the root search so the Run drawer can open over any route. */
 const RootSearch = Schema.toStandardSchemaV1(Schema.Struct({ run: Schema.optional(RunId) }));
 
 interface RouterContext {
@@ -62,7 +61,7 @@ const Crumbs = ({
   readonly view: OperatorView;
   readonly project: RepositoryName | undefined;
   readonly runId: RunId | undefined;
-  /** The Item number of the Task page being shown. */
+  /** The Item number of the open Task page. */
   readonly task: string | undefined;
 }) => {
   if (view === "configuration") return <ConfigurationCrumbs />;
@@ -134,7 +133,7 @@ const Shell = () => {
   const project = params.repository;
   const view = useOperatorView();
   const closeRun = () => void navigate({ to: ".", search: ({ run: _run, ...rest }) => rest });
-  // Remember the last opened Run so the Sheet stays mounted for its exit transition.
+  // Keeps the last opened Run so the Sheet stays mounted during its exit transition.
   const [shownRun, setShownRun] = useState(run);
   if (run !== undefined && run !== shownRun) setShownRun(run);
   const live = data._tag !== "NeedsSetup";
@@ -161,7 +160,7 @@ const Shell = () => {
           {data._tag === "NeedsSetup" && (
             <Alert className="rounded-none border-x-0 border-t-0 bg-transparent px-4 py-4 md:px-5">
               <WarningIcon weight="fill" className="text-needs-you" />
-              <AlertTitle className="text-md">GitHub App credentials are missing</AlertTitle>
+              <AlertTitle className="text-md">GitHub App not set up</AlertTitle>
               <AlertDescription className="max-w-prose">
                 <p>
                   {data.errorTag}. Set <code>USINE_GITHUB_APP_ID</code> and{" "}
@@ -172,7 +171,7 @@ const Shell = () => {
               </AlertDescription>
             </Alert>
           )}
-          {/* The Overview page lists Needs attention as its first block. */}
+          {/* The Overview page renders Needs attention itself. */}
           {view !== "desk" && <NeedsYou needs={data.needsYou} compact={params.run !== undefined} />}
           <Outlet />
         </div>

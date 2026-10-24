@@ -11,9 +11,8 @@ const Timestamp = Schema.String.check(
 );
 
 /**
- * GitHub declares most GraphQL connections nullable, and a null connection means
- * the same as an empty one. Decoding null to empty keeps the payload type
- * non-null and hashes both shapes identically.
+ * Decodes a nullable GraphQL connection with null as `empty`, so the payload type is non-null
+ * and both shapes hash the same.
  */
 const orEmpty = <A>(schema: Schema.Codec<A, A, never, never>, empty: A) =>
   Schema.NullOr(schema).pipe(
@@ -44,7 +43,7 @@ const IssueComments = Schema.Struct({
   nodes: Schema.Array(IssueComment),
 });
 
-/** The issue payload slice that `if:` expressions and prompt interpolation range over. */
+/** The issue payload slice available to `if:` expressions and prompt interpolation. */
 export const IssuePayload = Schema.Struct({
   number: PositiveInt,
   title: Schema.String,
@@ -78,7 +77,7 @@ export const IssuePayload = Schema.Struct({
 });
 export type IssuePayload = typeof IssuePayload.Type;
 
-/** Null when the reviewer is a deleted user or a mannequin. That null is real content and stays in the payload. */
+/** Null for a deleted user or a mannequin; the null is kept in the payload. */
 const RequestedReviewer = Schema.NullOr(
   Schema.Struct({ login: Schema.optionalKey(Schema.NonEmptyString) }),
 );
@@ -93,7 +92,7 @@ const Review = Schema.Struct({
 
 const ReviewThreadComment = Schema.Struct({ author: NullableActor, body: Schema.String });
 
-/** The pull-request payload slice that `if:` expressions and prompt interpolation range over. */
+/** The pull request payload slice available to `if:` expressions and prompt interpolation. */
 export const PullRequestPayload = Schema.Struct({
   number: PositiveInt,
   title: Schema.String,
@@ -113,10 +112,9 @@ export const PullRequestPayload = Schema.Struct({
   deletions: NonNegativeInt,
   changedFiles: NonNegativeInt,
   reviewDecision: Schema.NullOr(Schema.String),
-  // GitHub computes mergeability lazily: the first fetch after the base moves
-  // may answer UNKNOWN. Polling refreshes open PRs even when the REST issue
-  // feed is unchanged, retrying on each poll until computation settles. Older
-  // projections decode as UNKNOWN until that refresh.
+  // GitHub computes mergeability lazily, so the first fetch after the base changes can return
+  // UNKNOWN. Polling refreshes open PRs even when the REST issue feed is unchanged, until the
+  // value is computed. Older projections decode as UNKNOWN until then.
   mergeable: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed("UNKNOWN"))),
   mergeStateStatus: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed("UNKNOWN"))),
   statusCheckRollup: Schema.NullOr(Schema.Struct({ state: Schema.String })),
@@ -157,13 +155,13 @@ export const PullRequestPayload = Schema.Struct({
 });
 export type PullRequestPayload = typeof PullRequestPayload.Type;
 
-/** Identifies an Item's payload content for Event deduplication; timestamp-only changes keep the same hash. */
+/** The hash of an Item's payload content for Event deduplication; timestamp-only changes keep the same hash. */
 export const ContentHash = Schema.String.check(
   Schema.isPattern(/^[a-f0-9]{64}$/u, { message: "Expected a SHA-256 content hash" }),
 ).pipe(Schema.brand("GitHubContentHash"));
 export type ContentHash = typeof ContentHash.Type;
 
-/** An issue's observed payload and the content identity used to decide whether it represents new work. */
+/** An issue's payload and the content hash used to decide whether it's new work. */
 export class IssueSnapshot extends Schema.TaggedClass<IssueSnapshot>("@usine/github/IssueSnapshot")(
   "IssueSnapshot",
   {
@@ -172,7 +170,7 @@ export class IssueSnapshot extends Schema.TaggedClass<IssueSnapshot>("@usine/git
   },
 ) {}
 
-/** A pull request's observed payload and the content identity used to decide whether it represents new work. */
+/** A pull request's payload and the content hash used to decide whether it's new work. */
 export class PullRequestSnapshot extends Schema.TaggedClass<PullRequestSnapshot>(
   "@usine/github/PullRequestSnapshot",
 )("PullRequestSnapshot", {
@@ -180,6 +178,6 @@ export class PullRequestSnapshot extends Schema.TaggedClass<PullRequestSnapshot>
   contentHash: ContentHash,
 }) {}
 
-/** The fetched Item state shared by selection, prompt rendering, and Event deduplication. */
+/** The fetched Item state used by selection, prompt rendering, and Event deduplication. */
 export const PayloadSnapshot = Schema.Union([IssueSnapshot, PullRequestSnapshot]);
 export type PayloadSnapshot = typeof PayloadSnapshot.Type;

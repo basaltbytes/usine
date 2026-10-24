@@ -3,7 +3,7 @@ import { BrainSpec, Effort, Harness, ModelId } from "@usine/core/agent/brain";
 import { Schema } from "effect";
 import { InstancePath, ConfigFileError } from "./file.ts";
 
-/** An Agent's authored brain, parent overrides, and standing instructions, named by its Markdown filename. */
+/** A parsed Agent Markdown file; `name` comes from the filename. */
 export class AgentFile extends Schema.Class<AgentFile>("@usine/config/AgentFile")({
   name: AgentName,
   harness: Harness,
@@ -13,7 +13,6 @@ export class AgentFile extends Schema.Class<AgentFile>("@usine/config/AgentFile"
   parentEffort: Schema.Option(Effort),
   persona: AgentPersona,
 }) {
-  /** The roster member represented by this file, including persona and parent overrides. */
   get agent(): Agent {
     return new Agent({
       name: this.name,
@@ -25,7 +24,7 @@ export class AgentFile extends Schema.Class<AgentFile>("@usine/config/AgentFile"
   }
 }
 
-/** An Agent file excluded from the roster because it could not be loaded. */
+/** An Agent file that failed to load and is left out of the roster. */
 export class InvalidAgent extends Schema.Class<InvalidAgent>("@usine/config/InvalidAgent")({
   file: InstancePath,
   error: ConfigFileError,

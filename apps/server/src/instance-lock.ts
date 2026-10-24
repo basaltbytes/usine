@@ -2,21 +2,21 @@ import { DatabaseSync } from "node:sqlite";
 import type { InstanceDirectory } from "@usine/core/instance";
 import { Effect, FileSystem, Option, Path, Schema } from "effect";
 
-/** Another `usine up` holds the instance folder, possibly still draining its Attempts. */
+/** Another `usine up` has the instance lock, possibly while still draining its Attempts. */
 export class InstanceInUseError extends Schema.TaggedError<InstanceInUseError>(
   "@usine/server/InstanceInUseError",
 )("InstanceInUseError", {
   directory: Schema.String,
-  /** The holder's process id, when it could be read. */
+  /** The PID of the lock holder, if it could be read. */
   holder: Schema.Option(Schema.Int),
 }) {}
 
-/** The instance folder's lock could not be created or taken for a reason other than another holder. */
+/** The instance lock could not be created or acquired for a reason other than another holder. */
 export class InstanceLockError extends Schema.TaggedError<InstanceLockError>(
   "@usine/server/InstanceLockError",
 )("InstanceLockError", { directory: Schema.String, reason: Schema.String }) {}
 
-/** node:sqlite's failure when another connection holds the lock: SQLite's `SQLITE_BUSY` result. */
+/** The node:sqlite error when another connection has the lock (`SQLITE_BUSY`). */
 const SqliteBusy = Schema.Struct({ errcode: Schema.Literal(5) });
 
 const reasonOf = (cause: unknown): string =>
@@ -34,12 +34,8 @@ const takeLock = (file: string) => {
 };
 
 /**
- * Holds the instance folder for the scope, so only one `usine up` opens its
- * runtime and durable stores: two processes on one durable storage corrupt
- * it. The lock is an exclusive SQLite transaction on `.usine/instance.lock`,
- * which the operating system releases when the process exits, however it
- * exits. The holder writes its process id to `.usine/instance.pid` for the
- * refusal message.
+ * Acquires the instance lock for the scope, so only one `usine up` opens the stores. The lock is an
+ * exclusive SQLite transaction on `.usine/instance.lock`, released by the OS on exit.
  */
 export const holdInstance = Effect.fn("Server.holdInstance")(function* (
   directory: InstanceDirectory,

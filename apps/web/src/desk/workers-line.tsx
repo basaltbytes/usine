@@ -17,7 +17,6 @@ const Preflight = ({ worker, now }: { readonly worker: WorkerView; readonly now:
   );
 };
 
-/** Each Worker on one line: its name, slots in use of its total, and its last preflight. */
 export const WorkersLine = ({
   workers,
   now,

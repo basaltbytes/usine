@@ -26,7 +26,7 @@ let tasks: Map<string, TaskView>;
 const json = (body: string, status = 200) =>
   new Response(body, { status, headers: { "content-type": "application/json" } });
 
-// The operator client reads `globalThis.fetch`, so the page talks to this stand-in server.
+// The operator client uses `globalThis.fetch`, so this fake server answers the page's requests.
 globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = new URL(
     input instanceof Request ? input.url : String(input),
@@ -111,7 +111,7 @@ it("heads the page with the originating issue, its current pull request's state,
     .toHaveAttribute("href", `https://github.com/${taskRepository}/issues/40`);
   await expect.element(page.getByText("Open pull request #42", { exact: true })).toBeVisible();
   await expect.element(page.getByText("In review", { exact: true })).toBeVisible();
-  // The lane's own label is left out, as on the card.
+  // The lane's own label is not shown, as on the card.
   await expect.element(page.getByText("ui", { exact: true })).toBeVisible();
   await expect.element(page.getByText("Needs attention", { exact: true })).toBeVisible();
 
@@ -145,14 +145,14 @@ it("lists every Run newest first, each opening its Run page with why it ended", 
     .toHaveTextContent("The required check lint failed again");
   await expect.element(rowOf("start-dev")).toHaveTextContent("#40 Issue");
   await expect.element(rowOf("review-pr")).toHaveTextContent("Approved by PhilDL");
-  await expect.element(rowOf("review-pr")).toHaveTextContent("from the GitHub Ask");
+  await expect.element(rowOf("review-pr")).toHaveTextContent("from GitHub");
   await expect.element(rowOf("fix-ci", 1)).toHaveTextContent("Run again by PhilDL");
   // Two Attempts of 30 minutes each.
   await expect.element(rowOf("start-dev")).toHaveTextContent("1 h");
   await expect
     .element(rowOf("plan").getByRole("link", { name: "#41" }))
     .toHaveAttribute("href", `https://github.com/${taskRepository}/pull/41`);
-  // The Run that was run again opens from its short id, not from the row's own Run page.
+  // The short ID links to the earlier Run, not to the row's own Run page.
   await rowOf("fix-ci", 1).getByRole("link", { name: "run-canc", exact: true }).click();
   await expect
     .poll(() => router.state.location.pathname)
@@ -211,7 +211,7 @@ it("lists the pull requests with their state and the comments the Runs posted", 
   await expect
     .element(review.getByRole("link", { name: "review-pr" }))
     .toHaveAttribute("href", `/projects/${taskRepository}/runs/run-review`);
-  // A comment is dated by when GitHub says it was posted, else by its Attempt's end.
+  // A comment's date is GitHub's posted time, or its Attempt's end time when GitHub has none.
   const posted = review.getByTitle(/^Posted 2026-10-04 /u);
   await expect.element(posted).toHaveAttribute("datetime", "2026-10-04T09:05:00.000Z");
   const undated = comments

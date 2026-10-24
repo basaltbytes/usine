@@ -21,7 +21,7 @@ const factoryError = (error: ConfigFileError): FactoryConfigError =>
     message: error.message,
   });
 
-/** Loads an instance folder; an invalid `usine.yaml` fails the load, an invalid loop is quarantined and its siblings still load. */
+/** The service that loads an instance folder. An invalid `usine.yaml` fails the load; an invalid loop is quarantined. */
 export class InstanceFolder extends Context.Service<
   InstanceFolder,
   {

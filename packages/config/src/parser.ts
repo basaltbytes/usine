@@ -30,7 +30,9 @@ const formatIssue = SchemaIssue.makeFormatterDefault();
 
 // YAML reads an unquoted `if: true` as a boolean; it decodes to the same CEL literal.
 const ConditionFromYaml = Schema.Union([Schema.String, Schema.Boolean])
-  .annotate({ message: "Expected a CEL expression: quote the value so YAML reads it as a string" })
+  .annotate({
+    message: "Expected a CEL expression. Quote the value so that YAML reads it as a string.",
+  })
   .pipe(
     Schema.decodeTo(Source, {
       decode: SchemaGetter.transform((condition: string | boolean) => String(condition)),
@@ -166,7 +168,7 @@ const interpolations = (
           file,
           stage: "expression",
           expression: Option.none(),
-          message: `Unclosed prompt interpolation at character ${start}`,
+          message: `The prompt has an unclosed {{ at character ${start}. Close it with }}.`,
         });
       }
       const expression = body.slice(start + 2, end).trim();
@@ -315,31 +317,31 @@ const makeConfigWarnings = (engine: ExpressionEngine["Service"]) =>
     return warnings;
   });
 
-/** Parses supplied instance-file contents and checks the expressions that select Items and render task prompts. */
+/** The service that parses instance file contents and checks their CEL expressions. */
 export class ConfigParser extends Context.Service<
   ConfigParser,
   {
-    /** Reads registry and factory settings from `source`; `file` identifies the source in diagnostics. */
+    /** Parses `usine.yaml` contents; `file` is used only in diagnostics. */
     readonly parseUsineYaml: (
       file: InstancePath,
       source: string,
     ) => Effect.Effect<UsineConfig, ConfigFileError>;
-    /** Reads an Agent's brain and standing instructions; `file` supplies its filename-derived identity. */
+    /** Parses an Agent file, taking the Agent name from `file`. */
     readonly parseAgentFile: (
       file: InstancePath,
       source: string,
     ) => Effect.Effect<AgentFile, ConfigFileError>;
-    /** Reads a Loop and checks its selection and prompt expressions; `file` supplies its identity. */
+    /** Parses a Loop file and checks its `if` and prompt expressions, taking the Loop name from `file`. */
     readonly parseLoopFile: (
       file: InstancePath,
       source: string,
     ) => Effect.Effect<LoopFile, ConfigFileError>;
-    /** Reports undeclared labels used by Board lanes or Loop conditions without rejecting otherwise valid configuration. */
+    /** Returns warnings for undeclared labels used by Board lanes or Loop conditions. */
     readonly configWarnings: (
       config: UsineConfig,
       loops: ReadonlyArray<LoopFile>,
     ) => Effect.Effect<ReadonlyArray<ConfigWarning>, ExpressionCheckError>;
-    /** Renders the Loop's `{{ ... }}` expressions using `context.item` for the trigger payload and `context.repo` for the repository. */
+    /** Evaluates the Loop's `{{ ... }}` expressions with `context.item` as the trigger payload and `context.repo` as the repository. */
     readonly renderPrompt: (
       loop: LoopFile,
       context: Schema.JsonObject,

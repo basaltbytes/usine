@@ -1,49 +1,46 @@
 import { Schema, Option } from "effect";
 import { BrainSpec, Effort, ModelId } from "./brain.ts";
 
-/** Kebab-case name of a rostered Agent, taken from its filename. */
+/** The kebab-case name of an Agent, taken from its filename. */
 export const AgentName = Schema.String.check(
   Schema.isPattern(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u, {
-    message: "Expected a kebab-case Agent name",
+    message: "Expected a kebab-case agent name",
   }),
 ).pipe(Schema.brand("AgentName"));
 
 export type AgentName = typeof AgentName.Type;
 
 /**
- * The attribution line every GitHub comment, issue, pull request, or review an
- * Agent writes ends with. The Attempt prompt asks the Agent to append it, and
- * harvesting matches it to tell an Attempt's comments from those of other
- * Agents writing as the same bot login.
+ * Returns the signature line that ends every GitHub comment, issue, pull request, or review the
+ * Agent writes. Harvesting uses it to separate Agents that post as the same bot login.
  */
 export const githubSignature = (agent: AgentName): string => `— usine agent: ${agent}`;
 
-/** Standing Markdown instructions for one Agent. */
+/** The Agent's standing Markdown instructions. */
 export const AgentPersona = Schema.String.check(
-  Schema.isPattern(/\S/u, { message: "Expected a non-blank Agent persona" }),
+  Schema.isPattern(/\S/u, { message: "Expected a non-blank agent persona" }),
 ).pipe(Schema.brand("AgentPersona"));
 export type AgentPersona = typeof AgentPersona.Type;
 
-/** One named member of the instance's team roster. */
 export class Agent extends Schema.Class<Agent>("Agent")({
   name: AgentName,
-  /** Coding harness and settings used for this Agent's delegated child sessions. */
+  /** The harness, model, and effort of the Agent's child sessions. */
   brain: BrainSpec,
-  /** Preferred model for the coordinating Pi parent; an absent override uses the instance default. */
+  /** The model of the Pi parent session, or `None` for the instance default. */
   parentModel: Schema.OptionFromNullOr(ModelId),
   // Optional key rather than null: older stored agent rows have no such key.
-  /** Parent reasoning effort; an absent override uses the instance default, then the child brain's effort. */
+  /** The parent session's reasoning effort, or `None` for the instance default, then `brain.effort`. */
   parentEffort: Schema.OptionFromOptionalKey(Effort),
   persona: AgentPersona,
 }) {}
 
-/** Selects the Agent's parent-model override, then the instance default; `None` leaves selection to Pi. */
+/** Returns the Agent's `parentModel`, else the instance default. Returns `None` if neither is set, so Pi selects the model. */
 export const resolveParentModel = (
   agent: Agent,
   instanceDefault: Option.Option<ModelId>,
 ): Option.Option<ModelId> => Option.firstSomeOf([agent.parentModel, instanceDefault]);
 
-/** The agent's parent-effort override, else the instance default, else the child brain's effort. */
+/** Returns the Agent's `parentEffort`, else the instance default, else `brain.effort`. */
 export const resolveParentEffort = (agent: Agent, instanceDefault: Option.Option<Effort>): Effort =>
   Option.getOrElse(
     Option.firstSomeOf([agent.parentEffort, instanceDefault]),

@@ -137,7 +137,7 @@ const run = (item: ItemProjection, loop: string, state: RunStateTag) =>
     canRunAgain: state === "Succeeded" || state === "Canceled",
   });
 
-/** The Event `opened` was opened for, with `payload`, the Item as its trigger saw it. */
+/** Returns the Event that `opened` was opened for, with `payload` as the Item its trigger saw. */
 const eventOf = (opened: RunView, payload: Schema.JsonObject) =>
   [
     opened.id,
@@ -149,7 +149,7 @@ const eventOf = (opened: RunView, payload: Schema.JsonObject) =>
     }),
   ] as const;
 
-/** The Event `opened` was opened for, when `item` carried `labels`. */
+/** Returns the Event that `opened` was opened for, when `item` had `labels`. */
 const triggeredWith = (opened: RunView, item: ItemProjection, labels: ReadonlyArray<string>) =>
   eventOf(opened, { ...item.payload, labels: labelNodes(labels) });
 
@@ -164,7 +164,7 @@ const project = (
     return yield* projectBoard(managed, [], items, runs, [], new Map(), new Map(), new Map(events));
   });
 
-/** Each lane's name and the numbers of the cards in it. */
+/** Returns each lane's name and the numbers of its cards. */
 const lanes = (board: BoardView) =>
   Object.fromEntries(
     board.lanes.map(
@@ -210,7 +210,7 @@ describe("The lane of a running Task", () => {
           Done: [],
           Unmapped: [],
         });
-        // Each card names the Run that holds it, so its Run line says which Loop runs.
+        // Each card includes the Run that sets its lane, so its Run line shows which Loop runs.
         assert.deepStrictEqual(
           board.lanes.flatMap(({ items }) =>
             items.map(({ number, run }): readonly [number, string | undefined] => [
@@ -279,7 +279,7 @@ describe("The lane of a running Task", () => {
         ] as const;
         const board = yield* project([merged, unread, unlabeled, rebased], runs, [
           triggeredWith(runs[0], merged, ["ready-for-review"]),
-          // An Event whose payload has no labels to read is logged and does not hold its card.
+          // An Event whose payload has no labels is logged and doesn't set its card's lane.
           eventOf(runs[2], { number: 469 }),
           triggeredWith(runs[3], rebased, ["dependencies"]),
         ]);

@@ -93,7 +93,6 @@ const InvalidAgentRow = ({ agent }: { readonly agent: InvalidAgentView }) => {
   );
 };
 
-/** Every Agent file: the ones that did not load first, then the roster, each opening its detail. */
 export const AgentsList = ({ configuration }: { readonly configuration: ConfigurationView }) => (
   <ConfigurationPage title="Agents" counts={agentCounts(configuration)}>
     {configuration.agents.length === 0 && configuration.invalidAgents.length === 0 ? (
@@ -128,7 +127,7 @@ export const AgentsList = ({ configuration }: { readonly configuration: Configur
   </ConfigurationPage>
 );
 
-/** Where a parent setting comes from: this file, `settings` in `usine.yaml`, or the fallback. */
+/** Renders the source of a parent setting: this file, `settings` in `usine.yaml`, or the fallback. */
 const Source = ({ children }: { readonly children: string }) => (
   <p className="mt-0.5 text-xs text-muted-foreground">{children}</p>
 );
@@ -157,7 +156,7 @@ const AgentFacts = ({
           ? "Set in this file"
           : configuration.settings.parentModel !== null
             ? "From settings.parent_model"
-            : "Neither this file nor settings sets one"}
+            : "Not set in this file or in settings"}
       </Source>
     </Fact>
     <Fact label="Parent effort">
@@ -192,8 +191,7 @@ const AgentFacts = ({
   </Facts>
 );
 
-/** One Agent file in full: its persona beside its brain and the Loops that name it, or why it did
- * not load; `name` is the file's name without `.md`. */
+/** `name` is the Agent file name without `.md`. */
 export const AgentDetail = ({
   name,
   configuration,
@@ -216,15 +214,12 @@ export const AgentDetail = ({
   if (invalid !== undefined)
     return (
       <ConfigurationPage title={invalid.name} marks={<NotLoaded />} file={invalid.file}>
-        <FileError
-          error={invalid.error}
-          consequence="Not in the roster; every loop that uses this agent is quarantined."
-        />
+        <FileError error={invalid.error} consequence="Loops that use this agent are not loaded." />
       </ConfigurationPage>
     );
   return (
     <ConfigurationPage title={name}>
-      <Missing title="No agent by this name">
+      <Missing title="Agent not found">
         The configuration has no file <code>agents/{name}.md</code>.{" "}
         <Link to="/configuration/agents" className="text-primary hover:underline">
           See all agents

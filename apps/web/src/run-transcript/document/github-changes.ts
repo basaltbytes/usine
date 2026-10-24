@@ -12,8 +12,8 @@ import {
   type ReaderDocument,
 } from "./model.ts";
 
-// GitHub records one command's label removals and additions at the same second; a swap
-// made with two commands lands a few seconds apart.
+// GitHub records the label removals and additions of one command in the same second; a swap done
+// with two commands is a few seconds apart.
 const LABELS_IN_ONE_GO_MILLIS = 10_000;
 
 const toolStart = (tool: TranscriptTool): number =>
@@ -24,7 +24,7 @@ const toolStart = (tool: TranscriptTool): number =>
     }),
   );
 
-// When a row's content began; the outcome comes after every change of its Attempt.
+// Returns the start time of a row; the outcome sorts after every change of its Attempt.
 const rowStart = (row: ChapterRow): number =>
   Match.valueTags(row, {
     Message: ({ receivedAt }) => Date.parse(receivedAt),
@@ -36,14 +36,14 @@ const rowStart = (row: ChapterRow): number =>
     BoardMove: ({ move }) => Date.parse(move.at),
   });
 
-// A comment or review the outcome links, by the anchor GitHub gives it in its URL.
+// Returns whether the outcome links to the comment or review, matched by its URL anchor.
 const linkedBy = (outcome: string | null, url: string): boolean => {
   if (outcome === null) return false;
   const anchor = url.split("#")[1];
   return outcome.includes(anchor === undefined || anchor === "" ? url : anchor);
 };
 
-// A label change the outcome states in the line's own words, such as "removed `agent-in-progress`".
+// Returns whether the outcome states the label change, for example "removed `agent-in-progress`".
 const statedBy = (outcome: string | null, verb: "added" | "removed", label: LabelView) =>
   outcome !== null &&
   new RegExp(
@@ -61,12 +61,12 @@ const unstated = (outcome: string | null) => (row: GitHubChangeRow) => {
 };
 
 interface Placed {
-  /** The index of the first row that began after the change, or the row count when none did. */
+  /** The index of the first row that started after the change, or the row count if none did. */
   readonly slot: number;
   readonly row: GitHubChangeRow | BoardMoveRow;
 }
 
-// Consecutive label changes between the same two rows, recorded within seconds, share one row.
+// Puts consecutive label changes between two rows within `LABELS_IN_ONE_GO_MILLIS` in one row.
 const changeRows = (
   attemptId: AttemptId,
   changes: ReadonlyArray<GitHubChangeView>,
@@ -127,7 +127,7 @@ const placeInChapter = (
   const ending = chapter.rows.find((row) => row._tag === "Ending");
   const outcome = ending?._tag === "Ending" ? terminalText(ending.end) : null;
   const first = chapter.rows[0];
-  // With earlier activity not loaded, a change before the first loaded row has no place yet.
+  // If earlier activity is not loaded, changes before the first loaded row are skipped.
   const loadedFrom = !earlierUnloaded
     ? Number.NEGATIVE_INFINITY
     : first === undefined
@@ -157,12 +157,8 @@ const placeInChapter = (
 };
 
 /**
- * Places each Attempt's GitHub changes among its rows by time, before the first row that
- * began after the change, so a change made by a burst of calls follows that burst's line.
- * Labels changed in one go share one row; the operator's Board move has a row of its own.
- * A comment or review the Attempt's outcome links, or a label change it states in the
- * row's own words, is shown only as the outcome. An Attempt whose earlier activity is not
- * loaded shows only the changes from its first loaded row on.
+ * Inserts each Attempt's GitHub changes before the first row that started after the change. Changes
+ * that the outcome links to or states are shown only in the outcome.
  */
 export const withGitHubChanges = (
   document: ReaderDocument,

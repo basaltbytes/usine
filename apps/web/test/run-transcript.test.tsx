@@ -188,7 +188,7 @@ const rateLimits = (sequence: number, usedPercent: number) =>
 
 const history = { cursors: [], loading: false, error: null, load: () => {} };
 
-/** Renders the reader for a transcript, with the bursts holding `open` tool calls expanded. */
+/** Renders the reader for `events`, with the bursts that contain the `open` tool calls expanded. */
 const reader = (
   events: ReadonlyArray<TranscriptEventView>,
   attempts: ReadonlyArray<AttemptView> = [liveAttempt],
@@ -680,8 +680,8 @@ describe("run transcript", () => {
       transcript: [],
       earlierTranscript: [],
     });
-    // This operator boundary has a smaller page size than production; readers
-    // must follow cursors rather than infer completion from a particular limit.
+    // This fake API pages smaller than production, so the reader must follow cursors instead of
+    // assuming a page size.
     const read = async (request: ColdTranscriptRequest | TailTranscriptRequest) => {
       const after = request._tag === "TailTranscriptRequest" ? request.after : 0;
       return new RunDetailView({

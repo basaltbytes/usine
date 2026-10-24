@@ -269,8 +269,7 @@ describe("durable run engine", () => {
             Option.getOrUndefined(listed[0]?.step.result ?? Option.none())?.message,
             "listed result",
           );
-          // The closed window bounds settled history, but an open Run, here the
-          // older Waiting one, must never fall out of the operator's view.
+          // `closedLimit` bounds closed Runs only, so the older waiting Run is still listed.
           const bounded = yield* reader.list({ closedLimit: 0 });
           assert.deepStrictEqual(
             bounded.map(({ run }) => run.id),
@@ -341,8 +340,8 @@ describe("durable run engine", () => {
             );
             assert.deepStrictEqual(finished.approval, recorded);
 
-            // Re-delivery of the same approval Event is an idempotent join, and
-            // a later approval from another channel does not rewrite who approved.
+            // Redelivering the same approval Event changes nothing, and a later approval from
+            // another channel doesn't change the approver.
             yield* engine.approve(first.runId, approval, uiApproval);
             const rejoined = yield* engine.inspect(first.runId);
             assert.strictEqual(rejoined.attempts.length, 1);
@@ -405,7 +404,7 @@ describe("durable run engine", () => {
           assert.strictEqual(accepted._tag, "Claimed");
           if (accepted._tag !== "Claimed") return;
 
-          // A defect must neither strand an open Attempt nor repeat agent work automatically.
+          // A defect neither leaves an Attempt open nor retries agent work automatically.
           const finished = yield* waitFor(
             engine,
             accepted.runId,
@@ -709,7 +708,7 @@ describe("durable run engine", () => {
             counted.map(({ worker, attempts, running }) => [worker, attempts, running]),
           );
           assert.deepStrictEqual(yield* counts, [["local", 2, 1]]);
-          // `local` is in `StepExecutor.workers`, as a Worker a reload removed stays until its last Attempt ends.
+          // `local` is in `StepExecutor.workers`, like a removed Worker until its last Attempt ends.
           const local = WorkerName.make("local");
           assert.deepStrictEqual(
             yield* Effect.flip(engine.discardLeftovers(local)),
@@ -769,8 +768,7 @@ describe("durable run engine", () => {
       Effect.gen(function* () {
         const reserveEntered = yield* Deferred.make<void>();
         const reserveLeft = yield* Deferred.make<void>();
-        // A 0-capacity scheduler parks the run in `reserve` forever; only a
-        // cancel that reaches the parked reservation ends it.
+        // With 0 capacity, the Run waits in `reserve` forever; only a cancel ends the wait.
         const executor = Layer.succeed(StepExecutor)({
           workers: Effect.succeed([WorkerName.make("local")]),
           isLive: () => Effect.succeed(false),
@@ -814,7 +812,7 @@ describe("durable run engine", () => {
           const original = submission({ number: 1 });
           const first = yield* engine.submit(original);
           assert(first._tag === "Claimed");
-          // The id earlier versions gave this Event, so existing Runs keep theirs.
+          // The ID that earlier versions assigned to this Event, so existing Runs keep their IDs.
           assert.strictEqual(first.runId, "c33a338a9aaafa7490fa315fbf02a437");
           assert.strictEqual(yield* runIdFor(original), first.runId);
           const resubmitted = yield* engine.submit(
@@ -858,12 +856,12 @@ describe("durable run engine", () => {
   );
 });
 
-/** How many of the database's next transactions fail before they start. */
+/** The number of upcoming transactions that fail before they start. */
 interface Failures {
   left: number;
 }
 
-/** The instance's database, whose transactions fail while `failures` has some left, as on a transient SQLite error. */
+/** Returns the instance's database, with transactions that fail while `failures.left` is positive. */
 const flakyDatabase = (directory: InstanceDirectory, failures: Failures) =>
   Layer.effect(
     RunDatabase,
@@ -886,7 +884,7 @@ const flakyDatabase = (directory: InstanceDirectory, failures: Failures) =>
     }),
   ).pipe(Layer.provide(localSqliteLayer(directory)));
 
-/** The engine on `flakyDatabase`, with `executor` and every queued Event's trigger holding. */
+/** Returns the engine on `flakyDatabase` with `executor`; every queued Event's trigger still matches. */
 const flakyEngineLayer = (
   directory: InstanceDirectory,
   failures: Failures,

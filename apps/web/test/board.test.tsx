@@ -24,7 +24,7 @@ import {
   BoardView,
   ChildSessionBudgetFailureView,
   ClosedUnchangedView,
-  HeldForOperatorView,
+  SuppressedForOperatorView,
   LoopPausedView,
   LoopView,
   QuestionFailureView,
@@ -198,7 +198,7 @@ describe("Board Run failure copy", () => {
         }),
       ),
       {
-        title: "ChildSessionBudgetFailure",
+        title: "review: child session budget exhausted",
         detail: message,
         repository,
         runId,
@@ -336,7 +336,7 @@ describe("Board flow arrows", () => {
     ]);
     assert.strictEqual(ready?.tone, "idle");
     assert.strictEqual(ready?.next.name, "review");
-    // A Loop at work on a Task its trigger no longer matches does not watch the lane.
+    // A Loop running on a Task its trigger no longer matches is not listed for the lane.
     assert.deepStrictEqual(flows.get(BoardLaneId.make("review"))?.loops, []);
     assert.isFalse(flows.has(BoardLaneId.make("merge")));
   });
@@ -349,8 +349,8 @@ describe("Board card stall note", () => {
       failure: new QuestionFailureView({ question: "Which lanes stay on the Board?" }),
     }),
   });
-  const heldRun = runOnItem("Failed", [question]);
-  const held = itemWithRun("Failed", [question]);
+  const suppressingRun = runOnItem("Failed", [question]);
+  const suppressed = itemWithRun("Failed", [question]);
   const canceledLink = issueLink(18, "Cache the label catalog");
   const canceledRun = new RunView({
     ...runOnItem("Succeeded", [attempt(1, null)]),
@@ -361,7 +361,7 @@ describe("Board card stall note", () => {
     canRunAgain: true,
   });
   const canceled = new BoardTaskView({
-    ...held,
+    ...suppressed,
     ...canceledLink,
     items: [canceledLink],
     runs: [canceledRun],
@@ -370,7 +370,7 @@ describe("Board card stall note", () => {
   });
   const pausedLink = issueLink(19, "Review the harvest of PR comments");
   const paused = new BoardTaskView({
-    ...held,
+    ...suppressed,
     ...pausedLink,
     items: [pausedLink],
     runs: [],
@@ -397,7 +397,7 @@ describe("Board card stall note", () => {
                       name: LaneName.make("Backlog"),
                       sources: [],
                       origin: "authored",
-                      items: [held, canceled, paused],
+                      items: [suppressed, canceled, paused],
                     }),
                   ],
                 }),
@@ -409,7 +409,7 @@ describe("Board card stall note", () => {
                 repository,
                 loop: LoopName.make("review"),
                 item: issueLink(33, "Board lanes"),
-                reason: new HeldForOperatorView({ run: heldRun }),
+                reason: new SuppressedForOperatorView({ run: suppressingRun }),
               }),
               new StalledItemView({
                 repository,
@@ -431,14 +431,14 @@ describe("Board card stall note", () => {
       </QueryClientProvider>,
     );
 
-  it("answers a held Run's question from its failure note, and runs a canceled one again from the reason", () => {
+  it("answers a suppressing Run's question from its failure note, and runs a canceled one again from the reason", () => {
     const markup = render(false);
     assert.include(markup, "Which lanes stay on the Board?");
     assert.include(markup, "Mark answered");
     assert.notInclude(markup, ">Retry<");
     assert.match(markup, /start-dev <\/span>Canceled \d+d ago, unchanged since</u);
     assert.include(markup, ">Run again<");
-    // The paused Loop's fragment names it already, so no Loop name goes before it.
+    // The paused Loop's fragment already contains the Loop name, so it is not prefixed.
     assert.include(markup, ">review-fix paused<");
     assert.notInclude(markup, "review-fix </span>");
   });
@@ -494,7 +494,7 @@ describe("Board drag targets", () => {
     const proposed = render("proposed", ["ready", "review"]);
     const singleAuthored = render("authored", ["ready"]);
     for (const readOnly of [proposed, singleAuthored]) {
-      // Read-only cards are content, without an inert drag control around them.
+      // Read-only cards have no drag control around them.
       assert.ok(!readOnly.includes('role="button"'));
       assert.ok(readOnly.includes("Actions for issue #33"));
     }
@@ -534,7 +534,7 @@ describe("Board card link", () => {
       title: "Fix the Board lanes",
       url: "https://github.com/basaltbytes/usine/pull/40",
     });
-    // A Task whose pull request is its current Item still opens under the issue's number.
+    // A Task whose current Item is its pull request still links to the issue's number.
     const linked = new BoardTaskView({
       ...withRun,
       ...pullRequest,
@@ -684,7 +684,7 @@ describe("Board card Run line", () => {
     assert.strictEqual(runLineSince(run), failed.endedAt);
     // A retried Run is Running before its next Attempt starts.
     assert.strictEqual(runLineSince(new RunView({ ...run, state: "Running" })), null);
-    // Attempts closed before end times were recorded have none.
+    // Attempts that ended before end times were recorded have no end time.
     const unrecorded = new AttemptView({ ...failed, endedAt: null });
     assert.strictEqual(runLineSince(new RunView({ ...run, attempts: [unrecorded] })), null);
   });

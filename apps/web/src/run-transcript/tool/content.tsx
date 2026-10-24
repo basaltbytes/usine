@@ -15,8 +15,6 @@ import type { ToolPresentation, ToolSection } from "./presentation.ts";
 
 const JsonArray = Schema.Array(Schema.Json);
 
-// Unknown tools still expose their values as labeled, expandable content. Only
-// the explicit Raw details control renders the transport envelope as JSON.
 const Value = ({ value }: { readonly value: Schema.Json }) => {
   if (value === null) return <span className="text-muted-foreground">None</span>;
   if (Schema.is(Schema.String)(value))
@@ -72,7 +70,7 @@ const Fields = ({
   </dl>
 );
 
-/** Renders tool content; read results retain any source line numbers supplied by the harness. */
+/** Renders tool sections; read results get no added line numbers because their text already has them. */
 export const ToolSections = ({
   sections,
   category,

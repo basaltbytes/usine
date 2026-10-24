@@ -3,15 +3,15 @@ import { Match, Option } from "effect";
 import type { Chapter, ChapterRow, ReaderDocument } from "../document/model.ts";
 import type { TranscriptTool } from "../model.ts";
 
-/** One reader row that can receive new activity or be revealed during error navigation. */
+/** A reader row that can get new activity or be shown by error navigation. */
 export interface TranscriptUpdate {
   readonly key: string;
-  /** Original conversation position; a tool result does not move its call. */
+  /** The row's position in the conversation; a tool result does not change its call's position. */
   readonly sequence: TranscriptSequence;
-  /** Latest event contributing to this row, including a paired tool result. */
+  /** The newest event in this row, including a matched tool result. */
   readonly latestSequence: TranscriptSequence;
   readonly isError: boolean;
-  /** A tool call, which error navigation opens inside its folded burst. */
+  /** Whether the row is a tool call, which error navigation opens inside its folded burst. */
   readonly isTool: boolean;
 }
 
@@ -56,19 +56,19 @@ const rowUpdates = (row: ChapterRow): ReadonlyArray<TranscriptUpdate> =>
       }),
   });
 
-/** A reader row that error navigation can show: a row, or a tool call inside its folded burst. */
+/** A reader row that error navigation can show: a row or a tool call in a folded burst. */
 export interface NavigableRow {
   readonly key: string;
   readonly isTool: boolean;
 }
 
-/** The outline's two error counts: what the Run ended with or the operator must read, and what the Agent recovered from. */
+/** The outline's errors and recovered tool failures (see `errorTally`). */
 export interface ErrorTally {
   readonly errors: ReadonlyArray<NavigableRow>;
   readonly recovered: ReadonlyArray<NavigableRow>;
 }
 
-/** The notes of a chapter's connectivity warnings that are still open: each signal's latest warning. */
+/** Returns the note keys of a chapter's open connectivity warnings: the latest warning of each signal. */
 const openWarnings = (chapter: Chapter): ReadonlySet<string> => {
   const open = new Set(
     chapter.connectivity.map((warning) =>
@@ -89,7 +89,7 @@ const chapterErrors = (chapter: Chapter): ErrorTally => {
   const open = openWarnings(chapter);
   const errors: Array<NavigableRow> = [];
   const failedCalls: Array<TranscriptTool> = [];
-  // The newest point at which the Attempt's sessions still said or did something.
+  // The sequence of the Attempt's latest message or tool call.
   let wentOn = -1;
   const tool = (call: TranscriptTool) => {
     wentOn = Math.max(wentOn, call.sequence);
@@ -129,14 +129,10 @@ const chapterErrors = (chapter: Chapter): ErrorTally => {
 };
 
 /**
- * Counts what the outline's error count shows, in reading order, by one rule:
- * an error is what the Run ended with or what the operator must read. That is
- * each failed Attempt's outcome, the last of which is the Run's failure, every
- * blocker and question an Agent raised, operator input a session refused, and
- * each connectivity warning still open on a running Attempt. A tool call that
- * failed while its Attempt went on, with another message or call or with
- * success, is recovered and counted apart; a failed call the Attempt did not
- * go on from is part of that Attempt's outcome.
+ * Returns the outline's errors and recovered tool failures in reading order. Errors are each failed
+ * Attempt's outcome, every blocker and question, every rejected operator input, and each open
+ * connectivity warning on a running Attempt. A failed tool call followed by more activity in its
+ * Attempt is recovered; one with no later activity is part of the Attempt's outcome.
  */
 export const errorTally = (document: ReaderDocument): ErrorTally => {
   const tallies = document.chapters.map(chapterErrors);
@@ -146,32 +142,29 @@ export const errorTally = (document: ReaderDocument): ErrorTally => {
   };
 };
 
-/** Indexes the rows the reader shows, once each; account meters and omitted repeats are excluded. */
+/** Returns each row the reader shows once, excluding account meters and omitted repeats. */
 export const indexTranscriptUpdates = (document: ReaderDocument): ReadonlyArray<TranscriptUpdate> =>
   document.chapters
     .flatMap((chapter) => chapter.rows.flatMap(rowUpdates))
     .sort((left, right) => left.sequence - right.sequence);
 
-/** Activity received since the reader last acknowledged the latest conversation. */
+/** The activity received since the reader last acknowledged the latest row. */
 export interface UnreadTranscript {
-  /** Newest observed raw transcript event, including events omitted from the conversation. */
+  /** The newest transcript event received, including events not shown in the conversation. */
   readonly through: TranscriptSequence | null;
-  /** Last explicitly acknowledged tail; retained across closes and refreshes. */
+  /** The last acknowledged event; kept across closes and refreshes. */
   readonly readThrough: TranscriptSequence | null;
   readonly keys: ReadonlySet<string>;
 }
 
-/** Treats the initial loaded tail as read; through is its newest raw event, or null for an empty Run. */
+/** Returns a state in which the initially loaded tail is read; `through` is `null` for an empty Run. */
 export const initializeUnread = (through: TranscriptSequence | null): UnreadTranscript => ({
   through,
   readThrough: through,
   keys: new Set(),
 });
 
-/**
- * Adds each updated row once and advances the raw cursor. Earlier pages and repeated
- * responses cannot introduce unread activity, including when the initial tail contains only meters.
- */
+/** Adds each updated row once and advances `through`; earlier pages and repeated responses add no unread activity. */
 export const advanceUnread = (
   previous: UnreadTranscript,
   updates: ReadonlyArray<TranscriptUpdate>,
@@ -190,7 +183,7 @@ export const advanceUnread = (
     : { through: latest, readThrough: previous.readThrough, keys };
 };
 
-/** Clears the count without forgetting how far the transcript has already been observed. */
+/** Clears the unread rows and marks everything up to `through` as read. */
 export const acknowledgeUnread = (previous: UnreadTranscript): UnreadTranscript =>
   previous.keys.size === 0 && previous.readThrough === previous.through
     ? previous

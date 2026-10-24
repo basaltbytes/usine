@@ -19,18 +19,18 @@ import type { AttemptId } from "@usine/core/attempt";
 import type { RunSpec } from "@usine/core/attempt/channel";
 import { Effect, Option } from "effect";
 
-/** The model the Attempt's Pi parent runs with, checked against its effort and credential before the conversation exists. */
+/** The parent model, validated against the effort and credential. */
 interface ResolvedParent {
   readonly ref: ModelRef;
   readonly model: ModelId;
   readonly pool: PiPool;
 }
 
-/** usine's id for the Attempt's Pi parent, the default target of operator input. */
+/** Returns the session ID of the Attempt's Pi parent, the default target of operator input. */
 export const parentSessionId = (attemptId: AttemptId): AgentSessionId =>
   AgentSessionId.make(`parent:${attemptId}`);
 
-/** The parent as session events record it: the rostered Agent with the model actually resolved. */
+/** Returns the parent session with the rostered Agent and the resolved model. */
 export const parentSession = (spec: RunSpec, model: ModelId): ParentSession =>
   new ParentSession({
     id: parentSessionId(spec.attemptId),
@@ -61,7 +61,7 @@ const selectModel = Effect.fn("ParentModel.select")(function* (
       return yield* new UnknownModelError({
         harness: "pi",
         model: named,
-        message: `Pi does not expose model ${named}`,
+        message: `Pi has no model "${named}"`,
       });
     }
     return found.value;
@@ -76,7 +76,7 @@ const selectModel = Effect.fn("ParentModel.select")(function* (
   const available = yield* Effect.tryPromise({
     try: (signal) => models.getAvailable(undefined, { signal }),
     catch: (cause) =>
-      launchError(spec, "Could not list the models with a configured credential", cause),
+      launchError(spec, "Can't list the models that have a configured credential", cause),
   });
   const first = available[0];
   if (first === undefined) {
@@ -93,10 +93,9 @@ const selectModel = Effect.fn("ParentModel.select")(function* (
 });
 
 /**
- * Resolves the parent's model, effort, and billing pool exactly as a Pi parent
- * session did before it ran in the orchestrator: an unknown model, an effort the
- * model cannot run, and a credential outside the provider's pool all fail
- * before the conversation is created.
+ * Resolves the parent's model, effort, and billing pool. Fails before the conversation is created
+ * if the model is unknown, doesn't support the effort, or the credential is outside the provider's
+ * pool.
  */
 export const resolveParent = Effect.fn("ParentModel.resolve")(function* (
   models: Models,
@@ -121,12 +120,12 @@ export const resolveParent = Effect.fn("ParentModel.resolve")(function* (
       harness: "pi",
       model,
       effort: spec.parentEffort,
-      message: `Pi model ${model} does not support effort ${spec.parentEffort}; supported: ${supported.join(", ")}`,
+      message: `Pi model "${model}" doesn't support effort ${spec.parentEffort}. Supported efforts: ${supported.join(", ")}`,
     });
   }
   const check = yield* Effect.tryPromise({
     try: (signal) => models.checkAuth(selected.provider, { signal }),
-    catch: (cause) => launchError(spec, "Could not check the parent model's credential", cause),
+    catch: (cause) => launchError(spec, "Can't check the parent model's credential", cause),
   });
   const authentication = piAuthentication(
     check,
@@ -145,7 +144,7 @@ export const resolveParent = Effect.fn("ParentModel.resolve")(function* (
       harness: "pi",
       model,
       pool: required,
-      message: `Pi parent model ${model} requires a credential from the ${required} pool`,
+      message: `Pi parent model "${model}" requires a credential from the ${required} pool`,
     });
   }
   yield* Effect.logInfo("Pi parent authenticated", { model, pool });

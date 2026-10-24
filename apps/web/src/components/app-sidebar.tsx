@@ -21,11 +21,10 @@ import { cn } from "@/lib/utils";
 import { ConfigurationMenu } from "../configuration/layout.tsx";
 import { projectParams } from "../overview.ts";
 
-/** What the work panel shows: Overview, a Project's Board, its Tasks list or one of its Task
- * pages, another page of a Project such as a Run page, or the Configuration section. */
+/** `tasks` covers the Tasks list and Task pages; `project` covers other Project pages, such as a
+ * Run page. */
 export type OperatorView = "desk" | "board" | "tasks" | "project" | "configuration";
 
-/** The page the work panel shows, from the matched route. */
 export const useOperatorView = (): OperatorView => {
   const matchRoute = useMatchRoute();
   if (matchRoute({ to: "/configuration", fuzzy: true }) !== false) return "configuration";
@@ -46,9 +45,9 @@ export const AppSidebar = ({
   readonly projects: ReadonlyArray<ProjectView>;
   readonly view: OperatorView;
   readonly project: RepositoryName | undefined;
-  /** How many Needs you entries concern each Project. */
+  /** Needs you entry count per Project. */
   readonly needsYou: ReadonlyMap<RepositoryName, number>;
-  /** How many Needs you entries there are in all, including those about no Project. */
+  /** Total Needs you entries, including those without a Project. */
   readonly needsYouTotal: number;
   readonly live: boolean;
 }) => (
@@ -97,8 +96,8 @@ export const AppSidebar = ({
               const current = project === entry.repository;
               return (
                 <SidebarMenuItem key={entry.repository}>
-                  {/* Board or Tasks is the active row on their pages; the Project's own row is
-                      active on its other pages, such as a Run page. */}
+                  {/* On Board and Tasks pages that row is active; on other Project pages, such as
+                      a Run page, the Project row is active. */}
                   <SidebarMenuButton
                     isActive={current && view === "project"}
                     className={cn(count > 0 && "pr-8")}
@@ -144,7 +143,7 @@ export const AppSidebar = ({
       </SidebarGroup>
     </SidebarContent>
     <SidebarFooter className="px-4 pb-3">
-      {/* Reports the trigger streams, not the server: idle pollers must never read as a running factory. */}
+      {/* Shows trigger stream state, not server state, so idle pollers are not shown as running. */}
       <p className="flex items-center gap-2 text-xs text-muted-foreground">
         <span
           aria-hidden="true"

@@ -94,7 +94,7 @@ describe("GitHub credential provider failures", () => {
       assert.strictEqual(failure.reason, "refused");
       assert.strictEqual(
         failure.message,
-        "Could not mint a worker token for acme/demo: GitHub rejected the request with status 422: The permissions requested are not granted to this installation.",
+        'Could not create a worker token for "acme/demo": GitHub returned HTTP status 422: The permissions requested are not granted to this installation.',
       );
     }).pipe(
       Effect.provide(
@@ -104,7 +104,7 @@ describe("GitHub credential provider failures", () => {
             operation: "mint-worker-token",
             status: Option.some(422),
             message:
-              "GitHub rejected the request with status 422: The permissions requested are not granted to this installation.",
+              "GitHub returned HTTP status 422: The permissions requested are not granted to this installation.",
           }),
         ),
       ),
@@ -115,7 +115,10 @@ describe("GitHub credential provider failures", () => {
     Effect.gen(function* () {
       const failure = yield* issue;
       assert.strictEqual(failure.reason, "refused");
-      assert.strictEqual(failure.message, "GitHub App installation does not cover acme/demo");
+      assert.strictEqual(
+        failure.message,
+        'The GitHub App installation has no access to "acme/demo"',
+      );
     }).pipe(
       Effect.provide(
         provider(
@@ -136,7 +139,7 @@ describe("GitHub credential provider failures", () => {
       assert.strictEqual(failure.reason, "unreachable");
       assert.strictEqual(
         failure.message,
-        "Could not mint a worker token for acme/demo: The request to GitHub could not be sent",
+        'Could not create a worker token for "acme/demo": Could not send the request to GitHub',
       );
     }).pipe(
       Effect.provide(
@@ -145,7 +148,7 @@ describe("GitHub credential provider failures", () => {
           new GitHubApiError({
             operation: "mint-worker-token",
             status: Option.none(),
-            message: "The request to GitHub could not be sent",
+            message: "Could not send the request to GitHub",
           }),
         ),
       ),

@@ -73,14 +73,14 @@ it("reloads the configuration from any Configuration page and shows what changed
         body: JSON.stringify({
           error: "ReloadPreflightError",
           message:
-            "Worker preflight failed for Agent reviewer and Worker eu-1, which the reload adds or gives more slots. Worker local: Claude Code is not logged in. The running configuration is unchanged; fix the Worker, usine.yaml, or the Agent file, then reload again.",
+            'Worker preflight failed for agent "reviewer" and worker "eu-1" (added or given more slots by the reload). Worker "local": Claude Code needs a subscription login. Run claude auth login on the worker. The running configuration is unchanged. Fix the worker, usine.yaml, or the agent file, then reload again.',
           agents: ["reviewer"],
           workers: ["eu-1"],
           cause: {
             _tag: "WorkerCapabilityError",
             worker: "local",
             capability: "harness-login",
-            message: "Claude Code is not logged in.",
+            message: "Claude Code needs a subscription login. Run claude auth login on the worker.",
           },
         }),
       },
@@ -89,7 +89,7 @@ it("reloads the configuration from any Configuration page and shows what changed
         body: JSON.stringify({
           error: "RestartRequiredError",
           message:
-            "usine.yaml changed in a way that applies only when usine up restarts: Worker eu-1 changed its destination; the webhooks block changed. The running configuration is unchanged; restart usine up to apply the change.",
+            "These usine.yaml changes require a restart: the destination of Worker eu-1 changed; the webhooks block changed. The running configuration is unchanged. Restart usine up to apply them.",
           blocks: ["workers", "webhooks"],
           fields: ["workers.eu-1.destination", "webhooks"],
         }),
@@ -122,7 +122,7 @@ it("reloads the configuration from any Configuration page and shows what changed
     await expect.element(page.getByText("Loops added: triage")).toBeVisible();
     await expect.element(page.getByRole("link", { name: "triage", exact: true })).toBeVisible();
 
-    // The result stays on screen while the operator moves to another page of the section.
+    // The reload result stays visible after navigating to another Configuration page.
     await page.getByRole("link", { name: "Workers", exact: true }).click();
     await expect.element(page.getByRole("heading", { name: "Workers" })).toBeVisible();
     await expect.element(page.getByText("Loops added: triage")).toBeVisible();
@@ -130,7 +130,7 @@ it("reloads the configuration from any Configuration page and shows what changed
     await page.getByRole("button", { name: "Reload configuration" }).click();
     await expect.element(page.getByText("Configuration not reloaded")).toBeVisible();
     await expect
-      .element(page.getByText("usine.yaml, or the loops or agents folder, could not be loaded."))
+      .element(page.getByText("Could not load usine.yaml, the loops folder, or the agents folder."))
       .toBeVisible();
     await expect
       .element(page.getByText("The running configuration is unchanged", { exact: false }))
@@ -139,7 +139,7 @@ it("reloads the configuration from any Configuration page and shows what changed
     await page.getByRole("button", { name: "Dismiss the reload result" }).click();
     await expect.element(page.getByText("Configuration not reloaded")).not.toBeInTheDocument();
 
-    // A refused preflight links the Worker whose check failed and what the reload adds.
+    // A failed preflight links to the Worker whose check failed and to what the reload adds.
     const refusal = page.getByRole("alert").filter({ hasText: "Configuration not reloaded" });
     await page.getByRole("button", { name: "Reload configuration" }).click();
     await expect
@@ -150,7 +150,7 @@ it("reloads the configuration from any Configuration page and shows what changed
     await refusal.getByRole("link", { name: "local" }).click();
     await expect.element(page.getByRole("heading", { name: "local" })).toBeVisible();
 
-    // A change only a restart applies links each changed field of usine.yaml.
+    // A change that needs a restart links to each changed usine.yaml field.
     await page.getByRole("button", { name: "Reload configuration" }).click();
     await expect
       .element(refusal.getByText("Changed in usine.yaml:", { exact: false }))

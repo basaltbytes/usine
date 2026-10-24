@@ -15,13 +15,16 @@ import { AttemptView } from "./attempt.ts";
 import { TranscriptEventView, TranscriptPageCursor } from "./transcript.ts";
 import { RunUsageView } from "./usage.ts";
 
-/** The persisted Run lifecycle state as exposed in operator views. */
+/** The stored Run lifecycle state as shown in operator views. */
 export const RunStateTag = Schema.Literals(RunState.STATE_TAGS);
 export type RunStateTag = typeof RunStateTag.Type;
 
 const NullableString = Schema.NullOr(Schema.String);
 
-/** The operator's replacement task and selected roster member; the server derives the Agent's persona and brain. */
+/**
+ * The operator's replacement task and roster Agent. The server derives the Agent's persona and
+ * brain.
+ */
 export class EditAndRetry extends Schema.Class<EditAndRetry>("@usine/orchestrator/EditAndRetry")({
   task: AttemptTask,
   agent: AgentName,
@@ -36,24 +39,24 @@ export class SessionIntervention extends Schema.Class<SessionIntervention>(
   action: OperatorAction,
 }) {}
 
-/** The requested Agent is absent from the loaded instance roster. */
+/** The requested Agent isn't in the loaded roster. */
 export class RosterAgentNotFoundError extends Schema.TaggedError<RosterAgentNotFoundError>(
   "@usine/orchestrator/RosterAgentNotFoundError",
 )("RosterAgentNotFoundError", { agent: AgentName, message: Schema.String }) {}
 
-/** The Run's Loop is not in the loaded instance, so nothing says how a new Run of it opens. */
+/** The Run's Loop isn't in the loaded instance, so a new Run of it can't be opened. */
 export class LoopNotFoundError extends Schema.TaggedError<LoopNotFoundError>(
   "@usine/orchestrator/LoopNotFoundError",
 )("LoopNotFoundError", { loop: LoopName, message: Schema.String }) {}
 
-/** A Run's approval: when it was given and, once usine recorded it, who gave it through which channel. */
+/** A Run's approval: when it was given and, if recorded, who gave it and through which channel. */
 export class ApprovalView extends Schema.Class<ApprovalView>("@usine/orchestrator/ApprovalView")({
   approvedAt: Schema.String,
-  /** Null for approvals given before usine recorded who approved. */
+  /** Null for approvals given before the approver was recorded. */
   source: Schema.NullOr(ApprovalSource),
 }) {}
 
-/** A Run summary with its Attempts, result links, and currently available operator actions. */
+/** A Run with its Attempts, result links, and available operator actions. */
 export class RunView extends Schema.Class<RunView>("@usine/orchestrator/RunView")({
   id: RunId,
   itemKey: ItemKey,
@@ -64,53 +67,69 @@ export class RunView extends Schema.Class<RunView>("@usine/orchestrator/RunView"
   loopPaused: Schema.Boolean,
   openedAt: Schema.String,
   /**
-   * When the Run last closed: it succeeded, failed, or was canceled, even before any Attempt
-   * began. Null while it is open; a retry reopens a failed Run and clears it.
+   * When the Run last succeeded, failed, or was canceled, even before any Attempt. Null while open;
+   * a retry reopens a failed Run and clears it.
    */
   closedAt: Schema.NullOr(Schema.String),
   task: Schema.String,
   attempts: Schema.Array(AttemptView),
-  /** The approval the Run consumed; null until one arrives, and always null for a Loop with `approval: none`. */
+  /**
+   * The approval the Run consumed, or null until one arrives. Always null for a Loop with
+   * `approval: none`.
+   */
   approval: Schema.NullOr(ApprovalView),
-  /** The closed Run the operator ran again to open this one, and who asked; null for a Run its trigger opened. Its time is `openedAt`. */
+  /**
+   * The closed Run that the operator ran again to open this one, and who asked, or null for a
+   * trigger-opened Run. Its time is `openedAt`.
+   */
   runAgain: Schema.NullOr(RunAgain),
   resultMessage: NullableString,
   pullRequestUrl: NullableString,
   canApprove: Schema.Boolean,
   canRetry: Schema.Boolean,
-  /** The latest failed Attempt still requests attention; retry availability is independent. */
+  /**
+   * Whether the latest failed Attempt still requests attention, independent of retry availability.
+   */
   canResolveFailure: Schema.Boolean,
   canCancel: Schema.Boolean,
-  /** The Run succeeded or was canceled, so the operator can open a new Run for its Item state. */
+  /**
+   * Whether the Run succeeded or was canceled, so the operator can open a new Run for its Item
+   * state.
+   */
   canRunAgain: Schema.Boolean,
 }) {}
 
 const Milliseconds = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 const Count = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
-/** How long a Run's Attempts have worked, added up Attempt by Attempt. */
+/** The time a Run's Attempts worked, summed per Attempt. */
 export class RunDurationView extends Schema.Class<RunDurationView>(
   "@usine/orchestrator/RunDurationView",
 )({
-  /** The ended Attempts' time, each from its start to its recorded end. */
+  /** The ended Attempts' time, each from start to recorded end. */
   endedMillis: Milliseconds,
-  /** When the Attempt that still runs started, so the total keeps counting; null when none runs. */
+  /** The start of the running Attempt, or null if none runs. */
   runningSince: Schema.NullOr(Schema.String),
-  /** Ended Attempts closed before end times were recorded; their time is not in the total. */
+  /**
+   * The number of ended Attempts closed before end times were recorded, excluded from the total.
+   */
   unmeasured: Count,
 }) {}
 
-/** A Run summary with its triggering Event payload, a bounded portion of its transcript, and what its Attempts used. */
+/** A Run with its triggering Event payload, a page of its transcript, and its usage. */
 export class RunDetailView extends Schema.Class<RunDetailView>("@usine/orchestrator/RunDetailView")(
   {
     run: RunView,
     eventDedupKey: Schema.String,
     eventPayload: Schema.Json,
     transcript: Schema.Array(TranscriptEventView),
-    /** Current session controls remain available when their last activity predates the transcript page. */
+    /**
+     * The current session controls, included even when their last activity is before the transcript
+     * page.
+     */
     sessionState: Schema.Array(TranscriptEventView),
     earlierTranscript: Schema.Array(TranscriptPageCursor),
-    /** The Worker the newest Attempt runs or ran on; null before the first Attempt. */
+    /** The Worker of the newest Attempt, or null before the first Attempt. */
     worker: Schema.NullOr(WorkerName).pipe(Schema.withConstructorDefault(Effect.succeed(null))),
     duration: RunDurationView.pipe(
       Schema.withConstructorDefault(

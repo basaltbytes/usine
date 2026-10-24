@@ -16,17 +16,16 @@ import {
 import type { ExecutorOperation, ExecutorOperationError } from "../executor.ts";
 
 /**
- * Where a remote command starts, what it exports on top of the machine's own
- * environment, and how its output is cleaned before it is kept: a credential
- * that git or gh echoes is not written to any error, log, or parsed result.
+ * The working directory and extra environment for a remote command. `scrub` is applied to the
+ * output first, so a credential printed by git or gh isn't kept in any error, log, or parsed
+ * result.
  */
 export interface RemoteContext extends Pick<HostInvocation, "cwd" | "environment"> {
   readonly scrub?: (text: string) => string;
 }
 
-/** Runs commands on Workers' machines, each as one SSH command through the machine's child host. */
 export interface RemoteCommands {
-  /** The child host for one machine: the Attempt's children and every command below run through it. */
+  /** Returns the shell for one machine, used by the Attempt's children and the commands below. */
   readonly shellFor: (ssh: SshCommand, destination: SshDestination) => RemoteShell;
   /** Runs a local command, such as the exe.dev lobby, with only the SSH client's environment. */
   readonly local: (
@@ -35,14 +34,14 @@ export interface RemoteCommands {
     command: string,
     args: ReadonlyArray<string>,
   ) => Effect.Effect<string, ExecutorOperationError>;
-  /** Runs a remote command and returns its exit code and output; the caller decides what the exit code means. */
+  /** Runs a remote command and returns its exit code and output without checking the exit code. */
   readonly inspect: (
     operation: ExecutorOperation,
     shell: RemoteShell,
     command: string,
     args: ReadonlyArray<string>,
   ) => Effect.Effect<CommandResult, ExecutorOperationError>;
-  /** Runs a remote command and returns its stdout, or fails when it exits non-zero. */
+  /** Runs a remote command and returns its stdout. Fails if it exits non-zero. */
   readonly run: (
     operation: ExecutorOperation,
     shell: RemoteShell,
@@ -50,10 +49,7 @@ export interface RemoteCommands {
     args: ReadonlyArray<string>,
     context?: RemoteContext,
   ) => Effect.Effect<string, ExecutorOperationError>;
-  /**
-   * Runs a remote command with `input` sent on its standard input, so a
-   * secret appears in no command line and is not written to any log.
-   */
+  /** Runs a remote command with `input` on stdin, so a secret isn't in the command line or logs. */
   readonly runWithInput: (
     operation: ExecutorOperation,
     shell: RemoteShell,
@@ -64,8 +60,8 @@ export interface RemoteCommands {
 }
 
 /**
- * The local SSH client inherits only what SSH itself needs; GitHub and factory
- * credentials from the orchestrator environment are passed neither to it nor to the machine.
+ * The variables the local SSH client inherits. GitHub and factory credentials in the
+ * orchestrator environment aren't passed to the client or the machine.
  */
 export const SSH_ENVIRONMENT_ALLOWLIST = [
   "HOME",
@@ -80,9 +76,8 @@ export const SSH_ENVIRONMENT_ALLOWLIST = [
 ] as const;
 
 /**
- * The SSH client every remote Worker uses unless its options replace it. The
- * keepalive pair turns a dead TCP link into a non-zero SSH exit instead of a
- * silent park, so a lost machine fails the operation.
+ * The default SSH client for remote Workers. Its keepalive options make a dead TCP connection
+ * exit non-zero instead of hanging.
  */
 export const DEFAULT_SSH: SshCommand = {
   command: "ssh",
@@ -92,11 +87,9 @@ export const DEFAULT_SSH: SshCommand = {
 const encoder = new TextEncoder();
 
 /**
- * `shell` with `variables` set on the machine through the SSH connection
- * (OpenSSH `SendEnv`) rather than in the command line: each value is in the
- * local SSH client's own environment, which only this user and root can
- * read, and in no argument, log, or process listing. The machine's sshd
- * drops every name its `AcceptEnv` does not list.
+ * Returns `shell` with `variables` sent through OpenSSH `SendEnv` instead of the command line,
+ * so the values aren't in arguments, logs, or process listings. The remote sshd drops names
+ * not in its `AcceptEnv`.
  */
 export const sendingShell = (
   shell: RemoteShell,
@@ -117,10 +110,7 @@ export const sendingShell = (
   });
 };
 
-/**
- * The command runner every remote Worker kind uses, bound to this process's
- * spawner and to the allowlisted environment its SSH clients inherit.
- */
+/** The `RemoteCommands` that use this process's spawner and the allowlisted SSH environment. */
 export const remoteCommandsFor = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const environment = yield* allowlistedEnvironment(SSH_ENVIRONMENT_ALLOWLIST);

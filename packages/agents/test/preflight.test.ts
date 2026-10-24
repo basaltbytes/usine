@@ -20,7 +20,7 @@ const remote = new RemoteShell({
   destination: "worker.exe.xyz",
 });
 const overSsh = (line: string) => `ssh -o BatchMode=yes worker.exe.xyz -- ${line}`;
-/** The environment local checks must run with instead of the test process's own. */
+/** The environment for local checks, used instead of the test process's environment. */
 const workerEnvironment = { PATH: "/usr/bin:/bin" };
 const encoder = new TextEncoder();
 
@@ -177,8 +177,8 @@ describe("worker harness readiness", () => {
   );
 
   const subscriptionLogin =
-    "Claude requires a subscription login; run claude auth login on the Worker";
-  // Claude Code 2.1.296 exits 1 when nobody is logged in, after printing its status.
+    "Claude Code needs a subscription login. Run claude auth login on the worker.";
+  // Claude Code 2.1.296 prints its status and exits 1 when not logged in.
   for (const status of [
     { auth: { loggedIn: false, authMethod: "none", apiProvider: "firstParty" }, exitCode: 1 },
     { auth: { loggedIn: false, authMethod: "none", apiProvider: "firstParty" }, exitCode: 0 },
@@ -237,7 +237,7 @@ describe("worker harness readiness", () => {
           assert.strictEqual(error.capability, "login");
           assert.strictEqual(
             error.message,
-            "claude auth status --json failed; check the Worker's claude installation and login",
+            "claude auth status --json failed. Check the claude installation and login on the worker.",
           );
         }).pipe(
           Effect.provide(
@@ -337,7 +337,7 @@ describe("worker harness readiness", () => {
     Effect.gen(function* () {
       const error = yield* verifyHarness(brain("pi"), remote, {}).pipe(Effect.flip);
       assert(error instanceof HarnessUnavailableError);
-      assert.strictEqual(error.message, "Pi children run only on local Workers");
+      assert.strictEqual(error.message, "Pi children run only on local workers");
     }).pipe(
       Effect.provide(commands({})),
       Effect.provide(account(Effect.succeed(null)).layer),

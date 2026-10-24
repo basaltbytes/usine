@@ -22,9 +22,8 @@ const observeSignals = (requested: Deferred.Deferred<void>, forced: Deferred.Def
   );
 
 /**
- * Protects startup and running work with a bounded drain before runtime
- * resources close. `deadline` is read when the drain starts, so a reloaded
- * `max_attempt_minutes` applies to it.
+ * Runs `startup` and its work, and on shutdown drains them within `deadline` before runtime
+ * resources close. Reads `deadline` when the drain starts.
  */
 export const withGracefulShutdown = <A, E, R, E2, R2>(
   startup: Effect.Effect<
@@ -42,8 +41,8 @@ export const withGracefulShutdown = <A, E, R, E2, R2>(
     Effect.gen(function* () {
       const forced = yield* Deferred.make<void>();
       yield* observeSignals(requested, forced);
-      // Acquired before the forks: their shutdown completes while runtime
-      // resources (database, executor, HTTP) are still available.
+      // Acquired before the forks, so their shutdown completes while runtime resources (database,
+      // executor, HTTP) are still available.
       const runtimeScope = yield* Effect.acquireRelease(Scope.make(), (scope, exit) =>
         Scope.close(scope, exit),
       );

@@ -71,7 +71,7 @@ const emptyCatalog = new RepositoryLabelCatalog({
 const catalogEntityTag = EntityTag.make('W/"labels"');
 const StoredCatalogEntityTag = Schema.Struct({ labelEntityTag: Schema.NullOr(Schema.String) });
 const decodeStoredCatalogEntityTag = Schema.decodeUnknownSync(StoredCatalogEntityTag);
-/** The catalog ETag each stored poll cursor sends next cycle. */
+/** Returns the catalog ETag each stored poll cursor sends next cycle. */
 const storedCatalogEntityTags = (
   stored: ReadonlyMap<string, Schema.Json>,
 ): ReadonlyArray<string | null> =>
@@ -124,7 +124,7 @@ describe("PollingTriggers label preflight", () => {
           new GitHubApiError({
             operation: "list-repository-labels",
             status: Option.some(502),
-            message: "GitHub rejected the request with status 502",
+            message: "GitHub returned HTTP status 502",
           }),
         ),
       changes: (_repository, cursor) =>
@@ -365,7 +365,7 @@ describe("PollingTriggers label preflight", () => {
               new GitHubApiError({
                 operation: "create-repository-label",
                 status: Option.some(500),
-                message: "GitHub rejected the request with status 500",
+                message: "GitHub returned HTTP status 500",
               }),
             ),
           ),

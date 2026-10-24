@@ -44,7 +44,6 @@ import {
 } from "../../../src/pi/codex/app-server.ts";
 import { codexChildBackendLayer } from "../../../src/pi/codex/codex.ts";
 
-/** Ignores whether a queued operator message is read; the test does not observe it. */
 const noDelivery: OnDelivery = () => Effect.void;
 
 const request = (
@@ -453,7 +452,7 @@ describe("Codex child backend", () => {
   it.effect(
     "reports each provider reconnect of a turn and the recovery when the turn resumes",
     () => {
-      // The app-server notifications seen on a Worker whose gateway could not resolve chatgpt.com (#266).
+      // App-server notifications from a Worker whose gateway could not resolve chatgpt.com (#266).
       const reconnect = (message: string, additionalDetails: string, turnId = "turn-1") => ({
         method: "error",
         params: {
@@ -636,14 +635,14 @@ describe("Codex child backend", () => {
 
   it.effect("tolerates sparse rate windows, undecodable items, and unknown notifications", () => {
     const notifications: ReadonlyArray<CodexNotification> = [
-      // Sparse rolling update: only the load figure of one window is present.
+      // Partial rate-limit update: only one window's load figure is present.
       {
         method: "account/rateLimits/updated",
         params: { rateLimits: { primary: { usedPercent: 91 } } },
       },
-      // Undecodable item payload: logged and skipped, never fatal.
+      // Undecodable item payload: logged and skipped, not fatal.
       { method: "item/completed", params: { nonsense: true } },
-      // Server pushes with no normalized shape.
+      // Server notifications with no normalized form.
       { method: "error", params: { error: { message: "transient" }, willRetry: true } },
       { method: "thread/tokenUsage/updated", params: { tokens: 12 } },
       {

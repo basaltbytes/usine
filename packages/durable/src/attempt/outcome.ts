@@ -17,7 +17,6 @@ import {
 } from "../attempt-runtime.ts";
 import type { AttemptRecord, AttemptResult } from "./documents.ts";
 
-/** How an Attempt ended, as `execute` reports it. */
 export type Settled = Result.Result<AttemptReport, AttemptFailure>;
 
 const failureJson = Schema.fromJsonString(AttemptFailure);
@@ -37,12 +36,13 @@ const failureMessage = (failure: AttemptFailure): string =>
     AgentFailure: ({ message }) => message,
     BlockedFailure: ({ message }) => message,
     QuestionFailure: ({ question }) => question,
-    RunawayFailure: ({ ceiling }) => `The runaway guard tripped its ${ceiling} ceiling`,
+    RunawayFailure: ({ ceiling }) =>
+      `The runaway guard stopped the attempt at its ${ceiling} ceiling`,
     ChildSessionBudgetFailure: ({ attemptedChildren, maxChildren }) =>
-      `Attempt tried to spawn child ${attemptedChildren} after reaching its ${maxChildren}-child budget`,
+      `The attempt requested child ${attemptedChildren}, over its budget of ${maxChildren} children`,
   }) || failure._tag;
 
-/** The task outcome that records an Attempt failure; `settledOf` reads it back. */
+/** Returns the terminal task state for `failure`. */
 export const failedOutcome = (failure: AttemptFailure): NextTaskState<never, AttemptResult> => ({
   status: "terminal",
   outcome: {
@@ -51,7 +51,7 @@ export const failedOutcome = (failure: AttemptFailure): NextTaskState<never, Att
   },
 });
 
-/** The task outcome of a parent that finished with `message`; `settledOf` reads it back as its `AttemptReport`. */
+/** Returns the terminal task state for a parent that finished with `message`. */
 export const completedOutcome = (
   message: string,
   answeredOperator: boolean,
@@ -60,12 +60,12 @@ export const completedOutcome = (
   outcome: { status: "completed", result: { message, answeredOperator } },
 });
 
-/** The Attempt's outcome as its task recorded it, mapped to the report or failure `execute` returns. */
+/** Returns the report or failure recorded as the task's outcome. */
 export const settledOf = (task: TaskRecord<JsonValue, JsonValue, unknown>): Settled => {
   const outcome = task.state.outcome;
   if (outcome === undefined) {
     return Result.fail(
-      new InfraFailure({ message: "The Attempt task is still running", cause: task.state.status }),
+      new InfraFailure({ message: "The attempt task is still running", cause: task.state.status }),
     );
   }
   switch (outcome.status) {
@@ -74,7 +74,7 @@ export const settledOf = (task: TaskRecord<JsonValue, JsonValue, unknown>): Sett
         onNone: () =>
           Result.fail(
             new DefectFailure({
-              message: "The Attempt task completed without a final message",
+              message: "The attempt task completed without a final message",
               cause: outcome.result,
             }),
           ),
@@ -92,19 +92,19 @@ export const settledOf = (task: TaskRecord<JsonValue, JsonValue, unknown>): Sett
       );
     case "aborted":
       return Result.fail(
-        new AgentFailure({ message: "The Attempt was canceled and its parent stopped" }),
+        new AgentFailure({ message: "The attempt was canceled, and its parent stopped" }),
       );
     case "faulted":
       return Result.fail(
         new DefectFailure({
-          message: `The Attempt task faulted: ${outcome.error.message}`,
+          message: `The attempt task faulted: ${outcome.error.message}`,
           cause: outcome.error,
         }),
       );
     case "orphaned":
       return Result.fail(
         new InfraFailure({
-          message: `The Attempt task can no longer run: ${outcome.reason}`,
+          message: `The attempt task can no longer run: ${outcome.reason}`,
           cause: outcome.reason,
         }),
       );
@@ -113,14 +113,13 @@ export const settledOf = (task: TaskRecord<JsonValue, JsonValue, unknown>): Sett
 
 const resultJson = Schema.fromJsonString(StepResult);
 
-/** The harvested result as the Attempt's record keeps it. */
+/** Encodes a harvested result for `AttemptRecord.result`. */
 export const encodeResult = Schema.encodeSync(resultJson);
 const decodeHarvested = Schema.decodeUnknownOption(resultJson);
 
 /**
- * What a finished Attempt left, read from its record and its task: none until
- * its terminal envelope is relayed, and none for a canceled task. A recorded
- * result that does not decode counts as absent, so the checkout is harvested again.
+ * Returns the final state of a finished Attempt. Returns `None` before the terminal envelope is
+ * relayed or for a canceled task; a stored result that doesn't decode counts as absent.
  */
 export const finishedOf = (
   record: Readonly<AttemptRecord>,

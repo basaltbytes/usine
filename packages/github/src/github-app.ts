@@ -52,12 +52,12 @@ import {
 } from "./installation.ts";
 
 const TOKEN_MAX_LIFETIME_MS = 60 * 60 * 1_000;
-/** GitHub's expiry uses its own clock; ordinary worker/orchestrator skew is not a bad token. */
+/** The margin for clock skew between GitHub and this machine when checking token expiry, in milliseconds. */
 const TOKEN_CLOCK_SKEW_MARGIN_MS = 3 * 60 * 1_000;
-/** Renew the shared lease when its token has less than this long left. */
+/** The remaining token lifetime below which the shared lease is renewed, in milliseconds. */
 const LEASE_RENEWAL_MARGIN_MS = 5 * 60 * 1_000;
 
-/** The discovered installation and the installation-wide token the orchestrator calls GitHub with. */
+/** The installation and its installation-wide orchestrator token. */
 interface Lease {
   readonly installation: Installation;
   readonly token: InstallationToken;
@@ -89,7 +89,7 @@ const TokenResponse = Schema.Struct({
   repositories: Schema.OptionFromOptionalKey(Schema.Array(RepositoryResponse)),
 }).pipe(Schema.encodeKeys({ expiresAt: "expires_at" }));
 
-/** The operation name and request body for minting a token of this scope. */
+/** Returns the operation name and request body for minting a token of `scope`. */
 const mintPlan = (scope: TokenScope): { operation: GitHubOperation; body: Schema.Json } =>
   scope._tag === "InstallationWide"
     ? {
@@ -105,9 +105,8 @@ const mintPlan = (scope: TokenScope): { operation: GitHubOperation; body: Schema
       };
 
 /**
- * The factory's GitHub identity and repository access.
- * Orchestrator operations share installation-wide access; each Worker token is
- * newly minted for the repository assigned to its Attempt.
+ * The factory's GitHub App identity and repository access. Orchestrator operations share an
+ * installation-wide token; each Worker token is minted for its Attempt's repository.
  */
 export class GitHubApp extends Context.Service<
   GitHubApp,
@@ -116,14 +115,13 @@ export class GitHubApp extends Context.Service<
     readonly installation: () => Effect.Effect<Installation, GitHubAppError>;
     /** Returns the shared installation-wide token for orchestrator operations, renewing it near expiry. */
     readonly installationToken: () => Effect.Effect<InstallationToken, GitHubAppError>;
-    /** Reports access for every registry repository, retaining uncovered Projects as individual errors. */
+    /** Returns the access of every registry repository, with each uncovered Project as its own error. */
     readonly projectAccess: (
       registry: ReadonlyArray<RepositoryName>,
     ) => Effect.Effect<ReadonlyArray<ProjectAccess>, GitHubAppError>;
     /**
-     * Mints a fresh token restricted to the covered Project's repository for a
-     * Worker, with the repository permissions `WORKER_TOKEN_PERMISSIONS` lists
-     * for the Attempt's Loop permission level.
+     * Mints a new Worker token for the covered Project's repository, with the permissions
+     * `WORKER_TOKEN_PERMISSIONS` lists for the Loop permission level.
      */
     readonly workerToken: (
       project: CoveredProject,
@@ -142,7 +140,7 @@ export class GitHubApp extends Context.Service<
       const sign = yield* appJwtSigner(credentials);
       const http = yield* HttpClient.HttpClient;
 
-      /** Sends one request and decodes its JSON body. Any other outcome is a typed GitHub error. */
+      /** Sends one request and decodes its JSON body. Fails with a typed GitHub error otherwise. */
       const fetchJson = <S extends Schema.Codec<unknown, unknown, never, unknown>>(
         operation: GitHubOperation,
         request: HttpClientRequest.HttpClientRequest,
@@ -176,26 +174,29 @@ export class GitHubApp extends Context.Service<
         if (found === undefined) {
           return yield* new InstallationDiscoveryError({
             reason: "missing",
-            message: "The GitHub App is not installed on an account",
+            message:
+              "The GitHub App is not installed on any account. Install it on the account that owns the repositories.",
           });
         }
         if (others.length > 0) {
           return yield* new InstallationDiscoveryError({
             reason: "multiple",
-            message: "The GitHub App must have exactly one installation for this factory",
+            message:
+              "The GitHub App has more than one installation. Uninstall it from every account except one.",
           });
         }
         if (found.suspendedAt !== null) {
           return yield* new InstallationDiscoveryError({
             reason: "suspended",
-            message: "The GitHub App installation is suspended",
+            message:
+              "The GitHub App installation is suspended. Unsuspend it in the installation settings on GitHub.",
           });
         }
         const missing = missingPermissions(found.permissions);
         if (missing.length > 0) {
           return yield* new AppPermissionError({
             missing,
-            message: `The GitHub App installation is missing permissions: ${missing.join(", ")}`,
+            message: `The GitHub App installation is missing permissions: ${missing.join(", ")}. Grant them in the GitHub App settings, then approve the change on the installation.`,
           });
         }
         return new Installation({
@@ -229,8 +230,9 @@ export class GitHubApp extends Context.Service<
         if (lifetime <= 0 || lifetime > TOKEN_MAX_LIFETIME_MS + TOKEN_CLOCK_SKEW_MARGIN_MS) {
           return yield* new InvalidGitHubResponseError({
             operation,
-            message: "GitHub returned an installation token outside the one-hour lifetime bound",
-            detail: `expires_at ${DateTime.formatIso(response.expiresAt)} leaves ${lifetime}ms to live`,
+            message:
+              "GitHub returned an installation token that is expired or exceeds the one-hour lifetime limit",
+            detail: `expires_at ${DateTime.formatIso(response.expiresAt)} is ${lifetime}ms from now`,
           });
         }
         if (lifetime > TOKEN_MAX_LIFETIME_MS) {
@@ -247,8 +249,9 @@ export class GitHubApp extends Context.Service<
         ) {
           return yield* new InvalidGitHubResponseError({
             operation,
-            message: "GitHub did not confirm that the worker token is scoped to exactly one repo",
-            detail: `expected repository id ${scope.repositoryId}, confirmed [${confirmed.map((repo) => repo.id).join(", ")}]`,
+            message:
+              "GitHub did not confirm that the worker token is scoped to exactly one repository",
+            detail: `expected repository ID ${scope.repositoryId}, got [${confirmed.map((repo) => repo.id).join(", ")}]`,
           });
         }
         return new InstallationToken({
@@ -275,7 +278,7 @@ export class GitHubApp extends Context.Service<
           if (response.repositories.length === 0) {
             return yield* new InvalidGitHubResponseError({
               operation: "list-installation-repositories",
-              message: "GitHub pagination ended before total_count repositories were returned",
+              message: "GitHub returned an empty page before it listed total_count repositories",
               detail: `page ${page} was empty after ${installed.length} of ${response.totalCount} repositories`,
             });
           }
@@ -284,7 +287,7 @@ export class GitHubApp extends Context.Service<
 
       const leaseRef = yield* SynchronizedRef.make(Option.none<Lease>());
 
-      /** Returns the current lease, renewing it inside the ref when its token is under the margin. */
+      /** Returns the current lease, renewing it inside the ref if its token is within the margin. */
       const lease = Effect.fn("GitHubApp.lease")(() =>
         SynchronizedRef.modifyEffect(leaseRef, (current) =>
           Effect.gen(function* () {

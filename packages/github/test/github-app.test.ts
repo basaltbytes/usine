@@ -131,7 +131,7 @@ describe("GitHubApp", () => {
         assert.strictEqual(Redacted.value(worker.value), "worker-secret");
         yield* app.workerToken(covered, "write");
 
-        // One lease serves both orchestrator calls. Each worker call mints afresh.
+        // Both orchestrator calls share one lease; each Worker call mints a new token.
         const discoveries = requests.filter((request) =>
           request.url.endsWith("/app/installations?per_page=2"),
         );
@@ -375,11 +375,11 @@ describe("GitHubApp", () => {
       const refused = yield* app.workerToken(project, "write").pipe(Effect.flip);
       assert.strictEqual(
         refused.message,
-        "GitHub rejected the request with status 422: The permissions requested are not granted to this installation.",
+        "GitHub returned HTTP status 422: The permissions requested are not granted to this installation.",
       );
       assert.isTrue(isRefusal(refused));
       const outage = yield* app.workerToken(project, "write").pipe(Effect.flip);
-      assert.strictEqual(outage.message, "GitHub rejected the request with status 503");
+      assert.strictEqual(outage.message, "GitHub returned HTTP status 503");
       assert.isFalse(isRefusal(outage));
       const limited = yield* app.workerToken(project, "write").pipe(Effect.flip);
       assert.strictEqual(limited._tag, "GitHubRateLimitError");

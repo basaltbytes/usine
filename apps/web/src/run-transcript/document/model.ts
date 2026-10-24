@@ -33,50 +33,50 @@ import {
   withoutMarker,
 } from "./text.ts";
 
-/** A row's place in the durable transcript. */
+/** A row's position in the transcript. */
 interface RowPosition {
   readonly key: string;
   readonly sequence: TranscriptSequence;
-  /** Newest durable event represented by this row, including a paired tool result. */
+  /** The newest event in this row, including a matched tool result. */
   readonly latestSequence: TranscriptSequence;
   readonly receivedAt: string;
 }
 
-/** Whom a row is attributed to: "Parent", a child's Agent name, or the operator. */
+/** The author of a row: "Parent", a child's Agent name, or the operator. */
 export interface Speaker {
   readonly name: string;
-  /** The session the row belongs to; operator input carries the session it was sent to. */
+  /** The row's session; for operator input, the session it was sent to. */
   readonly sessionKey: string | null;
 }
 
-/** Prose from an Agent session or the operator. */
+/** A message from an Agent session or the operator. */
 export interface MessageRow extends RowPosition {
   readonly _tag: "Message";
   readonly speaker: Speaker;
-  /** Whether an Agent session said it or the operator sent it. */
+  /** Whether an Agent session or the operator sent the message. */
   readonly from: "agent" | "operator";
-  /** The prose without a reserved opening marker. */
+  /** The text without its reserved opening marker. */
   readonly text: string;
   readonly format: "markdown" | "plain";
-  /** Operator input the session refused; the text includes the refusal. */
+  /** Whether the session rejected this operator input; the text includes the rejection. */
   readonly undelivered: boolean;
-  /** The session that reads this operator input only when its current step ends, if any. */
+  /** The session that queued this operator input until its current step ends, or `null`. */
   readonly queued: QueuedFor | null;
-  /** The message opens with the reserved blocker marker. */
+  /** Whether the message starts with the reserved blocker marker. */
   readonly blocked: boolean;
-  /** The message opens with the reserved question marker. */
+  /** Whether the message starts with the reserved question marker. */
   readonly question: boolean;
 }
 
-/** The connectivity report a note shows: the Worker silent or answering again, or a session retrying its provider. */
+/** The connectivity state in a note: the Worker silent or answering again, or a session retrying its provider. */
 type ConnectivityNote =
   | { readonly _tag: "WorkerSilent" }
   | { readonly _tag: "WorkerAnswers" }
   | { readonly _tag: "ProviderRetrying"; readonly sessionId: string };
 
 /**
- * A lifecycle line, such as a session waiting for the operator, a requested cancel, or a
- * Worker or provider that stopped answering. A `failed` note is operator input the session refused.
+ * A lifecycle line, for example a session waiting for the operator, a requested cancel, or a Worker
+ * or provider that stopped answering. A `failed` note is operator input that the session rejected.
  */
 interface NoteRow extends RowPosition {
   readonly _tag: "Note";
@@ -86,16 +86,16 @@ interface NoteRow extends RowPosition {
   readonly connectivity: ConnectivityNote | null;
 }
 
-/** Consecutive tool calls of one session between two messages, folded into one line. */
+/** Consecutive tool calls of one session between two messages, shown as one line. */
 export interface Burst {
   readonly _tag: "Burst";
-  /** Named after its first call, so the burst keeps its identity while calls join it. */
+  /** The key of its first call, so it stays the same as calls are added. */
   readonly key: string;
   readonly speaker: Speaker;
   readonly tools: readonly [TranscriptTool, ...TranscriptTool[]];
 }
 
-/** A session handing work to a child, shown with the task it gave. */
+/** A session delegating work to a child, with the delegated task. */
 export interface DelegationRow {
   readonly _tag: "Delegation";
   readonly key: string;
@@ -103,7 +103,7 @@ export interface DelegationRow {
   readonly tool: TranscriptTool;
 }
 
-/** How an Attempt ended. */
+/** The outcome of an Attempt. */
 export type AttemptEnd =
   | { readonly _tag: "Succeeded"; readonly message: Option.Option<string> }
   | {
@@ -113,43 +113,42 @@ export type AttemptEnd =
     }
   | { readonly _tag: "Canceled"; readonly salvage: AttemptSalvage | null };
 
-/** The Attempt's outcome, in place of a final message that would repeat it. */
+/** The Attempt's outcome, shown instead of a final message that repeats it. */
 interface EndingRow {
   readonly _tag: "Ending";
   readonly key: string;
-  /** The terminal envelope's place, when that envelope is loaded. */
+  /** The terminal envelope's position, if the envelope is loaded. */
   readonly position: Option.Option<RowPosition>;
-  /** When the ending was said: the replaced final message, else the envelope or recorded end. */
+  /** The time of the replaced final message, else of the envelope or recorded end. */
   readonly receivedAt: Option.Option<string>;
-  /** The session whose final message the ending replaced. */
+  /** The session whose final message the ending replaces. */
   readonly speaker: Speaker | null;
   readonly end: AttemptEnd;
 }
 
-/** Labels an Agent removed from and added to the Run's Item in one go. */
+/** Labels an Agent removed from and added to the Run's Item together. */
 export interface LabelChanges {
   readonly _tag: "Labels";
   readonly removed: ReadonlyArray<LabelView>;
   readonly added: ReadonlyArray<LabelView>;
 }
 
-/** A change an Attempt's Agent made on the Run's GitHub Item, among the rows around its time. */
+/** A change an Attempt's Agent made on the Run's GitHub Item, placed among the rows by time. */
 export interface GitHubChangeRow {
   readonly _tag: "GitHubChange";
   readonly key: string;
-  /** When GitHub recorded the change; for labels changed in one go, the first of them. */
+  /** When GitHub recorded the change; for labels changed together, the first change. */
   readonly at: string;
   readonly change: LabelChanges | CommentedView | ReviewedView;
 }
 
-/** The operator's Board move of the Run's Item while the Attempt was at work, among the rows around its time. */
+/** An operator Board move of the Run's Item during the Attempt, placed among the rows by time. */
 export interface BoardMoveRow {
   readonly _tag: "BoardMove";
   readonly key: string;
   readonly move: BoardMovedView;
 }
 
-/** One row of an Attempt as the reader shows it. */
 export type ChapterRow =
   | MessageRow
   | NoteRow
@@ -159,66 +158,63 @@ export type ChapterRow =
   | GitHubChangeRow
   | BoardMoveRow;
 
-/** One Attempt of a Run: its sessions, its rows in transcript order, and its account readings. */
+/** One Attempt of a Run, with its sessions, rows in transcript order, and account readings. */
 export interface Chapter {
   readonly key: string;
   readonly attemptId: AttemptId;
   readonly attempt: Option.Option<AttemptView>;
-  /** The Attempt has no outcome and no terminal envelope yet. */
+  /** Whether the Attempt has no outcome and no terminal envelope yet. */
   readonly live: boolean;
   readonly parentModel: Option.Option<string>;
-  /** The parent first, then each child in the order it started. */
+  /** The parent session first, then each child in start order. */
   readonly sessions: ReadonlyArray<TranscriptSession>;
   readonly rows: ReadonlyArray<ChapterRow>;
   readonly meters: ReadonlyArray<PoolMeter>;
   readonly endedAt: Option.Option<string>;
-  /** The newest loaded event the Attempt sent, account readings aside. */
+  /** The time of the newest loaded event from the Attempt, excluding account readings. */
   readonly lastActivityAt: Option.Option<string>;
-  /** While the Attempt runs: its Worker not answering, or its children that cannot reach their provider. */
+  /** While the Attempt runs, the open connectivity warnings for its Worker and children. */
   readonly connectivity: ReadonlyArray<ConnectivityWarning>;
 }
 
-/** A Run's loaded transcript as the reader shows it, one chapter per Attempt. */
+/** A Run's loaded transcript, with one chapter per Attempt. */
 export interface ReaderDocument {
   readonly chapters: ReadonlyArray<Chapter>;
 }
 
 /**
- * What a checkpoint is: a session's turn, which the outline folds with that
- * session's neighbouring turns, or a row the reader marks and the outline lists
- * on its own (a blocker, a question, operator input, a Worker or provider
- * notice, the Attempt's outcome).
+ * The kind of a checkpoint: `turn`, which the outline folds with the session's adjacent turns, or a
+ * kind that the outline lists separately.
  */
 type CheckpointKind = "turn" | "blocker" | "question" | "operator" | "notice" | "ending";
 
-/** A row the outline lists by its own first sentence; failures, blockers, and warnings are marked. */
+/** A row that the outline lists by its first sentence. */
 export interface Checkpoint {
   readonly key: string;
   readonly sessionKey: string | null;
   readonly kind: CheckpointKind;
-  /** Who said it: "Parent", a child's Agent, or the operator; null for an outcome or a Worker notice. */
+  /** The speaker: "Parent", a child's Agent, or the operator; `null` for an outcome or a Worker notice. */
   readonly speaker: string | null;
-  /** The message's first sentence. */
   readonly text: string;
-  /** The sentence shortened to one outline row at a clause or word boundary. */
+  /** `text` shortened to one outline row at a clause or word boundary. */
   readonly label: string;
   readonly tone: "plain" | "warning" | "failed";
 }
 
-/** Consecutive turns of one session, which the outline lists as one entry until it is opened. */
+/** Consecutive turns of one session, listed as one outline entry until opened. */
 export interface TurnsEntry {
   readonly _tag: "Turns";
-  /** Named after its first turn, so the entry keeps its identity while turns join it. */
+  /** The key of its first turn, so it stays the same as turns are added. */
   readonly key: string;
   readonly speaker: string;
   readonly sessionKey: string | null;
   readonly turns: readonly [Checkpoint, ...Checkpoint[]];
 }
 
-/** One entry of an Attempt's outline: folded turns, or a checkpoint listed on its own. */
+/** An entry of an Attempt's outline: folded turns or a separate checkpoint. */
 export type OutlineEntry = TurnsEntry | { readonly _tag: "Mark"; readonly checkpoint: Checkpoint };
 
-/** Where the operator is reading: the Attempt at the reading line and the last checkpoint at or above it. */
+/** The reading position: the Attempt at the reading line and the last checkpoint at or above it. */
 export interface ReadingPlace {
   readonly attemptId: AttemptId;
   readonly checkpointKey: string | null;
@@ -235,7 +231,7 @@ const isTerminal = (notice: TranscriptNotice) =>
     notice.origin.payload._tag === "Failed" ||
     notice.origin.payload._tag === "Interrupted");
 
-/** Agent prose that a terminal outcome repeats: the result, an Agent's own failure report or blocker, or its question. */
+/** Returns the Agent text that a terminal outcome repeats: the result, failure report, blocker, or question. */
 export const terminalText = (end: AttemptEnd): string | null =>
   Match.valueTags(end, {
     Succeeded: ({ message }) => Option.getOrNull(message),
@@ -272,7 +268,7 @@ const envelopeEnd = (
   return null;
 };
 
-/** Whether an event shows the Attempt's sessions at work; meters and reports of no answer do not. */
+/** Returns whether an event is activity from the Attempt's sessions; meters and no-response reports are not. */
 const isActivity = ({ direction, payload }: TranscriptEventView): boolean =>
   direction === "outbound" &&
   payload._tag !== "WorkerUnresponsive" &&
@@ -306,7 +302,7 @@ const chapterRows = (
   let replaced: { readonly receivedAt: string; readonly speaker: Speaker } | null = null;
   let burst: Array<TranscriptTool> = [];
   let burstSpeaker: Speaker | null = null;
-  /** The row of each session's unanswered provider retries, by session id. */
+  /** The row index of each session's unresolved provider retries, by session ID. */
   const retrying = new Map<string, number>();
   const flush = () => {
     const [first, ...rest] = burst;
@@ -400,7 +396,7 @@ const chapterRows = (
       const text = `Provider unreachable, ${retriesLabel(event.retries)} so far. ${event.message}`;
       const streak = retrying.get(origin.session.id);
       const folded = streak === undefined ? undefined : rows[streak];
-      // Consecutive retries of one session read as one line that keeps the latest report.
+      // Consecutive retries of one session are merged into one line with the latest report.
       if (streak === rows.length - 1 && folded?._tag === "Note") {
         rows[streak] = { ...folded, latestSequence: entry.latestSequence, text };
         continue;
@@ -488,9 +484,9 @@ const chapterRows = (
 };
 
 /**
- * Arranges a projected transcript as the reader shows it: one chapter per Attempt, tool
- * calls folded between messages, a parent's copy of a child's message left out, and a
- * final message that the Attempt's outcome repeats shown once, as that outcome.
+ * Returns the reader document: one chapter per Attempt, tool calls grouped between messages, a
+ * parent's copy of a child's message omitted, and a final message that the outcome repeats shown
+ * only as the outcome.
  */
 export const readerDocument = (
   projection: TranscriptProjection,
@@ -563,8 +559,8 @@ export const readerDocument = (
 };
 
 /**
- * The rows the outline lists for a chapter, in order: each message, operator
- * input, Worker notice and provider warning, then the Attempt's outcome.
+ * Returns the outline checkpoints of a chapter in order: each message, operator input, Worker
+ * notice, and provider warning, then the Attempt's outcome.
  */
 export const chapterCheckpoints = (chapter: Chapter): ReadonlyArray<Checkpoint> =>
   chapter.rows.flatMap((row): ReadonlyArray<Checkpoint> => {
@@ -626,10 +622,8 @@ export const chapterCheckpoints = (chapter: Chapter): ReadonlyArray<Checkpoint> 
   });
 
 /**
- * The outline's entries for a chapter: each run of consecutive turns of one
- * session folds into one entry, and every other checkpoint stays its own entry,
- * so blockers, questions, operator input, notices, and the outcome are never
- * hidden in a fold.
+ * Returns the outline entries of a chapter: consecutive turns of one session are folded into one
+ * entry, and every other checkpoint is a separate entry, so it is never hidden in a fold.
  */
 export const outlineEntries = (chapter: Chapter): ReadonlyArray<OutlineEntry> => {
   const entries: Array<OutlineEntry> = [];
@@ -659,7 +653,7 @@ export type ReadingOrder = ReadonlyArray<{
   readonly checkpoint: boolean;
 }>;
 
-/** Orders every row the reader can show, including each Attempt's heading, history, and activity rows. */
+/** Returns every row the reader can show in order, including each Attempt's heading, history, and activity rows. */
 export const readingOrder = (document: ReaderDocument): ReadingOrder =>
   document.chapters.flatMap((chapter) => {
     const checkpoints = new Set(chapterCheckpoints(chapter).map(({ key }) => key));
@@ -678,9 +672,9 @@ export const readingOrder = (document: ReaderDocument): ReadingOrder =>
   });
 
 /**
- * Finds the reading place from the reader's rows in view: the first of them in
- * document order sets the Attempt, and the last checkpoint at or above it is marked.
- * Above an Attempt's first checkpoint, nothing in that Attempt is marked.
+ * Returns the reading position from the rows in view: the first in document order sets the Attempt,
+ * and the last checkpoint at or above it is marked. Above an Attempt's first checkpoint, no
+ * checkpoint is marked.
  */
 export const readingPlace = (
   order: ReadingOrder,

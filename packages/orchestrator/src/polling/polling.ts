@@ -62,7 +62,7 @@ import { markItemGone, observeItem, synchronizeLabels } from "./repository-sync.
 import { ItemHints, type ItemHint } from "./hints.ts";
 import { checkOpenIssues, NO_OPEN_ISSUE_CHECK, OPEN_ISSUE_CHECK_INTERVAL } from "./open-issues.ts";
 
-/** GitHub tolerates a handful of parallel REST and GraphQL calls per token. */
+/** The number of repositories polled in parallel, kept low for GitHub's per-token limits. */
 const REPOSITORY_CONCURRENCY = 4;
 
 const ITEM_CONCURRENCY = 4;
@@ -133,7 +133,7 @@ const watchedRepositories = (
 const sameWatches = (left: ReadonlyArray<WatchKey>, right: ReadonlyArray<WatchKey>): boolean =>
   left.length === right.length && left.every((value, index) => value === right[index]);
 
-/** What ends a wait between cycles before it is due. */
+/** The reason a wait between cycles ends. */
 type PollWake =
   | { readonly _tag: "Due" }
   | { readonly _tag: "Hint"; readonly hint: ItemHint }
@@ -144,42 +144,30 @@ export class PollingTriggers extends Context.Service<
   PollingTriggers,
   {
     /**
-     * Polls every managed repository, including those without active Loops.
-     * Label preflight precedes change detection; each changed Item is projected
-     * before its Run decisions. Known open pull requests are fetched again every
-     * cycle, changed or not, so mergeability that moves without an Item update
-     * still reaches the Board and Loops; `changedItems` counts detection only.
-     * A repository commits its cursor only after all Items finish. A Loop
-     * whose `if:` or prompt fails on an Item is logged once per content hash
-     * and reported in every cycle while it keeps failing; the Item's other
-     * Loops and the repository's other Items continue. The first completed
-     * cycle of the process, and the first one with an instance that differs
-     * from the previous cycle's, fetches those failing Items again, changed
-     * or not. An open pull request or failing Item that only the cursor kept
-     * and that GitHub no longer has is dropped from the cursor with a warning,
-     * and its unstarted Runs are revoked. At most once every 10 minutes per
-     * repository, the cycle also asks GitHub whether it still has each issue
-     * stored as open, and marks gone the ones it no longer has, revoking their
-     * unstarted Runs. Repository failures are reported while siblings
-     * continue; failure to read Loop runtime state fails the whole cycle.
+     * Polls every managed repository and evaluates its Loops against changed Items. Reports
+     * repository failures without stopping the others; fails only if Loop runtime state can't be
+     * read.
      */
     readonly poll: (instance: LoadedInstance) => Effect.Effect<PollCycle, EnginePersistenceError>;
-    /** Nudges an authoritative Item fetch after a self-write, retaining any request backoff from the writer. Pending duplicates coalesce; polling repairs loss. */
+    /**
+     * Requests an Item fetch after a self-write, keeping the writer's request backoff. Duplicate
+     * hints coalesce, and polling repairs lost ones.
+     */
     readonly hint: (
       repository: RepositoryName,
       item: ChangedItem,
       backoffUntil?: Option.Option<DateTime.Utc>,
     ) => Effect.Effect<void>;
     /**
-     * Repeats cycles at the configured interval and processes self-write Hints,
-     * respecting GitHub request backoff. Each cycle and each Hint reads the
-     * instance from `instances.get`. An accepted reload, seen on
-     * `instances.changes`, ends the wait for the configured interval: the next
-     * cycle starts at once with the reloaded instance, or at the time GitHub
-     * asked for when that is later.
+     * Runs cycles at the configured interval and processes self-write hints, respecting GitHub
+     * request backoff. An accepted reload starts the next cycle immediately, unless GitHub asked to
+     * wait longer.
      */
     readonly run: (instances: WatchedInstance) => Effect.Effect<never>;
-    /** The last completed cycle, including its isolated failures; absent until the first cycle completes. */
+    /**
+     * The last completed cycle with its isolated failures, or `None` before the first cycle
+     * completes.
+     */
     readonly latest: Effect.Effect<Option.Option<PollCycle>>;
   }
 >()("@usine/orchestrator/PollingTriggers") {
@@ -191,12 +179,12 @@ export class PollingTriggers extends Context.Service<
       const github = yield* GitHubPolling;
       const loops = yield* LoopControl;
       const latest = yield* Ref.make(Option.none<PollCycle>());
-      // Kept across cycles, so a repository whose poll fails keeps its last completion.
+      // Kept across cycles, so a repository whose poll fails keeps its last completion time.
       const completedPolls = yield* Ref.make<ReadonlyMap<string, RepositoryPoll>>(new Map());
       const hints = yield* ItemHints;
       const ownership = yield* Semaphore.make(1);
-      // A failing Item is fetched again only on its repository's first
-      // completed cycle of a process or of a reloaded instance.
+      // A failing Item is fetched again only on its repository's first completed cycle in a process
+      // or after a reload.
       const retriedFailingItems = yield* Ref.make<FailingItemRetries>({
         instance: Option.none(),
         repositories: new Set(),
@@ -293,10 +281,9 @@ export class PollingTriggers extends Context.Service<
           )
             ? []
             : stored.failingItems;
-          // Mergeability can change without an issue updated_at/ETag change
-          // (base moves and lazy UNKNOWN computation). Keep all observed open
-          // PRs in the durable cursor and refresh them on every poll, even 304s.
-          // Version 5 rebuilds this set by replaying detection on upgrade.
+          // Mergeability can change without an updated_at or ETag change, so open PRs stay in the
+          // cursor and are refreshed on every poll, even on 304. Cursor version 5 rebuilds this set
+          // on upgrade.
           const items = new Map<number, ChangedItem>([
             ...retrying.map((failing) => [failing.number, changedItem(failing)] as const),
             ...stored.openPullRequests.map(
@@ -316,9 +303,8 @@ export class PollingTriggers extends Context.Service<
               ({ number }) => number,
             ),
           );
-          // Fetched only because the cursor kept them: the open pull requests
-          // it refreshes and the Items whose Loops failed before this process
-          // or this instance.
+          // Items fetched only because the cursor kept them: refreshed open pull requests and Items
+          // whose Loops failed before this process or instance.
           const cursorOnly = new Set(
             [...stored.openPullRequests, ...retrying]
               .map(({ number }) => number)
@@ -362,10 +348,9 @@ export class PollingTriggers extends Context.Service<
                 );
                 return { _tag: "Evaluated", item, observation, cycle, failing } as const;
               }).pipe(
-                // An Item the cursor kept may have been deleted or transferred
-                // since; it must not stall the repository. A detected Item, a
-                // transient request failure, or any other invalid response
-                // still interrupts the cycle, which retries it next time.
+                // An Item kept only by the cursor may have been deleted or transferred, and must
+                // not stall the repository. Other failures still interrupt the cycle, which retries
+                // next time.
                 Effect.catchTag("GitHubItemNotFoundError", (error) =>
                   Effect.gen(function* () {
                     if (!cursorOnly.has(item.number)) return yield* error;
@@ -426,9 +411,9 @@ export class PollingTriggers extends Context.Service<
             ),
             failingItems,
           });
-          // Advancing the cursor is the commit point: every changed item was
-          // fetched, evaluated, and submitted or revoked. After a failure the
-          // old cursor stays so the next cycle re-polls.
+          // Advancing the cursor is the commit point: every changed Item was fetched, evaluated,
+          // and submitted or revoked. After a failure, the old cursor stays so the next cycle polls
+          // again.
           if (
             detected._tag === "RepositoryChanges" ||
             items.size > 0 ||

@@ -9,9 +9,8 @@ import { CommitSha } from "@usine/core/repository";
 import type { WorkerName } from "@usine/core/worker";
 import { Effect, Option, Result, Schema } from "effect";
 
-/** Bounds the salvage push so a stalled remote cannot hold the Attempt's cleanup open. */
 const PUSH_TIMEOUT = "2 minutes";
-/** The identity of the commits usine makes in an Attempt's worktree: salvage snapshots and rebased salvage. */
+/** The git identity for commits usine creates in an Attempt's worktree. */
 export const SALVAGE_GIT_CONFIG = [
   "-c",
   "user.name=usine",
@@ -28,19 +27,16 @@ export interface SalvageOptions<E extends Error> {
   readonly worktree: string;
   readonly baseCommit: Option.Option<CommitSha>;
   readonly ref: SalvageRef;
-  /** Runs git with the Worker's repository credentials; the salvage adds the worktree itself. */
+  /** Runs git with the Worker's repository credentials; `salvageWorktree` prepends `-C <worktree>`. */
   readonly git: (args: ReadonlyArray<string>) => Effect.Effect<string, E>;
 }
 
 const decodeCommit = Schema.decodeUnknownEffect(CommitSha);
 
 /**
- * The failure as the line an operator reads in the run drawer: its message, then
- * the diagnostic underneath it. A failed executor command says only `git exited
- * with code 128` and keeps git's stderr in its cause, which is what tells a
- * deleted remote from a revoked App. The local and SSH adapters scrub the
- * Attempt's token from that stderr before forming the error; an exe.dev VM
- * never receives one.
+ * Returns the operator-facing line for the run drawer: the failure's message followed by its
+ * cause's message. For a failed command, the cause is the stderr, which local and SSH executors
+ * scrub of the Attempt's token.
  */
 export const failureMessage = (failure: Error): string => {
   const detail = failure.cause instanceof Error ? failure.cause.message.trim() : "";
@@ -48,11 +44,9 @@ export const failureMessage = (failure: Error): string => {
 };
 
 /**
- * Preserves an unsuccessful Attempt's work before its worktree is removed:
- * commits everything left in the checkout and pushes HEAD to the Attempt's
- * salvage ref. A clean checkout at its base commit has nothing to salvage. A
- * failed push retains the worktree and reports its path instead. Never fails;
- * every skipped or failed stage is logged.
+ * Commits everything in an unsuccessful Attempt's checkout and pushes HEAD to its salvage ref
+ * before the worktree is removed. Skips a clean checkout at its base commit. If the push fails,
+ * keeps the worktree and reports its path. Never fails; skipped and failed stages are logged.
  */
 export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <E extends Error>(
   options: SalvageOptions<E>,
@@ -118,8 +112,6 @@ export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <
     }
   }
 
-  // A stalled remote is reported in words: a bare `TimeoutError` tells the
-  // operator nothing about which step never finished.
   const pushFailure = yield* git([
     "push",
     "--force",
@@ -131,7 +123,7 @@ export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <
     Effect.match({
       onFailure: (failure) => Option.some(failureMessage(failure)),
       onSuccess: Option.match({
-        onNone: () => Option.some(`git push did not finish within ${PUSH_TIMEOUT}`),
+        onNone: () => Option.some(`git push didn't finish within ${PUSH_TIMEOUT}`),
         onSome: () => Option.none<string>(),
       }),
     }),

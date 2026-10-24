@@ -1,13 +1,13 @@
 ---
 title: Loop files
-description: The frontmatter fields of a Loop file, the prompt template in its body, and what happens to a file that fails validation.
+description: The frontmatter fields of a loop file, the prompt template in its body, and what happens to a file that fails validation.
 sidebar:
   order: 2
 ---
 
-A Loop is one Markdown file in the `loops/` folder of the instance folder. The filename without `.md` is the Loop's name and identity: renaming the file retires the Loop and creates a new one. The YAML frontmatter declares the trigger, the selector, and the Agent. The body is the prompt template that usine renders into the Agent's task.
+A loop is one Markdown file in `loops/`. The file name without `.md` is the loop's name and identity: renaming the file removes the old loop and creates a new one, and deleting it removes the loop. The YAML frontmatter declares the trigger, the selector, and the agent. The body is the prompt template for the agent's task. usine has no built-in loops.
 
-The orchestrator reads every file ending in `.md` directly inside `loops/`, in name order, once at startup. It ignores other files. If the `loops/` or `agents/` folder is missing, the instance doesn't load.
+The orchestrator reads every `.md` file directly in `loops/`, in name order, at startup and at each [reload](/reference/configuration/cli/#reload). It ignores other files. If `loops/` or `agents/` is missing, the instance doesn't load.
 
 The schema is [`LoopFrontmatter`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/parser.ts#L31) in `packages/config/src/parser.ts`, which produces a [`LoopFile`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/loop.ts#L25).
 
@@ -37,57 +37,56 @@ If work cannot continue, add a comment to the issue that states the exact blocke
 
 ## File format
 
-The file starts with a line containing only `---`. The YAML frontmatter runs to the next line containing only `---`, and the body starts on the line after it ([`splitMarkdown`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/frontmatter.ts#L24)). LF and CRLF line endings both work.
+The file starts with a `---` line. The YAML frontmatter runs to the next `---` line, and the body starts after it ([`splitMarkdown`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/frontmatter.ts#L24)). LF and CRLF line endings both work.
 
-The filename must be kebab-case: lowercase letters and digits separated by single hyphens, such as `review-pr.md`.
+The file name must be kebab-case, such as `review-pr.md`.
 
 ## Frontmatter fields
 
-Keys are snake_case. An unknown key at any level is an error, as are duplicate keys.
+Keys are snake_case. Unknown keys at any level and duplicate keys are errors.
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
-| `trigger` | [trigger](#trigger) | required | The Loop's Stream and the condition that selects Items. |
-| `selector` | [selector](#selector) | every managed repository | The repositories the Loop applies to. |
-| `approval` | `none`, `required` | `none` | Whether each new Run waits for the operator's Approval. |
-| `step` | string | `run` | The name of the Run's single Step. |
-| `agent` | string | required | The Agent that owns the Loop's Runs: the name of a file in `agents/`, without `.md`. |
-| `max_cycles` | integer ≥ 1 | `3` | The Loop's Cycle budget per Item. |
-| `permissions` | `write`, `read` | `write` | What the Loop's Attempts may do to their repository. |
+| `trigger` | [trigger](#trigger) | required | The loop's stream and the condition that selects items. |
+| `selector` | [selector](#selector) | every managed repository | The repositories that the loop applies to. |
+| `approval` | `none`, `required` | `none` | Whether each new run waits for the operator's approval. |
+| `step` | string | `run` | The name of the run's single step. |
+| `agent` | string | required | The agent that does the loop's runs: the name of a file in `agents/`, without `.md`. |
+| `max_cycles` | integer ≥ 1 | `3` | The loop's cycle budget per item. |
+| `permissions` | `write`, `read` | `write` | What the loop's attempts can do to their repository. |
 
 ### `trigger`
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
-| `on` | `issue`, `pr`, `schedule` | required | The Stream: issues, pull requests, or the clock. |
+| `on` | `issue`, `pr`, `schedule` | required | The stream: issues (not pull requests), pull requests, or the clock. |
 | `if` | CEL expression | required | Selection condition that must evaluate to a boolean. See [Expressions](/reference/configuration/expressions/). |
 | `cron` | string | required for `schedule` | Five-field cron expression. Rejected for `issue` and `pr`. |
-| `tz` | string | `UTC` | IANA time zone the cron is evaluated in, such as `Europe/Paris`. `schedule` only. |
+| `tz` | string | `UTC` | IANA time zone for the cron, such as `Europe/Paris`. `schedule` only. |
 
 The trigger classes are [`IssueTrigger`, `PullRequestTrigger`, and `ScheduleTrigger`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/trigger.ts#L27).
 
-`if` is a string. YAML reads an unquoted `true` or `false` as a boolean, and usine reads it as the same CEL literal, so `if: true` selects every Item. Quote any other value that YAML would not read as a string, such as a number; the parser rejects it with `Expected a CEL expression: quote the value so YAML reads it as a string`. Use a folded block scalar (`>-`) to split a long condition over several lines.
+`if` is a string. An unquoted `true` or `false` counts as the CEL literal, so `if: true` selects every item. Quote any other value that YAML doesn't read as a string, such as a number, or the parser rejects it with `Expected a CEL expression. Quote the value so that YAML reads it as a string.`. Split a long condition with a folded block scalar (`>-`).
 
 #### `on: issue` and `on: pr`
 
-Each poll cycle, usine lists the issues and pull requests that changed in each selected repository, fetches each one's payload slice, and evaluates `if` against it ([`evaluateItem`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/polling/loop-evaluation.ts#L52)).
+Every `settings.poll_interval` seconds, usine lists the issues and pull requests that changed in each selected repository, fetches each one's payload slice, and evaluates `if` against it ([`evaluateItem`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/polling/loop-evaluation.ts#L52)). It also fetches every open pull request, because GitHub can change mergeability without updating the pull request. A board move queues a fetch of its item.
 
-- When `if` is true, usine renders the body and submits an Event. The Event's dedup key is the Loop, the repository, the Item number, and a hash of the payload without its timestamp fields. The same Item content produces the same Event, so it opens no second Run.
-- When `if` is false, usine revokes the Loop's Runs for that Item that no Attempt has started.
-- Before a queued Run opens, the engine evaluates `if` again against a fresh snapshot of the Item. If that check fails or takes more than five seconds, the Run opens ([`triggerConditionLayer`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/trigger-condition.ts#L23)).
+- If `if` is true, usine renders the body and submits an event, deduplicated by the loop, the repository, the item number, and a hash of the payload without its timestamps. The same content opens no second run; a new run needs a change, such as a label, a comment, or a commit.
+- If `if` is false, usine revokes the loop's runs for that item that no attempt has started. A running attempt finishes.
+- Before a queued run opens, the engine evaluates `if` again on a fresh snapshot of the item. If that check fails or takes more than five seconds, the run opens anyway ([`triggerConditionLayer`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/trigger-condition.ts#L23)).
 
-An Attempt for an `issue` Loop starts from the repository's default branch. An Attempt for a `pr` Loop starts from the pull request's head commit, `headRefOid`.
+An attempt for an `issue` loop starts detached at the latest commit of the default branch. An attempt for a `pr` loop starts detached at the pull request's head commit, `headRefOid`.
 
 #### `on: schedule`
 
-A schedule Loop fires once per Tick for each selected repository ([`ScheduleTriggers`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/schedule-triggers.ts#L203)). usine evaluates `if` with `item.tick` set to the Tick. Attempts start from the default branch.
+A schedule loop evaluates `if`, with `item.tick` set to the tick, once per tick for each selected repository ([`ScheduleTriggers`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/schedule-triggers.ts#L203)). Attempts start from the default branch. `max_cycles` doesn't apply.
 
-- Each Tick produces one Event per repository, with a dedup key made of the Loop, the repository, and the scheduled time.
-- usine evaluates only the latest Tick at or before the current time. After downtime, only the latest missed Tick fires. A new schedule Loop fires at startup for its latest past Tick.
-- When `if` is false for every repository, usine evaluates the same Tick again at its next wake, at most 60 seconds later, until the next Tick replaces it.
-- `max_cycles` doesn't apply to schedule Loops.
+- Each tick produces one event per repository, deduplicated by the loop, the repository, and the scheduled time.
+- usine evaluates only the latest tick at or before the current time, so after downtime only the latest missed tick fires. A new schedule loop fires at startup for its latest past tick.
+- If `if` is false for every repository, usine evaluates the same tick again at its next wake, at most 60 seconds later, until the next tick replaces it.
 
-`cron` has five fields: minute, hour, day of month, month, day of week. Effect's `Cron` module parses it, the same parser the scheduler uses ([`Cron`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/trigger.ts#L11)).
+`cron` has five fields: minute, hour, day of month, month, and day of week. Effect's `Cron` module parses it, as the scheduler does ([`Cron`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/trigger.ts#L11)).
 
 | Field | Values | Aliases |
 | --- | --- | --- |
@@ -97,9 +96,9 @@ A schedule Loop fires once per Tick for each selected repository ([`ScheduleTrig
 | month | 1 to 12 | `jan` to `dec` |
 | day of week | 0 to 7, where 0 and 7 are Sunday | `sun` to `sat` |
 
-Each field accepts `*`, lists (`1,15`), ranges (`1-5`), and step values (`*/15`). When both day fields are restricted, a date matches if either one matches. The parser rejects a six-field cron with seconds. Quote the value, because YAML reads a leading `*` as an alias.
+Each field accepts `*`, lists (`1,15`), ranges (`1-5`), and steps (`*/15`). If both day fields are restricted, a date matches either one. A six-field cron with seconds is rejected. Quote the value, because YAML reads a leading `*` as an alias.
 
-usine can't compute the cron boundaries inside a daylight-saving gap, so the schedule logs an error and retries at its next wake. During the hour that repeats when clocks go back, one local time matches two UTC instants, and the Loop fires at both.
+In a daylight-saving gap, usine can't compute the cron boundaries, so the schedule logs an error and retries at its next wake. In the hour that repeats when clocks go back, the loop fires at both UTC instants.
 
 ```markdown title="loops/weekly-triage.md"
 ---
@@ -120,14 +119,14 @@ This Run belongs to the Tick scheduled for {{ item.tick.scheduledAtLocal }}.
 
 ### `selector`
 
-Limits the Loop to a subset of the managed repositories ([`Selector`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/selector.ts#L6)). Without a selector the Loop applies to every repository in `usine.yaml`.
+Limits the loop to some managed repositories ([`Selector`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/selector.ts#L6)). Without it, the loop applies to every repository in `usine.yaml`.
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
 | `repos` | list of `owner/name` | none | Repositories by name. Each must be in the registry. Names match case-insensitively, as on GitHub. |
 | `tags` | list of strings | none | Repositories that have any of these tags. At least one registry repository must have each tag. |
 
-A selector sets `repos`, `tags`, or both; an empty mapping is an error. Each list must be non-empty and free of duplicates. With both keys, a repository must be listed in `repos` and have one of the `tags` ([`matchesSelector`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/selector.ts#L23)).
+A selector must set `repos`, `tags`, or both, each a non-empty list without duplicates. With both, a repository must be in `repos` and have one of the `tags` ([`matchesSelector`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/selector.ts#L23)).
 
 ```yaml title="loops/review-pr.md"
 selector:
@@ -137,19 +136,23 @@ selector:
 
 ### `approval`
 
-With `required`, each new Run waits for the operator to approve it in the UI before its first Attempt. The Loop's page under **Configuration** > **Loops** shows every field of the file as usine parsed it, its prompt with each `{{ }}` expression outlined, or the error that quarantined it. usine records the Approval as an Event. With the default `none`, Runs start without an Approval ([`ApprovalRequirement`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/core/src/loop.ts#L9)).
+With `required`, each new run waits in `Waiting` until the operator approves it in the UI. usine records the approval as an event. With the default `none`, runs start without an approval ([`ApprovalRequirement`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/core/src/loop.ts#L9)). If the item changes while a run waits and still matches, usine opens a new waiting run for the new state and cancels the older one as superseded. If it no longer matches, usine revokes the waiting run.
 
 ### `step`
 
-A non-empty string that sets the name of the Run's single Step ([`StepName`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/core/src/step/step.ts#L9)). The name identifies the Step's stored result. Renaming the Step creates a new Step; results stored under the old name stay there.
+A non-empty string that sets the name of the run's single step ([`StepName`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/core/src/step/step.ts#L9)). It appears in attempt IDs (`<run>/<step>/<number>`) and logs, so describe the work, such as `implement` or `review`. The name identifies the step's stored result. Renaming the step creates a new step, and results under the old name stay there.
 
 ### `agent`
 
-The kebab-case name of an [Agent file](/reference/configuration/agent-files/). The Agent must be in the roster. usine quarantines a Loop that references a missing or invalid Agent file, with the message `Unknown agent: <name>`.
+The kebab-case name of an [agent file](/reference/configuration/agent-files/). The agent must be in the roster. usine quarantines a loop that references a missing or invalid agent file, with the message `Unknown agent "<name>": agents/<name>.md is missing or invalid. Fix the agent file, or set agent to an existing agent.`
 
 ### `max_cycles`
 
-The Cycle budget: the most Runs this Loop may open for one Item before the operator resets the Item ([`CycleLimit`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/core/src/cycle-budget.ts#L8)). When a Loop reaches its limit, the next matching Event opens no Run and the engine opens an Item-level Ask instead. While that Ask is open, no Loop opens a new Run for the Item; the operator's reset starts a new budget ([`CycleBudget.admit`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/engine/src/cycle-budget/queries.ts#L84)). The default is 3. Schedule Loops ignore this field ([`triggerSubmission`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/trigger-submission.ts#L98)).
+The cycle budget: the number of runs that this loop can open on one item between operator resets ([`CycleLimit`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/core/src/cycle-budget.ts#L8)). The default is 3. Each loop counts separately, so three review and fix rounds allow three reviews and three fixes. A retry uses its run's reservation, and work canceled before its first attempt returns its reservation. Schedule loops ignore this field ([`triggerSubmission`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/trigger-submission.ts#L98)).
+
+When a loop reaches its limit, its next matching event opens an ask instead of a run: **Cycle budget exhausted** in **Needs attention**, with the item, the loops involved, the admitted runs, and the completed rounds. While the ask is open, no loop opens a run on that item, including a finishing loop, but runs that have a reservation finish. Label changes and restarts don't reset the budget, and the ask stays visible even if the item no longer matches any loop. usine doesn't post the ask on GitHub ([#36](https://github.com/basaltbytes/usine/issues/36)).
+
+**Reset cycle budget** starts a new budget and polls the repository again from the start ([`CycleBudget.admit`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/engine/src/cycle-budget/queries.ts#L84)). Only active loops that match the item then can open work. A paused loop stays paused.
 
 ```yaml title="loops/act-on-findings.md"
 max_cycles: 5
@@ -157,86 +160,85 @@ max_cycles: 5
 
 ### `permissions`
 
-What the Loop's Attempts may do to their repository ([`LoopPermissions`](https://github.com/basaltbytes/usine/blob/main/packages/core/src/loop.ts)). The default, `write`, lets them push branches and open and update pull requests. Set `read` for a Loop whose Agent must not change the repository, such as a review Loop:
+What the loop's attempts can do to their repository ([`LoopPermissions`](https://github.com/basaltbytes/usine/blob/main/packages/core/src/loop.ts)). The default, `write`, lets them push branches and open and update pull requests. Set `read` for a loop whose agent must not change the code, such as a review loop:
 
-- The Attempt's GitHub token has `contents: read`, so GitHub refuses a push, a merge, or a branch update made with it. This token is what keeps the Agent from changing the repository. The token keeps `pull_requests: write` and `issues: write`, so the Agent can still post reviews and comments with `gh pr review`, `gh pr comment`, and `gh issue comment`, and change labels. So `read` means the Agent cannot change the code; the Item itself stays writable, and a label the Agent sets can still trigger another Loop, as a review Loop's `review-passed` label does by design. The sets for both levels are [`WORKER_TOKEN_PERMISSIONS`](https://github.com/basaltbytes/usine/blob/main/packages/github/src/access.ts).
-- The Attempt's checkout has a pre-push hook that stops `git push` with `usine refused this push: the Loop <name> has permissions: read, so its Attempts cannot push to the repository.`, so the Agent reads why instead of GitHub's 403. The hook is a message, not a control: `git push --no-verify` skips it. The Attempt's git commands run this hook instead of the repository's own hooks.
-- An Attempt that ends without success leaves no salvage branch: its checkout is removed.
+- The attempt's GitHub token has `contents: read`, so GitHub refuses a push, a merge, or a branch update with it. It keeps `pull_requests: write` and `issues: write`, so the agent can still post reviews and comments with `gh pr review`, `gh pr comment`, and `gh issue comment`, and change labels, which can trigger other loops ([`WORKER_TOKEN_PERMISSIONS`](https://github.com/basaltbytes/usine/blob/main/packages/github/src/access.ts)).
+- The checkout has a pre-push hook, run instead of the repository's own hooks, that stops `git push` with `usine refused this push: the Loop <name> has permissions: read, so its Attempts cannot push to the repository.` The hook shows the agent the reason instead of GitHub's 403. It isn't a control: `git push --no-verify` skips it, and the token still blocks the push.
+- An attempt that ends without success leaves no salvage branch, and usine removes its checkout.
 
-usine records the permission level with each Event, so a Run keeps the level its Loop had when the Event matched. A change to the file applies to Events that match after the next reload.
+usine records the level with each event, so a run keeps the level that its loop had when the event matched. A changed level applies to events after the next reload.
 
-An exe.dev Worker uses exe.dev's GitHub integration, which grants the access of exe.dev's own GitHub App and cannot narrow it to `read`. An exe.dev Worker therefore refuses the Attempts of a `read` Loop before it attaches the integration: the Attempt fails with a message that names the Worker and the Loop, usine does not retry it, and the failed Run shows in **Needs attention**. Run `read` Loops on a local or SSH Worker.
+An exe.dev worker uses exe.dev's GitHub integration, which grants the access of exe.dev's own GitHub App and can't be narrowed to `read`. So it refuses a `read` loop's attempts before it attaches the integration: the attempt fails with a message that gives the worker and the loop, usine doesn't retry it, and the run appears in **Needs attention**. Run `read` loops on a local or SSH worker.
 
-`read` holds against the agent's tools, which use the attempt's token. How far it holds against an agent that looks for other credentials on purpose depends on the worker:
+`read` limits the attempt's token, not other credentials on the worker:
 
-- On the local worker, the agent runs as your Unix user, so it can read your own credentials in your home directory, such as gh's login, and push with them. The local worker is for agents you trust with your own access; see [what a local attempt can reach](/guides/add-a-worker/#what-a-local-attempt-can-reach).
-- An SSH worker has no GitHub credential of yours, and an SSH worker behind a gateway has no GitHub token on disk. Run a loop whose agent you don't trust that far on [SSH workers](/guides/add-a-worker/#ssh-workers), with or without a gateway, instead of the local worker.
-- On an SSH worker, an attempt can read the token or caller token of another attempt running on the same machine at the same time ([#231](https://github.com/basaltbytes/usine/issues/231), [#243](https://github.com/basaltbytes/usine/issues/243)), so a `read` attempt that runs beside a `write` one can reach access that pushes.
+- On the local worker, the agent runs as your Unix user and can push with your own credentials. See [Credentials that local attempts can read](/guides/add-a-worker/#credentials-that-local-attempts-can-read).
+- [SSH workers](/guides/add-a-worker/#ssh-workers) have none of your credentials, and a worker behind a gateway has no GitHub token on disk.
+- On an SSH worker, an attempt can read the token or caller token of another attempt that runs on the same machine at the same time ([#231](https://github.com/basaltbytes/usine/issues/231), [#243](https://github.com/basaltbytes/usine/issues/243)), including a `write` attempt.
 
 ```yaml title="loops/review-pr.md"
 permissions: read
 ```
 
-## The body: prompt template
+## Prompt template
 
-Everything after the closing `---` line is the prompt template. It must contain at least one non-whitespace character. When a trigger matches, usine renders the template into the Run's task.
+Everything after the closing `---` line is the prompt template, and it must not be blank. When a trigger matches, usine renders it into the run's task. You can change a failed run's task later with **Edit and retry**.
 
 ### Interpolation syntax
 
 `{{ expression }}` inserts the value of a CEL expression ([`interpolations`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/parser.ts#L126)):
 
-- An interpolation runs from `{{` to the next `}}`. Whitespace around the expression is trimmed, and the expression must not be blank.
-- An `{{` without a closing `}}` is an error.
-- There is no escape for a literal `{{`. A `}}` inside a CEL string literal ends the interpolation early.
-- The expression can use the same variables as the Loop's `if`: `repo`, and `item` shaped by the trigger's Stream. See [Expressions](/reference/configuration/expressions/#variables).
-- The expression must produce a scalar: `string`, `int`, `uint`, `double`, `bool`, or `null`. A list, a map, or an object fails validation when the file loads.
+- An interpolation runs from `{{` to the next `}}`. usine trims the whitespace around the expression, which must not be blank.
+- An `{{` without a closing `}}` is an error. There's no escape for a literal `{{`, and a `}}` in a CEL string ends the interpolation early.
+- The expression can use the same [variables](/reference/configuration/expressions/#variables) as `if`.
+- The expression must produce a scalar: `string`, `int`, `uint`, `double`, `bool`, or `null`. A list, a map, or an object fails validation.
 
-Values render as text: integers as decimal digits, booleans as `true` or `false`, doubles in JavaScript number form ([`render`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/parser.ts#L155)). To insert a list, reduce it to a string:
+Values render as text: integers as decimal digits, booleans as `true` or `false`, and doubles in JavaScript number form ([`render`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/parser.ts#L155)). To insert a list, reduce it to a string:
 
 ```markdown title="loops/start-dev.md"
 Labels on this issue: {{ item.labels.nodes.map(label, label.name).join(", ") }}
 ```
 
-### When rendering fails
+### Render failures
 
-usine type-checks every interpolation when the file loads, but a value can still fail at render time, for example a field that is `null` on this Item (see [null fields](/reference/configuration/expressions/#fields-that-can-be-null)).
+An interpolation that type-checks can still fail at render time, for example on a [null field](/reference/configuration/expressions/#fields-that-can-be-null):
 
-- For `issue` and `pr` Loops, usine submits no Event for that Loop and Item and continues with the other Loops and Items; the poll cursor still advances. **Needs attention** shows the failure with the Loop, the Item, and the interpolation for as long as it lasts, and usine logs `Loop evaluation failed on an Item` once per Loop, Item, and content hash. usine evaluates the Item again when it changes, and on the first poll after a restart or a reload, so a fixed template renders without waiting for a change.
-- For `schedule` Loops, the Tick fails for that repository, and usine evaluates it again at the next wake.
+- For `issue` and `pr` loops, usine submits no event for that loop and item, and continues with the others. The poll cursor still advances. **Needs attention** shows the failure with the loop, the item, and the interpolation while it lasts, and usine logs `Loop evaluation failed on an Item` once per loop, item, and content hash. usine evaluates the item again when it changes, and on the first poll after a restart or a reload.
+- For `schedule` loops, the tick fails for that repository, and usine evaluates it again at the next wake.
 
-### What the Agent receives
+### Agent prompt
 
-The rendered body is the task. The Attempt's Pi parent receives it inside instructions that usine assembles ([`assemblePrompt`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/agents/src/prompt.ts#L58)):
+The attempt's Pi parent receives the task in instructions that usine assembles ([`assemblePrompt`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/agents/src/prompt.ts#L58)):
 
-1. The repository name and the Event's full payload snapshot as JSON.
-2. The Agent's persona, the body of its Agent file.
+1. The repository name, the event's payload snapshot as JSON, and, on a retry, the salvage branch that the attempt resumes from.
+2. The agent's persona.
 3. The rendered task.
-4. Fixed instructions on completing the task and reporting a blocker.
-5. Fixed GitHub instructions, including the signature `— usine agent: <agent>` that every comment and review must end with.
+4. Fixed instructions: run checks in the foreground, push before finishing, and start the final answer with `[usine:blocked]` to report a blocker or `[usine:question]` to ask the operator for a decision.
+5. Fixed GitHub instructions: submit pull request reviews as `COMMENT` only, and end every comment, issue, pull request, and review with `— usine agent: <agent>`.
 
-The template doesn't need to copy payload fields, because the Agent can read them from the snapshot. Use interpolation for values that the task states directly, such as the head commit to verify.
+The task doesn't need to repeat payload fields or these rules. Interpolate values that the task states directly, such as the head commit to verify.
 
 ## Validation and quarantine
 
-usine validates each Loop file separately. A file that fails any check is quarantined: usine leaves it out of the loaded instance, it opens no Runs, and the other Loops still load ([`InstanceFolder.load`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/instance-folder.ts#L93)). The checks run in this order, and the first failure sets the stage:
+usine validates each loop file separately. A file that fails a check is quarantined: the loop opens no runs, and the other loops still load ([`InstanceFolder.load`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/instance-folder.ts#L93)). The checks run in this order, and the first failure sets the stage:
 
 | Stage | Checks | Example message |
 | --- | --- | --- |
-| `schema` | The filename ends in `.md` and is kebab-case. | `Expected a kebab-case filename identity` |
+| `schema` | The file name ends in `.md` and is kebab-case. | `Expected a kebab-case file name` |
 | `read` | The file can be read. | |
 | `frontmatter` | Opening and closing `---` lines. | `Expected the file to start with a YAML frontmatter delimiter (---)` |
 | `yaml` | YAML syntax, no duplicate keys, no parser warnings. | |
-| `schema` | Frontmatter keys and values; a non-blank body. | `Expected no excess property at ["trigger"]["cron"]` |
-| `expression` | `if` type-checks as a boolean; each interpolation is closed and type-checks as a scalar. | `No such key: nmae` |
-| `reference` | The Agent is in the roster; selected repositories and tags exist in `usine.yaml`. | `Unknown selector tags: mobile` |
+| `schema` | Frontmatter keys and values, including a valid `cron` and IANA `tz`, and a non-blank body. | `Expected no excess property at ["trigger"]["cron"]` |
+| `expression` | `if` type-checks as a boolean, and each interpolation is closed and type-checks as a scalar. | `No such key: nmae` |
+| `reference` | The agent is in the roster, and the selected repositories and tags exist in `usine.yaml`. | `Unknown tags in selector.tags: "mobile". Add them to a repository's tags in usine.yaml.` |
 
-At startup and at each reload, usine logs each quarantined Loop as a warning, `Loop quarantined; it opens no Runs until its file is fixed`, with its file, stage, and message, and lists it in **Needs attention** as **Loop quarantined**. Fix the file and reload the configuration ([CLI](/reference/configuration/cli/#reload)).
+At startup and at each reload, usine logs each quarantined loop as a warning, `Loop quarantined; it opens no Runs until its file is fixed`, with its file, stage, and message, and lists it in **Needs attention** as **Loop file not loaded**. Fix the file and [reload](/reference/configuration/cli/#reload).
 
-Two checks only log a warning. If `if` compares `item.labels` against a label name that isn't declared under `labels` in `usine.yaml`, usine logs `Loop trigger references an undeclared GitHub label` and still loads the Loop. The other check covers labels in Board Lanes; see [`repos[].lanes`](/reference/configuration/usine-yaml/#reposlanes).
+Two checks only log a warning: a label name in `if` ([label declarations](/reference/configuration/expressions/#label-declarations)) or in a [lane](/reference/configuration/usine-yaml/#reposlanes) that `usine.yaml` doesn't declare.
 
 ## More examples
 
-A pull-request Loop that reviews the head commit:
+A pull request loop that reviews the head commit:
 
 ```markdown title="loops/review-pr.md"
 ---
@@ -261,7 +263,7 @@ Before reading the diff, fetch `refs/pull/{{ item.number }}/head`, verify that i
 Post the review on GitHub. If you find any actionable issue, explain it with file and line references and add `agent-review-findings` to the pull request. If there are no actionable findings, post a short review result, make sure `agent-review-findings` is absent, and add `review-passed`. Do not edit the branch or merge the pull request.
 ```
 
-A pull-request Loop that fixes the findings of a review. Its trigger doesn't count reviews: `max_cycles` limits the review and fix rounds on each pull request, and when a Loop has used its limit, usine opens an Ask instead of another Run ([Bounded review and fix Loops](/guides/review-fix-loops/)):
+A pull request loop that fixes the findings of a review. Its trigger doesn't count reviews: `max_cycles` limits the review and fix rounds on each pull request. When a loop has used its limit, usine opens an ask instead of another run. See [Write review and fix loops](/guides/review-fix-loops/):
 
 ```markdown title="loops/act-on-findings.md"
 ---

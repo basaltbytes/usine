@@ -3,7 +3,7 @@ import { LoadedInstance } from "@usine/config/instance";
 import { Effect, Layer, Stream } from "effect";
 import { CurrentInstance } from "../../src/current-instance/current-instance.ts";
 
-/** A current instance that never changes; a test that reloads it has a bug. */
+/** Returns a current instance that never changes; reloading it is a test bug. */
 export const fixedInstance = (instance: LoadedInstance): CurrentInstance["Service"] => ({
   get: Effect.succeed(instance),
   changes: Stream.concat(Stream.make(instance), Stream.never),
@@ -11,7 +11,6 @@ export const fixedInstance = (instance: LoadedInstance): CurrentInstance["Servic
   registerWorkers: () => Effect.void,
 });
 
-/** The layer of `fixedInstance(instance)`. */
 export const fixedInstanceLayer = (instance: LoadedInstance) =>
   Layer.succeed(CurrentInstance)(fixedInstance(instance));
 

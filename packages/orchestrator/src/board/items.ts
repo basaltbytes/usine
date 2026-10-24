@@ -15,19 +15,19 @@ export interface ProjectedItem {
   readonly state: LaneItemState;
   readonly linkedPullRequests: ReadonlyArray<string>;
   readonly labels: ReadonlyArray<GitHubLabelName>;
-  /** True when GitHub reports the pull request branch as conflicting with its base. */
+  /** Whether GitHub reports the pull request branch as conflicting with its base. */
   readonly conflicting: boolean;
 }
 
 const labelsFrom = Schema.decodeUnknownEffect(Schema.Array(GitHubLabelName));
 
-// Only the labels are read, so a payload stored before a later field joined the slice still reads.
+// Only the labels are read, so a payload stored before later fields were added still decodes.
 const IssueLabels = Schema.Struct({ labels: IssuePayload.fields.labels });
 const PullRequestLabels = Schema.Struct({ labels: PullRequestPayload.fields.labels });
 
 /**
- * The labels in `payload`, an Item payload of `kind` such as the one the Event of a Run
- * recorded when its trigger matched. Fails when the payload has no labels of that shape.
+ * Returns the labels in an Item `payload` of `kind`, such as the payload of a Run's Event. Fails if
+ * the payload has no labels of that shape.
  */
 export const payloadLabels = (kind: ProjectedItem["kind"], payload: Schema.Json) =>
   Schema.decodeUnknownEffect(kind === "issue" ? IssueLabels : PullRequestLabels)(payload).pipe(
@@ -41,10 +41,7 @@ const projectionError = (item: ItemProjection, message: string) =>
     message,
   });
 
-/**
- * The Board's view of one stored Item. An Item GitHub no longer has counts as
- * closed, so its card leaves the open lanes.
- */
+/** Returns the Board's view of one stored Item. An Item gone from GitHub counts as closed. */
 export const projectedItem = (
   item: ItemProjection,
 ): Effect.Effect<ProjectedItem, BoardProjectionError> =>
@@ -91,5 +88,5 @@ export const projectedItem = (
         conflicting: state === "pr-open" && payload.mergeable === "CONFLICTING",
       };
     }
-    return yield* projectionError(item, `Unsupported Item projection source: ${item.source}`);
+    return yield* projectionError(item, `Unsupported item projection source: ${item.source}`);
   });

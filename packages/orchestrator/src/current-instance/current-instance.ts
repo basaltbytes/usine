@@ -28,78 +28,94 @@ import {
   restartChanges,
 } from "./changes.ts";
 
-/** A reload changed `usine.yaml` in a way that only a restart applies, so the running instance stays. */
+/** A reload changed `usine.yaml` in a way that needs a restart, so the running instance is kept. */
 export class RestartRequiredError extends Schema.TaggedError<RestartRequiredError>(
   "@usine/orchestrator/RestartRequiredError",
 )("RestartRequiredError", {
   blocks: Schema.NonEmptyArray(RestartBlock),
-  /** The changed fields, as paths into `usine.yaml` such as `webhooks` or `workers.build-1.destination`. */
+  /**
+   * The changed fields as paths into `usine.yaml`, such as `webhooks` or
+   * `workers.build-1.destination`.
+   */
   fields: Schema.NonEmptyArray(Schema.NonEmptyString),
-  /** A summary for operators: each change, and that the running configuration is kept. */
+  /** An operator summary of each change, stating that the running configuration is kept. */
   message: Schema.NonEmptyString,
 }) {}
 
-/** The refusal of a reload that makes `changes`. */
+/** Returns the refusal for a reload that makes `changes`. */
 export const restartRequired = (
   changes: EffectArray.NonEmptyReadonlyArray<RestartChange>,
 ): RestartRequiredError =>
   new RestartRequiredError({
     blocks: EffectArray.dedupe(EffectArray.map(changes, ({ block }) => block)),
     fields: EffectArray.map(changes, ({ field }) => field),
-    message: `usine.yaml changed in a way that applies only when usine up restarts: ${changes.map(({ reason }) => reason).join("; ")}. The running configuration is unchanged; restart usine up to apply the change.`,
+    message: `These usine.yaml changes require a restart: ${changes.map(({ reason }) => reason).join("; ")}. The running configuration is unchanged. Restart usine up to apply them.`,
   });
 
-/** A reload adds Workers, slots, or brains that failed Worker preflight, so the running instance stays. */
+/**
+ * A reload adds Workers, slots, or brains that failed Worker preflight, so the running instance is
+ * kept.
+ */
 export class ReloadPreflightError extends Schema.TaggedError<ReloadPreflightError>(
   "@usine/orchestrator/ReloadPreflightError",
 )("ReloadPreflightError", {
-  /** The reloaded Agents whose brains no running Agent has; preflight checked their brains on every Worker. */
+  /**
+   * The reloaded Agents with brains that no running Agent has, which preflight checked on every
+   * Worker.
+   */
   agents: Schema.Array(AgentName),
-  /** The Workers the reload adds or gives more slots; preflight checked each with every rostered brain. */
+  /**
+   * The Workers added or given more slots by the reload, which preflight checked with every
+   * rostered brain.
+   */
   workers: Schema.Array(WorkerName),
-  /** A summary for operators: what the reload adds, the failed Worker check, and that the running configuration is kept. */
+  /**
+   * An operator summary of the additions and the failed check, stating that the running
+   * configuration is kept.
+   */
   message: Schema.NonEmptyString,
-  /** The Worker preflight failure the executor reported. */
   cause: ExecutorError,
 }) {}
 
-/** The refusal of a reload whose preflight of `agents` and `workers` failed with `cause`. */
+/**
+ * Returns the refusal for a reload whose preflight of `agents` and `workers` failed with `cause`.
+ */
 export const reloadPreflightFailed = (
   agents: ReadonlyArray<AgentName>,
   workers: ReadonlyArray<WorkerName>,
   cause: ExecutorError,
 ): ReloadPreflightError => {
+  const quoted = (names: ReadonlyArray<string>) => names.map((name) => `"${name}"`).join(", ");
   const subjects = [
     ...(agents.length === 0
       ? []
-      : [`${agents.length === 1 ? "Agent" : "Agents"} ${agents.join(", ")}`]),
+      : [`${agents.length === 1 ? "agent" : "agents"} ${quoted(agents)}`]),
     ...(workers.length === 0
       ? []
       : [
-          `${workers.length === 1 ? "Worker" : "Workers"} ${workers.join(", ")}, which the reload adds or gives more slots`,
+          `${workers.length === 1 ? "worker" : "workers"} ${quoted(workers)} (added or given more slots by the reload)`,
         ]),
   ];
   const detail =
     cause._tag === "WorkerCapabilityError"
-      ? `Worker ${cause.worker}: ${cause.message}`
+      ? `Worker "${cause.worker}": ${cause.message}`
       : cause.message;
+  const sentence = `${detail.charAt(0).toUpperCase()}${detail.slice(1)}`.replace(/\.$/u, "");
   return new ReloadPreflightError({
     agents,
     workers,
-    message: `Worker preflight failed for ${subjects.join(" and ")}. ${detail.replace(/\.$/u, "")}. The running configuration is unchanged; fix the Worker, usine.yaml, or the Agent file, then reload again.`,
+    message: `Worker preflight failed for ${subjects.join(" and ")}. ${sentence}. The running configuration is unchanged. Fix the worker, usine.yaml, or the agent file, then reload again.`,
     cause,
   });
 };
 
-/** Why a reload kept the running instance. */
+/** The reason a reload kept the running instance. */
 export type InstanceReloadError = FactoryConfigError | RestartRequiredError | ReloadPreflightError;
 
 /**
- * How the Workers that run Attempts take a reload from `running` to `loaded`.
- * It refuses a `workers` change they cannot apply, and preflights the Workers,
- * slots, and brains the reload adds, without changing anything. It succeeds
- * with the effect that makes the Workers run `loaded`'s `workers` block, which
- * the reload runs once it has replaced the snapshot.
+ * Checks a reload from `running` to `loaded` without changing anything, and returns the effect that
+ * applies `loaded`'s `workers` block. Fails on an unsupported `workers` change or a failed
+ * preflight.
  */
 export type WorkerReload = (
   running: LoadedInstance,
@@ -130,38 +146,32 @@ const rejectionLogFields = (error: InstanceReloadError) =>
   });
 
 /**
- * The instance folder the orchestrator runs, as one snapshot that a reload
- * replaces. Polling, schedules, queued-Event checks, GitHub App project
- * discovery, Attempt settings, and the operator surface read it each time
- * they act, so a reload applies from their next cycle, check, or Attempt.
- * A Run keeps the Agent, task, and parent model it was opened with.
+ * The instance folder snapshot that the orchestrator runs, replaced by each reload. Consumers read
+ * it each time they act; a Run keeps the Agent, task, and parent model it opened with.
  */
 export class CurrentInstance extends Context.Service<
   CurrentInstance,
   {
     /** The snapshot that new work reads. */
     readonly get: Effect.Effect<LoadedInstance>;
-    /** The snapshot that new work reads, then each snapshot an accepted reload puts in its place. */
+    /** The current snapshot, then each snapshot an accepted reload installs. */
     readonly changes: Stream.Stream<LoadedInstance>;
     /**
-     * Loads the instance folder again with the startup loader and its
-     * per-file quarantine, then replaces the snapshot and reports what
-     * changed. An invalid `usine.yaml` or a changed `webhooks` block rejects
-     * the reload and keeps the running snapshot. The registered Workers
-     * decide which `workers` changes they take and preflight what the reload
-     * adds; without them, any `workers` change rejects the reload. Reloads
-     * run one at a time, and each outcome is logged.
+     * Reloads the instance folder, one reload at a time, and returns what changed. Fails and keeps
+     * the running snapshot on an invalid `usine.yaml`, a changed `webhooks` block, or a rejected
+     * `workers` change.
      */
     readonly reload: Effect.Effect<InstanceReload, InstanceReloadError>;
     /**
-     * Makes each reload, until the scope closes, go through `workers`. Before
-     * a registration, as in setup mode where no Worker runs Attempts, a
-     * reload refuses any `workers` change and checks no brain.
+     * Routes each reload through `workers` until the scope closes. Without a registration, as in
+     * setup mode, a reload rejects any `workers` change.
      */
     readonly registerWorkers: (workers: WorkerReload) => Effect.Effect<void, never, Scope.Scope>;
   }
 >()("@usine/orchestrator/CurrentInstance") {
-  /** Starts from `initial`, the folder `usine up` loaded at startup, and reloads `directory`. */
+  /**
+   * Starts from `initial`, the folder that `usine up` loaded at startup, and reloads `directory`.
+   */
   static readonly layer = (
     directory: InstanceDirectory,
     initial: LoadedInstance,
@@ -188,7 +198,8 @@ export class CurrentInstance extends Context.Service<
           return Effect.void;
         });
 
-        // Once the Workers have prepared the reload, it runs to the end, so what they added is applied.
+        // Once the Workers have prepared the reload, it runs to completion, so their additions are
+        // applied.
         const reload = Effect.uninterruptibleMask((restore) =>
           Effect.gen(function* () {
             const running = yield* SubscriptionRef.get(current);

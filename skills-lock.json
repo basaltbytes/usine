@@ -5,7 +5,7 @@
       "source": "basaltbytes/skills",
       "sourceType": "github",
       "skillPath": "skills/anti-slop-writing/SKILL.md",
-      "computedHash": "d499e53d695ff4a3591f5f7de39257d9c2e2ccdfaecc14c701d9d64431c72d6f"
+      "computedHash": "ac287af9395c82554f8418fa03ac223f1de6d039c225120f645021a719d85876"
     },
     "ask-matt": {
       "source": "mattpocock/skills",
@@ -41,7 +41,7 @@
       "source": "basaltbytes/skills",
       "sourceType": "github",
       "skillPath": "skills/coding-guidelines/SKILL.md",
-      "computedHash": "bc261f9ef04372e4989f643a8f0e8a7b7e4ddba52859f467698b0b44ff8c31c3"
+      "computedHash": "62b0ba5432e787931ee19fed3cac8998d44e5edabc4e47ff3de43052127e84f7"
     },
     "deslop": {
       "source": "cursor/plugins",

@@ -2,9 +2,8 @@ import type { Context as ChordContext } from "@earendil-works/chord";
 import type { DocumentWatch, JsonObject } from "@earendil-works/pi-durable";
 
 /**
- * Resolves with the first committed value of a document that `accept` takes,
- * starting with its value at acquisition. Cancelling the context rejects; the
- * watch is stopped either way.
+ * Resolves with the first committed document value that `accept` matches, starting with the current
+ * value. Rejects if the context is aborted or the watch ends, and stops the watch in every case.
  */
 export const firstAccepted = <T extends JsonObject>(
   watch: DocumentWatch<T>,

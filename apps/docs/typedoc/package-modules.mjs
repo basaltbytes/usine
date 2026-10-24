@@ -9,8 +9,8 @@ const repositoryDirectory = path.resolve(docsDirectory, "../..");
 const repositoryFileUrl = "https://github.com/basaltbytes/usine/blob/main/";
 
 /**
- * Every `@usine/*` devDependency of the docs site, with the declaration file behind each subpath
- * of its `exports` map. `directoryName` names the package's folder in the generated pages.
+ * The `@usine/*` devDependencies of the docs site, with the declaration file of each subpath in
+ * their `exports` maps. `directoryName` is the package's folder name in the generated pages.
  */
 export const documentedPackages = Object.keys(
   JSON.parse(readFileSync(path.join(docsDirectory, "package.json"), "utf8")).devDependencies,
@@ -31,7 +31,7 @@ export const documentedPackages = Object.keys(
     };
   });
 
-/** TypeDoc names each entry module by its declaration file's path relative to this directory. */
+/** The base directory of entry module names; TypeDoc uses each declaration file's path relative to it. */
 export const packagesDirectory = path.dirname(documentedPackages[0]?.directory ?? docsDirectory);
 
 export const entryPoints = documentedPackages.flatMap((documented) =>
@@ -39,8 +39,8 @@ export const entryPoints = documentedPackages.flatMap((documented) =>
 );
 
 /**
- * The GitHub URL of the source file that a package's declaration file was built from, or
- * `undefined` when the declaration file isn't in a package's `dist/` folder.
+ * Returns the GitHub URL of the source file that `declarationFile` was built from, or `undefined` if
+ * it is not in a package's `dist/` folder or the source file does not exist.
  *
  * @param {string} declarationFile
  */
@@ -72,8 +72,8 @@ const moduleName = (declarationFile) =>
  */
 
 /**
- * Nests the entry modules under one module per package. A package's root export (`.`) is the
- * package module itself. Returns the title of each module: its import specifier.
+ * Nests the entry modules under one module per package; a package's root export (`.`) is the
+ * package module. Returns each module with its title, which is its import specifier.
  *
  * @param {import("typedoc").ProjectReflection} project
  */
@@ -117,18 +117,17 @@ export function nestModulesByPackage(project) {
   return renames;
 }
 
-/** A subpath module with more members than this gets one page per source file. */
+/** The member count above which a subpath module is split into one page per source file. */
 const largeModuleMembers = 40;
 
 /**
- * Splits each large subpath module that re-exports members from other files: the members declared
- * in each other file move to a module of their own next to it, such as `operator/board` for the
- * members of `@usine/orchestrator/operator` declared in `board.ts`. The subpath module's comment
- * links the new pages. Returns the titles of the new modules. A package's root module is its
- * overview page and stays whole.
+ * Splits each subpath module with more than `largeModuleMembers` members: the members declared in
+ * another file move to a sibling module, for example `operator/board` for the members of
+ * `@usine/orchestrator/operator` declared in `board.ts`, and the subpath module's comment links to
+ * them. Package root modules are not split. Returns the titles of the new modules.
  *
- * The new modules are siblings rather than children of the subpath module: the module router puts
- * the page of a module nested two levels deep at the wrong path.
+ * The new modules are siblings, not children, because the module router puts pages nested two
+ * levels deep at the wrong path.
  *
  * @param {import("typedoc").ProjectReflection} project
  * @param {ModuleTitle[]} entryModules
@@ -193,8 +192,8 @@ export function splitLargeModules(project, entryModules, declarationFiles) {
 }
 
 /**
- * Points relative links in comments (`../../../docs/adr/0027-….md`) at the file on GitHub.
- * Left alone, TypeDoc copies the linked file into the generated pages.
+ * Replaces relative links in comments, for example `../../../docs/adr/0027-….md`, with GitHub URLs.
+ * Otherwise TypeDoc copies the linked files into the generated pages.
  *
  * @param {import("typedoc").ProjectReflection} project
  */

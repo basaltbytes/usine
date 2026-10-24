@@ -2,13 +2,13 @@ import { canonicalRepositoryName, type RepositoryName } from "@usine/core/reposi
 import type { ChangedItem } from "@usine/github/polling";
 import { Clock, Context, DateTime, Duration, Effect, Layer, Option, Queue, Ref } from "effect";
 
-/** A self-write identifies an Item to fetch; its payload still comes from GitHub. */
+/** An Item to fetch after a self-write. The payload still comes from GitHub. */
 export interface ItemHint {
   readonly repository: RepositoryName;
   readonly item: ChangedItem;
 }
 
-/** Pending Hints are bounded and coalesced; the normal poll repairs dropped nudges. */
+/** Pending hints are bounded and coalesced; the normal poll repairs dropped hints. */
 const make = Effect.gen(function* () {
   const pending = new Set<string>();
   const queue = yield* Queue.make<ItemHint>({ capacity: 128, strategy: "dropping" });
@@ -72,7 +72,7 @@ const make = Effect.gen(function* () {
   return { offer, take, defer, awaitBackoff };
 });
 
-/** Private pending Hint and request-backoff state owned by a polling runtime. */
+/** The pending hint and request-backoff state of a polling runtime. */
 export class ItemHints extends Context.Service<ItemHints, Effect.Success<typeof make>>()(
   "@usine/orchestrator/ItemHints",
 ) {

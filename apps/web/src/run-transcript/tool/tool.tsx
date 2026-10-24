@@ -28,7 +28,6 @@ const icons = {
   tool: WrenchIcon,
 };
 
-/** A call's readable input and result, then its complete payloads under Raw details. */
 export const ToolDetails = ({
   entry,
   view,
@@ -116,7 +115,7 @@ export const ToolDetails = ({
   );
 };
 
-/** Opening a call suspends following the bottom before its content grows. */
+/** Returns the disclosure state of a tool call; opening it stops following the bottom of the transcript before its content expands. */
 export const useToolDisclosure = (key: string) => {
   const { scrollToMessage } = useMessageScroller();
   const disclosure = useTranscriptDisclosure();
@@ -129,7 +128,6 @@ export const useToolDisclosure = (key: string) => {
   };
 };
 
-/** One durable tool call, displayed by its purpose with full payloads available on request. */
 export const TranscriptToolRow = ({ entry }: { readonly entry: TranscriptTool }) => {
   const disclosure = useToolDisclosure(entry.key);
   const view = presentTool(entry);

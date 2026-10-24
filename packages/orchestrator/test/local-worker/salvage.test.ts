@@ -289,7 +289,7 @@ describe("local worker salvage", () => {
         yield* git(["checkout", "-b", "attempt-3", firstBase]);
         yield* git(["commit", "--allow-empty", "-m", "wip(usine): salvage attempt r/3"]);
         const empty = yield* salvage(3, yield* head(seed));
-        // A fix lands on the default branch after the first Attempt started.
+        // A fix is committed on the default branch after the first Attempt started.
         yield* git(["checkout", "main"]);
         const tip = yield* commitFile("README.md", "# fixed on main\n", "fix: unblock the run");
         yield* git(["push", "origin", "main"]);
@@ -405,15 +405,15 @@ describe("local worker salvage", () => {
           yield* engine.cancel(accepted.runId);
           const salvage = yield* waitForSalvage(engine, accepted.runId);
           assert(salvage._tag === "Retained");
-          // The remote's own words reach the record, not only git's exit code,
-          // and the token they echoed does not.
+          // The remote's own message is in the record, not only git's exit code, and the token it
+          // echoed isn't.
           assert.include(salvage.message, "access revoked for [REDACTED]");
           assert.notInclude(salvage.message, TOKEN);
           assert(yield* fileSystem.exists(worktree));
           return { runId: accepted.runId, worktree };
         }).pipe(Effect.provide(runtime()));
-        // A second startup during the outage must also retain the only copy, and
-        // its reconcile rewrites the record with the reason that push failed too.
+        // A second startup during the outage must also keep the only copy, and its reconcile
+        // updates the record with the reason that push failed too.
         yield* Effect.gen(function* () {
           const engine = yield* RunEngine;
           const salvage = (yield* engine.inspect(saved.runId)).attempts[0]?.salvage;

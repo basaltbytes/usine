@@ -7,7 +7,6 @@ import type {
 import { Match } from "effect";
 import { agoLabel, clockLabel } from "../operator-copy.ts";
 
-/** An open connectivity problem of an Attempt in flight, as one line. */
 export const warningLine = (warning: ConnectivityWarningView): string =>
   Match.valueTags(warning, {
     WorkerSilent: ({ worker, lastAnsweredAt }) =>
@@ -16,14 +15,12 @@ export const warningLine = (warning: ConnectivityWarningView): string =>
       `${agent}: provider unreachable, ${retries} ${retries === 1 ? "retry" : "retries"} since ${clockLabel(since)}`,
   });
 
-/** How many Worker slots take no Attempt now, across the Workers. */
 const freeSlots = (workers: ReadonlyArray<WorkerView>): number =>
   workers.reduce(
     (free, { slots: { capacity, leased } }) => free + Math.max(0, capacity - leased),
     0,
   );
 
-/** What the empty Running block says: nothing running, and how many slots are free. */
 export const nothingRunning = (workers: ReadonlyArray<WorkerView>): string => {
   const total = workers.reduce((sum, { slots }) => sum + slots.capacity, 0);
   const free = freeSlots(workers);
@@ -31,13 +28,13 @@ export const nothingRunning = (workers: ReadonlyArray<WorkerView>): string => {
   return `Nothing running, ${free} of ${total} worker ${total === 1 ? "slot" : "slots"} free`;
 };
 
-/** When the factory last checked each repository, such as `Last checked 2m ago`, or none without repositories. */
+/** Returns text such as `Last checked 2m ago`, or `null` if there are no repositories. */
 export const lastCheckedLabel = (
   polls: ReadonlyArray<RepositoryPollView>,
   now: number,
 ): string | null => {
   if (polls.length === 0) return null;
-  if (polls.every(({ polledAt }) => polledAt === null)) return "No poll has finished yet";
+  if (polls.every(({ polledAt }) => polledAt === null)) return "Not checked yet";
   const [only] = polls;
   if (polls.length === 1 && only !== undefined && only.polledAt !== null) {
     return `Last checked ${agoLabel(only.polledAt, now)}`;
@@ -50,7 +47,7 @@ export const lastCheckedLabel = (
     .join(", ")}`;
 };
 
-/** The overview heading's counts, such as `2 running, 7 stalled`; none when both are zero. */
+/** Returns text such as `2 running, 7 stalled`, or `undefined` if both counts are zero. */
 export const deskCounts = (desk: DeskView): string | undefined => {
   const parts = [
     desk.running.length > 0 ? `${desk.running.length} running` : null,
@@ -59,7 +56,7 @@ export const deskCounts = (desk: DeskView): string | undefined => {
   return parts.length === 0 ? undefined : parts.join(", ");
 };
 
-/** The number of a GitHub pull request URL, such as `#402`; the URL itself when it names none. */
+/** Returns `#402` for a pull request URL, or the URL itself if it has no pull request number. */
 export const pullRequestLabel = (url: string): string => {
   const number = /\/pull\/(\d+)/u.exec(url)?.[1];
   return number === undefined ? url : `#${number}`;

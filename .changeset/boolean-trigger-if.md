@@ -2,4 +2,4 @@
 "@usine/config": patch
 ---
 
-A Loop's `if:` accepts an unquoted YAML `true` or `false` as the CEL literal. Other values that YAML does not read as a string fail with a message that says to quote them.
+A loop's `if:` accepts unquoted YAML `true` or `false`. Other non-string YAML values fail with a message to quote them.

@@ -11,7 +11,6 @@ import { RunFacts, RunTitle, WorkFacts } from "./header.tsx";
 import { runItem } from "./item.ts";
 import { RunWorkspace } from "./workspace.tsx";
 
-/** The whole Run: its header and actions, then the outline of its parts beside the reader. */
 export const RunPage = ({ runId }: { readonly runId: RunId }) => {
   const { data: overview } = useSuspenseQuery(overviewQuery());
   const detail = useRunDetail(runId, true);

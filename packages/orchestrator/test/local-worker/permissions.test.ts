@@ -38,7 +38,7 @@ import {
   workerCredential,
 } from "./support.ts";
 
-/** What the scripted parent saw in the Attempt's checkout. */
+/** What the scripted parent observed in the Attempt's checkout. */
 interface Observed {
   status?: string;
   push?: string;
@@ -151,7 +151,7 @@ describe("local worker Loop permissions", () => {
         const read = observed.get("read");
         const write = observed.get("write");
         assert(read !== undefined && write !== undefined);
-        // The hook lives outside the working tree, so nothing new shows in the checkout.
+        // The hook is outside the working tree, so nothing new shows in the checkout.
         assert.strictEqual(read.status, "exit=0\n");
         assert.include(
           read.push,
@@ -187,7 +187,7 @@ describe("local worker Loop permissions", () => {
           Effect.andThen(completes(context)),
         ),
       );
-      // The orchestrator's own environment holds the operator's GitHub tokens.
+      // The orchestrator's own environment contains the operator's GitHub tokens.
       const orchestratorEnvironment = ConfigProvider.fromEnv({
         env: {
           ...Object.fromEntries(

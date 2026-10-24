@@ -54,7 +54,10 @@ const nodeOptions = Effect.fn("DurableHarness.nodeOptions")(function* (
   } satisfies DurableHarnessOptions;
 }, Effect.provide(NodeServices.layer));
 
-/** The durable harness on the instance's `.usine/durable.sqlite`, with Pi's configured models and credentials. */
+/**
+ * Provides the durable harness on `.usine/durable.sqlite` with Pi's configured models and
+ * credentials.
+ */
 export const harnessLayer = (instanceDirectory: InstanceDirectory) =>
   Layer.unwrap(Effect.map(nodeOptions(instanceDirectory), durableHarnessLayer));
 
@@ -64,12 +67,12 @@ const childImplementations = Layer.mergeAll(
   piChildBackendLayer.pipe(Layer.provide(piSdkLive)),
 );
 
-/** Claude Code, Codex, and Pi children, chosen per Agent harness. */
+/** Provides the Claude Code, Codex, and Pi child backends, selected by the Agent's harness. */
 export const childBackendLayer = childDispatcherLayer.pipe(Layer.provide(childImplementations));
 
 /**
- * The Node durable Attempt runtime: the harness on the instance's storage and
- * the real child backends. Building it resumes every unfinished Attempt.
+ * Provides the Node `AttemptRuntime` with the real child backends. Building it resumes every
+ * unfinished Attempt.
  */
 export const layer = (instanceDirectory: InstanceDirectory) =>
   attemptRuntimeLayer.pipe(

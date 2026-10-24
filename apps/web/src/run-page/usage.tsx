@@ -11,7 +11,7 @@ import { poolLabel, tokensLabel, usdLabel } from "../operator-copy.ts";
 
 const count = new Intl.NumberFormat("en");
 
-/** A price as the operator reads it: dollars, and the word estimate on the Claude plan's figure. */
+/** Renders the cost in dollars, followed by `estimate` if the cost is an estimate. */
 const Cost = ({ cost }: { readonly cost: UsageCostView | null }) =>
   cost === null ? null : (
     <>
@@ -24,21 +24,17 @@ const sessionName = ({ session }: SessionUsageView) =>
   session._tag === "ParentSession" ? "Parent" : session.agent;
 
 const row = "grid grid-cols-[minmax(0,1fr)_auto_7rem] items-baseline gap-x-3 py-0.5";
-// Room for `at least` before a price, kept on every line so the token figures stay aligned.
+// The wider price column fits `at least`; every row uses it so the token figures stay aligned.
 const lowerBoundRow = "grid grid-cols-[minmax(0,1fr)_auto_10rem] items-baseline gap-x-3 py-0.5";
 
-/**
- * A pool's line: a Run's `PoolUsageView`, or a Task's `TaskPoolUsageView`, whose `unpriced` marks
- * its price as a lower bound.
- */
+/** A pool line from a Run or a Task; on a Task, `unpriced` marks the price as a lower bound. */
 type PoolLine = PoolUsageView | TaskPoolUsageView;
 
 const unpriced = (pool: PoolLine): boolean => "unpriced" in pool && pool.unpriced;
 
 /**
- * Tokens per billing pool, each with its price where the pool has a dollar rate. The ChatGPT plan
- * says it has no dollar rate instead of showing a price, and a Task's pool with usage not priced
- * yet says its price is `at least` that much. The Run page and the Tasks list share it.
+ * Renders tokens per billing pool, with a price if the pool has a dollar rate. A Task pool with
+ * unpriced usage shows its price as `at least`.
  */
 export const PoolBreakdown = ({ pools }: { readonly pools: ReadonlyArray<PoolLine> }) => {
   const lowerBound = pools.some((pool) => unpriced(pool) && pool.cost !== null);
@@ -69,10 +65,7 @@ export const PoolBreakdown = ({ pools }: { readonly pools: ReadonlyArray<PoolLin
   );
 };
 
-/**
- * What the Run's Attempts used: tokens per billing pool with its price where
- * the pool has a dollar rate, then per session under each Attempt.
- */
+/** Renders usage per billing pool, then per session under each Attempt. */
 export const UsageBreakdown = ({
   usage,
   attempts,
@@ -115,7 +108,7 @@ export const UsageBreakdown = ({
   </>
 );
 
-/** The Run header's token total, opening to the breakdown per pool and session. */
+/** Renders the token total, which opens the breakdown per pool and session. */
 export const UsageFact = ({
   usage,
   attempts,
@@ -127,7 +120,7 @@ export const UsageFact = ({
     Tokens
     <Popover>
       <PopoverTrigger
-        aria-label={`Tokens: ${count.format(usage.tokens)}. Show them per pool and session`}
+        aria-label={`Tokens: ${count.format(usage.tokens)}. Show per pool and session`}
         className="rounded-sm font-mono text-xs text-primary tabular-nums underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/70"
       >
         {tokensLabel(usage.tokens)}

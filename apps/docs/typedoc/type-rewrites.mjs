@@ -19,10 +19,9 @@ import {
 } from "typedoc";
 
 /**
- * Walks `type` bottom-up and replaces each node for which `replace` returns a type. Composite
- * types are updated in place, which keeps the details TypeDoc stores on them, such as the
- * comments of union members. Types inside an object literal are left alone: its members are
- * reflections of their own.
+ * Walks `type` bottom-up and replaces each node for which `replace` returns a type. Composite types
+ * are updated in place, which keeps details such as union member comments. Types inside object
+ * literals are skipped because their members are separate reflections.
  *
  * @param {import("typedoc").SomeType} type
  * @param {(type: import("typedoc").SomeType) => import("typedoc").SomeType | undefined} replace
@@ -84,7 +83,7 @@ function mapProjectTypes(project, replace) {
 }
 
 /**
- * The value of a string literal type, such as `RunId` for `"RunId"`.
+ * Returns the value of a string literal type, for example `RunId` for `"RunId"`.
  *
  * @param {import("typedoc").SomeType | undefined} type
  */
@@ -92,7 +91,8 @@ const stringLiteral = (type) =>
   type instanceof LiteralType && type.toString().startsWith('"') ? String(type.value) : undefined;
 
 /**
- * The names in the `Brand<"X">` parts of a branded type such as `string & Brand<"RunId">`.
+ * Returns the names in the `Brand<"X">` parts of a branded type, for example
+ * `string & Brand<"RunId">`.
  *
  * @param {import("typedoc").SomeType} type
  */
@@ -108,7 +108,7 @@ const brandNames = (type) =>
     : [];
 
 /**
- * The brand names of the type a type alias declares, such as `RunId` for
+ * Returns the brand names of the type that a type alias declares, for example `RunId` for
  * `type RunId = typeof RunId.Type`, which is `string & Brand<"RunId">`.
  *
  * @param {import("typescript").TypeChecker} checker
@@ -128,9 +128,9 @@ export function aliasBrandNames(checker, symbol) {
 }
 
 /**
- * Shows a branded type by the name of the type alias that declares it: `RunId` instead of
- * `string & Brand<"RunId">`. TypeDoc expands the brand when it reads a type from the checker
- * rather than from a type annotation, as for the fields of a `Schema.Class`.
+ * Replaces each branded type with a reference to the type alias that declares it: `RunId` instead
+ * of `string & Brand<"RunId">`. TypeDoc expands the brand when it reads a type from the checker
+ * rather than from a type annotation, as for `Schema.Class` fields.
  *
  * @param {import("typedoc").ProjectReflection} project
  * @param {Map<import("typedoc").DeclarationReflection, string[]>} aliasBrands The brand names of
@@ -156,8 +156,8 @@ export function nameBrandedTypes(project, aliasBrands) {
 }
 
 /**
- * Shows the schema type `Schema.decodeTo<Schema.declareConstructor<X, …>, …>` that TypeScript
- * writes for a `Schema.Class` named `X` as `typeof X`.
+ * Replaces the schema type `Schema.decodeTo<Schema.declareConstructor<X, …>, …>` that TypeScript
+ * emits for a `Schema.Class` named `X` with `typeof X`.
  *
  * @param {import("typedoc").SomeType} type
  */
@@ -185,8 +185,8 @@ export function nameClassSchemas(type) {
  */
 
 /**
- * Shortens the type of an `HttpApi.HttpApi` constant to its id and group names, and returns its
- * endpoints. TypeScript writes the whole API into the type: several kilobytes on one line.
+ * Shortens the type of an `HttpApi.HttpApi` constant to its ID and group names, and returns its
+ * endpoints. Without this, the type contains the whole API, several kilobytes on one line.
  *
  * @param {import("typedoc").DeclarationReflection} reflection
  * @returns {HttpApiEndpoint[] | undefined}

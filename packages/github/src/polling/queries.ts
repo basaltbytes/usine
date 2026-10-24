@@ -127,9 +127,8 @@ export const PULL_REQUEST_PAYLOAD_QUERY = `
 `;
 
 /**
- * Asks for `count` issues of one repository by number: alias `i<k>` reads the
- * issue numbered by the variable `$n<k>`. An issue the repository no longer
- * has comes back null under its alias.
+ * Returns a query for `count` issues of one repository by number: alias `i<k>` reads the issue
+ * numbered `$n<k>`. A missing issue is null under its alias.
  */
 export const issuesPresentQuery = (count: number): string => {
   const indexes = Array.from({ length: count }, (_, index) => index);

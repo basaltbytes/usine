@@ -10,10 +10,7 @@ import { UsageFact } from "./usage.tsx";
 
 const external = { target: "_blank", rel: "noreferrer" } as const;
 
-/**
- * The Item's number, linking to GitHub, and its title. A Run without an Item, or whose
- * title is unknown, is named by its Loop.
- */
+/** If the Run has no Item or its title is unknown, renders the Loop name. */
 export const RunTitle = ({
   run,
   item,
@@ -22,9 +19,9 @@ export const RunTitle = ({
 }: {
   readonly run: Pick<RunView, "loop" | "repository">;
   readonly item: Option.Option<RunItem>;
-  /** Renders the title text in the caller's heading element and size. */
+  /** Wraps the title in the caller's heading element. */
   readonly heading: (title: ReactNode) => ReactNode;
-  /** Names the title for the drawer-to-page view transition; one shown title at a time may carry it. */
+  /** Whether the title gets the drawer-to-page view transition name; only one visible title can have it. */
   readonly shared: boolean;
 }) => (
   <div
@@ -52,7 +49,6 @@ export const RunTitle = ({
   </div>
 );
 
-/** The Run's state, its pull request or the lack of one, its Loop, and its Agent, on one line. */
 export const RunFacts = ({
   run,
   item,
@@ -63,9 +59,9 @@ export const RunFacts = ({
     RunView,
     "state" | "attempts" | "pullRequestUrl" | "loop" | "agent" | "loopPaused"
   >;
-  /** A pull request Item is the Run's pull request when the Run produced none. */
+  /** If the Run opened no pull request and the Item is one, the Item is shown as the pull request. */
   readonly item: Option.Option<RunItem>;
-  /** Names the state for the drawer-to-page view transition, as on the title. */
+  /** Whether the state gets the drawer-to-page view transition name. */
   readonly shared: boolean;
   readonly className?: string;
 }) => {
@@ -122,13 +118,13 @@ const LiveDuration = ({ endedMillis, since }: { endedMillis: number; since: stri
   return <>{durationLabel(endedMillis + Math.max(0, now - Date.parse(since)))}</>;
 };
 
-/** The Run's Attempt time: the ended Attempts' time, counting on while one runs. */
+/** Renders the total Attempt time, which keeps counting while an Attempt runs. */
 const RunDuration = ({ duration }: { readonly duration: RunDurationView }) => (
   <span
     title={
       duration.unmeasured === 0
         ? "Total attempt time"
-        : `${duration.unmeasured} ${duration.unmeasured === 1 ? "attempt" : "attempts"} not counted, ended before end times were recorded`
+        : `${duration.unmeasured} ${duration.unmeasured === 1 ? "attempt" : "attempts"} not counted: no recorded end time`
     }
   >
     Duration{" "}
@@ -143,18 +139,14 @@ const RunDuration = ({ duration }: { readonly duration: RunDurationView }) => (
   </span>
 );
 
-/**
- * Where and how long the Run's Attempts worked, on the line under the Run's
- * facts: the Worker the newest Attempt runs or ran on and the Attempts' total
- * time, and on the Run page the tokens they used. Nothing before an Attempt starts.
- */
+/** Renders the newest Attempt's Worker and the total Attempt time, or nothing before an Attempt starts. */
 export const WorkFacts = ({
   detail,
   showUsage,
   className,
 }: {
   readonly detail: Pick<RunDetailView, "run" | "worker" | "duration" | "usage">;
-  /** The Run page shows the tokens; the drawer keeps to the Worker and the time. */
+  /** Whether to show token usage; `true` on the Run page, `false` in the drawer. */
   readonly showUsage: boolean;
   readonly className?: string;
 }) =>

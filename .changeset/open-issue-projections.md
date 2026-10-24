@@ -2,4 +2,4 @@
 "@usine/engine": patch
 ---
 
-`ItemProjectionReader.openIssues(repository)` returns the numbers of the repository's issue projections that are open and not marked gone.
+Adds `ItemProjectionReader.openIssues(repository)`: the numbers of open issue projections not marked gone.

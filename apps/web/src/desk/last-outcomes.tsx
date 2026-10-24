@@ -54,7 +54,7 @@ const OutcomeRow = ({ closed, now }: { readonly closed: ClosedRunView; readonly 
   );
 };
 
-/** The Runs that closed last, newest first; each row opens its Run page. */
+/** Renders the most recently closed Runs, newest first; each row links to its Run page. */
 export const LastOutcomes = ({
   outcomes,
   now,
