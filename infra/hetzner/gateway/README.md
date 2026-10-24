@@ -125,7 +125,7 @@ The Hetzner firewall admits SSH from `ORCHESTRATOR_CIDR` only, so the orchestrat
    TAILSCALE_AUTH_KEY=tskey-auth-... ./gateway.sh tailnet-up -i ~/.ssh/usine_worker
    ```
 
-   `tailnet-up` passes `--netfilter-mode=off`, because the `flush ruleset` in `gateway-nftables.conf` would delete Tailscale's rules at every nftables reload, and `--accept-dns=false`, so the gateway keeps Hetzner's resolvers. nftables accepts SSH on every interface, `tailscale0` included, and the gateway's other services only from the private network.
+   `tailnet-up` passes `--netfilter-mode=off`, because the `flush ruleset` in `gateway-nftables.conf` would delete Tailscale's rules at every nftables reload, and `--accept-dns=false`, so the gateway keeps Hetzner's resolvers. nftables accepts SSH on every interface, `tailscale0` included, and the gateway's other services only from the private network. It refuses connections from the gateway into the tailnet, and the tailnet's access rules decide which devices can reach the gateway on port 22.
 
 2. Keep the gateway's node key from expiring, which by default happens after 180 days and takes the gateway off the tailnet. In the Tailscale admin console, disable key expiry for the gateway's machine, or log in with a tagged auth key: tagged devices have key expiry disabled by default.
 
@@ -156,6 +156,8 @@ hcloud firewall add-rule usine-gateway --direction in --protocol tcp --port 22 -
 ```
 
 Without SSH, give root a password with `hcloud server reset-password usine-gateway`, which prints it, and log in as root on the server's Hetzner Cloud Console. Run `passwd -l root` when you're done.
+
+On an existing gateway joined to a tailnet by hand, run `tailscale set --accept-dns=false` first. Then add `oifname "tailscale0" ct state new reject` to the output chain in `/etc/nftables.conf` and run `nft -f /etc/nftables.conf`. With the tailnet's DNS on, the gateway's resolver is 100.100.100.100 on `tailscale0`, and that rule would block it.
 
 ## Change the allowlist or an API key
 
