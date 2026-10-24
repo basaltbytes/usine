@@ -1,9 +1,14 @@
 #!/bin/sh
 # Creates and deletes the usine gateway at Hetzner Cloud: a private network,
-# the gateway VM, and its firewall, all labeled $LABEL.
+# the gateway VM, and its firewall, all labeled $LABEL. install and tailnet-up
+# connect to the SSH destination in $GATEWAY_SSH, such as a Host alias in
+# ~/.ssh/config, or by default to root at the gateway's public address.
 #
 #   ORCHESTRATOR_CIDR=203.0.113.7/32 SSH_KEY=my-key ./gateway.sh create
-#   ./gateway.sh install -i ~/.ssh/usine_worker @usine/gateway                # the release on npm
+#   ./gateway.sh tailnet-up -i ~/.ssh/usine_worker                           # log in to a tailnet with the URL it prints
+#   TAILSCALE_AUTH_KEY=tskey-auth-... ./gateway.sh tailnet-up                # or with an auth key
+#   GATEWAY_SSH=usine-gateway ./gateway.sh install @usine/gateway            # the release on npm, through a Host alias
+#   ./gateway.sh install -i ~/.ssh/usine_worker @usine/gateway               # or through the public address
 #   pnpm --filter @usine/core --filter @usine/gateway pack                   # or a build: from the repository root, after pnpm build
 #   ./gateway.sh install -i ~/.ssh/usine_worker ./usine-core-0.3.0.tgz ./usine-gateway-0.0.0.tgz
 #   ./gateway.sh worker-user-data ~/.ssh/id_ed25519.pub > worker.mime        # cloud-init for a Worker behind it
@@ -67,26 +72,62 @@ EOF
   hcloud server poweron "$NAME"
   echo "Gateway $NAME is booting at $(hcloud server ip "$NAME"), $GATEWAY_IP on network $NAME."
   echo "Wait for it with: ssh root@$(hcloud server ip "$NAME") cloud-init status --wait"
+  echo "Then log it in to your tailnet: $0 tailnet-up [-i <identity-file>]"
   echo "Then install the gateway: $0 install [-i <identity-file>] (@usine/gateway[@<version>] | <tarball>...)"
 }
 
-# Runs scp or ssh with the identity file install was given, if any.
+# Sets destination to $GATEWAY_SSH, or to root at the gateway's public address.
+gateway_destination() {
+  if [ -n "${GATEWAY_SSH:-}" ]; then
+    destination=$GATEWAY_SSH
+  else
+    destination=root@$(hcloud server ip "$NAME")
+  fi
+}
+
+# Sets identity to the file after a leading -i, as with ssh -i, and skipped to
+# the number of arguments the option takes.
+identity_option() {
+  identity=""
+  skipped=0
+  if [ "${1:-}" = -i ]; then
+    [ -f "${2:-}" ] || { echo "Pass an existing identity file after -i" >&2; exit 2; }
+    identity=$2
+    skipped=2
+  fi
+}
+
+# Runs scp or ssh with the identity file from identity_option, if any.
 with_identity() {
   tool=$1
   shift
   if [ -n "$identity" ]; then "$tool" -i "$identity" -o IdentitiesOnly=yes "$@"; else "$tool" "$@"; fi
 }
 
+# Logs the gateway in to a tailnet with the auth key in $TAILSCALE_AUTH_KEY,
+# sent on standard input, or else with the login URL that tailscale up prints,
+# then prints the gateway's tailnet IPv4 address.
+tailnet_up() {
+  identity_option "$@"
+  shift "$skipped"
+  [ "$#" -eq 0 ] || { echo "tailnet-up takes no arguments other than -i <identity-file>" >&2; exit 2; }
+  gateway_destination
+  up="tailscale up --hostname=$NAME --netfilter-mode=off --accept-dns=false"
+  if [ -n "${TAILSCALE_AUTH_KEY:-}" ]; then
+    printf '%s' "$TAILSCALE_AUTH_KEY" | with_identity ssh "$destination" "$up --auth-key=file:/dev/stdin"
+  else
+    with_identity ssh -t "$destination" "$up"
+  fi
+  address=$(with_identity ssh "$destination" tailscale ip -4)
+  echo "Gateway $NAME is at $address on the tailnet."
+}
+
 # Installs @usine/gateway from npm, or tarballs made with pnpm pack, which it
 # copies to the gateway first. -i names the private key for scp and ssh, as
 # with ssh -i.
 install_packages() {
-  identity=""
-  if [ "${1:-}" = -i ]; then
-    [ -f "${2:-}" ] || { echo "Pass an existing identity file after -i" >&2; exit 2; }
-    identity=$2
-    shift 2
-  fi
+  identity_option "$@"
+  shift "$skipped"
   [ "$#" -gt 0 ] || { echo "Pass @usine/gateway, @usine/gateway@<version>, or the paths of tarballs made with pnpm pack" >&2; exit 2; }
   for package in "$@"; do
     case "$package" in
@@ -107,9 +148,9 @@ install_packages() {
         ;;
     esac
   done
-  address=$(hcloud server ip "$NAME")
-  [ "$#" -eq 0 ] || with_identity scp "$@" "root@$address:/root/"
-  with_identity ssh "root@$address" "/usr/local/sbin/usine-gateway-install$remote"
+  gateway_destination
+  [ "$#" -eq 0 ] || with_identity scp "$@" "$destination:/root/"
+  with_identity ssh "$destination" "/usr/local/sbin/usine-gateway-install$remote"
 }
 
 # Prints a MIME multipart cloud-init for a Worker behind the gateway: the
@@ -143,11 +184,12 @@ command=${1:-}
 [ "$#" -eq 0 ] || shift
 case "$command" in
   create) create ;;
+  tailnet-up) tailnet_up "$@" ;;
   install) install_packages "$@" ;;
   worker-user-data) worker_user_data "${1:-}" ;;
   delete) delete ;;
   *)
-    echo "usage: $0 create | install [-i <identity-file>] (@usine/gateway[@<version>] | <tarball>...) | worker-user-data <public-key-file> | delete" >&2
+    echo "usage: $0 create | tailnet-up [-i <identity-file>] | install [-i <identity-file>] (@usine/gateway[@<version>] | <tarball>...) | worker-user-data <public-key-file> | delete" >&2
     exit 2
     ;;
 esac

@@ -8,7 +8,7 @@ sidebar:
 import { FileTree, TabItem, Tabs } from "@astrojs/starlight/components";
 
 :::note
-This page describes commit [`7c0c3d3`](https://github.com/basaltbytes/usine/tree/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9) of basaltbytes/usine as it was on 2026-10-16, with later changes: the executor's own admin API forward ([#249][], 2026-10-19), refused GitHub tokens ([#431][], 2026-10-20), SSH workers that a reload adds or removes ([#387][], 2026-10-20), and the recorded kind of the gateway's Anthropic credential ([#248][], 2026-10-22).
+This page describes commit [`7c0c3d3`](https://github.com/basaltbytes/usine/tree/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9) of basaltbytes/usine as it was on 2026-10-16, with later changes: the executor's own admin API forward ([#249][], 2026-10-19), refused GitHub tokens ([#431][], 2026-10-20), SSH workers that a reload adds or removes ([#387][], 2026-10-20), the recorded kind of the gateway's Anthropic credential ([#248][], 2026-10-22), and SSH to the gateway over a tailnet ([#492][], 2026-10-24).
 :::
 
 A worker has an attempt's checkout and runs its children; the Pi parent runs in the orchestrator. [`infra/hetzner/README.md`](https://github.com/basaltbytes/usine/blob/main/infra/hetzner/README.md) and [`infra/hetzner/gateway/README.md`](https://github.com/basaltbytes/usine/blob/main/infra/hetzner/gateway/README.md) give the operating procedures.
@@ -45,11 +45,12 @@ workers:
       admin_token_env: USINE_GATEWAY_ADMIN_TOKEN
 ```
 
-Both `destination` keys are `Host` aliases, and the SSH configuration routes the worker connection through the gateway. The executor opens its own [forward to the admin API](#forward-to-the-admin-api) through `gateway.destination`, so the gateway's entry has no `LocalForward`:
+Both `destination` keys are `Host` aliases, and the SSH configuration routes the worker connection through the gateway. The gateway's entry has its tailnet address as `HostName` and its public address as `HostKeyAlias`, so `ssh` checks the host key that `known_hosts` has for the public address ([Hetzner gateway VM](#hetzner-gateway-vm)). The executor opens its own [forward to the admin API](#forward-to-the-admin-api) through `gateway.destination`, so the gateway's entry has no `LocalForward`:
 
 ```ssh-config title="~/.ssh/config"
 Host usine-gateway
-  HostName 203.0.113.7
+  HostName 100.64.0.10
+  HostKeyAlias 203.0.113.30
   User root
   IdentityFile ~/.ssh/usine_worker
 
@@ -187,6 +188,8 @@ Only exe.dev workers have long-lived GitHub credentials, their integrations, whi
 
 `infra/hetzner/gateway/gateway.sh create` makes a private network (`10.42.0.0/16`), the gateway VM with a public address, and a Hetzner firewall that allows SSH from the orchestrator's address. On first boot, `gateway-cloud-init.yaml` installs the parts below and writes an admin token and caller key from `openssl rand -hex 32` to `/etc/usine-gateway/secrets.env`.
 
+The orchestrator's public address can change, so the operator puts the gateway on the orchestrator machine's Tailscale tailnet and removes the public SSH rule ([#492][]). cloud-init installs Tailscale from its stable apt repository for the image's Debian release, with the repository's signing key embedded in the file, and doesn't log it in, so the file holds no secret. `gateway.sh tailnet-up` runs `tailscale up --hostname=<NAME> --netfilter-mode=off --accept-dns=false` over SSH, with the auth key in `TAILSCALE_AUTH_KEY` on standard input or else the interactive login, and prints the tailnet address ([gateway.sh][]). `install` and `tailnet-up` connect to `GATEWAY_SSH`, by default root at the public address. nftables accepts SSH on every interface, `tailscale0` included, and no inbound UDP: Tailscale connects directly through replies to the gateway's own packets, or else through a DERP relay. The [gateway README][] gives the steps and the recovery.
+
 ```mermaid
 flowchart LR
   subgraph orchestrator["Orchestrator machine"]
@@ -201,9 +204,9 @@ flowchart LR
     worker["Worker VM<br/>sshd :22"]
   end
   executor -->|"attach, renew, detach,<br/>list: bearer admin token"| forward
-  forward -->|"ssh -N -L, reopened<br/>by the executor"| sshd
+  forward -->|"ssh -N -L over the tailnet,<br/>reopened by the executor"| sshd
   sshd --> adminapi
-  executor -->|"ssh -J, caller token<br/>in SendEnv"| sshd
+  executor -->|"ssh -J over the tailnet,<br/>caller token in SendEnv"| sshd
   sshd -->|"SSH into the private<br/>network only"| worker
 ```
 
@@ -242,6 +245,7 @@ flowchart LR
 | dnsmasq                         | port 53 on the private address                                 | answers `<domain>` names with the gateway's address and refuses others ([#260][])                                                                                                                                                                                                      | [gateway-cloud-init.yaml:42][]                  |
 | nftables                        |                                                                | the firewall rules below                                                                                                                                                                                                                                                               | [gateway-nftables.conf][]                       |
 | sshd                            | port 22                                                        | bastion for `ssh -J` to workers and the admin API forward                                                                                                                                                                                                                              | [gateway-cloud-init.yaml:66][]                  |
+| Tailscale                       | UDP 41641, which nftables opens only to replies                | the tailnet address on `tailscale0`, which carries the orchestrator's SSH; `gateway.sh tailnet-up` logs it in with netfilter and DNS left to the gateway                                                                                                                               | [gateway.sh][]                                  |
 
 These are the service, DNS, and SSH settings of `gateway-cloud-init.yaml`, whose `@@NAME@@` placeholders `gateway.sh` replaces, and the firewall rules:
 
@@ -522,9 +526,9 @@ With `llm_providers: [anthropic]`, Claude Code children call `llm.<domain>/anthr
 | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `infra/hetzner/cloud-init.yaml`                 | Debian 13, user `usine`, key-only SSH (`AllowUsers usine`); `build-essential`, `bubblewrap` for Codex's sandbox ([#269][]), `ca-certificates`, `chromium`, `curl`, `git`, `gnupg`, `jq`; 2 GB swap and `vm.overcommit_memory = 1` for the lint gates' 6 GiB virtual buffer ([#270][]); `DISABLE_AUTOUPDATER=1` and `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium` in `/etc/environment`; a setup script for gh, Node.js 24, pnpm 11.20.0, Claude Code 2.1.296, Codex 0.153.4, and `/home/usine/.usine`. |
 | `infra/hetzner/gateway/worker-cloud-init.yaml`  | For a worker behind the gateway: the gateway as only resolver, apt through the forward proxy, gateway-only nftables, the settings below, and a systemd socket from `/run/usine-gateway/http.sock` to the gateway's port 80.                                                                                                                                                                                                                                                                                      |
-| `infra/hetzner/gateway/gateway-cloud-init.yaml` | The gateway VM: nftables, dnsmasq, the bastion sshd settings, Node.js, the `usine-gateway` systemd service, the secrets file.                                                                                                                                                                                                                                                                                                                                                                                    |
+| `infra/hetzner/gateway/gateway-cloud-init.yaml` | The gateway VM: nftables, dnsmasq, the bastion sshd settings, Tailscale (not logged in), Node.js, the `usine-gateway` systemd service, the secrets file.                                                                                                                                                                                                                                                                                                                                                         |
 | `infra/hetzner/create-worker.sh`                | Creates a server from `cloud-init.yaml`, labels it `usine=worker`, and attaches a firewall that allows SSH from one address.                                                                                                                                                                                                                                                                                                                                                                                     |
-| `infra/hetzner/gateway/gateway.sh`              | `create`, `delete`, `install <tarballs>`, and `worker-user-data`, which renders the two worker files as one MIME cloud-init.                                                                                                                                                                                                                                                                                                                                                                                     |
+| `infra/hetzner/gateway/gateway.sh`              | `create`, `delete`, `tailnet-up`, `install <tarballs>`, and `worker-user-data`, which renders the two worker files as one MIME cloud-init.                                                                                                                                                                                                                                                                                                                                                                       |
 
 Every SSH session reads these `worker-cloud-init.yaml` parts:
 
@@ -632,6 +636,8 @@ GATEWAY_PACKAGE=${GATEWAY_PACKAGE:-@usine/gateway}
 [gateway-cloud-init.yaml:66]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/infra/hetzner/gateway/gateway-cloud-init.yaml#L66
 [gateway-nftables.conf]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/infra/hetzner/gateway/gateway-nftables.conf
 [gateway.sh:19]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/infra/hetzner/gateway/gateway.sh#L19
+[gateway.sh]: https://github.com/basaltbytes/usine/blob/main/infra/hetzner/gateway/gateway.sh
+[gateway README]: https://github.com/basaltbytes/usine/blob/main/infra/hetzner/gateway/README.md#join-the-gateway-to-a-tailnet
 [#228]: https://github.com/basaltbytes/usine/issues/228
 [#231]: https://github.com/basaltbytes/usine/issues/231
 [#234]: https://github.com/basaltbytes/usine/issues/234
@@ -645,3 +651,4 @@ GATEWAY_PACKAGE=${GATEWAY_PACKAGE:-@usine/gateway}
 [#431]: https://github.com/basaltbytes/usine/issues/431
 [#387]: https://github.com/basaltbytes/usine/issues/387
 [#248]: https://github.com/basaltbytes/usine/issues/248
+[#492]: https://github.com/basaltbytes/usine/issues/492
