@@ -1,6 +1,6 @@
 import type { AttemptId } from "@usine/core/attempt";
 import type { LoopPermissions } from "@usine/core/loop";
-import type { RepositoryName } from "@usine/core/repository";
+import { type RepositoryName, safeSegment } from "@usine/core/repository";
 import type { WorkerName } from "@usine/core/worker";
 import { AttachRequest, type AttachmentId, InstallationCredential } from "@usine/gateway/admin";
 import { Cache, DateTime, Effect, Option, Redacted, Ref, Semaphore } from "effect";
@@ -15,19 +15,24 @@ import { type RemoteCommands, sendingShell } from "../../remote/commands.ts";
 import type { RemoteAccess } from "../../remote/machine.ts";
 import { renewableCredential } from "../../renewable-credential.ts";
 import type { MachineGateway, SshMachine } from "../model.ts";
-import { GH_GATEWAY_SOCKET_DIRECTORY, gatewayEnvironment, ghGatewayConfig } from "./environment.ts";
+import {
+  GH_GATEWAY_SOCKET_DIRECTORY,
+  gatewayConfigFiles,
+  gatewayEnvironment,
+} from "./environment.ts";
 
 /**
- * A script that writes `$2` and `$3` as `config.yml` and `hosts.yml` in directory `$1`. Each
- * file is written to a temporary name and renamed.
+ * A script that takes path and contents pairs and writes each file, creating its directory.
+ * Each file is written to a temporary name and renamed.
  */
-const WRITE_GH_CONFIG_SCRIPT = String.raw`
+const WRITE_FILES_SCRIPT = String.raw`
 set -e
-mkdir -p "$1"
-printf '%s' "$2" > "$1/config.yml.$$"
-printf '%s' "$3" > "$1/hosts.yml.$$"
-mv "$1/config.yml.$$" "$1/config.yml"
-mv "$1/hosts.yml.$$" "$1/hosts.yml"
+while [ "$#" -gt 1 ]; do
+  mkdir -p "$(dirname "$1")"
+  printf '%s' "$2" > "$1.$$"
+  mv "$1.$$" "$1"
+  shift 2
+done
 `.trim();
 
 /** The interval for re-storing a live Attempt's attachment, which bounds the outage after a Gateway restart. */
@@ -38,8 +43,14 @@ interface CurrentAttachment {
   readonly credential: WorkerCredential;
 }
 
-/** Returns gh's configuration directory on a Worker behind a Gateway. The directory contains no token. */
-const ghConfigDirectory = (machine: SshMachine): string => `${machine.workerDirectory}/gh`;
+/**
+ * Returns the directory of gh's configuration on a Worker behind a Gateway, and the Attempt's
+ * Codex home, which Codex also writes its sessions to. Neither contains a token.
+ */
+const configDirectories = (machine: SshMachine, attemptId: AttemptId) => ({
+  ghConfigDirectory: `${machine.workerDirectory}/gh`,
+  codexHome: `${machine.workerDirectory}/codex/${safeSegment(attemptId)}`,
+});
 
 /**
  * Grants each Attempt repository access through the Gateway without a token on the machine
@@ -123,14 +134,36 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
     const { admin, settings } = gateway;
     const fields = { attemptId, worker, repository, permissions, domain: settings.domain };
     yield* Effect.annotateCurrentSpan(fields);
-    const config = ghGatewayConfig(settings.domain);
+    const directories = configDirectories(machine, attemptId);
+    const codex = settings.llmProviders.includes("openai");
+    if (codex)
+      yield* Effect.addFinalizer(() =>
+        commands.run("cleanup", machine.shell, "rm", ["-rf", directories.codexHome]).pipe(
+          Effect.tap(() =>
+            Effect.logDebug("Removed the Attempt's Codex home", {
+              ...fields,
+              codexHome: directories.codexHome,
+            }),
+          ),
+          Effect.tapError((error) =>
+            Effect.logWarning("Could not remove the Attempt's Codex home", {
+              ...fields,
+              codexHome: directories.codexHome,
+              message: error.message,
+            }),
+          ),
+          Effect.ignore,
+        ),
+      );
     yield* commands.run(operation, machine.shell, "sh", [
       "-c",
-      WRITE_GH_CONFIG_SCRIPT,
+      WRITE_FILES_SCRIPT,
       "sh",
-      ghConfigDirectory(machine),
-      config["config.yml"],
-      config["hosts.yml"],
+      ...gatewayConfigFiles({
+        domain: settings.domain,
+        llmProviders: settings.llmProviders,
+        ...directories,
+      }).flat(),
     ]);
 
     const attached = yield* Ref.make(Option.none<CurrentAttachment>());
@@ -255,13 +288,14 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
     const { exported, sent } = gatewayEnvironment({
       domain: settings.domain,
       llmProviders: settings.llmProviders,
-      ghConfigDirectory: ghConfigDirectory(machine),
+      ...directories,
       callerToken,
     });
     return {
       shell: sendingShell(machine.shell, sent),
       secrets: sent,
-      readOnlyPaths: [ghConfigDirectory(machine), GH_GATEWAY_SOCKET_DIRECTORY],
+      readOnlyPaths: [directories.ghConfigDirectory, GH_GATEWAY_SOCKET_DIRECTORY],
+      writablePaths: codex ? [directories.codexHome] : [],
       environment: exported,
       gitEnvironment: exported,
       refresh: credential.refresh(),

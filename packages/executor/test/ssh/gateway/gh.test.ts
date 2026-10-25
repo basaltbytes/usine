@@ -61,6 +61,7 @@ it("authenticates gh pagination and GitHub URLs through the Gateway socket", asy
       domain,
       llmProviders: [],
       ghConfigDirectory: directory,
+      codexHome: join(directory, "codex"),
       callerToken: Redacted.make(caller),
     });
     const env = {

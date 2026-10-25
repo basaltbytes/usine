@@ -236,6 +236,7 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
       attemptId: Option.none(),
       checkout: Option.none(),
       readOnly: [],
+      writable: [],
       harnesses,
       environment,
       secrets: {},

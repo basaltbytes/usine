@@ -5,10 +5,11 @@
 # gateway holds: a CONNECT tunnel cannot remove a caller token or any other
 # credential, and the gateway serves them at git.<domain> and llm.<domain>.
 
-# Harness logins on the Worker. Claude Code and Codex use the operator's
-# subscription logins on the Worker's machine and reach their providers
-# through this proxy. Remove a harness's hosts when the gateway holds that
-# provider's credential (llm_providers in usine.yaml).
+# Harness logins on the Worker. Without a gateway credential for their
+# provider, Claude Code and Codex use the operator's logins on the Worker's
+# machine and reach their providers through this proxy. Remove a harness's
+# hosts when the gateway holds that provider's credential, a subscription
+# login or an API key (llm_providers in usine.yaml).
 
 # Claude Code with a Claude subscription: the API, and the OAuth token
 # endpoint that claude auth login and token refreshes call.

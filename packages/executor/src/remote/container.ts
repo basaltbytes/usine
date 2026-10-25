@@ -91,6 +91,8 @@ export interface ContainerSpec {
   readonly checkout: Option.Option<{ readonly path: string; readonly parent: string }>;
   /** Machine directories mounted read-only at their own paths. */
   readonly readOnly: ReadonlyArray<string>;
+  /** Machine directories of the Attempt mounted read-write at their own paths. */
+  readonly writable: ReadonlyArray<string>;
   /** The harnesses whose login files the container gets. */
   readonly harnesses: ReadonlyArray<Harness>;
   /** Variables set in the container without secrets. */
@@ -247,8 +249,9 @@ export const containersFor = (commands: RemoteCommands) => {
       "sh",
       CONTAINER_RUNTIME,
       spec.name,
-      String(spec.readOnly.length),
+      String(spec.readOnly.length + spec.writable.length),
       ...spec.readOnly,
+      ...spec.writable,
       ...logins.map(({ file }) => file),
     ])).split("\n");
     if (!home.startsWith("/"))
@@ -259,7 +262,8 @@ export const containersFor = (commands: RemoteCommands) => {
       });
     const found = logins.filter(({ file }) => present.includes(file));
     const readOnly = spec.readOnly.filter((path) => present.includes(path));
-    const missing = spec.readOnly.filter((path) => !present.includes(path));
+    const writable = spec.writable.filter((path) => present.includes(path));
+    const missing = [...spec.readOnly, ...spec.writable].filter((path) => !present.includes(path));
     if (missing.length > 0)
       yield* Effect.logWarning("The container doesn't mount these missing machine paths", {
         ...fields,
@@ -296,6 +300,7 @@ export const containersFor = (commands: RemoteCommands) => {
         ],
       }),
       ...readOnly.map((path) => bindMount(path, path, "readonly")),
+      ...writable.map((path) => bindMount(path, path, "writable")),
       ...found.map(({ file, mounted }) =>
         mounted
           ? bindMount(`${home}/${file}`, `${CONTAINER_HOME}/${file}`, "writable")

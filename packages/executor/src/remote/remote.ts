@@ -204,6 +204,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       attemptId: Option.some(attempt.attemptId),
       checkout: Option.some({ path: worktree, parent: `${machine.workerDirectory}/attempts` }),
       readOnly: [cachePath(machine, attempt.repository), ...access.readOnlyPaths],
+      writable: access.writablePaths,
       harnesses,
       environment: access.environment,
       secrets: access.secrets,

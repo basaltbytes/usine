@@ -145,6 +145,7 @@ export const sshCredentialsFor = Effect.fn("SshExecutor.credentialsFor")(functio
       shell: machine.shell,
       secrets: {},
       readOnlyPaths: [directory],
+      writablePaths: [],
       refresh: credential.refresh(),
       scrub: credential.scrub,
     } satisfies RemoteAccess;

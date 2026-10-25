@@ -1,5 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import { RemoteShell } from "@usine/agents/child-host";
+import { CODEX_CLI_VERSION } from "@usine/agents/preflight";
+import { Agent } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { HarnessReady, HarnessUnavailableError } from "@usine/core/agent/capability";
 import type { AttemptSalvage } from "@usine/core/attempt/salvage";
@@ -14,7 +16,10 @@ import {
   Attachment,
   AttachmentId,
   Attachments,
+  ChatGptLogin,
+  HostFilePath,
   InstallationCredential,
+  OpenAiProvider,
   SettingsInForce,
   UpstreamBase,
 } from "@usine/gateway";
@@ -64,6 +69,31 @@ const callerTokenOf = (request: AttemptRequest | undefined): string => {
   const token = request.host.sshEnvironment.GH_ENTERPRISE_TOKEN;
   assert(token !== undefined, "the child host sends the caller token");
   return token;
+};
+
+const CODEX_BRAIN = new BrainSpec({
+  harness: "codex",
+  model: ModelId.make("gpt-5.6-sol"),
+  effort: "low",
+});
+
+const codexRequest = new CheckoutRequest({
+  ...request,
+  agent: new Agent({ ...TEST_AGENT, brain: CODEX_BRAIN }),
+});
+
+/** A Gateway whose OpenAI credential is a ChatGPT login. */
+const CHATGPT_PROVIDERS = {
+  anthropic: Option.none(),
+  openai: Option.some(
+    new OpenAiProvider({
+      upstream: UpstreamBase.make("https://chatgpt.com/backend-api/codex"),
+      credential: new ChatGptLogin({
+        authFile: HostFilePath.make("/var/lib/usine-gateway/chatgpt/auth.json"),
+        tokenUrl: UpstreamBase.make("https://auth.openai.com/oauth/token"),
+      }),
+    }),
+  ),
 };
 
 /** An attachment left by an earlier orchestrator process. */
@@ -1012,6 +1042,109 @@ describe("SSH Worker behind a Gateway", () => {
       }).pipe(
         Effect.provide(
           gatewayRuntime(machine, mintingProvider(), gateway, { probes: { harnessReadiness } }),
+        ),
+      );
+    },
+  );
+
+  it.effect(
+    "points Codex at the Gateway's OpenAI route when the Gateway holds the ChatGPT login, with the caller token only through SSH",
+    () => {
+      const machine = fakeMachine();
+      const gateway = fakeGateway(machine, CHATGPT_PROVIDERS);
+      // A login on the machine would fail the check; the Gateway's credential needs none.
+      const harnessReadiness = () => (brain: BrainSpec) =>
+        Effect.succeed(
+          new HarnessUnavailableError({
+            harness: brain.harness,
+            capability: "login",
+            message: "Codex children need a ChatGPT login. Run codex login on the worker.",
+          }),
+        );
+      let given: AttemptRequest | undefined;
+      const parent: StubParent = (context) => {
+        given = context.request;
+        return completes(context);
+      };
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        yield* executor.preflight(WORKER, [CODEX_BRAIN], 1);
+        const lines = machine.state.calls.map(({ line }) => line);
+        assert.include(lines, "exec 'codex' '--version'");
+        assert(!lines.some((line) => line.includes("http_connect")), "no login host is checked");
+
+        const prepared = yield* executor.prepare(codexRequest);
+        yield* prepared.launch(sink);
+        const callerToken = callerTokenOf(given);
+        assert(given?.host instanceof RemoteShell);
+        assert.include(
+          given.host.ssh.args,
+          "SendEnv=GIT_CONFIG_VALUE_0 GH_ENTERPRISE_TOKEN GH_TOKEN USINE_GATEWAY_TOKEN",
+        );
+        assert.strictEqual(given.host.sshEnvironment.USINE_GATEWAY_TOKEN, callerToken);
+        const codexHome = `${WORKER_ROOT}/codex/remote-run_execute_1`;
+        assert.strictEqual(given.environment.CODEX_HOME, codexHome);
+        assert.isUndefined(given.environment.ANTHROPIC_BASE_URL);
+        assert.notInclude(JSON.stringify(given.environment), callerToken);
+        const config = machine.state.files.get(`${codexHome}/config.toml`) ?? "";
+        assert.include(config, 'model_provider = "usine-gateway"');
+        assert.include(config, 'base_url = "http://llm.gw.test/openai/v1"');
+        assert.include(config, 'env_key = "USINE_GATEWAY_TOKEN"');
+        assert.notInclude(config, callerToken);
+        assert.deepStrictEqual(yield* given.gatewayCredential, Option.some("subscription"));
+        assert(
+          machine.state.calls.some(({ line }) => line === `exec 'rm' '-rf' '${codexHome}'`),
+          "cleanup removes the Attempt's Codex home",
+        );
+      }).pipe(
+        Effect.provide(
+          gatewayRuntime(machine, mintingProvider(), gateway, {
+            address: gatewayAddress({ llmProviders: ["openai"] }),
+            parent,
+            probes: { harnessReadiness },
+          }),
+        ),
+      );
+    },
+  );
+
+  it.effect(
+    "preflight reports an unsupported Codex, and a Gateway without the OpenAI credential that llm_providers lists",
+    () => {
+      const machine = fakeMachine();
+      const gateway = fakeGateway(machine, CHATGPT_PROVIDERS);
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        machine.state.codexVersion = "codex-cli 0.1.0";
+        const old = yield* executor.preflight(WORKER, [CODEX_BRAIN], 1).pipe(Effect.flip);
+        assert(old._tag === "WorkerCapabilityError");
+        assert.strictEqual(old.capability, "toolchain");
+        assert.include(old.message, "The worker has codex-cli 0.1.0");
+        machine.state.codexVersion = `codex-cli ${CODEX_CLI_VERSION}`;
+
+        const inForce = yield* SettingsInForce;
+        yield* inForce.replace({
+          ...(yield* inForce.current),
+          providers: { anthropic: Option.none(), openai: Option.none() },
+        });
+        const missing = yield* executor.preflight(WORKER, [CODEX_BRAIN], 1).pipe(Effect.flip);
+        assert(missing._tag === "WorkerCapabilityError");
+        assert.strictEqual(missing.capability, "gateway");
+        assert.strictEqual(
+          missing.message,
+          'The gateway of SSH worker "eu-one" has no OpenAI credential, but the worker\'s llm_providers includes openai. Set OPENAI_API_KEY or USINE_GATEWAY_CHATGPT_AUTH_FILE on the gateway, or remove openai from llm_providers.',
+        );
+
+        gateway.switches.reportsProviders = false;
+        const unreported = yield* executor.preflight(WORKER, [CODEX_BRAIN], 1).pipe(Effect.flip);
+        assert(unreported._tag === "WorkerCapabilityError");
+        assert.strictEqual(unreported.capability, "gateway");
+        assert.include(unreported.message, "doesn't report its LLM credentials");
+      }).pipe(
+        Effect.provide(
+          gatewayRuntime(machine, mintingProvider(), gateway, {
+            address: gatewayAddress({ llmProviders: ["openai"] }),
+          }),
         ),
       );
     },
