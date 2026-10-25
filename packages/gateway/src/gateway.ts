@@ -1,6 +1,7 @@
 import { Layer } from "effect";
 import { Attachments } from "./attachment/store.ts";
 import { CallerTokens } from "./caller/caller.ts";
+import { ChatGptLogins } from "./chatgpt/logins.ts";
 import { SettingsInForce } from "./settings.ts";
 
 export { adminRoutes } from "./admin/server.ts";
@@ -39,12 +40,20 @@ export {
   Port,
 } from "./egress/egress.ts";
 export { GITHUB_ORIGINS, type GitHubOrigins } from "./github/github.ts";
+export { ChatGptAuthFileError, ChatGptTokens } from "./chatgpt/auth-file.ts";
+export { CHATGPT_TOKEN_URL, ChatGptLoginUnavailable, ChatGptLogins } from "./chatgpt/logins.ts";
 export {
   AnthropicApiKey,
   AnthropicCredential,
   AnthropicProvider,
   AnthropicSubscriptionToken,
+  type ChatGptAccess,
+  ChatGptLogin,
+  HostFilePath,
+  type LlmProvider,
   type LlmProviders,
+  OpenAiApiKey,
+  OpenAiCredential,
   OpenAiProvider,
 } from "./llm/llm.ts";
 export { endToEndHeaders } from "./proxy/forward.ts";
@@ -62,11 +71,13 @@ export { UpstreamBase } from "./upstream.ts";
 
 /**
  * The Gateway's shared state for one process: the attachment store, the caller token signer,
- * and the current settings. Provide this layer once to the reverse proxy, forward proxy, admin
- * API, and reload.
+ * the current settings, and the ChatGPT logins. Provide this layer once to the reverse proxy,
+ * forward proxy, admin API, and reload. The logins need a `FileSystem` for their auth files and
+ * an `HttpClient` for refreshes.
  */
 export const gatewayServices = Layer.mergeAll(
   Attachments.layer,
   CallerTokens.layer,
   SettingsInForce.layer,
+  ChatGptLogins.layer,
 );

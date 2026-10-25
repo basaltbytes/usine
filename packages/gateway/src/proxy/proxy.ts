@@ -23,7 +23,15 @@ import {
   githubRoute,
   withGitHubCredential,
 } from "../github/github.ts";
-import { configuredProvider, llmTarget, withProviderCredential } from "../llm/llm.ts";
+import { ChatGptLogins } from "../chatgpt/logins.ts";
+import {
+  type ChatGptLogin,
+  chatGptPath,
+  configuredProvider,
+  llmTarget,
+  withChatGptAccess,
+  withStaticCredential,
+} from "../llm/llm.ts";
 import { GatewaySettings, gatewayHosts, SettingsInForce } from "../settings.ts";
 import { endToEndHeaders, forwardRequest } from "./forward.ts";
 
@@ -40,6 +48,7 @@ export const RefusalReason = Schema.Literals([
   "attachment-expired",
   "repository-mismatch",
   "provider-not-configured",
+  "provider-login-unavailable",
 ]);
 export type RefusalReason = typeof RefusalReason.Type;
 
@@ -55,6 +64,7 @@ const REFUSAL_STATUS = {
   "attachment-expired": 403,
   "repository-mismatch": 403,
   "provider-not-configured": 503,
+  "provider-login-unavailable": 401,
 } as const satisfies Record<RefusalReason, number>;
 
 /** A refusal, with the caller's claims once its token is verified. */
@@ -120,6 +130,7 @@ export class GatewayProxy extends Context.Service<
       const inForce = yield* SettingsInForce;
       const attachments = yield* Attachments;
       const callers = yield* CallerTokens;
+      const logins = yield* ChatGptLogins;
       const client = yield* HttpClient.HttpClient;
       const hosts = gatewayHosts(settings.domain);
 
@@ -267,16 +278,56 @@ export class GatewayProxy extends Context.Service<
             "provider-not-configured",
             `The gateway has no credential for ${destination.value.provider}.`,
           );
-        const headers = withProviderCredential(
-          provider.value,
-          withoutCallerCredentials(endToEndHeaders(request.headers)),
-        );
-        const upstream = `${provider.value.upstream}${destination.value.rest}${target.search}`;
-        const response = yield* forwardRequest(client, request, upstream, headers);
+        const incoming = withoutCallerCredentials(endToEndHeaders(request.headers));
+        const { credential } = provider.value;
+        const outgoing =
+          credential._tag === "ChatGptLogin"
+            ? yield* chatGptRequest(claims, credential, destination.value.rest, incoming)
+            : {
+                path: destination.value.rest,
+                headers: withStaticCredential(credential, incoming),
+                answered: () => Effect.void,
+              };
+        const upstream = `${provider.value.upstream}${outgoing.path}${target.search}`;
+        const response = yield* forwardRequest(client, request, upstream, outgoing.headers);
+        yield* outgoing.answered(response.status);
         yield* forwarded("Forwarded an LLM request", request, target, attachment, response, {
           provider: destination.value.provider,
+          credential: credential._tag,
         });
         return response;
+      });
+
+      /**
+       * Returns the ChatGPT backend path and headers for a request with a ChatGPT login, and
+       * records a 401 answer so the next request refreshes the access token first.
+       */
+      const chatGptRequest = Effect.fn("GatewayProxy.chatGptRequest")(function* (
+        claims: CallerClaims,
+        login: ChatGptLogin,
+        rest: string,
+        incoming: Headers.Headers,
+      ) {
+        const path = chatGptPath(rest);
+        if (Option.isNone(path))
+          return yield* refusedCaller(
+            claims,
+            "unsupported-path",
+            `With a ChatGPT login, the gateway serves Codex's paths under /openai/v1 on ${hosts.llm}, such as /openai/v1/responses, not /openai${rest}.`,
+          );
+        const access = yield* logins
+          .access(login)
+          .pipe(
+            Effect.mapError((error) =>
+              refusedCaller(claims, "provider-login-unavailable", error.message),
+            ),
+          );
+        return {
+          path: path.value,
+          headers: withChatGptAccess(access, incoming),
+          answered: (status: number) =>
+            status === 401 ? logins.refused(login, access) : Effect.void,
+        };
       });
 
       /**

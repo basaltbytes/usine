@@ -30,12 +30,21 @@ import {
   gatewayFromEnvironment,
   type Listener,
 } from "../src/node/node.ts";
-import { ADMIN_TOKEN_VALUE, freeGatewayPorts, REPOSITORY, WORKER } from "./fixtures.ts";
+import {
+  ADMIN_TOKEN_VALUE,
+  authFileText,
+  chatGptAccessToken,
+  freeGatewayPorts,
+  REPOSITORY,
+  WORKER,
+} from "./fixtures.ts";
 
 const CALLER_KEY_VALUE = "caller-key-for-reload-tests-0123456789";
 const FIRST_KEY = "sk-ant-api03-firstKeyForReloadTests";
 const SECOND_KEY = "sk-ant-api03-secondKeyForReloadTests";
 const SUBSCRIPTION_TOKEN = "sk-ant-oat01-subscriptionTokenForReloadTests";
+const OPENAI_KEY = "sk-proj-keyForReloadTests0123456789";
+const CHATGPT_REFRESH = "rt-chatgptRefreshTokenForReloadTests";
 
 /** A stand-in for the Anthropic API that records each request's `x-api-key`. */
 const anthropicStandIn = Effect.gen(function* () {
@@ -329,6 +338,61 @@ describe("reloading the gateway", () => {
             { provider: "anthropic", credential: "subscription" },
           ]);
           assert.notInclude(lines.join("\n"), SUBSCRIPTION_TOKEN);
+        }),
+      ),
+  );
+
+  it.live(
+    "a ChatGPT login replaces the OpenAI key, and a conflicting or unusable one keeps the providers in force",
+    () =>
+      withGateway(["registry.npmjs.org"], (files) =>
+        Effect.gen(function* () {
+          const reload = Effect.flatMap(GatewayReload, ({ reload }) => reload);
+          const authFile = `USINE_GATEWAY_CHATGPT_AUTH_FILE=${files.path("auth.json")}`;
+          const access = chatGptAccessToken(DateTime.add(yield* DateTime.now, { hours: 1 }));
+          yield* files.write("secrets.env", [
+            ...secretsLines(FIRST_KEY),
+            `OPENAI_API_KEY=${OPENAI_KEY}`,
+          ]);
+          yield* reload;
+          const withKey = [
+            { provider: "anthropic", credential: "api-key" },
+            { provider: "openai", credential: "api-key" },
+          ];
+          assert.deepStrictEqual(yield* reportedProviders, withKey);
+
+          yield* files.write("auth.json", [authFileText({ access, refresh: CHATGPT_REFRESH })]);
+          yield* files.write("secrets.env", [
+            ...secretsLines(FIRST_KEY),
+            `OPENAI_API_KEY=${OPENAI_KEY}`,
+            authFile,
+          ]);
+          yield* reload;
+          yield* logged(
+            "Kept the previous LLM providers",
+            "OPENAI_API_KEY and USINE_GATEWAY_CHATGPT_AUTH_FILE are both set",
+          );
+          assert.deepStrictEqual(yield* reportedProviders, withKey);
+
+          yield* files.write("auth.json", ['{"OPENAI_API_KEY":null}']);
+          yield* files.write("secrets.env", [...secretsLines(FIRST_KEY), authFile]);
+          yield* reload;
+          yield* logged("Kept the previous LLM providers", "isn't a Codex ChatGPT login");
+          assert.deepStrictEqual(yield* reportedProviders, withKey);
+
+          yield* files.write("auth.json", [authFileText({ access, refresh: CHATGPT_REFRESH })]);
+          yield* reload;
+          assert.deepStrictEqual(yield* reportedProviders, [
+            { provider: "anthropic", credential: "api-key" },
+            { provider: "openai", credential: "subscription" },
+          ]);
+          yield* logged("Loaded the ChatGPT login", files.path("auth.json"));
+          assert.include(
+            lines.filter((line) => line.includes("Reloaded the gateway settings")).at(-1),
+            '"changed":["OPENAI_API_KEY","USINE_GATEWAY_CHATGPT_AUTH_FILE"]',
+          );
+          for (const secret of [OPENAI_KEY, CHATGPT_REFRESH, access])
+            assert.notInclude(lines.join("\n"), secret);
         }),
       ),
   );

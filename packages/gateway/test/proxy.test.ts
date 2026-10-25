@@ -1,3 +1,4 @@
+import { NodeFileSystem } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import {
   Context,
@@ -33,6 +34,7 @@ import {
   AnthropicProvider,
   AnthropicSubscriptionToken,
   type LlmProviders,
+  OpenAiApiKey,
   OpenAiProvider,
 } from "../src/llm/llm.ts";
 import { GatewayProxy, REFUSAL_HEADER } from "../src/proxy/proxy.ts";
@@ -123,6 +125,7 @@ const gateway = (providers: LlmProviders, answer: Answer = ok) =>
     Layer.provideMerge(Upstream.answering(answer)),
     Layer.provideMerge(settingsLayer(providers)),
     Layer.provideMerge(captureLogs),
+    Layer.provide(NodeFileSystem.layer),
   );
 
 /** Attaches `credential` for the test Worker and repository under `id` and returns the caller token. */
@@ -416,7 +419,7 @@ describe("GatewayProxy", () => {
             openai: Option.some(
               new OpenAiProvider({
                 upstream: UpstreamBase.make("https://api.openai.com"),
-                key: secret(OPENAI_KEY),
+                credential: new OpenAiApiKey({ key: secret(OPENAI_KEY) }),
               }),
             ),
           }),

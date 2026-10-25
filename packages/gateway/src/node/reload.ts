@@ -10,8 +10,9 @@ import {
   Redacted,
   Semaphore,
 } from "effect";
+import { ChatGptLogins } from "../chatgpt/logins.ts";
 import type { EgressAllowlist } from "../egress/egress.ts";
-import type { LlmProviders } from "../llm/llm.ts";
+import type { LlmProvider, LlmProviders } from "../llm/llm.ts";
 import { SettingsInForce } from "../settings.ts";
 import {
   egressAllowlistPath,
@@ -53,38 +54,51 @@ const restartValues = ({ domain, adminToken, callerKey, listeners }: RestartSett
   USINE_GATEWAY_ADMIN_PORT: String(listeners.admin.port),
 });
 
-/** Returns each credential variable with its value, or `None` if unset. */
+/** Returns each credential variable with its value, or `undefined` if unset. */
 const credentialValues = ({ anthropic, openai }: LlmProviders) => {
-  const credential = Option.getOrUndefined(
+  const anthropicCredential = Option.getOrUndefined(
     Option.map(anthropic, (provider) => provider.credential),
+  );
+  const openAiCredential = Option.getOrUndefined(
+    Option.map(openai, (provider) => provider.credential),
   );
   return {
     ANTHROPIC_API_KEY:
-      credential?._tag === "AnthropicApiKey" ? Redacted.value(credential.key) : undefined,
-    USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN:
-      credential?._tag === "AnthropicSubscriptionToken"
-        ? Redacted.value(credential.token)
+      anthropicCredential?._tag === "AnthropicApiKey"
+        ? Redacted.value(anthropicCredential.key)
         : undefined,
-    OPENAI_API_KEY: Option.getOrUndefined(
-      Option.map(openai, (provider) => Redacted.value(provider.key)),
-    ),
+    USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN:
+      anthropicCredential?._tag === "AnthropicSubscriptionToken"
+        ? Redacted.value(anthropicCredential.token)
+        : undefined,
+    OPENAI_API_KEY:
+      openAiCredential?._tag === "OpenAiApiKey" ? Redacted.value(openAiCredential.key) : undefined,
+    USINE_GATEWAY_CHATGPT_AUTH_FILE:
+      openAiCredential?._tag === "ChatGptLogin" ? openAiCredential.authFile : undefined,
   };
 };
 
-/** Returns the upstream variables that changed, for providers with a credential before and after. */
+/** The variable that sets each credential's upstream. */
+const UPSTREAM_VARIABLES = {
+  AnthropicApiKey: "USINE_GATEWAY_ANTHROPIC_UPSTREAM",
+  AnthropicSubscriptionToken: "USINE_GATEWAY_ANTHROPIC_UPSTREAM",
+  OpenAiApiKey: "USINE_GATEWAY_OPENAI_UPSTREAM",
+  ChatGptLogin: "USINE_GATEWAY_CHATGPT_UPSTREAM",
+} as const satisfies Record<LlmProvider["credential"]["_tag"], string>;
+
+/** Returns the upstream variables that changed, for providers with the same kind of credential before and after. */
 const changedUpstreams = (before: LlmProviders, after: LlmProviders): ReadonlyArray<string> => {
-  const differs = (
-    was: Option.Option<{ readonly upstream: string }>,
-    is: Option.Option<{ readonly upstream: string }>,
-  ) =>
-    Option.getOrElse(
-      Option.zipWith(was, is, (left, right) => left.upstream !== right.upstream),
-      () => false,
+  const changed = (was: Option.Option<LlmProvider>, is: Option.Option<LlmProvider>) =>
+    Option.toArray(
+      Option.flatMap(
+        Option.zipWith(was, is, (left, right) => [left, right] as const),
+        ([left, right]) =>
+          left.credential._tag === right.credential._tag && left.upstream !== right.upstream
+            ? Option.some(UPSTREAM_VARIABLES[right.credential._tag])
+            : Option.none(),
+      ),
     );
-  return [
-    ...(differs(before.anthropic, after.anthropic) ? ["USINE_GATEWAY_ANTHROPIC_UPSTREAM"] : []),
-    ...(differs(before.openai, after.openai) ? ["USINE_GATEWAY_OPENAI_UPSTREAM"] : []),
-  ];
+  return [...changed(before.anthropic, after.anthropic), ...changed(before.openai, after.openai)];
 };
 
 /** Returns the names of the variables whose values differ, never the values. */
@@ -141,9 +155,27 @@ const nextProviders = llmProviders.pipe(
   Effect.map(Option.some),
   Effect.catchTags({
     ConfigError: ({ message }) => keptProviders(message),
-    ConflictingAnthropicCredentials: ({ message }) => keptProviders(message),
+    ConflictingProviderCredentials: ({ message }) => keptProviders(message),
+    ChatGptAuthFileError: ({ message }) => keptProviders(message),
   }),
 );
+
+/**
+ * Reads a ChatGPT login's auth file again after a reload, so a login the operator copied
+ * replaces the one in memory. An unreadable file keeps the login in memory.
+ */
+const reloadChatGptLogin = (logins: ChatGptLogins["Service"], providers: LlmProviders) => {
+  const login = Option.getOrUndefined(Option.map(providers.openai, ({ credential }) => credential));
+  if (login?._tag !== "ChatGptLogin") return Effect.void;
+  return logins.reload(login).pipe(
+    Effect.catchTag("ChatGptAuthFileError", ({ message }) =>
+      Effect.logError("Kept the ChatGPT login in memory: its auth file could not be read", {
+        authFile: login.authFile,
+        error: message,
+      }),
+    ),
+  );
+};
 
 /** Returns the reload for a Gateway started with `started`, reading settings from the environment files over `base`. */
 export const gatewayReloadLayer = (started: StartupSettings, base: ConfigProvider.ConfigProvider) =>
@@ -151,6 +183,7 @@ export const gatewayReloadLayer = (started: StartupSettings, base: ConfigProvide
     GatewayReload,
     Effect.gen(function* () {
       const inForce = yield* SettingsInForce;
+      const logins = yield* ChatGptLogins;
       const fileSystem = yield* FileSystem.FileSystem;
       const oneAtATime = yield* Semaphore.make(1);
       const { domain, adminToken, callerKey } = started.settings;
@@ -172,6 +205,7 @@ export const gatewayReloadLayer = (started: StartupSettings, base: ConfigProvide
             providers: Option.getOrElse(providers, () => previous.providers),
           };
           yield* inForce.replace(next);
+          if (Option.isSome(providers)) yield* reloadChatGptLogin(logins, next.providers);
           yield* Effect.logInfo("Reloaded the gateway settings", {
             environmentFiles: source.files,
             allowlist: Option.isSome(allowlist.egress) ? "reloaded" : "kept",
