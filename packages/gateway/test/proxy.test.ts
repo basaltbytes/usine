@@ -428,6 +428,93 @@ describe("GatewayProxy", () => {
   );
 
   it.effect(
+    "serves only the routes Claude Code and Codex call, and refuses other API routes, encoded separators, and dot segments before any upstream request",
+    () =>
+      Effect.gen(function* () {
+        const caller = yield* attach(installation);
+        const ask = (path: string) =>
+          send(
+            `http://llm.gw.test${path}`,
+            { authorization: `Bearer ${caller}` },
+            { method: "POST", body: "{}" },
+          );
+        for (const path of [
+          "/anthropic/v1/messages?beta=true",
+          "/anthropic/v1/messages/count_tokens?beta=true",
+          "/anthropic/v1/models",
+          "/anthropic/v1/models/claude-haiku-5-5",
+          "/openai/v1/responses",
+          "/openai/v1/responses/compact",
+          "/openai/v1/models",
+        ])
+          assert.strictEqual((yield* ask(path)).status, 200, path);
+        assert.deepStrictEqual(
+          (yield* sent).map(({ url }) => url),
+          [
+            "https://api.anthropic.com/v1/messages?beta=true",
+            "https://api.anthropic.com/v1/messages/count_tokens?beta=true",
+            "https://api.anthropic.com/v1/models",
+            "https://api.anthropic.com/v1/models/claude-haiku-5-5",
+            "https://api.openai.com/v1/responses",
+            "https://api.openai.com/v1/responses/compact",
+            "https://api.openai.com/v1/models",
+          ],
+        );
+
+        for (const path of [
+          // Other parts of the providers' APIs.
+          "/anthropic/v1/files",
+          "/anthropic/v1/messages/batches",
+          "/anthropic/v1/organizations/api_keys",
+          "/openai/v1/files",
+          "/openai/v1/chat/completions",
+          // Paths outside /v1.
+          "/anthropic/messages",
+          "/openai/responses",
+          "/openai",
+          // Percent-encoded separators.
+          "/anthropic/v1/messages%2F..%2F..%2Ffiles",
+          "/openai/v1/responses%2f..%2ffiles",
+          "/openai/v1/responses%5C..%5Cfiles",
+          "/openai/v1/responses%252F..%252Ffiles",
+          // Dot segments, which URL parsing resolves before the route check.
+          "/anthropic/v1/messages/../files",
+          "/openai/v1/responses/%2e%2e/files",
+          "/openai/v1/responses/.%2E/files",
+          "/anthropic/v1/models/..",
+          // Trailing and doubled separators.
+          "/openai/v1/responses/",
+          "/anthropic/v1//messages",
+        ]) {
+          const refused = yield* ask(path);
+          assert.deepStrictEqual(
+            [refused.status, refused.headers.get(REFUSAL_HEADER)],
+            [404, "unsupported-path"],
+            path,
+          );
+        }
+        assert.lengthOf(yield* sent, 7, "no refused path reached an upstream");
+      }).pipe(
+        Effect.provide(
+          gateway({
+            anthropic: Option.some(
+              new AnthropicProvider({
+                upstream: UpstreamBase.make("https://api.anthropic.com"),
+                credential: new AnthropicApiKey({ key: secret(ANTHROPIC_KEY) }),
+              }),
+            ),
+            openai: Option.some(
+              new OpenAiProvider({
+                upstream: UpstreamBase.make("https://api.openai.com"),
+                credential: new OpenAiApiKey({ key: secret(OPENAI_KEY) }),
+              }),
+            ),
+          }),
+        ),
+      ),
+  );
+
+  it.effect(
     "a release download sends the installation token to github.com only, and passes its redirect to the asset host back unchanged",
     () =>
       Effect.gen(function* () {

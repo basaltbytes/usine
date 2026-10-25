@@ -26,7 +26,7 @@ import {
 import { ChatGptLogins } from "../chatgpt/logins.ts";
 import {
   type ChatGptLogin,
-  chatGptPath,
+  llmRoute,
   configuredProvider,
   llmTarget,
   withChatGptAccess,
@@ -278,17 +278,23 @@ export class GatewayProxy extends Context.Service<
             "provider-not-configured",
             `The gateway has no credential for ${destination.value.provider}.`,
           );
+        const path = llmRoute(provider.value, destination.value.rest);
+        if (Option.isNone(path))
+          return yield* refusedCaller(
+            claims,
+            "unsupported-path",
+            `The gateway serves only the routes Claude Code and Codex call on ${hosts.llm}, such as /anthropic/v1/messages and /openai/v1/responses, not ${target.pathname}.`,
+          );
         const incoming = withoutCallerCredentials(endToEndHeaders(request.headers));
         const { credential } = provider.value;
         const outgoing =
           credential._tag === "ChatGptLogin"
-            ? yield* chatGptRequest(claims, credential, destination.value.rest, incoming)
+            ? yield* chatGptRequest(claims, credential, incoming)
             : {
-                path: destination.value.rest,
                 headers: withStaticCredential(credential, incoming),
                 answered: () => Effect.void,
               };
-        const upstream = `${provider.value.upstream}${outgoing.path}${target.search}`;
+        const upstream = `${provider.value.upstream}${path.value}${target.search}`;
         const response = yield* forwardRequest(client, request, upstream, outgoing.headers);
         yield* outgoing.answered(response.status);
         yield* forwarded("Forwarded an LLM request", request, target, attachment, response, {
@@ -299,22 +305,14 @@ export class GatewayProxy extends Context.Service<
       });
 
       /**
-       * Returns the ChatGPT backend path and headers for a request with a ChatGPT login, and
-       * records a 401 answer so the next request refreshes the access token first.
+       * Returns the headers for a request with a ChatGPT login, and records a 401 answer so the
+       * next request refreshes the access token first.
        */
       const chatGptRequest = Effect.fn("GatewayProxy.chatGptRequest")(function* (
         claims: CallerClaims,
         login: ChatGptLogin,
-        rest: string,
         incoming: Headers.Headers,
       ) {
-        const path = chatGptPath(rest);
-        if (Option.isNone(path))
-          return yield* refusedCaller(
-            claims,
-            "unsupported-path",
-            `With a ChatGPT login, the gateway serves Codex's paths under /openai/v1 on ${hosts.llm}, such as /openai/v1/responses, not /openai${rest}.`,
-          );
         const access = yield* logins
           .access(login)
           .pipe(
@@ -323,7 +321,6 @@ export class GatewayProxy extends Context.Service<
             ),
           );
         return {
-          path: path.value,
           headers: withChatGptAccess(access, incoming),
           answered: (status: number) =>
             status === 401 ? logins.refused(login, access) : Effect.void,

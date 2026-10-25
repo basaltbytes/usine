@@ -113,16 +113,33 @@ export const configuredProvider = (
   name: LlmProviderName,
 ): Option.Option<LlmProvider> => (name === "anthropic" ? providers.anthropic : providers.openai);
 
-/** Matches a path under `/v1` with plain segments only, so no encoded separator can leave the upstream's prefix. */
-const CHATGPT_PATH = /^\/v1((?:\/[A-Za-z0-9_.~-]+)+)$/u;
+/**
+ * The routes each provider serves after its prefix: those Claude Code and Codex call. Each
+ * pattern matches whole plain segments, so a percent-encoded separator or a dot segment never
+ * matches, and other parts of the provider's API, such as files or organization administration,
+ * can't be reached with the Gateway's credential.
+ */
+const LLM_ROUTES = {
+  anthropic: [
+    /^\/v1\/messages$/u,
+    /^\/v1\/messages\/count_tokens$/u,
+    /^\/v1\/models$/u,
+    /^\/v1\/models\/[A-Za-z0-9][A-Za-z0-9._-]*$/u,
+  ],
+  openai: [/^\/v1\/responses$/u, /^\/v1\/responses\/compact$/u, /^\/v1\/models$/u],
+} as const satisfies Record<LlmProviderName, ReadonlyArray<RegExp>>;
 
 /**
- * Returns the ChatGPT backend path for `rest`, the path after `/openai`. Codex calls
- * `<base_url>/responses` with `base_url` ending in `/v1`, and the backend serves the same
- * paths without `/v1`, so `/v1/responses` is the backend's `/responses`.
+ * Returns the upstream path for `rest`, the path after the provider's prefix, if it's one of the
+ * provider's `LLM_ROUTES`. Codex calls `<base_url>/responses` with `base_url` ending in `/v1`;
+ * the ChatGPT backend serves the same routes without `/v1`, so with a ChatGPT login
+ * `/v1/responses` is the backend's `/responses`.
  */
-export const chatGptPath = (rest: string): Option.Option<string> =>
-  Option.fromNullishOr(CHATGPT_PATH.exec(rest)?.[1]);
+export const llmRoute = (provider: LlmProvider, rest: string): Option.Option<string> => {
+  const routes = provider._tag === "AnthropicProvider" ? LLM_ROUTES.anthropic : LLM_ROUTES.openai;
+  if (!routes.some((route) => route.test(rest))) return Option.none();
+  return Option.some(provider.credential._tag === "ChatGptLogin" ? rest.slice("/v1".length) : rest);
+};
 
 const OAUTH_BETA = "oauth-2025-04-20";
 

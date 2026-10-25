@@ -464,25 +464,30 @@ describe("GatewayProxy with a ChatGPT login", () => {
       }),
   );
 
-  it.effect("refuses paths outside /openai/v1 and encoded separators", () =>
-    Effect.gen(function* () {
-      const { login } = yield* authFile("60 minutes");
-      yield* Effect.gen(function* () {
-        yield* setAnswer(refreshing());
-        const caller = yield* attach;
-        for (const path of [
-          "/openai/responses",
-          "/openai/v1",
-          "/openai/v1/x%2F..%2Fconversations",
-        ]) {
-          const answer = yield* send(`http://llm.gw.test${path}`, {
-            authorization: `Bearer ${caller}`,
-          });
-          assert.deepStrictEqual([answer.status, answer.reason], [404, "unsupported-path"], path);
-        }
-        assert.lengthOf(yield* backendRequests, 0);
-      }).pipe(Effect.provide(proxyFor(login)));
-    }),
+  it.effect(
+    "refuses backend paths Codex doesn't call, and encoded separators, without a refresh",
+    () =>
+      Effect.gen(function* () {
+        const { login } = yield* authFile("1 minute");
+        yield* Effect.gen(function* () {
+          yield* setAnswer(refreshing());
+          const caller = yield* attach;
+          for (const path of [
+            "/openai/responses",
+            "/openai/v1",
+            "/openai/v1/x%2F..%2Fconversations",
+            "/openai/v1/conversations",
+            "/openai/v1/responses/../../conversations",
+          ]) {
+            const answer = yield* send(`http://llm.gw.test${path}`, {
+              authorization: `Bearer ${caller}`,
+            });
+            assert.deepStrictEqual([answer.status, answer.reason], [404, "unsupported-path"], path);
+          }
+          assert.lengthOf(yield* backendRequests, 0);
+          assert.lengthOf(yield* tokenRequests, 0);
+        }).pipe(Effect.provide(proxyFor(login)));
+      }),
   );
 
   it.effect("answers 401 and sends nothing upstream when the login can't be refreshed", () =>
