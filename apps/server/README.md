@@ -10,7 +10,19 @@ usine up
 
 It prints `http://127.0.0.1:7331` and stays attached to the terminal. `--port <port>` or `USINE_PORT` changes the port; if the port is taken, the CLI names the conflict and suggests the override. `usine --version` prints the `@usine/server` version that the instance pins.
 
-One `usine up` runs per instance folder. It holds `.usine/instance.lock` from startup until every store closes, and writes its pid to `.usine/instance.pid`. A second `usine up` there names the running process and exits nonzero before opening a store. A draining process keeps the folder until it exits.
+One `usine up` runs per instance folder. It holds `.usine/instance.lock` from startup until every store closes, writes its pid to `.usine/instance.pid`, and writes its pid, port, version, start time, and command line to `.usine/instance.json`. It removes both files when it exits. A second `usine up` there names the running process and exits nonzero before opening a store. A draining process keeps the folder until it exits.
+
+## Manage the instance
+
+```sh
+usine up --detach   # start in the background, with the output in .usine/usine.log
+usine status        # running or not, pid, address, version, uptime, open runs; exit 3 if stopped
+usine stop          # send SIGTERM and wait for the drain; --force ends the drain
+usine restart       # stop, then start the recorded command line in the background
+usine upgrade       # back up, move the @usine/server pin, install, commit, and restart
+```
+
+`stop`, `restart`, and `upgrade` wait `--timeout` seconds (120 by default) for each stop and start. `restart` and `upgrade` refuse while a run has a running attempt, unless `--force`, and when the shell lacks a gateway's admin token variable, because the new process inherits the shell's environment. `upgrade` applies to an instance that installs `@usine/server` from its own `package.json` pin; for a checkout, pull and build it, then run `usine restart`.
 
 Without GitHub App credentials, it logs the typed error, leaves both trigger streams idle, and opens the setup screen in the default browser. The browser command times out after two seconds; a failed opener only logs a warning. Runs, transcripts, and loop pause state stay readable, and the instance folder can be reloaded, but interventions are unavailable. Supply `USINE_GITHUB_APP_ID` and `USINE_GITHUB_PRIVATE_KEY`, or `app_id` and `private_key` in a mode-0600 `.usine/github-app.json`. Credentials are read only at startup, so restart `usine up` after adding them, as the setup screen says.
 
@@ -67,6 +79,6 @@ The versioned JSON has `exportedAt`, the full run `snapshot` (event, effective t
 
 ## Stop the server
 
-Press Ctrl+C or send `SIGTERM` once to stop polling and drain admitted attempts. The server waits up to `max_attempt_minutes` from the request, or indefinitely if unset; a second signal stops the wait. Queued runs and automatic retries stay saved, and an attempt cut off by the deadline uses normal restart recovery. Start the next `usine up` after the process exits.
+Run `usine stop`, press Ctrl+C, or send `SIGTERM` once to stop polling and drain admitted attempts. The server waits up to `max_attempt_minutes` from the request, or indefinitely if unset; a second signal, or `usine stop --force`, stops the wait. Queued runs and automatic retries stay saved, and an attempt cut off by the deadline uses normal restart recovery. Start the next `usine up` after the process exits; `usine stop` returns when it has.
 
 To clear a handled failure, select **Mark resolved** in the run drawer, opened from Needs attention or run history. Resolution survives restarts and keeps the failed outcome, transcript, and retry. A later failed attempt asks for attention again. After a question the button reads **Mark answered**; after a question or blocker, the loop then acts on the item's newest state.

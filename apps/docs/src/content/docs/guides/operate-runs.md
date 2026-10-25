@@ -1,6 +1,6 @@
 ---
 title: Operate runs
-description: Follow runs in the web UI, approve, retry, cancel, edit, and run them again, steer a live attempt, answer Needs attention, stop the orchestrator cleanly, and back up the runtime store.
+description: Follow runs in the web UI, approve, retry, cancel, edit, and run them again, steer a live attempt, answer Needs attention, stop, restart, and upgrade the orchestrator, and back up the runtime store.
 sidebar:
   order: 3
 ---
@@ -268,7 +268,17 @@ usine skips attempts on a worker that `usine.yaml` no longer declares, for examp
 
 ## Stop the orchestrator
 
-Press Ctrl+C once, or send `SIGTERM`. usine stops starting attempts and waits for running attempts to end, for at most `max_attempt_minutes`. A second Ctrl+C stops it without waiting, and the next `usine up` reattaches the running attempts. Start that `usine up` only after the process exits. See [Shutdown](/reference/configuration/cli/#shutdown).
+From the instance folder, run `usine stop`, or press Ctrl+C once in the terminal of `usine up`. usine stops starting attempts and waits for running attempts to end, for at most `max_attempt_minutes`. `usine stop` names the runs that it waits for and returns when the process exits, or after `--timeout` seconds (120 by default) while the drain continues. `usine stop --force`, or a second Ctrl+C, stops the orchestrator without waiting, and the next `usine up` reattaches the running attempts. See [Shutdown](/reference/configuration/cli/#shutdown).
+
+`usine status` tells whether the orchestrator runs, with its PID, address, engine version, uptime, and open runs. It exits with status 3 if the orchestrator doesn't run.
+
+## Restart and upgrade
+
+`usine restart` stops the orchestrator and starts it again in the background, with the same Node.js binary, entry point, port, and flags, and its output in `.usine/usine.log`. To start it in the background the first time, run `usine up --detach`.
+
+`usine restart` and `usine upgrade` refuse while a run has a running attempt, so that the drain doesn't keep the orchestrator down. Wait for the attempt to end, or pass `--force` to stop without waiting; the new process reattaches the attempt. The new process gets the environment of your shell, so set the variables that `usine up` reads, such as a gateway's `admin_token_env`, before you run the command. `usine restart` refuses if a gateway's variable is missing.
+
+To upgrade an instance that pins `@usine/server` in its `package.json`, run `usine upgrade`, or `usine upgrade <version>` for another version than `latest`. It backs up the stores into `.usine/backups/`, moves the pin, installs it, commits the change, and restarts the orchestrator. `usine upgrade --check` prints the versions and changes nothing. If the orchestrator runs from a checkout, pull and build that checkout, then run `usine restart`. See [`usine upgrade`](/reference/configuration/cli/#usine-upgrade-version).
 
 ## Back up and export
 
@@ -282,7 +292,7 @@ It also writes the durable storage to `/backups/factory-2026-10-16.durable.sqlit
 
 To restore a backup:
 
-1. Stop the orchestrator.
+1. Stop the orchestrator with `usine stop`.
 2. Move `.usine/runtime.sqlite` and `.usine/durable.sqlite` aside, with their `-wal` and `-shm` files.
 3. Copy both files of one backup in their place.
 4. Start `usine up` with the same configuration and usine version.
