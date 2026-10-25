@@ -279,17 +279,28 @@ export class GatewayProxy extends Context.Service<
         return response;
       });
 
+      /**
+       * Refuses a host the reverse proxy doesn't serve. gh sends every request to the gateway,
+       * including a followed redirect to a GitHub download host, so for an allowlisted host the
+       * refusal says how to download from it with curl.
+       */
+      const unknownHost = Effect.fn("GatewayProxy.unknownHost")(function* (target: RequestTarget) {
+        const { egress } = yield* inForce.current;
+        const served = `The gateway serves ${hosts.git} and ${hosts.llm}, not ${target.host}`;
+        return yield* refused(
+          "unknown-host",
+          egress.decide(target.host, 443)._tag === "EgressPermitted"
+            ? `${served}, which the forward proxy serves. gh sends every request to the gateway, so it can't follow GitHub's redirect to ${target.host}. Download with curl -fL -u ":$GH_TOKEN" from ${hosts.git} instead, such as http://${hosts.git}/OWNER/REPO/releases/download/TAG/FILE, or http://${hosts.git}/api/v3/repos/OWNER/REPO/tarball/REF for an archive.`
+            : `${served}. Send requests for other hosts through the forward proxy.`,
+        );
+      });
+
       const route = (request: HttpServerRequest.HttpServerRequest, target: RequestTarget) => {
         if (target.host === hosts.git) return github(request, target, "gateway");
         const githubHost = GITHUB_HOSTS.get(target.host);
         if (githubHost !== undefined) return github(request, target, githubHost);
         if (target.host === hosts.llm) return llm(request, target);
-        return Effect.fail(
-          refused(
-            "unknown-host",
-            `The gateway serves ${hosts.git} and ${hosts.llm}, not ${target.host}. Send requests for other hosts through the forward proxy.`,
-          ),
-        );
+        return unknownHost(target);
       };
 
       const handle = Effect.gen(function* () {

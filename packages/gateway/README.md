@@ -79,6 +79,14 @@ curl -fL -u ":$GH_TOKEN" -o tool.tar.gz http://git.<domain>/OWNER/REPO/releases/
 
 curl sends `-u` credentials only to the host of the first URL; a header set with `-H` would also reach the asset host.
 
+gh can't download from these hosts. It sends every request to the gateway through its socket, followed redirects included, so `gh release download` reaches the reverse proxy for the asset host, which refuses it with `unknown-host`. For a host on the egress allowlist, the refusal says to use curl instead: the command above for a release asset, or this one for an archive, which GitHub redirects to `codeload.github.com`:
+
+```sh
+curl -fL -u ":$GH_TOKEN" -o repo.tar.gz http://git.<domain>/api/v3/repos/OWNER/REPO/tarball/REF
+```
+
+Actions logs and artifacts redirect to `results-receiver.actions.githubusercontent.com` and Azure Blob Storage, which the allowlist doesn't list, so `gh run view --log`, `gh run view --log-failed`, and `gh run download` don't work on a worker, with gh or curl ([#540](https://github.com/basaltbytes/usine/issues/540)). [ADR 0027](../../docs/adr/0027-gateway-credential-proxy.md) records why the reverse proxy doesn't fetch other hosts.
+
 GitHub redirects some requests for a renamed or transferred repo: API calls to `https://api.github.com/repositories/ID/...`, and release downloads to the new name on github.com. The gateway rewrites a `Location` on github.com or api.github.com to `http://git.<domain>`, with API paths under `/api/v3`, and keeps the path and query, so the client follows it through the gateway. A `Location` on any other host passes unchanged.
 
 The gateway checks the followed request like any other. If GitHub answers a request whose path names the attached repo with a permanent redirect (301 or 308) to a path with another repo name, the attachment learns that name as the repo's new name, and serves paths with either name until it's detached or expires. The installation token is issued for the repo's id, so the new name reaches nothing the token couldn't. Other attachments, temporary redirects, and redirects of paths that name no repo teach no name, so a path with another name is still refused with `repository-mismatch`.

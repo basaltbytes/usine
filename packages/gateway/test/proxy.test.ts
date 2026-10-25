@@ -591,21 +591,25 @@ describe("GatewayProxy", () => {
       ),
   );
 
-  it.effect("the reverse proxy forwards nothing for other hosts, allowlisted ones included", () =>
-    Effect.gen(function* () {
-      const caller = yield* attach(installation);
-      for (const url of [
-        "http://objects.githubusercontent.com/release/asset",
-        "http://example.com/",
-      ]) {
-        const refused = yield* send(url, { authorization: `token ${caller}` });
-        assert.deepStrictEqual(
-          [refused.status, refused.headers.get(REFUSAL_HEADER)],
-          [404, "unknown-host"],
-        );
-      }
-      assert.deepStrictEqual(yield* sent, []);
-    }).pipe(Effect.provide(gateway(NO_PROVIDERS))),
+  it.effect(
+    "the reverse proxy forwards nothing for other hosts, allowlisted ones included, and tells gh users how to download from an allowlisted one",
+    () =>
+      Effect.gen(function* () {
+        const caller = yield* attach(installation);
+        const curl = "http://git.gw.test/OWNER/REPO/releases/download/TAG/FILE";
+        for (const [url, hint] of [
+          ["http://objects.githubusercontent.com/release/asset", true],
+          ["http://example.com/", false],
+        ] as const) {
+          const refused = yield* send(url, { authorization: `token ${caller}` });
+          assert.deepStrictEqual(
+            [refused.status, refused.headers.get(REFUSAL_HEADER)],
+            [404, "unknown-host"],
+          );
+          assert.strictEqual(refused.body.includes(curl), hint, refused.body);
+        }
+        assert.deepStrictEqual(yield* sent, []);
+      }).pipe(Effect.provide(gateway(NO_PROVIDERS))),
   );
 
   it.effect(
