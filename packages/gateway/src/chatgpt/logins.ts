@@ -351,16 +351,19 @@ export class ChatGptLogins extends Context.Service<
         presented: ChatGptAccess,
       ) {
         yield* Effect.annotateCurrentSpan({ authFile: login.authFile });
-        const current = yield* stateOf(login.authFile);
-        if (
-          Option.isNone(current) ||
-          Redacted.value(current.value.tokens.accessToken) !== Redacted.value(presented.accessToken)
-        )
+        // Marks the state in one update, so a refresh that ends meanwhile isn't overwritten.
+        const marked = yield* Ref.modify(states, (all) => {
+          const current = all.get(login.authFile);
+          return current === undefined ||
+            Redacted.value(current.tokens.accessToken) !== Redacted.value(presented.accessToken)
+            ? [false, all]
+            : [true, new Map(all).set(login.authFile, { ...current, refused: true })];
+        });
+        if (!marked)
           return yield* Effect.logDebug(
             "The ChatGPT backend refused an access token the gateway already replaced",
             { authFile: login.authFile },
           );
-        yield* store(login.authFile, { ...current.value, refused: true });
         yield* Effect.logWarning(
           "The ChatGPT backend refused the gateway's access token; the next request refreshes it first",
           { authFile: login.authFile },
