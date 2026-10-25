@@ -125,7 +125,7 @@ A worker with a `provisioner` in `usine.yaml`, instead of a `destination`, creat
 
 A server created for one attempt has no harness login, so preflight requires the gateway's credential for the provider (`llm_providers`) or the provisioner's API key: `api_keys.anthropic` for Claude Code, `api_keys.openai` for Codex.
 
-Each server is created with cloud-init user data that sets an Ed25519 host key that the executor generated, and the executor connects to it only with that key. The snapshot keeps cloud-init, which runs the user data on each server created from it.
+Each server is created with cloud-init user data that sets an Ed25519 host key that the executor generated, and the executor connects to it only with that key. The snapshot keeps cloud-init, which runs the user data on each server created from it. The nftables rules of `cloud-init.yaml`, or of `gateway/worker-nftables.conf` behind the gateway, let only root reach the metadata service that serves the user data, so the `usine` user and the attempt containers can't read the private key.
 
 ### Build the snapshot
 

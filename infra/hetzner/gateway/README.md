@@ -9,7 +9,7 @@ These files create the gateway host of [#223](https://github.com/basaltbytes/usi
 | `gateway-nftables.conf` | The gateway's firewall rules. |
 | `egress-allowlist` | The hosts that workers can reach through the forward proxy: package hosts and the harness login hosts. |
 | `worker-cloud-init.yaml` | What a worker VM needs behind the gateway; `gateway.sh worker-user-data` sends it after the worker file of `../cloud-init.yaml`. |
-| `worker-nftables.conf` | A worker's firewall rules: the gateway only. |
+| `worker-nftables.conf` | A worker's firewall rules: the gateway only, and the metadata service for root. |
 
 ## Traffic paths
 
