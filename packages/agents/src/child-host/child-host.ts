@@ -14,6 +14,14 @@ export const SshCommand = Schema.Struct({
 });
 export type SshCommand = typeof SshCommand.Type;
 
+/** A running container on the remote machine, entered with `<runtime> exec`. */
+export const ShellContainer = Schema.Struct({
+  /** The container CLI on the machine, such as `docker`. */
+  runtime: Schema.NonEmptyString,
+  name: Schema.NonEmptyString,
+});
+export type ShellContainer = typeof ShellContainer.Type;
+
 /** A host that runs each child on another machine as one SSH command, through its standard streams. */
 export class RemoteShell extends Schema.TaggedClass<RemoteShell>("@usine/agents/RemoteShell")(
   "RemoteShell",
@@ -28,6 +36,11 @@ export class RemoteShell extends Schema.TaggedClass<RemoteShell>("@usine/agents/
     sshEnvironment: Schema.Record(Schema.String, Schema.String),
     /** The SSH destination, passed as one argument. */
     destination: Schema.NonEmptyString,
+    /**
+     * The container that runs each command, with the working directory, variables, and PID file
+     * inside it. If absent, the SSH user's shell runs the command.
+     */
+    container: Schema.optionalKey(ShellContainer),
   },
 ) {}
 
@@ -78,13 +91,22 @@ const remoteShellCommand = (invocation: HostInvocation): string => {
   return `${[...setup, run].join(" && ")}; code=$?; rm -f ${pidFile}; exit "$code"`;
 };
 
-/** Returns the SSH client arguments that run `invocation`: the options, the destination, and one remote command line. */
-export const sshArguments = (host: RemoteShell, invocation: HostInvocation): Array<string> => [
-  ...host.ssh.args,
-  host.destination,
-  "--",
-  remoteShellCommand(invocation),
-];
+/**
+ * Returns the SSH client arguments that run `invocation`: the options, the destination, and one
+ * remote command line. In a container, the line runs `sh -c` with `invocation`'s command line
+ * through `<runtime> exec -i`, so its standard streams pass through.
+ */
+export const sshArguments = (host: RemoteShell, invocation: HostInvocation): Array<string> => {
+  const line = remoteShellCommand(invocation);
+  return [
+    ...host.ssh.args,
+    host.destination,
+    "--",
+    host.container === undefined
+      ? line
+      : `exec ${quoted([host.container.runtime, "exec", "-i", host.container.name, "sh", "-c", line])}`,
+  ];
+};
 
 /** Returns the PID file path of a remote child: next to its worktree, named by the child number in its session ID. */
 export const childPidFile = (worktree: string, session: AgentSessionId): string =>

@@ -143,6 +143,8 @@ export const sshCredentialsFor = Effect.fn("SshExecutor.credentialsFor")(functio
       environment,
       gitEnvironment: environment,
       shell: machine.shell,
+      secrets: {},
+      readOnlyPaths: [directory],
       refresh: credential.refresh(),
       scrub: credential.scrub,
     } satisfies RemoteAccess;

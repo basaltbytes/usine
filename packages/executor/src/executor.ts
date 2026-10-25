@@ -28,6 +28,7 @@ export const WorkerCapability = Schema.Literals([
   "harness-login",
   "credentials",
   "gateway",
+  "container",
 ]);
 export type WorkerCapability = typeof WorkerCapability.Type;
 
@@ -77,6 +78,8 @@ export class WorkerCapabilityError extends Schema.TaggedError<WorkerCapabilityEr
    * - `credentials`: an exe.dev integration isn't ready, or the Worker kind can't issue a
    *   read-only credential for a `permissions: read` Loop.
    * - `gateway`: the Gateway doesn't respond or isn't reachable from the machine.
+   * - `container`: the machine's Docker doesn't respond to the SSH user, the Attempt image can't
+   *   be pulled, or its user ID differs from the SSH user's.
    */
   capability: WorkerCapability,
   message: Schema.NonEmptyString,
@@ -90,6 +93,18 @@ export const ExecutorError = Schema.Union([
   WorkerCapabilityError,
 ]);
 export type ExecutorError = typeof ExecutorError.Type;
+
+/** The outcome of a preflight that found every capability that Attempts need. */
+export interface PreflightReport {
+  /**
+   * Why the Worker runs Attempts without a capability that keeps them apart, such as an SSH
+   * Worker whose machine has no Docker. `None` if it has every such capability.
+   */
+  readonly degraded: Option.Option<string>;
+}
+
+/** The report of a Worker that runs Attempts as designed. */
+export const fullPreflight: PreflightReport = { degraded: Option.none() };
 
 /** Logs each preflight failure at error level. */
 export const logPreflightFailure = <A, R>(
@@ -267,13 +282,13 @@ export class Executor extends Context.Service<
     ) => Effect.Effect<Option.Option<Result.Result<StepResult, AttemptFailure>>, AttemptFailure>;
     /**
      * Verifies Git, enough memory for `maxConcurrentAttempts` concurrent Attempts, and each brain
-     * in `brains`. Never installs tools or logs in.
+     * in `brains`. Never installs tools or logs in; an SSH Worker pulls its Attempt image.
      */
     readonly preflight: (
       worker: WorkerName,
       brains: ReadonlyArray<BrainSpec>,
       maxConcurrentAttempts: number,
-    ) => Effect.Effect<void, ExecutorError>;
+    ) => Effect.Effect<PreflightReport, ExecutorError>;
     /**
      * Verifies the Agent's brain, then acquires the checkout and credential in the caller's scope.
      * Clone, fetch, and lock waits are interruptible; on failure, releases everything acquired so

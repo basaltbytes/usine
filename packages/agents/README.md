@@ -44,7 +44,7 @@ Logs record the verified authentication method and pool. On completion or interr
 `ChildRequest.host` (`/child-host`) sets where a child runs, and `ChildRequest.worker` names that machine's worker:
 
 - `LocalProcess`: on this machine, with `ChildRequest.environment` as the whole environment.
-- `RemoteShell`: one `ssh <args> <destination> -- <remote command>`, which enters the worktree, exports the request's environment over the machine's own, writes its pid to `<worktree>.child-<n>.pid`, and runs the harness. The SSH client gets only `RemoteShell.sshEnvironment`.
+- `RemoteShell`: one `ssh <args> <destination> -- <remote command>`, which enters the worktree, exports the request's environment over the machine's own, writes its pid to `<worktree>.child-<n>.pid`, and runs the harness. The SSH client gets only `RemoteShell.sshEnvironment`. With `container`, the remote command is `<runtime> exec -i <name> sh -c <command line>`, so the directory, variables, and pid file are inside that container.
 
 Executors run `CHILD_KILL_SCRIPT` remotely to stop every child in those pid files before keeping or removing a worktree. Claude Code runs remotely through `spawnClaudeCodeProcess`, Codex over the same SSH command. Pi children run tools in this process and fail on `RemoteShell` with `AgentResultError`. They get only Pi's default tools, `read`, `bash`, `edit`, and `write`, whatever the global Pi `defaultTools` setting adds, and `bash` runs with exactly `ChildRequest.environment`.
 

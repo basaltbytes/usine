@@ -3,7 +3,7 @@ import { Option } from "effect";
 
 /**
  * The hooks directory inside the checkout's git directory for `permissions: read` Loops.
- * `git worktree remove` deletes it with the checkout.
+ * Removing the checkout deletes it.
  */
 export const PRE_PUSH_HOOKS_DIRECTORY = "usine-hooks";
 

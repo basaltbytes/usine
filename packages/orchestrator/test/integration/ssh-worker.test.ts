@@ -257,6 +257,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
         );
         const runtime = sshLayer(instanceDirectory, config, [agent.brain], {
           workers: yield* sshWorkerAddressesOf(config),
+          instance: "ssh-integration",
           ssh: sshFor(values),
           // Logins are the operator's; this test needs none, the preflight test checks them.
           harnessReadiness: () => (brain) =>
@@ -377,6 +378,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
         });
         const executor = sshExecutorLayer({
           workers: yield* sshWorkerAddressesOf(config),
+          instance: "ssh-integration",
           ssh: sshFor(values),
         }).pipe(
           Layer.provide(unused),
@@ -626,6 +628,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
         );
         const runtime = sshLayer(instanceDirectory, config, [agent.brain], {
           workers: yield* sshWorkerAddressesOf(config),
+          instance: "ssh-integration",
           ssh: gatewaySshFor(values),
           // The logins are the operator's; the Gateway's check of their hosts still runs.
           harnessReadiness: () => (brain) =>
@@ -723,6 +726,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
         });
         const executor = sshExecutorLayer({
           workers: yield* sshWorkerAddressesOf(config),
+          instance: "ssh-integration",
           ssh: gatewaySshFor(values),
         }).pipe(
           Layer.provide(unused),

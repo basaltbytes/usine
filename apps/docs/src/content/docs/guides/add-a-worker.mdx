@@ -14,7 +14,7 @@ A worker is the machine that has an attempt's checkout and runs its Claude Code 
 | `kind`               | Where children run                                           | GitHub credential on the machine                                     |
 | -------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------- |
 | `local`              | as processes on the orchestrator machine                     | a token file in a private temporary folder, removed with the attempt |
-| `ssh`                | on a Linux machine, one SSH command per child                | a token file under the worker's root, removed with the attempt       |
+| `ssh`                | on a Linux machine, in the attempt's own Docker container    | a token file under the worker's root, removed with the attempt       |
 | `ssh` with `gateway` | on a Linux machine with no public address, through a gateway | none: the gateway adds the token to the machine's GitHub requests    |
 | `exe.dev`            | not available: `usine up` refuses this kind at this commit   |                                                                      |
 
@@ -41,17 +41,17 @@ Use the local worker only for agents that you trust with your own access. For ot
 
 Worker [preflight](/reference/configuration/agent-files/#preflight) never installs anything or logs in. It checks:
 
-| Worker               | Checks                                                                                                                                                                                                                                                                          |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `local`              | `git --version`, the memory for `max_concurrent_attempts`, and each harness with the children's environment ([harness checks](/reference/configuration/agent-files/#preflight)).                                                                                                |
-| `ssh`                | The SSH connection, a writable `root`, `git --version`, the memory for `max_concurrent_attempts`, and each harness over SSH. A Pi agent in the roster fails this check.                                                                                                         |
-| `ssh` with `gateway` | The `ssh` checks, and also: the admin API accepts the admin token, the worker's sshd accepts the caller token variables, the worker can connect to `git.<domain>`, and for each harness that uses its login on the worker, the login's hosts respond through the forward proxy. |
+| Worker               | Checks                                                                                                                                                                                                                                                                                         |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `local`              | `git --version`, the memory for `max_concurrent_attempts`, and each harness with the children's environment ([harness checks](/reference/configuration/agent-files/#preflight)).                                                                                                               |
+| `ssh`                | The SSH connection, a writable `root`, `git --version`, the memory for `max_concurrent_attempts`, Docker and the attempt image, and each harness in a container from that image. Without Docker, each harness over SSH, and the worker is degraded. A Pi agent in the roster fails this check. |
+| `ssh` with `gateway` | The `ssh` checks, and also: the admin API accepts the admin token, the worker's sshd accepts the caller token variables, the worker can connect to `git.<domain>`, and for each harness that uses its login on the worker, the login's hosts respond through the forward proxy.                |
 
 The `memory` check is described under [`workers`](/reference/configuration/usine-yaml/#workers).
 
 ## SSH workers
 
-An SSH worker is a Linux machine with Git, a directory that the SSH user can write to, and your agents' harnesses on the `PATH` of a non-interactive SSH session, logged in for the SSH user.
+An SSH worker is a Linux machine with Git, Docker, a directory that the SSH user can write to, and your agents' harnesses logged in for the SSH user.
 
 ```yaml title="usine.yaml"
 workers:
@@ -65,13 +65,23 @@ workers:
 
 [`kind: ssh`](/reference/configuration/usine-yaml/#kind-ssh) describes the fields. `ssh` runs in batch mode, so connect once by hand to record the host key before you start `usine up`. An SSH agent works.
 
-usine writes each attempt's token to `<root>/workers/<name>/credentials/<attempt>` through standard input, so it doesn't appear on a command line, and removes it when the attempt ends. Attempts on one machine run as the same user and can read each other's tokens ([#231](https://github.com/basaltbytes/usine/issues/231)).
+usine writes each attempt's token to `<root>/workers/<name>/credentials/<attempt>` through standard input, so it doesn't appear on a command line, and removes it when the attempt ends.
+
+### A container per attempt
+
+Each attempt runs in its own container from an image with Node.js 22, pnpm, Git, gh, Chromium, Claude Code, and Codex, built from `infra/worker-image/Dockerfile` ([ADR 0011](https://github.com/basaltbytes/usine/blob/main/docs/adr/0011-github-app-identity-scoped-worker-tokens.md), amended 2026-10-25). The container mounts only that attempt's checkout read-write, and its cached clone, credential directory, and the harness login files of the SSH user read-only. Every command of the attempt runs in it with `docker exec`, so attempts can't read each other's checkouts, tokens, or processes. The SSH user's shell starts and removes the container and fetches the cached clone. [`workers[].container`](/reference/configuration/usine-yaml/#workerscontainer) sets the image and the CPU, memory, and process limits of each container.
+
+The container is named `usine-<attempt id>` and is removed with the checkout when the attempt ends. A process that stops without removing it leaves it; the next process removes it before its first attempt on that machine, and removes the containers of workers that `usine.yaml` no longer declares too.
+
+The containers use the machine's network, so a worker behind a gateway still reaches only the gateway. The SSH user must be in the `docker` group, which lets it act as root on the machine; the attempts never get Docker access.
+
+Without Docker on the machine, attempts run as the SSH user and can read each other's tokens ([#231](https://github.com/basaltbytes/usine/issues/231)). Preflight passes and reports the worker as degraded in the log and on the **Workers** page.
 
 ### Create a worker on Hetzner Cloud
 
-The scripts in `infra/hetzner/` create SSH workers with the `hcloud` CLI. `infra/hetzner/cloud-init.yaml` sets up a Debian 13 machine with a `usine` user that accepts SSH by key only, a 2 GB swap file, and `/home/usine/.usine` for the worker's root. It installs Git, gh, Node.js 24, pnpm 11.20.0, Claude Code 2.1.308, Codex 0.159.2, and Chromium. A cx33 or cpx32 has 7.7 GiB of memory, enough for two attempts without a warning.
+The scripts in `infra/hetzner/` create SSH workers with the `hcloud` CLI. `infra/hetzner/cloud-init.yaml` sets up a Debian 13 machine with a `usine` user that accepts SSH by key only, a 2 GB swap file, and `/home/usine/.usine` for the worker's root. It installs Docker, with `usine` in the `docker` group, and Git, gh, Node.js 24, pnpm 11.20.0, Claude Code 2.1.308, Codex 0.159.2, and Chromium, which the logins use. A cx33 or cpx32 has 7.7 GiB of memory, enough for two attempts without a warning.
 
-Attempts on the machine run as `usine` and share pnpm's default store, `/home/usine/.local/share/pnpm/store`, and the Turborepo cache that `/etc/environment` sets with `TURBO_CACHE_DIR=/home/usine/.cache/turbo`. Children are non-interactive SSH sessions, so they get `/etc/environment` and read no shell profile. `TURBO_CACHE_DIR` overrides a `cacheDir` in the repository's `turbo.json`. Turborepo still writes task logs to `.turbo/` in each package folder of the worktree.
+Each attempt's container has its own pnpm store and Turborepo cache, removed with the container, so `pnpm install` downloads every package for each attempt.
 
 <Steps>
 
@@ -96,7 +106,28 @@ Attempts on the machine run as `usine` and share pnpm's default store, `/home/us
    codex login --device-auth  # ChatGPT plan: open the URL it prints and enter the code it prints
    ```
 
-4. Add the worker to `usine.yaml` with its address as the `destination`, and [reload the configuration](/reference/configuration/cli/#reload). usine runs preflight on the worker before it takes attempts.
+4. Add the worker to `usine.yaml` with its address as the `destination`, and [reload the configuration](/reference/configuration/cli/#reload). usine runs preflight on the worker before it takes attempts, and pulls the attempt image.
+
+</Steps>
+
+### Move a worker to containers
+
+A worker created before cloud-init installed Docker runs its attempts as the SSH user. To give each attempt its own container:
+
+<Steps>
+
+1. Stop the worker's attempts: [stop](/reference/configuration/cli/#usine-stop) `usine up`, or wait until the worker runs none. An attempt whose checkout predates Docker keeps running as the SSH user after a restart.
+
+2. As root on the worker, install Docker and add `usine` to the `docker` group. `usine` has no sudo; [`infra/hetzner/README.md`](https://github.com/basaltbytes/usine/blob/main/infra/hetzner/README.md) shows how to become root:
+
+   ```sh title="Worker, as root"
+   apt-get install -y docker.io
+   usermod -aG docker usine
+   ```
+
+   Behind a gateway, also add the proxy drop-in, the `daemon.json`, and the `ghcr.io` hosts of `infra/hetzner/gateway/` first; [`infra/hetzner/gateway/README.md`](https://github.com/basaltbytes/usine/blob/main/infra/hetzner/gateway/README.md) lists them.
+
+3. Start `usine up`. Preflight pulls the image and reports the worker as passed, not degraded.
 
 </Steps>
 

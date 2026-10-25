@@ -2,6 +2,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterContextProvider } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { WorkerName } from "@usine/core/worker";
+import { DegradedCheckView, WorkerSlotsView, WorkerView } from "@usine/orchestrator/operator";
 import { assert, describe, it } from "vitest";
 import { DeskNeedsYou } from "../src/desk/desk.tsx";
 import { LastOutcomes } from "../src/desk/last-outcomes.tsx";
@@ -139,5 +141,20 @@ describe("Desk", () => {
     const visible = text(render(<WorkersLine workers={desk.workers} now={now} />));
     assert.include(visible, "local 1 of 2 slots in use Preflight passed 7h ago");
     assert.include(visible, "hz-worker-1 1 of 1 slot in use Preflight failed 6h ago");
+  });
+
+  it("shows a Worker that runs attempts without containers as degraded, not failed", () => {
+    const degraded = new WorkerView({
+      name: WorkerName.make("hz-worker-2"),
+      slots: new WorkerSlotsView({ capacity: 1, leased: 0 }),
+      preflight: new DegradedCheckView({
+        checkedAt: "2026-10-20T04:00:00.000Z",
+        message: "Docker isn't installed, so attempts run as the SSH user",
+      }),
+    });
+    const html = render(<WorkersLine workers={[degraded]} now={now} />);
+    assert.include(text(html), "hz-worker-2 0 of 1 slot in use Preflight degraded 6h ago");
+    assert.include(html, "Docker isn&#x27;t installed");
+    assert.notInclude(html, "text-destructive");
   });
 });

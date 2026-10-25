@@ -111,3 +111,34 @@ export type GatewayLlmProvider = typeof GatewayLlmProvider.Type;
  */
 export const GatewayCredentialKind = Schema.Literals(["api-key", "subscription"]);
 export type GatewayCredentialKind = typeof GatewayCredentialKind.Type;
+
+/**
+ * A container image reference, `[registry/]repository[:tag][@digest]`, such as
+ * `ghcr.io/basaltbytes/usine-worker:claude-2.1.308-codex-0.159.2`. Rejects values that the
+ * container CLI could parse as an option.
+ */
+export const ContainerImage = Schema.String.check(
+  Schema.isPattern(/^[a-z0-9][A-Za-z0-9._/:@-]{0,254}$/u, {
+    message:
+      "Expected a container image reference, such as ghcr.io/owner/image:tag, without spaces or a leading dash",
+  }),
+).pipe(Schema.brand("ContainerImage"));
+export type ContainerImage = typeof ContainerImage.Type;
+
+/** The CPUs a container may use, such as `1.5`. */
+export const ContainerCpus = Schema.Finite.check(Schema.isGreaterThan(0)).pipe(
+  Schema.brand("ContainerCpus"),
+);
+export type ContainerCpus = typeof ContainerCpus.Type;
+
+/** A container's memory limit in MiB. */
+export const ContainerMemoryMib = Schema.Int.check(Schema.isGreaterThanOrEqualTo(256)).pipe(
+  Schema.brand("ContainerMemoryMib"),
+);
+export type ContainerMemoryMib = typeof ContainerMemoryMib.Type;
+
+/** The maximum number of processes and threads in a container. */
+export const ContainerPids = Schema.Int.check(Schema.isGreaterThanOrEqualTo(64)).pipe(
+  Schema.brand("ContainerPids"),
+);
+export type ContainerPids = typeof ContainerPids.Type;

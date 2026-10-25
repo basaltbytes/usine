@@ -192,8 +192,8 @@ export class WorkerView extends Schema.Class<WorkerView>("@usine/orchestrator/Wo
    */
   slots: WorkerSlotsView,
   /**
-   * The newest failed check among the Worker's prerequisites and harnesses, or else the newest
-   * passed check. Null before the first preflight.
+   * The newest failed check among the Worker's prerequisites and harnesses, or else its degraded
+   * prerequisites, or else the newest passed check. Null before the first preflight.
    */
   preflight: Schema.NullOr(PreflightCheckView),
 }) {}
@@ -379,8 +379,11 @@ const standingCheck = (preflight: WorkerPreflight): Option.Option<PreflightCheck
     ...preflight.harnesses.map(({ check }) => check),
   ];
   const failed = checks.filter(({ _tag }) => _tag === "Failed");
+  const degraded = checks.filter(({ _tag }) => _tag === "Degraded");
   return Option.fromNullishOr(
-    (failed.length > 0 ? failed : checks).reduce<PreflightCheck | undefined>(
+    (failed.length > 0 ? failed : degraded.length > 0 ? degraded : checks).reduce<
+      PreflightCheck | undefined
+    >(
       (newest, check) =>
         newest === undefined || checkedAt(check) > checkedAt(newest) ? check : newest,
       undefined,

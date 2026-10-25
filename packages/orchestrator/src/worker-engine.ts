@@ -1,6 +1,7 @@
 import type { UsineConfig } from "@usine/config/factory";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import type { InstanceDirectory } from "@usine/core/instance";
+import { GitHubCredentials } from "@usine/github/github-app";
 import { Effect, Layer, Option } from "effect";
 import { layer as localLayer } from "./local.ts";
 import { layer as sshLayer, sshWorkerAddressesOf, sshWorkersOf } from "./ssh.ts";
@@ -20,14 +21,18 @@ export const workerEngineLayer = (
       const workers = config.workers.map(({ name }) => name).join(",");
       if (ssh.length === config.workers.length) {
         const addresses = yield* sshWorkerAddressesOf(config);
+        // The GitHub App is the instance's identity (ADR 0011).
+        const { appId } = yield* GitHubCredentials;
+        const instance = `github-app-${String(appId)}`;
         yield* Effect.logInfo("Running Attempts on SSH Workers", {
           workers,
+          instance,
           behindGateway: addresses
             .filter(({ gateway }) => Option.isSome(gateway))
             .map(({ name }) => name)
             .join(","),
         });
-        return sshLayer(instanceDirectory, config, brains, { workers: addresses });
+        return sshLayer(instanceDirectory, config, brains, { workers: addresses, instance });
       }
       yield* Effect.logInfo("Running Attempts with the local executor", { workers });
       return localLayer(instanceDirectory, config, brains, {});

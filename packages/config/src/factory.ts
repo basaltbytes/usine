@@ -3,6 +3,10 @@ import { ChildSessionBudget } from "@usine/core/agent/session";
 import { OperatorLogin } from "@usine/core/operator";
 import { RepositoryName } from "@usine/core/repository";
 import {
+  ContainerCpus,
+  ContainerImage,
+  ContainerMemoryMib,
+  ContainerPids,
   GatewayAdminPort,
   GatewayDomain,
   GatewayLlmProvider,
@@ -104,6 +108,22 @@ export class WorkerGateway extends Schema.Class<WorkerGateway>("@usine/config/Wo
 }) {}
 
 /**
+ * The container that each Attempt on an SSH Worker runs in, if the machine has Docker.
+ *
+ * - `image`: the image to run. If `None`, the executor's image for the harness versions of this
+ *   release.
+ * - `cpus`, `memoryMib`, and `pids`: the limits of each Attempt's container.
+ */
+export class WorkerContainer extends Schema.Class<WorkerContainer>("@usine/config/WorkerContainer")(
+  {
+    image: Schema.OptionFromOptionalKey(ContainerImage),
+    cpus: ContainerCpus.pipe(Schema.withDecodingDefaultKey(Effect.succeed(2))),
+    memoryMib: ContainerMemoryMib.pipe(Schema.withDecodingDefaultKey(Effect.succeed(4096))),
+    pids: ContainerPids.pipe(Schema.withDecodingDefaultKey(Effect.succeed(4096))),
+  },
+) {}
+
+/**
  * A Linux machine reached with `ssh`, with Worker state under `<root>/workers/<name>`. If
  * `gateway` is set, the machine stores no GitHub token; the executor sends each Attempt's token
  * to the Gateway.
@@ -124,6 +144,10 @@ export class SshWorker extends Schema.Class<SshWorker>("@usine/config/SshWorker"
         llmProviders: "llm_providers",
       }),
     ),
+  ),
+  container: WorkerContainer.pipe(
+    Schema.encodeKeys({ memoryMib: "memory_mib" }),
+    Schema.withDecodingDefaultKey(Effect.succeed({})),
   ),
 }) {}
 

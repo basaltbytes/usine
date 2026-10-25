@@ -8,7 +8,7 @@ sidebar:
 import { FileTree, TabItem, Tabs } from "@astrojs/starlight/components";
 
 :::note
-This page describes commit [`7c0c3d3`](https://github.com/basaltbytes/usine/tree/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9) of basaltbytes/usine as it was on 2026-10-16, with later changes: the executor's own admin API forward ([#249][], 2026-10-19), refused GitHub tokens ([#431][], 2026-10-20), SSH workers that a reload adds or removes ([#387][], 2026-10-20), the recorded kind of the gateway's Anthropic credential ([#248][], 2026-10-22), SSH to the gateway over a tailnet ([#492][], 2026-10-24), the Claude Code 2.1.308 and Codex 0.159.2 pins in `cloud-init.yaml` ([#229][], 2026-10-24), release downloads and GitHub redirects through `git.<domain>` ([#237][], 2026-10-24), and a renamed repository's new name ([#528][], 2026-10-25).
+This page describes commit [`7c0c3d3`](https://github.com/basaltbytes/usine/tree/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9) of basaltbytes/usine as it was on 2026-10-16, with later changes: the executor's own admin API forward ([#249][], 2026-10-19), refused GitHub tokens ([#431][], 2026-10-20), SSH workers that a reload adds or removes ([#387][], 2026-10-20), the recorded kind of the gateway's Anthropic credential ([#248][], 2026-10-22), SSH to the gateway over a tailnet ([#492][], 2026-10-24), the Claude Code 2.1.308 and Codex 0.159.2 pins in `cloud-init.yaml` ([#229][], 2026-10-24), release downloads and GitHub redirects through `git.<domain>` ([#237][], 2026-10-24), a renamed repository's new name ([#528][], 2026-10-25), and a container per attempt on an SSH worker with Docker ([#548](https://github.com/basaltbytes/usine/issues/548), 2026-10-25).
 :::
 
 A worker has an attempt's checkout and runs its children; the Pi parent runs in the orchestrator. [`infra/hetzner/README.md`](https://github.com/basaltbytes/usine/blob/main/infra/hetzner/README.md) and [`infra/hetzner/gateway/README.md`](https://github.com/basaltbytes/usine/blob/main/infra/hetzner/gateway/README.md) give the operating procedures.
@@ -87,7 +87,7 @@ State is in `<instance>/.usine/workers/<worker>/`: `repos/` caches, `attempts/` 
 
 Every command is `ssh -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=4 [-p port] [-i key -o IdentitiesOnly=yes] <destination> -- <quoted command>` ([commands.ts:87][], [ssh/ssh.ts:22][], [child-host.ts:85][]), and the client inherits only `HOME`, `LANG`, `LC_ALL`, `PATH`, `SHELL`, `SSH_AGENT_PID`, `SSH_AUTH_SOCK`, `TMPDIR`, and `USER` ([commands.ts:70][]).
 
-A shell script writes the token from standard input, never a command line, to `<root>/workers/<name>/credentials/<attempt>` ([ssh/credentials.ts:25][]), with mode 700 directories and mode 600 files. A process's first attempt on a worker removes earlier processes' credential directories. Attempts on one machine share a user and can read each other's tokens ([ADR 0026](https://github.com/basaltbytes/usine/blob/main/docs/adr/0026-eu-ssh-worker.md), [#231][]).
+A shell script writes the token from standard input, never a command line, to `<root>/workers/<name>/credentials/<attempt>` ([ssh/credentials.ts:25][]), with mode 700 directories and mode 600 files. A process's first attempt on a worker removes earlier processes' credential directories. Each attempt's container mounts only its own directory, so attempts can't read each other's tokens; on a machine without Docker, they share a user and can ([ADR 0026](https://github.com/basaltbytes/usine/blob/main/docs/adr/0026-eu-ssh-worker.md), [#231][]).
 
 ### ssh behind a gateway
 
@@ -110,6 +110,8 @@ The children's environment has an exported part, on each command line and withou
 | `GH_ENTERPRISE_TOKEN`, `GH_TOKEN`                        | the caller token                                                     | sent     |
 | `ANTHROPIC_BASE_URL`                                     | `http://llm.<domain>/anthropic`, with `anthropic` in `llm_providers` | exported |
 | `ANTHROPIC_AUTH_TOKEN`                                   | the caller token, with `anthropic` in `llm_providers`                | sent     |
+
+In an attempt's container, the exported part is the container's environment and each command line's, and the sent part goes into the container on `docker run`'s standard input (`--env-file /dev/stdin`). Children and checkout commands run with `docker exec` and send nothing over SSH. Only the fetch into the cached clone, as the SSH user, still sends the caller token with `SendEnv`. Each container sees only its own attempt's caller token ([#243](https://github.com/basaltbytes/usine/issues/243)).
 
 #### Forward to the admin API
 
@@ -143,9 +145,25 @@ A request that fails twice fails as without the forward: an attach fails the att
 - A removed worker stays until its last attempt ends, since that attempt's credential renewals and cleanup need the machine and forward; `removeWorker` then removes it and closes the forward if no worker remains behind the gateway.
 - A worker added back while its attempts run keeps its machine if its settings are unchanged; otherwise, `addWorker` fails with a `machine` capability error, refusing the reload until those attempts end.
 
+### ssh with Docker
+
+`sshContainersFor` ([ssh/container.ts](https://github.com/basaltbytes/usine/blob/main/packages/executor/src/ssh/container.ts)) decides at preflight how the worker runs attempts. With Docker, each attempt gets a container `usine-<attempt id>` from the worker's image, started when its checkout is prepared and removed after the checkout's release ([Checkout in an attempt container](/architecture/execution/#checkout-in-an-attempt-container)). Without Docker, attempts run as the SSH user, and the preflight report is degraded.
+
+| `docker run` option                  | Value                                                                                                                                                        |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--network`                          | `host`: the worker's nftables rules, which allow only the gateway, apply to the container, and behind a gateway `daemon.json` keeps Docker from adding rules |
+| `--cpus`, `--memory`, `--pids-limit` | `container.cpus`, `container.memory_mib`, `container.pids` from `usine.yaml` (2, 4096, 4096)                                                                 |
+| `--label`                            | `dev.usine.instance=github-app-<App ID>`, `dev.usine.worker=<name>`, `dev.usine.attempt=<attempt id>`                                                        |
+| `--env-file /dev/stdin`              | the attempt's exported and sent variables                                                                                                                    |
+| image                                | `container.image`, or `ATTEMPT_IMAGE` for this release                                                                                                       |
+
+Before a process starts its first container on a worker, it removes the containers with its instance label whose worker label is that worker or a worker that hasn't started a container in this process. That removes what a crashed process left, including the containers of workers that `usine.yaml` no longer declares, and keeps the running containers of another worker on the same machine. A container never outlives the process that started it, so **Discard leftovers** finds none. Preflight's own container for the harness checks has no instance label, is removed with `--rm`, and stops itself after 15 minutes.
+
+A reattached attempt gets a new container with its new credential. A checkout that is a linked worktree, made before the machine had Docker, goes on as the SSH user, with a warning.
+
 ### Code shared by remote kinds
 
-`remoteExecutorFor` ([remote.ts:44][]) has the checkout, salvage, recovery, and reattach code of SSH and exe.dev. Before a worktree is kept or removed, `CHILD_KILL_SCRIPT` sends each child in a `<worktree>.child-<n>.pid` file ([child-host.ts:96][]) TERM, then KILL after up to five seconds ([child-host.ts:106][]).
+`remoteExecutorFor` ([remote.ts:44][]) has the checkout, salvage, recovery, and reattach code of SSH and exe.dev. Before a worktree is kept or removed, `CHILD_KILL_SCRIPT` sends each child in a `<worktree>.child-<n>.pid` file ([child-host.ts:96][]) TERM, then KILL after up to five seconds ([child-host.ts:106][]), in the attempt's container if it has one.
 
 ## Preflight
 
@@ -159,15 +177,18 @@ flowchart TD
   connect --> root["root is a<br/>writable directory"]
   root --> sgit["git --version"]
   sgit --> gw{"gateway?"}
-  gw -->|no| sbrain["each brain over SSH"]
+  gw -->|no| docker{"Docker?"}
+  docker -->|no| sbrain["each brain over SSH,<br/>degraded"]
+  docker -->|yes| pull["docker pull the image,<br/>its user ID is the SSH user's"]
+  pull --> cbrain["each brain in a<br/>preflight container"]
   gw -->|yes| forward["the executor's forward<br/>to the admin API opens"]
   forward --> admin["the admin API accepts<br/>the admin token"]
   admin --> sent["sshd accepts the<br/>sent variables"]
   sent --> curl["curl to git.domain returns<br/>missing-caller-token"]
-  curl --> gbrain["each brain behind<br/>the Gateway"]
+  curl --> docker
   lbrain --> ok(["Worker preflight verified"])
   sbrain --> ok
-  gbrain --> ok
+  cbrain --> ok
 ```
 
 Behind a gateway, the check for each brain depends on where its harness gets its model credential ([gateway/preflight.ts:162][]):
@@ -524,13 +545,14 @@ With `llm_providers: [anthropic]`, Claude Code children call `llm.<domain>/anthr
 
 </FileTree>
 
-| File                                            | Adds                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `infra/hetzner/cloud-init.yaml`                 | Debian 13, user `usine`, key-only SSH (`AllowUsers usine`); `build-essential`, `bubblewrap` for Codex's sandbox ([#269][]), `ca-certificates`, `chromium`, `curl`, `git`, `gnupg`, `jq`; 2 GB swap and `vm.overcommit_memory = 1` for the lint gates' 6 GiB virtual buffer ([#270][]); `DISABLE_AUTOUPDATER=1` and `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium` in `/etc/environment`; a setup script for gh, Node.js 24, pnpm 11.20.0, Claude Code 2.1.308, Codex 0.159.2, and `/home/usine/.usine`. |
-| `infra/hetzner/gateway/worker-cloud-init.yaml`  | For a worker behind the gateway: the gateway as only resolver, apt through the forward proxy, gateway-only nftables, the settings below, and a systemd socket from `/run/usine-gateway/http.sock` to the gateway's port 80.                                                                                                                                                                                                                                                                                      |
-| `infra/hetzner/gateway/gateway-cloud-init.yaml` | The gateway VM: nftables, dnsmasq, the bastion sshd settings, Tailscale (not logged in), Node.js, the `usine-gateway` systemd service, the secrets file.                                                                                                                                                                                                                                                                                                                                                         |
-| `infra/hetzner/create-worker.sh`                | Creates a server from `cloud-init.yaml`, labels it `usine=worker`, and attaches a firewall that allows SSH from one address.                                                                                                                                                                                                                                                                                                                                                                                     |
-| `infra/hetzner/gateway/gateway.sh`              | `create`, `delete`, `tailnet-up`, `install <tarballs>`, and `worker-user-data`, which renders the two worker files as one MIME cloud-init.                                                                                                                                                                                                                                                                                                                                                                       |
+| File                                            | Adds                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `infra/hetzner/cloud-init.yaml`                 | Debian 13, user `usine`, key-only SSH (`AllowUsers usine`); `build-essential`, `bubblewrap` for Codex's sandbox ([#269][]), `ca-certificates`, `chromium`, `curl`, `docker.io` with `usine` in the `docker` group, `git`, `gnupg`, `jq`; 2 GB swap and `vm.overcommit_memory = 1` for the lint gates' 6 GiB virtual buffer ([#270][]); `DISABLE_AUTOUPDATER=1` and `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium` in `/etc/environment`; a setup script for gh, Node.js 24, pnpm 11.20.0, Claude Code 2.1.308, Codex 0.159.2, and `/home/usine/.usine`. |
+| `infra/hetzner/gateway/worker-cloud-init.yaml`  | For a worker behind the gateway: the gateway as only resolver, apt and Docker through the forward proxy, Docker without its own nftables rules, gateway-only nftables, the settings below, and a systemd socket from `/run/usine-gateway/http.sock` to the gateway's port 80.                                                                                                                                                                                                                                                                                    |
+| `infra/hetzner/gateway/gateway-cloud-init.yaml` | The gateway VM: nftables, dnsmasq, the bastion sshd settings, Tailscale (not logged in), Node.js, the `usine-gateway` systemd service, the secrets file.                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `infra/hetzner/create-worker.sh`                | Creates a server from `cloud-init.yaml`, labels it `usine=worker`, and attaches a firewall that allows SSH from one address.                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `infra/hetzner/gateway/gateway.sh`              | `create`, `delete`, `tailnet-up`, `install <tarballs>`, and `worker-user-data`, which renders the two worker files as one MIME cloud-init.                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `infra/worker-image/Dockerfile`                 | The attempt image: Debian 13, Node.js 22, pnpm, Git, gh, Chromium, Claude Code, and Codex at the versions of `cloud-init.yaml`, and the `usine` user with ID 1000. `.github/workflows/worker-image.yml` pushes it to `ghcr.io/basaltbytes/usine-worker`.                                                                                                                                                                                                                                                                                                         |
 
 Every SSH session reads these `worker-cloud-init.yaml` parts:
 

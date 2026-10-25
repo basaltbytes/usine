@@ -83,6 +83,11 @@ workers:
       destination: usine-gateway
       admin_token_env: USINE_GATEWAY_ADMIN_TOKEN
       llm_providers: [anthropic]
+    # Each attempt's container, if the machine has Docker. All keys are optional.
+    container:
+      cpus: 2
+      memory_mib: 4096
+      pids: 4096
   - name: worker-2
     kind: ssh
     destination: worker-2
@@ -258,7 +263,7 @@ A [reload](/reference/configuration/cli/#reload) applies these `workers` changes
 
 A failed preflight refuses the whole reload with `ReloadPreflightError`. These changes need a restart, and a reload refuses them with `RestartRequiredError`, which includes the field, such as `workers.worker-2.destination`:
 
-- A worker's `kind`, or any key other than `name` and `max_concurrent_attempts`: `destination`, `identity_file`, `port`, `root`, or `gateway`.
+- A worker's `kind`, or any key other than `name` and `max_concurrent_attempts`: `destination`, `identity_file`, `port`, `root`, `gateway`, or `container`.
 - A renamed worker: one worker removed and one added with the same `kind` and other keys.
 - A new worker whose `kind` differs from the kind of the running workers.
 
@@ -290,6 +295,7 @@ A Linux machine that the orchestrator connects to with its local `ssh` client ([
 | `port` | integer 1 to 65535 | none | Passed as `ssh -p`. Without it, the SSH configuration or port 22 applies. |
 | `root` | string | required | Absolute directory on the machine, without spaces or a trailing `/`. The worker stores its clones, worktrees, and credentials in `<root>/workers/<name>`. |
 | `gateway` | [gateway](#workersgateway) | none | The gateway in front of the machine. |
+| `container` | [container](#workerscontainer) | the defaults below | The container of each attempt, if the machine has Docker. |
 
 ```yaml title="usine.yaml"
 workers:
@@ -299,6 +305,35 @@ workers:
     identity_file: ~/.ssh/usine_worker
     port: 2222
     root: /srv/usine
+```
+
+### `workers[].container`
+
+If the machine has Docker, each attempt on the worker runs in its own container, which mounts only that attempt's checkout read-write, and its cached clone, credential directory, and harness logins read-only. Every command of the attempt runs in it with `docker exec`: the children, git in the checkout, salvage, the pre-push hook, and the attempt's harness check. The SSH user's shell runs only the container's start and removal and the fetch into the cached clone. Concurrent attempts can't read each other's checkouts, tokens, or processes ([`WorkerContainer`](https://github.com/basaltbytes/usine/blob/main/packages/config/src/factory.ts)).
+
+Without Docker, the worker runs its attempts as the SSH user, as before containers. Preflight passes and reports the worker as degraded in the log and on the **Workers** page. If the machine has Docker but the SSH user can't use it, or the image can't be pulled, preflight fails with a `container` capability error.
+
+| Key | Type | Default | Description |
+| --- | --- | --- | --- |
+| `image` | string | the release's image | The image to run, such as `ghcr.io/basaltbytes/usine-worker:claude-2.1.308-codex-0.159.2`. Without it, the image built from `infra/worker-image/Dockerfile` with the harness versions of the running usine release. Preflight pulls it. |
+| `cpus` | number > 0 | `2` | CPUs per container, passed as `docker run --cpus`. |
+| `memory_mib` | integer ≥ 256 | `4096` | Memory per container in MiB, passed as `docker run --memory`. A process that goes over it is ended by the kernel, not the whole machine. |
+| `pids` | integer ≥ 64 | `4096` | Processes and threads per container, passed as `docker run --pids-limit`. |
+
+`max_concurrent_attempts` stays the number of attempts, and so of containers, that the worker runs at the same time. Size `cpus` and `memory_mib` so that `max_concurrent_attempts` containers fit the machine.
+
+A custom image needs what the default one has: a `usine` user whose user ID is the SSH user's, with the home directory `/home/usine`, and Git, gh, curl, Node.js, and the harnesses on the `PATH`. Preflight compares the user IDs.
+
+```yaml title="usine.yaml"
+workers:
+  - name: worker-2
+    kind: ssh
+    destination: worker-2
+    root: /home/usine/.usine
+    max_concurrent_attempts: 2
+    container:
+      cpus: 2
+      memory_mib: 3584
 ```
 
 ### `workers[].gateway`

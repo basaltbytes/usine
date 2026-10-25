@@ -1,7 +1,8 @@
 #cloud-config
 # Puts a Worker VM without public addresses behind the gateway: the gateway
 # as resolver, time server, and forward proxy, gh's HTTP socket forwarded to
-# the gateway, and nftables that allow only the gateway.
+# the gateway, Docker pulling through the forward proxy, and nftables that
+# allow only the gateway.
 # `gateway.sh worker-user-data` replaces the @@NAME@@ placeholders and sends
 # this file after the Worker file of ../cloud-init.yaml, which creates the
 # usine user and installs the toolchain and harnesses through the proxy set
@@ -37,6 +38,21 @@ write_files:
       NO_PROXY=@@DOMAIN@@
       no_proxy=@@DOMAIN@@
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+
+  # Docker pulls the attempt image through the forward proxy, whose allowlist has ghcr.io.
+  - path: /etc/systemd/system/docker.service.d/http-proxy.conf
+    permissions: "0644"
+    content: |
+      [Service]
+      Environment=HTTPS_PROXY=http://@@GATEWAY_IP@@:3128
+      Environment=HTTP_PROXY=http://@@GATEWAY_IP@@:3128
+      Environment=NO_PROXY=@@DOMAIN@@
+
+  # Attempt containers use the host network, so the nftables rules above stay the only rules; Docker adds none.
+  - path: /etc/docker/daemon.json
+    permissions: "0644"
+    content: |
+      {"iptables": false, "ip6tables": false}
 
   # The empty NTP= drops the image's time servers, which the Worker cannot reach.
   - path: /etc/systemd/timesyncd.conf.d/usine-gateway.conf

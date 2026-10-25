@@ -6,6 +6,7 @@ import { Effect, Ref, Schema } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import {
   ExecutorOperationError,
+  fullPreflight,
   logPreflightFailure,
   WorkerCapabilityError,
   type WorkerCapability,
@@ -152,6 +153,7 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
       harnesses: [...new Set(brains.map(({ harness }) => harness))].join(","),
       integrations: options.githubIntegrations.length,
     });
+    return fullPreflight;
   }, logPreflightFailure);
 
   const vmFor = Effect.fn("ExeDevExecutor.vmFor")(function* (worker: WorkerName) {

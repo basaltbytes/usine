@@ -41,7 +41,7 @@ This replaces the 0.x `Executor.launch(prepared, io)` and `Executor.cleanup(prep
 
 ## Worker preflight
 
-Call `executor.preflight(worker, brains, maxConcurrentAttempts)` with the roster's `BrainSpec` values and the worker's `max_concurrent_attempts` before scheduling.
+Call `executor.preflight(worker, brains, maxConcurrentAttempts)` with the roster's `BrainSpec` values and the worker's `max_concurrent_attempts` before scheduling. It returns a `PreflightReport`, whose `degraded` gives the reason when the worker runs attempts without a capability that keeps them apart, such as an SSH worker without Docker; `fullPreflight` is the report without one.
 
 Every adapter compares the machine's memory with `maxConcurrentAttempts`. The local adapter reads `/proc/meminfo` on Linux and physical memory on macOS, where swap grows on demand; exe.dev and SSH read `/proc/meminfo` over SSH. Under 1.5 GiB per concurrent attempt, or no swap with more than one, is a `memory` `WorkerCapabilityError`; under 3 GiB logs a warning ([#270](https://github.com/basaltbytes/usine/issues/270)).
 
@@ -122,13 +122,19 @@ Salvage inspection, staging, or snapshot failures keep the checkout, uncommitted
 
 ## SSH worker
 
-`@usine/executor/ssh` runs the same contract on any Linux machine that the orchestrator reaches over SSH ([ADR 0026](../../docs/adr/0026-eu-ssh-worker.md)); `infra/hetzner` creates one on Hetzner Cloud. Each worker has an SSH destination, an optional identity file and port, and a root under which it keeps `workers/<name>/repos`, `attempts`, and `credentials`. The machine needs Git, gh, the roster's `claude` and `codex` CLIs, and their logins for the SSH user.
+`@usine/executor/ssh` runs the same contract on any Linux machine that the orchestrator reaches over SSH ([ADR 0026](../../docs/adr/0026-eu-ssh-worker.md)); `infra/hetzner` creates one on Hetzner Cloud. Each worker has an SSH destination, an optional identity file and port, and a root under which it keeps `workers/<name>/repos`, `attempts`, and `credentials`. The machine needs Git, Docker, and the roster's harness logins for the SSH user.
 
-Preflight changes nothing. It checks the SSH connection, a writable root, Git, memory for `maxConcurrentAttempts`, and the roster's harnesses where children run.
+Preflight checks the SSH connection, a writable root, Git, memory for `maxConcurrentAttempts`, Docker, and the roster's harnesses where children run. With Docker, it pulls the attempt image, checks that the image's user has the SSH user's ID, and probes the harnesses in a container from the image that removes itself. Without Docker, it probes them over SSH and reports the worker as degraded. A Docker that doesn't answer the SSH user, an image that can't be pulled and isn't on the machine, or another user ID is a `container` `WorkerCapabilityError`.
+
+### Attempt containers
+
+With Docker on the machine, each attempt runs in its own container from `SshWorkerAddress.container.image`, or `ATTEMPT_IMAGE`, the image of `infra/worker-image/Dockerfile` with this release's harness versions, with the address's CPU, memory, and process limits. The container mounts only the attempt's checkout read-write, and its cached clone, credential directory, and the SSH user's login files for the attempt's harness read-only; behind a gateway, also gh's configuration directory and socket. It uses the machine's network, and gets the attempt's variables, secrets included, on `docker run`'s standard input. Every command for the attempt runs in it through the shell's `container` (`docker exec -i <name> sh -c <command line>`): the children, the checkout's git, the harvest, the salvage, the pre-push hook, and the attempt's harness probe, which runs once the checkout exists. Only the container's start and removal and the cached clone's fetch run as the SSH user.
+
+The checkout is a repository of its own whose objects come from the cached clone through an alternate, so commits never write the read-only clone. The container is named `usine-<attempt id>` and labeled with `SshExecutorOptions.instance`, the worker, and the attempt. It's removed after the checkout's release, which salvages in it, and before the credential. A process's first use of a worker removes the containers with its instance label that belong to that worker, or to a worker that started no container in this process, so a running attempt's container on a shared machine stays. A reattached attempt gets a new container; a checkout from before Docker, a linked worktree, goes on as the SSH user.
 
 Prepare mints the attempt's single-repo token through the `CredentialProvider`, writes it with a gh `hosts.yml` to `<root>/workers/<name>/credentials/<attempt>`, and fetches the bare cached clone from `https://github.com/<repository>.git` with git's credential helper reading that file. The token goes over the writing command's stdin, so it's in no command line, process environment, or log, and git and gh output is scrubbed of it. As on the local worker, git and harvest commands renew a token that expires within five minutes; children, harvesting, and the salvage push export the same file paths, so they read the latest token. Cleanup stops the children, removes the checkout, then the credential directory. A process's first use of a worker, for an attempt or startup reconciliation, removes credentials an earlier process left; a reattached attempt gets a fresh one.
 
-Children, pid files, the kill script, sweeps, salvage, recovery, and reattachment share the exe.dev worker's code.
+Children, pid files, the kill script, sweeps, salvage, recovery, and reattachment share the exe.dev worker's code; in a container, the pid files and the kill script are inside it.
 
 ### Behind a gateway
 
@@ -136,7 +142,7 @@ A worker whose address has a `gateway` is on a private network behind a gateway 
 
 The cached clone fetches `http://git.<domain>/<repository>.git`. Children, harvesting, and the executor's git commands export settings that point git, gh, and package managers at the gateway: git sends the caller token only to `git.<domain>` and rewrites `https://github.com/` there, gh uses `git.<domain>` through the worker's socket with its config in `<root>/workers/<name>/gh`, and `HTTPS_PROXY` is the forward proxy.
 
-If the gateway has the Anthropic credential, Claude Code calls `llm.<domain>/anthropic`, and preflight checks only its binary. Otherwise Claude Code, and Codex always, use the operator's login on the machine through the forward proxy: preflight checks the login as without a gateway, then that each of the login's hosts answers HTTP through the proxy (`api.anthropic.com` and `platform.claude.com`, or `chatgpt.com` and `auth.openai.com`). A refused host is a `gateway` capability error naming the host to add to the egress allowlist. The caller token is in no command line: each SSH command sends `GIT_CONFIG_VALUE_0`, `GH_ENTERPRISE_TOKEN`, `GH_TOKEN`, and `ANTHROPIC_AUTH_TOKEN` from the client's environment (`SendEnv`), and the machine's sshd must accept them (`AcceptEnv`).
+If the gateway has the Anthropic credential, Claude Code calls `llm.<domain>/anthropic`, and preflight checks only its binary. Otherwise Claude Code, and Codex always, use the operator's login on the machine through the forward proxy: preflight checks the login as without a gateway, then that each of the login's hosts answers HTTP through the proxy (`api.anthropic.com` and `platform.claude.com`, or `chatgpt.com` and `auth.openai.com`). A refused host is a `gateway` capability error naming the host to add to the egress allowlist. The caller token is in no command line: each SSH command sends `GIT_CONFIG_VALUE_0`, `GH_ENTERPRISE_TOKEN`, `GH_TOKEN`, and `ANTHROPIC_AUTH_TOKEN` from the client's environment (`SendEnv`), and the machine's sshd must accept them (`AcceptEnv`). With Docker, only the cached clone's fetch sends them; the attempt's container gets them when it starts.
 
 The admin API listens on the gateway's loopback. With the first worker behind a gateway, the executor opens its own forward, `ssh -N -L 127.0.0.1:<port>:127.0.0.1:<adminPort> <destination>`, with the same SSH command and environment as its other clients, on a local port the kernel picks; workers behind that gateway share it. When the client exits, the executor starts another after a pause of one second, doubling up to one minute, and logs each open, exit, and reopen with the gateway's destination. An admin request that finds the forward closed, or gets no answer, reopens it at once and is sent once more. A second failure fails the request, with a message giving since when the forward has been closed, or, if it opens but the admin API doesn't answer, since when the API last answered through it. The forward closes when the last worker behind the gateway is removed, or with the layer.
 
@@ -149,11 +155,20 @@ A gateway released before that endpoint answers 404: the worker's first such pre
 The SSH layer needs a `ChildProcessSpawner`, a `CredentialProvider`, an `AttemptRuntime`, and an `HttpClient` for admin APIs. It provides `SshWorkers` beside the `Executor`, starting with the workers of `workers`. `addWorker(address)` adds a worker at runtime; behind a gateway, the worker shares that gateway's forward, or opens one if it's the first. `removeWorker(name)` removes a worker once no attempt runs on it, and closes its gateway's forward if no other worker uses it. Adding a worker the executor has with the same address changes nothing; with another address, it fails with a `machine` capability error until the worker is removed.
 
 ```ts
-import { SshDestination, SshIdentityFile, WorkerName, WorkerRoot } from "@usine/core/worker"
+import {
+  ContainerCpus,
+  ContainerMemoryMib,
+  ContainerPids,
+  SshDestination,
+  SshIdentityFile,
+  WorkerName,
+  WorkerRoot,
+} from "@usine/core/worker"
 import { layer } from "@usine/executor/ssh"
 import { Option } from "effect"
 
 const executorLayer = layer({
+  instance: "github-app-123456",
   workers: [
     {
       name: WorkerName.make("eu-one"),
@@ -162,6 +177,12 @@ const executorLayer = layer({
       port: Option.none(),
       root: WorkerRoot.make("/home/usine/.usine"),
       gateway: Option.none(),
+      container: {
+        image: Option.none(),
+        cpus: ContainerCpus.make(2),
+        memoryMib: ContainerMemoryMib.make(4096),
+        pids: ContainerPids.make(4096),
+      },
     },
   ],
 })

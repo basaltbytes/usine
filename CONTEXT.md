@@ -161,8 +161,12 @@ The stored attempt channel messages of one attempt.
 _Avoid_: log, session history, output
 
 **Preflight**:
-A read-only check that a worker can run attempts. It fails with typed capability errors and never installs anything.
+A check that a worker can run attempts. It fails with typed capability errors and installs nothing; an SSH worker's preflight pulls its attempt image.
 _Avoid_: bootstrap, provisioning, health check
+
+**Attempt container**:
+The container that runs every command of one attempt on an SSH worker with Docker, with only that attempt's checkout and credentials mounted (ADR 0011).
+_Avoid_: sandbox, box, VM
 
 **Gateway**:
 A host that gives worker VMs without a public address SSH access, DNS, time, credential injection for GitHub and LLM requests, and an allowlisted forward proxy (ADR 0027).

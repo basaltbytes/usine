@@ -11,6 +11,9 @@ import {
   BotAccount,
   BotLogin,
   BotUserId,
+  ContainerCpus,
+  ContainerMemoryMib,
+  ContainerPids,
   SshDestination,
   SshIdentityFile,
   SshPort,
@@ -98,6 +101,17 @@ interface RemoteCall {
   readonly command: StandardCommand;
   readonly line: string;
   readonly input: string;
+  /** The container that ran the command, if it ran through `docker exec`. */
+  readonly container?: string;
+}
+
+/** A container on the fake machine. */
+interface FakeContainer {
+  /** The arguments of its `docker run`. */
+  readonly args: ReadonlyArray<string>;
+  readonly labels: ReadonlyMap<string, string>;
+  /** The `--env-file` content read from standard input. */
+  readonly environment: string;
 }
 
 /** A fake SSH client that forwards a local port to a Gateway's admin API. */
@@ -144,6 +158,19 @@ interface FakeMachineState {
   gatewayAcceptsSsh: boolean;
   /** Every forward the executor started, in order. */
   readonly forwards: Array<FakeForward>;
+  /** Whether the machine has Docker, and whether its daemon answers the SSH user. */
+  docker: "absent" | "running" | "unusable";
+  /** Whether `docker pull` of the Attempt image fails, and whether the image is on the machine anyway. */
+  pullFails: boolean;
+  imageOnMachine: boolean;
+  /** The user ID inside the Attempt image. The SSH user's is 1000. */
+  imageUserId: string;
+  /** The containers on the machine, by name. */
+  readonly containers: Map<string, FakeContainer>;
+  /** The files under the SSH user's home, such as harness logins. */
+  readonly homeFiles: Set<string>;
+  /** Whether the checkout's `.git` is a file, as in a linked worktree of the cached clone. */
+  linkedCheckout: boolean;
 }
 
 const oneShotHandle = (stdout: string, exitCode: number, stderr = "") => {
@@ -251,6 +278,81 @@ export const fakeMachine = () => {
     files: new Map(),
     gatewayAcceptsSsh: true,
     forwards: [],
+    docker: "absent",
+    pullFails: false,
+    imageOnMachine: true,
+    imageUserId: "1000",
+    containers: new Map(),
+    homeFiles: new Set([".claude/.credentials.json", ".claude.json"]),
+    linkedCheckout: false,
+  };
+  /** Answers the commands that manage Docker containers, or returns `undefined` for others. */
+  const respondToDocker = (line: string, input: string) => {
+    const words = remoteWords(line);
+    if (line.includes("version -f"))
+      return state.docker === "absent"
+        ? oneShotHandle("", 3)
+        : state.docker === "unusable"
+          ? oneShotHandle(
+              "",
+              1,
+              "permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock",
+            )
+          : oneShotHandle("27.5.1\n", 0);
+    if (line.startsWith("exec 'docker' 'pull' "))
+      return state.pullFails
+        ? oneShotHandle("", 1, "Error response from daemon: Get https://ghcr.io/v2/: timeout")
+        : oneShotHandle("", 0);
+    if (line.startsWith("exec 'docker' 'image' 'inspect' "))
+      return oneShotHandle(
+        state.imageOnMachine ? "sha256:0123\n" : "",
+        state.imageOnMachine ? 0 : 1,
+      );
+    if (line.includes("--entrypoint")) return oneShotHandle(`1000 ${state.imageUserId}\n`, 0);
+    if (line.includes("absolute=$3")) {
+      // sh -c <script> sh docker <name> <count> <absolute paths...> <home files...>
+      const [, , , , , name = "", count = "0", ...rest] = words;
+      state.containers.delete(name);
+      const absolute = rest.slice(0, Number(count));
+      const home = rest.slice(Number(count)).filter((file) => state.homeFiles.has(file));
+      return oneShotHandle(["/home/usine", ...absolute, ...home, ""].join("\n"), 0);
+    }
+    if (line.startsWith("exec 'docker' 'run' ")) {
+      const name = words[words.indexOf("--name") + 1] ?? "";
+      const labels = new Map(
+        words.flatMap((word, index) => {
+          if (words[index - 1] !== "--label") return [];
+          const [key = "", ...value] = word.split("=");
+          return [[key, value.join("=")] as const];
+        }),
+      );
+      state.containers.set(name, { args: words.slice(1), labels, environment: input });
+      return oneShotHandle("4f0c2d\n", 0);
+    }
+    if (line.startsWith("exec 'docker' 'rm' '--force' ")) {
+      for (const name of words.slice(3)) state.containers.delete(name);
+      return oneShotHandle("", 0);
+    }
+    if (line.includes("container inspect")) {
+      const name = words[5] ?? "";
+      return oneShotHandle(state.containers.has(name) ? "no-children\n" : "no-container\n", 0);
+    }
+    if (line.includes("ps --all")) {
+      const label = words[5] ?? "";
+      const [key = "", value = ""] = label.split("=");
+      const listed = [...state.containers].filter(
+        ([, container]) => container.labels.get(key) === value,
+      );
+      return oneShotHandle(
+        listed
+          .map(([name, container]) => `${name} ${container.labels.get("dev.usine.worker") ?? ""}\n`)
+          .join(""),
+        0,
+      );
+    }
+    if (line.startsWith("exec 'test' '-f' "))
+      return oneShotHandle("", state.linkedCheckout ? 0 : 1);
+    return undefined;
   };
   const respond = (command: StandardCommand, line: string, input: string) => {
     if (state.stalled) return stalledHandle;
@@ -260,6 +362,8 @@ export const fakeMachine = () => {
         255,
         "ssh: connect to host 203.0.113.7 port 2222: Connection refused",
       );
+    const docker = respondToDocker(line, input);
+    if (docker !== undefined) return docker;
     if (line === "exec 'true'") return oneShotHandle("", 0);
     if (line.includes("printenv")) {
       const received = state.acceptsSentVariables
@@ -404,8 +508,19 @@ export const fakeMachine = () => {
       if (command._tag !== "StandardCommand") return yield* Effect.die("unexpected pipeline");
       const line = remoteLine(command);
       const input = yield* standardInput(command);
+      if (command.args.includes("-N")) {
+        state.calls.push({ command, line, input });
+        return yield* startForward(command);
+      }
+      // Runs a `docker exec` line's command as if inside the container.
+      if (line.startsWith("exec 'docker' 'exec' '-i' ")) {
+        const [, , , container = "", , , inner = ""] = remoteWords(line);
+        state.calls.push({ command, line: inner, input, container });
+        return state.containers.has(container)
+          ? respond(command, inner, input)
+          : oneShotHandle("", 1, `Error response from daemon: No such container: ${container}`);
+      }
       state.calls.push({ command, line, input });
-      if (command.args.includes("-N")) return yield* startForward(command);
       return respond(command, line, input);
     }),
   );
@@ -485,7 +600,16 @@ export const ADDRESS: SshWorkerAddress = {
   port: Option.some(SshPort.make(2222)),
   root: WorkerRoot.make("/srv/usine"),
   gateway: Option.none(),
+  container: {
+    image: Option.none(),
+    cpus: ContainerCpus.make(2),
+    memoryMib: ContainerMemoryMib.make(4096),
+    pids: ContainerPids.make(4096),
+  },
 };
+
+/** The instance label of the test executor's containers. */
+export const INSTANCE = "github-app-4242";
 
 /** An HTTP client layer for a Worker without a Gateway; never called. */
 const noGateway = Layer.succeed(
@@ -508,7 +632,7 @@ export const executorLayer = (
   /** Replaces the executor's own login and binary checks. */
   probes: Pick<SshExecutorOptions, "harnessReadiness"> = {},
 ) =>
-  sshLayer({ workers: [address], interruptGrace: "2 seconds", ...probes }).pipe(
+  sshLayer({ workers: [address], instance: INSTANCE, interruptGrace: "2 seconds", ...probes }).pipe(
     Layer.provide(machine.layer),
     Layer.provide(credentials.layer),
     Layer.provide(stubAttemptRuntime(storage, parent)),

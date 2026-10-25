@@ -14,7 +14,12 @@ import { StepName } from "@usine/core/step";
 import { type WorkerKind, WorkerName } from "@usine/core/worker";
 import { Submission } from "@usine/engine/engine";
 import { StepExecutor } from "@usine/engine/step-executor";
-import { Executor, ExecutorOperationError, WorkerCapabilityError } from "@usine/executor";
+import {
+  Executor,
+  ExecutorOperationError,
+  WorkerCapabilityError,
+  fullPreflight,
+} from "@usine/executor";
 import { type SshWorkerAddress, SshWorkers } from "@usine/executor/ssh";
 import {
   ConfigProvider,
@@ -201,6 +206,7 @@ const recordingExecutor = (
             message: "The machine has 2 GiB of memory, less than 1.5 GiB per Attempt.",
             cause: "MemTotal: 2097152 kB",
           });
+        return fullPreflight;
       }),
   });
 
@@ -1137,7 +1143,7 @@ describe("Worker status", () => {
                       }),
                     }),
                   )
-                : Effect.void,
+                : Effect.succeed(fullPreflight),
           });
           const context = yield* Layer.build(
             stepExecutorLayer(

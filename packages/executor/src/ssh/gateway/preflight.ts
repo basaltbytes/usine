@@ -1,3 +1,4 @@
+import type { RemoteShell } from "@usine/agents/child-host";
 import type { BrainSpec, Harness } from "@usine/core/agent/brain";
 import { HarnessReady, HarnessUnavailableError } from "@usine/core/agent/capability";
 import type { GatewayCredentialKind, WorkerName } from "@usine/core/worker";
@@ -237,13 +238,14 @@ const PROXY_REFUSED = "403";
  * credential, checks only the Claude Code binary. Otherwise, Claude Code and Codex use the
  * operator's login (ADR 0026): `probe` checks the login, then the machine must connect to the
  * login's hosts through the forward proxy. Pi goes to `probe`, which rejects it on any remote
- * machine.
+ * machine. The checks run through `shell`, on the machine or in a container on it.
  */
 export const gatewayHarnessProbe = (
   commands: RemoteCommands,
   machine: SshMachine,
   gateway: MachineGateway,
   probe: HarnessProbe,
+  shell: RemoteShell,
 ): HarnessProbe => {
   const worker = machine.address.name;
   const host = machine.shell.destination;
@@ -252,7 +254,7 @@ export const gatewayHarnessProbe = (
 
   const claudeBinary = Effect.fn("SshExecutor.probeClaudeBehindGateway")(function* () {
     yield* Effect.annotateCurrentSpan({ host, domain });
-    const result = yield* commands.inspect("preflight", machine.shell, "claude", ["--version"]);
+    const result = yield* commands.inspect("preflight", shell, "claude", ["--version"]);
     if (result.exitCode === SSH_FAILURE) return yield* unreachable(host, "claude", result);
     if (result.exitCode !== 0)
       return new HarnessUnavailableError({
@@ -272,7 +274,7 @@ export const gatewayHarnessProbe = (
   ) {
     const { label, hosts } = LOGINS[harness];
     yield* Effect.annotateCurrentSpan({ worker, host, domain, harness });
-    const result = yield* commands.inspect("preflight", machine.shell, "sh", [
+    const result = yield* commands.inspect("preflight", shell, "sh", [
       "-c",
       LOGIN_HOSTS_SCRIPT,
       "sh",

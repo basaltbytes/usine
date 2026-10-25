@@ -42,3 +42,15 @@ On 2026-10-14, a finish-pr attempt on the local worker made commit 69d4da0 on PR
 The address is `<id>+<slug>[bot]@users.noreply.github.com`, the ID-based noreply form that GitHub links to an account even after a rename. The ID is the bot account's, read once from `GET /users/<slug>[bot]`. The App ID is a different number, and as an account ID it can belong to an unrelated user. An attempt whose bot account can't be read fails before preparation, retried unless GitHub refused, because without the variables its commits would take the machine's identity again.
 
 Salvage commits and the rebase that applies a salvage use the same variables (#507). They had used `usine <usine@basaltbytes.dev>`, an identity linked to no GitHub account, so salvaged work showed no author profile and wasn't attributed to the App.
+
+## Amendment (2026-10-25, #548): each attempt on an SSH worker runs in its own container
+
+The 2026-10-19 amendment named the gap: attempts on an SSH worker share one Unix user, so an attempt could use another's token file, or behind a gateway its caller token, from the same machine, and a `read` attempt could push with a `write` attempt's token. File modes on `credentials/<attempt>` separate Unix users, not attempts. On an SSH worker whose machine has Docker, each attempt now runs in its own container, which mounts only its own checkout, credential directory, and harness logins: another attempt's token file isn't in its filesystem, and another attempt's processes, with their environment, aren't in its PID namespace. The token stays a single-repository installation token of at most an hour; the container changes who can read it, not what it opens.
+
+A container per attempt was chosen over a Unix user per attempt or per slot, the fix that #243 proposed. Users per slot need accounts, sudo rules, and ownership changes on checkouts and cached clones made in advance, and resource limits set up apart; Docker gives a mount, PID, and resource boundary with one `docker run`, and the image pins the harness versions that cloud-init installed by hand. A machine per attempt (#223, stage 3) remains the stronger boundary, sharing no kernel.
+
+Every command for the attempt runs in its container, the executor's git, salvage, and harvest included, because the checkout's git configuration and hooks are the agent's to change: run as the SSH user, which starts containers and so is root-equivalent through the `docker` group, they would run the agent's code outside the boundary. Only the fetch into the cached clone runs as the SSH user, and containers mount that clone read-only, so no attempt can change what the next one checks out. For the same reason, the checkout is a repository of its own that reads the clone's objects through an alternate, not a linked worktree whose git directory is inside the clone.
+
+The harness logins are mounted read-only, so an attempt can read the operator's login, as before, but can't replace it for later attempts.
+
+A machine without Docker runs attempts as the shared user, as before, and preflight reports the worker as degraded.

@@ -1,6 +1,8 @@
 #cloud-config
 # A usine SSH Worker on Debian: the `usine` user with Git, gh, Node.js, pnpm,
-# Claude Code, Codex, and Chromium, and SSH that admits only that user by key.
+# Claude Code, Codex, Chromium, and Docker, and SSH that admits only that user
+# by key. With Docker, each attempt runs in its own container from the image
+# of ../worker-image; the harnesses here serve the logins.
 # create-worker.sh and `gateway/gateway.sh worker-user-data` replace
 # "@AUTHORIZED_KEYS@" with the public keys to authorize, as a list. Behind the
 # gateway, `worker-user-data` adds gateway/worker-cloud-init.yaml, which puts
@@ -23,6 +25,7 @@ packages:
   - ca-certificates
   - chromium
   - curl
+  - docker.io
   - git
   - gnupg
   - jq
@@ -80,6 +83,8 @@ write_files:
       # Applies the overcommit setting of /etc/sysctl.d now, not at the next boot.
       sysctl --system
       install -d -o usine -g usine -m 0700 /home/usine/.usine /home/usine/.cache /home/usine/.cache/turbo
+      # The executor starts and removes the attempt containers as usine.
+      usermod -aG docker usine
       systemctl restart ssh
 
 runcmd:

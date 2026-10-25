@@ -55,15 +55,18 @@ const SlotCells = ({ slots }: { readonly slots: WorkerSlotsView }) => (
   </span>
 );
 
+const summaryBadge = {
+  passed: { state: "Succeeded", label: "Passed" },
+  degraded: { state: "Waiting", label: "Degraded" },
+  failed: { state: "Failed", label: "Failed" },
+} as const;
+
 const PreflightState = ({ worker }: { readonly worker: WorkerConfigurationView }) => {
   const { state, checkedAt } = preflightSummary(worker);
   if (state === "unchecked") return <span className="text-muted-foreground">Not checked</span>;
   return (
     <span className="inline-flex items-baseline gap-2">
-      <StatusBadge
-        state={state === "failed" ? "Failed" : "Succeeded"}
-        label={state === "failed" ? "Failed" : "Passed"}
-      />
+      <StatusBadge {...summaryBadge[state]} />
       {checkedAt !== null && (
         <span className="font-mono text-xs text-muted-foreground tabular-nums">
           {dayTimeLabel(checkedAt)}
@@ -151,12 +154,16 @@ export const WorkersList = ({ configuration }: { readonly configuration: Configu
   );
 };
 
-const CheckResult = ({ check }: { readonly check: PreflightCheckView }) =>
-  check._tag === "Passed" ? (
-    <StatusBadge state="Succeeded" label="Passed" />
-  ) : (
-    <StatusBadge state="Failed" label={`Failed: ${failedCheckLabel(check)}`} />
-  );
+const CheckResult = ({ check }: { readonly check: PreflightCheckView }) => {
+  switch (check._tag) {
+    case "Passed":
+      return <StatusBadge state="Succeeded" label="Passed" />;
+    case "Degraded":
+      return <StatusBadge state="Waiting" label="Degraded: no container per attempt" />;
+    case "Failed":
+      return <StatusBadge state="Failed" label={`Failed: ${failedCheckLabel(check)}`} />;
+  }
+};
 
 const CheckRow = ({
   subject,
@@ -179,7 +186,7 @@ const CheckRow = ({
       {dayTimeLabel(check.checkedAt)}
     </TableCell>
     <TableCell className="w-full py-3 align-top whitespace-normal wrap-anywhere">
-      {check._tag === "Failed" ? check.message : null}
+      {check._tag === "Passed" ? null : check.message}
     </TableCell>
   </TableRow>
 );
@@ -221,6 +228,26 @@ const WorkerFacts = ({ worker }: { readonly worker: WorkerConfigurationView }) =
         </Fact>
       )}
     </Facts>
+    {worker.container !== null && (
+      <div className="flex flex-col gap-3">
+        <h2 className="text-md font-semibold">Attempt container</h2>
+        <Facts>
+          <Fact label="Image">
+            {worker.container.image === null ? (
+              <Unset>Default for this release</Unset>
+            ) : (
+              <code className="font-mono text-xs wrap-anywhere">{worker.container.image}</code>
+            )}
+          </Fact>
+          <Fact label="Limits">
+            <span className="tabular-nums">
+              {worker.container.cpus} {worker.container.cpus === 1 ? "CPU" : "CPUs"},{" "}
+              {worker.container.memoryMib} MiB, {worker.container.pids} processes
+            </span>
+          </Fact>
+        </Facts>
+      </div>
+    )}
     {worker.gateway !== null && (
       <div className="flex flex-col gap-3">
         <h2 className="text-md font-semibold">Gateway</h2>
@@ -277,7 +304,10 @@ export const WorkerDetail = ({
       : [
           {
             subject: "Worker",
-            detail: "Machine, Git, memory, gateway, and credentials",
+            detail:
+              worker.kind === "ssh"
+                ? "Machine, Git, memory, gateway, credentials, and Docker"
+                : "Machine, Git, memory, gateway, and credentials",
             check: worker.prerequisites,
           },
         ]),

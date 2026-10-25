@@ -36,6 +36,7 @@ import {
   Executor,
   ExecutorError,
   ExecutorOperationError,
+  fullPreflight,
   logPreflightFailure,
   WorkerCapabilityError,
   type ExecutorOperation,
@@ -57,6 +58,7 @@ import {
   cacheDirectoryName,
   isCacheDirectoryName,
   keptCheckoutRecovery,
+  linkedWorktree,
   provisionWorktree,
   reattachWorktree,
   recoverWorktree,
@@ -306,15 +308,12 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         "repos",
         cacheDirectoryName(attempt.repository),
       );
+      const removeCheckout = <G>(git: (args: ReadonlyArray<string>) => Effect.Effect<string, G>) =>
+        Effect.asVoid(git(["--git-dir", cache, "worktree", "remove", "--force", worktree]));
       if (attempt.succeeded || attempt.permissions === "read") {
+        const git = (args: ReadonlyArray<string>) => executeCommand("cleanup", "git", args);
         return yield* recoverWorktree(
-          {
-            attempt,
-            host: "local",
-            worktree,
-            cache,
-            git: (args) => executeCommand("cleanup", "git", args),
-          },
+          { attempt, host: "local", worktree, git, removeCheckout: removeCheckout(git) },
           record,
         );
       }
@@ -328,8 +327,15 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
             baseEnvironment,
           );
           const git = credentialedGit(credential, author);
+          const inCheckout = (args: ReadonlyArray<string>) => git("cleanup", args);
           yield* recoverWorktree(
-            { attempt, host: "local", worktree, cache, git: (args) => git("cleanup", args) },
+            {
+              attempt,
+              host: "local",
+              worktree,
+              git: inCheckout,
+              removeCheckout: removeCheckout(inCheckout),
+            },
             record,
           );
         }),
@@ -403,6 +409,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         host: "local",
         gitVersion,
       });
+      return fullPreflight;
     }, logPreflightFailure);
 
     // Attempt commands receive only the allowlist and the Attempt's credential, never this
@@ -483,19 +490,23 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         target: string,
       ): Effect.Effect<void, PlatformError.PlatformError> =>
         fileSystem.remove(target, { recursive: true, force: true });
+      const host = {
+        removePath: remove,
+        cacheExists: fileSystem.exists(cache),
+        git: credentialedGit(credential, request.commitAuthor),
+      };
       const ops: WorkspaceOps<PlatformError.PlatformError | ExecutorError> = {
+        ...host,
         ensureRoots: Effect.andThen(
           fileSystem.makeDirectory(path.dirname(cache), { recursive: true }),
           fileSystem.makeDirectory(path.dirname(worktree), { recursive: true }),
         ),
-        removePath: remove,
-        cacheExists: fileSystem.exists(cache),
         promoteStaging: fileSystem.rename(`${cache}.cloning`, cache),
-        git: credentialedGit(credential, request.commitAuthor),
-        writeExecutable: (target, content) =>
+        checkout: linkedWorktree(host, { cache, worktree }, (target, content) =>
           fileSystem
             .makeDirectory(path.dirname(target), { recursive: true })
             .pipe(Effect.andThen(fileSystem.writeFileString(target, content, { mode: 0o755 }))),
+        ),
       };
       const acquire = Effect.gen(function* () {
         if (!request.reattach)
@@ -518,7 +529,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         return yield* reattachWorktree({
           request,
           host: "local",
-          layout: { cache, worktree },
+          layout: { worktree },
           ops,
           spec,
         });

@@ -1,3 +1,4 @@
+import type { RemoteShell } from "@usine/agents/child-host";
 import { ClaudeLoginLock } from "@usine/agents/runtime";
 import type { RepositoryName } from "@usine/core/repository";
 import type { WorkerName } from "@usine/core/worker";
@@ -10,6 +11,7 @@ import { agentsHarnessProbe } from "../harness-preflight.ts";
 import { DEFAULT_SSH, remoteCommandsFor } from "../remote/commands.ts";
 import type { RemoteGrant } from "../remote/machine.ts";
 import { remoteExecutorFor } from "../remote/remote.ts";
+import { sshContainersFor } from "./container.ts";
 import { sshCredentialsFor } from "./credentials.ts";
 import { gatewayAttachmentsFor } from "./gateway/attachments.ts";
 import { gatewayRepositoryUrl } from "./gateway/environment.ts";
@@ -31,21 +33,26 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
     yield* Effect.forEach(options.workers, workers.addWorker, { discard: true }).pipe(Effect.orDie);
 
     // Probes with no extra environment; the harness login is on the machine or at its Gateway.
-    const harnessProbe = (machine: SshMachine) => {
-      const probe =
-        options.harnessReadiness?.(machine) ?? agentsHarnessProbe(spawner, machine.shell, {});
+    const harnessProbe = (machine: SshMachine, shell: RemoteShell) => {
+      const probe = options.harnessReadiness?.(machine) ?? agentsHarnessProbe(spawner, shell, {});
       return Option.match(machine.gateway, {
         onNone: () => probe,
-        onSome: (gateway) => gatewayHarnessProbe(commands, machine, gateway, probe),
+        onSome: (gateway) => gatewayHarnessProbe(commands, machine, gateway, probe, shell),
       });
     };
     const credentials = yield* sshCredentialsFor(commands, machineFor);
     const attachments = yield* gatewayAttachmentsFor(commands, machineFor);
+    const containers = yield* sshContainersFor(commands, machineFor, options.instance);
 
     // Runs for every Worker, because one that moved behind a Gateway can still have tokens from
     // an earlier process.
     const reclaim = (worker: WorkerName) =>
-      credentials.reclaim(worker).pipe(Effect.andThen(attachments.reclaim(worker)));
+      credentials
+        .reclaim(worker)
+        .pipe(
+          Effect.andThen(attachments.reclaim(worker)),
+          Effect.andThen(containers.reclaim(worker)),
+        );
 
     const grantFor = (repository: RepositoryName) =>
       Effect.succeed({
@@ -79,8 +86,9 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
       label: "SSH",
       commands,
       machineFor,
-      preflight: sshPreflightFor(commands, machineFor, harnessProbe, logins),
+      preflight: sshPreflightFor(commands, machineFor, harnessProbe, logins, containers),
       harnessProbe,
+      isolation: containers.isolation,
       repositoryUrl: (machine, repository) =>
         Option.match(machine.gateway, {
           onNone: () => `https://github.com/${repository}.git`,
@@ -101,11 +109,11 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
 
 /**
  * The executor for Linux machines accessed over SSH. Each Attempt's Pi parent is a durable task
- * in this process (`AttemptRuntime`), and each child runs on the machine as one SSH command.
- * Without a Gateway, the Attempt's GitHub token is written next to its checkout (ADR 0026).
- * Behind a Gateway, the machine gets only a caller token for an attachment made through the
- * Gateway's admin API (ADR 0027). `SshWorkers` adds and removes Workers at runtime. Requires
- * Node.
+ * in this process (`AttemptRuntime`), and each child runs on the machine as one SSH command, in
+ * the Attempt's own container if the machine has Docker. Without a Gateway, the Attempt's GitHub
+ * token is written next to its checkout (ADR 0026). Behind a Gateway, the machine gets only a
+ * caller token for an attachment made through the Gateway's admin API (ADR 0027). `SshWorkers`
+ * adds and removes Workers at runtime. Requires Node.
  */
 export const layer = (
   options: SshExecutorOptions,
@@ -123,6 +131,8 @@ export type {
   SshExecutorOptions,
   SshMachine,
   SshWorkerAddress,
+  SshWorkerContainer,
   SshWorkerGateway,
 } from "./model.ts";
+export { ATTEMPT_IMAGE } from "./container.ts";
 export { SshWorkers } from "./workers.ts";

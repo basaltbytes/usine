@@ -10,7 +10,13 @@ import type { LoopName } from "@usine/core/loop";
 import { canonicalRepositoryName } from "@usine/core/repository";
 import type { RunId } from "@usine/core/run";
 import { BotLogin, WorkerName } from "@usine/core/worker";
-import { CheckoutRequest, Executor, ExecutorError, ExecutorOperationError } from "@usine/executor";
+import {
+  CheckoutRequest,
+  Executor,
+  ExecutorError,
+  ExecutorOperationError,
+  type PreflightReport,
+} from "@usine/executor";
 import type { Submission } from "@usine/engine/engine";
 import { StepExecutor, type WorkerLease } from "@usine/engine/step-executor";
 import { GitHubApp, type GitHubAppError, isRefusal } from "@usine/github/github-app";
@@ -25,6 +31,7 @@ import {
   Match,
   Option,
   Ref,
+  Result,
   Schema,
   Semaphore,
   TxPriorityQueue,
@@ -281,16 +288,24 @@ export const stepExecutorLayer = (
       const recordPreflightExit = Effect.fn("WorkerScheduler.recordPreflight")(function* (
         worker: WorkerName,
         roster: ReadonlyArray<BrainSpec>,
-        exit: Exit.Exit<void, ExecutorError>,
+        exit: Exit.Exit<PreflightReport, ExecutorError>,
       ) {
-        const failure = Exit.findErrorOption(exit);
+        const outcome: Option.Option<Result.Result<PreflightReport, ExecutorError>> =
+          Exit.isSuccess(exit)
+            ? Option.some(Result.succeed(exit.value))
+            : Option.map(Exit.findErrorOption(exit), (error) => Result.fail(error));
         // An interrupted or defective preflight gives no information about the Worker.
-        if (Exit.isFailure(exit) && Option.isNone(failure)) return;
+        if (Option.isNone(outcome)) return;
         const checkedAt = yield* DateTime.now;
         yield* Ref.update(preflights, (current) =>
           new Map(current).set(
             worker,
-            recordPreflight(current.get(worker) ?? unchecked(worker), roster, checkedAt, failure),
+            recordPreflight(
+              current.get(worker) ?? unchecked(worker),
+              roster,
+              checkedAt,
+              outcome.value,
+            ),
           ),
         );
       });

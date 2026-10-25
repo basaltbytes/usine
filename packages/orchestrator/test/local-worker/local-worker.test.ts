@@ -24,6 +24,7 @@ import {
   Executor,
   ExecutorError,
   ExecutorOperationError,
+  fullPreflight,
 } from "@usine/executor";
 import { GitHubApp, InstallationDiscoveryError } from "@usine/github/github-app";
 import { InstanceDirectory } from "@usine/core/instance";
@@ -945,7 +946,7 @@ describe("local worker", () => {
             recover: () => Effect.die("unused"),
             isLive: () => Effect.die("unused"),
             outcome: () => Effect.die("unused"),
-            preflight: () => Effect.void,
+            preflight: () => Effect.succeed(fullPreflight),
             prepare: (request) => {
               requested.push(request);
               return Effect.fail(

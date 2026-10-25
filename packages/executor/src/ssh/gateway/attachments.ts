@@ -15,7 +15,7 @@ import { type RemoteCommands, sendingShell } from "../../remote/commands.ts";
 import type { RemoteAccess } from "../../remote/machine.ts";
 import { renewableCredential } from "../../renewable-credential.ts";
 import type { MachineGateway, SshMachine } from "../model.ts";
-import { gatewayEnvironment, ghGatewayConfig } from "./environment.ts";
+import { GH_GATEWAY_SOCKET_DIRECTORY, gatewayEnvironment, ghGatewayConfig } from "./environment.ts";
 
 /**
  * A script that writes `$2` and `$3` as `config.yml` and `hosts.yml` in directory `$1`. Each
@@ -260,6 +260,8 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
     });
     return {
       shell: sendingShell(machine.shell, sent),
+      secrets: sent,
+      readOnlyPaths: [ghConfigDirectory(machine), GH_GATEWAY_SOCKET_DIRECTORY],
       environment: exported,
       gitEnvironment: exported,
       refresh: credential.refresh(),

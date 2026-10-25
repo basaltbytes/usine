@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import { AgentSessionId } from "@usine/core/agent/session";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -80,6 +80,34 @@ describe("remote shell commands", () => {
     await exited;
     assert.strictEqual(existsSync(pidFile), false);
     assert.strictEqual(stop(), "no-children");
+  });
+
+  it("runs the command line inside a container with its directory, variables, and pid file", () => {
+    const worktree = mkdtempSync(join(tmpdir(), "usine-remote-shell-"));
+    // Stands in for `docker exec -i <name> ...` by running the rest of its arguments.
+    const runtime = join(worktree, "fake-runtime");
+    writeFileSync(
+      runtime,
+      '#!/bin/sh\n[ "$1" = exec ] && [ "$2" = -i ] && [ "$3" = usine-attempt ] || exit 99\nshift 3\nexec "$@"\n',
+      { mode: 0o755 },
+    );
+    const contained = new RemoteShell({ ...host, container: { runtime, name: "usine-attempt" } });
+    const pidFile = childPidFile(worktree, AgentSessionId.make("parent:attempt/1:child:2"));
+    const [, , , , line] = sshArguments(contained, {
+      cwd: worktree,
+      environment: { GREETING: "it's $HOME" },
+      pidFile,
+      command: "sh",
+      args: ["-c", 'printf "%s|%s|%s" "$PWD" "$GREETING" "$(cat "$1")" > seen', "sh", pidFile],
+    });
+    assert(line !== undefined);
+    assert.isTrue(line.startsWith(`exec '${runtime}' 'exec' '-i' 'usine-attempt' 'sh' '-c' `));
+    execFileSync("sh", ["-c", line]);
+    const [cwd, greeting, recorded] = readFileSync(join(worktree, "seen"), "utf8").split("|");
+    assert.strictEqual(cwd, worktree);
+    assert.strictEqual(greeting, "it's $HOME");
+    assert.match(recorded ?? "", /^\d+$/u);
+    assert.strictEqual(existsSync(pidFile), false);
   });
 
   it("refuses a variable name the shell would not read as one", () => {

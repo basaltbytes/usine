@@ -207,11 +207,12 @@ describe("Agents page", () => {
 describe("Workers page", () => {
   it("lists each Worker with its slots in use and last preflight, then removed Workers", async () => {
     const page = text(await render(() => <WorkersList configuration={configurationFixture()} />));
-    assert.include(page, "2 workers");
+    assert.include(page, "3 workers");
     assert.include(page, "1 of 2");
     assert.include(page, "usine@eu-1");
     assert.include(page, "Failed");
     assert.include(page, "Not checked");
+    assert.include(page, "Degraded");
     assert.include(page, "spare removed by a reload, 1 attempt still running");
   });
 
@@ -233,6 +234,19 @@ describe("Workers page", () => {
     assert.include(page, "Read from USINE_GATEWAY_ADMIN_TOKEN");
     assert.include(page, "/srv/usine");
     assert.include(page, "No preflight since usine up started.");
+    assert.include(page, "Default for this release");
+    assert.include(page, "2 CPUs, 4096 MiB, 4096 processes");
+  });
+
+  it("shows an SSH Worker without Docker as degraded, with the reason, and its container settings", async () => {
+    const page = text(
+      await render(() => <WorkerDetail name="eu-2" configuration={configurationFixture()} />),
+    );
+    assert.include(page, "Machine, Git, memory, gateway, credentials, and Docker");
+    assert.include(page, "Degraded: no container per attempt");
+    assert.include(page, "can read each other's credentials");
+    assert.include(page, "registry.example/usine-worker:custom");
+    assert.include(page, "1.5 CPUs, 6144 MiB, 2048 processes");
   });
 
   it("says that no Worker runs Attempts in setup mode", async () => {
