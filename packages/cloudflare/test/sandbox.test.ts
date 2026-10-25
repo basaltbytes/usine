@@ -4,7 +4,7 @@ import { HttpRouter } from "effect/unstable/http";
 import { TestClock } from "effect/testing";
 import { ProcessStatus, SandboxSummary } from "../src/api/api.ts";
 import { processFiles, stopCommand } from "../src/sandbox/process.ts";
-import { keepAlive, LEASE, sandboxRoutes } from "../src/sandbox/sandbox.ts";
+import { collectBytes, keepAlive, LEASE, restore, sandboxRoutes } from "../src/sandbox/sandbox.ts";
 import {
   ATTEMPT,
   fakeSandbox,
@@ -217,6 +217,21 @@ describe("sandbox keepalive alarm", () => {
     }).pipe(Effect.provide(layer));
   });
 
+  it.effect(
+    "sets the inactivity timeout and handlers again when the Durable Object restarts",
+    () => {
+      const { state, layer } = fakeSandbox();
+      state.running = true;
+      state.stored = Option.some(storedSandbox(DateTime.makeUnsafe(Duration.toMillis(LEASE))));
+      return Effect.gen(function* () {
+        yield* restore();
+
+        expect(state.keepAlives).toBe(1);
+        expect(state.interceptions.length).toBeGreaterThan(0);
+      }).pipe(Effect.provide(layer));
+    },
+  );
+
   it.effect("lets the container stop once usine stopped renewing its lease", () => {
     const { state, layer } = fakeSandbox();
     state.running = true;
@@ -229,4 +244,21 @@ describe("sandbox keepalive alarm", () => {
       expect(Option.isNone(state.alarm)).toBe(true);
     }).pipe(Effect.provide(layer));
   });
+});
+
+describe("command output", () => {
+  it.effect("keeps output bytes that aren't UTF-8 as they are", () =>
+    Effect.gen(function* () {
+      const bytes = new Uint8Array([0xac, 0x41, 0xff]);
+      const { stdout, exitCode } = yield* collectBytes({
+        stdin: null,
+        stdout: new Response(bytes).body,
+        stderr: new Response("").body,
+        exitCode: Promise.resolve(0),
+      });
+
+      expect([...stdout]).toEqual([0xac, 0x41, 0xff]);
+      expect(exitCode).toBe(0);
+    }),
+  );
 });

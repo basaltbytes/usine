@@ -1,9 +1,9 @@
-import { Context, Effect, Layer, Option } from "effect";
+import { Context, Effect, Layer, Option, Schema } from "effect";
 import { HttpServer } from "effect/unstable/http";
 import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi";
 import {
   registryGroup,
-  type SandboxName,
+  SandboxName,
   SandboxList,
   type SandboxOwner,
   type SandboxSummary,
@@ -19,12 +19,20 @@ export class RegistryStorage extends Context.Service<
   }
 >()("@usine/cloudflare/RegistryStorage") {}
 
+/** A sandbox's Durable Object didn't answer with its summary or a 404. */
+export class SandboxLookupFailed extends Schema.TaggedError<SandboxLookupFailed>()(
+  "SandboxLookupFailed",
+  { name: SandboxName, reason: Schema.String },
+) {}
+
 /** Reads a sandbox's current summary from its own Durable Object. */
 export class SandboxLookup extends Context.Service<
   SandboxLookup,
   {
-    /** Returns `None` if the sandbox no longer exists. */
-    readonly get: (name: SandboxName) => Effect.Effect<Option.Option<SandboxSummary>>;
+    /** Returns `None` only if the sandbox's Durable Object answers that it doesn't exist. */
+    readonly get: (
+      name: SandboxName,
+    ) => Effect.Effect<Option.Option<SandboxSummary>, SandboxLookupFailed>;
   }
 >()("@usine/cloudflare/SandboxLookup") {}
 
@@ -33,7 +41,9 @@ const LOOKUP_CONCURRENCY = 8;
 
 /**
  * Returns the sandboxes of `owner`, each as its Durable Object reports it now. Forgets entries
- * whose sandbox no longer exists, such as one whose destroy couldn't reach the registry.
+ * whose sandbox no longer exists, such as one whose destroy couldn't reach the registry. A sandbox
+ * whose Durable Object doesn't answer keeps its entry and is left out of this listing, so nothing
+ * destroys it until a listing can read it.
  */
 const list = Effect.fn("SandboxRegistry.list")(function* (owner: SandboxOwner) {
   yield* Effect.annotateCurrentSpan({ owner });
@@ -55,6 +65,12 @@ const list = Effect.fn("SandboxRegistry.list")(function* (owner: SandboxOwner) {
                 ),
               )
             : Effect.void,
+        ),
+        Effect.catchTag("SandboxLookupFailed", (failure) =>
+          Effect.logWarning(
+            "Could not read a sandbox's state; kept its registration and left it out of the listing",
+            { sandbox: sandbox.name, owner, reason: failure.reason },
+          ).pipe(Effect.as(Option.none<SandboxSummary>())),
         ),
       ),
     { concurrency: LOOKUP_CONCURRENCY },

@@ -19,7 +19,7 @@ import { type AccessToken, accessGranted } from "./access.ts";
 import { ProcessId, ProviderCredential, SandboxName, SandboxSummary } from "./api/api.ts";
 import { GITHUB_HOSTS } from "./api/harness.ts";
 import { AttachOffsets } from "./api/stream.ts";
-import { registryRoutes, RegistryStorage, SandboxLookup } from "./registry.ts";
+import { registryRoutes, RegistryStorage, SandboxLookup, SandboxLookupFailed } from "./registry.ts";
 import { allowedHostsOf, gitHubRequest, providerRequest } from "./sandbox/outbound.ts";
 import {
   ContainerFailure,
@@ -31,7 +31,7 @@ import {
   StoredSandbox,
 } from "./sandbox/ports.ts";
 import { readFromCommand } from "./sandbox/process.ts";
-import { collect, keepAlive, restore, sandboxRoutes } from "./sandbox/sandbox.ts";
+import { collectBytes, keepAlive, restore, sandboxRoutes } from "./sandbox/sandbox.ts";
 import { attachStream, execStream, type StreamSocket } from "./sandbox/stream.ts";
 
 /** The bindings and variables that `wrangler.jsonc` and `wrangler secret put` give the Worker. */
@@ -172,14 +172,15 @@ const containerOf = (
       tryContainer("read", () =>
         container.exec([...readFromCommand(path, offset)], { stdout: "pipe", stderr: "pipe" }),
       ).pipe(
-        Effect.flatMap((process) => collect(process)),
-        Effect.flatMap(({ stdout, exitCode, stderr }) =>
-          exitCode === 0
-            ? Effect.succeed(Option.some(new TextEncoder().encode(stdout)))
-            : stderr.includes("No such file")
-              ? Effect.succeedNone
-              : Effect.fail(new ContainerFailure({ operation: "read", message: stderr.trim() })),
-        ),
+        // Keeps the bytes as they are: the attach stream counts them to resume at an offset.
+        Effect.flatMap((process) => collectBytes(process)),
+        Effect.flatMap(({ stdout, exitCode, stderr }) => {
+          if (exitCode === 0) return Effect.succeed(Option.some(stdout));
+          const message = new TextDecoder().decode(stderr).trim();
+          return message.includes("No such file")
+            ? Effect.succeedNone
+            : Effect.fail(new ContainerFailure({ operation: "read", message }));
+        }),
       ),
     size: (path) =>
       tryContainer("read", async () => {
@@ -401,17 +402,32 @@ export class SandboxRegistry extends DurableObject<Env> {
         Effect.promise(() => ctx.storage.delete(`sandbox:${name}`)).pipe(Effect.asVoid),
     };
     const lookup: SandboxLookup["Service"] = {
-      get: (name) =>
-        Effect.tryPromise(() =>
-          env.SANDBOX.getByName(name).fetch(`https://sandbox.internal/v1/sandboxes/${name}`),
-        ).pipe(
-          Effect.flatMap((response) =>
-            response.status === 404
-              ? Effect.succeedNone
-              : Effect.tryPromise(() => response.json()).pipe(Effect.map(decodeSummary)),
-          ),
-          Effect.orElseSucceed(() => Option.none<SandboxSummary>()),
-        ),
+      get: (name) => {
+        const failed = (reason: string) => new SandboxLookupFailed({ name, reason });
+        return Effect.tryPromise({
+          try: () =>
+            env.SANDBOX.getByName(name).fetch(`https://sandbox.internal/v1/sandboxes/${name}`),
+          catch: (cause) =>
+            failed(`no response: ${cause instanceof Error ? cause.message : String(cause)}`),
+        }).pipe(
+          Effect.flatMap((response) => {
+            // Only a 404 from the sandbox's own Durable Object says that the sandbox is gone.
+            if (response.status === 404) return Effect.succeedNone;
+            if (!response.ok) return Effect.fail(failed(`status ${String(response.status)}`));
+            return Effect.tryPromise({
+              try: () => response.json(),
+              catch: () => failed("the response isn't JSON"),
+            }).pipe(
+              Effect.flatMap((body) =>
+                Option.match(decodeSummary(body), {
+                  onNone: () => Effect.fail(failed("the response isn't a sandbox summary")),
+                  onSome: (summary) => Effect.succeed(Option.some(summary)),
+                }),
+              ),
+            );
+          }),
+        );
+      },
     };
     const web = HttpRouter.toWebHandler(
       registryRoutes.pipe(

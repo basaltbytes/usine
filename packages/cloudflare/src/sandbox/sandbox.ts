@@ -50,8 +50,8 @@ const unavailable = (name: SandboxName) => (failure: ContainerFailure) =>
 const readAll = async (stream: ReadableStream<Uint8Array> | null): Promise<Uint8Array> =>
   stream === null ? new Uint8Array() : new Uint8Array(await new Response(stream).arrayBuffer());
 
-/** Waits for `process` to exit and returns its output and exit code. */
-export const collect = (process: ContainerProcess) =>
+/** Waits for `process` to exit and returns its output bytes, unchanged, and exit code. */
+export const collectBytes = (process: ContainerProcess) =>
   Effect.tryPromise({
     try: () => Promise.all([readAll(process.stdout), readAll(process.stderr), process.exitCode]),
     catch: (cause) =>
@@ -59,8 +59,12 @@ export const collect = (process: ContainerProcess) =>
         operation: "exec",
         message: cause instanceof Error ? cause.message : String(cause),
       }),
-  }).pipe(
-    Effect.map(([stdout, stderr, exitCode]) => ({
+  }).pipe(Effect.map(([stdout, stderr, exitCode]) => ({ stdout, stderr, exitCode })));
+
+/** Waits for `process` to exit and returns its output as UTF-8 text, and exit code. */
+const collect = (process: ContainerProcess) =>
+  collectBytes(process).pipe(
+    Effect.map(({ stdout, stderr, exitCode }) => ({
       stdout: decoder.decode(stdout),
       stderr: decoder.decode(stderr),
       exitCode,
@@ -343,24 +347,37 @@ export const keepAlive = Effect.fn("Sandbox.keepAlive")(function* () {
 });
 
 /**
- * Registers the outbound handlers again after the Durable Object restarts while its container
- * runs. Does nothing for a sandbox without a running container.
+ * Registers the outbound handlers and sets the inactivity timeout again after the Durable Object
+ * restarts while its container runs, since the platform resets both for each instance. Does
+ * nothing for a sandbox without a running container.
  */
 export const restore = Effect.fn("Sandbox.restore")(function* () {
   const storage = yield* SandboxStorage;
   const container = yield* SandboxContainer;
   const found = yield* storage.load;
   if (Option.isNone(found) || !(yield* container.running)) return;
-  yield* intercept(found.value.name, found.value.credentials).pipe(
+  const fields = { sandbox: found.value.name, attempt: found.value.attempt };
+  yield* container.keepAlive(INACTIVITY_TIMEOUT).pipe(
     Effect.tapError((failure) =>
-      Effect.logError("Could not register the sandbox's outbound handlers again", {
-        sandbox: found.value.name,
+      Effect.logError("Could not set the container's inactivity timeout again", {
+        ...fields,
         operation: failure.operation,
         message: failure.message,
       }),
     ),
     Effect.ignore,
   );
+  yield* intercept(found.value.name, found.value.credentials).pipe(
+    Effect.tapError((failure) =>
+      Effect.logError("Could not register the sandbox's outbound handlers again", {
+        ...fields,
+        operation: failure.operation,
+        message: failure.message,
+      }),
+    ),
+    Effect.ignore,
+  );
+  yield* Effect.logInfo("Restored the running sandbox after its Durable Object restarted", fields);
 });
 
 const SandboxServedApi = HttpApi.make("SandboxApi").add(healthGroup, sandboxGroup);
