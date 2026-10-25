@@ -94,8 +94,9 @@ const EnvironmentVariableName = Schema.String.check(
  *   Gateway's loopback interface.
  * - `adminTokenEnv`: the orchestrator environment variable with the admin token, read when
  *   `usine up` starts or a reload adds the Worker.
- * - `llmProviders`: the providers whose credential the Gateway injects. Harnesses for other
- *   providers, and Codex, use the operator's login on the Worker through the forward proxy.
+ * - `llmProviders`: the providers whose credential the Gateway injects: `anthropic` for Claude
+ *   Code, `openai` for Codex. Harnesses for other providers use the operator's login on the
+ *   Worker through the forward proxy.
  */
 export class WorkerGateway extends Schema.Class<WorkerGateway>("@usine/config/WorkerGateway")({
   domain: GatewayDomain,

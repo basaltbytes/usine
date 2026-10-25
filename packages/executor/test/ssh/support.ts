@@ -1,4 +1,5 @@
 import { CHILD_KILL_SCRIPT } from "@usine/agents/child-host";
+import { CODEX_CLI_VERSION } from "@usine/agents/preflight";
 import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget } from "@usine/core/agent/session";
@@ -143,6 +144,8 @@ interface FakeMachineState {
   salvage: "clean" | "dirty";
   salvageCommitted: boolean;
   claudeLoggedIn: boolean;
+  /** What `codex --version` prints on the machine. */
+  codexVersion: string;
   /** Whether sshd accepts the variables the SSH client sends (`AcceptEnv`). */
   acceptsSentVariables: boolean;
   readonly droppedSentVariables: Set<string>;
@@ -152,7 +155,7 @@ interface FakeMachineState {
   forwardProxyReachable: boolean;
   /** Hosts that the forward proxy refuses to tunnel to. */
   readonly refusedHosts: Set<string>;
-  /** gh's configuration files written on the machine, by path. */
+  /** The Gateway configuration files written on the machine, by path. */
   readonly files: Map<string, string>;
   /** Whether the Gateway accepts the SSH connection of a forward to its admin API. */
   gatewayAcceptsSsh: boolean;
@@ -275,6 +278,7 @@ export const fakeMachine = () => {
     salvage: "clean",
     salvageCommitted: false,
     claudeLoggedIn: true,
+    codexVersion: `codex-cli ${CODEX_CLI_VERSION}`,
     acceptsSentVariables: true,
     droppedSentVariables: new Set(),
     gatewayReachable: true,
@@ -408,10 +412,12 @@ export const fakeMachine = () => {
             0,
           )
         : oneShotHandle("", 6, "curl: (6) Could not resolve host: git.gw.test");
+    // Writes the Gateway configuration files: path and contents pairs after the script and `$0`.
     if (line.includes("http_unix_socket")) {
-      const [directory, config, hosts] = remoteWords(line).slice(-3);
-      state.files.set(`${directory}/config.yml`, config ?? "");
-      state.files.set(`${directory}/hosts.yml`, hosts ?? "");
+      const words = remoteWords(line);
+      const pairs = words.slice(words.findIndex((word) => word.includes("shift 2")) + 2);
+      for (let index = 0; index + 1 < pairs.length; index += 2)
+        state.files.set(pairs[index] ?? "", pairs[index + 1] ?? "");
       return oneShotHandle("", 0);
     }
     if (line.includes("IFS= read -r token")) {
@@ -433,6 +439,7 @@ export const fakeMachine = () => {
     }
     if (line === "exec 'git' '--version'") return oneShotHandle("git version 2.47.3\n", 0);
     if (line === "exec 'claude' '--version'") return oneShotHandle(claudeVersionOutput, 0);
+    if (line === "exec 'codex' '--version'") return oneShotHandle(`${state.codexVersion}\n`, 0);
     if (line === "exec 'claude' 'auth' 'status' '--json'")
       return oneShotHandle(
         JSON.stringify({

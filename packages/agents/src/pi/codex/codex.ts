@@ -53,7 +53,7 @@ import { sessionChannel } from "../session.ts";
 import { sessionConversation } from "../conversation.ts";
 import { codexThreadTokens } from "../usage.ts";
 import { CodexAppServer, type CodexClient, operationError } from "./app-server.ts";
-import { codexPoolUnavailable, initializeCodex, verifyCodexAccount } from "./account.ts";
+import { codexChildPool, codexPoolUnavailable, initializeCodex } from "./account.ts";
 
 export { CodexAppServer, codexAppServerLive, type CodexConnection } from "./app-server.ts";
 
@@ -92,7 +92,11 @@ const makeCodexChild = Effect.gen(function* () {
       };
       const connection = yield* appServer.open(client);
       yield* initializeCodex(connection);
-      const pool = yield* verifyCodexAccount(connection, request.session.brain.model);
+      const pool = yield* codexChildPool(
+        connection,
+        request.session.brain,
+        request.session.gatewayCredential,
+      );
 
       const models: Array<(typeof ModelListResponse.Type.data)[number]> = [];
       let cursor: string | null = null;
@@ -417,6 +421,11 @@ const makeCodexChild = Effect.gen(function* () {
               return;
             }
             if (method === "account/updated") {
+              if (Option.isSome(request.session.gatewayCredential))
+                return yield* Effect.logDebug(
+                  "Skipping a Codex account change: the Gateway holds the OpenAI credential",
+                  { sessionId: session.id },
+                );
               const account = yield* Schema.decodeUnknownEffect(AccountUpdated)(params).pipe(
                 Effect.mapError(() => codexPoolUnavailable(request.session.brain.model)),
               );

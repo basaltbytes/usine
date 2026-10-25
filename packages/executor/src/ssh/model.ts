@@ -84,14 +84,19 @@ export interface MachineGateway {
   readonly forward: GatewayForward;
   readonly admin: GatewayAdmin;
   /**
-   * The Anthropic credential kind the Gateway uses for Claude Code, from the last preflight.
-   * `None` before the first preflight, if `llmProviders` doesn't include `anthropic`, or if the
-   * Gateway is too old to report it.
+   * The credential kind the Gateway uses for each provider, from the last preflight: Anthropic
+   * for Claude Code, OpenAI for Codex. `None` before the first preflight, for a provider that
+   * `llmProviders` doesn't list, or for Anthropic if the Gateway is too old to report it.
    */
-  readonly anthropicCredential: Ref.Ref<Option.Option<GatewayCredentialKind>>;
+  readonly credentials: Ref.Ref<GatewayCredentials>;
   /** Whether a preflight already warned that the Gateway is too old to report its Anthropic credential kind. */
   readonly warnedOfUnreportedCredential: Ref.Ref<boolean>;
 }
+
+/** The credential kind the Gateway holds for each provider; see `MachineGateway.credentials`. */
+export type GatewayCredentials = Readonly<
+  Record<GatewayLlmProvider, Option.Option<GatewayCredentialKind>>
+>;
 
 export interface SshMachine extends RemoteMachine {
   /** The Worker's address from `usine.yaml`; preflight checks its root. */

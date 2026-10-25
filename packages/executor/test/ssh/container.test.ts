@@ -1,15 +1,18 @@
 import { assert, describe, it } from "@effect/vitest";
 import { RemoteShell } from "@usine/agents/child-host";
+import { Agent } from "@usine/core/agent";
+import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptId } from "@usine/core/attempt";
 import { type AttemptSalvage, SalvageRef } from "@usine/core/attempt/salvage";
 import { WorkerName } from "@usine/core/worker";
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
 import { completes, type StubParent, StubStorage } from "@usine/durable/testing";
+import { ChatGptLogin, HostFilePath, OpenAiProvider, UpstreamBase } from "@usine/gateway";
 import { Deferred, Effect, Fiber, Option } from "effect";
 import { readFileSync } from "node:fs";
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
 import { ATTEMPT_IMAGE, SshWorkers } from "../../src/ssh/ssh.ts";
-import { fakeGateway, gatewayRuntime } from "./gateway/support.ts";
+import { fakeGateway, gatewayAddress, gatewayRuntime } from "./gateway/support.ts";
 import {
   ADDRESS,
   aloneOnItem,
@@ -170,6 +173,67 @@ describe("SSH Worker with Docker", () => {
         assert(credentialGone > containerGone, "the credential outlives the container");
         assert.strictEqual(machine.state.containers.size, 0);
       }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider(), parent)));
+    },
+  );
+
+  it.effect(
+    "mounts the Attempt's Codex home read-write when the Gateway holds the OpenAI credential, and removes it after the container",
+    () => {
+      const machine = dockerMachine();
+      const gateway = fakeGateway(machine, {
+        anthropic: Option.none(),
+        openai: Option.some(
+          new OpenAiProvider({
+            upstream: UpstreamBase.make("https://chatgpt.com/backend-api/codex"),
+            credential: new ChatGptLogin({
+              authFile: HostFilePath.make("/var/lib/usine-gateway/codex-auth.json"),
+              tokenUrl: UpstreamBase.make("https://auth.openai.com/oauth/token"),
+            }),
+          }),
+        ),
+      });
+      const codexRequest = new CheckoutRequest({
+        ...request,
+        agent: new Agent({
+          ...TEST_AGENT,
+          brain: new BrainSpec({
+            harness: "codex",
+            model: ModelId.make("gpt-5.6-sol"),
+            effort: "low",
+          }),
+        }),
+      });
+      const codexHome = `${WORKER_ROOT}/codex/remote-run_execute_1`;
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const prepared = yield* executor.prepare(codexRequest);
+        yield* prepared.launch(sink);
+
+        const { words, input } = runOf(machine, CONTAINER);
+        assert.include(input, `CODEX_HOME=${codexHome}\n`);
+        assert.match(input, /^USINE_GATEWAY_TOKEN=ugw1\./mu);
+        assert.include(
+          mountsOf(words),
+          `type=bind,"source=${codexHome}","destination=${codexHome}"`,
+        );
+        assert.include(machine.state.files.get(`${codexHome}/config.toml`) ?? "", "usine-gateway");
+        const lines = linesOf(machine);
+        const containerGone = lines.findIndex((line) =>
+          line.startsWith(`exec 'docker' 'rm' '--force' '${CONTAINER}'`),
+        );
+        const homeGone = lines.findIndex((line) => line === `exec 'rm' '-rf' '${codexHome}'`);
+        assert(
+          homeGone > containerGone && containerGone >= 0,
+          "the Codex home outlives the container",
+        );
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          gatewayRuntime(machine, mintingProvider(), gateway, {
+            address: gatewayAddress({ llmProviders: ["openai"] }),
+          }),
+        ),
+      );
     },
   );
 

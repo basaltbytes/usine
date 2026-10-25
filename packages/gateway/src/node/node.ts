@@ -1,5 +1,10 @@
 import { createServer } from "node:http";
-import { NodeHttpClient, NodeHttpServer, NodeHttpServerRequest } from "@effect/platform-node";
+import {
+  NodeFileSystem,
+  NodeHttpClient,
+  NodeHttpServer,
+  NodeHttpServerRequest,
+} from "@effect/platform-node";
 import { ConfigProvider, Context, Effect, Layer, Stream } from "effect";
 import {
   HttpMiddleware,
@@ -10,10 +15,9 @@ import {
   HttpServerResponse,
 } from "effect/unstable/http";
 import { adminRoutes } from "../admin/server.ts";
-import { Attachments } from "../attachment/store.ts";
-import { CallerTokens } from "../caller/caller.ts";
+import { gatewayServices } from "../gateway.ts";
 import { GatewayProxy } from "../proxy/proxy.ts";
-import { GatewaySettings, SettingsInForce } from "../settings.ts";
+import { GatewaySettings } from "../settings.ts";
 import { serveEgressProxy } from "./egress-proxy.ts";
 import {
   type GatewayListeners,
@@ -24,7 +28,7 @@ import {
 import { gatewayReloadLayer, reloadOnHangup } from "./reload.ts";
 
 export {
-  ConflictingAnthropicCredentials,
+  ConflictingProviderCredentials,
   DEFAULT_EGRESS_ALLOWLIST_PATH,
   EnvironmentFileError,
   type GatewayListeners,
@@ -100,8 +104,9 @@ const serveAdmin = Effect.fn("GatewayNode.serveAdmin")(function* (listener: List
 
 /**
  * The Gateway on Node: the reverse proxy, forward proxy, and admin API on their listeners,
- * sharing one attachment store, caller token signer, and settings. Upstream requests use
- * undici, which doesn't change `content-encoding`, so compressed bodies pass through unchanged.
+ * sharing one attachment store, caller token signer, settings, and ChatGPT logins. Upstream
+ * requests use undici, which doesn't change `content-encoding`, so compressed bodies pass
+ * through unchanged. ChatGPT logins read and write their auth files with Node's file system.
  */
 export const gatewayLayer = (listeners: GatewayListeners) =>
   Layer.effect(
@@ -114,10 +119,8 @@ export const gatewayLayer = (listeners: GatewayListeners) =>
     }),
   ).pipe(
     Layer.provide(GatewayProxy.layer),
-    Layer.provideMerge(
-      Layer.mergeAll(Attachments.layer, CallerTokens.layer, SettingsInForce.layer),
-    ),
-    Layer.provide(NodeHttpClient.layerUndici),
+    Layer.provideMerge(gatewayServices),
+    Layer.provide(Layer.mergeAll(NodeHttpClient.layerUndici, NodeFileSystem.layer)),
     // effect 4.0.0-rc.111 reads header redaction settings after the request fiber may have cleared its
     // context, so automatic HTTP spans are disabled. Named Gateway spans still record safe fields
     // without incoming credentials.

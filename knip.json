@@ -1,5 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignoreBinaries": ["codex"],
   "ignoreDependencies": [
     "@earendil-works/chord",
     "@earendil-works/pi-agent-core",

@@ -1,6 +1,6 @@
 import type { SshCommand } from "@usine/agents/child-host";
 import { safeSegment } from "@usine/core/repository";
-import type { GatewayCredentialKind, WorkerName } from "@usine/core/worker";
+import type { WorkerName } from "@usine/core/worker";
 import { Context, Effect, Equal, Exit, Option, Ref, Scope, SynchronizedRef } from "effect";
 import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -8,7 +8,13 @@ import { WorkerCapabilityError } from "../executor.ts";
 import type { RemoteCommands } from "../remote/commands.ts";
 import { gatewayAdminFor } from "./gateway/admin.ts";
 import { type GatewayForward, gatewayForwardFor } from "./gateway/forward.ts";
-import type { MachineGateway, SshMachine, SshWorkerAddress, SshWorkerGateway } from "./model.ts";
+import type {
+  GatewayCredentials,
+  MachineGateway,
+  SshMachine,
+  SshWorkerAddress,
+  SshWorkerGateway,
+} from "./model.ts";
 
 /** The Workers of the SSH executor, starting with `SshExecutorOptions.workers`. A reload adds and removes Workers at runtime. */
 export class SshWorkers extends Context.Service<
@@ -104,14 +110,17 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
       onNone: () => new Set([address.name]),
       onSome: (held) => new Set([...held.workers, address.name]),
     });
-    const anthropicCredential = yield* Ref.make(Option.none<GatewayCredentialKind>());
+    const credentials = yield* Ref.make<GatewayCredentials>({
+      anthropic: Option.none(),
+      openai: Option.none(),
+    });
     const warnedOfUnreportedCredential = yield* Ref.make(false);
     return {
       gateway: {
         settings,
         forward,
         admin,
-        anthropicCredential,
+        credentials,
         warnedOfUnreportedCredential,
       } satisfies MachineGateway,
       forwards: new Map(current.forwards).set(key, { forward, scope: forwardScope, workers }),

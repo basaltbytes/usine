@@ -15,12 +15,16 @@ const GH_GATEWAY_SOCKET = `${GH_GATEWAY_SOCKET_DIRECTORY}/http.sock`;
 
 const FORWARD_PROXY_PORT = 3128;
 
+/** The variable that Codex's `model_provider` reads the caller token from (`env_key`). */
+const CODEX_TOKEN_VARIABLE = "USINE_GATEWAY_TOKEN";
+
 /** The variables sent through the SSH connection because they contain the caller token. The Worker's sshd must accept each in `AcceptEnv`. */
 export const GATEWAY_SENT_VARIABLES = [
   "GIT_CONFIG_VALUE_0",
   "GH_ENTERPRISE_TOKEN",
   "GH_TOKEN",
   "ANTHROPIC_AUTH_TOKEN",
+  CODEX_TOKEN_VARIABLE,
 ] as const;
 
 /** Returns the Gateway's forward proxy URL from a Worker; children receive it as `HTTPS_PROXY`. */
@@ -41,13 +45,51 @@ export const ghGatewayConfig = (domain: GatewayDomain) =>
     "hosts.yml": `git.${domain}:\n    git_protocol: https\n`,
   }) as const;
 
+/**
+ * Returns Codex's `config.toml` for the Gateway at `domain`: a `model_provider` that sends the
+ * Responses API to `llm.<domain>/openai/v1` with the caller token from `USINE_GATEWAY_TOKEN` as
+ * the bearer token, and needs no login. The file contains no token.
+ */
+const codexGatewayConfig = (domain: GatewayDomain): string =>
+  [
+    'model_provider = "usine-gateway"',
+    "",
+    "[model_providers.usine-gateway]",
+    'name = "usine gateway"',
+    `base_url = "http://llm.${domain}/openai/v1"`,
+    `env_key = "${CODEX_TOKEN_VARIABLE}"`,
+    'wire_api = "responses"',
+    "requires_openai_auth = false",
+    "",
+  ].join("\n");
+
 export interface GatewayEnvironmentOptions {
   readonly domain: GatewayDomain;
   readonly llmProviders: ReadonlyArray<GatewayLlmProvider>;
   /** The machine directory that contains the `ghGatewayConfig` files. */
   readonly ghConfigDirectory: string;
+  /** The Attempt's machine directory that Codex uses as `CODEX_HOME` if the Gateway holds the OpenAI credential. */
+  readonly codexHome: string;
   readonly callerToken: CallerToken;
 }
+
+/**
+ * Returns the configuration files that the executor writes on the machine before an Attempt,
+ * keyed by path: gh's files, and Codex's `config.toml` if the Gateway holds the OpenAI
+ * credential. None contains a token.
+ */
+export const gatewayConfigFiles = (
+  options: Omit<GatewayEnvironmentOptions, "callerToken">,
+): ReadonlyArray<readonly [path: string, contents: string]> => {
+  const gh = ghGatewayConfig(options.domain);
+  return [
+    [`${options.ghConfigDirectory}/config.yml`, gh["config.yml"]],
+    [`${options.ghConfigDirectory}/hosts.yml`, gh["hosts.yml"]],
+    ...(options.llmProviders.includes("openai")
+      ? [[`${options.codexHome}/config.toml`, codexGatewayConfig(options.domain)] as const]
+      : []),
+  ];
+};
 
 /**
  * An Attempt's environment behind a Gateway. `exported` has no secrets and goes in each command
@@ -59,14 +101,22 @@ export interface GatewayEnvironment {
 }
 
 /**
- * Returns the variables of `gatewayEnvironment` without a caller token, for commands that
- * reach the Gateway's forward proxy but no attachment, such as a preflight's harness probes.
+ * Returns the variables of `gatewayEnvironment` without a caller token or Codex's home, which
+ * only an Attempt has, for commands that reach the Gateway's forward proxy but no attachment,
+ * such as a preflight's harness probes.
  */
 export const gatewayExportedEnvironment = (
   settings: Pick<GatewayEnvironmentOptions, "domain" | "llmProviders">,
   ghConfigDirectory: string,
-): Readonly<Record<string, string>> =>
-  gatewayEnvironment({ ...settings, ghConfigDirectory, callerToken: Redacted.make("") }).exported;
+): Readonly<Record<string, string>> => {
+  const { CODEX_HOME: _, ...exported } = gatewayEnvironment({
+    ...settings,
+    ghConfigDirectory,
+    codexHome: "",
+    callerToken: Redacted.make(""),
+  }).exported;
+  return exported;
+};
 
 /**
  * Returns the environment that points git, gh, package managers, and Claude Code at the
@@ -80,7 +130,10 @@ export const gatewayExportedEnvironment = (
  * - Package managers use the forward proxy at `<domain>:3128`; local addresses and the
  *   Gateway's own names bypass it.
  * - Claude Code calls `llm.<domain>/anthropic` with the caller token if the Gateway has the
- *   Anthropic credential. Otherwise, and for Codex, the harness uses its own login through the
+ *   Anthropic credential.
+ * - Codex reads `codexGatewayConfig` from `CODEX_HOME` and calls `llm.<domain>/openai/v1` with
+ *   the caller token if the Gateway has the OpenAI credential.
+ * - A harness whose provider the Gateway has no credential for uses its own login through the
  *   forward proxy, whose allowlist must include the login's hosts.
  */
 export const gatewayEnvironment = (options: GatewayEnvironmentOptions): GatewayEnvironment => {
@@ -110,9 +163,38 @@ export const gatewayEnvironment = (options: GatewayEnvironmentOptions): GatewayE
     GH_ENTERPRISE_TOKEN: callerToken,
     GH_TOKEN: callerToken,
   };
-  if (!options.llmProviders.includes("anthropic")) return { exported, sent };
+  const harnesses = options.llmProviders.map((provider) => harnessVariables(provider, options));
   return {
-    exported: { ...exported, ANTHROPIC_BASE_URL: `http://llm.${domain}/anthropic` },
-    sent: { ...sent, ANTHROPIC_AUTH_TOKEN: callerToken },
+    exported: {
+      ...exported,
+      ...Object.fromEntries(harnesses.flatMap(({ exported }) => Object.entries(exported))),
+    },
+    sent: {
+      ...sent,
+      ...Object.fromEntries(harnesses.map(({ token }) => [token, callerToken] as const)),
+    },
   };
+};
+
+/** The variables that point a provider's harness at the Gateway. */
+interface HarnessVariables {
+  readonly exported: Readonly<Record<string, string>>;
+  /** The variable that carries the caller token; it's sent, never exported. */
+  readonly token: (typeof GATEWAY_SENT_VARIABLES)[number];
+}
+
+/** Returns the variables that point `provider`'s harness at the Gateway. */
+const harnessVariables = (
+  provider: GatewayLlmProvider,
+  options: Pick<GatewayEnvironmentOptions, "domain" | "codexHome">,
+): HarnessVariables => {
+  switch (provider) {
+    case "anthropic":
+      return {
+        exported: { ANTHROPIC_BASE_URL: `http://llm.${options.domain}/anthropic` },
+        token: "ANTHROPIC_AUTH_TOKEN",
+      };
+    case "openai":
+      return { exported: { CODEX_HOME: options.codexHome }, token: CODEX_TOKEN_VARIABLE };
+  }
 };

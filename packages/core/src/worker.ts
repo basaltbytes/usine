@@ -98,16 +98,18 @@ export const GatewayAdminPort = Schema.Int.check(
 export type GatewayAdminPort = typeof GatewayAdminPort.Type;
 
 /**
- * An LLM provider whose credential the Gateway stores. The harness for that provider, such as
- * Claude Code for `anthropic`, uses the Attempt's caller token instead of a login on the machine.
+ * An LLM provider whose credential the Gateway stores. The harness for that provider, Claude
+ * Code for `anthropic` and Codex for `openai`, uses the Attempt's caller token instead of a login
+ * on the machine.
  */
-export const GatewayLlmProvider = Schema.Literals(["anthropic"]);
+export const GatewayLlmProvider = Schema.Literals(["anthropic", "openai"]);
 export type GatewayLlmProvider = typeof GatewayLlmProvider.Type;
 
 /**
  * The kind of LLM provider credential that the Gateway stores, as reported by its admin API.
- * `api-key` is billed at API rates; `subscription` uses a plan, such as a Claude plan from
- * `claude setup-token` ([ADR 0013](../../../docs/adr/0013-cost-accounting-native-meters-guardrails.md)).
+ * `api-key` is billed at API rates; `subscription` uses a plan: a Claude plan from
+ * `claude setup-token`, or a ChatGPT plan from `codex login`
+ * ([ADR 0013](../../../docs/adr/0013-cost-accounting-native-meters-guardrails.md)).
  */
 export const GatewayCredentialKind = Schema.Literals(["api-key", "subscription"]);
 export type GatewayCredentialKind = typeof GatewayCredentialKind.Type;

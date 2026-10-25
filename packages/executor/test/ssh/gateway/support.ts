@@ -21,7 +21,17 @@ import {
   type SettingsInForce,
   UpstreamBase,
 } from "@usine/gateway";
-import { type Duration, Effect, Latch, Layer, Option, Redacted, Result, Schema } from "effect";
+import {
+  type Duration,
+  Effect,
+  FileSystem,
+  Latch,
+  Layer,
+  Option,
+  Redacted,
+  Result,
+  Schema,
+} from "effect";
 import { TestClock } from "effect/testing";
 import {
   HttpClient,
@@ -146,7 +156,17 @@ export const fakeGateway = (
     adminToken: Schema.decodeSync(AdminToken)(ADMIN_TOKEN),
     callerKey: Schema.decodeSync(CallerKey)("caller-key-for-executor-tests-0123456789"),
   });
-  const services = gatewayServices.pipe(Layer.provideMerge(settings));
+  // The admin API reads no ChatGPT login, so the logins get no file system or token endpoint.
+  const noChatGptLogin = Layer.mergeAll(
+    FileSystem.layerNoop({}),
+    Layer.succeed(HttpClient.HttpClient)(
+      HttpClient.make(() => Effect.die(new Error("the test Gateway refreshes no ChatGPT login"))),
+    ),
+  );
+  const services = gatewayServices.pipe(
+    Layer.provideMerge(settings),
+    Layer.provide(noChatGptLogin),
+  );
   const client = Layer.effect(
     HttpClient.HttpClient,
     Effect.gen(function* () {

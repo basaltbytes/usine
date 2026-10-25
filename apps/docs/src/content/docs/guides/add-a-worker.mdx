@@ -133,7 +133,7 @@ A worker created before cloud-init installed Docker runs its attempts as the SSH
 
 ## SSH workers behind a gateway
 
-A gateway is a VM in front of workers that have no public address. It's their SSH bastion and DNS resolver, the proxy that adds the attempt's GitHub token and optionally an LLM provider's key to their requests, and a forward proxy to allowlisted package and harness login hosts. A worker behind it has no GitHub token on disk and can't reach any other host ([ADR 0027](https://github.com/basaltbytes/usine/blob/main/docs/adr/0027-gateway-credential-proxy.md)).
+A gateway is a VM in front of workers that have no public address. It's their SSH bastion and DNS resolver, the proxy that adds the attempt's GitHub token and the operator's LLM credentials to their requests, and a forward proxy to allowlisted package and harness login hosts. A worker behind it has no GitHub token or subscription login on disk and can't reach any other host ([ADR 0027](https://github.com/basaltbytes/usine/blob/main/docs/adr/0027-gateway-credential-proxy.md)).
 
 For each attempt, the executor attaches the attempt's installation token to the gateway through the admin API and receives a caller token. The children get the caller token over SSH, in environment variables that the worker's sshd accepts, and send it with every request to `git.<domain>` or `llm.<domain>`. The gateway checks it, replaces it with the real credential, and forwards the request over HTTPS.
 
@@ -159,7 +159,7 @@ flowchart LR
   W -->|"HTTPS tunnels to allowlisted hosts"| FP
   W -->|"name lookups"| DNS
   RP -->|"HTTPS with the installation token"| GH["github.com, api.github.com"]
-  RP -->|"HTTPS with the Gateway's key"| LLM["api.anthropic.com"]
+  RP -->|"HTTPS with the Gateway's subscription logins or keys"| LLM["api.anthropic.com, chatgpt.com"]
   FP -->|HTTPS| EXT["package registries and harness login hosts"]
 ```
 
@@ -220,9 +220,25 @@ The scripts are in `infra/hetzner/gateway/`, and its `README.md` describes every
    GATEWAY_SSH=usine-gateway ./infra/hetzner/gateway/gateway.sh install ./usine-core-0.3.0.tgz ./usine-gateway-0.0.0.tgz
    ```
 
-   On first boot, the VM generates its admin token and caller key in `/etc/usine-gateway/secrets.env`, readable by root and the `usine-gateway` group. To let the gateway call Anthropic with its own key, add `ANTHROPIC_API_KEY` to that file and run `systemctl reload usine-gateway`. See [`usine-gateway`](/reference/configuration/cli/#usine-gateway) for what a reload and a restart change.
+   On first boot, the VM generates its admin token and caller key in `/etc/usine-gateway/secrets.env`, readable by root and the `usine-gateway` group. See [`usine-gateway`](/reference/configuration/cli/#usine-gateway) for what a reload and a restart change.
 
-5. Create the worker on the private network, without public addresses. `worker-user-data` adds `infra/hetzner/gateway/worker-cloud-init.yaml` to `infra/hetzner/cloud-init.yaml`. It points the worker's resolver, apt, environment, and gh's socket at the gateway, makes sshd accept the caller token variables, and allows connections only to the gateway. A `cx33` has the 8 GB that a worker needs.
+5. Give the gateway your subscription logins, so that workers need none. Make each login on your own machine and copy it to the gateway:
+
+   ```sh title="Your machine"
+   claude setup-token
+   ssh usine-gateway 'read -r token && echo "USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN=$token" >> /etc/usine-gateway/secrets.env'
+   export CODEX_HOME=$(mktemp -d)
+   codex login
+   scp "$CODEX_HOME/auth.json" usine-gateway:/var/lib/usine-gateway/codex-auth.json
+   ssh usine-gateway 'chown usine-gateway:usine-gateway /var/lib/usine-gateway/codex-auth.json && chmod 0600 /var/lib/usine-gateway/codex-auth.json && echo USINE_GATEWAY_CHATGPT_AUTH_FILE=/var/lib/usine-gateway/codex-auth.json >> /etc/usine-gateway/settings.env && systemctl reload usine-gateway'
+   rm -rf "$CODEX_HOME" && unset CODEX_HOME
+   ```
+
+   Paste the token that `claude setup-token` prints when the first `ssh` waits for it. The token is valid for one year. The ChatGPT login needs `@usine/gateway` 0.2.0 or later. The empty `CODEX_HOME` gives the gateway a ChatGPT login of its own, which it refreshes and rewrites in `/var/lib/usine-gateway`; a copy of the login you use yourself would stop working at the first refresh on either side. Then remove `api.anthropic.com`, `platform.claude.com`, `chatgpt.com`, and `auth.openai.com` from `/etc/usine-gateway/egress-allowlist` and run `systemctl reload usine-gateway` again, so that no tunnel can send the caller token past the gateway.
+
+   To use API keys instead, add `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` to `secrets.env` and reload. Each provider takes one credential. To keep a harness's login on the worker instead, skip its provider here and log in on the worker in step 7.
+
+6. Create the worker on the private network, without public addresses. `worker-user-data` adds `infra/hetzner/gateway/worker-cloud-init.yaml` to `infra/hetzner/cloud-init.yaml`. It points the worker's resolver, apt, environment, and gh's socket at the gateway, makes sshd accept the caller token variables, and allows connections only to the gateway. A `cx33` has the 8 GB that a worker needs.
 
    ```sh title="usine checkout"
    ./infra/hetzner/gateway/gateway.sh worker-user-data ~/.ssh/usine_worker.pub > worker.mime
@@ -237,7 +253,7 @@ The scripts are in `infra/hetzner/gateway/`, and its `README.md` describes every
    ssh -J usine-gateway usine@10.42.0.3 cloud-init status --wait
    ```
 
-6. Log in to the harnesses on the worker, through the gateway's forward proxy:
+7. Only for a harness whose provider credential the gateway doesn't hold, log in on the worker, through the gateway's forward proxy:
 
    ```sh title="Orchestrator machine"
    ssh -t -J usine-gateway usine@10.42.0.3
@@ -245,7 +261,7 @@ The scripts are in `infra/hetzner/gateway/`, and its `README.md` describes every
    codex login --device-auth
    ```
 
-7. Add the worker to the same SSH configuration, with the gateway as its jump host:
+8. Add the worker to the same SSH configuration, with the gateway as its jump host:
 
    ```text title="~/.ssh/config"
    Host worker-one
@@ -255,29 +271,30 @@ The scripts are in `infra/hetzner/gateway/`, and its `README.md` describes every
      IdentityFile ~/.ssh/usine_worker
    ```
 
-8. In the instance folder, copy the admin token into a file that only you can read:
+9. In the instance folder, copy the admin token into a file that only you can read:
 
    ```sh title="Instance folder"
    (umask 077; ssh usine-gateway "sed -n 's/^USINE_GATEWAY_ADMIN_TOKEN=//p' /etc/usine-gateway/secrets.env" > .usine/gateway-admin-token)
    ```
 
-9. Add a [`gateway`](/reference/configuration/usine-yaml/#workersgateway) to the worker in `usine.yaml`, with the `Host` aliases as destinations, the gateway's `DOMAIN`, and the name of the variable that will contain the admin token:
+10. Add a [`gateway`](/reference/configuration/usine-yaml/#workersgateway) to the worker in `usine.yaml`, with the `Host` aliases as destinations, the gateway's `DOMAIN`, and the name of the variable that will contain the admin token:
 
-   ```yaml title="usine.yaml"
-   workers:
-     - name: worker-one
-       kind: ssh
-       destination: worker-one
-       root: /home/usine/.usine
-       gateway:
-         domain: gw.internal
-         destination: usine-gateway
-         admin_token_env: USINE_GATEWAY_ADMIN_TOKEN
-   ```
+    ```yaml title="usine.yaml"
+    workers:
+      - name: worker-one
+        kind: ssh
+        destination: worker-one
+        root: /home/usine/.usine
+        gateway:
+          domain: gw.internal
+          destination: usine-gateway
+          admin_token_env: USINE_GATEWAY_ADMIN_TOKEN
+          llm_providers: [anthropic, openai]
+    ```
 
-   If the gateway has `ANTHROPIC_API_KEY`, add `llm_providers: [anthropic]` under `gateway`, so that Claude Code children use the gateway's key instead of a login on the worker. Then remove `api.anthropic.com` and `platform.claude.com` from the gateway's `/etc/usine-gateway/egress-allowlist` and restart the service, so that no tunnel can send the caller token past the gateway.
+    `llm_providers` lists the providers whose credential the gateway holds from step 5: `anthropic` for Claude Code, `openai` for Codex. Their children call the gateway with the caller token instead of using a login on the worker. Leave out a provider whose harness logs in on the worker.
 
-10. Start the orchestrator with the token in its environment:
+11. Start the orchestrator with the token in its environment:
 
     ```sh title="Instance folder"
     USINE_GATEWAY_ADMIN_TOKEN=$(cat .usine/gateway-admin-token) usine up

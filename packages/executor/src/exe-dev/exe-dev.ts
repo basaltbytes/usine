@@ -24,6 +24,7 @@ const edgeAccess = (machine: RemoteMachine): RemoteAccess => ({
   shell: machine.shell,
   secrets: {},
   readOnlyPaths: [],
+  writablePaths: [],
   environment: { GH_HOST: EDGE_GITHUB_HOST },
   gitEnvironment: {},
   refresh: Effect.void,

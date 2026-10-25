@@ -23,7 +23,15 @@ import {
   githubRoute,
   withGitHubCredential,
 } from "../github/github.ts";
-import { configuredProvider, llmTarget, withProviderCredential } from "../llm/llm.ts";
+import { type ChatGptLoginUnavailable, ChatGptLogins } from "../chatgpt/logins.ts";
+import {
+  type ChatGptLogin,
+  llmRoute,
+  configuredProvider,
+  llmTarget,
+  withChatGptAccess,
+  withStaticCredential,
+} from "../llm/llm.ts";
 import { GatewaySettings, gatewayHosts, SettingsInForce } from "../settings.ts";
 import { endToEndHeaders, forwardRequest } from "./forward.ts";
 
@@ -40,6 +48,7 @@ export const RefusalReason = Schema.Literals([
   "attachment-expired",
   "repository-mismatch",
   "provider-not-configured",
+  "provider-login-unavailable",
 ]);
 export type RefusalReason = typeof RefusalReason.Type;
 
@@ -55,22 +64,37 @@ const REFUSAL_STATUS = {
   "attachment-expired": 403,
   "repository-mismatch": 403,
   "provider-not-configured": 503,
+  "provider-login-unavailable": 503,
 } as const satisfies Record<RefusalReason, number>;
 
-/** A refusal, with the caller's claims once its token is verified. */
+/** A refusal, with the caller's claims once its token is verified, and the response status. */
 class Refused extends Data.TaggedError("Refused")<{
   readonly reason: RefusalReason;
   readonly message: string;
   readonly caller: Option.Option<CallerClaims>;
+  readonly status: number;
 }> {}
 
 /** Returns a refusal for a request whose caller token isn't verified yet. */
 const refused = (reason: RefusalReason, message: string) =>
-  new Refused({ reason, message, caller: Option.none() });
+  new Refused({ reason, message, caller: Option.none(), status: REFUSAL_STATUS[reason] });
 
 /** Returns a refusal for a verified caller. */
 const refusedCaller = (claims: CallerClaims, reason: RefusalReason, message: string) =>
-  new Refused({ reason, message, caller: Option.some(claims) });
+  new Refused({ reason, message, caller: Option.some(claims), status: REFUSAL_STATUS[reason] });
+
+/**
+ * Returns the refusal for a ChatGPT login without a usable access token: 503 while a later
+ * refresh can succeed, which Codex retries, and 401 once the token endpoint has rejected the
+ * refresh token, which Codex doesn't.
+ */
+const loginUnavailable = (claims: CallerClaims, error: ChatGptLoginUnavailable) =>
+  new Refused({
+    reason: "provider-login-unavailable",
+    message: error.message,
+    caller: Option.some(claims),
+    status: error.reason === "refresh-rejected" ? 401 : 503,
+  });
 
 /** A request's host without its port, and its path and query. */
 interface RequestTarget {
@@ -120,6 +144,7 @@ export class GatewayProxy extends Context.Service<
       const inForce = yield* SettingsInForce;
       const attachments = yield* Attachments;
       const callers = yield* CallerTokens;
+      const logins = yield* ChatGptLogins;
       const client = yield* HttpClient.HttpClient;
       const hosts = gatewayHosts(settings.domain);
 
@@ -267,16 +292,49 @@ export class GatewayProxy extends Context.Service<
             "provider-not-configured",
             `The gateway has no credential for ${destination.value.provider}.`,
           );
-        const headers = withProviderCredential(
-          provider.value,
-          withoutCallerCredentials(endToEndHeaders(request.headers)),
-        );
-        const upstream = `${provider.value.upstream}${destination.value.rest}${target.search}`;
-        const response = yield* forwardRequest(client, request, upstream, headers);
+        const path = llmRoute(provider.value, destination.value.rest);
+        if (Option.isNone(path))
+          return yield* refusedCaller(
+            claims,
+            "unsupported-path",
+            `The gateway serves only the routes Claude Code and Codex call on ${hosts.llm}, such as /anthropic/v1/messages and /openai/v1/responses, not ${target.pathname}.`,
+          );
+        const incoming = withoutCallerCredentials(endToEndHeaders(request.headers));
+        const { credential } = provider.value;
+        const outgoing =
+          credential._tag === "ChatGptLogin"
+            ? yield* chatGptRequest(claims, credential, incoming)
+            : {
+                headers: withStaticCredential(credential, incoming),
+                answered: () => Effect.void,
+              };
+        const upstream = `${provider.value.upstream}${path.value}${target.search}`;
+        const response = yield* forwardRequest(client, request, upstream, outgoing.headers);
+        yield* outgoing.answered(response.status);
         yield* forwarded("Forwarded an LLM request", request, target, attachment, response, {
           provider: destination.value.provider,
+          credential: credential._tag,
         });
         return response;
+      });
+
+      /**
+       * Returns the headers for a request with a ChatGPT login, and records a 401 answer so the
+       * next request refreshes the access token first.
+       */
+      const chatGptRequest = Effect.fn("GatewayProxy.chatGptRequest")(function* (
+        claims: CallerClaims,
+        login: ChatGptLogin,
+        incoming: Headers.Headers,
+      ) {
+        const access = yield* logins
+          .access(login)
+          .pipe(Effect.mapError((error) => loginUnavailable(claims, error)));
+        return {
+          headers: withChatGptAccess(access, incoming),
+          answered: (status: number) =>
+            status === 401 ? logins.refused(login, access) : Effect.void,
+        };
       });
 
       /**
@@ -336,7 +394,7 @@ const PERMANENT_REDIRECTS: ReadonlySet<number> = new Set([301, 308]);
 const refusalResponse = (error: Refused): HttpServerResponse.HttpServerResponse =>
   HttpServerResponse.jsonUnsafe(
     { message: `usine gateway: ${error.message}`, reason: error.reason },
-    { status: REFUSAL_STATUS[error.reason], headers: { [REFUSAL_HEADER]: error.reason } },
+    { status: error.status, headers: { [REFUSAL_HEADER]: error.reason } },
   );
 
 const absoluteUrl = (value: string): Option.Option<URL> =>

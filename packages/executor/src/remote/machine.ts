@@ -32,6 +32,8 @@ export interface RemoteAccess {
   readonly secrets: Readonly<Record<string, Redacted.Redacted<string>>>;
   /** The machine directories that the Attempt's container mounts read-only, such as its credential directory. */
   readonly readOnlyPaths: ReadonlyArray<string>;
+  /** The machine directories of the Attempt that its container mounts read-write, such as a harness's home. */
+  readonly writablePaths: ReadonlyArray<string>;
   /** The extra environment for the Attempt's children and harvesting commands. Values appear in the command line, so none can be secret. */
   readonly environment: Readonly<Record<string, string>>;
   /** The extra environment for the executor's git commands on the checkout. Values appear in the command line, so none can be secret. */

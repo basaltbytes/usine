@@ -18,11 +18,10 @@ import {
 } from "../attachment/attachment.ts";
 import { CallerToken } from "../caller/caller.ts";
 import {
-  type AnthropicProvider,
   credentialKind,
+  type LlmProvider,
   LlmProviderName,
   type LlmProviders,
-  type OpenAiProvider,
 } from "../llm/llm.ts";
 
 export { AttachmentId, InstallationCredential } from "../attachment/attachment.ts";
@@ -90,10 +89,7 @@ export class LlmProviderList extends Schema.Class<LlmProviderList>(
   providers: Schema.Array(LlmProviderSummary),
 }) {
   static fromProviders({ anthropic, openai }: LlmProviders): LlmProviderList {
-    const listed = (
-      provider: LlmProviderName,
-      configured: Option.Option<AnthropicProvider | OpenAiProvider>,
-    ) =>
+    const listed = (provider: LlmProviderName, configured: Option.Option<LlmProvider>) =>
       Option.toArray(
         Option.map(
           configured,

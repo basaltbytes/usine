@@ -346,11 +346,11 @@ A worker behind a gateway has no GitHub token on its machine. The executor attac
 | `destination` | string | required | What the orchestrator's `ssh` client connects to for the gateway: a host name or address, optionally prefixed by `user@`, or a `Host` alias from the SSH configuration. The executor opens its own forward to the admin API through it, and reopens the forward whenever it closes. |
 | `admin_port` | integer, 1 to 65535 | `7070` | The admin API's port on the gateway's loopback interface (`USINE_GATEWAY_ADMIN_PORT` on the gateway). |
 | `admin_token_env` | string | required | Name of the orchestrator's environment variable that contains the admin token. The file never contains the token itself. |
-| `llm_providers` | list | `[]` | Providers whose credential is stored on the gateway. The only value is `anthropic` (Claude Code). |
+| `llm_providers` | list | `[]` | Providers whose credential is stored on the gateway: `anthropic` (Claude Code) and `openai` (Codex). |
 
 `usine up` reads the variable named by `admin_token_env` at startup, and at the reload that adds the worker. If it's unset, startup fails with a `gateway` capability error that includes the worker and variable names ([`sshWorkerAddressesOf`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/ssh.ts#L27)), and a reload fails with a `ReloadPreflightError` that contains that error. A running process doesn't see variables that are set after it starts, so set the variable before `usine up` starts.
 
-With `llm_providers: [anthropic]`, Claude Code children call `llm.<domain>/anthropic` with the caller token instead of using a login on the worker, and preflight checks only the `claude` binary. Preflight also asks the gateway which Anthropic credential it has, and fails if it has none. With an API key, the run page counts these children under API keys. With a subscription token, it counts them under the Claude plan. A harness whose provider isn't listed, and Codex always, uses its login on the worker and connects to its provider through the gateway's forward proxy.
+With `anthropic`, Claude Code children call `llm.<domain>/anthropic` with the caller token instead of using a login on the worker, and preflight checks only the `claude` binary. With `openai`, the executor writes a Codex `model_provider` to each attempt's Codex home, `<root>/workers/<name>/codex/<attempt>/config.toml`, and gives the attempt's Codex children that directory as `CODEX_HOME`, so they call `llm.<domain>/openai/v1` with the caller token; preflight checks only the `codex` binary and its version. Preflight also asks the gateway which credential it has for each listed provider, and fails if it has none. With an API key, the run page counts these children under API keys. With a subscription, a Claude subscription token or a ChatGPT login, it counts them under the Claude plan or the ChatGPT plan. A harness whose provider isn't listed uses its login on the worker and connects to its provider through the gateway's forward proxy.
 
 ```yaml title="usine.yaml"
 workers:
@@ -362,7 +362,7 @@ workers:
       domain: gateway.example.com
       destination: usine-gateway
       admin_token_env: USINE_GATEWAY_ADMIN_TOKEN
-      llm_providers: [anthropic]
+      llm_providers: [anthropic, openai]
 ```
 
 ### `kind: exe.dev`

@@ -1,13 +1,14 @@
 import type { RemoteShell } from "@usine/agents/child-host";
+import { unsupportedCodexVersion } from "@usine/agents/preflight";
 import type { BrainSpec, Harness } from "@usine/core/agent/brain";
 import { HarnessReady, HarnessUnavailableError } from "@usine/core/agent/capability";
-import type { GatewayCredentialKind, WorkerName } from "@usine/core/worker";
+import type { GatewayCredentialKind, GatewayLlmProvider, WorkerName } from "@usine/core/worker";
 import { Effect, Option, Redacted, Ref } from "effect";
 import type { CommandResult } from "../../child-command.ts";
 import { ExecutorOperationError, WorkerCapabilityError } from "../../executor.ts";
 import type { HarnessProbe } from "../../harness-preflight.ts";
 import { type RemoteCommands, sendingShell } from "../../remote/commands.ts";
-import type { MachineGateway, SshMachine } from "../model.ts";
+import type { GatewayCredentials, MachineGateway, SshMachine } from "../model.ts";
 import { forwardProxyUrl, GATEWAY_SENT_VARIABLES, gatewayEnvironment } from "./environment.ts";
 
 /** A placeholder caller token that lets preflight check the sent variables without attaching anything. */
@@ -57,47 +58,84 @@ const warnOfUnreportedCredential = (worker: WorkerName, gateway: MachineGateway)
     ),
   );
 
+/** Each provider's display name and the Gateway variables that set its credential. */
+const PROVIDER_CREDENTIALS = {
+  anthropic: {
+    label: "Anthropic",
+    variables: "ANTHROPIC_API_KEY or USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN",
+  },
+  openai: { label: "OpenAI", variables: "OPENAI_API_KEY or USINE_GATEWAY_CHATGPT_AUTH_FILE" },
+} as const satisfies Record<
+  GatewayLlmProvider,
+  { readonly label: string; readonly variables: string }
+>;
+
+const NO_CREDENTIALS: GatewayCredentials = { anthropic: Option.none(), openai: Option.none() };
+
 /**
- * Reads the Gateway's Anthropic credential kind and records it for the Worker (ADR 0013).
- * Fails if the Worker's `llmProviders` includes Anthropic and the Gateway has no Anthropic
- * credential. If the Gateway is too old to report credentials, keeps the Claude plan pool and
- * logs a warning.
+ * Reads the Gateway's credential kind for each provider in the Worker's `llmProviders` and
+ * records them for the Worker (ADR 0013). Fails if the Gateway has no credential for a listed
+ * provider. If the Gateway is too old to report credentials, keeps the Claude plan pool for
+ * Anthropic with a warning, and fails for OpenAI, which such a Gateway can't serve for Codex.
  */
-const recordAnthropicCredential = Effect.fn("SshExecutor.recordAnthropicCredential")(function* (
+const recordProviderCredentials = Effect.fn("SshExecutor.recordProviderCredentials")(function* (
   worker: WorkerName,
   gateway: MachineGateway,
 ) {
-  yield* Effect.annotateCurrentSpan({ worker, gateway: gateway.forward.gateway });
+  const listed = gateway.settings.llmProviders;
+  yield* Effect.annotateCurrentSpan({
+    worker,
+    gateway: gateway.forward.gateway,
+    llmProviders: listed.join(","),
+  });
+  if (listed.length === 0) {
+    yield* Ref.set(gateway.credentials, NO_CREDENTIALS);
+    return NO_CREDENTIALS;
+  }
   const reported = yield* gateway.admin.providers.pipe(
     Effect.mapError((error) => gatewayGap(worker, error.message, error)),
   );
-  const credential = yield* Option.match(reported, {
-    onNone: () =>
-      warnOfUnreportedCredential(worker, gateway).pipe(
-        Effect.as(Option.none<GatewayCredentialKind>()),
+  if (Option.isNone(reported)) {
+    if (listed.includes("openai"))
+      return yield* gatewayGap(
+        worker,
+        `The gateway of SSH worker "${worker}" doesn't report its LLM credentials, so Codex can't use its OpenAI credential. Upgrade @usine/gateway on the gateway, or remove openai from llm_providers.`,
+        new Error("the gateway answered 404 for GET /v1/providers"),
+      );
+    yield* warnOfUnreportedCredential(worker, gateway);
+    yield* Ref.set(gateway.credentials, NO_CREDENTIALS);
+    return NO_CREDENTIALS;
+  }
+  const { providers } = reported.value;
+  const kindOf = (provider: GatewayLlmProvider) =>
+    Option.fromNullishOr(providers.find((held) => held.provider === provider)?.credential);
+  const missing = listed.find((provider) => Option.isNone(kindOf(provider)));
+  if (missing !== undefined)
+    return yield* gatewayGap(
+      worker,
+      `The gateway of SSH worker "${worker}" has no ${PROVIDER_CREDENTIALS[missing].label} credential, but the worker's llm_providers includes ${missing}. Set ${PROVIDER_CREDENTIALS[missing].variables} on the gateway, or remove ${missing} from llm_providers.`,
+      new Error(
+        `the gateway reports ${providers.map(({ provider }) => provider).join(", ") || "no provider"}`,
       ),
-    onSome: ({ providers }) => {
-      const anthropic = providers.find(({ provider }) => provider === "anthropic");
-      return anthropic === undefined
-        ? Effect.fail(
-            gatewayGap(
-              worker,
-              `The gateway of SSH worker "${worker}" has no Anthropic credential, but the worker's llm_providers includes anthropic. Set ANTHROPIC_API_KEY or USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN on the gateway, or remove anthropic from llm_providers.`,
-              new Error(
-                `the gateway reports ${providers.map(({ provider }) => provider).join(", ") || "no provider"}`,
-              ),
-            ),
-          )
-        : Effect.succeed(Option.some(anthropic.credential));
-    },
-  });
-  yield* Ref.set(gateway.anthropicCredential, credential);
-  return credential;
+    );
+  const credentials: GatewayCredentials = {
+    anthropic: listed.includes("anthropic") ? kindOf("anthropic") : Option.none(),
+    openai: listed.includes("openai") ? kindOf("openai") : Option.none(),
+  };
+  yield* Ref.set(gateway.credentials, credentials);
+  return credentials;
 });
+
+/** Returns how a provider's harness authenticates on the Worker, for log lines. */
+const credentialMode = (kind: Option.Option<GatewayCredentialKind>, listed: boolean) =>
+  Option.match(kind, {
+    onNone: () => (listed ? "gateway-unreported" : "worker-login"),
+    onSome: (credential) => `gateway-${credential}`,
+  });
 
 /**
  * Returns the credential kind the Gateway injects for `harness`, as recorded by the last
- * preflight. Only Claude Code uses a Gateway credential; Codex and Pi use their own logins.
+ * preflight: Anthropic's for Claude Code, OpenAI's for Codex. Pi uses its own login.
  */
 export const gatewayCredentialFor = (
   gateway: MachineGateway,
@@ -105,8 +143,9 @@ export const gatewayCredentialFor = (
 ): Effect.Effect<Option.Option<GatewayCredentialKind>> => {
   switch (harness) {
     case "claude":
-      return Ref.get(gateway.anthropicCredential);
+      return Effect.map(Ref.get(gateway.credentials), ({ anthropic }) => anthropic);
     case "codex":
+      return Effect.map(Ref.get(gateway.credentials), ({ openai }) => openai);
     case "pi":
       return Effect.succeedNone;
   }
@@ -140,14 +179,13 @@ export const verifyGateway = Effect.fn("SshExecutor.verifyGateway")(function* (
   const { attachments } = yield* admin.list.pipe(
     Effect.mapError((error) => gatewayGap(worker, error.message, error)),
   );
-  const anthropicCredential = settings.llmProviders.includes("anthropic")
-    ? yield* recordAnthropicCredential(worker, gateway)
-    : Option.none<GatewayCredentialKind>();
+  const credentials = yield* recordProviderCredentials(worker, gateway);
 
   const { sent } = gatewayEnvironment({
     domain: settings.domain,
     llmProviders: settings.llmProviders,
     ghConfigDirectory: machine.workerDirectory,
+    codexHome: machine.workerDirectory,
     callerToken: PROBE_TOKEN,
   });
   const received = yield* commands.run("preflight", sendingShell(machine.shell, sent), "sh", [
@@ -195,21 +233,40 @@ export const verifyGateway = Effect.fn("SshExecutor.verifyGateway")(function* (
     adminPort: settings.adminPort,
     forwardPort: open.url.port,
     llmProviders: settings.llmProviders.join(","),
-    anthropicCredential: Option.getOrElse(anthropicCredential, () => "none"),
+    anthropic: credentialMode(credentials.anthropic, settings.llmProviders.includes("anthropic")),
+    openai: credentialMode(credentials.openai, settings.llmProviders.includes("openai")),
     attachments: attachments.filter((attachment) => attachment.worker === worker).length,
   });
 });
 
 /**
- * The harnesses that can use the operator's login on the machine, with the hosts each login
- * calls through the forward proxy. `infra/hetzner/gateway/egress-allowlist` lists the same
- * hosts.
+ * The harnesses that can use the operator's login on the machine or the Gateway's credential
+ * for their provider, with the hosts each login calls through the forward proxy.
+ * `infra/hetzner/gateway/egress-allowlist` lists the same hosts.
  */
 const LOGINS = {
-  claude: { label: "Claude Code", hosts: ["api.anthropic.com", "platform.claude.com"] },
-  codex: { label: "Codex", hosts: ["chatgpt.com", "auth.openai.com"] },
+  claude: {
+    label: "Claude Code",
+    provider: "Anthropic",
+    gatewayProvider: "anthropic",
+    hosts: ["api.anthropic.com", "platform.claude.com"],
+  },
+  codex: {
+    label: "Codex",
+    provider: "OpenAI",
+    gatewayProvider: "openai",
+    hosts: ["chatgpt.com", "auth.openai.com"],
+  },
 } as const satisfies Partial<
-  Record<Harness, { readonly label: string; readonly hosts: ReadonlyArray<string> }>
+  Record<
+    Harness,
+    {
+      readonly label: string;
+      readonly provider: string;
+      readonly gatewayProvider: GatewayLlmProvider;
+      readonly hosts: ReadonlyArray<string>;
+    }
+  >
 >;
 
 type LoginHarness = keyof typeof LOGINS;
@@ -252,21 +309,28 @@ export const gatewayHarnessProbe = (
   const { domain } = gateway.settings;
   const proxy = forwardProxyUrl(domain);
 
-  const claudeBinary = Effect.fn("SshExecutor.probeClaudeBehindGateway")(function* () {
-    yield* Effect.annotateCurrentSpan({ host, domain });
-    const result = yield* commands.inspect("preflight", shell, "claude", ["--version"]);
-    if (result.exitCode === SSH_FAILURE) return yield* unreachable(host, "claude", result);
+  /** Checks only the binary of a harness whose provider credential the Gateway holds; Codex's version must also be supported. */
+  const binaryOnly = Effect.fn("SshExecutor.probeBinaryBehindGateway")(function* (
+    harness: LoginHarness,
+  ) {
+    const { label, provider } = LOGINS[harness];
+    yield* Effect.annotateCurrentSpan({ host, domain, harness });
+    const result = yield* commands.inspect("preflight", shell, harness, ["--version"]);
+    if (result.exitCode === SSH_FAILURE) return yield* unreachable(host, harness, result);
     if (result.exitCode !== 0)
       return new HarnessUnavailableError({
-        harness: "claude",
+        harness,
         capability: "binary",
-        message: "claude --version failed. Check the Claude Code installation on the worker.",
+        message: `${harness} --version failed. Check the ${label} installation on the worker.`,
       });
+    const version = result.stdout.trim();
+    const unsupported = harness === "codex" ? unsupportedCodexVersion(version) : Option.none();
+    if (Option.isSome(unsupported)) return unsupported.value;
     yield* Effect.logInfo(
-      "Claude Code uses the Gateway's Anthropic credential; checked its binary only",
-      { host, version: result.stdout.trim() },
+      `${label} uses the Gateway's ${provider} credential; checked its binary only`,
+      { host, harness, version },
     );
-    return new HarnessReady({ harness: "claude" });
+    return new HarnessReady({ harness });
   });
 
   const loginHostsReachable = Effect.fn("SshExecutor.probeLoginHostsBehindGateway")(function* (
@@ -328,11 +392,10 @@ export const gatewayHarnessProbe = (
   return (brain) => {
     switch (brain.harness) {
       case "claude":
-        return gateway.settings.llmProviders.includes("anthropic")
-          ? claudeBinary()
-          : loginOnMachine(brain, "claude");
       case "codex":
-        return loginOnMachine(brain, "codex");
+        return gateway.settings.llmProviders.includes(LOGINS[brain.harness].gatewayProvider)
+          ? binaryOnly(brain.harness)
+          : loginOnMachine(brain, brain.harness);
       case "pi":
         return probe(brain);
     }
