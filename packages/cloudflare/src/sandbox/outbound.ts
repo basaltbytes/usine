@@ -80,6 +80,18 @@ export const allowedHostsOf = (value: string): ReadonlyArray<string> =>
 /** The headers a tool in the sandbox can use to send a credential. All are replaced. */
 const CREDENTIAL_HEADERS = ["authorization", "x-api-key", "proxy-authorization"] as const;
 
+/**
+ * Returns the URL for `host` over HTTPS with the path and query of `request`. The host comes from
+ * the handler, never from the sandbox: a path such as `//attacker.example/x` stays a path.
+ */
+const upstreamUrl = (request: Request, host: string): URL => {
+  const incoming = new URL(request.url);
+  const upstream = new URL(`https://${host}`);
+  upstream.pathname = incoming.pathname;
+  upstream.search = incoming.search;
+  return upstream;
+};
+
 const withoutCredentials = (request: Request): Headers => {
   const headers = new Headers(request.headers);
   for (const name of CREDENTIAL_HEADERS) headers.delete(name);
@@ -102,7 +114,7 @@ export const gitHubRequest = (
     "authorization",
     host === "github.com" ? `Basic ${btoa(`x-access-token:${value}`)}` : `token ${value}`,
   );
-  return new Request(request, { headers });
+  return new Request(upstreamUrl(request, host), new Request(request, { headers }));
 };
 
 /**
@@ -114,11 +126,7 @@ export const providerRequest = (
   provider: CloudflareLlmProvider,
   credential: ProviderCredential,
 ): Request => {
-  const incoming = new URL(request.url);
-  const upstream = new URL(
-    `${incoming.pathname}${incoming.search}`,
-    `https://${PROVIDER_HOSTS[provider].upstream}`,
-  );
+  const upstream = upstreamUrl(request, PROVIDER_HOSTS[provider].upstream);
   const headers = withoutCredentials(request);
   headers.delete("host");
   Match.valueTags(credential, {

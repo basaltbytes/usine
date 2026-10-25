@@ -101,6 +101,28 @@ describe("sandbox outbound handlers", () => {
     expect(openai.headers.get("authorization")).toBe("Bearer sk-openai-key");
   });
 
+  it("never lets a request path choose the host that receives a credential", () => {
+    const key = new ApiKeyCredential({ key: Redacted.make("sk-key") });
+    const paths = ["//attacker.example/collect", "/\\attacker.example/collect"];
+    for (const path of paths) {
+      for (const provider of ["anthropic", "openai"] as const) {
+        const forwarded = providerRequest(
+          new Request(`http://${PROVIDER_HOSTS[provider].sandbox}${path}?q=1`),
+          provider,
+          key,
+        );
+        expect(new URL(forwarded.url).host).toBe(PROVIDER_HOSTS[provider].upstream);
+        expect(new URL(forwarded.url).search).toBe("?q=1");
+      }
+      const git = gitHubRequest(
+        new Request(`https://github.com${path}`),
+        "github.com",
+        Redacted.make("ghs_installation-token"),
+      );
+      expect(new URL(git.url).host).toBe("github.com");
+    }
+  });
+
   it("points only the configured providers' harnesses at their handlers", () => {
     const claudeOnly = harnessEnvironment(["anthropic"]);
 
