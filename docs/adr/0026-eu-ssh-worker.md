@@ -10,6 +10,8 @@ File modes block other Unix users, not other attempts: attempts on a worker shar
 
 _Note, 2026-10-14:_ an SSH worker can now be behind a gateway ([ADR 0027](./0027-gateway-credential-proxy.md), `gateway` on the worker in `usine.yaml`), with no GitHub token on the machine. The executor attaches each attempt's token to the gateway and gives the machine only a caller token, passed in the children's SSH environment, never in a file or command line. Attempts sharing a user can still read each other's caller tokens from their processes and use that repository through the gateway while the attachment is valid, only from inside the private network ([#243](https://github.com/basaltbytes/usine/issues/243)), but none can take a GitHub token off the machine. Workers without a gateway are unchanged.
 
+_Note, 2026-10-25:_ under [ADR 0029](./0029-worker-kinds-and-adapter-set.md), each attempt on a long-lived `ssh` worker runs in its own container ([#548](https://github.com/basaltbytes/usine/issues/548)), which removes the shared-user exposure of #231 and #243, and a provisioner on the `ssh` kind creates one machine per attempt ([#550](https://github.com/basaltbytes/usine/issues/550)). ADR 0029 also makes EU residency a property of each worker adapter that the customer chooses, in place of this ADR's rule that customer attempts run on EU machines that usine controls.
+
 ## Considered options
 
 - **Keep exe.dev**: works today, but its control plane and terms stay outside the EU and any agreement. Rejected.

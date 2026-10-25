@@ -15,7 +15,7 @@ A worker has an attempt's checkout and runs its children; the Pi parent runs in 
 
 ## Worker kinds in `usine.yaml`
 
-`Worker` is a union of three classes ([factory.ts:150][]); without a `workers` key, the factory has one worker named `local` ([factory.ts:214][]). The kinds are `local` ([local.ts][]), whose children run as processes on the orchestrator's machine; `ssh` ([ssh/ssh.ts][]), optionally with a `gateway` (`admin_port` default 7070, `llm_providers` only `anthropic`); and `exe.dev` ([exe-dev.ts][]), whose edge adds the GitHub credential. Remote children run as one SSH command each. [`usine.yaml`](/reference/configuration/usine-yaml/) lists each kind's keys; the Hetzner READMEs use these forms:
+`Worker` is a union of three classes ([factory.ts:150][]); without a `workers` key, the factory has one worker named `local` ([factory.ts:214][]). The kinds are `local` ([local.ts][]), whose children run as processes on the orchestrator's machine; `ssh` ([ssh/ssh.ts][]), optionally with a `gateway` (`admin_port` default 7070, `llm_providers` only `anthropic`); and `exe.dev` ([exe-dev.ts][]), whose edge adds the GitHub credential. Remote children run as one SSH command each. [ADR 0029](https://github.com/basaltbytes/usine/blob/main/docs/adr/0029-worker-kinds-and-adapter-set.md) records why usine has these kinds and what it adds: a container per attempt on an `ssh` worker ([#548][]), and one machine per attempt through an `ssh` provisioner ([#550][]) or Cloudflare Sandboxes ([#551][]), none of them built yet. [`usine.yaml`](/reference/configuration/usine-yaml/) lists each kind's keys; the Hetzner READMEs use these forms:
 
 <Tabs>
   <TabItem label="ssh">
@@ -657,3 +657,6 @@ GATEWAY_PACKAGE=${GATEWAY_PACKAGE:-@usine/gateway}
 [#229]: https://github.com/basaltbytes/usine/issues/229
 [#237]: https://github.com/basaltbytes/usine/issues/237
 [#528]: https://github.com/basaltbytes/usine/issues/528
+[#548]: https://github.com/basaltbytes/usine/issues/548
+[#550]: https://github.com/basaltbytes/usine/issues/550
+[#551]: https://github.com/basaltbytes/usine/issues/551
