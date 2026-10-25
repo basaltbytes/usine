@@ -55,7 +55,7 @@ Outbound `SessionEvent` envelopes keep parent and first-level child session iden
 
 `SessionTokensUpdated` has a session's cumulative `TokenCount` and, as `costUsd`, the `UsdAmount` its harness priced it at: Pi from its model catalog, Claude Code from the Agent SDK. Codex sets no price. Older transcripts decode it to `Option.none()`.
 
-`ChildSession.gatewayCredential` is the `GatewayCredentialKind` the gateway in front of the child's worker used for its model requests: none if the child used its harness's login, and in older transcripts. `brainPool(brain, gatewayCredential)` returns a started session's billing pool; `sessionPool(session)` reads a recorded one's. A Claude Code child is in `apiKeys` if its gateway used an API key, otherwise in `claudePlan` (ADR 0013, ADR 0021).
+`ChildSession.gatewayCredential` is the `GatewayCredentialKind` the gateway in front of the child's worker used for its model requests: none if the child used its harness's login, and in older transcripts. `brainPool(brain, gatewayCredential)` returns a started session's billing pool; `sessionPool(session)` reads a recorded one's. A Claude Code child is in `apiKeys` if its gateway used an API key, otherwise in `claudePlan`; a Codex child is in `apiKeys` if its gateway used an API key, otherwise in `chatgptPlan` (ADR 0013, ADR 0021). `GatewayLlmProvider` is `anthropic` (Claude Code) or `openai` (Codex).
 
 The optional `SessionStarted.harnessSession` (`HarnessSession`) records the harness's `HarnessSessionId` and the worker `cwd`, apart from usine's session identity. Older transcripts decode it to `Option.none()`.
 

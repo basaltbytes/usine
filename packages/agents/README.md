@@ -32,7 +32,7 @@ The Claude backend also needs `ClaudeLoginLock` (`/runtime`), one per worker, wh
 
 - **Parent:** a Pi model with an API key, or an `openai-codex` ChatGPT model through Plus or Pro OAuth. The start log records `apiKeys` or `chatgptPlan`. A child past the run spec's child-session budget stops the parent with `ChildSessionBudgetExceededError`.
 - **Claude Code:** the worker's `claude` through the Agent SDK, with `bypassPermissions`, worker-user settings only, and the CLI login.
-- **Codex:** app-server JSON-RPC over stdio, with `approvalPolicy: never` and the CLI login. It checks the login with `account/read` before creating a thread, and records plan rate windows as `PoolRateLimitsUpdated`. An API-key login, no login, or an unsupported account fails with `PoolUnavailableError`, which needs the operator. A login change ends the session before more rate windows are recorded.
+- **Codex:** app-server JSON-RPC over stdio, with `approvalPolicy: never` and the CLI login. It checks the login with `account/read` before creating a thread, and records plan rate windows as `PoolRateLimitsUpdated`. An API-key login, no login, or an unsupported account fails with `PoolUnavailableError`, which needs the operator. A login change ends the session before more rate windows are recorded. If `ChildSession.gatewayCredential` is set, the gateway holds the OpenAI credential and Codex has no login: the child skips the login check and ignores login changes, and its pool follows the credential kind, `chatgptPlan` for a ChatGPT login and `apiKeys` for an API key.
 - **Pi children:** API keys only.
 
 Logs record the verified authentication method and pool. On completion or interrupt, usine closes the input of the child's Codex app server and waits for it to exit before publishing, releasing background commands. Scope cleanup does the same, bounded, and logs before force-stopping a stalled process.
@@ -102,7 +102,7 @@ Claude children save sessions, and Codex threads aren't ephemeral. `SessionStart
 
 `preflight(brain, host, environment)` (`/preflight`, Node) checks a worker without a prompt, using a `ChildProcessSpawner` layer. Each check sees `environment` as a child does. On a `RemoteShell` host, checks run over SSH, an SSH failure (exit 255) is an incomplete check rather than a missing harness, and a Pi brain is unavailable.
 
-It accepts Codex CLI **0.153.4 or 0.159.0 through 0.159.3** (`supportedCodexVersions`) with a verified ChatGPT account, a Claude subscription in `claude auth status --json`, and Pi's model and API key through the SDK. `HarnessUnavailableError` reports a missing binary, version, or login; `SessionOperationError` an incomplete check, such as a timeout or failed SDK connection. Install and log in as the worker user before starting usine.
+It accepts Codex CLI **0.153.4 or 0.159.0 through 0.159.3** (`supportedCodexVersions`; `unsupportedCodexVersion` returns the error for other `codex --version` output) with a verified ChatGPT account, a Claude subscription in `claude auth status --json`, and Pi's model and API key through the SDK. `HarnessUnavailableError` reports a missing binary, version, or login; `SessionOperationError` an incomplete check, such as a timeout or failed SDK connection. Install and log in as the worker user before starting usine.
 
 ## Live contract tests
 

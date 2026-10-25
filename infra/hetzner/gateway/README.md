@@ -25,11 +25,11 @@ git and gh use plain HTTP to `git.<domain>`. The gateway checks the caller token
 
 Release downloads use `git.<domain>` too, at `/OWNER/REPO/releases/download/TAG/FILE`. The gateway returns GitHub's redirect to the asset host unchanged, and the client fetches the asset through the forward proxy, so `egress-allowlist` keeps `objects.githubusercontent.com` and `release-assets.githubusercontent.com`. gh can't follow that redirect, because it sends every request to the gateway through its socket, and the reverse proxy refuses the asset host; workers download with curl. The gateway points GitHub redirects to github.com or api.github.com, such as a renamed repository's, at `git.<domain>`, and serves the new name to the attachment that GitHub redirected. See [GitHub paths](../../../packages/gateway/README.md#github-paths) in the package README.
 
-Claude Code and Codex use the operator's logins on the worker (a Claude subscription, a ChatGPT plan) through the forward proxy. If the gateway has a provider's credential (`llm_providers` in `usine.yaml`), Claude Code uses plain HTTP to `llm.<domain>`; the gateway swaps the caller token for its API key, calls the provider over HTTPS, and streams the response back unchanged.
+If the gateway has a provider's credential (`llm_providers` in `usine.yaml`), its harness uses plain HTTP to `llm.<domain>`: Claude Code at `/anthropic`, Codex at `/openai`. The gateway swaps the caller token for its credential, a subscription login or an API key, calls the provider over HTTPS, and streams the response back unchanged. See [Give the gateway the subscription logins](#give-the-gateway-the-subscription-logins). Otherwise Claude Code and Codex use the operator's logins on the worker (a Claude subscription, a ChatGPT plan) through the forward proxy.
 
 Package managers and harness logins use the forward proxy at `<gateway>:3128` through `HTTPS_PROXY` and `HTTP_PROXY`, and apt through its own proxy setting. A tunnel opens only to an `egress-allowlist` host on port 443 whose name matches the TLS ClientHello and resolves to a public address; anything else is refused and logged. The ClientHello check keeps an allowed name on a shared CDN address from reaching another tenant. Before you list a CDN host, check its certificate's names and how its CDN routes: an HTTP/2 client can reuse an allowed connection for another name on the certificate ([#240](https://github.com/basaltbytes/usine/issues/240)). Plain HTTP requests lose their caller token before leaving; `CONNECT` tunnels are opaque, so nothing can be removed from them.
 
-Never allowlist github.com, or a provider whose credential the gateway has; workers reach those through `git.<domain>` and `llm.<domain>`, where the gateway controls access. A github.com tunnel would let a worker push with any credential it got, and Claude Code opens api.anthropic.com connections outside `ANTHROPIC_BASE_URL` that would carry the caller token, so if the gateway has the Anthropic credential, remove the Claude Code hosts from `egress-allowlist`.
+Never allowlist github.com, or a provider whose credential the gateway has; workers reach those through `git.<domain>` and `llm.<domain>`, where the gateway controls access. A github.com tunnel would let a worker push with any credential it got, and Claude Code opens api.anthropic.com connections outside `ANTHROPIC_BASE_URL` that would carry the caller token, so if the gateway has the Anthropic credential, remove the Claude Code hosts from `egress-allowlist`, and if it has the OpenAI credential, the Codex hosts.
 
 The gateway uses its own public interface and forwards no worker packets.
 
@@ -103,7 +103,7 @@ pnpm --filter @usine/core --filter @usine/gateway pack
 
 Run `install` again to upgrade.
 
-At first boot, the VM writes its admin token and caller key to `/etc/usine-gateway/secrets.env`, readable by root and the `usine-gateway` group. The service reads `settings.env` and `secrets.env`, listed in its unit's `USINE_GATEWAY_ENVIRONMENT_FILES`, at startup and each reload. Add API keys there and reload:
+At first boot, the VM writes its admin token and caller key to `/etc/usine-gateway/secrets.env`, readable by root and the `usine-gateway` group. The service reads `settings.env` and `secrets.env`, listed in its unit's `USINE_GATEWAY_ENVIRONMENT_FILES`, at startup and each reload. To give the gateway the operator's subscription logins, see [Give the gateway the subscription logins](#give-the-gateway-the-subscription-logins). To use API keys instead, add them to `secrets.env` and reload:
 
 ```sh
 ssh root@<gateway> 'echo ANTHROPIC_API_KEY=sk-ant-... >> /etc/usine-gateway/secrets.env && systemctl reload usine-gateway'
@@ -190,6 +190,48 @@ ExecReload=kill -HUP $MAINPID
 systemctl daemon-reload && systemctl restart usine-gateway
 ```
 
+## Give the gateway the subscription logins
+
+A worker that lives for one attempt can't keep a login, so the gateway holds the operator's Claude and ChatGPT subscriptions and adds them to the workers' requests in place of their caller tokens. Make each login on your own machine and copy it to the gateway. Then list the providers in the worker's `llm_providers` (see [Add the worker to `usine.yaml`](#add-the-worker-to-usineyaml)) and remove their hosts from `/etc/usine-gateway/egress-allowlist`.
+
+For Claude, `claude setup-token` prints a token valid for one year, without saving it. Put it in `secrets.env`, which stays mode 0640 for root and the `usine-gateway` group, and reload:
+
+```sh
+claude setup-token
+ssh root@<gateway> 'read -r token && echo "USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN=$token" >> /etc/usine-gateway/secrets.env && systemctl reload usine-gateway'
+```
+
+`ssh` reads the token from your terminal, so it isn't in a command line or your shell history. Paste it and press Enter. A year later, run `claude setup-token` again, replace the line, and reload. Remove `ANTHROPIC_API_KEY` first if `secrets.env` has it: a provider takes one credential.
+
+For ChatGPT, log in to Codex with an empty `CODEX_HOME`, so the gateway gets a login of its own: a refresh token works once, so a copy of the `auth.json` you use yourself stops working at the first refresh on either side. Copy the file to the gateway's state directory, owned by `usine-gateway` with mode 0600, point `USINE_GATEWAY_CHATGPT_AUTH_FILE` at it, reload, and remove your copy:
+
+```sh
+export CODEX_HOME=$(mktemp -d)
+codex login
+scp "$CODEX_HOME/auth.json" root@<gateway>:/var/lib/usine-gateway/codex-auth.json
+ssh root@<gateway> 'chown usine-gateway:usine-gateway /var/lib/usine-gateway/codex-auth.json && chmod 0600 /var/lib/usine-gateway/codex-auth.json && echo USINE_GATEWAY_CHATGPT_AUTH_FILE=/var/lib/usine-gateway/codex-auth.json >> /etc/usine-gateway/settings.env && systemctl reload usine-gateway'
+rm -rf "$CODEX_HOME" && unset CODEX_HOME
+```
+
+The gateway refreshes the access token before it expires and writes the rotated tokens back to the file, so the service needs to write to `/var/lib/usine-gateway`. To replace the login, copy a new `auth.json` over the file and reload. Check the result in the journal:
+
+```sh
+ssh root@<gateway> 'journalctl -u usine-gateway -o cat -n 20 | grep -i chatgpt'
+```
+
+`Loaded the ChatGPT login` shows the file was read. `The token endpoint rejected the ChatGPT login's refresh token` means the login needs replacing; until then, Codex requests get 401 with `provider-login-unavailable`. [ChatGPT login](../../../packages/gateway/README.md#chatgpt-login) in the package README describes the refresh.
+
+Gateways created before the state directory need it in their unit. As root, add these lines to the `[Service]` section of `/etc/systemd/system/usine-gateway.service`, then restart the service once; the executor stores running attempts' attachments again within two minutes:
+
+```ini
+StateDirectory=usine-gateway
+StateDirectoryMode=0700
+```
+
+```sh
+systemctl daemon-reload && systemctl restart usine-gateway
+```
+
 ## Create a worker behind the gateway
 
 `worker-user-data` takes a file of public keys to authorize for `usine`, one per line:
@@ -209,11 +251,11 @@ Projects use Debian's Chromium through `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` (se
 
 A worker needs 8 GB: the lint and knip gates reserve a 6 GiB virtual buffer, which a 4 GB machine refuses, and two attempts at once thrash it ([#270](https://github.com/basaltbytes/usine/issues/270)). cloud-init sets `vm.overcommit_memory=1` and a 2 GB swap file, and installs bubblewrap for Codex's sandbox ([#269](https://github.com/basaltbytes/usine/issues/269)). Create the gateway first. A `cx33` worker takes about four minutes; follow with `ssh -J root@<gateway> usine@<worker> cloud-init status --wait`. `hcloud server describe worker-one` shows its private address.
 
-The worker's sshd accepts `GIT_CONFIG_VALUE_0`, `GH_ENTERPRISE_TOKEN`, `GH_TOKEN`, and `ANTHROPIC_AUTH_TOKEN` (`AcceptEnv`), which carry the caller token over SSH, out of command lines; if sshd drops them, preflight fails and names them. On existing workers, add `GH_TOKEN` to `/etc/ssh/sshd_config.d/40-usine-gateway.conf` and reload sshd. gh needs both token variables: `GH_TOKEN` serves absolute GitHub pagination links and explicit github.com URLs.
+The worker's sshd accepts `GIT_CONFIG_VALUE_0`, `GH_ENTERPRISE_TOKEN`, `GH_TOKEN`, `ANTHROPIC_AUTH_TOKEN`, and `USINE_GATEWAY_TOKEN` (`AcceptEnv`), which carry the caller token over SSH, out of command lines; if sshd drops them, preflight fails and names them. On existing workers, add the missing names to the `AcceptEnv` line of `/etc/ssh/sshd_config.d/40-usine-gateway.conf` and reload sshd: `GH_TOKEN` for gh, which needs both token variables because `GH_TOKEN` serves absolute GitHub pagination links and explicit github.com URLs, and `USINE_GATEWAY_TOKEN` for Codex on the gateway's OpenAI credential.
 
 ## Log in to the harnesses on the worker
 
-The operator's logins stay on the worker. Connect through the gateway as `usine` and log in to each harness the roster uses:
+Skip this for a harness whose provider credential the gateway holds ([Give the gateway the subscription logins](#give-the-gateway-the-subscription-logins)). For the others, the operator's logins stay on the worker. Connect through the gateway as `usine` and log in to each harness the roster uses:
 
 ```sh
 ssh -t -J root@<gateway> usine@<worker>
@@ -265,7 +307,7 @@ workers:
   USINE_GATEWAY_ADMIN_TOKEN=$(cat .usine/gateway-admin-token) usine up
   ```
 
-- `llm_providers` lists the providers whose credential the gateway has (empty by default); other harnesses use their login on the worker, as Codex always does. With `anthropic`, Claude Code children call `llm.<domain>/anthropic` with the caller token, preflight checks only the `claude` binary, and the Claude Code hosts must come off `egress-allowlist`.
+- `llm_providers` lists the providers whose credential the gateway has (empty by default), such as `[anthropic, openai]`; other harnesses use their login on the worker. With `anthropic`, Claude Code children call `llm.<domain>/anthropic` with the caller token, preflight checks only the `claude` binary, and the Claude Code hosts must come off `egress-allowlist`. With `openai`, the executor writes Codex's `model_provider` to `<root>/workers/<worker>/codex/config.toml` and gives Codex children that directory as `CODEX_HOME`, so they call `llm.<domain>/openai/v1` with the caller token; preflight checks only the `codex` binary and version, and the Codex hosts must come off `egress-allowlist`. Preflight logs each provider's mode in `SSH Worker Gateway verified`: `gateway-subscription`, `gateway-api-key`, or `worker-login`.
 
 Preflight attaches nothing. It checks that the admin forward opens (or gives the `ssh` command showing why), the admin API accepts the token, sshd accepts the caller token variables, the worker reaches `git.<domain>`, and, with Docker on the worker, that Docker answers and pulls the attempt image. For each harness using its worker login, it checks the login and that each login host answers through the forward proxy, in a container from the attempt image if the worker has Docker; a refused host fails with the host to add to `egress-allowlist`. During an attempt, the executor stores its attachment again every two minutes, so a restarted gateway, which keeps attachments in memory, recovers them within two minutes.
 
