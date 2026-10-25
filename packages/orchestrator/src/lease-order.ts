@@ -96,3 +96,32 @@ export const passedCount = (
   queued: ReadonlyArray<LeaseCandidate>,
   leased: LeaseCandidate,
 ): number => queued.filter((candidate) => Order.isLessThan(eventOrder)(candidate, leased)).length;
+
+/**
+ * Returns whether `earlier`, ranked before `waiting`, can take the slot `waiting` waits for. A
+ * reservation that names a Worker competes with one that doesn't only while that Worker is the only
+ * one in `open`, the Workers that take new Attempts.
+ */
+const competes = (
+  earlier: LeaseCandidate,
+  waiting: LeaseCandidate,
+  open: ReadonlyArray<WorkerName>,
+): boolean =>
+  Option.match(waiting.worker, {
+    onSome: (worker) => Option.contains(earlier.worker, worker),
+    onNone: () =>
+      Option.match(earlier.worker, {
+        onNone: () => true,
+        onSome: (worker) => open.length === 1 && open[0] === worker,
+      }),
+  });
+
+/**
+ * Returns the number of reservations in `earlier`, the reservations ranked before `waiting` in lease
+ * order, that take a Worker slot before `waiting`. `open` lists the Workers that take new Attempts.
+ */
+export const aheadCount = (
+  earlier: ReadonlyArray<LeaseCandidate>,
+  waiting: LeaseCandidate,
+  open: ReadonlyArray<WorkerName>,
+): number => earlier.filter((candidate) => competes(candidate, waiting, open)).length;

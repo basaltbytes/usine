@@ -395,11 +395,12 @@ const deskLayer = (polls: ReadonlyArray<RepositoryPoll>) => {
     latest: Effect.succeed(Option.none()),
   });
   const passed = (clock: string) => ({ _tag: "Passed" as const, checkedAt: time(clock) });
-  const queued = (runId: string, number: number): QueuedRun => ({
+  const queued = (runId: string, number: number, ahead: number): QueuedRun => ({
     runId: RunId.make(runId),
     loop: LoopName.make("review"),
     itemKey: itemKey(number),
     position: { _tag: "Lane", lane: LaneName.make("Review"), number: 3 },
+    ahead,
   });
   const slots = Layer.succeed(WorkerStatus)({
     slots: Effect.succeed([
@@ -407,9 +408,9 @@ const deskLayer = (polls: ReadonlyArray<RepositoryPoll>) => {
       { worker: WorkerName.make("spare"), capacity: 1, leased: 0 },
     ]),
     queue: Effect.succeed([
-      queued("review-20", 20),
-      queued("review-21", 21),
-      queued("queued-4", 4),
+      queued("review-20", 20, 0),
+      queued("review-21", 21, 1),
+      queued("queued-4", 4, 2),
     ]),
     preflights: Effect.succeed([
       {

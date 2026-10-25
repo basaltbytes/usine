@@ -427,7 +427,7 @@ const makeDesk = Effect.gen(function* () {
         ] as const,
         { concurrency: "unbounded" },
       );
-    const ahead = new Map(queue.map(({ runId }, index) => [runId, index]));
+    const ahead = new Map(queue.map(({ runId, ahead }) => [runId, ahead]));
     const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
     const access = workerAccesses(instance.config.workers);
     const repositories = yield* Effect.forEach(

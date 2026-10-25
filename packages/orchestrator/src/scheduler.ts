@@ -45,6 +45,7 @@ import {
 import { payloadLabels } from "./board/items.ts";
 import {
   type LeaseCandidate,
+  aheadCount,
   leaseOrder,
   passedCount,
   type PipelinePosition,
@@ -77,13 +78,6 @@ interface Reservation extends LeaseCandidate {
   readonly deferred: Deferred.Deferred<WorkerLease>;
   readonly state: Ref.Ref<ReservationState>;
 }
-
-const queuedRun = ({ runId, loop, itemKey, position }: Reservation): QueuedRun => ({
-  runId,
-  loop,
-  itemKey,
-  position,
-});
 
 const positionFields = (position: PipelinePosition) =>
   Match.valueTags(position, {
@@ -119,6 +113,25 @@ const slotPoolOf = (workers: ReadonlyArray<ConfigWorker>, previous: SlotPool): S
       .filter(([name, { leased }]) => !declared.has(name) && leased > 0)
       .map(([name, { leased }]) => [name, { capacity: 0, leased }] as const),
   ]);
+};
+
+/** Returns the Workers that take new Attempts: those `usine.yaml` declares with slots. */
+const openWorkers = (pool: SlotPool): ReadonlyArray<WorkerName> =>
+  [...pool].filter(([, { capacity }]) => capacity > 0).map(([worker]) => worker);
+
+/** Returns the Runs of `queued`, which is in lease order, with the Runs ahead of each. */
+const queuedRuns = (
+  queued: ReadonlyArray<Reservation>,
+  pool: SlotPool,
+): ReadonlyArray<QueuedRun> => {
+  const open = openWorkers(pool);
+  return queued.map((reservation, index) => ({
+    runId: reservation.runId,
+    loop: reservation.loop,
+    itemKey: reservation.itemKey,
+    position: reservation.position,
+    ahead: aheadCount(queued.slice(0, index), reservation, open),
+  }));
 };
 
 const isFree = (pool: SlotPool, worker: WorkerName): boolean => {
@@ -622,19 +635,23 @@ export const stepExecutorLayer = (
             order: yield* Ref.getAndUpdate(nextOrder, (value) => value + 1),
             state,
           };
-          const queue = yield* Effect.tx(
+          const [queue, current] = yield* Effect.tx(
             TxPriorityQueue.offer(pending, reservation).pipe(
-              Effect.andThen(TxPriorityQueue.toArray(pending)),
+              Effect.andThen(Effect.all([TxPriorityQueue.toArray(pending), TxRef.get(pool)])),
             ),
           );
           const fields = {
             ...run,
             ...positionFields(reservation.position),
             queued: queue.length,
-            ahead: queue.indexOf(reservation),
+            ahead: aheadCount(
+              queue.slice(0, queue.indexOf(reservation)),
+              reservation,
+              openWorkers(current),
+            ),
           };
           if (Option.isNone(worker)) yield* Effect.logInfo("Run waits for a worker slot", fields);
-          else if (((yield* TxRef.get(pool)).get(worker.value)?.capacity ?? 0) > 0)
+          else if ((current.get(worker.value)?.capacity ?? 0) > 0)
             yield* Effect.logInfo(
               "Run waits for a slot on the Worker its reattached Attempt runs on",
               { ...fields, worker: worker.value },
@@ -760,7 +777,9 @@ export const stepExecutorLayer = (
             [...current].map(([worker, { capacity, leased }]) => ({ worker, capacity, leased })),
           ),
         ),
-        queue: TxPriorityQueue.toArray(pending).pipe(Effect.map((queued) => queued.map(queuedRun))),
+        queue: Effect.tx(Effect.all([TxPriorityQueue.toArray(pending), TxRef.get(pool)])).pipe(
+          Effect.map(([queued, current]) => queuedRuns(queued, current)),
+        ),
         preflights: Ref.get(preflights).pipe(Effect.map((current) => [...current.values()])),
       });
 
