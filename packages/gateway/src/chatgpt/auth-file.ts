@@ -1,4 +1,14 @@
-import { DateTime, Effect, Encoding, FileSystem, Option, Redacted, Result, Schema } from "effect";
+import {
+  DateTime,
+  Effect,
+  Encoding,
+  Exit,
+  FileSystem,
+  Option,
+  Redacted,
+  Result,
+  Schema,
+} from "effect";
 
 /**
  * The error when a ChatGPT login's `auth.json` can't be read or written, or isn't a Codex
@@ -121,15 +131,21 @@ export const readAuthFile = Effect.fn("ChatGptAuthFile.read")(function* (path: s
   return yield* Effect.fromResult(tokensFromAuthFile(path, text));
 });
 
+/** Returns the path of a new temporary file next to `path`. */
+const besides = (path: string, suffix: string) => `${path}.${crypto.randomUUID()}.${suffix}`;
+
 /**
  * Writes rotated tokens into the Codex `auth.json` at `path` and sets `last_refresh`, keeping
  * its other fields. Writes a temporary file with mode 0600 next to it and renames it over the
- * file, so a reader sees either file whole.
+ * file, so a reader sees either file whole, and removes the temporary file if that fails or is
+ * interrupted. Returns `false`, writing nothing, if the file's refresh token isn't one `owns`
+ * accepts, such as a login the operator copied in that the next reload reads.
  */
 export const writeAuthFile = Effect.fn("ChatGptAuthFile.write")(function* (
   path: string,
   tokens: ChatGptTokens,
   idToken: Option.Option<string>,
+  owns: (refreshToken: string) => boolean,
 ) {
   yield* Effect.annotateCurrentSpan({ authFile: path });
   const fs = yield* FileSystem.FileSystem;
@@ -141,6 +157,10 @@ export const writeAuthFile = Effect.fn("ChatGptAuthFile.write")(function* (
   const current = yield* Effect.fromOption(decodeAuthFileObject(text)).pipe(
     Effect.mapError(() => failed(`${path} is no longer a JSON object, so it wasn't replaced.`)),
   );
+  const inFile = decodeAuthFileFields(current).pipe(
+    Option.map(({ tokens: held }) => held.refresh_token),
+  );
+  if (!Option.exists(inFile, owns)) return false;
   const previousTokens = Option.getOrElse(decodeJsonObject(current.tokens), () => ({}));
   const next = {
     ...current,
@@ -155,10 +175,37 @@ export const writeAuthFile = Effect.fn("ChatGptAuthFile.write")(function* (
       onSome: DateTime.formatIso,
     }),
   };
-  const temporary = `${path}.${crypto.randomUUID()}.tmp`;
+  const temporary = besides(path, "tmp");
   yield* fs.writeFileString(temporary, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 }).pipe(
     Effect.andThen(fs.rename(temporary, path)),
-    Effect.tapError(() => fs.remove(temporary).pipe(Effect.ignore)),
+    Effect.onExit((exit) =>
+      Exit.isSuccess(exit) ? Effect.void : fs.remove(temporary).pipe(Effect.ignore),
+    ),
     Effect.mapError((error) => failed(error.message)),
+  );
+  return true;
+});
+
+/**
+ * Checks that the Gateway can write the rotated tokens next to the auth file at `path`, by
+ * creating and removing a file there, so a missing write permission shows before the first
+ * refresh.
+ */
+export const checkAuthFileWritable = Effect.fn("ChatGptAuthFile.checkWritable")(function* (
+  path: string,
+) {
+  yield* Effect.annotateCurrentSpan({ authFile: path });
+  const fs = yield* FileSystem.FileSystem;
+  const probe = besides(path, "check");
+  yield* fs.writeFileString(probe, "", { mode: 0o600 }).pipe(
+    Effect.andThen(fs.remove(probe)),
+    Effect.mapError(
+      (error) =>
+        new ChatGptAuthFileError({
+          path,
+          operation: "write",
+          message: `The gateway can't write next to ${path}, so it couldn't save a refreshed login: ${error.message}`,
+        }),
+    ),
   );
 });

@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer, request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -30,6 +30,7 @@ import {
 import { AnonymousCredential, Attachment } from "../src/attachment/attachment.ts";
 import { Attachments } from "../src/attachment/store.ts";
 import { CallerClaims, CallerTokens } from "../src/caller/caller.ts";
+import { checkAuthFileWritable } from "../src/chatgpt/auth-file.ts";
 import { ChatGptLogins } from "../src/chatgpt/logins.ts";
 import { gatewayServices } from "../src/gateway.ts";
 import { ChatGptLogin, HostFilePath, type LlmProviders, OpenAiProvider } from "../src/llm/llm.ts";
@@ -287,20 +288,151 @@ describe("ChatGptLogins", () => {
   );
 
   it.effect(
-    "a failed refresh fails the request instead of using the old token, and the next request tries again",
+    "a failed refresh fails the waiting requests instead of using the old token, and a request after the backoff tries again",
     () =>
       Effect.gen(function* () {
         const { login } = yield* authFile("1 minute");
         yield* setAnswer(() => Effect.succeed(json(503, { error: "temporarily_unavailable" })));
-        const failed = yield* Effect.flip(accessToken(login));
-        assert.strictEqual(failed._tag, "ChatGptLoginUnavailable");
-        assert.strictEqual(failed.reason, "refresh-failed");
-        assert.include(failed.message, "503");
+        const failures = yield* Effect.all(
+          Array.from({ length: 5 }, () => Effect.flip(accessToken(login))),
+          { concurrency: "unbounded" },
+        );
+        for (const failed of failures) {
+          assert.strictEqual(failed._tag, "ChatGptLoginUnavailable");
+          assert.strictEqual(failed.reason, "refresh-failed");
+        }
+        assert.lengthOf(yield* tokenRequests, 1, "the waiting requests share one refresh");
 
         yield* setAnswer(refreshing());
+        assert.strictEqual((yield* Effect.flip(accessToken(login))).reason, "refresh-failed");
+        assert.lengthOf(yield* tokenRequests, 1, "a request during the backoff calls nothing");
+
+        yield* TestClock.adjust("10 seconds");
         assert.strictEqual(nonceOf(yield* accessToken(login)), "second");
         assert.lengthOf(yield* tokenRequests, 2);
       }).pipe(Effect.provide(logins)),
+  );
+
+  it.effect("keeps the token endpoint's error text out of messages unless it's an error code", () =>
+    Effect.gen(function* () {
+      const { login } = yield* authFile("1 minute");
+      yield* setAnswer(() =>
+        Effect.succeed(json(400, { error: "refresh token rt-leaked-in-an-error is invalid" })),
+      );
+      const failed = yield* Effect.flip(accessToken(login));
+      assert.strictEqual(failed.reason, "refresh-failed");
+      assert.notInclude(failed.message, "rt-leaked-in-an-error");
+    }).pipe(Effect.provide(logins)),
+  );
+
+  it.effect(
+    "a request that ends during a refresh doesn't stop it, so the rotated token is kept",
+    () =>
+      Effect.gen(function* () {
+        const { path, login } = yield* authFile("1 minute");
+        yield* (yield* ChatGptLogins).reload(login);
+        const arrived = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        const answer = refreshing();
+        yield* setAnswer((sent) =>
+          Deferred.succeed(arrived, undefined).pipe(
+            Effect.andThen(Deferred.await(release)),
+            Effect.andThen(answer(sent)),
+          ),
+        );
+        const caller = yield* Effect.forkChild(accessToken(login));
+        yield* Deferred.await(arrived);
+        yield* Fiber.interrupt(caller);
+        yield* Deferred.succeed(release, undefined);
+
+        assert.strictEqual(nonceOf(yield* accessToken(login)), "second");
+        assert.lengthOf(yield* tokenRequests, 1);
+        assert.strictEqual((yield* readWritten(path)).tokens.refresh_token, "refresh-second");
+      }).pipe(Effect.provide(logins)),
+  );
+
+  it.effect("a 401 right after a refresh doesn't refresh again until a minute has passed", () =>
+    Effect.gen(function* () {
+      const { login } = yield* authFile("1 minute");
+      const service = yield* ChatGptLogins;
+      yield* setAnswer(refreshing());
+      const refreshed = yield* service.access(login);
+      yield* service.refused(login, refreshed);
+      assert.strictEqual(nonceOf(yield* accessToken(login)), "second");
+      assert.lengthOf(yield* tokenRequests, 1);
+
+      yield* TestClock.adjust("1 minute");
+      yield* service.refused(login, refreshed);
+      yield* accessToken(login);
+      assert.lengthOf(yield* tokenRequests, 2);
+    }).pipe(Effect.provide(logins)),
+  );
+
+  it.effect("accepts null optional fields in the refresh answer, as Codex does", () =>
+    Effect.gen(function* () {
+      const { path, login } = yield* authFile("1 minute");
+      yield* setAnswer(() =>
+        Effect.map(DateTime.now, (now) =>
+          json(200, {
+            access_token: chatGptAccessToken(DateTime.add(now, { hours: 1 }), "second"),
+            refresh_token: null,
+            id_token: null,
+          }),
+        ),
+      );
+      assert.strictEqual(nonceOf(yield* accessToken(login)), "second");
+      assert.strictEqual((yield* readWritten(path)).tokens.refresh_token, "refresh-first");
+    }).pipe(Effect.provide(logins)),
+  );
+
+  it.effect(
+    "leaves an auth file the operator replaced during a refresh, and the next reload takes its login",
+    () =>
+      Effect.gen(function* () {
+        const { path, login } = yield* authFile("1 minute");
+        const answer = refreshing();
+        yield* setAnswer((sent) =>
+          replaceAuthFile(path, "refresh-operator", "60 minutes").pipe(
+            Effect.andThen(answer(sent)),
+          ),
+        );
+        assert.strictEqual(nonceOf(yield* accessToken(login)), "second");
+        assert.strictEqual((yield* readWritten(path)).tokens.refresh_token, "refresh-operator");
+
+        yield* (yield* ChatGptLogins).reload(login);
+        assert.strictEqual(nonceOf(yield* accessToken(login)), "refresh-operator");
+      }).pipe(Effect.provide(logins)),
+  );
+
+  it.effect(
+    "a reload of another auth file with a refresh token this login replaced keeps the rotated one",
+    () =>
+      Effect.gen(function* () {
+        const { directory, login } = yield* authFile("1 minute");
+        yield* setAnswer(refreshing());
+        assert.strictEqual(nonceOf(yield* accessToken(login)), "second");
+        const moved = join(directory, "moved.json");
+        yield* replaceAuthFile(moved, "refresh-first", "60 minutes");
+        const elsewhere = new ChatGptLogin({ ...login, authFile: HostFilePath.make(moved) });
+        yield* (yield* ChatGptLogins).reload(elsewhere);
+        assert.strictEqual(nonceOf(yield* accessToken(elsewhere)), "second");
+        assert.lengthOf(yield* tokenRequests, 1);
+      }).pipe(Effect.provide(logins)),
+  );
+
+  it.effect.skipIf(process.getuid?.() === 0)(
+    "reports an auth file whose directory the gateway can't write to",
+    () =>
+      Effect.gen(function* () {
+        const { directory, path } = yield* authFile("60 minutes");
+        yield* Effect.acquireRelease(
+          Effect.promise(() => chmod(directory, 0o500)),
+          () => Effect.promise(() => chmod(directory, 0o700)),
+        );
+        const failed = yield* Effect.flip(checkAuthFileWritable(path));
+        assert.strictEqual(failed.operation, "write");
+        assert.include(failed.message, "can't write next to");
+      }).pipe(Effect.provide(NodeFileSystem.layer)),
   );
 
   for (const [status, body] of [

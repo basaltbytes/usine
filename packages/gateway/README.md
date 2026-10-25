@@ -153,22 +153,23 @@ With `USINE_GATEWAY_CHATGPT_AUTH_FILE`, the gateway serves Codex's [LLM routes](
 
 The file is the `auth.json` that `codex login` writes in `CODEX_HOME`. The gateway reads its `tokens.access_token`, `tokens.refresh_token`, and `tokens.account_id` (or the account in `tokens.id_token`) on first use and on each [reload](#reload), and keeps them in memory. It refreshes the access token as Codex does:
 
-- When the access token expires within five minutes, or the backend answered the last request with 401, the next request first sends the refresh token to `https://auth.openai.com/oauth/token` with Codex's client ID.
-- Refreshes run one at a time; requests that arrive during a refresh wait for its token.
-- The response's new access token, rotated refresh token, and ID token go to the file, through a temporary file with mode 0600 in the same directory that replaces it, so the service needs write access to the directory. The file's other fields stay.
-- If a refresh fails, the request fails with 401 and `provider-login-unavailable`, and nothing is sent upstream with the old token. A network error or server error is retried on the next request. A rejected refresh token (401, `invalid_grant`, `refresh_token_expired`, `refresh_token_reused`, or `refresh_token_invalidated`) is not retried until a reload reads another login.
+- When the access token expires within five minutes, or the backend answered a request with 401, the next request first sends the refresh token to `https://auth.openai.com/oauth/token` with Codex's client ID. A 401 for a token refreshed less than a minute earlier doesn't start another refresh.
+- Refreshes run one at a time, and requests that arrive during a refresh wait for its result. A refresh runs apart from the request that started it, so a request that ends early doesn't stop it between the rotation and the write-back.
+- The response's new access token, rotated refresh token, and ID token go to the file, through a temporary file with mode 0600 in the same directory that replaces it, so the service needs write access to the directory. The file's other fields stay. If the file holds a login the gateway didn't refresh, such as one you just copied in, it's left for the next reload.
+- If a refresh fails, the waiting requests fail with 401 and `provider-login-unavailable`, and nothing is sent upstream with the old token. After a network error or server error, requests fail without calling the token endpoint for ten seconds, then the next one tries again. A rejected refresh token (401, `invalid_grant`, `refresh_token_expired`, `refresh_token_reused`, or `refresh_token_invalidated`) is not tried again until a reload reads another login. Refusals give a fixed message and never the token endpoint's text; the log has its error code.
 
-A reload keeps the tokens in memory if the file has their refresh token or one they replaced, so it never goes back to a used refresh token, and otherwise uses the file's login.
+At startup and each reload, the gateway reads the file and checks that it can write next to it, and fails or keeps the previous providers if it can't. A reload keeps the tokens in memory if the file has their refresh token or one they replaced, so it never goes back to a used refresh token, and otherwise uses the file's login.
 
 | Log line | Level | When |
 | --- | --- | --- |
 | `Loaded the ChatGPT login` | info | The file was read, with `authFile`, the access token's `expiresAt`, and `replaced` on a reload |
 | `Refreshing the ChatGPT login`, `Refreshed the ChatGPT login` | info | A refresh started (`reason` is `expiring` or `refused-by-upstream`) and ended, with `rotated` |
 | `Wrote the refreshed ChatGPT login to its auth file` | info | The rotated tokens are in the file |
+| `Left the auth file as it is: it holds another ChatGPT login` | warning | The file has a login the gateway didn't refresh; reload to use it |
 | `Could not write the refreshed ChatGPT login to its auth file` | error | The login works from memory, but after a restart the file's refresh token may no longer work |
-| `Could not refresh the ChatGPT login; the next request tries again` | error | A network error, timeout, or server error |
+| `Could not refresh the ChatGPT login; a later request tries again` | error | A network error or server error, with `error` and the `backoff` |
 | `The token endpoint rejected the ChatGPT login's refresh token` | error | The login needs a new `auth.json` and a reload |
-| `The ChatGPT backend refused the gateway's access token` | warning | The backend answered 401; the next request refreshes first |
+| `The ChatGPT backend refused the gateway's access token` | warning | The backend answered 401; the next request refreshes first, unless the token is less than a minute old |
 
 Make the gateway's login separate from the one on your own machine. A refresh token works once, so if two copies of one `auth.json` refresh, the second is rejected with `refresh_token_reused`. [`infra/hetzner/gateway/README.md`](../../infra/hetzner/gateway/README.md) gives the steps.
 

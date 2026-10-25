@@ -2,7 +2,7 @@ import { GatewayDomain } from "@usine/core/worker";
 import { Config, ConfigProvider, Effect, FileSystem, Layer, Option, Schema } from "effect";
 import { parseEgressAllowlist } from "../egress/egress.ts";
 import { GITHUB_ORIGINS } from "../github/github.ts";
-import { readAuthFile } from "../chatgpt/auth-file.ts";
+import { checkAuthFileWritable, readAuthFile } from "../chatgpt/auth-file.ts";
 import { CHATGPT_TOKEN_URL } from "../chatgpt/logins.ts";
 import {
   AnthropicApiKey,
@@ -88,7 +88,8 @@ const onlyOne = <A, B>(
 
 /**
  * The LLM providers and credentials from the settings. A ChatGPT login's auth file is read and
- * parsed, so an unusable file fails here, before the Gateway listens or a reload applies it.
+ * parsed, and its directory checked for writing, so an unusable file fails here, before the
+ * Gateway listens or a reload applies it.
  */
 export const llmProviders = Effect.gen(function* () {
   const anthropicKey = yield* Config.option(Config.schema(Secret, "ANTHROPIC_API_KEY"));
@@ -128,8 +129,10 @@ export const llmProviders = Effect.gen(function* () {
       ),
     ],
   );
-  if (Option.isSome(openAiCredential) && openAiCredential.value._tag === "ChatGptLogin")
+  if (Option.isSome(openAiCredential) && openAiCredential.value._tag === "ChatGptLogin") {
     yield* readAuthFile(openAiCredential.value.authFile);
+    yield* checkAuthFileWritable(openAiCredential.value.authFile);
+  }
   return {
     anthropic: Option.map(
       anthropicCredential,
