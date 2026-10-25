@@ -11,7 +11,7 @@ import {
   SshWorkers,
 } from "@usine/executor/ssh";
 import { Config, ConfigProvider, Effect, Layer, Option } from "effect";
-import { FetchHttpClient } from "effect/unstable/http";
+import { externalHttpClientLayer } from "./http-client.ts";
 import { stepExecutorLayer } from "./scheduler.ts";
 
 /** Returns the SSH Workers that `usine.yaml` declares, in declared order. */
@@ -116,7 +116,7 @@ export const layer = (
 ) => {
   const executor = sshExecutorLayer(options).pipe(
     Layer.provide(NodeServices.layer),
-    Layer.provide(FetchHttpClient.layer),
+    Layer.provide(externalHttpClientLayer),
   );
   const stepExecutor = sshStepExecutorLayer(config, brains).pipe(Layer.provide(executor));
   return localEngineLayer(instanceDirectory).pipe(Layer.provideMerge(stepExecutor));

@@ -53,6 +53,10 @@ export class BoardTaskView extends Schema.Class<BoardTaskView>("@usine/orchestra
     pullRequest: Schema.NullOr(BoardPullRequestView),
     /** Every saved Run for the visible Items, earliest first. */
     runs: Schema.Array(RunView),
+    /**
+     * The newest Run that needs the operator, else the open Run, else the newest Run, or null if
+     * there are no Runs. A failed Run on a closed or merged Item doesn't need the operator.
+     */
     run: Schema.NullOr(RunView),
     needsYou: Schema.Boolean,
     /** Whether the current Item is an open pull request whose branch conflicts with its base. */

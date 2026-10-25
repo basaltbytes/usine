@@ -43,6 +43,7 @@ const record = new InstanceRecord({
     nodeOptions: ["--enable-source-maps"],
     script: "/opt/usine/dist/main.js",
     port: Port.make(8_111),
+    logLevel: "Info",
     allowVolatileInstance: false,
   }),
 });
@@ -101,6 +102,7 @@ describe("instance lock", () => {
           nodeOptions: ["--enable-source-maps"],
           script: "/opt/usine/dist/main.js",
           port: 8_111,
+          logLevel: "Info",
           allowVolatileInstance: false,
         });
         assert.strictEqual(stopping.pid, record.pid);

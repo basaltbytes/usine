@@ -118,6 +118,7 @@ selector:
   tags: [engine]
 agent: reviewer
 permissions: read
+priority: 2
 step: review
 ---
 Review the pull request.
@@ -283,6 +284,7 @@ describe("Configuration view", () => {
       assert.strictEqual(startDev.approval, "required");
       assert.strictEqual(startDev.maxCycles, 5);
       assert.strictEqual(startDev.permissions, "write");
+      assert.isNull(startDev.priority);
       assert.strictEqual(startDev.step, "implement");
       assert.strictEqual(startDev.agent, "developer");
       assert.strictEqual(
@@ -297,6 +299,7 @@ describe("Configuration view", () => {
       assert.deepStrictEqual(review.selector, { repos: null, tags: ["engine"] });
       assert.deepStrictEqual(review.repositories, [usine]);
       assert.strictEqual(review.permissions, "read");
+      assert.strictEqual(review.priority, 2);
       assert.isFalse(review.paused);
 
       const nightly = byName.get(LoopName.make("nightly"));

@@ -133,6 +133,7 @@ const pinnedInstance = async () => {
     nodeOptions: ["--experimental-strip-types", "--no-warnings"],
     script: join(engine, "main.mjs"),
     port: await freePort(),
+    logLevel: "Info",
     allowVolatileInstance: false,
   });
   const { pid } = await run(startDetached(directory, launch, Duration.seconds(30)));
@@ -194,6 +195,7 @@ describe("usine upgrade", { timeout: SCENARIO_TIMEOUT_MS }, () => {
       nodeOptions: ["--experimental-strip-types", "--no-warnings"],
       script: FIXTURE,
       port: await freePort(),
+      logLevel: "Info",
       allowVolatileInstance: false,
     });
     const { pid } = await run(startDetached(directory, launch, Duration.seconds(30)));

@@ -180,6 +180,20 @@ describe("Board Run failure copy", () => {
     );
   });
 
+  it("leaves out a failure on a closed issue, as Needs attention does", () => {
+    const card = itemWithRun("Failed", [attempt(1, "Checks failed")]);
+    const [issue] = card.items;
+    assert(issue !== undefined);
+    const closed = new BoardTaskView({
+      ...card,
+      state: "issue-closed",
+      items: [new BoardItemLink({ ...issue, state: "issue-closed" })],
+      needsYou: false,
+    });
+    assert.strictEqual(itemFailure(closed), null);
+    assert.isNull(currentRun(closed));
+  });
+
   it("explains an exhausted child-session budget in the drawer and Needs attention", () => {
     const failure = new ChildSessionBudgetFailureView({
       maxChildren: ChildSessionBudget.make(4),

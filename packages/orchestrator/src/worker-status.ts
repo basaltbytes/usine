@@ -23,6 +23,12 @@ export interface QueuedRun {
   readonly loop: LoopName;
   readonly itemKey: ItemKey;
   readonly position: PipelinePosition;
+  /**
+   * The fewest queued Runs that take a Worker slot before this one. Of the Runs that wait for their
+   * reattached Attempt's Worker, a Run that can take any Worker's slot counts only those of the
+   * Worker with the fewest, among the Workers that take new Attempts.
+   */
+  readonly ahead: number;
 }
 
 /** A passed preflight check. */

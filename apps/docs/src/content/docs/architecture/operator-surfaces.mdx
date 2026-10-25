@@ -225,7 +225,7 @@ Environment:
 
 ## Logs and spans
 
-Every service method is an `Effect.fn` span annotated with domain ids (`runId`, `attemptId`, `repository`, `loop`, `worker`), and decision points log structured fields with `Effect.logInfo`, `logWarning`, or `logError`. `apps/server` installs no logger layer, so logs go to the console through Effect's default logger. With a [`tracing`](/reference/configuration/usine-yaml/#tracing) block in `usine.yaml`, it installs Effect's OTLP tracer and exports spans over OTLP/HTTP ([tracing.ts][]). Without one, spans aren't exported. Each run is a trace whose root span, `RunDriver.drive`, links to the span that launched the run ([run-driver.ts][]), and the web UI sends no trace headers ([api.ts][]). The gateway uses `Logger.consoleJson`, one JSON object per line for journald ([node/main.ts:7][]). These messages answer common questions:
+Every service method is an `Effect.fn` span annotated with domain ids (`runId`, `attemptId`, `repository`, `loop`, `worker`), and decision points log structured fields with `Effect.logInfo`, `logWarning`, or `logError`. `apps/server` installs no logger layer, so logs go to the console through Effect's default logger. With a [`tracing`](/reference/configuration/usine-yaml/#tracing) block in `usine.yaml`, it installs Effect's OTLP tracer and exports spans over OTLP/HTTP ([tracing.ts][]). Without one, spans aren't exported. Each run is a trace whose root span, `RunDriver.drive`, links to the span that launched the run ([run-driver.ts][]), and neither the web UI ([api.ts][]) nor the orchestrator's clients for GitHub and the gateways ([http-client.ts][]) send trace headers. The gateway uses `Logger.consoleJson`, one JSON object per line for journald ([node/main.ts:7][]). These messages answer common questions:
 
 | Question                               | Message                                                                                                                                   | Code                                                             |
 | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
@@ -316,5 +316,6 @@ Every service method is an `Effect.fn` span annotated with domain ids (`runId`, 
 [tracing.ts]: https://github.com/basaltbytes/usine/blob/main/apps/server/src/tracing.ts
 [run-driver.ts]: https://github.com/basaltbytes/usine/blob/main/packages/engine/src/engine/run-driver.ts
 [api.ts]: https://github.com/basaltbytes/usine/blob/main/apps/web/src/api.ts
+[http-client.ts]: https://github.com/basaltbytes/usine/blob/main/packages/orchestrator/src/http-client.ts
 [current-instance.ts]: https://github.com/basaltbytes/usine/blob/main/packages/orchestrator/src/current-instance/current-instance.ts
 [reload-signal.ts]: https://github.com/basaltbytes/usine/blob/main/apps/server/src/reload-signal.ts

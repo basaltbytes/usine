@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 import type { InstanceDirectory } from "@usine/core/instance";
 import { Console, Deferred, Duration, Effect, FileSystem, Option, Schema } from "effect";
-import { DEFAULT_LIFECYCLE_TIMEOUT_SECONDS, Port, SERVER_HOST } from "./cli.ts";
+import { DEFAULT_LIFECYCLE_TIMEOUT_SECONDS, Port, SERVER_HOST, type UpLogLevel } from "./cli.ts";
 import { InstanceInUseError } from "./instance/lock.ts";
 import { type InstanceLaunch, ProcessId, currentLaunch, instanceFiles } from "./instance/record.ts";
 import { answers } from "./instance/operator-api.ts";
@@ -37,7 +37,15 @@ const reasonOf = (cause: unknown): string =>
   cause instanceof Error ? cause.message : String(cause);
 
 const launchArguments = (launch: InstanceLaunch): ReadonlyArray<string> => {
-  const args = [...launch.nodeOptions, launch.script, "up", "--port", String(launch.port)];
+  const args = [
+    ...launch.nodeOptions,
+    launch.script,
+    "up",
+    "--port",
+    String(launch.port),
+    "--log-level",
+    launch.logLevel.toLowerCase(),
+  ];
   if (launch.allowVolatileInstance) args.push("--allow-volatile-instance");
   return args;
 };
@@ -193,6 +201,7 @@ export const startedMessage = ({ pid, port }: StartedInstance): string =>
 export const upDetached = Effect.fn("Cli.upDetached")(function* (
   directory: InstanceDirectory,
   port: Port,
+  logLevel: UpLogLevel,
   allowVolatileInstance: boolean,
 ) {
   const state = yield* probeInstance(directory);
@@ -202,7 +211,7 @@ export const upDetached = Effect.fn("Cli.upDetached")(function* (
       holder: state._tag === "Running" ? Option.some(state.record.pid) : state.pid,
     });
   }
-  const launch = yield* currentLaunch(port, allowVolatileInstance);
+  const launch = yield* currentLaunch(port, logLevel, allowVolatileInstance);
   const started = yield* startDetached(
     directory,
     launch,

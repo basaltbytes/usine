@@ -228,6 +228,8 @@ Entries about an issue that is closed or a pull request that is closed or merged
 - The item's **Cycle budget exhausted** entry leaves at the next poll. usine records the ask as closed, not reset, so the item keeps its budget: if the item is reopened and a loop matches it again, the entry comes back.
 - A run waiting for approval is revoked at the next poll if the loop's `if:` requires an open item, such as `item.state == "OPEN"`.
 
+A run in a repository that you remove from `usine.yaml` leaves too: its approval, failure, question, or blocker isn't listed, because the repository has no project to mark. A failed run stays under **Recent runs**.
+
 ## Runaway guards
 
 `max_attempt_minutes` and `max_attempt_tokens` in [`settings`](/reference/configuration/usine-yaml/#settings) limit each attempt. Both are off by default:

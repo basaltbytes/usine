@@ -8,7 +8,7 @@ Run it from an instance folder:
 usine up
 ```
 
-It prints `http://127.0.0.1:7331` and stays attached to the terminal. `--port <port>` or `USINE_PORT` changes the port; if the port is taken, the CLI names the conflict and suggests the override. `usine --version` prints the `@usine/server` version that the instance pins.
+It prints `http://127.0.0.1:7331` and stays attached to the terminal. `--port <port>` or `USINE_PORT` changes the port; if the port is taken, the CLI names the conflict and suggests the override. `--log-level <level>` or `USINE_LOG_LEVEL` sets the lowest level it logs, `info` by default; `debug` adds the lines that say why something was skipped. `usine --version` prints the `@usine/server` version that the instance pins.
 
 One `usine up` runs per instance folder. It holds `.usine/instance.lock` from startup until every store closes, writes its pid to `.usine/instance.pid`, and writes its pid, port, version, start time, and command line to `.usine/instance.json`. It removes both files when it exits. A second `usine up` there names the running process and exits nonzero before opening a store. A draining process keeps the folder until it exits.
 

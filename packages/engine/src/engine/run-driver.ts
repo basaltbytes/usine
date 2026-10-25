@@ -206,17 +206,21 @@ export class RunDriver extends Context.Service<
           fibers,
           runId,
           drive(runId).pipe(
+            // Logged inside the Run's span: the launch span has ended by the time drive fails.
+            Effect.tapCause((cause) =>
+              Cause.hasInterruptsOnly(cause)
+                ? Effect.void
+                : Effect.logError(
+                    "The Run's fiber stopped on an engine failure; the next reconcile or a restart resumes it",
+                    { runId, cause },
+                  ),
+            ),
             Effect.withSpan("RunDriver.drive", {
               root: true,
               links: Option.toArray(Option.map(launchedBy, (span) => ({ span, attributes: {} }))),
             }),
             Effect.catchCause((cause) =>
-              Cause.hasInterruptsOnly(cause)
-                ? Effect.failCause(cause)
-                : Effect.logError(
-                    "The Run's fiber stopped on an engine failure; the next reconcile or a restart resumes it",
-                    { runId, cause },
-                  ),
+              Cause.hasInterruptsOnly(cause) ? Effect.failCause(cause) : Effect.void,
             ),
           ),
           { onlyIfMissing: true },

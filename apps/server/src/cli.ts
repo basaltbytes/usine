@@ -20,10 +20,24 @@ export type Port = typeof Port.Type;
 
 const PortFromString = Schema.NumberFromString.pipe(Schema.decodeTo(Port));
 
+/** The minimum level of the lines `usine up` logs. */
+export const UpLogLevel = Schema.Literals(["Trace", "Debug", "Info", "Warn", "Error"]);
+export type UpLogLevel = typeof UpLogLevel.Type;
+
+const LogLevelName = Schema.Literals(["trace", "debug", "info", "warn", "error"]);
+
+const LOG_LEVEL_NAMES = {
+  trace: "Trace",
+  debug: "Debug",
+  info: "Info",
+  warn: "Warn",
+  error: "Error",
+} as const satisfies Record<typeof LogLevelName.Type, UpLogLevel>;
+
 export const DEFAULT_LIFECYCLE_TIMEOUT_SECONDS = 120;
 
 export const CLI_USAGE = `Usage:
-  usine up [--port <port>] [--allow-volatile-instance] [--detach]
+  usine up [--port <port>] [--log-level <level>] [--allow-volatile-instance] [--detach]
   usine status
   usine stop [--timeout <seconds>] [--force]
   usine restart [--timeout <seconds>] [--force]
@@ -35,6 +49,7 @@ export const CLI_USAGE = `Usage:
 
 Options:
   -p, --port <port>            Listen on this port (default: 7331)
+  --log-level <level>          Log at this level and above: trace, debug, info, warn, or error (default: info)
   --allow-volatile-instance    Start even when the instance folder is in a temporary directory
   --detach                     Start in the background, with the output in .usine/usine.log
   --timeout <seconds>          Wait this long for the instance to stop, and again to start (default: ${DEFAULT_LIFECYCLE_TIMEOUT_SECONDS})
@@ -46,6 +61,7 @@ Options:
 
 Environment:
   USINE_PORT                     Listen on this port if --port is not set
+  USINE_LOG_LEVEL                Log at this level if --log-level is not set
   USINE_ALLOW_VOLATILE_INSTANCE  Set to 1 for the same effect as --allow-volatile-instance`;
 
 export class CliUsageError extends Schema.TaggedError<CliUsageError>("@usine/server/CliUsageError")(
@@ -96,7 +112,12 @@ export class VersionCommand extends Schema.TaggedClass<VersionCommand>(
 
 export class UpCommand extends Schema.TaggedClass<UpCommand>("@usine/server/UpCommand")(
   "UpCommand",
-  { port: Port, allowVolatileInstance: Schema.Boolean, detach: Schema.Boolean },
+  {
+    port: Port,
+    logLevel: UpLogLevel,
+    allowVolatileInstance: Schema.Boolean,
+    detach: Schema.Boolean,
+  },
 ) {}
 
 /** Reports whether `usine up` runs in the current instance folder. */
@@ -151,6 +172,7 @@ export class BackupCommand extends Schema.TaggedClass<BackupCommand>("@usine/ser
 
 export interface CliEnvironment {
   readonly port: Option.Option<string>;
+  readonly logLevel: Option.Option<string>;
   readonly allowVolatileInstance: Option.Option<string>;
 }
 
@@ -176,6 +198,18 @@ const decodePort = (
   Schema.decodeUnknownEffect(PortFromString)(value).pipe(
     Effect.mapError(() =>
       usageError(`${source} must be a whole number between 1 and 65535.\n\n${CLI_USAGE}`),
+    ),
+  );
+
+/** Decodes a log level name, ignoring case. */
+const decodeLogLevel = (
+  source: "--log-level" | "USINE_LOG_LEVEL",
+  value: string,
+): Effect.Effect<UpLogLevel, CliUsageError> =>
+  Schema.decodeUnknownEffect(LogLevelName)(value.toLowerCase()).pipe(
+    Effect.map((name) => LOG_LEVEL_NAMES[name]),
+    Effect.mapError(() =>
+      usageError(`${source} must be trace, debug, info, warn, or error.\n\n${CLI_USAGE}`),
     ),
   );
 
@@ -211,6 +245,7 @@ const upCommand = (
 ): Effect.Effect<UpCommand, CliUsageError> =>
   Effect.gen(function* () {
     let port: Option.Option<string> = Option.none();
+    let logLevel: Option.Option<string> = Option.none();
     let allowVolatileInstance = Option.exists(environment.allowVolatileInstance, (v) => v === "1");
     let detach = false;
     for (let index = 0; index < args.length; index += 1) {
@@ -222,6 +257,13 @@ const upCommand = (
         index += 1;
       } else if (arg?.startsWith("--port=")) {
         port = Option.some(arg.slice("--port=".length));
+      } else if (arg === "--log-level") {
+        const value = args[index + 1];
+        if (value === undefined) return yield* usageError();
+        logLevel = Option.some(value);
+        index += 1;
+      } else if (arg?.startsWith("--log-level=")) {
+        logLevel = Option.some(arg.slice("--log-level=".length));
       } else if (arg === ALLOW_VOLATILE_FLAG) {
         allowVolatileInstance = true;
       } else if (arg === "--detach") {
@@ -238,7 +280,20 @@ const upCommand = (
         }),
       onSome: (value) => decodePort("--port", value),
     });
-    return new UpCommand({ port: resolvedPort, allowVolatileInstance, detach });
+    const resolvedLogLevel = yield* Option.match(logLevel, {
+      onNone: () =>
+        Option.match(environment.logLevel, {
+          onNone: () => Effect.succeed<UpLogLevel>("Info"),
+          onSome: (value) => decodeLogLevel("USINE_LOG_LEVEL", value),
+        }),
+      onSome: (value) => decodeLogLevel("--log-level", value),
+    });
+    return new UpCommand({
+      port: resolvedPort,
+      logLevel: resolvedLogLevel,
+      allowVolatileInstance,
+      detach,
+    });
   });
 
 const SecondsFromString = Schema.NumberFromString.pipe(

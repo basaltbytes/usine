@@ -126,7 +126,7 @@ export class QueuedForWorkerView extends Schema.TaggedClass<QueuedForWorkerView>
 )("QueuedForWorker", {
   run: RunView,
   /**
-   * The number of Runs that take a Worker slot before `run`, or null if the scheduler doesn't
+   * The fewest Runs that take a Worker slot before `run`, or null if the scheduler doesn't
    * queue `run`: it hasn't asked for a slot yet, or this process runs no Attempts.
    */
   ahead: Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
@@ -455,7 +455,7 @@ const makeDesk = Effect.gen(function* () {
       ] as const,
       { concurrency: "unbounded" },
     );
-    const ahead = new Map(queue.map(({ runId }, index) => [runId, index]));
+    const ahead = new Map(queue.map(({ runId, ahead }) => [runId, ahead]));
     const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
     const access = workerAccesses(instance.config.workers);
     const repositories = yield* Effect.forEach(

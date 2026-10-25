@@ -126,7 +126,7 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
           (signal) =>
             sdk.start({
               cwd: homedir(),
-              environment: Option.none(),
+              environment: Option.some(environment),
               extensions: [],
               model: brain.model,
               signal,

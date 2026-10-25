@@ -76,6 +76,7 @@ const recordFor = (port: Port) =>
       nodeOptions: [],
       script: "/opt/usine/apps/server/dist/main.js",
       port,
+      logLevel: "Info",
       allowVolatileInstance: false,
     }),
   });

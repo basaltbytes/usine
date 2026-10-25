@@ -45,6 +45,7 @@ const recordFor = (pid: number) =>
       nodeOptions: [],
       script: "/opt/usine/dist/main.js",
       port: Port.make(8_112),
+      logLevel: "Info",
       allowVolatileInstance: false,
     }),
   });

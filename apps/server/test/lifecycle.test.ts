@@ -9,7 +9,7 @@ import { RunId } from "@usine/core/run";
 import { ConfigProvider, Duration, Effect, Layer, Option, Schema } from "effect";
 import { FetchHttpClient, type HttpClient } from "effect/unstable/http";
 import { afterEach, assert, describe, it } from "vitest";
-import { LifecycleOptions, Port, SERVER_HOST } from "../src/cli.ts";
+import { LifecycleOptions, Port, SERVER_HOST, type UpLogLevel } from "../src/cli.ts";
 import { startDetached } from "../src/detach.ts";
 import { InstanceLaunch, instanceFiles } from "../src/instance/record.ts";
 import { probeInstance } from "../src/instance/state.ts";
@@ -61,12 +61,17 @@ const options = (seconds: number, force = false) =>
   new LifecycleOptions({ timeout: Duration.seconds(seconds), force });
 
 /** Starts the fixture in the background, the way `usine restart` starts `usine up`. */
-const startFixture = async (directory: InstanceDirectory, script = FIXTURE) => {
+const startFixture = async (
+  directory: InstanceDirectory,
+  script = FIXTURE,
+  logLevel: UpLogLevel = "Info",
+) => {
   const launch = new InstanceLaunch({
     node: process.execPath,
     nodeOptions: ["--experimental-strip-types", "--no-warnings"],
     script,
     port: await freePort(),
+    logLevel,
     allowVolatileInstance: false,
   });
   const { pid } = await run(startDetached(directory, launch, Duration.seconds(30)));
@@ -104,10 +109,10 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
     assert.deepStrictEqual(state.stale, Option.none());
   });
 
-  it("restarts into a new process with the recorded launch and the same port", async () => {
+  it("restarts into a new process with the recorded launch, port, and log level", async () => {
     const directory = instanceFolder();
     const files = instanceFiles(directory);
-    const first = await startFixture(directory);
+    const first = await startFixture(directory, FIXTURE, "Debug");
 
     await run(restart(directory, options(20)));
 
@@ -118,6 +123,8 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
     assert.isFalse(alive(first.pid));
     assert.strictEqual(state.record.launch.port, first.launch.port);
     assert.deepStrictEqual(state.record.launch.nodeOptions, first.launch.nodeOptions);
+    // Both starts passed --log-level to the fixture, which recorded it as usine up does.
+    assert.strictEqual(state.record.launch.logLevel, "Debug");
     assert.strictEqual(readFileSync(files.pid, "utf8").trim(), String(state.record.pid));
     const log = readFileSync(files.log, "utf8");
     assert.strictEqual(log.match(/fixture listening/gu)?.length, 2, log);
@@ -203,6 +210,7 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
       nodeOptions: ["--eval", "console.error('cannot start'); process.exit(3)"],
       script: FIXTURE,
       port: await freePort(),
+      logLevel: "Info",
       allowVolatileInstance: false,
     });
     const error = await run(

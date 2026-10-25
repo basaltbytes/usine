@@ -21,6 +21,7 @@ const exitWith = (message: string) =>
 const main = Effect.gen(function* () {
   const command = yield* parseCli(process.argv.slice(2), {
     port: Option.fromNullishOr(process.env.USINE_PORT),
+    logLevel: Option.fromNullishOr(process.env.USINE_LOG_LEVEL),
     allowVolatileInstance: Option.fromNullishOr(process.env.USINE_ALLOW_VOLATILE_INSTANCE),
   });
   const directory = InstanceDirectory.make(process.cwd());
@@ -37,15 +38,15 @@ const main = Effect.gen(function* () {
         Effect.promise(() => import("./backup.ts")),
         ({ backup }) => backup(directory, output),
       ),
-    UpCommand: ({ port, allowVolatileInstance, detach }) =>
+    UpCommand: ({ port, logLevel, allowVolatileInstance, detach }) =>
       detach
         ? Effect.flatMap(
             Effect.promise(() => import("./detach.ts")),
-            ({ upDetached }) => upDetached(directory, port, allowVolatileInstance),
+            ({ upDetached }) => upDetached(directory, port, logLevel, allowVolatileInstance),
           )
         : Effect.flatMap(
             Effect.promise(() => import("./up.ts")),
-            ({ up }) => up(port, allowVolatileInstance),
+            ({ up }) => up(port, logLevel, allowVolatileInstance),
           ),
     StatusCommand: () =>
       Effect.flatMap(

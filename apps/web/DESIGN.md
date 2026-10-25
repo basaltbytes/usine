@@ -423,7 +423,7 @@ Every string on screen, from title to tooltip, states what is true in common app
 2. **Software is not a person.** A run, loop, item, worker, or agent doesn't wait, ask, want, hold, carry, belong, see, act, or own anything, and is never "its", "their", or "theirs". Write the state: `Waiting for approval`, not `Its Run waits for your approval`.
 3. **The fact comes first.** Cut clauses that explain a consequence, such as `so no run opens` or `the loop waits for a retry`. Something for the operator to do is a button, not a sentence.
 4. **Common app words, no factory roleplay, no invented terms.** Overview, Running, Stalled, Needs attention, Recent runs, Last checked. Never Desk, Not moving, Needs you, Running now, Last outcomes, or the factory.
-5. **Short.** A status or stall reason is a fragment with no final period: `Canceled 2d ago, unchanged since`, `Failed 3h ago: Agent failure`, `Queued, no free worker`, `usine-worker-1 silent since 19:31:03`.
+5. **Short.** A status or stall reason is a fragment with no final period: `Canceled 2d ago, unchanged since`, `Failed 3h ago: Agent failure`, `Waiting for a free worker slot`, `usine-worker-1 silent since 19:31:03`.
 
 ## Do's and Don'ts
 

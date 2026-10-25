@@ -20,7 +20,11 @@ import {
   volatileRoots,
 } from "../src/cli.ts";
 
-const noEnvironment = { port: Option.none<string>(), allowVolatileInstance: Option.none<string>() };
+const noEnvironment = {
+  port: Option.none<string>(),
+  logLevel: Option.none<string>(),
+  allowVolatileInstance: Option.none<string>(),
+};
 
 describe("usine CLI", () => {
   it("parses backup independently of server settings and provides help", async () => {
@@ -200,6 +204,30 @@ describe("usine CLI", () => {
     assert.match(flagError.message, /between 1 and 65535/);
     assert(environmentError instanceof CliUsageError);
     assert.match(environmentError.message, /^USINE_PORT/);
+  });
+
+  it("reads the log level from the flag, then the environment, ignoring case", async () => {
+    const level = async (args: ReadonlyArray<string>, environment = Option.none<string>()) => {
+      const command = await Effect.runPromise(
+        parseCli(["up", ...args], { ...noEnvironment, logLevel: environment }),
+      );
+      assert(command._tag === "UpCommand");
+      return command.logLevel;
+    };
+    assert.strictEqual(await level([]), "Info");
+    assert.strictEqual(await level([], Option.some("DEBUG")), "Debug");
+    assert.strictEqual(await level(["--log-level", "warn"], Option.some("debug")), "Warn");
+    assert.strictEqual(await level(["--log-level=trace"]), "Trace");
+    const flagError = await Effect.runPromise(
+      parseCli(["up", "--log-level", "verbose"], noEnvironment).pipe(Effect.flip),
+    );
+    const environmentError = await Effect.runPromise(
+      parseCli(["up"], { ...noEnvironment, logLevel: Option.some("") }).pipe(Effect.flip),
+    );
+    assert(flagError instanceof CliUsageError);
+    assert.match(flagError.message, /^--log-level must be trace, debug, info, warn, or error/);
+    assert(environmentError instanceof CliUsageError);
+    assert.match(environmentError.message, /^USINE_LOG_LEVEL/);
   });
 
   it("reads the version pinned in the installed server package", async () => {

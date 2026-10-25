@@ -246,6 +246,16 @@ const LoopFacts = ({
         <Unset>runs per item before a reset</Unset>
       </Fact>
       <Fact label="Permissions">{permissionsLabel[loop.permissions]}</Fact>
+      <Fact label="Priority">
+        {loop.priority === null ? (
+          <Unset>None; runs wait in lane order</Unset>
+        ) : (
+          <>
+            <span className="tabular-nums">{loop.priority}</span>{" "}
+            <Unset>queued ahead of runs in lane order</Unset>
+          </>
+        )}
+      </Fact>
       <Fact label="Step">
         <code className="font-mono text-xs">{loop.step}</code>
       </Fact>

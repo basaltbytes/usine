@@ -273,7 +273,9 @@ describe("Worker scheduler reservations that name a Worker", () => {
       ]),
       () =>
         Effect.gen(function* () {
-          const scheduler = yield* startScheduler([]);
+          const context = yield* schedulerContext([]);
+          const scheduler = Context.get(context, StepExecutor);
+          const status = Context.get(context, WorkerStatus);
           const agent = yield* developer;
           const onLocal = yield* scheduler.reserve(runOf(1), submission(agent, 1), Option.none());
           assert.strictEqual(onLocal.worker, local);
@@ -283,8 +285,74 @@ describe("Worker scheduler reservations that name a Worker", () => {
           yield* assertWaiting(reattaching, "local's only slot is leased; spare's stays free");
           const behind = yield* scheduler.reserve(runOf(3), submission(agent, 3), Option.none());
           assert.strictEqual(behind.worker, spare);
+          const waiting = yield* Effect.forkChild(
+            scheduler.reserve(runOf(4), submission(agent, 4), Option.none()),
+          );
+          yield* assertWaiting(waiting, "both slots are leased");
+          assert.deepStrictEqual(
+            (yield* status.queue).map(({ runId, ahead }) => [runId, ahead]),
+            [
+              [runOf(2), 0],
+              [runOf(4), 0],
+            ],
+            "the reattached Attempt's Run waits for local only, so spare's next slot goes to run 4",
+          );
           yield* onLocal.release;
           assert.strictEqual((yield* leaseOf(reattaching)).worker, local);
+          yield* behind.release;
+          assert.strictEqual((yield* leaseOf(waiting)).worker, spare);
+        }).pipe(Effect.scoped),
+    ),
+  );
+
+  it.live("count for the Runs behind them while every Worker has one", () =>
+    withWorkers(
+      localWorkers([
+        ["local", 1],
+        ["spare", 1],
+      ]),
+      () =>
+        Effect.gen(function* () {
+          const context = yield* schedulerContext([]);
+          const scheduler = Context.get(context, StepExecutor);
+          const status = Context.get(context, WorkerStatus);
+          const agent = yield* developer;
+          const onLocal = yield* scheduler.reserve(runOf(1), submission(agent, 1), Option.none());
+          yield* scheduler.reserve(runOf(2), submission(agent, 2), Option.none());
+          const reattachingLocal = yield* Effect.forkChild(
+            scheduler.reserve(runOf(3), submission(agent, 3), Option.some(local)),
+          );
+          const reattachingSpare = yield* Effect.forkChild(
+            scheduler.reserve(runOf(4), submission(agent, 4), Option.some(spare)),
+          );
+          const waiting = yield* Effect.forkChild(
+            scheduler.reserve(runOf(5), submission(agent, 5), Option.none()),
+          );
+          yield* assertWaiting(waiting, "both slots are leased");
+          assert.deepStrictEqual(
+            (yield* status.queue).map(({ runId, ahead }) => [runId, ahead]),
+            [
+              [runOf(3), 0],
+              [runOf(4), 0],
+              [runOf(5), 1],
+            ],
+            "whichever Worker frees a slot first, its reattached Attempt's Run takes it",
+          );
+          yield* onLocal.release;
+          const onLocalAgain = yield* leaseOf(reattachingLocal);
+          assert.strictEqual(onLocalAgain.worker, local);
+          yield* assertWaiting(waiting, "local's freed slot went to run 3");
+          assert.deepStrictEqual(
+            (yield* status.queue).map(({ runId, ahead }) => [runId, ahead]),
+            [
+              [runOf(4), 0],
+              [runOf(5), 0],
+            ],
+            "local's next slot goes to run 5",
+          );
+          yield* onLocalAgain.release;
+          assert.strictEqual((yield* leaseOf(waiting)).worker, local);
+          yield* Fiber.interrupt(reattachingSpare);
         }).pipe(Effect.scoped),
     ),
   );

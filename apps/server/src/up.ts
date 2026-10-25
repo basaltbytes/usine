@@ -23,11 +23,13 @@ import {
   FileSystem,
   Layer,
   Option,
+  References,
   Result,
 } from "effect";
 import { liveBackendLayer, needsSetupBackendLayer } from "./backend.ts";
 import {
   type Port,
+  type UpLogLevel,
   VolatileInstanceDirectoryError,
   openBrowser,
   packageVersion,
@@ -193,7 +195,7 @@ const start = Effect.fnUntraced(function* (
   );
 });
 
-export const up = (port: Port, allowVolatileInstance: boolean) =>
+export const up = (port: Port, logLevel: UpLogLevel, allowVolatileInstance: boolean) =>
   Effect.scoped(
     Effect.gen(function* () {
       const directory = InstanceDirectory.make(process.cwd());
@@ -204,7 +206,7 @@ export const up = (port: Port, allowVolatileInstance: boolean) =>
         pid: ProcessId.make(process.pid),
         version: yield* packageVersion().pipe(Effect.provide(NodeServices.layer)),
         startedAt: yield* DateTime.now,
-        launch: yield* currentLaunch(port, allowVolatileInstance),
+        launch: yield* currentLaunch(port, logLevel, allowVolatileInstance),
       });
       // Acquired before any store opens and released after every store closes.
       yield* holdInstance(directory, record).pipe(Effect.provide(NodeServices.layer));
@@ -217,4 +219,4 @@ export const up = (port: Port, allowVolatileInstance: boolean) =>
       );
       return yield* start(directory, instances, port).pipe(Effect.provideContext(tracer));
     }),
-  );
+  ).pipe(Effect.provideService(References.MinimumLogLevel, logLevel));

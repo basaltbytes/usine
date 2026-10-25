@@ -1309,8 +1309,11 @@ describe("store failures in a Run's fiber", () => {
             });
           }),
         ).pipe(Layer.provide(executorLayer(plans)));
-        const recovering = Logger.make(({ message }) => {
+        const failureSpans: Array<string | undefined> = [];
+        const recovering = Logger.make(({ message, fiber }) => {
           if (/fiber stopped on an engine failure/u.test(JSON.stringify(message))) {
+            const span = fiber.currentSpan;
+            failureSpans.push(span?._tag === "Span" ? span.name : undefined);
             failures.left = 0;
           }
         });
@@ -1325,6 +1328,8 @@ describe("store failures in a Run's fiber", () => {
           );
           assert.strictEqual(finished.attempts.length, 1);
           assert.strictEqual(yield* Ref.get(reserved), 2);
+          // The failure is an event of the Run's trace, not of the launch span that already ended.
+          assert.deepStrictEqual(failureSpans, ["RunDriver.drive"]);
         }).pipe(
           Effect.provide(flakyEngineLayer(directory, failures, executor)),
           Effect.provideService(ReconcileInterval, "50 millis"),

@@ -124,7 +124,9 @@ export const taskCards = (
         : [],
     );
     const preferred =
-      history.find(({ run }) => run.canApprove || run.canResolveFailure) ?? active ?? history[0];
+      history.find(({ item, run }) => runNeedsAttention(run, isSettledItemState(item.state))) ??
+      active ??
+      history[0];
     const runs = history.map(({ run }) => run).reverse();
     const view = new BoardTaskView({
       ...itemLink(current),

@@ -1,4 +1,9 @@
-import { LabelLaneSource, LaneName, StateLaneSource } from "@usine/config/board";
+import {
+  isSettledItemState,
+  LabelLaneSource,
+  LaneName,
+  StateLaneSource,
+} from "@usine/config/board";
 import { GitHubLabelName } from "@usine/config/label";
 import { AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
@@ -183,8 +188,12 @@ const task = (
 ) => {
   const current = members.at(-1) ?? members[0];
   const state = extra.state ?? (current.kind === "pr" ? "pr-open" : "issue-open");
-  const preferred =
-    [...runs].reverse().find((run) => run.canApprove || run.canResolveFailure) ?? runs.at(-1);
+  // As the server does, a failed Run on a closed or merged Item doesn't need the operator.
+  const needsYou = (run: RunView) =>
+    run.canApprove ||
+    (run.canResolveFailure &&
+      !members.some(({ itemKey, state }) => itemKey === run.itemKey && isSettledItemState(state)));
+  const preferred = [...runs].reverse().find(needsYou) ?? runs.at(-1);
   return new BoardTaskView({
     ...current,
     title: members[0].title,
@@ -198,7 +207,7 @@ const task = (
         : null,
     runs,
     run: preferred ?? null,
-    needsYou: runs.some((run) => run.canApprove || run.canResolveFailure),
+    needsYou: runs.some(needsYou),
     conflicting: extra.conflicting ?? false,
     loops: (extra.loops ?? []).map((loop) => LoopName.make(loop)),
     usage: taskUsageOf(runs, extra.pools),

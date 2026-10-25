@@ -22,7 +22,7 @@ Entries:
 - **Loop file not loaded** or **Agent file not loaded**: a file that failed to load at startup or reload, with the reason, until fixed and reloaded.
 - **Worker not configured**: a worker no longer in `usine.yaml` that has recorded attempts, with their count and the full detail, actions below. Startup doesn't reconcile them. Declare the worker again and restart `usine up`, or choose **Discard leftovers** and **Confirm discard** to stop tracking them, which removes nothing from the worker. While attempts a reload left there still run, the entry says how many (`2 attempts still running on it. Discard the leftovers after they end`), and **Discard leftovers** appears after the last ends. A refused discard, for example because the worker is declared again, shows the reason.
 
-A failed run, question, or blocker on an item that is closed or merged isn't listed and doesn't mark the project or its card; the run stays under **Recent runs** and in its drawer, which marks the item closed or merged. A cycle budget entry leaves at the first poll after its item closes or merges.
+A failed run, question, or blocker on an item that is closed or merged isn't listed and doesn't mark the project or its card; the run stays under **Recent runs** and in its drawer, which marks the item closed or merged. A cycle budget entry leaves at the first poll after its item closes or merges. A run in a repository that `usine.yaml` no longer lists isn't listed either, since it has no project to mark.
 
 ## Overview
 
@@ -60,10 +60,10 @@ A card joins explicitly linked issues and PRs. It shows:
 
 - Each member's mark, the task's title on at most two lines, and up to three labels besides the lane's own, with a count of the rest.
 - For an open run, or a failed run that still needs the operator: a dot in the state's color (pulsing while `Running`), then the loop, state, time, and agent. The time counts from the run's opening while `Waiting` or `Queued`, the current attempt's start while `Running`, and the failure once `Failed`; the tooltip gives the full timestamp and start point. Succeeded and canceled runs show only on the task page, in the drawer, and in **Run history**.
-- Under that line: failures, with **Retry** if retryable or **Mark answered** or **Mark resolved** for a question or blocker; merge conflicts; run action and **Run again** progress, including that no run opened because the cycle budget is used up; and move progress.
+- Under that line: failures on items that are still open, with **Retry** if retryable or **Mark answered** or **Mark resolved** for a question or blocker; merge conflicts; run action and **Run again** progress, including that no run opened because the cycle budget is used up; and move progress.
 - For a stalled task, the overview's reason (from `GET /api/desk`), after the loop if no run line shows it, and the one action that unblocks it, such as **Approve** or **Run again**.
 
-Clicking a card opens its task page. The card menu lists only actions that apply: each member on GitHub; **Open run** for the run shown; **Run history** if the task has other runs; **Approve** for a `Waiting` run; **Retry** for a `Failed` one; **Cancel run**, after confirmation, for an open run; **Run again** with the loop's name if the latest run succeeded or was canceled, which opens the new run's drawer even if the card changes lanes first; and **Move to** with the other writable lanes, absent if there are none and while a move is saving.
+Clicking a card opens its task page. The card menu lists only actions that apply: each member on GitHub; **Open run** for the run shown; **Run history** if the task has other runs; **Approve** for a `Waiting` run; **Retry** for a `Failed` one on an open item; **Cancel run**, after confirmation, for an open run; **Run again** with the loop's name if the latest run succeeded or was canceled, which opens the new run's drawer even if the card changes lanes first; and **Move to** with the other writable lanes, absent if there are none and while a move is saving.
 
 The menu button names the current issue or PR, whose labels a move changes. It shows on hover, on focus, and while the menu is open, and always on touch screens.
 

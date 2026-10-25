@@ -1,7 +1,7 @@
 import { renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DateTime, Effect, FileSystem, Option, Schema } from "effect";
-import { Port } from "../cli.ts";
+import { Port, UpLogLevel } from "../cli.ts";
 
 /** An operating system process ID. */
 export const ProcessId = Schema.Int.check(Schema.isGreaterThan(0)).pipe(Schema.brand("ProcessId"));
@@ -16,16 +16,18 @@ export class InstanceLaunch extends Schema.Class<InstanceLaunch>("@usine/server/
   /** The CLI entry point, from `process.argv[1]`. */
   script: Schema.NonEmptyString,
   port: Port,
+  logLevel: UpLogLevel,
   allowVolatileInstance: Schema.Boolean,
 }) {}
 
 /** Returns how this process was started. Dies without `process.argv[1]`, which a CLI always has. */
-export const currentLaunch = (port: Port, allowVolatileInstance: boolean) =>
+export const currentLaunch = (port: Port, logLevel: UpLogLevel, allowVolatileInstance: boolean) =>
   Schema.decodeUnknownEffect(InstanceLaunch)({
     node: process.execPath,
     nodeOptions: process.execArgv,
     script: process.argv[1],
     port,
+    logLevel,
     allowVolatileInstance,
   }).pipe(Effect.orDie);
 
