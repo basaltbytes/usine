@@ -57,7 +57,7 @@ const REJECTED_CODES: ReadonlySet<string> = new Set([
  * be read (`unreadable`), a refresh failed and is tried again after a short backoff
  * (`refresh-failed`), or the token endpoint rejected the refresh token, which only a new login
  * fixes (`refresh-rejected`). The message names no token and no text from the token endpoint.
- * The reverse proxy answers it with 401.
+ * The reverse proxy answers 401 for `refresh-rejected`, and otherwise 503, which Codex retries.
  */
 export class ChatGptLoginUnavailable extends Schema.TaggedError<ChatGptLoginUnavailable>()(
   "ChatGptLoginUnavailable",
@@ -109,11 +109,17 @@ const tokenErrorCode = (body: string): Option.Option<string> =>
     Option.filter((code) => ERROR_CODE.test(code)),
   );
 
-/** Whether a refresh failure means the refresh token can't be used again, as Codex classifies it. */
+/** The client error statuses that a later request can get past: a request timeout and a rate limit. */
+const TRANSIENT_CLIENT_ERRORS: ReadonlySet<number> = new Set([408, 429]);
+
+/**
+ * Whether a refresh failure means the refresh token can't be used again: a client error other
+ * than a timeout or rate limit, such as `invalid_grant`, or one of Codex's rejection codes.
+ * Server errors and network errors are transient.
+ */
 const isRejection = (status: number, code: Option.Option<string>): boolean =>
-  status === 401 ||
-  Option.exists(code, (value) => REJECTED_CODES.has(value)) ||
-  (status === 400 && Option.contains(code, "invalid_grant"));
+  (status >= 400 && status < 500 && !TRANSIENT_CLIENT_ERRORS.has(status)) ||
+  Option.exists(code, (value) => REJECTED_CODES.has(value));
 
 interface LoginState {
   readonly tokens: ChatGptTokens;

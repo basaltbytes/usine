@@ -320,10 +320,19 @@ describe("ChatGptLogins", () => {
         Effect.succeed(json(400, { error: "refresh token rt-leaked-in-an-error is invalid" })),
       );
       const failed = yield* Effect.flip(accessToken(login));
-      assert.strictEqual(failed.reason, "refresh-failed");
+      assert.strictEqual(failed.reason, "refresh-rejected");
       assert.notInclude(failed.message, "rt-leaked-in-an-error");
     }).pipe(Effect.provide(logins)),
   );
+
+  for (const status of [408, 429, 500, 503])
+    it.effect(`treats a ${String(status)} from the token endpoint as transient`, () =>
+      Effect.gen(function* () {
+        const { login } = yield* authFile("1 minute");
+        yield* setAnswer(() => Effect.succeed(json(status, { error: "try_again" })));
+        assert.strictEqual((yield* Effect.flip(accessToken(login))).reason, "refresh-failed");
+      }).pipe(Effect.provide(logins)),
+    );
 
   it.effect(
     "a request that ends during a refresh doesn't stop it, so the rotated token is kept",
@@ -439,6 +448,7 @@ describe("ChatGptLogins", () => {
     [400, { error: "invalid_grant", error_description: "Refresh token is invalid" }],
     [400, { error: { code: "refresh_token_reused", message: "Already used" } }],
     [401, { error: "unauthorized" }],
+    [403, {}],
   ] as const)
     it.effect(
       `a refresh rejected with ${String(status)} ${JSON.stringify(body)} stops refreshing until a reload reads a new login`,
@@ -622,22 +632,32 @@ describe("GatewayProxy with a ChatGPT login", () => {
       }),
   );
 
-  it.effect("answers 401 and sends nothing upstream when the login can't be refreshed", () =>
-    Effect.gen(function* () {
-      const { login } = yield* authFile("1 minute");
-      yield* Effect.gen(function* () {
-        yield* setAnswer(() => Effect.succeed(json(502, { error: "bad_gateway" })));
-        const caller = yield* attach;
-        const answer = yield* send(
-          "http://llm.gw.test/openai/v1/responses",
-          { authorization: `Bearer ${caller}` },
-          "{}",
-        );
-        assert.deepStrictEqual([answer.status, answer.reason], [401, "provider-login-unavailable"]);
-        assert.lengthOf(yield* backendRequests, 0);
-      }).pipe(Effect.provide(proxyFor(login)));
-    }),
-  );
+  for (const [token, status, outcome] of [
+    [json(502, { error: "bad_gateway" }), 503, "a transient failure, which Codex retries"],
+    [json(400, { error: "invalid_grant" }), 401, "a rejected refresh token"],
+  ] as const)
+    it.effect(
+      `answers ${String(status)} and sends nothing upstream when the login can't be refreshed after ${outcome}`,
+      () =>
+        Effect.gen(function* () {
+          const { login } = yield* authFile("1 minute");
+          yield* Effect.gen(function* () {
+            yield* setAnswer(() => Effect.succeed(token.clone()));
+            const caller = yield* attach;
+            const answer = yield* send(
+              "http://llm.gw.test/openai/v1/responses",
+              { authorization: `Bearer ${caller}` },
+              "{}",
+            );
+            assert.deepStrictEqual(
+              [answer.status, answer.reason],
+              [status, "provider-login-unavailable"],
+            );
+            assert.include(answer.body, '"reason":"provider-login-unavailable"');
+            assert.lengthOf(yield* backendRequests, 0);
+          }).pipe(Effect.provide(proxyFor(login)));
+        }),
+    );
 
   it.effect("refreshes before the next request when the backend refuses the access token", () =>
     Effect.gen(function* () {

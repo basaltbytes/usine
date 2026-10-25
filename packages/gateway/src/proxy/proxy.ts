@@ -23,7 +23,7 @@ import {
   githubRoute,
   withGitHubCredential,
 } from "../github/github.ts";
-import { ChatGptLogins } from "../chatgpt/logins.ts";
+import { type ChatGptLoginUnavailable, ChatGptLogins } from "../chatgpt/logins.ts";
 import {
   type ChatGptLogin,
   llmRoute,
@@ -64,23 +64,37 @@ const REFUSAL_STATUS = {
   "attachment-expired": 403,
   "repository-mismatch": 403,
   "provider-not-configured": 503,
-  "provider-login-unavailable": 401,
+  "provider-login-unavailable": 503,
 } as const satisfies Record<RefusalReason, number>;
 
-/** A refusal, with the caller's claims once its token is verified. */
+/** A refusal, with the caller's claims once its token is verified, and the response status. */
 class Refused extends Data.TaggedError("Refused")<{
   readonly reason: RefusalReason;
   readonly message: string;
   readonly caller: Option.Option<CallerClaims>;
+  readonly status: number;
 }> {}
 
 /** Returns a refusal for a request whose caller token isn't verified yet. */
 const refused = (reason: RefusalReason, message: string) =>
-  new Refused({ reason, message, caller: Option.none() });
+  new Refused({ reason, message, caller: Option.none(), status: REFUSAL_STATUS[reason] });
 
 /** Returns a refusal for a verified caller. */
 const refusedCaller = (claims: CallerClaims, reason: RefusalReason, message: string) =>
-  new Refused({ reason, message, caller: Option.some(claims) });
+  new Refused({ reason, message, caller: Option.some(claims), status: REFUSAL_STATUS[reason] });
+
+/**
+ * Returns the refusal for a ChatGPT login without a usable access token: 503 while a later
+ * refresh can succeed, which Codex retries, and 401 once the token endpoint has rejected the
+ * refresh token, which Codex doesn't.
+ */
+const loginUnavailable = (claims: CallerClaims, error: ChatGptLoginUnavailable) =>
+  new Refused({
+    reason: "provider-login-unavailable",
+    message: error.message,
+    caller: Option.some(claims),
+    status: error.reason === "refresh-rejected" ? 401 : 503,
+  });
 
 /** A request's host without its port, and its path and query. */
 interface RequestTarget {
@@ -315,11 +329,7 @@ export class GatewayProxy extends Context.Service<
       ) {
         const access = yield* logins
           .access(login)
-          .pipe(
-            Effect.mapError((error) =>
-              refusedCaller(claims, "provider-login-unavailable", error.message),
-            ),
-          );
+          .pipe(Effect.mapError((error) => loginUnavailable(claims, error)));
         return {
           headers: withChatGptAccess(access, incoming),
           answered: (status: number) =>
@@ -384,7 +394,7 @@ const PERMANENT_REDIRECTS: ReadonlySet<number> = new Set([301, 308]);
 const refusalResponse = (error: Refused): HttpServerResponse.HttpServerResponse =>
   HttpServerResponse.jsonUnsafe(
     { message: `usine gateway: ${error.message}`, reason: error.reason },
-    { status: REFUSAL_STATUS[error.reason], headers: { [REFUSAL_HEADER]: error.reason } },
+    { status: error.status, headers: { [REFUSAL_HEADER]: error.reason } },
   );
 
 const absoluteUrl = (value: string): Option.Option<URL> =>
