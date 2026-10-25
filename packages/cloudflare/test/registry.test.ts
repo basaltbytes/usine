@@ -19,6 +19,8 @@ const summary = (name: string, owner: SandboxOwner, running: boolean) =>
     instanceType: "standard-4",
     createdAt: DateTime.makeUnsafe(0),
     running,
+    held: false,
+    draining: false,
   });
 
 describe("sandbox registry", () => {

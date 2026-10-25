@@ -24,6 +24,10 @@ RUN npm install -g pnpm@11.20.0 @anthropic-ai/claude-code@2.1.308 @openai/codex@
 # Files in @cloudflare/sandbox runs this helper to read the process files.
 COPY --from=sandbox-tools /usr/local/bin/sandbox-shim /usr/local/bin/sandbox-shim
 
+# Records the platform's SIGTERM for the Worker; see init.sh.
+COPY init.sh /usr/local/bin/usine-sandbox-init
+RUN chmod 0755 /usr/local/bin/usine-sandbox-init
+
 RUN useradd --create-home --shell /bin/bash usine \
   && install -d -o usine -g usine /home/usine/.codex /home/usine/.usine/processes /home/usine/workspace
 COPY --chown=usine:usine codex-config.toml /home/usine/.codex/config.toml
@@ -32,7 +36,8 @@ USER usine
 WORKDIR /home/usine
 ENV HOME=/home/usine
 
-# tini reaps the commands that the Worker starts; the container runs until the Worker destroys it
-# or its inactivity timeout passes.
+# tini reaps the commands that the Worker starts and passes the platform's SIGTERM to the init
+# script. The container runs until the Worker destroys it, its inactivity timeout passes, or the
+# platform stops it.
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["sleep", "infinity"]
+CMD ["/usr/local/bin/usine-sandbox-init"]

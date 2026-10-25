@@ -88,6 +88,16 @@ export class SandboxSummary extends Schema.Class<SandboxSummary>(
   createdAt: Schema.DateTimeUtc,
   /** Whether the container runs. A container that stopped lost its disk. */
   running: Schema.Boolean,
+  /**
+   * Whether usine holds the sandbox: the keepalive alarm keeps its container running past the
+   * lease, until usine reconciles or destroys it, because it keeps a checkout.
+   */
+  held: Schema.Boolean,
+  /**
+   * Whether the platform sent the container SIGTERM. It stops the container within 15 minutes, and
+   * a container that starts again has an empty disk.
+   */
+  draining: Schema.Boolean,
 }) {}
 
 export class SandboxList extends Schema.Class<SandboxList>("@usine/cloudflare/SandboxList")({
@@ -194,6 +204,11 @@ export const sandboxGroup = HttpApiGroup.make("sandbox").add(
   HttpApiEndpoint.put("credentials", "/v1/sandboxes/:name/credentials", {
     params: sandbox,
     payload: SandboxCredentials.annotate(strict),
+    success: SandboxSummary,
+    error: [SandboxNotFound, ContainerUnavailable],
+  }),
+  HttpApiEndpoint.post("hold", "/v1/sandboxes/:name/hold", {
+    params: sandbox,
     success: SandboxSummary,
     error: [SandboxNotFound, ContainerUnavailable],
   }),

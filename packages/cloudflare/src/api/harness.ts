@@ -7,6 +7,12 @@ export const SANDBOX_HOME = "/home/usine";
 export const PROCESSES_DIRECTORY = `${SANDBOX_HOME}/.usine/processes`;
 
 /**
+ * The file that the image's init writes when the platform sends the container SIGTERM, before
+ * it stops the container within 15 minutes (`image/init.sh`).
+ */
+export const DRAIN_MARKER = `${SANDBOX_HOME}/.usine/draining`;
+
+/**
  * The certificate authority that signs the certificates of the hosts the Worker intercepts over
  * HTTPS. The container runtime mounts it.
  */

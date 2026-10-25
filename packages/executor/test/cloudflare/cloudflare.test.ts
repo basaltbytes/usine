@@ -87,6 +87,7 @@ const executor = (
     instance: INSTANCE,
     shell: { command: process.execPath, args: ["--no-warnings", SHELL] },
     interruptGrace: "2 seconds",
+    drainPollInterval: "100 millis",
   }).pipe(
     Layer.provide(credentials.layer),
     Layer.provide(stubAttemptRuntime(storage, parent)),
@@ -104,7 +105,10 @@ const runningSandbox = (
   owner: OWNER,
   attempt,
   running: true,
+  held: false,
+  draining: false,
   github: [],
+  providers: [],
   paths: new Set(paths),
   commands: [],
   stops: 0,
@@ -247,6 +251,9 @@ describe("cloudflare Worker", () => {
         const kept = worker.state.sandboxes.get(SANDBOX);
         assert(kept !== undefined);
         assert.deepStrictEqual(kept.github, [`${TOKEN_PREFIX}1`, null]);
+        // The revocation also removes the provider keys, and the hold keeps the checkout.
+        assert.deepStrictEqual(kept.providers, [1, 0]);
+        assert.isTrue(kept.held);
         const createsBefore = worker.state.requests.filter(
           (line) => line === `PUT /v1/sandboxes/${SANDBOX}`,
         ).length;
@@ -272,6 +279,44 @@ describe("cloudflare Worker", () => {
         assert.isTrue(
           kept.stops >= 2,
           "reattachment stops the commands left from before the restart",
+        );
+        assert.isFalse(worker.state.sandboxes.has(SANDBOX));
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "drains an Attempt whose sandbox the platform stops: salvages, destroys it, and fails retryably",
+    () =>
+      Effect.gen(function* () {
+        const worker = yield* fakeWorker;
+        worker.state.respond = (_sandbox, words) =>
+          words[0] === "git" && words.includes("status")
+            ? Option.some({ stdout: " M src/index.ts\n", exitCode: 0 })
+            : Option.none();
+        const working = yield* Deferred.make<void>();
+        const parent: StubParent = () =>
+          Deferred.succeed(working, undefined).pipe(Effect.andThen(Effect.never));
+        let pushes: ReadonlyArray<string> = [];
+        const exit = yield* Effect.gen(function* () {
+          const cloudflare = yield* Executor;
+          const prepared = yield* cloudflare.prepare(request);
+          const running = yield* Effect.forkChild(prepared.launch(sink));
+          yield* Deferred.await(working);
+          const sandbox = worker.state.sandboxes.get(SANDBOX);
+          assert(sandbox !== undefined);
+          sandbox.draining = true;
+          const launched = yield* Fiber.await(running);
+          pushes = sandbox.commands.filter((line) => line.includes("'push'"));
+          return launched;
+        }).pipe(Effect.scoped, Effect.provide(executor(worker, mintingProvider(), parent)));
+
+        assert.isTrue(Exit.isFailure(exit));
+        const failure = Exit.findErrorOption(exit);
+        assert(Option.isSome(failure) && failure.value._tag === "InfraFailure");
+        assert.include(failure.value.message, "Cloudflare is stopping the attempt's sandbox");
+        assert.isTrue(
+          pushes.some((line) => line.includes(request.salvageRef)),
+          "the release pushes the salvage before the platform stops the container",
         );
         assert.isFalse(worker.state.sandboxes.has(SANDBOX));
       }).pipe(Effect.scoped),

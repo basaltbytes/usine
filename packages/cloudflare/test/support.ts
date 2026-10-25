@@ -35,7 +35,7 @@ const credentials = (token = "ghs_first") =>
     ],
   });
 
-export const storedSandbox = (leaseUntil: DateTime.Utc) =>
+export const storedSandbox = (leaseUntil: DateTime.Utc, held = false) =>
   new StoredSandbox({
     name: NAME,
     owner: OWNER,
@@ -44,6 +44,7 @@ export const storedSandbox = (leaseUntil: DateTime.Utc) =>
     instanceType: "standard-4",
     createdAt: DateTime.makeUnsafe(0),
     leaseUntil,
+    held,
     credentials: credentials(),
   });
 

@@ -24,6 +24,7 @@ export const SandboxOperation = Schema.Literals([
   "get",
   "list",
   "credentials",
+  "hold",
   "stop",
   "destroy",
 ]);
@@ -35,6 +36,7 @@ const ACTIONS = {
   get: "read the sandbox",
   list: "list the sandboxes",
   credentials: "renew the sandbox's credentials",
+  hold: "hold the sandbox",
   stop: "stop the sandbox's commands",
   destroy: "destroy the sandbox",
 } as const satisfies Record<SandboxOperation, string>;
@@ -103,6 +105,8 @@ export interface SandboxClient {
     name: SandboxName,
     credentials: SandboxCredentials,
   ) => Effect.Effect<SandboxSummary, SandboxRequestError>;
+  /** Keeps the sandbox's container running past its lease, until it's destroyed. */
+  readonly hold: (name: SandboxName) => Effect.Effect<SandboxSummary, SandboxRequestError>;
   readonly stop: (name: SandboxName) => Effect.Effect<Stopped, SandboxRequestError>;
   readonly destroy: (name: SandboxName) => Effect.Effect<Destroyed, SandboxRequestError>;
 }
@@ -171,6 +175,7 @@ export const sandboxClientFor = Effect.fn("CloudflareExecutor.sandboxClientFor")
       request("credentials", client.sandbox.credentials({ params: { name }, payload: body }), {
         sandbox: name,
       }),
+    hold: (name) => request("hold", client.sandbox.hold({ params: { name } }), { sandbox: name }),
     stop: (name) => request("stop", client.sandbox.stop({ params: { name } }), { sandbox: name }),
     destroy: (name) =>
       request("destroy", client.sandbox.destroy({ params: { name } }), { sandbox: name }),

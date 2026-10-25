@@ -27,8 +27,14 @@ export interface FakeSandbox {
   readonly owner: string;
   readonly attempt: string;
   running: boolean;
+  /** Whether usine holds the sandbox past its lease. */
+  held: boolean;
+  /** Whether the platform is stopping the container, as its drain marker reports. */
+  draining: boolean;
   /** The GitHub token of each credential publication, in order; `null` for a revocation. */
   readonly github: Array<string | null>;
+  /** The number of provider keys of each credential publication, in order. */
+  readonly providers: Array<number>;
   /** The paths that exist in the sandbox's container. */
   readonly paths: Set<string>;
   /** The command lines it ran through its exec stream, in order. */
@@ -131,6 +137,8 @@ const summaryOf = (sandbox: FakeSandbox) => ({
   instanceType: "standard-4",
   createdAt: "2026-10-25T00:00:00.000Z",
   running: sandbox.running,
+  held: sandbox.held,
+  draining: sandbox.draining,
 });
 
 const readBody = (request: IncomingMessage) =>
@@ -228,7 +236,10 @@ export const fakeWorker = Effect.gen(function* () {
             owner: created.owner,
             attempt: created.attempt,
             running: true,
+            held: false,
+            draining: false,
             github: [],
+            providers: [],
             paths: new Set(),
             commands: [],
             stops: 0,
@@ -237,6 +248,7 @@ export const fakeWorker = Effect.gen(function* () {
         existing.github.push(
           Option.getOrNull(Option.map(created.credentials.github, Redacted.value)),
         );
+        existing.providers.push(created.credentials.providers.length);
         state.sandboxes.set(name, existing);
         return json(response, 200, summaryOf(existing));
       }
@@ -246,9 +258,15 @@ export const fakeWorker = Effect.gen(function* () {
       if (request.method === "PUT" && action === "credentials") {
         if (!sandbox.running)
           return json(response, 503, { _tag: "ContainerUnavailable", name, message: "stopped" });
-        sandbox.github.push(
-          Option.getOrNull(Option.map(decodeCredentials(JSON.parse(body)).github, Redacted.value)),
-        );
+        const credentials = decodeCredentials(JSON.parse(body));
+        sandbox.github.push(Option.getOrNull(Option.map(credentials.github, Redacted.value)));
+        sandbox.providers.push(credentials.providers.length);
+        return json(response, 200, summaryOf(sandbox));
+      }
+      if (request.method === "POST" && action === "hold") {
+        if (!sandbox.running)
+          return json(response, 503, { _tag: "ContainerUnavailable", name, message: "stopped" });
+        sandbox.held = true;
         return json(response, 200, summaryOf(sandbox));
       }
       if (request.method === "POST" && action === "stop") {

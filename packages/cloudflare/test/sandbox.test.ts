@@ -4,6 +4,7 @@ import { HttpRouter } from "effect/unstable/http";
 import { TestClock } from "effect/testing";
 import { ProcessStatus, SandboxSummary } from "../src/api/api.ts";
 import { processFiles, stopCommand } from "../src/sandbox/process.ts";
+import { DRAIN_MARKER } from "../src/api/harness.ts";
 import { collectBytes, keepAlive, LEASE, restore, sandboxRoutes } from "../src/sandbox/sandbox.ts";
 import {
   ATTEMPT,
@@ -193,6 +194,33 @@ describe("sandbox routes", () => {
     expect(unknown.status).toBe(404);
   });
 
+  it("holds a sandbox past its lease until it's destroyed, through a reattachment", async () => {
+    const { state, call } = served();
+    await call("PUT", `/v1/sandboxes/${NAME}`, createBody());
+    const held = await call("POST", `/v1/sandboxes/${NAME}/hold`);
+    await call("PUT", `/v1/sandboxes/${NAME}`, createBody());
+
+    expect(held.status).toBe(200);
+    expect(decodeSummary(await held.json()).held).toBe(true);
+    assert(Option.isSome(state.stored));
+    expect(state.stored.value.held).toBe(true);
+
+    await call("DELETE", `/v1/sandboxes/${NAME}`);
+    const gone = await call("POST", `/v1/sandboxes/${NAME}/hold`);
+    expect(gone.status).toBe(404);
+  });
+
+  it("reports that the platform is draining the container once its init wrote the marker", async () => {
+    const { state, call } = served();
+    await call("PUT", `/v1/sandboxes/${NAME}`, createBody());
+    const before = decodeSummary(await (await call("GET", `/v1/sandboxes/${NAME}`)).json());
+    state.files.set(DRAIN_MARKER, text("2026-10-25T20:00:00Z\n"));
+    const after = decodeSummary(await (await call("GET", `/v1/sandboxes/${NAME}`)).json());
+
+    expect(before.draining).toBe(false);
+    expect(after.draining).toBe(true);
+  });
+
   it("reports the protocol and the Worker's image names", async () => {
     const { call } = served();
     const response = await call("GET", "/v1/health");
@@ -214,6 +242,19 @@ describe("sandbox keepalive alarm", () => {
       expect(Option.map(state.alarm, DateTime.toEpochMillis)).toEqual(
         Option.some(Duration.toMillis(Duration.sum(Duration.hours(1), Duration.minutes(4)))),
       );
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("keeps a held container running after its lease expired", () => {
+    const { state, layer } = fakeSandbox();
+    state.running = true;
+    state.stored = Option.some(storedSandbox(DateTime.makeUnsafe(Duration.toMillis(LEASE)), true));
+    return Effect.gen(function* () {
+      yield* TestClock.adjust("3 days");
+      yield* keepAlive();
+
+      expect(state.keepAlives).toBe(1);
+      expect(Option.isSome(state.alarm)).toBe(true);
     }).pipe(Effect.provide(layer));
   });
 

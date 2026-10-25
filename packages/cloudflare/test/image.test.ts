@@ -1,6 +1,15 @@
 import { describe, expect, it } from "@effect/vitest";
-import { readFileSync } from "node:fs";
-import { PROVIDER_HOSTS, PROCESSES_DIRECTORY, SANDBOX_HOME } from "../src/api/harness.ts";
+import { spawn } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  DRAIN_MARKER,
+  PROVIDER_HOSTS,
+  PROCESSES_DIRECTORY,
+  SANDBOX_HOME,
+} from "../src/api/harness.ts";
 
 // turbo.json lists the cloud-init file as an input of this package's tests.
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
@@ -34,5 +43,29 @@ describe("sandbox image", () => {
     expect(dockerfile).toContain(
       `COPY --chown=usine:usine codex-config.toml ${SANDBOX_HOME}/.codex/config.toml`,
     );
+  });
+
+  it("records the platform's SIGTERM in the drain marker and keeps running", async () => {
+    expect(DRAIN_MARKER).toBe(`${SANDBOX_HOME}/.usine/draining`);
+    expect(dockerfile).toContain(`ENV HOME=${SANDBOX_HOME}`);
+    expect(dockerfile).toContain('CMD ["/usr/local/bin/usine-sandbox-init"]');
+    const home = mkdtempSync(join(tmpdir(), "usine-sandbox-init-"));
+    const marker = join(home, ".usine", "draining");
+    const init = spawn("sh", [fileURLToPath(new URL("../image/init.sh", import.meta.url))], {
+      env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin", HOME: home },
+      stdio: "ignore",
+    });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      init.kill("SIGTERM");
+      for (let waited = 0; waited < 5_000 && !existsSync(marker); waited += 50)
+        await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(readFileSync(marker, "utf8")).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\n$/u);
+      expect(init.exitCode).toBeNull();
+      expect(init.signalCode).toBeNull();
+    } finally {
+      init.kill("SIGKILL");
+    }
   });
 });

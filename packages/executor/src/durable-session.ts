@@ -323,6 +323,11 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
       const stop = yield* Ref.get(stopping);
       if (Option.isSome(stop) && stop.value._tag === "Runaway")
         return yield* new RunawayFailure({ ceiling: stop.value.ceiling });
+      if (Option.isSome(stop) && stop.value._tag === "Drain")
+        return yield* new InfraFailure({
+          message: stop.value.message,
+          cause: new Error(stop.value.message),
+        });
       if (
         Option.isSome(stop) &&
         Exit.isFailure(executed) &&
@@ -380,7 +385,11 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
                 Option.match(stop, {
                   onNone: () => stopReasons.failed,
                   onSome: (reason) =>
-                    reason._tag === "Cancel" ? stopReasons.cancel : "a ceiling tripped",
+                    Match.valueTags(reason, {
+                      Cancel: () => stopReasons.cancel,
+                      Runaway: () => "a ceiling tripped",
+                      Drain: () => "the Worker is losing the Attempt's machine",
+                    }),
                 }),
               ).pipe(Effect.result);
               if (Result.isFailure(stopped))
@@ -648,6 +657,24 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
       );
 
   /**
+   * Stops the launched Attempt because the Worker is losing its machine, such as a sandbox whose
+   * host the platform restarts. The launch fails with a retryable `InfraFailure` with `message`,
+   * and its release salvages the checkout, so the next Attempt resumes from the salvage. Returns
+   * whether the Attempt ran here.
+   */
+  const drain = Effect.fn("DurableSession.drain")(function* (
+    attemptId: AttemptId,
+    message: string,
+  ) {
+    yield* Effect.annotateCurrentSpan({ attemptId });
+    yield* Effect.logWarning("Draining the Attempt before the Worker loses its machine", {
+      attemptId,
+      message,
+    });
+    return yield* stop(attemptId, { _tag: "Drain", message });
+  });
+
+  /**
    * Cancels the Attempt at any stage, then stops a live parent task this process didn't launch,
    * for example one awaiting reattachment. Fails if that task can't be confirmed stopped. Once it
    * is, reconciles the checkout that a launch kept while the stop was unconfirmed.
@@ -825,6 +852,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
     launch,
     prepare,
     cancel,
+    drain,
     intervene,
     isLive,
     outcome,

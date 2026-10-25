@@ -1,6 +1,6 @@
 import { AttemptId } from "@usine/core/attempt";
 import { CloudflareImageName, CloudflareInstanceType } from "@usine/core/worker";
-import { Context, type DateTime, type Duration, type Effect, type Option, Schema } from "effect";
+import { Context, type DateTime, type Duration, Effect, type Option, Schema } from "effect";
 import { SandboxCredentials, SandboxName, SandboxOwner, SandboxSummary } from "../api/api.ts";
 import type { Interception } from "./outbound.ts";
 
@@ -75,10 +75,15 @@ export class StoredSandbox extends Schema.Class<StoredSandbox>("@usine/cloudflar
    * renewal, and command extends it.
    */
   leaseUntil: Schema.DateTimeUtc,
+  /**
+   * Whether usine holds the sandbox for a checkout that it keeps. The keepalive alarm then keeps
+   * the container running past `leaseUntil`, until usine destroys the sandbox.
+   */
+  held: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
   /** Kept so the outbound handlers can be registered again after the Durable Object restarts. */
   credentials: SandboxCredentials,
 }) {
-  summary(running: boolean): SandboxSummary {
+  summary(running: boolean, draining: boolean): SandboxSummary {
     return new SandboxSummary({
       name: this.name,
       owner: this.owner,
@@ -87,6 +92,8 @@ export class StoredSandbox extends Schema.Class<StoredSandbox>("@usine/cloudflar
       instanceType: this.instanceType,
       createdAt: this.createdAt,
       running,
+      held: this.held,
+      draining,
     });
   }
 }

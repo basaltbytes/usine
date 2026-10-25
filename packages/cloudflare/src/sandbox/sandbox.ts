@@ -22,6 +22,7 @@ import {
   SandboxNotFound,
   Stopped,
 } from "../api/api.ts";
+import { DRAIN_MARKER } from "../api/harness.ts";
 import { interceptionsFor } from "./outbound.ts";
 import {
   ContainerFailure,
@@ -70,6 +71,33 @@ const collect = (process: ContainerProcess) =>
       exitCode,
     })),
   );
+
+/**
+ * Returns `sandbox`'s summary as its container is now. A drain marker that can't be read is
+ * logged and reported as no drain; the executor asks again.
+ */
+const summarize = Effect.fn("Sandbox.summarize")(function* (sandbox: StoredSandbox) {
+  const container = yield* SandboxContainer;
+  const running = yield* container.running;
+  if (!running) return sandbox.summary(false, false);
+  const draining = yield* container.size(DRAIN_MARKER).pipe(
+    Effect.map(Option.isSome),
+    Effect.tapError((failure) =>
+      Effect.logWarning("Could not read the sandbox's drain marker", {
+        sandbox: sandbox.name,
+        operation: failure.operation,
+        message: failure.message,
+      }),
+    ),
+    Effect.orElseSucceed(() => false),
+  );
+  if (draining)
+    yield* Effect.logWarning(
+      "The platform is stopping the sandbox's container, which loses its disk",
+      { sandbox: sandbox.name, attempt: sandbox.attempt },
+    );
+  return sandbox.summary(true, draining);
+});
 
 /** Returns the stored sandbox, or fails with `SandboxNotFound`. */
 const stored = Effect.fn("Sandbox.stored")(function* (name: SandboxName) {
@@ -121,6 +149,7 @@ export const extendLease = Effect.fn("Sandbox.extendLease")(function* (
     instanceType: sandbox.instanceType,
     createdAt: sandbox.createdAt,
     leaseUntil: DateTime.addDuration(now, LEASE),
+    held: sandbox.held,
     credentials,
   });
   yield* storage.save(extended);
@@ -178,11 +207,13 @@ const create = Effect.fn("Sandbox.create")(function* (name: SandboxName, request
     instanceType: request.instanceType,
     createdAt: Option.match(existing, { onNone: () => now, onSome: ({ createdAt }) => createdAt }),
     leaseUntil: DateTime.addDuration(now, LEASE),
+    // A hold lasts until the sandbox is destroyed, through a reattachment.
+    held: Option.exists(existing, ({ held }) => held),
     credentials: request.credentials,
   });
   yield* storage.save(sandbox);
   yield* storage.alarmAt(DateTime.addDuration(now, KEEPALIVE_INTERVAL));
-  const summary = sandbox.summary(true);
+  const summary = yield* summarize(sandbox);
   yield* directory.record(summary);
   yield* Effect.logInfo(
     Option.isNone(existing)
@@ -197,9 +228,7 @@ const create = Effect.fn("Sandbox.create")(function* (name: SandboxName, request
 
 const get = Effect.fn("Sandbox.get")(function* (name: SandboxName) {
   yield* Effect.annotateCurrentSpan({ sandbox: name });
-  const sandbox = yield* stored(name);
-  const container = yield* SandboxContainer;
-  return sandbox.summary(yield* container.running);
+  return yield* summarize(yield* stored(name));
 });
 
 const credentials = Effect.fn("Sandbox.credentials")(function* (
@@ -215,7 +244,29 @@ const credentials = Effect.fn("Sandbox.credentials")(function* (
     attempt: sandbox.attempt,
     leaseUntil: DateTime.formatIso(extended.leaseUntil),
   });
-  return extended.summary(true);
+  return yield* summarize(extended);
+});
+
+/**
+ * Holds the sandbox: the keepalive alarm keeps its container running past the lease, until the
+ * sandbox is destroyed. usine holds a sandbox whose checkout it keeps, so that the checkout
+ * survives until usine reconciles it.
+ */
+const hold = Effect.fn("Sandbox.hold")(function* (name: SandboxName) {
+  yield* Effect.annotateCurrentSpan({ sandbox: name });
+  const sandbox = yield* runningSandboxFor(name);
+  const storage = yield* SandboxStorage;
+  const now = yield* DateTime.now;
+  const held = new StoredSandbox({ ...sandbox, held: true });
+  yield* storage.save(held);
+  yield* storage.alarmAt(DateTime.addDuration(now, KEEPALIVE_INTERVAL));
+  yield* Effect.logInfo(
+    sandbox.held
+      ? "The sandbox was already held"
+      : "Holding the sandbox until usine reconciles or destroys it",
+    { sandbox: name, attempt: sandbox.attempt },
+  );
+  return yield* summarize(held);
 });
 
 const stop = Effect.fn("Sandbox.stop")(function* (name: SandboxName) {
@@ -308,8 +359,9 @@ const health = Effect.fn("Sandbox.health")(function* () {
 });
 
 /**
- * Keeps the container running while the sandbox's lease lasts, then lets the platform stop it
- * after `INACTIVITY_TIMEOUT`. Runs from the Durable Object's alarm, and sets the next one.
+ * Keeps the container running while the sandbox's lease lasts or usine holds it, then lets the
+ * platform stop it after `INACTIVITY_TIMEOUT`. Runs from the Durable Object's alarm, and sets the
+ * next one.
  */
 export const keepAlive = Effect.fn("Sandbox.keepAlive")(function* () {
   const storage = yield* SandboxStorage;
@@ -322,7 +374,7 @@ export const keepAlive = Effect.fn("Sandbox.keepAlive")(function* () {
   const sandbox = found.value;
   const fields = { sandbox: sandbox.name, attempt: sandbox.attempt };
   const now = yield* DateTime.now;
-  if (DateTime.isGreaterThan(now, sandbox.leaseUntil)) {
+  if (!sandbox.held && DateTime.isGreaterThan(now, sandbox.leaseUntil)) {
     yield* Effect.logWarning(
       "The sandbox's lease expired without a request from usine; the platform stops its container after the inactivity timeout",
       { ...fields, leaseUntil: DateTime.formatIso(sandbox.leaseUntil) },
@@ -391,6 +443,7 @@ const sandboxHandlers = HttpApiBuilder.group(SandboxServedApi, "sandbox", (route
     .handle("create", ({ params, payload }) => create(params.name, payload))
     .handle("get", ({ params }) => get(params.name))
     .handle("credentials", ({ params, payload }) => credentials(params.name, payload))
+    .handle("hold", ({ params }) => hold(params.name))
     .handle("stop", ({ params }) => stop(params.name))
     .handle("destroy", ({ params }) => destroy(params.name))
     .handle("process", ({ params }) => processStatus(params.name, params.process)),

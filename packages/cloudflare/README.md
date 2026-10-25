@@ -35,6 +35,7 @@ Every request needs the `CF-Access-Client-Id` and `CF-Access-Client-Secret` head
 | `PUT /v1/sandboxes/<name>` | Creates the sandbox of an Attempt, or returns it if it already runs that Attempt. |
 | `GET /v1/sandboxes/<name>` | One sandbox. |
 | `PUT /v1/sandboxes/<name>/credentials` | Replaces the handlers' credentials, such as a renewed installation token. |
+| `POST /v1/sandboxes/<name>/hold` | Keeps the container running past its lease until the sandbox is destroyed. |
 | `POST /v1/sandboxes/<name>/stop` | Stops every command that still runs in the sandbox. |
 | `DELETE /v1/sandboxes/<name>` | Destroys the container and forgets the sandbox. |
 | `GET /v1/sandboxes/<name>/processes/<process>` | A command's state and output size, from its process files. |
@@ -43,7 +44,9 @@ Every request needs the `CF-Access-Client-Id` and `CF-Access-Client-Secret` head
 
 Each command runs in its own session, with its process ID, output, and exit code in files under `/home/usine/.usine/processes/<process>`. If the stream that started a command closes, the command's stdin closes, and its output keeps going to the files, so a later request can attach or read its state.
 
-A keepalive alarm keeps the container running for two hours after the last create, credential renewal, or command, then lets the platform stop it after ten minutes of inactivity. A stopped container loses its disk.
+A keepalive alarm keeps the container running for two hours after the last create, credential renewal, or command, then lets the platform stop it after ten minutes of inactivity. A held sandbox keeps running until it's destroyed: usine holds the sandbox of a checkout that it keeps, such as one with unpushed work. A stopped container loses its disk.
+
+When Cloudflare restarts a host or replaces an instance, it sends the container SIGTERM and stops it up to 15 minutes later. The image's init (`image/init.sh`) writes the time to `/home/usine/.usine/draining` and keeps the container running, and each sandbox summary reports `draining` while the file exists. The executor then drains the Attempt: it salvages the checkout and destroys the sandbox before the container stops.
 
 ## Deploy
 

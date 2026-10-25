@@ -5,7 +5,7 @@ import type {
   CloudflareLlmProvider,
   WorkerName,
 } from "@usine/core/worker";
-import type { Effect, Redacted } from "effect";
+import type { Duration, Effect, Redacted } from "effect";
 
 /** A provider API key that the Worker's outbound handler holds for each Attempt. */
 export interface CloudflareProviderKey {
@@ -41,4 +41,9 @@ export interface CloudflareExecutorOptions {
   readonly shell?: SshCommand;
   /** The timeout for the parent task's cancellation, then separately for the Attempt to finish. Defaults to 10 seconds. */
   readonly interruptGrace?: Parameters<typeof Effect.timeoutOption>[1];
+  /**
+   * How often a running Attempt asks the Worker whether the platform is stopping its sandbox's
+   * container, which it does up to 15 minutes after SIGTERM. Defaults to 30 seconds.
+   */
+  readonly drainPollInterval?: Duration.Input;
 }

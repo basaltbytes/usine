@@ -160,18 +160,25 @@ const brainGap = (
           ),
   });
 
-/** Returns the sandbox credentials with `github` and every provider key of `address`. */
-const credentialsFor = (
-  address: CloudflareWorkerAddress,
-  github: Option.Option<Redacted.Redacted<string>>,
-) =>
+/** Returns the sandbox credentials of a running Attempt: `github` and every provider key of `address`. */
+const credentialsFor = (address: CloudflareWorkerAddress, github: Redacted.Redacted<string>) =>
   new SandboxCredentials({
-    github,
+    github: Option.some(github),
     providers: address.providers.map(
       ({ provider, apiKey }) =>
         new ProviderGrant({ provider, credential: new ApiKeyCredential({ key: apiKey }) }),
     ),
   });
+
+/**
+ * The credentials of a sandbox that runs no Attempt: a preflight's, or one that usine keeps. Its
+ * outbound handlers refuse GitHub and every provider.
+ */
+const NO_CREDENTIALS = new SandboxCredentials({ github: Option.none(), providers: [] });
+
+/** The message of the `InfraFailure` of an Attempt whose sandbox the platform stops. */
+const DRAIN_MESSAGE =
+  "Cloudflare is stopping the attempt's sandbox, whose disk a new container won't have; the attempt salvaged its checkout, and the next attempt resumes from the salvage";
 
 /** A probe that checks a harness's binary and version in a sandbox. Pi never reaches it. */
 const versionProbe =
@@ -221,6 +228,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
       interruptGrace: options.interruptGrace ?? "10 seconds",
     });
     const shell = options.shell ?? DEFAULT_SHELL;
+    const drainPollInterval = options.drainPollInterval ?? "30 seconds";
 
     const workers = new Map<WorkerName, CloudflareWorker>();
     for (const address of options.workers) {
@@ -311,6 +319,75 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
       });
     });
 
+    /**
+     * Holds the sandbox, whose checkout stays, so that the Worker keeps its container running
+     * until usine reconciles or destroys it. Logs a failure, after which the container stops two
+     * hours after the sandbox's last request.
+     */
+    const holdSandbox = Effect.fn("CloudflareExecutor.holdSandbox")(function* (
+      worker: CloudflareWorker,
+      name: SandboxName,
+      reason: string,
+    ) {
+      const fields = { worker: worker.address.name, sandbox: name, reason };
+      yield* Effect.annotateCurrentSpan(fields);
+      yield* worker.client.hold(name).pipe(
+        Effect.tap(() =>
+          Effect.logInfo("Holding the sandbox until usine reconciles or destroys it", fields),
+        ),
+        Effect.tapError((error) =>
+          Effect.logError(
+            "Could not hold the sandbox; its container and checkout stop two hours after its last request",
+            { ...fields, message: error.message },
+          ),
+        ),
+        Effect.ignore,
+      );
+    });
+
+    /**
+     * Returns whether the platform is stopping the sandbox's container. Logs a failed request and
+     * returns false, so the next poll asks again.
+     */
+    const isDraining = Effect.fn("CloudflareExecutor.isDraining")(function* (
+      worker: CloudflareWorker,
+      name: SandboxName,
+    ) {
+      yield* Effect.annotateCurrentSpan({ worker: worker.address.name, sandbox: name });
+      return yield* worker.client.get(name).pipe(
+        Effect.map(Option.exists(({ draining }) => draining)),
+        Effect.tapError((error) =>
+          Effect.logWarning("Could not ask whether the sandbox is draining; asking again", {
+            worker: worker.address.name,
+            sandbox: name,
+            message: error.message,
+          }),
+        ),
+        Effect.orElseSucceed(() => false),
+      );
+    });
+
+    /**
+     * Asks every `drainPollInterval` whether the platform is stopping the Attempt's sandbox, and
+     * drains the Attempt when it is: the Attempt fails with a retryable `InfraFailure`, and its
+     * release salvages the checkout within the platform's 15 minutes.
+     */
+    const watchDrain = (worker: CloudflareWorker, name: SandboxName, attemptId: AttemptId) =>
+      Effect.sleep(drainPollInterval).pipe(
+        Effect.andThen(isDraining(worker, name)),
+        Effect.repeat({ until: (draining) => draining }),
+        Effect.andThen(session.drain(attemptId, DRAIN_MESSAGE)),
+        Effect.tapError((error) =>
+          Effect.logError("Could not drain the Attempt whose sandbox the platform stops", {
+            attemptId,
+            worker: worker.address.name,
+            sandbox: name,
+            message: error.message,
+          }),
+        ),
+        Effect.ignore,
+      );
+
     /** Stops every command that still runs in the sandbox, which reads its process files. */
     const stopCommands = Effect.fn("CloudflareExecutor.stopCommands")(function* (
       operation: ExecutorOperation,
@@ -371,25 +448,21 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
       yield* Effect.addFinalizer(() =>
         Effect.gen(function* () {
           if ((yield* Ref.get(destroyed)) || !(yield* Ref.get(created))) return;
-          yield* worker.client
-            .credentials(name, credentialsFor(worker.address, Option.none()))
-            .pipe(
-              Effect.tap(() =>
-                Effect.logInfo("Revoked the credentials of the kept sandbox", fields),
+          yield* worker.client.credentials(name, NO_CREDENTIALS).pipe(
+            Effect.tap(() => Effect.logInfo("Revoked the credentials of the kept sandbox", fields)),
+            Effect.tapError((error) =>
+              Effect.logError(
+                "Could not revoke the credentials of the kept sandbox; the installation token expires within the hour",
+                { ...fields, message: error.message },
               ),
-              Effect.tapError((error) =>
-                Effect.logError(
-                  "Could not revoke the credentials of the kept sandbox; the installation token expires within the hour",
-                  { ...fields, message: error.message },
-                ),
-              ),
-              Effect.ignore,
-            );
+            ),
+            Effect.ignore,
+          );
         }),
       );
       const publish = (token: Redacted.Redacted<string>) =>
         Effect.gen(function* () {
-          const credentials = credentialsFor(worker.address, Option.some(token));
+          const credentials = credentialsFor(worker.address, token);
           if (yield* Ref.get(created)) return yield* worker.client.credentials(name, credentials);
           const summary = yield* worker.client.create(
             name,
@@ -680,12 +753,13 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
             record.salvage,
             commitAuthor,
           );
-          if (retained)
+          if (retained) {
             yield* Effect.logWarning("Keeping the sandbox, whose checkout holds unpushed work", {
               attemptId: attempt.attemptId,
               sandbox: name,
             });
-          else yield* destroySandbox(worker, name, "its checkout was reconciled");
+            yield* holdSandbox(worker, name, "its checkout holds unpushed work");
+          } else yield* destroySandbox(worker, name, "its checkout was reconciled");
         }),
       );
     });
@@ -749,7 +823,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
                   attempt: PREFLIGHT_ATTEMPT,
                   image: address.image,
                   instanceType: address.instanceType,
-                  credentials: credentialsFor(address, Option.none()),
+                  credentials: NO_CREDENTIALS,
                 }),
               )
               .pipe(Effect.mapError(operationError("preflight")));
@@ -862,6 +936,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
               ...fields,
               sandbox: name,
             });
+            yield* holdSandbox(worker, name, "the Attempt's checkout stays");
             return;
           }
           yield* destroySandbox(worker, name, "the Attempt's resources were released").pipe(
@@ -1010,69 +1085,74 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
       });
       const keptWith = (kept: Effect.Effect<void>) =>
         Ref.set(keep, true).pipe(Effect.andThen(kept));
+      const launchIn = (io: AttemptChannel.Sink) =>
+        session.launch(prepared, io, {
+          host: shell,
+          environment: childEnvironment(
+            sandboxEnvironment(worker),
+            request.commitAuthor,
+            provisioned.gitHooks,
+          ),
+          gatewayCredential: Effect.succeed(
+            gatewayCredential(worker, prepared.spec.agent.brain.harness),
+          ),
+          harvest: (windows) =>
+            harvestFacts(
+              prepared.spec,
+              harvestCommand("launch", worker, name, prepared.worktree, access),
+              windows,
+            ).pipe(
+              Effect.mapError(
+                (error) =>
+                  new InfraFailure({
+                    message: `Can't harvest the attempt's checkout: ${error.message}`,
+                    cause: error,
+                  }),
+              ),
+            ),
+          harvestComments: (windows) =>
+            harvestPostedComments(
+              prepared.spec,
+              harvestCommand("launch", worker, name, prepared.worktree, access),
+              windows,
+            ),
+          keepForReattach: keptWith(provisioned.keepForReattach),
+          keepUntilStopped: keptWith(provisioned.keepUntilStopped),
+          reconcileKept: (record) =>
+            Effect.gen(function* () {
+              const summary = yield* worker.client
+                .get(name)
+                .pipe(Effect.mapError(operationError("cleanup")));
+              if (!Option.exists(summary, ({ running }) => running)) {
+                yield* Effect.logInfo("The kept sandbox is gone or stopped; nothing to reconcile", {
+                  ...fields,
+                  sandbox: name,
+                });
+                if (Option.isSome(summary))
+                  yield* destroySandbox(worker, name, "its container stopped");
+                return;
+              }
+              const retained = yield* reconcileCheckout(
+                keptCheckoutRecovery(request),
+                worker,
+                name,
+                record,
+                Effect.succeed(request.commitAuthor),
+              );
+              if (retained)
+                yield* holdSandbox(worker, name, "its kept checkout holds unpushed work");
+              else yield* destroySandbox(worker, name, "its kept checkout was reconciled");
+            }),
+        });
       return {
         workspace: prepared,
         launch: (io: AttemptChannel.Sink) =>
-          session.launch(prepared, io, {
-            host: shell,
-            environment: childEnvironment(
-              sandboxEnvironment(worker),
-              request.commitAuthor,
-              provisioned.gitHooks,
-            ),
-            gatewayCredential: Effect.succeed(
-              gatewayCredential(worker, prepared.spec.agent.brain.harness),
-            ),
-            harvest: (windows) =>
-              harvestFacts(
-                prepared.spec,
-                harvestCommand("launch", worker, name, prepared.worktree, access),
-                windows,
-              ).pipe(
-                Effect.mapError(
-                  (error) =>
-                    new InfraFailure({
-                      message: `Can't harvest the attempt's checkout: ${error.message}`,
-                      cause: error,
-                    }),
-                ),
-              ),
-            harvestComments: (windows) =>
-              harvestPostedComments(
-                prepared.spec,
-                harvestCommand("launch", worker, name, prepared.worktree, access),
-                windows,
-              ),
-            keepForReattach: keptWith(provisioned.keepForReattach),
-            keepUntilStopped: keptWith(provisioned.keepUntilStopped),
-            reconcileKept: (record) =>
-              Effect.gen(function* () {
-                const summary = yield* worker.client
-                  .get(name)
-                  .pipe(Effect.mapError(operationError("cleanup")));
-                if (!Option.exists(summary, ({ running }) => running)) {
-                  yield* Effect.logInfo(
-                    "The kept sandbox is gone or stopped; nothing to reconcile",
-                    {
-                      ...fields,
-                      sandbox: name,
-                    },
-                  );
-                  if (Option.isSome(summary))
-                    yield* destroySandbox(worker, name, "its container stopped");
-                  return;
-                }
-                const retained = yield* reconcileCheckout(
-                  keptCheckoutRecovery(request),
-                  worker,
-                  name,
-                  record,
-                  Effect.succeed(request.commitAuthor),
-                );
-                if (!retained)
-                  yield* destroySandbox(worker, name, "its kept checkout was reconciled");
-              }),
-          }),
+          Effect.scoped(
+            Effect.gen(function* () {
+              yield* watchDrain(worker, name, request.attemptId).pipe(Effect.forkScoped);
+              return yield* launchIn(io);
+            }),
+          ),
         salvaged: Deferred.await(salvaged),
         recordSalvage: provisioned.recordSalvage,
       };
