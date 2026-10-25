@@ -1,7 +1,7 @@
 import { SettledItemState } from "@usine/config/board";
 import { AgentName } from "@usine/core/agent";
 import { TokenCount } from "@usine/core/agent/session";
-import { AttemptId, AttemptTask } from "@usine/core/attempt";
+import { AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
 import { OperatorAction, SessionTarget } from "@usine/core/attempt/channel";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
@@ -117,6 +117,19 @@ export class RunDurationView extends Schema.Class<RunDurationView>(
   unmeasured: Count,
 }) {}
 
+/**
+ * An Attempt on the Run's Loop and Item whose parent task isn't confirmed stopped. The open Run
+ * starts no Attempt until a reconcile confirms the stop (#523).
+ */
+export class UnconfirmedStopView extends Schema.Class<UnconfirmedStopView>(
+  "@usine/orchestrator/UnconfirmedStopView",
+)({
+  /** The Run of the Attempt: this Run, or an earlier Run of the Loop on the Item. */
+  runId: RunId,
+  attemptNumber: AttemptNumber,
+  worker: WorkerName,
+}) {}
+
 /** A Run with its triggering Event payload, a page of its transcript, and its usage. */
 export class RunDetailView extends Schema.Class<RunDetailView>("@usine/orchestrator/RunDetailView")(
   {
@@ -148,6 +161,10 @@ export class RunDetailView extends Schema.Class<RunDetailView>("@usine/orchestra
       Schema.withConstructorDefault(
         Effect.succeed(new RunUsageView({ tokens: TokenCount.make(0), pools: [], sessions: [] })),
       ),
+    ),
+    /** The unconfirmed stop that keeps the open Run from starting an Attempt, or null. */
+    unconfirmedStop: Schema.NullOr(UnconfirmedStopView).pipe(
+      Schema.withConstructorDefault(Effect.succeed(null)),
     ),
   },
 ) {}

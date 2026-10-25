@@ -1,6 +1,6 @@
 import type { RunView, StalledItemView } from "@usine/orchestrator/operator";
 import { Match } from "effect";
-import { agoLabel, failureReason } from "../operator-copy.ts";
+import { agoLabel, failureReason, stopWaitLine } from "../operator-copy.ts";
 import { runActivityAt } from "../task/model.ts";
 
 const isQuestion = (run: RunView): boolean => {
@@ -27,6 +27,7 @@ export const stallSentence = ({ loop, reason }: StalledItemView, now: number): s
     ClosedUnchanged: ({ run }) =>
       `${run.state === "Succeeded" ? "Succeeded" : "Canceled"} ${agoLabel(runActivityAt(run), now)}, unchanged since`,
     LoopPaused: () => `${loop} paused`,
+    WaitingForStop: ({ run, stop }) => stopWaitLine(run.id, stop),
     QueuedForWorker: ({ ahead }) =>
       ahead === null
         ? "Waiting for a free worker slot"

@@ -1,17 +1,23 @@
-import { AttemptId } from "@usine/core/attempt";
+import { AttemptId, StopReason } from "@usine/core/attempt";
+import { ItemKey } from "@usine/core/item";
+import { LoopName } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
 import { WorkerName } from "@usine/core/worker";
 import { Context, Effect, Layer, Schema } from "effect";
 
 /**
- * A closed Attempt whose parent task isn't confirmed stopped. It keeps a slot of `worker` until a
- * reconcile confirms the stop (#475).
+ * A closed Attempt whose parent task isn't confirmed stopped. It keeps a slot of `worker`, and no
+ * Run of `loop` on `itemKey` starts an Attempt, until a reconcile confirms the stop (#475, #523).
+ * `reason` is why the engine stops the parent task, which each retry passes to the executor.
  */
 export class UnconfirmedStop extends Schema.Class<UnconfirmedStop>("@usine/engine/UnconfirmedStop")(
   {
     attemptId: AttemptId,
     runId: RunId,
+    loop: LoopName,
+    itemKey: ItemKey,
     worker: WorkerName,
+    reason: StopReason,
   },
 ) {}
 

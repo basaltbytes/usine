@@ -1,4 +1,4 @@
-import { AttemptId } from "@usine/core/attempt";
+import { AttemptId, type StopReason } from "@usine/core/attempt";
 import type { AttemptRecovery } from "@usine/core/attempt/salvage";
 import { WorkerName } from "@usine/core/worker";
 import { Array as EffectArray, Effect, Option, Ref, Result, Schema } from "effect";
@@ -128,13 +128,13 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
     yield* Effect.annotateCurrentSpan(fields);
     // `recover` also stops the task, but its failure doesn't distinguish an unconfirmed stop from
     // a failed salvage.
-    const stopped = yield* executor.interrupt(attempt.attemptId).pipe(Effect.result);
+    const stopped = yield* executor.interrupt(attempt.attemptId, "startup").pipe(Effect.result);
     if (Result.isSuccess(stopped)) {
       yield* recover(attempt);
       return Option.none<SalvageCandidate>();
     }
     yield* Effect.logWarning(
-      "Could not confirm that the parent task of a closed Attempt stopped; its checkout and a slot of its Worker stay kept until a reconcile confirms the stop",
+      "Could not confirm that the parent task of a closed Attempt stopped; its checkout and a slot of its Worker stay kept, and no Attempt starts on its Loop's Item, until a reconcile confirms the stop",
       { ...fields, errorTag: stopped.failure._tag, message: stopped.failure.message },
     );
     yield* keep(attempt);
@@ -250,16 +250,22 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
   }, Effect.uninterruptible);
 
   /**
-   * Stops the parent task of `attemptId`. Fails with `ParentStopUnconfirmedError` if the stop isn't
-   * confirmed.
+   * Stops the parent task of `attemptId` for `reason`. Fails with `ParentStopUnconfirmedError` if
+   * the stop isn't confirmed.
    */
   const confirmStop = Effect.fn("CheckoutRecovery.confirmStop")(function* (
     attemptId: AttemptId,
     occupied: Occupied,
+    reason: StopReason,
   ) {
-    const fields = { attemptId, worker: occupied.worker, checkoutKept: occupied.checkoutKept };
+    const fields = {
+      attemptId,
+      worker: occupied.worker,
+      checkoutKept: occupied.checkoutKept,
+      reason,
+    };
     yield* Effect.annotateCurrentSpan(fields);
-    const stopped = yield* executor.interrupt(attemptId).pipe(Effect.result);
+    const stopped = yield* executor.interrupt(attemptId, reason).pipe(Effect.result);
     if (Result.isSuccess(stopped)) return;
     const failure = { ...fields, errorTag: stopped.failure._tag, message: stopped.failure.message };
     yield* occupied.checkoutKept
@@ -268,7 +274,7 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
           failure,
         )
       : Effect.logWarning(
-          "Could not confirm that the parent task of a closed Attempt stopped; its Worker's slot stays taken until a reconcile confirms the stop",
+          "Could not confirm that the parent task of a closed Attempt stopped; its Worker's slot stays taken, and no Attempt starts on its Loop's Item, until a reconcile confirms the stop",
           failure,
         );
     return yield* new ParentStopUnconfirmedError({
@@ -314,8 +320,16 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
     yield* recover(attempt);
   });
 
-  const reconcile = Effect.fn("CheckoutRecovery.reconcile")(function* (attemptId: AttemptId) {
-    yield* Effect.annotateCurrentSpan({ attemptId });
+  /**
+   * Stops the parent task of `attemptId` for `reason` if a slot is kept for it, then reconciles a
+   * checkout startup kept and releases the slot. Fails with `ParentStopUnconfirmedError` and keeps
+   * both if the stop isn't confirmed.
+   */
+  const reconcile = Effect.fn("CheckoutRecovery.reconcile")(function* (
+    attemptId: AttemptId,
+    reason: StopReason,
+  ) {
+    yield* Effect.annotateCurrentSpan({ attemptId, reason });
     const occupied = (yield* Ref.get(kept)).get(attemptId);
     if (occupied === undefined) {
       yield* Effect.logDebug("No slot kept for the Attempt awaits its parent task's stop", {
@@ -324,7 +338,7 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
       return;
     }
     // The parent task must stop before the reconcile, the next Attempt, or the slot's release.
-    yield* confirmStop(attemptId, occupied);
+    yield* confirmStop(attemptId, occupied, reason);
     if (occupied.checkoutKept) yield* recoverKept(attemptId);
     // Removed only after reconciling, so a cancel during the reconcile reconciles again and the
     // slot stays taken while the parent task can still run (#177).

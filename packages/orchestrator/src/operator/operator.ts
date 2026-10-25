@@ -12,6 +12,7 @@ import { CycleBudgets, type CycleBudgetResetRejectedError } from "@usine/engine/
 import { LoopName } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
 import { ApprovalSource } from "@usine/core/run/approval";
+import * as RunState from "@usine/core/run/state";
 import type { WorkerName } from "@usine/core/worker";
 import type { ItemKey, ItemNumber } from "@usine/core/item";
 import type { RepositoryName } from "@usine/core/repository";
@@ -30,7 +31,12 @@ import {
 } from "@usine/engine/engine";
 import { ItemProjectionReader } from "@usine/engine/item-projection";
 import { LoopControl, type LoopRuntimeState } from "@usine/engine/loop-control";
-import { type ProjectionRevision, RunReader, type RunSummary } from "@usine/engine/run-reader";
+import {
+  type ProjectionRevision,
+  RunReader,
+  type RunSnapshot,
+  type RunSummary,
+} from "@usine/engine/run-reader";
 import { RepositoryLabelProjectionReader } from "@usine/engine/repository-label-projection";
 import { GitHubItemWriter } from "@usine/github/item-writer";
 import type { GitHubAppError } from "@usine/github/github-app";
@@ -95,6 +101,7 @@ import {
   LoopNotFoundError,
   SessionIntervention,
   RosterAgentNotFoundError,
+  UnconfirmedStopView,
 } from "./run.ts";
 import {
   readRunningEvents,
@@ -622,33 +629,73 @@ const makeOperatorObservation = Effect.gen(function* () {
     ),
   );
 
+  /**
+   * Returns the unconfirmed stop on the Loop and Item of the open Run of `snapshot`, which keeps
+   * the Run from starting an Attempt, or null.
+   */
+  const blockingStop = Effect.fn("Operator.blockingStop")(function* (
+    snapshot: RunSnapshot,
+    unconfirmedStops: ReadonlyArray<UnconfirmedStop>,
+  ) {
+    if (!RunState.isOpen(snapshot.run.state)) return null;
+    const stop = unconfirmedStops.find(
+      ({ loop, itemKey }) => loop === snapshot.run.loop && itemKey === snapshot.itemKey,
+    );
+    if (stop === undefined) return null;
+    const fields = {
+      runId: snapshot.run.id,
+      unstoppedRunId: stop.runId,
+      attemptId: stop.attemptId,
+    };
+    yield* Effect.annotateCurrentSpan(fields);
+    const attempts =
+      stop.runId === snapshot.run.id
+        ? snapshot.attempts
+        : (yield* reader.inspect(stop.runId)).attempts;
+    const attempt = attempts.find(({ id }) => id === stop.attemptId);
+    if (attempt === undefined) {
+      yield* Effect.logWarning(
+        "The Run with the unconfirmed stop has no such Attempt; the Run view shows no wait",
+        fields,
+      );
+      return null;
+    }
+    return new UnconfirmedStopView({
+      runId: stop.runId,
+      attemptNumber: attempt.number,
+      worker: stop.worker,
+    });
+  });
+
   const detail = Effect.fn("Operator.detail")(function* (
     instance: LoadedInstance,
     runId: RunId,
     request: TranscriptRequest = new ColdTranscriptRequest(),
   ) {
     yield* Effect.annotateCurrentSpan({ runId });
-    const [snapshot, states] = yield* Effect.all(
-      [reader.inspect(runId), controls.states] as const,
+    const [snapshot, states, unconfirmedStops] = yield* Effect.all(
+      [reader.inspect(runId), controls.states, stops.list] as const,
       { concurrency: "unbounded" },
     );
     const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
-    const [transcript, sessionState, usage, unrecordedEnds, settled] = yield* Effect.all(
-      [
-        readTranscript(reader, snapshot, request),
-        Effect.forEach(
-          snapshot.attempts.filter((attempt) => Option.isNone(attempt.outcome)),
-          (attempt) => reader.transcript(new TranscriptSessionsQuery({ attemptId: attempt.id })),
-          { concurrency: "unbounded" },
-        ),
-        usageReader.read(snapshot),
-        readUnrecordedEnds(reader, snapshot),
-        settledItemState(snapshot.itemKey).pipe(
-          Effect.provideService(ItemProjectionReader, itemReader),
-        ),
-      ],
-      { concurrency: "unbounded" },
-    );
+    const [transcript, sessionState, usage, unrecordedEnds, settled, unconfirmedStop] =
+      yield* Effect.all(
+        [
+          readTranscript(reader, snapshot, request),
+          Effect.forEach(
+            snapshot.attempts.filter((attempt) => Option.isNone(attempt.outcome)),
+            (attempt) => reader.transcript(new TranscriptSessionsQuery({ attemptId: attempt.id })),
+            { concurrency: "unbounded" },
+          ),
+          usageReader.read(snapshot),
+          readUnrecordedEnds(reader, snapshot),
+          settledItemState(snapshot.itemKey).pipe(
+            Effect.provideService(ItemProjectionReader, itemReader),
+          ),
+          blockingStop(snapshot, unconfirmedStops),
+        ],
+        { concurrency: "unbounded" },
+      );
     return new RunDetailView({
       run: runView(snapshot, paused, workerAccesses(instance.config.workers)),
       eventDedupKey: snapshot.event.dedupKey,
@@ -660,6 +707,7 @@ const makeOperatorObservation = Effect.gen(function* () {
       settledItemState: Option.getOrNull(settled),
       duration: runDuration(snapshot.attempts, unrecordedEnds),
       usage,
+      unconfirmedStop,
     });
   });
 
@@ -1126,6 +1174,7 @@ export {
   RunView,
   RunDurationView,
   RunDetailView,
+  UnconfirmedStopView,
   EditAndRetry,
   LoopNotFoundError,
   SessionIntervention,
@@ -1228,6 +1277,7 @@ export {
   ClosedUnchangedView,
   RunFailedView,
   LoopPausedView,
+  WaitingForStopView,
   CycleBudgetUsedUpView,
   AwaitingApprovalView,
   QueuedForWorkerView,

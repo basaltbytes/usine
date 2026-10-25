@@ -72,9 +72,11 @@ export class Claim extends Schema.Class<Claim>("@usine/engine/internal/Claim")({
   supersededRun: OptionalRunId,
 }) {}
 
-/** A persisted Attempt that startup reconciliation visits, with the ID of its Run. */
+/** A persisted Attempt that startup reconciliation visits, with its Run and the Run's Loop and Item. */
 export interface SalvageCandidate extends AttemptRecovery {
   readonly runId: RunId;
+  readonly loop: LoopName;
+  readonly itemKey: ItemKey;
 }
 
 export class AttemptStarted extends Schema.TaggedClass<AttemptStarted>(
@@ -94,10 +96,15 @@ export class RunClosed extends Schema.TaggedClass<RunClosed>("@usine/engine/inte
   {},
 ) {}
 
-/** The result of `RunStore.cancel`, decided in the closing transaction. */
+/** The result of `RunStore.cancel`, decided in the closing transaction, with the Run's Loop and Item. */
 export type CancelOutcome =
   | { readonly _tag: "AlreadyClosed" }
-  | { readonly _tag: "Canceled"; readonly openAttempt: Option.Option<AttemptId> };
+  | {
+      readonly _tag: "Canceled";
+      readonly openAttempt: Option.Option<AttemptId>;
+      readonly loop: LoopName;
+      readonly itemKey: ItemKey;
+    };
 
 const makeRunStore = Effect.gen(function* () {
   const database = yield* RunDatabase;
@@ -837,6 +844,8 @@ const makeRunStore = Effect.gen(function* () {
         const canceled: CancelOutcome = {
           _tag: "Canceled",
           openAttempt: Option.map(decision.attempt, ({ id }) => id),
+          loop: current.run.loop,
+          itemKey: current.itemKey,
         };
         return canceled;
       }),

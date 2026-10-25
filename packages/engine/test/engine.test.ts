@@ -54,7 +54,7 @@ import {
   conditionLayer,
   engineLayer,
   executorLayer,
-  oneSlotExecutor,
+  slottedExecutor,
   stepResult,
   submission,
   testAgent,
@@ -904,9 +904,21 @@ describe("durable run engine", () => {
             );
             assert.deepStrictEqual(attempts, []);
             assert.strictEqual(yield* TxRef.get(leased), 1);
-            assert.deepStrictEqual(yield* unconfirmed.list, [
-              new UnconfirmedStop({ attemptId: attempt.id, runId: running.runId, worker: local }),
-            ]);
+            // The canceled execution also fails, so either stop can record the Attempt first.
+            const listed = yield* unconfirmed.list;
+            assert.deepStrictEqual(
+              listed.map(({ reason: _reason, ...stop }) => stop),
+              [
+                {
+                  attemptId: attempt.id,
+                  runId: running.runId,
+                  loop: unstoppable.loop,
+                  itemKey: unstoppable.itemKey,
+                  worker: local,
+                },
+              ],
+            );
+            assert.include(["cancel", "failed"], listed[0]?.reason);
 
             // Once a retry stops the parent task, the slot is released and the Run behind takes it.
             yield* Ref.set(refusing, false);
@@ -929,24 +941,29 @@ describe("durable run engine", () => {
       ),
   );
 
-  it.live(
-    "keeps the slot of a failed Attempt whose parent task can't be stopped until a retried stop succeeds",
-    () =>
+  it.live.each([1, 2])(
+    "keeps the slot of a failed Attempt whose parent task can't be stopped, and starts no retry on a Worker with %i slots, until a retried stop succeeds",
+    (slots) =>
       withInstance((directory) =>
         Effect.gen(function* () {
-          const worker = yield* oneSlotExecutor([
-            Effect.fail(new InfraFailure({ message: "Lost the parent task", cause: "offline" })),
-            Effect.succeed(stepResult("ran in the freed slot")),
-          ]);
+          const worker = yield* slottedExecutor(
+            [
+              Effect.fail(new InfraFailure({ message: "Lost the parent task", cause: "offline" })),
+              Effect.succeed(stepResult("ran after the stop")),
+            ],
+            slots,
+          );
           yield* Ref.set(worker.unstoppable, true);
           yield* Effect.gen(function* () {
             const engine = yield* RunEngine;
             const unconfirmed = yield* UnconfirmedStops;
-            const accepted = yield* engine.submit(submission({ number: 44, item: "unstoppable" }));
+            const failing = submission({ number: 44, item: "unstoppable" });
+            const accepted = yield* engine.submit(failing);
             assert(accepted._tag === "Claimed");
 
-            // The Run's retry waits for the slot across the reconciles that retry the stop.
-            const [, { attempts }] = yield* Effect.repeat(
+            // The Run's retry doesn't start, even in a free slot, across the reconciles that retry
+            // the stop.
+            const [stops, { attempts }] = yield* Effect.repeat(
               Effect.all([Ref.get(worker.stops), engine.inspect(accepted.runId)]),
               {
                 until: ([stops, { attempts }]) => stops.length >= 4 || attempts.length > 1,
@@ -960,12 +977,16 @@ describe("durable run engine", () => {
               Option.map(failed.outcome, ({ _tag }) => _tag),
               Option.some("Failed"),
             );
+            assert.deepStrictEqual(new Set(stops.map(([, reason]) => reason)), new Set(["failed"]));
             assert.strictEqual(yield* TxRef.get(worker.leased), 1);
             assert.deepStrictEqual(yield* unconfirmed.list, [
               new UnconfirmedStop({
                 attemptId: failed.id,
                 runId: accepted.runId,
+                loop: failing.loop,
+                itemKey: failing.itemKey,
                 worker: WorkerName.make("local"),
+                reason: "failed",
               }),
             ]);
 
@@ -990,10 +1011,88 @@ describe("durable run engine", () => {
       ),
   );
 
+  it.live(
+    "starts no Attempt on the Item of a canceled Attempt whose parent task can't be stopped, even in a free slot, until a retried stop succeeds",
+    () =>
+      withInstance((directory) =>
+        Effect.gen(function* () {
+          const local = WorkerName.make("local");
+          const worker = yield* slottedExecutor(
+            [
+              Effect.never,
+              Effect.succeed(stepResult("ran on another item")),
+              Effect.succeed(stepResult("ran after the stop")),
+            ],
+            2,
+          );
+          yield* Effect.gen(function* () {
+            const engine = yield* RunEngine;
+            const unconfirmed = yield* UnconfirmedStops;
+            const canceled = submission({ number: 46, item: "unstoppable-cancel" });
+            const running = yield* engine.submit(canceled);
+            assert(running._tag === "Claimed");
+            const [attempt] = (yield* waitFor(
+              engine,
+              running.runId,
+              ({ attempts }) => attempts.length === 1,
+            )).attempts;
+            assert(attempt !== undefined);
+            const behind = submission({ number: 47, item: "unstoppable-cancel" });
+            assert.strictEqual((yield* engine.submit(behind))._tag, "Queued");
+
+            yield* Ref.set(worker.unstoppable, true);
+            const refusal = yield* Effect.flip(engine.cancel(running.runId));
+            assert.strictEqual(refusal._tag, "AttemptCancellationError");
+            assert.deepStrictEqual(yield* unconfirmed.list, [
+              new UnconfirmedStop({
+                attemptId: attempt.id,
+                runId: running.runId,
+                loop: canceled.loop,
+                itemKey: canceled.itemKey,
+                worker: local,
+                reason: "cancel",
+              }),
+            ]);
+
+            // A Run on another Item takes the free slot.
+            const other = yield* engine.submit(submission({ number: 48, item: "another-item" }));
+            assert(other._tag === "Claimed");
+            yield* waitFor(engine, other.runId, ({ run }) => run.state._tag === "Succeeded");
+
+            // The queued Event's Run on the same Item starts no Attempt across the reconciles that
+            // retry the stop.
+            const queuedRunId = yield* runIdFor(behind);
+            const [stops, waiting] = yield* Effect.repeat(
+              Effect.all([Ref.get(worker.stops), engine.inspect(queuedRunId)]),
+              {
+                until: ([stops, { attempts }]) => stops.length >= 5 || attempts.length > 0,
+                schedule: Schedule.spaced("10 millis"),
+              },
+            );
+            assert.deepStrictEqual(waiting.attempts, []);
+            assert.deepStrictEqual(new Set(stops.map(([, reason]) => reason)), new Set(["cancel"]));
+            assert.strictEqual(yield* TxRef.get(worker.leased), 1);
+
+            // Once a retry stops the parent task, the queued Event's Run starts.
+            yield* Ref.set(worker.unstoppable, false);
+            yield* waitFor(engine, queuedRunId, ({ run }) => run.state._tag === "Succeeded");
+            assert.deepStrictEqual(yield* unconfirmed.list, []);
+            yield* Effect.repeat(TxRef.get(worker.leased), {
+              until: (count) => count === 0,
+              schedule: Schedule.spaced("10 millis"),
+            }).pipe(Effect.timeout("2 seconds"));
+          }).pipe(
+            Effect.provide(engineLayer(directory, worker.executor)),
+            Effect.provideService(ReconcileInterval, "50 millis"),
+          );
+        }),
+      ),
+  );
+
   it.live("frees the slot of a failed Attempt at once when its parent task stops", () =>
     withInstance((directory) =>
       Effect.gen(function* () {
-        const worker = yield* oneSlotExecutor([
+        const worker = yield* slottedExecutor([
           Effect.fail(new InfraFailure({ message: "Lost the parent task", cause: "offline" })),
           Effect.succeed(stepResult("ran in the freed slot")),
         ]);
@@ -1012,7 +1111,7 @@ describe("durable run engine", () => {
           const [failed] = delivered.attempts;
           assert(failed !== undefined);
           assert.lengthOf(delivered.attempts, 2);
-          assert.deepStrictEqual(yield* Ref.get(worker.stops), [failed.id]);
+          assert.deepStrictEqual(yield* Ref.get(worker.stops), [[failed.id, "failed"]]);
           assert.deepStrictEqual(yield* unconfirmed.list, []);
           yield* Effect.repeat(TxRef.get(worker.leased), {
             until: (count) => count === 0,

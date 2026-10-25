@@ -94,7 +94,12 @@ import { FailureView, LocalWorkerAccess, SshWorkerAccess } from "../src/operator
 import { UnconfiguredWorkerNeed } from "../src/operator/need.ts";
 import { Operator } from "../src/operator/operator.ts";
 import { ReadyOverview } from "../src/operator/overview.ts";
-import { ApprovalView, EditAndRetry, SessionIntervention } from "../src/operator/run.ts";
+import {
+  ApprovalView,
+  EditAndRetry,
+  SessionIntervention,
+  UnconfirmedStopView,
+} from "../src/operator/run.ts";
 import { PollCycle, PollingTriggers, RepositoryPollFailure } from "../src/polling-triggers.ts";
 import { ScheduleCycle, ScheduleTriggers } from "../src/schedule-triggers.ts";
 import { failureView, runDuration } from "../src/operator/projection.ts";
@@ -1714,7 +1719,16 @@ describe("Operator", () => {
           }),
           attempts: [new Attempt({ ...original, outcome: Option.some(new AttemptCanceled()) })],
         });
-        const stops = yield* Ref.make([new UnconfirmedStop({ attemptId, runId, worker: local })]);
+        const stops = yield* Ref.make([
+          new UnconfirmedStop({
+            attemptId,
+            runId,
+            loop: snapshot.run.loop,
+            itemKey: snapshot.itemKey,
+            worker: local,
+            reason: "cancel",
+          }),
+        ]);
         yield* Effect.gen(function* () {
           const operator = yield* Operator;
           const unconfirmedNeeds = Effect.map(operator.overview(instance), ({ needsYou }) =>
@@ -1748,6 +1762,74 @@ describe("Operator", () => {
               reads,
               revision,
               canceled,
+              noCycleBudgets,
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              Ref.get(stops),
+            ),
+          ),
+        );
+      }),
+  );
+
+  it.effect(
+    "shows on an open Run's detail the unconfirmed stop that keeps it from starting an Attempt",
+    () =>
+      Effect.gen(function* () {
+        const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+        const moved = yield* Ref.make<ItemLabelMutation | null>(null);
+        const reads = yield* Ref.make(0);
+        const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+        const local = WorkerName.make("local");
+        const original = snapshot.attempts[0];
+        assert(original !== undefined);
+        // The failed Attempt's retry waits for its parent task's stop.
+        const retrying = new RunSnapshot({
+          ...snapshot,
+          run: new Run({ ...snapshot.run, state: new RunState.Running() }),
+          attempts: [
+            new Attempt({
+              ...original,
+              outcome: Option.some(
+                new AttemptFailed({
+                  failure: new InfraFailure({ message: "Lost the parent task", cause: "offline" }),
+                }),
+              ),
+            }),
+          ],
+        });
+        const stops = yield* Ref.make([
+          new UnconfirmedStop({
+            attemptId,
+            runId,
+            loop: snapshot.run.loop,
+            itemKey: snapshot.itemKey,
+            worker: local,
+            reason: "failed",
+          }),
+        ]);
+        yield* Effect.gen(function* () {
+          const operator = yield* Operator;
+          const shown = Effect.map(
+            operator.detail(instance, runId),
+            ({ unconfirmedStop }) => unconfirmedStop,
+          );
+          assert.deepStrictEqual(
+            yield* shown,
+            new UnconfirmedStopView({ runId, attemptNumber: original.number, worker: local }),
+          );
+          yield* Ref.set(stops, []);
+          assert.strictEqual(yield* shown, null);
+        }).pipe(
+          Effect.provide(
+            testLayer(
+              approved,
+              moved,
+              reads,
+              revision,
+              retrying,
               noCycleBudgets,
               undefined,
               undefined,

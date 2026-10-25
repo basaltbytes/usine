@@ -12,10 +12,16 @@ import {
   RunFailureNeed,
   UnconfiguredWorkerNeed,
   UnconfirmedStopNeed,
+  UnconfirmedStopView,
 } from "@usine/orchestrator/operator";
 import { Schema } from "effect";
 import { assert, describe, it } from "vitest";
-import { conflictingSalvageMessage, needCopy, reloadSummary } from "../src/operator-copy.ts";
+import {
+  conflictingSalvageMessage,
+  needCopy,
+  reloadSummary,
+  runStateLine,
+} from "../src/operator-copy.ts";
 
 describe("salvage copy in the reader", () => {
   it("names the conflicting salvage a retry starts without", () => {
@@ -194,9 +200,38 @@ describe("unconfirmed stop copy in Needs attention", () => {
     );
     assert.deepStrictEqual(copy, {
       title: "develop: parent task not stopped",
-      detail: "Attempt 2 still ending on local, using one slot. Stop retried every few minutes",
+      detail:
+        "Attempt 2 still ending on local, using one slot. No new attempt on this item until it stops. Stop retried every few minutes",
       repository: RepositoryName.make("basaltbytes/usine"),
       runId: RunId.make("canceled"),
     });
+  });
+});
+
+describe("run state while a parent task isn't confirmed stopped", () => {
+  const stop = (runId: string) =>
+    new UnconfirmedStopView({
+      runId: RunId.make(runId),
+      attemptNumber: AttemptNumber.make(1),
+      worker: WorkerName.make("local"),
+    });
+  const run = { id: RunId.make("retrying"), state: "Running", attempts: [] } as const;
+
+  it("names the run's own attempt and the worker it still ends on", () => {
+    assert.strictEqual(
+      runStateLine(run, stop("retrying")),
+      "Waiting for attempt 1 to stop on local",
+    );
+  });
+
+  it("names an earlier run's attempt", () => {
+    assert.strictEqual(
+      runStateLine(run, stop("canceled")),
+      "Waiting for attempt 1 of an earlier run to stop on local",
+    );
+  });
+
+  it("keeps the state without an unconfirmed stop", () => {
+    assert.strictEqual(runStateLine(run), "Running, attempt 1");
   });
 });

@@ -45,7 +45,7 @@ import {
   ItemProjectionReader,
   ItemProjectionSource,
 } from "@usine/engine/item-projection";
-import { UnconfirmedStops } from "@usine/engine/engine";
+import { UnconfirmedStop, UnconfirmedStops } from "@usine/engine/engine";
 import { LoopRuntimeState } from "@usine/engine/loop-control";
 import { LoopSighting, RunReader, RunSummary } from "@usine/engine/run-reader";
 import { TranscriptEntry, TranscriptSequence } from "@usine/engine/transcript";
@@ -53,6 +53,7 @@ import { Source } from "@usine/expression/expression-engine";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { DateTime, Effect, Layer, Option, Schema } from "effect";
 import { OperatorObservation } from "../src/operator/operator.ts";
+import { UnconfirmedStopView } from "../src/operator/run.ts";
 import { PollCycle, PollingTriggers, RepositoryPoll } from "../src/polling-triggers.ts";
 import { gitHubItemKey } from "../src/polling/repository-sync.ts";
 import { ScheduleTriggers } from "../src/schedule-triggers.ts";
@@ -349,18 +350,25 @@ const transcript = [
   outbound(4, "11:57:00", retrying(2)),
 ];
 
-const deskLayer = (polls: ReadonlyArray<RepositoryPoll>) => {
+const deskLayer = (
+  polls: ReadonlyArray<RepositoryPoll>,
+  stopped: {
+    readonly runs: ReadonlyArray<RunSummary>;
+    readonly unconfirmed: ReadonlyArray<UnconfirmedStop>;
+  } = { runs: [], unconfirmed: [] },
+) => {
+  const all = [...runs, ...stopped.runs];
   const reader = Layer.succeed(RunReader)({
     inspect: () => Effect.die("unused"),
     evidence: () => Effect.die("unused"),
-    list: () => Effect.succeed(runs),
+    list: () => Effect.succeed(all),
     closed: ({ limit }) =>
       Effect.succeed(
-        runs
+        all
           .filter(({ run }) => !RunState.OPEN_STATE_TAGS.some((tag) => tag === run.state._tag))
           .slice(0, limit),
       ),
-    forItems: (keys) => Effect.succeed(runs.filter(({ itemKey }) => keys.includes(itemKey))),
+    forItems: (keys) => Effect.succeed(all.filter(({ itemKey }) => keys.includes(itemKey))),
     events: () => Effect.die("unused"),
     revision: () => Effect.die("unused"),
     transcript: (query) =>
@@ -451,7 +459,7 @@ const deskLayer = (polls: ReadonlyArray<RepositoryPoll>) => {
         loopControlLayer([new LoopRuntimeState({ loop: review.name, paused: true })]),
         repositoryLabelProjectionReaderLayer,
         MarcbachmannCelLayer,
-        UnconfirmedStops.empty,
+        Layer.succeed(UnconfirmedStops)({ list: Effect.succeed(stopped.unconfirmed) }),
       ),
     ),
   );
@@ -490,6 +498,57 @@ describe("Operator desk", () => {
       assert(budget?._tag === "CycleBudgetUsedUp");
       assert.strictEqual(budget.ask.id, ask.id);
     }).pipe(Effect.provide(deskLayer(polled))),
+  );
+
+  it.effect(
+    "says that an Item's open Run waits for the stop of an earlier Attempt on the Item",
+    () =>
+      Effect.gen(function* () {
+        const desk = yield* (yield* OperatorObservation).desk(instance);
+        const reason = desk.notMoving.find(({ item }) => item.number === 4)?.reason;
+        assert(reason?._tag === "WaitingForStop");
+        assert.strictEqual(reason.run.id, RunId.make("queued-4"));
+        assert.deepStrictEqual(
+          reason.stop,
+          new UnconfirmedStopView({
+            runId: RunId.make("canceled-4"),
+            attemptNumber: AttemptNumber.make(1),
+            worker: WorkerName.make("local"),
+          }),
+        );
+        assert.deepStrictEqual(
+          desk.notMoving.map(({ item, reason: { _tag } }) => [item.number, _tag]).slice(-2),
+          [
+            [4, "WaitingForStop"],
+            [7, "AwaitingPoll"],
+          ],
+        );
+      }).pipe(
+        Effect.provide(
+          deskLayer(polled, {
+            runs: [
+              summary("canceled-4", 4, canceledByOperator, "08:40:00", [
+                attempt(
+                  "canceled-4",
+                  "08:41:00",
+                  Option.some(new AttemptCanceled()),
+                  Option.some("08:45:00"),
+                ),
+              ]),
+            ],
+            unconfirmed: [
+              new UnconfirmedStop({
+                attemptId: AttemptId.make("canceled-4-attempt"),
+                runId: RunId.make("canceled-4"),
+                loop: startDev.name,
+                itemKey: itemKey(4),
+                worker: WorkerName.make("local"),
+                reason: "cancel",
+              }),
+            ],
+          }),
+        ),
+      ),
   );
 
   it.effect(

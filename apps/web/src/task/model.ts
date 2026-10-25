@@ -125,6 +125,7 @@ export interface TaskRow {
 const keepsInFlight = ({ reason }: StalledItemView): boolean =>
   Match.valueTags(reason, {
     AwaitingApproval: () => true,
+    WaitingForStop: () => true,
     QueuedForWorker: () => true,
     SuppressedForOperator: () => true,
     CycleBudgetUsedUp: () => true,

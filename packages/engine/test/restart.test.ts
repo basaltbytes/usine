@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import type { Attempt, AttemptId } from "@usine/core/attempt";
+import type { Attempt, AttemptId, StopReason } from "@usine/core/attempt";
 import { AgentFailure, type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
 import { type AttemptRecovery, SalvagePushed } from "@usine/core/attempt/salvage";
 import type { InstanceDirectory } from "@usine/core/instance";
@@ -38,7 +38,7 @@ import {
   committedBeforeCrash,
   engineLayer,
   executorLayer,
-  oneSlotExecutor,
+  slottedExecutor,
   stepResult,
   submission,
   waitFor,
@@ -1001,12 +1001,18 @@ describe("engine restart", () => {
       withInstance((directory) =>
         Effect.gen(function* () {
           const local = WorkerName.make("local");
-          const [canceled] = yield* stopDuringAttempts(directory, [
-            submission({ number: 37, item: "acquired-then-unstoppable" }),
-          ]);
+          const acquired = submission({ number: 37, item: "acquired-then-unstoppable" });
+          const [canceled] = yield* stopDuringAttempts(directory, [acquired]);
           assert(canceled !== undefined);
-          const unconfirmed = [
-            new UnconfirmedStop({ attemptId: canceled.id, runId: canceled.runId, worker: local }),
+          const unconfirmed = (reason: StopReason) => [
+            new UnconfirmedStop({
+              attemptId: canceled.id,
+              runId: canceled.runId,
+              loop: acquired.loop,
+              itemKey: acquired.itemKey,
+              worker: local,
+              reason,
+            }),
           ];
           const started = (executor: Layer.Layer<StepExecutor>, scope: Scope.Scope) =>
             Scope.provide(Layer.build(engineLayer(directory, executor)), scope).pipe(
@@ -1047,7 +1053,7 @@ describe("engine restart", () => {
           );
           assert.deepStrictEqual(waiting.attempts, []);
           assert.strictEqual(yield* TxRef.get(first.leased), 1);
-          assert.deepStrictEqual(yield* before.stops.list, unconfirmed);
+          assert.deepStrictEqual(yield* before.stops.list, unconfirmed("cancel"));
           yield* Scope.close(firstScope, Exit.void);
 
           // The orchestrator restarts again. The parent task still runs and still can't be
@@ -1057,7 +1063,7 @@ describe("engine restart", () => {
           const secondScope = yield* Scope.make();
           const after = yield* started(second.executor, secondScope);
           assert.strictEqual(yield* TxRef.get(second.leased), 1);
-          assert.deepStrictEqual(yield* after.stops.list, unconfirmed);
+          assert.deepStrictEqual(yield* after.stops.list, unconfirmed("startup"));
           yield* Deferred.succeed(second.gate, undefined);
           const [, stillWaiting] = yield* Effect.repeat(
             Effect.all([Ref.get(second.refused), after.engine.inspect(fresh.runId)]),
@@ -1096,9 +1102,9 @@ describe("engine restart", () => {
       ),
   );
 
-  it.live(
-    "keeps the slot of a failed Attempt whose parent task can't be stopped across a restart, until a retried stop succeeds",
-    () =>
+  it.live.each([1, 2])(
+    "keeps the slot of a failed Attempt whose parent task can't be stopped across a restart, and starts no retry on a Worker with %i slots, until a retried stop succeeds",
+    (slots) =>
       withInstance((directory) =>
         Effect.gen(function* () {
           const started = (executor: Layer.Layer<StepExecutor>, scope: Scope.Scope) =>
@@ -1110,17 +1116,17 @@ describe("engine restart", () => {
               })),
             );
 
-          // The first Attempt fails, and its parent task can't be stopped, so the Run's retry
-          // waits for the slot of `local`.
-          const first = yield* oneSlotExecutor([
-            Effect.fail(new InfraFailure({ message: "Lost the parent task", cause: "offline" })),
-          ]);
+          // The first Attempt fails, and its parent task can't be stopped, so the Run starts no
+          // retry, even in a free slot of `local`.
+          const first = yield* slottedExecutor(
+            [Effect.fail(new InfraFailure({ message: "Lost the parent task", cause: "offline" }))],
+            slots,
+          );
           yield* Ref.set(first.unstoppable, true);
           const firstScope = yield* Scope.make();
           const before = yield* started(first.executor, firstScope);
-          const accepted = yield* before.engine.submit(
-            submission({ number: 39, item: "failed-then-restarted" }),
-          );
+          const failing = submission({ number: 39, item: "failed-then-restarted" });
+          const accepted = yield* before.engine.submit(failing);
           assert(accepted._tag === "Claimed");
           const [listed, { attempts }] = yield* Effect.repeat(
             Effect.all([before.stops.list, before.engine.inspect(accepted.runId)]),
@@ -1132,29 +1138,33 @@ describe("engine restart", () => {
           );
           const [failed] = attempts;
           assert(failed !== undefined);
-          const unconfirmed = [
+          const unconfirmed = (reason: StopReason) => [
             new UnconfirmedStop({
               attemptId: failed.id,
               runId: accepted.runId,
+              loop: failing.loop,
+              itemKey: failing.itemKey,
               worker: WorkerName.make("local"),
+              reason,
             }),
           ];
           assert.lengthOf(attempts, 1);
-          assert.deepStrictEqual(listed, unconfirmed);
+          assert.deepStrictEqual(listed, unconfirmed("failed"));
           assert.strictEqual(yield* TxRef.get(first.leased), 1);
           yield* Scope.close(firstScope, Exit.void);
 
-          // After the restart, the parent task still can't be stopped, so startup occupies the
-          // slot for the closed Attempt, and the retry keeps waiting.
-          const second = yield* oneSlotExecutor([
-            Effect.succeed(stepResult("ran in the freed slot")),
-          ]);
+          // After the restart, the parent task still can't be stopped, so startup occupies a
+          // slot for the closed Attempt, and the Run still starts no retry.
+          const second = yield* slottedExecutor(
+            [Effect.succeed(stepResult("ran after the stop"))],
+            slots,
+          );
           yield* Ref.set(second.unstoppable, true);
           const secondScope = yield* Scope.make();
           const after = yield* started(second.executor, secondScope);
           assert.strictEqual(yield* TxRef.get(second.leased), 1);
-          assert.deepStrictEqual(yield* after.stops.list, unconfirmed);
-          const [, waiting] = yield* Effect.repeat(
+          assert.deepStrictEqual(yield* after.stops.list, unconfirmed("startup"));
+          const [stops, waiting] = yield* Effect.repeat(
             Effect.all([Ref.get(second.stops), after.engine.inspect(accepted.runId)]),
             {
               until: ([stops, { attempts }]) => stops.length >= 3 || attempts.length > 1,
@@ -1162,6 +1172,7 @@ describe("engine restart", () => {
             },
           );
           assert.lengthOf(waiting.attempts, 1);
+          assert.deepStrictEqual(new Set(stops.map(([, reason]) => reason)), new Set(["startup"]));
           assert.strictEqual(yield* TxRef.get(second.leased), 1);
 
           // Once a retry stops the parent task, the slot is released and the retry takes it.
