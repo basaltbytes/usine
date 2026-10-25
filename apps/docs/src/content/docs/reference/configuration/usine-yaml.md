@@ -309,9 +309,9 @@ workers:
 
 ### `workers[].container`
 
-If the machine has Docker, each attempt on the worker runs in its own container, which mounts only that attempt's checkout read-write, and its cached clone, credential directory, and harness logins read-only. Every command of the attempt runs in it with `docker exec`: the children, git in the checkout, salvage, the pre-push hook, and the attempt's harness check. The SSH user's shell runs only the container's start and removal and the fetch into the cached clone. Concurrent attempts can't read each other's checkouts, tokens, or processes ([`WorkerContainer`](https://github.com/basaltbytes/usine/blob/main/packages/config/src/factory.ts)).
+If the machine has Docker, each attempt on the worker runs in its own container, which mounts only that attempt's checkout and the harness login files read-write, and its cached clone and credential directory read-only. Every command of the attempt runs in it with `docker exec`: the children, git in the checkout, salvage, the pre-push hook, and the attempt's harness check. The SSH user's shell runs only the container's start and removal and the fetch into the cached clone. Concurrent attempts can't read each other's checkouts, tokens, or processes ([`WorkerContainer`](https://github.com/basaltbytes/usine/blob/main/packages/config/src/factory.ts)).
 
-Without Docker, the worker runs its attempts as the SSH user, as before containers. Preflight passes and reports the worker as degraded in the log and on the **Workers** page. If the machine has Docker but the SSH user can't use it, or the image can't be pulled, preflight fails with a `container` capability error.
+Without Docker, the worker runs its attempts as the SSH user, as before containers. Preflight passes and reports the worker as degraded in the log and on the **Workers** page. If the machine has Docker, preflight fails with a `container` capability error when Docker doesn't answer the SSH user, the image can't be pulled, or the SSH user is in the `docker` group without the `docker` CLI: attempts run as the SSH user only if that user can't use Docker.
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |

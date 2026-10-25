@@ -31,6 +31,7 @@ import {
 
 const CONTAINER = "usine-remote-run_execute_1";
 const CACHE = `${WORKER_ROOT}/repos/acme_demo.git`;
+const MARKER = `${WORKER_ROOT}/container-checkouts/remote-run_execute_1`;
 
 const sink = {
   append: () => Effect.void,
@@ -130,7 +131,7 @@ describe("SSH Worker with Docker", () => {
           `type=bind,"source=${WORKTREE}","destination=${WORKTREE}"`,
           `type=bind,"source=${CACHE}","destination=${CACHE}",readonly`,
           `type=bind,"source=${CREDENTIALS}","destination=${CREDENTIALS}",readonly`,
-          `type=bind,"source=/home/usine/.claude/.credentials.json","destination=/home/usine/.claude/.credentials.json",readonly`,
+          `type=bind,"source=/home/usine/.claude/.credentials.json","destination=/home/usine/.claude/.credentials.json"`,
           `type=bind,"source=/home/usine/.claude.json","destination=/usr/local/share/usine/seed/.claude.json",readonly`,
         ]);
         assert.include(input, `GH_CONFIG_DIR=${CREDENTIALS}\n`);
@@ -151,7 +152,15 @@ describe("SSH Worker with Docker", () => {
         assert(!onMachine.some(({ line }) => line.includes(`'-C' '${WORKTREE}'`)));
 
         const lines = linesOf(machine);
-        const checkoutGone = lines.indexOf(`exec 'rm' '-rf' '${WORKTREE}'`);
+        const marked = lines.findIndex((line) => line.includes(`'${MARKER}'`));
+        const started = lines.findIndex(
+          (line) => line.startsWith("exec 'docker' 'run' ") && line.includes(`'${CONTAINER}'`),
+        );
+        assert(marked >= 0 && marked < started, "the marker exists before the container");
+        assert.deepStrictEqual([...machine.state.markers], [], "the marker goes with the checkout");
+        const checkoutGone = lines.findIndex(
+          (line) => line.includes('rm -f "$2"') && line.includes(`'${WORKTREE}' '${MARKER}'`),
+        );
         const containerGone = lines.indexOf(`exec 'docker' 'rm' '--force' '${CONTAINER}'`);
         const credentialGone = lines.indexOf(`exec 'rm' '-rf' '${CREDENTIALS}'`);
         assert(
@@ -353,59 +362,161 @@ describe("SSH Worker with Docker", () => {
     },
   );
 
-  for (const checkout of ["standalone", "linked"] as const)
+  /** Starts `request`'s Attempt in a process that stops while its parent runs, which keeps the checkout. */
+  const stopWhileRunning = (
+    machine: ReturnType<typeof fakeMachine>,
+    credentials: ReturnType<typeof mintingProvider>,
+    storage: StubStorage,
+  ) => {
+    const started = Deferred.makeUnsafe<void>();
+    const working: StubParent = () =>
+      Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never));
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      const launch = yield* (yield* executor.prepare(request)).launch(sink).pipe(Effect.forkChild);
+      yield* Deferred.await(started);
+      yield* Fiber.interrupt(launch);
+    }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials, working, storage)));
+  };
+
+  /** Returns the calls since `before` that ran git in the checkout as the SSH user. */
+  const hostGitInCheckout = (machine: ReturnType<typeof fakeMachine>, before: number) =>
+    machine.state.calls
+      .slice(before)
+      .filter(
+        ({ line, container }) =>
+          container === undefined &&
+          (line.includes(`'-C' '${WORKTREE}'`) ||
+            (line.startsWith(`cd '${WORKTREE}'`) && line.includes("'git'"))),
+      );
+
+  it.effect(
+    "reattaches in a new container with the new credential, even if the Attempt made its .git a file",
+    () => {
+      const machine = dockerMachine();
+      const credentials = mintingProvider();
+      const storage = new StubStorage();
+      let given: AttemptRequest | undefined;
+      const parent: StubParent = (context) => {
+        given = context.request;
+        return completes(context);
+      };
+      return Effect.gen(function* () {
+        yield* stopWhileRunning(machine, credentials, storage);
+        assert.strictEqual(machine.state.containers.size, 0, "a stopping process removes it");
+        assert.deepStrictEqual([...machine.state.markers], [MARKER]);
+        // A linked worktree's .git is a file; the Attempt could have written one.
+        machine.state.linkedCheckout = true;
+
+        yield* Effect.gen(function* () {
+          const executor = yield* Executor;
+          const before = machine.state.calls.length;
+          const prepared = yield* executor.prepare(
+            new CheckoutRequest({ ...request, reattach: true }),
+          );
+          yield* prepared.launch(sink);
+          const calls = machine.state.calls.slice(before);
+          assert(!calls.some(({ line }) => line.includes("partialClone")), "the checkout stays");
+          assert(given !== undefined && given.host instanceof RemoteShell);
+          assert.deepStrictEqual(given.host.container, { runtime: "docker", name: CONTAINER });
+          const restarted = calls.findIndex(({ line }) => line.startsWith("exec 'docker' 'run' "));
+          const written = calls.findIndex(({ line }) => writesCredential(line));
+          assert(restarted >= 0, "a new container starts");
+          assert(written >= 0 && written < restarted, "after the new credential is written");
+          assert.strictEqual(credentials.minted.length, 2);
+          assert.deepStrictEqual(hostGitInCheckout(machine, before), []);
+        }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials, parent, storage)));
+        assert.strictEqual(machine.state.containers.size, 0);
+      });
+    },
+  );
+
+  it.effect(
+    "salvages a crashed Attempt's checkout in a container, even if the Attempt made its .git a file",
+    () => {
+      const machine = dockerMachine();
+      const credentials = mintingProvider();
+      return Effect.gen(function* () {
+        yield* stopWhileRunning(machine, credentials, new StubStorage());
+        machine.state.linkedCheckout = true;
+        machine.state.salvage = "dirty";
+        const before = machine.state.calls.length;
+        const recorded: Array<AttemptSalvage> = [];
+        yield* Effect.gen(function* () {
+          const executor = yield* Executor;
+          yield* executor.recover(
+            {
+              attemptId: request.attemptId,
+              repository: request.repository,
+              worker: WORKER,
+              ref: request.salvageRef,
+              permissions: "write",
+              succeeded: false,
+              open: false,
+            },
+            {
+              salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
+              comments: () => Effect.void,
+              windows: aloneOnItem(),
+            },
+            Effect.succeed(request.commitAuthor),
+          );
+        }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials)));
+        assert.strictEqual(recorded[0]?._tag, "Pushed");
+        const push = machine.state.calls.find(({ line }) => line.includes("'push' '--force'"));
+        assert.strictEqual(push?.container, CONTAINER);
+        assert.deepStrictEqual(hostGitInCheckout(machine, before), []);
+        assert.deepStrictEqual([...machine.state.markers], []);
+      });
+    },
+  );
+
+  for (const change of ["docker-installed", "docker-removed"] as const)
     it.effect(
-      `reattaches after a restart ${checkout === "standalone" ? "in a new container with the new credential" : "as the SSH user to a linked worktree from before Docker"}`,
+      change === "docker-installed"
+        ? "refuses to reattach a checkout from before Docker, since the SSH user can now use Docker"
+        : "refuses to reattach a container's checkout as the SSH user once the machine has no Docker",
       () => {
-        const machine = dockerMachine();
+        const machine = change === "docker-installed" ? fakeMachine() : dockerMachine();
         const credentials = mintingProvider();
         const storage = new StubStorage();
-        let given: AttemptRequest | undefined;
-        const parent: StubParent = (context) => {
-          given = context.request;
-          return completes(context);
-        };
         return Effect.gen(function* () {
-          const started = Deferred.makeUnsafe<void>();
-          const working: StubParent = () =>
-            Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never));
-          yield* Effect.gen(function* () {
+          yield* stopWhileRunning(machine, credentials, storage);
+          machine.state.docker = change === "docker-installed" ? "running" : "absent";
+          const before = machine.state.calls.length;
+          const failure = yield* Effect.gen(function* () {
             const executor = yield* Executor;
-            const launch = yield* (yield* executor.prepare(request))
-              .launch(sink)
-              .pipe(Effect.forkChild);
-            yield* Deferred.await(started);
-            yield* Fiber.interrupt(launch);
-          }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials, working, storage)));
-          assert.strictEqual(machine.state.containers.size, 0, "a stopping process removes it");
-          machine.state.linkedCheckout = checkout === "linked";
-
-          yield* Effect.gen(function* () {
-            const executor = yield* Executor;
-            const before = machine.state.calls.length;
-            const prepared = yield* executor.prepare(
-              new CheckoutRequest({ ...request, reattach: true }),
-            );
-            yield* prepared.launch(sink);
-            const calls = machine.state.calls.slice(before);
-            assert(!calls.some(({ line }) => line.includes("partialClone")), "the checkout stays");
-            assert(given !== undefined && given.host instanceof RemoteShell);
-            if (checkout === "linked") {
-              assert.strictEqual(given.host.container, undefined);
-              assert(!calls.some(({ line }) => line.startsWith("exec 'docker' 'run' ")));
-              return;
-            }
-            assert.deepStrictEqual(given.host.container, { runtime: "docker", name: CONTAINER });
-            const restarted = calls.findIndex(({ line }) =>
-              line.startsWith("exec 'docker' 'run' "),
-            );
-            const written = calls.findIndex(({ line }) => writesCredential(line));
-            assert(restarted >= 0, "a new container starts");
-            assert(written >= 0 && written < restarted, "after the new credential is written");
-            assert.strictEqual(credentials.minted.length, 2);
-          }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials, parent, storage)));
-          assert.strictEqual(machine.state.containers.size, 0);
+            return yield* executor.prepare(new CheckoutRequest({ ...request, reattach: true }));
+          }).pipe(
+            Effect.flip,
+            Effect.scoped,
+            Effect.provide(runtime(machine, credentials, completes, storage)),
+          );
+          assert.include(
+            failure.message,
+            change === "docker-installed"
+              ? "is from before the machine had Docker"
+              : "no longer has Docker",
+          );
+          const calls = machine.state.calls.slice(before);
+          assert(!calls.some(({ line }) => line.startsWith("exec 'docker' 'run' ")));
+          assert.deepStrictEqual(hostGitInCheckout(machine, before), []);
         });
       },
     );
+
+  it.effect(
+    "fails preflight when the SSH user is in the docker group but has no docker CLI",
+    () => {
+      const machine = dockerMachine();
+      machine.state.docker = "socket-only";
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const failure = yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1).pipe(Effect.flip);
+        assert(failure._tag === "WorkerCapabilityError");
+        assert.strictEqual(failure.capability, "container");
+        assert.include(failure.message, "can use Docker's socket");
+      }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider())));
+    },
+  );
 });

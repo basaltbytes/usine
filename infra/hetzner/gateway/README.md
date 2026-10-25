@@ -221,7 +221,7 @@ claude auth login          # Claude subscription: open the URL it prints, then p
 codex login --device-auth  # ChatGPT plan: open the URL it prints and enter the code it prints
 ```
 
-Both use the forward proxy (`HTTPS_PROXY` in `/etc/environment`). `claude auth status` and `codex login status` show the result. Attempt containers mount `~/.claude/.credentials.json` and `~/.codex/auth.json` read-only and copy `~/.claude.json` and `~/.codex/config.toml`, so log in on the worker, not in a container.
+Both use the forward proxy (`HTTPS_PROXY` in `/etc/environment`). `claude auth status` and `codex login status` show the result. Attempt containers mount `~/.claude/.credentials.json` and `~/.codex/auth.json` read-write and copy `~/.claude.json` and `~/.codex/config.toml`, so log in on the worker, not in a container.
 
 ## Add the worker to `usine.yaml`
 

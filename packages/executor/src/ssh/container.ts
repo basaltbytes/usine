@@ -21,12 +21,23 @@ export const ATTEMPT_IMAGE = ContainerImage.make(
   "ghcr.io/basaltbytes/usine-worker:claude-2.1.308-codex-0.159.2",
 );
 
-/** The exit code of `DETECT_SCRIPT` when the machine has no container CLI. */
+/** The exit code of `DETECT_SCRIPT` when the machine has no Docker and the SSH user no access to one. */
 const RUNTIME_ABSENT = 3;
+/** The exit code of `DETECT_SCRIPT` when the SSH user can use Docker's socket but has no `docker` CLI. */
+const SOCKET_WITHOUT_CLI = 4;
 
-/** A script that prints the version of the container runtime `$1`'s server. */
+/**
+ * A script that prints the version of the container runtime `$1`'s server. Without the CLI, it
+ * exits 4 if the SSH user is in the `docker` group or can write Docker's socket, and 3 if not.
+ */
 const DETECT_SCRIPT = String.raw`
-command -v "$1" >/dev/null 2>&1 || exit 3
+if ! command -v "$1" >/dev/null 2>&1; then
+  for group in $(id -nG); do
+    if [ "$group" = docker ]; then exit 4; fi
+  done
+  if [ -w /var/run/docker.sock ]; then exit 4; fi
+  exit 3
+fi
 exec "$1" version -f '{{.Server.Version}}'
 `.trim();
 
@@ -72,7 +83,12 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
     instance,
   });
 
-  /** Returns the server version of the machine's Docker, or `None` if the machine has none. */
+  /**
+   * Returns the server version of the machine's Docker, or `None` if the machine has none and
+   * the SSH user no access to one. Fails if the SSH user can use Docker but Docker doesn't
+   * answer, because Attempts must then run in containers: as the SSH user, they could use
+   * Docker's socket to act as root.
+   */
   const detect = Effect.fn("SshExecutor.detectContainerRuntime")(function* (machine: SshMachine) {
     const worker = machine.address.name;
     const host = machine.shell.destination;
@@ -92,6 +108,12 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
         `Can't reach SSH worker "${worker}" at ${host} to check Docker`,
         new Error(detected.stderr.trim() || `ssh exited with code ${SSH_FAILURE}`),
       );
+    if (detected.exitCode === SOCKET_WITHOUT_CLI)
+      return yield* containerGap(
+        worker,
+        `The SSH user of worker "${worker}" can use Docker's socket, but the docker CLI isn't installed. Install it, so that each attempt runs in its own container, or take the user out of the docker group.`,
+        new Error("docker group or writable socket without the docker CLI"),
+      );
     return yield* containerGap(
       worker,
       `Docker on SSH worker "${worker}" doesn't respond to its SSH user. Start Docker, and add the user to the docker group.`,
@@ -104,8 +126,9 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
 
   /**
    * Checks the machine's Docker for preflight, pulls the Attempt image, and checks that the
-   * image's user has the SSH user's ID, so the containers can write the checkouts. A machine
-   * without Docker runs Attempts as the SSH user, which the result reports as degraded.
+   * image's user has the SSH user's ID, so the containers can write the checkouts. Only a
+   * machine without Docker runs Attempts as the SSH user, which the result reports as
+   * degraded; with Docker, any failure fails the preflight.
    */
   const verify = Effect.fn("SshExecutor.verifyContainers")(function* (machine: SshMachine) {
     const worker = machine.address.name;

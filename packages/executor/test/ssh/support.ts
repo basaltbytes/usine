@@ -158,8 +158,11 @@ interface FakeMachineState {
   gatewayAcceptsSsh: boolean;
   /** Every forward the executor started, in order. */
   readonly forwards: Array<FakeForward>;
-  /** Whether the machine has Docker, and whether its daemon answers the SSH user. */
-  docker: "absent" | "running" | "unusable";
+  /**
+   * Whether the machine has Docker, and whether its daemon answers the SSH user. With
+   * `socket-only`, the SSH user is in the docker group, but the machine has no docker CLI.
+   */
+  docker: "absent" | "running" | "unusable" | "socket-only";
   /** Whether `docker pull` of the Attempt image fails, and whether the image is on the machine anyway. */
   pullFails: boolean;
   imageOnMachine: boolean;
@@ -171,6 +174,8 @@ interface FakeMachineState {
   readonly homeFiles: Set<string>;
   /** Whether the checkout's `.git` is a file, as in a linked worktree of the cached clone. */
   linkedCheckout: boolean;
+  /** The container markers on the machine, by path. */
+  readonly markers: Set<string>;
 }
 
 const oneShotHandle = (stdout: string, exitCode: number, stderr = "") => {
@@ -285,6 +290,7 @@ export const fakeMachine = () => {
     containers: new Map(),
     homeFiles: new Set([".claude/.credentials.json", ".claude.json"]),
     linkedCheckout: false,
+    markers: new Set(),
   };
   /** Answers the commands that manage Docker containers, or returns `undefined` for others. */
   const respondToDocker = (line: string, input: string) => {
@@ -292,13 +298,15 @@ export const fakeMachine = () => {
     if (line.includes("version -f"))
       return state.docker === "absent"
         ? oneShotHandle("", 3)
-        : state.docker === "unusable"
-          ? oneShotHandle(
-              "",
-              1,
-              "permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock",
-            )
-          : oneShotHandle("27.5.1\n", 0);
+        : state.docker === "socket-only"
+          ? oneShotHandle("", 4)
+          : state.docker === "unusable"
+            ? oneShotHandle(
+                "",
+                1,
+                "permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock",
+              )
+            : oneShotHandle("27.5.1\n", 0);
     if (line.startsWith("exec 'docker' 'pull' "))
       return state.pullFails
         ? oneShotHandle("", 1, "Error response from daemon: Get https://ghcr.io/v2/: timeout")
@@ -350,8 +358,19 @@ export const fakeMachine = () => {
         0,
       );
     }
-    if (line.startsWith("exec 'test' '-f' "))
-      return oneShotHandle("", state.linkedCheckout ? 0 : 1);
+    if (line.includes(': > "$1"')) {
+      state.markers.add(words.at(-1) ?? "");
+      return oneShotHandle("", 0);
+    }
+    if (line.includes('rm -f "$2"')) {
+      state.markers.delete(words.at(-1) ?? "");
+      return oneShotHandle("", 0);
+    }
+    if (line.startsWith("exec 'test' '-f' ")) {
+      const path = words.at(-1) ?? "";
+      if (path.endsWith("/.git")) return oneShotHandle("", state.linkedCheckout ? 0 : 1);
+      return oneShotHandle("", state.markers.has(path) ? 0 : 1);
+    }
     return undefined;
   };
   const respond = (command: StandardCommand, line: string, input: string) => {
@@ -520,8 +539,16 @@ export const fakeMachine = () => {
           ? respond(command, inner, input)
           : oneShotHandle("", 1, `Error response from daemon: No such container: ${container}`);
       }
-      state.calls.push({ command, line, input });
-      return respond(command, line, input);
+      // Records `docker run` behind the pipe that gives it standard input as the docker command.
+      const piped = `exec 'sh' '-c' ${quote('cat | "$@"')} 'sh' `;
+      const direct = line.startsWith(piped)
+        ? `exec ${remoteWords(line)
+            .slice(4)
+            .map((word) => quote(word))
+            .join(" ")}`
+        : line;
+      state.calls.push({ command, line: direct, input });
+      return respond(command, direct, input);
     }),
   );
   return { state, layer: Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, service) };

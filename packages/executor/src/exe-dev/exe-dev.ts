@@ -87,6 +87,7 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
       harnessProbe: (_machine, shell) => machines.harnessProbe(shell),
       // exe.dev runs every Attempt of a Worker on its one VM as the VM's user.
       isolation: () => Effect.succeed(sharedUser),
+      runsContainers: false,
       repositoryUrl: (_machine, repository) => `https://${EDGE_GITHUB_HOST}/${repository}.git`,
       // exe.dev Workers have no Gateway; every harness uses its own login.
       gatewayCredential: () => Effect.succeedNone,

@@ -159,7 +159,7 @@ A request that fails twice fails as without the forward: an attach fails the att
 
 Before a process starts its first container on a worker, it removes the containers with its instance label whose worker label is that worker or a worker that hasn't started a container in this process. That removes what a crashed process left, including the containers of workers that `usine.yaml` no longer declares, and keeps the running containers of another worker on the same machine. A container never outlives the process that started it, so **Discard leftovers** finds none. Preflight's own container for the harness checks has no instance label, is removed with `--rm`, and stops itself after 15 minutes.
 
-A reattached attempt gets a new container with its new credential. A checkout that is a linked worktree, made before the machine had Docker, goes on as the SSH user, with a warning.
+Before a container first starts for a checkout, the executor writes `<worker directory>/container-checkouts/<attempt id>`, which no container mounts, and removes it with the checkout. A reattachment or recovery decides from that marker, never from the checkout, which the attempt can change: a marked checkout runs in a new container, with the new credential; an unmarked one runs as the SSH user, and only on a machine without Docker. Any other case, such as a checkout from before Docker on a machine that now has it, fails and leaves the checkout for the operator. Preflight degrades only a machine whose SSH user has no Docker access; a Docker that doesn't answer fails it.
 
 ### Code shared by remote kinds
 

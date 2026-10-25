@@ -76,6 +76,11 @@ export interface RemoteWorker<M extends RemoteMachine> {
   readonly harnessProbe: (machine: M, shell: RemoteShell) => HarnessProbe;
   /** Returns how new Attempts on `machine` run, as the Worker's last preflight found. */
   readonly isolation: (machine: M) => Effect.Effect<AttemptIsolation, ExecutorError>;
+  /**
+   * Whether the Worker kind runs Attempt containers. If true, each existing checkout's container
+   * marker decides how a reattachment or recovery runs commands in it.
+   */
+  readonly runsContainers: boolean;
   /** Returns the URL the cached clone on `machine` fetches `repository` from. */
   readonly repositoryUrl: (machine: M, repository: RepositoryName) => string;
   /** Returns the credential kind that the Gateway on `machine` injects for `harness`. Returns `None` if the machine has no Gateway or the harness uses its own login. */

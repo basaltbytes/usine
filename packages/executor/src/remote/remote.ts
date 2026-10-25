@@ -41,9 +41,9 @@ import {
 import {
   type AttemptIsolation,
   attemptContainerName,
+  containerCheckoutMarker,
   type ContainerSettings,
   containersFor,
-  sharedUser,
 } from "./container.ts";
 import { workerLeftoversFor } from "./leftovers.ts";
 import { workerWatchesFor } from "./liveness.ts";
@@ -79,6 +79,9 @@ git -C "$1" config remote.origin.promisor true
 git -C "$1" config remote.origin.partialclonefilter blob:none
 git -C "$1" checkout -q --detach "$4"
 `.trim();
+
+/** A script that removes the checkout `$1`, then its container marker `$2`. */
+const REMOVE_CHECKOUT_SCRIPT = 'rm -rf "$1" && rm -f "$2"';
 
 /** A script that removes everything inside the directory `$1` and keeps the directory. */
 const EMPTY_DIRECTORY_SCRIPT = 'find "$1" -mindepth 1 -maxdepth 1 -exec rm -rf {} +';
@@ -142,27 +145,44 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
     });
 
     /**
-     * Returns `isolation` for the checkout at `worktree`, or the SSH user's shell if the checkout
-     * is a linked worktree from before the machine had a container runtime: its git directory is
-     * in the cached clone, which an Attempt container mounts read-only.
+     * Returns how commands run in `attemptId`'s existing checkout at `worktree`: in its container
+     * if the container marker, which no container can reach, records one, or as the SSH user if
+     * it records none. Nothing in the checkout decides, since an Attempt can change it. Fails if
+     * the Worker's `isolation` can't run the checkout that way: a container's checkout on a
+     * machine without Docker, or a checkout from before Docker, as the SSH user who can now use
+     * Docker.
      */
     const isolationOfCheckout = Effect.fn(span("isolationOfCheckout"))(function* (
       operation: ExecutorOperation,
       machine: M,
+      attemptId: AttemptId,
       worktree: string,
       isolation: AttemptIsolation,
     ) {
-      if (isolation._tag === "SharedUser") return isolation;
-      const linked = yield* commands.inspect(operation, machine.shell, "test", [
-        "-f",
-        `${worktree}/.git`,
-      ]);
-      if (linked.exitCode !== 0) return isolation;
-      yield* Effect.logWarning(
-        "The checkout is a linked worktree from before the Worker ran containers; its commands run as the SSH user",
-        { host: machine.shell.destination, worktree },
+      if (!worker.runsContainers) return isolation;
+      const host = machine.shell.destination;
+      yield* Effect.annotateCurrentSpan({ host, worktree, isolation: isolation._tag });
+      const contained = yield* containers.marked(
+        operation,
+        machine.shell,
+        containerCheckoutMarker(machine.workerDirectory, attemptId),
       );
-      return sharedUser;
+      if (contained === (isolation._tag === "Container")) return isolation;
+      const message = contained
+        ? `The checkout ${worktree} was mounted in an attempt container, and the machine no longer has Docker, so usine runs no command in it as the SSH user. Install Docker, or salvage and remove the checkout by hand.`
+        : `The checkout ${worktree} is from before the machine had Docker, and the SSH user can use Docker, so usine runs no command in it as that user. Salvage and remove the checkout by hand.`;
+      yield* Effect.logError("Refused to run commands in the checkout", {
+        attemptId,
+        host,
+        worktree,
+        contained,
+        message,
+      });
+      return yield* new ExecutorOperationError({
+        operation,
+        message,
+        cause: new Error(contained ? "container marker without Docker" : "no container marker"),
+      });
     });
 
     /** Returns the container of an Attempt, which mounts its checkout and the paths of `access`. */
@@ -209,11 +229,13 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       }
       const started = yield* SynchronizedRef.make(Option.none<RemoteShell>());
       const spec = containerSpec(machine, isolation.settings, attempt, worktree, access, harnesses);
+      const marker = containerCheckoutMarker(machine.workerDirectory, attempt.attemptId);
       const shell = SynchronizedRef.modifyEffect(started, (current) =>
         Option.match(current, {
           onSome: (shell) => Effect.succeed([shell, current] as const),
           onNone: () =>
-            containers.start(operation, machine.shell, spec).pipe(
+            containers.mark(operation, machine.shell, marker).pipe(
+              Effect.andThen(containers.start(operation, machine.shell, spec)),
               Scope.provide(scope),
               Effect.map((shell) => [shell, Option.some(shell)] as const),
             ),
@@ -277,9 +299,25 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         return true;
       });
 
-    /** Removes the checkout at `worktree` from the machine; it holds no registration in the cached clone. */
-    const removeStandalone = (operation: "prepare" | "cleanup", machine: M, worktree: string) =>
-      Effect.asVoid(commands.run(operation, machine.shell, "rm", ["-rf", worktree]));
+    /**
+     * Removes a container's checkout at `worktree` from the machine, then its container marker.
+     * It holds no registration in the cached clone.
+     */
+    const removeStandalone = (
+      operation: "prepare" | "cleanup",
+      machine: M,
+      attemptId: AttemptId,
+      worktree: string,
+    ) =>
+      Effect.asVoid(
+        commands.run(operation, machine.shell, "sh", [
+          "-c",
+          REMOVE_CHECKOUT_SCRIPT,
+          "sh",
+          worktree,
+          containerCheckoutMarker(machine.workerDirectory, attemptId),
+        ]),
+      );
 
     /**
      * Stops the children in `attempt`'s checkout at `worktree`, salvages it with a new
@@ -297,6 +335,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       const isolation = yield* isolationOfCheckout(
         "cleanup",
         machine,
+        attempt.attemptId,
         worktree,
         yield* worker.isolation(machine),
       );
@@ -312,7 +351,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         git: (args: ReadonlyArray<string>) => Effect.Effect<string, ExecutorError>,
       ) =>
         isolation._tag === "Container"
-          ? removeStandalone("cleanup", machine, worktree)
+          ? removeStandalone("cleanup", machine, attempt.attemptId, worktree)
           : Effect.asVoid(
               git([
                 "--git-dir",
@@ -395,6 +434,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
                     yield* isolationOfCheckout(
                       "cleanup",
                       machine,
+                      attempt.attemptId,
                       worktree,
                       yield* worker.isolation(machine),
                     ),
@@ -461,9 +501,9 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       );
 
     /**
-     * Checks that a reattached Attempt's parent task was created for this worktree and the
-     * worktree still exists, then stops children left from before the restart. Returns the
-     * parent's RunSpec and how the checkout's commands run.
+     * Checks that a reattached Attempt's parent task was created for this worktree, the worktree
+     * still exists, and `isolation` can run commands in it, then stops children left from before
+     * the restart. Returns the parent's RunSpec.
      */
     const takeOver = Effect.fn(span("takeOver"))(function* (
       request: CheckoutRequest,
@@ -488,9 +528,9 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
           "Can't inspect the reattached attempt's checkout",
           new Error(inspected.stderr.trim()),
         );
-      const checkoutIsolation = yield* isolationOfCheckout("prepare", machine, worktree, isolation);
-      yield* stopChildren("prepare", machine, worktree, request.attemptId, checkoutIsolation);
-      return { spec, isolation: checkoutIsolation };
+      yield* isolationOfCheckout("prepare", machine, request.attemptId, worktree, isolation);
+      yield* stopChildren("prepare", machine, worktree, request.attemptId, isolation);
+      return spec;
     });
 
     /**
@@ -553,7 +593,10 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
             inContainer("prepare", "sh", ["-c", WRITE_EXECUTABLE_SCRIPT, "sh", target, content]),
           ),
         remove: (cleanup) =>
-          cleanup("worktree-directory", removeStandalone("cleanup", machine, worktree)),
+          cleanup(
+            "worktree-directory",
+            removeStandalone("cleanup", machine, request.attemptId, worktree),
+          ),
       };
     };
 
@@ -647,7 +690,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       }
       const grant = yield* worker.grantFor(request.repository);
       const machine = yield* worker.machineFor(request.worker);
-      const workerIsolation = yield* worker.isolation(machine);
+      const isolation = yield* worker.isolation(machine);
       const probeBrain = (shell: RemoteShell) =>
         verifyHarnessReadiness(
           request.worker,
@@ -656,12 +699,12 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
           logins,
         );
       // An Attempt container doesn't exist yet, so its probe runs once the checkout is prepared.
-      if (workerIsolation._tag === "SharedUser") yield* probeBrain(machine.shell);
+      if (isolation._tag === "SharedUser") yield* probeBrain(machine.shell);
       const host = machine.shell.destination;
       const cache = cachePath(machine, request.repository);
       const worktree = `${machine.workerDirectory}/attempts/${safeSegment(request.attemptId)}`;
       const staging = `${cache}.cloning`;
-      yield* Effect.annotateCurrentSpan({ host, isolation: workerIsolation._tag });
+      yield* Effect.annotateCurrentSpan({ host, isolation: isolation._tag });
       yield* Effect.logInfo(
         request.reattach
           ? `Reattaching the Attempt to its ${label} checkout`
@@ -673,7 +716,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
           repository: request.repository,
           loop: request.loop,
           permissions: request.permissions,
-          isolation: workerIsolation._tag,
+          isolation: isolation._tag,
           worktree,
         },
       );
@@ -685,17 +728,11 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       );
       // A reattachment reuses its checkout before any credential is granted.
       const reattached = request.reattach
-        ? Option.some(yield* takeOver(request, machine, worktree, workerIsolation))
+        ? Option.some(yield* takeOver(request, machine, worktree, isolation))
         : Option.none();
-      const isolation = Option.match(reattached, {
-        onNone: () => workerIsolation,
-        onSome: (taken) => taken.isolation,
-      });
-      if (workerIsolation._tag === "Container" && isolation._tag === "SharedUser")
-        yield* probeBrain(machine.shell);
       const harness = Option.match(reattached, {
         onNone: () => request.agent.brain.harness,
-        onSome: ({ spec }) => spec.agent.brain.harness,
+        onSome: (spec) => spec.agent.brain.harness,
       });
 
       // A checkout kept after a failed remote stop never closes its scope, so its salvage result
@@ -779,8 +816,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
               layout: { cache, staging, worktree },
               ops,
             }),
-          onSome: ({ spec }) =>
-            reattachWorktree({ request, host, layout: { worktree }, ops, spec }),
+          onSome: (spec) => reattachWorktree({ request, host, layout: { worktree }, ops, spec }),
         });
         const { provisioned } = yield* Effect.acquireRelease(
           Effect.uninterruptibleMask((restore) =>

@@ -89,6 +89,7 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
       preflight: sshPreflightFor(commands, machineFor, harnessProbe, logins, containers),
       harnessProbe,
       isolation: containers.isolation,
+      runsContainers: true,
       repositoryUrl: (machine, repository) =>
         Option.match(machine.gateway, {
           onNone: () => `https://github.com/${repository}.git`,

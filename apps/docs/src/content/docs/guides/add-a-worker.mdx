@@ -69,13 +69,13 @@ usine writes each attempt's token to `<root>/workers/<name>/credentials/<attempt
 
 ### A container per attempt
 
-Each attempt runs in its own container from an image with Node.js 22, pnpm, Git, gh, Chromium, Claude Code, and Codex, built from `infra/worker-image/Dockerfile` ([ADR 0011](https://github.com/basaltbytes/usine/blob/main/docs/adr/0011-github-app-identity-scoped-worker-tokens.md), amended 2026-10-25). The container mounts only that attempt's checkout read-write, and its cached clone, credential directory, and the harness login files of the SSH user read-only. Every command of the attempt runs in it with `docker exec`, so attempts can't read each other's checkouts, tokens, or processes. The SSH user's shell starts and removes the container and fetches the cached clone. [`workers[].container`](/reference/configuration/usine-yaml/#workerscontainer) sets the image and the CPU, memory, and process limits of each container.
+Each attempt runs in its own container from an image with Node.js 22, pnpm, Git, gh, Chromium, Claude Code, and Codex, built from `infra/worker-image/Dockerfile` ([ADR 0011](https://github.com/basaltbytes/usine/blob/main/docs/adr/0011-github-app-identity-scoped-worker-tokens.md), amended 2026-10-25). The container mounts only that attempt's checkout and the SSH user's harness login files read-write, and its cached clone and credential directory read-only. The harnesses rewrite the login files when they refresh their tokens, as they do without containers. Every command of the attempt runs in it with `docker exec`, so attempts can't read each other's checkouts, tokens, or processes. The SSH user's shell starts and removes the container and fetches the cached clone. [`workers[].container`](/reference/configuration/usine-yaml/#workerscontainer) sets the image and the CPU, memory, and process limits of each container.
 
 The container is named `usine-<attempt id>` and is removed with the checkout when the attempt ends. A process that stops without removing it leaves it; the next process removes it before its first attempt on that machine, and removes the containers of workers that `usine.yaml` no longer declares too.
 
 The containers use the machine's network, so a worker behind a gateway still reaches only the gateway. The SSH user must be in the `docker` group, which lets it act as root on the machine; the attempts never get Docker access.
 
-Without Docker on the machine, attempts run as the SSH user and can read each other's tokens ([#231](https://github.com/basaltbytes/usine/issues/231)). Preflight passes and reports the worker as degraded in the log and on the **Workers** page.
+Without Docker on the machine, attempts run as the SSH user and can read each other's tokens ([#231](https://github.com/basaltbytes/usine/issues/231)). Preflight passes and reports the worker as degraded in the log and on the **Workers** page. If the SSH user can use Docker, attempts never run as that user: a Docker that doesn't answer, or the `docker` group without the `docker` CLI, fails preflight.
 
 ### Create a worker on Hetzner Cloud
 
@@ -116,7 +116,7 @@ A worker created before cloud-init installed Docker runs its attempts as the SSH
 
 <Steps>
 
-1. Stop the worker's attempts: [stop](/reference/configuration/cli/#usine-stop) `usine up`, or wait until the worker runs none. An attempt whose checkout predates Docker keeps running as the SSH user after a restart.
+1. Stop the worker's attempts: [stop](/reference/configuration/cli/#usine-stop) `usine up`, or wait until the worker runs none. After the restart, usine refuses to reattach or salvage a checkout from before Docker, since that would run git as a user who can now use Docker; it leaves the checkout for you to salvage and remove.
 
 2. As root on the worker, install Docker and add `usine` to the `docker` group. `usine` has no sudo; [`infra/hetzner/README.md`](https://github.com/basaltbytes/usine/blob/main/infra/hetzner/README.md) shows how to become root:
 

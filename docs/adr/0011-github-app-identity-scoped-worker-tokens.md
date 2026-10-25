@@ -51,6 +51,8 @@ A container per attempt was chosen over a Unix user per attempt or per slot, the
 
 Every command for the attempt runs in its container, the executor's git, salvage, and harvest included, because the checkout's git configuration and hooks are the agent's to change: run as the SSH user, which starts containers and so is root-equivalent through the `docker` group, they would run the agent's code outside the boundary. Only the fetch into the cached clone runs as the SSH user, and containers mount that clone read-only, so no attempt can change what the next one checks out. For the same reason, the checkout is a repository of its own that reads the clone's objects through an alternate, not a linked worktree whose git directory is inside the clone.
 
-The harness logins are mounted read-only, so an attempt can read the operator's login, as before, but can't replace it for later attempts.
+Which checkouts a container had is recorded in a file beside the worker's directories that no container mounts, written before the container starts. A reattachment or recovery reads that file, never the checkout: an attempt can rewrite its `.git`, and a checkout that looked like a linked worktree would otherwise make the SSH user run git with the attempt's hooks and configuration.
 
-A machine without Docker runs attempts as the shared user, as before, and preflight reports the worker as degraded.
+The harness login files are mounted read-write, as the shared user had them: the harnesses rewrite them when they refresh an OAuth token, and on the operator's subscriptions a refresh that can't be saved may leave every later attempt with a revoked login. An attempt can read and replace the operator's login, as before; the login lock still serializes Claude starts on the worker.
+
+A machine without Docker runs attempts as the shared user, as before, and preflight reports the worker as degraded. A machine whose SSH user can use Docker never does: there, the shared user is root-equivalent ([ADR 0027](./0027-gateway-credential-proxy.md), amended 2026-10-25).

@@ -50,9 +50,9 @@ export type AttemptIsolation =
 export const sharedUser: AttemptIsolation = { _tag: "SharedUser" };
 
 /**
- * The harness login files under the SSH user's home: `mounted` ones read-only at the same path
- * under the container's home, `seeded` ones copied there at start, because the harness writes
- * them.
+ * The harness login files under the SSH user's home: `mounted` ones at the same path under the
+ * container's home, read-write because the harness rewrites them when it refreshes its OAuth
+ * token, and `seeded` ones copied there at start.
  */
 const LOGIN_FILES = {
   claude: { mounted: [".claude/.credentials.json"], seeded: [".claude.json"] },
@@ -66,6 +66,16 @@ const LOGIN_FILES = {
 /** Returns the name of `attemptId`'s container. */
 export const attemptContainerName = (attemptId: AttemptId): string =>
   `usine-${safeSegment(attemptId)}`;
+
+/**
+ * Returns the file whose presence records that `attemptId`'s checkout was mounted in a
+ * container. It's outside every container's mounts, so no Attempt can create or remove it.
+ */
+export const containerCheckoutMarker = (workerDirectory: string, attemptId: AttemptId): string =>
+  `${workerDirectory}/container-checkouts/${safeSegment(attemptId)}`;
+
+/** A script that creates the empty file `$1` and its directory. */
+const MARK_SCRIPT = 'mkdir -p "$(dirname "$1")" && : > "$1"';
 
 /** One container to start on a machine. */
 export interface ContainerSpec {
@@ -131,6 +141,13 @@ const LIST_SCRIPT = String.raw`
 command -v "$1" >/dev/null 2>&1 || exit 0
 exec "$1" ps --all --filter "label=$2" --format '{{.Names}} {{.Label "dev.usine.worker"}}'
 `.trim();
+
+/**
+ * A script that runs `$@` with this script's standard input through a pipe. `docker run
+ * --env-file /dev/stdin` can't open a socket, which sshd and some process spawners give as
+ * standard input.
+ */
+const PIPED_STDIN_SCRIPT = 'cat | "$@"';
 
 /** Returns a CSV field of a `--mount` option, quoted so a comma in a path is kept. */
 const field = (key: string, value: string): string => `"${key}=${value.replaceAll('"', '""')}"`;
@@ -280,11 +297,9 @@ export const containersFor = (commands: RemoteCommands) => {
       }),
       ...readOnly.map((path) => bindMount(path, path, "readonly")),
       ...found.map(({ file, mounted }) =>
-        bindMount(
-          `${home}/${file}`,
-          `${mounted ? CONTAINER_HOME : SEED_DIRECTORY}/${file}`,
-          "readonly",
-        ),
+        mounted
+          ? bindMount(`${home}/${file}`, `${CONTAINER_HOME}/${file}`, "writable")
+          : bindMount(`${home}/${file}`, `${SEED_DIRECTORY}/${file}`, "readonly"),
       ),
     ];
     // Host networking keeps the machine's nftables rules, which admit only the Gateway, in front
@@ -312,7 +327,13 @@ export const containersFor = (commands: RemoteCommands) => {
     ];
     yield* Effect.addFinalizer(() => remove(shell, spec.name));
     yield* commands
-      .runWithInput(operation, shell, CONTAINER_RUNTIME, args, envFile)
+      .runWithInput(
+        operation,
+        shell,
+        "sh",
+        ["-c", PIPED_STDIN_SCRIPT, "sh", CONTAINER_RUNTIME, ...args],
+        envFile,
+      )
       .pipe(Effect.ensuring(Effect.sync(() => Redacted.wipeUnsafe(envFile))));
     yield* Effect.logInfo("Started the container", {
       ...fields,
@@ -393,5 +414,32 @@ export const containersFor = (commands: RemoteCommands) => {
     return left;
   });
 
-  return { start, stopChildren, sweep, remove };
+  /** Records that the checkout of `marker` is mounted in a container, before any container starts. */
+  const mark = Effect.fn("RemoteExecutor.markContainerCheckout")(function* (
+    operation: ExecutorOperation,
+    shell: RemoteShell,
+    marker: string,
+  ) {
+    yield* Effect.annotateCurrentSpan({ host: shell.destination, marker });
+    yield* commands.run(operation, shell, "sh", ["-c", MARK_SCRIPT, "sh", marker]);
+  });
+
+  /** Returns whether a container has had the checkout of `marker` mounted. */
+  const marked = Effect.fn("RemoteExecutor.isContainerCheckout")(function* (
+    operation: ExecutorOperation,
+    shell: RemoteShell,
+    marker: string,
+  ) {
+    yield* Effect.annotateCurrentSpan({ host: shell.destination, marker });
+    const inspected = yield* commands.inspect(operation, shell, "test", ["-f", marker]);
+    if (inspected.exitCode === 0) return true;
+    if (inspected.exitCode === 1) return false;
+    return yield* new ExecutorOperationError({
+      operation,
+      message: "Can't inspect whether a container had the checkout",
+      cause: new Error(inspected.stderr.trim() || `test exited with code ${inspected.exitCode}`),
+    });
+  });
+
+  return { start, stopChildren, sweep, remove, mark, marked };
 };
