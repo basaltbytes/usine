@@ -543,6 +543,7 @@ describe("Board projection", () => {
           number: ItemNumber.make(33),
           title: "Board lanes",
           url: "https://github.com/basaltbytes/usine/issues/33",
+          state: "issue-open",
         }),
       ],
       labels: [bug],

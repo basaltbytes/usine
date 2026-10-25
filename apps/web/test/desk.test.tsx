@@ -63,7 +63,8 @@ describe("Desk", () => {
   it("lists each Attempt in flight with its Worker, last activity, and open warnings", () => {
     const html = render(<RunningNow running={desk.running} workers={desk.workers} now={now} />);
     const visible = text(html);
-    assert.include(visible, "#403 Operator desk replaces the Projects home");
+    assert.include(html, 'title="Issue #403, open"');
+    assert.include(visible, "Operator desk replaces the Projects home");
     assert.include(visible, "hz-worker-1");
     assert.include(visible, "1m ago");
     assert.include(visible, "local silent since");

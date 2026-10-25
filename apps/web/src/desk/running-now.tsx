@@ -1,5 +1,8 @@
 import { WarningIcon } from "@phosphor-icons/react";
-import type { RunningAttemptView, WorkerView } from "@usine/orchestrator/operator";
+import type { FactoryOverview, RunningAttemptView, WorkerView } from "@usine/orchestrator/operator";
+import { Option } from "effect";
+import { ItemHeading } from "@/components/item/heading";
+import { itemIdentity, useOverview } from "@/components/item/identity";
 import {
   Table,
   TableBody,
@@ -10,7 +13,7 @@ import {
 } from "@/components/ui/table";
 import { agoLabel, dayTimeLabel, timestampLabel } from "../operator-copy.ts";
 import { nothingRunning, warningLine } from "./copy.ts";
-import { EmptyLine, ItemTitle, RunPageLink, RunRow } from "./section.tsx";
+import { EmptyLine, RunPageLink, RunRow } from "./section.tsx";
 
 /** Formats `instant` as a time when it is today, otherwise as a day and time. */
 const startLabel = (instant: string, now: number): string => {
@@ -22,17 +25,31 @@ const startLabel = (instant: string, now: number): string => {
 
 const RunningRow = ({
   running,
+  overview,
   now,
 }: {
   readonly running: RunningAttemptView;
+  readonly overview: FactoryOverview | undefined;
   readonly now: number;
 }) => {
   const { run, attempt, item, lastActivityAt, warnings } = running;
+  const origin = item === null ? null : itemIdentity(overview, item).origin;
   return (
     <RunRow run={run}>
       <TableCell className="w-full max-w-0 py-3 whitespace-normal align-top">
         <RunPageLink run={run}>
-          <ItemTitle item={item} run={run} />
+          {origin === null ? (
+            <span className="block truncate text-sm font-medium">
+              Run <span className="font-mono text-xs">{run.id.slice(0, 8)}</span>
+            </span>
+          ) : (
+            <ItemHeading
+              variant="row"
+              item={Option.some(origin)}
+              title={origin.title}
+              linked={false}
+            />
+          )}
         </RunPageLink>
         <p className="mt-0.5 truncate text-xs text-muted-foreground lg:hidden">
           <span className="md:hidden">
@@ -94,8 +111,9 @@ export const RunningNow = ({
   readonly running: ReadonlyArray<RunningAttemptView>;
   readonly workers: ReadonlyArray<WorkerView>;
   readonly now: number;
-}) =>
-  running.length === 0 ? (
+}) => {
+  const overview = useOverview();
+  return running.length === 0 ? (
     <EmptyLine>{nothingRunning(workers)}</EmptyLine>
   ) : (
     <div className="-mx-2">
@@ -112,9 +130,10 @@ export const RunningNow = ({
         </TableHeader>
         <TableBody>
           {running.map((entry) => (
-            <RunningRow key={entry.attempt.id} running={entry} now={now} />
+            <RunningRow key={entry.attempt.id} running={entry} overview={overview} now={now} />
           ))}
         </TableBody>
       </Table>
     </div>
   );
+};

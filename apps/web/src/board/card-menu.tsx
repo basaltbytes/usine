@@ -2,6 +2,7 @@ import { ArrowSquareOutIcon, DotsThreeIcon } from "@phosphor-icons/react";
 import type { RunId } from "@usine/core/run";
 import type { BoardLaneView, BoardTaskView, RunView } from "@usine/orchestrator/operator";
 import { Fragment, type ReactNode, useState } from "react";
+import { ItemMark, itemName } from "@/components/item/mark";
 import { StateMark } from "@/components/status-badge";
 import {
   AlertDialog,
@@ -27,7 +28,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { elapsedLabel, itemKindLabel, openedTitle, runActionLabel } from "../operator-copy.ts";
+import { elapsedLabel, openedTitle, runActionLabel } from "../operator-copy.ts";
 import type { RunActions } from "../run-actions.ts";
 import type { CardRunAgain } from "./run-again.ts";
 
@@ -91,7 +92,7 @@ export const CardMenu = ({
   readonly className?: string;
 }) => {
   const [confirmingCancel, setConfirmingCancel] = useState(false);
-  const subject = `${itemKindLabel(item.kind).toLowerCase()} #${item.number}`;
+  const subject = itemName(item);
   const past = item.runs.filter(({ id }) => id !== run?.id);
   // If the latest Run succeeded or was canceled, there is no Run line, so Run again shows the Loop.
   const ended = item.run?.canRunAgain === true ? item.run : null;
@@ -106,7 +107,7 @@ export const CardMenu = ({
           rel="noreferrer"
           closeOnClick
         >
-          Open #{member.number} on GitHub
+          Open <ItemMark item={member} linked={false} /> on GitHub
           <ArrowSquareOutIcon className="ml-auto text-muted-foreground" aria-hidden="true" />
         </DropdownMenuLinkItem>
       )),

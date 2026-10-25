@@ -1,8 +1,10 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { CycleBudgetNeed } from "@usine/orchestrator/operator";
+import { Option } from "effect";
+import { taskCard, useOverview } from "@/components/item/identity";
 import { Button } from "@/components/ui/button";
 import { api } from "../api.ts";
-import { needCopy } from "../operator-copy.ts";
+import { cycleBudgetCounts, needCopy } from "../operator-copy.ts";
 import { overviewQuery } from "../overview.ts";
 import { NeedItem } from "./need-item.tsx";
 
@@ -19,14 +21,22 @@ export const CycleBudgetAsk = ({
     mutationFn: () => api((client) => client.resetCycleBudget({ payload: { askId: need.ask.id } })),
     onSuccess: () => queries.invalidateQueries({ queryKey: overviewQuery().queryKey }),
   });
+  const item = Option.flatMap(taskCard(useOverview(), need.ask.itemKey), ({ items }) =>
+    Option.fromNullishOr(items.find(({ itemKey }) => itemKey === need.ask.itemKey)),
+  );
+  const copy = needCopy(need);
   return (
     <NeedItem
-      copy={needCopy(need)}
+      copy={Option.match(item, {
+        onNone: () => copy,
+        onSome: () => ({ ...copy, detail: cycleBudgetCounts(need.ask) }),
+      })}
+      item={Option.getOrUndefined(item)}
       compact={compact}
       error={reset.isError ? reset.error.message : null}
       actions={
         <>
-          {need.itemUrl !== null && (
+          {Option.isNone(item) && need.itemUrl !== null && (
             <Button
               variant="ghost"
               nativeButton={false}

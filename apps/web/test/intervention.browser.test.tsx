@@ -24,7 +24,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { commands, page, userEvent } from "vitest/browser";
 import { SessionComposer } from "../src/run-intervention/session-composer.tsx";
-import { RunActions } from "../src/run-intervention/actions.tsx";
+import { ContextualActions } from "../src/run-intervention/contextual-actions.tsx";
 import { EditAndRetry } from "../src/run-intervention/edit-and-retry.tsx";
 import { runAgainBlocked } from "../src/operator-copy.ts";
 import "../src/index.css";
@@ -185,13 +185,21 @@ it("runs a succeeded Run again as it ended or with an edited task and agent, and
       new Claimed({ eventId: EventId.make("run-again-event"), runId: RunId.make("opened-again") }),
     ),
   );
-  mount(<RunActions run={succeededRun} onEdit={() => {}} openRun={(id) => void opened.push(id)} />);
-  await expect
-    .element(page.getByRole("button", { name: "Edit and run again", exact: true }))
-    .toBeVisible();
+  mount(
+    <ContextualActions
+      run={succeededRun}
+      onEdit={() => {}}
+      openRun={(id) => void opened.push(id)}
+    />,
+  );
   await expect
     .element(page.getByRole("button", { name: "Retry", exact: true }))
     .not.toBeInTheDocument();
+  await page.getByRole("button", { name: "More actions", exact: true }).click();
+  await expect
+    .element(page.getByRole("menuitem", { name: "Edit and run again", exact: true }))
+    .toBeVisible();
+  await userEvent.keyboard("{Escape}");
   await page.getByRole("button", { name: "Run again", exact: true }).click();
   await expect.poll(() => opened).toEqual(["opened-again"]);
 
@@ -245,7 +253,13 @@ it("says that running a Run again opened no Run once the Item's cycle budget is 
       }),
     ),
   );
-  mount(<RunActions run={succeededRun} onEdit={() => {}} openRun={(id) => void opened.push(id)} />);
+  mount(
+    <ContextualActions
+      run={succeededRun}
+      onEdit={() => {}}
+      openRun={(id) => void opened.push(id)}
+    />,
+  );
   await page.getByRole("button", { name: "Run again", exact: true }).click();
   await expect.element(page.getByText(runAgainBlocked, { exact: true })).toBeVisible();
   expect(opened).toEqual([]);

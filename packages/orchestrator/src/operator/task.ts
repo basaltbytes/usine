@@ -1,4 +1,4 @@
-import { LaneItemState, LaneName } from "@usine/config/board";
+import { LaneName } from "@usine/config/board";
 import type { LoadedInstance } from "@usine/config/instance";
 import { GitHubLabelName } from "@usine/config/label";
 import { ItemKey, ItemNumber } from "@usine/core/item";
@@ -38,7 +38,6 @@ const TASK_BOARD_ITEMS = 500;
 /** One issue or pull request of a Task, with its GitHub state as the Board card shows it. */
 export class TaskItemView extends Schema.Class<TaskItemView>("@usine/orchestrator/TaskItemView")({
   ...BoardItemLink.fields,
-  state: LaneItemState,
   labels: Schema.Array(GitHubLabelName),
   /** Whether the Item is an open pull request whose branch conflicts with its base. */
   conflicting: Schema.Boolean,

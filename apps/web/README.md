@@ -2,13 +2,19 @@
 
 The usine web UI, served by `@usine/server`. Internal; never published.
 
+## Issues and pull requests
+
+A task is named after its originating item: the earliest issue, or else, for a task with no issue such as a Dependabot pull request, the earliest pull request. Every page titles a task or run with that item's mark and title, so a pull request number is in a title only for a task without an issue. The task's other pull requests appear as marks beside it, never in the title.
+
+A mark is the item's GitHub icon and number in GitHub's state colour: an issue icon or a pull request icon, open, merged, or closed. It links to the item on GitHub, and its tooltip says the kind, number, and state, such as `Pull request #530, closed`. A mark inside a row, card, or entry that opens something else doesn't link. While a state is unknown, the mark shows the kind's icon in the muted colour.
+
 ## Needs attention
 
 Peach-tinted entries in two columns at the top of every screen except the overview, where they're the first block; absent when empty. Each entry has a title, project, detail line, and actions; an entry about a run opens its drawer. On the run page, entries take one line each, with the full detail in a tooltip. The sidebar shows the total beside **Overview** and a count per project.
 
 Entries:
 
-- **Approval**: the loop and the item's number and title, with **Approve** and **Cancel run**. While any screen sends an action on the run, the buttons are disabled and name it, such as `Approving…`. The entry leaves when the action succeeds, before the overview refreshes. A refusal because the run changed state, for example after approval from the drawer, shows only in the drawer and run page; the entry leaves with the refresh.
+- **Approval**: the loop and the task's name, with **Approve** and **Cancel run**. While any screen sends an action on the run, the buttons are disabled and name it, such as `Approving…`. The entry leaves when the action succeeds, before the overview refreshes. A refusal because the run changed state, for example after approval from the drawer, shows only in the drawer and run page; the entry leaves with the refresh.
 - **\<loop\>: blocked** or **Question from \<loop\>**, with the agent's blocker or question. **Mark resolved** (**Mark answered** for a question, in its drawer and run page) lets the run's loop act on the item's newest state.
 - **Failed run**. **Mark resolved**, in its drawer (from **Needs attention** or **Run history**) or run page, clears the warning and its project and board attention, across reloads and restarts, and keeps the outcome, attempt details, transcript, and retry controls. A later failed attempt raises it again.
 - **Cycle budget used up** on an item, with the loops and their counts. **Reset cycle budget** records an explicit answer and refreshes the overview; the runtime fetches current trigger input before opening more work.
@@ -16,16 +22,16 @@ Entries:
 - **Loop file not loaded** or **Agent file not loaded**: a file that failed to load at startup or reload, with the reason, until fixed and reloaded.
 - **Worker not configured**: a worker no longer in `usine.yaml` that has recorded attempts, with their count and the full detail, actions below. Startup doesn't reconcile them. Declare the worker again and restart `usine up`, or choose **Discard leftovers** and **Confirm discard** to stop tracking them, which removes nothing from the worker. While attempts a reload left there still run, the entry says how many (`2 attempts still running on it. Discard the leftovers after they end`), and **Discard leftovers** appears after the last ends. A refused discard, for example because the worker is declared again, shows the reason.
 
-A failed run, question, or blocker on an item that is closed or merged isn't listed and doesn't mark the project or its card; the run stays under **Recent runs** and in its drawer, which says `Issue closed`, `Pull request closed`, or `Pull request merged`. A cycle budget entry leaves at the first poll after its item closes or merges.
+A failed run, question, or blocker on an item that is closed or merged isn't listed and doesn't mark the project or its card; the run stays under **Recent runs** and in its drawer, which marks the item closed or merged. A cycle budget entry leaves at the first poll after its item closes or merges.
 
 ## Overview
 
 The first screen, at `/`:
 
 - **Needs attention**, or `Nothing needs attention` with the time of the last finished poll.
-- **Running**: one row per attempt in flight: item, loop, agent, worker, start time, last activity, and open connectivity warnings in yellow.
-- **Stalled**: one row per item a loop's trigger matches with no running attempt, with a reason such as `Canceled 2d ago, unchanged since` and the one applicable action: **Approve**, **Mark answered**, **Mark resolved**, **Reset cycle budget**, **Retry**, **Run again**, or **Resume**. Below `md`, the loop, reason, and action stack under the item.
-- **Recent runs**: the last 10 closed runs, with outcome and pull request.
+- **Running**: one row per attempt in flight: the task's name, loop, agent, worker, start time, last activity, and open connectivity warnings in yellow.
+- **Stalled**: one row per item a loop's trigger matches with no running attempt, named by its task, with a reason such as `Canceled 2d ago, unchanged since` and the one applicable action: **Approve**, **Mark answered**, **Mark resolved**, **Reset cycle budget**, **Retry**, **Run again**, or **Resume**. Below `md`, the loop, reason, and action stack under the item.
+- **Recent runs**: the last 10 closed runs, with outcome and the pull request the run opened, unless it names the task.
 - One line with each worker's slots in use and last preflight.
 
 A row about a run opens its run page. Empty blocks say what they would list, and loading blocks show skeleton rows. With no project registered, the overview points to `repos` in `usine.yaml` and offers **Reload configuration**.
@@ -52,7 +58,7 @@ Only authored label-backed lanes accept moves, and only if another writable lane
 
 A card joins explicitly linked issues and PRs. It shows:
 
-- Each member's number and kind (`PR` for a pull request), the title on at most two lines, and up to three labels besides the lane's own, with a count of the rest.
+- Each member's mark, the task's title on at most two lines, and up to three labels besides the lane's own, with a count of the rest.
 - For an open run, or a failed run that still needs the operator: a dot in the state's color (pulsing while `Running`), then the loop, state, time, and agent. The time counts from the run's opening while `Waiting` or `Queued`, the current attempt's start while `Running`, and the failure once `Failed`; the tooltip gives the full timestamp and start point. Succeeded and canceled runs show only on the task page, in the drawer, and in **Run history**.
 - Under that line: failures, with **Retry** if retryable or **Mark answered** or **Mark resolved** for a question or blocker; merge conflicts; run action and **Run again** progress, including that no run opened because the cycle budget is used up; and move progress.
 - For a stalled task, the overview's reason (from `GET /api/desk`), after the loop if no run line shows it, and the one action that unblocks it, such as **Approve** or **Run again**.
@@ -71,10 +77,10 @@ At `/projects/<owner>/<name>/tasks`: the board's tasks with at least one run, fi
 
 Columns:
 
-- **Task**: the originating item's number and the task's title.
+- **Task**: the task's name.
 - **Status**, then ` · ` and when the last run was last active, such as `Done · 28m ago`.
 - **Runs**: the loops in first-run order, each with its last run's state mark, then the run count.
-- **Pull request**, with its state, such as `#425 merged` or `#427 open`.
+- **Pull request**: the task's other pull requests as marks.
 - **Elapsed time** (the attempts' time, counting while one runs, such as `48 min`), **Tokens** (`1.2M`), and **Estimated cost** (priced dollars, `$20.55`): bare figures under their headers.
 
 A muted `*` marks a figure lower than the real one: elapsed time while some attempts lack timing (`0s*`, reason in the tooltip), or cost while some usage is unpriced, such as a Claude session before its first result (reason at the top of the hover card). Hovering tokens or cost shows tokens per billing pool, summed over the runs.
@@ -84,7 +90,7 @@ The status is the first that applies:
 1. `Running`, with the loop.
 2. `Waiting for approval`.
 3. The stall reason of a pending or queued run, as on the overview.
-4. `Done`, if the current item is merged or closed and no run is open.
+4. `Done`, after the current item's state icon, if the item is merged or closed and no run is open.
 5. A stalled task's reason.
 6. `Needs attention`, if a failed run or a suppression needs the operator.
 7. The last run's outcome, such as `Failed`.
@@ -101,12 +107,12 @@ Columns follow the table's width, not the window's; [`DESIGN.md`](DESIGN.md#layo
 
 At `/projects/<owner>/<name>/tasks/<number>`, where the number is the originating item's: the earliest issue, or else the earliest pull request. Any member's number opens the page under that address. An item outside the board's 500 newest shows `Task not found`.
 
-The header has the originating item's number (linked to GitHub) and the task title; below them, the current item's state (with its number if it's a pull request), lane, labels besides the lane's own, and **Needs attention** if it applies. **Move to** is at the right while another writable lane exists and no move is saving.
+The header has the task's name; below it, the task's other pull requests, the lane, labels besides the lane's own, and **Needs attention** if it applies. **Move to** is at the right while another writable lane exists and no move is saving.
 
 Sections:
 
 - **Runs**: every run on the task's items, newest first: state, loop, item (if several), agent, attempts, attempt duration, open time, and the resulting pull request. Under the loop: a failed run's typed reason and message, who ran it again, and who approved it. Below 1280px, the other facts fold under the loop; below 640px, the state does too. A row opens its run page and shows **Approve** for a waiting run or **Retry** for a failed run that still needs the operator. The row menu has the other actions that apply, with **Cancel run** confirmed; **Edit and retry** and **Edit and run again** open the editor under the row.
-- **Pull requests**: state and conflicts with the base, each linked to GitHub.
+- **Pull requests**: each one's mark and title, linked to GitHub, and any conflict with the base.
 - **Comments and reviews**: what the runs' attempts posted, whatever their outcome, with item, run, and posting time (or attempt end, if recorded before posting times were), each linked to GitHub.
 
 Empty sections say how they fill. The page refreshes every 2 seconds while a run can be canceled, every 15 seconds otherwise, and when the overview refreshes after a run action or move.
@@ -115,20 +121,37 @@ Empty sections say how they fill. The page refreshes every 2 seconds while a run
 
 A run opened from a card menu, **Needs attention**, **Run history**, or **Run again** on the task page shows in a drawer over the current screen:
 
-- The item's number and title (linked), and the run's state.
-- Its pull request, linked (or the item, if it's a pull request and the run produced none), or `No pull request`.
-- The loop and agent, and for a failed run on an item that is closed or merged, `Issue closed`, `Pull request closed`, or `Pull request merged`.
-- Once an attempt has started: the newest attempt's worker and the **Duration** of all attempts, counting while one runs.
-- The actions that apply.
+- Above the title: the loop and agent.
+- The task's name.
+- Under it: the run's state and its pull request, which is the one the run opened, else the item if it's a pull request, unless it names the task.
+- Once an attempt has started: the duration of all attempts, counting while one runs, and the newest attempt's worker. Then `Loop paused` if the loop is paused.
+- The actions for the run's state (see [Run actions](#run-actions)).
 - An outcome paragraph: a succeeded run's result; a failed run's typed reason, message, and salvage; what a waiting or queued run waits for; or a running run's current activity and latest message.
+
+Each item appears once. Names and states come from the task's board card. If the board doesn't show the task, the run's item names it, with its state from the newest poll if it's closed or merged, and the pull request has no state.
 
 **Open run page**, or the expand icon beside **Close**, opens the run page; with view transitions and without reduced motion, the title and state animate from the drawer into the page.
 
+### Run actions
+
+The drawer and run page show only the actions that apply: a primary button, a secondary button, and **More actions** with the rest.
+
+| Run | Primary | Secondary | More actions |
+| --- | --- | --- | --- |
+| Waiting for approval | **Approve** | | **Cancel run** |
+| Pending, queued, or running | | **Cancel run** | |
+| Failed with a question | **Mark answered** | **Edit and retry** | **Retry** |
+| Failed with a blocker | **Mark resolved** | **Edit and retry** | **Retry** |
+| Failed otherwise | **Retry** | **Edit and retry** | **Mark resolved** |
+| Succeeded or canceled | | **Run again** | **Edit and run again** |
+
+Once a question or blocker is marked answered or resolved, the run's actions are those of any other failure. If a failed run can't be retried, **Mark resolved** is the primary button. **Cancel run** asks for confirmation with **Confirm cancel** and **Keep running**.
+
 ## Run page
 
-At `/projects/<owner>/<name>/runs/<run>`: the whole run under the drawer's header, whose worker and duration line adds the **Tokens** the sessions used. The total opens a breakdown per billing pool and per session under each attempt, priced by the harness for pools with a dollar rate: API keys, and the Claude plan as an estimate. The ChatGPT plan says it has no dollar rate.
+At `/projects/<owner>/<name>/runs/<run>`: the whole run under the drawer's header and actions. The line under the title adds the tokens the sessions used, such as `159.6K tokens`; the total opens a breakdown per billing pool and per session under each attempt, priced by the harness for pools with a dollar rate: API keys, and the Claude plan as an estimate. The ChatGPT plan says it has no dollar rate.
 
-**Run again**, on a succeeded or canceled run (or in the card menu for the task's latest run), opens a new run of its loop on the same item content with the run's task and agent; **Edit and run again** lets you change them first. The drawer or page then shows the new run, whose event says who ran it again, when, and from which run, linked by short id in the event document and on the task page. If the item's cycle budget is used up, no run opens and the actions say so. For **Edit and retry**, see [Intervening in a run](#intervening-in-a-run).
+**Run again**, on a succeeded or canceled run (or in the card menu for the task's latest run), opens a new run of its loop on the same item content with the run's task and agent; **Edit and run again**, under **More actions**, lets you change them first. The drawer or page then shows the new run, whose event says who ran it again, when, and from which run, linked by short id in the event document and on the task page. If the item's cycle budget is used up, no run opens and the actions say so. For **Edit and retry**, see [Intervening in a run](#intervening-in-a-run).
 
 ### Outline
 
@@ -158,7 +181,7 @@ Calls between two messages fold into one line that says what ran, such as “Ran
 
 An expanded fold shows each call as one row, start and finish together, naming the command, file, search, or delegated task. Commands show terminal output, reads show source, and edits show a patch or before-and-after text, each in a copyable panel; other tools show labeled parameters and readable results. **Raw details** has the complete input and output.
 
-A label change, comment, or review the agent made on the run's item is a line under the fold of the calls that made it: “Removed agent-in-progress, added ready-for-review”, with labels in GitHub colors, or “Commented on #247” or “Reviewed #320”, linked to the comment or review. They come from the item's GitHub timeline (the App's changes during that attempt), not from commands, so a command that changed nothing adds no line. The run page reads them on open, when an attempt starts or ends, and every 30 seconds while one runs; if GitHub can't be read, a notice at the top says so.
+A label change, comment, or review the agent made on the run's item is a line under the fold of the calls that made it: “Removed agent-in-progress, added ready-for-review”, with labels in GitHub colors, or “Commented on” or “Reviewed” and the item's mark, linked to the comment or review. They come from the item's GitHub timeline (the App's changes during that attempt), not from commands, so a command that changed nothing adds no line. The run page reads them on open, when an attempt starts or ends, and every 30 seconds while one runs; if GitHub can't be read, a notice at the top says so.
 
 Your board moves during an attempt go through the same App, but usine records each move before sending it, so the reader shows it as yours, like a timed operator note: “You moved it from Review to Findings on the Board”. Moves from before usine recorded them show as the agent's label change.
 
@@ -204,7 +227,7 @@ If the machine has its own Chromium, such as a worker built by [`infra/hetzner/c
 
 ## Stack
 
-React, TypeScript, TanStack Query, TanStack Router, Tailwind CSS, shadcn components on Base UI with Phosphor icons, and shadcn/typeset over react-markdown for prose. The visual system (ADR 0015) is dark-only on Catppuccin Mocha; [`DESIGN.md`](DESIGN.md) defines its colors, type, and components.
+React, TypeScript, TanStack Query, TanStack Router, Tailwind CSS, shadcn components on Base UI with Phosphor icons, GitHub Octicons for issue and pull request marks, and shadcn/typeset over react-markdown for prose. The visual system (ADR 0015) is dark-only on Catppuccin Mocha; [`DESIGN.md`](DESIGN.md) defines its colors, type, and components.
 
 ## How to add UI
 
@@ -212,6 +235,7 @@ The registry is the component library, and the theme is the only place for color
 
 - **Use a registry component first.** Everything under `src/components/ui/` came from `pnpm dlx shadcn@latest add <name>` (run inside `apps/web`; `components.json` has the preset). Compose those primitives (`Item`, `Card`, `Badge`, `Sheet`, `Message`, `Collapsible`, `Empty`, …) in screen files. The full set is installed: check it before writing a new element.
 - **Extend with tokens, not hex.** Colors, fonts, and radii are CSS variables in `src/index.css`, exposed to Tailwind through the `@theme inline` block. A new semantic color is a token pair there (`:root` and `.dark`) plus one `--color-*` line; screens then use utilities such as `text-run-active`. Never write a literal color in a component.
+- **Render issues and pull requests with `src/components/item/`.** `ItemMark` is the only place that picks an item's icon, colour, and state words; `ItemHeading` puts a mark inline in a title; `PullRequestMarks` lists pull requests; `identity.ts` finds the item that names a task. Never print an item number another way.
 - **Never hand-roll a parallel component.** No `styles.css`, no ad-hoc button or badge classes. A composition shared by several screens (for example `src/components/status-badge.tsx`) wraps a registry primitive in `src/components/`, next to `ui/`, keeping vendored and composed components apart.
 - **Edit registry files in place** to fix type or a11y issues. They're exempt from the `usine/*` lint rules (`.oxlintrc.json` override), since upstream doesn't follow them, and `knip` treats them as entry files, so unused components aren't reported.
 - **Use AI Elements for conversation tools.** `src/components/ai-elements/` adapts the upstream Tool, CodeBlock, and Terminal components to Base UI, Phosphor icons, and the app's tokens (its README records provenance and changes). Fill these panels with readable tool content; complete transport payloads go under **Raw details**. shadcn MessageScroller handles conversation scrolling; every direct content row has a stable `MessageScrollerItem` identity.

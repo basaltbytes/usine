@@ -1,7 +1,13 @@
-import { CaretDownIcon } from "@phosphor-icons/react";
+import { CaretDownIcon, KanbanIcon } from "@phosphor-icons/react";
 import type { ProjectView, TaskView } from "@usine/orchestrator/operator";
+import { Option } from "effect";
 import { ErrorAlert } from "@/components/error-alert";
+import { ItemHeading } from "@/components/item/heading";
+import { taskIdentity } from "@/components/item/identity";
+import { itemName } from "@/components/item/mark";
+import { PullRequestMarks } from "@/components/item/pull-request-marks";
 import { LabelBadge } from "@/components/label-badge";
+import { PageFact, PageHeader } from "@/components/page";
 import { NeedsYouBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,8 +19,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cardLabels, type LabelCatalog } from "../board/card.tsx";
 import { useBoardMoves } from "../board/moves.ts";
-import { itemKindLabel, moveProgressMessage } from "../operator-copy.ts";
-import { itemStateLine } from "./model.ts";
+import { moveProgressMessage } from "../operator-copy.ts";
 
 /** Shows Move to only if another writable lane exists and no move of this Task is pending. */
 export const TaskHeader = ({
@@ -28,8 +33,8 @@ export const TaskHeader = ({
   readonly disabled: boolean;
 }) => {
   const moves = useBoardMoves(project);
-  const [origin] = task.items;
-  const current = task.items.find(({ itemKey }) => itemKey === task.current) ?? origin;
+  const [first] = task.items;
+  const current = task.items.find(({ itemKey }) => itemKey === task.current) ?? first;
   const placed = project.board.lanes
     .flatMap((lane) => lane.items.map((card) => ({ lane, card })))
     .find(({ card }) => card.itemKey === task.current);
@@ -58,31 +63,19 @@ export const TaskHeader = ({
           (label) => pending === undefined || !laneLabels.has(label),
         );
   const catalog: LabelCatalog = new Map(project.labels.map((label) => [label.name, label]));
-  const subject = `${itemKindLabel(current.kind).toLowerCase()} #${current.number}`;
   const movable = !disabled && !moves.isPending && pending === undefined && targets.length > 0;
+  const { origin, pullRequests } = taskIdentity(task.items);
   return (
-    <header className="flex flex-col gap-3">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
-        <div className="flex min-w-0 flex-col gap-1.5">
-          <div className="flex min-w-0 items-baseline gap-2.5">
-            <a
-              href={origin.url}
-              target="_blank"
-              rel="noreferrer"
-              title={`Open ${itemKindLabel(origin.kind).toLowerCase()} #${origin.number} on GitHub`}
-              className="shrink-0 font-mono text-xs text-primary underline-offset-4 hover:underline"
-            >
-              #{origin.number}
-            </a>
-            <h1 className="text-xl font-semibold text-balance wrap-anywhere">{task.title}</h1>
-          </div>
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-sm text-muted-foreground">
-            <span className="font-medium text-foreground">
-              {itemStateLine(current, current.itemKey === origin.itemKey)}
-            </span>
-            <span>
-              Lane <span className="text-foreground">{laneName}</span>
-            </span>
+    <div className="flex flex-col gap-3">
+      <PageHeader
+        actionsBeside="sm"
+        heading={<ItemHeading variant="page" item={Option.some(origin)} title={task.title} />}
+        facts={
+          <>
+            <PullRequestMarks pullRequests={pullRequests} />
+            <PageFact icon={KanbanIcon} title="Lane">
+              <span className="text-foreground">{laneName}</span>
+            </PageFact>
             {pending !== undefined && (
               <span role="status">{moveProgressMessage(pending.phase)}</span>
             )}
@@ -94,30 +87,37 @@ export const TaskHeader = ({
               </span>
             )}
             {task.needsYou && <NeedsYouBadge />}
-          </div>
-        </div>
-        {placed !== undefined && movable && (
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={<Button variant="outline" className="self-start" />}
-              aria-label={`Move ${subject} to another lane`}
-            >
-              Move to
-              <CaretDownIcon data-icon="inline-end" aria-hidden="true" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-auto min-w-40">
-              <DropdownMenuGroup>
-                {targets.map((lane) => (
-                  <DropdownMenuItem key={lane.id} onClick={() => moves.moveItem(placed.card, lane)}>
-                    {lane.name}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-      </div>
+          </>
+        }
+        {...(placed !== undefined && movable
+          ? {
+              actions: (
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={<Button variant="outline" />}
+                    aria-label={`Move ${itemName(current)} to another lane`}
+                  >
+                    Move to
+                    <CaretDownIcon data-icon="inline-end" aria-hidden="true" />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-auto min-w-40">
+                    <DropdownMenuGroup>
+                      {targets.map((lane) => (
+                        <DropdownMenuItem
+                          key={lane.id}
+                          onClick={() => moves.moveItem(placed.card, lane)}
+                        >
+                          {lane.name}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ),
+            }
+          : {})}
+      />
       {moves.error !== null && <ErrorAlert className="max-w-3xl" message={moves.error.message} />}
-    </header>
+    </div>
   );
 };

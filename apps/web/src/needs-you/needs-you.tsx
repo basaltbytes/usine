@@ -11,6 +11,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { itemIdentity, useOverview } from "@/components/item/identity";
 import { cn } from "@/lib/utils";
 import { useOpenRun } from "../open-run.ts";
 import { needCopy, runActionLabel, runActionProgress } from "../operator-copy.ts";
@@ -34,10 +35,14 @@ const ApprovalAsk = ({
   const action = useRunAction();
   const [confirmingCancel, setConfirmingCancel] = useState(false);
   const sent = usePendingRunAction(need.runId);
+  const overview = useOverview();
+  const origin = need.item === null ? undefined : itemIdentity(overview, need.item).origin;
+  const copy = needCopy(need);
   return (
     <>
       <NeedItem
-        copy={needCopy(need)}
+        copy={origin === undefined ? copy : { ...copy, detail: origin.title }}
+        item={origin}
         compact={compact}
         open={() => openRun(need.runId)}
         error={

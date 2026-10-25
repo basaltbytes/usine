@@ -125,35 +125,33 @@ it("lists only the tasks with runs, in flight first, with their status and last 
   // and merged by last Run close time. The four tasks no Loop ran on are not listed. Each status
   // ends with the last Run's activity time unless the stall text already has a time.
   await expect.poll(rowTexts).toEqual([
-    ["#9Redesign the Board columns and cards", "Running implement · 6m ago"],
+    ["#9 Redesign the Board columns and cards", "Running implement · 6m ago"],
     [
-      "#7Retry salvage pushes when the Worker loses its network mid-Attempt",
+      "#7 Retry salvage pushes when the Worker loses its network mid-Attempt",
       "Waiting for approval · 3m ago",
     ],
-    ["#44Pin the Node version of the release workflow", "Queued · 2m ago"],
+    ["#44 Pin the Node version of the release workflow", "Queued · 2m ago"],
     [
-      "#28Pin GitHub Actions to commit SHAs and add Dependabot for them",
+      "#28 Pin GitHub Actions to commit SHAs and add Dependabot for them",
       "Failed 1h ago: Agent failure",
     ],
     [
-      "#18Cache the label catalog per repository",
+      "#18 Cache the label catalog per repository",
       expect.stringMatching(/^Canceled \d+h ago, unchanged since$/u),
     ],
-    ["#5Show the salvage branch on failed Attempts", "Done · 1d ago"],
+    ["#5 Show the salvage branch on failed Attempts", "Done · 1d ago"],
   ]);
 
   const redesign = rowOf(/Redesign the Board columns/u);
   // Each Loop once, in first-run order, with its last Run's state, then the Run count.
   await expect.element(redesign).toHaveTextContent("plan Succeeded · implement Running2");
   await expect
-    .element(redesign.getByRole("link", { name: "#31", exact: true }))
+    .element(redesign.getByRole("link", { name: "Pull request #31, open", exact: true }))
     .toHaveAttribute("href", "https://github.com/board-test/repo/pull/31");
   // The pull request, then the time, tokens, and dollars of a priced Run and a ChatGPT plan Run,
   // each in its own cell.
-  await expect.element(redesign).toHaveTextContent(/#31open41 min27\.3K\$2\.00$/u);
-  await expect
-    .element(rowOf(/Show the salvage branch/u))
-    .toHaveTextContent(/#6merged30 min48K\$3\.10$/u);
+  await expect.element(redesign).toHaveTextContent(/#3141 min27\.3K\$2\.00$/u);
+  await expect.element(rowOf(/Show the salvage branch/u)).toHaveTextContent(/#630 min48K\$3\.10$/u);
   // No Attempt started on the waiting task, and the canceled one reported no tokens.
   expect(cellTexts(/Retry salvage pushes/u).slice(4)).toEqual(["", "", ""]);
   expect(cellTexts(/Cache the label catalog/u).slice(4)).toEqual(["10 min", "", ""]);
@@ -190,7 +188,7 @@ it("marks the priced dollars with an asterisk while a run has no price yet, and 
     .element(page.getByText("$13.45*", { exact: true }))
     .toHaveAttribute("title", "Some sessions have no price yet; the real figure is higher");
   const redesign = rowOf(/Redesign the Board columns/u);
-  await expect.element(redesign).toHaveTextContent(/#31open41 min27\.5K\$9\.95\*$/u);
+  await expect.element(redesign).toHaveTextContent(/#3141 min27\.5K\$9\.95\*$/u);
   await redesign
     .getByRole("button", { name: "Estimated cost: at least $9.95. Show per pool" })
     .hover();
@@ -281,7 +279,7 @@ it("opens the task page from anywhere on a row, under its originating item", asy
     position: { x: runs.left - bounds.left + runs.width / 2, y: bounds.height / 2 },
   });
   await expect.poll(() => router.state.location.pathname).toBe(`${list}/9`);
-  await expect.poll(crumbTexts).toEqual(["board-test/repo", "Tasks", "#9"]);
+  await expect.poll(crumbTexts).toEqual(["board-test/repo", "Tasks", "Issue #9"]);
   await crumbs().getByRole("link", { name: "Tasks", exact: true }).click();
   await expect.poll(() => router.state.location.pathname).toBe(list);
 });

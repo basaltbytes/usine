@@ -108,7 +108,7 @@ export const UsageBreakdown = ({
   </>
 );
 
-/** Renders the token total, which opens the breakdown per pool and session. */
+/** Renders the token total, such as `27.3K tokens`, which opens the breakdown per pool and session. */
 export const UsageFact = ({
   usage,
   attempts,
@@ -116,21 +116,18 @@ export const UsageFact = ({
   readonly usage: RunUsageView;
   readonly attempts: ReadonlyArray<Pick<AttemptView, "id" | "number">>;
 }) => (
-  <span className="inline-flex items-baseline gap-1.5">
-    Tokens
-    <Popover>
-      <PopoverTrigger
-        aria-label={`Tokens: ${count.format(usage.tokens)}. Show per pool and session`}
-        className="rounded-sm font-mono text-xs text-primary tabular-nums underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/70"
-      >
-        {tokensLabel(usage.tokens)}
-      </PopoverTrigger>
-      <PopoverContent
-        align="start"
-        className="w-[26rem] max-w-[calc(100vw-2rem)] gap-3 p-3 text-xs shadow-raised"
-      >
-        <UsageBreakdown usage={usage} attempts={attempts} />
-      </PopoverContent>
-    </Popover>
-  </span>
+  <Popover>
+    <PopoverTrigger
+      aria-label={`Tokens: ${count.format(usage.tokens)}. Show per pool and session`}
+      className="rounded-sm text-primary underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/70"
+    >
+      <span className="font-mono text-xs tabular-nums">{tokensLabel(usage.tokens)}</span> tokens
+    </PopoverTrigger>
+    <PopoverContent
+      align="start"
+      className="w-[26rem] max-w-[calc(100vw-2rem)] gap-3 p-3 text-xs shadow-raised"
+    >
+      <UsageBreakdown usage={usage} attempts={attempts} />
+    </PopoverContent>
+  </Popover>
 );

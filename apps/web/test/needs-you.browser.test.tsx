@@ -75,6 +75,7 @@ const approvalOf = (id: RunId, number: number, title: string) =>
       number: ItemNumber.make(number),
       title,
       url: `https://github.com/approval/project/issues/${number}`,
+      state: "issue-open",
     }),
   });
 const approval = approvalOf(runId, 367, "Keep Needs attention current");

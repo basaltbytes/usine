@@ -1,4 +1,3 @@
-import type { SettledItemState } from "@usine/config/board";
 import { BrainSpec } from "@usine/core/agent/brain";
 import type { BillingPool } from "@usine/core/agent/session";
 import type { SalvagePushed } from "@usine/core/attempt/salvage";
@@ -8,7 +7,7 @@ import { RunId } from "@usine/core/run";
 import type { ApprovalChannel } from "@usine/core/run/approval";
 import type { InstanceReload } from "@usine/orchestrator/current-instance";
 import type {
-  BoardItemLink,
+  CycleBudgetNeed,
   FailureView,
   LoopView,
   NeedView,
@@ -41,20 +40,6 @@ export const runActionLabel = {
 export const runAgainProgress = "Opening a run…";
 
 export const runAgainBlocked = "No run opened: cycle budget used up. Reset it in Needs attention";
-
-export const itemKindLabel = (kind: BoardItemLink["kind"]): string =>
-  kind === "pr" ? "Pull request" : "Issue";
-
-export const settledItemLabel = (state: SettledItemState): string => {
-  switch (state) {
-    case "issue-closed":
-      return "Issue closed";
-    case "pr-closed":
-      return "Pull request closed";
-    case "pr-merged":
-      return "Pull request merged";
-  }
-};
 
 /** Returns the label of a Loop trigger, using the Item kind names from Board cards. */
 export const triggerLabel = (trigger: LoopView["trigger"]): string => {
@@ -243,17 +228,21 @@ export const queuedMessageLabel = (session: QueuedFor): string =>
 export const conflictingSalvageMessage = ({ ref, commit }: SalvagePushed): string =>
   `Not applied: the previous attempt's work on ${ref} at ${commit.slice(0, 7)} conflicts with the current revision. It is still on ${ref}`;
 
+/** Returns a used-up cycle budget's rounds and Runs per Loop, for example `3 completed rounds. start-dev: 2 runs`. */
+export const cycleBudgetCounts = (ask: CycleBudgetNeed["ask"]): string =>
+  `${ask.completedCycles} completed rounds. ${ask.counts.map(({ loop, admitted }) => `${loop}: ${admitted} ${admitted === 1 ? "run" : "runs"}`).join("; ")}`;
+
 export const needCopy = (need: NeedView): NeedCopy =>
   Match.valueTags(need, {
     CycleBudgetNeed: ({ ask, itemLabel }) => ({
       title: "Cycle budget exhausted",
-      detail: `${itemLabel}: ${ask.completedCycles} completed rounds. ${ask.counts.map(({ loop, admitted }) => `${loop}: ${admitted} ${admitted === 1 ? "run" : "runs"}`).join("; ")}`,
+      detail: `${itemLabel}: ${cycleBudgetCounts(ask)}`,
       repository: ask.repository,
       runId: null,
     }),
     ApprovalNeed: ({ loop, repository, runId, item }) => ({
       title: `${loop}: approval needed`,
-      detail: item === null ? "Open the run for the task text" : `#${item.number} ${item.title}`,
+      detail: item === null ? "Open the run for the task text" : item.title,
       repository,
       runId,
     }),

@@ -11,9 +11,12 @@ import {
 } from "@tanstack/react-router";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
+import type { FactoryOverview } from "@usine/orchestrator/operator";
 import { Schema } from "effect";
 import { AppSidebar, type OperatorView, useOperatorView } from "@/components/app-sidebar";
 import { BootScreen } from "@/components/boot-screen";
+import { cardIdentity } from "@/components/item/identity";
+import { itemLabel } from "@/components/item/mark";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Breadcrumb,
@@ -54,6 +57,17 @@ const Unreachable = ({ error }: ErrorComponentProps) => {
   );
 };
 
+/** Returns the name of the Task with the item `number`: its originating item, else the item. */
+const taskCrumb = (overview: FactoryOverview, repository: RepositoryName, number: string) => {
+  const card = overview.projects
+    .find((project) => project.repository === repository)
+    ?.board.lanes.flatMap(({ items }) => items)
+    .find(({ items }) => items.some((member) => String(member.number) === number));
+  return card === undefined
+    ? `Item #${number}`
+    : itemLabel({ ...cardIdentity(card).origin, state: null });
+};
+
 const Crumbs = ({
   view,
   project,
@@ -63,7 +77,7 @@ const Crumbs = ({
   readonly view: OperatorView;
   readonly project: RepositoryName | undefined;
   readonly runId: RunId | undefined;
-  /** The Item number of the open Task page. */
+  /** The open Task page's originating item, such as `Issue #481`. */
   readonly task: string | undefined;
 }) => {
   if (view === "configuration") return <ConfigurationCrumbs />;
@@ -116,9 +130,7 @@ const Crumbs = ({
         <>
           <BreadcrumbSeparator />
           <BreadcrumbItem>
-            <BreadcrumbPage>
-              <span className="font-mono text-xs">#{task}</span>
-            </BreadcrumbPage>
+            <BreadcrumbPage>{task}</BreadcrumbPage>
           </BreadcrumbItem>
         </>
       )}
@@ -154,7 +166,16 @@ const Shell = () => {
           <SidebarTrigger className="text-muted-foreground hover:text-foreground" />
           <Breadcrumb>
             <BreadcrumbList>
-              <Crumbs view={view} project={project} runId={params.run} task={params.number} />
+              <Crumbs
+                view={view}
+                project={project}
+                runId={params.run}
+                task={
+                  project === undefined || params.number === undefined
+                    ? undefined
+                    : taskCrumb(data, project, params.number)
+                }
+              />
             </BreadcrumbList>
           </Breadcrumb>
         </header>

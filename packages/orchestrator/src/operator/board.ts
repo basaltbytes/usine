@@ -15,7 +15,7 @@ export type BoardLaneId = typeof BoardLaneId.Type;
 export const BoardLaneOrigin = Schema.Literals(["authored", "proposed", "fallback"]);
 export type BoardLaneOrigin = typeof BoardLaneOrigin.Type;
 
-/** An Item of a Task, with its own title and GitHub URL. */
+/** An Item of a Task, with its own title, GitHub URL, and GitHub state. */
 export class BoardItemLink extends Schema.Class<BoardItemLink>("@usine/orchestrator/BoardItemLink")(
   {
     itemKey: ItemKey,
@@ -23,6 +23,7 @@ export class BoardItemLink extends Schema.Class<BoardItemLink>("@usine/orchestra
     number: ItemNumber,
     title: Schema.String,
     url: Schema.NonEmptyString,
+    state: LaneItemState,
   },
 ) {}
 
@@ -43,7 +44,6 @@ export class BoardPullRequestView extends Schema.Class<BoardPullRequestView>(
 export class BoardTaskView extends Schema.Class<BoardTaskView>("@usine/orchestrator/BoardTaskView")(
   {
     ...BoardItemLink.fields,
-    state: LaneItemState,
     labels: Schema.Array(GitHubLabelName),
     items: Schema.Array(BoardItemLink).check(Schema.isNonEmpty()),
     /**

@@ -4,6 +4,8 @@ import type { RunId } from "@usine/core/run";
 import type { RunView, TaskItemView, TaskView } from "@usine/orchestrator/operator";
 import { Option } from "effect";
 import { type ReactNode, useState } from "react";
+import { pullRequestAt } from "@/components/item/identity";
+import { ItemMark, type ItemRef } from "@/components/item/mark";
 import { StateMark } from "@/components/status-badge";
 import {
   AlertDialog,
@@ -52,29 +54,21 @@ import {
   useRunAgain,
 } from "../run-actions.ts";
 import { EditAndRetry, type EditIntent, editApplies } from "../run-intervention/edit-and-retry.tsx";
-import { pullRequestNumber } from "../run-page/item.ts";
 import { ApprovalLine } from "../run-page/approval.tsx";
 import { RunAgainLine } from "../run-page/run-again.tsx";
-import { attemptsDuration, itemReference, runFailure } from "./model.ts";
+import { attemptsDuration, runFailure } from "./model.ts";
 import { linkedRow, rowLink, SectionEmpty, SectionHeading } from "./section.tsx";
 
 const COLUMNS = 8;
 
 const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`;
 
-const PullRequestLink = ({ url }: { readonly url: string }) => (
-  <a
-    href={url}
-    target="_blank"
-    rel="noreferrer"
-    className="relative z-10 font-mono text-xs text-primary underline-offset-4 hover:underline"
-  >
-    {Option.match(pullRequestNumber(url), {
-      onNone: () => "Pull request",
-      onSome: (number) => `#${number}`,
-    })}
-  </a>
-);
+/** Renders the Run's pull request mark above the row link. */
+const PullRequest = ({ pullRequest }: { readonly pullRequest: Option.Option<ItemRef> }) =>
+  Option.match(pullRequest, {
+    onNone: () => null,
+    onSome: (item) => <ItemMark item={item} className="relative z-10" />,
+  });
 
 const Duration = ({ run }: { readonly run: RunView }) => {
   const now = useNow(30_000);
@@ -99,14 +93,20 @@ const Opened = ({ run }: { readonly run: RunView }) => (
 );
 
 /** Renders the facts that have no column below the `xl` breakpoint. */
-const FoldedFacts = ({ run }: { readonly run: RunView }) => (
+const FoldedFacts = ({
+  run,
+  pullRequest,
+}: {
+  readonly run: RunView;
+  readonly pullRequest: Option.Option<ItemRef>;
+}) => (
   <p className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-xs text-muted-foreground xl:hidden">
     <span className="font-medium text-foreground sm:hidden">{run.state}</span>
     <span>{run.agent}</span>
     <span>{plural(run.attempts.length, "attempt")}</span>
     <Duration run={run} />
     <Opened run={run} />
-    {run.pullRequestUrl !== null && <PullRequestLink url={run.pullRequestUrl} />}
+    <PullRequest pullRequest={pullRequest} />
   </p>
 );
 
@@ -268,11 +268,14 @@ const RowActions = ({
 const RunRow = ({
   run,
   item,
+  pullRequest,
   openRun,
 }: {
   readonly run: RunView;
-  /** The Task's Item for the Run; shown only if the Task has more than one Item. */
+  /** The Run's Item, if the Task has more than one Item and it isn't the Run's pull request. */
   readonly item: TaskItemView | null;
+  /** The pull request the Run opened, with its state from the Task. */
+  readonly pullRequest: Option.Option<ItemRef>;
   readonly openRun: (runId: RunId) => void;
 }) => {
   const [editing, setEditing] = useState<EditIntent | null>(null);
@@ -298,16 +301,12 @@ const RunRow = ({
               >
                 {run.loop}
               </Link>
-              {item !== null && (
-                <span className="shrink-0 font-mono text-xs text-muted-foreground">
-                  {itemReference(item)}
-                </span>
-              )}
+              {item !== null && <ItemMark item={item} className="relative z-10 shrink-0" />}
             </p>
             <FailureLine run={run} />
             {run.runAgain !== null && <RunAgainLine run={run} source="link" className="text-xs" />}
             {run.approval !== null && <ApprovalLine approval={run.approval} className="text-xs" />}
-            <FoldedFacts run={run} />
+            <FoldedFacts run={run} pullRequest={pullRequest} />
             {status !== null && (
               <p role="status" className="text-xs">
                 {status}
@@ -326,7 +325,7 @@ const RunRow = ({
           <Opened run={run} />
         </TableCell>
         <TableCell className="hidden py-3 xl:table-cell">
-          {run.pullRequestUrl !== null && <PullRequestLink url={run.pullRequestUrl} />}
+          <PullRequest pullRequest={pullRequest} />
         </TableCell>
         <TableCell className="py-2.5">
           <RowActions run={run} onEdit={setEditing} openRun={openRun} status={setStatus} />
@@ -385,14 +384,27 @@ export const TaskRuns = ({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {task.runs.map((run) => (
-                <RunRow
-                  key={run.id}
-                  run={run}
-                  item={named ? (items.get(run.itemKey) ?? null) : null}
-                  openRun={openRun}
-                />
-              ))}
+              {task.runs.map((run) => {
+                const pullRequest = Option.flatMap(
+                  Option.fromNullishOr(run.pullRequestUrl),
+                  (url) => pullRequestAt(url, task.items),
+                );
+                const item = named ? (items.get(run.itemKey) ?? null) : null;
+                return (
+                  <RunRow
+                    key={run.id}
+                    run={run}
+                    item={
+                      item === null ||
+                      Option.exists(pullRequest, ({ number }) => number === item.number)
+                        ? null
+                        : item
+                    }
+                    pullRequest={pullRequest}
+                    openRun={openRun}
+                  />
+                );
+              })}
             </TableBody>
           </Table>
         </div>

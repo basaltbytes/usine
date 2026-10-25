@@ -106,10 +106,16 @@ it("heads the page with the originating issue, its current pull request's state,
   await mount(40);
   const heading = page.getByRole("heading", { level: 1 });
   await expect.element(heading).toHaveTextContent("Rework the conversation reader");
+  const header = page.elementLocator(heading.element().closest("header") ?? document.body);
   await expect
-    .element(page.getByRole("link", { name: "#40", exact: true }))
+    .element(heading.getByRole("link", { name: "Issue #40, open", exact: true }))
     .toHaveAttribute("href", `https://github.com/${taskRepository}/issues/40`);
-  await expect.element(page.getByText("Open pull request #42", { exact: true })).toBeVisible();
+  await expect
+    .element(header.getByRole("link", { name: "Pull request #41, merged", exact: true }))
+    .toBeVisible();
+  await expect
+    .element(header.getByRole("link", { name: "Pull request #42, open", exact: true }))
+    .toBeVisible();
   await expect.element(page.getByText("In review", { exact: true })).toBeVisible();
   // The lane's own label is not shown, as on the card.
   await expect.element(page.getByText("ui", { exact: true })).toBeVisible();
@@ -143,15 +149,23 @@ it("lists every Run newest first, each opening its Run page with why it ended", 
   await expect
     .element(rowOf("start-dev"))
     .toHaveTextContent("The required check lint failed again");
-  await expect.element(rowOf("start-dev")).toHaveTextContent("#40 Issue");
+  await expect
+    .element(rowOf("start-dev").getByRole("link", { name: "Issue #40, open", exact: true }))
+    .toBeInTheDocument();
   await expect.element(rowOf("review-pr")).toHaveTextContent("Approved by PhilDL");
   await expect.element(rowOf("review-pr")).toHaveTextContent("from GitHub");
   await expect.element(rowOf("fix-ci", 1)).toHaveTextContent("Run again by PhilDL");
   // Two Attempts of 30 minutes each.
   await expect.element(rowOf("start-dev")).toHaveTextContent("1 h");
   await expect
-    .element(rowOf("plan").getByRole("link", { name: "#41" }))
+    .element(rowOf("plan").getByRole("link", { name: "Pull request #41, merged" }))
     .toHaveAttribute("href", `https://github.com/${taskRepository}/pull/41`);
+  // A Run on the pull request it opened shows that pull request once, in its own column.
+  expect(
+    rowOf("fix-ci", 1)
+      .getByRole("link", { name: "Pull request #42, open", exact: true })
+      .elements(),
+  ).toHaveLength(1);
   // The short ID links to the earlier Run, not to the row's own Run page.
   await rowOf("fix-ci", 1).getByRole("link", { name: "run-canc", exact: true }).click();
   await expect
@@ -195,16 +209,34 @@ it("lists the pull requests with their state and the comments the Runs posted", 
   await expect
     .element(pullRequests.getByRole("row").nth(0))
     .toHaveTextContent("Plan the reader rework");
-  await expect.element(pullRequests.getByRole("row").nth(0)).toHaveTextContent("Merged");
+  await expect
+    .element(
+      pullRequests
+        .getByRole("row")
+        .nth(0)
+        .getByRole("img", { name: "Pull request #41, merged", exact: true }),
+    )
+    .toBeInTheDocument();
   await expect
     .element(pullRequests.getByRole("row").nth(1))
     .toHaveTextContent("Conflicts with base");
-  await expect.element(pullRequests.getByRole("row").nth(1)).toHaveTextContent("Open");
+  await expect
+    .element(
+      pullRequests
+        .getByRole("row")
+        .nth(1)
+        .getByRole("img", { name: "Pull request #42, open", exact: true }),
+    )
+    .toBeInTheDocument();
 
   const comments = page.getByRole("region", { name: /^Comments and reviews/u });
   const review = comments.getByRole("row").nth(0);
   await expect.element(review).toHaveTextContent("Review");
-  await expect.element(review).toHaveTextContent("on #41 PR");
+  await expect
+    .element(review.getByRole("img", { name: "Pull request #41, merged", exact: true }))
+    .toBeInTheDocument();
+  // The item's mark is the row's only icon; the whole row links to the review.
+  expect(review.element().querySelectorAll("svg")).toHaveLength(1);
   await expect
     .element(review.getByRole("link", { name: /^Review/u }))
     .toHaveAttribute("href", `https://github.com/${taskRepository}/pull/41#pullrequestreview-7`);
@@ -226,7 +258,9 @@ it("explains how an Item without Runs, pull requests, or comments fills", async 
   await expect.element(page.getByText("No runs yet")).toBeVisible();
   await expect.element(page.getByText("No pull requests")).toBeVisible();
   await expect.element(page.getByText("No comments or reviews")).toBeVisible();
-  await expect.element(page.getByText("Open issue", { exact: true })).toBeVisible();
+  await expect
+    .element(page.getByRole("link", { name: "Issue #12, open", exact: true }))
+    .toBeVisible();
   expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
 });
 

@@ -42,13 +42,19 @@ const boardRepository = RepositoryName.make("board-test/repo");
 
 const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 
-const link = (number: number, kind: "issue" | "pr", title: string) =>
+const link = (
+  number: number,
+  kind: "issue" | "pr",
+  title: string,
+  state: BoardItemLink["state"] = kind === "pr" ? "pr-open" : "issue-open",
+) =>
   new BoardItemLink({
     itemKey: ItemKey.make(`${boardRepository}:${number}`),
     kind,
     number: ItemNumber.make(number),
     title,
     url: `https://github.com/${boardRepository}/${kind === "pr" ? "pull" : "issues"}/${number}`,
+    state,
   });
 
 const attempt = (
@@ -217,8 +223,13 @@ const salvage = link(
   "Retry salvage pushes when the Worker loses its network mid-Attempt",
 );
 const pinned = link(28, "pr", "Pin GitHub Actions to commit SHAs and add Dependabot for them");
-const shipped = link(5, "issue", "Show the salvage branch on failed Attempts");
-const shippedPr = link(6, "pr", "feat(web): show the salvage branch on failed Attempts");
+const shipped = link(5, "issue", "Show the salvage branch on failed Attempts", "issue-closed");
+const shippedPr = link(
+  6,
+  "pr",
+  "feat(web): show the salvage branch on failed Attempts",
+  "pr-merged",
+);
 const dropped = link(18, "issue", "Cache the label catalog per repository");
 const flaky = link(
   15,
