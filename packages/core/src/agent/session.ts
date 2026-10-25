@@ -149,7 +149,7 @@ export type BillingPool = typeof BillingPool.Type;
  * Returns the billing pool of a session with `brain` and the Gateway credential kind, if any.
  *
  * - Claude Code: `apiKeys` if the Gateway injects an API key, otherwise `claudePlan` (ADR 0013).
- * - Codex: `chatgptPlan`.
+ * - Codex: `apiKeys` if the Gateway injects an API key, otherwise `chatgptPlan`.
  * - Pi: `chatgptPlan` for `openai-codex/` models, otherwise `apiKeys` (ADR 0021).
  */
 export const brainPool = (
@@ -160,7 +160,7 @@ export const brainPool = (
     case "claude":
       return Option.contains(gatewayCredential, "api-key") ? "apiKeys" : "claudePlan";
     case "codex":
-      return "chatgptPlan";
+      return Option.contains(gatewayCredential, "api-key") ? "apiKeys" : "chatgptPlan";
     case "pi":
       return brain.model.startsWith("openai-codex/") ? "chatgptPlan" : "apiKeys";
   }

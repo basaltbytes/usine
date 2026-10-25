@@ -202,9 +202,15 @@ describe("ConfigParser", () => {
         only?.kind === "ssh" &&
           Option.map(only.gateway, ({ adminPort, llmProviders }) => ({ adminPort, llmProviders })),
       ).toEqual(Option.some({ adminPort: 7070, llmProviders: [] }));
+      const [both] = (yield* parse(gatewayOf([...valid, "llm_providers: [anthropic, openai]"])))
+        .workers;
+      expect(
+        both?.kind === "ssh" && Option.map(both.gateway, ({ llmProviders }) => llmProviders),
+      ).toEqual(Option.some(["anthropic", "openai"]));
 
       for (const workers of [
-        gatewayOf([...valid, "llm_providers: [openai]"]),
+        gatewayOf([...valid, "llm_providers: [gemini]"]),
+        gatewayOf([...valid, "llm_providers: [openai, openai]"]),
         gatewayOf(["domain: GW.internal", ...valid.slice(1)]),
         gatewayOf([valid[0] ?? "", "destination: -oProxyCommand=sh", valid[2] ?? ""]),
         gatewayOf([valid[0] ?? "", valid[2] ?? ""]),
