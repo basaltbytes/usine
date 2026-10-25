@@ -24,9 +24,9 @@ export interface QueuedRun {
   readonly itemKey: ItemKey;
   readonly position: PipelinePosition;
   /**
-   * The number of queued Runs that take a Worker slot before this one. A Run that waits for a slot
-   * on its reattached Attempt's Worker counts for other Runs only while that Worker is the only one
-   * that takes new Attempts.
+   * The fewest queued Runs that take a Worker slot before this one. Of the Runs that wait for their
+   * reattached Attempt's Worker, a Run that can take any Worker's slot counts only those of the
+   * Worker with the fewest, among the Workers that take new Attempts.
    */
   readonly ahead: number;
 }

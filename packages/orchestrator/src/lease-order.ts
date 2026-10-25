@@ -2,7 +2,7 @@ import type { Lane, LaneName } from "@usine/config/board";
 import { canonicalLabelName } from "@usine/config/label";
 import type { LoopPriority } from "@usine/config/loop";
 import type { WorkerName } from "@usine/core/worker";
-import { Match, Option, Order } from "effect";
+import { Array as EffectArray, Match, Option, Order } from "effect";
 
 /** Where a queued Run's Item is in the pipeline, which ranks the Run for a free Worker slot. */
 export type PipelinePosition =
@@ -97,31 +97,29 @@ export const passedCount = (
   leased: LeaseCandidate,
 ): number => queued.filter((candidate) => Order.isLessThan(eventOrder)(candidate, leased)).length;
 
-/**
- * Returns whether `earlier`, ranked before `waiting`, can take the slot `waiting` waits for. A
- * reservation that names a Worker competes with one that doesn't only while that Worker is the only
- * one in `open`, the Workers that take new Attempts.
- */
-const competes = (
-  earlier: LeaseCandidate,
-  waiting: LeaseCandidate,
-  open: ReadonlyArray<WorkerName>,
-): boolean =>
-  Option.match(waiting.worker, {
-    onSome: (worker) => Option.contains(earlier.worker, worker),
-    onNone: () =>
-      Option.match(earlier.worker, {
-        onNone: () => true,
-        onSome: (worker) => open.length === 1 && open[0] === worker,
-      }),
-  });
+const namingCount = (candidates: ReadonlyArray<LeaseCandidate>, worker: WorkerName): number =>
+  candidates.filter((candidate) => Option.contains(candidate.worker, worker)).length;
 
 /**
- * Returns the number of reservations in `earlier`, the reservations ranked before `waiting` in lease
+ * Returns the fewest reservations in `earlier`, the reservations ranked before `waiting` in lease
  * order, that take a Worker slot before `waiting`. `open` lists the Workers that take new Attempts.
+ *
+ * A reservation that names a Worker takes that Worker's next free slot. A `waiting` that names no
+ * Worker comes after every reservation in `earlier` that names none, and after every one that names
+ * the Worker in `open` that the fewest reservations name.
  */
 export const aheadCount = (
   earlier: ReadonlyArray<LeaseCandidate>,
   waiting: LeaseCandidate,
   open: ReadonlyArray<WorkerName>,
-): number => earlier.filter((candidate) => competes(candidate, waiting, open)).length;
+): number =>
+  Option.match(waiting.worker, {
+    onSome: (worker) => namingCount(earlier, worker),
+    onNone: () => {
+      const naming = open.map((worker) => namingCount(earlier, worker));
+      return (
+        earlier.filter(({ worker }) => Option.isNone(worker)).length +
+        (EffectArray.isReadonlyArrayNonEmpty(naming) ? EffectArray.min(naming, Order.Number) : 0)
+      );
+    },
+  });

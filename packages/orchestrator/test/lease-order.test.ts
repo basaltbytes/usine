@@ -130,12 +130,22 @@ describe("Runs ahead", () => {
   const earlier = candidate(2, lane(1));
   const waiting = candidate(3, lane(1));
 
-  it("leaves out a reservation that names a Worker while another Worker takes Attempts", () => {
+  it("leaves out a reservation that names a Worker while another Worker that takes Attempts has none", () => {
     assert.strictEqual(aheadCount([reattaching, earlier], waiting, [local, spare]), 1);
   });
 
   it("counts a reservation that names the only Worker that takes Attempts", () => {
     assert.strictEqual(aheadCount([reattaching, earlier], waiting, [local]), 2);
+  });
+
+  it("counts, while each Worker that takes Attempts has reservations that name it, those of the Worker with the fewest", () => {
+    const onSpare = candidate(4, unpositioned, Option.some(spare));
+    assert.strictEqual(aheadCount([reattaching, onSpare], waiting, [local, spare]), 1);
+    const alsoLocal = candidate(5, unpositioned, Option.some(local));
+    assert.strictEqual(
+      aheadCount([reattaching, alsoLocal, onSpare, earlier], waiting, [local, spare]),
+      2,
+    );
   });
 
   it("counts, for a reservation that names a Worker, only the earlier ones that name it too", () => {
