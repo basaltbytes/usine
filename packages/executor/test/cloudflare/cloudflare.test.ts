@@ -38,7 +38,9 @@ import {
 } from "./fake-worker.ts";
 
 const WORKER = WorkerName.make("cf-one");
-const SANDBOX = "cf-one.remote-run_execute_1";
+const INSTANCE = "github-app-1";
+const OWNER = `${INSTANCE}.${WORKER}`;
+const SANDBOX = `${OWNER}.remote-run_execute_1`;
 const WORKTREE = "/home/usine/workspace/attempts/remote-run_execute_1";
 const SHELL = fileURLToPath(new URL("../../src/cloudflare/shell/shell.ts", import.meta.url));
 const ANTHROPIC: CloudflareProviderKey = {
@@ -82,6 +84,7 @@ const executor = (
         providers,
       },
     ],
+    instance: INSTANCE,
     shell: { command: process.execPath, args: ["--no-warnings", SHELL] },
     interruptGrace: "2 seconds",
   }).pipe(
@@ -98,7 +101,7 @@ const runningSandbox = (
   paths: ReadonlyArray<string> = [],
 ): FakeSandbox => ({
   name,
-  owner: WORKER,
+  owner: OWNER,
   attempt,
   running: true,
   github: [],
@@ -172,7 +175,7 @@ describe("cloudflare Worker", () => {
 
         assert.deepStrictEqual(
           worker.state.requests.filter((line) => line.startsWith("DELETE")),
-          ["DELETE /v1/sandboxes/cf-one.preflight", `DELETE /v1/sandboxes/${SANDBOX}`],
+          [`DELETE /v1/sandboxes/${OWNER}.preflight`, `DELETE /v1/sandboxes/${SANDBOX}`],
         );
         assert.strictEqual(worker.state.sandboxes.size, 0);
         const [given] = seen;
@@ -274,16 +277,20 @@ describe("cloudflare Worker", () => {
       }).pipe(Effect.scoped),
   );
 
-  it.live("destroys orphan sandboxes without a checkout and keeps those that hold one", () =>
+  it.live("destroys its orphan sandboxes without a checkout and keeps those that hold one", () =>
     Effect.gen(function* () {
       const worker = yield* fakeWorker;
-      const stopped = { ...runningSandbox("cf-one.stopped", "old/execute/1"), running: false };
-      const empty = runningSandbox("cf-one.preflight", "preflight");
-      const holding = runningSandbox("cf-one.crashed", "crashed/execute/1", [
+      const stopped = { ...runningSandbox(`${OWNER}.stopped`, "old/execute/1"), running: false };
+      const empty = runningSandbox(`${OWNER}.preflight`, "preflight");
+      const holding = runningSandbox(`${OWNER}.crashed`, "crashed/execute/1", [
         "/home/usine/workspace/attempts",
         "/home/usine/workspace/attempts/crashed_execute_1",
       ]);
-      const foreign = { ...runningSandbox("cf-two.other", "other/execute/1"), owner: "cf-two" };
+      // A sandbox of another instance's Worker with the same name.
+      const foreign = {
+        ...runningSandbox(`github-app-2.${WORKER}.other`, "other/execute/1"),
+        owner: `github-app-2.${WORKER}`,
+      };
       for (const sandbox of [stopped, empty, holding, foreign])
         worker.state.sandboxes.set(sandbox.name, sandbox);
       yield* Effect.gen(function* () {
@@ -293,8 +300,8 @@ describe("cloudflare Worker", () => {
       }).pipe(Effect.scoped, Effect.provide(executor(worker, mintingProvider())));
 
       assert.deepStrictEqual([...worker.state.sandboxes.keys()].sort(), [
-        "cf-one.crashed",
-        "cf-two.other",
+        `${OWNER}.crashed`,
+        `github-app-2.${WORKER}.other`,
       ]);
     }).pipe(Effect.scoped),
   );

@@ -31,7 +31,7 @@ Every request needs the `CF-Access-Client-Id` and `CF-Access-Client-Secret` head
 | Route | Purpose |
 | --- | --- |
 | `GET /v1/health` | The protocol version and the image names. |
-| `GET /v1/sandboxes?owner=<worker>` | The sandboxes of one usine Worker, each with whether its container runs. |
+| `GET /v1/sandboxes?owner=<instance>.<worker>` | The sandboxes of one usine instance's Worker, each with whether its container runs. |
 | `PUT /v1/sandboxes/<name>` | Creates the sandbox of an Attempt, or returns it if it already runs that Attempt. |
 | `GET /v1/sandboxes/<name>` | One sandbox. |
 | `PUT /v1/sandboxes/<name>/credentials` | Replaces the handlers' credentials, such as a renewed installation token. |

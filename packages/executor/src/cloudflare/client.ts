@@ -8,6 +8,7 @@ import {
   type SandboxCredentials,
   type SandboxList,
   type SandboxName,
+  type SandboxOwner,
   type SandboxSummary,
   type Stopped,
 } from "@usine/cloudflare";
@@ -96,6 +97,7 @@ export interface SandboxClient {
   readonly get: (
     name: SandboxName,
   ) => Effect.Effect<Option.Option<SandboxSummary>, SandboxRequestError>;
+  /** Lists the sandboxes of this usine instance and Worker. */
   readonly list: Effect.Effect<SandboxList, SandboxRequestError>;
   readonly credentials: (
     name: SandboxName,
@@ -105,9 +107,13 @@ export interface SandboxClient {
   readonly destroy: (name: SandboxName) => Effect.Effect<Destroyed, SandboxRequestError>;
 }
 
-/** Returns the client for `address`'s Worker, which sends the Access service token with each request. */
+/**
+ * Returns the client for `address`'s Worker, which sends the Access service token with each
+ * request and lists only `owner`'s sandboxes.
+ */
 export const sandboxClientFor = Effect.fn("CloudflareExecutor.sandboxClientFor")(function* (
   address: CloudflareWorkerAddress,
+  owner: SandboxOwner,
 ) {
   const client = yield* HttpApiClient.make(SandboxApi, {
     baseUrl: address.workerUrl,
@@ -160,7 +166,7 @@ export const sandboxClientFor = Effect.fn("CloudflareExecutor.sandboxClientFor")
         ),
         { sandbox: name },
       ),
-    list: request("list", client.registry.list({ query: { owner: worker } })),
+    list: request("list", client.registry.list({ query: { owner } }), { owner }),
     credentials: (name, body) =>
       request("credentials", client.sandbox.credentials({ params: { name }, payload: body }), {
         sandbox: name,

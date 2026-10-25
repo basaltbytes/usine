@@ -9,10 +9,22 @@ import * as Schema from "effect/Schema";
 export const ACCESS_CLIENT_ID_HEADER = "cf-access-client-id";
 export const ACCESS_CLIENT_SECRET_HEADER = "cf-access-client-secret";
 
-/** A sandbox's Durable Object name: the usine Worker's name, a dot, and the Attempt as a path segment. */
+/**
+ * The usine instance and Worker that a sandbox belongs to: the instance's identity, such as
+ * `github-app-123`, a dot, and the usine Worker's name. Orphan cleanup lists only its own owner's
+ * sandboxes, so instances that share a deployed Worker never remove each other's.
+ */
+export const SandboxOwner = Schema.String.check(
+  Schema.isPattern(/^[a-z0-9]+(?:-[a-z0-9]+)*\.[a-z0-9]+(?:-[a-z0-9]+)*$/u, {
+    message: "Expected a sandbox owner: <instance>.<worker>, each in kebab case",
+  }),
+).pipe(Schema.brand("SandboxOwner"));
+export type SandboxOwner = typeof SandboxOwner.Type;
+
+/** A sandbox's Durable Object name: its owner, a dot, and the Attempt as a path segment. */
 export const SandboxName = Schema.String.check(
-  Schema.isPattern(/^[a-z0-9]+(?:-[a-z0-9]+)*\.[A-Za-z0-9_.-]{1,160}$/u, {
-    message: "Expected a sandbox name: <worker>.<attempt>",
+  Schema.isPattern(/^[a-z0-9]+(?:-[a-z0-9]+)*\.[a-z0-9]+(?:-[a-z0-9]+)*\.[A-Za-z0-9_.-]{1,160}$/u, {
+    message: "Expected a sandbox name: <instance>.<worker>.<attempt>",
   }),
 ).pipe(Schema.brand("SandboxName"));
 export type SandboxName = typeof SandboxName.Type;

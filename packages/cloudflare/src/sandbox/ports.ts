@@ -1,7 +1,7 @@
 import { AttemptId } from "@usine/core/attempt";
-import { CloudflareImageName, CloudflareInstanceType, WorkerName } from "@usine/core/worker";
+import { CloudflareImageName, CloudflareInstanceType } from "@usine/core/worker";
 import { Context, type DateTime, type Duration, type Effect, type Option, Schema } from "effect";
-import { SandboxCredentials, SandboxName, SandboxSummary } from "../api/api.ts";
+import { SandboxCredentials, SandboxName, SandboxOwner, SandboxSummary } from "../api/api.ts";
 import type { Interception } from "./outbound.ts";
 
 /** A command started in the container, with the streams the start requested. */
@@ -65,7 +65,7 @@ export class SandboxContainer extends Context.Service<
 /** A sandbox as its Durable Object stores it. */
 export class StoredSandbox extends Schema.Class<StoredSandbox>("@usine/cloudflare/StoredSandbox")({
   name: SandboxName,
-  owner: WorkerName,
+  owner: SandboxOwner,
   attempt: AttemptId,
   image: CloudflareImageName,
   instanceType: CloudflareInstanceType,

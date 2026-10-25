@@ -1,8 +1,13 @@
-import type { WorkerName } from "@usine/core/worker";
 import { Context, Effect, Layer, Option } from "effect";
 import { HttpServer } from "effect/unstable/http";
 import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi";
-import { registryGroup, type SandboxName, SandboxList, type SandboxSummary } from "./api/api.ts";
+import {
+  registryGroup,
+  type SandboxName,
+  SandboxList,
+  type SandboxOwner,
+  type SandboxSummary,
+} from "./api/api.ts";
 
 /** The registry Durable Object's storage: the last summary each sandbox recorded, by name. */
 export class RegistryStorage extends Context.Service<
@@ -30,7 +35,7 @@ const LOOKUP_CONCURRENCY = 8;
  * Returns the sandboxes of `owner`, each as its Durable Object reports it now. Forgets entries
  * whose sandbox no longer exists, such as one whose destroy couldn't reach the registry.
  */
-const list = Effect.fn("SandboxRegistry.list")(function* (owner: WorkerName) {
+const list = Effect.fn("SandboxRegistry.list")(function* (owner: SandboxOwner) {
   yield* Effect.annotateCurrentSpan({ owner });
   const storage = yield* RegistryStorage;
   const lookup = yield* SandboxLookup;

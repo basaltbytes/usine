@@ -8,6 +8,7 @@ import {
   SandboxCredentials,
   type SandboxName,
   sandboxName,
+  SandboxOwner,
 } from "@usine/cloudflare";
 import { harnessEnvironment, SANDBOX_HOME } from "@usine/cloudflare/harness";
 import type { BrainSpec, Harness } from "@usine/core/agent/brain";
@@ -106,6 +107,8 @@ const PROVIDER_LABELS = {
 
 interface CloudflareWorker {
   readonly address: CloudflareWorkerAddress;
+  /** This instance's owner of the Worker's sandboxes. */
+  readonly owner: SandboxOwner;
   readonly client: SandboxClient;
   readonly providers: ReadonlyArray<CloudflareLlmProvider>;
   /** Returns the shell that runs commands in the sandbox `name`, through the sandbox shell. */
@@ -225,7 +228,19 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
         return yield* Effect.die(
           new Error(`CloudflareExecutorOptions.workers names "${address.name}" twice`),
         );
-      const client = yield* sandboxClientFor(address);
+      const owner = yield* Option.match(
+        Schema.decodeUnknownOption(SandboxOwner)(`${options.instance}.${address.name}`),
+        {
+          onNone: () =>
+            Effect.die(
+              new Error(
+                `CloudflareExecutorOptions.instance "${options.instance}" isn't in kebab case`,
+              ),
+            ),
+          onSome: Effect.succeed,
+        },
+      );
+      const client = yield* sandboxClientFor(address, owner);
       const sshEnvironment = {
         ...Object.fromEntries(
           ["HOME", "PATH", "TMPDIR"].flatMap((name) =>
@@ -240,6 +255,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
       };
       workers.set(address.name, {
         address,
+        owner,
         client,
         providers: Arr.dedupe(address.providers.map(({ provider }) => provider)),
         shellFor: (name) => new RemoteShell({ ssh: shell, sshEnvironment, destination: name }),
@@ -378,7 +394,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
           const summary = yield* worker.client.create(
             name,
             new CreateSandbox({
-              owner: worker.address.name,
+              owner: worker.owner,
               attempt: attemptId,
               image: worker.address.image,
               instanceType: worker.address.instanceType,
@@ -523,7 +539,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
     const reconcileOrphans = Effect.fn("CloudflareExecutor.reconcileOrphans")(function* (
       worker: CloudflareWorker,
     ) {
-      const fields = { worker: worker.address.name };
+      const fields = { worker: worker.address.name, owner: worker.owner };
       yield* Effect.annotateCurrentSpan(fields);
       const { sandboxes } = yield* worker.client.list.pipe(
         Effect.mapError(operationError("cleanup")),
@@ -607,7 +623,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
       yield* Effect.annotateCurrentSpan({ ...attempt });
       yield* session.stopForRecovery(attempt);
       const worker = yield* workerFor("cleanup", attempt.worker);
-      const name = sandboxName(attempt.worker, attempt.attemptId);
+      const name = sandboxName(worker.owner, attempt.attemptId);
       yield* Effect.scoped(
         Effect.gen(function* () {
           yield* claim(name);
@@ -707,7 +723,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
         if (Option.isSome(gap)) return yield* gap.value;
       }
       if (distinct.length > 0) {
-        const name = sandboxName(workerName, PREFLIGHT_ATTEMPT);
+        const name = sandboxName(worker.owner, PREFLIGHT_ATTEMPT);
         yield* Effect.scoped(
           Effect.gen(function* () {
             yield* claim(name);
@@ -729,7 +745,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
               .create(
                 name,
                 new CreateSandbox({
-                  owner: workerName,
+                  owner: worker.owner,
                   attempt: PREFLIGHT_ATTEMPT,
                   image: address.image,
                   instanceType: address.instanceType,
@@ -776,7 +792,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
         });
         return yield* gap.value;
       }
-      const name = sandboxName(request.worker, request.attemptId);
+      const name = sandboxName(worker.owner, request.attemptId);
       const layout = layoutFor(request.repository, request.attemptId);
       const shell = worker.shellFor(name);
       yield* claim(name);

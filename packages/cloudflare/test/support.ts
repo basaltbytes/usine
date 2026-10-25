@@ -1,11 +1,12 @@
 import { AttemptId } from "@usine/core/attempt";
-import { CloudflareImageName, WorkerName } from "@usine/core/worker";
+import { CloudflareImageName } from "@usine/core/worker";
 import { DateTime, Effect, Layer, Option, Redacted } from "effect";
 import {
   ApiKeyCredential,
   ProviderGrant,
   SandboxCredentials,
   SandboxName,
+  SandboxOwner,
   type SandboxSummary,
 } from "../src/api/api.ts";
 import type { Interception } from "../src/sandbox/outbound.ts";
@@ -18,8 +19,8 @@ import {
   StoredSandbox,
 } from "../src/sandbox/ports.ts";
 
-export const NAME = SandboxName.make("cf-one.run-1_execute_1");
-export const OWNER = WorkerName.make("cf-one");
+export const NAME = SandboxName.make("github-app-1.cf-one.run-1_execute_1");
+export const OWNER = SandboxOwner.make("github-app-1.cf-one");
 export const ATTEMPT = AttemptId.make("run-1/execute/1");
 export const IMAGE = CloudflareImageName.make("usine");
 

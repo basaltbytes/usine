@@ -4,12 +4,13 @@ import type { BrainSpec } from "@usine/core/agent/brain";
 import type { InstanceDirectory } from "@usine/core/instance";
 import { ExecutorOperationError, WorkerCapabilityError } from "@usine/executor";
 import {
+  type CloudflareExecutorOptions,
   type CloudflareWorkerAddress,
   layer as cloudflareExecutorLayer,
 } from "@usine/executor/cloudflare";
 import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
 import { Config, Effect, Layer } from "effect";
-import { FetchHttpClient } from "effect/unstable/http";
+import { externalHttpClientLayer } from "./http-client.ts";
 import { stepExecutorLayer } from "./scheduler.ts";
 
 /** Returns the Cloudflare Workers that `usine.yaml` declares, in declared order. */
@@ -69,11 +70,12 @@ export const layer = (
   instanceDirectory: InstanceDirectory,
   config: UsineConfig,
   brains: ReadonlyArray<BrainSpec>,
-  workers: ReadonlyArray<CloudflareWorkerAddress>,
+  options: CloudflareExecutorOptions,
 ) => {
-  const executor = cloudflareExecutorLayer({ workers }).pipe(
+  const { workers } = options;
+  const executor = cloudflareExecutorLayer(options).pipe(
     Layer.provide(NodeServices.layer),
-    Layer.provide(FetchHttpClient.layer),
+    Layer.provide(externalHttpClientLayer),
   );
   const started = new Set(workers.map(({ name }) => name));
   const stepExecutor = stepExecutorLayer(config, brains, {

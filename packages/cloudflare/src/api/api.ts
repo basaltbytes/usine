@@ -4,11 +4,11 @@ import {
   CloudflareImageName,
   CloudflareInstanceType,
   CloudflareLlmProvider,
-  WorkerName,
+  type WorkerName,
 } from "@usine/core/worker";
 import { Schema } from "effect";
 import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi";
-import { ProcessId, SandboxName } from "./names.ts";
+import { ProcessId, SandboxName, SandboxOwner } from "./names.ts";
 
 export {
   ACCESS_CLIENT_ID_HEADER,
@@ -17,14 +17,22 @@ export {
   execPath,
   ProcessId,
   SandboxName,
+  SandboxOwner,
 } from "./names.ts";
 
 /** The version of the sandbox API and the exec stream, reported by `/v1/health`. */
 export const SANDBOX_PROTOCOL = 1;
 
-/** Returns the name of the sandbox that runs `attempt` for `worker`. */
-export const sandboxName = (worker: WorkerName, attempt: AttemptId): SandboxName =>
-  SandboxName.make(`${worker}.${safeSegment(attempt)}`);
+/**
+ * Returns the owner of the sandboxes that `instance` runs for `worker`. Throws if `instance` isn't
+ * in kebab case.
+ */
+export const sandboxOwner = (instance: string, worker: WorkerName): SandboxOwner =>
+  SandboxOwner.make(`${instance}.${worker}`);
+
+/** Returns the name of the sandbox that runs `attempt` for `owner`. */
+export const sandboxName = (owner: SandboxOwner, attempt: AttemptId): SandboxName =>
+  SandboxName.make(`${owner}.${safeSegment(attempt)}`);
 
 /** An API key that the provider's outbound handler sends in place of the sandbox's placeholder. */
 export class ApiKeyCredential extends Schema.TaggedClass<ApiKeyCredential>()("ApiKey", {
@@ -62,7 +70,7 @@ export class SandboxCredentials extends Schema.Class<SandboxCredentials>(
 
 /** A request to create the sandbox for one Attempt, or to return it if it already runs that Attempt. */
 export class CreateSandbox extends Schema.Class<CreateSandbox>("@usine/cloudflare/CreateSandbox")({
-  owner: WorkerName,
+  owner: SandboxOwner,
   attempt: AttemptId,
   image: CloudflareImageName,
   instanceType: CloudflareInstanceType,
@@ -73,7 +81,7 @@ export class SandboxSummary extends Schema.Class<SandboxSummary>(
   "@usine/cloudflare/SandboxSummary",
 )({
   name: SandboxName,
-  owner: WorkerName,
+  owner: SandboxOwner,
   attempt: AttemptId,
   image: CloudflareImageName,
   instanceType: CloudflareInstanceType,
@@ -127,10 +135,10 @@ export class SandboxNotFound extends Schema.TaggedError<SandboxNotFound>()(
   { httpApiStatus: 404 },
 ) {}
 
-/** The sandbox exists for another Worker or Attempt. */
+/** The sandbox exists for another owner or Attempt. */
 export class SandboxConflict extends Schema.TaggedError<SandboxConflict>()(
   "SandboxConflict",
-  { name: SandboxName, owner: WorkerName, attempt: AttemptId },
+  { name: SandboxName, owner: SandboxOwner, attempt: AttemptId },
   { httpApiStatus: 409 },
 ) {}
 
@@ -165,7 +173,7 @@ export const healthGroup = HttpApiGroup.make("health").add(
 /** `GET /v1/sandboxes`, served by the registry Durable Object. */
 export const registryGroup = HttpApiGroup.make("registry").add(
   HttpApiEndpoint.get("list", "/v1/sandboxes", {
-    query: { owner: WorkerName },
+    query: { owner: SandboxOwner },
     success: SandboxList,
   }),
 );

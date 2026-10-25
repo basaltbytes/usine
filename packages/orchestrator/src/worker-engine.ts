@@ -42,11 +42,15 @@ export const workerEngineLayer = (
       }
       if (cloudflareWorkersOf(config).length === config.workers.length) {
         const addresses = yield* cloudflareWorkerAddressesOf(config);
+        // The GitHub App is the instance's identity (ADR 0011).
+        const { appId } = yield* GitHubCredentials;
+        const instance = `github-app-${String(appId)}`;
         yield* Effect.logInfo("Running Attempts in Cloudflare sandboxes", {
           workers,
+          instance,
           workerUrls: addresses.map(({ workerUrl }) => workerUrl.origin).join(","),
         });
-        return cloudflareLayer(instanceDirectory, config, brains, addresses);
+        return cloudflareLayer(instanceDirectory, config, brains, { workers: addresses, instance });
       }
       yield* Effect.logInfo("Running Attempts with the local executor", { workers });
       return localLayer(instanceDirectory, config, brains, {});

@@ -29,6 +29,12 @@ export interface CloudflareWorkerAddress {
 export interface CloudflareExecutorOptions {
   readonly workers: ReadonlyArray<CloudflareWorkerAddress>;
   /**
+   * The identity of this usine instance, in kebab case, such as `github-app-123`. It's part of
+   * each sandbox's owner and name, so that orphan cleanup removes only this instance's sandboxes
+   * when instances share a deployed Worker.
+   */
+  readonly instance: string;
+  /**
    * The local command that runs one command in a sandbox, with the arguments of an SSH client.
    * Defaults to this package's `shell.js` under the running Node.js.
    */

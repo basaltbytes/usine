@@ -1,12 +1,11 @@
 import { describe, expect, it } from "@effect/vitest";
-import { WorkerName } from "@usine/core/worker";
 import { DateTime, Effect, Layer, Option, Schema } from "effect";
 import { HttpRouter } from "effect/unstable/http";
-import { SandboxName, SandboxSummary } from "../src/api/api.ts";
+import { SandboxName, SandboxOwner, SandboxSummary } from "../src/api/api.ts";
 import { registryRoutes, RegistryStorage, SandboxLookup } from "../src/registry.ts";
 import { ATTEMPT, IMAGE, OWNER } from "./support.ts";
 
-const summary = (name: string, owner: WorkerName, running: boolean) =>
+const summary = (name: string, owner: SandboxOwner, running: boolean) =>
   new SandboxSummary({
     name: SandboxName.make(name),
     owner,
@@ -19,18 +18,19 @@ const summary = (name: string, owner: WorkerName, running: boolean) =>
 
 describe("sandbox registry", () => {
   it("lists the owner's sandboxes as they are now and forgets those that are gone", async () => {
-    const other = WorkerName.make("cf-two");
+    // Another instance's Worker with the same name.
+    const other = SandboxOwner.make("github-app-2.cf-one");
     const recorded = new Map(
       [
-        summary("cf-one.alive", OWNER, true),
-        summary("cf-one.stopped", OWNER, true),
-        summary("cf-one.gone", OWNER, true),
-        summary("cf-two.alive", other, true),
+        summary("github-app-1.cf-one.alive", OWNER, true),
+        summary("github-app-1.cf-one.stopped", OWNER, true),
+        summary("github-app-1.cf-one.gone", OWNER, true),
+        summary("github-app-2.cf-one.alive", other, true),
       ].map((sandbox) => [sandbox.name, sandbox]),
     );
     const current = new Map([
-      ["cf-one.alive", summary("cf-one.alive", OWNER, true)],
-      ["cf-one.stopped", summary("cf-one.stopped", OWNER, false)],
+      ["github-app-1.cf-one.alive", summary("github-app-1.cf-one.alive", OWNER, true)],
+      ["github-app-1.cf-one.stopped", summary("github-app-1.cf-one.stopped", OWNER, false)],
     ]);
     const services = Layer.mergeAll(
       Layer.succeed(RegistryStorage)({
@@ -54,9 +54,13 @@ describe("sandbox registry", () => {
     )(await response.json());
 
     expect(list.sandboxes.map(({ name, running }) => [name, running])).toEqual([
-      ["cf-one.alive", true],
-      ["cf-one.stopped", false],
+      ["github-app-1.cf-one.alive", true],
+      ["github-app-1.cf-one.stopped", false],
     ]);
-    expect([...recorded.keys()]).toEqual(["cf-one.alive", "cf-one.stopped", "cf-two.alive"]);
+    expect([...recorded.keys()]).toEqual([
+      "github-app-1.cf-one.alive",
+      "github-app-1.cf-one.stopped",
+      "github-app-2.cf-one.alive",
+    ]);
   });
 });
