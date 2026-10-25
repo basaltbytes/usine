@@ -1,15 +1,15 @@
 import { TokenCount, UsdAmount } from "@usine/core/agent/session";
 import { flow, Option, Schema } from "effect";
 import type { CodexTokenUsage } from "../protocol/codex.ts";
+import { UsageCount } from "../protocol/count.ts";
 
-const Count = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 const Dollars = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0));
 const PiUsage = Schema.Struct({
   role: Schema.Literal("assistant"),
   usage: Schema.Struct({
-    input: Count,
-    output: Count,
-    cacheWrite: Count,
+    input: UsageCount,
+    output: UsageCount,
+    cacheWrite: UsageCount,
     cost: Schema.optionalKey(Schema.Struct({ total: Dollars })),
   }),
 });
@@ -45,16 +45,16 @@ const ClaudeAssistantUsage = Schema.Struct({
   message: Schema.Struct({
     id: Schema.NonEmptyString,
     usage: Schema.Struct({
-      input_tokens: Count,
-      output_tokens: Count,
-      cache_creation_input_tokens: Schema.optionalKey(Schema.NullOr(Count)),
+      input_tokens: UsageCount,
+      output_tokens: UsageCount,
+      cache_creation_input_tokens: Schema.optionalKey(Schema.NullOr(UsageCount)),
     }),
   }),
 });
 const ClaudeModelUsage = Schema.Struct({
-  inputTokens: Count,
-  outputTokens: Count,
-  cacheCreationInputTokens: Count,
+  inputTokens: UsageCount,
+  outputTokens: UsageCount,
+  cacheCreationInputTokens: UsageCount,
   costUSD: Schema.optionalKey(Dollars),
 });
 const ClaudeResultUsage = Schema.Struct({

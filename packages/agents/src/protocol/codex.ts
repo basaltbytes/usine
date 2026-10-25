@@ -1,5 +1,6 @@
 import { HarnessSessionId } from "@usine/core/agent/session";
 import { Schema } from "effect";
+import { UsageCount } from "./count.ts";
 
 /**
  * The Codex app-server wire types: the request types that usine sends, copied from
@@ -169,12 +170,15 @@ export const RateLimitsUpdated = Schema.Struct({
   }),
 });
 
-const Count = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 /** The Codex thread token usage, cumulative across turns; `inputTokens` includes cached input. */
 export const CodexTokenUsage = Schema.Struct({
   threadId: Schema.NonEmptyString,
   tokenUsage: Schema.Struct({
-    total: Schema.Struct({ inputTokens: Count, cachedInputTokens: Count, outputTokens: Count }),
+    total: Schema.Struct({
+      inputTokens: UsageCount,
+      cachedInputTokens: UsageCount,
+      outputTokens: UsageCount,
+    }),
   }),
 });
 export type CodexTokenUsage = typeof CodexTokenUsage.Type;
