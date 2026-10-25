@@ -365,6 +365,40 @@ describe("Board projection", () => {
     }),
   );
 
+  it.effect("prefers the active Run over a failed Run on a closed issue, which needs no one", () =>
+    Effect.gen(function* () {
+      const config = Schema.decodeUnknownSync(UsineConfig)({
+        version: 1,
+        repos: [{ name: repository, lanes: [{ name: "Review", sources: [{ label: review }] }] }],
+      });
+      const managed = config.repos[0];
+      assert(managed !== undefined);
+      const pr = new ItemProjection({
+        ...mergedPullRequest,
+        payload: {
+          ...mergedPullRequest.payload,
+          state: "OPEN",
+          merged: false,
+          mergedAt: null,
+          labels: { totalCount: 1, nodes: [{ name: review }] },
+        },
+      });
+      const failed = new RunView({
+        ...runForBoard("failed-run", "Failed"),
+        pullRequestUrl: "https://github.com/basaltbytes/usine/pull/98",
+      });
+      const reviewRun = new RunView({
+        ...runForBoard("review-run", "Running"),
+        itemKey: pr.itemKey,
+        openedAt: "2026-09-01T11:00:00.000Z",
+      });
+      const board = yield* projectBoard(managed, [], [closedItem, pr], [failed, reviewRun]);
+      const card = board.lanes.flatMap(({ items }) => items)[0];
+      assert.strictEqual(card?.run?.id, reviewRun.id);
+      assert.strictEqual(card?.needsYou, false);
+    }),
+  );
+
   it.effect(
     "keeps issue development and PR review in one Task after the issue loses its label",
     () =>

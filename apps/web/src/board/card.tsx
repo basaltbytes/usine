@@ -1,6 +1,7 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Link } from "@tanstack/react-router";
+import { isSettledItemState } from "@usine/config/board";
 import type { RepositoryName } from "@usine/core/repository";
 import type { RunId } from "@usine/core/run";
 import { OPEN_STATE_TAGS } from "@usine/core/run/state";
@@ -45,10 +46,18 @@ const VISIBLE_LABELS = 3;
 
 const OPEN_STATES = new Set<RunView["state"]>(OPEN_STATE_TAGS);
 
+/**
+ * Returns whether the operator must resolve the failure of `run`, one of the Task's Runs: it's
+ * unresolved, and the Run's Item isn't closed or merged.
+ */
+const failureNeedsYou = (item: BoardTaskView, run: RunView): boolean =>
+  run.canResolveFailure &&
+  !item.items.some(({ itemKey, state }) => itemKey === run.itemKey && isSettledItemState(state));
+
 /** Returns the card's Run: an open Run or a failed Run that needs the operator, else `null`. */
 export const currentRun = (item: BoardTaskView): RunView | null => {
   const run = item.run;
-  return run !== null && (OPEN_STATES.has(run.state) || run.canResolveFailure) ? run : null;
+  return run !== null && (OPEN_STATES.has(run.state) || failureNeedsYou(item, run)) ? run : null;
 };
 
 /** Returns when the Run opened while it waits, when the current Attempt started while it runs, or
@@ -78,10 +87,8 @@ interface RunFailure {
 
 /** Returns the newest Run whose failure needs attention, or `null`. */
 const failedRun = (item: BoardTaskView): RunFailure | null => {
-  const run =
-    [...item.runs].reverse().find(({ canResolveFailure }) => canResolveFailure) ??
-    (item.run?.canResolveFailure ? item.run : null);
-  if (run === null) return null;
+  const run = [...item.runs].reverse().find((candidate) => failureNeedsYou(item, candidate));
+  if (run === undefined) return null;
   const attempts = run.attempts;
   for (let index = attempts.length - 1; index >= 0; index -= 1) {
     const outcome = attempts[index]?.outcome;
