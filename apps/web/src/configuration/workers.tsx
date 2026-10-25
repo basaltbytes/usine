@@ -301,6 +301,9 @@ const ProvisionerFacts = ({
       <Fact label="Anthropic key">
         <Variable name={provisioner.anthropicKeyEnv} />
       </Fact>
+      <Fact label="OpenAI key">
+        <Variable name={provisioner.openaiKeyEnv} />
+      </Fact>
     </Facts>
   </div>
 );

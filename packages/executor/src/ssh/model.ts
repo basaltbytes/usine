@@ -57,6 +57,8 @@ export interface SshWorkerContainer {
 export interface ProviderApiKeys {
   /** Claude Code's `ANTHROPIC_API_KEY`. */
   readonly anthropic: Option.Option<Redacted.Redacted<string>>;
+  /** Codex's `OPENAI_API_KEY`. */
+  readonly openai: Option.Option<Redacted.Redacted<string>>;
 }
 
 /** Creates each Attempt's machine as a Hetzner Cloud server from a snapshot. */

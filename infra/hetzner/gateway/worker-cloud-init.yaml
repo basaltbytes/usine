@@ -21,7 +21,7 @@ packages:
   - nftables
 
 write_files:
-  # A server created from a snapshot of this Worker gets no user data, so cloud-init's own configuration sets the resolver at each boot too.
+  # A server created from a snapshot of this Worker gets only the executor's user data, which sets its host key, so cloud-init's own configuration sets the resolver at each boot too.
   - path: /etc/cloud/cloud.cfg.d/90-usine-gateway-resolver.cfg
     permissions: "0644"
     content: |

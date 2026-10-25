@@ -338,6 +338,11 @@ describe("ConfigParser", () => {
       if (boatProvisioner?.provider !== "boat") return;
       expect(boatProvisioner.size).toBe("default");
       expect(Option.getOrNull(boatProvisioner.apiKeys.anthropic)).toBe("USINE_ANTHROPIC_API_KEY");
+      const [codex] = (yield* parse([...boat, "        openai: USINE_OPENAI_API_KEY"])).workers;
+      expect(
+        codex?.kind === "ssh" &&
+          Option.flatMap(codex.provisioner, (settings) => settings.apiKeys.openai),
+      ).toEqual(Option.some("USINE_OPENAI_API_KEY"));
       const large = (yield* parse([...boat, "      size: large"])).workers[0];
       expect(
         large?.kind === "ssh" &&
@@ -366,7 +371,7 @@ describe("ConfigParser", () => {
         ],
         [[...boat, "      size: huge"], ""],
         [[...boat, "      region: fsn1"], ""],
-        [boat.map((line) => line.replace("anthropic:", "openai:")), ""],
+        [boat.map((line) => line.replace("anthropic:", "gemini:")), ""],
         [hetzner.slice(0, -1), ""],
       ] as const) {
         const parsed = yield* parse(workers).pipe(Effect.result);

@@ -6,7 +6,7 @@ import type { AttemptRecovery } from "@usine/core/attempt/salvage";
 import { type RepositoryName, safeSegment } from "@usine/core/repository";
 import type { GatewayCredentialKind, WorkerName } from "@usine/core/worker";
 import type { AttemptRuntime } from "@usine/durable/attempt-runtime";
-import { Context, Effect, type FileSystem, Layer, Option, type Path, Redacted } from "effect";
+import { Context, Effect, type FileSystem, Layer, Option, type Path } from "effect";
 import type { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import {
@@ -16,55 +16,24 @@ import {
   WorkerMachines,
 } from "../executor.ts";
 import { agentsHarnessProbe, type HarnessProbe } from "../harness-preflight.ts";
-import { DEFAULT_SSH, remoteCommandsFor, sendingShell } from "../remote/commands.ts";
-import type { RemoteAccess, RemoteGrant } from "../remote/machine.ts";
+import { DEFAULT_SSH, remoteCommandsFor } from "../remote/commands.ts";
+import type { RemoteGrant } from "../remote/machine.ts";
 import { remoteExecutorFor } from "../remote/remote.ts";
 import { sshContainersFor } from "./container.ts";
 import { sshCredentialsFor } from "./credentials.ts";
 import { gatewayAttachmentsFor } from "./gateway/attachments.ts";
 import { gatewayRepositoryUrl } from "./gateway/environment.ts";
+import { provisionedApiKey, withApiKeys } from "./api-keys.ts";
 import {
-  claudeBinaryProbe,
   gatewayCredentialFor,
   gatewayHarnessProbe,
+  harnessBinaryProbe,
   verifyGatewayAdmin,
 } from "./gateway/preflight.ts";
 import type { SshExecutorOptions, SshMachine } from "./model.ts";
 import { sshMachinePreflightFor, sshPreflightFor } from "./preflight.ts";
 import { provisionedMachinesFor } from "./provisioner/machines.ts";
 import { sshMachinesFor, SshWorkers } from "./workers.ts";
-
-/**
- * Returns the API key that each Attempt on `machine` gets for `harness`, or `None` if its
- * machine isn't provisioned, the provisioner sets no key, or the Gateway has the provider's
- * credential.
- */
-const apiKeyFor = (
-  machine: SshMachine,
-  harness: Harness,
-): Option.Option<Redacted.Redacted<string>> => {
-  const { address } = machine;
-  if (address.machine._tag !== "Provisioned" || harness !== "claude") return Option.none();
-  if (Option.exists(machine.gateway, ({ settings }) => settings.llmProviders.includes("anthropic")))
-    return Option.none();
-  return address.machine.provisioner.apiKeys.anthropic;
-};
-
-/** Returns `access` with the provisioner's API keys among the Attempt's secrets. */
-const withApiKeys = (machine: SshMachine, access: RemoteAccess): RemoteAccess => {
-  const key = apiKeyFor(machine, "claude");
-  if (Option.isNone(key)) return access;
-  const value = Redacted.value(key.value);
-  const secrets = { ANTHROPIC_API_KEY: key.value };
-  return {
-    ...access,
-    // An Attempt container gets the secrets when it starts; without one, the SSH connection
-    // sends them.
-    shell: sendingShell(access.shell, secrets),
-    secrets: { ...access.secrets, ...secrets },
-    scrub: (text) => access.scrub(text).replaceAll(value, "<redacted>"),
-  };
-};
 
 const makeSshExecutor = (options: SshExecutorOptions) =>
   Effect.gen(function* () {
@@ -85,18 +54,20 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
     // or a provisioned machine's Attempts get an API key.
     const harnessProbe = (machine: SshMachine, shell: RemoteShell): HarnessProbe => {
       const own = options.harnessReadiness?.(machine) ?? agentsHarnessProbe(spawner, shell, {});
+      const keyed = (harness: Harness) => Option.isSome(provisionedApiKey(machine, harness));
       const probe: HarnessProbe = (brain) =>
-        Option.isSome(apiKeyFor(machine, brain.harness))
-          ? claudeBinaryProbe(
+        brain.harness !== "pi" && keyed(brain.harness)
+          ? harnessBinaryProbe(
               commands,
               machine.shell.destination,
               shell,
+              brain.harness,
               "the API key in the attempt's environment",
             )
           : own(brain);
       return Option.match(machine.gateway, {
         onNone: () => probe,
-        onSome: (gateway) => gatewayHarnessProbe(commands, machine, gateway, probe, shell),
+        onSome: (gateway) => gatewayHarnessProbe(commands, machine, gateway, probe, shell, keyed),
       });
     };
     const credentials = yield* sshCredentialsFor(commands, machineFor);
@@ -138,30 +109,25 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
         acquire: (attemptId, worker, permissions, machine, operation) =>
           Effect.gen(function* () {
             yield* reclaim(worker);
-            if (Option.isNone(machine.gateway))
-              return withApiKeys(
-                machine,
-                yield* credentials.acquire(
+            const access = Option.isNone(machine.gateway)
+              ? yield* credentials.acquire(
                   attemptId,
                   worker,
                   repository,
                   permissions,
                   machine,
                   operation,
-                ),
-              );
-            return withApiKeys(
-              machine,
-              yield* attachments.acquire(
-                attemptId,
-                worker,
-                repository,
-                permissions,
-                machine,
-                machine.gateway.value,
-                operation,
-              ),
-            );
+                )
+              : yield* attachments.acquire(
+                  attemptId,
+                  worker,
+                  repository,
+                  permissions,
+                  machine,
+                  machine.gateway.value,
+                  operation,
+                );
+            return yield* withApiKeys(commands, machine, attemptId, access, operation);
           }),
       } satisfies RemoteGrant<SshMachine>);
 
@@ -216,7 +182,7 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
           onSome: (gateway) => gatewayCredentialFor(gateway, harness),
         }).pipe(
           Effect.map((kind): Option.Option<GatewayCredentialKind> =>
-            Option.isSome(kind) || Option.isNone(apiKeyFor(machine, harness))
+            Option.isSome(kind) || Option.isNone(provisionedApiKey(machine, harness))
               ? kind
               : Option.some("api-key"),
           ),

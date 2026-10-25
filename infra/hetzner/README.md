@@ -123,7 +123,9 @@ A worker with a `provisioner` in `usine.yaml`, instead of a `destination`, creat
 - For a worker behind the gateway, the gateway's network, `usine-gateway` by default. Each server joins it with no public address; see [`gateway/README.md`](gateway/README.md#provisioned-workers-behind-the-gateway).
 - The snapshot.
 
-A server created for one attempt has no harness login, so preflight requires the gateway's Anthropic credential (`llm_providers`) or `api_keys.anthropic` for Claude Code, and refuses Codex.
+A server created for one attempt has no harness login, so preflight requires the gateway's credential for the provider (`llm_providers`) or the provisioner's API key: `api_keys.anthropic` for Claude Code, `api_keys.openai` for Codex.
+
+Each server is created with cloud-init user data that sets an Ed25519 host key that the executor generated, and the executor connects to it only with that key. The snapshot keeps cloud-init, which runs the user data on each server created from it.
 
 ### Build the snapshot
 

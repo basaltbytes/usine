@@ -1,8 +1,13 @@
-import type { BrainSpec, Harness } from "@usine/core/agent/brain";
+import type { BrainSpec } from "@usine/core/agent/brain";
 import { HarnessUnavailableError } from "@usine/core/agent/capability";
 import type { AttemptId } from "@usine/core/attempt";
 import type { RunId } from "@usine/core/run";
-import type { MachineId, MachineProvider, WorkerName } from "@usine/core/worker";
+import type {
+  GatewayLlmProvider,
+  MachineId,
+  MachineProvider,
+  WorkerName,
+} from "@usine/core/worker";
 import { RemoteShell } from "@usine/agents/child-host";
 import {
   Array as Arr,
@@ -31,8 +36,14 @@ import {
   WorkerMachines,
 } from "../../executor.ts";
 import type { RemoteCommands } from "../../remote/commands.ts";
+import { gatewayHolds, provisionedApiKey } from "../api-keys.ts";
 import type { MachineGateway, SshExecutorOptions, SshMachine, SshProvisioner } from "../model.ts";
-import { knownHostsLine, type SshWorkerEntry } from "../workers.ts";
+import {
+  hostKeyAlias,
+  knownHostsLine,
+  type PinnedHostKey,
+  type SshWorkerEntry,
+} from "../workers.ts";
 import { BOAT_API, boatDriverFor } from "./boat.ts";
 import { HETZNER_API, hetznerDriverFor } from "./hetzner.ts";
 import {
@@ -65,26 +76,6 @@ if command -v docker >/dev/null 2>&1; then
 fi
 `.trim();
 
-/** The provider each harness needs a credential from. Pi children run only on local Workers. */
-const PROVIDER_OF_HARNESS = {
-  claude: Option.some("anthropic"),
-  // The ChatGPT login broker (#235) adds Codex's provider to the Gateway's `llm_providers`.
-  codex: Option.some("openai"),
-  pi: Option.none(),
-} as const satisfies Record<Harness, Option.Option<string>>;
-
-/** Returns whether the Gateway holds a credential for `harness`'s provider. */
-const gatewayHolds = (gateway: Option.Option<MachineGateway>, harness: Harness): boolean =>
-  Option.exists(gateway, ({ settings }) =>
-    Option.exists(PROVIDER_OF_HARNESS[harness], (provider) =>
-      settings.llmProviders.some((held) => held === provider),
-    ),
-  );
-
-/** Returns whether the provisioner gives each Attempt an API key for `harness`. */
-const keyed = (provisioner: SshProvisioner, harness: Harness): boolean =>
-  harness === "claude" && Option.isSome(provisioner.apiKeys.anthropic);
-
 /**
  * Returns the error for the first harness in `brains` that can't authenticate on a machine
  * created for one Attempt, which keeps no login: one whose provider credential is neither at
@@ -100,18 +91,21 @@ const harnessCredentialGap = (
     provisioner.provider === "boat"
       ? "A subscription login needs a gateway, which a Boat worker can't have."
       : "A subscription login needs a gateway, which this worker doesn't have.";
+  const missing = (label: string, provider: GatewayLlmProvider, login: string) => {
+    const head = `${label} on provisioned worker "${worker}" has no credential, because a machine created for one attempt keeps no login.`;
+    return Option.isSome(entry.gateway)
+      ? `${head} Add ${provider} to the gateway's llm_providers, with ${login} or an API key on the gateway, or set provisioner.api_keys.${provider}.`
+      : `${head} Set provisioner.api_keys.${provider}. ${noGateway}`;
+  };
   for (const harness of Arr.dedupe(brains.map((brain) => brain.harness))) {
-    if (gatewayHolds(entry.gateway, harness) || keyed(provisioner, harness)) continue;
+    if (gatewayHolds(entry.gateway, harness) || Option.isSome(provisionedApiKey(entry, harness)))
+      continue;
     const message = (() => {
       switch (harness) {
         case "claude":
-          return Option.isSome(entry.gateway)
-            ? `Claude Code on provisioned worker "${worker}" has no credential, because a machine created for one attempt keeps no login. Add anthropic to the gateway's llm_providers, with a subscription token or API key on the gateway, or set provisioner.api_keys.anthropic.`
-            : `Claude Code on provisioned worker "${worker}" has no credential, because a machine created for one attempt keeps no login. Set provisioner.api_keys.anthropic. ${noGateway}`;
+          return missing("Claude Code", "anthropic", "a subscription token");
         case "codex":
-          return Option.isSome(entry.gateway)
-            ? `Codex on provisioned worker "${worker}" needs a ChatGPT login that outlives the machine, and the gateway can't hold one yet (#235).`
-            : `Codex on provisioned worker "${worker}" needs a ChatGPT login, and Codex children don't run on API keys (ADR 0013). ${noGateway}`;
+          return missing("Codex", "openai", "a ChatGPT login");
         case "pi":
           return `Pi children run only on local workers, not on provisioned worker "${worker}".`;
       }
@@ -167,7 +161,7 @@ export interface ProvisionedMachinesOptions {
     entry: SshWorkerEntry,
     id: MachineId,
     endpoint: MachineEndpoint,
-    knownHostsFile: string,
+    hostKey: PinnedHostKey,
   ) => SshMachine;
   /** The machine preflight of `sshMachinePreflightFor`. */
   readonly verifyMachine: (
@@ -434,29 +428,14 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     yield* Effect.logInfo("Deleted the machine", { ...fields, machine: id.value });
   });
 
-  /** Writes the host key file for `endpoint` if the provider reported the key. */
-  const recordHostKey = Effect.fn("SshExecutor.recordHostKey")(function* (
-    provider: MachineProvider,
+  /** Writes the `known_hosts` file that pins `key` as the host key of machine `id`. */
+  const pinHostKey = Effect.fn("SshExecutor.pinHostKey")(function* (
+    worker: WorkerName,
     id: MachineId,
-    endpoint: MachineEndpoint,
+    pinned: PinnedHostKey,
+    key: string,
   ) {
-    const file = knownHostsFile(provider, id);
-    yield* Option.match(knownHostsLine(endpoint), {
-      onNone: () => Effect.void,
-      onSome: (line) => fs.writeFileString(file, line),
-    });
-    return file;
-  });
-
-  /** Returns the machine at `id` once the provider reports its SSH endpoint. */
-  const machineOf = Effect.fn("SshExecutor.machineAtEndpoint")(function* (
-    entry: SshWorkerEntry,
-    driver: MachineDriver,
-    id: MachineId,
-  ) {
-    const worker = entry.address.name;
-    const endpoint = yield* driver.endpoint(id, interval);
-    const file = yield* recordHostKey(driver.provider, id, endpoint).pipe(
+    yield* fs.writeFileString(pinned.file, knownHostsLine(pinned.alias, key)).pipe(
       Effect.mapError(
         (error) =>
           new WorkerCapabilityError({
@@ -467,7 +446,40 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
           }),
       ),
     );
-    return options.machineAt(entry, id, endpoint, file);
+  });
+
+  /**
+   * Returns the machine at `id` once the provider reports its SSH endpoint, with its host key
+   * pinned: `created`, the key the driver gave the machine, else the key the provider reports,
+   * else the key an earlier process recorded. Fails if there's none, since a first connection's
+   * key isn't trusted.
+   */
+  const machineOf = Effect.fn("SshExecutor.machineAtEndpoint")(function* (
+    entry: SshWorkerEntry,
+    driver: MachineDriver,
+    id: MachineId,
+    created: Option.Option<string>,
+  ) {
+    const worker = entry.address.name;
+    const pinned = {
+      file: knownHostsFile(driver.provider, id),
+      alias: hostKeyAlias(driver.provider, id),
+    };
+    if (Option.isSome(created)) yield* pinHostKey(worker, id, pinned, created.value);
+    const endpoint = yield* driver.endpoint(id, interval);
+    if (Option.isSome(endpoint.hostKey))
+      yield* pinHostKey(worker, id, pinned, endpoint.hostKey.value);
+    else if (
+      Option.isNone(created) &&
+      !(yield* fs.exists(pinned.file).pipe(Effect.orElseSucceed(() => false)))
+    )
+      return yield* new MachineUnavailableError({
+        worker,
+        provider: driver.provider,
+        reason: "provider",
+        message: `usine has no SSH host key for ${driver.provider} machine ${id} of worker "${worker}": the provider reported none, and ${pinned.file} doesn't exist. usine doesn't trust the host key of a first connection.`,
+      });
+    return options.machineAt(entry, id, endpoint, pinned);
   });
 
   /** Waits until the machine answers over SSH and runs `READY_SCRIPT`. */
@@ -598,11 +610,12 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
       runId,
       provider: driver.provider,
     });
-    const id = yield* driver
+    const created = yield* driver
       .create(machineName(worker, yield* randomHex(8)), tags)
       .pipe(Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : unregister(hold))));
+    const id = created.id;
     yield* update(hold, (current) => ({ ...current, id: Option.some(id) }));
-    const ready = machineOf(entry, driver, id).pipe(
+    const ready = machineOf(entry, driver, id, created.hostKey).pipe(
       Effect.tap((machine) =>
         awaitSsh(machine).pipe(
           Effect.catchTag("ExecutorOperationError", (error) =>
@@ -699,7 +712,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
       Option.contains(tags.attempt, attemptTag(attemptId)),
     );
     if (listed === undefined) return false;
-    const machine = yield* machineOf(workerEntry, driver, listed.id).pipe(
+    const machine = yield* machineOf(workerEntry, driver, listed.id, Option.none()).pipe(
       Effect.timeoutOrElse({
         duration: readyTimeout,
         orElse: () => Effect.fail(timedOut(worker, driver.provider)),

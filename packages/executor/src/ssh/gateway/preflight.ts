@@ -305,8 +305,9 @@ export const harnessBinaryProbe = Effect.fn("SshExecutor.probeHarnessBinary")(fu
 
 /**
  * The harnesses that can use the operator's login on the machine or the Gateway's credential
- * for their provider, with the hosts each login calls through the forward proxy.
- * `infra/hetzner/gateway/egress-allowlist` lists the same hosts.
+ * for their provider, with the hosts each login calls through the forward proxy, which
+ * `infra/hetzner/gateway/egress-allowlist` lists, and the API host that an API key in the
+ * Attempt's environment calls.
  */
 const LOGINS = {
   claude: {
@@ -314,12 +315,14 @@ const LOGINS = {
     provider: "Anthropic",
     gatewayProvider: "anthropic",
     hosts: ["api.anthropic.com", "platform.claude.com"],
+    apiHost: "api.anthropic.com",
   },
   codex: {
     label: "Codex",
     provider: "OpenAI",
     gatewayProvider: "openai",
     hosts: ["chatgpt.com", "auth.openai.com"],
+    apiHost: "api.openai.com",
   },
 } as const satisfies Partial<
   Record<
@@ -329,11 +332,13 @@ const LOGINS = {
       readonly provider: string;
       readonly gatewayProvider: GatewayLlmProvider;
       readonly hosts: ReadonlyArray<string>;
+      readonly apiHost: string;
     }
   >
 >;
 
-type LoginHarness = keyof typeof LOGINS;
+/** A harness that can use a login, the Gateway's credential, or an API key. */
+export type LoginHarness = keyof typeof LOGINS;
 
 /**
  * A script that takes the forward proxy URL and host names, and prints one line per host: the
@@ -355,11 +360,13 @@ const LOGIN_HOST_ANSWER = /^(\S+) (\d+) (\d{3}) (\d{3})$/u;
 const PROXY_REFUSED = "403";
 
 /**
- * Probes a brain on a Worker behind a Gateway (ADR 0027). If the Gateway has the Anthropic
- * credential, checks only the Claude Code binary. Otherwise, Claude Code and Codex use the
- * operator's login (ADR 0026): `probe` checks the login, then the machine must connect to the
- * login's hosts through the forward proxy. Pi goes to `probe`, which rejects it on any remote
- * machine. The checks run through `shell`, on the machine or in a container on it.
+ * Probes a brain on a Worker behind a Gateway (ADR 0027). If the Gateway has the credential of
+ * the harness's provider, checks only the harness binary. Otherwise, Claude Code and Codex use
+ * the operator's login (ADR 0026), or an API key in the Attempt's environment if `apiKeyed`
+ * returns `true` for the harness: `probe` checks the login or the binary, then the machine must
+ * connect to the login's hosts, or the provider's API host, through the forward proxy. Pi goes
+ * to `probe`, which rejects it on any remote machine. The checks run through `shell`, on the
+ * machine or in a container on it.
  */
 export const gatewayHarnessProbe = (
   commands: RemoteCommands,
@@ -367,6 +374,7 @@ export const gatewayHarnessProbe = (
   gateway: MachineGateway,
   probe: HarnessProbe,
   shell: RemoteShell,
+  apiKeyed: (harness: LoginHarness) => boolean,
 ): HarnessProbe => {
   const worker = machine.address.name;
   const host = machine.shell.destination;
@@ -386,7 +394,13 @@ export const gatewayHarnessProbe = (
   const loginHostsReachable = Effect.fn("SshExecutor.probeLoginHostsBehindGateway")(function* (
     harness: LoginHarness,
   ) {
-    const { label, hosts } = LOGINS[harness];
+    const { label } = LOGINS[harness];
+    const keyed = apiKeyed(harness);
+    const hosts: ReadonlyArray<string> = keyed ? [LOGINS[harness].apiHost] : LOGINS[harness].hosts;
+    const uses = keyed ? "an API key" : "its login";
+    const alternative = keyed
+      ? `, or add ${LOGINS[harness].gatewayProvider} to the worker's llm_providers with the key on the gateway`
+      : "";
     yield* Effect.annotateCurrentSpan({ worker, host, domain, harness });
     const result = yield* commands.inspect("preflight", shell, "sh", [
       "-c",
@@ -415,8 +429,8 @@ export const gatewayHarnessProbe = (
       return yield* gatewayGap(
         worker,
         answer?.connect === PROXY_REFUSED
-          ? `${label} uses its login on SSH worker "${worker}", and the gateway's forward proxy blocks ${loginHost}. Add ${loginHost} to the gateway's egress allowlist.`
-          : `${label} uses its login on SSH worker "${worker}", which can't reach ${loginHost} through the gateway's forward proxy at ${proxy}`,
+          ? `${label} uses ${uses} on SSH worker "${worker}", and the gateway's forward proxy blocks ${loginHost}. Add ${loginHost} to the gateway's egress allowlist${alternative}.`
+          : `${label} uses ${uses} on SSH worker "${worker}", which can't reach ${loginHost} through the gateway's forward proxy at ${proxy}`,
         cause,
       );
     }

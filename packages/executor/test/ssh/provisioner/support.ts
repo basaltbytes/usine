@@ -22,7 +22,7 @@ export const hetznerSettings = (
   sshKey: HetznerResourceName.make("usine-orchestrator"),
   sshUser: SshUser.make("usine"),
   labels: { team: "platform" },
-  apiKeys: { anthropic: Option.none() },
+  apiKeys: { anthropic: Option.none(), openai: Option.none() },
   ...overrides,
 });
 
@@ -31,6 +31,6 @@ export const boatSettings = (overrides: Partial<BoatProvisioner> = {}): BoatProv
   provider: "boat",
   token: Redacted.make("boat_key_for_tests"),
   size: "default",
-  apiKeys: { anthropic: Option.some(Redacted.make("sk-ant-api-for-tests")) },
+  apiKeys: { anthropic: Option.some(Redacted.make("sk-ant-api-for-tests")), openai: Option.none() },
   ...overrides,
 });

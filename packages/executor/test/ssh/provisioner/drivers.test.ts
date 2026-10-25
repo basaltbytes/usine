@@ -9,7 +9,7 @@ import {
   MachineId,
   WorkerName,
 } from "@usine/core/worker";
-import { Effect, Option, Redacted } from "effect";
+import { Effect, Option, Redacted, Schema } from "effect";
 import type { BoatProvisioner, HetznerProvisioner } from "../../../src/ssh/model.ts";
 import { boatSettings, hetznerSettings } from "./support.ts";
 import { boatDriverFor } from "../../../src/ssh/provisioner/boat.ts";
@@ -38,11 +38,12 @@ describe("Hetzner Cloud driver", () => {
       const providers = fakeProviders();
       return Effect.gen(function* () {
         const driver = yield* hetznerDriverFor(WORKER, hetznerSettings(), true, HETZNER_TEST_API);
-        const id = yield* driver.create("usine-hetzner-pool-0a1b2c3d", tags);
+        const { id, hostKey } = yield* driver.create("usine-hetzner-pool-0a1b2c3d", tags);
         const created = providers.calls.find(
           ({ method, path }) => method === "POST" && path === "/servers",
         );
-        assert.deepStrictEqual(created?.body, {
+        const { user_data: userData, ...body } = created?.body ?? {};
+        assert.deepStrictEqual(body, {
           name: "usine-hetzner-pool-0a1b2c3d",
           server_type: "cx33",
           location: "nbg1",
@@ -60,10 +61,23 @@ describe("Hetzner Cloud driver", () => {
           },
           start_after_create: true,
         });
+        assert(Option.isSome(hostKey));
+        assert.match(hostKey.value, /^ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI[A-Za-z0-9+/]{43}=?$/u);
+        const userDataLines = Schema.decodeUnknownSync(Schema.String)(userData).split("\n");
+        assert.deepStrictEqual(userDataLines.slice(0, 5), [
+          "#cloud-config",
+          "ssh_deletekeys: true",
+          "ssh_genkeytypes: []",
+          "ssh_keys:",
+          "  ed25519_private: |",
+        ]);
+        assert.strictEqual(userDataLines[5], "    -----BEGIN OPENSSH PRIVATE KEY-----");
+        assert.include(userDataLines, "    -----END OPENSSH PRIVATE KEY-----");
+        assert.include(userDataLines, `  ed25519_public: ${hostKey.value}`);
         providers.hetzner.startingReads = 2;
         const endpoint = yield* driver.endpoint(id, noWait);
         assert.strictEqual(endpoint.destination, "usine@10.42.0.5");
-        assert.deepStrictEqual(endpoint.hostKey, { _tag: "FirstUse" });
+        assert.isTrue(Option.isNone(endpoint.hostKey));
         assert.isTrue(Option.isNone(endpoint.port));
 
         yield* driver.tag(id, { ...tags, attempt: Option.some(ATTEMPT) });
@@ -101,7 +115,7 @@ describe("Hetzner Cloud driver", () => {
           false,
           HETZNER_TEST_API,
         );
-        const id = yield* driver.create("usine-hetzner-pool-1", tags);
+        const { id } = yield* driver.create("usine-hetzner-pool-1", tags);
         const created = providers.calls.find(({ method }) => method === "POST");
         assert.deepInclude(created?.body ?? {}, {
           firewalls: [{ firewall: 81 }],
@@ -221,7 +235,8 @@ describe("Boat driver", () => {
           "ssh-ed25519 AAAAOperatorKey usine",
           BOAT_TEST_API,
         );
-        const id = yield* driver.create("ignored", tags);
+        const { id, hostKey } = yield* driver.create("ignored", tags);
+        assert.isTrue(Option.isNone(hostKey));
         const created = providers.boat.sandboxes.get(id);
         assert.deepStrictEqual(created?.body, {
           type: "default",
@@ -236,10 +251,7 @@ describe("Boat driver", () => {
         created.provisioningReads = 2;
         const endpoint = yield* driver.endpoint(id, noWait);
         assert.strictEqual(endpoint.destination, "user@198.51.100.20");
-        assert.deepStrictEqual(endpoint.hostKey, {
-          _tag: "Pinned",
-          key: providers.boat.hostKey,
-        });
+        assert.deepStrictEqual(endpoint.hostKey, Option.some(providers.boat.hostKey));
         const key = providers.calls.find(({ path }) => path === `/sandboxes/${id}/sshkey`);
         assert.deepStrictEqual(key?.body, { key: "ssh-ed25519 AAAAOperatorKey usine" });
 
@@ -269,7 +281,7 @@ describe("Boat driver", () => {
           "ssh-ed25519 AAAA",
           BOAT_TEST_API,
         );
-        const endpoint = yield* driver.endpoint(yield* driver.create("x", tags), noWait);
+        const endpoint = yield* driver.endpoint((yield* driver.create("x", tags)).id, noWait);
         assert.strictEqual(endpoint.destination, "user@203.0.113.10");
         assert.deepStrictEqual(endpoint.port, Option.some(22001));
       }).pipe(Effect.provide(providers.layer));
@@ -286,7 +298,7 @@ describe("Boat driver", () => {
         "ssh-ed25519 AAAA",
         BOAT_TEST_API,
       );
-      const ours = yield* driver.create("x", tags);
+      const { id: ours } = yield* driver.create("x", tags);
       yield* driver.create("x", { ...tags, worker: WorkerName.make("other") });
       yield* driver.create("x", { ...tags, instance: "github-app-1" });
       const listed = yield* driver.list("github-app-4242", WORKER);

@@ -1,11 +1,12 @@
 import { MachineId, SshDestination, type WorkerName } from "@usine/core/worker";
-import { DateTime, Effect, Option, Schema } from "effect";
+import { DateTime, Effect, Option, Redacted, Schema } from "effect";
 import {
   MachineUnavailableError,
   type MachineUnavailableReason,
   WorkerCapabilityError,
 } from "../../executor.ts";
 import type { HetznerProvisioner } from "../model.ts";
+import { generateHostKey, type HostKeyPair } from "./host-key.ts";
 import {
   failureText,
   type ProviderFailure,
@@ -31,6 +32,26 @@ const LABELS = {
   process: "usine-process",
   attempt: "usine-attempt",
 } as const;
+
+/**
+ * Returns the cloud-init user data that replaces the image's SSH host keys with `hostKey` at the
+ * server's first boot, so the executor knows the key before it connects. cloud-init runs it on a
+ * server created from a snapshot too, because the new server has a new instance ID.
+ */
+const hostKeyUserData = (hostKey: HostKeyPair): string =>
+  [
+    "#cloud-config",
+    "ssh_deletekeys: true",
+    "ssh_genkeytypes: []",
+    "ssh_keys:",
+    "  ed25519_private: |",
+    ...Redacted.value(hostKey.privateKey)
+      .trimEnd()
+      .split("\n")
+      .map((line) => `    ${line}`),
+    `  ed25519_public: ${hostKey.publicKey}`,
+    "",
+  ].join("\n");
 
 const Pagination = Schema.Struct({
   meta: Schema.optionalKey(
@@ -309,6 +330,7 @@ export const hetznerDriverFor = (
         const firewall = Option.isSome(settings.firewall)
           ? yield* named("firewalls", settings.firewall.value)
           : Option.none<number>();
+        const hostKey = yield* generateHostKey;
         const response = yield* api.send("POST", "/servers", {
           body: {
             name,
@@ -326,11 +348,15 @@ export const hetznerDriverFor = (
             }),
             public_net: { enable_ipv4: !privateOnly, enable_ipv6: false },
             labels: labelsOf(tags),
+            user_data: hostKeyUserData(hostKey),
             start_after_create: true,
           },
         });
         const created = yield* api.decode(Created, "create a server")(response);
-        return MachineId.make(String(created.server.id));
+        return {
+          id: MachineId.make(String(created.server.id)),
+          hostKey: Option.some(hostKey.publicKey),
+        };
       },
       (effect, _name, _tags) =>
         effect.pipe(
@@ -373,8 +399,8 @@ export const hetznerDriverFor = (
             return {
               destination: SshDestination.make(`${settings.sshUser}@${address.value}`),
               port: Option.none(),
-              hostKey: { _tag: "FirstUse" },
-            } as const;
+              hostKey: Option.none(),
+            };
           yield* Effect.logDebug("Waiting for the Hetzner Cloud server to run", {
             worker,
             machine: id,

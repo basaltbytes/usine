@@ -9,7 +9,6 @@ import type { BoatProvisioner } from "../model.ts";
 import { failureText, type ProviderFailure, providerApiFor } from "./http.ts";
 import {
   attemptTag,
-  type HostKey,
   type ListedMachine,
   type MachineDriver,
   type MachineTags,
@@ -222,7 +221,7 @@ export const boatDriverFor = (
           },
         });
         const created = yield* api.decode(OneSandbox, "create a sandbox")(response);
-        return MachineId.make(created.sandbox.id);
+        return { id: MachineId.make(created.sandbox.id), hostKey: Option.none() };
       },
       (effect) =>
         effect.pipe(
@@ -274,14 +273,10 @@ export const boatDriverFor = (
         if (Option.isNone(target))
           return yield* unavailable("provider", "Boat reported no SSH address for the new sandbox");
         const user = answer.sshUser ?? "user";
-        const hostKey: HostKey =
-          answer.hostKey === undefined
-            ? { _tag: "FirstUse" }
-            : { _tag: "Pinned", key: answer.hostKey };
         return {
           destination: SshDestination.make(`${user}@${target.value.host}`),
           port: target.value.port,
-          hostKey,
+          hostKey: Option.fromUndefinedOr(answer.hostKey),
         };
       },
       (effect) =>

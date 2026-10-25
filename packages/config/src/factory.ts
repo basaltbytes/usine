@@ -134,11 +134,13 @@ export class WorkerContainer extends Schema.Class<WorkerContainer>("@usine/confi
 /**
  * The orchestrator environment variables with the LLM provider API keys that each Attempt on a
  * provisioned Worker gets in its environment, read when `usine up` starts or a reload adds the
- * Worker. `anthropic` becomes `ANTHROPIC_API_KEY` for Claude Code.
+ * Worker. `anthropic` becomes `ANTHROPIC_API_KEY` for Claude Code, and `openai` becomes
+ * `OPENAI_API_KEY` for Codex.
  */
 export class ProviderApiKeys extends Schema.Class<ProviderApiKeys>("@usine/config/ProviderApiKeys")(
   {
     anthropic: Schema.OptionFromOptionalKey(EnvironmentVariableName),
+    openai: Schema.OptionFromOptionalKey(EnvironmentVariableName),
   },
 ) {}
 

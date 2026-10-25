@@ -256,6 +256,7 @@ export const configurationJson = {
         sshUser: "usine",
         labels: { team: "platform" },
         anthropicKeyEnv: null,
+        openaiKeyEnv: null,
       },
       machines: [
         {
@@ -313,6 +314,7 @@ export const configurationJson = {
         tokenEnv: "BOAT_API_KEY",
         size: "default",
         anthropicKeyEnv: "ANTHROPIC_API_KEY",
+        openaiKeyEnv: null,
       },
       machines: [],
       provisioning: null,

@@ -62,17 +62,20 @@ const sshWorkerMachineOf = (worker: SshWorker, missing: MissingSecret) =>
       settings.tokenEnv,
       missing(`${settings.provider} API token`, settings.tokenEnv, "provisioner.token_env"),
     );
-    const apiKeys = {
-      anthropic: yield* Effect.transposeOption(
-        Option.map(settings.apiKeys.anthropic, (variable) =>
+    const apiKey = (provider: "anthropic" | "openai", label: string) =>
+      Effect.transposeOption(
+        Option.map(settings.apiKeys[provider], (variable) =>
           secretFrom(
             worker,
             "harness-login",
             variable,
-            missing("Anthropic API key", variable, "provisioner.api_keys.anthropic"),
+            missing(label, variable, `provisioner.api_keys.${provider}`),
           ),
         ),
-      ),
+      );
+    const apiKeys = {
+      anthropic: yield* apiKey("anthropic", "Anthropic API key"),
+      openai: yield* apiKey("openai", "OpenAI API key"),
     };
     switch (settings.provider) {
       case "hetzner":

@@ -378,7 +378,7 @@ Both providers take these keys:
 | --- | --- | --- | --- |
 | `provider` | `hetzner`, `boat` | required | Selects the provider and the other keys that it accepts. |
 | `token_env` | string | required | Name of the orchestrator's environment variable that contains the provider's API token: a Hetzner Cloud API token with **Read & Write** permission for the project, or a Boat API key. The file never contains the token itself. |
-| `api_keys` | mapping | `{}` | LLM provider API keys for each attempt, as names of the orchestrator's environment variables. The only key is `anthropic`, which each attempt's container gets as `ANTHROPIC_API_KEY` for Claude Code, unless the worker's gateway has `anthropic` in `llm_providers`. |
+| `api_keys` | mapping | `{}` | LLM provider API keys for each attempt, as names of the orchestrator's environment variables. Each attempt's container gets `anthropic` as `ANTHROPIC_API_KEY` for Claude Code, and `openai` as `OPENAI_API_KEY` for Codex, unless the worker's gateway has the provider in `llm_providers`. |
 
 `kind: ssh` keys with a `provisioner`:
 
@@ -388,6 +388,10 @@ Both providers take these keys:
 - `max_concurrent_attempts` caps the machines in flight, including those being created.
 
 `usine up` reads the variables named by `token_env` and `api_keys` when it starts, and a reload reads them for the worker that it adds.
+
+With `api_keys.openai`, the executor writes a Codex `model_provider` to each attempt's `CODEX_HOME`, which sends the Responses API to `api.openai.com` with the key from `OPENAI_API_KEY`, so Codex needs no login. Behind a gateway, a harness with an API key reaches its provider through the forward proxy, so the gateway's egress allowlist must have `api.anthropic.com` or `api.openai.com`.
+
+The executor connects to each machine only with a host key that it knows beforehand, with `StrictHostKeyChecking=yes`. It writes the key to a file for that machine under `.usine/known-hosts/` in the instance folder before the first connection, and the file stays across restarts until the machine is deleted. For a Hetzner server, the executor generates the key and passes it in the server's cloud-init user data. For a Boat sandbox, it uses the key that Boat's API returns, and a sandbox without one fails its creation.
 
 #### `provider: hetzner`
 
@@ -411,7 +415,9 @@ Each server gets these labels:
 - `usine-process`: a random value for each `usine up` process.
 - `usine-attempt`: a hash of the attempt ID, once the attempt starts.
 
-A value that is longer than 63 characters or has characters other than letters, digits, `_`, `.`, and `-` becomes a hash. Behind a gateway, the executor connects to each server through `gateway.destination` with `ssh -J`. It records each server's host key at the first connection, in a known-hosts file for that server under `.usine/known-hosts/` in the instance folder.
+A value that is longer than 63 characters or has characters other than letters, digits, `_`, `.`, and `-` becomes a hash. Behind a gateway, the executor connects to each server through `gateway.destination` with `ssh -J`.
+
+Each server is created with cloud-init user data that replaces the image's SSH host keys with an Ed25519 key that the executor generated, so the image must run cloud-init at first boot, as Hetzner's images and the snapshots of `snapshot.sh` do.
 
 ```yaml title="usine.yaml"
 workers:
@@ -424,7 +430,7 @@ workers:
       domain: gw.internal
       destination: usine-gateway
       admin_token_env: USINE_GATEWAY_ADMIN_TOKEN
-      llm_providers: [anthropic]
+      llm_providers: [anthropic, openai]
     provisioner:
       provider: hetzner
       token_env: HCLOUD_TOKEN
@@ -444,7 +450,7 @@ Creates a Boat sandbox for each attempt, with none of the account's secrets, no 
 | --- | --- | --- | --- |
 | `size` | `small`, `default`, `large`, `xlarge` | `default` | The Boat machine type. `default` has 4 vCPU and 8 GB. `xlarge` needs a Boat plan of $100 per month or more. |
 
-A Boat worker can't have a `gateway`, because Boat has no network rules, so no gateway can be its machines' only way out. Each attempt's installation token is written to its machine, as on an SSH worker without a gateway, and Claude Code needs `api_keys.anthropic`. Boat documents no region choice, and its machines are in Germany, Finland, and France, so a `region` key is refused like any unknown key. Boat has no labels, so each sandbox's name carries the same tags: `usine <instance> <worker> <run> <process> <attempt>`. If Boat reports a sandbox's host key, the executor requires it; otherwise it records the key of the first connection.
+A Boat worker can't have a `gateway`, because Boat has no network rules, so no gateway can be its machines' only way out. Each attempt's installation token is written to its machine, as on an SSH worker without a gateway, Claude Code needs `api_keys.anthropic`, and Codex needs `api_keys.openai`. Boat documents no region choice, and its machines are in Germany, Finland, and France, so a `region` key is refused like any unknown key. Boat has no labels, so each sandbox's name carries the same tags: `usine <instance> <worker> <run> <process> <attempt>`.
 
 ```yaml title="usine.yaml"
 workers:
@@ -470,7 +476,7 @@ The parser refuses an `ssh` worker that:
 
 A reload refuses a changed `provisioner` with `RestartRequiredError`.
 
-Preflight creates no machine. It checks the provider token; for Hetzner, the server type in the location, the image, the SSH key, and the network; for Boat, the account's limits, which fail preflight if Boat doesn't offer the account the `size`. Hetzner documents no limits endpoint, so preflight reads none for it. It also checks the gateway's admin API, and that each harness of the roster has a credential that no machine has to keep: for Claude Code, `anthropic` in the gateway's `llm_providers` or `api_keys.anthropic`. Codex and Pi agents fail preflight on a provisioned worker. A Hetzner server type that is out of stock in the location logs a warning, and so does a Boat account that can't start sandboxes now or whose active-sandbox cap is below `max_concurrent_attempts`. The checks that need a machine run on the worker's first machine each day (UTC) and its first machine after `usine up`.
+Preflight creates no machine. It checks the provider token; for Hetzner, the server type in the location, the image, the SSH key, and the network; for Boat, the account's limits, which fail preflight if Boat doesn't offer the account the `size`. Hetzner documents no limits endpoint, so preflight reads none for it. It also checks the gateway's admin API, and that each harness of the roster has a credential that no machine has to keep: for Claude Code, `anthropic` in the gateway's `llm_providers` or `api_keys.anthropic`; for Codex, `openai` in `llm_providers` or `api_keys.openai`. Pi agents fail preflight on a provisioned worker. A Hetzner server type that is out of stock in the location logs a warning, and so does a Boat account that can't start sandboxes now or whose active-sandbox cap is below `max_concurrent_attempts`. The checks that need a machine run on the worker's first machine each day (UTC) and its first machine after `usine up`.
 
 ### `kind: exe.dev`
 

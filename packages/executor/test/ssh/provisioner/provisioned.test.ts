@@ -5,7 +5,7 @@ import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptId } from "@usine/core/attempt";
 import type { AttemptRecovery } from "@usine/core/attempt/salvage";
 import { RunId } from "@usine/core/run";
-import { SshIdentityFile, WorkerRoot } from "@usine/core/worker";
+import { type GatewayLlmProvider, SshIdentityFile, WorkerRoot } from "@usine/core/worker";
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
 import {
   completes,
@@ -13,7 +13,15 @@ import {
   StubStorage,
   stubAttemptRuntime,
 } from "@usine/durable/testing";
-import { Deferred, Effect, Fiber, Layer, Option, Redacted } from "effect";
+import {
+  AnthropicProvider,
+  AnthropicSubscriptionToken,
+  ChatGptLogin,
+  HostFilePath,
+  OpenAiProvider,
+  UpstreamBase,
+} from "@usine/gateway";
+import { Deferred, Effect, Fiber, Layer, Option, Redacted, Schema } from "effect";
 import {
   CheckoutRequest,
   claudeLoginLockLayer,
@@ -52,7 +60,7 @@ const hetznerAddress: SshWorkerAddress = {
     _tag: "Provisioned",
     provisioner: hetznerSettings({
       network: Option.none(),
-      apiKeys: { anthropic: Option.some(Redacted.make(KEY)) },
+      apiKeys: { anthropic: Option.some(Redacted.make(KEY)), openai: Option.none() },
     }),
   },
 };
@@ -104,6 +112,94 @@ const codexAgent = new Agent({
   persona: AgentPersona.make("Review the change."),
 });
 
+const codexRequest = new CheckoutRequest({ ...request, agent: codexAgent });
+
+const OPENAI_KEY = "sk-proj-openai-for-provisioned-tests";
+
+/** The Attempt's Codex home on a provisioned machine under `ROOT`. */
+const CODEX_HOME = `${ROOT}/workers/eu-one/codex/remote-run_execute_1`;
+
+/** A Gateway with a Claude subscription token and a ChatGPT login. */
+const SUBSCRIPTION_PROVIDERS = {
+  anthropic: Option.some(
+    new AnthropicProvider({
+      upstream: UpstreamBase.make("https://api.anthropic.com"),
+      credential: new AnthropicSubscriptionToken({
+        token: Redacted.make("sk-ant-oat01-for-provisioned-tests"),
+      }),
+    }),
+  ),
+  openai: Option.some(
+    new OpenAiProvider({
+      upstream: UpstreamBase.make("https://chatgpt.com/backend-api/codex"),
+      credential: new ChatGptLogin({
+        authFile: HostFilePath.make("/var/lib/usine-gateway/chatgpt/auth.json"),
+        tokenUrl: UpstreamBase.make("https://auth.openai.com/oauth/token"),
+      }),
+    }),
+  ),
+};
+
+/** Records that an earlier process pinned the host key of Hetzner server `id`. */
+const pinnedEarlier = (machine: ReturnType<typeof fakeMachine>, id: number) =>
+  machine.state.localFiles.set(
+    `${LOCAL_TEMPORARY_DIRECTORY}/hetzner-${String(id)}`,
+    `usine-hetzner-${String(id)} ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEarlierHostKeyForTests\n`,
+  );
+
+/** Returns the public host key in the user data of the first server created. */
+const createdHostKey = (providers: ReturnType<typeof fakeProviders>): string | undefined => {
+  const userData = Schema.decodeUnknownOption(Schema.String)(
+    providers.calls.find(({ method, path }) => method === "POST" && path === "/servers")?.body
+      ?.user_data,
+  );
+  return Option.getOrUndefined(
+    Option.flatMapNullishOr(userData, (text) => /^ {2}ed25519_public: (.+)$/mu.exec(text)?.[1]),
+  );
+};
+
+/** Returns a provisioned Hetzner Worker behind a Gateway with `llmProviders`. */
+const gatewayHetznerAddress = (
+  llmProviders: ReadonlyArray<GatewayLlmProvider>,
+  apiKeys: { readonly openai?: string } = {},
+): SshWorkerAddress => ({
+  ...gatewayAddress({ llmProviders }),
+  port: Option.none(),
+  root: ROOT,
+  machine: {
+    _tag: "Provisioned",
+    provisioner: hetznerSettings({
+      apiKeys: {
+        anthropic: Option.none(),
+        openai: Option.map(Option.fromUndefinedOr(apiKeys.openai), Redacted.make),
+      },
+    }),
+  },
+});
+
+/** Returns the executor for `address` behind `gateway`. */
+const gatewayRuntimeOf = (
+  machine: ReturnType<typeof fakeMachine>,
+  providers: ReturnType<typeof fakeProviders>,
+  gateway: ReturnType<typeof fakeGateway>,
+  address: SshWorkerAddress,
+  parent: StubParent = completes,
+) =>
+  sshLayer({
+    workers: [address],
+    instance: INSTANCE,
+    interruptGrace: "2 seconds",
+    providerEndpoints: { hetzner: HETZNER_TEST_API },
+    machinePollInterval: "1 millis",
+    machineReadyTimeout: "1 second",
+  }).pipe(
+    Layer.provide(machine.layer),
+    Layer.provide(mintingProvider().layer),
+    Layer.provide(stubAttemptRuntime(new StubStorage(), parent)),
+    Layer.provide(claudeLoginLockLayer),
+    Layer.provide(providers.over(gateway.layer)),
+  );
+
 describe("Provisioned SSH Worker behind a Gateway", () => {
   it.live(
     "creates the server on the Gateway's network without public addresses, jumps through the Gateway, and attaches the token there",
@@ -150,23 +246,107 @@ describe("Provisioned SSH Worker behind a Gateway", () => {
         assert.strictEqual(providers.hetzner.servers.size, 0);
       }).pipe(
         Effect.scoped,
+        Effect.provide(gatewayRuntimeOf(machine, providers, gateway, address, parent)),
+      );
+    },
+  );
+
+  it.live(
+    "runs Codex on the Gateway's ChatGPT login: checks only the binary, writes the Attempt's Codex home, and sends the caller token",
+    () => {
+      const machine = fakeMachine();
+      const providers = fakeProviders();
+      const gateway = fakeGateway(machine, SUBSCRIPTION_PROVIDERS);
+      let given: AttemptRequest | undefined;
+      const parent: StubParent = (context) => {
+        given = context.request;
+        return completes(context);
+      };
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const machines = yield* WorkerMachines;
+        const report = yield* executor.preflight(WORKER, [codexAgent.brain], 1);
+        assert.isTrue(Option.isSome(report.deferred));
+        const grant = yield* machines.create(WORKER, RUN, [codexAgent.brain]);
+        const lines = machine.state.calls.map(({ line }) => line);
+        assert.include(lines, "exec 'codex' '--version'");
+        assert.isFalse(
+          lines.some((line) => line.includes("http_connect")),
+          "no login host is checked",
+        );
+
+        yield* machines.assign(grant.hold, codexRequest.attemptId);
+        yield* (yield* executor.prepare(codexRequest)).launch(sink);
+        assert(given !== undefined && given.host instanceof RemoteShell);
+        assert.strictEqual(given.environment.CODEX_HOME, CODEX_HOME);
+        assert.isString(given.host.sshEnvironment.USINE_GATEWAY_TOKEN);
+        assert.include(
+          machine.state.files.get(`${CODEX_HOME}/config.toml`) ?? "",
+          'base_url = "http://llm.gw.test/openai/v1"',
+        );
+        assert.deepStrictEqual(yield* given.gatewayCredential, Option.some("subscription"));
+        yield* machines.release(grant.hold);
+      }).pipe(
+        Effect.scoped,
         Effect.provide(
-          sshLayer({
-            workers: [address],
-            instance: INSTANCE,
-            interruptGrace: "2 seconds",
-            providerEndpoints: { hetzner: HETZNER_TEST_API },
-            machinePollInterval: "1 millis",
-            machineReadyTimeout: "1 second",
-          }).pipe(
-            Layer.provide(machine.layer),
-            Layer.provide(mintingProvider().layer),
-            Layer.provide(stubAttemptRuntime(new StubStorage(), parent)),
-            Layer.provide(claudeLoginLockLayer),
-            Layer.provide(providers.over(gateway.layer)),
+          gatewayRuntimeOf(
+            machine,
+            providers,
+            gateway,
+            gatewayHetznerAddress(["anthropic", "openai"]),
+            parent,
           ),
         ),
       );
+    },
+  );
+
+  it.live(
+    "refuses Codex behind a Gateway without openai and without an OpenAI API key, and checks the API host for one with a key",
+    () => {
+      const machine = fakeMachine();
+      const providers = fakeProviders();
+      const gateway = fakeGateway(machine);
+      return Effect.gen(function* () {
+        const refused = yield* Effect.gen(function* () {
+          const executor = yield* Executor;
+          return yield* executor.preflight(WORKER, [codexAgent.brain], 1).pipe(Effect.flip);
+        }).pipe(
+          Effect.scoped,
+          Effect.provide(
+            gatewayRuntimeOf(machine, providers, gateway, gatewayHetznerAddress(["anthropic"])),
+          ),
+        );
+        assert(refused._tag === "WorkerCapabilityError");
+        assert.strictEqual(refused.capability, "harness-login");
+        assert.include(
+          refused.message,
+          "Add openai to the gateway's llm_providers, with a ChatGPT login or an API key on the gateway, or set provisioner.api_keys.openai.",
+        );
+
+        machine.state.refusedHosts.add("api.openai.com");
+        const blocked = yield* Effect.gen(function* () {
+          const executor = yield* Executor;
+          const machines = yield* WorkerMachines;
+          yield* executor.preflight(WORKER, [codexAgent.brain], 1);
+          return yield* machines.create(WORKER, RUN, [codexAgent.brain]).pipe(Effect.flip);
+        }).pipe(
+          Effect.scoped,
+          Effect.provide(
+            gatewayRuntimeOf(
+              machine,
+              providers,
+              gateway,
+              gatewayHetznerAddress(["anthropic"], { openai: OPENAI_KEY }),
+            ),
+          ),
+        );
+        assert.include(
+          blocked.message,
+          "Codex uses an API key on SSH worker \"eu-one\", and the gateway's forward proxy blocks api.openai.com. Add api.openai.com to the gateway's egress allowlist, or add openai to the worker's llm_providers with the key on the gateway.",
+        );
+        assert.strictEqual(providers.hetzner.servers.size, 0, "the unusable machine was deleted");
+      });
     },
   );
 });
@@ -214,11 +394,18 @@ describe("Provisioned SSH Worker", () => {
         assert(given !== undefined && given.host instanceof RemoteShell);
         const destination = `usine@${server.publicIp ?? ""}`;
         assert.strictEqual(given.host.destination, destination);
-        assert.include(given.host.ssh.args, "StrictHostKeyChecking=accept-new");
-        assert.include(
-          given.host.ssh.args,
-          `UserKnownHostsFile=${LOCAL_TEMPORARY_DIRECTORY}/hetzner-${grant.id}`,
+        const knownHosts = `${LOCAL_TEMPORARY_DIRECTORY}/hetzner-${grant.id}`;
+        assert.include(given.host.ssh.args, "StrictHostKeyChecking=yes");
+        assert.include(given.host.ssh.args, `HostKeyAlias=usine-hetzner-${grant.id}`);
+        assert.include(given.host.ssh.args, `UserKnownHostsFile=${knownHosts}`);
+        const hostKey = createdHostKey(providers);
+        assert(hostKey !== undefined, "the server was created with a host key");
+        assert.strictEqual(
+          machine.state.localFiles.get(knownHosts),
+          `usine-hetzner-${grant.id} ${hostKey}\n`,
         );
+        const pinned = machine.state.localWrites.find(({ path }) => path === knownHosts);
+        assert.strictEqual(pinned?.afterCalls, 0, "the key was pinned before the first connection");
         // Without Docker, the key goes over the SSH connection, never in a command line.
         assert.strictEqual(given.host.sshEnvironment.ANTHROPIC_API_KEY, KEY);
         assert.isFalse(machine.state.calls.some(({ line }) => line.includes(KEY)));
@@ -230,6 +417,7 @@ describe("Provisioned SSH Worker", () => {
         yield* machines.release(grant.hold);
         assert.strictEqual(providers.hetzner.servers.size, 0);
         assert.lengthOf(yield* machines.machines, 0);
+        assert.isFalse(machine.state.localFiles.has(knownHosts));
         assert.include(logs.lines.join("\n"), "Deleted the machine");
       }).pipe(
         Effect.scoped,
@@ -386,6 +574,7 @@ describe("Provisioned SSH Worker", () => {
           ["usine-process", "earlier00000"],
         ]);
         if (attempt !== undefined) labels.set("usine-attempt", attempt);
+        pinnedEarlier(machine, id);
         providers.hetzner.servers.set(id, {
           id,
           name: `usine-eu-one-${String(id)}`,
@@ -460,6 +649,7 @@ describe("Provisioned SSH Worker", () => {
     const providers = fakeProviders();
     return Effect.gen(function* () {
       const executor = yield* Executor;
+      pinnedEarlier(machine, 21);
       providers.hetzner.servers.set(21, {
         id: 21,
         name: "usine-eu-one-21",
@@ -504,6 +694,55 @@ describe("Provisioned SSH Worker", () => {
   });
 
   it.live(
+    "doesn't connect to an earlier process's machine whose host key it has no record of, and keeps the machine",
+    () => {
+      const machine = fakeMachine();
+      const providers = fakeProviders();
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        providers.hetzner.servers.set(22, {
+          id: 22,
+          name: "usine-eu-one-22",
+          status: "running",
+          created: new Date().toISOString(),
+          labels: {
+            "usine-instance": INSTANCE,
+            "usine-worker": WORKER,
+            "usine-run": RUN,
+            "usine-process": "earlier00000",
+            "usine-attempt": attemptTag(request.attemptId),
+          },
+          privateIp: undefined,
+          publicIp: "203.0.113.92",
+          startingReads: 0,
+        });
+        const refused = yield* executor
+          .recover(
+            {
+              attemptId: request.attemptId,
+              worker: WORKER,
+              repository: request.repository,
+              ref: request.salvageRef,
+              permissions: "write",
+              succeeded: true,
+              open: false,
+            },
+            sink,
+            Effect.succeed(request.commitAuthor),
+          )
+          .pipe(Effect.flip);
+        assert.include(refused.message, "usine has no SSH host key for hetzner machine 22");
+        assert.include(refused.message, "doesn't trust the host key of a first connection");
+        assert.isFalse(
+          machine.state.calls.some(({ command }) => command.args.includes("usine@203.0.113.92")),
+          "nothing connected to the machine",
+        );
+        assert.isTrue(providers.hetzner.servers.has(22), "the machine and its checkout stay");
+      }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, hetznerAddress)));
+    },
+  );
+
+  it.live(
     "preflights without a machine: the provider, then the harness credentials, and defers the harness checks",
     () => {
       const machine = fakeMachine();
@@ -519,13 +758,83 @@ describe("Provisioned SSH Worker", () => {
         const codex = yield* executor.preflight(WORKER, [codexAgent.brain], 1).pipe(Effect.flip);
         assert(codex._tag === "WorkerCapabilityError");
         assert.strictEqual(codex.capability, "harness-login");
-        assert.include(codex.message, "Codex children don't run on API keys");
+        assert.include(codex.message, "Set provisioner.api_keys.openai.");
+        assert.include(codex.message, "A subscription login needs a gateway");
+
+        const pi = yield* executor
+          .preflight(
+            WORKER,
+            [
+              new BrainSpec({
+                harness: "pi",
+                model: ModelId.make("anthropic/claude-sonnet-5"),
+                effort: "high",
+              }),
+            ],
+            1,
+          )
+          .pipe(Effect.flip);
+        assert.include(pi.message, "Pi children run only on local workers");
 
         providers.hetzner.token = "rotated";
         const token = yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1).pipe(Effect.flip);
         assert(token._tag === "WorkerCapabilityError");
         assert.strictEqual(token.capability, "provider");
       }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, hetznerAddress)));
+    },
+  );
+
+  it.live(
+    "runs Codex with the provisioner's OpenAI API key: checks only the binary, and writes a Codex home that reads the key from the environment",
+    () => {
+      const machine = fakeMachine();
+      const providers = fakeProviders();
+      const keyed: SshWorkerAddress = {
+        ...hetznerAddress,
+        machine: {
+          _tag: "Provisioned",
+          provisioner: hetznerSettings({
+            network: Option.none(),
+            apiKeys: { anthropic: Option.none(), openai: Option.some(Redacted.make(OPENAI_KEY)) },
+          }),
+        },
+      };
+      let given: AttemptRequest | undefined;
+      const parent: StubParent = (context) => {
+        given = context.request;
+        return completes(context);
+      };
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const machines = yield* WorkerMachines;
+        const report = yield* executor.preflight(WORKER, [codexAgent.brain], 1);
+        assert.isTrue(Option.isSome(report.deferred));
+        const grant = yield* machines.create(WORKER, RUN, [codexAgent.brain]);
+        assert.include(
+          machine.state.calls.map(({ line }) => line),
+          "exec 'codex' '--version'",
+        );
+
+        yield* machines.assign(grant.hold, codexRequest.attemptId);
+        yield* (yield* executor.prepare(codexRequest)).launch(sink);
+        assert(given !== undefined && given.host instanceof RemoteShell);
+        assert.strictEqual(given.environment.CODEX_HOME, CODEX_HOME);
+        assert.strictEqual(given.host.sshEnvironment.OPENAI_API_KEY, OPENAI_KEY);
+        const config = machine.state.files.get(`${CODEX_HOME}/config.toml`) ?? "";
+        assert.include(config, 'base_url = "https://api.openai.com/v1"');
+        assert.include(config, 'env_key = "OPENAI_API_KEY"');
+        assert.include(config, "requires_openai_auth = false");
+        assert.isFalse(
+          machine.state.calls.some(({ line }) => line.includes(OPENAI_KEY)),
+          "the key is in no command line",
+        );
+        assert.deepStrictEqual(yield* given.gatewayCredential, Option.some("api-key"));
+        assert.isTrue(
+          machine.state.calls.some(({ line }) => line === `exec 'rm' '-rf' '${CODEX_HOME}'`),
+          "the Attempt's Codex home is removed",
+        );
+        yield* machines.release(grant.hold);
+      }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, keyed, { parent })));
     },
   );
 
@@ -564,7 +873,7 @@ describe("Provisioned SSH Worker", () => {
         yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
         const grant = yield* machines.create(WORKER, RUN, [TEST_AGENT.brain]);
         const known = machine.state.localFiles.get(`${LOCAL_TEMPORARY_DIRECTORY}/boat-${grant.id}`);
-        assert.strictEqual(known, `198.51.100.20 ${providers.boat.hostKey}\n`);
+        assert.strictEqual(known, `usine-boat-${grant.id} ${providers.boat.hostKey ?? ""}\n`);
         const key = providers.calls.find(({ path }) => path.endsWith("/sshkey"));
         assert.deepStrictEqual(key?.body, { key: "ssh-ed25519 AAAAOperatorKey usine" });
         assert.isTrue(
@@ -577,6 +886,26 @@ describe("Provisioned SSH Worker", () => {
         assert.isUndefined(
           machine.state.localFiles.get(`${LOCAL_TEMPORARY_DIRECTORY}/boat-${grant.id}`),
         );
+      }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, boatAddress)));
+    },
+  );
+
+  it.live(
+    "refuses a Boat sandbox whose host key the API doesn't report, and deletes it without connecting",
+    () => {
+      const machine = fakeMachine();
+      machine.state.localFiles.set("/keys/usine_boat.pub", "ssh-ed25519 AAAAOperatorKey usine\n");
+      const providers = fakeProviders();
+      providers.boat.hostKey = undefined;
+      return Effect.gen(function* () {
+        const machines = yield* WorkerMachines;
+        const refused = yield* machines.create(WORKER, RUN, [TEST_AGENT.brain]).pipe(Effect.flip);
+        assert(refused._tag === "MachineUnavailableError");
+        assert.strictEqual(refused.reason, "provider");
+        assert.include(refused.message, "doesn't trust the host key of a first connection");
+        assert.lengthOf(machine.state.calls, 0, "nothing connected to the sandbox");
+        assert.strictEqual(providers.boat.sandboxes.size, 0, "the sandbox was deleted");
+        assert.lengthOf(yield* machines.machines, 0);
       }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, boatAddress)));
     },
   );

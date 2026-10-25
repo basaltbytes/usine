@@ -315,9 +315,9 @@ Preflight attaches nothing. It checks that the admin forward opens (or gives the
 
 A provisioned worker ([`../README.md`](../README.md#provisioned-workers)) creates a server for each attempt from a snapshot that `../snapshot.sh` builds in this network. Each server joins the network when usine creates it (`provisioner.network`), with no public address, and the executor connects to its private address through the gateway with `ssh -J <gateway.destination>`, so the servers need no `Host` entry. The gateway needs no change for them: it decides by caller token, not by address, and each attempt's attachment has a caller token of its own.
 
-A server created from a snapshot gets no user data, so the resolver line of `worker-cloud-init.yaml`'s `bootcmd` doesn't run on it. The same file writes `/etc/cloud/cloud.cfg.d/90-usine-gateway-resolver.cfg`, whose `bootcmd` cloud-init runs at every boot, so the snapshot's servers resolve names with the gateway too.
+A server created from a snapshot gets only the executor's user data, which sets its host key, so the resolver line of `worker-cloud-init.yaml`'s `bootcmd` doesn't run on it. The same file writes `/etc/cloud/cloud.cfg.d/90-usine-gateway-resolver.cfg`, whose `bootcmd` cloud-init runs at every boot, so the snapshot's servers resolve names with the gateway too.
 
-The servers have no harness login. For Claude Code, give the gateway the Anthropic credential, list `anthropic` in the worker's `llm_providers`, and remove the Claude Code hosts from `egress-allowlist`. Or set `provisioner.api_keys.anthropic` and keep those hosts, which Claude Code then reaches through the forward proxy with the key. Codex can't run on them until the gateway stores a ChatGPT login ([#235](https://github.com/basaltbytes/usine/issues/235)).
+The servers have no harness login. For each harness, give the gateway the provider's credential, a subscription login or an API key, list the provider in the worker's `llm_providers`, and remove the harness's hosts from `egress-allowlist`. Or set the provider's key in `provisioner.api_keys` and allow the provider's API host, `api.anthropic.com` or `api.openai.com`, which the harness then reaches through the forward proxy with the key. `api.openai.com` isn't in the default allowlist.
 
 ## Add the time server to an existing gateway and worker
 

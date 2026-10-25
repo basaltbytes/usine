@@ -27,13 +27,15 @@ A provisioned worker is an `ssh` worker that creates a machine at a cloud provid
 
 A machine created for one attempt keeps no harness login: a login saved in a snapshot contains one refresh token, and the first machine that refreshes it invalidates it for the others. So at `usine up`, and at the reload that adds the worker, preflight refuses a provisioned worker if a harness that its agents use has no credential outside the machine.
 
-| Harness     | Credential                                                                                                                                                                                                                                                                                                                                |
-| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Claude Code | `anthropic` in the gateway's [`llm_providers`](/reference/configuration/usine-yaml/#workersgateway), with an API key or a subscription token on the gateway. Or `provisioner.api_keys.anthropic`, which each attempt's container gets as `ANTHROPIC_API_KEY`, billed at API rates. If both are set, the gateway's credential applies.     |
-| Codex       | Not available. Codex needs a ChatGPT login that outlives the machine, which the gateway can't hold yet ([#235](https://github.com/basaltbytes/usine/issues/235)), and Codex children run only on the ChatGPT plan ([ADR 0013](https://github.com/basaltbytes/usine/blob/main/docs/adr/0013-cost-accounting-native-meters-guardrails.md)). |
-| Pi          | Not available. Pi children run only on local workers.                                                                                                                                                                                                                                                                                     |
+| Harness     | Credential                                                                                                                                                                                                                                                                                            |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Code | `anthropic` in the gateway's [`llm_providers`](/reference/configuration/usine-yaml/#workersgateway), with a subscription token or an API key on the gateway. Or `provisioner.api_keys.anthropic`, which each attempt's container gets as `ANTHROPIC_API_KEY`. If both are set, the gateway's applies. |
+| Codex       | `openai` in the gateway's `llm_providers`, with a ChatGPT login or an API key on the gateway. Or `provisioner.api_keys.openai`, which each attempt's container gets as `OPENAI_API_KEY`. If both are set, the gateway's applies.                                                                      |
+| Pi          | Not available. Pi children run only on local workers.                                                                                                                                                                                                                                                 |
 
-A Boat worker can't have a gateway, so its Claude Code agents need `api_keys`. The run page counts Claude Code children that use an API key under API keys, and those that use the gateway's subscription token under the Claude plan.
+A Boat worker can't have a gateway, so its Claude Code and Codex agents need `api_keys`. With an OpenAI key, each attempt gets its own `CODEX_HOME` with a `config.toml` that points Codex at `api.openai.com` with the key from `OPENAI_API_KEY`, so Codex needs no login. Behind a gateway that doesn't hold the provider's credential, the machine reaches the provider through the gateway's forward proxy, and the first machine's checks fail if the egress allowlist doesn't have `api.anthropic.com` or `api.openai.com`; `api.openai.com` isn't in the default allowlist.
+
+The run page counts children that use an API key under API keys, and those that use a subscription on the gateway under the Claude or ChatGPT plan.
 
 ## Hetzner Cloud
 
@@ -58,7 +60,7 @@ Each attempt gets a server created from a snapshot that you build with `infra/he
 
    The snapshot authorizes this key for the `usine` user, whom the executor connects as. Hetzner adds the registered key for root, which the server's sshd refuses; it keeps Hetzner from emailing a root password for each server.
 
-3. Set up the gateway: steps 1 to 4 and 8 of [SSH workers behind a gateway](/guides/add-a-worker/#ssh-workers-behind-a-gateway). Its network is `usine-gateway` by default. For Claude Code, give the gateway the Anthropic credential: add `ANTHROPIC_API_KEY`, or `USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN` for a Claude subscription, to `/etc/usine-gateway/secrets.env` and run `systemctl reload usine-gateway`. Then remove `api.anthropic.com` and `platform.claude.com` from `/etc/usine-gateway/egress-allowlist` and restart the service. The gateway's use of a subscription token is untested against Anthropic ([#234](https://github.com/basaltbytes/usine/issues/234)).
+3. Set up the gateway: steps 1 to 5 and 9 of [SSH workers behind a gateway](/guides/add-a-worker/#ssh-workers-behind-a-gateway). Its network is `usine-gateway` by default. Step 5 gives the gateway a credential for each harness that your agents use, and removes the login hosts from its egress allowlist. The gateway's use of a subscription token is untested against Anthropic ([#234](https://github.com/basaltbytes/usine/issues/234)).
 
 4. Build the snapshot in the gateway's network. Use the public key of the worker's `identity_file`; its private key must be next to it. `GATEWAY_SSH` is the gateway's `Host` alias:
 
@@ -84,7 +86,7 @@ Each attempt gets a server created from a snapshot that you build with `infra/he
          domain: gw.internal
          destination: usine-gateway
          admin_token_env: USINE_GATEWAY_ADMIN_TOKEN
-         llm_providers: [anthropic]
+         llm_providers: [anthropic, openai]
        provisioner:
          provider: hetzner
          token_env: HCLOUD_TOKEN
@@ -120,7 +122,7 @@ Without a `gateway`, each server gets a public IPv4 address, and the executor co
 SSH_KEY=usine-worker ./infra/hetzner/snapshot.sh ~/.ssh/usine_worker.pub
 ```
 
-The attempt's GitHub token is written to the server, as on an [SSH worker](/guides/add-a-worker/#ssh-workers) without a gateway, and Claude Code needs `api_keys.anthropic`.
+The attempt's GitHub token is written to the server, as on an [SSH worker](/guides/add-a-worker/#ssh-workers) without a gateway, Claude Code needs `api_keys.anthropic`, and Codex needs `api_keys.openai`.
 
 The server's sshd accepts only the `usine` user's key, from any address. To accept SSH only from the orchestrator's address, create a Hetzner firewall and set its name in `provisioner.firewall`, so that each server gets it when it's created:
 
@@ -209,7 +211,7 @@ Each attempt gets a Boat sandbox: a VM with Boat's Ubuntu 24.04 image, which has
 
 On a Boat worker:
 
-- A sandbox can reach any host. The installation token is in a file on the machine, readable by the attempt, which an agent can use from anywhere until the token expires, within the hour ([ADR 0026](https://github.com/basaltbytes/usine/blob/main/docs/adr/0026-eu-ssh-worker.md)). The Anthropic API key is in the attempt container's environment, where an agent can read it and spend it.
+- A sandbox can reach any host. The installation token is in a file on the machine, readable by the attempt, which an agent can use from anywhere until the token expires, within the hour ([ADR 0026](https://github.com/basaltbytes/usine/blob/main/docs/adr/0026-eu-ssh-worker.md)). The API keys are in the attempt container's environment, where an agent can read them and spend them.
 - usine creates each sandbox with none of the account's secrets (`noEnv`), so it can't act on your account or other sandboxes. It turns off snapshots, because Boat can store snapshot copies outside the EU and no attempt resumes a sandbox. It also turns off command monitoring and the automatic stop, since usine deletes the sandbox. A creation succeeds only if a machine of the size is ready (`failFast`); otherwise Boat creates and bills nothing.
 - Boat has no labels, so the sandbox name carries usine's tags: `usine <instance> <worker> <run> <process> <attempt>`.
 
@@ -227,8 +229,17 @@ A failed creation isn't an attempt failure. The slot is freed, the run keeps its
 | -------------------------- | -------------------------------------------------------------------------------- | --------------------------------- |
 | No machine of the type now | `resource_unavailable`, or a plan shown as currently unavailable                 | 503: no machine of the size ready |
 | Account limit              | `resource_limit_exceeded`                                                        | 402 or 429                        |
-| Refused or failed request  | an API error                                                                     | an API error                      |
+| Refused or failed request  | an API error                                                                     | an API error, or no host key      |
 | No answer                  | the API doesn't respond, or the server doesn't answer over SSH within 10 minutes | the same                          |
+
+### Host keys
+
+The executor connects to a machine only with a host key that it knows before the first connection, and never trusts the key that a first connection presents:
+
+- Hetzner Cloud: the executor generates an Ed25519 host key pair for each server and passes it in the server's cloud-init user data (`ssh_keys`), which replaces the image's host keys at first boot. cloud-init runs the user data on a server created from a snapshot too, because the new server has an instance ID of its own. A server whose image has no cloud-init never presents the key, so the executor's connections fail until the creation times out. Processes on the server can read the private key from Hetzner's metadata service; the key belongs to that server only, which is deleted after the attempt.
+- Boat: the executor uses the host key that `POST /sandboxes/{id}/sshkey` returns. If Boat returns none, the creation fails, and the sandbox is deleted without a connection.
+
+The executor writes each key to `.usine/known-hosts/<provider>-<id>` in the instance folder before its first connection, and connects with `StrictHostKeyChecking=yes`. The files stay across restarts, so recovery connects to an earlier process's machine with the key that process wrote. For a machine with no file, recovery fails without connecting, and usine keeps the machine for a later process; to reconnect, write `usine-<provider>-<id> <host key>` to the file, or delete the machine by hand (see [Leftover machines](#leftover-machines)).
 
 ### Machine checks
 
@@ -256,4 +267,4 @@ usine deletes the machines that no attempt holds after startup recovery and ever
 
 - Hetzner Cloud bills every started hour that a server exists, so an attempt of a few minutes costs an hour. On 2026-10-25, a `cx33` cost €0.0144 per hour, and Hetzner showed its Cost-Optimized and Regular Performance plans as currently unavailable ([research note](https://github.com/basaltbytes/usine/blob/main/docs/research/hosted-sandboxes.md#hetzner)). Hetzner also bills each snapshot by its size.
 - Boat bills each second that a sandbox runs, and a deleted sandbox costs nothing more. On 2026-10-25, `default` cost $0.036 per hour, and a plan from $20 per seat per month included 555 hours of it.
-- Claude Code children with `api_keys` or a gateway API key are billed by Anthropic at API rates.
+- Claude Code and Codex children with `api_keys` or a gateway API key are billed by Anthropic and OpenAI at API rates.

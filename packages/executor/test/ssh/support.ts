@@ -186,6 +186,8 @@ interface FakeMachineState {
   readonly markers: Set<string>;
   /** The files the executor wrote on the orchestrator's machine, such as host keys, by path. */
   readonly localFiles: Map<string, string>;
+  /** Each write to `localFiles`, with the number of commands that ran before it. */
+  readonly localWrites: Array<{ readonly path: string; readonly afterCalls: number }>;
 }
 
 const oneShotHandle = (stdout: string, exitCode: number, stderr = "") => {
@@ -303,6 +305,7 @@ export const fakeMachine = () => {
     linkedCheckout: false,
     markers: new Set(),
     localFiles: new Map(),
+    localWrites: [],
   };
   /** Answers the commands that manage Docker containers, or returns `undefined` for others. */
   const respondToDocker = (line: string, input: string) => {
@@ -420,8 +423,8 @@ export const fakeMachine = () => {
             0,
           )
         : oneShotHandle("", 6, "curl: (6) Could not resolve host: git.gw.test");
-    // Writes the Gateway configuration files: path and contents pairs after the script and `$0`.
-    if (line.includes("http_unix_socket")) {
+    // Writes configuration files: path and contents pairs after the script and `$0`.
+    if (line.includes('mv "$1.$$" "$1"')) {
       const words = remoteWords(line);
       const pairs = words.slice(words.findIndex((word) => word.includes("shift 2")) + 2);
       for (let index = 0; index + 1 < pairs.length; index += 2)
@@ -583,7 +586,12 @@ export const fakeMachine = () => {
           ),
         onSome: (content) => Effect.succeed(content),
       }),
-    writeFileString: (path, data) => Effect.sync(() => void state.localFiles.set(path, data)),
+    writeFileString: (path, data) =>
+      Effect.sync(() => {
+        state.localFiles.set(path, data);
+        state.localWrites.push({ path, afterCalls: state.calls.length });
+      }),
+    exists: (path) => Effect.succeed(state.localFiles.has(path)),
     remove: (path) => Effect.sync(() => void state.localFiles.delete(path)),
   });
   return {

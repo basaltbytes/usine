@@ -39,19 +39,23 @@ export interface ListedMachine {
   readonly createdAt: DateTime.Utc;
 }
 
-/** How the executor checks a machine's SSH host key. */
-export type HostKey =
-  /** The provider reported the key, which the client requires. */
-  | { readonly _tag: "Pinned"; readonly key: string }
-  /** The client records the key of its first connection and requires it afterwards. */
-  | { readonly _tag: "FirstUse" };
-
 /** Where the executor reaches a machine over SSH. */
 export interface MachineEndpoint {
   /** `user@address`. */
   readonly destination: SshDestination;
   readonly port: Option.Option<SshPort>;
-  readonly hostKey: HostKey;
+  /**
+   * The machine's SSH host key that the provider's API reports, as `known_hosts` writes it, or
+   * `None` if the driver set the key when it created the machine (`CreatedMachine.hostKey`).
+   */
+  readonly hostKey: Option.Option<string>;
+}
+
+/** A machine that a provider accepted to create. */
+interface CreatedMachine {
+  readonly id: MachineId;
+  /** The SSH host key that the driver gave the machine, or `None` if the provider sets one. */
+  readonly hostKey: Option.Option<string>;
 }
 
 /** The error of a provider API request other than a creation. Contains no token. */
@@ -81,11 +85,11 @@ export interface MachineDriver {
     worker: WorkerName,
     maxConcurrentAttempts: number,
   ) => Effect.Effect<DriverReport, WorkerCapabilityError>;
-  /** Creates a machine named `name` with `tags` and returns its ID once the provider accepts it. */
+  /** Creates a machine named `name` with `tags` once the provider accepts it. */
   readonly create: (
     name: string,
     tags: MachineTags,
-  ) => Effect.Effect<MachineId, MachineUnavailableError>;
+  ) => Effect.Effect<CreatedMachine, MachineUnavailableError>;
   /** Waits until the machine runs and has an SSH address. Polls every `interval`. */
   readonly endpoint: (
     id: MachineId,

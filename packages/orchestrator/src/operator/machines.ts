@@ -63,6 +63,8 @@ export class HetznerProvisionerView extends Schema.TaggedClass<HetznerProvisione
   labels: Schema.Record(Schema.String, Schema.String),
   /** The variable with the Anthropic API key for each Attempt, or null. */
   anthropicKeyEnv: Schema.NullOr(Schema.String),
+  /** The variable with the OpenAI API key for each Attempt, or null. */
+  openaiKeyEnv: Schema.NullOr(Schema.String),
 }) {}
 
 /** A Boat provisioner from `usine.yaml`, with the names of its variables only. */
@@ -73,6 +75,8 @@ export class BoatProvisionerView extends Schema.TaggedClass<BoatProvisionerView>
   size: BoatSize,
   /** The variable with the Anthropic API key for each Attempt, or null. */
   anthropicKeyEnv: Schema.NullOr(Schema.String),
+  /** The variable with the OpenAI API key for each Attempt, or null. */
+  openaiKeyEnv: Schema.NullOr(Schema.String),
 }) {}
 
 export const ProvisionerView = Schema.Union([HetznerProvisionerView, BoatProvisionerView]);
@@ -116,10 +120,12 @@ export const provisionerView = (worker: SshWorker): ProvisionerView | null =>
             sshUser: settings.sshUser,
             labels: settings.labels,
             anthropicKeyEnv: Option.getOrNull(settings.apiKeys.anthropic),
+            openaiKeyEnv: Option.getOrNull(settings.apiKeys.openai),
           })
         : new BoatProvisionerView({
             tokenEnv: settings.tokenEnv,
             size: settings.size,
             anthropicKeyEnv: Option.getOrNull(settings.apiKeys.anthropic),
+            openaiKeyEnv: Option.getOrNull(settings.apiKeys.openai),
           }),
   });

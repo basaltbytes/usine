@@ -1,6 +1,6 @@
 import type { SshCommand } from "@usine/agents/child-host";
 import { safeSegment } from "@usine/core/repository";
-import type { MachineId, SshDestination, WorkerName } from "@usine/core/worker";
+import type { MachineId, MachineProvider, WorkerName } from "@usine/core/worker";
 import { Context, Effect, Equal, Exit, Option, Ref, Scope, SynchronizedRef } from "effect";
 import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -82,27 +82,33 @@ const sshCommandFor = (base: SshCommand, address: SshWorkerAddress): SshCommand 
   ],
 });
 
-/** Returns the host name in `destination`, without its user. */
-const hostOf = (destination: SshDestination): string =>
-  destination.slice(destination.indexOf("@") + 1);
+/** A provisioned machine's pinned SSH host key: its `known_hosts` file and the name the key is recorded under. */
+export interface PinnedHostKey {
+  readonly file: string;
+  readonly alias: string;
+}
 
 /**
- * Returns the SSH command for a machine created for one Attempt: the shared options, its host
- * key file, the Gateway as jump host if the Worker has one, and its port and the Worker's key.
+ * Returns the SSH command for a machine created for one Attempt: the shared options, its pinned
+ * host key, the Gateway as jump host if the Worker has one, and its port and the Worker's key.
+ * The key is recorded under an alias rather than the address, so it holds for the machine
+ * whatever address it reports, and the client accepts no other key.
  */
 const provisionedSshCommandFor = (
   base: SshCommand,
   entry: SshWorkerEntry,
   endpoint: MachineEndpoint,
-  knownHostsFile: string,
+  hostKey: PinnedHostKey,
 ): SshCommand => ({
   command: base.command,
   args: [
     ...base.args,
     "-o",
-    `UserKnownHostsFile=${knownHostsFile}`,
+    `UserKnownHostsFile=${hostKey.file}`,
     "-o",
-    `StrictHostKeyChecking=${endpoint.hostKey._tag === "Pinned" ? "yes" : "accept-new"}`,
+    `HostKeyAlias=${hostKey.alias}`,
+    "-o",
+    "StrictHostKeyChecking=yes",
     ...Option.match(entry.gateway, {
       onNone: () => [],
       onSome: ({ settings }) => ["-J", settings.destination],
@@ -115,19 +121,12 @@ const provisionedSshCommandFor = (
   ],
 });
 
-/**
- * Returns the `known_hosts` line that pins a provisioned machine's host key, or `None` if the
- * client records the key of its first connection.
- */
-export const knownHostsLine = (endpoint: MachineEndpoint): Option.Option<string> => {
-  if (endpoint.hostKey._tag === "FirstUse") return Option.none();
-  const host = hostOf(endpoint.destination);
-  const pattern = Option.match(endpoint.port, {
-    onNone: () => host,
-    onSome: (port) => `[${host}]:${String(port)}`,
-  });
-  return Option.some(`${pattern} ${endpoint.hostKey.key}\n`);
-};
+/** Returns the name that a provisioned machine's host key is recorded under. */
+export const hostKeyAlias = (provider: MachineProvider, id: MachineId): string =>
+  `usine-${provider}-${id}`;
+
+/** Returns the `known_hosts` line that pins `key` for the machine recorded under `alias`. */
+export const knownHostsLine = (alias: string, key: string): string => `${alias} ${key}\n`;
 
 /**
  * Returns the SSH Workers' machines, which `addWorker` and `removeWorker` change at runtime and
@@ -341,12 +340,12 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
     entry: SshWorkerEntry,
     id: MachineId,
     endpoint: MachineEndpoint,
-    knownHostsFile: string,
+    hostKey: PinnedHostKey,
   ): SshMachine => ({
     address: entry.address,
     gateway: entry.gateway,
     shell: commands.shellFor(
-      provisionedSshCommandFor(base, entry, endpoint, knownHostsFile),
+      provisionedSshCommandFor(base, entry, endpoint, hostKey),
       endpoint.destination,
     ),
     workerDirectory: workerDirectoryOf(entry.address),

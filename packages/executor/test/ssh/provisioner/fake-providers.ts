@@ -94,7 +94,8 @@ interface BoatState {
   readonly sandboxes: Map<string, FakeSandbox>;
   nextId: number;
   token: string;
-  readonly hostKey: string;
+  /** The host key the API reports, or `undefined` if it reports none. */
+  hostKey: string | undefined;
   /** Boat's SSH forward, or `undefined` for a machine address of its own. */
   sshEndpoint: string | undefined;
   createFails: CannedError | undefined;
@@ -399,19 +400,20 @@ export const fakeProviders = () => {
         else sandbox.state = "ready";
         return [200, { ok: true, type: "sandbox.info", sandbox: sandboxJson(sandbox) }];
       }
-      if (call.method === "POST" && segments[2] === "sshkey")
+      if (call.method === "POST" && segments[2] === "sshkey") {
+        const configured = {
+          ok: true,
+          type: "ssh_key.configured",
+          success: true,
+          machineIp: "198.51.100.20",
+          sshUser: "user",
+          sshEndpoint: boat.sshEndpoint ?? null,
+        };
         return [
           200,
-          {
-            ok: true,
-            type: "ssh_key.configured",
-            success: true,
-            machineIp: "198.51.100.20",
-            sshUser: "user",
-            sshEndpoint: boat.sshEndpoint ?? null,
-            hostKey: boat.hostKey,
-          },
+          boat.hostKey === undefined ? configured : { ...configured, hostKey: boat.hostKey },
         ];
+      }
       if (call.method === "PATCH") {
         sandbox.name = Schema.decodeUnknownSync(NamedBody)(call.body).name;
         return [200, { ok: true, type: "sandbox.info", sandbox: sandboxJson(sandbox) }];
