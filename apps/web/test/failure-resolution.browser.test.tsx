@@ -97,6 +97,7 @@ const unrelated = new ApprovalNeed({
     number: ItemNumber.make(7),
     title: "Write the release notes",
     url: "https://github.com/another/project/issues/7",
+    state: "issue-open",
   }),
 });
 
@@ -160,9 +161,10 @@ it("resolves a failure from Needs attention while retaining unrelated attention,
     await page
       .getByRole("button", { name: /implement: agent failure.*Work was completed separately/ })
       .click();
-    await page.getByRole("button", { name: "Mark resolved", exact: true }).click();
+    await page.getByRole("button", { name: "More actions", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Mark resolved", exact: true }).click();
     await expect
-      .element(page.getByRole("button", { name: "Mark resolved", exact: true }))
+      .element(page.getByRole("button", { name: "More actions", exact: true }))
       .not.toBeInTheDocument();
     await expect.element(page.getByRole("button", { name: "Retry", exact: true })).toBeEnabled();
     await page.getByRole("button", { name: "Retry", exact: true }).click();
@@ -192,7 +194,7 @@ it("resolves a failure from Needs attention while retaining unrelated attention,
     await expect
       .element(
         needs.getByRole("button", {
-          name: /implement: approval needed.*#7 Write the release notes/,
+          name: /implement: approval needed.*Issue #7, open Write the release notes/,
         }),
       )
       .toBeVisible();
@@ -210,7 +212,11 @@ it("resolves a failure from Needs attention while retaining unrelated attention,
   }
 });
 
-it("leaves a closed issue's failed run out of Needs attention and says in its drawer that the issue is closed", async () => {
+it("leaves a closed issue's failed run out of Needs attention and marks the issue closed in its drawer", async () => {
+  const onIssue = new RunView({
+    ...run,
+    itemKey: ItemKey.make('["github","resolution/project",1]'),
+  });
   const overview = JSON.stringify(
     Schema.encodeSync(FactoryOverview)(
       new ReadyOverview({
@@ -218,7 +224,7 @@ it("leaves a closed issue's failed run out of Needs attention and says in its dr
           new ProjectView({
             repository,
             status: "needs-you",
-            runs: [run],
+            runs: [onIssue],
             board: new BoardView({ lanes: [], failures: [] }),
             labels: [],
             preflightFindings: [],
@@ -232,7 +238,7 @@ it("leaves a closed issue's failed run out of Needs attention and says in its dr
   const detail = JSON.stringify(
     Schema.encodeSync(RunDetailView)(
       new RunDetailView({
-        run,
+        run: onIssue,
         eventDedupKey: "event",
         eventPayload: {},
         transcript: [],
@@ -261,17 +267,20 @@ it("leaves a closed issue's failed run out of Needs attention and says in its dr
       ),
     );
     const drawer = page.getByRole("dialog");
-    await expect.element(drawer.getByText("Issue closed", { exact: true })).toBeVisible();
-    await expect.element(drawer.getByText("Agent failure", { exact: true })).toBeVisible();
     await expect
-      .element(drawer.getByRole("button", { name: "Mark resolved", exact: true }))
+      .element(drawer.getByRole("link", { name: "Issue #1, closed", exact: true }))
+      .toBeVisible();
+    await expect.element(drawer.getByText("Agent failure", { exact: true })).toBeVisible();
+    await drawer.getByRole("button", { name: "More actions", exact: true }).click();
+    await expect
+      .element(page.getByRole("menuitem", { name: "Mark resolved", exact: true }))
       .toBeVisible();
     // The open drawer hides the rest of the page from assistive technology.
     const needs = page.getByRole("region", { name: "Needs attention", includeHidden: true });
     await expect
       .element(
         needs.getByRole("button", {
-          name: /implement: approval needed.*#7 Write the release notes/,
+          name: /implement: approval needed.*Issue #7, open Write the release notes/,
           includeHidden: true,
         }),
       )

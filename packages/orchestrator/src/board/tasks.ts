@@ -33,6 +33,7 @@ const itemLink = (item: ProjectedItem) =>
     number: item.number,
     title: item.title,
     url: item.url,
+    state: item.state,
   });
 
 /**
@@ -128,7 +129,6 @@ export const taskCards = (
     const view = new BoardTaskView({
       ...itemLink(current),
       title: origin.item.title,
-      state: current.state,
       labels: current.labels,
       items: ordered.map(({ item }) => itemLink(item)),
       pullRequest,

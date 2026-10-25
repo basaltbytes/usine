@@ -9,13 +9,14 @@ import {
   CodeBlockHeader,
   CodeBlockTitle,
 } from "@/components/ai-elements/code-block";
+import { ItemMark } from "@/components/item/mark";
 import { Markdown } from "@/components/markdown";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ReaderLine } from "../run-transcript/transcript.tsx";
 import { ApprovalLine } from "./approval.tsx";
 import { RunAgainLine } from "./run-again.tsx";
-import { eventItem } from "./item.ts";
+import { eventItem, eventItemRef } from "./item.ts";
 
 const Page = ({ label, children }: { readonly label: string; readonly children: ReactNode }) => (
   <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
@@ -60,16 +61,7 @@ export const EventDocument = ({
           onSome: (event) => (
             <div className="mt-2 space-y-3">
               <p className="text-md">
-                {detail.run.loop} matched {event.kind.toLowerCase()}{" "}
-                <a
-                  href={event.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="font-mono text-sm text-primary underline-offset-4 hover:underline"
-                >
-                  #{event.number}
-                </a>{" "}
-                {event.title}
+                {detail.run.loop} matched <ItemMark item={eventItemRef(event)} /> {event.title}
               </p>
               <dl className="grid grid-cols-[6rem_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm">
                 <dt className="text-muted-foreground">State</dt>

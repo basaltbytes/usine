@@ -1,7 +1,5 @@
 import { Link, useNavigate } from "@tanstack/react-router";
-import type { BoardItemLink, RunView } from "@usine/orchestrator/operator";
-import { GitHubItemKey } from "@usine/orchestrator/polling-triggers";
-import { Option, Schema } from "effect";
+import type { RunView } from "@usine/orchestrator/operator";
 import type { ReactNode } from "react";
 import { TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
@@ -50,36 +48,6 @@ export const EmptyLine = ({ children }: { readonly children: ReactNode }) => (
   <p className="text-sm text-muted-foreground">{children}</p>
 );
 
-const decodeItemKey = Schema.decodeUnknownOption(GitHubItemKey);
-
-/** If the Item is unknown, shows the Run ID. */
-export const ItemTitle = ({
-  item,
-  run,
-}: {
-  readonly item: BoardItemLink | null;
-  readonly run?: Pick<RunView, "id" | "itemKey"> | undefined;
-}) => {
-  const number =
-    item?.number ??
-    Option.getOrUndefined(
-      Option.map(
-        Option.flatMap(Option.fromNullishOr(run), ({ itemKey }) => decodeItemKey(itemKey)),
-        ([, , value]) => value,
-      ),
-    );
-  return (
-    <span className="flex min-w-0 items-baseline gap-2">
-      <span className="shrink-0 font-mono text-xs text-muted-foreground tabular-nums">
-        {number === undefined ? `Run ${run?.id.slice(0, 8) ?? ""}` : `#${number}`}
-      </span>
-      <span className="truncate font-medium" title={item?.title}>
-        {item?.title ?? ""}
-      </span>
-    </span>
-  );
-};
-
 /** Renders a link to the Run page of `run`; the enclosing row opens the same page on click. */
 export const RunPageLink = ({
   run,
@@ -98,7 +66,10 @@ export const RunPageLink = ({
   </Link>
 );
 
-/** Renders a table row that opens the Run page of `run` on click; if `run` is `null`, the row is not clickable. */
+/**
+ * Renders a table row that opens the Run page of `run` on a click outside its links and buttons; if
+ * `run` is `null`, the row is not clickable.
+ */
 export const RunRow = ({
   run,
   className,
@@ -120,11 +91,14 @@ export const RunRow = ({
       onClick={
         run === null
           ? undefined
-          : () =>
+          : (event) => {
+              if (event.target instanceof Element && event.target.closest("a, button") !== null)
+                return;
               void navigate({
                 to: "/projects/$owner/$name/runs/$run",
                 params: { ...projectParams(run.repository), run: run.id },
-              })
+              });
+            }
       }
     >
       {children}

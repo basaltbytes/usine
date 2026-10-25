@@ -18,9 +18,8 @@ import {
 } from "@/components/ui/sheet";
 import { clockLabel, queuedMessageLabel, timestampLabel } from "./operator-copy.ts";
 import { overviewQuery, projectParams } from "./overview.ts";
-import { RunFacts, RunTitle, WorkFacts } from "./run-page/header.tsx";
-import { runItem } from "./run-page/item.ts";
-import { RunActions } from "./run-intervention/actions.tsx";
+import { RunHeader } from "./run-page/header.tsx";
+import { ContextualActions } from "./run-intervention/contextual-actions.tsx";
 import { EditAndRetry, type EditIntent, editApplies } from "./run-intervention/edit-and-retry.tsx";
 import { useOpenRun } from "./open-run.ts";
 import { CurrentActivity } from "./run-transcript/activity.tsx";
@@ -121,10 +120,6 @@ export const RunDrawer = ({
   const [editing, setEditing] = useState<EditIntent | null>(null);
   const openRun = useOpenRun();
   const run = detail.data?.run;
-  const item =
-    detail.data === undefined
-      ? Option.none()
-      : runItem(detail.data.run, overview, detail.data.eventPayload);
   return (
     <Sheet
       open={open}
@@ -145,28 +140,17 @@ export const RunDrawer = ({
             </>
           ) : (
             <>
-              <RunTitle
-                run={run}
-                item={item}
+              <RunHeader
+                detail={detail.data}
+                overview={overview}
+                placement="drawer"
                 shared={open}
-                heading={(title) => (
-                  <SheetTitle className="text-lg font-semibold wrap-anywhere">{title}</SheetTitle>
-                )}
+                as={SheetTitle}
+                actions={<ContextualActions run={run} onEdit={setEditing} openRun={openRun} />}
               />
               <SheetDescription className="sr-only">
                 Run {run.id} of {run.loop} on {run.repository}
               </SheetDescription>
-              <div className="space-y-1">
-                <RunFacts
-                  run={run}
-                  item={item}
-                  settledItemState={detail.data.settledItemState}
-                  shared={open}
-                  className="gap-x-4"
-                />
-                <WorkFacts detail={detail.data} showUsage={false} className="gap-x-4" />
-              </div>
-              <RunActions run={run} onEdit={setEditing} openRun={openRun} />
             </>
           )}
         </SheetHeader>

@@ -1,4 +1,4 @@
-import type { SettledItemState } from "@usine/config/board";
+import { LaneName, type SettledItemState } from "@usine/config/board";
 import { AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import {
@@ -34,6 +34,10 @@ import { TranscriptSequence } from "@usine/engine/transcript";
 import {
   AgentFailureView,
   ApprovalView,
+  BoardItemLink,
+  BoardLaneId,
+  BoardTaskView,
+  BoardView,
   AttemptView,
   CanceledAttemptView,
   FailedAttemptView,
@@ -45,19 +49,22 @@ import {
   RunView,
   SessionUsageView,
   SucceededAttemptView,
+  ProjectView,
+  ReadOnlyBoardLaneView,
+  ReadyOverview,
   TranscriptEventView,
   UsageCostView,
   LocalWorkerAccess,
 } from "@usine/orchestrator/operator";
 import { GitHubItemKey } from "@usine/orchestrator/polling-triggers";
 import { DateTime, Option, Schema } from "effect";
-import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
 import { clockLabel, dayTimeLabel } from "../src/operator-copy.ts";
 import { RunSummary } from "../src/run-drawer.tsx";
 import { EventDocument } from "../src/run-page/documents.tsx";
-import { RunFacts, RunTitle, WorkFacts } from "../src/run-page/header.tsx";
+import { RunHeader } from "../src/run-page/header.tsx";
+import { taskUsageOf } from "./board-fixture.ts";
 import { UsageBreakdown } from "../src/run-page/usage.tsx";
 import { eventPreview, runItem } from "../src/run-page/item.ts";
 import { Outline } from "../src/run-page/outline.tsx";
@@ -124,36 +131,111 @@ const detail = (view: RunView, transcript: ReadonlyArray<TranscriptEventView> = 
     sessionState: [],
     earlierTranscript: [],
   });
-const header = (
-  view: RunView,
-  payload: Schema.Json = detail(view).eventPayload,
-  shared = false,
-) => {
-  const item = runItem(view, undefined, payload);
-  return renderToStaticMarkup(
-    <>
-      <RunTitle
-        run={view}
-        item={item}
-        shared={shared}
-        heading={(title: ReactNode) => <h1>{title}</h1>}
-      />
-      <RunFacts run={view} item={item} shared={shared} />
-    </>,
-  );
+const member = (
+  number: number,
+  kind: "issue" | "pr",
+  state: BoardItemLink["state"],
+  title = "Board lanes",
+) =>
+  new BoardItemLink({
+    itemKey: Schema.encodeSync(GitHubItemKey)(["github", repository, ItemNumber.make(number)]),
+    kind,
+    number: ItemNumber.make(number),
+    title,
+    url: `https://github.com/basaltbytes/usine/${kind === "pr" ? "pull" : "issues"}/${number}`,
+    state,
+  });
+/** Returns an overview whose Board shows one Task with `members`. */
+const overviewWith = (members: readonly [BoardItemLink, ...Array<BoardItemLink>]) => {
+  const current = members.at(-1) ?? members[0];
+  return new ReadyOverview({
+    projects: [
+      new ProjectView({
+        repository,
+        status: "clear",
+        runs: [],
+        board: new BoardView({
+          lanes: [
+            new ReadOnlyBoardLaneView({
+              id: BoardLaneId.make("fallback:all"),
+              name: LaneName.make("All"),
+              sources: [],
+              origin: "fallback",
+              items: [
+                new BoardTaskView({
+                  ...current,
+                  title: members[0].title,
+                  labels: [],
+                  items: members,
+                  pullRequest: null,
+                  runs: [],
+                  run: null,
+                  needsYou: false,
+                  conflicting: false,
+                  loops: [],
+                  usage: taskUsageOf([]),
+                }),
+              ],
+            }),
+          ],
+          failures: [],
+        }),
+        labels: [],
+        preflightFindings: [],
+      }),
+    ],
+    loops: [],
+    needsYou: [],
+  });
 };
+/** Renders the Run header for Item #33; `members` are the items of its Task on the Board. */
+const heading = (
+  view: RunDetailView,
+  {
+    payload = view.eventPayload,
+    shared = false,
+    placement = "page",
+    members,
+  }: {
+    readonly payload?: Schema.Json;
+    readonly shared?: boolean;
+    readonly placement?: "page" | "drawer";
+    readonly members?: readonly [BoardItemLink, ...Array<BoardItemLink>];
+  } = {},
+) =>
+  renderToStaticMarkup(
+    <RunHeader
+      detail={new RunDetailView({ ...view, eventPayload: payload })}
+      overview={members === undefined ? undefined : overviewWith(members)}
+      placement={placement}
+      shared={shared}
+      actions={null}
+    />,
+  );
+const header = (view: RunView, options?: Parameters<typeof heading>[1]) =>
+  heading(detail(view), options);
+/** Returns the visible text of the run title. */
+const titleText = (markup: string) =>
+  /<h1[^>]*>(.*?)<\/h1>/su.exec(markup)?.[1]?.replaceAll(/<[^>]+>/gu, "") ?? "";
+const pullRequestPayload = {
+  number: 33,
+  title: "Board lanes",
+  url: "https://github.com/basaltbytes/usine/pull/33",
+  state: "OPEN",
+};
+const links = (markup: string, url: string) => markup.split(`href="${url}"`).length - 1;
 
 describe("Run header", () => {
-  it("links the Item and produced PR to GitHub in new tabs", () => {
+  it("links the issue and the pull request the Run opened to GitHub in new tabs", () => {
     const markup = header(run({ pullRequestUrl: "https://github.com/basaltbytes/usine/pull/101" }));
-    assert.include(markup, ">#33<");
+    assert.include(markup, 'title="Issue #33"');
     assert.include(markup, 'href="https://github.com/basaltbytes/usine/issues/33"');
+    assert.include(markup, 'title="Pull request #101"');
     assert.include(markup, 'href="https://github.com/basaltbytes/usine/pull/101"');
-    assert.include(markup, "#101");
     assert.lengthOf(markup.match(/target="_blank"/gu) ?? [], 2);
   });
 
-  it("says when the Run produced no pull request and names its state, Loop and Agent", () => {
+  it("names the state, Loop, and Agent, and shows no pull request if the Run opened none", () => {
     const failed = run({
       state: "Failed",
       attempts: [
@@ -166,7 +248,7 @@ describe("Run header", () => {
       ],
     });
     const markup = header(failed);
-    assert.include(markup, "No pull request");
+    assert.notInclude(markup, "No pull request");
     assert.notInclude(markup, "/pull/");
     assert.include(markup, "Failed after 2 attempts");
     assert.include(markup, "start-dev");
@@ -174,26 +256,70 @@ describe("Run header", () => {
     assert.lengthOf(markup.match(/target="_blank"/gu) ?? [], 1);
   });
 
-  it("says that a failed Run's Item is closed or merged", () => {
-    const facts = (view: RunView, state: SettledItemState) =>
-      renderToStaticMarkup(
-        <RunFacts
-          run={view}
-          item={runItem(view, undefined, detail(view).eventPayload)}
-          settledItemState={state}
-          shared={false}
-        />,
-      );
+  it("marks each item with its GitHub state from the Board", () => {
+    const markup = header(
+      run({ pullRequestUrl: "https://github.com/basaltbytes/usine/pull/101" }),
+      {
+        members: [member(33, "issue", "issue-closed"), member(101, "pr", "pr-merged")],
+      },
+    );
+    assert.include(markup, 'title="Issue #33, closed"');
+    assert.include(markup, 'title="Pull request #101, merged"');
+    assert.notInclude(markup, "Issue closed");
+  });
+
+  it("marks the Item with its settled state while the Board doesn't show its Task", () => {
     const failed = run({
       state: "Failed",
       attempts: [
         attempt(new FailedAttemptView({ failure: new AgentFailureView({ message: "x" }) })),
       ],
     });
-    assert.include(facts(failed, "issue-closed"), "Issue closed");
-    assert.include(facts(failed, "pr-closed"), "Pull request closed");
-    assert.include(facts(failed, "pr-merged"), "Pull request merged");
-    assert.notInclude(facts(run(), "issue-closed"), "Issue closed");
+    const settled = (state: SettledItemState, payload = detail(failed).eventPayload) =>
+      heading(new RunDetailView({ ...detail(failed), settledItemState: state }), { payload });
+    assert.include(settled("issue-closed"), 'title="Issue #33, closed"');
+    assert.include(settled("pr-closed", pullRequestPayload), 'title="Pull request #33, closed"');
+    assert.include(settled("pr-merged", pullRequestPayload), 'title="Pull request #33, merged"');
+    assert.include(header(failed), 'title="Issue #33"');
+  });
+
+  it("names a pull request Run's Task after its issue, inline in the title, with the pull request in the facts", () => {
+    const markup = header(run(), {
+      payload: pullRequestPayload,
+      shared: true,
+      members: [
+        member(30, "issue", "issue-open", "Write the docs"),
+        member(33, "pr", "pr-open", "Docs for the board"),
+      ],
+    });
+    assert.match(
+      markup,
+      /<h1[^>]*style="view-transition-name:run-title"><a [^>]*title="Issue #30, open"/u,
+    );
+    assert.strictEqual(titleText(markup), "#30 Write the docs");
+    assert.include(markup, 'title="Pull request #33, open"');
+    assert.strictEqual(links(markup, "https://github.com/basaltbytes/usine/pull/33"), 1);
+  });
+
+  it("names a Task with no issue after its pull request, inline in the title", () => {
+    const markup = header(run({ pullRequestUrl: "https://github.com/basaltbytes/usine/pull/33" }), {
+      payload: pullRequestPayload,
+      members: [member(33, "pr", "pr-closed", "Bump the npm group")],
+    });
+    assert.strictEqual(titleText(markup), "#33 Bump the npm group");
+    assert.include(markup, 'title="Pull request #33, closed"');
+    assert.strictEqual(links(markup, "https://github.com/basaltbytes/usine/pull/33"), 1);
+  });
+
+  it("titles an issue Item from its Board card", () => {
+    const markup = header(run(), { members: [member(33, "issue", "issue-open", "Lanes")] });
+    assert.strictEqual(titleText(markup), "#33 Lanes");
+    assert.strictEqual(links(markup, "https://github.com/basaltbytes/usine/issues/33"), 1);
+  });
+
+  it("says when the Loop is paused", () => {
+    assert.include(header(run({ loopPaused: true })), "Loop paused");
+    assert.notInclude(header(run()), "Loop paused");
   });
 
   it("titles the Run from the Board's Item, then from its Event", () => {
@@ -210,23 +336,8 @@ describe("Run header", () => {
     );
   });
 
-  it("shows the Item as the Run's pull request when the Item is one and the Run produced none", () => {
-    const markup = header(run(), {
-      number: 33,
-      title: "Board lanes",
-      url: "https://github.com/basaltbytes/usine/pull/33",
-      state: "OPEN",
-    });
-    assert.notInclude(markup, "No pull request");
-    assert.lengthOf(
-      markup.match(/href="https:\/\/github.com\/basaltbytes\/usine\/pull\/33"/gu) ?? [],
-      2,
-    );
-    assert.include(markup, "#33</span>");
-  });
-
   it("names the title and state for the drawer-to-page transition only where they are shared", () => {
-    const shared = header(run(), detail(run()).eventPayload, true);
+    const shared = header(run(), { shared: true });
     assert.include(shared, "view-transition-name:run-title");
     assert.include(shared, "view-transition-name:run-state");
     assert.notInclude(header(run()), "view-transition-name");
@@ -236,7 +347,7 @@ describe("Run header", () => {
     const scheduled = run({ itemKey: ItemKey.make('["github","basaltbytes/usine"]') });
     const markup = header(scheduled);
     assert.notInclude(markup, "/issues/");
-    assert.include(markup, "start-dev on basaltbytes/usine");
+    assert.strictEqual(titleText(markup), "start-dev on basaltbytes/usine");
   });
 });
 
@@ -314,19 +425,18 @@ describe("Run work facts", () => {
       usage,
     });
   const facts = (view: RunDetailView, showUsage: boolean) =>
-    renderToStaticMarkup(<WorkFacts detail={view} showUsage={showUsage} />).replaceAll(
-      /<[^>]+>/gu,
-      " ",
-    );
+    heading(view, { placement: showUsage ? "page" : "drawer" })
+      .replaceAll(/<[^>]+>/gu, " ")
+      .replaceAll(/\s+/gu, " ");
 
   it("names the newest Attempt's Worker, the Attempts' total time, and on the Run page their tokens", () => {
     const page = facts(worked(), true);
-    assert.match(page, /Worker\s+usine-worker-1/u);
-    assert.match(page, /Duration\s+25 min/u);
-    assert.match(page, /Tokens\s+27\.3K/u);
+    assert.include(page, "usine-worker-1");
+    assert.include(page, " 25 min ");
+    assert.include(page, "27.3K tokens");
     const drawer = facts(worked(), false);
-    assert.match(drawer, /Worker\s+usine-worker-1/u);
-    assert.notInclude(drawer, "Tokens");
+    assert.include(drawer, "usine-worker-1");
+    assert.notInclude(drawer, "tokens");
   });
 
   it("counts a running Attempt into the total and says when earlier Attempts have no recorded end", () => {
@@ -334,12 +444,15 @@ describe("Run work facts", () => {
       worked({ runningSince: new Date(Date.now() - 10 * 60_000).toISOString() }),
       false,
     );
-    assert.match(running, /Duration\s+35 min/u);
-    assert.match(facts(worked({ unmeasured: 1 }), false), /Duration\s+at least 25 min/u);
+    assert.include(running, " 35 min ");
+    assert.include(facts(worked({ unmeasured: 1 }), false), " at least 25 min ");
   });
 
   it("says nothing about work before the first Attempt", () => {
-    assert.equal(facts(detail(run({ state: "Waiting", attempts: [] })), true), "");
+    const waiting = facts(detail(run({ state: "Waiting", attempts: [] })), true);
+    assert.include(waiting, "Waiting for approval");
+    assert.notInclude(waiting, " min ");
+    assert.notInclude(waiting, "tokens");
   });
 
   it("prices only pools with a dollar rate, marks the Claude plan's figure as an estimate, and lists each session under its Attempt", () => {

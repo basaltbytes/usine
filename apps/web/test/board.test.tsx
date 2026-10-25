@@ -84,6 +84,7 @@ const issueLink = (number: number, title: string) =>
     number: ItemNumber.make(number),
     title,
     url: `https://github.com/basaltbytes/usine/issues/${number}`,
+    state: "issue-open",
   });
 
 const runOnItem = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<AttemptView>) =>
@@ -125,6 +126,7 @@ const itemWithRun = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<Atte
         number: ItemNumber.make(33),
         title: "Board lanes",
         url: "https://github.com/basaltbytes/usine/issues/33",
+        state: "issue-open",
       }),
     ],
     state: "issue-open",
@@ -533,6 +535,7 @@ describe("Board card link", () => {
       number: ItemNumber.make(40),
       title: "Fix the Board lanes",
       url: "https://github.com/basaltbytes/usine/pull/40",
+      state: "pr-open",
     });
     // A Task whose current Item is its pull request still links to the issue's number.
     const linked = new BoardTaskView({
@@ -555,6 +558,7 @@ describe("Board card link", () => {
           number: ItemNumber.make(12),
           title: "Document the cycle budget reset",
           url: "https://github.com/basaltbytes/usine/issues/12",
+          state: "issue-open",
         }),
       ],
       runs: [],

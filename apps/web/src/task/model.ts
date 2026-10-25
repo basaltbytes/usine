@@ -1,17 +1,16 @@
-import { isSettledItemState, type LaneItemState } from "@usine/config/board";
+import { isSettledItemState } from "@usine/config/board";
 import type { LoopName } from "@usine/core/loop";
 import type { CommentKind } from "@usine/core/step/result";
 import type {
-  BoardItemLink,
   BoardLaneView,
   BoardTaskView,
   FailureView,
   RunView,
   StalledItemView,
-  TaskItemView,
   TaskUsageView,
 } from "@usine/orchestrator/operator";
 import { Match, Option } from "effect";
+import { cardIdentity } from "@/components/item/identity";
 import { durationLabel, tokensLabel, usdLabel } from "../operator-copy.ts";
 
 /**
@@ -47,16 +46,6 @@ export const runFailure = (
     : Option.none();
 };
 
-/** Returns an Item's state and kind, for example `Open issue` or `Merged pull request #41`; the
- * number is included if the Item is not the Task's originating Item. */
-export const itemStateLine = (
-  item: Pick<TaskItemView, "kind" | "number" | "state">,
-  origin: boolean,
-): string => {
-  const kind = item.kind === "pr" ? "pull request" : "issue";
-  return `${itemStateLabel(item.state)} ${kind}${origin ? "" : ` #${item.number}`}`;
-};
-
 /** Returns when a Run was last active: its close time if it is closed; otherwise its last Attempt's
  * end, that Attempt's start while it runs or if no end was recorded, or the Run's open time before
  * any Attempt. */
@@ -85,14 +74,8 @@ export const taskStall = (
 export const stallRun = ({ reason }: Pick<StalledItemView, "reason">): RunView | null =>
   "run" in reason ? reason.run : null;
 
-/** Returns the Task's originating Item: its earliest issue, or its earliest pull request if it has
- * no issue. */
-export const taskOrigin = (task: BoardTaskView): BoardItemLink =>
-  // The view schema rejects a Task without Items; the fallback only satisfies the type.
-  task.items[0] ?? task;
-
-/** Returns the number in the Task page URL, which is the originating Item's number. */
-export const taskNumber = (task: BoardTaskView): string => String(taskOrigin(task).number);
+/** Returns the number in the Task page URL, which is the originating item's number. */
+export const taskNumber = (task: BoardTaskView): string => String(cardIdentity(task).origin.number);
 
 /**
  * The Task's status in the Tasks list. `Running`, `AwaitingApproval`, `Queued`, and `Stalled` are in
@@ -373,20 +356,6 @@ export const taskLoops = (task: Pick<BoardTaskView, "runs">): ReadonlyArray<Task
   return [...states].map(([loop, state]) => ({ loop, state }));
 };
 
-/** Returns the GitHub name of an Item state: Open, Closed, or Merged. */
-export const itemStateLabel = (state: LaneItemState): string => {
-  switch (state) {
-    case "issue-open":
-    case "pr-open":
-      return "Open";
-    case "issue-closed":
-    case "pr-closed":
-      return "Closed";
-    case "pr-merged":
-      return "Merged";
-  }
-};
-
 export const commentKindLabel = (kind: CommentKind): string => {
   switch (kind) {
     case "issue-comment":
@@ -397,7 +366,3 @@ export const commentKindLabel = (kind: CommentKind): string => {
       return "Review comment";
   }
 };
-
-/** Returns an Item's number and kind as shown on Board cards: `#41 PR` or `#40 Issue`. */
-export const itemReference = (item: Pick<TaskItemView, "kind" | "number">): string =>
-  `#${item.number} ${item.kind === "pr" ? "PR" : "Issue"}`;

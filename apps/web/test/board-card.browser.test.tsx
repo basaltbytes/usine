@@ -207,8 +207,10 @@ it("shows a card's menu button on hover or focus and while its menu is open", as
 
 it("shows the number and kind, a title clamped to two lines, and only labels the lane does not name", async () => {
   const card = cardOf(/^Reader restore test/u);
-  expect(card.textContent).toContain("#15 Issue");
-  expect(card.textContent).not.toContain("Issue #15");
+  expect(card.textContent).toContain("#15");
+  await expect
+    .element(page.elementLocator(card).getByRole("link", { name: "Issue #15, open", exact: true }))
+    .toBeInTheDocument();
 
   const title = page.getByText(/^Reader restore test/u).element();
   const lineHeight = Number.parseFloat(getComputedStyle(title).lineHeight);
@@ -231,9 +233,13 @@ const markAnimation = (row: HTMLElement) => {
 
 it("times a running Run from its current Attempt, on one line with a pulsing mark", async () => {
   const running = cardOf(/^Redesign the Board/u);
-  expect(running.textContent).toContain("#9 Issue#31 PR");
+  expect(running.textContent).toContain("#9#31");
   await expect
-    .element(page.elementLocator(running).getByText("Pull request #31", { exact: true }))
+    .element(
+      page
+        .elementLocator(running)
+        .getByRole("link", { name: "Pull request #31, open", exact: true }),
+    )
     .toBeInTheDocument();
   const ids = running.querySelector("p");
   expect(ids?.getBoundingClientRect().height).toBeLessThanOrEqual(
@@ -347,7 +353,10 @@ it("opens the Task page from anywhere on the card body, with or without a Run", 
 
 it("lists only the actions that apply to a card without a Run", async () => {
   await actions(12).click();
-  expect(await menuContents()).toEqual({ items: ["Open #12 on GitHub", "Move to"], separators: 1 });
+  expect(await menuContents()).toEqual({
+    items: ["Open #12 on GitHub", "Move to"],
+    separators: 1,
+  });
   await userEvent.keyboard("{Escape}");
   await expect.element(page.getByRole("menu")).not.toBeInTheDocument();
 
@@ -462,7 +471,7 @@ it("lists the current Run's applicable actions and moves the card through Move t
     separators: 3,
   });
   await expect
-    .element(page.getByRole("menuitem", { name: "Open #7 on GitHub" }))
+    .element(page.getByRole("menuitem", { name: "Open Issue #7, open on GitHub" }))
     .toHaveAttribute("href", "https://github.com/board-test/repo/issues/7");
   expect(page.getByRole("menu").element().querySelector("[aria-disabled=true]")).toBeNull();
 

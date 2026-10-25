@@ -55,9 +55,3 @@ export const deskCounts = (desk: DeskView): string | undefined => {
   ].filter((part) => part !== null);
   return parts.length === 0 ? undefined : parts.join(", ");
 };
-
-/** Returns `#402` for a pull request URL, or the URL itself if it has no pull request number. */
-export const pullRequestLabel = (url: string): string => {
-  const number = /\/pull\/(\d+)/u.exec(url)?.[1];
-  return number === undefined ? url : `#${number}`;
-};

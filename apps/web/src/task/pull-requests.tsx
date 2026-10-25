@@ -1,7 +1,7 @@
 import { ArrowSquareOutIcon } from "@phosphor-icons/react";
 import type { TaskView } from "@usine/orchestrator/operator";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
-import { itemStateLabel } from "./model.ts";
+import { ItemMark } from "@/components/item/mark";
 import { linkedRow, rowLink, SectionEmpty, SectionHeading } from "./section.tsx";
 
 export const TaskPullRequests = ({ task }: { readonly task: TaskView }) => {
@@ -19,8 +19,8 @@ export const TaskPullRequests = ({ task }: { readonly task: TaskView }) => {
             <TableBody className="border-t">
               {pullRequests.map((pullRequest) => (
                 <TableRow key={pullRequest.itemKey} className={linkedRow}>
-                  <TableCell className="w-0 py-3 font-mono text-xs text-muted-foreground">
-                    #{pullRequest.number}
+                  <TableCell className="w-0 py-3">
+                    <ItemMark item={pullRequest} linked={false} />
                   </TableCell>
                   <TableCell className="w-full py-3 whitespace-normal">
                     <a
@@ -38,12 +38,9 @@ export const TaskPullRequests = ({ task }: { readonly task: TaskView }) => {
                     </a>
                   </TableCell>
                   <TableCell className="py-3 text-right">
-                    <span className="inline-flex flex-col items-end gap-0.5 sm:flex-row sm:items-baseline sm:gap-3">
-                      {pullRequest.conflicting && (
-                        <span className="text-xs text-destructive">Conflicts with base</span>
-                      )}
-                      <span>{itemStateLabel(pullRequest.state)}</span>
-                    </span>
+                    {pullRequest.conflicting && (
+                      <span className="text-xs text-destructive">Conflicts with base</span>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}

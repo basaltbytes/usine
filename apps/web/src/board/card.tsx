@@ -17,12 +17,12 @@ import { StateMark } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { ItemMark } from "@/components/item/mark";
 import { useNow } from "@/hooks/use-now";
 import { cn } from "@/lib/utils";
 import {
   elapsedLabel,
   failureMessage,
-  itemKindLabel,
   moveProgressMessage,
   runActionLabel,
   runActionProgress,
@@ -284,21 +284,10 @@ const CardFace = ({
     item.needsYou && !(run?.canApprove || run?.canResolveFailure) && stall === null;
   return (
     <div className="flex min-w-0 flex-col gap-1.5 px-3">
-      <p className="flex flex-wrap gap-x-3 pr-6 font-mono text-xs text-muted-foreground">
-        {item.items.map((member) =>
-          member.kind === "pr" ? (
-            <span key={member.itemKey}>
-              <span aria-hidden="true">#{member.number} PR</span>
-              <span className="sr-only">
-                {itemKindLabel(member.kind)} #{member.number}
-              </span>
-            </span>
-          ) : (
-            <span key={member.itemKey}>
-              #{member.number} {itemKindLabel(member.kind)}
-            </span>
-          ),
-        )}
+      <p className="flex flex-wrap items-baseline gap-x-2.5 pr-6">
+        {item.items.map((member) => (
+          <ItemMark key={member.itemKey} item={member} className="relative z-10" />
+        ))}
       </p>
       <CardTitle item={item} repository={repository} />
       <CardLabels labels={cardLabels(item, lane)} catalog={catalog} />

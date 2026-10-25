@@ -68,6 +68,7 @@ const overview = (
                   number: ItemNumber.make(index + 1),
                   title: `Task ${index + 1}${index === 1 ? revision : ""}`,
                   url: `https://github.com/${projectRepository}/issues/${index + 1}`,
+                  state: "issue-open",
                 });
                 return [
                   new BoardTaskView({

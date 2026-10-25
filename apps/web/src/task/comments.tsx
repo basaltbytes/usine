@@ -1,10 +1,10 @@
-import { ArrowSquareOutIcon } from "@phosphor-icons/react";
 import { Link } from "@tanstack/react-router";
 import type { TaskView } from "@usine/orchestrator/operator";
+import { ItemMark } from "@/components/item/mark";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import { dayTimeLabel, timestampLabel } from "../operator-copy.ts";
 import { projectParams } from "../overview.ts";
-import { commentKindLabel, itemReference } from "./model.ts";
+import { commentKindLabel } from "./model.ts";
 import { linkedRow, rowLink, SectionEmpty, SectionHeading } from "./section.tsx";
 
 /** Returns the posted time, else the Attempt's end time for comments recorded before posted times
@@ -54,14 +54,10 @@ export const TaskComments = ({ task }: { readonly task: TaskView }) => {
                       >
                         {commentKindLabel(comment.kind)}
                         {item !== undefined && (
-                          <span className="ml-2 font-mono text-xs font-normal text-muted-foreground">
-                            on {itemReference(item)}
+                          <span className="ml-2 text-xs font-normal text-muted-foreground">
+                            on <ItemMark item={item} linked={false} />
                           </span>
                         )}
-                        <ArrowSquareOutIcon
-                          className="ml-1.5 inline size-3.5 text-muted-foreground"
-                          aria-label="Opens on GitHub"
-                        />
                       </a>
                     </TableCell>
                     <TableCell className="py-3">

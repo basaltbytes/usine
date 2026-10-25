@@ -1,5 +1,6 @@
 import { CaretRightIcon } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
+import { ItemMark, type ItemRef } from "@/components/item/mark";
 import { cn } from "@/lib/utils";
 import type { NeedCopy } from "../operator-copy.ts";
 
@@ -8,6 +9,7 @@ import type { NeedCopy } from "../operator-copy.ts";
  * and the full text in a tooltip. */
 export const NeedItem = ({
   copy,
+  item,
   open,
   actions,
   error,
@@ -15,6 +17,8 @@ export const NeedItem = ({
   compact = false,
 }: {
   readonly copy: Pick<NeedCopy, "title" | "detail" | "repository">;
+  /** The item the entry is about, marked before the detail; linked only if `open` is absent. */
+  readonly item?: ItemRef | undefined;
   readonly open?: (() => void) | undefined;
   readonly actions?: ReactNode;
   /** The error message of the last failed action on this entry. */
@@ -46,6 +50,11 @@ export const NeedItem = ({
       )}
       title={wraps ? undefined : copy.detail}
     >
+      {item !== undefined && (
+        <>
+          <ItemMark item={item} linked={open === undefined} />{" "}
+        </>
+      )}
       {copy.detail}
     </span>
   );

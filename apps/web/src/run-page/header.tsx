@@ -1,124 +1,34 @@
-import type { SettledItemState } from "@usine/config/board";
-import type { RunDetailView, RunDurationView, RunView } from "@usine/orchestrator/operator";
+import {
+  ArrowsClockwiseIcon,
+  CoinsIcon,
+  HardDrivesIcon,
+  RobotIcon,
+  TimerIcon,
+} from "@phosphor-icons/react";
+import type {
+  FactoryOverview,
+  RunDetailView,
+  RunDurationView,
+  RunView,
+} from "@usine/orchestrator/operator";
 import { Option } from "effect";
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
+import { ItemHeading } from "@/components/item/heading";
+import { taskCard } from "@/components/item/identity";
+import { PullRequestMarks } from "@/components/item/pull-request-marks";
+import { PageFact, PageHeader } from "@/components/page";
 import { StateMark } from "@/components/status-badge";
 import { useNow } from "@/hooks/use-now";
-import { cn } from "@/lib/utils";
-import { durationLabel, runStateLine, settledItemLabel } from "../operator-copy.ts";
-import { pullRequestNumber, type RunItem } from "./item.ts";
+import { durationLabel, runStateLine } from "../operator-copy.ts";
+import { type RunItem, runHeaderItems, runItem } from "./item.ts";
 import { UsageFact } from "./usage.tsx";
 
-const external = { target: "_blank", rel: "noreferrer" } as const;
-
-/** If the Run has no Item or its title is unknown, renders the Loop name. */
-export const RunTitle = ({
-  run,
-  item,
-  heading,
-  shared,
-}: {
-  readonly run: Pick<RunView, "loop" | "repository">;
-  readonly item: Option.Option<RunItem>;
-  /** Wraps the title in the caller's heading element. */
-  readonly heading: (title: ReactNode) => ReactNode;
-  /** Whether the title gets the drawer-to-page view transition name; only one visible title can have it. */
-  readonly shared: boolean;
-}) => (
-  <div
-    className="flex min-w-0 items-baseline gap-2.5"
-    style={shared ? { viewTransitionName: "run-title" } : undefined}
-  >
-    {Option.match(item, {
-      onNone: () => null,
-      onSome: ({ number, url }) => (
-        <a
-          href={url}
-          {...external}
-          className="shrink-0 font-mono text-xs text-primary underline-offset-4 hover:underline"
-        >
-          #{number}
-        </a>
-      ),
-    })}
-    {heading(
-      Option.getOrElse(
-        Option.flatMap(item, ({ title }) => title),
-        () => `${run.loop} on ${run.repository}`,
-      ),
-    )}
-  </div>
-);
-
-export const RunFacts = ({
-  run,
-  item,
-  settledItemState = null,
-  shared,
-  className,
-}: {
-  readonly run: Pick<
-    RunView,
-    "state" | "attempts" | "pullRequestUrl" | "loop" | "agent" | "loopPaused"
-  >;
-  /** If the Run opened no pull request and the Item is one, the Item is shown as the pull request. */
-  readonly item: Option.Option<RunItem>;
-  /** The Item's state if it's closed or merged, shown for a failed Run. */
-  readonly settledItemState?: SettledItemState | null;
-  /** Whether the state gets the drawer-to-page view transition name. */
-  readonly shared: boolean;
-  readonly className?: string;
-}) => {
-  const pullRequest =
-    run.pullRequestUrl ??
-    Option.getOrNull(
-      Option.map(
-        Option.filter(item, ({ pullRequest }) => pullRequest),
-        ({ url }) => url,
-      ),
-    );
-  return (
-    <p
-      className={cn(
-        "flex flex-wrap items-center gap-x-5 gap-y-1 text-sm text-muted-foreground",
-        className,
-      )}
-    >
-      <span
-        className="inline-flex items-center gap-2 font-medium text-foreground"
-        style={shared ? { viewTransitionName: "run-state" } : undefined}
-      >
-        <StateMark state={run.state} />
-        {runStateLine(run)}
-      </span>
-      {pullRequest === null ? (
-        <span>No pull request</span>
-      ) : (
-        <a
-          href={pullRequest}
-          {...external}
-          className="text-primary underline-offset-4 hover:underline"
-        >
-          Pull request
-          {Option.match(pullRequestNumber(pullRequest), {
-            onNone: () => null,
-            onSome: (number) => <span className="font-mono text-xs"> #{number}</span>,
-          })}
-        </a>
-      )}
-      <span>
-        Loop <span className="text-foreground">{run.loop}</span>
-      </span>
-      <span>
-        Agent <span className="text-foreground">{run.agent}</span>
-      </span>
-      {run.loopPaused && <span>Loop paused</span>}
-      {run.state === "Failed" && settledItemState !== null && (
-        <span>{settledItemLabel(settledItemState)}</span>
-      )}
-    </p>
+/** Returns the Item's title, or the Loop and repository if the Run has no Item or its title is unknown. */
+const runTitleText = (run: Pick<RunView, "loop" | "repository">, item: Option.Option<RunItem>) =>
+  Option.getOrElse(
+    Option.flatMap(item, ({ title }) => title),
+    () => `${run.loop} on ${run.repository}`,
   );
-};
 
 const LiveDuration = ({ endedMillis, since }: { endedMillis: number; since: string }) => {
   const now = useNow(1_000);
@@ -126,50 +36,103 @@ const LiveDuration = ({ endedMillis, since }: { endedMillis: number; since: stri
 };
 
 /** Renders the total Attempt time, which keeps counting while an Attempt runs. */
-const RunDuration = ({ duration }: { readonly duration: RunDurationView }) => (
+const Duration = ({ duration }: { readonly duration: RunDurationView }) => (
   <span
     title={
       duration.unmeasured === 0
         ? "Total attempt time"
         : `${duration.unmeasured} ${duration.unmeasured === 1 ? "attempt" : "attempts"} not counted: no recorded end time`
     }
+    className="font-mono text-xs tabular-nums"
   >
-    Duration{" "}
-    <span className="font-mono text-xs text-foreground tabular-nums">
-      {duration.unmeasured > 0 && "at least "}
-      {duration.runningSince === null ? (
-        durationLabel(duration.endedMillis)
-      ) : (
-        <LiveDuration endedMillis={duration.endedMillis} since={duration.runningSince} />
-      )}
-    </span>
+    {duration.unmeasured > 0 && "at least "}
+    {duration.runningSince === null ? (
+      durationLabel(duration.endedMillis)
+    ) : (
+      <LiveDuration endedMillis={duration.endedMillis} since={duration.runningSince} />
+    )}
   </span>
 );
 
-/** Renders the newest Attempt's Worker and the total Attempt time, or nothing before an Attempt starts. */
-export const WorkFacts = ({
+/**
+ * Renders a Run's header: the Loop and Agent, the Task's name, then the state, the Run's pull
+ * request, and once an Attempt has started, the duration, tokens on the page, and Worker.
+ */
+export const RunHeader = ({
   detail,
-  showUsage,
+  overview,
+  placement,
+  shared,
+  actions,
+  as,
   className,
 }: {
-  readonly detail: Pick<RunDetailView, "run" | "worker" | "duration" | "usage">;
-  /** Whether to show token usage; `true` on the Run page, `false` in the drawer. */
-  readonly showUsage: boolean;
+  readonly detail: RunDetailView;
+  readonly overview: FactoryOverview | undefined;
+  /** `page` shows tokens and puts the actions beside the heading from `lg`; `drawer` puts them under it. */
+  readonly placement: "page" | "drawer";
+  /** Whether the title and state get the drawer-to-page view transition names; only one visible header can have them. */
+  readonly shared: boolean;
+  readonly actions: ReactNode;
+  /** The heading element, such as the drawer's dialog title; `h1` by default. */
+  readonly as?: ComponentProps<typeof ItemHeading>["as"];
   readonly className?: string;
-}) =>
-  detail.worker === null ? null : (
-    <p
-      className={cn(
-        "flex flex-wrap items-baseline gap-x-5 gap-y-1 text-sm text-muted-foreground",
-        className,
-      )}
-    >
-      <span>
-        Worker <span className="text-foreground">{detail.worker}</span>
-      </span>
-      <RunDuration duration={detail.duration} />
-      {showUsage && detail.usage.sessions.length > 0 && (
-        <UsageFact usage={detail.usage} attempts={detail.run.attempts} />
-      )}
-    </p>
+}) => {
+  const { run } = detail;
+  const item = runItem(run, overview, detail.eventPayload);
+  const items = runHeaderItems(run, item, taskCard(overview, run.itemKey), detail.settledItemState);
+  return (
+    <PageHeader
+      actionsBeside={placement === "page" ? "lg" : "never"}
+      {...(className === undefined ? {} : { className })}
+      eyebrow={
+        <>
+          <PageFact icon={ArrowsClockwiseIcon} title="Loop">
+            {run.loop}
+          </PageFact>
+          <PageFact icon={RobotIcon} title="Agent">
+            {run.agent}
+          </PageFact>
+        </>
+      }
+      heading={
+        <ItemHeading
+          variant="page"
+          item={items.heading}
+          title={Option.getOrElse(items.title, () => runTitleText(run, item))}
+          {...(as === undefined ? {} : { as })}
+          {...(shared ? { style: { viewTransitionName: "run-title" } } : {})}
+        />
+      }
+      facts={
+        <>
+          <span
+            className="inline-flex items-center gap-2 font-medium text-foreground"
+            style={shared ? { viewTransitionName: "run-state" } : undefined}
+          >
+            <StateMark state={run.state} />
+            {runStateLine(run)}
+          </span>
+          <PullRequestMarks pullRequests={Option.toArray(items.pullRequest)} />
+          {detail.worker !== null && (
+            <>
+              <PageFact icon={TimerIcon}>
+                <Duration duration={detail.duration} />
+              </PageFact>
+              {placement === "page" && detail.usage.sessions.length > 0 && (
+                <PageFact icon={CoinsIcon}>
+                  <UsageFact usage={detail.usage} attempts={run.attempts} />
+                </PageFact>
+              )}
+              <PageFact icon={HardDrivesIcon} title="Worker">
+                {detail.worker}
+              </PageFact>
+            </>
+          )}
+          {run.loopPaused && <span>Loop paused</span>}
+        </>
+      }
+      actions={actions}
+    />
   );
+};

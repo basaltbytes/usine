@@ -2,6 +2,7 @@ import { GithubLogoIcon } from "@phosphor-icons/react";
 import type { LabelView, ReviewedView } from "@usine/orchestrator/operator";
 import { Match } from "effect";
 import { Fragment, type ReactNode } from "react";
+import { ItemMark } from "@/components/item/mark";
 import { LabelBadge } from "@/components/label-badge";
 import { timestampLabel } from "../operator-copy.ts";
 import type { GitHubChangeRow, LabelChanges } from "./document/model.ts";
@@ -13,19 +14,27 @@ const reviewed = {
   DISMISSED: (item) => <>Reviewed {item}, since dismissed</>,
 } satisfies Record<ReviewedView["state"], (item: ReactNode) => ReactNode>;
 
-/** Renders a link to a comment or review URL, labelled with the issue or pull request number in it. */
-const ItemLink = ({ url, what }: { readonly url: string; readonly what: string }) => {
-  const number = /\/(?:issues|pull)\/(\d+)/u.exec(url)?.[1];
-  return (
+/** Renders the item of a comment or review URL as a mark that links to the comment or review. */
+const ItemLink = ({ url }: { readonly url: string }) => {
+  const match = /\/(issues|pull)\/(\d+)/u.exec(url);
+  return match?.[1] === undefined || match[2] === undefined ? (
     <a
       href={url}
       target="_blank"
       rel="noreferrer"
-      title={`Open the ${what} on GitHub`}
-      className="font-mono text-primary underline-offset-4 hover:underline"
+      className="text-primary underline-offset-4 hover:underline"
     >
-      {number === undefined ? "GitHub" : `#${number}`}
+      GitHub
     </a>
+  ) : (
+    <ItemMark
+      item={{
+        kind: match[1] === "pull" ? "pr" : "issue",
+        number: Number(match[2]),
+        url,
+        state: null,
+      }}
+    />
   );
 };
 
@@ -67,10 +76,10 @@ export const GitHubChangeLine = ({ row }: { readonly row: GitHubChangeRow }) => 
         Labels: (change) => <Labels change={change} />,
         Commented: ({ url }) => (
           <>
-            Commented on <ItemLink url={url} what="comment" />
+            Commented on <ItemLink url={url} />
           </>
         ),
-        Reviewed: ({ url, state }) => reviewed[state](<ItemLink url={url} what="review" />),
+        Reviewed: ({ url, state }) => reviewed[state](<ItemLink url={url} />),
       })}
     </p>
   </div>

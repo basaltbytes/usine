@@ -87,6 +87,13 @@ export default mergeConfig(
                     resolved = true;
                     return route.fulfill({ contentType: "application/json", body: '{"ok":true}' });
                   });
+                  await page.route("**/api/projects/resolution/project/tasks/*", (route) =>
+                    route.fulfill({
+                      status: 404,
+                      contentType: "application/json",
+                      body: '{"error":"BoardItemNotFoundError","message":"Task not found"}',
+                    }),
+                  );
                   await page.route("**/api/runs/resolution-run/retry", (route) =>
                     route.fulfill({
                       status: 409,

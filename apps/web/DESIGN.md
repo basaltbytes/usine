@@ -183,7 +183,7 @@ Dark only: the `.dark` block in `src/index.css` is the shipped theme, and `:root
 Catppuccin Mocha as published: neutral grounds from crust to text, one action accent, and four state colours.
 
 ### Primary
-- **Mauve** (`{colors.mauve}`): primary buttons, focus rings, links, the text caret, and text selection (mixed to 32%), and nothing else.
+- **Mauve** (`{colors.mauve}`): primary buttons, focus rings, links, the text caret, text selection (mixed to 32%), and item marks of closed issues and merged pull requests, and nothing else.
 
 ### Secondary
 - **Blue** (`{colors.blue}`): a run that is Pending, Queued, or Running; a flow arrow whose loops are working.
@@ -206,9 +206,9 @@ Catppuccin Mocha as published: neutral grounds from crust to text, one action ac
 GitHub label colours come unchanged from the repository, in the label chip (see Components): data, not palette.
 
 ### Named Rules
-**The One Action Colour Rule.** Mauve marks what the operator can act on or has focused. States never use mauve; actions use no state colour except destructive red.
+**The One Action Colour Rule.** Mauve marks what the operator can act on or has focused. States never use mauve; actions use no state colour except destructive red. The one exception is the item mark, which uses GitHub's state colours (see Item mark).
 
-**The State Tone Rule.** Blue running, peach waiting and Needs attention, red failed, green succeeded, overlay0 canceled. A state is a 6px dot in its tone beside the state's word, so colour is never the only signal. The same scale marks a project active (blue) or clear (green), a loop active (live green) or paused (overlay0), and an item merged (green), closed (overlay0), or open (subtext0).
+**The State Tone Rule.** Blue running, peach waiting and Needs attention, red failed, green succeeded, overlay0 canceled. A state is a 6px dot in its tone beside the state's word, so colour is never the only signal. The same scale marks a project active (blue) or clear (green) and a loop active (live green) or paused (overlay0). An issue or pull request state is an item mark, never a dot.
 
 ## Typography
 
@@ -223,7 +223,7 @@ GitHub label colours come unchanged from the repository, in the label chip (see 
 - **Label strong** (600 or 500, 14px, 20px): the sidebar wordmark, sheet titles, alert titles.
 - **Body** (400, 13px, 20px): default UI text, buttons, menu items, card titles (500), lane names (600).
 - **Caption** (400 or 500, 12px, 16px): meta, run lines, chips, counts, sidebar group names.
-- **Mono** (400, 12px, 16px, tabular figures): item numbers and kinds, elapsed times, ids, code.
+- **Mono** (400, 12px, 16px, tabular figures): item numbers, elapsed times, ids, code.
 
 ### Named Rules
 **The Five Sizes Rule.** Text is 12, 13, 14, 16, or 20px. `@theme` resets `--text-*`, so any other Tailwind size generates nothing.
@@ -242,17 +242,17 @@ Page gutters are 16px, 20px from `md`. The page shell is prose (content stops at
 
 **Tasks list** (`repository › Tasks`). The page heading with counts, a 13px subtext0 totals line, and a flat table; with no runs, `No runs yet` in 13px subtext0. The [README](README.md#tasks-list) lists what each column and status says.
 
-- **Task**: number in 12px mono subtext0, title in 13px medium, one line.
-- **Status**: a dot in the state's tone (peach for `Needs attention`; green for merged `Done`, overlay0 for closed) and 12px medium words on the row's 20px line, the dot on the first line when the words wrap. ` · ` and the last run's time follow in 12px regular subtext0, the time in mono, on one line with the dot.
+- **Task**: the task's item heading, row form.
+- **Status**: a dot in the state's tone (peach for `Needs attention`; for `Done`, the current item's icon-only item mark) and 12px medium words on the row's 20px line, the dot on the first line when the words wrap. ` · ` and the last run's time follow in 12px regular subtext0, the time in mono, on one line with the dot.
 - **Runs**: the loops as `start-dev · review-pr · finish-pr`, each after its last run's state dot, then the run count in 12px mono subtext0.
-- **Pull request**: number in 12px mono mauve, `open` or `merged` in 12px subtext0.
+- **Pull request**: the task's other pull requests as item marks, 10px apart.
 - **Elapsed time**, **Tokens**, **Estimated cost**: right-aligned 12px mono tabular figures, no words, with a subtext0 `*` hung in the right padding to keep figures aligned. Hovering tokens or cost opens the usage breakdown popover.
 
 Columns follow the table's width, not the window's: **Tokens** and **Estimated cost** from 896px, **Runs** and **Pull request** from 1024px, **Elapsed time** always. The title takes the remaining width on one line, cut short only when the table is narrower than its columns. From a 448px table, **Status** and **Runs** take their own width up to an equal share of what remains after 416px for the title and header width for the figure columns (112px to 208px). Past that, **Status** wraps and **Runs** truncates before the title is cut, and a status word wider than the share, such as the loop `dependency_updates`, breaks. A short status such as `Done · 28m ago` takes only its own width. On a phone, **Status** wraps to its longest word.
 
 **Configuration detail page.** From `lg`, the file's long parts (trigger, selector, prompt, persona, lanes, preflight) are in a main column and its short facts in a 21rem rail on the right behind a hairline; below `lg`, the rail comes first. The heading row has the name, state mark, and file path (12px mono, under the name), with actions at the right that wrap under the path on phones.
 
-**Task page** (`repository › Tasks › #<number>`). At most 1024px wide, flat, with the page gutters, 20px above and 40px below. Header: the item number in 12px mono mauve (linked) on the baseline of the 20px title; a 13px facts line with 20px between facts (the state in medium text colour, `Lane` and its name, chips, Needs attention); and from `sm`, Move to as an outline button right of the title. Then Runs, Pull requests, and Comments and reviews, 32px apart, each a 16px semibold title with its count in 13px subtext0, 8px above a flat table. Runs shows every column from `xl`; below, agent, attempts, duration, opened, and pull request fold into one 12px line under the loop, and below `sm` the state's dot joins that line before the loop. Run row cells align to the top, so a failure, approval, or Run again line under the loop doesn't move other cells. An empty section is a hairline, a 13px medium title, and one sentence on how it fills.
+**Task page** (`repository › Tasks › Issue #<number>`, the breadcrumb naming the originating item in plain words). At most 1024px wide, flat, with the page gutters, 20px above and 40px below. Header: the page header with the task's item heading; facts are the task's other pull requests as item marks, the lane after `Kanban` (tooltip `Lane`), chips, and Needs attention; Move to is an outline button right of the heading from `sm`. Then Runs, Pull requests, and Comments and reviews, 32px apart, each a 16px semibold title with its count in 13px subtext0, 8px above a flat table. Runs shows every column from `xl`; below, agent, attempts, duration, opened, and pull request fold into one 12px line under the loop, and below `sm` the state's dot joins that line before the loop. Run row cells align to the top, so a failure, approval, or Run again line under the loop doesn't move other cells. An empty section is a hairline, a 13px medium title, and one sentence on how it fills.
 
 **Run page.** Below the breadcrumb (`repository › Run <short id>`) and any Needs attention row, the header is 16px from the panel edges (20px from `md`), with actions right of the title from `lg` and under the facts line otherwise. From `lg`, the outline and reader are side by side:
 
@@ -319,7 +319,7 @@ Compact and quiet, mostly 28px tall.
 - **Shadow Strategy:** none at rest; Raised while dragged.
 - **Border:** 7% white ring; 15% on hover; peach at 45% when the card needs the operator (65% on hover).
 - **Internal Padding:** 10px top and bottom, 12px sides; rows 6px apart.
-- **Content order:** item numbers and kinds in mono; the title (two lines, 13px medium); labels; the run line (state dot, loop, state, mono elapsed time, agent at the right). A failure is red text on red at 8% with its action. A stall reason is 12px subtext0, at most three lines, after the loop in text colour if no run line shows it, then the action as an extra-small outline button.
+- **Content order:** each member's item mark, 10px apart; the task's title (two lines, 13px medium); labels; the run line (state dot, loop, state, mono elapsed time, agent at the right). A failure is red text on red at 8% with its action. A stall reason is 12px subtext0, at most three lines, after the loop in text colour if no run line shows it, then the action as an extra-small outline button.
 - **Menu:** a 20px ghost icon button in the top right corner, shown on hover or focus with a pointer, always on touch.
 
 ### Inputs / Fields
@@ -351,7 +351,7 @@ A `{{ }}` expression in a rendered prompt is outlined, not filled: mono, no fill
 One 10px cell per worker slot, 4px apart: running blue while an attempt uses it, an empty ring otherwise, with the count beside them.
 
 ### Needs attention item
-8px radius, peach border at 25%, peach fill at 5% (8% on hover), 14px by 10px padding. Title in 13px medium, context in 12px, actions (primary and ghost buttons) at the right; the whole row opens the related run.
+8px radius, peach border at 25%, peach fill at 5% (8% on hover), 14px by 10px padding. Title in 13px medium, context in 12px, actions (primary and ghost buttons) at the right; the whole row opens the related run. An entry about an item starts its context with the item mark: an approval's is the task's name, a cycle budget's the item and its counts.
 
 **Compact:** on the run page, to leave height for the reader: one entry per row, 6px apart, 12px by 4px padding, no repository, the title whole. From `sm`, an entry is one line with the detail shortened 12px after the title, in full in its tooltip; below `sm`, the detail wraps to two lines under the title.
 
@@ -359,10 +359,31 @@ One 10px cell per worker slot, 4px apart: running blue while an attempt uses it,
 A 22 by 8 one-pixel arrow at the end of an authored lane's heading, crossing the gap to the next authored lane, after the matching loops' names in 12px (`paused` after a paused one). Blue if one has a queued or running run on the lane's tasks, peach if all their open runs wait, otherwise subtext0 with the arrow in overlay0. With no such loop, the arrow is alone, in overlay0.
 
 ### Overview rows
-Flat tables; only rows about a run open something (its run page). An item cell is its number in 12px mono subtext0 and its title in 13px medium, truncated; multi-line rows align to the top. A connectivity warning is 12px yellow with a filled warning icon under the item, the harness's message below. Stalled has the reason as a 13px fragment and the action as a subtext0 ghost button. The Workers line ends the page under a hairline: `Workers` in 12px medium text colour, then each worker's name in mono, slots in use, and last preflight as a state dot and words, red if failed.
+Flat tables; only rows about a run open something (its run page). An item cell is the task's item heading, row form; multi-line rows align to the top. A connectivity warning is 12px yellow with a filled warning icon under the item, the harness's message below. Stalled has the reason as a 13px fragment and the action as a subtext0 ghost button. The Workers line ends the page under a hairline: `Workers` in 12px medium text colour, then each worker's name in mono, slots in use, and last preflight as a state dot and words, red if failed.
+
+### Page header
+One header for the run page, the run drawer, and the task page: an optional 12px subtext0 line with 14px between facts, each fact after its Phosphor icon at text size in overlay0 with its kind as tooltip; the item heading; a 13px subtext0 facts line with 20px between facts; and the actions, right of the heading from `lg` on the run page and `sm` on the task page, under it in the drawer.
 
 ### Run header
-On the run page and in the drawer. The item number in 12px mono mauve, linked to GitHub, on the title's baseline 10px before it; the title in 20px semibold (16px in the drawer). Under it, a 13px subtext0 facts line with 20px between facts: the state mark and state line (`Failed after 3 Attempts`) in medium text colour, the pull request link or `No pull request`, and `Loop` and `Agent` with values in text colour, then, for a failed run on an item that is closed or merged, `Issue closed`, `Pull request closed`, or `Pull request merged`. Once an attempt has started, a second line in the same style: `Worker` and its name; `Duration` and the attempts' total in 12px mono (`at least` if an attempt's end wasn't recorded), counting while one runs; and, on the page only, `Tokens` and the total in 12px mono mauve, which opens the usage breakdown. Then the applicable action buttons.
+The page header of the run page and the drawer. Above the heading: the loop after `ArrowsClockwise` and the agent after `Robot`. The heading is the task's item heading. Facts: the state mark and state line (`Failed after 3 attempts`) in medium text colour; the run's pull request as an item mark unless it names the task; once an attempt has started, the attempts' total in 12px mono after `Timer` (`at least` if an attempt's end wasn't recorded, counting while one runs), on the page only the token total after `Coins` as `159.6K tokens` in mauve with the figure in 12px mono, which opens the usage breakdown, and the worker after `HardDrives`; then `Loop paused`. Each item appears once.
+
+### Run actions
+After the run header: right of it from `lg` on the page, under it otherwise. Only the actions that apply, in three places: a primary button for the state's main action, a secondary outline button (ghost for Cancel run), and a 28px subtext0 ghost icon button (`DotsThree`, labelled More actions) whose menu lists the rest, absent when empty. The [README](README.md#run-actions) lists the actions per state. Cancel run turns the buttons into Confirm cancel (destructive) and Keep running (ghost).
+
+### Item mark
+The only way an issue or pull request number appears: its Octicon and `#number` in 12px mono, 4px apart, both in the item's state colour, linked to GitHub in a new tab and underlined on hover, with `Pull request #530, closed` as tooltip and accessible name. Inside a row, card, entry, or menu item that opens something else, it doesn't link. Before a title, the icon is 16px and the number 14px, 6px apart; a done task's status uses the icon alone.
+
+| Kind | State | Octicon | Colour |
+| --- | --- | --- | --- |
+| Issue | Open | `IssueOpened` | green |
+| Issue | Closed | `IssueClosed` | mauve |
+| Pull request | Open | `GitPullRequest` | green |
+| Pull request | Merged | `GitMerge` | mauve |
+| Pull request | Closed | `GitPullRequestClosed` | red |
+| Either | Unknown | the kind's open icon | subtext0 |
+
+### Item heading
+A task's name: its item mark inline in the title's text, a space, then the title, so a wrapped line starts under the icon. The [README](README.md#issues-and-pull-requests) says which item names a task. Page form: the 20px semibold title, the mark's number on its first baseline; the run page heading keeps the `run-title` view transition name. Row form: one 13px medium line that truncates the title and keeps the mark, with the title as tooltip.
 
 ### Usage breakdown
 A popover from a token total, at most 416px wide, 12px text. `Tokens per pool` lists each billing pool with tokens in mono and a price: dollars in mono text colour, then `estimate` in subtext0 for the Claude plan; `No dollar rate` in subtext0 for the ChatGPT plan. On the tasks list, a pool with unpriced usage has `at least` in subtext0 before its price, and the price column widens from 112px to 160px to keep token figures aligned; opened from a cost marked `*`, the popover starts with `Some sessions have no price yet; the real figure is higher.` in subtext0, 8px above `Tokens per pool`. Below a hairline, `Tokens per session` lists each session under its attempt (name, truncated model in mono subtext0, tokens, price) in the same columns. A closing subtext0 line says what a token count is.
@@ -374,7 +395,7 @@ A popover from a token total, at most 416px wide, 12px text. `Tokens per pool` l
 A quiet 12px line for the tool calls between two messages, even a single one: a caret, what the calls did (`Ran 5 commands · baseline gate, pnpm lint`), failed calls counted in red and running ones in blue, then ` · ` and the span in mono. A ghost button at least 28px tall, 8px wider than the reader's text on each side; hover turns the text to text colour. Open, the caret turns, the line has no fill at rest (surface0 at 70% on hover), and the call panels follow, 4px apart.
 
 ### GitHub change line
-A quiet 12px subtext0 line for an agent's change to the run's GitHub item, under the fold line of the calls that made it. A 14px GitHub mark replaces the caret, 8px before the text. Labels read `Removed`, chips, `, added`, chips, in their GitHub colours. A comment reads `Commented on` and the item number in mono mauve, linked; a review reads `Approved`, `Requested changes on`, or `Reviewed` the same way. The text is on a 20px line so chips align to its baseline, at least 28px tall like a fold line. No fill, no hover; the tooltip gives GitHub's recorded time.
+A quiet 12px subtext0 line for an agent's change to the run's GitHub item, under the fold line of the calls that made it. A 14px GitHub mark replaces the caret, 8px before the text. Labels read `Removed`, chips, `, added`, chips, in their GitHub colours. A comment reads `Commented on` and the item's mark, linked to the comment, in the muted colour since its state isn't read; a review reads `Approved`, `Requested changes on`, or `Reviewed` the same way. The text is on a 20px line so chips align to its baseline, at least 28px tall like a fold line. No fill, no hover; the tooltip gives GitHub's recorded time.
 
 ### Board move line
 The operator's board move during the attempt, placed by time like a GitHub change line but styled as an operator note: the time in the gutter in 12px mono, then one 12px subtext0 line, `You moved it from Review to Findings on the Board`. No GitHub mark (the operator made it) and no chips (the lane names say what moved).
@@ -408,7 +429,7 @@ Every string on screen, from title to tooltip, states what is true in common app
 
 ### Do:
 - **Do** put new screens in the base work panel on the mantle ground, with mantle cards and surface0 popovers.
-- **Do** use mauve only for actions, focus, links, and selection.
+- **Do** use mauve only for actions, focus, links, selection, and item marks.
 - **Do** show state as the State Tone Rule says; pulse the dot only while Running, never under reduced motion.
 - **Do** keep text on the 12/13/14/16/20 scale, with mono only for ids, numbers, times, and code.
 - **Do** keep surfaces flat behind 7% white hairlines, with the Raised shadow only on menus, popovers, and dragged items.

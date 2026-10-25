@@ -15,7 +15,6 @@ import { Option } from "effect";
 import { assert, describe, it } from "vitest";
 import {
   attemptsDuration,
-  itemStateLine,
   type TaskRow,
   taskCounts,
   taskDuration,
@@ -51,13 +50,6 @@ describe("Task page model", () => {
     assert.isTrue(
       Option.isNone(attemptsDuration({ attempts: [{ ...ended, endedAt: null }] }, now)),
     );
-  });
-
-  it("names the current Item's number only when it is not the originating Item", () => {
-    const [issue, merged] = fullTask().items;
-    assert.strictEqual(itemStateLine(issue, true), "Open issue");
-    assert(merged !== undefined);
-    assert.strictEqual(itemStateLine(merged, false), "Merged pull request #41");
   });
 });
 

@@ -167,15 +167,23 @@ export const fullTask = () =>
           }),
         },
       ),
-      run("run-canceled", 42, "fix-ci", "Canceled", "2026-10-05T09:00:00.000Z", [
-        attempt(
-          "run-canceled",
-          1,
-          "2026-10-05T09:00:00.000Z",
-          new CanceledAttemptView(),
-          "2026-10-05T09:05:00.000Z",
-        ),
-      ]),
+      run(
+        "run-canceled",
+        42,
+        "fix-ci",
+        "Canceled",
+        "2026-10-05T09:00:00.000Z",
+        [
+          attempt(
+            "run-canceled",
+            1,
+            "2026-10-05T09:00:00.000Z",
+            new CanceledAttemptView(),
+            "2026-10-05T09:05:00.000Z",
+          ),
+        ],
+        { pullRequestUrl: conflicting.url },
+      ),
       run(
         "run-review",
         41,
@@ -287,8 +295,8 @@ const card = (task: TaskView) => {
     state: current.state,
     labels: current.labels,
     items: task.items.map(
-      ({ itemKey, kind, number, title, url }) =>
-        new BoardItemLink({ itemKey, kind, number, title, url }),
+      ({ itemKey, kind, number, title, url, state }) =>
+        new BoardItemLink({ itemKey, kind, number, title, url, state }),
     ),
     pullRequest: null,
     runs: [...task.runs].reverse(),

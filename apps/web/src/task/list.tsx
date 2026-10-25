@@ -1,14 +1,17 @@
 import { Link } from "@tanstack/react-router";
 import type { RepositoryName } from "@usine/core/repository";
 import type {
-  BoardPullRequestView,
   BoardTaskView,
   ProjectView,
   StalledItemView,
   TaskUsageView,
 } from "@usine/orchestrator/operator";
-import { Match } from "effect";
+import { Match, Option } from "effect";
 import { Fragment, type ReactNode } from "react";
+import { ItemHeading } from "@/components/item/heading";
+import { cardIdentity } from "@/components/item/identity";
+import { ItemMark } from "@/components/item/mark";
+import { PullRequestMarks } from "@/components/item/pull-request-marks";
 import { Page, PageHeading } from "@/components/page";
 import { StateMark } from "@/components/status-badge";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
@@ -22,7 +25,7 @@ import {
 } from "@/components/ui/table";
 import { useNow } from "@/hooks/use-now";
 import { cn } from "@/lib/utils";
-import { EmptyLine, ItemTitle } from "../desk/section.tsx";
+import { EmptyLine } from "../desk/section.tsx";
 import {
   agoLabel,
   durationLabel,
@@ -35,7 +38,6 @@ import { PoolBreakdown } from "../run-page/usage.tsx";
 import { stallNamesLoop, stallSentence } from "../stall/copy.ts";
 import {
   costUnpriced,
-  itemStateLabel,
   runActivityAt,
   type TaskRow,
   type TaskTotals,
@@ -43,7 +45,6 @@ import {
   taskDuration,
   taskLoops,
   taskNumber,
-  taskOrigin,
   taskRows,
   taskTotals,
   totalsFigures,
@@ -51,9 +52,6 @@ import {
   untimedNote,
 } from "./model.ts";
 import { linkedRow, rowLink } from "./section.tsx";
-
-const pullRequestLink =
-  "relative z-10 rounded-sm font-mono text-xs text-primary underline-offset-4 outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring/70 focus-visible:outline-solid";
 
 // Column visibility uses container queries on the table width, because the sidebar can leave less
 // room than the viewport suggests. Elapsed time is always shown; Tokens and Estimated cost need
@@ -96,9 +94,14 @@ const stallTone = ({ reason }: StalledItemView): string =>
  * Run do not include it.
  */
 const statusLine = (
-  { task, last, status }: TaskRow,
+  { last, status }: TaskRow,
   now: number,
-): { readonly state: string; readonly words: string; readonly at: string | null } => {
+): {
+  /** The state mark's tone; `Done` shows the current item's GitHub state instead. */
+  readonly state: string;
+  readonly words: string;
+  readonly at: string | null;
+} => {
   const at = runActivityAt(last);
   const stallLine = (stall: StalledItemView) => ({
     state: stallTone(stall),
@@ -112,7 +115,7 @@ const statusLine = (
     Stalled: ({ stall }) => stallLine(stall),
     Idle: ({ stall }) => stallLine(stall),
     NeedsAttention: () => ({ state: "needs-you", words: "Needs attention", at }),
-    Done: () => ({ state: itemStateLabel(task.state), words: "Done", at }),
+    Done: () => ({ state: "Done", words: "Done", at }),
     Ended: ({ run }) => ({ state: run.state, words: run.state, at }),
   });
 };
@@ -125,7 +128,11 @@ const Status = ({ row, now }: { readonly row: TaskRow; readonly now: number }) =
   // phone, where the column is as wide as its longest word, text still wraps between words.
   return (
     <span className={cn("flex items-start gap-1.5 text-xs/5 font-medium", SIDE_CONTENT)}>
-      <StateMark state={state} className="mt-1.75" />
+      {state === "Done" ? (
+        <ItemMark item={row.task} linked={false} numbered={false} className="mt-0.75" />
+      ) : (
+        <StateMark state={state} className="mt-1.75" />
+      )}
       <span className="min-w-0 wrap-break-word">
         {words}
         {at !== null && (
@@ -231,17 +238,6 @@ const TaskCost = ({ usage }: { readonly usage: TaskUsageView }) => {
   );
 };
 
-const PullRequest = ({ pullRequest }: { readonly pullRequest: BoardPullRequestView }) => (
-  <span className="inline-flex items-baseline gap-1.5">
-    <a href={pullRequest.url} target="_blank" rel="noreferrer" className={pullRequestLink}>
-      #{pullRequest.number}
-    </a>
-    <span className="text-xs text-muted-foreground">
-      {pullRequest.state === "pr-merged" ? "merged" : "open"}
-    </span>
-  </span>
-);
-
 const TaskListRow = ({
   row,
   repository,
@@ -259,7 +255,12 @@ const TaskListRow = ({
         params={{ ...projectParams(repository), number: taskNumber(row.task) }}
         className={cn("block min-w-0", rowLink)}
       >
-        <ItemTitle item={taskOrigin(row.task)} />
+        <ItemHeading
+          variant="row"
+          item={Option.some(cardIdentity(row.task).origin)}
+          title={row.task.title}
+          linked={false}
+        />
       </Link>
     </TableCell>
     <TableCell className={SIDE_COLUMN}>
@@ -269,7 +270,10 @@ const TaskListRow = ({
       <Runs task={row.task} />
     </TableCell>
     <TableCell className={cn("py-3 text-right align-top", WIDE_COLUMN)}>
-      {row.task.pullRequest !== null && <PullRequest pullRequest={row.task.pullRequest} />}
+      <PullRequestMarks
+        pullRequests={cardIdentity(row.task).pullRequests}
+        className="relative z-10 justify-end"
+      />
     </TableCell>
     <TableCell className={TOTAL_COLUMN}>
       <TaskTime task={row.task} now={now} />

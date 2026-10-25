@@ -1,11 +1,10 @@
 import { cn } from "@/lib/utils";
 
-/** Returns the tone class for a Run, Attempt, Project, Loop, or Item state (ADR 0015). An unpaused
- * Loop is `live`; an Open Item uses the default muted tone. */
+/** Returns the tone class for a Run, Attempt, Project, or Loop state (ADR 0015). An unpaused Loop
+ * is `live`. Issue and pull request states use `ItemMark`. */
 const stateTone = (state: string): string => {
   switch (state) {
     case "Succeeded":
-    case "Merged":
     case "clear":
     case "live":
       return "text-run-succeeded";
@@ -21,7 +20,6 @@ const stateTone = (state: string): string => {
     case "Failed":
       return "text-run-failed";
     case "Canceled":
-    case "Closed":
     case "paused":
       return "text-run-canceled";
     default:

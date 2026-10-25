@@ -1,4 +1,8 @@
-import type { ClosedRunView } from "@usine/orchestrator/operator";
+import type { ClosedRunView, FactoryOverview } from "@usine/orchestrator/operator";
+import { Option } from "effect";
+import { ItemHeading } from "@/components/item/heading";
+import { cardIdentity, pullRequestAt, taskCard, useOverview } from "@/components/item/identity";
+import { ItemMark } from "@/components/item/mark";
 import { StatusBadge } from "@/components/status-badge";
 import {
   Table,
@@ -9,16 +13,45 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { agoLabel, timestampLabel } from "../operator-copy.ts";
-import { pullRequestLabel } from "./copy.ts";
-import { EmptyLine, ItemTitle, RunPageLink, RunRow } from "./section.tsx";
+import { EmptyLine, RunPageLink, RunRow } from "./section.tsx";
 
-const OutcomeRow = ({ closed, now }: { readonly closed: ClosedRunView; readonly now: number }) => {
+const OutcomeRow = ({
+  closed,
+  overview,
+  now,
+}: {
+  readonly closed: ClosedRunView;
+  readonly overview: FactoryOverview | undefined;
+  readonly now: number;
+}) => {
   const { run, item, closedAt } = closed;
+  const card = taskCard(overview, run.itemKey);
+  const origin = Option.match(card, {
+    onNone: () => item,
+    onSome: (found) => cardIdentity(found).origin,
+  });
+  const pullRequest = Option.filter(
+    Option.flatMap(Option.fromNullishOr(run.pullRequestUrl), (url) =>
+      pullRequestAt(url, Option.match(card, { onNone: () => [], onSome: ({ items }) => items })),
+    ),
+    ({ number }) => number !== origin?.number,
+  );
   return (
     <RunRow run={run}>
       <TableCell className="w-full max-w-0 py-3">
         <RunPageLink run={run}>
-          <ItemTitle item={item} run={run} />
+          {origin === null ? (
+            <span className="block truncate text-sm font-medium">
+              Run <span className="font-mono text-xs">{run.id.slice(0, 8)}</span>
+            </span>
+          ) : (
+            <ItemHeading
+              variant="row"
+              item={Option.some(origin)}
+              title={origin.title}
+              linked={false}
+            />
+          )}
         </RunPageLink>
         <p className="mt-0.5 truncate text-xs text-muted-foreground md:hidden">{run.loop}</p>
       </TableCell>
@@ -39,15 +72,10 @@ const OutcomeRow = ({ closed, now }: { readonly closed: ClosedRunView; readonly 
         {run.pullRequestUrl === null ? (
           <span className="text-xs text-muted-foreground">None</span>
         ) : (
-          <a
-            href={run.pullRequestUrl}
-            target="_blank"
-            rel="noreferrer"
-            onClick={(event) => event.stopPropagation()}
-            className="rounded-sm font-mono text-xs text-primary underline-offset-4 outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring/70 focus-visible:outline-solid"
-          >
-            {pullRequestLabel(run.pullRequestUrl)}
-          </a>
+          Option.match(pullRequest, {
+            onNone: () => null,
+            onSome: (found) => <ItemMark item={found} />,
+          })
         )}
       </TableCell>
     </RunRow>
@@ -61,8 +89,9 @@ export const LastOutcomes = ({
 }: {
   readonly outcomes: ReadonlyArray<ClosedRunView>;
   readonly now: number;
-}) =>
-  outcomes.length === 0 ? (
+}) => {
+  const overview = useOverview();
+  return outcomes.length === 0 ? (
     <EmptyLine>No recent runs</EmptyLine>
   ) : (
     <div className="-mx-2">
@@ -78,9 +107,10 @@ export const LastOutcomes = ({
         </TableHeader>
         <TableBody>
           {outcomes.map((closed) => (
-            <OutcomeRow key={closed.run.id} closed={closed} now={now} />
+            <OutcomeRow key={closed.run.id} closed={closed} overview={overview} now={now} />
           ))}
         </TableBody>
       </Table>
     </div>
   );
+};

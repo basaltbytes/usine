@@ -72,6 +72,7 @@ const link = (number: number, title: string) => {
     number: ItemNumber.make(number),
     title,
     url: `https://github.com/${deskRepository}/issues/${number}`,
+    state: "issue-open",
   });
   links.set(item.itemKey, item);
   return item;

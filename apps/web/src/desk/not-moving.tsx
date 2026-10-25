@@ -1,4 +1,7 @@
-import type { StalledItemView } from "@usine/orchestrator/operator";
+import type { FactoryOverview, StalledItemView } from "@usine/orchestrator/operator";
+import { Option } from "effect";
+import { ItemHeading } from "@/components/item/heading";
+import { itemIdentity, useOverview } from "@/components/item/identity";
 import { useIsMobile } from "@/hooks/use-mobile";
 import {
   Table,
@@ -11,22 +14,32 @@ import {
 import { StallAction } from "../stall/action.tsx";
 import { stallSentence } from "../stall/copy.ts";
 import { stallRun } from "../task/model.ts";
-import { EmptyLine, ItemTitle, RunPageLink, RunRow } from "./section.tsx";
+import { EmptyLine, RunPageLink, RunRow } from "./section.tsx";
 
 const StalledRow = ({
   stalled,
+  overview,
   now,
   readOnly,
   narrow,
 }: {
   readonly stalled: StalledItemView;
+  readonly overview: FactoryOverview | undefined;
   readonly now: number;
   readonly readOnly: boolean;
   /** Whether to render the row as a single cell, as below the `md` breakpoint. */
   readonly narrow: boolean;
 }) => {
   const run = stallRun(stalled);
-  const title = <ItemTitle item={stalled.item} />;
+  const { origin } = itemIdentity(overview, stalled.item);
+  const title = (
+    <ItemHeading
+      variant="row"
+      item={Option.some(origin)}
+      title={origin.title}
+      linked={run === null}
+    />
+  );
   const item = run === null ? title : <RunPageLink run={run}>{title}</RunPageLink>;
   const action = <StallAction stalled={stalled} readOnly={readOnly} appearance="row" />;
   if (narrow)
@@ -68,6 +81,7 @@ export const NotMoving = ({
   readonly polled: boolean;
 }) => {
   const narrow = useIsMobile();
+  const overview = useOverview();
   if (stalled.length === 0)
     return <EmptyLine>{polled ? "Nothing stalled" : "Not checked yet"}</EmptyLine>;
   return (
@@ -92,6 +106,7 @@ export const NotMoving = ({
             <StalledRow
               key={`${entry.loop}:${entry.item.itemKey}`}
               stalled={entry}
+              overview={overview}
               now={now}
               readOnly={readOnly}
               narrow={narrow}
