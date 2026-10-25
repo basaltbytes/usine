@@ -1,6 +1,21 @@
 import { Option, Schema } from "effect";
 import { ProcessId } from "../api/api.ts";
-import { PROCESSES_DIRECTORY } from "../api/harness.ts";
+import { PROCESSES_DIRECTORY, SANDBOX_HOME } from "../api/harness.ts";
+
+/**
+ * Returns the Container API options of a command the Worker runs. The platform passes a command
+ * only the image's `PATH`, not its `ENV HOME`, so the options set `HOME` and start the command in
+ * the sandbox home.
+ */
+export const commandOptions = (stdin: "pipe" | "closed"): ContainerExecOptions => {
+  const options: ContainerExecOptions = {
+    cwd: SANDBOX_HOME,
+    env: { HOME: SANDBOX_HOME },
+    stdout: "pipe",
+    stderr: "pipe",
+  };
+  return stdin === "pipe" ? { ...options, stdin: "pipe" } : options;
+};
 
 /** Returns the directory with the process files of `process`. */
 const processDirectory = (process: ProcessId): string => `${PROCESSES_DIRECTORY}/${process}`;

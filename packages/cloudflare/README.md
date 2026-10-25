@@ -42,7 +42,7 @@ Every request needs the `CF-Access-Client-Id` and `CF-Access-Client-Secret` head
 | `GET /v1/sandboxes/<name>/exec` (WebSocket) | Runs one command with `sh -c`, with its stdin, stdout, stderr, and exit code on the stream. |
 | `GET /v1/sandboxes/<name>/processes/<process>/attach?stdout=<n>&stderr=<n>` (WebSocket) | Resumes a command's output after the given byte offsets, then sends its exit code. |
 
-Each command runs in its own session, with its process ID, output, and exit code in files under `/home/usine/.usine/processes/<process>`. If the stream that started a command closes, the command's stdin closes, and its output keeps going to the files, so a later request can attach or read its state.
+Each command runs as the `usine` user in `/home/usine`, with `HOME` set, since the platform passes a command only the image's `PATH`. It runs in its own session, with its process ID, output, and exit code in files under `/home/usine/.usine/processes/<process>`. If the stream that started a command closes, the command's stdin closes, and its output keeps going to the files, so a later request can attach or read its state. The Worker closes the stream without an exit code when it can't read the command's output or exit code from the container, so the client attaches from the bytes it received.
 
 A keepalive alarm keeps the container running for two hours after the last create, credential renewal, or command, then lets the platform stop it after ten minutes of inactivity. A held sandbox keeps running until it's destroyed: usine holds the sandbox of a checkout that it keeps, such as one with unpushed work. A stopped container loses its disk.
 

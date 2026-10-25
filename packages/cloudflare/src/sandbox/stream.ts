@@ -1,4 +1,4 @@
-import { type Cause, Duration, Effect, Fiber, Option, Queue, Stream } from "effect";
+import { type Cause, Duration, Effect, Fiber, Option, Queue, Result, Stream } from "effect";
 import type { ProcessId, SandboxName } from "../api/api.ts";
 import {
   type AttachOffsets,
@@ -146,23 +146,32 @@ export const execStream = Effect.fn("Sandbox.execStream")(function* (
     [pump(socket, "stdout", handle.stdout), pump(socket, "stderr", handle.stderr)],
     { concurrency: 2, discard: true },
   ).pipe(Effect.forkChild);
-  const exitCode = yield* Effect.tryPromise({
-    try: () => handle.exitCode,
-    catch: (cause) =>
-      new ContainerFailure({
-        operation: "exec",
-        message: cause instanceof Error ? cause.message : String(cause),
+  const exitCode = yield* Fiber.join(output).pipe(
+    Effect.andThen(
+      Effect.tryPromise({
+        try: () => handle.exitCode,
+        catch: (cause) =>
+          new ContainerFailure({
+            operation: "exec",
+            message: cause instanceof Error ? cause.message : String(cause),
+          }),
       }),
-  }).pipe(Effect.option);
-  yield* Fiber.join(output).pipe(Effect.ignore);
+    ),
+    Effect.result,
+  );
   yield* Fiber.interrupt(input);
-  if (Option.isNone(exitCode)) {
-    yield* Effect.logError("Lost the command's exit code", fields);
-    return yield* refuse(socket, "The container lost the command's exit code");
+  if (Result.isFailure(exitCode)) {
+    // Closes without `Exited`, as a dropped connection does: the client then attaches to the
+    // process files from the bytes it received, and gets the rest of the output and the exit code.
+    yield* Effect.logError("Lost the command's output or exit code; the client attaches", {
+      ...fields,
+      error: exitCode.failure.message,
+    });
+    return yield* socket.close(1011, "container stream failed");
   }
-  yield* socket.send(encodeServerMessage(new Exited({ exitCode: exitCode.value })));
+  yield* socket.send(encodeServerMessage(new Exited({ exitCode: exitCode.success })));
   yield* socket.close(1000, "exited");
-  yield* Effect.logInfo("The sandbox's command exited", { ...fields, exitCode: exitCode.value });
+  yield* Effect.logInfo("The sandbox's command exited", { ...fields, exitCode: exitCode.success });
 });
 
 /**

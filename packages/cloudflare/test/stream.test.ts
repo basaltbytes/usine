@@ -102,6 +102,58 @@ describe("sandbox exec stream", () => {
     }).pipe(Effect.provide(sandbox.layer));
   });
 
+  it.effect(
+    "drops the stream when the command's output fails, so the client attaches from the bytes it has",
+    () => {
+      const sandbox = running();
+      let pulls = 0;
+      sandbox.state.run = () => ({
+        stdin: null,
+        stdout: new ReadableStream<Uint8Array>({
+          pull: (controller) => {
+            pulls += 1;
+            if (pulls === 1) controller.enqueue(text("M  staged.ts\n"));
+            else controller.error(new Error("stream reset"));
+          },
+        }),
+        stderr: new Response("").body,
+        exitCode: Promise.resolve(0),
+      });
+      return Effect.gen(function* () {
+        const client = yield* fakeSocket;
+        yield* Queue.offer(
+          client.messages,
+          encodeClientMessage(new ExecStart({ command: "git status --porcelain" })),
+        );
+        yield* execStream(NAME, client.socket);
+
+        const [started, ...rest] = client.control();
+        assert(started?._tag === "Started");
+        expect(rest).toEqual([]);
+        expect(client.closed).toEqual([1011]);
+
+        const files = processFiles(started.process);
+        sandbox.state.files.set(files.pid, text("4242"));
+        sandbox.state.files.set(files.stdout, text("M  staged.ts\n?? new.ts\n"));
+        sandbox.state.files.set(files.exit, text("0"));
+        const attached = yield* fakeSocket;
+        yield* attachStream(
+          NAME,
+          started.process,
+          { stdout: text(client.output("stdout")).length, stderr: 0 },
+          attached.socket,
+        );
+
+        expect(client.output("stdout") + attached.output("stdout")).toBe(
+          "M  staged.ts\n?? new.ts\n",
+        );
+        expect(attached.control()).toEqual([
+          expect.objectContaining({ _tag: "Exited", exitCode: 0 }),
+        ]);
+      }).pipe(Effect.provide(sandbox.layer));
+    },
+  );
+
   it.effect("refuses a command for a sandbox whose container stopped", () => {
     const sandbox = running();
     sandbox.state.running = false;

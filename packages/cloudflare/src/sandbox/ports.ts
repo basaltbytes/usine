@@ -40,7 +40,7 @@ export class SandboxContainer extends Context.Service<
       image: string,
       instanceType: CloudflareInstanceType,
     ) => Effect.Effect<void, ContainerFailure>;
-    /** Runs `command` as the image's user in its home directory, with piped stdout and stderr. */
+    /** Runs `command` as the image's user in its home directory, with `HOME` set and piped output. */
     readonly exec: (
       command: ReadonlyArray<string>,
       stdin: "pipe" | "closed",

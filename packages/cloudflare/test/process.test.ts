@@ -3,9 +3,11 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { SANDBOX_HOME } from "../src/api/harness.ts";
 import {
   PROCESS_SCRIPT,
   STOP_SCRIPT,
+  commandOptions,
   exitCodeOf,
   pidOf,
   stoppedCount,
@@ -17,9 +19,13 @@ interface Finished {
   readonly exitCode: number | null;
 }
 
-/** Runs `PROCESS_SCRIPT` locally as the container would, with `input` on stdin. */
+/**
+ * Runs `PROCESS_SCRIPT` locally as the container would, with `input` on stdin. The platform passes
+ * an exec only the image's `PATH` and the exec's `env`.
+ */
 const runProcess = (directory: string, command: string, input: string) => {
   const child = spawn("sh", ["-c", PROCESS_SCRIPT, "usine-process", directory, command], {
+    env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin", ...commandOptions("pipe").env },
     stdio: ["pipe", "pipe", "pipe"],
   });
   let stdout = "";
@@ -67,6 +73,13 @@ describe("sandbox process files", () => {
     );
     expect(pidOf(readFileSync(join(directory, "pid"), "utf8"))._tag).toBe("Some");
     expect(existsSync(join(directory, "stdout.pipe"))).toBe(false);
+  });
+
+  it("gives the command the sandbox home, which the platform doesn't pass from the image", async () => {
+    const root = mkdtempSync(join(tmpdir(), "usine-process-"));
+    const { finished } = runProcess(join(root, "d".repeat(32)), 'printf %s "$HOME"', "");
+
+    expect(await finished).toEqual({ stdout: SANDBOX_HOME, stderr: "", exitCode: 0 });
   });
 
   it("keeps copying output to the files after the stream that started the command closes", async () => {

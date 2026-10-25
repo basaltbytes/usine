@@ -30,7 +30,7 @@ import {
   SandboxStorage,
   StoredSandbox,
 } from "./sandbox/ports.ts";
-import { readFromCommand } from "./sandbox/process.ts";
+import { commandOptions, readFromCommand } from "./sandbox/process.ts";
 import { collectBytes, keepAlive, restore, sandboxRoutes } from "./sandbox/sandbox.ts";
 import { attachStream, execStream, type StreamSocket } from "./sandbox/stream.ts";
 
@@ -150,14 +150,7 @@ const containerOf = (
         catch: containerFailure("start"),
       }),
     exec: (command, stdin) =>
-      tryContainer("exec", () =>
-        container.exec(
-          [...command],
-          stdin === "pipe"
-            ? { stdin: "pipe", stdout: "pipe", stderr: "pipe" }
-            : { stdout: "pipe", stderr: "pipe" },
-        ),
-      ),
+      tryContainer("exec", () => container.exec([...command], commandOptions(stdin))),
     read: (path) =>
       tryContainer("read", async () => {
         try {
@@ -170,7 +163,7 @@ const containerOf = (
       }),
     readFrom: (path, offset) =>
       tryContainer("read", () =>
-        container.exec([...readFromCommand(path, offset)], { stdout: "pipe", stderr: "pipe" }),
+        container.exec([...readFromCommand(path, offset)], commandOptions("closed")),
       ).pipe(
         // Keeps the bytes as they are: the attach stream counts them to resume at an offset.
         Effect.flatMap((process) => collectBytes(process)),
