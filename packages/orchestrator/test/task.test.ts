@@ -426,12 +426,13 @@ const readTask = (
   number: number,
   project: RepositoryName = repository,
   runEvents: ReadonlyArray<RunEvent> = [],
+  loaded: LoadedInstance = instance,
 ) =>
   Effect.gen(function* () {
     const requested = yield* Ref.make<ReadonlyArray<string>>([]);
     const task = yield* Effect.gen(function* () {
       const operator = yield* OperatorObservation;
-      return yield* operator.task(instance, project, ItemNumber.make(number));
+      return yield* operator.task(loaded, project, ItemNumber.make(number));
     }).pipe(Effect.provide(observation(requested, runEvents)));
     return { task, requested: yield* Ref.get(requested) };
   });
@@ -515,7 +516,7 @@ describe("Task view", () => {
     }),
   );
 
-  it.effect("names the lane its running Run was triggered from as the Board does", () =>
+  it.effect("names the lane the Board places its running Task in", () =>
     Effect.gen(function* () {
       // fix-ci was triggered while #42 had `ready`; it has `ready-for-review` now.
       const triggered = new RunEvent({
@@ -527,9 +528,27 @@ describe("Task view", () => {
           receivedAt: at("2026-10-06T08:59:00.000Z"),
         }),
       });
-      const { task } = yield* readTask(40, repository, [triggered]);
-      assert.strictEqual(task.current, gitHubItemKey(repository, 42));
-      assert.strictEqual(task.lane.name, "Ready");
+      const labeled = yield* readTask(40, repository, [triggered]);
+      assert.strictEqual(labeled.task.current, gitHubItemKey(repository, 42));
+      assert.strictEqual(labeled.task.lane.name, "In review");
+      // With no lane for `ready-for-review`, the Task is in the lane its Run was triggered from.
+      const unlaned = new LoadedInstance({
+        ...instance,
+        config: Schema.decodeUnknownSync(UsineConfig)({
+          version: 1,
+          repos: [
+            {
+              name: repository,
+              lanes: [
+                { name: "Ready", sources: [{ label: "ready" }] },
+                { name: "Pull requests", sources: [{ state: "pr-open" }] },
+              ],
+            },
+          ],
+        }),
+      });
+      const fallback = yield* readTask(40, repository, [triggered], unlaned);
+      assert.strictEqual(fallback.task.lane.name, "Ready");
     }),
   );
 

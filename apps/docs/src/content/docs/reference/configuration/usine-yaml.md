@@ -194,7 +194,7 @@ Each lane is one board column ([`Lane`](https://github.com/basaltbytes/usine/blo
 A source can appear in only one lane of a repository, ignoring case for labels. The board places each task as follows ([`laneFor`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/board/projection.ts#L78)):
 
 1. A task whose current item is a merged or closed pull request, or a closed issue, goes to the first lane with a matching `state` source. An item that GitHub no longer has, as found by polling, counts as closed.
-2. A task whose newest open run is `Running` goes to the first lane, in file order, with a `label` source that matches a label the item had when that run's trigger matched. The card stays there until the run ends, even if the loop removes the label. If no lane matches, rule 3 applies.
+2. A task whose newest open run is `Running` goes to the first lane, in file order, with a `label` source that matches one of the item's labels. If none matches, it goes to the first lane with a `label` source that matches a label the item had when that run's trigger matched, so a loop that removes its trigger label and sets no other lane label leaves the card in that lane until the run ends. If neither matches, rule 3 applies.
 3. Any other task goes to the first lane, in file order, with a `label` source that matches one of the item's labels, or else to the first lane with a matching `state` source.
 4. A task that matches no lane goes to the `Unmapped` column.
 
@@ -202,7 +202,7 @@ A lane with a `label` source accepts board moves, which add its labels and remov
 
 Without `lanes`, the board shows one read-only lane per repository label, sorted by name ([`effectiveLanes`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/board/projection.ts#L50)).
 
-Lane order also ranks runs that wait for a worker slot: a run whose item was in a later lane when its trigger matched, by rule 2, goes first ([queue order](/reference/configuration/loop-files/#priority)). The proposed lanes of a repository without `lanes` don't rank runs.
+Lane order also ranks runs that wait for a worker slot: a run whose item had the label of a later lane when its trigger matched goes first ([queue order](/reference/configuration/loop-files/#priority)). The proposed lanes of a repository without `lanes` don't rank runs.
 
 An undeclared `label` source still loads, and usine logs `Board Lane references an undeclared GitHub label`.
 

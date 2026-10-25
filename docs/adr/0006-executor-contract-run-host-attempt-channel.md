@@ -107,7 +107,7 @@ A free slot now goes to the first waiting run in this order (`leaseOrder` in `pa
 
 1. A reservation that names a worker, as before.
 2. A run of a loop whose file sets `priority`, higher first.
-3. A run with a lane position, later lane first. The position is the first lane, in the repository's `lanes` order, with a label source among the item's labels in the run's event. It's the lane that the board keeps the run's card in while the run runs (ADR 0024, 2026-10-21).
+3. A run with a lane position, later lane first. The position is the first lane, in the repository's `lanes` order, with a label source among the item's labels in the run's event. It's the lane that the item was in when the trigger matched (ADR 0024, 2026-10-21).
 4. Any other run, such as a schedule run or a run in a repository without `lanes`.
 
 Event order ranks runs at the same position.
