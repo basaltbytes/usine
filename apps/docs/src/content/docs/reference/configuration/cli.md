@@ -8,7 +8,7 @@ sidebar:
 The `@usine/server` package provides the `usine` binary ([`main.ts`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/main.ts#L47)). Run every command from the instance folder, the folder that contains `usine.yaml`.
 
 ```sh title="Usage"
-usine up [--port <port>] [--allow-volatile-instance]
+usine up [--port <port>] [--log-level <level>] [--allow-volatile-instance]
 usine backup <path>
 usine export-run <runId> [--output <path>]
 usine --help
@@ -30,6 +30,7 @@ For any other form, the parser prints the usage on standard error and exits with
 | Flag | Value | Default | Description |
 | --- | --- | --- | --- |
 | `-p <port>`, `--port <port>`, `--port=<port>` | integer 1 to 65535 | `USINE_PORT`, then `7331` | The HTTP port. The server listens only on `127.0.0.1`. |
+| `--log-level <level>`, `--log-level=<level>` | `trace`, `debug`, `info`, `warn`, or `error`, in any case | `USINE_LOG_LEVEL`, then `info` | The lowest level of the lines that usine logs. `debug` adds the lines that say why usine skipped or deferred something, such as an entry left out of **Needs attention**. A change takes effect at the next `usine up`. |
 | `--allow-volatile-instance` | none | off | Starts even if the instance folder is under a temporary directory. |
 
 If a flag repeats, the last value wins.
@@ -121,6 +122,7 @@ The `usine` process reads these variables:
 | Variable | Read by | Description |
 | --- | --- | --- |
 | `USINE_PORT` | `usine up` | The HTTP port if `--port` is absent. If the value isn't a whole number from 1 to 65535, `usine up` exits with status 1. |
+| `USINE_LOG_LEVEL` | `usine up` | The log level if `--log-level` is absent. If the value isn't `trace`, `debug`, `info`, `warn`, or `error`, in any case, `usine up` exits with status 1. |
 | `USINE_ALLOW_VOLATILE_INSTANCE` | `usine up` | `1` has the same effect as `--allow-volatile-instance`. usine ignores other values. |
 | `TMPDIR` | `usine up` | Added to the temporary directories of the volatile path check. |
 | `USINE_GITHUB_APP_ID` | `usine up` | The GitHub App ID, a positive integer. Takes precedence over `app_id` in the secrets file. |

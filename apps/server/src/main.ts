@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { NodeRuntime, NodeServices } from "@effect/platform-node";
-import { Console, Effect, Match, Option } from "effect";
+import { Console, Effect, Match, Option, References } from "effect";
 import { CLI_USAGE, packageVersion, parseCli } from "./cli.ts";
 import { failureMessage } from "./failure-message.ts";
 
@@ -16,6 +16,7 @@ const exitWith = (message: string) =>
 const main = Effect.gen(function* () {
   const command = yield* parseCli(process.argv.slice(2), {
     port: Option.fromNullishOr(process.env.USINE_PORT),
+    logLevel: Option.fromNullishOr(process.env.USINE_LOG_LEVEL),
     allowVolatileInstance: Option.fromNullishOr(process.env.USINE_ALLOW_VOLATILE_INSTANCE),
   });
   return yield* Match.valueTags(command, {
@@ -31,10 +32,13 @@ const main = Effect.gen(function* () {
         Effect.promise(() => import("./backup.ts")),
         ({ backup }) => backup(output),
       ),
-    UpCommand: ({ port, allowVolatileInstance }) =>
+    UpCommand: ({ port, logLevel, allowVolatileInstance }) =>
       Effect.flatMap(
         Effect.promise(() => import("./up.ts")),
-        ({ up }) => up(port, allowVolatileInstance),
+        ({ up }) =>
+          up(port, allowVolatileInstance).pipe(
+            Effect.provideService(References.MinimumLogLevel, logLevel),
+          ),
       ),
   });
 }).pipe(
