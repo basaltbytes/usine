@@ -33,6 +33,7 @@ The first screen, at `/`:
 - **Stalled**: one row per item a loop's trigger matches with no running attempt, named by its task, with a reason such as `Canceled 2d ago, unchanged since` and the one applicable action: **Approve**, **Mark answered**, **Mark resolved**, **Reset cycle budget**, **Retry**, **Run again**, or **Resume**. Below `md`, the loop, reason, and action stack under the item.
 - **Recent runs**: the last 10 closed runs, with outcome and the pull request the run opened, unless it names the task.
 - One line with each worker's slots in use and last preflight.
+- **Statistics**: a switch between `7 days`, `30 days` (the default), and `All`, then figures for runs closed, median run and attempt time, and cost and tokens per run; runs closed per day stacked by outcome; the outcome shares; merged pull requests with first pass and lead time; runs per loop or agent, or attempts per model, by outcome over a table of time, tokens, and cost; attempts per run; queue wait and slot use per worker; and Needs attention entries per day with the waits for an approval and for a retry. Each block has a one-line reading or says what is missing, such as `No closed runs in the last 7 days`. Switching windows dims the previous figures until the next arrive. Each chart's values are also in a table for screen readers.
 
 A row about a run opens its run page. Empty blocks say what they would list, and loading blocks show skeleton rows. With no project registered, the overview points to `repos` in `usine.yaml` and offers **Reload configuration**.
 

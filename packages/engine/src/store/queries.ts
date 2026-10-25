@@ -21,6 +21,7 @@ import {
   asc,
   desc,
   eq,
+  gte,
   inArray,
   isNull,
   ne,
@@ -386,6 +387,24 @@ export const queriesFor = (database: RunDatabaseClient) => {
       .where(notInArray(storedStateTag, [...RunState.OPEN_STATE_TAGS]))
       .orderBy(desc(runs.closedAt), desc(runs.runId))
       .limit(limit)
+      .execute()
+      .pipe(Effect.flatMap(decodeRunRows));
+    return yield* summariesWithAttempts(closedRuns);
+  });
+
+  // Every closed Run with `closedAt` at or after `since`, or every closed Run for `None`.
+  const closedRunSummariesSince = Effect.fn("RunStoreQueries.closedRunSummariesSince")(function* (
+    since: Option.Option<DateTime.Utc>,
+  ) {
+    const closed = notInArray(storedStateTag, [...RunState.OPEN_STATE_TAGS]);
+    const closedRuns = yield* selectRuns()
+      .where(
+        Option.match(since, {
+          onNone: () => closed,
+          onSome: (from) => and(closed, gte(runs.closedAt, encodeDateTime(from))),
+        }),
+      )
+      .orderBy(desc(runs.closedAt), desc(runs.runId))
       .execute()
       .pipe(Effect.flatMap(decodeRunRows));
     return yield* summariesWithAttempts(closedRuns);
@@ -982,6 +1001,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     revokeUnstarted,
     runSummaries,
     closedRunSummaries,
+    closedRunSummariesSince,
     itemRunSummaries,
     runEvents,
     runForEvent,

@@ -10,7 +10,7 @@ import { WorkerName } from "@usine/core/worker";
 import { RunAgainResult } from "@usine/engine/engine";
 import { TranscriptSequence } from "@usine/engine/transcript";
 import { ExecutorOperation, WorkerCapability } from "@usine/executor";
-import { Match, Record, Schema, SchemaTransformation } from "effect";
+import { Effect, Match, Record, Schema, SchemaTransformation } from "effect";
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware } from "effect/unstable/httpapi";
 import { InstanceReload, RestartBlock } from "../current-instance/changes.ts";
 import type { InstanceReloadError } from "../current-instance/current-instance.ts";
@@ -26,6 +26,7 @@ import { RunGitHubChangesView } from "./github-changes.ts";
 import { TaskView } from "./task.ts";
 import { ConfigurationView } from "./configuration.ts";
 import { DeskView } from "./desk.ts";
+import { StatisticsView, StatisticsWindow } from "./statistics/view.ts";
 
 const errorStatuses = {
   SchemaError: 400,
@@ -356,5 +357,16 @@ export const OperatorApi = HttpApi.make("OperatorApi").add(
     )
     .add(HttpApiEndpoint.get("configuration", "/api/configuration", { success: ConfigurationView }))
     .add(HttpApiEndpoint.get("desk", "/api/desk", { success: DeskView }))
+    .add(
+      HttpApiEndpoint.get("statistics", "/api/statistics", {
+        query: Schema.Struct({
+          window: queryValue.pipe(
+            Schema.decodeTo(StatisticsWindow),
+            Schema.withDecodingDefaultKey(Effect.succeed("30d" as const)),
+          ),
+        }),
+        success: StatisticsView,
+      }),
+    )
     .middleware(OperatorHttpPolicy),
 );

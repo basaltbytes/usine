@@ -37,7 +37,7 @@
   --input: rgb(76 79 105 / 18%);
   --ring: #8839ef;
   --overlay: rgb(76 79 105 / 40%);
-  --chart-1: oklch(0.879 0.169 91.605);
+  --chart-1: #209fb5; /* sapphire */
   --chart-2: oklch(0.769 0.188 70.08);
   --chart-3: oklch(0.666 0.179 58.318);
   --chart-4: oklch(0.555 0.163 48.998);
@@ -99,6 +99,7 @@
   --run-canceled: #6c7086; /* overlay0 */
   --needs-you: #fab387; /* peach */
   --warning: #f9e2af; /* yellow */
+  --chart-1: #74c7ec; /* sapphire, the one hue for a single data series */
 }
 
 /* One type scale: 12 captions and meta, 13 body, 14 emphasised UI, 16 section titles, 20 screen

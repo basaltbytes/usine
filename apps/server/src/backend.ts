@@ -25,6 +25,8 @@ import {
   type OperatorObservation,
   type EditAndRetry,
   type SessionIntervention,
+  type StatisticsView,
+  type StatisticsWindow,
   type TaskView,
 } from "@usine/orchestrator/operator";
 import type { ItemNumber } from "@usine/core/item";
@@ -78,6 +80,7 @@ export class FactoryBackend extends Context.Service<
     ) => Effect.Effect<TaskView, BackendError>;
     readonly configuration: Effect.Effect<ConfigurationView, BackendError>;
     readonly desk: Effect.Effect<DeskView, BackendError>;
+    readonly statistics: (window: StatisticsWindow) => Effect.Effect<StatisticsView, BackendError>;
   }
 >()("@usine/server/FactoryBackend") {}
 
@@ -121,6 +124,8 @@ export const liveBackendLayer = (
       Effect.flatMap(instances.get, (instance) => operator.task(instance, repository, item)),
     configuration: Effect.flatMap(instances.get, configuration.view),
     desk: Effect.flatMap(instances.get, operator.desk),
+    statistics: (window) =>
+      Effect.flatMap(instances.get, (instance) => operator.statistics(instance, window)),
   });
 
 /**
@@ -167,5 +172,7 @@ export const needsSetupBackendLayer = (
       Effect.flatMap(instances.get, (instance) => observation.task(instance, repository, item)),
     configuration: Effect.flatMap(instances.get, configuration.view),
     desk: Effect.flatMap(instances.get, observation.desk),
+    statistics: (window) =>
+      Effect.flatMap(instances.get, (instance) => observation.statistics(instance, window)),
   });
 };

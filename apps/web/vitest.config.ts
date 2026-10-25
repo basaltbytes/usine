@@ -21,6 +21,7 @@ interface ApprovalExchange {
   lateOverviews: number;
 }
 const approvals = new WeakMap<Page, ApprovalExchange>();
+const statisticsWindows = new WeakMap<Page, Array<string | null>>();
 // The overview response delay after approval, as on a busy instance (#463).
 const SLOW_OVERVIEW_MS = 5_000;
 
@@ -286,6 +287,36 @@ export default mergeConfig(
                     route.fulfill({ status: 409, contentType: "application/json", body }),
                   );
                 },
+                // Serves the overview, the desk, and the statistics of each window, and records
+                // the `window` of each statistics request.
+                statisticsResponses: async (
+                  { page },
+                  overview: string,
+                  desk: string,
+                  statistics: Readonly<Record<"7d" | "30d" | "all", string>>,
+                ) => {
+                  const windows: Array<string | null> = [];
+                  statisticsWindows.set(page, windows);
+                  await page.unroute("**/api/overview");
+                  await page.unroute("**/api/desk");
+                  await page.unroute("**/api/statistics*");
+                  await page.route("**/api/overview", (route) =>
+                    route.fulfill({ contentType: "application/json", body: overview }),
+                  );
+                  await page.route("**/api/desk", (route) =>
+                    route.fulfill({ contentType: "application/json", body: desk }),
+                  );
+                  await page.route("**/api/statistics*", (route) => {
+                    const window = new URL(route.request().url()).searchParams.get("window");
+                    windows.push(window);
+                    return route.fulfill(
+                      window === "7d" || window === "30d" || window === "all"
+                        ? { contentType: "application/json", body: statistics[window] }
+                        : { status: 400 },
+                    );
+                  });
+                },
+                statisticsRequests: async ({ page }) => statisticsWindows.get(page) ?? [],
                 boardResponses: async ({ page }, overview: string, moveStatus: 200 | 503) => {
                   await page.unroute("**/api/overview");
                   await page.unroute("**/api/projects/board-test/repo/items/*/lane");

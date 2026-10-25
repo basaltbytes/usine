@@ -1,6 +1,6 @@
 import { AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
-import { ProviderRetries } from "@usine/core/agent/session";
+import { ProviderRetries, TokenCount, UsdAmount } from "@usine/core/agent/session";
 import { AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
 import {
   CycleBudgetAsk,
@@ -54,6 +54,23 @@ import {
   WorkerSlotsView,
   WorkerView,
   LocalWorkerAccess,
+  AgentStatisticsView,
+  AttemptCountView,
+  BrainStatisticsView,
+  CostSummaryView,
+  DurationSummaryView,
+  FirstPassView,
+  LoopStatisticsView,
+  NeedsAttentionPeriodView,
+  NeedsAttentionView,
+  OutcomeCountsView,
+  PoolTokensView,
+  StatisticsView,
+  type StatisticsWindow,
+  ThroughputPeriodView,
+  UsageSummaryView,
+  WorkerQueueWaitView,
+  WorkerUtilizationView,
 } from "@usine/orchestrator/operator";
 import { GitHubItemKey } from "@usine/orchestrator/polling-triggers";
 import { Schema } from "effect";
@@ -421,4 +438,195 @@ export const deskFixture = (now: number) => {
   });
 
   return { desk, empty, overview };
+};
+
+const MINUTE = 60_000;
+const DAY = 86_400_000;
+
+const durations = (count: number, median: number, p90: number, mean: number) =>
+  new DurationSummaryView({
+    count,
+    meanMillis: Math.round(mean * MINUTE),
+    medianMillis: Math.round(median * MINUTE),
+    p90Millis: Math.round(p90 * MINUTE),
+  });
+
+const outcomes = (succeeded: number, failed: number, canceled: number) =>
+  new OutcomeCountsView({ succeeded, failed, canceled });
+
+const usage = (measured: number, claudePlan: number, chatgptPlan: number, priced: number) =>
+  new UsageSummaryView({
+    measured,
+    tokens: TokenCount.make(claudePlan + chatgptPlan),
+    meanTokens: TokenCount.make(Math.round((claudePlan + chatgptPlan) / measured)),
+    pools: [
+      new PoolTokensView({ pool: "claudePlan", tokens: TokenCount.make(claudePlan) }),
+      new PoolTokensView({ pool: "chatgptPlan", tokens: TokenCount.make(chatgptPlan) }),
+    ],
+    cost:
+      priced === 0
+        ? null
+        : new CostSummaryView({
+            usd: UsdAmount.make(priced * 3.1),
+            meanUsd: UsdAmount.make(3.1),
+            estimate: true,
+            priced,
+          }),
+  });
+
+/** Returns the statistics of `window` with no closed Run; periods end on the UTC day of `now`. */
+export const emptyStatisticsFixture = (now: number, window: StatisticsWindow) => {
+  const today = now - (now % DAY);
+  return new StatisticsView({
+    window,
+    from: new Date(today).toISOString(),
+    to: new Date(now).toISOString(),
+    bucket: "day",
+    runs: outcomes(0, 0, 0),
+    runTime: null,
+    attemptTime: null,
+    unmeasuredAttempts: 0,
+    usage: new UsageSummaryView({
+      measured: 0,
+      tokens: TokenCount.make(0),
+      meanTokens: null,
+      pools: [],
+      cost: null,
+    }),
+    throughput: [
+      new ThroughputPeriodView({
+        start: new Date(today).toISOString().slice(0, 10),
+        ...outcomes(0, 0, 0),
+      }),
+    ],
+    firstPass: new FirstPassView({ merged: 0, firstPass: 0 }),
+    leadTime: null,
+    loops: [],
+    agents: [],
+    brains: [],
+    queueWait: [],
+    attemptsPerRun: [],
+    utilization: [
+      new WorkerUtilizationView({
+        worker: WorkerName.make("local"),
+        slots: 2,
+        occupiedMillis: 0,
+        share: 0,
+      }),
+    ],
+    needsAttention: new NeedsAttentionView({
+      approvals: 0,
+      failures: 0,
+      periods: [],
+      approvalWait: null,
+      retryWait: null,
+    }),
+  });
+};
+
+/**
+ * Returns the statistics of the desk's Loops, Agents, and Workers over the 7 or 30 days that end
+ * on the UTC day of `now`; the 30-day figures are three times the 7-day ones.
+ */
+export const statisticsFixture = (now: number, window: "7d" | "30d") => {
+  const days = window === "7d" ? 7 : 30;
+  const scale = window === "7d" ? 1 : 3;
+  const from = now - (now % DAY) - (days - 1) * DAY;
+  const periods = Array.from({ length: days }, (_, index) =>
+    new Date(from + index * DAY).toISOString().slice(0, 10),
+  );
+  const busiest = days - 3;
+  const developer = {
+    outcomes: outcomes(6 * scale, 2 * scale, scale),
+    time: durations(9 * scale, 39, 70, 41),
+    usage: usage(9 * scale, 3_000_000 * scale, 0, 6 * scale),
+  };
+  const reviewer = {
+    outcomes: outcomes(3 * scale, 0, 0),
+    time: durations(3 * scale, 5, 9, 6),
+    usage: usage(3 * scale, 600_000 * scale, 600_000 * scale, 2 * scale),
+  };
+  return new StatisticsView({
+    window,
+    from: new Date(from).toISOString(),
+    to: new Date(now).toISOString(),
+    bucket: "day",
+    runs: outcomes(9 * scale, 2 * scale, scale),
+    runTime: durations(12 * scale, 18, 64, 26),
+    attemptTime: durations(14 * scale, 14, 52, 19),
+    unmeasuredAttempts: 0,
+    usage: usage(12 * scale, 3_600_000 * scale, 600_000 * scale, 8 * scale),
+    throughput: periods.map(
+      (start, index) =>
+        new ThroughputPeriodView({
+          start,
+          ...(index === busiest
+            ? outcomes(5 * scale, 2 * scale, 0)
+            : index > busiest
+              ? outcomes(2 * scale, 0, index === days - 1 ? scale : 0)
+              : outcomes(0, 0, 0)),
+        }),
+    ),
+    firstPass: new FirstPassView({ merged: 4 * scale, firstPass: 3 * scale }),
+    leadTime: durations(4 * scale, 130, 300, 180),
+    loops: [
+      new LoopStatisticsView({ loop: LoopName.make("start-dev"), ...developer }),
+      new LoopStatisticsView({ loop: LoopName.make("review-fix"), ...reviewer }),
+    ],
+    agents: [
+      new AgentStatisticsView({ agent: AgentName.make("developer"), ...developer }),
+      new AgentStatisticsView({ agent: AgentName.make("reviewer"), ...reviewer }),
+    ],
+    brains: [
+      new BrainStatisticsView({
+        brain,
+        outcomes: outcomes(9 * scale, 4 * scale, scale),
+        time: durations(14 * scale, 14, 52, 19),
+        usage: usage(14 * scale, 3_600_000 * scale, 600_000 * scale, 8 * scale),
+      }),
+    ],
+    queueWait: [
+      new WorkerQueueWaitView({
+        worker: WorkerName.make("hz-worker-1"),
+        wait: durations(4, 2, 9, 3),
+      }),
+      new WorkerQueueWaitView({
+        worker: WorkerName.make("local"),
+        wait: durations(10, 0.1, 1, 0.5),
+      }),
+    ],
+    attemptsPerRun: [
+      new AttemptCountView({ attempts: 1, runs: 10 * scale }),
+      new AttemptCountView({ attempts: 2, runs: scale }),
+      new AttemptCountView({ attempts: 3, runs: scale }),
+    ],
+    utilization: [
+      new WorkerUtilizationView({
+        worker: WorkerName.make("local"),
+        slots: 2,
+        occupiedMillis: 900 * MINUTE,
+        share: 0.38,
+      }),
+      new WorkerUtilizationView({
+        worker: WorkerName.make("hz-worker-1"),
+        slots: 1,
+        occupiedMillis: 180 * MINUTE,
+        share: 0.12,
+      }),
+    ],
+    needsAttention: new NeedsAttentionView({
+      approvals: 3 * scale,
+      failures: 2 * scale,
+      periods: periods.map(
+        (start, index) =>
+          new NeedsAttentionPeriodView({
+            start,
+            approvals: index === busiest ? 3 * scale : 0,
+            failures: index === days - 1 ? 2 * scale : 0,
+          }),
+      ),
+      approvalWait: durations(3 * scale, 14, 120, 40),
+      retryWait: null,
+    }),
+  });
 };

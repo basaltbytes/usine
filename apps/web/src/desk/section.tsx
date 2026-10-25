@@ -11,6 +11,7 @@ export const DeskSection = ({
   count,
   countTone = "muted",
   note,
+  actions,
   children,
 }: {
   readonly id: string;
@@ -19,6 +20,8 @@ export const DeskSection = ({
   /** `needs-you` uses the Needs you tone, as in the sidebar. */
   readonly countTone?: "muted" | "needs-you";
   readonly note?: ReactNode;
+  /** Controls at the end of the header, after the note. */
+  readonly actions?: ReactNode;
   readonly children: ReactNode;
 }) => (
   <section aria-labelledby={id} className="flex min-w-0 flex-col gap-2">
@@ -38,6 +41,9 @@ export const DeskSection = ({
       )}
       {note !== undefined && (
         <span className="ml-auto text-xs text-muted-foreground tabular-nums">{note}</span>
+      )}
+      {actions !== undefined && (
+        <div className={cn("self-center", note === undefined && "ml-auto")}>{actions}</div>
       )}
     </header>
     {children}

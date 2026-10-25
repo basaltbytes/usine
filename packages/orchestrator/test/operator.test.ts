@@ -437,6 +437,7 @@ const testLayer = (
         Effect.as([runSnapshot]),
       ),
     closed: () => Effect.succeed([]),
+    closedSince: () => Effect.die("unused"),
     forItems: () => Effect.succeed([runSnapshot]),
     events: (runIds) =>
       Effect.succeed(

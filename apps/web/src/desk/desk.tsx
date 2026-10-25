@@ -17,6 +17,7 @@ import { NotMoving } from "./not-moving.tsx";
 import { deskQuery } from "./query.ts";
 import { RunningNow } from "./running-now.tsx";
 import { DeskSection, EmptyLine } from "./section.tsx";
+import { Statistics } from "./statistics/statistics.tsx";
 import { WorkersLine } from "./workers-line.tsx";
 
 const NoProjects = () => {
@@ -76,7 +77,10 @@ const LoadingBlock = ({ id, title }: { readonly id: string; readonly title: stri
   </DeskSection>
 );
 
-/** Renders the Overview page at `/`. Needs attention reads the overview query; the other sections read the desk query. */
+/**
+ * Renders the Overview page at `/`. Needs attention reads the overview query, Statistics its own
+ * query, and the other sections the desk query.
+ */
 export const Desk = () => {
   const { data: overview } = useSuspenseQuery(overviewQuery());
   const desk = useQuery(deskQuery());
@@ -120,6 +124,7 @@ export const Desk = () => {
             {desk.data.workers.length > 0 && <WorkersLine workers={desk.data.workers} now={now} />}
           </>
         )}
+        <Statistics />
       </div>
     </Page>
   );

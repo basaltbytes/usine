@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Option } from "effect";
+import { Context, type DateTime, Effect, Layer, Option } from "effect";
 import { RunId } from "@usine/core/run";
 import { ItemKey } from "@usine/core/item";
 import { RunDatabase } from "../database/database.ts";
@@ -54,6 +54,9 @@ const makeRunReader = Effect.gen(function* () {
   const closed = Effect.fn("RunReader.closed")((options: { readonly limit: number }) =>
     queries.closedRunSummaries(options.limit).pipe(persistence("list closed runs")),
   );
+  const closedSince = Effect.fn("RunReader.closedSince")((since: Option.Option<DateTime.Utc>) =>
+    queries.closedRunSummariesSince(since).pipe(persistence("list runs closed since a time")),
+  );
   const revision = Effect.fn("RunReader.revision")(() =>
     queries.revision().pipe(persistence("read projection revision")),
   );
@@ -78,6 +81,7 @@ const makeRunReader = Effect.gen(function* () {
     evidence,
     list,
     closed,
+    closedSince,
     forItems,
     events,
     revision,
@@ -103,6 +107,13 @@ export class RunReader extends Context.Service<
     readonly closed: (options: {
       readonly limit: number;
     }) => Effect.Effect<ReadonlyArray<RunSummary>, RunStoreError>;
+    /**
+     * Returns every Run that closed at or after `since`, or every closed Run for `None`, by close
+     * time, newest first.
+     */
+    readonly closedSince: (
+      since: Option.Option<DateTime.Utc>,
+    ) => Effect.Effect<ReadonlyArray<RunSummary>, RunStoreError>;
     /** Returns every Run for `itemKeys`, newest first, with all their Attempts. */
     readonly forItems: (
       itemKeys: ReadonlyArray<ItemKey>,

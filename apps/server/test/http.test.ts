@@ -10,6 +10,7 @@ import { LaneName } from "@usine/config/board";
 import { QuarantinedLoop } from "@usine/config/loop";
 import { UsineConfig } from "@usine/config/factory";
 import { AgentName } from "@usine/core/agent";
+import { TokenCount } from "@usine/core/agent/session";
 import { AttemptId, AttemptTask } from "@usine/core/attempt";
 import { CycleBudgetAskId } from "@usine/core/cycle-budget";
 import { ItemKey, ItemNumber } from "@usine/core/item";
@@ -73,6 +74,12 @@ import {
   ConfigurationView,
   type OperatorConfiguration,
   SettingsView,
+  NeedsAttentionView,
+  OutcomeCountsView,
+  FirstPassView,
+  StatisticsView,
+  type StatisticsWindow,
+  UsageSummaryView,
   WorkerConfigurationView,
 } from "@usine/orchestrator/operator";
 import {
@@ -253,9 +260,44 @@ const desk = new DeskView({
   workers: [],
   polls: [new RepositoryPollView({ repository: repositoryName, polledAt: null })],
 });
+const statisticsOf = (window: StatisticsWindow) =>
+  new StatisticsView({
+    window,
+    from: "2026-09-01T00:00:00.000Z",
+    to: "2026-09-01T12:00:00.000Z",
+    bucket: "day",
+    runs: new OutcomeCountsView({ succeeded: 0, failed: 0, canceled: 0 }),
+    runTime: null,
+    attemptTime: null,
+    unmeasuredAttempts: 0,
+    usage: new UsageSummaryView({
+      measured: 0,
+      tokens: TokenCount.make(0),
+      meanTokens: null,
+      pools: [],
+      cost: null,
+    }),
+    throughput: [],
+    firstPass: new FirstPassView({ merged: 0, firstPass: 0 }),
+    leadTime: null,
+    loops: [],
+    agents: [],
+    brains: [],
+    queueWait: [],
+    attemptsPerRun: [],
+    utilization: [],
+    needsAttention: new NeedsAttentionView({
+      approvals: 0,
+      failures: 0,
+      periods: [],
+      approvalWait: null,
+      retryWait: null,
+    }),
+  });
 const observation: OperatorObservation["Service"] = {
   overview: () => Effect.succeed(overview),
   desk: () => Effect.succeed(desk),
+  statistics: (_instance, window) => Effect.succeed(statisticsOf(window)),
   detail: () => Effect.succeed(detail),
   task: () => Effect.succeed(task),
 };
@@ -359,6 +401,25 @@ describe("operator HTTP API", () => {
     );
     assert.strictEqual(taskResponse.status, 200);
     assert.deepStrictEqual(Schema.decodeUnknownSync(TaskView)(await taskResponse.json()), task);
+
+    for (const [search, window] of [
+      ["?window=7d", "7d"],
+      ["", "30d"],
+      ["?window=all&window=7d", "all"],
+    ] as const) {
+      const statisticsResponse = await app.handler(
+        new Request(`http://localhost/api/statistics${search}`),
+      );
+      assert.strictEqual(statisticsResponse.status, 200, search);
+      assert.strictEqual(
+        Schema.decodeUnknownSync(StatisticsView)(await statisticsResponse.json()).window,
+        window,
+      );
+    }
+    const unknownWindow = await app.handler(
+      new Request("http://localhost/api/statistics?window=90d"),
+    );
+    assert.strictEqual(unknownWindow.status, 400);
 
     for (const search of [
       "after=2&after=0",
@@ -514,6 +575,7 @@ describe("operator HTTP API", () => {
       task: (repository, item) => Effect.fail(new BoardItemNotFoundError({ repository, item })),
       configuration: Effect.succeed(configurationView),
       desk: Effect.succeed(desk),
+      statistics: (window) => Effect.succeed(statisticsOf(window)),
     });
     const rejectingApp = HttpRouter.toWebHandler(
       apiRoutes.pipe(HttpRouter.provideRequest(rejecting)),
@@ -797,6 +859,7 @@ describe("operator HTTP API", () => {
           : Effect.fail(new BoardItemNotFoundError({ repository, item })),
       configuration: Effect.succeed(configurationView),
       desk: Effect.succeed(desk),
+      statistics: (window) => Effect.succeed(statisticsOf(window)),
     });
     const server = HttpRouter.serve(apiRoutes.pipe(HttpRouter.provideRequest(live))).pipe(
       Layer.provideMerge(NodeHttpServer.layerTest),

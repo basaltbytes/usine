@@ -14,8 +14,23 @@ sidebar:
 - **Stalled**: each item that a trigger matches but that no attempt works on, with the reason and the action that moves it again.
 - **Recent runs**: the 10 most recently closed runs, with their outcome and pull request.
 - **Workers**: each worker's slots in use and its last preflight.
+- **Statistics**: how the factory ran over the last 7 days, the last 30 days (the default), or all stored runs. See [Read the statistics](#read-the-statistics).
 
 Select a run's row to open its run page.
+
+### Read the statistics
+
+Each block has a one-line reading, or says what is missing, such as `No closed runs in the last 7 days`. Days are UTC days. A window longer than 62 days counts per week. Runs that a newer event or an item change canceled before any attempt are left out.
+
+- **Runs closed**, **Median run time**, **Median attempt time**: run time is from a run's opening to its close, so it includes the wait for approval and for a worker slot; attempt time is from an attempt's start to its end. The p90 and the mean are below each median. Attempts that ended before usine recorded end times count in neither.
+- **Cost per run** and **Tokens per run**: the mean over runs with an attempt. A run has a price only if each of its API key and Claude plan sessions has one; Claude plan prices are estimates. ChatGPT plan sessions have no dollar rate, so they add tokens but no cost.
+- **Runs closed per day**: closed runs stacked by outcome. **Outcomes** gives the shares.
+- **Merged pull requests**: the pull requests merged in the window whose task has a run. **First pass** is the share where no loop ran twice on an item of the task, so no review round sent it back. **Lead time** runs from the task's first run, which its trigger label opened, to the merge.
+- **Runs per loop**, **Runs per agent**, **Attempts per model**: outcomes, median and p90 time, tokens, and cost for each loop or agent, or for each harness, model, and effort.
+- **Attempts per run**: how many closed runs needed a retry.
+- **Queue wait**: per worker, the time from a run's opening, or its approval, to its first attempt's start.
+- **Worker utilization**: the share of the window that each worker's slots held attempts.
+- **Needs attention**: approvals asked for and failed attempts that no automatic retry followed, per day, with the median wait for an approval and from a failure to your retry. **Mark resolved** records no time, so failures you resolve that way count as entries but not in the wait.
 
 ### Stall reasons
 
