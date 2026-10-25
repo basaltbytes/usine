@@ -78,8 +78,9 @@ export class WorkerCapabilityError extends Schema.TaggedError<WorkerCapabilityEr
    * - `credentials`: an exe.dev integration isn't ready, or the Worker kind can't issue a
    *   read-only credential for a `permissions: read` Loop.
    * - `gateway`: the Gateway doesn't respond or isn't reachable from the machine.
-   * - `container`: the machine's Docker doesn't respond to the SSH user, the Attempt image can't
-   *   be pulled, or its user ID differs from the SSH user's.
+   * - `container`: the machine's Docker doesn't respond to the SSH user, the SSH user can use
+   *   Docker's socket without the `docker` CLI, the Attempt image can't be pulled, or its user ID
+   *   differs from the SSH user's.
    */
   capability: WorkerCapability,
   message: Schema.NonEmptyString,

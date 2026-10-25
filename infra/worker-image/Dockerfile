@@ -1,7 +1,7 @@
 # The image of each attempt's container on an SSH worker with Docker. The
-# executor mounts the attempt's checkout read-write, and its cached clone,
-# credential directory, and harness logins read-only, and runs every command
-# of the attempt with `docker exec` as the usine user. The harness versions
+# executor mounts the attempt's checkout and harness logins read-write, and its
+# cached clone and credential directory read-only, and runs every command of
+# the attempt with `docker exec` as the usine user. The harness versions
 # match ../hetzner/cloud-init.yaml; packages/agents/test/preflight.test.ts
 # checks them, and .github/workflows/worker-image.yml tags the image with them.
 FROM debian:trixie-slim
