@@ -44,6 +44,8 @@ The rule above that the forward proxy never lists an LLM provider becomes: it ne
 
 That leaves the subscription login on the machine, where an agent can read and spend it, as without a gateway. It can't take the login to a host of its choosing: the paths out are still the gateway's.
 
+_Note, 2026-10-25 ([ADR 0029](./0029-worker-kinds-and-adapter-set.md), [#549](https://github.com/basaltbytes/usine/issues/549)):_ this amendment assumes a worker is one long-lived machine, where a login made once serves every attempt. A machine created for one attempt can't keep a login: an image or snapshot contains one refresh token, and the first machine that refreshes it invalidates it for the others. On such machines, the gateway stores the Claude or ChatGPT session by default and sends it in place of the caller token ([#234](https://github.com/basaltbytes/usine/issues/234), [#235](https://github.com/basaltbytes/usine/issues/235)), and an API key in the same provider entry is the alternative. By the rule above, a gateway that has a provider's session doesn't list that provider's hosts, so the long-lived workers behind it use the session too.
+
 ## Amendment (2026-10-19, #254): the gateway is the workers' time server
 
 Workers behind the gateway reached no time server, so their clocks drifted after boot, though TLS certificate checks and harness OAuth expiry depend on them. The gateway now runs chrony, syncing from Hetzner's time servers (`ntp1.hetzner.de`, `ntp2.hetzner.com`, `ntp3.hetzner.net`) and the Debian pool and answering NTP only on the private network. Each worker's systemd-timesyncd asks the gateway's private address, and its firewall allows only UDP port 123 to the gateway.
