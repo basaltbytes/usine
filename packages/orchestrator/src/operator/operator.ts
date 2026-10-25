@@ -119,6 +119,8 @@ import {
 } from "./github-changes.ts";
 import { TaskReader, type TaskReadError, type TaskView } from "./task.ts";
 import { type DeskView, OperatorDesk } from "./desk.ts";
+import { OperatorStatistics } from "./statistics/statistics.ts";
+import type { StatisticsView, StatisticsWindow } from "./statistics/view.ts";
 
 export type BoardMoveError =
   | BoardItemNotFoundError
@@ -724,8 +726,9 @@ const makeOperatorObservation = Effect.gen(function* () {
 
   const tasks = yield* TaskReader;
   const { desk } = yield* OperatorDesk;
+  const { statistics } = yield* OperatorStatistics;
 
-  return { detail, overview, task: tasks.read, desk } as const;
+  return { detail, overview, task: tasks.read, desk, statistics } as const;
 });
 
 /** The read-only operator surface, which needs no trigger execution. */
@@ -764,11 +767,27 @@ export class OperatorObservation extends Context.Service<
      * closed Runs, Worker slots and preflights, and poll times.
      */
     readonly desk: (instance: LoadedInstance) => Effect.Effect<DeskView, OperatorObservationError>;
+    /**
+     * Computes how the factory ran in `window`: closed Runs by outcome, Loop, Agent, and brain,
+     * with time, tokens, and cost, and the throughput, pull request, Worker, retry, and Needs
+     * attention measures.
+     */
+    readonly statistics: (
+      instance: LoadedInstance,
+      window: StatisticsWindow,
+    ) => Effect.Effect<StatisticsView, OperatorObservationError>;
   }
 >()("@usine/orchestrator/OperatorObservation") {
   static readonly layer = Layer.effect(OperatorObservation, makeOperatorObservation).pipe(
     Layer.provide(
-      Layer.mergeAll(TaskReader.layer, OperatorDesk.layer, LoopMatches.layer, RunUsageReader.layer),
+      Layer.mergeAll(
+        TaskReader.layer,
+        OperatorDesk.layer,
+        LoopMatches.layer,
+        RunUsageReader.layer,
+        // Shares the overview's usage reader, so both read an ended Attempt's reports once.
+        OperatorStatistics.layer.pipe(Layer.provide(RunUsageReader.layer)),
+      ),
     ),
   );
 }
@@ -1300,6 +1319,26 @@ export {
   RepositoryPollView,
   DeskView,
 } from "./desk.ts";
+export {
+  StatisticsWindow,
+  StatisticsBucket,
+  DurationSummaryView,
+  OutcomeCountsView,
+  PoolTokensView,
+  CostSummaryView,
+  UsageSummaryView,
+  LoopStatisticsView,
+  AgentStatisticsView,
+  BrainStatisticsView,
+  ThroughputPeriodView,
+  FirstPassView,
+  WorkerQueueWaitView,
+  AttemptCountView,
+  WorkerUtilizationView,
+  NeedsAttentionPeriodView,
+  NeedsAttentionView,
+  StatisticsView,
+} from "./statistics/view.ts";
 export {
   FailedTranscriptView,
   TranscriptPayload,

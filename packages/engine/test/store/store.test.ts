@@ -234,6 +234,16 @@ describe("run store", () => {
           (yield* reader.list({ closedLimit: 2 })).map(({ run }) => run.id),
           [newest, middle],
         );
+        const newestClosedAt = (yield* store.snapshot(newest)).closedAt;
+        assert(Option.isSome(newestClosedAt));
+        assert.deepStrictEqual(
+          (yield* reader.closedSince(newestClosedAt)).map(({ run }) => run.id),
+          [old, newest],
+        );
+        assert.deepStrictEqual(
+          (yield* reader.closedSince(Option.none())).map(({ run }) => run.id),
+          [old, newest, middle],
+        );
 
         // A Run canceled before any Attempt closes at the cancel time, not at its open time.
         const waited = yield* claim("waited-for-approval");

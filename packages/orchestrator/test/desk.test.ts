@@ -368,6 +368,7 @@ const deskLayer = (
           .filter(({ run }) => !RunState.OPEN_STATE_TAGS.some((tag) => tag === run.state._tag))
           .slice(0, limit),
       ),
+    closedSince: () => Effect.die("unused"),
     forItems: (keys) => Effect.succeed(all.filter(({ itemKey }) => keys.includes(itemKey))),
     events: () => Effect.die("unused"),
     revision: () => Effect.die("unused"),

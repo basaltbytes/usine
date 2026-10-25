@@ -207,6 +207,7 @@ const testLayer = (current: Ref.Ref<RunSnapshot>, requests: Ref.Ref<ReadonlyArra
     evidence: () => Effect.die("unused"),
     list: () => Effect.die("unused"),
     closed: () => Effect.die("unused"),
+    closedSince: () => Effect.die("unused"),
     forItems: () =>
       Ref.get(current).pipe(
         Effect.map((saved) => [
