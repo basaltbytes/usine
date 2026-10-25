@@ -9,8 +9,8 @@ export const externalHttpClientLayer = Layer.effect(
   HttpClient.HttpClient,
   Effect.map(
     HttpClient.HttpClient,
-    HttpClient.transform((response) =>
-      Effect.provideService(response, HttpClient.TracerPropagationEnabled, false),
+    HttpClient.transform((send) =>
+      Effect.provideService(send, HttpClient.TracerPropagationEnabled, false),
     ),
   ),
 ).pipe(Layer.provide(FetchHttpClient.layer));
