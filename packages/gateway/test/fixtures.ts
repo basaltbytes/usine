@@ -1,7 +1,8 @@
+import { createServer, type Server } from "node:net";
 import { RepositoryName } from "@usine/core/repository";
 import { GatewayDomain, WorkerName } from "@usine/core/worker";
 import { AttachmentId } from "../src/attachment/attachment.ts";
-import { Layer, Option, Redacted, Result, Schema } from "effect";
+import { Effect, Layer, Option, Predicate, Redacted, Result, Schema } from "effect";
 import { parseEgressAllowlist } from "../src/egress/egress.ts";
 import { GITHUB_ORIGINS, type GitHubOrigins } from "../src/github/github.ts";
 import type { LlmProviders } from "../src/llm/llm.ts";
@@ -42,3 +43,33 @@ export const settingsLayer = (
 export const NO_PROVIDERS: LlmProviders = { anthropic: Option.none(), openai: Option.none() };
 
 export const secret = (value: string) => Redacted.make(value);
+
+/** Listens on a free loopback port until the scope closes, and returns the port. */
+const heldPort = Effect.acquireRelease(
+  Effect.callback<Server>((resume) => {
+    const server = createServer();
+    server.once("error", (error) => resume(Effect.die(error)));
+    server.listen(0, "127.0.0.1", () => resume(Effect.succeed(server)));
+  }),
+  (server) =>
+    Effect.callback<void>((resume) => {
+      server.close(() => resume(Effect.void));
+    }),
+).pipe(
+  Effect.flatMap((server) => {
+    const address = server.address();
+    return address !== null && !Predicate.isString(address)
+      ? Effect.succeed(address.port)
+      : Effect.die(new Error("the probe server has no port"));
+  }),
+);
+
+/**
+ * Returns three distinct loopback ports for the Gateway's listeners. The three probes listen at
+ * the same time, so no port repeats, but another process can bind a port before the Gateway does.
+ */
+export const freeGatewayPorts = Effect.all({
+  proxy: heldPort,
+  egress: heldPort,
+  admin: heldPort,
+}).pipe(Effect.scoped);
