@@ -26,7 +26,7 @@ import { RegistryTag, type ManagedRepo, type Worker } from "@usine/config/factor
 import { ConfigFileError, InstancePath } from "@usine/config/file";
 import type { LoadedInstance } from "@usine/config/instance";
 import { canonicalLabelName, GitHubLabelName } from "@usine/config/label";
-import { PromptTemplate } from "@usine/config/loop";
+import { LoopPriority, PromptTemplate } from "@usine/config/loop";
 import { matchesSelector } from "@usine/config/selector";
 import { Cron, TimeZone } from "@usine/config/trigger";
 import type { EnginePersistenceError } from "@usine/engine/engine";
@@ -65,6 +65,8 @@ export class LoopFileView extends Schema.Class<LoopFileView>("@usine/orchestrato
   approval: ApprovalRequirement,
   maxCycles: CycleLimit,
   permissions: LoopPermissions,
+  /** The Loop's queue priority, or null if its Runs wait in lane order. */
+  priority: Schema.NullOr(LoopPriority),
   step: StepName,
   agent: AgentName,
   /** The Markdown prompt template, with its `{{ }}` expressions as written. */
@@ -431,6 +433,7 @@ const makeOperatorConfiguration = Effect.gen(function* () {
           approval: loop.approval,
           maxCycles: loop.maxCycles,
           permissions: loop.permissions,
+          priority: Option.getOrNull(loop.priority),
           step: loop.step,
           agent: loop.agent,
           prompt: loop.body,
