@@ -19,7 +19,10 @@ const RESUME_COMMANDS = {
  * Returns `command` for the operator's terminal: unchanged for a local or undeclared Worker, or
  * quoted again and wrapped in `ssh -t` for an SSH Worker.
  */
-const fromOperatorTerminal = (access: WorkerAccess | null, command: string): string => {
+const fromOperatorTerminal = (
+  access: Exclude<WorkerAccess, { readonly _tag: "Sandbox" }> | null,
+  command: string,
+): string => {
   if (access === null || access._tag === "Local") return command;
   const port = access.port === null ? [] : ["-p", String(access.port)];
   return ["ssh", "-t", ...port, access.destination, shellArgument(command)].join(" ");
@@ -41,6 +44,13 @@ export const SessionHandoff = ({
     return <p className="text-xs text-muted-foreground">No saved harness session</p>;
   const { resume, saved } = handoff.value;
   const { worker, workerAccess } = attempt;
+  if (workerAccess?._tag === "Sandbox")
+    return (
+      <p className="text-xs text-muted-foreground">
+        Session <span className="font-mono">{saved.id}</span> ran in a Cloudflare sandbox, which
+        accepts no terminal and is destroyed at attempt cleanup
+      </p>
+    );
   const command = fromOperatorTerminal(
     workerAccess,
     `cd -- ${shellArgument(saved.cwd)} && ${resume} ${shellArgument(saved.id)}`,

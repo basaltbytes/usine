@@ -1233,6 +1233,7 @@ export {
   AttemptOutcomeView,
   LocalWorkerAccess,
   SshWorkerAccess,
+  SandboxWorkerAccess,
   WorkerAccess,
   AttemptView,
 } from "./attempt.ts";

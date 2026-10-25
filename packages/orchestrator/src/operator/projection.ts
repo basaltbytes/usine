@@ -27,6 +27,7 @@ import {
   LocalWorkerAccess,
   QuestionFailureView,
   RunawayFailureView,
+  SandboxWorkerAccess,
   SshWorkerAccess,
   SucceededAttemptView,
   type WorkerAccess,
@@ -83,6 +84,8 @@ const workerAccess = (worker: ConfigWorker): WorkerAccess => {
         destination: SshDestination.make(`${worker.name}.exe.xyz`),
         port: null,
       });
+    case "cloudflare":
+      return new SandboxWorkerAccess();
   }
 };
 

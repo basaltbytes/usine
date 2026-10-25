@@ -246,6 +246,76 @@ describe("ConfigParser", () => {
     }).pipe(Effect.provide(parserLayer)),
   );
 
+  it.effect("parses a cloudflare Worker and refuses malformed sandbox settings", () =>
+    Effect.gen(function* () {
+      const parser = yield* ConfigParser;
+      const parse = (workers: ReadonlyArray<string>) =>
+        parser.parseUsineYaml(
+          InstancePath.make("usine.yaml"),
+          ["version: 1", "repos: []", "workers:", ...workers].join("\n"),
+        );
+      const base = [
+        "  - name: cf-one",
+        "    kind: cloudflare",
+        "    worker_url: https://usine-sandboxes.acme.workers.dev",
+        "    access_client_id_env: USINE_CF_ACCESS_CLIENT_ID",
+        "    access_client_secret_env: USINE_CF_ACCESS_CLIENT_SECRET",
+        "    image: usine",
+      ];
+      const configured = yield* parse([
+        ...base,
+        "    max_concurrent_attempts: 3",
+        "    llm_providers:",
+        "      - provider: anthropic",
+        "        api_key_env: ANTHROPIC_API_KEY",
+        "      - provider: openai",
+        "        api_key_env: OPENAI_API_KEY",
+      ]);
+      const [worker] = configured.workers;
+      expect(worker?.kind).toBe("cloudflare");
+      if (worker?.kind !== "cloudflare") return;
+      expect(worker.workerUrl.origin).toBe("https://usine-sandboxes.acme.workers.dev");
+      expect(worker.accessClientIdEnv).toBe("USINE_CF_ACCESS_CLIENT_ID");
+      expect(worker.accessClientSecretEnv).toBe("USINE_CF_ACCESS_CLIENT_SECRET");
+      expect(worker.image).toBe("usine");
+      expect(worker.instanceType).toBe("standard-4");
+      expect(worker.maxConcurrentAttempts).toBe(3);
+      expect(worker.llmProviders.map(({ provider, apiKeyEnv }) => [provider, apiKeyEnv])).toEqual([
+        ["anthropic", "ANTHROPIC_API_KEY"],
+        ["openai", "OPENAI_API_KEY"],
+      ]);
+      const defaults = yield* parse([...base, "    instance_type: standard-2"]);
+      const [sized] = defaults.workers;
+      expect(sized?.kind === "cloudflare" && [sized.instanceType, sized.llmProviders]).toEqual([
+        "standard-2",
+        [],
+      ]);
+
+      const replace = (key: string, line: string) =>
+        base.map((entry) => (entry.trimStart().startsWith(`${key}:`) ? line : entry));
+      for (const workers of [
+        replace("worker_url", "    worker_url: http://usine-sandboxes.acme.workers.dev"),
+        replace("worker_url", "    worker_url: https://usine-sandboxes.acme.workers.dev/api"),
+        replace("worker_url", "    worker_url: https://id:secret@usine.acme.workers.dev"),
+        replace("access_client_id_env", "    access_client_id_env: 0123abcd.access"),
+        replace("image", "    image: registry.cloudflare.com/acme/usine:1"),
+        [...base, "    instance_type: standard-5"],
+        [...base, "    access_client_secret: secret"],
+        [
+          ...base,
+          "    llm_providers:",
+          "      - { provider: anthropic, api_key_env: ANTHROPIC_API_KEY }",
+          "      - { provider: anthropic, api_key_env: OTHER_KEY }",
+        ],
+        [...base, "    llm_providers: [{ provider: gemini, api_key_env: GEMINI_API_KEY }]"],
+        base.filter((line) => !line.includes("image")),
+      ]) {
+        const failure = yield* parse(workers).pipe(Effect.flip);
+        expect(failure.stage).toBe("schema");
+      }
+    }).pipe(Effect.provide(parserLayer)),
+  );
+
   it.effect("parses declared labels and rejects invalid label declarations", () =>
     Effect.gen(function* () {
       const parser = yield* ConfigParser;

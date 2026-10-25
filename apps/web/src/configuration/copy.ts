@@ -21,6 +21,7 @@ export const workerKindLabel = {
   local: "Local",
   "exe.dev": "exe.dev",
   ssh: "SSH",
+  cloudflare: "Cloudflare",
 } satisfies Record<WorkerKind, string>;
 
 export const approvalLabel = {
@@ -58,6 +59,8 @@ export const workerPlace = (worker: WorkerConfigurationView): string => {
       return `exe.dev VM ${worker.name}`;
     case "ssh":
       return worker.destination ?? "";
+    case "cloudflare":
+      return "A Cloudflare sandbox per attempt";
   }
 };
 

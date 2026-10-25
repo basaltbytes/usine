@@ -100,8 +100,16 @@ export class SshWorkerAccess extends Schema.TaggedClass<SshWorkerAccess>(
   "@usine/orchestrator/SshWorkerAccess",
 )("Ssh", { destination: SshDestination, port: Schema.NullOr(SshPort) }) {}
 
+/**
+ * A Worker that runs each Attempt in its own Cloudflare sandbox, which accepts no operator terminal
+ * and is destroyed when the Attempt ends.
+ */
+export class SandboxWorkerAccess extends Schema.TaggedClass<SandboxWorkerAccess>(
+  "@usine/orchestrator/SandboxWorkerAccess",
+)("Sandbox", {}) {}
+
 /** How the operator accesses a Worker's machine, from its `usine.yaml` entry. */
-export const WorkerAccess = Schema.Union([LocalWorkerAccess, SshWorkerAccess]);
+export const WorkerAccess = Schema.Union([LocalWorkerAccess, SshWorkerAccess, SandboxWorkerAccess]);
 export type WorkerAccess = typeof WorkerAccess.Type;
 
 /** One Attempt with its Worker, effective brain, start, end, outcome, and salvaged work. */
