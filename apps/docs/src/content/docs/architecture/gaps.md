@@ -14,7 +14,6 @@ Open issues from `gh issue list --repo basaltbytes/usine --state open --limit 20
 ## CLI and configuration
 
 - [#41][]: no `create-usine` scaffolder, GitHub App manifest flow, or preflight on demand. Without credentials, `usine up` only shows a notice ([up.ts:122][]).
-- [#154][]: the CLI has no `status`, `stop`, `restart`, or `upgrade` command ([cli.ts:23][]).
 - [#233][]: npm installs pull `@effect/platform-node-shared` 4.0.4, which needs `effect` ^4.0.4.
 - [#40][]: the Configuration section is read-only; the YAML writer has no production caller.
 
@@ -71,7 +70,6 @@ Open issues from `gh issue list --repo basaltbytes/usine --state open --limit 20
 - [#56][]: a seed issue for tests, not a gap.
 
 [up.ts:122]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/up.ts#L122
-[cli.ts:23]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/cli.ts#L23
 [polling.ts:222]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/polling/polling.ts#L222
 [#35]: https://github.com/basaltbytes/usine/issues/35
 [#36]: https://github.com/basaltbytes/usine/issues/36
@@ -80,7 +78,6 @@ Open issues from `gh issue list --repo basaltbytes/usine --state open --limit 20
 [#41]: https://github.com/basaltbytes/usine/issues/41
 [#56]: https://github.com/basaltbytes/usine/issues/56
 [#115]: https://github.com/basaltbytes/usine/issues/115
-[#154]: https://github.com/basaltbytes/usine/issues/154
 [#158]: https://github.com/basaltbytes/usine/issues/158
 [#178]: https://github.com/basaltbytes/usine/issues/178
 [#181]: https://github.com/basaltbytes/usine/issues/181

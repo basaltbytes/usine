@@ -37,7 +37,7 @@ alias usine="node /path/to/usine/apps/server/dist/main.js"
 
 The `@usine/server` package is on npm, but installing it with npm fails at this commit because of a dependency range ([#233](https://github.com/basaltbytes/usine/issues/233)).
 
-To update usine, pull, run `pnpm install --frozen-lockfile` and `pnpm build` again, and restart `usine up`. The server reads the UI files on every request, so after a UI-only rebuild, reload the page.
+To update usine, pull, run `pnpm install --frozen-lockfile` and `pnpm build` again, and run `usine restart` from the instance folder. The server reads the UI files on every request, so after a UI-only rebuild, reload the page.
 
 ## Create the instance folder
 
@@ -56,6 +56,9 @@ To update usine, pull, run `pnpm install --frozen-lockfile` and `pnpm build` aga
     - github-app.json
     - instance.lock
     - instance.pid
+    - instance.json
+    - usine.log
+    - backups/
     - workers/
 
 </FileTree>
@@ -161,6 +164,16 @@ usine up
 
 The process runs in the foreground and prints `usine is running at http://127.0.0.1:7331`. If a startup check fails, `usine up` stops with a message that says what to fix. If the GitHub App credentials are missing or invalid, it starts in setup mode and opens the setup page in your browser. [Startup](/reference/configuration/cli/#startup) lists the checks, flags, and setup mode.
 
+To run the orchestrator in the background instead, run `usine up --detach`. It returns once the orchestrator listens, and the orchestrator writes its output to `.usine/usine.log`. Then manage it from the instance folder:
+
+```sh title="Instance folder"
+usine status    # whether it runs, its PID, address, version, uptime, and open runs
+usine restart   # stop after the drain, and start again in the background
+usine stop      # stop after the drain
+```
+
+See [Operate runs](/guides/operate-runs/#stop-the-orchestrator) for the drain and for upgrades.
+
 ## Open the web UI
 
 The UI is at `http://127.0.0.1:7331`, or on the port you set. The server listens only on the loopback interface and has no login. It refuses browser requests from pages on non-loopback origins, so other websites can't use it through your browser. To use the UI from another computer, forward the port over SSH:
@@ -181,6 +194,9 @@ usine writes its state to `.usine/` in the instance folder:
 | `.usine/durable.sqlite`                       | The Pi parent task and conversation of each attempt, which usine resumes after a restart.                              |
 | `.usine/github-app.json`                      | The App credentials, if you use the file.                                                                              |
 | `.usine/instance.lock`, `.usine/instance.pid` | The lock that prevents a second `usine up`, and the process ID of the running one.                                     |
+| `.usine/instance.json`                        | The [instance record](/reference/configuration/cli/#instance-record) of the running `usine up`.                        |
+| `.usine/usine.log`                            | The output of an orchestrator that `usine up --detach`, `usine restart`, or `usine upgrade` started.                   |
+| `.usine/backups/`                             | The copies of the stores that `usine upgrade` makes before it moves the pin.                                           |
 | `.usine/workers/<worker>/`                    | For a local worker: cached clones in `repos/`, attempt worktrees in `attempts/`, and the Turborepo cache in `turbo/`.  |
 
 The runtime store records every event, so that a loop doesn't act twice on the same item content. Deleting it deletes this record and the run history, so back it up with [`usine backup`](/guides/operate-runs/#back-up-and-export) instead.

@@ -1,6 +1,6 @@
 import { createServer } from "node:net";
 import { NodeServices } from "@effect/platform-node";
-import { Effect, Layer, Option, Schema } from "effect";
+import { Duration, Effect, Layer, Option, Schema } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { ServeError } from "effect/unstable/http/HttpServerError";
 import { assert, describe, it } from "vitest";
@@ -84,6 +84,52 @@ describe("usine CLI", () => {
   ])("rejects incomplete or unsupported Run export arguments: $args", async ({ args }) => {
     const error = await Effect.runPromise(parseCli(args, noEnvironment).pipe(Effect.flip));
     assert.instanceOf(error, CliUsageError);
+  });
+
+  it("parses the lifecycle commands with their timeout, force, and check flags", async () => {
+    const parse = (args: ReadonlyArray<string>) =>
+      Effect.runPromise(parseCli(args, { ...noEnvironment, port: Option.some("invalid") }));
+    const status = await parse(["status"]);
+    const stop = await parse(["stop"]);
+    const restart = await parse(["restart", "--timeout", "30", "--force"]);
+    const upgrade = await parse(["upgrade", "0.4.0", "--check", "--timeout=5"]);
+    const latest = await parse(["upgrade"]);
+    const detached = await Effect.runPromise(parseCli(["up", "--detach"], noEnvironment));
+
+    assert.strictEqual(status._tag, "StatusCommand");
+    assert(stop._tag === "StopCommand");
+    assert.strictEqual(Duration.toSeconds(stop.options.timeout), 120);
+    assert.isFalse(stop.options.force);
+    assert(restart._tag === "RestartCommand");
+    assert.strictEqual(Duration.toSeconds(restart.options.timeout), 30);
+    assert.isTrue(restart.options.force);
+    assert(upgrade._tag === "UpgradeCommand");
+    assert.deepStrictEqual(upgrade.version, Option.some("0.4.0"));
+    assert.isTrue(upgrade.check);
+    assert.strictEqual(Duration.toSeconds(upgrade.options.timeout), 5);
+    assert(latest._tag === "UpgradeCommand");
+    assert.deepStrictEqual(latest.version, Option.none());
+    assert(detached._tag === "UpCommand");
+    assert.isTrue(detached.detach);
+    for (const command of ["status", "stop", "restart", "upgrade"]) {
+      assert.strictEqual((await parse([command, "--help"]))._tag, "HelpCommand");
+    }
+  });
+
+  it.each([
+    { args: ["status", "--force"] },
+    { args: ["stop", "--check"] },
+    { args: ["stop", "extra"] },
+    { args: ["restart", "--timeout"] },
+    { args: ["restart", "--timeout", "0"] },
+    { args: ["restart", "--timeout", "1.5"] },
+    { args: ["upgrade", "0.4.0", "0.5.0"] },
+    { args: ["upgrade", "--port", "7331"] },
+  ])("rejects unsupported lifecycle arguments: $args", async ({ args }) => {
+    assert.instanceOf(
+      await Effect.runPromise(parseCli(args, noEnvironment).pipe(Effect.flip)),
+      CliUsageError,
+    );
   });
 
   it("accepts the volatile-instance override from the flag or the environment", async () => {

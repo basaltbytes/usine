@@ -34,6 +34,18 @@ usine up
 
 It prints the local UI address. Without GitHub App credentials, the UI runs in setup mode, and polling and schedules stay idle. Set `USINE_GITHUB_APP_ID` and `USINE_GITHUB_PRIVATE_KEY`, or put `app_id` and `private_key` in `.usine/github-app.json` with mode `0600`.
 
+`usine up` runs in the foreground. To run it in the background, with its output in `.usine/usine.log`, and to manage it from the instance folder:
+
+```sh
+usine up --detach   # start in the background
+usine status        # whether it runs, its PID, address, version, uptime, and open runs
+usine restart       # stop after the drain, and start again in the background
+usine stop          # stop after the drain
+usine upgrade       # move the @usine/server pin in package.json, install, and restart
+```
+
+See the [CLI reference](https://docs.usine.dev/reference/configuration/cli/) for the flags.
+
 ## Development
 
 ```sh

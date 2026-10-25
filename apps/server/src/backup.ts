@@ -1,4 +1,4 @@
-import { InstanceDirectory } from "@usine/core/instance";
+import type { InstanceDirectory } from "@usine/core/instance";
 import { backup as backupDurableStorage } from "@usine/durable/backup";
 import { backup as backupDatabase } from "@usine/engine/local-sqlite";
 import { Console, Effect, FileSystem, Path } from "effect";
@@ -10,11 +10,13 @@ const durableDestination = (path: Path.Path, destination: string): string => {
 };
 
 /**
- * Copies the runtime database to `output` and the durable storage next to it, durable storage
- * first. If the runtime copy fails, removes the durable copy.
+ * Copies the instance's runtime database to `output` and its durable storage next to it, durable
+ * storage first. If the runtime copy fails, removes the durable copy.
  */
-export const backup = Effect.fn("Cli.backup")(function* (output: string) {
-  const directory = InstanceDirectory.make(process.cwd());
+export const backup = Effect.fn("Cli.backup")(function* (
+  directory: InstanceDirectory,
+  output: string,
+) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const destination = path.resolve(output);

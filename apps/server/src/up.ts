@@ -16,6 +16,7 @@ import {
   Cause,
   Console,
   Context,
+  DateTime,
   Duration,
   Deferred,
   Effect,
@@ -29,6 +30,7 @@ import {
   type Port,
   VolatileInstanceDirectoryError,
   openBrowser,
+  packageVersion,
   portInUse,
   refuseTakenPort,
   serverStartError,
@@ -36,7 +38,8 @@ import {
   volatileRoots,
 } from "./cli.ts";
 import { serverLayer } from "./http.ts";
-import { holdInstance } from "./instance-lock.ts";
+import { holdInstance } from "./instance/lock.ts";
+import { InstanceRecord, ProcessId, currentLaunch } from "./instance/record.ts";
 import { reloadOnHangup } from "./reload-signal.ts";
 import { withGracefulShutdown } from "./shutdown.ts";
 import { tracingLayer } from "./tracing.ts";
@@ -197,8 +200,14 @@ export const up = (port: Port, allowVolatileInstance: boolean) =>
       yield* refuseVolatileInstance(directory, allowVolatileInstance).pipe(
         Effect.provide(NodeServices.layer),
       );
+      const record = new InstanceRecord({
+        pid: ProcessId.make(process.pid),
+        version: yield* packageVersion().pipe(Effect.provide(NodeServices.layer)),
+        startedAt: yield* DateTime.now,
+        launch: yield* currentLaunch(port, allowVolatileInstance),
+      });
       // Acquired before any store opens and released after every store closes.
-      yield* holdInstance(directory).pipe(Effect.provide(NodeServices.layer));
+      yield* holdInstance(directory, record).pipe(Effect.provide(NodeServices.layer));
       yield* refuseTakenPort(port).pipe(Effect.provide(NodeServices.layer));
       const instances = yield* loadInstance(directory);
       const { config } = yield* instances.get;
