@@ -775,6 +775,69 @@ describe("Codex child backend", () => {
     );
   });
 
+  for (const [credential, pool] of [
+    ["subscription", "chatgptPlan"],
+    ["api-key", "apiKeys"],
+  ] as const)
+    it.effect(
+      `runs on the Gateway's OpenAI ${credential} without a login check, in the ${pool} pool`,
+      () => {
+        const calls: Array<{ readonly method: string; readonly params: Schema.Json }> = [];
+        const { "account/read": _, ...withoutAccount } = successfulResponses([
+          { id: "gpt-5.6-terra", model: "gpt-5.6-terra" },
+        ]);
+        const server = connectionLayer(
+          withoutAccount,
+          [
+            { method: "account/updated", params: { authMode: "apikey" } },
+            {
+              method: "account/rateLimits/updated",
+              params: { rateLimits: { primary: { usedPercent: 42 } } },
+            },
+            {
+              method: "item/completed",
+              params: {
+                threadId: "thread-1",
+                turnId: "turn-1",
+                item: { type: "agentMessage", id: "message-1", text: "Done through the gateway." },
+              },
+            },
+            {
+              method: "turn/completed",
+              params: { turn: { id: "turn-1", status: "completed", error: null } },
+            },
+          ],
+          calls,
+        );
+        const base = request();
+        const throughGateway = new ChildRequest({
+          ...base,
+          session: new ChildSession({
+            ...base.session,
+            gatewayCredential: Option.some(credential),
+          }),
+        });
+        return Effect.scoped(
+          Effect.gen(function* () {
+            const backend = yield* CodexChildBackend;
+            const running = yield* backend.launch(throughGateway);
+            const [events, result] = yield* Effect.all([
+              Stream.runCollect(running.events),
+              running.result,
+            ]);
+            assert.strictEqual(result.message, "Done through the gateway.");
+            assert(!calls.some(({ method }) => method === "account/read"));
+            const limits = events.find((event) => event._tag === "PoolRateLimitsUpdated");
+            assert(limits?._tag === "PoolRateLimitsUpdated");
+            assert.strictEqual(limits.pool, pool);
+            const started = events[0];
+            assert(started?._tag === "SessionStarted" && started.session._tag === "ChildSession");
+            assert.deepStrictEqual(started.session.gatewayCredential, Option.some(credential));
+          }).pipe(Effect.provide(codexChildBackendLayer), Effect.provide(server)),
+        );
+      },
+    );
+
   it.effect("rejects a model absent from the app-server catalog", () => {
     const server = connectionLayer(
       successfulResponses([{ id: "gpt-5.6-sol", model: "gpt-5.6-sol" }]),

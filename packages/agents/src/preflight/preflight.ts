@@ -28,6 +28,18 @@ export const supportedCodexVersions: ReadonlyArray<string> = [
   "0.153.4",
 ];
 
+/** Returns the error for `codex --version` output that names no supported Codex CLI version. */
+export const unsupportedCodexVersion = (version: string): Option.Option<HarnessUnavailableError> =>
+  supportedCodexVersions.some((supported) => version === `codex-cli ${supported}`)
+    ? Option.none()
+    : Option.some(
+        new HarnessUnavailableError({
+          harness: "codex",
+          capability: "version",
+          message: `The worker has ${/^codex-cli [0-9]+\.[0-9]+\.[0-9]+$/u.test(version) ? version : "an unrecognized Codex version"}. Install a supported Codex CLI version: ${supportedCodexVersions.join(", ")}.`,
+        }),
+      );
+
 const ClaudeAuthentication = Schema.Struct({
   loggedIn: Schema.Boolean,
   authMethod: Schema.String,
@@ -61,12 +73,8 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
     switch (brain.harness) {
       case "codex": {
         const version = yield* probe("binary", "codex", ["--version"]);
-        if (!supportedCodexVersions.some((supported) => version === `codex-cli ${supported}`))
-          return yield* new HarnessUnavailableError({
-            harness: "codex",
-            capability: "version",
-            message: `The worker has ${/^codex-cli [0-9]+\.[0-9]+\.[0-9]+$/u.test(version) ? version : "an unrecognized Codex version"}. Install a supported Codex CLI version: ${supportedCodexVersions.join(", ")}.`,
-          });
+        const unsupported = unsupportedCodexVersion(version);
+        if (Option.isSome(unsupported)) return yield* unsupported.value;
         yield* Effect.scoped(
           Effect.gen(function* () {
             const server = yield* CodexAppServer;
