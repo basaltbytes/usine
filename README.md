@@ -45,6 +45,8 @@ pnpm lint      # oxlint
 pnpm format    # oxfmt
 ```
 
+Tests import other workspace packages from their `dist`, and the `@usine/server` tests also run its own `dist/main.js`. turbo builds both before it tests. To test one package, run `pnpm turbo run test --filter <package>`; `pnpm --filter <package> test` skips the builds, so it fails or tests stale code until you run `pnpm build`.
+
 ## Releases
 
 [Changesets](https://github.com/changesets/changesets) handles releases: add a changeset for each user-visible change; CI opens a release PR, and merging it publishes. 0.x APIs change without notice.
