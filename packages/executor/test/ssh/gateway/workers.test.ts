@@ -136,7 +136,10 @@ describe("SSH Workers added and removed while the executor runs", () => {
         const workers = yield* SshWorkers;
         yield* workers.addWorker(gatewayAddress());
         const refused = yield* workers
-          .addWorker({ ...gatewayAddress(), destination: SshDestination.make("usine@203.0.113.8") })
+          .addWorker({
+            ...gatewayAddress(),
+            machine: { _tag: "Fixed", destination: SshDestination.make("usine@203.0.113.8") },
+          })
           .pipe(Effect.flip);
         assert.strictEqual(refused.capability, "machine");
         assert.strictEqual(

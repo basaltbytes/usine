@@ -152,19 +152,15 @@ export const gatewayCredentialFor = (
 };
 
 /**
- * Verifies the Gateway in front of an SSH Worker without attaching anything: the admin API
- * forward opens and accepts the admin token, the machine's sshd accepts the caller-token
- * variables, and the machine can connect to `git.<domain>`, which rejects a request without a caller
- * token. If the Gateway has the Anthropic credential, records its kind for the Worker.
+ * Verifies the Gateway's admin API for an SSH Worker without attaching anything: the forward
+ * opens and the admin API accepts the admin token. Records the Gateway's credential kind for
+ * each provider in the Worker's `llmProviders`. Needs no Worker machine.
  */
-export const verifyGateway = Effect.fn("SshExecutor.verifyGateway")(function* (
-  commands: RemoteCommands,
+export const verifyGatewayAdmin = Effect.fn("SshExecutor.verifyGatewayAdmin")(function* (
   worker: WorkerName,
-  machine: SshMachine,
   gateway: MachineGateway,
 ) {
   const { admin, forward, settings } = gateway;
-  const gitHost = `git.${settings.domain}`;
   yield* Effect.annotateCurrentSpan({ worker, domain: settings.domain, gateway: forward.gateway });
   const open = yield* forward.current.pipe(
     Effect.catchTag("GatewayForwardClosed", (closed) => forward.reopen(closed.generation)),
@@ -180,7 +176,33 @@ export const verifyGateway = Effect.fn("SshExecutor.verifyGateway")(function* (
     Effect.mapError((error) => gatewayGap(worker, error.message, error)),
   );
   const credentials = yield* recordProviderCredentials(worker, gateway);
+  yield* Effect.logInfo("SSH Worker Gateway admin API verified", {
+    worker,
+    domain: settings.domain,
+    gateway: forward.gateway,
+    adminPort: settings.adminPort,
+    forwardPort: open.url.port,
+    llmProviders: settings.llmProviders.join(","),
+    anthropic: credentialMode(credentials.anthropic, settings.llmProviders.includes("anthropic")),
+    openai: credentialMode(credentials.openai, settings.llmProviders.includes("openai")),
+    attachments: attachments.filter((attachment) => attachment.worker === worker).length,
+  });
+});
 
+/**
+ * Verifies the Gateway from an SSH Worker's machine without attaching anything: the machine's
+ * sshd accepts the caller-token variables, and the machine can connect to `git.<domain>`, which
+ * rejects a request without a caller token.
+ */
+const verifyGatewayFromMachine = Effect.fn("SshExecutor.verifyGatewayFromMachine")(function* (
+  commands: RemoteCommands,
+  worker: WorkerName,
+  machine: SshMachine,
+  gateway: MachineGateway,
+) {
+  const { forward, settings } = gateway;
+  const gitHost = `git.${settings.domain}`;
+  yield* Effect.annotateCurrentSpan({ worker, domain: settings.domain, gateway: forward.gateway });
   const { sent } = gatewayEnvironment({
     domain: settings.domain,
     llmProviders: settings.llmProviders,
@@ -226,17 +248,59 @@ export const verifyGateway = Effect.fn("SshExecutor.verifyGateway")(function* (
           `curl exited with code ${String(probed.exitCode)}`,
       ),
     );
-  yield* Effect.logInfo("SSH Worker Gateway verified", {
+  yield* Effect.logInfo("SSH Worker reaches its Gateway", {
     worker,
+    host: machine.shell.destination,
     domain: settings.domain,
     gateway: forward.gateway,
-    adminPort: settings.adminPort,
-    forwardPort: open.url.port,
-    llmProviders: settings.llmProviders.join(","),
-    anthropic: credentialMode(credentials.anthropic, settings.llmProviders.includes("anthropic")),
-    openai: credentialMode(credentials.openai, settings.llmProviders.includes("openai")),
-    attachments: attachments.filter((attachment) => attachment.worker === worker).length,
   });
+});
+
+/**
+ * Verifies the Gateway in front of an SSH Worker without attaching anything: the admin API
+ * checks of `verifyGatewayAdmin`, then the machine checks of `verifyGatewayFromMachine`.
+ */
+export const verifyGateway = (
+  commands: RemoteCommands,
+  worker: WorkerName,
+  machine: SshMachine,
+  gateway: MachineGateway,
+) =>
+  verifyGatewayAdmin(worker, gateway).pipe(
+    Effect.andThen(verifyGatewayFromMachine(commands, worker, machine, gateway)),
+  );
+
+/**
+ * Checks only the binary of a harness whose credential the machine doesn't keep, the Gateway's
+ * or an API key in the Attempt's environment, named by `credential` in the log. Codex's version
+ * must also be supported.
+ */
+export const harnessBinaryProbe = Effect.fn("SshExecutor.probeHarnessBinary")(function* (
+  commands: RemoteCommands,
+  host: string,
+  shell: RemoteShell,
+  harness: "claude" | "codex",
+  credential: string,
+) {
+  const label = harness === "claude" ? "Claude Code" : "Codex";
+  yield* Effect.annotateCurrentSpan({ host, harness, credential });
+  const result = yield* commands.inspect("preflight", shell, harness, ["--version"]);
+  if (result.exitCode === SSH_FAILURE) return yield* unreachable(host, harness, result);
+  if (result.exitCode !== 0)
+    return new HarnessUnavailableError({
+      harness,
+      capability: "binary",
+      message: `${harness} --version failed. Check the ${label} installation on the worker.`,
+    });
+  const version = result.stdout.trim();
+  const unsupported = harness === "codex" ? unsupportedCodexVersion(version) : Option.none();
+  if (Option.isSome(unsupported)) return unsupported.value;
+  yield* Effect.logInfo(`${label} uses ${credential}; checked its binary only`, {
+    host,
+    harness,
+    version,
+  });
+  return new HarnessReady({ harness });
 });
 
 /**
@@ -309,29 +373,15 @@ export const gatewayHarnessProbe = (
   const { domain } = gateway.settings;
   const proxy = forwardProxyUrl(domain);
 
-  /** Checks only the binary of a harness whose provider credential the Gateway holds; Codex's version must also be supported. */
-  const binaryOnly = Effect.fn("SshExecutor.probeBinaryBehindGateway")(function* (
-    harness: LoginHarness,
-  ) {
-    const { label, provider } = LOGINS[harness];
-    yield* Effect.annotateCurrentSpan({ host, domain, harness });
-    const result = yield* commands.inspect("preflight", shell, harness, ["--version"]);
-    if (result.exitCode === SSH_FAILURE) return yield* unreachable(host, harness, result);
-    if (result.exitCode !== 0)
-      return new HarnessUnavailableError({
-        harness,
-        capability: "binary",
-        message: `${harness} --version failed. Check the ${label} installation on the worker.`,
-      });
-    const version = result.stdout.trim();
-    const unsupported = harness === "codex" ? unsupportedCodexVersion(version) : Option.none();
-    if (Option.isSome(unsupported)) return unsupported.value;
-    yield* Effect.logInfo(
-      `${label} uses the Gateway's ${provider} credential; checked its binary only`,
-      { host, harness, version },
+  /** Checks only the binary of a harness whose provider credential the Gateway holds. */
+  const binaryOnly = (harness: LoginHarness) =>
+    harnessBinaryProbe(
+      commands,
+      host,
+      shell,
+      harness,
+      `the Gateway's ${LOGINS[harness].provider} credential`,
     );
-    return new HarnessReady({ harness });
-  });
 
   const loginHostsReachable = Effect.fn("SshExecutor.probeLoginHostsBehindGateway")(function* (
     harness: LoginHarness,

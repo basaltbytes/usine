@@ -1,6 +1,6 @@
 import type { SshCommand } from "@usine/agents/child-host";
 import { safeSegment } from "@usine/core/repository";
-import type { WorkerName } from "@usine/core/worker";
+import type { MachineId, SshDestination, WorkerName } from "@usine/core/worker";
 import { Context, Effect, Equal, Exit, Option, Ref, Scope, SynchronizedRef } from "effect";
 import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -15,6 +15,7 @@ import type {
   SshWorkerAddress,
   SshWorkerGateway,
 } from "./model.ts";
+import type { MachineEndpoint } from "./provisioner/model.ts";
 
 /** The Workers of the SSH executor, starting with `SshExecutorOptions.workers`. A reload adds and removes Workers at runtime. */
 export class SshWorkers extends Context.Service<
@@ -42,14 +43,31 @@ interface HeldForward {
   readonly workers: ReadonlySet<WorkerName>;
 }
 
+/** A Worker the executor has: its address and Gateway, and its machine if it's long-lived. */
+export interface SshWorkerEntry {
+  readonly address: SshWorkerAddress;
+  readonly gateway: Option.Option<MachineGateway>;
+  /** `None` for a provisioned Worker, whose machines exist one per Attempt. */
+  readonly machine: Option.Option<SshMachine>;
+}
+
 interface Machines {
-  readonly byWorker: ReadonlyMap<WorkerName, SshMachine>;
+  readonly byWorker: ReadonlyMap<WorkerName, SshWorkerEntry>;
   /** Keyed by Gateway destination and admin port. */
   readonly forwards: ReadonlyMap<string, HeldForward>;
 }
 
 const forwardKey = ({ destination, adminPort }: SshWorkerGateway) =>
   `${destination} ${String(adminPort)}`;
+
+/** Returns where a Worker's machines are, for logs: its destination, or its provider. */
+const placeOf = (address: SshWorkerAddress): string =>
+  address.machine._tag === "Fixed"
+    ? address.machine.destination
+    : `a ${address.machine.provisioner.provider} machine per attempt`;
+
+const workerDirectoryOf = (address: SshWorkerAddress): string =>
+  `${address.root}/workers/${safeSegment(address.name)}`;
 
 /** Returns the SSH command for one Worker: the shared options, then its port and key. */
 const sshCommandFor = (base: SshCommand, address: SshWorkerAddress): SshCommand => ({
@@ -63,6 +81,53 @@ const sshCommandFor = (base: SshCommand, address: SshWorkerAddress): SshCommand 
     }),
   ],
 });
+
+/** Returns the host name in `destination`, without its user. */
+const hostOf = (destination: SshDestination): string =>
+  destination.slice(destination.indexOf("@") + 1);
+
+/**
+ * Returns the SSH command for a machine created for one Attempt: the shared options, its host
+ * key file, the Gateway as jump host if the Worker has one, and its port and the Worker's key.
+ */
+const provisionedSshCommandFor = (
+  base: SshCommand,
+  entry: SshWorkerEntry,
+  endpoint: MachineEndpoint,
+  knownHostsFile: string,
+): SshCommand => ({
+  command: base.command,
+  args: [
+    ...base.args,
+    "-o",
+    `UserKnownHostsFile=${knownHostsFile}`,
+    "-o",
+    `StrictHostKeyChecking=${endpoint.hostKey._tag === "Pinned" ? "yes" : "accept-new"}`,
+    ...Option.match(entry.gateway, {
+      onNone: () => [],
+      onSome: ({ settings }) => ["-J", settings.destination],
+    }),
+    ...Option.match(endpoint.port, { onNone: () => [], onSome: (port) => ["-p", String(port)] }),
+    ...Option.match(entry.address.identityFile, {
+      onNone: () => [],
+      onSome: (file) => ["-i", file, "-o", "IdentitiesOnly=yes"],
+    }),
+  ],
+});
+
+/**
+ * Returns the `known_hosts` line that pins a provisioned machine's host key, or `None` if the
+ * client records the key of its first connection.
+ */
+export const knownHostsLine = (endpoint: MachineEndpoint): Option.Option<string> => {
+  if (endpoint.hostKey._tag === "FirstUse") return Option.none();
+  const host = hostOf(endpoint.destination);
+  const pattern = Option.match(endpoint.port, {
+    onNone: () => host,
+    onSome: (port) => `[${host}]:${String(port)}`,
+  });
+  return Option.some(`${pattern} ${endpoint.hostKey.key}\n`);
+};
 
 /**
  * Returns the SSH Workers' machines, which `addWorker` and `removeWorker` change at runtime and
@@ -131,7 +196,7 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
   const addWorker = Effect.fn("SshExecutor.addWorker")(function* (address: SshWorkerAddress) {
     const fields = {
       worker: address.name,
-      host: address.destination,
+      host: placeOf(address),
       ...Option.match(address.gateway, {
         onNone: () => ({}),
         onSome: ({ destination }) => ({ gateway: destination }),
@@ -148,23 +213,35 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
             capability: "machine",
             message: `Can't change the settings of SSH worker "${address.name}" while its attempts run. Reload again after they end.`,
             cause: new Error(
-              `SSH worker "${address.name}" is in use at ${existing.address.destination}`,
+              `SSH worker "${address.name}" is in use at ${placeOf(existing.address)}`,
             ),
           });
         }
         const behind = yield* Effect.transposeOption(
           Option.map(address.gateway, (settings) => gatewayFor(current, address, settings)),
         );
-        const machine: SshMachine = {
+        const gateway = Option.map(behind, ({ gateway }) => gateway);
+        const entry: SshWorkerEntry = {
           address,
-          gateway: Option.map(behind, ({ gateway }) => gateway),
-          shell: commands.shellFor(sshCommandFor(base, address), address.destination),
-          workerDirectory: `${address.root}/workers/${safeSegment(address.name)}`,
+          gateway,
+          machine:
+            address.machine._tag === "Fixed"
+              ? Option.some({
+                  address,
+                  gateway,
+                  shell: commands.shellFor(
+                    sshCommandFor(base, address),
+                    address.machine.destination,
+                  ),
+                  workerDirectory: workerDirectoryOf(address),
+                  provisioned: Option.none(),
+                })
+              : Option.none(),
         };
         return [
           Option.some(Option.exists(behind, ({ opened }) => opened)),
           {
-            byWorker: new Map(current.byWorker).set(address.name, machine),
+            byWorker: new Map(current.byWorker).set(address.name, entry),
             forwards: Option.match(behind, {
               onNone: () => current.forwards,
               onSome: ({ forwards }) => forwards,
@@ -213,7 +290,7 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
       return;
     }
     const { machine, left } = removed.value;
-    const fields = { worker, host: machine.address.destination };
+    const fields = { worker, host: placeOf(machine.address) };
     if (Option.isNone(left)) {
       yield* Effect.logInfo("SSH Worker removed from the executor", fields);
       return;
@@ -234,17 +311,55 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
     );
   });
 
-  const machineFor = Effect.fn("SshExecutor.machineFor")(function* (worker: WorkerName) {
-    const machine = (yield* SynchronizedRef.get(machines)).byWorker.get(worker);
-    if (machine === undefined)
+  const workerFor = Effect.fn("SshExecutor.workerFor")(function* (worker: WorkerName) {
+    const entry = (yield* SynchronizedRef.get(machines)).byWorker.get(worker);
+    if (entry === undefined)
       return yield* new WorkerCapabilityError({
         worker,
         capability: "machine",
         message: `No SSH worker named "${worker}" is configured`,
         cause: new Error("SSH worker address missing"),
       });
-    return machine;
+    return entry;
   });
 
-  return { machineFor, workers: SshWorkers.of({ addWorker, removeWorker }) };
+  /** Returns a long-lived Worker's machine. Fails for a provisioned Worker, which has none. */
+  const machineFor = Effect.fn("SshExecutor.machineFor")(function* (worker: WorkerName) {
+    const entry = yield* workerFor(worker);
+    if (Option.isNone(entry.machine))
+      return yield* new WorkerCapabilityError({
+        worker,
+        capability: "machine",
+        message: `SSH worker "${worker}" creates a machine for each attempt, so it has no machine of its own`,
+        cause: new Error("provisioned SSH worker"),
+      });
+    return entry.machine.value;
+  });
+
+  /** Returns the machine at `endpoint` that a provider created for one Attempt on `entry`'s Worker. */
+  const machineAt = (
+    entry: SshWorkerEntry,
+    id: MachineId,
+    endpoint: MachineEndpoint,
+    knownHostsFile: string,
+  ): SshMachine => ({
+    address: entry.address,
+    gateway: entry.gateway,
+    shell: commands.shellFor(
+      provisionedSshCommandFor(base, entry, endpoint, knownHostsFile),
+      endpoint.destination,
+    ),
+    workerDirectory: workerDirectoryOf(entry.address),
+    provisioned: Option.some(id),
+  });
+
+  return {
+    machineFor,
+    workerFor,
+    machineAt,
+    entries: SynchronizedRef.get(machines).pipe(
+      Effect.map(({ byWorker }) => [...byWorker.values()]),
+    ),
+    workers: SshWorkers.of({ addWorker, removeWorker }),
+  };
 });

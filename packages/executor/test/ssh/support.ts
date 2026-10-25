@@ -32,9 +32,12 @@ import {
   DateTime,
   Deferred,
   Effect,
+  FileSystem,
   Layer,
   Logger,
   Option,
+  Path,
+  PlatformError,
   Redacted,
   Sink,
   Stream,
@@ -95,6 +98,8 @@ export const TEST_AGENT = new Agent({
 });
 
 const NUL = String.fromCharCode(0);
+/** The temporary directory the fake local file system creates. */
+export const LOCAL_TEMPORARY_DIRECTORY = "/tmp/usine-known-hosts-test";
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
@@ -179,6 +184,8 @@ interface FakeMachineState {
   linkedCheckout: boolean;
   /** The container markers on the machine, by path. */
   readonly markers: Set<string>;
+  /** The files the executor wrote on the orchestrator's machine, such as host keys, by path. */
+  readonly localFiles: Map<string, string>;
 }
 
 const oneShotHandle = (stdout: string, exitCode: number, stderr = "") => {
@@ -295,6 +302,7 @@ export const fakeMachine = () => {
     homeFiles: new Set([".claude/.credentials.json", ".claude.json"]),
     linkedCheckout: false,
     markers: new Set(),
+    localFiles: new Map(),
   };
   /** Answers the commands that manage Docker containers, or returns `undefined` for others. */
   const respondToDocker = (line: string, input: string) => {
@@ -558,7 +566,34 @@ export const fakeMachine = () => {
       return respond(command, direct, input);
     }),
   );
-  return { state, layer: Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, service) };
+  const fileSystem = FileSystem.layerNoop({
+    makeDirectory: () => Effect.void,
+    makeTempDirectoryScoped: () => Effect.succeed(LOCAL_TEMPORARY_DIRECTORY),
+    readFileString: (path) =>
+      Option.match(Option.fromNullishOr(state.localFiles.get(path)), {
+        onNone: () =>
+          Effect.fail(
+            PlatformError.systemError({
+              _tag: "NotFound",
+              module: "FileSystem",
+              method: "readFileString",
+              description: "No such file",
+              pathOrDescriptor: path,
+            }),
+          ),
+        onSome: (content) => Effect.succeed(content),
+      }),
+    writeFileString: (path, data) => Effect.sync(() => void state.localFiles.set(path, data)),
+    remove: (path) => Effect.sync(() => void state.localFiles.delete(path)),
+  });
+  return {
+    state,
+    layer: Layer.mergeAll(
+      Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, service),
+      fileSystem,
+      Path.layer,
+    ),
+  };
 };
 
 /** Returns a provider that mints a distinct token per request (one hour by default) and records the requested permission level. */
@@ -629,7 +664,7 @@ export const capturedLogs = () => {
 /** The test Worker's address, without a Gateway. */
 export const ADDRESS: SshWorkerAddress = {
   name: WORKER,
-  destination: DESTINATION,
+  machine: { _tag: "Fixed", destination: DESTINATION },
   identityFile: Option.some(SshIdentityFile.make("~/.ssh/usine_worker")),
   port: Option.some(SshPort.make(2222)),
   root: WorkerRoot.make("/srv/usine"),

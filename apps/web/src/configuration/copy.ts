@@ -43,32 +43,44 @@ export const capabilityLabel = {
   credentials: "credentials",
   gateway: "gateway",
   container: "Docker",
+  provider: "provider",
 } satisfies Record<Capability, string>;
 
 /** Returns the missing capability of a failed check, for example `harness login`, or `check failed` if the check itself failed. */
 export const failedCheckLabel = (check: Extract<PreflightCheckView, { _tag: "Failed" }>) =>
   check.capability === null ? "check failed" : capabilityLabel[check.capability];
 
-/** Returns the Worker's location from `usine.yaml`. */
+/**
+ * Returns the Worker's location from `usine.yaml`, such as `usine@eu-1`, or for a provisioned
+ * Worker, its machines, such as `hetzner cx33 in nbg1, one machine per attempt`.
+ */
 export const workerPlace = (worker: WorkerConfigurationView): string => {
   switch (worker.kind) {
     case "local":
       return "This machine";
     case "exe.dev":
       return `exe.dev VM ${worker.name}`;
-    case "ssh":
-      return worker.destination ?? "";
+    case "ssh": {
+      const { provisioner } = worker;
+      if (provisioner === null) return worker.destination ?? "";
+      const machine =
+        provisioner._tag === "hetzner"
+          ? `hetzner ${provisioner.serverType} in ${provisioner.location}`
+          : `boat ${provisioner.size}`;
+      return `${machine}, one machine per attempt`;
+    }
   }
 };
 
 interface PreflightSummary {
-  readonly state: "passed" | "degraded" | "failed" | "unchecked";
+  readonly state: "passed" | "degraded" | "deferred" | "failed" | "unchecked";
   readonly checkedAt: string | null;
 }
 
 /**
  * Returns a summary of the Worker's newest failed check, else its degraded check, else its newest
- * check, else `unchecked`.
+ * passed or deferred check, else `unchecked`. Of checks at the same instant, the first wins: the
+ * prerequisites, then the harnesses in order.
  */
 export const preflightSummary = (worker: WorkerConfigurationView): PreflightSummary => {
   const checks = [
@@ -84,7 +96,15 @@ export const preflightSummary = (worker: WorkerConfigurationView): PreflightSumm
   if (failed.length > 0) return { state: "failed", checkedAt: newest(failed) };
   const degraded = checks.filter(({ _tag }) => _tag === "Degraded");
   if (degraded.length > 0) return { state: "degraded", checkedAt: newest(degraded) };
-  if (checks.length > 0) return { state: "passed", checkedAt: newest(checks) };
+  const latest = checks.reduce<PreflightCheckView | undefined>(
+    (found, check) => (found === undefined || check.checkedAt > found.checkedAt ? check : found),
+    undefined,
+  );
+  if (latest !== undefined)
+    return {
+      state: latest._tag === "Deferred" ? "deferred" : "passed",
+      checkedAt: latest.checkedAt,
+    };
   return { state: "unchecked", checkedAt: null };
 };
 

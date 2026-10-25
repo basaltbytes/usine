@@ -30,9 +30,9 @@ The first screen, at `/`:
 
 - **Needs attention**, or `Nothing needs attention` with the time of the last finished poll.
 - **Running**: one row per attempt in flight: the task's name, loop, agent, worker, start time, last activity, and open connectivity warnings in yellow.
-- **Stalled**: one row per item a loop's trigger matches with no running attempt, named by its task, with a reason such as `Canceled 2d ago, unchanged since` and the one applicable action: **Approve**, **Mark answered**, **Mark resolved**, **Reset cycle budget**, **Retry**, **Run again**, or **Resume**. Below `md`, the loop, reason, and action stack under the item.
+- **Stalled**: one row per item a loop's trigger matches with no running attempt, named by its task, with a reason such as `Canceled 2d ago, unchanged since` and the one applicable action: **Approve**, **Mark answered**, **Mark resolved**, **Reset cycle budget**, **Retry**, **Run again**, or **Resume**. A queued run whose machine a provisioned worker is creating reads `Creating a Hetzner machine, started 2m ago` instead of waiting for a slot. Below `md`, the loop, reason, and action stack under the item.
 - **Recent runs**: the last 10 closed runs, with outcome and the pull request the run opened, unless it names the task.
-- One line with each worker's slots in use and last preflight.
+- One line with each worker's slots in use and last preflight. A provisioned worker adds the count of its machines, if any, and while machine creation is paused, the failure and the next try in red, such as `Machine creation failed: quota reached. Next try at 19:46`.
 - **Statistics**: a switch between `7 days`, `30 days` (the default), and `All`, then figures for runs closed, median run and attempt time, and cost and tokens per run; runs closed per day stacked by outcome; the outcome shares; merged pull requests with first pass and lead time; runs per loop or agent, or attempts per model, by outcome over a table of time, tokens, and cost; attempts per run; queue wait and slot use per worker; and Needs attention entries per day with the waits for an approval and for a retry. Each block has a one-line reading or says what is missing, such as `No closed runs in the last 7 days`. Switching windows dims the previous figures until the next arrive. Each chart's values are also in a table for screen readers.
 
 A row about a run opens its run page. Empty blocks say what they would list, and loading blocks show skeleton rows. With no project registered, the overview points to `repos` in `usine.yaml` and offers **Reload configuration**.
@@ -125,9 +125,9 @@ A run opened from a card menu, **Needs attention**, **Run history**, or **Run ag
 - Above the title: the loop and agent.
 - The task's name.
 - Under it: the run's state and its pull request, which is the one the run opened, else the item if it's a pull request, unless it names the task.
-- Once an attempt has started: the duration of all attempts, counting while one runs, and the newest attempt's worker. Then `Loop paused` if the loop is paused.
+- Once an attempt has started: the duration of all attempts, counting while one runs, and the newest attempt's worker, followed by its machine's provider ID while a provisioned worker holds one for it. Then `Loop paused` if the loop is paused.
 - The actions for the run's state (see [Run actions](#run-actions)).
-- An outcome paragraph: a succeeded run's result; a failed run's typed reason, message, and salvage; what a waiting or queued run waits for; or a running run's current activity and latest message.
+- An outcome paragraph: a succeeded run's result; a failed run's typed reason, message, and salvage; what a waiting or queued run waits for, such as the machine being created for its next attempt; or a running run's current activity and latest message.
 
 Each item appears once. Names and states come from the task's board card. If the board doesn't show the task, the run's item names it, with its state from the newest poll if it's closed or merged, and the pull request has no state.
 
@@ -158,6 +158,8 @@ At `/projects/<owner>/<name>/runs/<run>`: the whole run under the drawer's heade
 
 The outline lists the task and the event with two-line previews, then each attempt with its outcome mark, start reason, start time, and duration, counting while it runs. Start reasons are the event, an operator retry, an edit and retry, a retry after an infrastructure failure, or a restart, marked if the restart reattached it.
 
+While a provisioned worker creates the machine for a queued run's next attempt, the outline ends with **Creating machine**: the provider, the machine's ID once the provider assigns one, the attempt number, and the start time and age. The header's state reads `Queued, creating a Hetzner machine`.
+
 An approved run of a gated loop adds a line to the event entry and the event in the reader, such as “Approved by octocat · 15 Oct 19:30 · from the UI”, or “from GitHub” for a 👍 on the ask. It omits the name if `usine.yaml` sets no `operator`, and shows only “Approved” and the time for runs approved before usine recorded approvers.
 
 The attempt being read expands to its sessions (parent and children, with live status, hold state, and working time), then its checkpoints in order. Consecutive messages of one session fold into one entry, such as “developer, 14 messages”, listing each message by its first sentence, cut to a clause or whole words. Blockers, questions, operator messages, worker and provider notices, and the outcome are separate entries named by speaker; a blocker or the final failure is red, and a warning yellow.
@@ -170,6 +172,7 @@ Under the outline, a red count with previous and next controls steps through loa
 
 - For a local worker, it changes into the worktree and resumes the session.
 - For an SSH worker, it runs that over `ssh -t` to the worker's `destination`, with `-p` if `usine.yaml` sets `port`, quoted again for the remote shell; the worktree line names the worker.
+- For a provisioned worker, which has no `destination`, it uses the local form to run on the attempt's machine and says that the machine is deleted with the attempt; the worktree line names the worker.
 - For a worker that `usine.yaml` no longer declares, it uses the local form and says so.
 
 **Copy command** copies the wrapped command as one line. Resuming needs the attempt's harness login and its worktree, which attempt cleanup removes. Older transcripts and Pi children say no harness session was saved.
@@ -196,7 +199,8 @@ The instance folder as the orchestrator parsed it, read-only, in five full-panel
 
 - **Loop**: trigger and selector as written, the agent with its brain, the selected repositories, approval, cycle limit, permissions, step, and the prompt as Markdown with each `{{ }}` expression outlined. The database-backed **Pause** or **Resume** control is in the heading and on each list row.
 - **Agent**: the persona and where its parent model and effort come from.
-- **Worker**: connection and gateway settings (never the admin token), slots in use, and the last preflight of its own prerequisites and of each harness.
+- **Worker**: connection and gateway settings (never the admin token), slots in use, and the last preflight of its own prerequisites and of each harness. The **Workers** list places a provisioned worker by its machines, such as `hetzner cx33 in nbg1, one machine per attempt`, and adds the failure and next try while machine creation is paused.
+  - For a provisioned worker: the provisioner settings (provider; server type, location, image, network, firewall, SSH key, SSH user, and labels for Hetzner, or size for Boat) and the names of the variables with the provider token and the Anthropic API key, never their values. **Machines** lists each machine in flight, oldest first, with the provider ID, state (`Creating`, `Ready`, or `Deleting`), age, and the run it serves, which opens its drawer, or the attempt for a machine found after a restart. Above them, the last failed creation shows the reason, the provider's message, the failures in a row, and the next try. Harness checks run on the first machine of each day, so each harness reads `Deferred` until that check passes or fails.
 - **Repository**: its lanes in board order with each label as GitHub has it, the labels usine creates there, and the loops that select it.
 - **Settings**: `settings`, `operator`, the webhooks mode, and `tracing`, with what each value does.
 

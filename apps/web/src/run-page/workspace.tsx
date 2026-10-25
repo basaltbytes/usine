@@ -208,6 +208,7 @@ export const RunWorkspace = ({
         selection={selection}
         reading={place}
         composerSession={composer?.key ?? null}
+        machine={detail.machine}
         onSelect={select}
         onCheckpoint={(checkpoint, chapter) => {
           setChosen((previous) =>

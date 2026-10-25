@@ -21,6 +21,13 @@ packages:
   - nftables
 
 write_files:
+  # A server created from a snapshot of this Worker gets no user data, so cloud-init's own configuration sets the resolver at each boot too.
+  - path: /etc/cloud/cloud.cfg.d/90-usine-gateway-resolver.cfg
+    permissions: "0644"
+    content: |
+      bootcmd:
+        - [sh, -c, 'rm -f /etc/resolv.conf && printf "nameserver @@GATEWAY_IP@@\n" > /etc/resolv.conf']
+
   - path: /etc/nftables.conf
     permissions: "0644"
     encoding: b64

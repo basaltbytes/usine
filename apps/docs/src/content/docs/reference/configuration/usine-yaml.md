@@ -248,7 +248,7 @@ Every kind takes these keys:
 | --- | --- | --- | --- |
 | `name` | string | required | Kebab-case: lowercase letters and digits separated by single hyphens. |
 | `kind` | `local`, `ssh`, `exe.dev` | required | Selects the worker adapter and the other keys that it accepts. |
-| `max_concurrent_attempts` | integer ≥ 1 | `1` | The number of attempts that the worker runs at the same time. See the memory check below. |
+| `max_concurrent_attempts` | integer ≥ 1 | `1` | The number of attempts that the worker runs at the same time. See the memory check below. For a [provisioned worker](#workersprovisioner), it also caps the machines in flight, including those being created. |
 
 A run takes a slot of the first worker in this list with a free slot ([`stepExecutorLayer`](https://github.com/basaltbytes/usine/blob/main/packages/orchestrator/src/scheduler.ts)). Waiting runs take free slots in [queue order](/reference/configuration/loop-files/#priority): runs in later [lanes](#reposlanes) first, then in the order that their events arrived. At startup, a failed preflight on any worker stops `usine up`.
 
@@ -263,7 +263,7 @@ A [reload](/reference/configuration/cli/#reload) applies these `workers` changes
 
 A failed preflight refuses the whole reload with `ReloadPreflightError`. These changes need a restart, and a reload refuses them with `RestartRequiredError`, which includes the field, such as `workers.worker-2.destination`:
 
-- A worker's `kind`, or any key other than `name` and `max_concurrent_attempts`: `destination`, `identity_file`, `port`, `root`, `gateway`, or `container`.
+- A worker's `kind`, or any key other than `name` and `max_concurrent_attempts`: `destination`, `identity_file`, `port`, `root`, `gateway`, `container`, or `provisioner`.
 - A renamed worker: one worker removed and one added with the same `kind` and other keys.
 - A new worker whose `kind` differs from the kind of the running workers.
 
@@ -286,13 +286,16 @@ workers:
 
 ### `kind: ssh`
 
-A Linux machine that the orchestrator connects to with its local `ssh` client ([`SshWorker`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/factory.ts#L130)). The client runs with `BatchMode=yes`, so the key must work without a prompt and the host key must already be in `known_hosts`.
+A Linux machine that the orchestrator connects to with its local `ssh` client ([`SshWorker`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/factory.ts#L130)). The client runs with `BatchMode=yes`, so the key must work without a prompt and the host key must already be in `known_hosts`. A provisioned worker's machines get their own known-hosts files instead (see [`workers[].provisioner`](#workersprovisioner)).
+
+A worker sets either `destination`, for one long-lived machine, or `provisioner`, for one machine per attempt.
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
-| `destination` | string | required | A host name, an address, or a `Host` alias from the operator's SSH configuration, optionally prefixed by `user@`. A value starting with `-` is rejected. |
-| `identity_file` | string | none | Private key passed as `ssh -i`, with `IdentitiesOnly=yes`. An absolute path or a path starting with `~/`, without spaces. Without it, the SSH agent and configuration choose the key. |
-| `port` | integer 1 to 65535 | none | Passed as `ssh -p`. Without it, the SSH configuration or port 22 applies. |
+| `destination` | string | required unless `provisioner` is set | A host name, an IPv4 or IPv6 address, or a `Host` alias from the operator's SSH configuration, optionally prefixed by `user@`. A value starting with `-` is rejected, and so is a worker that sets both `destination` and `provisioner`. |
+| `provisioner` | [provisioner](#workersprovisioner) | none | Creates a machine for each attempt at Hetzner Cloud or Boat, and deletes it after the attempt. |
+| `identity_file` | string | none | Private key passed as `ssh -i`, with `IdentitiesOnly=yes`. An absolute path or a path starting with `~/`, without spaces. Without it, the SSH agent and configuration choose the key. Required with a Boat provisioner. |
+| `port` | integer 1 to 65535 | none | Passed as `ssh -p`. Without it, the SSH configuration or port 22 applies. Refused with a `provisioner`, which takes the port from the provider. |
 | `root` | string | required | Absolute directory on the machine, without spaces or a trailing `/`. The worker stores its clones, worktrees, and credentials in `<root>/workers/<name>`. |
 | `gateway` | [gateway](#workersgateway) | none | The gateway in front of the machine. |
 | `container` | [container](#workerscontainer) | the defaults below | The container of each attempt, if the machine has Docker. |
@@ -364,6 +367,110 @@ workers:
       admin_token_env: USINE_GATEWAY_ADMIN_TOKEN
       llm_providers: [anthropic, openai]
 ```
+
+### `workers[].provisioner`
+
+A provisioned worker creates a machine for each attempt at its provider, runs the attempt there as on a long-lived SSH worker, and deletes the machine after the attempt ([`HetznerProvisioner`, `BoatProvisioner`](https://github.com/basaltbytes/usine/blob/main/packages/config/src/factory.ts), [#550](https://github.com/basaltbytes/usine/issues/550)). [Add a provisioned worker](/guides/add-a-provisioned-worker/) gives the setup.
+
+Both providers take these keys:
+
+| Key | Type | Default | Description |
+| --- | --- | --- | --- |
+| `provider` | `hetzner`, `boat` | required | Selects the provider and the other keys that it accepts. |
+| `token_env` | string | required | Name of the orchestrator's environment variable that contains the provider's API token: a Hetzner Cloud API token with **Read & Write** permission for the project, or a Boat API key. The file never contains the token itself. |
+| `api_keys` | mapping | `{}` | LLM provider API keys for each attempt, as names of the orchestrator's environment variables. The only key is `anthropic`, which each attempt's container gets as `ANTHROPIC_API_KEY` for Claude Code, unless the worker's gateway has `anthropic` in `llm_providers`. |
+
+`kind: ssh` keys with a `provisioner`:
+
+- `destination` and `port` are refused: the provider gives each machine's address and port.
+- `identity_file` is the key the executor connects with. A Boat provisioner requires it and adds `<identity_file>.pub` to each sandbox.
+- `root` is created on each machine before its attempt.
+- `max_concurrent_attempts` caps the machines in flight, including those being created.
+
+`usine up` reads the variables named by `token_env` and `api_keys` when it starts, and a reload reads them for the worker that it adds.
+
+#### `provider: hetzner`
+
+Creates a Hetzner Cloud server for each attempt.
+
+| Key | Type | Default | Description |
+| --- | --- | --- | --- |
+| `server_type` | string | required | The server type, such as `cx33` or `cpx32`. Lowercase letters, digits, and hyphens. Each server runs one attempt; a `cx33` or `cpx32` has the 8 GB that usine's own gates need. |
+| `location` | string | required | The location, such as `fsn1`, `nbg1`, or `hel1`. With `network`, a location in the network's zone. |
+| `image` | string | required | A snapshot's numeric ID or description, which `infra/hetzner/snapshot.sh` prints, or a system image's name, such as `debian-13`. A name that no system image has selects the newest available snapshot with that description. Printable ASCII, at most 255 characters, with no space at either end. |
+| `network` | string | none | Name of the private network that each server joins. Required with a `gateway`: the gateway's network, in which servers get no public address and the executor connects to the private address. Without a gateway, servers get a public IPv4 address, which the executor connects to. |
+| `firewall` | string | none | Name of the project's firewall that each server gets when it's created, such as one that admits SSH only from the orchestrator's address. |
+| `ssh_key` | string | required | Name of the project's SSH key for each server: the public key of `identity_file`. Hetzner adds it for root, whom the snapshot's sshd refuses, and so emails no root password. |
+| `ssh_user` | Unix user name | `usine` | The user that the executor connects as, whose key the snapshot authorizes. |
+| `labels` | mapping of strings | `{}` | More labels for each server, by Hetzner's label rules. Keys that start with `usine-` are refused. |
+
+Each server gets these labels:
+
+- `usine-instance`: `github-app-<App ID>`.
+- `usine-worker` and `usine-run`: the worker and the run that the server was created for.
+- `usine-process`: a random value for each `usine up` process.
+- `usine-attempt`: a hash of the attempt ID, once the attempt starts.
+
+A value that is longer than 63 characters or has characters other than letters, digits, `_`, `.`, and `-` becomes a hash. Behind a gateway, the executor connects to each server through `gateway.destination` with `ssh -J`. It records each server's host key at the first connection, in a known-hosts file for that server under `.usine/known-hosts/` in the instance folder.
+
+```yaml title="usine.yaml"
+workers:
+  - name: hetzner-pool
+    kind: ssh
+    max_concurrent_attempts: 4
+    root: /home/usine/.usine
+    identity_file: ~/.ssh/usine_worker
+    gateway:
+      domain: gw.internal
+      destination: usine-gateway
+      admin_token_env: USINE_GATEWAY_ADMIN_TOKEN
+      llm_providers: [anthropic]
+    provisioner:
+      provider: hetzner
+      token_env: HCLOUD_TOKEN
+      server_type: cx33
+      location: fsn1
+      image: usine-worker-claude-2.1.308-codex-0.159.2
+      network: usine-gateway
+      ssh_key: usine-worker
+      labels: { team: platform }
+```
+
+#### `provider: boat`
+
+Creates a Boat sandbox for each attempt, with none of the account's secrets, no snapshots, no command monitoring, and no automatic stop.
+
+| Key | Type | Default | Description |
+| --- | --- | --- | --- |
+| `size` | `small`, `default`, `large`, `xlarge` | `default` | The Boat machine type. `default` has 4 vCPU and 8 GB. `xlarge` needs a Boat plan of $100 per month or more. |
+
+A Boat worker can't have a `gateway`, because Boat has no network rules, so no gateway can be its machines' only way out. Each attempt's installation token is written to its machine, as on an SSH worker without a gateway, and Claude Code needs `api_keys.anthropic`. Boat documents no region choice, and its machines are in Germany, Finland, and France, so a `region` key is refused like any unknown key. Boat has no labels, so each sandbox's name carries the same tags: `usine <instance> <worker> <run> <process> <attempt>`. If Boat reports a sandbox's host key, the executor requires it; otherwise it records the key of the first connection.
+
+```yaml title="usine.yaml"
+workers:
+  - name: boat-pool
+    kind: ssh
+    root: /home/user/.usine
+    identity_file: ~/.ssh/usine_boat
+    provisioner:
+      provider: boat
+      token_env: BOAT_API_KEY
+      size: default
+      api_keys: { anthropic: USINE_ANTHROPIC_API_KEY }
+```
+
+#### Refusals and preflight
+
+The parser refuses an `ssh` worker that:
+
+- Sets both `destination` and `provisioner`, or neither.
+- Sets `port` and `provisioner`.
+- Has a `gateway` and a Hetzner provisioner without `network`.
+- Has a `gateway` and a Boat provisioner, or a Boat provisioner without `identity_file`.
+
+A reload refuses a changed `provisioner` with `RestartRequiredError`.
+
+Preflight creates no machine. It checks the provider token; for Hetzner, the server type in the location, the image, the SSH key, and the network; for Boat, the account's limits, which fail preflight if Boat doesn't offer the account the `size`. Hetzner documents no limits endpoint, so preflight reads none for it. It also checks the gateway's admin API, and that each harness of the roster has a credential that no machine has to keep: for Claude Code, `anthropic` in the gateway's `llm_providers` or `api_keys.anthropic`. Codex and Pi agents fail preflight on a provisioned worker. A Hetzner server type that is out of stock in the location logs a warning, and so does a Boat account that can't start sandboxes now or whose active-sandbox cap is below `max_concurrent_attempts`. The checks that need a machine run on the worker's first machine each day (UTC) and its first machine after `usine up`.
 
 ### `kind: exe.dev`
 

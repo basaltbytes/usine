@@ -311,6 +311,14 @@ workers:
 
 Preflight attaches nothing. It checks that the admin forward opens (or gives the `ssh` command showing why), the admin API accepts the token, sshd accepts the caller token variables, the worker reaches `git.<domain>`, and, with Docker on the worker, that Docker answers and pulls the attempt image. For each harness using its worker login, it checks the login and that each login host answers through the forward proxy, in a container from the attempt image if the worker has Docker; a refused host fails with the host to add to `egress-allowlist`. During an attempt, the executor stores its attachment again every two minutes, so a restarted gateway, which keeps attachments in memory, recovers them within two minutes.
 
+## Provisioned workers behind the gateway
+
+A provisioned worker ([`../README.md`](../README.md#provisioned-workers)) creates a server for each attempt from a snapshot that `../snapshot.sh` builds in this network. Each server joins the network when usine creates it (`provisioner.network`), with no public address, and the executor connects to its private address through the gateway with `ssh -J <gateway.destination>`, so the servers need no `Host` entry. The gateway needs no change for them: it decides by caller token, not by address, and each attempt's attachment has a caller token of its own.
+
+A server created from a snapshot gets no user data, so the resolver line of `worker-cloud-init.yaml`'s `bootcmd` doesn't run on it. The same file writes `/etc/cloud/cloud.cfg.d/90-usine-gateway-resolver.cfg`, whose `bootcmd` cloud-init runs at every boot, so the snapshot's servers resolve names with the gateway too.
+
+The servers have no harness login. For Claude Code, give the gateway the Anthropic credential, list `anthropic` in the worker's `llm_providers`, and remove the Claude Code hosts from `egress-allowlist`. Or set `provisioner.api_keys.anthropic` and keep those hosts, which Claude Code then reaches through the forward proxy with the key. Codex can't run on them until the gateway stores a ChatGPT login ([#235](https://github.com/basaltbytes/usine/issues/235)).
+
 ## Add the time server to an existing gateway and worker
 
 Gateways and workers created before chrony was added need these steps for a worker time source ([#254](https://github.com/basaltbytes/usine/issues/254)). Infra changes don't reach running machines ([#264](https://github.com/basaltbytes/usine/issues/264)), so run them by hand. They use the default `NETWORK_CIDR` and `GATEWAY_IP`, `10.42.0.0/16` and `10.42.0.2`. Do the gateway first; the worker's timesyncd needs its chrony.

@@ -72,7 +72,7 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
    * uninterruptible step.
    */
   const keep = Effect.fn("CheckoutRecovery.keep")(function* (attempt: AttemptRecovery) {
-    yield* executor.occupy(attempt.worker).pipe(
+    yield* executor.occupy(attempt.worker, attempt.attemptId).pipe(
       Effect.flatMap((lease) =>
         Effect.cached(lease.release).pipe(
           Effect.map((release): Occupied => ({

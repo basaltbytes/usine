@@ -60,14 +60,16 @@ const configDirectories = (machine: SshMachine, attemptId: AttemptId) => ({
  */
 export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFor")(function* (
   commands: RemoteCommands,
-  machineFor: (worker: WorkerName) => Effect.Effect<SshMachine, ExecutorError>,
+  workerFor: (
+    worker: WorkerName,
+  ) => Effect.Effect<{ readonly gateway: Option.Option<MachineGateway> }, ExecutorError>,
 ) {
   const provider = yield* CredentialProvider;
 
   const detachLeftovers = Effect.fn("SshExecutor.detachLeftoverAttachments")(function* (
     worker: WorkerName,
   ) {
-    const machine = yield* machineFor(worker);
+    const machine = yield* workerFor(worker);
     yield* Effect.annotateCurrentSpan({ worker });
     if (Option.isNone(machine.gateway))
       return yield* Effect.logDebug("The Worker has no Gateway to detach leftovers from", {

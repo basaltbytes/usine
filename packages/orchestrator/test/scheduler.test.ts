@@ -3,7 +3,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { UsineConfig } from "@usine/config/factory";
 import type { Agent } from "@usine/core/agent";
 import { HarnessUnavailableError } from "@usine/core/agent/capability";
-import { AttemptTask } from "@usine/core/attempt";
+import { AttemptId, AttemptTask } from "@usine/core/attempt";
 import { DedupKey, Event, EventId } from "@usine/core/event";
 import { InstanceDirectory } from "@usine/core/instance";
 import { ItemKey } from "@usine/core/item";
@@ -585,8 +585,10 @@ describe("Worker scheduler slots occupied by Attempts that already run", () => {
             const lines: Array<ReadonlyArray<unknown>> = [];
             const scheduler = yield* startScheduler([]);
             const agent = yield* developer;
-            const first = yield* scheduler.occupy(local);
-            const second = yield* scheduler.occupy(local).pipe(Effect.withLogger(logsIn(lines)));
+            const first = yield* scheduler.occupy(local, AttemptId.make("running-1"));
+            const second = yield* scheduler
+              .occupy(local, AttemptId.make("running-2"))
+              .pipe(Effect.withLogger(logsIn(lines)));
             assert.deepStrictEqual(
               logged(
                 lines,
@@ -614,7 +616,9 @@ describe("Worker scheduler slots occupied by Attempts that already run", () => {
         const lines: Array<ReadonlyArray<unknown>> = [];
         const scheduler = yield* startScheduler([]);
         const gone = WorkerName.make("gone");
-        const lease = yield* scheduler.occupy(gone).pipe(Effect.withLogger(logsIn(lines)));
+        const lease = yield* scheduler
+          .occupy(gone, AttemptId.make("running-1"))
+          .pipe(Effect.withLogger(logsIn(lines)));
         assert.deepStrictEqual(
           logged(
             lines,
@@ -946,7 +950,75 @@ const build2 = WorkerName.make("build-2");
 const build3 = WorkerName.make("build-3");
 const TOKEN_ENV = "USINE_TEST_GATEWAY_TWO_TOKEN";
 
+/** Returns an SSH Worker that creates a Hetzner Cloud server for each Attempt. */
+const provisionedSshWorker = (name: string, max: number, serverType = "cx33") => `  - name: ${name}
+    kind: ssh
+    max_concurrent_attempts: ${max}
+    root: /home/usine/.usine
+    provisioner:
+      provider: hetzner
+      token_env: USINE_TEST_HCLOUD_TOKEN
+      server_type: ${serverType}
+      location: nbg1
+      image: usine-worker-test
+      ssh_key: usine-orchestrator
+      api_keys:
+        anthropic: USINE_TEST_ANTHROPIC_KEY
+`;
+
 describe("SSH Workers on reload", () => {
+  it.live(
+    "adds a provisioned SSH Worker with its provider token and API key read at the reload, and refuses a changed provisioner",
+    () =>
+      withWorkers(sshWorker("build-1", 1), (root) =>
+        Effect.gen(function* () {
+          const instances = yield* CurrentInstance;
+          const events: Array<string> = [];
+          const added: Array<SshWorkerAddress> = [];
+          const environment: Record<string, string> = {};
+          yield* startSshScheduler(events, { added, environment });
+
+          yield* writeInstanceFiles(root, [
+            [
+              "usine.yaml",
+              usineYaml(`${sshWorker("build-1", 1)}${provisionedSshWorker("pool", 2)}`),
+            ],
+          ]);
+          const unset = yield* Effect.flip(instances.reload);
+          assert(unset._tag === "ReloadPreflightError", unset._tag);
+          assert.include(
+            unset.message,
+            'The hetzner API token for SSH worker "pool" is missing: USINE_TEST_HCLOUD_TOKEN is not set',
+          );
+          assert.include(unset.message, "set provisioner.token_env to a variable");
+
+          environment.USINE_TEST_HCLOUD_TOKEN = "hcloud-token";
+          environment.USINE_TEST_ANTHROPIC_KEY = "sk-ant-api-key";
+          const report = yield* instances.reload;
+          assert.deepStrictEqual(report.workers.added, [WorkerName.make("pool")]);
+          const address = added.at(-1);
+          assert(address !== undefined && address.machine._tag === "Provisioned");
+          const { provisioner } = address.machine;
+          assert.strictEqual(provisioner.provider, "hetzner");
+          assert.strictEqual(Redacted.value(provisioner.token), "hcloud-token");
+          assert.deepStrictEqual(
+            Option.map(provisioner.apiKeys.anthropic, Redacted.value),
+            Option.some("sk-ant-api-key"),
+          );
+
+          yield* writeInstanceFiles(root, [
+            [
+              "usine.yaml",
+              usineYaml(`${sshWorker("build-1", 1)}${provisionedSshWorker("pool", 2, "cpx32")}`),
+            ],
+          ]);
+          const changed = yield* Effect.flip(instances.reload);
+          assert(changed._tag === "RestartRequiredError", changed._tag);
+          assert.deepStrictEqual(changed.fields, ["workers.pool.provisioner"]);
+        }).pipe(Effect.scoped),
+      ),
+  );
+
   it.live(
     "adds an SSH Worker to the executor before its preflight, with its Gateway's admin token read at the reload",
     () =>

@@ -4,6 +4,7 @@ An `ssh` worker is any Linux machine that the orchestrator reaches over SSH. The
 
 - `cloud-init.yaml` builds a Debian 13 machine: the `usine` user, with SSH by key only, Docker, Git, gh, Node.js 24, pnpm, Claude Code, Codex pinned to a supported version, and Chromium. It also builds a worker behind the gateway of `gateway/`, where `gateway/gateway.sh worker-user-data` adds the gateway's worker settings.
 - `create-worker.sh` creates the server with that file, labels it `usine=worker`, and attaches a Hetzner firewall that allows SSH only from the orchestrator's address.
+- `snapshot.sh` builds the snapshot from which a [provisioned worker](#provisioned-workers) creates a server for each attempt.
 - `../worker-image/Dockerfile` is the image of each attempt's container. CI builds it and pushes it to `ghcr.io/basaltbytes/usine-worker`, tagged with its Claude Code and Codex versions.
 
 ## Attempt containers
@@ -112,6 +113,57 @@ passwd -l root
 ```
 
 For a worker behind the gateway, write the Docker proxy drop-in and `daemon.json` of `gateway/worker-cloud-init.yaml` first, and add the `ghcr.io` hosts of `gateway/egress-allowlist` to the gateway's allowlist; see [`gateway/README.md`](gateway/README.md). Start `usine up`; preflight pulls the image.
+
+## Provisioned workers
+
+A worker with a `provisioner` in `usine.yaml`, instead of a `destination`, creates a server for each attempt from a snapshot and deletes it after the attempt ([#550](https://github.com/basaltbytes/usine/issues/550)). [Add a provisioned worker](https://docs.usine.dev/guides/add-a-provisioned-worker/) gives the steps, and [`workers[].provisioner`](https://docs.usine.dev/reference/configuration/usine-yaml/#workersprovisioner) the keys. The project needs:
+
+- An API token with **Read & Write** permission, from **Security** > **API tokens** in the Hetzner Cloud Console. The orchestrator reads it from the variable that `token_env` names. The token applies to every resource of the project; usine deletes only servers with its `usine-instance` and `usine-worker` labels.
+- The worker's SSH key, registered once: `hcloud ssh-key create --name usine-worker --public-key-from-file ~/.ssh/usine_worker.pub`. Hetzner adds it for root, whom sshd refuses, and so emails no root password. The `usine` user's key comes from the snapshot.
+- For a worker behind the gateway, the gateway's network, `usine-gateway` by default. Each server joins it with no public address; see [`gateway/README.md`](gateway/README.md#provisioned-workers-behind-the-gateway).
+- The snapshot.
+
+A server created for one attempt has no harness login, so preflight requires the gateway's Anthropic credential (`llm_providers`) or `api_keys.anthropic` for Claude Code, and refuses Codex.
+
+### Build the snapshot
+
+`snapshot.sh` takes the public key of the worker's `identity_file`, with the private key next to it, and an SSH key of the project in `SSH_KEY`. With `NETWORK`, it builds the snapshot behind the gateway and connects through `GATEWAY_SSH`:
+
+```sh
+SSH_KEY=usine-worker NETWORK=usine-gateway GATEWAY_SSH=usine-gateway ./infra/hetzner/snapshot.sh ~/.ssh/usine_worker.pub
+SSH_KEY=usine-worker ./infra/hetzner/snapshot.sh ~/.ssh/usine_worker.pub   # a worker without a gateway
+```
+
+The script:
+
+1. Creates a temporary server `usine-snapshot-<time>`, labeled `usine=snapshot-build`, from `cloud-init.yaml` with the key authorized for `usine` and a public IPv4 address, or with `NETWORK` from `gateway/gateway.sh worker-user-data` in that network, with no public address.
+2. Waits until it accepts SSH as `usine` and cloud-init finishes, through the gateway with `-J` if it's behind it. Each run uses a known-hosts file of its own.
+3. Checks that Docker answers `usine`, and pulls the attempt image: `ATTEMPT_IMAGE` in `packages/executor/src/ssh/container.ts`, or the `ATTEMPT_IMAGE` variable.
+4. Shuts the server down and saves it as a snapshot labeled `usine=snapshot`, with the description `usine-worker-<image tag>`, such as `usine-worker-claude-2.1.308-codex-0.159.2`, or `DESCRIPTION`.
+5. Deletes the server, also after a failure, and prints the snapshot's ID and description for `provisioner.image`.
+
+`LOCATION` (default `fsn1`), `SERVER_TYPE` (default `cx23`), `IMAGE` (default `debian-13`), and `SERVER_NAME` set the temporary server. A server created from the snapshot needs a disk at least as large as `SERVER_TYPE`'s, so build it on the smallest type you use; `cx33` and `cpx32` have more than `cx23`. Behind the gateway, `gateway.sh` reads `GATEWAY_IP`, `DOMAIN`, and `NETWORK_CIDR` as for `create`, and the snapshot works only in that gateway's network.
+
+The snapshot has no harness login and no token. The attempt image must be public on GHCR, because a server created for one attempt has no `docker login`. Hetzner bills each snapshot by its size; `hcloud image list --type snapshot --selector usine=snapshot` lists them, and `hcloud image delete` deletes one.
+
+When a usine release changes the attempt image or `cloud-init.yaml`, build a new snapshot from a checkout of that release. With `image` set to a description, each server is created from the newest available snapshot with it, so a new snapshot with the same description needs no restart. A changed `image` does: a reload refuses a changed `provisioner`.
+
+### Servers without a gateway
+
+Without a gateway, each server has a public IPv4 address and accepts the `usine` user's key from any address. To admit only the orchestrator, create a firewall with the rules file of `create-worker.sh` and name it in `provisioner.firewall`, so that each server gets it when it's created:
+
+```sh
+hcloud firewall create --name usine-<worker> --rules-file firewall.json
+```
+
+### Leftover servers
+
+usine deletes the servers that no attempt holds after each startup's recovery and every 3 minutes. Servers are left only while no `usine up` runs for the instance. Then list and delete them by label, with the GitHub App's ID:
+
+```sh
+hcloud server list -l usine-instance=github-app-<App ID>
+hcloud server delete <id>...
+```
 
 ## Remove a worker
 

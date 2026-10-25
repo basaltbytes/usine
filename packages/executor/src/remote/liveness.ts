@@ -130,7 +130,7 @@ interface WorkerWatch extends WorkerWatcher {
   readonly shell: RemoteShell;
 }
 
-/** The liveness watches of one executor, one per Worker with a running Attempt. */
+/** The liveness watches of one executor, one per machine with a running Attempt. */
 export interface WorkerWatches {
   /**
    * Adds the Attempt to its Worker's watch until the caller's scope closes. Every minute, the
@@ -260,14 +260,16 @@ export const workerWatchesFor = (
   Effect.gen(function* () {
     const scope = yield* Effect.scope;
     const lock = yield* Semaphore.make(1);
-    const watched = new Map<WorkerName, Watched>();
+    // Keyed by Worker and destination, since a provisioned Worker has one machine per Attempt.
+    const watched = new Map<string, Watched>();
+    const keyOf = (watch: WorkerWatch) => `${watch.worker} ${watch.shell.destination}`;
 
     const join = (watch: WorkerWatch) =>
       Semaphore.withPermit(
         lock,
         Effect.gen(function* () {
           const fields = { attemptId: watch.attemptId, worker: watch.worker };
-          const existing = watched.get(watch.worker);
+          const existing = watched.get(keyOf(watch));
           if (existing !== undefined) {
             existing.watchers.set(watch.attemptId, watch);
             const current = yield* Ref.get(existing.liveness);
@@ -306,7 +308,7 @@ export const workerWatchesFor = (
             liveness,
             () => [...watchers.values()],
           ).pipe(Effect.forkIn(scope));
-          watched.set(watch.worker, { liveness, watchers, fiber });
+          watched.set(keyOf(watch), { liveness, watchers, fiber });
           yield* Effect.logDebug("Watching the Worker while Attempts run on it", {
             ...fields,
             host: watch.shell.destination,
@@ -319,11 +321,11 @@ export const workerWatchesFor = (
       Semaphore.withPermit(
         lock,
         Effect.gen(function* () {
-          const existing = watched.get(watch.worker);
+          const existing = watched.get(keyOf(watch));
           if (existing === undefined) return;
           existing.watchers.delete(watch.attemptId);
           if (existing.watchers.size > 0) return;
-          watched.delete(watch.worker);
+          watched.delete(keyOf(watch));
           yield* Fiber.interrupt(existing.fiber);
           yield* Effect.logDebug("Stopped watching the Worker; no Attempt runs on it", {
             attemptId: watch.attemptId,

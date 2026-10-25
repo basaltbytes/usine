@@ -5,7 +5,7 @@ import { AgentName } from "@usine/core/agent";
 import { RunawayCeiling } from "@usine/core/attempt/failure";
 import { AttemptSalvage } from "@usine/core/attempt/salvage";
 import { AttemptStart } from "@usine/core/attempt/start";
-import { SshDestination, SshPort, WorkerName } from "@usine/core/worker";
+import { MachineProvider, SshDestination, SshPort, WorkerName } from "@usine/core/worker";
 import { Effect, Schema } from "effect";
 
 /** An infra failure without its defect cause. */
@@ -100,8 +100,20 @@ export class SshWorkerAccess extends Schema.TaggedClass<SshWorkerAccess>(
   "@usine/orchestrator/SshWorkerAccess",
 )("Ssh", { destination: SshDestination, port: Schema.NullOr(SshPort) }) {}
 
+/**
+ * A provisioned Worker, which created a machine for each Attempt at `provider` and deletes it
+ * once the Attempt's slot is released, so `usine.yaml` has no address for it.
+ */
+export class ProvisionedWorkerAccess extends Schema.TaggedClass<ProvisionedWorkerAccess>(
+  "@usine/orchestrator/ProvisionedWorkerAccess",
+)("Provisioned", { provider: MachineProvider }) {}
+
 /** How the operator accesses a Worker's machine, from its `usine.yaml` entry. */
-export const WorkerAccess = Schema.Union([LocalWorkerAccess, SshWorkerAccess]);
+export const WorkerAccess = Schema.Union([
+  LocalWorkerAccess,
+  SshWorkerAccess,
+  ProvisionedWorkerAccess,
+]);
 export type WorkerAccess = typeof WorkerAccess.Type;
 
 /** One Attempt with its Worker, effective brain, start, end, outcome, and salvaged work. */

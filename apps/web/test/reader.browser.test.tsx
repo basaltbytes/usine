@@ -35,7 +35,7 @@ import {
   SshWorkerAccess,
   TranscriptEventView,
   TranscriptPageCursor,
-  type WorkerAccess,
+  WorkerAccess,
 } from "@usine/orchestrator/operator";
 import { createRoot, type Root } from "react-dom/client";
 import { flushSync } from "react-dom";
@@ -848,12 +848,14 @@ it("addresses the composer to the parent until a live child is chosen in the out
 });
 
 const usineWorker = SshDestination.make("usine-worker-1");
+const sameLogin = "Same harness login as the attempt. The worktree is removed at attempt cleanup";
 const resumeCases: ReadonlyArray<{
   readonly worker: string;
   readonly harness: "claude" | "codex";
   readonly access: WorkerAccess | null;
   readonly facts: ReadonlyArray<string>;
   readonly command: string;
+  readonly note?: string;
 }> = [
   {
     worker: "local",
@@ -886,11 +888,19 @@ const resumeCases: ReadonlyArray<{
     ],
     command: String.raw`cd -- '/worker/Philippe'\''s repo' && claude --resume 'native-session'`,
   },
+  {
+    worker: "hz-pool",
+    harness: "claude",
+    access: Schema.decodeUnknownSync(WorkerAccess)({ _tag: "Provisioned", provider: "hetzner" }),
+    facts: ["Worktree /worker/Philippe's repo on hz-pool"],
+    command: String.raw`cd -- '/worker/Philippe'\''s repo' && claude --resume 'native-session'`,
+    note: "Run it on the attempt's Hetzner machine, which is deleted with the attempt",
+  },
 ];
 
 it.each(resumeCases)(
   "gives a finished $harness child on $worker one copyable command for the operator's terminal",
-  async ({ worker, harness, access, facts, command }) => {
+  async ({ worker, harness, access, facts, command, note = sameLogin }) => {
     const child = new ChildSession({
       id: AgentSessionId.make("saved-child"),
       parentId: parent.id,
@@ -920,14 +930,7 @@ it.each(resumeCases)(
       await expect.element(page.getByText(fact, { exact: true })).toBeVisible();
     }
     await expect.element(page.getByText("Resume this session", { exact: true })).toBeVisible();
-    await expect
-      .element(
-        page.getByText(
-          "Same harness login as the attempt. The worktree is removed at attempt cleanup",
-          { exact: true },
-        ),
-      )
-      .toBeVisible();
+    await expect.element(page.getByText(note, { exact: true })).toBeVisible();
     // The command wraps in the popover instead of scrolling sideways.
     const code = page.getByRole("dialog").element().querySelector("pre");
     expect(code?.textContent).toBe(command);

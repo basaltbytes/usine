@@ -1,10 +1,16 @@
-import type { WorkerView } from "@usine/orchestrator/operator";
+import type { ProvisioningPauseView, WorkerView } from "@usine/orchestrator/operator";
 import { StateMark } from "@/components/status-badge";
-import { agoLabel, timestampLabel } from "../operator-copy.ts";
+import {
+  agoLabel,
+  creationFailureTitle,
+  nextCreationLine,
+  timestampLabel,
+} from "../operator-copy.ts";
 
 const outcome = {
   Passed: { state: "Succeeded", label: "passed", className: undefined },
   Degraded: { state: "Waiting", label: "degraded", className: "text-run-waiting" },
+  Deferred: { state: "Deferred", label: "deferred", className: undefined },
   Failed: { state: "Failed", label: "failed", className: "text-destructive" },
 } as const;
 
@@ -22,6 +28,20 @@ const Preflight = ({ worker, now }: { readonly worker: WorkerView; readonly now:
     </span>
   );
 };
+
+const CreationPaused = ({
+  pause,
+  now,
+}: {
+  readonly pause: ProvisioningPauseView;
+  readonly now: number;
+}) => (
+  <span className="text-destructive" title={pause.message}>
+    <StateMark state="Failed" className="mr-1.5 align-middle" />
+    {creationFailureTitle(pause)}.{" "}
+    <span className="tabular-nums">{nextCreationLine(pause, now)}</span>
+  </span>
+);
 
 export const WorkersLine = ({
   workers,
@@ -41,8 +61,13 @@ export const WorkersLine = ({
         <span className="tabular-nums">
           {worker.slots.leased} of {worker.slots.capacity}{" "}
           {worker.slots.capacity === 1 ? "slot" : "slots"} in use
+          {worker.machines.length > 0 &&
+            `, ${worker.machines.length} ${worker.machines.length === 1 ? "machine" : "machines"}`}
         </span>
         <Preflight worker={worker} now={now} />
+        {worker.provisioning?.blocked === true && (
+          <CreationPaused pause={worker.provisioning} now={now} />
+        )}
       </span>
     ))}
   </footer>

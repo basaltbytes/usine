@@ -149,6 +149,10 @@ _Avoid_: daemon, app, backend
 A machine that runs an attempt's harness children in a checkout: local, an exe.dev VM, or an SSH host. The Pi parent always runs in the orchestrator.
 _Avoid_: runner, sandbox, executor
 
+**Provisioner**:
+The setting of an SSH worker that creates a machine at a provider, Hetzner Cloud or Boat, for each attempt and deletes it afterwards (ADR 0029). A worker with one is a provisioned worker.
+_Avoid_: autoscaler, pool, fleet
+
 **Run host**:
 Removed in ADR 0006.
 

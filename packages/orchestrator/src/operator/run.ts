@@ -13,6 +13,7 @@ import * as RunState from "@usine/core/run/state";
 import { WorkerName } from "@usine/core/worker";
 import { Effect, Schema } from "effect";
 import { AttemptView } from "./attempt.ts";
+import { MachineView } from "./machines.ts";
 import { TranscriptEventView, TranscriptPageCursor } from "./transcript.ts";
 import { RunUsageView } from "./usage.ts";
 
@@ -166,5 +167,10 @@ export class RunDetailView extends Schema.Class<RunDetailView>("@usine/orchestra
     unconfirmedStop: Schema.NullOr(UnconfirmedStopView).pipe(
       Schema.withConstructorDefault(Effect.succeed(null)),
     ),
+    /**
+     * The machine a provisioned Worker creates or holds for the Run's next or running Attempt, or
+     * null.
+     */
+    machine: Schema.NullOr(MachineView).pipe(Schema.withConstructorDefault(Effect.succeed(null))),
   },
 ) {}
