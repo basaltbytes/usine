@@ -38,8 +38,8 @@ export class BoardPullRequestView extends Schema.Class<BoardPullRequestView>(
 
 /**
  * A Board card for a Task projected from linked Items and placed by its current Item. While the
- * Task's newest open Run is running, the card stays in the lane that matched when the Run was
- * triggered.
+ * Task's newest open Run is running and the current Item has no lane label, the card stays in the
+ * lane that matched when the Run was triggered.
  */
 export class BoardTaskView extends Schema.Class<BoardTaskView>("@usine/orchestrator/BoardTaskView")(
   {

@@ -173,33 +173,57 @@ const lanes = (board: BoardView) =>
   );
 
 describe("The lane of a running Task", () => {
+  it.effect("is the lane its Item's labels match, after the Agent swapped its trigger label", () =>
+    Effect.gen(function* () {
+      // start-dev swapped ready-for-agent for agent-in-progress; review-pr set its finding label.
+      const develop = issue(470, ["agent-in-progress", "bug"]);
+      const review = pullRequest(474, ["agent-review-findings"]);
+      const runs = [
+        run(develop, "start-dev", "Running"),
+        run(review, "review-pr", "Running"),
+      ] as const;
+      const board = yield* project([develop, review], runs, [
+        triggeredWith(runs[0], develop, ["ready-for-agent", "bug"]),
+        triggeredWith(runs[1], review, ["ready-for-review"]),
+      ]);
+      assert.deepStrictEqual(lanes(board), {
+        Ready: [],
+        "In progress": [470],
+        Review: [],
+        Findings: [474],
+        Passed: [],
+        Merge: [],
+        "Pull requests": [],
+        Done: [],
+        Unmapped: [],
+      });
+      assert.deepStrictEqual(
+        board.lanes.flatMap(({ items }) => items.map(({ run }): string | undefined => run?.loop)),
+        ["start-dev", "review-pr"],
+      );
+    }),
+  );
+
   it.effect(
     "is the lane its Run's trigger label routed to, after the Agent removed that label",
     () =>
       Effect.gen(function* () {
-        // start-dev swapped ready-for-agent for agent-in-progress; the PR Loops removed theirs.
-        const develop = issue(470, ["agent-in-progress", "bug"]);
+        // The PR Loops removed their trigger labels and set no other lane label.
         const review = pullRequest(466, []);
         const findings = pullRequest(472, ["bug"]);
         const finish = pullRequest(468, []);
         const runs = [
-          run(develop, "start-dev", "Running"),
           run(review, "review-pr", "Running"),
           run(findings, "act-on-findings", "Running"),
           run(finish, "finish-pr", "Running"),
         ] as const;
-        const board = yield* project(
-          [develop, review, findings, finish, pullRequest(319, [])],
-          runs,
-          [
-            triggeredWith(runs[0], develop, ["ready-for-agent", "bug"]),
-            triggeredWith(runs[1], review, ["ready-for-review"]),
-            triggeredWith(runs[2], findings, ["agent-review-findings", "bug"]),
-            triggeredWith(runs[3], finish, ["review-passed"]),
-          ],
-        );
+        const board = yield* project([review, findings, finish, pullRequest(319, [])], runs, [
+          triggeredWith(runs[0], review, ["ready-for-review"]),
+          triggeredWith(runs[1], findings, ["agent-review-findings", "bug"]),
+          triggeredWith(runs[2], finish, ["review-passed"]),
+        ]);
         assert.deepStrictEqual(lanes(board), {
-          Ready: [470],
+          Ready: [],
           "In progress": [],
           Review: [466],
           Findings: [472],
@@ -219,7 +243,6 @@ describe("The lane of a running Task", () => {
             ]),
           ),
           [
-            [470, "start-dev"],
             [466, "review-pr"],
             [472, "act-on-findings"],
             [468, "finish-pr"],
@@ -228,8 +251,8 @@ describe("The lane of a running Task", () => {
         );
         // The card still shows the labels its Item has now.
         assert.deepStrictEqual<ReadonlyArray<string> | undefined>(
-          board.lanes[0]?.items[0]?.labels,
-          ["agent-in-progress", "bug"],
+          board.lanes.find(({ name }) => name === "Findings")?.items[0]?.labels,
+          ["bug"],
         );
       }),
   );

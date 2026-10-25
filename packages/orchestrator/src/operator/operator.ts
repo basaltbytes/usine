@@ -259,7 +259,7 @@ const makeOperatorObservation = Effect.gen(function* () {
             (a, b) => b.openedAt.localeCompare(a.openedAt) || b.id.localeCompare(a.id),
           );
           // The reader keeps ended Attempts' reports, so only running Attempts are read again. A
-          // running Run's Event gives the lane its card stays in while its Agent changes labels.
+          // running Run's Event gives its card's lane while its Item has no lane label.
           const [usages, runEvents] = yield* Effect.all(
             [
               Effect.forEach(

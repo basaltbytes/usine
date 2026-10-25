@@ -38,7 +38,7 @@ Each project has a board. A lane shows the labels and item states that route ite
 
 A card with an open or unresolved `Failed` run shows the run's loop, state, agent, and time since it opened, since the current attempt started, or since the failure (hover for the timestamp). A stalled card gives the same reason and action as **Stalled**, such as **Retry**, **Mark answered**, or **Mark resolved**.
 
-A `Running` run's card stays in the lane of its trigger label until the first poll after the run ends, even if the loop removes the label. A card that you move during a run gets its new labels immediately and moves when the run ends.
+A `Running` run's card goes to the lane of the item's current labels, such as a label that the loop sets when it starts. If the loop removes its trigger label and sets no other lane label, the card stays in the lane of its trigger label until the first poll after the run ends. A card that you move during a run moves like any other card.
 
 The card menu lists only the actions that apply: open the items on GitHub or the run, **Run history**, approve, retry, or cancel, run the latest run again, and **Move to**. Runs without an item, such as schedule runs, are under **Runs without a card**.
 

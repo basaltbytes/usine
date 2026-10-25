@@ -515,10 +515,13 @@ export const boardOverviewDocumentedLongLoop = () =>
   });
 
 const reviewing = link(46, "pr", "Keep a running card in the lane its Run was triggered from");
+const starting = link(47, "issue", "Move a running card to the lane of its current labels");
 
 /**
- * Returns the Board while `review` runs on #46. The Loop removed its trigger label `review`, so #46
- * has only `ci`, and the server keeps the card in the Review lane until the Run ends.
+ * Returns the Board while `review` runs on #46 and `implement` runs on #47. The review Loop removed
+ * its trigger label `review`, so #46 has only `ci`, and the server keeps the card in the Review
+ * lane until the Run ends. The implement Loop swapped `ready-for-agent` for `in-progress`, so the
+ * server places #47 in the In progress lane.
  */
 export const boardOverviewReviewing = () => {
   const running = new RunView({
@@ -528,6 +531,19 @@ export const boardOverviewReviewing = () => {
     loopPaused: false,
   });
   const held = task([reviewing], ["ci"], [running]);
+  const started = task(
+    [starting],
+    ["in-progress", "bug"],
+    [
+      run("run-starting", starting, "implement", "Running", 1, [
+        attempt(1, minutesAgo(1), "running"),
+      ]),
+    ],
+  );
+  const added = new Map([
+    ["Review", held],
+    ["In progress", started],
+  ]);
   const overview = boardOverview();
   return new ReadyOverview({
     ...overview,
@@ -537,11 +553,12 @@ export const boardOverviewReviewing = () => {
           ...project,
           board: new BoardView({
             ...project.board,
-            lanes: project.board.lanes.map((lane) =>
-              lane._tag === "WritableBoardLane" && lane.name === "Review"
-                ? new WritableBoardLaneView({ ...lane, items: [held, ...lane.items] })
-                : lane,
-            ),
+            lanes: project.board.lanes.map((lane) => {
+              const card = added.get(lane.name);
+              return lane._tag === "WritableBoardLane" && card !== undefined
+                ? new WritableBoardLaneView({ ...lane, items: [card, ...lane.items] })
+                : lane;
+            }),
           }),
         }),
     ),

@@ -44,7 +44,8 @@ export class TaskItemView extends Schema.Class<TaskItemView>("@usine/orchestrato
 }) {}
 
 /**
- * The Task's Board lane: its current Item's lane, or the lane its running Run was triggered from.
+ * The Task's Board lane: its current Item's lane or, while a Run runs and the Item has no lane
+ * label, the lane that Run was triggered from.
  */
 export class TaskLaneView extends Schema.Class<TaskLaneView>("@usine/orchestrator/TaskLaneView")({
   id: BoardLaneId,

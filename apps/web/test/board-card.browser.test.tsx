@@ -289,7 +289,7 @@ it("shows a card whose running Run's Loop removed its lane label in that lane, c
     .element(lane("Pull requests").getByRole("heading", { name: "Pull requests 2" }))
     .toBeVisible();
   expect(lane("Pull requests").element().contains(card)).toBe(false);
-  await expect.element(page.getByText("8 lanes, 11 items", { exact: true })).toBeVisible();
+  await expect.element(page.getByText("8 lanes, 12 items", { exact: true })).toBeVisible();
   const row = runLine(card, "Running");
   expect(row.textContent).toBe("reviewRunning2mreviewer");
   expect(markAnimation(row)).not.toBe("none");
@@ -297,6 +297,21 @@ it("shows a card whose running Run's Loop removed its lane label in that lane, c
   expect([...card.querySelectorAll("[data-slot=badge]")].map((badge) => badge.textContent)).toEqual(
     ["ci"],
   );
+});
+
+it("shows a running card whose Loop swapped its lane label in the lane of its current labels, with its Run line", async () => {
+  overview = boardOverviewReviewing();
+  await commands.boardResponses(JSON.stringify(Schema.encodeSync(FactoryOverview)(overview)), 200);
+  flushSync(() => queryClient.setQueryData(["overview"], overview));
+  const inProgress = lane("In progress");
+  await expect.element(inProgress.getByRole("heading", { name: "In progress 2" })).toBeVisible();
+  const card = cardOf(/^Move a running card/u);
+  expect(inProgress.element().contains(card)).toBe(true);
+  await expect.element(lane("Ready").getByRole("heading", { name: "Ready 1" })).toBeVisible();
+  expect(lane("Ready").element().contains(card)).toBe(false);
+  const row = runLine(card, "Running");
+  expect(row.textContent).toBe("implementRunning1mdeveloper");
+  expect(markAnimation(row)).not.toBe("none");
 });
 
 it("offers Retry beside the failure only on the card whose Run failed", async () => {
