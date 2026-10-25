@@ -7,7 +7,7 @@ import {
   HttpServerRequest,
   HttpServerResponse,
 } from "effect/unstable/http";
-import type { Attachment } from "../attachment/attachment.ts";
+import type { Attachment, LiveAttachment } from "../attachment/attachment.ts";
 import { Attachments } from "../attachment/store.ts";
 import {
   type CallerClaims,
@@ -18,6 +18,7 @@ import {
 import {
   GITHUB_HOSTS,
   type GitHubHost,
+  type GitHubRoute,
   gatewayLocation,
   githubRoute,
   withGitHubCredential,
@@ -150,11 +151,11 @@ export class GatewayProxy extends Context.Service<
         );
         const lookup = yield* attachments.find(claims.attachment);
         return yield* Match.valueTags(lookup, {
-          LiveAttachment: ({ attachment }) =>
-            attachment.worker === claims.worker &&
-            canonicalRepositoryName(attachment.repository) ===
+          LiveAttachment: (live) =>
+            live.attachment.worker === claims.worker &&
+            canonicalRepositoryName(live.attachment.repository) ===
               canonicalRepositoryName(claims.repository)
-              ? Effect.succeed({ claims, attachment })
+              ? Effect.succeed({ claims, live })
               : Effect.fail(stale),
           ExpiredAttachment: () =>
             Effect.fail(
@@ -168,11 +169,19 @@ export class GatewayProxy extends Context.Service<
         });
       });
 
-      /** Points a `Location` at github.com or api.github.com to `git.<domain>`, and logs the rewrite. */
+      /**
+       * Points a `Location` at github.com or api.github.com to `git.<domain>`, and logs the rewrite.
+       * GitHub answers a renamed or transferred repository's former name with a permanent
+       * redirect to its new name, so if `requested` named the repository, a 301 or 308 teaches
+       * the attachment the repository its `Location` names. A path that names no repository, such
+       * as `/repositories/ID/...`, teaches nothing: the gateway can't tell which repository it was.
+       */
       const throughGateway = Effect.fn("GatewayProxy.throughGateway")(function* (
         answer: HttpServerResponse.HttpServerResponse,
-        attachment: Attachment,
+        live: LiveAttachment,
+        requested: GitHubRoute,
       ) {
+        const { attachment } = live;
         const from = Option.flatMap(Headers.get(answer.headers, "location"), absoluteUrl);
         const to = Option.flatMap(from, (url) => gatewayLocation(settings.github, hosts.git, url));
         if (Option.isNone(from) || Option.isNone(to)) return answer;
@@ -183,6 +192,11 @@ export class GatewayProxy extends Context.Service<
           from: from.value.host,
           path: to.value.pathname,
         });
+        if (Option.isSome(requested.repository) && PERMANENT_REDIRECTS.has(answer.status)) {
+          const named = githubRoute(settings.github, "gateway", to.value.pathname, to.value.search);
+          const newName = Option.flatMap(named, ({ repository }) => repository);
+          if (Option.isSome(newName)) yield* attachments.learnNewName(attachment.id, newName.value);
+        }
         return HttpServerResponse.setHeader(answer, "location", to.value.href);
       });
 
@@ -191,7 +205,8 @@ export class GatewayProxy extends Context.Service<
         target: RequestTarget,
         host: GitHubHost,
       ) {
-        const { claims, attachment } = yield* authenticate(request);
+        const { claims, live } = yield* authenticate(request);
+        const { attachment } = live;
         const route = githubRoute(settings.github, host, target.pathname, target.search);
         if (Option.isNone(route))
           return yield* refusedCaller(
@@ -200,10 +215,7 @@ export class GatewayProxy extends Context.Service<
             `The gateway serves Git smart HTTP, release downloads, and the GitHub API, not ${target.pathname}.`,
           );
         const named = route.value.repository;
-        if (
-          Option.isSome(named) &&
-          canonicalRepositoryName(named.value) !== canonicalRepositoryName(claims.repository)
-        )
+        if (Option.isSome(named) && !live.serves(named.value))
           return yield* refusedCaller(
             claims,
             "repository-mismatch",
@@ -216,7 +228,8 @@ export class GatewayProxy extends Context.Service<
         );
         const response = yield* throughGateway(
           yield* forwardRequest(client, request, route.value.upstream, headers),
-          attachment,
+          live,
+          route.value,
         );
         yield* forwarded(
           route.value.protocol === "release"
@@ -235,7 +248,10 @@ export class GatewayProxy extends Context.Service<
         request: HttpServerRequest.HttpServerRequest,
         target: RequestTarget,
       ) {
-        const { claims, attachment } = yield* authenticate(request);
+        const {
+          claims,
+          live: { attachment },
+        } = yield* authenticate(request);
         const destination = llmTarget(target.pathname);
         if (Option.isNone(destination))
           return yield* refusedCaller(
@@ -302,6 +318,9 @@ export class GatewayProxy extends Context.Service<
     }),
   );
 }
+
+/** The statuses GitHub uses to redirect a renamed or transferred repository's former name. */
+const PERMANENT_REDIRECTS: ReadonlySet<number> = new Set([301, 308]);
 
 const refusalResponse = (error: Refused): HttpServerResponse.HttpServerResponse =>
   HttpServerResponse.jsonUnsafe(

@@ -67,12 +67,14 @@ type Answer = (url: URL) => Response;
 const ok: Answer = () =>
   new Response("upstream body", { status: 200, headers: { "x-upstream": "yes" } });
 
-/** Answers each URL in `locations` with a redirect to its value, and other URLs with `ok`. */
+/** Answers each URL in `locations` with a redirect to its value, and other URLs with `otherwise`. */
 const redirecting =
-  (status: number, locations: Readonly<Record<string, string>>): Answer =>
+  (status: number, locations: Readonly<Record<string, string>>, otherwise: Answer = ok): Answer =>
   (url) => {
     const location = locations[url.toString()];
-    return location === undefined ? ok(url) : new Response("", { status, headers: { location } });
+    return location === undefined
+      ? otherwise(url)
+      : new Response("", { status, headers: { location } });
   };
 
 /** The requests the fake upstream received, and its answer to each. */
@@ -472,7 +474,7 @@ describe("GatewayProxy", () => {
   );
 
   it.effect(
-    "redirects to github.com and api.github.com point at git.<domain>, which still refuses a renamed repository's new name",
+    "redirects to github.com and api.github.com point at git.<domain>, which serves a renamed repository's new name after GitHub's redirect",
     () =>
       Effect.gen(function* () {
         lines.length = 0;
@@ -498,18 +500,28 @@ describe("GatewayProxy", () => {
           200,
           null,
         ]);
-        const followed = yield* send(
-          "http://git.gw.test/acme/renamed.git/info/refs?service=git-upload-pack",
-          { "x-usine-gateway-token": caller },
-        );
-        assert.deepStrictEqual(
-          [followed.status, followed.headers.get(REFUSAL_HEADER)],
-          [403, "repository-mismatch"],
-        );
         assert.strictEqual(
           (yield* sent).at(-1)?.url,
           "https://api.github.com/repositories/42/pulls?state=open",
         );
+        assert.deepStrictEqual(
+          yield* location("/acme/renamed.git/info/refs?service=git-upload-pack"),
+          [200, null],
+        );
+        assert.strictEqual(
+          (yield* sent).at(-1)?.url,
+          "https://github.com/acme/renamed.git/info/refs?service=git-upload-pack",
+        );
+        const learned = lines.find((line) =>
+          line.includes("Learned the new name of an attached repository"),
+        );
+        assert(learned !== undefined, lines.join("\n"));
+        for (const field of [
+          `"worker":"${WORKER}"`,
+          '"repository":"acme/demo"',
+          '"newName":"acme/renamed"',
+        ])
+          assert.include(learned, field);
         const rewrite = lines.find((line) => line.includes('"from":"api.github.com"'));
         assert(rewrite !== undefined, lines.join("\n"));
         for (const field of [
@@ -531,6 +543,49 @@ describe("GatewayProxy", () => {
               "https://github.com/acme/demo.git/info/refs?service=git-upload-pack":
                 "https://github.com/acme/renamed.git/info/refs?service=git-upload-pack",
             }),
+          ),
+        ),
+      ),
+  );
+
+  it.effect(
+    "only a permanent redirect of a request that names the repository teaches a new name, and only to that attachment",
+    () =>
+      Effect.gen(function* () {
+        const caller = yield* attach(installation);
+        const otherAttempt = yield* attachAs(OTHER_ATTACHMENT, installation);
+        const outcome = (path: string, token: string) =>
+          Effect.map(
+            send(`http://git.gw.test${path}`, { "x-usine-gateway-token": token }),
+            (response) => [response.status, response.headers.get(REFUSAL_HEADER)],
+          );
+        yield* outcome("/acme/demo.git/info/refs", caller);
+        yield* outcome("/acme/demo/releases/download/v1.2.0/tool.tar.gz", caller);
+        yield* outcome("/api/v3/repositories/42", caller);
+        assert.deepStrictEqual(yield* outcome("/acme/renamed.git/info/refs", caller), [200, null]);
+        for (const [path, token] of [
+          ["/acme/renamed.git/info/refs", otherAttempt],
+          ["/acme/moved/releases/download/v1.2.0/tool.tar.gz", caller],
+          ["/api/v3/repos/acme/elsewhere", caller],
+        ] as const)
+          assert.deepStrictEqual(yield* outcome(path, token), [403, "repository-mismatch"], path);
+      }).pipe(
+        Effect.provide(
+          gateway(
+            NO_PROVIDERS,
+            redirecting(
+              301,
+              {
+                "https://github.com/acme/demo.git/info/refs":
+                  "https://github.com/acme/renamed.git/info/refs",
+                "https://api.github.com/repositories/42":
+                  "https://api.github.com/repos/acme/elsewhere",
+              },
+              redirecting(302, {
+                "https://github.com/acme/demo/releases/download/v1.2.0/tool.tar.gz":
+                  "https://github.com/acme/moved/releases/download/v1.2.0/tool.tar.gz",
+              }),
+            ),
           ),
         ),
       ),
