@@ -89,10 +89,11 @@ const laneFor = (
     : (labelLaneFor(item, lanes) ?? stateLaneFor(item, lanes));
 
 /**
- * Returns the label lane that matched when `running` was triggered, from its Event's labels, or
- * `undefined` if the current Item is closed or merged or no lane can be read from the Event.
+ * Returns the lane of a card whose newest open Run is `running`: the label lane that the current
+ * Item's labels match, else the label lane that the labels of the Run's Event match. Returns
+ * `undefined` if the current Item is closed or merged, or if neither set of labels matches a lane.
  */
-const triggerLaneFor = Effect.fn("Board.triggerLane")(function* (
+const runningLaneFor = Effect.fn("Board.runningLane")(function* (
   repository: ManagedRepo,
   view: BoardTaskView,
   running: RunView,
@@ -107,10 +108,18 @@ const triggerLaneFor = Effect.fn("Board.triggerLane")(function* (
   };
   yield* Effect.annotateCurrentSpan(fields);
   if (isSettledItemState(view.state)) return undefined;
+  const current = labelLaneFor(view, lanes);
+  if (current !== undefined) {
+    yield* Effect.logDebug("Placing the running card in the lane its Item's labels match", {
+      ...fields,
+      lane: current.lane.name,
+    });
+    return current;
+  }
   const event = runEvents.get(running.id);
   if (event === undefined) {
     yield* Effect.logDebug(
-      "No Event read for the card's running Run; placing it by its Item's labels",
+      "No Event read for the card's running Run; placing it by its Item's state",
       fields,
     );
     return undefined;
@@ -119,7 +128,7 @@ const triggerLaneFor = Effect.fn("Board.triggerLane")(function* (
     Effect.map(Option.some),
     Effect.catch((error) =>
       Effect.logWarning(
-        "The running Run's Event has no labels to read; placing its card by its Item's labels",
+        "The running Run's Event has no labels to read; placing its card by its Item's state",
         { ...fields, eventId: event.id, errorTag: error._tag, message: error.message },
       ).pipe(Effect.as(Option.none())),
     ),
@@ -128,7 +137,7 @@ const triggerLaneFor = Effect.fn("Board.triggerLane")(function* (
   const lane = labelLaneFor({ labels: labels.value }, lanes);
   yield* Effect.logDebug(
     lane === undefined
-      ? "No lane label when the card's running Run was triggered; placing it by its Item's labels"
+      ? "No lane label when the card's running Run was triggered; placing it by its Item's state"
       : "Keeping the card in the lane its running Run was triggered from",
     { ...fields, lane: lane?.lane.name ?? "none" },
   );
@@ -137,7 +146,8 @@ const triggerLaneFor = Effect.fn("Board.triggerLane")(function* (
 
 /**
  * Groups the repository's stored Items into Task cards and the cards into lanes. A card with a
- * running Run stays in the lane its trigger matched, read from `runEvents`.
+ * running Run goes to the label lane that its current Item's labels match. If none matches, the
+ * card stays in the lane its Run's trigger matched, read from `runEvents`.
  */
 export const projectBoard = Effect.fn("Board.project")(
   (
@@ -184,11 +194,11 @@ export const projectBoard = Effect.fn("Board.project")(
       for (const definition of lanes) grouped.set(laneId(definition), []);
       const unmatched: Array<BoardTaskView> = [];
       for (const { view, running } of cards) {
-        const triggerLane =
+        const runningLane =
           running === undefined
             ? undefined
-            : yield* triggerLaneFor(repository, view, running, lanes, runEvents);
-        const definition = triggerLane ?? laneFor(view, lanes);
+            : yield* runningLaneFor(repository, view, running, lanes, runEvents);
+        const definition = runningLane ?? laneFor(view, lanes);
         if (definition === undefined) unmatched.push(view);
         else grouped.get(laneId(definition))?.push(view);
       }

@@ -701,7 +701,7 @@ describe("Operator", () => {
     }),
   );
 
-  it.effect("keeps a running Run's card in the lane its Event's labels routed to", () =>
+  it.effect("places a running Run's card by its Item's labels, else by its Event's labels", () =>
     Effect.gen(function* () {
       const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
       const moved = yield* Ref.make<ItemLabelMutation | null>(null);
@@ -712,13 +712,34 @@ describe("Operator", () => {
         ...snapshot.event,
         payload: { number: 31, labels: { totalCount: 1, nodes: [{ name: "ready-for-review" }] } },
       });
+      // No lane has a label that #31 has now.
+      const unlaned = new LoadedInstance({
+        ...instance,
+        config: Schema.decodeUnknownSync(UsineConfig)({
+          version: 1,
+          repos: [
+            {
+              name: repository,
+              lanes: [
+                { name: "Triage", sources: [{ label: "triage" }] },
+                {
+                  name: "In review",
+                  sources: [{ label: "ready-for-review" }, { state: "pr-open" }],
+                },
+                { name: "Issues", sources: [{ state: "issue-open" }] },
+              ],
+            },
+          ],
+        }),
+      });
       const laneOf = (overview: ReadyOverview): string | undefined =>
         overview.projects[0]?.board.lanes.find(({ items }) =>
           items.some((item) => item.itemKey === itemKey),
         )?.name;
-      for (const [state, lane] of [
-        [new RunState.Running(), "In review"],
-        [new RunState.Waiting(), "Ready"],
+      for (const [loaded, state, lane, toLane] of [
+        [instance, new RunState.Running(), "Ready", "In review"],
+        [unlaned, new RunState.Running(), "In review", "Triage"],
+        [unlaned, new RunState.Waiting(), "Issues", "In review"],
       ] as const) {
         const current = new RunSnapshot({
           ...snapshot,
@@ -728,11 +749,10 @@ describe("Operator", () => {
         const recordedMoves: Array<BoardMoveRecord> = [];
         yield* Effect.gen(function* () {
           const operator = yield* Operator;
-          assert.strictEqual(laneOf(yield* operator.overview(instance)), lane);
+          assert.strictEqual(laneOf(yield* operator.overview(loaded)), lane);
           // A move records the lane the Board showed the card in.
-          const toLane = lane === "Ready" ? "In review" : "Ready";
           yield* operator.moveBoardItem(
-            instance,
+            loaded,
             new BoardMove({
               repository,
               item: CoreItemNumber.make(31),

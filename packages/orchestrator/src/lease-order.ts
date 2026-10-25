@@ -18,7 +18,8 @@ export type PipelinePosition =
 /**
  * Returns the position of a Run: its Loop's `priority`, else the first of the repository's `lanes`
  * with a label source among the Item `labels` in the Run's Event, compared ignoring case as GitHub
- * does. The Board keeps the Run's card in that lane while the Run runs.
+ * does. While the Run runs, the Board keeps its card in that lane unless the Item's current labels
+ * match a lane.
  */
 export const pipelinePosition = (
   priority: Option.Option<LoopPriority>,

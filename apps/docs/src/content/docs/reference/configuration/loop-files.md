@@ -187,7 +187,7 @@ When every worker slot is taken, runs wait in a queue. A free slot goes to the f
 
 1. A run that reattaches an attempt still running on the worker with the free slot.
 2. A run of a loop that sets `priority`, higher first.
-3. A run with a lane position, later lane first. The position is the first lane, in the repository's [`lanes`](/reference/configuration/usine-yaml/#reposlanes) order, with a `label` source that matches a label the item had when the run's trigger matched. It's the lane that the board shows the run's card in while it runs.
+3. A run with a lane position, later lane first. The position is the first lane, in the repository's [`lanes`](/reference/configuration/usine-yaml/#reposlanes) order, with a `label` source that matches a label the item had when the run's trigger matched. While the run runs, the board shows its card in that lane unless the item's current labels match a lane.
 4. Any other run, such as a schedule run or a run in a repository without `lanes`.
 
 Runs at the same position keep the order in which their events arrived.
