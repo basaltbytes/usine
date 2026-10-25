@@ -656,6 +656,55 @@ describe("Operator", () => {
     }),
   );
 
+  it.effect(
+    "leaves the Runs of a repository usine.yaml no longer lists out of Needs attention",
+    () =>
+      Effect.gen(function* () {
+        const original = snapshot.attempts[0];
+        assert(original !== undefined);
+        const failed = new RunSnapshot({
+          ...snapshot,
+          run: new Run({ ...snapshot.run, state: new RunState.Failed() }),
+          attempts: [
+            new Attempt({
+              ...original,
+              outcome: Option.some(
+                new AttemptFailed({
+                  failure: new InfraFailure({
+                    message: "Worker unavailable",
+                    cause: "disconnected",
+                  }),
+                }),
+              ),
+            }),
+          ],
+        });
+        const elsewhere = new LoadedInstance({
+          ...instance,
+          config: Schema.decodeUnknownSync(UsineConfig)({
+            version: 1,
+            repos: [{ name: "basaltbytes/site" }],
+          }),
+        });
+        const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+        const moved = yield* Ref.make<ItemLabelMutation | null>(null);
+        const reads = yield* Ref.make(0);
+        const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+        for (const [current, need] of [
+          [snapshot, "ApprovalNeed"],
+          [failed, "RunFailureNeed"],
+        ] as const) {
+          const needs = (loaded: LoadedInstance) =>
+            Effect.gen(function* () {
+              const overview = yield* (yield* Operator).overview(loaded);
+              return overview.needsYou.map(({ _tag }) => _tag);
+            }).pipe(Effect.provide(testLayer(approved, moved, reads, revision, current)));
+          assert.include(yield* needs(instance), need);
+          assert.notInclude(yield* needs(elsewhere), need);
+        }
+      }),
+  );
+
   it.effect("projects when each Attempt on a Board card started and when a closed one ended", () =>
     Effect.gen(function* () {
       const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);

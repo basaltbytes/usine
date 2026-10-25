@@ -14,7 +14,7 @@ import { RunId } from "@usine/core/run";
 import { ApprovalSource } from "@usine/core/run/approval";
 import type { WorkerName } from "@usine/core/worker";
 import type { ItemKey, ItemNumber } from "@usine/core/item";
-import type { RepositoryName } from "@usine/core/repository";
+import { canonicalRepositoryName, type RepositoryName } from "@usine/core/repository";
 import {
   RetryRequest,
   RunAgainRequest,
@@ -303,8 +303,19 @@ const makeOperatorObservation = Effect.gen(function* () {
     const allRuns = new Map(views.map((run) => [run.id, run]));
     for (const { projectRuns } of projected)
       for (const run of projectRuns) allRuns.set(run.id, run);
+    // A Run of a repository that usine.yaml no longer lists has no Project to mark.
+    const managed = new Set(instance.config.repos.map(({ name }) => canonicalRepositoryName(name)));
+    const managedRuns: Array<(typeof views)[number]> = [];
+    for (const run of allRuns.values()) {
+      if (managed.has(canonicalRepositoryName(run.repository))) managedRuns.push(run);
+      else if (run.state === "Waiting" || run.canResolveFailure)
+        yield* Effect.logDebug(
+          "Run's repository is not in usine.yaml; left out of Needs attention",
+          { runId: run.id, repository: run.repository, state: run.state },
+        );
+    }
     const failedItems = new Set(
-      [...allRuns.values()].flatMap((run) =>
+      managedRuns.flatMap((run) =>
         run.state !== "Waiting" && run.canResolveFailure ? [run.itemKey] : [],
       ),
     );
@@ -386,7 +397,7 @@ const makeOperatorObservation = Effect.gen(function* () {
         ),
       ),
     );
-    for (const run of allRuns.values()) {
+    for (const run of managedRuns) {
       if (run.state === "Waiting") {
         needsYou.push(
           new ApprovalNeed({
