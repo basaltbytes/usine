@@ -591,7 +591,7 @@ describe("local worker", () => {
             } else {
               const fiber = yield* preparing.pipe(Effect.forkChild);
               yield* Deferred.await(started);
-              yield* executor.cancel(AttemptId.make(`prepare-${phase}/run/1`));
+              yield* executor.cancel(AttemptId.make(`prepare-${phase}/run/1`), "cancel");
               const exit = yield* Fiber.await(fiber);
               assert(Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause));
             }

@@ -35,7 +35,7 @@ Startup reconciliation lists each worker's `attempts/` once per executor instanc
 
 ### Cancel
 
-`cancel(attemptId)` applies from the start of preparation: harness probes, credential acquisition, repo lock waits, and checkout creation. It stops preparation before releasing acquired resources and blocks a later launch. `cancel` and the canceled `prepare` or `launch` return only after release. For a live attempt, it cancels the parent task and waits the configured grace before forcing termination. Concurrent and repeated cancels wait for cleanup and keep the launch's typed failure; after release, cancel does nothing.
+`cancel(attemptId, reason)` applies from the start of preparation: harness probes, credential acquisition, repo lock waits, and checkout creation. It stops preparation before releasing acquired resources and blocks a later launch. `cancel` and the canceled `prepare` or `launch` return only after release. For a live attempt, it cancels the parent task and waits the configured grace before forcing termination. Concurrent and repeated cancels wait for cleanup and keep the launch's typed failure; after release, cancel does nothing.
 
 This replaces the 0.x `Executor.launch(prepared, io)` and `Executor.cleanup(prepared)`; the engine's `StepExecutor` contract is unchanged.
 
@@ -80,7 +80,7 @@ A reattachment reads only what its armed ceilings use: the transcript for either
 
 After the harvest, the result is recorded in durable storage before the worktree is released, and `outcome` returns it, or the parent's failure, to an engine that stopped before recording the attempt. If storage has the parent's failure, `recover` first records the open attempt's comments, harvested in its worktree with a fresh credential, through the `RecoverySink`'s `comments`, filtered by the windows that its `windows` reads after GitHub lists them. A missing worktree or credential, or unreadable windows, is logged and records none.
 
-Every other end, whether failure, cancel, or tripped ceiling, cancels the parent task. The engine calls `recover` only for attempts that no run reattaches, so `recover` cancels a live parent task first and reconciles the worktree even if `isLive` still reports the attempt, as for an unharvested report. If the stop can't be confirmed (liveness unreadable, or the cancel fails or outlasts the interrupt grace), `recover` and `cancel` fail with a `cancel` `ExecutorOperationError`, and `recover` leaves the worktree, which the task might still write.
+Every other end, whether failure, cancel, or tripped ceiling, cancels the parent task. The engine calls `recover` only for attempts that no run reattaches, so `recover` cancels a live parent task first and reconciles the worktree even if `isLive` still reports the attempt, as for an unharvested report. If the stop can't be confirmed (liveness unreadable, or the cancel fails or outlasts the interrupt grace), `recover` and `cancel` fail with a `cancel` `ExecutorOperationError`, and `recover` leaves the worktree, which the task might still write. A launch whose stop isn't confirmed also leaves the worktree, without salvage; the next `cancel` that confirms the stop salvages and removes it as `recover` does, and logs a failure without failing (#523). `cancel` logs the engine's reason for the stop: `cancel`, `failed`, or `startup`.
 
 ## exe.dev worker
 

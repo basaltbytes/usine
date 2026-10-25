@@ -30,6 +30,7 @@ import {
   CycleBudgetUsedUpView,
   DeskView,
   FailedAttemptView,
+  InfraFailureView,
   LoopPausedView,
   LoopView,
   FailedCheckView,
@@ -47,6 +48,8 @@ import {
   StalledItemView,
   SucceededAttemptView,
   SuppressedForOperatorView,
+  UnconfirmedStopView,
+  WaitingForStopView,
   WorkerSilentView,
   WorkerSlotsView,
   WorkerView,
@@ -165,6 +168,7 @@ export const deskFixture = (now: number) => {
   const paused = link(392, "Review the harvest of PR comments");
   const queued = link(398, "Mark a gone issue's projection from the re-check");
   const fresh = link(411, "Command palette once there is more than one Project");
+  const unstopped = link(415, "Retry after a parent task that may still run");
 
   const waitingRun = run("run-approval-410", approval, "start-dev", "Waiting", 12, []);
   const questionRun = run("run-question-367", question, "start-dev", "Failed", 180, [
@@ -203,6 +207,17 @@ export const deskFixture = (now: number) => {
     ]),
   );
   const queuedRun = run("run-queued-398", queued, "start-dev", "Queued", 3, []);
+  const retryingRun = run("run-retrying-415", unstopped, "start-dev", "Running", 20, [
+    attempt(
+      "run-retrying-415",
+      19,
+      new FailedAttemptView({
+        failure: new InfraFailureView({ message: "Lost the parent task" }),
+      }),
+      "local",
+      10,
+    ),
+  ]);
   const ask = new CycleBudgetAsk({
     id: CycleBudgetAskId.make("event-budget-355"),
     itemKey: budget.itemKey,
@@ -298,6 +313,18 @@ export const deskFixture = (now: number) => {
         ),
       ),
       stalled("review-fix", paused, new LoopPausedView()),
+      stalled(
+        "start-dev",
+        unstopped,
+        new WaitingForStopView({
+          run: retryingRun,
+          stop: new UnconfirmedStopView({
+            runId: retryingRun.id,
+            attemptNumber: AttemptNumber.make(1),
+            worker: WorkerName.make("local"),
+          }),
+        }),
+      ),
       stalled("start-dev", queued, new QueuedForWorkerView({ run: queuedRun, ahead: 2 })),
       stalled("start-dev", fresh, new AwaitingPollView()),
     ],

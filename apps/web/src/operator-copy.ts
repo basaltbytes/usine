@@ -12,6 +12,7 @@ import type {
   LoopView,
   NeedView,
   RunView,
+  UnconfirmedStopView,
 } from "@usine/orchestrator/operator";
 import { Match, Option } from "effect";
 import type { BoardMoveProgress } from "./board/moves.ts";
@@ -130,8 +131,28 @@ export const tokensLabel = (tokens: number): string =>
 export const usdLabel = (usd: number): string =>
   usd > 0 && usd < 0.005 ? "under $0.01" : `$${usd.toFixed(2)}`;
 
-/** Returns the Run state as a phrase, for example `Failed after 3 attempts`, `Waiting for approval`, or `Running, attempt 2`. */
-export const runStateLine = (run: Pick<RunView, "state" | "attempts">): string => {
+/**
+ * Returns why the open Run `runId` starts no attempt, for example `Waiting for attempt 1 to stop on
+ * local`, or `Waiting for attempt 1 of an earlier run to stop on local` for another Run's attempt.
+ */
+export const stopWaitLine = (
+  runId: RunView["id"],
+  { runId: stopped, attemptNumber, worker }: UnconfirmedStopView,
+): string =>
+  stopped === runId
+    ? `Waiting for attempt ${attemptNumber} to stop on ${worker}`
+    : `Waiting for attempt ${attemptNumber} of an earlier run to stop on ${worker}`;
+
+/**
+ * Returns the Run state as a phrase, for example `Failed after 3 attempts`, `Waiting for approval`,
+ * or `Running, attempt 2`. While `unconfirmedStop` keeps an open Run from starting an attempt,
+ * returns `stopWaitLine`.
+ */
+export const runStateLine = (
+  run: Pick<RunView, "id" | "state" | "attempts">,
+  unconfirmedStop: UnconfirmedStopView | null = null,
+): string => {
+  if (unconfirmedStop !== null) return stopWaitLine(run.id, unconfirmedStop);
   const attempts = run.attempts.length;
   const after =
     attempts === 0 ? "" : ` after ${attempts} ${attempts === 1 ? "attempt" : "attempts"}`;
@@ -302,7 +323,7 @@ export const needCopy = (need: NeedView): NeedCopy =>
     }),
     UnconfirmedStopNeed: ({ loop, repository, runId, attemptNumber, worker }) => ({
       title: `${loop}: parent task not stopped`,
-      detail: `Attempt ${attemptNumber} still ending on ${worker}, using one slot. Stop retried every few minutes`,
+      detail: `Attempt ${attemptNumber} still ending on ${worker}, using one slot. No new attempt on this item until it stops. Stop retried every few minutes`,
       repository,
       runId,
     }),

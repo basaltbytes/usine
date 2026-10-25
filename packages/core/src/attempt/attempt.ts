@@ -27,6 +27,13 @@ export const AttemptTask = Schema.String.check(
 ).pipe(Schema.brand("AttemptTask"));
 export type AttemptTask = typeof AttemptTask.Type;
 
+/**
+ * Why the engine stops an Attempt's parent task: the operator canceled the Attempt (`cancel`), the
+ * Attempt failed (`failed`), or startup found the Attempt closed or not reattached (`startup`).
+ */
+export const StopReason = Schema.Literals(["cancel", "failed", "startup"]);
+export type StopReason = typeof StopReason.Type;
+
 /** The task and Agent that an operator sets for a Run's later Attempts. */
 export class AttemptContext extends Schema.Class<AttemptContext>("AttemptContext")({
   task: AttemptTask,

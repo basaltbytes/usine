@@ -128,13 +128,19 @@ const makeRunEngine = Effect.gen(function* () {
     // Stop the Attempt before interrupting its fiber; otherwise its parent task stays live
     // waiting for a reattach.
     const handshake = Option.isSome(outcome.openAttempt)
-      ? yield* stepExecutor.interrupt(outcome.openAttempt.value).pipe(Effect.result)
+      ? yield* stepExecutor.interrupt(outcome.openAttempt.value, "cancel").pipe(Effect.result)
       : Result.succeed(undefined);
     yield* driver.stop(runId);
-    // The Attempt's slot, and a checkout that startup kept for a reattach, stay kept until the
-    // parent task is confirmed stopped.
+    // The Attempt's slot, and a checkout that startup kept for a reattach, stay kept, and the
+    // queued Event's Run starts no Attempt, until the parent task is confirmed stopped.
     if (Option.isSome(outcome.openAttempt))
-      yield* driver.releaseKept(runId, outcome.openAttempt.value);
+      yield* driver.releaseKept({
+        attemptId: outcome.openAttempt.value,
+        runId,
+        loop: outcome.loop,
+        itemKey: outcome.itemKey,
+        reason: "cancel",
+      });
     yield* driver.continueWithNewest(runId);
     if (Option.isSome(outcome.openAttempt) && Result.isFailure(handshake)) {
       return yield* new AttemptCancellationError({
@@ -290,7 +296,8 @@ export class RunEngine extends Context.Service<
     /**
      * Cancels an open Run and interrupts its active Attempt; does nothing for a closed Run. If the
      * Attempt's parent task can't be confirmed stopped, fails with `AttemptCancellationError`, and
-     * the Attempt keeps its Worker slot until a reconcile confirms the stop (#475).
+     * until a reconcile confirms the stop, the Attempt keeps its Worker slot (#475) and no Run of
+     * the Loop on the Item starts an Attempt (#523).
      */
     readonly cancel: (runId: RunId) => Effect.Effect<void, RunEngineError>;
     /**
@@ -312,7 +319,9 @@ export class RunEngine extends Context.Service<
     /**
      * Starts a fiber for every open Run without one, except Runs waiting for approval, and opens the
      * queued Events that no closed Run continued, and retries the parent task stops that a cancel,
-     * a failed Attempt, or startup couldn't confirm. Runs at startup and every `ReconcileInterval`.
+     * a failed Attempt, or startup couldn't confirm. A Run whose Loop and Item have an unconfirmed
+     * stop starts no Attempt until a reconcile confirms it. Runs at startup and every
+     * `ReconcileInterval`.
      */
     readonly reconcile: () => Effect.Effect<void, RunEngineError>;
     /**
