@@ -8,24 +8,19 @@ import {
 } from "@usine/core/worker";
 import { Schema } from "effect";
 import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi";
+import { ProcessId, SandboxName } from "./names.ts";
+
+export {
+  ACCESS_CLIENT_ID_HEADER,
+  ACCESS_CLIENT_SECRET_HEADER,
+  attachPath,
+  execPath,
+  ProcessId,
+  SandboxName,
+} from "./names.ts";
 
 /** The version of the sandbox API and the exec stream, reported by `/v1/health`. */
 export const SANDBOX_PROTOCOL = 1;
-
-/**
- * The request headers with the Cloudflare Access service token. The Worker refuses every request
- * whose headers don't match the token it's configured with.
- */
-export const ACCESS_CLIENT_ID_HEADER = "cf-access-client-id";
-export const ACCESS_CLIENT_SECRET_HEADER = "cf-access-client-secret";
-
-/** A sandbox's Durable Object name: the usine Worker's name, a dot, and the Attempt as a path segment. */
-export const SandboxName = Schema.String.check(
-  Schema.isPattern(/^[a-z0-9]+(?:-[a-z0-9]+)*\.[A-Za-z0-9_.-]{1,160}$/u, {
-    message: "Expected a sandbox name: <worker>.<attempt>",
-  }),
-).pipe(Schema.brand("SandboxName"));
-export type SandboxName = typeof SandboxName.Type;
 
 /** Returns the name of the sandbox that runs `attempt` for `worker`. */
 export const sandboxName = (worker: WorkerName, attempt: AttemptId): SandboxName =>
@@ -53,12 +48,15 @@ const uniqueProviders = Schema.makeFilter<ReadonlyArray<ProviderGrant>>(
   { message: "Expected each provider once" },
 );
 
-/** The secrets that a sandbox's outbound handlers hold. The container never receives them. */
+/**
+ * The secrets that a sandbox's outbound handlers hold. The container never receives them. A host
+ * without a credential is refused, so replacing the credentials with none revokes them.
+ */
 export class SandboxCredentials extends Schema.Class<SandboxCredentials>(
   "@usine/cloudflare/SandboxCredentials",
 )({
   /** The Attempt's installation token, added to requests for `github.com` and `api.github.com`. */
-  github: Schema.Redacted(Schema.NonEmptyString),
+  github: Schema.OptionFromOptionalKey(Schema.Redacted(Schema.NonEmptyString)),
   providers: Schema.Array(ProviderGrant).check(uniqueProviders),
 }) {}
 
@@ -103,12 +101,6 @@ export class Stopped extends Schema.Class<Stopped>("@usine/cloudflare/Stopped")(
 export class Destroyed extends Schema.Class<Destroyed>("@usine/cloudflare/Destroyed")({
   destroyed: Schema.Boolean,
 }) {}
-
-/** The ID of one command a sandbox ran through its exec stream, which names its process files. */
-export const ProcessId = Schema.String.check(
-  Schema.isPattern(/^[0-9a-f]{32}$/u, { message: "Expected 32 lowercase hexadecimal digits" }),
-).pipe(Schema.brand("SandboxProcessId"));
-export type ProcessId = typeof ProcessId.Type;
 
 export class ProcessRunning extends Schema.TaggedClass<ProcessRunning>()("Running", {}) {}
 
@@ -220,13 +212,3 @@ export const sandboxGroup = HttpApiGroup.make("sandbox").add(
  * through this API.
  */
 export const SandboxApi = HttpApi.make("SandboxApi").add(healthGroup, registryGroup, sandboxGroup);
-
-/** Returns the path of the WebSocket that runs one command in the sandbox (`stream.ts`). */
-export const execPath = (name: SandboxName): string => `/v1/sandboxes/${name}/exec`;
-
-/**
- * Returns the path of the WebSocket that streams a command's output from the given byte offsets
- * of its process files, then its exit code.
- */
-export const attachPath = (name: SandboxName, process: ProcessId): string =>
-  `/v1/sandboxes/${name}/processes/${process}/attach`;

@@ -1,5 +1,17 @@
-import { Option, Schema } from "effect";
-import { ProcessId } from "./api.ts";
+// Imports Option and Schema alone, not the whole `effect` index: the executor's sandbox shell
+// loads this module once per command.
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+import { ProcessId } from "./names.ts";
+
+export {
+  ACCESS_CLIENT_ID_HEADER,
+  ACCESS_CLIENT_SECRET_HEADER,
+  attachPath,
+  execPath,
+  ProcessId,
+  SandboxName,
+} from "./names.ts";
 
 /**
  * The first text message of an exec stream. The sandbox runs `command` with `sh -c` as the image's

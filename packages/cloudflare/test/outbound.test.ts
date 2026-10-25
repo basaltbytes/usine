@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
-import { Redacted } from "effect";
+import { Option, Redacted } from "effect";
 import { ApiKeyCredential, ProviderGrant, SandboxCredentials } from "../src/api/api.ts";
 import { harnessEnvironment, PROVIDER_HOSTS } from "../src/api/harness.ts";
 import {
@@ -10,7 +10,7 @@ import {
 } from "../src/sandbox/outbound.ts";
 
 const credentials = new SandboxCredentials({
-  github: Redacted.make("ghs_installation-token"),
+  github: Option.some(Redacted.make("ghs_installation-token")),
   providers: [
     new ProviderGrant({
       provider: "anthropic",
@@ -30,7 +30,22 @@ describe("sandbox outbound handlers", () => {
       "GitHub:github.com",
       "GitHub:api.github.com",
       "Provider:anthropic.usine.internal",
+      "Denied:openai.usine.internal",
       "Allowed:registry.npmjs.org",
+    ]);
+  });
+
+  it("denies every GitHub and provider host once the credentials are revoked", () => {
+    const revoked = interceptionsFor(
+      new SandboxCredentials({ github: Option.none(), providers: [] }),
+      [],
+    );
+
+    expect(revoked.map(({ _tag, host }) => `${_tag}:${host}`)).toEqual([
+      "Denied:github.com",
+      "Denied:api.github.com",
+      "Denied:anthropic.usine.internal",
+      "Denied:openai.usine.internal",
     ]);
   });
 

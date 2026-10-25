@@ -66,12 +66,15 @@ describe("sandbox routes", () => {
       "GitHub:github.com",
       "GitHub:api.github.com",
       "Provider:anthropic.usine.internal",
+      "Denied:openai.usine.internal",
       "Allowed:registry.npmjs.org",
     ]);
     expect(state.recorded.map(({ name }) => name)).toEqual([NAME]);
     expect(Option.isSome(state.alarm) && state.keepAlives).toBe(1);
     assert(Option.isSome(state.stored));
-    expect(Redacted.value(state.stored.value.credentials.github)).toBe("ghs_first");
+    expect(Option.map(state.stored.value.credentials.github, Redacted.value)).toEqual(
+      Option.some("ghs_first"),
+    );
   });
 
   it("returns the running sandbox when the same Attempt asks again, and refuses another Attempt", async () => {

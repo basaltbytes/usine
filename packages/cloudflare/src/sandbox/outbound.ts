@@ -1,5 +1,5 @@
 import type { CloudflareLlmProvider } from "@usine/core/worker";
-import { Match, Redacted } from "effect";
+import { Match, Option, Redacted } from "effect";
 import type { ProviderCredential, SandboxCredentials } from "../api/api.ts";
 import { GITHUB_HOSTS, type GitHubHost, PROVIDER_HOSTS } from "../api/harness.ts";
 
@@ -24,34 +24,46 @@ interface AllowedInterception {
   readonly host: string;
 }
 
+/** Requests to a GitHub or provider host without a credential, refused with status 403. */
+interface DeniedInterception {
+  readonly _tag: "Denied";
+  readonly host: string;
+  readonly scheme: "http" | "https";
+}
+
 /** One host whose container traffic goes to an outbound handler instead of the internet. */
-export type Interception = GitHubInterception | ProviderInterception | AllowedInterception;
+export type Interception =
+  | GitHubInterception
+  | ProviderInterception
+  | AllowedInterception
+  | DeniedInterception;
 
 /**
  * Returns the hosts a sandbox reaches: GitHub and the providers with the Attempt's credentials,
  * and `allowedHosts` unchanged. The container has no other way out. GitHub and provider hosts
- * are never treated as allowlisted, so no request reaches them without a credential.
+ * without a credential are denied rather than left out, because a running container keeps its
+ * last handler for a host; they're never treated as allowlisted.
  */
 export const interceptionsFor = (
   credentials: SandboxCredentials,
   allowedHosts: ReadonlyArray<string>,
 ): ReadonlyArray<Interception> => {
-  const reserved = new Set<string>([
-    ...GITHUB_HOSTS,
-    ...Object.values(PROVIDER_HOSTS).map(({ sandbox }) => sandbox),
-  ]);
+  const providerHosts = Object.values(PROVIDER_HOSTS).map(({ sandbox }) => sandbox);
+  const reserved = new Set<string>([...GITHUB_HOSTS, ...providerHosts]);
+  const providers = Object.entries(PROVIDER_HOSTS).map(([provider, { sandbox }]): Interception => {
+    const grant = credentials.providers.find((candidate) => candidate.provider === provider);
+    return grant === undefined
+      ? { _tag: "Denied", host: sandbox, scheme: "http" }
+      : { _tag: "Provider", host: sandbox, provider: grant.provider, credential: grant.credential };
+  });
   return [
-    ...GITHUB_HOSTS.map((host): Interception => ({
-      _tag: "GitHub",
-      host,
-      token: credentials.github,
-    })),
-    ...credentials.providers.map(({ provider, credential }): Interception => ({
-      _tag: "Provider",
-      host: PROVIDER_HOSTS[provider].sandbox,
-      provider,
-      credential,
-    })),
+    ...GITHUB_HOSTS.map((host): Interception =>
+      Option.match(credentials.github, {
+        onNone: () => ({ _tag: "Denied", host, scheme: "https" }),
+        onSome: (token) => ({ _tag: "GitHub", host, token }),
+      }),
+    ),
+    ...providers,
     ...[...new Set(allowedHosts)]
       .filter((host) => !reserved.has(host))
       .map((host): Interception => ({ _tag: "Allowed", host })),

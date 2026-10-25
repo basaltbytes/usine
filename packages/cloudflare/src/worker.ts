@@ -217,6 +217,12 @@ const containerOf = (
           tryContainer("intercept", () =>
             container.interceptOutboundHttps(host, exports.AllowedOutbound({ props: {} })),
           ),
+        Denied: ({ host, scheme }) =>
+          tryContainer("intercept", () =>
+            scheme === "https"
+              ? container.interceptOutboundHttps(host, exports.DeniedOutbound({ props: {} }))
+              : container.interceptOutboundHttp(host, exports.DeniedOutbound({ props: {} })),
+          ),
       }),
   };
 };
@@ -484,6 +490,19 @@ export class AllowedOutbound extends WorkerEntrypoint<Env, Record<string, never>
     const response = await fetch(request);
     await logForwarded("allowed", request, response);
     return response;
+  }
+}
+
+/** Refuses the sandbox's requests for a GitHub or provider host that has no credential. */
+export class DeniedOutbound extends WorkerEntrypoint<Env, Record<string, never>> {
+  override async fetch(request: Request): Promise<Response> {
+    await run(
+      Effect.logWarning("Refused a sandbox request for a host without a credential", {
+        method: request.method,
+        host: new URL(request.url).host,
+      }),
+    );
+    return plain(403, "usine attached no credential for this host to the sandbox.\n");
   }
 }
 

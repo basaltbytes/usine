@@ -25,7 +25,7 @@ export const IMAGE = CloudflareImageName.make("usine");
 
 const credentials = (token = "ghs_first") =>
   new SandboxCredentials({
-    github: Redacted.make(token),
+    github: Option.some(Redacted.make(token)),
     providers: [
       new ProviderGrant({
         provider: "anthropic",
