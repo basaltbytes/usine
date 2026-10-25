@@ -10,7 +10,7 @@ import { WorkerName } from "@usine/core/worker";
 import { CycleBudgets } from "@usine/engine/cycle-budget";
 import { ItemProjectionReader } from "@usine/engine/item-projection";
 import { LoopControl } from "@usine/engine/loop-control";
-import type { RunStoreError } from "@usine/engine/engine";
+import { type RunStoreError, UnconfirmedStops } from "@usine/engine/engine";
 import { type LoopSighting, RunReader, type RunSummary } from "@usine/engine/run-reader";
 import { type TranscriptEntry, TranscriptPageQuery } from "@usine/engine/transcript";
 import { Context, DateTime, Effect, Layer, Match, Option, Order, Result, Schema } from "effect";
@@ -22,7 +22,7 @@ import { AttemptView } from "./attempt.ts";
 import { BoardItemLink } from "./board.ts";
 import { checkView, PreflightCheckView, WorkerSlotsView } from "./configuration.ts";
 import { runView, workerAccesses } from "./projection.ts";
-import { RunView } from "./run.ts";
+import { RunView, UnconfirmedStopView } from "./run.ts";
 
 /** The number of newest transcript rows the desk reads per running Attempt. */
 const RECENT_TRANSCRIPT_ROWS = 200;
@@ -132,6 +132,14 @@ export class QueuedForWorkerView extends Schema.TaggedClass<QueuedForWorkerView>
   ahead: Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
 }) {}
 
+/**
+ * `run` starts no Attempt until the parent task of the Attempt in `stop`, on the same Loop and
+ * Item, is confirmed stopped (#523).
+ */
+export class WaitingForStopView extends Schema.TaggedClass<WaitingForStopView>(
+  "@usine/orchestrator/WaitingForStopView",
+)("WaitingForStop", { run: RunView, stop: UnconfirmedStopView }) {}
+
 /** No Event of the Loop has a Run for the Item's current state yet. The next poll acts on it. */
 export class AwaitingPollView extends Schema.TaggedClass<AwaitingPollView>(
   "@usine/orchestrator/AwaitingPollView",
@@ -145,6 +153,7 @@ export const StallReasonView = Schema.Union([
   RunFailedView,
   ClosedUnchangedView,
   LoopPausedView,
+  WaitingForStopView,
   QueuedForWorkerView,
   AwaitingPollView,
 ]);
@@ -221,6 +230,8 @@ interface StallFacts {
   readonly ask: Option.Option<CycleBudgetAsk>;
   /** The number of Runs ahead of each Run in the scheduler's queue. */
   readonly ahead: ReadonlyMap<RunView["id"], number>;
+  /** The Attempt on the Item whose parent task isn't confirmed stopped, for the Loop's open Run. */
+  readonly stop: Option.Option<UnconfirmedStopView>;
 }
 
 /**
@@ -233,9 +244,14 @@ const stallReason = ({
   paused,
   ask,
   ahead,
+  stop,
 }: StallFacts): Option.Option<StallReasonView> => {
   const open = runs.find(({ state }) => RunState.OPEN_STATE_TAGS.some((tag) => tag === state));
   if (open !== undefined) {
+    // The engine doesn't stop an Attempt that already runs, but starts no other one.
+    const running = open.attempts.at(-1)?.outcome === null;
+    if (Option.isSome(stop) && open.state !== "Waiting" && !running)
+      return Option.some(new WaitingForStopView({ run: open, stop: stop.value }));
     switch (open.state) {
       case "Running":
         return Option.none();
@@ -282,6 +298,7 @@ const REASON_ORDER: ReadonlyArray<StallReasonView["_tag"]> = [
   "RunFailed",
   "ClosedUnchanged",
   "LoopPaused",
+  "WaitingForStop",
   "QueuedForWorker",
   "AwaitingPoll",
 ];
@@ -397,6 +414,7 @@ const makeDesk = Effect.gen(function* () {
   const polling = yield* PollingTriggers;
   const loopMatches = yield* LoopMatches;
   const workerStatus = yield* WorkerStatus;
+  const stops = yield* UnconfirmedStops;
 
   const recentActivity = Effect.fn("Operator.desk.recentActivity")(function* (
     attempt: AttemptView,
@@ -413,20 +431,30 @@ const makeDesk = Effect.gen(function* () {
   });
 
   const desk = Effect.fn("Operator.desk")(function* (instance: LoadedInstance) {
-    const [summaries, closed, states, asks, slots, queue, preflights, latestPoll] =
-      yield* Effect.all(
-        [
-          reader.list({ closedLimit: 0 }),
-          reader.closed({ limit: CLOSED_RUNS_READ }),
-          controls.states,
-          budgets.asks(),
-          workerStatus.slots,
-          workerStatus.queue,
-          workerStatus.preflights,
-          polling.latest,
-        ] as const,
-        { concurrency: "unbounded" },
-      );
+    const [
+      summaries,
+      closed,
+      states,
+      asks,
+      slots,
+      queue,
+      preflights,
+      latestPoll,
+      unconfirmedStops,
+    ] = yield* Effect.all(
+      [
+        reader.list({ closedLimit: 0 }),
+        reader.closed({ limit: CLOSED_RUNS_READ }),
+        controls.states,
+        budgets.asks(),
+        workerStatus.slots,
+        workerStatus.queue,
+        workerStatus.preflights,
+        polling.latest,
+        stops.list,
+      ] as const,
+      { concurrency: "unbounded" },
+    );
     const ahead = new Map(queue.map(({ runId, ahead }) => [runId, ahead]));
     const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
     const access = workerAccesses(instance.config.workers);
@@ -468,6 +496,25 @@ const makeDesk = Effect.gen(function* () {
       (left, right) =>
         right.openedAt.localeCompare(left.openedAt) || right.id.localeCompare(left.id),
     );
+    /** Returns the unconfirmed stop on `loop` and `itemKey`, if the desk read its Run. */
+    const stopOn = (loop: LoopName, itemKey: ItemKey): Option.Option<UnconfirmedStopView> =>
+      Option.flatMap(
+        Option.fromNullishOr(
+          unconfirmedStops.find((stop) => stop.loop === loop && stop.itemKey === itemKey),
+        ),
+        (stop) =>
+          Option.map(
+            Option.fromNullishOr(
+              runs.get(stop.runId)?.attempts.find(({ id }) => id === stop.attemptId),
+            ),
+            ({ number }) =>
+              new UnconfirmedStopView({
+                runId: stop.runId,
+                attemptNumber: number,
+                worker: stop.worker,
+              }),
+          ),
+      );
 
     const notMoving: Array<StalledItemView> = [];
     for (const { loop, item } of matches) {
@@ -483,6 +530,7 @@ const makeDesk = Effect.gen(function* () {
         paused: paused.has(loop.name),
         ask: Option.fromNullishOr(asks.find(({ itemKey }) => itemKey === item.itemKey)),
         ahead,
+        stop: stopOn(loop.name, item.itemKey),
       });
       if (Option.isNone(reason)) continue;
       yield* Effect.logDebug("Matched Item is not moving", {
@@ -497,6 +545,12 @@ const makeDesk = Effect.gen(function* () {
           RunFailed: ({ run }) => ({ runId: run.id }),
           ClosedUnchanged: ({ run }) => ({ runId: run.id, state: run.state }),
           LoopPaused: () => ({}),
+          WaitingForStop: ({ run, stop }) => ({
+            runId: run.id,
+            unstoppedRunId: stop.runId,
+            attemptNumber: stop.attemptNumber,
+            worker: stop.worker,
+          }),
           QueuedForWorker: ({ run, ahead }) => ({ runId: run.id, ahead }),
           AwaitingPoll: () => ({}),
         }),

@@ -77,6 +77,11 @@ export interface ProvisionedWorktree {
    */
   readonly keepForReattach: Effect.Effect<void>;
   /**
+   * Skips salvage and checkout removal when the scope closes, because the parent task may still
+   * run in the checkout. The executor reconciles it once a stop is confirmed (#523).
+   */
+  readonly keepUntilStopped: Effect.Effect<void>;
+  /**
    * The hooks directory for the children's git (`withGitHooks`), set only for a
    * `permissions: read` Loop. If `None`, the repository's own hooks apply.
    */
@@ -89,6 +94,12 @@ interface ReleaseOptions<E> {
   readonly layout: Pick<WorkspaceLayout, "cache" | "worktree">;
   readonly ops: Pick<WorkspaceOps<E>, "cacheExists" | "git" | "removePath">;
 }
+
+/**
+ * Why a checkout's release leaves it on disk: for a restart to reattach its parent task, or until
+ * the parent task is confirmed stopped.
+ */
+type KeptFor = "reattach" | "unconfirmed-stop";
 
 /** Returns a function that runs one cleanup step and logs and ignores its failure, so later steps still run. */
 const cleanupFor =
@@ -121,7 +132,7 @@ const registerRelease = Effect.fn("Executor.registerRelease")(function* <E exten
   const salvaged = yield* Deferred.make<Option.Option<AttemptSalvage>, AttemptFailure>();
   const recorder = yield* Ref.make(Option.none<AttemptChannel.Sink["salvage"]>());
   const cleanup = cleanupFor(options);
-  const kept = yield* Ref.make(false);
+  const kept = yield* Ref.make(Option.none<KeptFor>());
   // `kept` is checked even after a successful launch: a failed result write keeps the checkout.
   yield* Effect.addFinalizer(
     Effect.fn("Executor.releaseWorktree")(function* (exit) {
@@ -131,14 +142,20 @@ const registerRelease = Effect.fn("Executor.registerRelease")(function* <E exten
         repository: request.repository,
         host: options.host,
       });
-      if (yield* Ref.get(kept)) {
+      const keptFor = yield* Ref.get(kept);
+      if (Option.isSome(keptFor)) {
         yield* Deferred.succeed(salvaged, Option.none());
-        yield* Effect.logInfo("Leaving the checkout in place for the Attempt's reattachment", {
-          attemptId: request.attemptId,
-          worker: request.worker,
-          host: options.host,
-          worktree: layout.worktree,
-        });
+        yield* Effect.logInfo(
+          keptFor.value === "reattach"
+            ? "Leaving the checkout in place for the Attempt's reattachment"
+            : "Leaving the checkout in place, without salvage, until the Attempt's parent task is confirmed stopped",
+          {
+            attemptId: request.attemptId,
+            worker: request.worker,
+            host: options.host,
+            worktree: layout.worktree,
+          },
+        );
         return;
       }
       const baseCommit = yield* Ref.get(checkedOut);
@@ -238,7 +255,8 @@ const registerRelease = Effect.fn("Executor.registerRelease")(function* <E exten
     salvaged: Deferred.await(salvaged),
     recordSalvage: (record: AttemptChannel.Sink["salvage"]) =>
       Ref.set(recorder, Option.some(record)),
-    keepForReattach: Ref.set(kept, true),
+    keepForReattach: Ref.set(kept, Option.some<KeptFor>("reattach")),
+    keepUntilStopped: Ref.set(kept, Option.some<KeptFor>("unconfirmed-stop")),
   };
 });
 
@@ -494,6 +512,7 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
     salvaged: release.salvaged,
     recordSalvage: release.recordSalvage,
     keepForReattach: release.keepForReattach,
+    keepUntilStopped: release.keepUntilStopped,
     gitHooks,
   } satisfies ProvisionedWorktree;
 });
@@ -531,6 +550,7 @@ export const reattachWorktree = Effect.fn("Executor.reattachWorktree")(function*
     salvaged: release.salvaged,
     recordSalvage: release.recordSalvage,
     keepForReattach: release.keepForReattach,
+    keepUntilStopped: release.keepUntilStopped,
     gitHooks,
   } satisfies ProvisionedWorktree;
 });
@@ -548,9 +568,24 @@ export interface RecoveryOptions<E> {
 }
 
 /**
- * Reconciles a checkout left by an earlier process: salvages it without a known base, records
- * the result, and removes the worktree only after its work is pushed. Checkouts of succeeded
- * Attempts and of `permissions: read` Loops are removed without salvage.
+ * Returns the recovery of an unsuccessful Attempt's checkout that its launch kept while the parent
+ * task's stop was unconfirmed.
+ */
+export const keptCheckoutRecovery = (request: CheckoutRequest): AttemptRecovery => ({
+  attemptId: request.attemptId,
+  worker: request.worker,
+  repository: request.repository,
+  ref: request.salvageRef,
+  permissions: request.permissions,
+  succeeded: false,
+  open: false,
+});
+
+/**
+ * Reconciles a checkout left by an earlier process, or kept while its parent task's stop was
+ * unconfirmed: salvages it without a known base, records the result, and removes the worktree
+ * only after its work is pushed. Checkouts of succeeded Attempts and of `permissions: read` Loops
+ * are removed without salvage.
  */
 export const recoverWorktree = Effect.fn("Executor.recoverWorktree")(function* <
   E extends Error,

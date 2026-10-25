@@ -93,6 +93,7 @@ describe("Desk", () => {
       "Failed 3h ago: Agent failure",
       "Canceled 9h ago, unchanged since",
       "review-fix paused",
+      "Waiting for attempt 1 to stop on local",
       "Waiting for a free worker slot, behind 2 runs",
       "Waiting for the next poll",
     ]) {

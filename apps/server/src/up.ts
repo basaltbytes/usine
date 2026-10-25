@@ -16,19 +16,23 @@ import {
   Cause,
   Console,
   Context,
+  DateTime,
   Duration,
   Deferred,
   Effect,
   FileSystem,
   Layer,
   Option,
+  References,
   Result,
 } from "effect";
 import { liveBackendLayer, needsSetupBackendLayer } from "./backend.ts";
 import {
   type Port,
+  type UpLogLevel,
   VolatileInstanceDirectoryError,
   openBrowser,
+  packageVersion,
   portInUse,
   refuseTakenPort,
   serverStartError,
@@ -36,7 +40,8 @@ import {
   volatileRoots,
 } from "./cli.ts";
 import { serverLayer } from "./http.ts";
-import { holdInstance } from "./instance-lock.ts";
+import { holdInstance } from "./instance/lock.ts";
+import { InstanceRecord, ProcessId, currentLaunch } from "./instance/record.ts";
 import { reloadOnHangup } from "./reload-signal.ts";
 import { withGracefulShutdown } from "./shutdown.ts";
 import { tracingLayer } from "./tracing.ts";
@@ -190,15 +195,21 @@ const start = Effect.fnUntraced(function* (
   );
 });
 
-export const up = (port: Port, allowVolatileInstance: boolean) =>
+export const up = (port: Port, logLevel: UpLogLevel, allowVolatileInstance: boolean) =>
   Effect.scoped(
     Effect.gen(function* () {
       const directory = InstanceDirectory.make(process.cwd());
       yield* refuseVolatileInstance(directory, allowVolatileInstance).pipe(
         Effect.provide(NodeServices.layer),
       );
+      const record = new InstanceRecord({
+        pid: ProcessId.make(process.pid),
+        version: yield* packageVersion().pipe(Effect.provide(NodeServices.layer)),
+        startedAt: yield* DateTime.now,
+        launch: yield* currentLaunch(port, logLevel, allowVolatileInstance),
+      });
       // Acquired before any store opens and released after every store closes.
-      yield* holdInstance(directory).pipe(Effect.provide(NodeServices.layer));
+      yield* holdInstance(directory, record).pipe(Effect.provide(NodeServices.layer));
       yield* refuseTakenPort(port).pipe(Effect.provide(NodeServices.layer));
       const instances = yield* loadInstance(directory);
       const { config } = yield* instances.get;
@@ -208,4 +219,4 @@ export const up = (port: Port, allowVolatileInstance: boolean) =>
       );
       return yield* start(directory, instances, port).pipe(Effect.provideContext(tracer));
     }),
-  );
+  ).pipe(Effect.provideService(References.MinimumLogLevel, logLevel));

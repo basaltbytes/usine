@@ -2,7 +2,7 @@ import type { AttemptRecovery, RecoverySink } from "@usine/core/attempt/salvage"
 import { Agent } from "@usine/core/agent";
 import { BrainSpec, Effort, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget } from "@usine/core/agent/session";
-import { AttemptTask, AttemptId } from "@usine/core/attempt";
+import { AttemptTask, AttemptId, type StopReason } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptFailure } from "@usine/core/attempt/failure";
 import { LoopName, LoopPermissions } from "@usine/core/loop";
@@ -190,7 +190,8 @@ export class AttemptWorkspace extends Schema.Class<AttemptWorkspace>(
 /**
  * An Attempt prepared in the caller's scope and valid only within it. Closing that scope stops
  * any active session, removes the checkout, and releases credentials, whether or not `launch`
- * ran.
+ * ran. The checkout stays on disk while the parent task stays live for a reattachment or isn't
+ * confirmed stopped.
  */
 export interface PreparedAttempt {
   readonly workspace: AttemptWorkspace;
@@ -283,11 +284,18 @@ export class Executor extends Context.Service<
     ) => Effect.Effect<PreparedAttempt, ExecutorError, Scope.Scope>;
     /**
      * Stops preparation and releases partial resources, or cancels the live parent task with a
-     * grace period before forced termination, including one not reattached after a restart. Fails
-     * if the parent task can't be confirmed stopped. A canceled Attempt can't launch; after
-     * release, does nothing.
+     * grace period before forced termination, including one not reattached after a restart.
+     * `reason` is why the engine stops the task, which the executor logs. Fails if the parent task
+     * can't be confirmed stopped. A canceled Attempt can't launch.
+     *
+     * An Attempt whose launch ended without a confirmed stop keeps its checkout on disk. Once a
+     * later call confirms the stop, it salvages and removes that checkout, as `recover` does, and
+     * logs a failure without failing.
      */
-    readonly cancel: (attemptId: AttemptId) => Effect.Effect<void, ExecutorError>;
+    readonly cancel: (
+      attemptId: AttemptId,
+      reason: StopReason,
+    ) => Effect.Effect<void, ExecutorError>;
     /** Sends an operator intervention to the Attempt's live session. */
     readonly intervene: (
       attemptId: AttemptId,

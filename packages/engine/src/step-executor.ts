@@ -1,7 +1,7 @@
 import type { AttemptRecovery, RecoverySink } from "@usine/core/attempt/salvage";
 import { Agent } from "@usine/core/agent";
 import { ModelId } from "@usine/core/agent/brain";
-import { Attempt, AttemptTask, type AttemptId } from "@usine/core/attempt";
+import { Attempt, AttemptTask, type AttemptId, type StopReason } from "@usine/core/attempt";
 import { SalvagePushed } from "@usine/core/attempt/salvage";
 import { Event } from "@usine/core/event";
 import { LoopPermissions } from "@usine/core/loop";
@@ -82,11 +82,16 @@ export class StepExecutor extends Context.Service<
       record: RecoverySink<E>,
     ) => Effect.Effect<void, E | AttemptFailure>;
     /**
-     * Stops the Attempt's work, including a parent task that survived a restart. Fails if the parent
-     * task can't be confirmed stopped. The engine also calls it after `execute` fails, and keeps
-     * the Attempt's Worker slot while it fails (#512).
+     * Stops the Attempt's work for `reason`, including a parent task that survived a restart. Fails
+     * if the parent task can't be confirmed stopped. The engine also calls it after `execute`
+     * fails, and keeps the Attempt's Worker slot while it fails (#512). Once a stop is confirmed,
+     * the executor salvages and removes a checkout that it kept while the stop was unconfirmed
+     * (#523).
      */
-    readonly interrupt: (attemptId: AttemptId) => Effect.Effect<void, AttemptFailure>;
+    readonly interrupt: (
+      attemptId: AttemptId,
+      reason: StopReason,
+    ) => Effect.Effect<void, AttemptFailure>;
     /** Sends a non-terminal operator action to a live session of the Attempt. */
     readonly intervene: (
       attemptId: AttemptId,

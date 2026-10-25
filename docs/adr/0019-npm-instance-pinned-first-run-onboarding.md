@@ -33,3 +33,11 @@ The Workers page under Configuration is the **preflight surface**: it runs the v
 - Onboarding must resume wherever a first run stopped: each step is idempotent and re-enterable (App created but key lost, key present but nothing installed, installation live but registry empty).
 - Locally, one install contains orchestrator and run host, so only remote workers can skew, which preflight catches (ADR 0006).
 - The prebuilt exe.dev image stays adapter-owned (ADR 0006).
+
+## Amendment (2026-10-25, #154): the CLI starts, stops, restarts, and upgrades an instance
+
+`usine up` still runs in the foreground, and a supervisor such as launchd or systemd can still run it. In practice, the dogfood instance ran detached, and each engine upgrade was a manual sequence: build the checkout or bump the pin, find the PID, send `SIGTERM`, wait for the drain, relaunch with `nohup`, and read the log. No command told whether an instance was up. The CLI now has `usine status`, `usine stop`, `usine restart`, `usine upgrade`, and `usine up --detach`.
+
+`usine up` records its PID, port, engine version, start time, and command line in `.usine/instance.json`. The instance lock decides whether an instance runs, so a PID that the OS reused never counts. `stop` sends the drain signal of [ADR 0023](./0023-graceful-attempt-drain.md) and waits, and `--force` sends the second signal. The first signal is recorded, so a second `stop` waits instead of ending the drain. `restart` and `upgrade` refuse while an attempt runs, because without a ceiling the drain can keep the instance down for hours, and `--force` lets the next start reattach the attempt instead. The restarted process inherits the environment of the shell that runs the command, so they also refuse when that shell lacks a gateway admin token variable.
+
+`upgrade` keeps the pin as the engine version: it backs up the stores into `.usine/backups/`, moves the pin, installs, commits the change, and restarts. An engine outside the instance, such as a checkout, has no pin to move, so `upgrade` changes nothing and says how to update that engine.

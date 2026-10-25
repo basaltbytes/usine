@@ -27,6 +27,7 @@ import { childEnvironment, commitIdentity } from "../child-environment.ts";
 import { keyedLockFor } from "../keyed-lock.ts";
 import {
   cacheDirectoryName,
+  keptCheckoutRecovery,
   type ProvisionedWorktree,
   provisionWorktree,
   reattachWorktree,
@@ -122,16 +123,9 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
             Effect.map((stdout) => (stdout === "" ? [] : stdout.replace(/\n$/u, "").split("\n"))),
           );
 
-    const recover = Effect.fn(span("recover"))(function* <E, A>(
-      attempt: AttemptRecovery,
-      record: RecoverySink<E>,
-      commitAuthor: Effect.Effect<BotAccount, A>,
-    ) {
-      yield* Effect.annotateCurrentSpan({ ...attempt });
-      yield* session.stopForRecovery(attempt);
-      const { machine, checkouts } = yield* workerLeftovers(attempt.worker);
-      const worktree = `${machine.workerDirectory}/attempts/${safeSegment(attempt.attemptId)}`;
-      const inspectCheckout = Effect.gen(function* () {
+    /** Returns whether the checkout at `worktree` exists on `machine`. */
+    const checkoutExists = (machine: M, worktree: string) =>
+      Effect.gen(function* () {
         const inspected = yield* commands.inspect("cleanup", machine.shell, "test", [
           "-d",
           worktree,
@@ -144,8 +138,66 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
           );
         return true;
       });
+
+    /**
+     * Stops the children in `attempt`'s checkout at `worktree`, salvages it with a new
+     * credential, records the salvage through `record`, and removes the checkout once its work is
+     * pushed. See `recoverWorktree`.
+     */
+    const reconcileCheckout = Effect.fn(span("reconcileCheckout"))(function* <E, A>(
+      attempt: AttemptRecovery,
+      machine: M,
+      worktree: string,
+      record: RecoverySink<E>["salvage"],
+      commitAuthor: Effect.Effect<BotAccount, A>,
+    ) {
+      yield* Effect.annotateCurrentSpan({ attemptId: attempt.attemptId, worker: attempt.worker });
+      const reconcile = (
+        git: (args: ReadonlyArray<string>) => Effect.Effect<string, ExecutorError>,
+      ) =>
+        recoverWorktree(
+          {
+            attempt,
+            host: machine.shell.destination,
+            worktree,
+            cache: `${machine.workerDirectory}/repos/${cacheDirectoryName(attempt.repository)}`,
+            git,
+          },
+          record,
+        );
+      if (attempt.succeeded || attempt.permissions === "read") {
+        yield* stopChildren("cleanup", machine, worktree);
+        yield* reconcile((args) => commands.run("cleanup", machine.shell, "git", args));
+        return;
+      }
+      const author = yield* commitAuthor;
+      const grant = yield* worker.grantFor(attempt.repository);
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const access = yield* grant.acquire(
+            attempt.attemptId,
+            attempt.worker,
+            attempt.permissions,
+            machine,
+            "cleanup",
+          );
+          yield* stopChildren("cleanup", machine, worktree);
+          yield* reconcile(accessGit("cleanup", access, author));
+        }),
+      );
+    });
+
+    const recover = Effect.fn(span("recover"))(function* <E, A>(
+      attempt: AttemptRecovery,
+      record: RecoverySink<E>,
+      commitAuthor: Effect.Effect<BotAccount, A>,
+    ) {
+      yield* Effect.annotateCurrentSpan({ ...attempt });
+      yield* session.stopForRecovery(attempt);
+      const { machine, checkouts } = yield* workerLeftovers(attempt.worker);
+      const worktree = `${machine.workerDirectory}/attempts/${safeSegment(attempt.attemptId)}`;
       // Checks the cached listing first to avoid an SSH round trip per persisted Attempt.
-      const present = checkouts.has(worktree) && (yield* inspectCheckout);
+      const present = checkouts.has(worktree) && (yield* checkoutExists(machine, worktree));
       yield* session.recoverPostedComments(
         attempt,
         present
@@ -172,38 +224,31 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         record,
       );
       if (!present) return;
-      const reconcile = (
-        git: (args: ReadonlyArray<string>) => Effect.Effect<string, ExecutorError>,
-      ) =>
-        recoverWorktree(
-          {
-            attempt,
-            host: machine.shell.destination,
-            worktree,
-            cache: `${machine.workerDirectory}/repos/${cacheDirectoryName(attempt.repository)}`,
-            git,
-          },
-          record.salvage,
-        );
-      if (attempt.succeeded || attempt.permissions === "read") {
-        yield* stopChildren("cleanup", machine, worktree);
-        yield* reconcile((args) => commands.run("cleanup", machine.shell, "git", args));
+      yield* reconcileCheckout(attempt, machine, worktree, record.salvage, commitAuthor);
+    });
+
+    /**
+     * Reconciles the checkout at `worktree` on `machine` that the launch of `request` kept while
+     * its parent task's stop was unconfirmed. Does nothing if the checkout is gone.
+     */
+    const reconcileKept = Effect.fn(span("reconcileKept"))(function* (
+      request: CheckoutRequest,
+      machine: M,
+      worktree: string,
+      record: AttemptChannel.Sink["salvage"],
+    ) {
+      const fields = { attemptId: request.attemptId, worker: request.worker, worktree };
+      yield* Effect.annotateCurrentSpan(fields);
+      if (!(yield* checkoutExists(machine, worktree))) {
+        yield* Effect.logInfo("The kept checkout is gone; nothing to reconcile", fields);
         return;
       }
-      const author = yield* commitAuthor;
-      const grant = yield* worker.grantFor(attempt.repository);
-      yield* Effect.scoped(
-        Effect.gen(function* () {
-          const access = yield* grant.acquire(
-            attempt.attemptId,
-            attempt.worker,
-            attempt.permissions,
-            machine,
-            "cleanup",
-          );
-          yield* stopChildren("cleanup", machine, worktree);
-          yield* reconcile(accessGit("cleanup", access, author));
-        }),
+      yield* reconcileCheckout(
+        keptCheckoutRecovery(request),
+        machine,
+        worktree,
+        record,
+        Effect.succeed(request.commitAuthor),
       );
     });
 
@@ -494,6 +539,8 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
                     windows,
                   ),
                 keepForReattach: provisioned.keepForReattach,
+                keepUntilStopped: provisioned.keepUntilStopped,
+                reconcileKept: (record) => reconcileKept(request, machine, worktree, record),
               });
             }),
           ),

@@ -84,6 +84,7 @@ const stallTone = ({ reason }: StalledItemView): string =>
     RunFailed: () => "Failed",
     ClosedUnchanged: ({ run }) => run.state,
     LoopPaused: () => "paused",
+    WaitingForStop: ({ run }) => run.state,
     QueuedForWorker: ({ run }) => run.state,
     AwaitingPoll: () => "Pending",
   });

@@ -111,7 +111,7 @@ export const RunHeader = ({
             style={shared ? { viewTransitionName: "run-state" } : undefined}
           >
             <StateMark state={run.state} />
-            {runStateLine(run)}
+            {runStateLine(run, detail.unconfirmedStop)}
           </span>
           <PullRequestMarks pullRequests={Option.toArray(items.pullRequest)} />
           {detail.worker !== null && (

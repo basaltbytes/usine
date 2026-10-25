@@ -8,7 +8,11 @@ sidebar:
 The `@usine/server` package provides the `usine` binary ([`main.ts`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/main.ts#L47)). Run every command from the instance folder, the folder that contains `usine.yaml`.
 
 ```sh title="Usage"
-usine up [--port <port>] [--log-level <level>] [--allow-volatile-instance]
+usine up [--port <port>] [--log-level <level>] [--allow-volatile-instance] [--detach]
+usine status
+usine stop [--timeout <seconds>] [--force]
+usine restart [--timeout <seconds>] [--force]
+usine upgrade [<version>] [--check] [--timeout <seconds>] [--force]
 usine backup <path>
 usine export-run <runId> [--output <path>]
 usine --help
@@ -20,9 +24,13 @@ For any other form, the parser prints the usage on standard error and exits with
 | Command | Description |
 | --- | --- |
 | `usine up` | Starts the orchestrator and serves the UI. |
+| `usine status` | Reports whether the orchestrator runs, and its PID, address, engine version, uptime, and open runs. |
+| `usine stop` | Stops the orchestrator after its drain. |
+| `usine restart` | Stops the orchestrator and starts it again in the background. |
+| `usine upgrade` | Moves the instance's `@usine/server` pin to another version and restarts the orchestrator. |
 | `usine backup <path>` | Copies the runtime store and the durable storage while the orchestrator runs. |
 | `usine export-run <runId>` | Writes one run's records and transcript to a JSON file. |
-| `usine --help`, `usine -h` | Prints the usage. `usine up --help`, `usine backup --help`, and `usine export-run --help` do the same. |
+| `usine --help`, `usine -h` | Prints the usage. `usine <command> --help` does the same for every command. |
 | `usine --version`, `usine -v` | Prints the version of the installed `@usine/server`. |
 
 ## `usine up`
@@ -30,8 +38,9 @@ For any other form, the parser prints the usage on standard error and exits with
 | Flag | Value | Default | Description |
 | --- | --- | --- | --- |
 | `-p <port>`, `--port <port>`, `--port=<port>` | integer 1 to 65535 | `USINE_PORT`, then `7331` | The HTTP port. The server listens only on `127.0.0.1`. |
-| `--log-level <level>`, `--log-level=<level>` | `trace`, `debug`, `info`, `warn`, or `error`, in any case | `USINE_LOG_LEVEL`, then `info` | The lowest level of the lines that usine logs. `debug` adds the lines that say why usine skipped or deferred something, such as an entry left out of **Needs attention**. A change takes effect at the next `usine up`. |
+| `--log-level <level>`, `--log-level=<level>` | `trace`, `debug`, `info`, `warn`, or `error`, in any case | `USINE_LOG_LEVEL`, then `info` | The lowest level of the lines that usine logs. `debug` adds the lines that say why usine skipped or deferred something, such as an entry left out of **Needs attention**. A change takes effect at the next `usine up`; `usine restart` keeps the recorded level. |
 | `--allow-volatile-instance` | none | off | Starts even if the instance folder is under a temporary directory. |
+| `--detach` | none | off | Starts the orchestrator in the background. See [Background start](#background-start). |
 
 If a flag repeats, the last value wins.
 
@@ -40,13 +49,37 @@ If a flag repeats, the last value wins.
 `usine up` runs these steps in order and stops at the first failure ([`up`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/up.ts#L104)):
 
 1. **Volatile path check.** usine refuses an instance folder under `os.tmpdir()`, `$TMPDIR`, `/tmp`, `/private/tmp`, or `/var/folders`, by the given path or its real path, because the runtime store is the only copy of every run and transcript. With `--allow-volatile-instance`, usine logs a warning and continues.
-2. **Instance lock.** usine holds an exclusive SQLite transaction on `.usine/instance.lock` and writes its process ID to `.usine/instance.pid` ([`holdInstance`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/instance-lock.ts#L44)). A second `usine up` in the folder exits and prints that ID. The lock ends with the process, however it exits.
+2. **Instance lock.** usine holds an exclusive SQLite transaction on `.usine/instance.lock`, writes its process ID to `.usine/instance.pid`, and writes the [instance record](#instance-record) to `.usine/instance.json` ([`holdInstance`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/instance-lock.ts#L44)). A second `usine up` in the folder exits and prints that ID. The lock ends with the process, however it exits. usine removes both files when it exits, unless the OS kills it, for example with `SIGKILL`.
 3. **Port check.** usine refuses a port that another process listens on, and prints that process if `lsof` finds it.
 4. **Instance load.** usine reads `usine.yaml`, `agents/`, and `loops/`, and exits with status 1 if `usine.yaml` is invalid or a folder is missing. Invalid loop and agent files don't stop startup ([Validation and quarantine](/reference/configuration/loop-files/#validation-and-quarantine)).
 5. **GitHub App credentials.** usine reads `USINE_GITHUB_APP_ID` and `USINE_GITHUB_PRIVATE_KEY`, and fills a missing one from `.usine/github-app.json` ([`loadLocalCredentials`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/github/src/local-secrets.ts#L69)). If both variables are set, usine doesn't read the file. It accepts PKCS#1 keys (`BEGIN RSA PRIVATE KEY`, as GitHub downloads them) and PKCS#8 keys.
 6. **Runtime.** usine opens the stores, reads each gateway's admin token, runs preflight on every worker, starts polling and schedules, and reattaches the attempts that an earlier process left running. It prints `usine is running at http://127.0.0.1:<port>`.
 
 An expected startup failure prints one line with the file, setting, or worker at fault, such as a preflight check like `machine` or `harness-login`, and what to do, and exits with status 1. Only a defect in usine prints a full trace.
+
+### Background start
+
+`usine up --detach` checks that no `usine up` runs in the folder. It then starts `usine up` with the same Node.js binary, Node.js options, entry point, port, log level, and `--allow-volatile-instance` flag, in a new session and with no terminal. The new process appends its output to `.usine/usine.log`, which has owner-only permissions; usine doesn't rotate it. The command waits up to 120 seconds for the process to write its instance record and answer HTTP requests, and then prints:
+
+```text
+usine is running at http://127.0.0.1:7331 (pid 48120), with its output in .usine/usine.log.
+```
+
+If the process exits first, the command prints how it exited and the last 20 lines of the log, and exits with status 1. If the process still runs without answering after 120 seconds, the command says so and exits with status 1. The process inherits the environment of the shell that runs the command.
+
+### Instance record
+
+`.usine/instance.json` describes the running `usine up`. It has owner-only permissions:
+
+| Key | Description |
+| --- | --- |
+| `pid` | The process ID, which `.usine/instance.pid` also contains. |
+| `version` | The `@usine/server` version of the process. |
+| `startedAt` | When the process took the instance lock, in ISO 8601 format. |
+| `launch` | How the process started: `node` (the Node.js binary), `nodeOptions`, `script` (the CLI entry point), `port`, and `allowVolatileInstance`. `usine restart` starts the new process with these values. |
+| `stoppingSince` | When the process received its first `SIGINT` or `SIGTERM`. Absent until then. |
+
+The record says which process holds the instance, but the instance lock says whether one does. If a process stops without removing its files, for example after `SIGKILL`, `usine status` reports them as stale, and the next `usine up` replaces them.
 
 ### Setup mode
 
@@ -85,9 +118,88 @@ kill -HUP "$(cat .usine/instance.pid)"
 
 ### Shutdown
 
-The first `SIGINT` or `SIGTERM` (Ctrl+C) starts a graceful drain: usine logs `Orchestrator shutdown started`, stops opening new work, and waits for active attempts to finish ([`withGracefulShutdown`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/shutdown.ts#L25)). The drain's deadline is `settings.max_attempt_minutes`, or none without that setting. After a full drain, the log shows `Orchestrator exiting after graceful drain`.
+The first `SIGINT` or `SIGTERM` (Ctrl+C) starts a graceful drain: usine logs `Orchestrator shutdown started`, writes `stoppingSince` to the instance record, stops opening new work, and waits for active attempts to finish ([`withGracefulShutdown`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/shutdown.ts#L25)). The drain's deadline is `settings.max_attempt_minutes`, or none without that setting. After a full drain, the log shows `Orchestrator exiting after graceful drain`.
 
 A second signal, or the deadline, stops the orchestrator without waiting. Running attempts stay recorded as open, and the next `usine up` reattaches them. Runs that wait for a worker and pending automatic retries continue at the next start. The process exits with status 130. Until it exits, the instance lock blocks a new `usine up`.
+
+`usine stop` sends these signals for you and waits for the process to exit.
+
+## `usine status`
+
+Reports whether `usine up` runs in the instance folder. It reads the instance lock and the instance record, and sends one `GET /api/overview` to the running orchestrator:
+
+```text
+usine is running in /home/me/factory.
+  pid       48120
+  address   http://127.0.0.1:7331
+  engine    @usine/server 0.4.0, installed in the instance
+  started   2026-10-25T16:04:00.000Z (2h 13m 5s ago)
+  runs      1 running, 2 queued
+  update    @usine/server 0.5.0 is available. Run usine upgrade.
+```
+
+- `engine` names the entry point if the engine runs from outside the instance's `node_modules`, such as a checkout.
+- `runs` counts the open runs by state. If the orchestrator doesn't answer, it says `unavailable` and why.
+- `installed` appears if the `usine` that you run has the orchestrator's entry point but another version, for example after an install without a restart.
+- `update` appears for an engine that is installed in the instance from its `package.json` pin. It compares the running version with the `latest` version that `npm view` reports.
+- A draining orchestrator reports `usine is stopping` and when the drain started.
+- An orchestrator of an earlier usine version, which writes only `.usine/instance.pid`, is reported as running with its PID only.
+- A stopped instance reports `usine is not running`, and the PID of stale files if a process left them.
+
+The command exits with status 0 if a process holds the instance, and 3 if none does.
+
+## `usine stop`
+
+| Flag | Value | Default | Description |
+| --- | --- | --- | --- |
+| `--timeout <seconds>`, `--timeout=<seconds>` | whole number above 0 | `120` | How long to wait for the process to exit. |
+| `--force` | none | off | Sends a second `SIGTERM`, which stops the orchestrator without waiting for running attempts. The next `usine up` reattaches them. |
+
+Sends `SIGTERM` to the orchestrator, which starts the [drain](#shutdown), and waits until the process exits. It names the runs whose attempts the drain waits for. If no `usine up` runs, it prints `usine is not running in <folder>.` and exits with status 0. It also stops an orchestrator of an earlier usine version, through `.usine/instance.pid`.
+
+If the process still runs after the timeout, the command exits with status 1, and the drain continues. Run `usine stop` again to keep waiting: the instance record shows the drain, so the command doesn't send the second signal. Run `usine stop --force` to stop without waiting.
+
+## `usine restart`
+
+Takes the same flags as `usine stop`. It applies `--timeout` to the stop and again to the start.
+
+Stops the orchestrator as `usine stop` does, then starts it as a [background start](#background-start) with the Node.js binary, Node.js options, entry point, port, and flags from the instance record. After a rebuild of a checkout, the entry point is the rebuilt one. The new process inherits the environment of the shell that runs `usine restart`, not the environment of the process that it replaces.
+
+The command changes nothing and exits with status 1 in these cases:
+
+- No `usine up` runs in the folder. Start it with `usine up --detach`.
+- The orchestrator wrote no instance record, because an earlier usine version started it. Stop it with `usine stop`, and start it with `usine up --detach`.
+- A run has a running attempt, unless you pass `--force`. Without a deadline, the drain would keep the orchestrator down until the attempt ends.
+- The shell doesn't set the `admin_token_env` variable of a gateway in the running configuration. The new process would stop at startup without it.
+
+## `usine upgrade [<version>]`
+
+| Flag | Value | Default | Description |
+| --- | --- | --- | --- |
+| `<version>` | a version, range, or dist-tag | `latest` | The `@usine/server` version to pin. |
+| `--check` | none | off | Prints the running, pinned, and available versions, and changes nothing. |
+| `--timeout <seconds>`, `--force` | | | As for `usine restart`. |
+
+Moves the `@usine/server` pin in the instance's `package.json` and restarts the orchestrator on the new version. It applies to an instance that pins `@usine/server` to a registry version and runs the engine from its own `node_modules`. The command runs these steps in order:
+
+1. **Version.** It resolves `<version>` with `npm view` in the instance folder, so the folder's `.npmrc` applies. Other `@usine/*` packages with a registry version in `package.json` move to the version that the new `@usine/server` depends on, or to their latest version.
+2. **Checks.** It refuses, as `usine restart` does, while a run has a running attempt or the shell lacks a gateway's admin token variable.
+3. **Backup.** It copies `.usine/runtime.sqlite` and `.usine/durable.sqlite` into `.usine/backups/`, as `usine backup` does, named `runtime-<UTC time>-<running version>.sqlite` and `runtime-<UTC time>-<running version>.durable.sqlite`.
+4. **Stop.** It stops the orchestrator as `usine stop` does.
+5. **Install.** It rewrites the version of each pin in `package.json` and keeps the rest of the file as it is. Then it runs `install` with the instance's package manager: the one in the `packageManager` field, else the one whose lockfile exists (pnpm, npm, Yarn, or Bun), else npm. If the install fails, it restores `package.json` and the lockfile, and the orchestrator stays stopped.
+6. **Commit.** It commits `package.json` and the lockfile, and no other file, as `Pin @usine/server to <version>`. If Git fails, it says so and continues.
+7. **Start.** If the orchestrator was running, it starts it as `usine restart` does, and the new version runs its forward-only migrations at startup.
+
+If the new version exits before it listens, for example because a migration failed, the command prints the last lines of `.usine/usine.log` and the steps to roll back: revert the commit, install, restore the backup, and start the orchestrator.
+
+The command changes nothing in these cases:
+
+- The orchestrator runs from outside the instance's `node_modules`, such as a checkout or a global install. The command exits with status 1 and says how to update that engine. `--check` still prints the versions.
+- `package.json` is missing, or doesn't pin `@usine/server` to a registry version, for example because it links a local folder. The command exits with status 1.
+- The pin already has the version. If the orchestrator runs another version, the command suggests `usine restart`.
+- Without `<version>`, the `latest` version is older than the pin.
+
+If no `usine up` runs, the command moves the pin and installs, and doesn't start the orchestrator.
 
 ## `usine backup <path>`
 
@@ -121,8 +233,8 @@ The `usine` process reads these variables:
 
 | Variable | Read by | Description |
 | --- | --- | --- |
-| `USINE_PORT` | `usine up` | The HTTP port if `--port` is absent. If the value isn't a whole number from 1 to 65535, `usine up` exits with status 1. |
-| `USINE_LOG_LEVEL` | `usine up` | The log level if `--log-level` is absent. If the value isn't `trace`, `debug`, `info`, `warn`, or `error`, in any case, `usine up` exits with status 1. |
+| `USINE_PORT` | `usine up` | The HTTP port if `--port` is absent. If the value isn't a whole number from 1 to 65535, `usine up` exits with status 1. `usine restart` passes the recorded port with `--port`, so this variable doesn't change it. |
+| `USINE_LOG_LEVEL` | `usine up` | The log level if `--log-level` is absent. If the value isn't `trace`, `debug`, `info`, `warn`, or `error`, in any case, `usine up` exits with status 1. `usine restart` passes the recorded level with `--log-level`, so this variable doesn't change it. |
 | `USINE_ALLOW_VOLATILE_INSTANCE` | `usine up` | `1` has the same effect as `--allow-volatile-instance`. usine ignores other values. |
 | `TMPDIR` | `usine up` | Added to the temporary directories of the volatile path check. |
 | `USINE_GITHUB_APP_ID` | `usine up` | The GitHub App ID, a positive integer. Takes precedence over `app_id` in the secrets file. |
@@ -138,8 +250,9 @@ Child processes don't inherit the orchestrator's environment. Git and `gh` comma
 
 | Status | When |
 | --- | --- |
-| `0` | `--help`, `--version`, a completed `backup` or `export-run`. |
-| `1` | A usage error, a refused start (volatile path, instance in use, port in use, lock failure), an invalid `usine.yaml`, any other startup failure, or a failed `backup` or `export-run`. The message is on standard error. |
+| `0` | `--help`, `--version`, a completed `backup`, `export-run`, `stop`, `restart`, or `upgrade`, a background start that listens, or `status` while a process holds the instance. |
+| `1` | A usage error, a refused start (volatile path, instance in use, port in use, lock failure), an invalid `usine.yaml`, any other startup failure, a failed `backup` or `export-run`, or a refused, timed-out, or failed `stop`, `restart`, or `upgrade`. The message is on standard error. |
+| `3` | `status` while no process holds the instance. |
 | `130` | `usine up` stopped by `SIGINT` or `SIGTERM`. |
 
 ## `usine-gateway`

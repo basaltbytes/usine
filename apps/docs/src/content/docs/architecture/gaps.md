@@ -14,7 +14,6 @@ Open issues from `gh issue list --repo basaltbytes/usine --state open --limit 20
 ## CLI and configuration
 
 - [#41][]: no `create-usine` scaffolder, GitHub App manifest flow, or preflight on demand. Without credentials, `usine up` only shows a notice ([up.ts:122][]).
-- [#154][]: the CLI has no `status`, `stop`, `restart`, or `upgrade` command ([cli.ts:23][]).
 - [#40][]: the Configuration section is read-only; the YAML writer has no production caller.
 
 ## Triggers, asks, and cost
@@ -57,7 +56,6 @@ Open issues from `gh issue list --repo basaltbytes/usine --state open --limit 20
 - [#56][]: a seed issue for tests, not a gap.
 
 [up.ts:122]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/up.ts#L122
-[cli.ts:23]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/cli.ts#L23
 [#35]: https://github.com/basaltbytes/usine/issues/35
 [#36]: https://github.com/basaltbytes/usine/issues/36
 [#37]: https://github.com/basaltbytes/usine/issues/37
@@ -65,7 +63,6 @@ Open issues from `gh issue list --repo basaltbytes/usine --state open --limit 20
 [#41]: https://github.com/basaltbytes/usine/issues/41
 [#56]: https://github.com/basaltbytes/usine/issues/56
 [#115]: https://github.com/basaltbytes/usine/issues/115
-[#154]: https://github.com/basaltbytes/usine/issues/154
 [#182]: https://github.com/basaltbytes/usine/issues/182
 [#185]: https://github.com/basaltbytes/usine/issues/185
 [#187]: https://github.com/basaltbytes/usine/issues/187

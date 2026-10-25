@@ -560,10 +560,10 @@ describe("exe.dev preparation", () => {
           ssh.state.hangPreparation = phase;
           const fiber = yield* Effect.forkChild(executor.prepare(request));
           while (!ssh.state.parked) yield* Effect.yieldNow;
-          yield* executor.cancel(ATTEMPT_ID);
+          yield* executor.cancel(ATTEMPT_ID, "cancel");
           const exit = yield* Fiber.await(fiber);
           assert(Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause));
-          yield* executor.cancel(ATTEMPT_ID);
+          yield* executor.cancel(ATTEMPT_ID, "cancel");
           assert.strictEqual(
             ssh.state.commands.filter(({ args }) => args.includes("detach")).length,
             phase === "preflight" ? 0 : 1,
@@ -598,8 +598,8 @@ describe("exe.dev preparation", () => {
     return Effect.gen(function* () {
       const executor = yield* Executor;
       const prepared = yield* executor.prepare(request);
-      yield* executor.cancel(ATTEMPT_ID);
-      yield* executor.cancel(ATTEMPT_ID);
+      yield* executor.cancel(ATTEMPT_ID, "cancel");
+      yield* executor.cancel(ATTEMPT_ID, "cancel");
       const error = yield* prepared
         .launch({
           append: () => Effect.void,
@@ -638,7 +638,7 @@ describe("exe.dev preparation", () => {
       // before the canceling fiber finished cleanup.
       const released = yield* attempt.pipe(Effect.exit, Effect.map(detaches), Effect.forkChild);
       while (!ssh.state.parked) yield* Effect.yieldNow;
-      const canceling = yield* Effect.forkChild(executor.cancel(ATTEMPT_ID));
+      const canceling = yield* Effect.forkChild(executor.cancel(ATTEMPT_ID, "cancel"));
       assert.strictEqual(yield* Fiber.join(released), 1);
       yield* Fiber.join(canceling);
       assert.strictEqual(detaches(), 1);
@@ -665,7 +665,7 @@ describe("exe.dev preparation", () => {
         .pipe(Effect.scoped, Effect.forkChild);
       // Lets the second prepare wait on the held repository lock.
       for (let turn = 0; turn < 20; turn += 1) yield* Effect.yieldNow;
-      yield* executor.cancel(AttemptId.make("remote-run/execute/2"));
+      yield* executor.cancel(AttemptId.make("remote-run/execute/2"), "cancel");
       const exit = yield* Fiber.await(waiting);
       assert(Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause));
       assert.strictEqual(

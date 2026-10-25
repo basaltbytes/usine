@@ -56,6 +56,7 @@ import {
 import {
   cacheDirectoryName,
   isCacheDirectoryName,
+  keptCheckoutRecovery,
   provisionWorktree,
   reattachWorktree,
   recoverWorktree,
@@ -285,7 +286,26 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         record,
       );
       if (!present) return;
-      const cache = path.join(root, "repos", cacheDirectoryName(attempt.repository));
+      yield* reconcileCheckout(attempt, worktree, record.salvage, commitAuthor);
+    });
+
+    /**
+     * Salvages `attempt`'s checkout at `worktree` with a new credential, records the salvage
+     * through `record`, and removes the checkout once its work is pushed. See `recoverWorktree`.
+     */
+    const reconcileCheckout = Effect.fn("LocalExecutor.reconcileCheckout")(function* <E, A>(
+      attempt: AttemptRecovery,
+      worktree: string,
+      record: RecoverySink<E>["salvage"],
+      commitAuthor: Effect.Effect<BotAccount, A>,
+    ) {
+      yield* Effect.annotateCurrentSpan({ attemptId: attempt.attemptId, worker: attempt.worker });
+      const cache = path.join(
+        workersRoot,
+        attempt.worker,
+        "repos",
+        cacheDirectoryName(attempt.repository),
+      );
       if (attempt.succeeded || attempt.permissions === "read") {
         return yield* recoverWorktree(
           {
@@ -295,7 +315,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
             cache,
             git: (args) => executeCommand("cleanup", "git", args),
           },
-          record.salvage,
+          record,
         );
       }
       const author = yield* commitAuthor;
@@ -310,11 +330,45 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
           const git = credentialedGit(credential, author);
           yield* recoverWorktree(
             { attempt, host: "local", worktree, cache, git: (args) => git("cleanup", args) },
-            record.salvage,
+            record,
           );
         }),
       );
     });
+
+    /**
+     * Reconciles the checkout at `worktree` that the launch of `request` kept while its parent
+     * task's stop was unconfirmed. Does nothing if the checkout is gone.
+     */
+    const reconcileKept = Effect.fn("LocalExecutor.reconcileKept")(
+      function* (
+        request: CheckoutRequest,
+        worktree: string,
+        record: AttemptChannel.Sink["salvage"],
+      ) {
+        yield* Effect.annotateCurrentSpan({ attemptId: request.attemptId, worker: request.worker });
+        if (!(yield* fileSystem.exists(worktree))) {
+          yield* Effect.logInfo("The kept checkout is gone; nothing to reconcile", {
+            attemptId: request.attemptId,
+            worker: request.worker,
+            worktree,
+          });
+          return;
+        }
+        yield* reconcileCheckout(
+          keptCheckoutRecovery(request),
+          worktree,
+          record,
+          Effect.succeed(request.commitAuthor),
+        );
+      },
+      (effect) =>
+        effect.pipe(
+          Effect.catchTag("PlatformError", (cause) =>
+            Effect.fail(executorError("cleanup", "Can't reconcile the kept local checkout", cause)),
+          ),
+        ),
+    );
 
     const preflight = Effect.fn("LocalExecutor.preflight")(function* (
       worker: CheckoutRequest["worker"],
@@ -505,6 +559,8 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
                 windows,
               ),
             keepForReattach: prepared.keepForReattach,
+            keepUntilStopped: prepared.keepUntilStopped,
+            reconcileKept: (record) => reconcileKept(request, worktree, record),
           }),
         salvaged: prepared.salvaged,
         recordSalvage: prepared.recordSalvage,

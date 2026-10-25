@@ -286,7 +286,7 @@ describe("exe.dev launch", () => {
             .pipe(Effect.flip);
           assert(recovered._tag === "ExecutorOperationError");
           assert.strictEqual(recovered.operation, "cancel");
-          const canceled = yield* executor.cancel(ATTEMPT_ID).pipe(Effect.flip);
+          const canceled = yield* executor.cancel(ATTEMPT_ID, "cancel").pipe(Effect.flip);
           assert(canceled._tag === "ExecutorOperationError");
           assert.strictEqual(canceled.operation, "cancel");
           assert.isTrue(yield* executor.isLive(ATTEMPT_ID), "the parent task may still run");
@@ -401,13 +401,13 @@ describe("exe.dev launch", () => {
         assert.isTrue(yield* executor.isLive(ATTEMPT_ID));
         const before = ssh.state.commands.length;
         const released = yield* executor
-          .cancel(ATTEMPT_ID)
+          .cancel(ATTEMPT_ID, "cancel")
           .pipe(
             Effect.map(
               () => ssh.state.commands.filter(({ args }) => args.includes("detach")).length,
             ),
           );
-        yield* executor.cancel(ATTEMPT_ID);
+        yield* executor.cancel(ATTEMPT_ID, "cancel");
         const failure = yield* Fiber.join(launch).pipe(Effect.flip);
         assert.strictEqual(failure._tag, "AgentFailure");
         assert.strictEqual(failure.message, "The parent task was canceled");
@@ -509,7 +509,7 @@ describe("exe.dev launch", () => {
         const prepared = yield* executor.prepare(onItem);
         const launch = yield* prepared.launch(sink).pipe(Effect.forkChild);
         yield* Deferred.await(started);
-        yield* executor.cancel(ATTEMPT_ID);
+        yield* executor.cancel(ATTEMPT_ID, "cancel");
         const failure = yield* Fiber.join(launch).pipe(Effect.flip);
         assert.strictEqual(failure._tag, "AgentFailure");
         assert.deepStrictEqual(recorded, [`issue-comment ${COMMENT}`]);
@@ -538,9 +538,9 @@ describe("exe.dev launch", () => {
         })
         .pipe(Effect.forkChild);
       yield* Deferred.await(started);
-      const first = yield* executor.cancel(ATTEMPT_ID).pipe(Effect.forkChild);
+      const first = yield* executor.cancel(ATTEMPT_ID, "cancel").pipe(Effect.forkChild);
       yield* Deferred.await(recordingSalvage);
-      const second = yield* executor.cancel(ATTEMPT_ID).pipe(Effect.forkChild);
+      const second = yield* executor.cancel(ATTEMPT_ID, "cancel").pipe(Effect.forkChild);
       // Runs pending fibers while cleanup waits on durable salvage recording.
       yield* TestClock.adjust("0 millis");
       yield* Effect.sync(() => {
@@ -556,7 +556,7 @@ describe("exe.dev launch", () => {
         ssh.state.commands.filter(({ args }) => args.includes("detach")).length,
         1,
       );
-      yield* executor.cancel(ATTEMPT_ID);
+      yield* executor.cancel(ATTEMPT_ID, "cancel");
     }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, working(started))));
   });
 
@@ -605,7 +605,7 @@ describe("exe.dev launch", () => {
           refused.message,
           "This attempt has no live session in this orchestrator",
         );
-        const cancel = yield* executor.cancel(ATTEMPT_ID).pipe(Effect.forkChild);
+        const cancel = yield* executor.cancel(ATTEMPT_ID, "cancel").pipe(Effect.forkChild);
         // A full interrupt grace passes; the cancel must not time out on a stop it didn't start.
         yield* TestClock.adjust("2 seconds");
         yield* Effect.sync(() => {
@@ -616,9 +616,12 @@ describe("exe.dev launch", () => {
         assert.strictEqual(failure._tag, "InfraFailure");
         assert.strictEqual(failure.message, "The parent stopped");
         assert.isFalse(yield* executor.isLive(ATTEMPT_ID));
+        // The launch's own stop outlasted the interrupt grace, so the launch kept the checkout
+        // and released its grant; the cancel that confirmed the stop reconciled the checkout with
+        // a second grant (#523).
         assert.strictEqual(
           ssh.state.commands.filter(({ args }) => args.includes("detach")).length,
-          1,
+          2,
         );
       }).pipe(
         Effect.scoped,

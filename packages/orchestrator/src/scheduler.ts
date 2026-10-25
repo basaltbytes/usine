@@ -768,8 +768,8 @@ export const stepExecutorLayer = (
         Effect.scoped,
       );
 
-      const interrupt: StepExecutor["Service"]["interrupt"] = (attemptId) =>
-        executor.cancel(attemptId).pipe(Effect.mapError(asAttemptFailure));
+      const interrupt: StepExecutor["Service"]["interrupt"] = (attemptId, reason) =>
+        executor.cancel(attemptId, reason).pipe(Effect.mapError(asAttemptFailure));
 
       const status = WorkerStatus.of({
         slots: TxRef.get(pool).pipe(

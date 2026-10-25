@@ -213,6 +213,7 @@ export const StallAction = ({
       ) : null;
     case "LoopPaused":
       return <ResumeAction appearance={appearance} loop={stalled.loop} />;
+    case "WaitingForStop":
     case "QueuedForWorker":
     case "AwaitingPoll":
       return null;

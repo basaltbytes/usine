@@ -1,7 +1,7 @@
 import { NodeServices } from "@effect/platform-node";
 import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
-import { type AttemptId, AttemptTask } from "@usine/core/attempt";
+import { type AttemptId, AttemptTask, type StopReason } from "@usine/core/attempt";
 import { type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
 import { Event, DedupKey, EventId } from "@usine/core/event";
 import { InstanceDirectory } from "@usine/core/instance";
@@ -73,18 +73,19 @@ export const executorLayer = (plans: Ref.Ref<ReadonlyArray<AttemptPlan>>) =>
   });
 
 /**
- * Returns a `StepExecutor` whose Worker `local` has one slot, counted in `leased` as the scheduler
- * counts it; `occupy` takes a slot even past it. Each Attempt runs the next of `plans`. Every
- * `interrupt` call is added to `stops`, and fails while `unstoppable` is true, as when the parent
- * task can't be confirmed stopped.
+ * Returns a `StepExecutor` whose Worker `local` has `slots` slots, counted in `leased` as the
+ * scheduler counts them; `occupy` takes a slot even past them. Each Attempt runs the next of
+ * `plans`. Every `interrupt` call is added to `stops` with its reason, and fails while
+ * `unstoppable` is true, as when the parent task can't be confirmed stopped.
  */
-export const oneSlotExecutor = Effect.fn("test.oneSlotExecutor")(function* (
+export const slottedExecutor = Effect.fn("test.slottedExecutor")(function* (
   plans: ReadonlyArray<AttemptPlan>,
+  slots = 1,
 ) {
   const local = WorkerName.make("local");
   const leased = yield* TxRef.make(0);
   const unstoppable = yield* Ref.make(false);
-  const stops = yield* Ref.make<ReadonlyArray<AttemptId>>([]);
+  const stops = yield* Ref.make<ReadonlyArray<readonly [AttemptId, StopReason]>>([]);
   const remaining = yield* Ref.make(plans);
   const lease = () => ({ worker: local, release: TxRef.update(leased, (count) => count - 1) });
   const executor = Layer.succeed(StepExecutor)({
@@ -93,9 +94,9 @@ export const oneSlotExecutor = Effect.fn("test.oneSlotExecutor")(function* (
     outcome: () => Effect.succeed(Option.none()),
     recover: () => Effect.void,
     intervene: () => Effect.void,
-    interrupt: (attemptId) =>
+    interrupt: (attemptId, reason) =>
       Effect.gen(function* () {
-        yield* Ref.update(stops, (ids) => [...ids, attemptId]);
+        yield* Ref.update(stops, (seen) => [...seen, [attemptId, reason] as const]);
         if (yield* Ref.get(unstoppable))
           return yield* new InfraFailure({
             message: "Could not cancel the parent task",
@@ -106,7 +107,7 @@ export const oneSlotExecutor = Effect.fn("test.oneSlotExecutor")(function* (
     reserve: () =>
       Effect.tx(
         Effect.gen(function* () {
-          if ((yield* TxRef.get(leased)) >= 1) return yield* Effect.txRetry;
+          if ((yield* TxRef.get(leased)) >= slots) return yield* Effect.txRetry;
           yield* TxRef.update(leased, (count) => count + 1);
         }),
       ).pipe(Effect.map(lease)),

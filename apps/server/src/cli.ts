@@ -34,8 +34,14 @@ const LOG_LEVEL_NAMES = {
   error: "Error",
 } as const satisfies Record<typeof LogLevelName.Type, UpLogLevel>;
 
+export const DEFAULT_LIFECYCLE_TIMEOUT_SECONDS = 120;
+
 export const CLI_USAGE = `Usage:
-  usine up [--port <port>] [--log-level <level>] [--allow-volatile-instance]
+  usine up [--port <port>] [--log-level <level>] [--allow-volatile-instance] [--detach]
+  usine status
+  usine stop [--timeout <seconds>] [--force]
+  usine restart [--timeout <seconds>] [--force]
+  usine upgrade [<version>] [--check] [--timeout <seconds>] [--force]
   usine backup <path>
   usine export-run <runId> [--output <path>]
   usine --help
@@ -45,6 +51,10 @@ Options:
   -p, --port <port>            Listen on this port (default: 7331)
   --log-level <level>          Log at this level and above: trace, debug, info, warn, or error (default: info)
   --allow-volatile-instance    Start even when the instance folder is in a temporary directory
+  --detach                     Start in the background, with the output in .usine/usine.log
+  --timeout <seconds>          Wait this long for the instance to stop, and again to start (default: ${DEFAULT_LIFECYCLE_TIMEOUT_SECONDS})
+  --force                      Stop without waiting for running attempts; the next start reattaches them
+  --check                      Print the running and the latest @usine/server version, and change nothing
   -o, --output <path>          Write the run evidence to this file (default: run-<encoded-runId>.json)
   -h, --help                   Print this help
   -v, --version                Print the installed @usine/server version
@@ -102,8 +112,49 @@ export class VersionCommand extends Schema.TaggedClass<VersionCommand>(
 
 export class UpCommand extends Schema.TaggedClass<UpCommand>("@usine/server/UpCommand")(
   "UpCommand",
-  { port: Port, logLevel: UpLogLevel, allowVolatileInstance: Schema.Boolean },
+  {
+    port: Port,
+    logLevel: UpLogLevel,
+    allowVolatileInstance: Schema.Boolean,
+    detach: Schema.Boolean,
+  },
 ) {}
+
+/** Reports whether `usine up` runs in the current instance folder. */
+export class StatusCommand extends Schema.TaggedClass<StatusCommand>("@usine/server/StatusCommand")(
+  "StatusCommand",
+  {},
+) {}
+
+/** How long a lifecycle command waits for each stop and start, and whether it ends the drain. */
+export class LifecycleOptions extends Schema.Class<LifecycleOptions>(
+  "@usine/server/LifecycleOptions",
+)({
+  timeout: Schema.Duration,
+  /** Sends a second `SIGTERM`, which stops the instance without waiting for running Attempts. */
+  force: Schema.Boolean,
+}) {}
+
+/** Stops the `usine up` of the current instance folder and waits for it to exit. */
+export class StopCommand extends Schema.TaggedClass<StopCommand>("@usine/server/StopCommand")(
+  "StopCommand",
+  { options: LifecycleOptions },
+) {}
+
+/** Stops the `usine up` of the current instance folder and starts it again in the background. */
+export class RestartCommand extends Schema.TaggedClass<RestartCommand>(
+  "@usine/server/RestartCommand",
+)("RestartCommand", { options: LifecycleOptions }) {}
+
+/** Moves the instance's `@usine/server` pin to another published version and restarts it. */
+export class UpgradeCommand extends Schema.TaggedClass<UpgradeCommand>(
+  "@usine/server/UpgradeCommand",
+)("UpgradeCommand", {
+  /** A version or dist-tag; `latest` if absent. */
+  version: Schema.Option(Schema.NonEmptyString),
+  check: Schema.Boolean,
+  options: LifecycleOptions,
+}) {}
 
 /** Exports one Run from the current instance into a new local JSON file. */
 export class ExportRunCommand extends Schema.TaggedClass<ExportRunCommand>(
@@ -129,6 +180,10 @@ export const CliCommand = Schema.Union([
   HelpCommand,
   VersionCommand,
   UpCommand,
+  StatusCommand,
+  StopCommand,
+  RestartCommand,
+  UpgradeCommand,
   ExportRunCommand,
   BackupCommand,
 ]);
@@ -192,6 +247,7 @@ const upCommand = (
     let port: Option.Option<string> = Option.none();
     let logLevel: Option.Option<string> = Option.none();
     let allowVolatileInstance = Option.exists(environment.allowVolatileInstance, (v) => v === "1");
+    let detach = false;
     for (let index = 0; index < args.length; index += 1) {
       const arg = args[index];
       if (arg === "--port" || arg === "-p") {
@@ -210,6 +266,8 @@ const upCommand = (
         logLevel = Option.some(arg.slice("--log-level=".length));
       } else if (arg === ALLOW_VOLATILE_FLAG) {
         allowVolatileInstance = true;
+      } else if (arg === "--detach") {
+        detach = true;
       } else {
         return yield* usageError();
       }
@@ -234,29 +292,124 @@ const upCommand = (
       port: resolvedPort,
       logLevel: resolvedLogLevel,
       allowVolatileInstance,
+      detach,
     });
   });
+
+const SecondsFromString = Schema.NumberFromString.pipe(
+  Schema.decodeTo(Schema.Int.check(Schema.isGreaterThan(0))),
+);
+
+interface LifecycleArguments {
+  readonly options: LifecycleOptions;
+  readonly check: boolean;
+  readonly operands: ReadonlyArray<string>;
+}
+
+/** Parses `--timeout`, `--force`, and, if `allowCheck`, `--check`, and collects the operands. */
+const lifecycleArguments = (
+  args: ReadonlyArray<string>,
+  allowCheck: boolean,
+): Effect.Effect<LifecycleArguments, CliUsageError> =>
+  Effect.gen(function* () {
+    let timeout: Option.Option<string> = Option.none();
+    let force = false;
+    let check = false;
+    const operands: Array<string> = [];
+    for (let index = 0; index < args.length; index += 1) {
+      const arg = args[index] ?? "";
+      if (arg === "--timeout") {
+        const value = args[index + 1];
+        if (value === undefined) return yield* usageError();
+        timeout = Option.some(value);
+        index += 1;
+      } else if (arg.startsWith("--timeout=")) {
+        timeout = Option.some(arg.slice("--timeout=".length));
+      } else if (arg === "--force") {
+        force = true;
+      } else if (arg === "--check" && allowCheck) {
+        check = true;
+      } else if (arg !== "" && !arg.startsWith("-")) {
+        operands.push(arg);
+      } else {
+        return yield* usageError();
+      }
+    }
+    const seconds = yield* Option.match(timeout, {
+      onNone: () => Effect.succeed(DEFAULT_LIFECYCLE_TIMEOUT_SECONDS),
+      onSome: (value) =>
+        Schema.decodeUnknownEffect(SecondsFromString)(value).pipe(
+          Effect.mapError(() =>
+            usageError(`--timeout must be a whole number of seconds above 0.\n\n${CLI_USAGE}`),
+          ),
+        ),
+    });
+    return {
+      options: new LifecycleOptions({ timeout: Duration.seconds(seconds), force }),
+      check,
+      operands,
+    };
+  });
+
+const stopOrRestartCommand = (command: "stop" | "restart", args: ReadonlyArray<string>) =>
+  Effect.flatMap(lifecycleArguments(args, false), ({ options, operands }) => {
+    if (operands.length > 0) return Effect.fail(usageError());
+    return Effect.succeed(
+      command === "stop" ? new StopCommand({ options }) : new RestartCommand({ options }),
+    );
+  });
+
+const upgradeCommand = (args: ReadonlyArray<string>) =>
+  Effect.flatMap(lifecycleArguments(args, true), ({ options, check, operands }) => {
+    const [version, ...rest] = operands;
+    if (rest.length > 0) return Effect.fail(usageError());
+    return Effect.succeed(
+      new UpgradeCommand({ version: Option.fromUndefinedOr(version), check, options }),
+    );
+  });
+
+const SUBCOMMANDS: ReadonlySet<string> = new Set([
+  "up",
+  "status",
+  "stop",
+  "restart",
+  "upgrade",
+  "backup",
+  "export-run",
+]);
 
 /** Parses process arguments and the environment into one validated CLI command. */
 export const parseCli = Effect.fn("Cli.parse")((
   args: ReadonlyArray<string>,
   environment: CliEnvironment,
 ): Effect.Effect<CliCommand, CliUsageError> => {
+  const [command = "", ...rest] = args;
   if (
-    (args.length === 1 && (args[0] === "--help" || args[0] === "-h")) ||
-    (args.length === 2 &&
-      (args[0] === "up" || args[0] === "export-run" || args[0] === "backup") &&
-      (args[1] === "--help" || args[1] === "-h"))
+    (args.length === 1 && (command === "--help" || command === "-h")) ||
+    (args.length === 2 && SUBCOMMANDS.has(command) && (rest[0] === "--help" || rest[0] === "-h"))
   ) {
     return Effect.succeed(new HelpCommand());
   }
-  if (args.length === 1 && (args[0] === "--version" || args[0] === "-v")) {
+  if (args.length === 1 && (command === "--version" || command === "-v")) {
     return Effect.succeed(new VersionCommand());
   }
-  if (args[0] === "backup") return backupCommand(args.slice(1));
-  if (args[0] === "export-run") return exportRunCommand(args.slice(1));
-  if (args[0] !== "up") return Effect.fail(usageError());
-  return upCommand(args.slice(1), environment);
+  switch (command) {
+    case "backup":
+      return backupCommand(rest);
+    case "export-run":
+      return exportRunCommand(rest);
+    case "up":
+      return upCommand(rest, environment);
+    case "status":
+      return rest.length === 0 ? Effect.succeed(new StatusCommand()) : Effect.fail(usageError());
+    case "stop":
+    case "restart":
+      return stopOrRestartCommand(command, rest);
+    case "upgrade":
+      return upgradeCommand(rest);
+    default:
+      return Effect.fail(usageError());
+  }
 });
 
 /**

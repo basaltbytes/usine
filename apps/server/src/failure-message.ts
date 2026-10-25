@@ -1,14 +1,24 @@
-import { type Effect, Match, Option, Schema } from "effect";
+import { Duration, type Effect, Match, Option, Schema } from "effect";
 import type { backup } from "./backup.ts";
 import type { CliUsageError, CliVersionError } from "./cli.ts";
+import type { upDetached } from "./detach.ts";
 import type { exportRun } from "./export-run.ts";
+import type { restart } from "./restart.ts";
+import type { status } from "./status.ts";
+import type { LifecycleCommandName, stop } from "./stop.ts";
 import type { up } from "./up.ts";
+import type { UpgradeFailedError, upgrade } from "./upgrade.ts";
 
 /** The expected failures of CLI commands. Defects aren't included and still crash. */
 export type CliFailure =
   | CliUsageError
   | CliVersionError
   | Effect.Error<ReturnType<typeof up>>
+  | Effect.Error<ReturnType<typeof upDetached>>
+  | Effect.Error<ReturnType<typeof status>>
+  | Effect.Error<ReturnType<typeof stop>>
+  | Effect.Error<ReturnType<typeof restart>>
+  | Effect.Error<ReturnType<typeof upgrade>>
   | Effect.Error<ReturnType<typeof backup>>
   | Effect.Error<ReturnType<typeof exportRun>>;
 
@@ -68,6 +78,61 @@ const backupFailure = (
 const holderOf = (holder: Option.Option<number>): string =>
   Option.match(holder, { onNone: () => "", onSome: (pid) => ` (pid ${pid})` });
 
+const runList = (runs: ReadonlyArray<string>): string =>
+  `${runs.length === 1 ? "run" : "runs"} ${runs.join(", ")}`;
+
+const waitingFor = (runs: ReadonlyArray<string>): string =>
+  runs.length === 0 ? "" : `, waiting for the running attempts of ${runList(runs)}`;
+
+const stopTimeout = (
+  command: LifecycleCommandName,
+  pid: number,
+  timeout: Duration.Duration,
+  runs: ReadonlyArray<string>,
+): string => {
+  const still = `usine (pid ${pid}) is still stopping after ${Duration.format(timeout)}${waitingFor(runs)}. Its drain continues.`;
+  return Match.value(command).pipe(
+    Match.when(
+      "stop",
+      () =>
+        `${still} Run usine stop again to keep waiting, or usine stop --force to stop without waiting; the next usine up reattaches the running attempts.`,
+    ),
+    Match.when(
+      "restart",
+      () =>
+        `usine restart started no new process: ${still} Wait for it with usine stop, then run usine up --detach, or run usine restart --force to stop without waiting.`,
+    ),
+    Match.when(
+      "upgrade",
+      () =>
+        `usine upgrade left the pin unchanged: ${still} Run usine upgrade again after it exits, or run usine upgrade --force to stop without waiting.`,
+    ),
+    Match.exhaustive,
+  );
+};
+
+const rollback = (failure: UpgradeFailedError): string =>
+  [
+    `To roll back to ${failure.previous}:`,
+    `1. ${Option.match(failure.commit, {
+      onNone: () => `Set @usine/server back to ${failure.previous} in package.json.`,
+      onSome: (commit) =>
+        `Run git revert --no-edit ${commit}, or set @usine/server back to ${failure.previous} in package.json.`,
+    })}`,
+    `2. Run ${failure.packageManager} install.`,
+    ...Option.toArray(
+      Option.map(
+        failure.backup,
+        (backup) =>
+          `3. Move .usine/runtime.sqlite and .usine/durable.sqlite aside with their -wal and -shm files. Copy ${backup} to .usine/runtime.sqlite, and ${backup.replace(/\.sqlite$/u, ".durable.sqlite")}, if it exists, to .usine/durable.sqlite.`,
+      ),
+    ),
+    `${Option.isSome(failure.backup) ? 4 : 3}. Run usine up --detach.`,
+  ].join("\n");
+
+const logLines = (tail: string): string =>
+  tail === "" ? "The log is empty." : `The last lines of .usine/usine.log:\n${tail}`;
+
 /**
  * Returns the operator message for a failed CLI command, with the file, setting, Worker, or Run at
  * fault and the next step.
@@ -123,4 +188,64 @@ export const failureMessage = (failure: CliFailure): string =>
       `Cannot ${operation} run ${runId} while it is ${state.toLowerCase()}.`,
     RunRetryBlockedError: ({ message }) => message,
     RunInterventionRejectedError: ({ message }) => message,
+    SignalError: ({ pid, signal, reason }) =>
+      `Could not send ${signal} to pid ${pid} (${clause(reason)}). Run the command as the user that started usine.`,
+    StopTimeoutError: ({ command, pid, timeout, runs }) => stopTimeout(command, pid, timeout, runs),
+    InstanceNotRunningError: ({ command, directory }) =>
+      `usine ${command} did nothing: usine is not running in ${directory}. Start it with usine up --detach.`,
+    UnrecordedInstanceError: ({ command, directory, pid }) =>
+      Option.match(pid, {
+        onNone: () =>
+          `usine ${command} did nothing: a process holds ${directory}/.usine/instance.lock, but .usine/instance.pid names no running process. Wait for it to finish starting, then run usine ${command} again.`,
+        onSome: (holder) =>
+          `usine ${command} did nothing: usine (pid ${holder}) runs in ${directory} without .usine/instance.json, so its port and command line are unknown. It is a usine version that doesn't write one, or it is still starting. Stop it with usine stop, then start it with usine up --detach.`,
+      }),
+    MissingEnvironmentError: ({ command, variables }) =>
+      `usine ${command} left the instance running: this shell doesn't set ${variables.join(", ")}, which the new usine up reads at startup for its ${variables.length === 1 ? "gateway" : "gateways"}. The new process gets the environment of the shell that runs usine ${command}. Set ${variables.length === 1 ? "it" : "them"}, then run usine ${command} again.`,
+    LiveAttemptsError: ({ command, runs }) =>
+      `usine ${command} left the instance running: ${runList(runs)} ${runs.length === 1 ? "has a running attempt" : "have running attempts"}. Wait for ${runs.length === 1 ? "it" : "them"} to end, or run usine ${command} --force to stop without waiting; the next start reattaches the attempts.`,
+    DetachedStartError: ({ outcome, pid, exit, timeout, port, log, tail }) =>
+      outcome === "exited"
+        ? `usine up exited (${Option.getOrElse(exit, () => "unknown status")}) before it listened on port ${port}. ${logLines(tail)}`
+        : `usine up${holderOf(pid)} didn't answer on port ${port} within ${Duration.format(timeout)}. It still runs. Check ${log}, or stop it with usine stop.`,
+    DetachedSpawnError: ({ command, reason }) =>
+      `Could not start ${command} in the background (${clause(reason)}).`,
+    EngineOutsideInstanceError: ({ script, version, packaged }) =>
+      packaged
+        ? `usine upgrade changed nothing: the running engine, @usine/server ${version}, runs from ${script}, outside this instance's node_modules. Update that install with its package manager, then run usine restart.`
+        : `usine upgrade changed nothing: the running engine, @usine/server ${version}, runs from ${script}, a checkout outside this instance. Pull and build that checkout (git pull, pnpm install --frozen-lockfile, pnpm build), then run usine restart.`,
+    EnginePinError: ({ path, missing, linked }) =>
+      missing
+        ? `usine upgrade changed nothing: ${path} doesn't exist. usine upgrade moves the @usine/server pin of an instance that installs the engine from npm.`
+        : Option.match(linked, {
+            onNone: () =>
+              `usine upgrade changed nothing: ${path} doesn't pin @usine/server to a registry version. Add it with an exact version, such as "@usine/server": "0.3.0", and install it.`,
+            onSome: (spec) =>
+              `usine upgrade changed nothing: ${path} points @usine/server at ${spec}. Update that folder, then run usine restart.`,
+          }),
+    InstanceManifestError: ({ path, reason }) =>
+      `Could not read ${path} (${clause(reason)}). Fix the file, then run the command again.`,
+    PackageLookupError: ({ name, spec, reason }) =>
+      `Could not find ${name}@${spec} on the npm registry (${clause(reason)}). Check the version, and the registry in .npmrc.`,
+    UpgradeFileError: ({ path, reason }) =>
+      `usine upgrade stopped: could not access ${path} (${clause(reason)}).`,
+    UpgradeFailedError: (failure) =>
+      Match.value(failure.stage).pipe(
+        Match.when(
+          "install",
+          () =>
+            `usine upgrade could not install @usine/server ${failure.target}: ${clause(failure.reason)}. package.json and the lockfile are back at ${failure.previous}, and the instance is stopped. Run ${failure.packageManager} install, then usine up --detach.`,
+        ),
+        Match.when(
+          "start",
+          () =>
+            `@usine/server ${failure.target} did not start: ${failure.reason}. The instance is stopped. ${logLines(failure.tail)}\n\n${rollback(failure)}`,
+        ),
+        Match.when(
+          "listen",
+          () =>
+            `@usine/server ${failure.target} started, but ${failure.reason}. It still runs: check .usine/usine.log, or stop it with usine stop. ${logLines(failure.tail)}\n\n${rollback(failure)}`,
+        ),
+        Match.exhaustive,
+      ),
   });

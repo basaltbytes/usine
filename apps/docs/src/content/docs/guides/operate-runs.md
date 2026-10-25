@@ -1,6 +1,6 @@
 ---
 title: Operate runs
-description: Follow runs in the web UI, approve, retry, cancel, edit, and run them again, steer a live attempt, answer Needs attention, stop the orchestrator cleanly, and back up the runtime store.
+description: Follow runs in the web UI, approve, retry, cancel, edit, and run them again, steer a live attempt, answer Needs attention, stop, restart, and upgrade the orchestrator, and back up the runtime store.
 sidebar:
   order: 3
 ---
@@ -27,6 +27,7 @@ Select a run's row to open its run page.
 | **Failed \<time\> ago**, with the failure's reason                         | **Retry**                                       |
 | **Canceled \<time\> ago, unchanged since** or **Succeeded \<time\> ago, unchanged since**. A loop opens one run per state of an item. | **Run again**                                   |
 | **\<loop\> paused**                                                        | **Resume**                                      |
+| **Waiting for attempt \<n\> to stop on \<worker\>**                          | None. It starts once usine confirms that the attempt's parent task stopped. See [Cancel a run](#cancel-a-run). |
 | **Waiting for a free worker slot**                                         | None. It starts when a slot is free.            |
 | **Waiting for the next poll**                                              | None. The next poll acts on the item's current state. |
 
@@ -135,7 +136,7 @@ The engine retries automatically only after an `InfraFailure`, such as an unreac
 | `RunawayFailure`            | The attempt reached `max_attempt_minutes` or `max_attempt_tokens`.                                         |
 | `ChildSessionBudgetFailure` | The parent tried to start more children than `max_children` allows.                                       |
 
-When an attempt fails, usine stops its parent task. If usine can't confirm the stop, the attempt keeps its slot on the worker, as after a [cancel](#cancel-a-run): no other attempt, including the run's automatic retry, starts in that slot, and **Needs attention** shows **\<loop\>: parent task not stopped** until a retried stop succeeds.
+When an attempt fails, usine stops its parent task. If usine can't confirm the stop, the attempt keeps its slot on the worker and its worktree, as after a [cancel](#cancel-a-run). Until a retried stop succeeds, no other attempt starts in that slot, the run's automatic retry starts on no worker, the run page shows **Waiting for attempt \<n\> to stop on \<worker\>**, and **Needs attention** shows **\<loop\>: parent task not stopped**. usine then salvages the worktree, and the retry starts from that salvage.
 
 **Retry** starts a new attempt, as many times as you want. When an attempt doesn't succeed, usine commits its changes and pushes the worktree to `usine/salvage/<run>/<attempt number>`, a branch that usine never deletes. If the push fails, the worktree stays on the worker and the attempt shows its path.
 
@@ -172,7 +173,7 @@ As with a question, the blocker comment opens no run. After you remove the block
 
 Select **Cancel run**, then **Confirm cancel**. usine stops a running attempt, pushes its work to a salvage branch, and closes the run as `Canceled`. Polling the same item content starts nothing.
 
-If usine can't confirm that the attempt's parent task stopped, the cancel returns an error, and the attempt keeps its slot on the worker, so no other attempt starts there in its place. **Needs attention** shows **\<loop\>: parent task not stopped**. usine retries the stop at each reconcile, every three minutes, also after the next `usine up`, and frees the slot once a stop succeeds.
+If usine can't confirm that the attempt's parent task stopped, the cancel returns an error, and the attempt keeps its slot on the worker, so no other attempt starts there in its place. The worktree stays on the worker without salvage, and no attempt of the loop starts on the item, so a queued event's run waits too. **Needs attention** shows **\<loop\>: parent task not stopped**. usine retries the stop at each reconcile, every three minutes, also after the next `usine up`. Once a stop succeeds, usine salvages the worktree and frees the slot.
 
 To run the loop on the item again, remove the loop's label, wait until usine sees the item without it (one poll, or immediately after a board move), and add the label again. The same applies to superseded and revoked runs. If you remove and add the label within one poll interval, polling sees no change, so use **Run again**. A `Failed` run keeps its event, so retry it instead.
 
@@ -219,7 +220,7 @@ For a Claude Code or Codex child, the terminal icon in the outline shows the ses
 | **Loop file not loaded**               | A loop file failed to load and opens no runs. Fix the file and reload the configuration.                             |
 | **Agent file not loaded**              | An agent file failed to load and isn't in the roster. Fix the file and reload the configuration.                    |
 | **Worker not configured**              | Attempts are recorded on a worker that `usine.yaml` no longer declares. See [Restarts](#restarts).                   |
-| **\<loop\>: parent task not stopped**  | A closed attempt's parent task may still run, so the attempt keeps a slot on its worker. See [Cancel a run](#cancel-a-run) and [Retry a failed run](#retry-a-failed-run). |
+| **\<loop\>: parent task not stopped**  | A closed attempt's parent task may still run, so the attempt keeps a slot on its worker and its worktree, and no attempt of the loop starts on the item. See [Cancel a run](#cancel-a-run) and [Retry a failed run](#retry-a-failed-run). |
 
 Entries about an issue that is closed or a pull request that is closed or merged leave on their own:
 
@@ -264,13 +265,23 @@ If an attempt isn't reattached:
 
 Canceling a run whose attempt waits for its reattach salvages and removes the worktree, unless usine has taken it over again. If usine can't confirm that the parent task stopped, it keeps the worktree and the slot and retries the stop at each reconcile, also after the next `usine up`.
 
-At each start, usine also reconciles checkouts that earlier attempts left on declared workers: it salvages failed and canceled attempts and removes succeeded ones, after it stops the parent task of a closed attempt that still runs. If it can't confirm that stop, it keeps the worktree and a slot, logs `Could not confirm that the parent task of a closed Attempt stopped`, lists the attempt in **Needs attention**, and retries at each reconcile.
+At each start, usine also reconciles checkouts that earlier attempts left on declared workers: it salvages failed and canceled attempts and removes succeeded ones, after it stops the parent task of a closed attempt that still runs. If it can't confirm that stop, it keeps the worktree and a slot, starts no attempt of the loop on the item, logs `Could not confirm that the parent task of a closed Attempt stopped`, lists the attempt in **Needs attention**, and retries at each reconcile.
 
 usine skips attempts on a worker that `usine.yaml` no longer declares, for example after you replace `local` with an SSH worker. It logs one warning per start with their count, shows **Worker not configured** in **Needs attention**, and leaves their checkouts. Their runs wait until you declare the worker again or cancel them. Declare the worker again and restart `usine up`, or select **Discard leftovers**, then **Confirm discard**, to stop tracking them without changing the worker. Remove the checkouts yourself. A worker that you declare again reconciles only attempts recorded after the discard. After a reload removes a worker, the entry says how many attempts still run, such as `2 attempts still running on it. Discard the leftovers after they end`, and refuses a discard until they end.
 
 ## Stop the orchestrator
 
-Press Ctrl+C once, or send `SIGTERM`. usine stops starting attempts and waits for running attempts to end, for at most `max_attempt_minutes`. A second Ctrl+C stops it without waiting, and the next `usine up` reattaches the running attempts. Start that `usine up` only after the process exits. See [Shutdown](/reference/configuration/cli/#shutdown).
+From the instance folder, run `usine stop`, or press Ctrl+C once in the terminal of `usine up`. usine stops starting attempts and waits for running attempts to end, for at most `max_attempt_minutes`. `usine stop` names the runs that it waits for and returns when the process exits, or after `--timeout` seconds (120 by default) while the drain continues. `usine stop --force`, or a second Ctrl+C, stops the orchestrator without waiting, and the next `usine up` reattaches the running attempts. See [Shutdown](/reference/configuration/cli/#shutdown).
+
+`usine status` tells whether the orchestrator runs, with its PID, address, engine version, uptime, and open runs. It exits with status 3 if the orchestrator doesn't run.
+
+## Restart and upgrade
+
+`usine restart` stops the orchestrator and starts it again in the background, with the same Node.js binary, entry point, port, and flags, and its output in `.usine/usine.log`. To start it in the background the first time, run `usine up --detach`.
+
+`usine restart` and `usine upgrade` refuse while a run has a running attempt, so that the drain doesn't keep the orchestrator down. Wait for the attempt to end, or pass `--force` to stop without waiting; the new process reattaches the attempt. The new process gets the environment of your shell, so set the variables that `usine up` reads, such as a gateway's `admin_token_env`, before you run the command. `usine restart` refuses if a gateway's variable is missing.
+
+To upgrade an instance that pins `@usine/server` in its `package.json`, run `usine upgrade`, or `usine upgrade <version>` for another version than `latest`. It backs up the stores into `.usine/backups/`, moves the pin, installs it, commits the change, and restarts the orchestrator. `usine upgrade --check` prints the versions and changes nothing. If the orchestrator runs from a checkout, pull and build that checkout, then run `usine restart`. See [`usine upgrade`](/reference/configuration/cli/#usine-upgrade-version).
 
 ## Back up and export
 
@@ -284,7 +295,7 @@ It also writes the durable storage to `/backups/factory-2026-10-16.durable.sqlit
 
 To restore a backup:
 
-1. Stop the orchestrator.
+1. Stop the orchestrator with `usine stop`.
 2. Move `.usine/runtime.sqlite` and `.usine/durable.sqlite` aside, with their `-wal` and `-shm` files.
 3. Copy both files of one backup in their place.
 4. Start `usine up` with the same configuration and usine version.
