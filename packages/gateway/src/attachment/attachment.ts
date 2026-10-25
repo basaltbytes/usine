@@ -1,4 +1,4 @@
-import { RepositoryName } from "@usine/core/repository";
+import { canonicalRepositoryName, RepositoryName } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
 import { DateTime, Effect, Encoding, Schema } from "effect";
 
@@ -54,10 +54,22 @@ export class Attachment extends Schema.Class<Attachment>("@usine/gateway/Attachm
   }
 }
 
-/** A lookup result for an active attachment. */
+/**
+ * A lookup result for an active attachment. `newNames` are the names GitHub's permanent
+ * redirects gave the attached repository after a rename or transfer.
+ */
 export class LiveAttachment extends Schema.TaggedClass<LiveAttachment>()("LiveAttachment", {
   attachment: Attachment,
-}) {}
+  newNames: Schema.Array(RepositoryName),
+}) {
+  /** Returns whether `repository` is the attached repository, by its attached name or a new name. */
+  serves(repository: RepositoryName): boolean {
+    const wanted = canonicalRepositoryName(repository);
+    return [this.attachment.repository, ...this.newNames].some(
+      (name) => canonicalRepositoryName(name) === wanted,
+    );
+  }
+}
 
 /** A lookup result for an attachment whose token expired without renewal. */
 export class ExpiredAttachment extends Schema.TaggedClass<ExpiredAttachment>()(

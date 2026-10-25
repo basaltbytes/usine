@@ -44,15 +44,19 @@ const tokenOf = (lookup: Effect.Success<ReturnType<Attachments["Service"]["find"
 
 describe("Attachments", () => {
   it.effect(
-    "a renewal under the same id replaces the token, so the gateway never sends the stale one",
+    "a renewal under the same id replaces the token, so the gateway never sends the stale one, and keeps the repository's learned new name",
     () =>
       at(
         START,
         Effect.gen(function* () {
           const attachments = yield* Attachments;
           yield* attachments.attach(attachment(ATTACHMENT, "ghs_first", 60));
+          yield* attachments.learnNewName(ATTACHMENT, RepositoryName.make("acme/renamed"));
           yield* attachments.attach(attachment(ATTACHMENT, "ghs_second", 120));
-          assert.strictEqual(tokenOf(yield* attachments.find(ATTACHMENT)), "ghs_second");
+          const renewed = yield* attachments.find(ATTACHMENT);
+          assert.strictEqual(tokenOf(renewed), "ghs_second");
+          assert(renewed._tag === "LiveAttachment");
+          assert.isTrue(renewed.serves(RepositoryName.make("ACME/Renamed")));
           assert.strictEqual((yield* attachments.list()).length, 1);
         }),
       ),
