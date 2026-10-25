@@ -247,7 +247,7 @@ Every kind takes these keys:
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
 | `name` | string | required | Kebab-case: lowercase letters and digits separated by single hyphens. |
-| `kind` | `local`, `ssh`, `exe.dev` | required | Selects the worker adapter and the other keys that it accepts. |
+| `kind` | `local`, `ssh`, `cloudflare`, `exe.dev` | required | Selects the worker adapter and the other keys that it accepts. |
 | `max_concurrent_attempts` | integer ≥ 1 | `1` | The number of attempts that the worker runs at the same time. See the memory check below. |
 
 A run takes a slot of the first worker in this list with a free slot ([`stepExecutorLayer`](https://github.com/basaltbytes/usine/blob/main/packages/orchestrator/src/scheduler.ts)). Waiting runs take free slots in [queue order](/reference/configuration/loop-files/#priority): runs in later [lanes](#reposlanes) first, then in the order that their events arrived. At startup, a failed preflight on any worker stops `usine up`.
@@ -258,19 +258,19 @@ A [reload](/reference/configuration/cli/#reload) applies these `workers` changes
 | --- | --- |
 | A worker's `max_concurrent_attempts` goes up | Runs preflight on the worker with the new count and every harness in the roster. Then the new slots take waiting runs immediately. |
 | A worker's `max_concurrent_attempts` goes down | The worker starts no new attempt until it runs fewer attempts than the new count. Running attempts finish, and usine removes each extra slot when its attempt ends. |
-| A new worker | Runs preflight on it with every harness in the roster. The worker takes attempts after preflight passes. For an `ssh` worker behind a gateway, the reload first reads the variable named by `admin_token_env`, and refuses with `ReloadPreflightError` if it's unset. A new worker shares the admin API forward of a gateway that another worker uses. For a new gateway, usine opens a new forward. |
+| A new worker | Runs preflight on it with every harness in the roster. The worker takes attempts after preflight passes. For an `ssh` worker behind a gateway, the reload first reads the variable named by `admin_token_env`, and refuses with `ReloadPreflightError` if it's unset. A new worker shares the admin API forward of a gateway that another worker uses. For a new gateway, usine opens a new forward. A reload can't add a `cloudflare` worker that `usine up` didn't start with, and refuses with `ReloadPreflightError`. |
 | A removed worker | The worker starts no new attempt, and its running attempts finish. **Needs attention** shows **Worker not configured** with the number of attempts that still run. After the last one ends, you can select **Discard leftovers**. Then the forward to an `ssh` worker's gateway closes, unless another worker uses that gateway. |
 
 A failed preflight refuses the whole reload with `ReloadPreflightError`. These changes need a restart, and a reload refuses them with `RestartRequiredError`, which includes the field, such as `workers.worker-2.destination`:
 
-- A worker's `kind`, or any key other than `name` and `max_concurrent_attempts`: `destination`, `identity_file`, `port`, `root`, `gateway`, or `container`.
+- A worker's `kind`, or any key other than `name` and `max_concurrent_attempts`: `destination`, `identity_file`, `port`, `root`, `gateway`, or `container` for `ssh`, and `worker_url`, `access_client_id_env`, `access_client_secret_env`, `image`, `instance_type`, or `llm_providers` for `cloudflare`.
 - A renamed worker: one worker removed and one added with the same `kind` and other keys.
 - A new worker whose `kind` differs from the kind of the running workers.
 
-Preflight divides the worker's memory by `max_concurrent_attempts`, because attempts run the repository's own `pnpm install`, `pnpm build`, and `pnpm test`, which need far more memory than the harnesses. The `memory` check fails if an attempt gets less than 1.5 GiB, or if the worker has no swap and `max_concurrent_attempts` is more than 1. Below 3 GiB per attempt, it logs a warning with a value to use. To fix a failure, lower `max_concurrent_attempts` or add memory or swap. On 2026-10-15, two attempts made a 4 GB worker without swap thrash until sshd stopped responding ([#270](https://github.com/basaltbytes/usine/issues/270)). Local workers on Linux and SSH workers report memory and swap in `/proc/meminfo`. On macOS, preflight reads the physical memory and counts swap as present, because macOS adds swap files when memory runs low.
+Preflight divides the worker's memory by `max_concurrent_attempts`, because attempts run the repository's own `pnpm install`, `pnpm build`, and `pnpm test`, which need far more memory than the harnesses. The `memory` check fails if an attempt gets less than 1.5 GiB, or if the worker has no swap and `max_concurrent_attempts` is more than 1. Below 3 GiB per attempt, it logs a warning with a value to use. To fix a failure, lower `max_concurrent_attempts` or add memory or swap. On 2026-10-15, two attempts made a 4 GB worker without swap thrash until sshd stopped responding ([#270](https://github.com/basaltbytes/usine/issues/270)). Local workers on Linux and SSH workers report memory and swap in `/proc/meminfo`. On macOS, preflight reads the physical memory and counts swap as present, because macOS adds swap files when memory runs low. A `cloudflare` worker has no memory check: each attempt gets its own sandbox with the memory of its `instance_type`.
 
 :::caution
-`usine up` uses one executor for every worker. It starts the instance only if all workers are `local` or all are `ssh` ([`workerEngineLayer`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/worker-engine.ts#L13)). Any other combination, and any `exe.dev` worker, parses but fails startup with `UnsupportedWorkerError` ([#228](https://github.com/basaltbytes/usine/issues/228)).
+`usine up` uses one executor for every worker. It starts the instance only if all workers are `local`, all are `ssh`, or all are `cloudflare` ([`workerEngineLayer`](https://github.com/basaltbytes/usine/blob/main/packages/orchestrator/src/worker-engine.ts)). Any other combination, and any `exe.dev` worker, parses but fails startup with `UnsupportedWorkerError` ([#228](https://github.com/basaltbytes/usine/issues/228)).
 :::
 
 ### `kind: local`
@@ -363,6 +363,37 @@ workers:
       destination: usine-gateway
       admin_token_env: USINE_GATEWAY_ADMIN_TOKEN
       llm_providers: [anthropic, openai]
+```
+
+### `kind: cloudflare`
+
+Runs each attempt in its own Cloudflare sandbox, through the Worker that you deploy from `@usine/cloudflare` ([`CloudflareWorker`](https://github.com/basaltbytes/usine/blob/main/packages/config/src/factory.ts)). [Run attempts in Cloudflare sandboxes](/guides/cloudflare-sandboxes/) describes the deployment and the limitations.
+
+| Key | Type | Default | Description |
+| --- | --- | --- | --- |
+| `worker_url` | URL | required | The deployed Worker's origin, such as `https://usine-sandboxes.acme.workers.dev`. Must start with `https://`, and can't have a path, a username, a password, a query string, or a fragment. |
+| `access_client_id_env` | string | required | Name of the orchestrator's environment variable that contains the client ID of the Cloudflare Access service token that the Worker accepts. |
+| `access_client_secret_env` | string | required | Name of the orchestrator's environment variable that contains the token's client secret. |
+| `image` | string | required | The name of an image in the Worker's `containers[].images`: letters, digits, and underscores, up to 63 characters, not starting with a digit. The deployed `wrangler.jsonc` names it `usine`. |
+| `instance_type` | `lite`, `basic`, `standard-1`, `standard-2`, `standard-3`, `standard-4` | `standard-4` | The Cloudflare container instance type of each sandbox. `standard-4` has 4 vCPU, 12 GiB of memory, and 20 GB of disk. |
+| `llm_providers` | list | `[]` | The providers whose API key the Worker's outbound handlers add to the sandbox's requests. Each entry has a `provider`, `anthropic` or `openai`, and an `api_key_env`, the name of the orchestrator's environment variable with the key. Each provider can appear once. |
+
+A sandbox holds no harness login. Claude Code agents need `anthropic`, and Codex agents need `openai`; preflight fails the `harness-login` check without it. Pi agents can't run on this kind.
+
+`usine up` reads every variable that the worker names at startup. If one is unset, startup fails with a `credentials` capability error that names the variable and the worker ([`cloudflareWorkerAddressesOf`](https://github.com/basaltbytes/usine/blob/main/packages/orchestrator/src/cloudflare.ts)). The orchestrator sends the service token with each request to the Worker, and the provider keys and each attempt's installation token to the outbound handlers of the attempt's sandbox. The sandbox never receives them.
+
+```yaml title="usine.yaml"
+workers:
+  - name: cf-one
+    kind: cloudflare
+    worker_url: https://usine-sandboxes.acme.workers.dev
+    access_client_id_env: USINE_CF_ACCESS_CLIENT_ID
+    access_client_secret_env: USINE_CF_ACCESS_CLIENT_SECRET
+    image: usine
+    max_concurrent_attempts: 4
+    llm_providers:
+      - provider: anthropic
+        api_key_env: ANTHROPIC_API_KEY
 ```
 
 ### `kind: exe.dev`

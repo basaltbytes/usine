@@ -124,6 +124,9 @@ importers:
       '@usine/agents':
         specifier: workspace:*
         version: link:../../packages/agents
+      '@usine/cloudflare':
+        specifier: workspace:*
+        version: link:../../packages/cloudflare
       '@usine/config':
         specifier: workspace:*
         version: link:../../packages/config

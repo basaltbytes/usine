@@ -11,6 +11,8 @@ Each sandbox is a Durable Object that owns one container, started from an image 
 | `openai.usine.internal` over HTTP | Replaces the placeholder key with the OpenAI API key | `https://api.openai.com` |
 | Each host in `ALLOWED_HOSTS` over HTTPS | Forwards the request unchanged | The host |
 
+While a sandbox has no installation token or no key for a provider, such as a sandbox that the executor keeps after its Attempt, the handler for that host refuses every request with status 403. `ALLOWED_HOSTS` can't name a GitHub or provider host.
+
 HTTPS interception needs the container to trust Cloudflare's container certificate authority. The executor sets `GIT_SSL_CAINFO`, `CURL_CA_BUNDLE`, `SSL_CERT_FILE`, and `NODE_EXTRA_CA_CERTS` to it for every command, as Cloudflare's coding-agent runner does. Claude Code and Codex use plain HTTP to their handlers, with a placeholder key.
 
 ## Entry points

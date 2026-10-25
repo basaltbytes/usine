@@ -22,6 +22,7 @@ The site build generates these pages from the TSDoc comments of each package's p
 - [`@usine/engine`](/reference/api/engine/): the event ledger, run scheduling, restart recovery, and the SQLite store.
 - [`@usine/agents`](/reference/api/agents/): the Claude Code, Codex, and Pi child backends, attempt prompts, and preflight.
 - [`@usine/durable`](/reference/api/durable/): the Pi parent of each attempt, on durable storage that persists across restarts.
-- [`@usine/executor`](/reference/api/executor/): the worker contract and its local, exe.dev, and SSH adapters.
+- [`@usine/executor`](/reference/api/executor/): the worker contract and its local, exe.dev, SSH, and Cloudflare adapters.
 - [`@usine/gateway`](/reference/api/gateway/): the proxy that adds credentials to worker traffic and enforces the egress allowlist.
+- [`@usine/cloudflare`](/reference/api/cloudflare/): the sandbox API, exec stream, and harness environment of the Cloudflare Worker that runs each attempt in its own sandbox.
 - [`@usine/orchestrator`](/reference/api/orchestrator/): the full engine as one Effect layer that can run in-process.
