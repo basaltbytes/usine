@@ -2,17 +2,23 @@ import type { WorkerView } from "@usine/orchestrator/operator";
 import { StateMark } from "@/components/status-badge";
 import { agoLabel, timestampLabel } from "../operator-copy.ts";
 
+const outcome = {
+  Passed: { state: "Succeeded", label: "passed", className: undefined },
+  Degraded: { state: "Waiting", label: "degraded", className: "text-run-waiting" },
+  Failed: { state: "Failed", label: "failed", className: "text-destructive" },
+} as const;
+
 const Preflight = ({ worker, now }: { readonly worker: WorkerView; readonly now: number }) => {
   const preflight = worker.preflight;
   if (preflight === null) return <span>No preflight yet</span>;
-  const passed = preflight._tag === "Passed";
+  const { state, label, className } = outcome[preflight._tag];
   return (
     <span
-      className={passed ? undefined : "text-destructive"}
-      title={passed ? timestampLabel(preflight.checkedAt) : preflight.message}
+      className={className}
+      title={preflight._tag === "Passed" ? timestampLabel(preflight.checkedAt) : preflight.message}
     >
-      <StateMark state={passed ? "Succeeded" : "Failed"} className="mr-1.5 align-middle" />
-      Preflight {passed ? "passed" : "failed"} {agoLabel(preflight.checkedAt, now)}
+      <StateMark state={state} className="mr-1.5 align-middle" />
+      Preflight {label} {agoLabel(preflight.checkedAt, now)}
     </span>
   );
 };

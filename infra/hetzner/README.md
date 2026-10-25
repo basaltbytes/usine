@@ -2,10 +2,17 @@
 
 An `ssh` worker is any Linux machine that the orchestrator reaches over SSH. These files create one on Hetzner Cloud in Falkenstein (`fsn1`), Nuremberg (`nbg1`), or Helsinki (`hel1`). [Add a worker](https://docs.usine.dev/guides/add-a-worker/) covers the same steps. [ADR 0026](../../docs/adr/0026-eu-ssh-worker.md) records why usine runs its own workers on EU machines.
 
-- `cloud-init.yaml` builds a Debian 13 machine: the `usine` user, with SSH by key only, Git, gh, Node.js 24, pnpm, Claude Code, Codex pinned to a supported version, and Chromium. It also builds a worker behind the gateway of `gateway/`, where `gateway/gateway.sh worker-user-data` adds the gateway's worker settings.
+- `cloud-init.yaml` builds a Debian 13 machine: the `usine` user, with SSH by key only, Docker, Git, gh, Node.js 24, pnpm, Claude Code, Codex pinned to a supported version, and Chromium. It also builds a worker behind the gateway of `gateway/`, where `gateway/gateway.sh worker-user-data` adds the gateway's worker settings.
 - `create-worker.sh` creates the server with that file, labels it `usine=worker`, and attaches a Hetzner firewall that allows SSH only from the orchestrator's address.
+- `../worker-image/Dockerfile` is the image of each attempt's container. CI builds it and pushes it to `ghcr.io/basaltbytes/usine-worker`, tagged with its Claude Code and Codex versions.
 
-Each child of an attempt is a non-interactive SSH session, which gets the variables of `/etc/environment` and reads no shell profile. `/etc/environment` sets:
+## Attempt containers
+
+With Docker on the machine, each attempt runs in its own container from the attempt image, and every command of the attempt runs in it with `docker exec`. The container mounts the attempt's checkout and the `usine` user's harness login files read-write, and its cached clone and credential directory read-only, so attempts can't read each other's tokens ([#231](https://github.com/basaltbytes/usine/issues/231)). It uses the machine's network. `usine` starts and removes the containers, so it's in the `docker` group, which makes it root-equivalent on the machine; the containers have no Docker access, and no attempt runs as `usine` on a machine with Docker. Preflight at `usine up` checks Docker, pulls the image, and checks that the image's `usine` user has the user ID of the machine's `usine` (1000 on these machines). [`workers[].container`](https://docs.usine.dev/reference/configuration/usine-yaml/#workerscontainer) sets the image and each container's CPU, memory, and process limits.
+
+Inside a container, the image sets `DISABLE_AUTOUPDATER`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium`, and `TURBO_CACHE_DIR`, and the executor sets the attempt's credential and gateway variables. The image's entrypoint copies `~/.claude.json` and `~/.codex/config.toml` into the container's home, where the harnesses can write them; `~/.claude/.credentials.json` and `~/.codex/auth.json` are read-write mounts of the machine's files, which the harnesses rewrite when they refresh their tokens.
+
+A machine without Docker runs each child as a non-interactive SSH session of `usine`, as described in the rest of this file, and preflight reports the worker as degraded. That session gets the variables of `/etc/environment` and reads no shell profile. `/etc/environment` sets:
 
 - `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium`, for Debian's Chromium. Playwright doesn't read it, so a project's test config passes it as `executablePath`, as `apps/web/vitest.config.ts` does. A Turborepo task sees it only if the task lists it in `env`, as the `test` task in `turbo.json` does.
 - `TURBO_CACHE_DIR`, which Turborepo reads itself; see [Caches shared by attempts](#caches-shared-by-attempts).
@@ -61,13 +68,19 @@ An attempt's children run the repo's own gates, such as `pnpm install`, `pnpm bu
 
 ## Caches shared by attempts
 
+A container's pnpm store and Turborepo cache are its own and go with it. The rest of this section is about a machine without Docker.
+
 Each attempt starts in a new worktree, so only caches outside it carry over. All attempts run as `usine` and share pnpm's store at `/home/usine/.local/share/pnpm/store`, from which `pnpm install` links packages and downloads only missing ones, and Turborepo's cache at `/home/usine/.cache/turbo` (`TURBO_CACHE_DIR`). A task whose inputs match an earlier attempt's run restores its outputs. `TURBO_CACHE_DIR` overrides a `cacheDir` in the repo's `turbo.json`; task logs still go to `.turbo/` in the package folder, which is removed with the worktree.
 
 Without `TURBO_CACHE_DIR` and a `cacheDir`, Turborepo 2.10 puts a linked worktree's cache beside the main repo, which for an attempt is `<root>/workers/<name>/repos/.turbo/cache`.
 
 ## Upgrade the harnesses
 
-`cloud-init.yaml` pins the Claude Code and Codex versions that usine supports, and it runs only when the server is created. When the pins change, install them on each running worker. `usine` has no sudo and root can't log in over SSH, so install them as root through `su` in an SSH session as `usine`:
+The attempt image has the Claude Code and Codex versions that the usine release supports, and its tag names them. A usine release with new versions names a new tag, which preflight pulls at the next `usine up` or reload that preflights the worker; nothing changes on the machine. A worker with `container.image` in `usine.yaml` gets new versions when you change that tag. CI pushes an image for every change to `infra/worker-image/`. A change that keeps the versions overwrites their tag, and workers get it at their next preflight.
+
+The first image pushed to GHCR is private. Make the `usine-worker` package public in its package settings on GitHub, or run `docker login ghcr.io` as `usine` on each worker.
+
+The harnesses that `cloud-init.yaml` installs on the machine serve the logins, and run attempts only on a machine without Docker. `cloud-init.yaml` runs only when the server is created, so to change their versions on a running worker, install them by hand. `usine` has no sudo and root can't log in over SSH, so install them as root through `su` in an SSH session as `usine`:
 
 1. Give root a password with `hcloud server reset-password <name>`, which prints it, then switch to root:
 
@@ -86,6 +99,19 @@ Without `TURBO_CACHE_DIR` and a `cacheDir`, Turborepo 2.10 puts a linked worktre
    ```
 
 The harness logins stay. `usine up` checks the Codex version at startup and before every attempt.
+
+## Add Docker to an existing worker
+
+A worker created before `cloud-init.yaml` installed Docker runs attempts as `usine`. Stop `usine up` or wait until the worker runs no attempt: after Docker is installed, usine refuses to reattach or salvage a checkout from before, because that would run git as `usine`, who can then use Docker. Such a checkout stays for you to salvage and remove. Then, as root through `su` as above:
+
+```sh
+set -a; . /etc/environment; set +a
+apt-get install -y docker.io
+usermod -aG docker usine
+passwd -l root
+```
+
+For a worker behind the gateway, write the Docker proxy drop-in and `daemon.json` of `gateway/worker-cloud-init.yaml` first, and add the `ghcr.io` hosts of `gateway/egress-allowlist` to the gateway's allowlist; see [`gateway/README.md`](gateway/README.md). Start `usine up`; preflight pulls the image.
 
 ## Remove a worker
 

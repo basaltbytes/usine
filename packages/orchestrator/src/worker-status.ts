@@ -4,8 +4,18 @@ import type { ItemKey } from "@usine/core/item";
 import type { LoopName } from "@usine/core/loop";
 import type { RunId } from "@usine/core/run";
 import type { WorkerName } from "@usine/core/worker";
-import type { ExecutorError, WorkerCapability } from "@usine/executor";
-import { Array as Arr, Context, type DateTime, Effect, Layer, Option, Order, Schema } from "effect";
+import type { ExecutorError, PreflightReport, WorkerCapability } from "@usine/executor";
+import {
+  Array as Arr,
+  Context,
+  type DateTime,
+  Effect,
+  Layer,
+  Option,
+  Order,
+  Result,
+  Schema,
+} from "effect";
 import type { PipelinePosition } from "./lease-order.ts";
 
 /** A Worker's current slot usage in the scheduler. */
@@ -37,6 +47,17 @@ export interface PreflightPassed {
   readonly checkedAt: DateTime.Utc;
 }
 
+/**
+ * A passed check of a Worker's own prerequisites that found it running Attempts without a
+ * capability that keeps them apart, such as an SSH Worker without Docker.
+ */
+export interface PreflightDegraded {
+  readonly _tag: "Degraded";
+  readonly checkedAt: DateTime.Utc;
+  /** The executor's summary for operators. */
+  readonly message: string;
+}
+
 /** A preflight check that found a missing prerequisite or couldn't run. */
 export interface PreflightFailed {
   readonly _tag: "Failed";
@@ -48,7 +69,7 @@ export interface PreflightFailed {
 }
 
 /** The last outcome of one preflight check and when it ended. */
-export type PreflightCheck = PreflightPassed | PreflightFailed;
+export type PreflightCheck = PreflightPassed | PreflightDegraded | PreflightFailed;
 
 /** The last preflight of one harness on a Worker. */
 export interface HarnessPreflight {
@@ -86,25 +107,31 @@ const withHarnesses = (
   );
 
 /**
- * Returns `previous` updated with one preflight of `brains`. An unavailable harness fails that
- * harness and passes the ones checked before it; any other `failure` fails only the prerequisites.
+ * Returns `previous` updated with one preflight of `brains`. A degraded report passes every
+ * harness and records the prerequisites as degraded. An unavailable harness fails that harness
+ * and passes the ones checked before it; any other failure fails only the prerequisites.
  */
 export const recordPreflight = (
   previous: WorkerPreflight,
   brains: ReadonlyArray<BrainSpec>,
   checkedAt: DateTime.Utc,
-  failure: Option.Option<ExecutorError>,
+  outcome: Result.Result<PreflightReport, ExecutorError>,
 ): WorkerPreflight => {
   const harnesses = Arr.dedupe(brains.map(({ harness }) => harness));
-  if (Option.isNone(failure)) {
+  if (Result.isSuccess(outcome)) {
     const passed: PreflightCheck = { _tag: "Passed", checkedAt };
     return {
       worker: previous.worker,
-      prerequisites: Option.some(passed),
+      prerequisites: Option.some(
+        Option.match(outcome.success.degraded, {
+          onNone: () => passed,
+          onSome: (message): PreflightCheck => ({ _tag: "Degraded", checkedAt, message }),
+        }),
+      ),
       harnesses: withHarnesses(previous.harnesses, harnesses, passed),
     };
   }
-  const error = failure.value;
+  const error = outcome.failure;
   const capability =
     error._tag === "WorkerCapabilityError" ? Option.some(error.capability) : Option.none();
   const failed: PreflightCheck = { _tag: "Failed", checkedAt, capability, message: error.message };

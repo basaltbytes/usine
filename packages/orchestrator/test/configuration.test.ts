@@ -12,8 +12,8 @@ import {
   RepositoryLabelProjection,
   RepositoryLabelProjectionReader,
 } from "@usine/engine/repository-label-projection";
-import { WorkerCapabilityError } from "@usine/executor";
-import { DateTime, Effect, FileSystem, Layer, Option, Schema } from "effect";
+import { fullPreflight, WorkerCapabilityError } from "@usine/executor";
+import { DateTime, Effect, FileSystem, Layer, Option, Result, Schema } from "effect";
 import { CurrentInstance } from "../src/current-instance/current-instance.ts";
 import { idleTriggersLayer } from "../src/idle-triggers.ts";
 import { LabelPreflightFinding } from "../src/label-reconciler.ts";
@@ -235,13 +235,18 @@ const workers = Layer.succeed(WorkerStatus)({
       model: ModelId.make("claude-opus-4-1"),
       effort: "xhigh",
     });
-    const started = recordPreflight(unchecked(local), [codex], startedAt, Option.none());
+    const started = recordPreflight(
+      unchecked(local),
+      [codex],
+      startedAt,
+      Result.succeed(fullPreflight),
+    );
     return [
       recordPreflight(
         started,
         [codex, claude],
         DateTime.addDuration(startedAt, "1 hour"),
-        Option.some(claudeLoggedOut),
+        Result.fail(claudeLoggedOut),
       ),
     ];
   }),

@@ -38,6 +38,33 @@ interface WorkspaceLayout {
   readonly worktree: string;
 }
 
+/** Runs one cleanup step, and logs and ignores its failure, so later steps still run. */
+export type CleanupStep<E> = <A>(
+  resource: string,
+  effect: Effect.Effect<A, E>,
+) => Effect.Effect<void>;
+
+/** The Attempt's checkout: how it is created and removed, and where git runs in it. */
+export interface CheckoutOps<E> {
+  /** Creates the checkout at the layout's worktree, detached at `commit`. */
+  readonly add: (commit: CommitSha) => Effect.Effect<void, E>;
+  /** Removes a checkout that `add` created during preparation, so `add` can create it again. */
+  readonly discard: Effect.Effect<void, E>;
+  /**
+   * Runs git in the checkout with the Attempt's repository credentials and `commitIdentity` for
+   * the request's `commitAuthor`, which authors the salvage commit and commits the rebased
+   * salvage. `args` name the checkout with `-C`.
+   */
+  readonly git: (
+    operation: "prepare" | "cleanup",
+    args: ReadonlyArray<string>,
+  ) => Effect.Effect<string, E>;
+  /** Writes `content` to `path` inside the checkout, creating its directory, and makes it executable. */
+  readonly writeExecutable: (path: string, content: string) => Effect.Effect<void, E>;
+  /** Removes the checkout when the Attempt releases it, running each step through `cleanup`. */
+  readonly remove: (cleanup: CleanupStep<E>) => Effect.Effect<void>;
+}
+
 /** Executor-specific operations for the shared provisioning code. */
 export interface WorkspaceOps<E> {
   readonly ensureRoots: Effect.Effect<void, E>;
@@ -45,17 +72,80 @@ export interface WorkspaceOps<E> {
   readonly cacheExists: Effect.Effect<boolean, E>;
   /** Atomically moves the finished staging clone to the cache path. */
   readonly promoteStaging: Effect.Effect<void, E>;
-  /**
-   * Runs git with the Attempt's repository credentials and `commitIdentity` for the request's
-   * `commitAuthor`, which authors the salvage commit and commits the rebased salvage.
-   */
+  /** Runs git on the cached clone with the Attempt's repository credentials. */
   readonly git: (
     operation: "prepare" | "cleanup",
     args: ReadonlyArray<string>,
   ) => Effect.Effect<string, E>;
-  /** Writes `content` to `path` on the Worker's machine, creating its directory, and makes it executable. */
-  readonly writeExecutable: (path: string, content: string) => Effect.Effect<void, E>;
+  readonly checkout: CheckoutOps<E>;
 }
+
+/**
+ * Returns the checkout as a linked worktree of the cached clone, created and removed with
+ * `git worktree`. `ops.git` runs every git command, in the checkout too.
+ */
+export const linkedWorktree = <E>(
+  ops: Pick<WorkspaceOps<E>, "cacheExists" | "git" | "removePath">,
+  layout: Pick<WorkspaceLayout, "cache" | "worktree">,
+  writeExecutable: (path: string, content: string) => Effect.Effect<void, E>,
+): CheckoutOps<E> => ({
+  add: (commit) =>
+    Effect.asVoid(
+      ops.git("prepare", [
+        "--git-dir",
+        layout.cache,
+        "worktree",
+        "add",
+        "--detach",
+        layout.worktree,
+        commit,
+      ]),
+    ),
+  discard: Effect.asVoid(
+    ops.git("prepare", [
+      "--git-dir",
+      layout.cache,
+      "worktree",
+      "remove",
+      "--force",
+      layout.worktree,
+    ]),
+  ),
+  git: ops.git,
+  writeExecutable,
+  remove: (cleanup) =>
+    Effect.gen(function* () {
+      const cacheExists = yield* ops.cacheExists.pipe(
+        Effect.tapError((error) =>
+          Effect.logWarning("Could not inspect cache during cleanup", {
+            worktree: layout.worktree,
+            message: String(error),
+          }),
+        ),
+        Effect.orElseSucceed(() => false),
+      );
+      if (cacheExists) {
+        yield* cleanup(
+          "git-worktree",
+          ops.git("cleanup", [
+            "--git-dir",
+            layout.cache,
+            "worktree",
+            "remove",
+            "--force",
+            layout.worktree,
+          ]),
+        );
+      }
+      yield* cleanup("worktree-directory", ops.removePath("cleanup", layout.worktree));
+      if (cacheExists) {
+        yield* cleanup(
+          "cache-registration",
+          ops.git("cleanup", ["--git-dir", layout.cache, "worktree", "prune"]),
+        );
+      }
+    }),
+});
 
 export interface ProvisionOptions<E> {
   readonly request: CheckoutRequest;
@@ -91,8 +181,8 @@ export interface ProvisionedWorktree {
 interface ReleaseOptions<E> {
   readonly request: CheckoutRequest;
   readonly host: string;
-  readonly layout: Pick<WorkspaceLayout, "cache" | "worktree">;
-  readonly ops: Pick<WorkspaceOps<E>, "cacheExists" | "git" | "removePath">;
+  readonly layout: Pick<WorkspaceLayout, "worktree">;
+  readonly ops: Pick<WorkspaceOps<E>, "checkout">;
 }
 
 /**
@@ -101,9 +191,9 @@ interface ReleaseOptions<E> {
  */
 type KeptFor = "reattach" | "unconfirmed-stop";
 
-/** Returns a function that runs one cleanup step and logs and ignores its failure, so later steps still run. */
+/** Returns the `CleanupStep` that logs a failed step with the Attempt's fields. */
 const cleanupFor =
-  <E>(options: Pick<ReleaseOptions<E>, "request" | "host" | "layout">) =>
+  <E>(options: Pick<ReleaseOptions<E>, "request" | "host" | "layout">): CleanupStep<E> =>
   <A>(resource: string, effect: Effect.Effect<A, E>) =>
     effect.pipe(
       Effect.tapError((error) =>
@@ -179,7 +269,7 @@ const registerRelease = Effect.fn("Executor.registerRelease")(function* <E exten
                 worktree: layout.worktree,
                 baseCommit,
                 ref: request.salvageRef,
-                git: (args) => ops.git("cleanup", args),
+                git: (args) => ops.checkout.git("cleanup", args),
               })
           : Option.none<AttemptSalvage>();
       if (Option.isSome(salvage)) {
@@ -219,35 +309,7 @@ const registerRelease = Effect.fn("Executor.registerRelease")(function* <E exten
         host: options.host,
         worktree: layout.worktree,
       });
-      const cacheExists = yield* ops.cacheExists.pipe(
-        Effect.tapError((error) =>
-          Effect.logWarning("Could not inspect cache during cleanup", {
-            attemptId: request.attemptId,
-            message: String(error),
-          }),
-        ),
-        Effect.orElseSucceed(() => false),
-      );
-      if (cacheExists) {
-        yield* cleanup(
-          "git-worktree",
-          ops.git("cleanup", [
-            "--git-dir",
-            layout.cache,
-            "worktree",
-            "remove",
-            "--force",
-            layout.worktree,
-          ]),
-        );
-      }
-      yield* cleanup("worktree-directory", ops.removePath("cleanup", layout.worktree));
-      if (cacheExists) {
-        yield* cleanup(
-          "cache-registration",
-          ops.git("cleanup", ["--git-dir", layout.cache, "worktree", "prune"]),
-        );
-      }
+      yield* ops.checkout.remove(cleanup);
     }),
   );
   return {
@@ -268,7 +330,7 @@ const installPrePushHook = Effect.fn("Executor.installPrePushHook")(function* <E
   readonly request: CheckoutRequest;
   readonly host: string;
   readonly layout: Pick<WorkspaceLayout, "worktree">;
-  readonly ops: Pick<WorkspaceOps<E>, "git" | "writeExecutable">;
+  readonly ops: Pick<WorkspaceOps<E>, "checkout">;
 }) {
   const { layout, ops, request } = options;
   const fields = {
@@ -286,14 +348,14 @@ const installPrePushHook = Effect.fn("Executor.installPrePushHook")(function* <E
     );
     return Option.none<string>();
   }
-  const gitDirectory = (yield* ops.git("prepare", [
+  const gitDirectory = (yield* ops.checkout.git("prepare", [
     "-C",
     layout.worktree,
     "rev-parse",
     "--absolute-git-dir",
   ])).trim();
   const hooks = `${gitDirectory}/${PRE_PUSH_HOOKS_DIRECTORY}`;
-  yield* ops.writeExecutable(`${hooks}/pre-push`, prePushHook(request.loop));
+  yield* ops.checkout.writeExecutable(`${hooks}/pre-push`, prePushHook(request.loop));
   yield* Effect.logInfo(
     "The Attempt's Loop has read permissions; its checkout's pre-push hook explains a refused push",
     { ...fields, hooks },
@@ -323,7 +385,7 @@ const checkOutWorktree = Effect.fn("Executor.checkOutWorktree")(function* <E ext
   const { layout, ops, request } = options;
   const inCache = (args: ReadonlyArray<string>) =>
     ops.git("prepare", ["--git-dir", layout.cache, ...args]);
-  const add = (commit: string) => inCache(["worktree", "add", "--detach", layout.worktree, commit]);
+  const add = ops.checkout.add;
   if (Option.isNone(salvage)) {
     yield* add(base);
     return withoutSalvage;
@@ -367,7 +429,7 @@ const checkOutWorktree = Effect.fn("Executor.checkOutWorktree")(function* <E ext
     yield* Effect.logInfo("Resuming the Attempt from the previous salvage", fields);
     return { resume: salvage, conflicting: Option.none() } satisfies SalvageCheckout;
   }
-  const rebased = yield* ops
+  const rebased = yield* ops.checkout
     .git("prepare", [
       "-C",
       layout.worktree,
@@ -381,13 +443,13 @@ const checkOutWorktree = Effect.fn("Executor.checkOutWorktree")(function* <E ext
     ])
     .pipe(Effect.result);
   if (Result.isFailure(rebased)) {
-    yield* inCache(["worktree", "remove", "--force", layout.worktree]);
+    yield* ops.checkout.discard;
     return yield* setAside(
       "The previous salvage does not rebase onto the revision; the Attempt starts from the revision and the salvage stays on its branch",
       failureMessage(rebased.failure),
     );
   }
-  const rebasedHead = (yield* ops.git("prepare", [
+  const rebasedHead = (yield* ops.checkout.git("prepare", [
     "-C",
     layout.worktree,
     "rev-parse",
@@ -518,7 +580,6 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
 });
 
 export interface ReattachOptions<E> extends ReleaseOptions<E> {
-  readonly ops: Pick<WorkspaceOps<E>, "cacheExists" | "git" | "removePath" | "writeExecutable">;
   /** The RunSpec from the parent's durable request. */
   readonly spec: AttemptChannel.RunSpec;
 }
@@ -559,12 +620,13 @@ export interface RecoveryOptions<E> {
   readonly attempt: AttemptRecovery;
   readonly host: string;
   readonly worktree: string;
-  readonly cache: string;
   /**
-   * Runs git with the Worker's repository credentials. For an Attempt that is salvaged, it also
-   * sets the `commitIdentity` that authors the salvage commit.
+   * Runs git in the checkout with the Worker's repository credentials. For an Attempt that is
+   * salvaged, it also sets the `commitIdentity` that authors the salvage commit.
    */
   readonly git: (args: ReadonlyArray<string>) => Effect.Effect<string, E>;
+  /** Removes the checkout and its registration in the cached clone. */
+  readonly removeCheckout: Effect.Effect<void, E>;
 }
 
 /**
@@ -597,7 +659,7 @@ export const recoverWorktree = Effect.fn("Executor.recoverWorktree")(function* <
   const { attempt, host, worktree } = options;
   yield* Effect.annotateCurrentSpan({ ...attempt, host, worktree });
   if (attempt.succeeded || attempt.permissions === "read") {
-    yield* options.git(["--git-dir", options.cache, "worktree", "remove", "--force", worktree]);
+    yield* options.removeCheckout;
     yield* Effect.logInfo(
       attempt.succeeded
         ? "Released the checkout of a succeeded Attempt"
@@ -616,7 +678,7 @@ export const recoverWorktree = Effect.fn("Executor.recoverWorktree")(function* <
   if (Option.isNone(salvage)) return;
   yield* record(salvage.value);
   if (salvage.value._tag === "Retained") return;
-  yield* options.git(["--git-dir", options.cache, "worktree", "remove", "--force", worktree]);
+  yield* options.removeCheckout;
   yield* Effect.logInfo("Reconciled and released Attempt salvage", { ...attempt, host, worktree });
 });
 

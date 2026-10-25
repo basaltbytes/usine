@@ -6,7 +6,7 @@ sidebar:
 ---
 
 :::note
-This page describes commit [`7c0c3d3`](https://github.com/basaltbytes/usine/tree/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9) of basaltbytes/usine as it was on 2026-10-16, and the later operator question marker, blocker failure, relayed harness failure, salvage rebase, parent hold, and Claude Agent SDK 0.3.308 ([#241](https://github.com/basaltbytes/usine/issues/241), [#341](https://github.com/basaltbytes/usine/issues/341), [#364](https://github.com/basaltbytes/usine/issues/364), [#282](https://github.com/basaltbytes/usine/issues/282), [#159](https://github.com/basaltbytes/usine/issues/159), [#481](https://github.com/basaltbytes/usine/issues/481)), the pool of a Claude Code child whose gateway uses an API key ([#248](https://github.com/basaltbytes/usine/issues/248)), the Pi child's fixed tool set ([#181](https://github.com/basaltbytes/usine/issues/181)), and the checkout that a launch keeps while its parent task's stop is unconfirmed ([#523](https://github.com/basaltbytes/usine/issues/523)). Code links point at that commit.
+This page describes commit [`7c0c3d3`](https://github.com/basaltbytes/usine/tree/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9) of basaltbytes/usine as it was on 2026-10-16, and the later operator question marker, blocker failure, relayed harness failure, salvage rebase, parent hold, and Claude Agent SDK 0.3.308 ([#241](https://github.com/basaltbytes/usine/issues/241), [#341](https://github.com/basaltbytes/usine/issues/341), [#364](https://github.com/basaltbytes/usine/issues/364), [#282](https://github.com/basaltbytes/usine/issues/282), [#159](https://github.com/basaltbytes/usine/issues/159), [#481](https://github.com/basaltbytes/usine/issues/481)), the pool of a Claude Code child whose gateway uses an API key ([#248](https://github.com/basaltbytes/usine/issues/248)), the Pi child's fixed tool set ([#181](https://github.com/basaltbytes/usine/issues/181)), the checkout that a launch keeps while its parent task's stop is unconfirmed ([#523](https://github.com/basaltbytes/usine/issues/523)), and the container per attempt on an SSH worker with Docker ([#548](https://github.com/basaltbytes/usine/issues/548)). Code links point at that commit, except for the container's.
 :::
 
 An attempt passes through six layers, from the engine down; all but the children run in the orchestrator.
@@ -117,6 +117,22 @@ export class Executor extends Context.Service<
 - If the rebase fails or the salvage shares no history with the base, the worktree is recreated at the base. The salvage branch keeps the work; `RunSpec.conflictingSalvage`, the parent's prompt, and the `Started` envelope include its name.
 
 The worktree is `<worker directory>/attempts/<attempt id>` and the cache `<worker directory>/repos/<repository>.git`, with every character other than letters, digits, `_`, `.`, and `-` replaced by `_` ([provision.ts:21](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/provision.ts#L21)).
+
+#### Checkout in an attempt container
+
+On an SSH worker whose machine has Docker, the checkout isn't a linked worktree, whose git directory is inside the cache: the attempt's container mounts the cache read-only, so a commit couldn't write its objects there. `remoteExecutorFor` ([remote.ts](https://github.com/basaltbytes/usine/blob/main/packages/executor/src/remote/remote.ts)) creates `attempts/<attempt id>` on the machine, starts the container `usine-<attempt id>` ([container.ts](https://github.com/basaltbytes/usine/blob/main/packages/executor/src/remote/container.ts)), and runs `git init` in it. The checkout's `.git/objects/info/alternates` names the cache's objects, and its `origin`, the repository URL, is a partial-clone remote (`extensions.partialClone`, `remote.origin.promisor`, `blob:none`), so `git checkout --detach <base>` fetches the missing blobs into the checkout's own objects. Commits, branches, fetches, and the salvage write only the checkout. A rebase failure empties the directory instead of removing it, since the container mounts that directory. The checkout starts with no `origin/*` refs; the cache's are as old as its clone.
+
+| Path in the container                                                   | Mount                                                      |
+| ----------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `<worker directory>/attempts`                                           | an empty tmpfs, for the children's PID files               |
+| `<worker directory>/attempts/<attempt id>`                              | the checkout, read-write                                   |
+| `<worker directory>/repos/<repository>.git`                             | the cache, read-only                                       |
+| `<worker directory>/credentials/<attempt id>`                           | the token directory, read-only, without a gateway          |
+| `<worker directory>/gh`, `/run/usine-gateway`                           | gh's configuration and socket, read-only, behind a gateway |
+| `/home/usine/.claude/.credentials.json`, `/home/usine/.codex/auth.json` | the SSH user's login of the attempt's harness, read-write  |
+| `/usr/local/share/usine/seed/.claude.json`, `.../.codex/config.toml`    | copied into `/home/usine` by the image's entrypoint        |
+
+The fetch into the cache runs as the SSH user; every other command of the attempt runs with `docker exec -i usine-<attempt id> sh -c <command line>`, because the checkout's git configuration and hooks are the agent's to change. `RemoteShell.container` ([child-host.ts](https://github.com/basaltbytes/usine/blob/main/packages/agents/src/child-host/child-host.ts)) wraps the command line, so the children, harvest, salvage, pre-push hook, and the attempt's harness check use the same code as without a container. The PID files are in the container's tmpfs, and the kill script runs in the container; a missing or stopped container has no child to stop. The container starts after the credential, so the attempt's harness check runs after the checkout exists, outside the repository's fetch lock. Its finalizer runs after the checkout's release, which salvages in it, and before the credential's.
 
 ### Launch, runaway guard, and release
 

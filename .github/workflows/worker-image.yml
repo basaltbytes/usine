@@ -1,0 +1,60 @@
+name: Worker image
+
+# Builds infra/worker-image/Dockerfile, the image of each attempt's container on
+# an SSH worker with Docker, and pushes it to GHCR from main. The tag names the
+# Claude Code and Codex versions that the Dockerfile pins, which is the tag of
+# the SSH executor's default image (ATTEMPT_IMAGE in
+# packages/executor/src/ssh/container.ts). A pull request only builds it.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "infra/worker-image/**"
+      - ".github/workflows/worker-image.yml"
+  pull_request:
+    paths:
+      - "infra/worker-image/**"
+      - ".github/workflows/worker-image.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: worker-image-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/basaltbytes/usine-worker
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Read the harness versions
+        id: pins
+        run: |
+          pin() { sed -n "s/^ARG $1=//p" infra/worker-image/Dockerfile; }
+          tag="claude-$(pin CLAUDE_CODE_VERSION)-codex-$(pin CODEX_VERSION)"
+          [[ "$tag" =~ ^claude-[0-9.]+-codex-[0-9.]+$ ]] || { echo "Unexpected tag: $tag" >&2; exit 1; }
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: Build
+        env:
+          TAG: ${{ steps.pins.outputs.tag }}
+        run: |
+          docker build \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --tag "${IMAGE}:${TAG}" \
+            --tag "${IMAGE}:sha-${GITHUB_SHA::12}" \
+            infra/worker-image
+      - name: Push
+        if: github.event_name != 'pull_request'
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker push --all-tags "$IMAGE"

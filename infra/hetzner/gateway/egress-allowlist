@@ -49,6 +49,11 @@ release-assets.githubusercontent.com
 codeload.github.com
 cli.github.com
 
+# The attempt container image on GitHub's container registry, and the host
+# its layers download from.
+ghcr.io
+pkg-containers.githubusercontent.com
+
 # Debian packages
 deb.debian.org
 security.debian.org

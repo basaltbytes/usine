@@ -33,6 +33,8 @@ Never allowlist github.com, or a provider whose credential the gateway has; work
 
 The gateway uses its own public interface and forwards no worker packets.
 
+Attempt containers on a worker use the worker's network (`docker run --network host`), so the paths above and the worker's nftables rules apply to them as to any process on the worker. A bridge network would send their traffic through Docker's own forwarding and NAT rules instead, around the output chain. The worker's `daemon.json` turns Docker's rules off, so the worker's ruleset is the only one. Each container gets the attempt's caller token on `docker run`'s standard input, as container variables, so no command line and no shell of `usine` carries it, except the fetch into the cached clone, which runs as `usine` with the token sent over SSH. Docker pulls the attempt image from `ghcr.io` through the forward proxy, with the proxy in its systemd drop-in.
+
 ### Paths by client
 
 From the gateway's journal and dnsmasq's query log on 2026-10-15, with the children's environment from the executor (`HTTPS_PROXY=http://<domain>:3128`):
@@ -199,7 +201,9 @@ hcloud server create --name worker-one --type cx33 --image debian-13 --location 
   --label usine=worker --user-data-from-file worker.mime
 ```
 
-The output is a MIME multipart cloud-init: `../cloud-init.yaml`'s worker file, then `worker-cloud-init.yaml`, whose lists (packages, files, commands) are appended per its `Merge-Type` header. The second file points the resolver, apt, and `/etc/environment` at the gateway, so the first file's setup installs the toolchain through the forward proxy: Debian packages from `deb.debian.org` and `mirror.hetzner.com`, gh from `cli.github.com`, Node.js from `deb.nodesource.com`, and pnpm and the harnesses from `registry.npmjs.org`.
+The output is a MIME multipart cloud-init: `../cloud-init.yaml`'s worker file, then `worker-cloud-init.yaml`, whose lists (packages, files, commands) are appended per its `Merge-Type` header. The second file points the resolver, apt, `/etc/environment`, and Docker at the gateway, so the first file's setup installs the toolchain through the forward proxy: Debian packages and Docker from `deb.debian.org` and `mirror.hetzner.com`, gh from `cli.github.com`, Node.js from `deb.nodesource.com`, and pnpm and the harnesses from `registry.npmjs.org`. Docker pulls the attempt image from `ghcr.io` and `pkg-containers.githubusercontent.com`, which `egress-allowlist` lists.
+
+On a worker created before these files installed Docker, add as root `/etc/systemd/system/docker.service.d/http-proxy.conf` and `/etc/docker/daemon.json` with the contents of `worker-cloud-init.yaml`, then install Docker as [`../README.md`](../README.md#add-docker-to-an-existing-worker) describes. On the gateway, add the two `ghcr.io` hosts to `/etc/usine-gateway/egress-allowlist` and run `systemctl reload usine-gateway`.
 
 Projects use Debian's Chromium through `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` (see [`../README.md`](../README.md)), and `egress-allowlist` omits Playwright's download: on x64 Linux, Playwright 1.61 fetches from `cdn.playwright.dev`, which redirects to `storage.googleapis.com`, every Google Cloud Storage bucket's endpoint, so allowing it would let a worker upload a checkout to any bucket it has a signed URL for.
 
@@ -217,7 +221,7 @@ claude auth login          # Claude subscription: open the URL it prints, then p
 codex login --device-auth  # ChatGPT plan: open the URL it prints and enter the code it prints
 ```
 
-Both use the forward proxy (`HTTPS_PROXY` in `/etc/environment`). `claude auth status` and `codex login status` show the result.
+Both use the forward proxy (`HTTPS_PROXY` in `/etc/environment`). `claude auth status` and `codex login status` show the result. Attempt containers mount `~/.claude/.credentials.json` and `~/.codex/auth.json` read-write and copy `~/.claude.json` and `~/.codex/config.toml`, so log in on the worker, not in a container.
 
 ## Add the worker to `usine.yaml`
 
@@ -263,7 +267,7 @@ workers:
 
 - `llm_providers` lists the providers whose credential the gateway has (empty by default); other harnesses use their login on the worker, as Codex always does. With `anthropic`, Claude Code children call `llm.<domain>/anthropic` with the caller token, preflight checks only the `claude` binary, and the Claude Code hosts must come off `egress-allowlist`.
 
-Preflight attaches nothing. It checks that the admin forward opens (or gives the `ssh` command showing why), the admin API accepts the token, sshd accepts the caller token variables, and the worker reaches `git.<domain>`. For each harness using its worker login, it checks the login and that each login host answers through the forward proxy; a refused host fails with the host to add to `egress-allowlist`. During an attempt, the executor stores its attachment again every two minutes, so a restarted gateway, which keeps attachments in memory, recovers them within two minutes.
+Preflight attaches nothing. It checks that the admin forward opens (or gives the `ssh` command showing why), the admin API accepts the token, sshd accepts the caller token variables, the worker reaches `git.<domain>`, and, with Docker on the worker, that Docker answers and pulls the attempt image. For each harness using its worker login, it checks the login and that each login host answers through the forward proxy, in a container from the attempt image if the worker has Docker; a refused host fails with the host to add to `egress-allowlist`. During an attempt, the executor stores its attachment again every two minutes, so a restarted gateway, which keeps attachments in memory, recovers them within two minutes.
 
 ## Add the time server to an existing gateway and worker
 

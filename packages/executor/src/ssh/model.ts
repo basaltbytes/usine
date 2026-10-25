@@ -1,5 +1,9 @@
 import type { SshCommand } from "@usine/agents/child-host";
 import type {
+  ContainerCpus,
+  ContainerImage,
+  ContainerMemoryMib,
+  ContainerPids,
   GatewayAdminPort,
   GatewayCredentialKind,
   GatewayDomain,
@@ -30,6 +34,16 @@ export interface SshWorkerGateway {
   readonly llmProviders: ReadonlyArray<GatewayLlmProvider>;
 }
 
+/** The container of each Attempt on an SSH Worker whose machine has Docker. */
+export interface SshWorkerContainer {
+  /** The image to run. If `None`, `ATTEMPT_IMAGE`. */
+  readonly image: Option.Option<ContainerImage>;
+  readonly cpus: ContainerCpus;
+  readonly memoryMib: ContainerMemoryMib;
+  /** The maximum number of processes and threads. */
+  readonly pids: ContainerPids;
+}
+
 export interface SshWorkerAddress {
   /**
    * The Worker's name in `usine.yaml`; its state is in `workers/<name>` under `root`. A request
@@ -46,10 +60,17 @@ export interface SshWorkerAddress {
   readonly root: WorkerRoot;
   /** The Gateway in front of the machine. If `None`, each Attempt's token is written on the machine (ADR 0026). */
   readonly gateway: Option.Option<SshWorkerGateway>;
+  /** Each Attempt's container. Used only if the machine has Docker. */
+  readonly container: SshWorkerContainer;
 }
 
 export interface SshExecutorOptions {
   readonly workers: ReadonlyArray<SshWorkerAddress>;
+  /**
+   * The identity of this usine instance on the Workers' machines. It labels each Attempt
+   * container, so that a later process removes only this instance's containers.
+   */
+  readonly instance: string;
   /** The local SSH command and the options placed before each Worker's port and identity file. Defaults to `ssh` in batch mode with keepalives. */
   readonly ssh?: SshCommand;
   /** The timeout for the parent task's cancellation, then separately for the Attempt to finish. Defaults to 10 seconds. */

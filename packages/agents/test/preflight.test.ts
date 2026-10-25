@@ -136,6 +136,28 @@ describe("worker harness readiness", () => {
     ]);
   });
 
+  // turbo.json lists the Dockerfile as an input too.
+  it("pins the attempt container image's pnpm and harnesses at the Hetzner worker versions", () => {
+    const dockerfile = readFileSync(
+      new URL("../../../infra/worker-image/Dockerfile", import.meta.url),
+      "utf8",
+    );
+    const argument = (name: string) =>
+      [...dockerfile.matchAll(new RegExp(`^ARG ${name}=(\\S+)$`, "gmu"))].map(([, value]) => value);
+    assert.deepStrictEqual(
+      {
+        pnpm: argument("PNPM_VERSION"),
+        claude: argument("CLAUDE_CODE_VERSION"),
+        codex: argument("CODEX_VERSION"),
+      },
+      {
+        pnpm: cloudInitPins(/pnpm@(\S+)/gu),
+        claude: cloudInitPins(/@anthropic-ai\/claude-code@(\S+)/gu),
+        codex: cloudInitPins(/@openai\/codex@(\S+)/gu),
+      },
+    );
+  });
+
   for (const result of [
     { stdout: "", exitCode: 127, capability: "binary" },
     { stdout: "codex-cli 0.144.0", exitCode: 0, capability: "version" },

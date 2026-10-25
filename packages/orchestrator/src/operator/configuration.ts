@@ -11,6 +11,10 @@ import { OperatorLogin } from "@usine/core/operator";
 import { RepositoryName } from "@usine/core/repository";
 import { StepName } from "@usine/core/step";
 import {
+  ContainerCpus,
+  ContainerImage,
+  ContainerMemoryMib,
+  ContainerPids,
   GatewayAdminPort,
   GatewayDomain,
   GatewayLlmProvider,
@@ -146,6 +150,14 @@ export class PassedCheckView extends Schema.TaggedClass<PassedCheckView>(
   "@usine/orchestrator/PassedCheckView",
 )("Passed", { checkedAt: Schema.String }) {}
 
+/**
+ * A passed check of the Worker's own prerequisites, at an ISO instant, that found it running
+ * Attempts without a capability that keeps them apart, such as an SSH Worker without Docker.
+ */
+export class DegradedCheckView extends Schema.TaggedClass<DegradedCheckView>(
+  "@usine/orchestrator/DegradedCheckView",
+)("Degraded", { checkedAt: Schema.String, message: Schema.String }) {}
+
 /** A preflight check that found a missing prerequisite or couldn't run, at an ISO instant. */
 export class FailedCheckView extends Schema.TaggedClass<FailedCheckView>(
   "@usine/orchestrator/FailedCheckView",
@@ -156,7 +168,11 @@ export class FailedCheckView extends Schema.TaggedClass<FailedCheckView>(
   message: Schema.String,
 }) {}
 
-export const PreflightCheckView = Schema.Union([PassedCheckView, FailedCheckView]);
+export const PreflightCheckView = Schema.Union([
+  PassedCheckView,
+  DegradedCheckView,
+  FailedCheckView,
+]);
 export type PreflightCheckView = typeof PreflightCheckView.Type;
 
 /** The last preflight of one harness on a Worker. */
@@ -166,6 +182,17 @@ export class HarnessPreflightView extends Schema.Class<HarnessPreflightView>(
   harness: Harness,
   check: PreflightCheckView,
 }) {}
+
+/** The container of each Attempt on an SSH Worker with Docker, from `usine.yaml`. */
+export class ContainerView extends Schema.Class<ContainerView>("@usine/orchestrator/ContainerView")(
+  {
+    /** Null for the default image of this usine release. */
+    image: Schema.NullOr(ContainerImage),
+    cpus: ContainerCpus,
+    memoryMib: ContainerMemoryMib,
+    pids: ContainerPids,
+  },
+) {}
 
 /** A Worker as declared in `usine.yaml`, with its slot usage and last preflight. */
 export class WorkerConfigurationView extends Schema.Class<WorkerConfigurationView>(
@@ -180,11 +207,13 @@ export class WorkerConfigurationView extends Schema.Class<WorkerConfigurationVie
   identityFile: Schema.NullOr(SshIdentityFile),
   root: Schema.NullOr(WorkerRoot),
   gateway: Schema.NullOr(GatewayView),
+  /** An SSH Worker's Attempt container, used if its machine has Docker; null for the other kinds. */
+  container: Schema.NullOr(ContainerView),
   /** Null while the scheduler runs no Attempts, as in setup mode. */
   slots: Schema.NullOr(WorkerSlotsView),
   /**
-   * The Worker's own prerequisites: machine, Git, memory, Gateway, and credentials. Null before any
-   * preflight.
+   * The Worker's own prerequisites: machine, Git, memory, Gateway, credentials, and Docker. Null
+   * before any preflight. Degraded for an SSH Worker without Docker.
    */
   prerequisites: Schema.NullOr(PreflightCheckView),
   /** In harness name order; empty before any harness check. */
@@ -292,6 +321,8 @@ const fileStem = (file: InstancePath): string => {
 export const checkView = (check: PreflightCheck): PreflightCheckView =>
   Match.valueTags(check, {
     Passed: ({ checkedAt }) => new PassedCheckView({ checkedAt: DateTime.formatIso(checkedAt) }),
+    Degraded: ({ checkedAt, message }) =>
+      new DegradedCheckView({ checkedAt: DateTime.formatIso(checkedAt), message }),
     Failed: ({ checkedAt, capability, message }) =>
       new FailedCheckView({
         checkedAt: DateTime.formatIso(checkedAt),
@@ -318,8 +349,21 @@ const workerConnection = (worker: Worker) =>
               llmProviders: gateway.llmProviders,
             }),
         }),
+        container: new ContainerView({
+          image: Option.getOrNull(worker.container.image),
+          cpus: worker.container.cpus,
+          memoryMib: worker.container.memoryMib,
+          pids: worker.container.pids,
+        }),
       }
-    : { destination: null, port: null, identityFile: null, root: null, gateway: null };
+    : {
+        destination: null,
+        port: null,
+        identityFile: null,
+        root: null,
+        gateway: null,
+        container: null,
+      };
 
 const makeOperatorConfiguration = Effect.gen(function* () {
   const controls = yield* LoopControl;

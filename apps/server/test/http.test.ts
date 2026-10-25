@@ -274,6 +274,7 @@ const configurationView = new ConfigurationView({
       identityFile: null,
       root: null,
       gateway: null,
+      container: null,
       slots: null,
       prerequisites: null,
       harnesses: [],

@@ -1,16 +1,20 @@
+import type { RemoteShell } from "@usine/agents/child-host";
 import type { ClaudeLoginLock } from "@usine/agents/runtime";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import type { WorkerName } from "@usine/core/worker";
-import { Effect, Option } from "effect";
+import { Array as Arr, Effect, Option } from "effect";
 import {
   type ExecutorError,
   logPreflightFailure,
+  type PreflightReport,
   WorkerCapabilityError,
   type WorkerCapability,
 } from "../executor.ts";
 import { type HarnessProbe, verifyHarnessReadiness } from "../harness-preflight.ts";
 import { verifyLinuxMemory } from "../memory-preflight.ts";
 import type { RemoteCommands } from "../remote/commands.ts";
+import type { SshContainers } from "./container.ts";
+import { gatewayExportedEnvironment } from "./gateway/environment.ts";
 import { verifyGateway } from "./gateway/preflight.ts";
 import type { SshMachine } from "./model.ts";
 
@@ -25,16 +29,19 @@ const capabilityError = (
 ): WorkerCapabilityError => new WorkerCapabilityError({ worker, capability, message, cause });
 
 /**
- * Verifies an SSH Worker without changing its machine: SSH connects, the root is a writable
- * directory, Git runs, memory is enough for the concurrent Attempts, the Gateway (if any)
- * responds and is reachable, and each brain is ready. Claude brains are checked under the
- * Worker's lock in `logins`.
+ * Verifies an SSH Worker: SSH connects, the root is a writable directory, Git runs, memory is
+ * enough for the concurrent Attempts, the Gateway (if any) responds and is reachable, Docker
+ * and the Attempt image work if the machine has Docker, and each brain is ready. Pulls the
+ * Attempt image and changes nothing else. With Docker, brains are probed in a container from
+ * the image; without, as the SSH user, which the report gives as degraded. Claude brains are
+ * checked under the Worker's lock in `logins`.
  */
 export const sshPreflightFor = (
   commands: RemoteCommands,
   machineFor: (worker: WorkerName) => Effect.Effect<SshMachine, ExecutorError>,
-  harnessProbe: (machine: SshMachine) => HarnessProbe,
+  harnessProbe: (machine: SshMachine, shell: RemoteShell) => HarnessProbe,
   logins: ClaudeLoginLock["Service"],
+  containers: SshContainers,
 ) =>
   Effect.fn("SshExecutor.preflight")(function* (
     worker: WorkerName,
@@ -100,12 +107,32 @@ export const sshPreflightFor = (
 
     if (Option.isSome(machine.gateway))
       yield* verifyGateway(commands, worker, machine, machine.gateway.value);
-    yield* verifyHarnessReadiness(worker, brains, harnessProbe(machine), logins);
+    const containerCheck = yield* containers.verify(machine);
+    const harnesses = Arr.dedupe(brains.map(({ harness }) => harness));
+    const probe = (shell: RemoteShell) =>
+      verifyHarnessReadiness(worker, brains, harnessProbe(machine, shell), logins);
+    yield* containerCheck.isolation._tag === "Container" && harnesses.length > 0
+      ? Effect.scoped(
+          containers
+            .preflightShell(
+              machine,
+              harnesses,
+              Option.match(machine.gateway, {
+                onNone: () => ({}),
+                onSome: ({ settings }) =>
+                  gatewayExportedEnvironment(settings, `${machine.workerDirectory}/gh`),
+              }),
+            )
+            .pipe(Effect.flatMap(probe)),
+        )
+      : probe(machine.shell);
     yield* Effect.logInfo("SSH Worker preflight verified", {
       worker,
       host,
       root,
       gitVersion,
-      harnesses: [...new Set(brains.map(({ harness }) => harness))].join(","),
+      isolation: containerCheck.isolation._tag,
+      harnesses: harnesses.join(","),
     });
+    return { degraded: containerCheck.degraded } satisfies PreflightReport;
   }, logPreflightFailure);

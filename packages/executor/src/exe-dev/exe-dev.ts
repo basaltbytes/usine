@@ -6,6 +6,7 @@ import { Effect, Layer, Option } from "effect";
 import type { ChildProcessSpawner } from "effect/unstable/process";
 import { CredentialUnavailableError, Executor } from "../executor.ts";
 import type { RemoteAccess, RemoteGrant, RemoteMachine } from "../remote/machine.ts";
+import { sharedUser } from "../remote/container.ts";
 import { remoteExecutorFor } from "../remote/remote.ts";
 import { commandsFor } from "./commands.ts";
 import { credentialGrantsFor } from "./grants.ts";
@@ -21,6 +22,8 @@ const EDGE_GITHUB_HOST = "github.int.exe.xyz";
  */
 const edgeAccess = (machine: RemoteMachine): RemoteAccess => ({
   shell: machine.shell,
+  secrets: {},
+  readOnlyPaths: [],
   environment: { GH_HOST: EDGE_GITHUB_HOST },
   gitEnvironment: {},
   refresh: Effect.void,
@@ -81,7 +84,10 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
       commands: commands.shared,
       machineFor,
       preflight: machines.preflight,
-      harnessProbe: (machine) => machines.harnessProbe(machine.shell),
+      harnessProbe: (_machine, shell) => machines.harnessProbe(shell),
+      // exe.dev runs every Attempt of a Worker on its one VM as the VM's user.
+      isolation: () => Effect.succeed(sharedUser),
+      runsContainers: false,
       repositoryUrl: (_machine, repository) => `https://${EDGE_GITHUB_HOST}/${repository}.git`,
       // exe.dev Workers have no Gateway; every harness uses its own login.
       gatewayCredential: () => Effect.succeedNone,

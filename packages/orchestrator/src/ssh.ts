@@ -55,6 +55,12 @@ const sshWorkerAddressOf = (worker: SshWorker, missing: (variable: string) => st
       port: worker.port,
       root: worker.root,
       gateway,
+      container: {
+        image: worker.container.image,
+        cpus: worker.container.cpus,
+        memoryMib: worker.container.memoryMib,
+        pids: worker.container.pids,
+      },
     } satisfies SshWorkerAddress;
   });
 

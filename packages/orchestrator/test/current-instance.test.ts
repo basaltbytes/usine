@@ -4,7 +4,7 @@ import { GitHubLabelName } from "@usine/config/label";
 import { AgentName } from "@usine/core/agent";
 import { InstanceDirectory } from "@usine/core/instance";
 import { LoopName } from "@usine/core/loop";
-import { Executor, WorkerCapabilityError } from "@usine/executor";
+import { Executor, WorkerCapabilityError, fullPreflight } from "@usine/executor";
 import { Effect, FileSystem, Layer, Logger, Path } from "effect";
 import { CurrentInstance } from "../src/current-instance/current-instance.ts";
 import { stepExecutorLayer } from "../src/scheduler.ts";
@@ -95,6 +95,7 @@ const startWorkers = (preflighted: Array<string>) =>
               message: "Claude Code is not logged in.",
               cause: "claude auth status: logged out",
             });
+          return fullPreflight;
         }),
     });
     yield* Layer.build(

@@ -139,7 +139,7 @@ The layer registers with `CurrentInstance`, so a reload changes workers without 
 
 Other workers are preflighted with the brains the reload adds; any failed preflight refuses the reload. Resizes, additions, removals, and retired slots are logged with counts. Attempts read `max_children`, the runaway ceilings, and the parent effort from `CurrentInstance` at start, so reloads apply to the next attempt. The layer rejects worker kinds its executor can't run. Capability failures during preparation become non-retryable `AgentFailure` outcomes, like missing model credentials.
 
-The layer also provides `WorkerStatus` (`/worker-status`): each worker's slots and how many are taken, the waiting runs in lease order, and the last preflight of each worker's own prerequisites and of each harness, with time and result. It records the startup preflight and every reload's, refused ones included. The local, SSH, and exe.dev compositions pass it on; `WorkerStatus.idle` stands in where no worker runs attempts.
+The layer also provides `WorkerStatus` (`/worker-status`): each worker's slots and how many are taken, the waiting runs in lease order, and the last preflight of each worker's own prerequisites and of each harness, with time and result: passed, failed, or, for an SSH worker without Docker, degraded. It records the startup preflight and every reload's, refused ones included. The local, SSH, and exe.dev compositions pass it on; `WorkerStatus.idle` stands in where no worker runs attempts.
 
 ## Compositions
 
@@ -159,7 +159,7 @@ All three compositions run each attempt's Pi parent in the orchestrator as a dur
 
 `runtimeLayer(instanceDirectory)` (`/runtime`) composes the whole application, adding GitHub polling, schedule triggers, CEL parsing, `Orchestrator`, and `Operator`. It uses the SSH composition if every worker is `ssh`, otherwise the local one, which refuses other kinds at startup. One `ClaudeLoginLock` serves both the attempt runtime and the worker composition. Preflight requirements come from the instance's agents at build time. It needs `GitHubCredentials` and `CurrentInstance`, which the host loads. `operatorObservationLayer(instanceDirectory)` is the read-only Node composition for setup and maintenance: it provides `OperatorObservation` and `OperatorConfiguration` from durable runs and loop state, with triggers idle and no worker running attempts.
 
-`/ssh` composes the scheduler with the SSH executor, and also needs a `CredentialProvider` for the token each attempt writes on its machine or attaches to its gateway. `sshWorkersOf(config)` returns the declared SSH workers; `sshWorkerAddressesOf(config)` turns them into executor addresses, reading each gateway's admin token from its `admin_token_env` variable, and fails with a `gateway` capability error naming an unset one. Admin APIs are called with `fetch` through the executor's forward to each gateway's `destination`.
+`/ssh` composes the scheduler with the SSH executor, and also needs a `CredentialProvider` for the token each attempt writes on its machine or attaches to its gateway. `sshWorkersOf(config)` returns the declared SSH workers; `sshWorkerAddressesOf(config)` turns them into executor addresses, with their `container` settings, reading each gateway's admin token from its `admin_token_env` variable, and fails with a `gateway` capability error naming an unset one. Admin APIs are called with `fetch` through the executor's forward to each gateway's `destination`. `workerEngineLayer` labels the SSH executor's attempt containers with `github-app-<App ID>` from `GitHubCredentials`, the instance's identity (ADR 0011).
 
 `sshStepExecutorLayer(config, brains)` lets a reload resize, add, and remove SSH workers through `SshWorkers`. An added worker joins the executor before preflight, and its gateway's token is read then; an unset variable refuses the reload with `ReloadPreflightError` naming it, since a running process doesn't see variables set after it started. A removed worker leaves the executor once its last attempt ends, and its gateway's forward closes if no other worker uses it.
 
@@ -169,7 +169,7 @@ import { Effect, Layer } from "effect"
 
 const EngineLive = Layer.unwrap(
   Effect.map(sshWorkerAddressesOf(config), (workers) =>
-    sshLayer(instanceDirectory, config, brains, { workers }),
+    sshLayer(instanceDirectory, config, brains, { workers, instance: "github-app-123456" }),
   ),
 )
 ```

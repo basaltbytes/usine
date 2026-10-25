@@ -3,12 +3,15 @@ import type { GatewayDomain, GatewayLlmProvider } from "@usine/core/worker";
 import { type CallerToken, GATEWAY_TOKEN_HEADER } from "@usine/gateway/admin";
 import { Redacted } from "effect";
 
+/** The directory of the Unix socket that gh reaches the Gateway through. */
+export const GH_GATEWAY_SOCKET_DIRECTORY = "/run/usine-gateway";
+
 /**
  * The Unix socket that systemd forwards to the Gateway's port 80
  * (`infra/hetzner/gateway/worker-cloud-init.yaml`). gh sends plain HTTP over it, and only HTTPS
  * to `GH_HOST` directly.
  */
-const GH_GATEWAY_SOCKET = "/run/usine-gateway/http.sock";
+const GH_GATEWAY_SOCKET = `${GH_GATEWAY_SOCKET_DIRECTORY}/http.sock`;
 
 const FORWARD_PROXY_PORT = 3128;
 
@@ -54,6 +57,16 @@ export interface GatewayEnvironment {
   readonly exported: Readonly<Record<string, string>>;
   readonly sent: Readonly<Record<string, Redacted.Redacted<string>>>;
 }
+
+/**
+ * Returns the variables of `gatewayEnvironment` without a caller token, for commands that
+ * reach the Gateway's forward proxy but no attachment, such as a preflight's harness probes.
+ */
+export const gatewayExportedEnvironment = (
+  settings: Pick<GatewayEnvironmentOptions, "domain" | "llmProviders">,
+  ghConfigDirectory: string,
+): Readonly<Record<string, string>> =>
+  gatewayEnvironment({ ...settings, ghConfigDirectory, callerToken: Redacted.make("") }).exported;
 
 /**
  * Returns the environment that points git, gh, package managers, and Claude Code at the

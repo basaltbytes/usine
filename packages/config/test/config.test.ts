@@ -147,6 +147,11 @@ describe("ConfigParser", () => {
         "      admin_port: 7071",
         "      admin_token_env: USINE_GATEWAY_ADMIN_TOKEN",
         "      llm_providers: [anthropic]",
+        "    container:",
+        "      image: registry.example:5000/usine/worker:custom",
+        "      cpus: 1.5",
+        "      memory_mib: 6144",
+        "      pids: 2048",
       ]);
       const [first, second] = configured.workers;
       expect(first?.kind).toBe("ssh");
@@ -165,6 +170,18 @@ describe("ConfigParser", () => {
       expect(gateway?.adminPort).toBe(7071);
       expect(gateway?.adminTokenEnv).toBe("USINE_GATEWAY_ADMIN_TOKEN");
       expect(gateway?.llmProviders).toEqual(["anthropic"]);
+      expect({ ...first.container, image: Option.getOrNull(first.container.image) }).toEqual({
+        image: null,
+        cpus: 2,
+        memoryMib: 4096,
+        pids: 4096,
+      });
+      expect({ ...second.container, image: Option.getOrNull(second.container.image) }).toEqual({
+        image: "registry.example:5000/usine/worker:custom",
+        cpus: 1.5,
+        memoryMib: 6144,
+        pids: 2048,
+      });
 
       const gatewayOf = (lines: ReadonlyArray<string>) => [
         "  - name: eu",
@@ -201,6 +218,21 @@ describe("ConfigParser", () => {
         ["  - name: eu", "    kind: ssh", "    destination: eu", "    root: /srv/usine/"],
         ["  - name: eu", "    kind: ssh", "    destination: eu", "    root: /srv", "    port: 0"],
         ["  - name: eu", "    kind: ssh", "    destination: eu", "    root: /srv", "    user: x"],
+        ...[
+          "image: --privileged",
+          "image: ghcr.io/usine/worker latest",
+          "cpus: 0",
+          "memory_mib: 128",
+          "pids: 0",
+          "memoryMib: 4096",
+        ].map((line) => [
+          "  - name: eu",
+          "    kind: ssh",
+          "    destination: eu",
+          "    root: /srv",
+          "    container:",
+          `      ${line}`,
+        ]),
       ]) {
         const failure = yield* parse(workers).pipe(Effect.flip);
         expect(failure.stage).toBe("schema");

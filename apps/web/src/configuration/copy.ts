@@ -42,6 +42,7 @@ export const capabilityLabel = {
   "harness-login": "harness login",
   credentials: "credentials",
   gateway: "gateway",
+  container: "Docker",
 } satisfies Record<Capability, string>;
 
 /** Returns the missing capability of a failed check, for example `harness login`, or `check failed` if the check itself failed. */
@@ -61,11 +62,14 @@ export const workerPlace = (worker: WorkerConfigurationView): string => {
 };
 
 interface PreflightSummary {
-  readonly state: "passed" | "failed" | "unchecked";
+  readonly state: "passed" | "degraded" | "failed" | "unchecked";
   readonly checkedAt: string | null;
 }
 
-/** Returns a summary of the Worker's newest failed check, else its newest check, else `unchecked`. */
+/**
+ * Returns a summary of the Worker's newest failed check, else its degraded check, else its newest
+ * check, else `unchecked`.
+ */
 export const preflightSummary = (worker: WorkerConfigurationView): PreflightSummary => {
   const checks = [
     ...(worker.prerequisites === null ? [] : [worker.prerequisites]),
@@ -78,6 +82,8 @@ export const preflightSummary = (worker: WorkerConfigurationView): PreflightSumm
       null,
     );
   if (failed.length > 0) return { state: "failed", checkedAt: newest(failed) };
+  const degraded = checks.filter(({ _tag }) => _tag === "Degraded");
+  if (degraded.length > 0) return { state: "degraded", checkedAt: newest(degraded) };
   if (checks.length > 0) return { state: "passed", checkedAt: newest(checks) };
   return { state: "unchecked", checkedAt: null };
 };
