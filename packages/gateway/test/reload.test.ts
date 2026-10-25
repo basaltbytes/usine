@@ -1,6 +1,5 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, request } from "node:http";
-import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NodeServices } from "@effect/platform-node";
@@ -15,36 +14,28 @@ import {
   Redacted,
   Schedule,
 } from "effect";
-import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
+import {
+  FetchHttpClient,
+  HttpClient,
+  HttpClientRequest,
+  HttpServerError,
+} from "effect/unstable/http";
 import { HttpApiClient } from "effect/unstable/httpapi";
 import { AttachRequest, GatewayAdminApi } from "../src/admin/api.ts";
 import { AnonymousCredential } from "../src/attachment/attachment.ts";
 import {
+  EgressProxyListenError,
   GatewayAddresses,
   GatewayReload,
   gatewayFromEnvironment,
   type Listener,
 } from "../src/node/node.ts";
-import { ADMIN_TOKEN_VALUE, REPOSITORY, WORKER } from "./fixtures.ts";
+import { ADMIN_TOKEN_VALUE, freeGatewayPorts, REPOSITORY, WORKER } from "./fixtures.ts";
 
 const CALLER_KEY_VALUE = "caller-key-for-reload-tests-0123456789";
 const FIRST_KEY = "sk-ant-api03-firstKeyForReloadTests";
 const SECOND_KEY = "sk-ant-api03-secondKeyForReloadTests";
 const SUBSCRIPTION_TOKEN = "sk-ant-oat01-subscriptionTokenForReloadTests";
-
-/** Returns a loopback port that's free at the time of the call. */
-const freePort = Effect.callback<number>((resume) => {
-  const server = createNetServer();
-  server.once("error", (error) => resume(Effect.die(error)));
-  server.listen(0, "127.0.0.1", () => {
-    const address = server.address();
-    server.close(() =>
-      address !== null && !Predicate.isString(address)
-        ? resume(Effect.succeed(address.port))
-        : resume(Effect.die(new Error("the probe server has no port"))),
-    );
-  });
-});
 
 /** A stand-in for the Anthropic API that records each request's `x-api-key`. */
 const anthropicStandIn = Effect.gen(function* () {
@@ -124,9 +115,14 @@ const logged = (...needles: ReadonlyArray<string>) =>
       : Effect.succeed(line);
   }).pipe(Effect.retry({ schedule: Schedule.spaced("20 millis"), times: 100 }));
 
+const gateway = gatewayFromEnvironment.pipe(
+  Layer.provideMerge(FetchHttpClient.layer),
+  Layer.provide(NodeServices.layer),
+);
+
 /**
  * Writes the Gateway's files, then runs `body` against `usine-gateway` started from the files
- * in `USINE_GATEWAY_ENVIRONMENT_FILES`.
+ * in `USINE_GATEWAY_ENVIRONMENT_FILES`. If a listener can't bind, starts again on new ports.
  */
 const withGateway = <A, E>(
   allowlist: ReadonlyArray<string>,
@@ -139,12 +135,8 @@ const withGateway = <A, E>(
   ) => Effect.Effect<A, E, GatewayAddresses | GatewayReload | HttpClient.HttpClient>,
 ) =>
   Effect.gen(function* () {
-    lines.length = 0;
     const anthropic = yield* anthropicStandIn;
     const files = yield* gatewayFiles;
-    const ports = { proxy: yield* freePort, egress: yield* freePort, admin: yield* freePort };
-    const settings = settingsLines(files, ports, anthropic.origin);
-    yield* files.write("settings.env", settings);
     yield* files.write("secrets.env", secretsLines(FIRST_KEY));
     yield* files.write("egress-allowlist", allowlist);
     const environment = ConfigProvider.fromEnv({
@@ -152,14 +144,20 @@ const withGateway = <A, E>(
         USINE_GATEWAY_ENVIRONMENT_FILES: `${files.path("settings.env")}:${files.path("secrets.env")}`,
       },
     });
-    return yield* body(files, { settings, anthropic: anthropic.keys }).pipe(
-      Effect.provide(
-        gatewayFromEnvironment.pipe(
-          Layer.provideMerge(FetchHttpClient.layer),
-          Layer.provide(NodeServices.layer),
-        ),
-      ),
-      Effect.provideService(ConfigProvider.ConfigProvider, environment),
+    return yield* Effect.gen(function* () {
+      lines.length = 0;
+      const settings = settingsLines(files, yield* freeGatewayPorts, anthropic.origin);
+      yield* files.write("settings.env", settings);
+      return yield* body(files, { settings, anthropic: anthropic.keys }).pipe(
+        Effect.provide(gateway),
+        Effect.provideService(ConfigProvider.ConfigProvider, environment),
+      );
+    }).pipe(
+      Effect.retry({
+        while: (error) =>
+          error instanceof HttpServerError.ServeError || error instanceof EgressProxyListenError,
+        times: 3,
+      }),
     );
   }).pipe(Effect.scoped, Effect.provide(recordLogs));
 
