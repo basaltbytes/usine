@@ -1,0 +1,32 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Rename the Worker and the images for your account; see README.md.
+  "name": "usine-sandboxes",
+  "main": "dist/worker.js",
+  "compatibility_date": "2026-10-19",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "containers": [
+    {
+      "class_name": "AttemptSandbox",
+      "scheduling_policy": "durable_object",
+      "images": {
+        "usine": { "dockerfile": "./image/Dockerfile" },
+      },
+    },
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "SANDBOX", "class_name": "AttemptSandbox" },
+      { "name": "REGISTRY", "class_name": "SandboxRegistry" },
+    ],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["AttemptSandbox", "SandboxRegistry"] }],
+  "vars": {
+    // The hosts a sandbox reaches over HTTPS without a credential, separated by commas.
+    "ALLOWED_HOSTS": "registry.npmjs.org",
+  },
+  // Set the Access service token with:
+  //   wrangler secret put ACCESS_CLIENT_ID
+  //   wrangler secret put ACCESS_CLIENT_SECRET
+}

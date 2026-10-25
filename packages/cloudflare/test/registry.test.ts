@@ -1,0 +1,62 @@
+import { describe, expect, it } from "@effect/vitest";
+import { WorkerName } from "@usine/core/worker";
+import { DateTime, Effect, Layer, Option, Schema } from "effect";
+import { HttpRouter } from "effect/unstable/http";
+import { SandboxName, SandboxSummary } from "../src/api/api.ts";
+import { registryRoutes, RegistryStorage, SandboxLookup } from "../src/registry.ts";
+import { ATTEMPT, IMAGE, OWNER } from "./support.ts";
+
+const summary = (name: string, owner: WorkerName, running: boolean) =>
+  new SandboxSummary({
+    name: SandboxName.make(name),
+    owner,
+    attempt: ATTEMPT,
+    image: IMAGE,
+    instanceType: "standard-4",
+    createdAt: DateTime.makeUnsafe(0),
+    running,
+  });
+
+describe("sandbox registry", () => {
+  it("lists the owner's sandboxes as they are now and forgets those that are gone", async () => {
+    const other = WorkerName.make("cf-two");
+    const recorded = new Map(
+      [
+        summary("cf-one.alive", OWNER, true),
+        summary("cf-one.stopped", OWNER, true),
+        summary("cf-one.gone", OWNER, true),
+        summary("cf-two.alive", other, true),
+      ].map((sandbox) => [sandbox.name, sandbox]),
+    );
+    const current = new Map([
+      ["cf-one.alive", summary("cf-one.alive", OWNER, true)],
+      ["cf-one.stopped", summary("cf-one.stopped", OWNER, false)],
+    ]);
+    const services = Layer.mergeAll(
+      Layer.succeed(RegistryStorage)({
+        list: Effect.sync(() => [...recorded.values()]),
+        put: (sandbox) => Effect.sync(() => void recorded.set(sandbox.name, sandbox)),
+        remove: (name) => Effect.sync(() => void recorded.delete(name)),
+      }),
+      Layer.succeed(SandboxLookup)({
+        get: (name) => Effect.sync(() => Option.fromNullishOr(current.get(name))),
+      }),
+    );
+    const web = HttpRouter.toWebHandler(registryRoutes.pipe(HttpRouter.provideRequest(services)), {
+      disableLogger: true,
+    });
+
+    const response = await web.handler(
+      new Request(`https://sandboxes.test/v1/sandboxes?owner=${OWNER}`),
+    );
+    const list = Schema.decodeUnknownSync(
+      Schema.toCodecJson(Schema.Struct({ sandboxes: Schema.Array(SandboxSummary) })),
+    )(await response.json());
+
+    expect(list.sandboxes.map(({ name, running }) => [name, running])).toEqual([
+      ["cf-one.alive", true],
+      ["cf-one.stopped", false],
+    ]);
+    expect([...recorded.keys()]).toEqual(["cf-one.alive", "cf-one.stopped", "cf-two.alive"]);
+  });
+});
