@@ -67,6 +67,11 @@ write_files:
       		# cloud-init reads the user data as root at boot; it has a provisioned server's SSH host private key, so no other user or container may.
       		ip daddr 169.254.169.254 meta skuid != 0 drop
       	}
+      	# A bridged container has no uid on the host; nothing forwarded reaches the metadata service.
+      	chain forward {
+      		type filter hook forward priority -10; policy accept;
+      		ip daddr 169.254.169.254 drop
+      	}
       }
 
   # Oxc reserves a 6 GiB virtual buffer at start, which the kernel's heuristic refuses on a machine with less memory plus swap (#270).
