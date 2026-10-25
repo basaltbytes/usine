@@ -12,9 +12,9 @@ import { GitHubItemWriter } from "@usine/github/item-writer";
 import { GitHubLabelWriter } from "@usine/github/label-writer";
 import { GitHubPolling } from "@usine/github/polling";
 import { Effect, Layer } from "effect";
-import { FetchHttpClient } from "effect/unstable/http";
 import { gitHubCredentialLayer } from "./credentials.ts";
 import { CurrentInstance } from "./current-instance/current-instance.ts";
+import { externalHttpClientLayer } from "./http-client.ts";
 import { idleTriggersLayer } from "./idle-triggers.ts";
 import { LabelReconciler } from "./label-reconciler.ts";
 import { OperatorConfiguration } from "./operator/configuration.ts";
@@ -48,13 +48,13 @@ export const operatorObservationLayer = (instanceDirectory: InstanceDirectory) =
  */
 export const runtimeLayer = (instanceDirectory: InstanceDirectory) => {
   const app = GitHubApp.layer.pipe(
-    Layer.provide(FetchHttpClient.layer),
+    Layer.provide(externalHttpClientLayer),
     Layer.provide(NodeServices.layer),
   );
   const credentials = gitHubCredentialLayer.pipe(Layer.provide(app));
   const polling = GitHubPolling.layer.pipe(
     Layer.provide(app),
-    Layer.provide(FetchHttpClient.layer),
+    Layer.provide(externalHttpClientLayer),
     Layer.provide(NodeServices.layer),
   );
   const triggerCondition = triggerConditionLayer.pipe(
@@ -86,15 +86,15 @@ export const runtimeLayer = (instanceDirectory: InstanceDirectory) => {
   );
   const itemWriter = GitHubItemWriter.layer.pipe(
     Layer.provide(app),
-    Layer.provide(FetchHttpClient.layer),
+    Layer.provide(externalHttpClientLayer),
   );
   const itemHistory = GitHubItemHistory.layer.pipe(
     Layer.provide(app),
-    Layer.provide(FetchHttpClient.layer),
+    Layer.provide(externalHttpClientLayer),
   );
   const labelWriter = GitHubLabelWriter.layer.pipe(
     Layer.provide(app),
-    Layer.provide(FetchHttpClient.layer),
+    Layer.provide(externalHttpClientLayer),
   );
   const labelReconciler = LabelReconciler.layer.pipe(Layer.provide(labelWriter));
   const parser = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
