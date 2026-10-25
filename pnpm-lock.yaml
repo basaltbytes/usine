@@ -590,6 +590,9 @@ importers:
       '@usine/agents':
         specifier: workspace:*
         version: link:../agents
+      '@usine/cloudflare':
+        specifier: workspace:*
+        version: link:../cloudflare
       '@usine/core':
         specifier: workspace:*
         version: link:../core
@@ -600,9 +603,15 @@ importers:
         specifier: workspace:*
         version: link:../gateway
     devDependencies:
+      '@effect/platform-node':
+        specifier: 'catalog:'
+        version: 4.0.0-rc.111(effect@4.0.0-rc.111)(redis@6.2.1)
       '@effect/vitest':
         specifier: 'catalog:'
         version: 4.0.0-rc.111(effect@4.0.0-rc.111)(vitest@4.1.11)
+      '@types/ws':
+        specifier: 8.18.2
+        version: 8.18.2
       '@usine/tsconfig':
         specifier: workspace:*
         version: link:../../tooling/tsconfig
@@ -615,6 +624,9 @@ importers:
       vitest:
         specifier: 'catalog:'
         version: 4.1.11(@types/node@26.6.5)(@vitest/browser-playwright@4.1.11)(vite@8.3.4(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
+      ws:
+        specifier: 8.22.0
+        version: 8.22.0
 
   packages/expression:
     dependencies:

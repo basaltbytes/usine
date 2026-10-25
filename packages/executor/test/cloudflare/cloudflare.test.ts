@@ -1,0 +1,405 @@
+import { NodeServices } from "@effect/platform-node";
+import { assert, describe, it } from "@effect/vitest";
+import { RemoteShell, sshArguments } from "@usine/agents/child-host";
+import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { Agent } from "@usine/core/agent";
+import { CloudflareImageName, WorkerName } from "@usine/core/worker";
+import type { AttemptRequest } from "@usine/durable/attempt-runtime";
+import {
+  completes,
+  type StubParent,
+  StubStorage,
+  stubAttemptRuntime,
+} from "@usine/durable/testing";
+import { Deferred, Effect, Exit, Fiber, Layer, Option, Redacted, Stream } from "effect";
+import { FetchHttpClient } from "effect/unstable/http";
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { fileURLToPath } from "node:url";
+import { layer as cloudflareLayer } from "../../src/cloudflare/cloudflare.ts";
+import type { CloudflareProviderKey } from "../../src/cloudflare/model.ts";
+import { SHELL_ENVIRONMENT } from "../../src/cloudflare/shell/environment.ts";
+import {
+  CheckoutRequest,
+  claudeLoginLockLayer,
+  Executor,
+  WorkerCapabilityError,
+} from "../../src/executor.ts";
+import {
+  aloneOnItem,
+  mintingProvider,
+  request as sshRequest,
+  TOKEN_PREFIX,
+} from "../ssh/support.ts";
+import {
+  ACCESS_CLIENT_ID,
+  ACCESS_CLIENT_SECRET,
+  type FakeSandbox,
+  fakeWorker,
+} from "./fake-worker.ts";
+
+const WORKER = WorkerName.make("cf-one");
+const SANDBOX = "cf-one.remote-run_execute_1";
+const WORKTREE = "/home/usine/workspace/attempts/remote-run_execute_1";
+const SHELL = fileURLToPath(new URL("../../src/cloudflare/shell/shell.ts", import.meta.url));
+const ANTHROPIC: CloudflareProviderKey = {
+  provider: "anthropic",
+  apiKey: Redacted.make("sk-ant-test-key"),
+};
+
+const request = new CheckoutRequest({ ...sshRequest, worker: WORKER });
+
+const sink = {
+  append: () => Effect.void,
+  salvage: () => Effect.void,
+  comments: () => Effect.void,
+  transcript: Effect.succeed([]),
+  windows: aloneOnItem(),
+};
+
+const brain = (harness: "claude" | "codex" | "pi") =>
+  new Agent({
+    ...request.agent,
+    brain: new BrainSpec({ harness, model: ModelId.make("model"), effort: "high" }),
+  });
+
+const executor = (
+  worker: { readonly url: URL },
+  credentials: ReturnType<typeof mintingProvider>,
+  parent: StubParent = completes,
+  storage: StubStorage = new StubStorage(),
+  providers: ReadonlyArray<CloudflareProviderKey> = [ANTHROPIC],
+  accessClientSecret = ACCESS_CLIENT_SECRET,
+) =>
+  cloudflareLayer({
+    workers: [
+      {
+        name: WORKER,
+        workerUrl: worker.url,
+        accessClientId: Redacted.make(ACCESS_CLIENT_ID),
+        accessClientSecret: Redacted.make(accessClientSecret),
+        image: CloudflareImageName.make("usine"),
+        instanceType: "standard-4",
+        providers,
+      },
+    ],
+    shell: { command: process.execPath, args: ["--no-warnings", SHELL] },
+    interruptGrace: "2 seconds",
+  }).pipe(
+    Layer.provide(credentials.layer),
+    Layer.provide(stubAttemptRuntime(storage, parent)),
+    Layer.provide(claudeLoginLockLayer),
+    Layer.provide(FetchHttpClient.layer),
+    Layer.provide(NodeServices.layer),
+  );
+
+const runningSandbox = (
+  name: string,
+  attempt: string,
+  paths: ReadonlyArray<string> = [],
+): FakeSandbox => ({
+  name,
+  owner: WORKER,
+  attempt,
+  running: true,
+  github: [],
+  paths: new Set(paths),
+  commands: [],
+  stops: 0,
+});
+
+/** A parent that runs `cat` in the sandbox through its host, with `input` on stdin, and records the output. */
+const echoingParent =
+  (input: string, output: Array<string>, seen: Array<AttemptRequest>): StubParent =>
+  (context) =>
+    Effect.gen(function* () {
+      seen.push(context.request);
+      const host = context.request.host;
+      assert(host instanceof RemoteShell);
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const handle = yield* spawner.spawn(
+        ChildProcess.make(
+          host.ssh.command,
+          sshArguments(host, {
+            cwd: context.request.cwd,
+            environment: context.request.environment,
+            command: "cat",
+            args: [],
+          }),
+          {
+            env: { ...host.sshEnvironment },
+            extendEnv: false,
+            stdin: Stream.make(new TextEncoder().encode(input)),
+          },
+        ),
+      );
+      output.push(yield* handle.stdout.pipe(Stream.decodeText(), Stream.mkString));
+      return yield* completes(context);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer), Effect.orDie);
+
+describe("cloudflare Worker", () => {
+  it.live(
+    "runs an Attempt in its own sandbox, with credentials only in the Worker, then destroys it",
+    () =>
+      Effect.gen(function* () {
+        const worker = yield* fakeWorker;
+        const credentials = mintingProvider();
+        const output: Array<string> = [];
+        const seen: Array<AttemptRequest> = [];
+        yield* Effect.gen(function* () {
+          const cloudflare = yield* Executor;
+          assert.strictEqual(cloudflare.kind, "cloudflare");
+          yield* cloudflare.preflight(WORKER, [request.agent.brain], 2);
+          const prepared = yield* cloudflare.prepare(request);
+          assert.strictEqual(prepared.workspace.worktree, WORKTREE);
+          const sandbox = worker.state.sandboxes.get(SANDBOX);
+          assert(sandbox !== undefined);
+          assert.deepStrictEqual(sandbox.github, [`${TOKEN_PREFIX}1`]);
+          yield* prepared.launch(sink);
+          assert.deepStrictEqual(output, ["hello from the parent"]);
+          assert.strictEqual(sandbox.stops, 1);
+          assert.isTrue(
+            sandbox.commands.some(
+              (line) =>
+                line.includes("'clone'") && line.includes("'https://github.com/acme/demo.git'"),
+            ),
+          );
+        }).pipe(
+          Effect.scoped,
+          Effect.provide(
+            executor(worker, credentials, echoingParent("hello from the parent", output, seen)),
+          ),
+        );
+
+        assert.deepStrictEqual(
+          worker.state.requests.filter((line) => line.startsWith("DELETE")),
+          ["DELETE /v1/sandboxes/cf-one.preflight", `DELETE /v1/sandboxes/${SANDBOX}`],
+        );
+        assert.strictEqual(worker.state.sandboxes.size, 0);
+        const [given] = seen;
+        assert(given !== undefined && given.host instanceof RemoteShell);
+        assert.strictEqual(given.host.destination, SANDBOX);
+        assert.strictEqual(
+          given.host.sshEnvironment[SHELL_ENVIRONMENT.accessClientSecret],
+          ACCESS_CLIENT_SECRET,
+        );
+        assert.strictEqual(
+          given.environment["ANTHROPIC_BASE_URL"],
+          "http://anthropic.usine.internal",
+        );
+        assert.strictEqual(
+          given.environment["SSL_CERT_FILE"],
+          "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
+        );
+        assert.isTrue(Option.contains(yield* given.gatewayCredential, "api-key"));
+        assert.notInclude(JSON.stringify(given.environment), TOKEN_PREFIX);
+        assert.notInclude(JSON.stringify(given.environment), "sk-ant-test-key");
+        assert.notInclude(JSON.stringify([...worker.state.sandboxes.values()]), "sk-ant");
+      }).pipe(Effect.scoped),
+  );
+
+  it.live("stops a canceled Attempt's commands and destroys its sandbox", () =>
+    Effect.gen(function* () {
+      const worker = yield* fakeWorker;
+      const working = yield* Deferred.make<void>();
+      const parent: StubParent = () =>
+        Deferred.succeed(working, undefined).pipe(Effect.andThen(Effect.never));
+      yield* Effect.gen(function* () {
+        const cloudflare = yield* Executor;
+        const prepared = yield* cloudflare.prepare(request);
+        const running = yield* Effect.forkChild(prepared.launch(sink));
+        yield* Deferred.await(working);
+        yield* cloudflare.cancel(request.attemptId, "cancel");
+        const exit = yield* Fiber.await(running);
+        assert.isTrue(Exit.isFailure(exit));
+      }).pipe(Effect.scoped, Effect.provide(executor(worker, mintingProvider(), parent)));
+
+      assert.isFalse(worker.state.sandboxes.has(SANDBOX));
+      const stopsBeforeDelete = worker.state.requests.indexOf(`POST /v1/sandboxes/${SANDBOX}/stop`);
+      assert.isTrue(stopsBeforeDelete >= 0);
+      assert.isTrue(
+        stopsBeforeDelete < worker.state.requests.indexOf(`DELETE /v1/sandboxes/${SANDBOX}`),
+      );
+    }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "keeps the sandbox for a reattachment, revokes its token, and reattaches after a restart",
+    () =>
+      Effect.gen(function* () {
+        const worker = yield* fakeWorker;
+        const storage = new StubStorage();
+        const credentials = mintingProvider();
+        const working = yield* Deferred.make<void>();
+        const blocks: StubParent = () =>
+          Deferred.succeed(working, undefined).pipe(Effect.andThen(Effect.never));
+        yield* Effect.gen(function* () {
+          const cloudflare = yield* Executor;
+          const prepared = yield* cloudflare.prepare(request);
+          const running = yield* Effect.forkChild(prepared.launch(sink));
+          yield* Deferred.await(working);
+          // The orchestrator stops: the launch is interrupted without a stop.
+          yield* Fiber.interrupt(running);
+        }).pipe(Effect.scoped, Effect.provide(executor(worker, credentials, blocks, storage)));
+
+        const kept = worker.state.sandboxes.get(SANDBOX);
+        assert(kept !== undefined);
+        assert.deepStrictEqual(kept.github, [`${TOKEN_PREFIX}1`, null]);
+        const createsBefore = worker.state.requests.filter(
+          (line) => line === `PUT /v1/sandboxes/${SANDBOX}`,
+        ).length;
+
+        yield* Effect.gen(function* () {
+          const cloudflare = yield* Executor;
+          assert.isTrue(yield* cloudflare.isLive(request.attemptId));
+          const prepared = yield* cloudflare.prepare(
+            new CheckoutRequest({ ...request, reattach: true }),
+          );
+          yield* prepared.launch(sink);
+        }).pipe(Effect.scoped, Effect.provide(executor(worker, credentials, completes, storage)));
+
+        assert.strictEqual(
+          worker.state.requests.filter((line) => line === `PUT /v1/sandboxes/${SANDBOX}`).length,
+          createsBefore,
+        );
+        assert.deepStrictEqual(kept.github.slice(0, 3), [
+          `${TOKEN_PREFIX}1`,
+          null,
+          `${TOKEN_PREFIX}2`,
+        ]);
+        assert.isTrue(
+          kept.stops >= 2,
+          "reattachment stops the commands left from before the restart",
+        );
+        assert.isFalse(worker.state.sandboxes.has(SANDBOX));
+      }).pipe(Effect.scoped),
+  );
+
+  it.live("destroys orphan sandboxes without a checkout and keeps those that hold one", () =>
+    Effect.gen(function* () {
+      const worker = yield* fakeWorker;
+      const stopped = { ...runningSandbox("cf-one.stopped", "old/execute/1"), running: false };
+      const empty = runningSandbox("cf-one.preflight", "preflight");
+      const holding = runningSandbox("cf-one.crashed", "crashed/execute/1", [
+        "/home/usine/workspace/attempts",
+        "/home/usine/workspace/attempts/crashed_execute_1",
+      ]);
+      const foreign = { ...runningSandbox("cf-two.other", "other/execute/1"), owner: "cf-two" };
+      for (const sandbox of [stopped, empty, holding, foreign])
+        worker.state.sandboxes.set(sandbox.name, sandbox);
+      yield* Effect.gen(function* () {
+        const cloudflare = yield* Executor;
+        const prepared = yield* cloudflare.prepare(request);
+        yield* prepared.launch(sink);
+      }).pipe(Effect.scoped, Effect.provide(executor(worker, mintingProvider())));
+
+      assert.deepStrictEqual([...worker.state.sandboxes.keys()].sort(), [
+        "cf-one.crashed",
+        "cf-two.other",
+      ]);
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("refuses brains the sandbox can't run before creating a sandbox", () =>
+    Effect.gen(function* () {
+      const worker = yield* fakeWorker;
+      yield* Effect.gen(function* () {
+        const cloudflare = yield* Executor;
+        const codex = yield* cloudflare
+          .prepare(new CheckoutRequest({ ...request, agent: brain("codex") }))
+          .pipe(Effect.flip);
+        const pi = yield* cloudflare.preflight(WORKER, [brain("pi").brain], 1).pipe(Effect.flip);
+        assert(codex instanceof WorkerCapabilityError && pi instanceof WorkerCapabilityError);
+        assert.strictEqual(codex.capability, "harness-login");
+        assert.include(codex.message, "openai");
+        assert.strictEqual(pi.capability, "toolchain");
+      }).pipe(Effect.scoped, Effect.provide(executor(worker, mintingProvider())));
+
+      assert.strictEqual(worker.state.sandboxes.size, 0);
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("reports a refused Access token and a missing image as capability gaps", () =>
+    Effect.gen(function* () {
+      const worker = yield* fakeWorker;
+      const refused = yield* Executor.pipe(
+        Effect.flatMap((cloudflare) => cloudflare.preflight(WORKER, [], 1)),
+        Effect.flip,
+        Effect.scoped,
+        Effect.provide(
+          executor(worker, mintingProvider(), completes, new StubStorage(), [ANTHROPIC], "wrong"),
+        ),
+      );
+      worker.state.images = ["other"];
+      const missing = yield* Executor.pipe(
+        Effect.flatMap((cloudflare) => cloudflare.preflight(WORKER, [], 1)),
+        Effect.flip,
+        Effect.scoped,
+        Effect.provide(executor(worker, mintingProvider())),
+      );
+
+      assert(refused instanceof WorkerCapabilityError && missing instanceof WorkerCapabilityError);
+      assert.strictEqual(refused.capability, "credentials");
+      assert.strictEqual(missing.capability, "toolchain");
+      assert.include(missing.message, 'no image "usine"');
+    }).pipe(Effect.scoped),
+  );
+});
+
+describe("sandbox shell", () => {
+  const run = (url: URL, line: string, secret = ACCESS_CLIENT_SECRET) =>
+    Effect.gen(function* () {
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const handle = yield* spawner.spawn(
+        ChildProcess.make(process.execPath, ["--no-warnings", SHELL, SANDBOX, "--", line], {
+          env: {
+            [SHELL_ENVIRONMENT.workerUrl]: url.origin,
+            [SHELL_ENVIRONMENT.accessClientId]: ACCESS_CLIENT_ID,
+            [SHELL_ENVIRONMENT.accessClientSecret]: secret,
+          },
+          extendEnv: false,
+        }),
+      );
+      const [stdout, stderr, exitCode] = yield* Effect.all(
+        [
+          handle.stdout.pipe(Stream.decodeText(), Stream.mkString),
+          handle.stderr.pipe(Stream.decodeText(), Stream.mkString),
+          handle.exitCode,
+        ],
+        { concurrency: "unbounded" },
+      );
+      return { stdout, stderr, exitCode: Number(exitCode) };
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
+
+  it.live("attaches to a command's output after its stream drops, and keeps its exit code", () =>
+    Effect.gen(function* () {
+      const worker = yield* fakeWorker;
+      worker.state.sandboxes.set(SANDBOX, runningSandbox(SANDBOX, request.attemptId));
+      const line = "exec 'git' 'log' '--oneline'";
+      worker.state.respond = (_sandbox, words) =>
+        words[1] === "log"
+          ? Option.some({ stdout: "abc123 first\ndef456 second\n", exitCode: 3 })
+          : Option.none();
+      worker.state.dropOnce.add(line);
+      const result = yield* run(worker.url, line);
+
+      assert.deepStrictEqual(result, {
+        stdout: "abc123 first\ndef456 second\n",
+        stderr: "",
+        exitCode: 3,
+      });
+      assert.isTrue(worker.state.requests.some((path) => path.endsWith("/attach")));
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("exits 255 like ssh when the Worker refuses it or the sandbox is gone", () =>
+    Effect.gen(function* () {
+      const worker = yield* fakeWorker;
+      const refused = yield* run(worker.url, "exec 'true'", "wrong");
+      const gone = yield* run(worker.url, "exec 'true'");
+
+      assert.strictEqual(refused.exitCode, 255);
+      assert.strictEqual(gone.exitCode, 255);
+      assert.include(gone.stderr, SANDBOX);
+    }).pipe(Effect.scoped),
+  );
+});
