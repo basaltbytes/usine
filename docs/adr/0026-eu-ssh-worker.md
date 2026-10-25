@@ -12,6 +12,8 @@ _Note, 2026-10-14:_ an SSH worker can now be behind a gateway ([ADR 0027](./0027
 
 _Note, 2026-10-25:_ under [ADR 0029](./0029-worker-kinds-and-adapter-set.md), each attempt on a long-lived `ssh` worker runs in its own container ([#548](https://github.com/basaltbytes/usine/issues/548)), which removes the shared-user exposure of #231 and #243, and a provisioner on the `ssh` kind creates one machine per attempt ([#550](https://github.com/basaltbytes/usine/issues/550)). ADR 0029 also makes EU residency a property of each worker adapter that the customer chooses, in place of this ADR's rule that customer attempts run on EU machines that usine controls.
 
+_Note, 2026-10-25 ([#550](https://github.com/basaltbytes/usine/issues/550)):_ on a provisioned `ssh` worker, each machine is created for one attempt and deleted after it, so no attempts share a machine, and the exposure between co-located attempts of #231 and #243 doesn't arise there. A Boat worker writes the installation token to its machine as this ADR's first stage does, through standard input, with the same modes, and removes it with the attempt, because Boat has no network rules, so no gateway can be its machines' only way out ([ADR 0029](./0029-worker-kinds-and-adapter-set.md), "No egress control on Boat"). The reasons that stage 1 accepted a token on the machine hold there: the token opens one repository and expires within the hour, and the machine runs one attempt.
+
 ## Considered options
 
 - **Keep exe.dev**: works today, but its control plane and terms stay outside the EU and any agreement. Rejected.

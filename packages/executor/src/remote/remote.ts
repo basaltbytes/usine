@@ -111,6 +111,18 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
     const runtime = yield* AttemptRuntime;
     const workerWatches = yield* workerWatchesFor(commands);
     const containers = containersFor(commands);
+    const attemptMachine =
+      worker.attemptMachine ??
+      ((name: WorkerName, _attemptId: AttemptId) => worker.machineFor(name));
+    const leftoversOf = (attempt: AttemptRecovery) =>
+      worker.leftovers === undefined
+        ? workerLeftovers(attempt.worker).pipe(Effect.map((found) => Option.some(found)))
+        : worker.leftovers(attempt, workerLeftovers(attempt.worker));
+    const recovered = worker.recovered ?? (() => Effect.void);
+    const checkoutHeld = worker.checkoutHeld ?? (() => Effect.void);
+    /** Returns `removal` that records the checkout of `attemptId` as gone once it succeeds. */
+    const removing = <A, E, R>(attemptId: AttemptId, removal: Effect.Effect<A, E, R>) =>
+      Effect.tap(removal, () => checkoutHeld(attemptId, false));
 
     const cachePath = (machine: M, repository: RepositoryName) =>
       `${machine.workerDirectory}/repos/${cacheDirectoryName(repository)}`;
@@ -351,18 +363,21 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       const removeCheckout = (
         git: (args: ReadonlyArray<string>) => Effect.Effect<string, ExecutorError>,
       ) =>
-        isolation._tag === "Container"
-          ? removeStandalone("cleanup", machine, attempt.attemptId, worktree)
-          : Effect.asVoid(
-              git([
-                "--git-dir",
-                cachePath(machine, attempt.repository),
-                "worktree",
-                "remove",
-                "--force",
-                worktree,
-              ]),
-            );
+        removing(
+          attempt.attemptId,
+          isolation._tag === "Container"
+            ? removeStandalone("cleanup", machine, attempt.attemptId, worktree)
+            : Effect.asVoid(
+                git([
+                  "--git-dir",
+                  cachePath(machine, attempt.repository),
+                  "worktree",
+                  "remove",
+                  "--force",
+                  worktree,
+                ]),
+              ),
+        );
       if (attempt.succeeded || attempt.permissions === "read") {
         yield* stopChildren("cleanup", machine, worktree, attempt.attemptId, isolation);
         const git = (args: ReadonlyArray<string>) =>
@@ -407,10 +422,21 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
     ) {
       yield* Effect.annotateCurrentSpan({ ...attempt });
       yield* session.stopForRecovery(attempt);
-      const { machine, checkouts } = yield* workerLeftovers(attempt.worker);
+      const located = yield* leftoversOf(attempt);
+      if (Option.isNone(located)) {
+        yield* Effect.logInfo("The Attempt's machine is gone; nothing is left to reconcile", {
+          attemptId: attempt.attemptId,
+          worker: attempt.worker,
+        });
+        yield* session.recoverPostedComments(attempt, Option.none(), record);
+        return;
+      }
+      const { machine, checkouts } = located.value;
       const worktree = `${machine.workerDirectory}/attempts/${safeSegment(attempt.attemptId)}`;
+      yield* Effect.addFinalizer((exit) => recovered(attempt, Exit.isSuccess(exit)));
       // Checks the cached listing first to avoid an SSH round trip per persisted Attempt.
       const present = checkouts.has(worktree) && (yield* checkoutExists(machine, worktree));
+      yield* checkoutHeld(attempt.attemptId, present);
       yield* session.recoverPostedComments(
         attempt,
         present
@@ -454,7 +480,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       );
       if (!present) return;
       yield* reconcileCheckout(attempt, machine, worktree, record.salvage, commitAuthor);
-    });
+    }, Effect.scoped);
 
     /**
      * Reconciles the checkout at `worktree` on `machine` that the launch of `request` kept while
@@ -596,7 +622,10 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         remove: (cleanup) =>
           cleanup(
             "worktree-directory",
-            removeStandalone("cleanup", machine, request.attemptId, worktree),
+            removing(
+              request.attemptId,
+              removeStandalone("cleanup", machine, request.attemptId, worktree),
+            ),
           ),
       };
     };
@@ -650,19 +679,37 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
                 worker.repositoryUrl(machine, request.repository),
                 checkout,
               )
-            : linkedWorktree(host, layout, (target, content) =>
-                Effect.asVoid(
-                  commands.run("prepare", machine.shell, "sh", [
-                    "-c",
-                    WRITE_EXECUTABLE_SCRIPT,
-                    "sh",
-                    target,
-                    content,
-                  ]),
+            : linkedCheckout(
+                request.attemptId,
+                linkedWorktree(host, layout, (target, content) =>
+                  Effect.asVoid(
+                    commands.run("prepare", machine.shell, "sh", [
+                      "-c",
+                      WRITE_EXECUTABLE_SCRIPT,
+                      "sh",
+                      target,
+                      content,
+                    ]),
+                  ),
                 ),
               ),
       };
     };
+
+    /** Returns `ops` whose removal records the checkout as gone once its directory is removed. */
+    const linkedCheckout = (
+      attemptId: AttemptId,
+      ops: CheckoutOps<ExecutorError>,
+    ): CheckoutOps<ExecutorError> => ({
+      ...ops,
+      remove: (cleanup) =>
+        ops.remove((resource, effect) =>
+          cleanup(
+            resource,
+            resource === "worktree-directory" ? removing(attemptId, effect) : effect,
+          ),
+        ),
+    });
 
     const prepare = Effect.fn(span("prepare"))(function* (request: CheckoutRequest) {
       yield* Effect.annotateCurrentSpan({
@@ -690,7 +737,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         });
       }
       const grant = yield* worker.grantFor(request.repository);
-      const machine = yield* worker.machineFor(request.worker);
+      const machine = yield* attemptMachine(request.worker, request.attemptId);
       const isolation = yield* worker.isolation(machine);
       const probeBrain = (shell: RemoteShell) =>
         verifyHarnessReadiness(
@@ -846,6 +893,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
             : executorError(`Can't prepare the ${label} attempt workspace`, cause),
         ),
       );
+      yield* checkoutHeld(request.attemptId, true);
       if (isolation._tag === "Container") yield* probeBrain(yield* checkoutHost.shell);
 
       const prepared = provisioned.workspace;

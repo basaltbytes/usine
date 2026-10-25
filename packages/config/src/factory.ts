@@ -3,6 +3,7 @@ import { ChildSessionBudget } from "@usine/core/agent/session";
 import { OperatorLogin } from "@usine/core/operator";
 import { RepositoryName } from "@usine/core/repository";
 import {
+  BoatSize,
   ContainerCpus,
   ContainerImage,
   ContainerMemoryMib,
@@ -10,13 +11,19 @@ import {
   GatewayAdminPort,
   GatewayDomain,
   GatewayLlmProvider,
+  HetznerImage,
+  HetznerLabels,
+  HetznerLocation,
+  HetznerResourceName,
+  HetznerServerType,
   SshDestination,
   SshIdentityFile,
   SshPort,
+  SshUser,
   WorkerName,
   WorkerRoot,
 } from "@usine/core/worker";
-import { Effect, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 import { nonBlankString, uniqueRepositoryNames } from "./checks.ts";
 import { LaneSource, Lane } from "./board.ts";
 import { canonicalLabelName, DeclaredLabel } from "./label.ts";
@@ -125,15 +132,106 @@ export class WorkerContainer extends Schema.Class<WorkerContainer>("@usine/confi
 ) {}
 
 /**
+ * The orchestrator environment variables with the LLM provider API keys that each Attempt on a
+ * provisioned Worker gets in its environment, read when `usine up` starts or a reload adds the
+ * Worker. `anthropic` becomes `ANTHROPIC_API_KEY` for Claude Code, and `openai` becomes
+ * `OPENAI_API_KEY` for Codex.
+ */
+export class ProviderApiKeys extends Schema.Class<ProviderApiKeys>("@usine/config/ProviderApiKeys")(
+  {
+    anthropic: Schema.OptionFromOptionalKey(EnvironmentVariableName),
+    openai: Schema.OptionFromOptionalKey(EnvironmentVariableName),
+  },
+) {}
+
+const ProviderApiKeysFromYaml = ProviderApiKeys.pipe(
+  Schema.withDecodingDefaultKey(Effect.succeed({})),
+);
+
+/**
+ * Creates one Hetzner Cloud server per Attempt from a snapshot, and deletes it after the
+ * Attempt (#550).
+ *
+ * - `tokenEnv`: the orchestrator environment variable with a Hetzner Cloud API token with read
+ *   and write access to the project.
+ * - `serverType` and `location`: each server's type and location.
+ * - `image`: the snapshot's ID or description, which `infra/hetzner/snapshot.sh` prints.
+ * - `network`: the private network to attach each server to. With a Gateway, it's the Gateway's
+ *   network and the server gets no public address.
+ * - `firewall`: the project's firewall to apply to each server, such as one that admits SSH only
+ *   from the orchestrator's address to a server with a public address.
+ * - `sshKey`: the name of the SSH key in the project that each server authorizes.
+ * - `sshUser`: the user the executor connects as.
+ * - `labels`: extra labels for each server.
+ * - `apiKeys`: provider API keys for each Attempt, for harnesses whose credential the Gateway
+ *   doesn't have.
+ */
+export class HetznerProvisioner extends Schema.Class<HetznerProvisioner>(
+  "@usine/config/HetznerProvisioner",
+)({
+  provider: Schema.Literal("hetzner"),
+  tokenEnv: EnvironmentVariableName,
+  serverType: HetznerServerType,
+  location: HetznerLocation,
+  image: HetznerImage,
+  network: Schema.OptionFromOptionalKey(HetznerResourceName),
+  firewall: Schema.OptionFromOptionalKey(HetznerResourceName),
+  sshKey: HetznerResourceName,
+  sshUser: SshUser.pipe(Schema.withDecodingDefaultKey(Effect.succeed("usine"))),
+  labels: HetznerLabels.pipe(Schema.withDecodingDefaultKey(Effect.succeed({}))),
+  apiKeys: ProviderApiKeysFromYaml,
+}) {}
+
+/**
+ * Creates one Boat sandbox per Attempt and deletes it after the Attempt (#550). Boat has no
+ * network rules, so a Boat Worker has no Gateway, and each Attempt's GitHub token is on its
+ * machine (ADR 0026). Boat documents no region choice; its machines are in Germany, Finland, and
+ * France.
+ *
+ * - `tokenEnv`: the orchestrator environment variable with a Boat API key.
+ * - `size`: each sandbox's Boat machine type.
+ * - `apiKeys`: provider API keys for each Attempt. A harness without one can't authenticate,
+ *   because a subscription login needs a Gateway.
+ */
+export class BoatProvisioner extends Schema.Class<BoatProvisioner>("@usine/config/BoatProvisioner")(
+  {
+    provider: Schema.Literal("boat"),
+    tokenEnv: EnvironmentVariableName,
+    size: BoatSize.pipe(Schema.withDecodingDefaultKey(Effect.succeed("default"))),
+    apiKeys: ProviderApiKeysFromYaml,
+  },
+) {}
+
+/** The provider that creates one machine per Attempt for an SSH Worker; `provider` selects it. */
+export const WorkerProvisioner = Schema.Union([HetznerProvisioner, BoatProvisioner]);
+export type WorkerProvisioner = typeof WorkerProvisioner.Type;
+
+const WorkerProvisionerFromYaml = Schema.Union([
+  HetznerProvisioner.pipe(
+    Schema.encodeKeys({
+      tokenEnv: "token_env",
+      serverType: "server_type",
+      sshKey: "ssh_key",
+      sshUser: "ssh_user",
+      apiKeys: "api_keys",
+    }),
+  ),
+  BoatProvisioner.pipe(Schema.encodeKeys({ tokenEnv: "token_env", apiKeys: "api_keys" })),
+]);
+
+/**
  * A Linux machine reached with `ssh`, with Worker state under `<root>/workers/<name>`. If
  * `gateway` is set, the machine stores no GitHub token; the executor sends each Attempt's token
- * to the Gateway.
+ * to the Gateway. A Worker sets either `destination`, for one long-lived machine, or
+ * `provisioner`, for one machine per Attempt; `maxConcurrentAttempts` then caps the machines in
+ * flight.
  */
 export class SshWorker extends Schema.Class<SshWorker>("@usine/config/SshWorker")({
   name: WorkerName,
   kind: Schema.Literal("ssh"),
   maxConcurrentAttempts: MaxConcurrentAttempts,
-  destination: SshDestination,
+  destination: Schema.OptionFromOptionalKey(SshDestination),
+  provisioner: Schema.OptionFromOptionalKey(WorkerProvisionerFromYaml),
   identityFile: Schema.OptionFromOptionalKey(SshIdentityFile),
   port: Schema.OptionFromOptionalKey(SshPort),
   root: WorkerRoot,
@@ -151,6 +249,31 @@ export class SshWorker extends Schema.Class<SshWorker>("@usine/config/SshWorker"
     Schema.withDecodingDefaultKey(Effect.succeed({})),
   ),
 }) {}
+
+/** Returns the reason an SSH Worker's machine settings conflict, or `undefined` if they don't. */
+const sshMachineConflict = (worker: SshWorker): string | undefined => {
+  const provisioner = Option.getOrUndefined(worker.provisioner);
+  if (provisioner === undefined)
+    return Option.isNone(worker.destination)
+      ? `SSH worker "${worker.name}" needs a destination or a provisioner`
+      : undefined;
+  if (Option.isSome(worker.destination))
+    return `SSH worker "${worker.name}" sets both destination and provisioner; a provisioned worker creates its machines, so remove destination`;
+  if (Option.isSome(worker.port))
+    return `SSH worker "${worker.name}" sets port, which a provisioned worker takes from its provider`;
+  switch (provisioner.provider) {
+    case "hetzner":
+      return Option.isSome(worker.gateway) && Option.isNone(provisioner.network)
+        ? `SSH worker "${worker.name}" has a gateway, so its provisioner needs the gateway's private network in network`
+        : undefined;
+    case "boat":
+      if (Option.isSome(worker.gateway))
+        return `SSH worker "${worker.name}" has a Boat provisioner and a gateway; Boat has no network rules, so no gateway can be its machines' only way out. Remove gateway.`;
+      return Option.isNone(worker.identityFile)
+        ? `SSH worker "${worker.name}" has a Boat provisioner and needs identity_file, whose .pub file usine adds to each sandbox`
+        : undefined;
+  }
+};
 
 /** A configured Worker; `kind` selects the adapter. */
 export const Worker = Schema.Union([LocalWorker, ExeDevWorker, SshWorker]);
@@ -224,7 +347,7 @@ const WorkerFromYaml = Schema.Union([
       maxConcurrentAttempts: "max_concurrent_attempts",
       identityFile: "identity_file",
     }),
-  ),
+  ).check(Schema.makeFilter((worker: SshWorker) => sshMachineConflict(worker) ?? true)),
 ]);
 
 const ManagedRepos = Schema.Array(ManagedRepo).check(

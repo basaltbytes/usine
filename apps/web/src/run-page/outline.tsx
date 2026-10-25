@@ -1,6 +1,6 @@
 import { CaretRightIcon, TerminalWindowIcon } from "@phosphor-icons/react";
 import type { AttemptId } from "@usine/core/attempt";
-import type { AttemptView, RunView } from "@usine/orchestrator/operator";
+import type { AttemptView, MachineView, RunView } from "@usine/orchestrator/operator";
 import { Option } from "effect";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { StateMark } from "@/components/status-badge";
@@ -12,6 +12,7 @@ import {
   attemptStartLabel,
   dayTimeLabel,
   durationLabel,
+  providerLabel,
   timestampLabel,
 } from "../operator-copy.ts";
 import { Elapsed } from "../run-transcript/activity.tsx";
@@ -317,9 +318,36 @@ const ChapterTree = ({
   </div>
 );
 
+/** Renders the machine that a provisioned Worker creates for a queued Run's next Attempt. */
+const MachineStep = ({
+  machine,
+  attemptNumber,
+}: {
+  readonly machine: MachineView;
+  readonly attemptNumber: number;
+}) => (
+  <div className="relative rounded-md py-1.5 pr-2 pl-6">
+    <StateMark state="Queued" className="absolute top-3 left-2.5" />
+    <span className="block font-medium">
+      {machine.state === "creating" ? "Creating machine" : "Machine ready"}
+    </span>
+    <span className="block truncate text-xs text-muted-foreground">
+      {providerLabel[machine.provider]}
+      {machine.id !== null && <span className="font-mono"> {machine.id}</span>}, for attempt{" "}
+      {attemptNumber}
+    </span>
+    <span className="flex justify-between gap-3 font-mono text-xs tabular-nums text-muted-foreground">
+      <time dateTime={machine.since} title={timestampLabel(machine.since)}>
+        {dayTimeLabel(machine.since)}
+      </time>
+      <Elapsed since={machine.since} />
+    </span>
+  </div>
+);
+
 /**
  * While the reader is shown, expands the Attempt being read to its sessions and checkpoints and marks
- * the checkpoint at the reading line.
+ * the checkpoint at the reading line. Ends with `machine` while a queued Run's next Attempt waits for it.
  */
 export const Outline = ({
   run,
@@ -331,6 +359,7 @@ export const Outline = ({
   onSelect,
   onCheckpoint,
   errors,
+  machine = null,
   className,
   id,
 }: {
@@ -345,10 +374,18 @@ export const Outline = ({
   readonly onSelect: (selection: OutlineSelection) => void;
   readonly onCheckpoint: (checkpoint: Checkpoint, chapter: Chapter) => void;
   readonly errors: ReactNode;
+  /** The machine a provisioned Worker creates or holds for the Run's next or running Attempt. */
+  readonly machine?: MachineView | null;
   readonly className?: string;
   readonly id?: string;
 }) => {
   const navRef = useRef<HTMLElement>(null);
+  const awaitedMachine =
+    run.state === "Queued" &&
+    machine !== null &&
+    (machine.state === "creating" || (machine.state === "ready" && machine.attemptId === null))
+      ? machine
+      : null;
   const open = selection._tag === "Attempt" ? (reading?.attemptId ?? selection.attemptId) : null;
   const current = selection._tag === "Attempt" ? (reading?.checkpointKey ?? null) : null;
   useEffect(() => {
@@ -473,6 +510,9 @@ export const Outline = ({
           </div>
         );
       })}
+      {awaitedMachine !== null && (
+        <MachineStep machine={awaitedMachine} attemptNumber={run.attempts.length + 1} />
+      )}
       {errors !== null && <div className="mt-3 border-t px-2 pt-3">{errors}</div>}
     </nav>
   );

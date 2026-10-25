@@ -8,7 +8,15 @@ import { AttemptFailure } from "@usine/core/attempt/failure";
 import { LoopName, LoopPermissions } from "@usine/core/loop";
 import { SalvagePushed, SalvageRef } from "@usine/core/attempt/salvage";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
-import { BotAccount, BotLogin, WorkerName, WorkerKind } from "@usine/core/worker";
+import { RunId } from "@usine/core/run";
+import {
+  BotAccount,
+  BotLogin,
+  MachineId,
+  MachineProvider,
+  WorkerName,
+  WorkerKind,
+} from "@usine/core/worker";
 import { StepResult } from "@usine/core/step/result";
 import { Context, Effect, Option, type Result, Schema, Scope } from "effect";
 
@@ -29,6 +37,7 @@ export const WorkerCapability = Schema.Literals([
   "credentials",
   "gateway",
   "container",
+  "provider",
 ]);
 export type WorkerCapability = typeof WorkerCapability.Type;
 
@@ -81,11 +90,43 @@ export class WorkerCapabilityError extends Schema.TaggedError<WorkerCapabilityEr
    * - `container`: the machine's Docker doesn't respond to the SSH user, the SSH user can use
    *   Docker's socket without the `docker` CLI, the Attempt image can't be pulled, or its user ID
    *   differs from the SSH user's.
+   * - `provider`: a provisioned Worker's provider refuses its token, or its image, SSH key,
+   *   network, server type, or location doesn't exist there.
    */
   capability: WorkerCapability,
   message: Schema.NonEmptyString,
   /** The observed value, for example unrecognized `git --version` output or the harness readiness report. */
   cause: Schema.Defect(),
+}) {}
+
+/**
+ * `capacity` if the provider has no machine of the configured type now, `quota` if the account's
+ * limits are reached, `refused` if the provider refuses the token or the request, `provider` for
+ * an API error or rate limit, `unreachable` if the API doesn't respond, and `timeout` if the
+ * machine didn't answer over SSH in time. Each is retried later.
+ */
+export const MachineUnavailableReason = Schema.Literals([
+  "capacity",
+  "quota",
+  "refused",
+  "provider",
+  "unreachable",
+  "timeout",
+]);
+export type MachineUnavailableReason = typeof MachineUnavailableReason.Type;
+
+/**
+ * The error when a provisioned Worker can't create a machine for an Attempt. The Run keeps
+ * waiting, and the scheduler tries again later; it isn't an Attempt failure.
+ */
+export class MachineUnavailableError extends Schema.TaggedError<MachineUnavailableError>(
+  "@usine/executor/MachineUnavailableError",
+)("MachineUnavailableError", {
+  worker: WorkerName,
+  provider: MachineProvider,
+  reason: MachineUnavailableReason,
+  /** An operator-facing summary with the provider's own message. Contains no token. */
+  message: Schema.NonEmptyString,
 }) {}
 
 export const ExecutorError = Schema.Union([
@@ -102,10 +143,16 @@ export interface PreflightReport {
    * Worker whose machine has no Docker. `None` if it has every such capability.
    */
   readonly degraded: Option.Option<string>;
+  /**
+   * When the brains are checked instead, if the preflight had no machine to check them on, as
+   * for a provisioned Worker, which checks them on its first machine each day. `None` if the
+   * preflight checked them.
+   */
+  readonly deferred: Option.Option<string>;
 }
 
 /** The report of a Worker that runs Attempts as designed. */
-export const fullPreflight: PreflightReport = { degraded: Option.none() };
+export const fullPreflight: PreflightReport = { degraded: Option.none(), deferred: Option.none() };
 
 /** Logs each preflight failure at error level. */
 export const logPreflightFailure = <A, R>(
@@ -319,5 +366,91 @@ export class Executor extends Context.Service<
     ) => Effect.Effect<void, AttemptFailure>;
   }
 >()("@usine/executor/Executor") {}
+
+/** The executor's hold on one provisioned machine, which `WorkerMachines.release` ends. */
+export const MachineHold = Schema.NonEmptyString.pipe(Schema.brand("MachineHold"));
+export type MachineHold = typeof MachineHold.Type;
+
+/** A machine that a provisioned Worker created for an Attempt and holds until `release`. */
+export class MachineGrant extends Schema.Class<MachineGrant>("@usine/executor/MachineGrant")({
+  hold: MachineHold,
+  id: MachineId,
+  worker: WorkerName,
+  provider: MachineProvider,
+  /**
+   * The brains that this machine's check verified, the first check on the Worker each day, or
+   * `None` if it ran no such check.
+   */
+  checked: Schema.Option(Schema.Array(BrainSpec)),
+}) {}
+
+/**
+ * `creating` until the machine answers over SSH, `ready` while an Attempt holds it, and
+ * `deleting` until its deletion succeeds.
+ */
+export const MachineState = Schema.Literals(["creating", "ready", "deleting"]);
+export type MachineState = typeof MachineState.Type;
+
+/** A machine in flight on a provisioned Worker. */
+export class MachineStatus extends Schema.Class<MachineStatus>("@usine/executor/MachineStatus")({
+  worker: WorkerName,
+  provider: MachineProvider,
+  state: MachineState,
+  /** `None` until the provider accepts the creation. */
+  id: Schema.Option(MachineId),
+  /** The Run the machine was created for, or `None` for a machine found after a restart. */
+  runId: Schema.Option(RunId),
+  attemptId: Schema.Option(AttemptId),
+  /** When the creation started, or when the provider created a machine found after a restart. */
+  since: Schema.DateTimeUtc,
+}) {}
+
+/**
+ * The machines of the provisioned Workers, which create one machine per Attempt and delete it
+ * afterwards (#550). Only the SSH executor provides it.
+ */
+export class WorkerMachines extends Context.Service<
+  WorkerMachines,
+  {
+    /** Returns whether `worker` creates a machine for each Attempt. */
+    readonly provisions: (worker: WorkerName) => Effect.Effect<boolean>;
+    /**
+     * Creates a machine on `worker` for the next Attempt of `runId`, labeled with the instance,
+     * Worker, and Run, and waits until it answers over SSH. The first machine on the Worker each
+     * day also gets the preflight checks of `brains`, whose failure is a `WorkerCapabilityError`.
+     * On failure or interruption, deletes the machine.
+     */
+    readonly create: (
+      worker: WorkerName,
+      runId: RunId,
+      brains: ReadonlyArray<BrainSpec>,
+    ) => Effect.Effect<MachineGrant, MachineUnavailableError | WorkerCapabilityError>;
+    /** Gives the held machine to the Attempt, so that `Executor.prepare` uses it and a restart finds it. */
+    readonly assign: (
+      hold: MachineHold,
+      attemptId: AttemptId,
+    ) => Effect.Effect<void, ExecutorOperationError>;
+    /**
+     * Holds the machine of `attemptId`, an Attempt from before a restart on `worker`, until
+     * `release`. Returns `None` if `worker` isn't provisioned or the provider no longer lists the
+     * machine. If the provider can't be read, the hold keeps a `sweep` from deleting the machine,
+     * and a later use looks it up again.
+     */
+    readonly adopt: (
+      worker: WorkerName,
+      attemptId: AttemptId,
+    ) => Effect.Effect<Option.Option<MachineHold>>;
+    /** Deletes the held machine. Logs a failure, and each `sweep` tries again. */
+    readonly release: (hold: MachineHold) => Effect.Effect<void>;
+    /**
+     * Lists each provisioned Worker's machines at its provider and deletes those that no
+     * Attempt or creation in this process holds. Run it after startup recovery, which adopts or
+     * reconciles the machines of earlier Attempts.
+     */
+    readonly sweep: Effect.Effect<void>;
+    /** The machines in flight, oldest first. */
+    readonly machines: Effect.Effect<ReadonlyArray<MachineStatus>>;
+  }
+>()("@usine/executor/WorkerMachines") {}
 
 export { claudeLoginLockLayer } from "./claude-login-lock.ts";

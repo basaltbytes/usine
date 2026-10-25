@@ -27,6 +27,7 @@ import {
   LocalWorkerAccess,
   QuestionFailureView,
   RunawayFailureView,
+  ProvisionedWorkerAccess,
   SshWorkerAccess,
   SucceededAttemptView,
   type WorkerAccess,
@@ -72,9 +73,16 @@ const workerAccess = (worker: ConfigWorker): WorkerAccess => {
     case "local":
       return new LocalWorkerAccess();
     case "ssh":
-      return new SshWorkerAccess({
-        destination: worker.destination,
-        port: Option.getOrNull(worker.port),
+      // `usine.yaml` sets a destination for every SSH Worker without a provisioner.
+      return Option.match(worker.provisioner, {
+        onSome: ({ provider }) => new ProvisionedWorkerAccess({ provider }),
+        onNone: () =>
+          new SshWorkerAccess({
+            destination: Option.getOrElse(worker.destination, () =>
+              SshDestination.make(worker.name),
+            ),
+            port: Option.getOrNull(worker.port),
+          }),
       });
     case "exe.dev":
       // exe.dev names the VM after the Worker and serves it at `<vm>.exe.xyz` on the default port;

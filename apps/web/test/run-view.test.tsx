@@ -71,6 +71,7 @@ import { Outline } from "../src/run-page/outline.tsx";
 import { readerDocument } from "../src/run-transcript/document/model.ts";
 import { projectTranscript } from "../src/run-transcript/model.ts";
 import { SalvageLine } from "../src/run-transcript/outcome.tsx";
+import { machineFixture } from "./machine-fixture.ts";
 import { WithRouter } from "./memory-router.tsx";
 
 const repository = RepositoryName.make("basaltbytes/usine");
@@ -468,6 +469,67 @@ describe("Run work facts", () => {
       "Attempt 1 Parent openai/gpt-5.5 1,500 $0.75 developer claude-opus-4-7 20,000 $1.25 estimate",
     );
     assert.include(text, "Attempt 2 reviewer gpt-5.6-sol 5,800 Tokens are");
+  });
+});
+
+describe("provisioned machine", () => {
+  const visible = (markup: string) =>
+    markup
+      .replaceAll(/<[^>]+>/gu, " ")
+      .replaceAll(/\s+/gu, " ")
+      .replaceAll(" ,", ",");
+  const failed = attempt(
+    new FailedAttemptView({ failure: new AgentFailureView({ message: "No" }) }),
+  );
+  const outline = (view: RunView, machine: RunDetailView["machine"]) =>
+    visible(
+      renderToStaticMarkup(
+        <Outline
+          run={view}
+          eventPreview="Issue #33"
+          document={readerDocument(projectTranscript([], view.attempts), view.attempts, [])}
+          selection={{ _tag: "Event" }}
+          reading={null}
+          composerSession={null}
+          onSelect={() => {}}
+          onCheckpoint={() => {}}
+          errors={null}
+          machine={machine}
+        />,
+      ),
+    );
+
+  it("shows the machine being created for a queued Run's next Attempt as its own step", () => {
+    const queued = run({ state: "Queued", closedAt: null, attempts: [failed] });
+    const machine = machineFixture({
+      runId: queued.id,
+      since: new Date(Date.now() - 2 * 60_000).toISOString(),
+    });
+    const steps = outline(queued, machine);
+    assert.include(steps, "Creating machine Hetzner, for attempt 2");
+    assert.isBelow(steps.indexOf("Attempt 1"), steps.indexOf("Creating machine"));
+    const view = new RunDetailView({ ...detail(queued), machine });
+    assert.include(visible(heading(view)), "Queued, creating a Hetzner machine");
+    assert.include(
+      renderToStaticMarkup(<RunSummary detail={view} />),
+      "Creating a Hetzner machine, started 2m ago",
+    );
+  });
+
+  it("names the provider ID of the running Attempt's machine beside its Worker", () => {
+    const running = run({ state: "Running", closedAt: null, attempts: [attempt(null)] });
+    const machine = machineFixture({
+      runId: running.id,
+      state: "ready",
+      id: "52341896",
+      attemptId,
+    });
+    const markup = heading(
+      new RunDetailView({ ...detail(running), worker: WorkerName.make("hz-pool"), machine }),
+    );
+    assert.include(visible(markup), "hz-pool 52341896");
+    assert.include(markup, 'title="Hetzner server 52341896"');
+    assert.notInclude(outline(running, machine), "machine");
   });
 });
 

@@ -152,7 +152,23 @@ If the worker's `llmProviders` lists a provider, preflight also reads the gatewa
 
 A gateway released before that endpoint answers 404: the worker's first such preflight logs `SSH Worker's Gateway does not report the kind of its Anthropic credential` at warning level, later ones at debug, and its Claude Code children count in the Claude plan pool. Each preflight asks again, so the first one after an upgrade records the kind. A gateway reload that changes the credential reaches the record at the worker's next preflight: at orchestrator start, or when a configuration reload adds the worker, gives it more slots, or adds a brain. A running attempt's next Claude Code child records the new kind; earlier children keep theirs. Local and exe.dev workers have no gateway, so their children record none.
 
-The SSH layer needs a `ChildProcessSpawner`, a `CredentialProvider`, an `AttemptRuntime`, and an `HttpClient` for admin APIs. It provides `SshWorkers` beside the `Executor`, starting with the workers of `workers`. `addWorker(address)` adds a worker at runtime; behind a gateway, the worker shares that gateway's forward, or opens one if it's the first. `removeWorker(name)` removes a worker once no attempt runs on it, and closes its gateway's forward if no other worker uses it. Adding a worker the executor has with the same address changes nothing; with another address, it fails with a `machine` capability error until the worker is removed.
+### Provisioned machines
+
+A worker whose address has `machine: { _tag: "Provisioned" }` has no machine of its own: it creates a Hetzner Cloud server or a Boat sandbox for each attempt and deletes it afterwards ([#550](https://github.com/basaltbytes/usine/issues/550)). The layer provides `WorkerMachines` for the scheduler:
+
+- `create(worker, runId, brains)` creates the machine, tagged with `SshExecutorOptions.instance`, the worker, the run, and a random value of this process, and waits up to `machineReadyTimeout` (10 minutes by default) until it answers over SSH. It then waits for cloud-init, creates the root, and waits for Docker. The worker's first machine each day, and its first after the layer starts, also gets the machine preflight with `brains`, whose failure is a `WorkerCapabilityError`. A provider's refusal, no capacity or quota, no answer, or a timeout is a `MachineUnavailableError` with its `reason`. On failure or interruption, the machine is deleted.
+- `assign(hold, attemptId)` tags the machine with a hash of the attempt ID; `prepare` uses it from then on.
+- `adopt(worker, attemptId)` holds the machine of an attempt from an earlier process, found by that tag in one listing per worker. If the provider can't be read, the hold still keeps `sweep` from deleting the machine, and the next use looks it up again.
+- `release(hold)` deletes the machine, unless it has the attempt's checkout: one kept for a reattachment, until its parent task's stop is confirmed, or with unpreserved work. That machine stays for the next process. A failed deletion is retried by `sweep`.
+- `sweep` lists each provisioned worker's machines and deletes those that no hold or creation of this process has. The engine runs it after startup recovery and at each reconcile.
+
+`recover` finds an earlier attempt's machine by its tag, reconciles the checkout there, and deletes the machine unless the checkout stays.
+
+A Hetzner server is created from `image` with the project's SSH key, in `network` and with no public address behind a gateway, which the executor jumps through with `ssh -J <gateway.destination>`; without a gateway it has a public IPv4 address and `firewall`. Its `user_data` sets an Ed25519 host key that the executor generates for it. A Boat sandbox is created with `noEnv`, without snapshots or monitoring, and without automatic stop, and gets `<identity_file>.pub` through `POST /sandboxes/{id}/sshkey`, which returns its host key; a sandbox without one fails its creation. The executor writes each machine's host key to a file under `knownHostsDirectory` before the first connection, and connects with `StrictHostKeyChecking=yes`. A machine of an earlier process without a file there gets no connection. Boat has no labels, so the sandbox name carries the tags.
+
+Preflight of a provisioned worker creates no machine: it checks the provider token, the image, SSH key, network, and firewall or the account's limits, the gateway's admin API, and that each harness has a credential outside the machine: Claude Code needs `anthropic` in the gateway's `llmProviders` or `apiKeys.anthropic`, which each attempt gets as `ANTHROPIC_API_KEY`; Codex needs `openai` there or `apiKeys.openai`, which each attempt gets as `OPENAI_API_KEY` with a `CODEX_HOME` whose `config.toml` reads it; and Pi is refused. Its report's `deferred` says that the harnesses are checked on the first machine each day.
+
+The SSH layer needs a `ChildProcessSpawner`, a `CredentialProvider`, an `AttemptRuntime`, an `HttpClient` for admin and provider APIs, and a `FileSystem` and `Path` for host key and public key files. It provides `SshWorkers` and `WorkerMachines` beside the `Executor`, starting with the workers of `workers`. `addWorker(address)` adds a worker at runtime; behind a gateway, the worker shares that gateway's forward, or opens one if it's the first. `removeWorker(name)` removes a worker once no attempt runs on it, and closes its gateway's forward if no other worker uses it. Adding a worker the executor has with the same address changes nothing; with another address, it fails with a `machine` capability error until the worker is removed.
 
 ```ts
 import {
@@ -172,7 +188,7 @@ const executorLayer = layer({
   workers: [
     {
       name: WorkerName.make("eu-one"),
-      destination: SshDestination.make("usine@203.0.113.7"),
+      machine: { _tag: "Fixed", destination: SshDestination.make("usine@203.0.113.7") },
       identityFile: Option.some(SshIdentityFile.make("~/.ssh/usine_worker")),
       port: Option.none(),
       root: WorkerRoot.make("/home/usine/.usine"),

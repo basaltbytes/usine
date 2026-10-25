@@ -31,8 +31,16 @@ export const workerEngineLayer = (
             .filter(({ gateway }) => Option.isSome(gateway))
             .map(({ name }) => name)
             .join(","),
+          provisioned: addresses
+            .filter(({ machine }) => machine._tag === "Provisioned")
+            .map(({ name }) => name)
+            .join(","),
         });
-        return sshLayer(instanceDirectory, config, brains, { workers: addresses, instance });
+        return sshLayer(instanceDirectory, config, brains, {
+          workers: addresses,
+          instance,
+          knownHostsDirectory: `${instanceDirectory}/.usine/known-hosts`,
+        });
       }
       yield* Effect.logInfo("Running Attempts with the local executor", { workers });
       return localLayer(instanceDirectory, config, brains, {});

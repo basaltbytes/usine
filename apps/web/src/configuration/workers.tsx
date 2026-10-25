@@ -1,7 +1,9 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import type {
   ConfigurationView,
+  MachineView,
   PreflightCheckView,
+  ProvisioningPauseView,
   WorkerConfigurationView,
   WorkerSlotsView,
 } from "@usine/orchestrator/operator";
@@ -14,8 +16,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useNow } from "@/hooks/use-now";
 import { cn } from "@/lib/utils";
-import { dayTimeLabel } from "../operator-copy.ts";
+import {
+  creationFailuresLine,
+  creationFailureTitle,
+  dayTimeLabel,
+  elapsedLabel,
+  nextCreationLine,
+  providerLabel,
+  timestampLabel,
+} from "../operator-copy.ts";
 import {
   failedCheckLabel,
   harnessLabel,
@@ -58,6 +69,7 @@ const SlotCells = ({ slots }: { readonly slots: WorkerSlotsView }) => (
 const summaryBadge = {
   passed: { state: "Succeeded", label: "Passed" },
   degraded: { state: "Waiting", label: "Degraded" },
+  deferred: { state: "Deferred", label: "Deferred" },
   failed: { state: "Failed", label: "Failed" },
 } as const;
 
@@ -76,7 +88,25 @@ const PreflightState = ({ worker }: { readonly worker: WorkerConfigurationView }
   );
 };
 
+/** Renders a provisioned Worker's last failed machine creation and when it creates one again. */
+const CreationFailure = ({
+  pause,
+  now,
+}: {
+  readonly pause: ProvisioningPauseView;
+  readonly now: number;
+}) => (
+  <div className="rounded-lg border border-destructive/25 bg-destructive/8 px-3 pt-2 pb-2.5 text-sm">
+    <p className="font-medium text-destructive">{creationFailureTitle(pause)}</p>
+    <p className="wrap-anywhere">{pause.message}</p>
+    <p className="mt-1 text-xs text-muted-foreground tabular-nums">
+      {creationFailuresLine(pause, now)}. {nextCreationLine(pause, now)}
+    </p>
+  </div>
+);
+
 const WorkerRow = ({ worker }: { readonly worker: WorkerConfigurationView }) => {
+  const now = useNow(15_000);
   const navigate = useNavigate();
   const params = { worker: worker.name };
   return (
@@ -109,6 +139,12 @@ const WorkerRow = ({ worker }: { readonly worker: WorkerConfigurationView }) => 
       </TableCell>
       <TableCell className="w-full">
         <PreflightState worker={worker} />
+        {worker.provisioning?.blocked === true && (
+          <p className="text-xs text-destructive tabular-nums" title={worker.provisioning.message}>
+            {creationFailureTitle(worker.provisioning)}.{" "}
+            {nextCreationLine(worker.provisioning, now)}
+          </p>
+        )}
       </TableCell>
     </OpeningRow>
   );
@@ -160,6 +196,8 @@ const CheckResult = ({ check }: { readonly check: PreflightCheckView }) => {
       return <StatusBadge state="Succeeded" label="Passed" />;
     case "Degraded":
       return <StatusBadge state="Waiting" label="Degraded: no container per attempt" />;
+    case "Deferred":
+      return <StatusBadge state="Deferred" label="Deferred" />;
     case "Failed":
       return <StatusBadge state="Failed" label={`Failed: ${failedCheckLabel(check)}`} />;
   }
@@ -191,20 +229,101 @@ const CheckRow = ({
   </TableRow>
 );
 
+/** Renders the name of the orchestrator environment variable that holds a secret, never its value. */
+const Variable = ({ name }: { readonly name: string | null }) =>
+  name === null ? (
+    <Unset>Not set</Unset>
+  ) : (
+    <>
+      <Unset>Read from </Unset>
+      <code className="font-mono text-xs">{name}</code>
+    </>
+  );
+
+const ProvisionerFacts = ({
+  provisioner,
+}: {
+  readonly provisioner: NonNullable<WorkerConfigurationView["provisioner"]>;
+}) => (
+  <div className="flex flex-col gap-3">
+    <h2 className="text-md font-semibold">Provisioner</h2>
+    <Facts>
+      <Fact label="Provider">{providerLabel[provisioner._tag]}</Fact>
+      {provisioner._tag === "hetzner" ? (
+        <>
+          <Fact label="Server type">
+            <code className="font-mono text-xs">{provisioner.serverType}</code>
+          </Fact>
+          <Fact label="Location">
+            <code className="font-mono text-xs">{provisioner.location}</code>
+          </Fact>
+          <Fact label="Image">
+            <code className="font-mono text-xs">{provisioner.image}</code>
+          </Fact>
+          <Fact label="Network">
+            {provisioner.network === null ? (
+              <Unset>None; each server has a public address</Unset>
+            ) : (
+              <code className="font-mono text-xs">{provisioner.network}</code>
+            )}
+          </Fact>
+          <Fact label="Firewall">
+            {provisioner.firewall === null ? (
+              <Unset>None</Unset>
+            ) : (
+              <code className="font-mono text-xs">{provisioner.firewall}</code>
+            )}
+          </Fact>
+          <Fact label="SSH key">
+            <code className="font-mono text-xs">{provisioner.sshKey}</code>
+          </Fact>
+          <Fact label="SSH user">
+            <code className="font-mono text-xs">{provisioner.sshUser}</code>
+          </Fact>
+          {Object.keys(provisioner.labels).length > 0 && (
+            <Fact label="Labels">
+              <code className="font-mono text-xs">
+                {Object.entries(provisioner.labels)
+                  .map(([key, value]) => `${key}=${value}`)
+                  .join(", ")}
+              </code>
+            </Fact>
+          )}
+        </>
+      ) : (
+        <Fact label="Size">
+          <code className="font-mono text-xs">{provisioner.size}</code>
+        </Fact>
+      )}
+      <Fact label="API token">
+        <Variable name={provisioner.tokenEnv} />
+      </Fact>
+      <Fact label="Anthropic key">
+        <Variable name={provisioner.anthropicKeyEnv} />
+      </Fact>
+      <Fact label="OpenAI key">
+        <Variable name={provisioner.openaiKeyEnv} />
+      </Fact>
+    </Facts>
+  </div>
+);
+
 const WorkerFacts = ({ worker }: { readonly worker: WorkerConfigurationView }) => (
   <div className="flex flex-col gap-6">
     <Facts>
       <Fact label="Kind">{workerKindLabel[worker.kind]}</Fact>
       <Fact label="Max attempts">
         <span className="tabular-nums">{worker.maxConcurrentAttempts}</span>{" "}
-        <Unset>at the same time</Unset>
+        <Unset>
+          {worker.provisioner === null ? "at the same time" : "at the same time, one machine each"}
+        </Unset>
       </Fact>
       {worker.destination !== null && (
         <Fact label="Destination">
           <code className="font-mono text-xs">{worker.destination}</code>
         </Fact>
       )}
-      {worker.kind === "ssh" && (
+      {worker.kind === "ssh" && worker.provisioner === null && (
         <Fact label="Port">
           {worker.port === null ? (
             <Unset>From the SSH configuration</Unset>
@@ -228,6 +347,7 @@ const WorkerFacts = ({ worker }: { readonly worker: WorkerConfigurationView }) =
         </Fact>
       )}
     </Facts>
+    {worker.provisioner !== null && <ProvisionerFacts provisioner={worker.provisioner} />}
     {worker.container !== null && (
       <div className="flex flex-col gap-3">
         <h2 className="text-md font-semibold">Attempt container</h2>
@@ -278,6 +398,91 @@ const WorkerFacts = ({ worker }: { readonly worker: WorkerConfigurationView }) =
   </div>
 );
 
+const machineState = {
+  creating: { state: "Queued", label: "Creating" },
+  ready: { state: "live", label: "Ready" },
+  deleting: { state: "Canceled", label: "Deleting" },
+} as const satisfies Record<MachineView["state"], { state: string; label: string }>;
+
+/** Renders the Run a machine serves, which opens its drawer, or its Attempt after a restart. */
+const MachineFor = ({ machine }: { readonly machine: MachineView }) => {
+  const { runId, attemptId } = machine;
+  if (runId !== null)
+    return (
+      <Link
+        to="."
+        search={(previous) => ({ ...previous, run: runId })}
+        className="text-primary hover:underline"
+      >
+        Run <span className="font-mono text-xs">{runId.slice(0, 8)}</span>
+      </Link>
+    );
+  if (attemptId === null) return <Unset>Found after a restart</Unset>;
+  return (
+    <span>
+      Attempt <span className="font-mono text-xs">{attemptId.slice(0, 8)}</span>
+      <Unset>, found after a restart</Unset>
+    </span>
+  );
+};
+
+/** Renders a provisioned Worker's last failed machine creation, then its machines oldest first. */
+const Machines = ({ worker }: { readonly worker: WorkerConfigurationView }) => {
+  const now = useNow(15_000);
+  return (
+    <DetailSection title="Machines" aside="Created for each attempt and deleted afterwards">
+      {worker.provisioning !== null && <CreationFailure pause={worker.provisioning} now={now} />}
+      {worker.machines.length === 0 ? (
+        <p className="text-muted-foreground">No machines</p>
+      ) : (
+        <div className="-mx-2">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="max-sm:w-full">Machine</TableHead>
+                <TableHead>State</TableHead>
+                <TableHead className="text-right">Age</TableHead>
+                <TableHead className="w-full max-sm:hidden">For</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {worker.machines.map((machine, index) => (
+                <TableRow
+                  key={machine.id ?? `${machine.since}:${index}`}
+                  className="hover:bg-transparent"
+                >
+                  <TableCell className="whitespace-normal max-sm:w-full max-sm:align-top">
+                    {machine.id === null ? (
+                      <span className="text-muted-foreground">No ID yet</span>
+                    ) : (
+                      <span className="font-mono text-xs">{machine.id}</span>
+                    )}
+                    <span className="mt-0.5 block text-xs sm:hidden">
+                      <MachineFor machine={machine} />
+                    </span>
+                  </TableCell>
+                  <TableCell className="max-sm:align-top">
+                    <StatusBadge {...machineState[machine.state]} />
+                  </TableCell>
+                  <TableCell
+                    className="text-right font-mono text-xs text-muted-foreground tabular-nums max-sm:align-top"
+                    title={`Since ${timestampLabel(machine.since)}`}
+                  >
+                    {elapsedLabel(machine.since, now)}
+                  </TableCell>
+                  <TableCell className="w-full max-sm:hidden">
+                    <MachineFor machine={machine} />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </DetailSection>
+  );
+};
+
 export const WorkerDetail = ({
   name,
   configuration,
@@ -305,9 +510,11 @@ export const WorkerDetail = ({
           {
             subject: "Worker",
             detail:
-              worker.kind === "ssh"
-                ? "Machine, Git, memory, gateway, credentials, and Docker"
-                : "Machine, Git, memory, gateway, and credentials",
+              worker.provisioner !== null
+                ? "Provider, gateway, and credentials"
+                : worker.kind === "ssh"
+                  ? "Machine, Git, memory, gateway, credentials, and Docker"
+                  : "Machine, Git, memory, gateway, and credentials",
             check: worker.prerequisites,
           },
         ]),
@@ -335,10 +542,16 @@ export const WorkerDetail = ({
             </div>
           )}
         </DetailSection>
+        {worker.provisioner !== null && <Machines worker={worker} />}
         <DetailSection
           title="Preflight"
           aside="At startup, and when a reload adds workers, slots, or an agent with a new harness, model, or effort"
         >
+          {worker.provisioner !== null && (
+            <p className="text-muted-foreground">
+              Harness checks run on the first machine of each day.
+            </p>
+          )}
           {checks.length === 0 ? (
             <p className="text-muted-foreground">No preflight since usine up started.</p>
           ) : (

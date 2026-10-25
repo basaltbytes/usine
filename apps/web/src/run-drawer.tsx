@@ -2,7 +2,7 @@ import { ArrowsOutSimpleIcon } from "@phosphor-icons/react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import type { RunId } from "@usine/core/run";
-import type { RunDetailView } from "@usine/orchestrator/operator";
+import type { MachineView, RunDetailView } from "@usine/orchestrator/operator";
 import { Option } from "effect";
 import { useMemo, useState } from "react";
 import { ErrorAlert } from "@/components/error-alert";
@@ -16,7 +16,13 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { clockLabel, queuedMessageLabel, timestampLabel } from "./operator-copy.ts";
+import { useNow } from "@/hooks/use-now";
+import {
+  clockLabel,
+  machineCreationLine,
+  queuedMessageLabel,
+  timestampLabel,
+} from "./operator-copy.ts";
 import { overviewQuery, projectParams } from "./overview.ts";
 import { RunHeader } from "./run-page/header.tsx";
 import { ContextualActions } from "./run-intervention/contextual-actions.tsx";
@@ -84,6 +90,11 @@ const finalEnd = (run: RunDetailView["run"]): Option.Option<AttemptEnd> => {
   return Option.none();
 };
 
+const MachineCreation = ({ machine }: { readonly machine: MachineView }) => {
+  const now = useNow(15_000);
+  return <p className="text-muted-foreground">{machineCreationLine(machine, now)}</p>;
+};
+
 export const RunSummary = ({ detail }: { readonly detail: RunDetailView }) => {
   const run = detail.run;
   switch (run.state) {
@@ -92,7 +103,11 @@ export const RunSummary = ({ detail }: { readonly detail: RunDetailView }) => {
     case "Waiting":
       return <p className="text-muted-foreground">Waiting for approval</p>;
     case "Queued":
-      return <p className="text-muted-foreground">Approved, waiting for a free worker</p>;
+      return detail.machine?.state === "creating" ? (
+        <MachineCreation machine={detail.machine} />
+      ) : (
+        <p className="text-muted-foreground">Approved, waiting for a free worker</p>
+      );
     case "Running":
       return <LiveSummary detail={detail} />;
     case "Succeeded":

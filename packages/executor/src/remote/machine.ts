@@ -1,6 +1,7 @@
 import type { RemoteShell } from "@usine/agents/child-host";
 import type { BrainSpec, Harness } from "@usine/core/agent/brain";
 import type { AttemptId } from "@usine/core/attempt";
+import type { AttemptRecovery } from "@usine/core/attempt/salvage";
 import type { LoopPermissions } from "@usine/core/loop";
 import type { RepositoryName } from "@usine/core/repository";
 import type { GatewayCredentialKind, WorkerKind, WorkerName } from "@usine/core/worker";
@@ -14,6 +15,13 @@ import type {
 import type { HarnessProbe } from "../harness-preflight.ts";
 import type { RemoteCommands } from "./commands.ts";
 import type { AttemptIsolation } from "./container.ts";
+
+/** A machine with checkouts left for reconciliation. */
+interface RemoteLeftovers<M extends RemoteMachine> {
+  readonly machine: M;
+  /** The paths directly under the Worker's `attempts` directory. */
+  readonly checkouts: ReadonlySet<string>;
+}
 
 export interface RemoteMachine {
   readonly shell: RemoteShell;
@@ -68,6 +76,30 @@ export interface RemoteWorker<M extends RemoteMachine> {
   readonly commands: RemoteCommands;
   /** Returns a Worker's machine. Fails with a typed error if the machine is missing or doesn't respond. */
   readonly machineFor: (worker: WorkerName) => Effect.Effect<M, ExecutorError>;
+  /**
+   * Returns the machine an Attempt runs on, if the Worker kind creates one per Attempt.
+   * Defaults to `machineFor`.
+   */
+  readonly attemptMachine?: (
+    worker: WorkerName,
+    attemptId: AttemptId,
+  ) => Effect.Effect<M, ExecutorError>;
+  /**
+   * Returns the machine with `attempt`'s leftover checkout and the paths under its `attempts`
+   * directory, or `None` if the Attempt's machine is gone. `listed` is the Worker's machine and
+   * its listed checkouts, the default.
+   */
+  readonly leftovers?: (
+    attempt: AttemptRecovery,
+    listed: Effect.Effect<RemoteLeftovers<M>, ExecutorError>,
+  ) => Effect.Effect<Option.Option<RemoteLeftovers<M>>, ExecutorError>;
+  /** Runs after `recover` reconciled `attempt`'s machine, with whether it succeeded. */
+  readonly recovered?: (attempt: AttemptRecovery, succeeded: boolean) => Effect.Effect<void>;
+  /**
+   * Records whether the machine of `attemptId` has the Attempt's checkout: from its preparation
+   * or a recovery that finds it, until its removal succeeds.
+   */
+  readonly checkoutHeld?: (attemptId: AttemptId, held: boolean) => Effect.Effect<void>;
   /** See `Executor.preflight`. */
   readonly preflight: (
     worker: WorkerName,

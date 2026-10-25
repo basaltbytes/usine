@@ -132,7 +132,8 @@ export class RunDriver extends Context.Service<
     /**
      * Opens the queued Events whose continuation didn't run and starts a fiber for every open Run
      * without one, except Runs waiting for approval. Also retries the parent task stops that
-     * `releaseKept`, `recoverWorkspaces`, or the end of an Attempt couldn't confirm.
+     * `releaseKept`, `recoverWorkspaces`, or the end of an Attempt couldn't confirm, then runs
+     * `StepExecutor.sweep`.
      */
     readonly reconcile: () => Effect.Effect<void, RunStoreError>;
     /** Returns the closed Attempts whose parent task stop `reconcile` retries. */
@@ -726,6 +727,8 @@ export class RunDriver extends Context.Service<
           Effect.map(FiberMap.has(fibers, runId), (running) => !running),
         );
         yield* Effect.forEach(withoutFiber, launch, { discard: true });
+        // After the stops above, so a machine whose stop they confirmed is released before it.
+        yield* executor.sweep;
         const fields = {
           continuedAfterRunIds: continuations,
           startedRunIds: withoutFiber,

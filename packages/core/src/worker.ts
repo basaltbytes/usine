@@ -44,13 +44,17 @@ export class BotAccount extends Schema.Class<BotAccount>("BotAccount")({
 }
 
 /**
- * The `ssh` destination: a host name, address, or SSH config Host alias, optionally prefixed
- * with `user@`. Rejects values that `ssh` could parse as an option, such as `-oProxyCommand=...`.
+ * The `ssh` destination: a host name, IPv4 or IPv6 address, or SSH config Host alias, optionally
+ * prefixed with `user@`. Rejects values that `ssh` could parse as an option, such as
+ * `-oProxyCommand=...`.
  */
 export const SshDestination = Schema.String.check(
-  Schema.isPattern(/^(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/u, {
-    message: "Expected an SSH destination: a host name or address, optionally prefixed by a user",
-  }),
+  Schema.isPattern(
+    /^(?:[A-Za-z0-9._-]+@)?(?:[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?|[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7})$/u,
+    {
+      message: "Expected an SSH destination: a host name or address, optionally prefixed by a user",
+    },
+  ),
 ).pipe(Schema.brand("SshDestination"));
 export type SshDestination = typeof SshDestination.Type;
 
@@ -144,3 +148,93 @@ export const ContainerPids = Schema.Int.check(Schema.isGreaterThanOrEqualTo(64))
   Schema.brand("ContainerPids"),
 );
 export type ContainerPids = typeof ContainerPids.Type;
+
+/** The cloud provider that creates one machine per Attempt for a provisioned SSH Worker. */
+export const MachineProvider = Schema.Literals(["hetzner", "boat"]);
+export type MachineProvider = typeof MachineProvider.Type;
+
+/**
+ * A machine's ID at its provider: a Hetzner Cloud server ID, such as `52341896`, or a Boat
+ * sandbox ID, such as `bx_23456789`.
+ */
+export const MachineId = Schema.String.check(
+  Schema.isPattern(/^[A-Za-z0-9_-]{1,64}$/u, { message: "Expected a provider machine ID" }),
+).pipe(Schema.brand("MachineId"));
+export type MachineId = typeof MachineId.Type;
+
+/** A Hetzner Cloud server type, such as `cx33` or `cpx32`. */
+export const HetznerServerType = Schema.String.check(
+  Schema.isPattern(/^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/u, {
+    message: "Expected a Hetzner server type, such as cx33",
+  }),
+).pipe(Schema.brand("HetznerServerType"));
+export type HetznerServerType = typeof HetznerServerType.Type;
+
+/** A Hetzner Cloud location, such as `fsn1`, `nbg1`, or `hel1`. */
+export const HetznerLocation = Schema.String.check(
+  Schema.isPattern(/^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/u, {
+    message: "Expected a Hetzner location, such as nbg1",
+  }),
+).pipe(Schema.brand("HetznerLocation"));
+export type HetznerLocation = typeof HetznerLocation.Type;
+
+/**
+ * The image of each Hetzner Cloud server: a snapshot's ID or description, or a system image's
+ * name, such as `debian-13`.
+ */
+export const HetznerImage = Schema.String.check(
+  Schema.isPattern(/^[!-~](?:[ -~]{0,253}[!-~])?$/u, {
+    message: "Expected a Hetzner image ID, snapshot description, or image name",
+  }),
+).pipe(Schema.brand("HetznerImage"));
+export type HetznerImage = typeof HetznerImage.Type;
+
+/** The name of a Hetzner Cloud resource, such as a network or an SSH key. */
+export const HetznerResourceName = Schema.String.check(
+  Schema.isPattern(/^[!-~](?:[ -~]{0,126}[!-~])?$/u, {
+    message: "Expected a Hetzner resource name without control characters",
+  }),
+).pipe(Schema.brand("HetznerResourceName"));
+export type HetznerResourceName = typeof HetznerResourceName.Type;
+
+const HETZNER_LABEL_KEY =
+  /^(?:[a-z0-9A-Z](?:[-_.a-z0-9A-Z]*[a-z0-9A-Z])?\/)?[a-z0-9A-Z](?:[-_.a-z0-9A-Z]{0,61}[a-z0-9A-Z])?$/u;
+const HETZNER_LABEL_VALUE = /^(?:[a-z0-9A-Z](?:[-_.a-z0-9A-Z]{0,61}[a-z0-9A-Z])?)?$/u;
+
+/** Returns whether `value` is a valid Hetzner Cloud label value. */
+export const isHetznerLabelValue = (value: string): boolean => HETZNER_LABEL_VALUE.test(value);
+
+/**
+ * Extra labels for each Hetzner Cloud server, by Hetzner's label rules. Keys that start with
+ * `usine-` are usine's own.
+ */
+export const HetznerLabels = Schema.Record(
+  Schema.String,
+  Schema.String.check(
+    Schema.isPattern(HETZNER_LABEL_VALUE, { message: "Expected a Hetzner label value" }),
+  ),
+).check(
+  Schema.makeFilter((labels: Readonly<Record<string, string>>) => {
+    const keys = Object.keys(labels);
+    const invalid = keys.find((key) => !HETZNER_LABEL_KEY.test(key));
+    if (invalid !== undefined) return `Expected a Hetzner label key, not "${invalid}"`;
+    const reserved = keys.find((key) => key.startsWith("usine-"));
+    return reserved === undefined
+      ? true
+      : `Expected a label key that doesn't start with usine-, which usine sets itself, not "${reserved}"`;
+  }),
+);
+export type HetznerLabels = typeof HetznerLabels.Type;
+
+/** A Unix user name for SSH, such as `usine`. */
+export const SshUser = Schema.String.check(
+  Schema.isPattern(/^[a-z_][a-z0-9_-]{0,31}$/u, { message: "Expected a Unix user name" }),
+).pipe(Schema.brand("SshUser"));
+export type SshUser = typeof SshUser.Type;
+
+/**
+ * A Boat machine size: `small`, `default` (4 vCPU and 8 GB), `large`, or `xlarge`, which needs
+ * a Boat plan of $100 per month or more.
+ */
+export const BoatSize = Schema.Literals(["small", "default", "large", "xlarge"]);
+export type BoatSize = typeof BoatSize.Type;

@@ -3,11 +3,12 @@ import type { SshWorker, UsineConfig, Worker as ConfigWorker } from "@usine/conf
 import type { BrainSpec } from "@usine/core/agent/brain";
 import type { InstanceDirectory } from "@usine/core/instance";
 import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
-import { WorkerCapabilityError } from "@usine/executor";
+import { WorkerCapabilityError, WorkerMachines } from "@usine/executor";
 import {
   layer as sshExecutorLayer,
   type SshExecutorOptions,
   type SshWorkerAddress,
+  type SshWorkerMachine,
   SshWorkers,
 } from "@usine/executor/ssh";
 import { Config, ConfigProvider, Effect, Layer, Option } from "effect";
@@ -19,10 +20,95 @@ export const sshWorkersOf = (config: UsineConfig): ReadonlyArray<SshWorker> =>
   config.workers.filter((worker): worker is SshWorker => worker.kind === "ssh");
 
 /**
- * Returns how the executor connects to `worker`, reading the Gateway admin token from
- * `admin_token_env`. Fails with a `gateway` capability error if the variable is unset.
+ * Returns the message for a secret of an SSH Worker that the orchestrator's environment lacks:
+ * `secret` names it, such as `gateway admin token`, and `variable` is its variable.
  */
-const sshWorkerAddressOf = (worker: SshWorker, missing: (variable: string) => string) =>
+type MissingSecret = (secret: string, variable: string, key: string) => string;
+
+/** Returns the variable named `variable` from the orchestrator's environment. */
+const secretFrom = (
+  worker: SshWorker,
+  capability: "gateway" | "provider" | "harness-login",
+  variable: string,
+  message: string,
+) =>
+  Config.redacted(variable).pipe(
+    Effect.mapError(
+      (cause) =>
+        new WorkerCapabilityError({
+          worker: worker.name,
+          capability,
+          message,
+          cause,
+        }),
+    ),
+  );
+
+/**
+ * Returns how the executor finds `worker`'s machines: its destination, or its provisioner with
+ * the provider token and API keys read from their variables.
+ */
+const sshWorkerMachineOf = (worker: SshWorker, missing: MissingSecret) =>
+  Effect.gen(function* () {
+    if (Option.isNone(worker.provisioner)) {
+      if (Option.isNone(worker.destination))
+        return yield* Effect.die(new Error(`SSH worker "${worker.name}" has no destination`));
+      return { _tag: "Fixed", destination: worker.destination.value } satisfies SshWorkerMachine;
+    }
+    const settings = worker.provisioner.value;
+    const token = yield* secretFrom(
+      worker,
+      "provider",
+      settings.tokenEnv,
+      missing(`${settings.provider} API token`, settings.tokenEnv, "provisioner.token_env"),
+    );
+    const apiKey = (provider: "anthropic" | "openai", label: string) =>
+      Effect.transposeOption(
+        Option.map(settings.apiKeys[provider], (variable) =>
+          secretFrom(
+            worker,
+            "harness-login",
+            variable,
+            missing(label, variable, `provisioner.api_keys.${provider}`),
+          ),
+        ),
+      );
+    const apiKeys = {
+      anthropic: yield* apiKey("anthropic", "Anthropic API key"),
+      openai: yield* apiKey("openai", "OpenAI API key"),
+    };
+    switch (settings.provider) {
+      case "hetzner":
+        return {
+          _tag: "Provisioned",
+          provisioner: {
+            provider: "hetzner",
+            token,
+            serverType: settings.serverType,
+            location: settings.location,
+            image: settings.image,
+            network: settings.network,
+            firewall: settings.firewall,
+            sshKey: settings.sshKey,
+            sshUser: settings.sshUser,
+            labels: settings.labels,
+            apiKeys,
+          },
+        } satisfies SshWorkerMachine;
+      case "boat":
+        return {
+          _tag: "Provisioned",
+          provisioner: { provider: "boat", token, size: settings.size, apiKeys },
+        } satisfies SshWorkerMachine;
+    }
+  });
+
+/**
+ * Returns how the executor connects to `worker`, reading the Gateway admin token from
+ * `admin_token_env` and a provisioner's token and API keys from their variables. Fails with a
+ * capability error if a variable is unset.
+ */
+const sshWorkerAddressOf = (worker: SshWorker, missing: MissingSecret) =>
   Effect.gen(function* () {
     const gateway = yield* Effect.transposeOption(
       Option.map(worker.gateway, (settings) =>
@@ -41,7 +127,7 @@ const sshWorkerAddressOf = (worker: SshWorker, missing: (variable: string) => st
               new WorkerCapabilityError({
                 worker: worker.name,
                 capability: "gateway",
-                message: missing(settings.adminTokenEnv),
+                message: missing("gateway admin token", settings.adminTokenEnv, "admin_token_env"),
                 cause,
               }),
           ),
@@ -50,7 +136,7 @@ const sshWorkerAddressOf = (worker: SshWorker, missing: (variable: string) => st
     );
     return {
       name: worker.name,
-      destination: worker.destination,
+      machine: yield* sshWorkerMachineOf(worker, missing),
       identityFile: worker.identityFile,
       port: worker.port,
       root: worker.root,
@@ -65,8 +151,9 @@ const sshWorkerAddressOf = (worker: SshWorker, missing: (variable: string) => st
   });
 
 /**
- * Returns how the executor connects to each declared SSH Worker, reading Gateway admin tokens at
- * startup. If an `admin_token_env` variable is unset, fails with a `gateway` capability error.
+ * Returns how the executor connects to each declared SSH Worker, reading Gateway admin tokens and
+ * provisioner tokens and API keys at startup. If a variable is unset, fails with a capability
+ * error that names it.
  */
 export const sshWorkerAddressesOf = Effect.fn("Orchestrator.sshWorkerAddressesOf")(function* (
   config: UsineConfig,
@@ -74,8 +161,8 @@ export const sshWorkerAddressesOf = Effect.fn("Orchestrator.sshWorkerAddressesOf
   return yield* Effect.forEach(sshWorkersOf(config), (worker) =>
     sshWorkerAddressOf(
       worker,
-      (variable) =>
-        `The gateway admin token for SSH worker "${worker.name}" is missing. Set ${variable} in the orchestrator's environment.`,
+      (secret, variable) =>
+        `The ${secret} for SSH worker "${worker.name}" is missing. Set ${variable} in the orchestrator's environment.`,
     ),
   );
 });
@@ -89,6 +176,7 @@ export const sshStepExecutorLayer = (config: UsineConfig, brains: ReadonlyArray<
   Layer.unwrap(
     Effect.gen(function* () {
       const machines = yield* SshWorkers;
+      const provisioned = yield* Effect.serviceOption(WorkerMachines);
       const environment = yield* ConfigProvider.ConfigProvider;
       const add = Effect.fn("Orchestrator.addSshWorker")(function* (worker: ConfigWorker) {
         yield* Effect.annotateCurrentSpan({ worker: worker.name });
@@ -98,13 +186,14 @@ export const sshStepExecutorLayer = (config: UsineConfig, brains: ReadonlyArray<
           );
         const address = yield* sshWorkerAddressOf(
           worker,
-          (variable) =>
-            `The gateway admin token for SSH worker "${worker.name}" is missing: ${variable} is not set in the orchestrator's environment. usine up reads only the variables that were set when it started. Set ${variable} and restart usine up, or set admin_token_env to a variable that usine up already has.`,
+          (secret, variable, key) =>
+            `The ${secret} for SSH worker "${worker.name}" is missing: ${variable} is not set in the orchestrator's environment. usine up reads only the variables that were set when it started. Set ${variable} and restart usine up, or set ${key} to a variable that usine up already has.`,
         ).pipe(Effect.provideService(ConfigProvider.ConfigProvider, environment));
         yield* machines.addWorker(address);
       });
       return stepExecutorLayer(config, brains, {
         workers: { add, remove: machines.removeWorker },
+        ...Option.match(provisioned, { onNone: () => ({}), onSome: (machines) => ({ machines }) }),
       });
     }),
   );

@@ -1,3 +1,4 @@
+import type { RemoteShell } from "@usine/agents/child-host";
 import type { AttemptId } from "@usine/core/attempt";
 import type { LoopPermissions } from "@usine/core/loop";
 import { type RepositoryName, safeSegment } from "@usine/core/repository";
@@ -43,13 +44,48 @@ interface CurrentAttachment {
   readonly credential: WorkerCredential;
 }
 
+/** Writes each file of `files` on the machine through `shell`, creating its directory. */
+export const writeMachineFiles = (
+  commands: RemoteCommands,
+  operation: ExecutorOperation,
+  shell: RemoteShell,
+  files: ReadonlyArray<readonly [path: string, contents: string]>,
+) => commands.run(operation, shell, "sh", ["-c", WRITE_FILES_SCRIPT, "sh", ...files.flat()]);
+
+/** Returns the Attempt's Codex home on `machine`, which Codex also writes its sessions to. */
+export const attemptCodexHome = (machine: SshMachine, attemptId: AttemptId): string =>
+  `${machine.workerDirectory}/codex/${safeSegment(attemptId)}`;
+
+/** Removes the Attempt's Codex home at `codexHome` when the caller's scope closes. */
+export const removeCodexHomeOnClose = (
+  commands: RemoteCommands,
+  machine: SshMachine,
+  codexHome: string,
+  fields: { readonly attemptId: AttemptId; readonly worker: WorkerName },
+) =>
+  Effect.addFinalizer(() =>
+    commands.run("cleanup", machine.shell, "rm", ["-rf", codexHome]).pipe(
+      Effect.tap(() =>
+        Effect.logDebug("Removed the Attempt's Codex home", { ...fields, codexHome }),
+      ),
+      Effect.tapError((error) =>
+        Effect.logWarning("Could not remove the Attempt's Codex home", {
+          ...fields,
+          codexHome,
+          message: error.message,
+        }),
+      ),
+      Effect.ignore,
+    ),
+  );
+
 /**
  * Returns the directory of gh's configuration on a Worker behind a Gateway, and the Attempt's
- * Codex home, which Codex also writes its sessions to. Neither contains a token.
+ * Codex home. Neither contains a token.
  */
 const configDirectories = (machine: SshMachine, attemptId: AttemptId) => ({
   ghConfigDirectory: `${machine.workerDirectory}/gh`,
-  codexHome: `${machine.workerDirectory}/codex/${safeSegment(attemptId)}`,
+  codexHome: attemptCodexHome(machine, attemptId),
 });
 
 /**
@@ -60,14 +96,16 @@ const configDirectories = (machine: SshMachine, attemptId: AttemptId) => ({
  */
 export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFor")(function* (
   commands: RemoteCommands,
-  machineFor: (worker: WorkerName) => Effect.Effect<SshMachine, ExecutorError>,
+  workerFor: (
+    worker: WorkerName,
+  ) => Effect.Effect<{ readonly gateway: Option.Option<MachineGateway> }, ExecutorError>,
 ) {
   const provider = yield* CredentialProvider;
 
   const detachLeftovers = Effect.fn("SshExecutor.detachLeftoverAttachments")(function* (
     worker: WorkerName,
   ) {
-    const machine = yield* machineFor(worker);
+    const machine = yield* workerFor(worker);
     yield* Effect.annotateCurrentSpan({ worker });
     if (Option.isNone(machine.gateway))
       return yield* Effect.logDebug("The Worker has no Gateway to detach leftovers from", {
@@ -136,35 +174,17 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
     yield* Effect.annotateCurrentSpan(fields);
     const directories = configDirectories(machine, attemptId);
     const codex = settings.llmProviders.includes("openai");
-    if (codex)
-      yield* Effect.addFinalizer(() =>
-        commands.run("cleanup", machine.shell, "rm", ["-rf", directories.codexHome]).pipe(
-          Effect.tap(() =>
-            Effect.logDebug("Removed the Attempt's Codex home", {
-              ...fields,
-              codexHome: directories.codexHome,
-            }),
-          ),
-          Effect.tapError((error) =>
-            Effect.logWarning("Could not remove the Attempt's Codex home", {
-              ...fields,
-              codexHome: directories.codexHome,
-              message: error.message,
-            }),
-          ),
-          Effect.ignore,
-        ),
-      );
-    yield* commands.run(operation, machine.shell, "sh", [
-      "-c",
-      WRITE_FILES_SCRIPT,
-      "sh",
-      ...gatewayConfigFiles({
+    if (codex) yield* removeCodexHomeOnClose(commands, machine, directories.codexHome, fields);
+    yield* writeMachineFiles(
+      commands,
+      operation,
+      machine.shell,
+      gatewayConfigFiles({
         domain: settings.domain,
         llmProviders: settings.llmProviders,
         ...directories,
-      }).flat(),
-    ]);
+      }),
+    );
 
     const attached = yield* Ref.make(Option.none<CurrentAttachment>());
     // Serializes publish and restore so the Gateway never gets an older token.

@@ -29,6 +29,7 @@ packages:
   - git
   - gnupg
   - jq
+  - nftables
 
 # Swap lets the OOM killer end one process instead of the whole machine thrashing when an Attempt's gates run out of memory (#270).
 swap:
@@ -52,6 +53,21 @@ write_files:
       DISABLE_AUTOUPDATER=1
       PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
       TURBO_CACHE_DIR=/home/usine/.cache/turbo
+
+  # Behind the gateway, gateway/worker-cloud-init.yaml writes this file after this one, and its rules replace these.
+  - path: /etc/nftables.conf
+    permissions: "0644"
+    content: |
+      #!/usr/sbin/nft -f
+      table inet usine_metadata
+      delete table inet usine_metadata
+      table inet usine_metadata {
+      	chain output {
+      		type filter hook output priority filter; policy accept;
+      		# cloud-init reads the user data as root at boot; it has a provisioned server's SSH host private key, so no other user or container may.
+      		ip daddr 169.254.169.254 meta skuid != 0 drop
+      	}
+      }
 
   # Oxc reserves a 6 GiB virtual buffer at start, which the kernel's heuristic refuses on a machine with less memory plus swap (#270).
   - path: /etc/sysctl.d/90-usine-worker.conf
@@ -85,6 +101,7 @@ write_files:
       install -d -o usine -g usine -m 0700 /home/usine/.usine /home/usine/.cache /home/usine/.cache/turbo
       # The executor starts and removes the attempt containers as usine.
       usermod -aG docker usine
+      systemctl enable --now nftables
       systemctl restart ssh
 
 runcmd:

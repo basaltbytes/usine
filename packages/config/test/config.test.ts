@@ -3,7 +3,7 @@ import { describe, expect, it } from "@effect/vitest";
 import { InstanceDirectory } from "@usine/core/instance";
 import { type Environment, ExpressionEngine, Source } from "@usine/expression/expression-engine";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
-import { Effect, Layer, Logger, Option, Schema } from "effect";
+import { Effect, Layer, Logger, Option, Result, Schema } from "effect";
 import { InstanceFolder } from "../src/instance-folder.ts";
 import { InstancePath } from "../src/file.ts";
 import { LoadedInstance } from "../src/instance/instance.ts";
@@ -157,7 +157,8 @@ describe("ConfigParser", () => {
       expect(first?.kind).toBe("ssh");
       expect(second?.kind).toBe("ssh");
       if (first?.kind !== "ssh" || second?.kind !== "ssh") return;
-      expect(first.destination).toBe("usine@203.0.113.7");
+      expect(Option.getOrNull(first.destination)).toBe("usine@203.0.113.7");
+      expect(Option.isNone(first.provisioner)).toBe(true);
       expect(Option.getOrNull(first.identityFile)).toBe("~/.ssh/usine_worker");
       expect(Option.getOrNull(first.port)).toBe(2222);
       expect(first.root).toBe("/home/usine/.usine");
@@ -242,6 +243,142 @@ describe("ConfigParser", () => {
       ]) {
         const failure = yield* parse(workers).pipe(Effect.flip);
         expect(failure.stage).toBe("schema");
+      }
+    }).pipe(Effect.provide(parserLayer)),
+  );
+
+  it.effect("parses a provisioned ssh Worker's Hetzner and Boat settings with their defaults", () =>
+    Effect.gen(function* () {
+      const parser = yield* ConfigParser;
+      const parse = (workers: ReadonlyArray<string>) =>
+        parser.parseUsineYaml(
+          InstancePath.make("usine.yaml"),
+          ["version: 1", "repos: []", "workers:", ...workers].join("\n"),
+        );
+      const gateway = [
+        "    gateway:",
+        "      domain: gw.internal",
+        "      destination: usine-gateway",
+        "      admin_token_env: USINE_GATEWAY_ADMIN_TOKEN",
+        "      llm_providers: [anthropic]",
+      ];
+      const hetzner = [
+        "  - name: hetzner-pool",
+        "    kind: ssh",
+        "    root: /home/usine/.usine",
+        "    identity_file: ~/.ssh/usine_worker",
+        "    max_concurrent_attempts: 4",
+        ...gateway,
+        "    provisioner:",
+        "      provider: hetzner",
+        "      token_env: HCLOUD_TOKEN",
+        "      server_type: cx33",
+        "      location: nbg1",
+        "      image: usine-worker-claude-2.1.308-codex-0.159.2",
+        "      network: usine-gateway",
+        "      ssh_key: usine-orchestrator",
+      ];
+      const [pool] = (yield* parse(hetzner)).workers;
+      expect(pool?.kind).toBe("ssh");
+      if (pool?.kind !== "ssh") return;
+      expect(Option.isNone(pool.destination)).toBe(true);
+      expect(pool.maxConcurrentAttempts).toBe(4);
+      const provisioner = Option.getOrNull(pool.provisioner);
+      expect(provisioner?.provider).toBe("hetzner");
+      if (provisioner?.provider !== "hetzner") return;
+      expect({
+        tokenEnv: provisioner.tokenEnv,
+        serverType: provisioner.serverType,
+        location: provisioner.location,
+        image: provisioner.image,
+        network: Option.getOrNull(provisioner.network),
+        sshKey: provisioner.sshKey,
+        sshUser: provisioner.sshUser,
+        labels: provisioner.labels,
+        anthropicKey: Option.getOrNull(provisioner.apiKeys.anthropic),
+      }).toEqual({
+        tokenEnv: "HCLOUD_TOKEN",
+        serverType: "cx33",
+        location: "nbg1",
+        image: "usine-worker-claude-2.1.308-codex-0.159.2",
+        network: "usine-gateway",
+        sshKey: "usine-orchestrator",
+        sshUser: "usine",
+        labels: {},
+        anthropicKey: null,
+      });
+      const labeled = yield* parse([
+        ...hetzner,
+        "      ssh_user: worker",
+        "      labels: { team: platform, cost-centre: ci }",
+      ]);
+      const labeledProvisioner =
+        labeled.workers[0]?.kind === "ssh" ? labeled.workers[0].provisioner : Option.none();
+      expect(
+        Option.map(labeledProvisioner, (settings) =>
+          settings.provider === "hetzner" ? [settings.sshUser, settings.labels] : [],
+        ),
+      ).toEqual(Option.some(["worker", { team: "platform", "cost-centre": "ci" }]));
+
+      const boat = [
+        "  - name: boat-pool",
+        "    kind: ssh",
+        "    root: /home/user/.usine",
+        "    identity_file: ~/.ssh/usine_boat",
+        "    provisioner:",
+        "      provider: boat",
+        "      token_env: BOAT_API_KEY",
+        "      api_keys:",
+        "        anthropic: USINE_ANTHROPIC_API_KEY",
+      ];
+      const [sandboxes] = (yield* parse(boat)).workers;
+      const boatProvisioner =
+        sandboxes?.kind === "ssh" ? Option.getOrNull(sandboxes.provisioner) : null;
+      expect(boatProvisioner?.provider).toBe("boat");
+      if (boatProvisioner?.provider !== "boat") return;
+      expect(boatProvisioner.size).toBe("default");
+      expect(Option.getOrNull(boatProvisioner.apiKeys.anthropic)).toBe("USINE_ANTHROPIC_API_KEY");
+      const [codex] = (yield* parse([...boat, "        openai: USINE_OPENAI_API_KEY"])).workers;
+      expect(
+        codex?.kind === "ssh" &&
+          Option.flatMap(codex.provisioner, (settings) => settings.apiKeys.openai),
+      ).toEqual(Option.some("USINE_OPENAI_API_KEY"));
+      const large = (yield* parse([...boat, "      size: large"])).workers[0];
+      expect(
+        large?.kind === "ssh" &&
+          Option.map(large.provisioner, (settings) =>
+            settings.provider === "boat" ? settings.size : "",
+          ),
+      ).toEqual(Option.some("large"));
+
+      for (const [workers, message] of [
+        [
+          [...hetzner, "    destination: usine@203.0.113.7"],
+          "sets both destination and provisioner",
+        ],
+        [[...hetzner, "    port: 2222"], "takes from its provider"],
+        [
+          hetzner.filter((line) => !line.includes("network:")),
+          "needs the gateway's private network",
+        ],
+        [[...boat, ...gateway], "Boat has no network rules"],
+        [boat.filter((line) => !line.includes("identity_file")), "needs identity_file"],
+        [[...hetzner, "      labels: { usine-attempt: x }"], "usine sets itself"],
+        [[...hetzner, "      labels: { team: has space }"], "Hetzner label value"],
+        [
+          hetzner.map((line) => (line.includes("server_type:") ? "      server_type: CX33" : line)),
+          "Hetzner server type",
+        ],
+        [[...boat, "      size: huge"], ""],
+        [[...boat, "      region: fsn1"], ""],
+        [boat.map((line) => line.replace("anthropic:", "gemini:")), ""],
+        [hetzner.slice(0, -1), ""],
+      ] as const) {
+        const parsed = yield* parse(workers).pipe(Effect.result);
+        expect(Result.isFailure(parsed), workers.join("\n")).toBe(true);
+        if (Result.isSuccess(parsed)) continue;
+        expect(parsed.failure.stage).toBe("schema");
+        expect(parsed.failure.message).toContain(message);
       }
     }).pipe(Effect.provide(parserLayer)),
   );

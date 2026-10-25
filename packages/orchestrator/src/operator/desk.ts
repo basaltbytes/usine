@@ -18,6 +18,12 @@ import { projectedItem } from "../board/items.ts";
 import { LoopMatches } from "../loop-matches.ts";
 import { PollingTriggers } from "../polling-triggers.ts";
 import { type PreflightCheck, type WorkerPreflight, WorkerStatus } from "../worker-status.ts";
+import {
+  MachineView,
+  machineView,
+  ProvisioningPauseView,
+  provisioningPauseView,
+} from "./machines.ts";
 import { AttemptView } from "./attempt.ts";
 import { BoardItemLink } from "./board.ts";
 import { checkView, PreflightCheckView, WorkerSlotsView } from "./configuration.ts";
@@ -130,6 +136,11 @@ export class QueuedForWorkerView extends Schema.TaggedClass<QueuedForWorkerView>
    * queue `run`: it hasn't asked for a slot yet, or this process runs no Attempts.
    */
   ahead: Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  /**
+   * The machine that a provisioned Worker creates for `run`'s next Attempt, or null if none is
+   * being created.
+   */
+  creating: Schema.NullOr(MachineView).pipe(Schema.withConstructorDefault(Effect.succeed(null))),
 }) {}
 
 /**
@@ -193,9 +204,15 @@ export class WorkerView extends Schema.Class<WorkerView>("@usine/orchestrator/Wo
   slots: WorkerSlotsView,
   /**
    * The newest failed check among the Worker's prerequisites and harnesses, or else its degraded
-   * prerequisites, or else the newest passed check. Null before the first preflight.
+   * prerequisites, or else the newest passed or deferred check. Null before the first preflight.
    */
   preflight: Schema.NullOr(PreflightCheckView),
+  /** A provisioned Worker's machines in flight, oldest first. */
+  machines: Schema.Array(MachineView).pipe(Schema.withConstructorDefault(Effect.succeed([]))),
+  /** A provisioned Worker's last failed machine creation, or null after a success. */
+  provisioning: Schema.NullOr(ProvisioningPauseView).pipe(
+    Schema.withConstructorDefault(Effect.succeed(null)),
+  ),
 }) {}
 
 /**
@@ -230,6 +247,8 @@ interface StallFacts {
   readonly ask: Option.Option<CycleBudgetAsk>;
   /** The number of Runs ahead of each Run in the scheduler's queue. */
   readonly ahead: ReadonlyMap<RunView["id"], number>;
+  /** The machine being created for each Run's next Attempt. */
+  readonly creating: ReadonlyMap<RunView["id"], MachineView>;
   /** The Attempt on the Item whose parent task isn't confirmed stopped, for the Loop's open Run. */
   readonly stop: Option.Option<UnconfirmedStopView>;
 }
@@ -244,6 +263,7 @@ const stallReason = ({
   paused,
   ask,
   ahead,
+  creating,
   stop,
 }: StallFacts): Option.Option<StallReasonView> => {
   const open = runs.find(({ state }) => RunState.OPEN_STATE_TAGS.some((tag) => tag === state));
@@ -259,7 +279,11 @@ const stallReason = ({
         return Option.some(new AwaitingApprovalView({ run: open }));
       default:
         return Option.some(
-          new QueuedForWorkerView({ run: open, ahead: ahead.get(open.id) ?? null }),
+          new QueuedForWorkerView({
+            run: open,
+            ahead: ahead.get(open.id) ?? null,
+            creating: creating.get(open.id) ?? null,
+          }),
         );
     }
   }
@@ -444,6 +468,8 @@ const makeDesk = Effect.gen(function* () {
       preflights,
       latestPoll,
       unconfirmedStops,
+      inFlight,
+      pauses,
     ] = yield* Effect.all(
       [
         reader.list({ closedLimit: 0 }),
@@ -455,8 +481,18 @@ const makeDesk = Effect.gen(function* () {
         workerStatus.preflights,
         polling.latest,
         stops.list,
+        workerStatus.machines,
+        workerStatus.provisioning,
       ] as const,
       { concurrency: "unbounded" },
+    );
+    const machineViews = inFlight.map(machineView);
+    const creating = new Map(
+      machineViews.flatMap((machine) =>
+        machine.state === "creating" && machine.runId !== null
+          ? [[machine.runId, machine] as const]
+          : [],
+      ),
     );
     const ahead = new Map(queue.map(({ runId, ahead }) => [runId, ahead]));
     const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
@@ -533,6 +569,7 @@ const makeDesk = Effect.gen(function* () {
         paused: paused.has(loop.name),
         ask: Option.fromNullishOr(asks.find(({ itemKey }) => itemKey === item.itemKey)),
         ahead,
+        creating,
         stop: stopOn(loop.name, item.itemKey),
       });
       if (Option.isNone(reason)) continue;
@@ -622,6 +659,13 @@ const makeDesk = Effect.gen(function* () {
         }),
         preflight: Option.getOrNull(
           Option.map(Option.flatMap(Option.fromNullishOr(preflight), standingCheck), checkView),
+        ),
+        machines: machineViews.filter((machine) => machine.worker === name),
+        provisioning: Option.getOrNull(
+          Option.map(
+            Option.fromNullishOr(pauses.find((pause) => pause.worker === name)),
+            provisioningPauseView,
+          ),
         ),
       });
     });

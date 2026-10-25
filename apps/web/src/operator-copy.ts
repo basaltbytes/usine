@@ -5,12 +5,15 @@ import type { AttemptStart } from "@usine/core/attempt/start";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import type { ApprovalChannel } from "@usine/core/run/approval";
+import type { MachineProvider } from "@usine/core/worker";
 import type { InstanceReload } from "@usine/orchestrator/current-instance";
 import type {
   CycleBudgetNeed,
   FailureView,
   LoopView,
+  MachineView,
   NeedView,
+  ProvisioningPauseView,
   RunView,
   UnconfirmedStopView,
 } from "@usine/orchestrator/operator";
@@ -143,16 +146,65 @@ export const stopWaitLine = (
     ? `Waiting for attempt ${attemptNumber} to stop on ${worker}`
     : `Waiting for attempt ${attemptNumber} of an earlier run to stop on ${worker}`;
 
+export const providerLabel = {
+  hetzner: "Hetzner",
+  boat: "Boat",
+} as const satisfies Record<MachineProvider, string>;
+
+/** The provider's word for one machine, as in `Hetzner server 52341896`. */
+export const providerMachineNoun = {
+  hetzner: "server",
+  boat: "sandbox",
+} as const satisfies Record<MachineProvider, string>;
+
+/** Returns the status of a machine being created, such as `Creating a Hetzner machine, started 2m ago`. */
+export const machineCreationLine = (machine: MachineView, now: number): string =>
+  `Creating a ${providerLabel[machine.provider]} machine, started ${agoLabel(machine.since, now)}`;
+
+const creationFailureReason = {
+  capacity: "no capacity",
+  quota: "quota reached",
+  refused: "refused by the provider",
+  provider: "provider error",
+  unreachable: "unreachable",
+  timeout: "SSH timeout",
+} as const satisfies Record<Exclude<ProvisioningPauseView["reason"], "check">, string>;
+
+/** Returns why a provisioned Worker has no new machine, such as `Machine creation failed: quota reached`. */
+export const creationFailureTitle = ({ reason }: ProvisioningPauseView): string =>
+  reason === "check"
+    ? "Preflight failed on the first machine of the day"
+    : `Machine creation failed: ${creationFailureReason[reason]}`;
+
+/** Returns `instant` to the minute, with its day unless it is on the day of `now`: `19:46` or `26 Oct 07:46`. */
+const nearTimeLabel = (instant: string, now: number): string =>
+  new Date(instant).toDateString() === new Date(now).toDateString()
+    ? timestampLabel(instant).slice(11)
+    : dayTimeLabel(instant);
+
+/** Returns when a provisioned Worker creates a machine again: `Next try at 19:46`, or `Pause ended at 19:46`. */
+export const nextCreationLine = (
+  { blocked, retryAt }: ProvisioningPauseView,
+  now: number,
+): string => `${blocked ? "Next try" : "Pause ended"} at ${nearTimeLabel(retryAt, now)}`;
+
+/** Returns how often machine creation failed, for example `Failed 3 times in a row, last at 19:31`. */
+export const creationFailuresLine = ({ failures, failedAt }: ProvisioningPauseView, now: number) =>
+  `${failures === 1 ? "Failed once" : `Failed ${failures} times in a row`}, last at ${nearTimeLabel(failedAt, now)}`;
+
 /**
  * Returns the Run state as a phrase, for example `Failed after 3 attempts`, `Waiting for approval`,
  * or `Running, attempt 2`. While `unconfirmedStop` keeps an open Run from starting an attempt,
- * returns `stopWaitLine`.
+ * returns `stopWaitLine`; while `machine` is being created for a queued Run, says so.
  */
 export const runStateLine = (
   run: Pick<RunView, "id" | "state" | "attempts">,
   unconfirmedStop: UnconfirmedStopView | null = null,
+  machine: MachineView | null = null,
 ): string => {
   if (unconfirmedStop !== null) return stopWaitLine(run.id, unconfirmedStop);
+  if (run.state === "Queued" && machine?.state === "creating")
+    return `Queued, creating a ${providerLabel[machine.provider]} machine`;
   const attempts = run.attempts.length;
   const after =
     attempts === 0 ? "" : ` after ${attempts} ${attempts === 1 ? "attempt" : "attempts"}`;

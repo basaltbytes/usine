@@ -83,6 +83,7 @@ const recordingExecutor = (
     interrupt: () => Effect.void,
     reserve: () => Effect.never,
     occupy: () => Effect.die("no open Attempt survives the restart"),
+    sweep: Effect.void,
     execute: () => Effect.die("no Attempt starts after the restart"),
   });
 
@@ -209,6 +210,7 @@ const restartedExecutor = Effect.fn("test.restartedExecutor")(function* (
     interrupt: stop,
     reserve: () => Deferred.await(state.gate).pipe(Effect.andThen(freeSlot), Effect.as(lease)),
     occupy: () => TxRef.update(state.leased, (count) => count + 1).pipe(Effect.as(lease)),
+    sweep: Effect.void,
     execute: (execution, io) =>
       Effect.gen(function* () {
         const { id } = execution.attempt;
@@ -320,6 +322,50 @@ describe("engine restart", () => {
     ),
   );
 
+  it.live(
+    "sweeps the Workers' resources after startup recovery reconciles the earlier Attempts",
+    () =>
+      withInstance((directory) =>
+        Effect.gen(function* () {
+          const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([Effect.never]);
+          const firstScope = yield* Scope.make();
+          const first = Context.get(
+            yield* Scope.provide(
+              Layer.build(engineLayer(directory, executorLayer(plans))),
+              firstScope,
+            ),
+            RunEngine,
+          );
+          const accepted = yield* first.submit(submission({ number: 12 }));
+          assert(accepted._tag === "Claimed");
+          yield* waitFor(first, accepted.runId, ({ run }) => run.state._tag === "Running");
+          yield* Scope.close(firstScope, Exit.void);
+
+          const order = yield* Ref.make<ReadonlyArray<string>>([]);
+          const recorded = (step: string) => Ref.update(order, (steps) => [...steps, step]);
+          const scripted = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
+            Effect.succeed(stepResult("after the restart")),
+          ]);
+          const base = Context.get(yield* Layer.build(executorLayer(scripted)), StepExecutor);
+          const restarted = Layer.succeed(StepExecutor)({
+            ...base,
+            recover: (attempt) => recorded(`recover ${attempt.attemptId}`),
+            sweep: recorded("sweep"),
+          });
+          const secondScope = yield* Scope.make();
+          yield* Scope.provide(Layer.build(engineLayer(directory, restarted)), secondScope);
+          const steps = yield* Ref.get(order);
+          const firstSweep = steps.indexOf("sweep");
+          assert.isAtLeast(firstSweep, 1, "startup sweeps");
+          assert.isTrue(
+            steps.slice(0, firstSweep).some((step) => step.startsWith("recover ")),
+            "the sweep runs after the recovery of the earlier Attempt",
+          );
+          yield* Scope.close(secondScope, Exit.void);
+        }),
+      ),
+  );
+
   it.live("reattaches an in-flight Attempt whose parent task outlived the restart", () =>
     withInstance((directory) =>
       Effect.gen(function* () {
@@ -333,6 +379,7 @@ describe("engine restart", () => {
           intervene: () => Effect.void,
           interrupt: () => Effect.void,
           occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
+          sweep: Effect.void,
           reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
           execute: (execution) =>
             Ref.updateAndGet(executions, (seen) => [
@@ -415,6 +462,7 @@ describe("engine restart", () => {
                     intervene: () => Effect.void,
                     interrupt: () => Effect.void,
                     occupy: () => Effect.die("no open Attempt survives into the first runtime"),
+                    sweep: Effect.void,
                     reserve: (_, { itemKey }) =>
                       Effect.succeed({
                         worker: itemKey === onLocal.itemKey ? local : spare,
@@ -499,6 +547,7 @@ describe("engine restart", () => {
             intervene: () => Effect.void,
             interrupt: () => Effect.void,
             occupy: (worker) => counted(worker, 1).pipe(Effect.as(leaseOn(worker))),
+            sweep: Effect.void,
             reserve: (_, __, worker) => freeSlot(worker).pipe(Effect.map(leaseOn)),
             execute: (execution, io) =>
               Effect.gen(function* () {
@@ -612,6 +661,7 @@ describe("engine restart", () => {
             intervene: () => Effect.void,
             interrupt: () => Effect.void,
             occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
+            sweep: Effect.void,
             reserve: () =>
               Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
             // The parent finishes and its result is stored, then the process stops before the Run records it.
