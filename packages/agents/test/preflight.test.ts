@@ -215,9 +215,19 @@ describe("worker harness readiness", () => {
 
   const subscriptionLogin =
     "Claude Code needs a subscription login. Run claude auth login on the worker.";
-  // Claude Code 2.1.296 prints its status and exits 1 when not logged in.
+  // Claude Code 2.1.308 prints its status and exits 1 when not logged in.
   for (const status of [
-    { auth: { loggedIn: false, authMethod: "none", apiProvider: "firstParty" }, exitCode: 1 },
+    {
+      auth: {
+        loggedIn: false,
+        authMethod: "none",
+        apiProvider: "firstParty",
+        analyticsDisabled: false,
+        projectsDirectory: "/home/worker/.claude/projects",
+        configDirectory: "/home/worker/.claude",
+      },
+      exitCode: 1,
+    },
     { auth: { loggedIn: false, authMethod: "none", apiProvider: "firstParty" }, exitCode: 0 },
     { auth: { loggedIn: true, authMethod: "api_key", apiProvider: "firstParty" }, exitCode: 0 },
     { auth: { loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty" }, exitCode: 0 },
