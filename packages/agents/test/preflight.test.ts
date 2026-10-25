@@ -1,13 +1,13 @@
 import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { HarnessReady, HarnessUnavailableError } from "@usine/core/agent/capability";
-import { Deferred, Effect, Fiber, Layer, Schema, Sink, Stream } from "effect";
+import { Deferred, Effect, Fiber, Layer, Option, Schema, Sink, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { TestClock } from "effect/testing";
 import { readFileSync } from "node:fs";
 import { LocalProcess, RemoteShell } from "../src/child-host/child-host.ts";
 import { CodexAppServer, type CodexConnection } from "../src/pi/codex/app-server.ts";
-import { PiSdk, type PiStartResult } from "../src/pi/sdk.ts";
+import { PiSdk, type PiStartOptions, type PiStartResult } from "../src/pi/sdk.ts";
 import {
   CODEX_CLI_VERSION,
   supportedCodexVersions,
@@ -301,6 +301,7 @@ describe("worker harness readiness", () => {
   for (const pool of ["apiKeys", "chatgptPlan"] as const) {
     it.effect(`checks Pi ${pool} authentication and disposes its unprompted SDK session`, () => {
       let disposed = 0;
+      let options: PiStartOptions | undefined;
       const started: PiStartResult = {
         _tag: "Started",
         model: ModelId.make("provider/model"),
@@ -333,10 +334,19 @@ describe("worker harness readiness", () => {
           assert.strictEqual(error.capability, "login");
         }
         assert.strictEqual(disposed, 1);
+        // The session's bash tool would run with the worker's environment, not this process's.
+        assert.deepStrictEqual(options?.environment, Option.some(workerEnvironment));
       }).pipe(
         Effect.provide(commands({})),
         Effect.provide(account(Effect.succeed(null)).layer),
-        Effect.provide(Layer.succeed(PiSdk)({ start: async () => started })),
+        Effect.provide(
+          Layer.succeed(PiSdk)({
+            start: async (received) => {
+              options = received;
+              return started;
+            },
+          }),
+        ),
       );
     });
   }
