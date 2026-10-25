@@ -221,16 +221,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
             yield* succeeds(host, {
               ...inWorktree,
               command: "git",
-              args: [
-                "-c",
-                "user.name=usine",
-                "-c",
-                "user.email=usine@basaltbytes.dev",
-                "commit",
-                "--allow-empty",
-                "-m",
-                "ssh worker integration",
-              ],
+              args: ["commit", "--allow-empty", "-m", "ssh worker integration"],
             });
             const pidFile = childPidFile(
               request.cwd,
@@ -576,16 +567,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
             yield* succeeds(host, {
               ...inWorktree,
               command: "git",
-              args: [
-                "-c",
-                "user.name=usine",
-                "-c",
-                "user.email=usine@basaltbytes.dev",
-                "commit",
-                "--allow-empty",
-                "-m",
-                "gateway worker integration",
-              ],
+              args: ["commit", "--allow-empty", "-m", "gateway worker integration"],
             });
             yield* succeeds(host, {
               ...inWorktree,
