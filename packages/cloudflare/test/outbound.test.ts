@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
-import { Option, Redacted } from "effect";
+import { DateTime, Option, Redacted } from "effect";
 import { ApiKeyCredential, ProviderGrant, SandboxCredentials } from "../src/api/api.ts";
 import { harnessEnvironment, PROVIDER_HOSTS } from "../src/api/harness.ts";
 import {
@@ -9,7 +9,10 @@ import {
   providerRequest,
 } from "../src/sandbox/outbound.ts";
 
+const issuedAt = DateTime.makeUnsafe("2026-10-26T08:00:00.000Z");
+
 const credentials = new SandboxCredentials({
+  issuedAt,
   github: Option.some(Redacted.make("ghs_installation-token")),
   providers: [
     new ProviderGrant({
@@ -37,7 +40,7 @@ describe("sandbox outbound handlers", () => {
 
   it("denies every GitHub and provider host once the credentials are revoked", () => {
     const revoked = interceptionsFor(
-      new SandboxCredentials({ github: Option.none(), providers: [] }),
+      new SandboxCredentials({ issuedAt, github: Option.none(), providers: [] }),
       [],
     );
 

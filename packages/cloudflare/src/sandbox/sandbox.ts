@@ -1,5 +1,5 @@
 import { CloudflareImageName } from "@usine/core/worker";
-import { DateTime, Duration, Effect, Layer, Option, Schema } from "effect";
+import { DateTime, Duration, Effect, Layer, Option, Schema, Semaphore } from "effect";
 import { HttpServer } from "effect/unstable/http";
 import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi";
 import {
@@ -20,6 +20,7 @@ import {
   sandboxGroup,
   type SandboxName,
   SandboxNotFound,
+  StaleCredentials,
   Stopped,
 } from "../api/api.ts";
 import { DRAIN_MARKER } from "../api/harness.ts";
@@ -134,6 +135,26 @@ const intercept = Effect.fn("Sandbox.intercept")(function* (
   });
 });
 
+/** Fails with `StaleCredentials` if `sandbox` holds credentials issued after `credentials`. */
+const refuseStale = Effect.fn("Sandbox.refuseStale")(function* (
+  sandbox: StoredSandbox,
+  credentials: SandboxCredentials,
+) {
+  const current = sandbox.credentials.issuedAt;
+  if (!DateTime.isLessThan(credentials.issuedAt, current)) return;
+  yield* Effect.logWarning("Refused credentials issued before the ones the sandbox holds", {
+    sandbox: sandbox.name,
+    attempt: sandbox.attempt,
+    issuedAt: DateTime.formatIso(credentials.issuedAt),
+    current: DateTime.formatIso(current),
+  });
+  return yield* new StaleCredentials({
+    name: sandbox.name,
+    issuedAt: credentials.issuedAt,
+    current,
+  });
+});
+
 /**
  * Applies `change` to the sandbox as it's stored now, saves the result, and returns it, or fails
  * with `SandboxNotFound` if the sandbox was destroyed.
@@ -191,6 +212,7 @@ const create = Effect.fn("Sandbox.create")(function* (name: SandboxName, request
       attempt: existing.value.attempt,
     });
   }
+  if (Option.isSome(existing)) yield* refuseStale(existing.value, request.credentials);
   const images = yield* container.images;
   const image = images[request.image];
   if (image === undefined) {
@@ -247,6 +269,7 @@ const credentials = Effect.fn("Sandbox.credentials")(function* (
 ) {
   yield* Effect.annotateCurrentSpan({ sandbox: name });
   const sandbox = yield* runningSandboxFor(name);
+  yield* refuseStale(sandbox, renewed);
   yield* intercept(name, renewed).pipe(Effect.mapError(unavailable(name)));
   const now = yield* DateTime.now;
   const extended = yield* updateStored(
@@ -261,6 +284,9 @@ const credentials = Effect.fn("Sandbox.credentials")(function* (
   yield* Effect.logInfo("Renewed the sandbox's credentials", {
     sandbox: name,
     attempt: sandbox.attempt,
+    issuedAt: DateTime.formatIso(renewed.issuedAt),
+    github: Option.isSome(renewed.github),
+    providers: renewed.providers.map(({ provider }) => provider).join(","),
     leaseUntil: DateTime.formatIso(extended.leaseUntil),
   });
   return yield* summarize(extended);
@@ -460,14 +486,20 @@ const healthHandlers = HttpApiBuilder.group(SandboxServedApi, "health", (routes)
 );
 
 const sandboxHandlers = HttpApiBuilder.group(SandboxServedApi, "sandbox", (routes) =>
-  routes
-    .handle("create", ({ params, payload }) => create(params.name, payload))
-    .handle("get", ({ params }) => get(params.name))
-    .handle("credentials", ({ params, payload }) => credentials(params.name, payload))
-    .handle("hold", ({ params }) => hold(params.name))
-    .handle("stop", ({ params }) => stop(params.name))
-    .handle("destroy", ({ params }) => destroy(params.name))
-    .handle("process", ({ params }) => processStatus(params.name, params.process)),
+  Effect.gen(function* () {
+    // A create or credential change registers handlers, then stores their credentials. One runs
+    // at a time, so another change's handlers never replace them in between.
+    const credentialChanges = yield* Semaphore.make(1);
+    const oneAtATime = credentialChanges.withPermits(1);
+    return routes
+      .handle("create", ({ params, payload }) => oneAtATime(create(params.name, payload)))
+      .handle("get", ({ params }) => get(params.name))
+      .handle("credentials", ({ params, payload }) => oneAtATime(credentials(params.name, payload)))
+      .handle("hold", ({ params }) => hold(params.name))
+      .handle("stop", ({ params }) => stop(params.name))
+      .handle("destroy", ({ params }) => destroy(params.name))
+      .handle("process", ({ params }) => processStatus(params.name, params.process));
+  }),
 );
 
 /**

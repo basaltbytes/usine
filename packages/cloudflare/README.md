@@ -36,7 +36,7 @@ Every request needs the `CF-Access-Client-Id` and `CF-Access-Client-Secret` head
 | `GET /v1/sandboxes?owner=<instance>.<worker>` | The sandboxes of one usine instance's Worker, each with whether its container runs. |
 | `PUT /v1/sandboxes/<name>` | Creates the sandbox of an Attempt, or returns it if it already runs that Attempt. |
 | `GET /v1/sandboxes/<name>` | One sandbox. |
-| `PUT /v1/sandboxes/<name>/credentials` | Replaces the handlers' credentials, such as a renewed installation token. |
+| `PUT /v1/sandboxes/<name>/credentials` | Replaces the handlers' credentials, such as a renewed installation token, or revokes them with none. |
 | `POST /v1/sandboxes/<name>/hold` | Keeps the container running past its lease until the sandbox is destroyed. |
 | `POST /v1/sandboxes/<name>/stop` | Stops every command that still runs in the sandbox. |
 | `DELETE /v1/sandboxes/<name>` | Destroys the container and forgets the sandbox. |
@@ -45,6 +45,8 @@ Every request needs the `CF-Access-Client-Id` and `CF-Access-Client-Secret` head
 | `GET /v1/sandboxes/<name>/processes/<process>/attach?stdout=<n>&stderr=<n>` (WebSocket) | Resumes a command's output after the given byte offsets, then sends its exit code. |
 
 Each command runs as the `usine` user in `/home/usine`, with `HOME` set, since the platform passes a command only the image's `PATH`. It runs in its own session, with its process ID, output, and exit code in files under `/home/usine/.usine/processes/<process>`. If the stream that started a command closes, the command's stdin closes, and its output keeps going to the files, so a later request can attach or read its state. The Worker closes the stream without an exit code when it can't read the command's output or exit code from the container, so the client attaches from the bytes it received.
+
+Each set of credentials carries `issuedAt`, the time usine issued it. A sandbox applies one create or credential change at a time, and refuses credentials issued before the ones it holds with status 409 and `StaleCredentials`. A renewal that's still on its way when usine revokes the credentials therefore can't restore them.
 
 A keepalive alarm keeps the container running for two hours after the last create, credential renewal, or command, then lets the platform stop it after ten minutes of inactivity. A held sandbox keeps running until it's destroyed: usine holds the sandbox of a checkout that it keeps, such as one with unpushed work. A stopped container loses its disk.
 

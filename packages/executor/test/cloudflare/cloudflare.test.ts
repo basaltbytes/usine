@@ -135,6 +135,7 @@ const runningSandbox = (
   draining: false,
   github: [],
   providers: [],
+  issued: [],
   paths: new Set(paths),
   commands: [],
   stops: 0,
@@ -304,6 +305,14 @@ describe("cloudflare Worker", () => {
           null,
           `${TOKEN_PREFIX}2`,
         ]);
+        // Each change is issued after the one before, through the restart, so the Worker never
+        // takes a delayed renewal over the revocation that followed it.
+        assert.isTrue(
+          kept.issued.every(
+            (issued, index) => index === 0 || issued > (kept.issued[index - 1] ?? ""),
+          ),
+          kept.issued.join(", "),
+        );
         assert.isTrue(
           kept.stops >= 2,
           "reattachment stops the commands left from before the restart",

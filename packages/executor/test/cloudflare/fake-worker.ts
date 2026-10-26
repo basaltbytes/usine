@@ -12,7 +12,7 @@ import {
   outputFrame,
   Started,
 } from "@usine/cloudflare/stream";
-import { Effect, Option, Redacted, Schema } from "effect";
+import { DateTime, Effect, Option, Redacted, Schema } from "effect";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { type WebSocket as ServerSocket, WebSocketServer } from "ws";
@@ -35,6 +35,8 @@ export interface FakeSandbox {
   readonly github: Array<string | null>;
   /** The number of provider keys of each credential publication, in order. */
   readonly providers: Array<number>;
+  /** The `issuedAt` of each credential publication, in order, as ISO strings. */
+  readonly issued: Array<string>;
   /** The paths that exist in the sandbox's container. */
   readonly paths: Set<string>;
   /** The command lines it ran through its exec stream, in order. */
@@ -128,6 +130,24 @@ const defaultResponse = (
 
 const decodeCreate = Schema.decodeUnknownSync(Schema.toCodecJson(CreateSandbox));
 const decodeCredentials = Schema.decodeUnknownSync(Schema.toCodecJson(SandboxCredentials));
+
+/**
+ * Records `credentials` as `sandbox`'s next publication, or returns the Worker's refusal of
+ * credentials issued before the last ones.
+ */
+const publish = (
+  sandbox: FakeSandbox,
+  credentials: SandboxCredentials,
+): Option.Option<Schema.Json> => {
+  const issuedAt = DateTime.formatIso(credentials.issuedAt);
+  const current = sandbox.issued.at(-1);
+  if (current !== undefined && issuedAt < current)
+    return Option.some({ _tag: "StaleCredentials", name: sandbox.name, issuedAt, current });
+  sandbox.github.push(Option.getOrNull(Option.map(credentials.github, Redacted.value)));
+  sandbox.providers.push(credentials.providers.length);
+  sandbox.issued.push(issuedAt);
+  return Option.none();
+};
 
 const summaryOf = (sandbox: FakeSandbox) => ({
   name: sandbox.name,
@@ -240,15 +260,14 @@ export const fakeWorker = Effect.gen(function* () {
             draining: false,
             github: [],
             providers: [],
+            issued: [],
             paths: new Set(),
             commands: [],
             stops: 0,
           } satisfies FakeSandbox);
+        const refused = publish(existing, created.credentials);
+        if (Option.isSome(refused)) return json(response, 409, refused.value);
         existing.running = true;
-        existing.github.push(
-          Option.getOrNull(Option.map(created.credentials.github, Redacted.value)),
-        );
-        existing.providers.push(created.credentials.providers.length);
         state.sandboxes.set(name, existing);
         return json(response, 200, summaryOf(existing));
       }
@@ -258,9 +277,8 @@ export const fakeWorker = Effect.gen(function* () {
       if (request.method === "PUT" && action === "credentials") {
         if (!sandbox.running)
           return json(response, 503, { _tag: "ContainerUnavailable", name, message: "stopped" });
-        const credentials = decodeCredentials(JSON.parse(body));
-        sandbox.github.push(Option.getOrNull(Option.map(credentials.github, Redacted.value)));
-        sandbox.providers.push(credentials.providers.length);
+        const refused = publish(sandbox, decodeCredentials(JSON.parse(body)));
+        if (Option.isSome(refused)) return json(response, 409, refused.value);
         return json(response, 200, summaryOf(sandbox));
       }
       if (request.method === "POST" && action === "hold") {

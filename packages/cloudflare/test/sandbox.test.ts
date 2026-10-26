@@ -11,24 +11,32 @@ import {
   fakeSandbox,
   finishedProcess,
   IMAGE,
+  ISSUED_AT,
   NAME,
   OWNER,
   storedSandbox,
   text,
 } from "./support.ts";
 
-const encodeCredentials = (token: string) => ({
+/** Returns the time usine issued credentials, `minutes` after the first. */
+const issuedAt = (minutes: number) =>
+  DateTime.formatIso(DateTime.add(DateTime.makeUnsafe(ISSUED_AT), { minutes }));
+
+const encodeCredentials = (token: string, issued = issuedAt(0)) => ({
+  issuedAt: issued,
   github: token,
   providers: [{ provider: "anthropic", credential: { _tag: "ApiKey", key: "sk-ant-key" } }],
 });
 
-const createBody = (attempt: string = ATTEMPT) =>
+const revocation = (issued: string) => JSON.stringify({ issuedAt: issued, providers: [] });
+
+const createBody = (attempt: string = ATTEMPT, issued = issuedAt(0)) =>
   JSON.stringify({
     owner: OWNER,
     attempt,
     image: IMAGE,
     instanceType: "standard-3",
-    credentials: encodeCredentials("ghs_first"),
+    credentials: encodeCredentials("ghs_first", issued),
   });
 
 const served = (allowedHosts?: ReadonlyArray<string>) => {
@@ -118,7 +126,7 @@ describe("sandbox routes", () => {
     const renewed = await call(
       "PUT",
       `/v1/sandboxes/${NAME}/credentials`,
-      JSON.stringify(encodeCredentials("ghs_second")),
+      JSON.stringify(encodeCredentials("ghs_second", issuedAt(1))),
     );
 
     expect(renewed.status).toBe(200);
@@ -134,7 +142,11 @@ describe("sandbox routes", () => {
 
   it.each([
     ["a reattachment's credentials", "", createBody()],
-    ["renewed credentials", "/credentials", JSON.stringify(encodeCredentials("ghs_second"))],
+    [
+      "renewed credentials",
+      "/credentials",
+      JSON.stringify(encodeCredentials("ghs_second", issuedAt(1))),
+    ],
   ])("keeps a hold that completes while it registers %s", async (_, path, body) => {
     const { state, call } = served();
     await call("PUT", `/v1/sandboxes/${NAME}`, createBody());
@@ -158,6 +170,73 @@ describe("sandbox routes", () => {
     expect(state.stored.value.held).toBe(true);
   });
 
+  it("keeps a revocation that arrives while an earlier renewal registers its handlers", async () => {
+    const { state, call } = served();
+    await call("PUT", `/v1/sandboxes/${NAME}`, createBody());
+    let registering: () => void = () => undefined;
+    const reached = new Promise<void>((resolve) => (registering = resolve));
+    let register: () => void = () => undefined;
+    const registered = new Promise<void>((resolve) => (register = resolve));
+    state.beforeIntercept = () => {
+      state.beforeIntercept = () => Effect.void;
+      registering();
+      return Effect.promise(() => registered);
+    };
+    const renewal = call(
+      "PUT",
+      `/v1/sandboxes/${NAME}/credentials`,
+      JSON.stringify(encodeCredentials("ghs_second", issuedAt(1))),
+    );
+    await reached;
+    // The executor stopped waiting for the renewal and revokes the credentials.
+    const revoked = call("PUT", `/v1/sandboxes/${NAME}/credentials`, revocation(issuedAt(2)));
+    await Promise.race([revoked, new Promise((resolve) => setTimeout(resolve, 50))]);
+    register();
+    const statuses = (await Promise.all([renewal, revoked])).map(({ status }) => status);
+
+    expect(statuses).toEqual([200, 200]);
+    assert(Option.isSome(state.stored));
+    expect(Option.isNone(state.stored.value.credentials.github)).toBe(true);
+    expect(state.stored.value.credentials.providers).toEqual([]);
+    expect(state.interceptions.slice(-5).map(({ _tag, host }) => `${_tag}:${host}`)).toEqual([
+      "Denied:github.com",
+      "Denied:api.github.com",
+      "Denied:anthropic.usine.internal",
+      "Denied:openai.usine.internal",
+      "Allowed:registry.npmjs.org",
+    ]);
+  });
+
+  it.each([
+    ["renewal", "/credentials", JSON.stringify(encodeCredentials("ghs_second", issuedAt(1)))],
+    ["reattachment", "", createBody(ATTEMPT, issuedAt(1))],
+  ])(
+    "refuses a %s issued before a revocation that reached the sandbox first",
+    async (_, path, body) => {
+      const { state, call } = served();
+      await call("PUT", `/v1/sandboxes/${NAME}`, createBody());
+      const revoked = await call(
+        "PUT",
+        `/v1/sandboxes/${NAME}/credentials`,
+        revocation(issuedAt(2)),
+      );
+      const registered = state.interceptions.length;
+      const stale = await call("PUT", `/v1/sandboxes/${NAME}${path}`, body);
+
+      expect(revoked.status).toBe(200);
+      expect(stale.status).toBe(409);
+      expect(await stale.json()).toMatchObject({
+        _tag: "StaleCredentials",
+        issuedAt: issuedAt(1),
+        current: issuedAt(2),
+      });
+      expect(state.interceptions).toHaveLength(registered);
+      assert(Option.isSome(state.stored));
+      expect(Option.isNone(state.stored.value.credentials.github)).toBe(true);
+      expect(DateTime.formatIso(state.stored.value.credentials.issuedAt)).toBe(issuedAt(2));
+    },
+  );
+
   it("refuses to renew the credentials of a sandbox whose container stopped", async () => {
     const { state, call } = served();
     await call("PUT", `/v1/sandboxes/${NAME}`, createBody());
@@ -165,7 +244,7 @@ describe("sandbox routes", () => {
     const response = await call(
       "PUT",
       `/v1/sandboxes/${NAME}/credentials`,
-      JSON.stringify(encodeCredentials("ghs_second")),
+      JSON.stringify(encodeCredentials("ghs_second", issuedAt(1))),
     );
 
     expect(response.status).toBe(503);

@@ -24,8 +24,12 @@ export const OWNER = SandboxOwner.make("github-app-1.cf-one");
 export const ATTEMPT = AttemptId.make("run-1/execute/1");
 export const IMAGE = CloudflareImageName.make("usine");
 
+/** When usine issued the credentials of `storedSandbox`. */
+export const ISSUED_AT = "2026-10-26T08:00:00.000Z";
+
 const credentials = (token = "ghs_first") =>
   new SandboxCredentials({
+    issuedAt: DateTime.makeUnsafe(ISSUED_AT),
     github: Option.some(Redacted.make(token)),
     providers: [
       new ProviderGrant({

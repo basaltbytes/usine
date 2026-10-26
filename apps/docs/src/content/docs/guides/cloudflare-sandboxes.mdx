@@ -151,6 +151,8 @@ A provider handler forwards only the requests that Claude Code and Codex send: A
 
 While a sandbox waits for a restart, or keeps a checkout after its attempt, its handlers hold no credential, and they refuse its requests for GitHub and the providers with status 403. A sandbox that preflight creates never gets a credential.
 
+A token renewal that's still on its way when the executor revokes the credentials can't restore them. Each credential change carries the time the executor issued it. The Worker applies a sandbox's changes one at a time, and refuses credentials issued before the ones the sandbox holds.
+
 ## Troubleshooting
 
 - **The Worker refused the Access service token**: the variables that `access_client_id_env` and `access_client_secret_env` name don't match the Worker's `ACCESS_CLIENT_ID` and `ACCESS_CLIENT_SECRET` secrets. Fix the values, then restart `usine up`.

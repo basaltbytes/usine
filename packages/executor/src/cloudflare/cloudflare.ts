@@ -30,6 +30,7 @@ import { AttemptRuntime } from "@usine/durable/attempt-runtime";
 import {
   Array as Arr,
   Cache,
+  DateTime,
   Deferred,
   Effect,
   Exit,
@@ -161,8 +162,13 @@ const brainGap = (
   });
 
 /** Returns the sandbox credentials of a running Attempt: `github` and every provider key of `address`. */
-const credentialsFor = (address: CloudflareWorkerAddress, github: Redacted.Redacted<string>) =>
+const credentialsFor = (
+  address: CloudflareWorkerAddress,
+  github: Redacted.Redacted<string>,
+  issuedAt: DateTime.Utc,
+) =>
   new SandboxCredentials({
+    issuedAt,
     github: Option.some(github),
     providers: address.providers.map(
       ({ provider, apiKey }) =>
@@ -171,10 +177,11 @@ const credentialsFor = (address: CloudflareWorkerAddress, github: Redacted.Redac
   });
 
 /**
- * The credentials of a sandbox that runs no Attempt: a preflight's, or one that usine keeps. Its
- * outbound handlers refuse GitHub and every provider.
+ * Returns the credentials of a sandbox that runs no Attempt: a preflight's, or one that usine
+ * keeps. Its outbound handlers refuse GitHub and every provider.
  */
-const NO_CREDENTIALS = new SandboxCredentials({ github: Option.none(), providers: [] });
+const noCredentials = (issuedAt: DateTime.Utc) =>
+  new SandboxCredentials({ issuedAt, github: Option.none(), providers: [] });
 
 /** The message of the `InfraFailure` of an Attempt whose sandbox the platform stops. */
 const DRAIN_MESSAGE =
@@ -273,6 +280,20 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
         shellFor: (name) => new RemoteShell({ ssh: shell, sshEnvironment, destination: name }),
       });
     }
+
+    const lastIssued = yield* Ref.make(DateTime.makeUnsafe(0));
+    /**
+     * Returns the time to put on new sandbox credentials: now, or a millisecond after the last
+     * ones if the clock reads earlier. A sandbox refuses credentials older than the ones it holds,
+     * so this keeps a revocation later than the renewals before it.
+     */
+    const issueTime = Effect.gen(function* () {
+      const now = yield* DateTime.now;
+      return yield* Ref.modify(lastIssued, (last) => {
+        const issued = DateTime.max(now, DateTime.add(last, { milliseconds: 1 }));
+        return [issued, issued] as const;
+      });
+    });
 
     /** The sandboxes this process uses now; orphan reconciliation never destroys them. */
     const active = new Set<SandboxName>();
@@ -432,7 +453,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
     });
 
     /**
-     * Creates the sandbox `name` for `attempt` from the Worker's image with `NO_CREDENTIALS`, so
+     * Creates the sandbox `name` for `attempt` from the Worker's image without credentials, so
      * that it reaches neither GitHub nor a provider until `acquireSandbox` grants credentials.
      */
     const createSandbox = Effect.fn("CloudflareExecutor.createSandbox")(function* (
@@ -457,7 +478,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
             attempt,
             image: worker.address.image,
             instanceType: worker.address.instanceType,
-            credentials: NO_CREDENTIALS,
+            credentials: noCredentials(yield* issueTime),
           }),
         )
         .pipe(Effect.mapError(operationError(operation)));
@@ -483,7 +504,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
       yield* Effect.addFinalizer(() =>
         Effect.gen(function* () {
           if (yield* Ref.get(destroyed)) return;
-          yield* worker.client.credentials(name, NO_CREDENTIALS).pipe(
+          yield* worker.client.credentials(name, noCredentials(yield* issueTime)).pipe(
             Effect.tap(() => Effect.logInfo("Revoked the credentials of the kept sandbox", fields)),
             Effect.tapError((error) =>
               Effect.logError(
@@ -496,9 +517,12 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
         }),
       );
       const publish = (token: Redacted.Redacted<string>) =>
-        worker.client
-          .credentials(name, credentialsFor(worker.address, token))
-          .pipe(Effect.mapError(operationError(operation)));
+        issueTime.pipe(
+          Effect.flatMap((issuedAt) =>
+            worker.client.credentials(name, credentialsFor(worker.address, token, issuedAt)),
+          ),
+          Effect.mapError(operationError(operation)),
+        );
       const credential = yield* renewableCredential(
         credentialProvider.issue,
         repository,

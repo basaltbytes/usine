@@ -74,6 +74,8 @@ const reason = (failure: { readonly _tag: string }): string => {
       return "the sandbox doesn't exist";
     case "SandboxConflict":
       return "the sandbox exists for another Attempt";
+    case "StaleCredentials":
+      return "the sandbox holds credentials that usine issued later";
     case "ImageNotFound":
       return "the Worker has no image with that name";
     case "ContainerUnavailable":

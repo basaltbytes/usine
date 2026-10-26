@@ -63,6 +63,12 @@ const uniqueProviders = Schema.makeFilter<ReadonlyArray<ProviderGrant>>(
 export class SandboxCredentials extends Schema.Class<SandboxCredentials>(
   "@usine/cloudflare/SandboxCredentials",
 )({
+  /**
+   * When usine issued these credentials, later than any credentials it issued before. The sandbox
+   * refuses credentials issued before the ones it holds, so a delayed request can't restore
+   * credentials that a later request replaced or revoked.
+   */
+  issuedAt: Schema.DateTimeUtc,
   /** The Attempt's installation token, added to requests for `github.com` and `api.github.com`. */
   github: Schema.OptionFromOptionalKey(Schema.Redacted(Schema.NonEmptyString)),
   providers: Schema.Array(ProviderGrant).check(uniqueProviders),
@@ -152,6 +158,13 @@ export class SandboxConflict extends Schema.TaggedError<SandboxConflict>()(
   { httpApiStatus: 409 },
 ) {}
 
+/** The sandbox holds credentials issued at `current`, after the request's, which it refused. */
+export class StaleCredentials extends Schema.TaggedError<StaleCredentials>()(
+  "StaleCredentials",
+  { name: SandboxName, issuedAt: Schema.DateTimeUtc, current: Schema.DateTimeUtc },
+  { httpApiStatus: 409 },
+) {}
+
 /** The Worker's `containers[].images` has no image with this name. */
 export class ImageNotFound extends Schema.TaggedError<ImageNotFound>()(
   "ImageNotFound",
@@ -194,7 +207,7 @@ export const sandboxGroup = HttpApiGroup.make("sandbox").add(
     params: sandbox,
     payload: CreateSandbox.annotate(strict),
     success: SandboxSummary,
-    error: [SandboxConflict, ImageNotFound, ContainerUnavailable],
+    error: [SandboxConflict, StaleCredentials, ImageNotFound, ContainerUnavailable],
   }),
   HttpApiEndpoint.get("get", "/v1/sandboxes/:name", {
     params: sandbox,
@@ -205,7 +218,7 @@ export const sandboxGroup = HttpApiGroup.make("sandbox").add(
     params: sandbox,
     payload: SandboxCredentials.annotate(strict),
     success: SandboxSummary,
-    error: [SandboxNotFound, ContainerUnavailable],
+    error: [SandboxNotFound, StaleCredentials, ContainerUnavailable],
   }),
   HttpApiEndpoint.post("hold", "/v1/sandboxes/:name/hold", {
     params: sandbox,

@@ -259,7 +259,11 @@ describe("sandbox attach stream", () => {
       return Effect.gen(function* () {
         const client = yield* attachWhileReading(sandbox, (call) =>
           Effect.gen(function* () {
-            const revoked = yield* call("PUT", "/credentials", JSON.stringify({ providers: [] }));
+            const revoked = yield* call(
+              "PUT",
+              "/credentials",
+              JSON.stringify({ issuedAt: "2026-10-26T09:00:00.000Z", providers: [] }),
+            );
             const held = yield* call("POST", "/hold");
             expect([revoked.status, held.status]).toEqual([200, 200]);
           }),
