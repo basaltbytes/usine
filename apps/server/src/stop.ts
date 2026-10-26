@@ -154,6 +154,7 @@ const killProcess = Effect.fn("Cli.killProcess")(function* (
   pid: ProcessId,
   timeout: Duration.Duration,
 ) {
+  yield* Effect.annotateCurrentSpan({ command, pid });
   yield* signalProcess(pid, "SIGKILL");
   yield* Console.log(
     `usine (pid ${pid}) did not exit within ${Duration.format(timeout)}. Sent SIGKILL: the next start reattaches the running attempts.`,
