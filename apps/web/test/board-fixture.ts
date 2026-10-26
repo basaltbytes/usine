@@ -138,7 +138,7 @@ const pool = (
     cost:
       usd === null
         ? null
-        : new UsageCostView({ usd: UsdAmount.make(usd), estimate: name === "claudePlan" }),
+        : new UsageCostView({ usd: UsdAmount.make(usd), estimate: name !== "apiKeys" }),
     unpriced,
   });
 
@@ -317,12 +317,12 @@ const boardProject = () =>
                 attempt(2, minutesAgo(6), "running"),
               ]),
             ],
-            // The plan Run is priced; the implement Run is on the unpriced ChatGPT plan.
+            // The plan Run is priced; the implement Run is on the ChatGPT plan.
             {
               pools: [
                 pool("apiKeys", 1_500, 0.75),
                 pool("claudePlan", 20_000, 1.25),
-                pool("chatgptPlan", 5_800),
+                pool("chatgptPlan", 5_800, 0.4),
               ],
             },
           ),

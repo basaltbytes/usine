@@ -123,16 +123,12 @@ const runMillis = (summary: RunSummary): number =>
 
 /**
  * Sums the tokens and prices of `units`, each the sessions of one Run or Attempt. A unit is priced
- * if it has a session in a pool with a dollar rate and each such session has a price; ChatGPT plan
- * sessions have no dollar rate, so they add tokens but no cost.
+ * if it has a session and each of its sessions has a price.
  */
 const usageSummary = (units: ReadonlyArray<ReadonlyArray<SessionUsageView>>): UsageSummaryView => {
   const sessions = units.flat();
   const tokens = sum(sessions.map((session) => session.tokens));
-  const priced = units.filter((unit) => {
-    const rated = unit.filter(({ pool }) => pool !== "chatgptPlan");
-    return rated.length > 0 && rated.every(({ cost }) => cost !== null);
-  });
+  const priced = units.filter((unit) => unit.length > 0 && unit.every(({ cost }) => cost !== null));
   const usd = sum(
     priced.flatMap((unit) => unit.flatMap(({ cost }) => (cost === null ? [] : [cost.usd]))),
   );

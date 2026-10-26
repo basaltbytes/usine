@@ -1,7 +1,9 @@
+import { openAiPrice } from "@usine/agents/openai-prices";
 import {
   AgentSession,
   BillingPool,
   sessionPool,
+  type SessionTokensUpdated,
   TokenCount,
   UsdAmount,
 } from "@usine/core/agent/session";
@@ -14,8 +16,8 @@ import { Context, Effect, Layer, Option, Schema } from "effect";
 import type { AttemptView } from "./attempt.ts";
 
 /**
- * A dollar cost reported by a harness. `estimate` is true for Claude plan figures, which the Agent
- * SDK computes from bundled prices (ADR 0013).
+ * A dollar cost from a harness or from usine's OpenAI price table. `estimate` is true in the Claude
+ * and ChatGPT plans, which don't bill per token (ADR 0013).
  */
 export class UsageCostView extends Schema.Class<UsageCostView>("@usine/orchestrator/UsageCostView")(
   { usd: UsdAmount, estimate: Schema.Boolean },
@@ -29,7 +31,7 @@ export class SessionUsageView extends Schema.Class<SessionUsageView>(
   session: AgentSession,
   pool: BillingPool,
   tokens: TokenCount,
-  /** Null in the ChatGPT plan, which has no dollar rate, or if the harness priced nothing. */
+  /** Null if neither the harness nor the OpenAI price table priced the session. */
   cost: Schema.NullOr(UsageCostView),
 }) {}
 
@@ -38,15 +40,12 @@ export class PoolUsageView extends Schema.Class<PoolUsageView>("@usine/orchestra
   {
     pool: BillingPool,
     tokens: TokenCount,
-    /** Null in the ChatGPT plan, or if any session in the pool has no price. */
+    /** Null if any session in the pool has no price. */
     cost: Schema.NullOr(UsageCostView),
   },
 ) {}
 
-/**
- * The tokens a Run's Attempts used, per pool and session, with prices where a pool has a dollar
- * rate.
- */
+/** The tokens a Run's Attempts used, per pool and session, with their prices. */
 export class RunUsageView extends Schema.Class<RunUsageView>("@usine/orchestrator/RunUsageView")({
   tokens: TokenCount,
   /** In the order API keys, Claude plan, ChatGPT plan; unused pools are absent. */
@@ -61,15 +60,9 @@ export class TaskPoolUsageView extends Schema.Class<TaskPoolUsageView>(
 )({
   pool: BillingPool,
   tokens: TokenCount,
-  /**
-   * The cost of the priced sessions, or null in the ChatGPT plan or if no session in the pool has a
-   * price yet.
-   */
+  /** The cost of the priced sessions, or null if no session in the pool has a price yet. */
   cost: Schema.NullOr(UsageCostView),
-  /**
-   * Whether a session in a priced pool has no price yet, so `cost` is a lower bound. Always false
-   * in the ChatGPT plan.
-   */
+  /** Whether a session in the pool has no price yet, so `cost` is a lower bound. */
   unpriced: Schema.Boolean,
 }) {}
 
@@ -93,7 +86,7 @@ export class TaskUsageView extends Schema.Class<TaskUsageView>("@usine/orchestra
     pools: Schema.Array(TaskPoolUsageView),
     /**
      * The summed cost of the priced pools, or null if no pool has a price. It's an estimate if it
-     * includes the Claude plan, and a lower bound if a pool is `unpriced`.
+     * includes the Claude or ChatGPT plan, and a lower bound if a pool is `unpriced`.
      */
     cost: Schema.NullOr(UsageCostView),
   },
@@ -102,39 +95,65 @@ export class TaskUsageView extends Schema.Class<TaskUsageView>("@usine/orchestra
 const POOLS: ReadonlyArray<BillingPool> = ["apiKeys", "claudePlan", "chatgptPlan"];
 
 const priced = (pool: BillingPool, usd: Option.Option<UsdAmount>): UsageCostView | null =>
-  pool === "chatgptPlan"
-    ? null
-    : Option.match(usd, {
-        onNone: () => null,
-        onSome: (value) => new UsageCostView({ usd: value, estimate: pool === "claudePlan" }),
-      });
+  Option.match(usd, {
+    onNone: () => null,
+    onSome: (value) => new UsageCostView({ usd: value, estimate: pool !== "apiKeys" }),
+  });
+
+/** Returns the harness's price, or for a Codex session, the OpenAI table's price of its breakdown. */
+const sessionPrice = ({
+  session,
+  costUsd,
+  breakdown,
+}: SessionTokensUpdated): Option.Option<UsdAmount> =>
+  Option.isSome(costUsd) || session.brain.harness !== "codex"
+    ? costUsd
+    : Option.flatMap(breakdown, (tokens) => openAiPrice(session.brain.model, tokens));
+
+interface RunUsage {
+  readonly view: RunUsageView;
+  /** The models of Codex sessions with a token breakdown that the OpenAI price table lacks. */
+  readonly unknownModels: ReadonlySet<string>;
+}
 
 /**
  * Sums a Run's token reports per pool and for the Run, using each session's highest report because
  * reports are cumulative.
  */
-const runUsage = (reports: ReadonlyArray<TranscriptEntry>): RunUsageView => {
-  const highest = new Map<string, SessionUsageView>();
+const runUsage = (reports: ReadonlyArray<TranscriptEntry>): RunUsage => {
+  const highest = new Map<string, { attemptId: AttemptId; report: SessionTokensUpdated }>();
   for (const { attemptId, envelope } of reports) {
     const payload = envelope.payload;
     if (payload._tag !== "SessionEvent" || payload.event._tag !== "SessionTokensUpdated") continue;
-    const { session, totalTokens, costUsd } = payload.event;
-    const key = `${attemptId} ${session.id}`;
+    const key = `${attemptId} ${payload.event.session.id}`;
     const previous = highest.get(key);
-    if (previous !== undefined && previous.tokens >= totalTokens) continue;
-    const pool = sessionPool(session);
-    highest.set(
-      key,
-      new SessionUsageView({
-        attemptId,
-        session,
-        pool,
-        tokens: totalTokens,
-        cost: priced(pool, costUsd),
-      }),
-    );
+    if (previous !== undefined && previous.report.totalTokens >= payload.event.totalTokens)
+      continue;
+    highest.set(key, { attemptId, report: payload.event });
   }
-  const sessions = [...highest.values()];
+  const latest = [...highest.values()].map((entry) => ({
+    ...entry,
+    price: sessionPrice(entry.report),
+  }));
+  const sessions = latest.map(({ attemptId, report, price }) => {
+    const pool = sessionPool(report.session);
+    return new SessionUsageView({
+      attemptId,
+      session: report.session,
+      pool,
+      tokens: report.totalTokens,
+      cost: priced(pool, price),
+    });
+  });
+  const unknownModels = new Set(
+    latest.flatMap(({ report, price }) =>
+      Option.isNone(price) &&
+      report.session.brain.harness === "codex" &&
+      Option.isSome(report.breakdown)
+        ? [report.session.brain.model]
+        : [],
+    ),
+  );
   const pools = POOLS.flatMap((pool) => {
     const members = sessions.filter((session) => session.pool === pool);
     if (members.length === 0) return [];
@@ -152,11 +171,14 @@ const runUsage = (reports: ReadonlyArray<TranscriptEntry>): RunUsageView => {
       }),
     ];
   });
-  return new RunUsageView({
-    tokens: TokenCount.make(sessions.reduce((sum, { tokens }) => sum + tokens, 0)),
-    pools,
-    sessions,
-  });
+  return {
+    view: new RunUsageView({
+      tokens: TokenCount.make(sessions.reduce((sum, { tokens }) => sum + tokens, 0)),
+      pools,
+      sessions,
+    }),
+    unknownModels,
+  };
 };
 
 /**
@@ -195,7 +217,7 @@ export const taskUsage = (
             ? Option.none()
             : Option.some(UsdAmount.make(costs.reduce((sum, usd) => sum + usd, 0))),
         ),
-        unpriced: pool !== "chatgptPlan" && costs.length < members.length,
+        unpriced: costs.length < members.length,
       }),
     ];
   });
@@ -219,6 +241,7 @@ export const taskUsage = (
 const makeRunUsageReader = Effect.gen(function* () {
   const runs = yield* RunReader;
   const ended = yield* Effect.sync(() => new Map<AttemptId, ReadonlyArray<TranscriptEntry>>());
+  const loggedModels = yield* Effect.sync(() => new Set<string>());
 
   const attemptReports = Effect.fn("RunUsageReader.attemptReports")(function* (attempt: Attempt) {
     const cached = ended.get(attempt.id);
@@ -231,7 +254,15 @@ const makeRunUsageReader = Effect.gen(function* () {
   const read = Effect.fn("RunUsageReader.read")(function* (snapshot: RunUsageSource) {
     yield* Effect.annotateCurrentSpan({ runId: snapshot.run.id });
     const attempts = yield* Effect.forEach(snapshot.attempts, attemptReports, { concurrency: 4 });
-    const usage = runUsage(attempts.flatMap(({ reports }) => reports));
+    const { view: usage, unknownModels } = runUsage(attempts.flatMap(({ reports }) => reports));
+    for (const model of unknownModels) {
+      if (loggedModels.has(model)) continue;
+      loggedModels.add(model);
+      yield* Effect.logWarning(
+        "The OpenAI price table has no rates for a Codex model, so its sessions have no cost",
+        { model, runId: snapshot.run.id },
+      );
+    }
     yield* Effect.logDebug("Read Run usage", {
       runId: snapshot.run.id,
       sessions: usage.sessions.length,
@@ -249,7 +280,8 @@ type RunUsageSource = Pick<RunSnapshot, "run" | "attempts">;
 
 /**
  * Reads a Run's usage from each session's highest token report. Caches the reports of Attempts with
- * an outcome and rereads running Attempts on every call.
+ * an outcome and rereads running Attempts on every call. Logs one warning per Codex model that the
+ * OpenAI price table lacks.
  */
 export class RunUsageReader extends Context.Service<
   RunUsageReader,

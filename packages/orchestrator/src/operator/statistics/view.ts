@@ -69,7 +69,7 @@ export class TaskTimeView extends Schema.Class<TaskTimeView>("@usine/orchestrato
   runs: Schema.Array(LoopRunTimeView),
 }) {}
 
-/** The median cost of a task. `estimate` is true if a session is in the Claude plan. */
+/** The median cost of a task. `estimate` is true if a session is in the Claude or ChatGPT plan. */
 export class TaskCostView extends Schema.Class<TaskCostView>("@usine/orchestrator/TaskCostView")({
   medianUsd: UsdAmount,
   estimate: Schema.Boolean,
@@ -150,9 +150,8 @@ export class PoolTokensView extends Schema.Class<PoolTokensView>(
 )({ pool: BillingPool, tokens: TokenCount }) {}
 
 /**
- * The cost of the priced Runs or Attempts: those with a session in the API keys or Claude plan pool
- * and a price for each such session. ChatGPT plan sessions have no dollar rate and add no cost.
- * `estimate` is true if a priced session is in the Claude plan.
+ * The cost of the priced Runs or Attempts: those with a price for each session. `estimate` is true
+ * if a priced session is in the Claude or ChatGPT plan.
  */
 export class CostSummaryView extends Schema.Class<CostSummaryView>(
   "@usine/orchestrator/CostSummaryView",

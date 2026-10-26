@@ -1,4 +1,4 @@
-import { TokenCount, UsdAmount } from "@usine/core/agent/session";
+import { TokenBreakdown, TokenCount, UsdAmount } from "@usine/core/agent/session";
 import { flow, Option, Schema } from "effect";
 import type { CodexTokenUsage } from "../protocol/codex.ts";
 import { UsageCount } from "../protocol/count.ts";
@@ -106,3 +106,12 @@ export const claudeTokenMeter = () => {
  */
 export const codexThreadTokens = (total: CodexTokenUsage["tokenUsage"]["total"]): TokenCount =>
   TokenCount.make(total.outputTokens + Math.max(0, total.inputTokens - total.cachedInputTokens));
+
+/** Returns a Codex thread's tokens per billing rate. */
+export const codexTokenBreakdown = (total: CodexTokenUsage["tokenUsage"]["total"]) =>
+  new TokenBreakdown({
+    input: Math.max(0, total.inputTokens - total.cachedInputTokens - total.cacheWriteInputTokens),
+    cachedInput: total.cachedInputTokens,
+    cacheWrite: total.cacheWriteInputTokens,
+    output: total.outputTokens,
+  });

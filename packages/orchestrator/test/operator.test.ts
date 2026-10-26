@@ -40,6 +40,7 @@ import {
   ParentSession,
   SessionTokensUpdated,
   TextOutput,
+  TokenBreakdown,
   TokenCount,
   ToolStarted,
   UsdAmount,
@@ -321,7 +322,8 @@ const gatewayClaudeChild = new ChildSession({
   gatewayCredential: Option.some("api-key"),
 });
 /**
- * Returns transcript row `sequence` of `attempt`, where `session` reports `tokens` so far at `usd`.
+ * Returns transcript row `sequence` of `attempt`, where `session` reports `tokens` so far at `usd`,
+ * split per billing rate as `breakdown`.
  */
 const tokenReport = (
   attempt: AttemptId,
@@ -329,6 +331,7 @@ const tokenReport = (
   tokens: number,
   usd: number | null,
   sequence: number,
+  breakdown: Option.Option<TokenBreakdown> = Option.none(),
 ) =>
   new TranscriptEntry({
     sequence: TranscriptSequence.make(sequence),
@@ -344,6 +347,7 @@ const tokenReport = (
           session,
           totalTokens: TokenCount.make(tokens),
           costUsd: usd === null ? Option.none() : Option.some(UsdAmount.make(usd)),
+          breakdown,
         }),
       }),
     }),
@@ -351,20 +355,31 @@ const tokenReport = (
   });
 /**
  * Returns the token reports that the usage query returns: each session's reports, including the
- * highest.
+ * highest. Codex reports no price, so the OpenAI price table prices its breakdown at $0.10.
  */
-const usageReports = (
-  [
-    [attemptId, apiParent, 1_000, 0.5],
-    [attemptId, apiParent, 1_500, 0.75],
-    [attemptId, claudeChild, 20_000, 1.25],
-    [retryAttemptId, planParent, 800, 0.3],
-    [retryAttemptId, codexChild, 5_000, null],
-    [retryAttemptId, gatewayClaudeChild, 3_000, 0.25],
-  ] as const
-).map(([attempt, session, tokens, usd], index) =>
-  tokenReport(attempt, session, tokens, usd, 1_000 + index),
-);
+const usageReports = [
+  ...(
+    [
+      [attemptId, apiParent, 1_000, 0.5],
+      [attemptId, apiParent, 1_500, 0.75],
+      [attemptId, claudeChild, 20_000, 1.25],
+      [retryAttemptId, planParent, 800, 0.3],
+    ] as const
+  ).map(([attempt, session, tokens, usd], index) =>
+    tokenReport(attempt, session, tokens, usd, 1_000 + index),
+  ),
+  tokenReport(
+    retryAttemptId,
+    codexChild,
+    5_000,
+    null,
+    1_004,
+    Option.some(
+      new TokenBreakdown({ input: 2_500, cachedInput: 100_000, cacheWrite: 0, output: 2_500 }),
+    ),
+  ),
+  tokenReport(retryAttemptId, gatewayClaudeChild, 3_000, 0.25, 1_005),
+];
 
 interface RecordedApproval {
   readonly runId: RunId;
@@ -958,7 +973,7 @@ describe("Operator", () => {
             [
               ["apiKeys", 4_500, { usd: 1, estimate: false }],
               ["claudePlan", 20_000, { usd: 1.25, estimate: true }],
-              ["chatgptPlan", 5_800, null],
+              ["chatgptPlan", 5_800, { usd: 0.4, estimate: true }],
             ],
           );
           // The Claude Code child on the local Worker used the Claude plan login; the one on the
@@ -982,8 +997,8 @@ describe("Operator", () => {
             [
               [attemptId, "api-parent", "apiKeys", 1_500, { usd: 0.75, estimate: false }],
               [attemptId, "claude-child", "claudePlan", 20_000, { usd: 1.25, estimate: true }],
-              [retryAttemptId, "plan-parent", "chatgptPlan", 800, null],
-              [retryAttemptId, "codex-child", "chatgptPlan", 5_000, null],
+              [retryAttemptId, "plan-parent", "chatgptPlan", 800, { usd: 0.3, estimate: true }],
+              [retryAttemptId, "codex-child", "chatgptPlan", 5_000, { usd: 0.1, estimate: true }],
               [
                 retryAttemptId,
                 "gateway-claude-child",
@@ -1028,9 +1043,9 @@ describe("Operator", () => {
               pools: [
                 ["apiKeys", 4_500, 1, false],
                 ["claudePlan", 20_000, 1.25, false],
-                ["chatgptPlan", 5_800, null, false],
+                ["chatgptPlan", 5_800, 0.4, false],
               ],
-              cost: { usd: 2.25, estimate: true },
+              cost: { usd: 2.65, estimate: true },
             },
           );
           assert.deepStrictEqual(usageQueries, [

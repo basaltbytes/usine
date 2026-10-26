@@ -293,7 +293,7 @@ const session = (
     cost:
       usd === null
         ? null
-        : new UsageCostView({ usd: UsdAmount.make(usd), estimate: pool === "claudePlan" }),
+        : new UsageCostView({ usd: UsdAmount.make(usd), estimate: pool !== "apiKeys" }),
   });
 const usageOf = (sessions: ReadonlyArray<SessionUsageView>) =>
   new RunUsageView({
@@ -303,7 +303,7 @@ const usageOf = (sessions: ReadonlyArray<SessionUsageView>) =>
   });
 const usage = new Map([
   [implemented.run.id, usageOf([session("implemented/1", "claudePlan", 100_000, 2)])],
-  [firstReview.run.id, usageOf([session("first-review/1", "chatgptPlan", 50_000, null, gpt)])],
+  [firstReview.run.id, usageOf([session("first-review/1", "chatgptPlan", 50_000, 0.5, gpt)])],
   [
     fixed.run.id,
     usageOf([
@@ -312,13 +312,14 @@ const usage = new Map([
       session("fixed/3", "apiKeys", 30_000, 1.5),
     ]),
   ],
+  // Recorded before Codex sessions reported a token breakdown, so it has no price.
   [secondReview.run.id, usageOf([session("second-review/1", "chatgptPlan", 40_000, null, gpt)])],
   [abandoned.run.id, usageOf([session("abandoned/1", "apiKeys", 9_000, 1)])],
-  // A ChatGPT plan parent with a priced Claude plan child.
+  // A ChatGPT plan parent with a Claude plan child.
   [
     RunId.make("only-review"),
     usageOf([
-      session("only-review/1", "chatgptPlan", 10_000, null, gpt),
+      session("only-review/1", "chatgptPlan", 10_000, 0.25, gpt),
       session("only-review/1", "claudePlan", 2_000, 0.25),
     ]),
   ],
@@ -566,7 +567,7 @@ describe("Run statistics", () => {
     assert.isNull(durationSummary([]));
   });
 
-  it("prices Runs whose dollar-rate sessions all have a price, per Loop", () => {
+  it("prices Runs whose sessions all have a price, per Loop", () => {
     const cost = (loop: LoopName) => week.loops.find((group) => group.loop === loop)?.usage.cost;
     // The Claude plan Run and the API key Run; the canceled Run has no session.
     assert.deepStrictEqual(
@@ -575,8 +576,11 @@ describe("Run statistics", () => {
     );
     // One API key session has no price.
     assert.isNull(cost(actOnFindings));
-    // Only the ChatGPT plan Run whose Claude plan child has a price.
-    assert.deepStrictEqual([cost(reviewPr)?.usd, cost(reviewPr)?.priced], [0.25, 1]);
+    // The ChatGPT plan Runs with a price, one with a Claude plan child; the other has none.
+    assert.deepStrictEqual(
+      [cost(reviewPr)?.usd, cost(reviewPr)?.estimate, cost(reviewPr)?.priced],
+      [1, true, 2],
+    );
   });
 
   it("breaks down Runs per Loop and Agent, and Attempts per harness, model, and effort", () => {

@@ -680,7 +680,7 @@ describe("Task usage", () => {
       cost:
         usd === null
           ? null
-          : new UsageCostView({ usd: UsdAmount.make(usd), estimate: pool === "claudePlan" }),
+          : new UsageCostView({ usd: UsdAmount.make(usd), estimate: pool !== "apiKeys" }),
     });
   /**
    * Returns a Run's usage as `RunUsageReader` reads it: a pool has no price while a session has
@@ -696,11 +696,11 @@ describe("Task usage", () => {
           pool,
           tokens: TokenCount.make(members.reduce((sum, { tokens }) => sum + tokens, 0)),
           cost:
-            pool === "chatgptPlan" || costs.length < members.length
+            costs.length < members.length
               ? null
               : new UsageCostView({
                   usd: UsdAmount.make(costs.reduce((sum, { usd }) => sum + usd, 0)),
-                  estimate: pool === "claudePlan",
+                  estimate: pool !== "apiKeys",
                 }),
         });
       }),
@@ -718,7 +718,7 @@ describe("Task usage", () => {
   const priced = RunId.make("priced");
   const chatgpt = RunId.make("chatgpt");
 
-  it("adds up a priced Run and a ChatGPT plan Run: time, tokens, pools, and the priced dollars", () => {
+  it("adds up an API key and Claude plan Run and a ChatGPT plan Run: time, tokens, pools, and dollars", () => {
     const usage = taskUsage(
       [
         {
@@ -748,8 +748,8 @@ describe("Task usage", () => {
         [
           chatgpt,
           runUsage([
-            session("chatgpt-1", "chatgptPlan", 800, null),
-            session("chatgpt-2", "chatgptPlan", 5_000, null),
+            session("chatgpt-1", "chatgptPlan", 800, 0.3),
+            session("chatgpt-2", "chatgptPlan", 5_000, 0.1),
           ]),
         ],
       ]),
@@ -758,13 +758,12 @@ describe("Task usage", () => {
     assert.deepStrictEqual(usage.runningSince, ["2026-10-20T12:10:00.000Z"]);
     assert.strictEqual(usage.unmeasured, 1);
     assert.strictEqual(usage.tokens, 27_300);
-    // The ChatGPT plan has no dollar rate, so its usage isn't counted as missing a price.
     assert.deepStrictEqual(pools(usage), [
       ["apiKeys", 1_500, 0.75, false],
       ["claudePlan", 20_000, 1.25, false],
-      ["chatgptPlan", 5_800, null, false],
+      ["chatgptPlan", 5_800, 0.4, false],
     ]);
-    assert.deepStrictEqual({ ...usage.cost }, { usd: 2, estimate: true });
+    assert.deepStrictEqual({ ...usage.cost }, { usd: 2.4, estimate: true });
   });
 
   it("keeps the priced dollars when a Run at work has no price yet, and says the pool is unpriced", () => {
@@ -797,7 +796,7 @@ describe("Task usage", () => {
     assert.deepStrictEqual({ ...usage.cost }, { usd: 3.25, estimate: true });
   });
 
-  it("has no cost when no session in a pool with a dollar rate has a price", () => {
+  it("has no cost when no session has a price", () => {
     const usage = taskUsage(
       [{ id: chatgpt, attempts: [] }],
       new Map([
@@ -812,7 +811,7 @@ describe("Task usage", () => {
     );
     assert.deepStrictEqual(pools(usage), [
       ["apiKeys", 400, null, true],
-      ["chatgptPlan", 300, null, false],
+      ["chatgptPlan", 300, null, true],
     ]);
     assert.strictEqual(usage.cost, null);
   });

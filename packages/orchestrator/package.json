@@ -95,6 +95,7 @@
   "dependencies": {
     "@effect/platform-node": "catalog:",
     "@effect/platform-node-shared": "catalog:",
+    "@usine/agents": "workspace:*",
     "@usine/config": "workspace:*",
     "@usine/core": "workspace:*",
     "@usine/durable": "workspace:*",
@@ -105,7 +106,6 @@
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
-    "@usine/agents": "workspace:*",
     "@usine/gateway": "workspace:*",
     "@usine/tsconfig": "workspace:*",
     "effect": "catalog:",

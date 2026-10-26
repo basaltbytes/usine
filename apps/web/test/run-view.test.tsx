@@ -387,7 +387,11 @@ describe("Run work facts", () => {
         tokens: TokenCount.make(20_000),
         cost: cost(1.25, true),
       }),
-      new PoolUsageView({ pool: "chatgptPlan", tokens: TokenCount.make(5_800), cost: null }),
+      new PoolUsageView({
+        pool: "chatgptPlan",
+        tokens: TokenCount.make(5_800),
+        cost: cost(0.4, true),
+      }),
     ],
     sessions: [
       new SessionUsageView({
@@ -409,7 +413,7 @@ describe("Run work facts", () => {
         session: childSession("codex", "reviewer", "codex", "gpt-5.6-sol"),
         pool: "chatgptPlan",
         tokens: TokenCount.make(5_800),
-        cost: null,
+        cost: cost(0.4, true),
       }),
     ],
   });
@@ -456,19 +460,19 @@ describe("Run work facts", () => {
     assert.notInclude(waiting, "tokens");
   });
 
-  it("prices only pools with a dollar rate, marks the Claude plan's figure as an estimate, and lists each session under its Attempt", () => {
+  it("prices each pool, marks the plans' figures as estimates, and lists each session under its Attempt", () => {
     const markup = renderToStaticMarkup(
       <UsageBreakdown usage={usage} attempts={twoAttempts.attempts} />,
     );
     const text = markup.replaceAll(/<[^>]+>/gu, " ").replaceAll(/\s+/gu, " ");
     assert.include(text, "API keys 1,500 $0.75 Claude plan");
     assert.include(text, "Claude plan 20,000 $1.25 estimate");
-    assert.include(text, "ChatGPT plan 5,800 No dollar rate");
+    assert.include(text, "ChatGPT plan 5,800 $0.40 estimate");
     assert.include(
       text,
       "Attempt 1 Parent openai/gpt-5.5 1,500 $0.75 developer claude-opus-4-7 20,000 $1.25 estimate",
     );
-    assert.include(text, "Attempt 2 reviewer gpt-5.6-sol 5,800 Tokens are");
+    assert.include(text, "Attempt 2 reviewer gpt-5.6-sol 5,800 $0.40 estimate Tokens are");
   });
 });
 

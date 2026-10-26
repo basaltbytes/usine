@@ -33,8 +33,8 @@ type PoolLine = PoolUsageView | TaskPoolUsageView;
 const unpriced = (pool: PoolLine): boolean => "unpriced" in pool && pool.unpriced;
 
 /**
- * Renders tokens per billing pool, with a price if the pool has a dollar rate. A Task pool with
- * unpriced usage shows its price as `at least`.
+ * Renders tokens per billing pool, with a price if the pool has one. A Task pool with unpriced
+ * usage shows its price as `at least`.
  */
 export const PoolBreakdown = ({ pools }: { readonly pools: ReadonlyArray<PoolLine> }) => {
   const lowerBound = pools.some((pool) => unpriced(pool) && pool.cost !== null);
@@ -48,16 +48,10 @@ export const PoolBreakdown = ({ pools }: { readonly pools: ReadonlyArray<PoolLin
             {count.format(pool.tokens)}
           </span>
           <span className="text-right">
-            {pool.pool === "chatgptPlan" ? (
-              <span className="text-muted-foreground">No dollar rate</span>
-            ) : (
-              <>
-                {unpriced(pool) && pool.cost !== null && (
-                  <span className="text-muted-foreground">at least </span>
-                )}
-                <Cost cost={pool.cost} />
-              </>
+            {unpriced(pool) && pool.cost !== null && (
+              <span className="text-muted-foreground">at least </span>
             )}
+            <Cost cost={pool.cost} />
           </span>
         </div>
       ))}
@@ -103,7 +97,8 @@ export const UsageBreakdown = ({
       })}
     </section>
     <p className="text-muted-foreground">
-      Tokens are output and uncached input. Dollars are the price each harness reports.
+      Tokens are output and uncached input. Dollars are the price each harness reports, or for
+      Codex, the OpenAI API price.
     </p>
   </>
 );
