@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,12 +7,19 @@ import { fileURLToPath } from "node:url";
 import { NodeServices } from "@effect/platform-node";
 import { InstanceDirectory } from "@usine/core/instance";
 import { RunId } from "@usine/core/run";
-import { Duration, Effect, Layer, Option, Schema } from "effect";
+import { DateTime, Duration, Effect, Layer, Option, Schema } from "effect";
 import { FetchHttpClient, type HttpClient } from "effect/unstable/http";
 import { afterEach, assert, describe, it } from "vitest";
 import { LifecycleOptions, Port, SERVER_HOST, type UpLogLevel } from "../src/cli.ts";
 import { startDetached } from "../src/detach.ts";
-import { InstanceLaunch, instanceFiles } from "../src/instance/record.ts";
+import { holdInstance } from "../src/instance/lock.ts";
+import { ListeningPortsError } from "../src/instance/ports.ts";
+import {
+  InstanceLaunch,
+  InstanceRecord,
+  ProcessId,
+  instanceFiles,
+} from "../src/instance/record.ts";
 import { probeInstance } from "../src/instance/state.ts";
 import { restart } from "../src/restart.ts";
 import { stop } from "../src/stop.ts";
@@ -98,6 +105,9 @@ const runCli = (directory: InstanceDirectory, args: ReadonlyArray<string>) =>
     );
   });
 
+const pid1OfAnotherUser =
+  process.platform === "linux" && statSync("/proc/1").uid !== process.getuid?.();
+
 const alive = (pid: number) => {
   try {
     process.kill(pid, 0);
@@ -175,40 +185,89 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
     await run(stop(directory, options(20, true)));
   });
 
-  it("restarts an instance without a readable record from its pid file", async () => {
+  it("checks an instance without a readable record on its own port, then restarts it", async () => {
     const directory = instanceFolder();
     const files = instanceFiles(directory);
     const first = await startFixture(directory);
-    writeFileSync(files.record, JSON.stringify({ pid: "unreadable" }));
+    const unreadable = JSON.stringify({ pid: "unreadable" });
+    writeFileSync(files.record, unreadable);
+    const variable = `USINE_TEST_GATEWAY_TOKEN_${process.pid}`;
+    writeFileSync(join(directory, "fixture-gateway-env"), variable);
     writeFileSync(
       join(directory, "fixture-runs.json"),
       JSON.stringify([{ id: "run-live", state: "Running" }]),
     );
-    const fallback = Effect.succeed(
-      new InstanceLaunch({
-        node: first.launch.node,
-        nodeOptions: first.launch.nodeOptions,
-        script: FIXTURE,
-        port: first.launch.port,
-        logLevel: "Debug",
-        allowVolatileInstance: false,
-      }),
-    );
+    writeFileSync(join(directory, "fixture-drain"), "never");
+    // Nothing answers on the new port, so checks that asked it would pass and signal the instance.
+    const fallback = new InstanceLaunch({
+      node: first.launch.node,
+      nodeOptions: first.launch.nodeOptions,
+      script: FIXTURE,
+      port: await freePort(),
+      logLevel: "Debug",
+      allowVolatileInstance: false,
+    });
+    assert.notStrictEqual(fallback.port, first.launch.port);
 
-    // The checks ask the fallback port, where the instance answers.
-    const refused = await run(restart(directory, options(20), fallback).pipe(Effect.flip));
+    const missing = await run(
+      restart(directory, options(1), Effect.succeed(fallback)).pipe(Effect.flip),
+    );
+    assert(missing._tag === "MissingEnvironmentError");
+    assert.deepStrictEqual(missing.variables, [variable]);
+    rmSync(join(directory, "fixture-gateway-env"));
+    const refused = await run(
+      restart(directory, options(1), Effect.succeed(fallback)).pipe(Effect.flip),
+    );
     assert(refused._tag === "LiveAttemptsError");
+    assert.deepStrictEqual(refused.runs, [RunId.make("run-live")]);
+    // A signal would make the fixture record its drain over the unreadable record.
+    assert.strictEqual(readFileSync(files.record, "utf8"), unreadable, "no signal was sent");
     assert.isTrue(alive(first.pid), "a refused restart leaves the instance running");
 
-    await run(restart(directory, options(20, true), fallback));
+    await run(restart(directory, options(20, true), Effect.succeed(fallback)));
     const state = await run(probeInstance(directory));
     assert(state._tag === "Running");
     pids.add(state.record.pid);
     assert.notStrictEqual(state.record.pid, first.pid);
     assert.isFalse(alive(first.pid));
+    assert.strictEqual(state.record.launch.port, fallback.port);
     assert.strictEqual(state.record.launch.logLevel, "Debug");
     await run(stop(directory, options(20, true)));
   });
+
+  // Another user's descriptors are unreadable, so this runs where pid 1 belongs to someone else.
+  it.skipIf(!pid1OfAnotherUser)(
+    "refuses to restart an instance without a readable record whose ports it can't list",
+    async () => {
+      const directory = instanceFolder();
+      const files = instanceFiles(directory);
+      const fallback = new InstanceLaunch({
+        node: process.execPath,
+        nodeOptions: [],
+        script: FIXTURE,
+        port: await freePort(),
+        logLevel: "Info",
+        allowVolatileInstance: false,
+      });
+      const refused = await run(
+        Effect.gen(function* () {
+          yield* holdInstance(
+            directory,
+            new InstanceRecord({
+              pid: ProcessId.make(1),
+              version: "0.3.0",
+              startedAt: yield* DateTime.now,
+              launch: fallback,
+            }),
+          );
+          writeFileSync(files.record, "unreadable");
+          return yield* restart(directory, options(1), Effect.succeed(fallback)).pipe(Effect.flip);
+        }).pipe(Effect.scoped),
+      );
+      assert.instanceOf(refused, ListeningPortsError);
+      assert.strictEqual(refused.pid, 1);
+    },
+  );
 
   it("waits for a long drain without sending the second signal, and --force ends it", async () => {
     const directory = instanceFolder();

@@ -204,6 +204,8 @@ export const failureMessage = (failure: CliFailure): string =>
         onSome: (holder) =>
           `usine ${command} did nothing: usine (pid ${holder}) runs in ${directory} without a readable .usine/instance.json, so its port and command line are unknown. It is a usine version that doesn't write one, or it is still starting. Stop it with usine stop, then start it with usine up --detach.`,
       }),
+    ListeningPortsError: ({ pid, reason }) =>
+      `usine restart left the instance running: usine (pid ${pid}) runs without a readable .usine/instance.json, and the ports it listens on are unknown (${clause(reason)}). usine restart can't check its running attempts or gateway variables without them. Run usine restart as the user that started usine, or stop it with usine stop, then start it with usine up --detach.`,
     MissingEnvironmentError: ({ command, variables }) =>
       `usine ${command} left the instance running: neither this shell nor .env sets ${variables.join(", ")}, which the new usine up reads at startup for its ${variables.length === 1 ? "gateway" : "gateways"}. The new process gets the environment of the shell that runs usine ${command}, and reads .env in the instance folder. Add ${variables.length === 1 ? "it" : "them"} to .env, then run usine ${command} again.`,
     LiveAttemptsError: ({ command, runs }) =>

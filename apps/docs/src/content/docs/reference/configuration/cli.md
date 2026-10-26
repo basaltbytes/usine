@@ -165,7 +165,7 @@ Takes the same flags as `usine stop`. It applies `--timeout` to the stop and aga
 
 Stops the orchestrator as `usine stop` does, then starts it as a [background start](#background-start) with the Node.js binary, Node.js options, entry point, port, and flags from the instance record. After a rebuild of a checkout, the entry point is the rebuilt one. The new process inherits the environment of the shell that runs `usine restart`, not the environment of the process that it replaces, and reads the [environment file](#environment-file) again. A variable in `.env` doesn't need to be set in that shell.
 
-If the orchestrator has no instance record that this `usine` can read, for example because an earlier usine version started it, the command stops the process in `.usine/instance.pid`. It then starts `usine up` as `usine up --detach` without flags would: with the `usine` that you run, and the port, log level, and volatile flag that the shell or `.env` sets, else the defaults. It prints that port first. The checks below ask the orchestrator on that port, and pass if it doesn't answer.
+If the orchestrator has no instance record that this `usine` can read, for example because an earlier usine version started it, the command stops the process in `.usine/instance.pid`. It then starts `usine up` as `usine up --detach` without flags would: with the `usine` that you run, and the port, log level, and volatile flag that the shell or `.env` sets, else the defaults. Before it stops the process, it lists the TCP ports that the process listens on, from `/proc` on Linux and from `lsof` elsewhere, and runs the checks below on the port where the process answers the operator API. That port can differ from the new one. The checks pass if no port answers. The command prints the port that it checks, if any, and the new port.
 
 The command changes nothing and exits with status 1 in these cases:
 
@@ -173,6 +173,7 @@ The command changes nothing and exits with status 1 in these cases:
 - A process holds the instance lock, but `.usine/instance.pid` names no running process, because the orchestrator is still starting. Run the command again after it starts.
 - A run has a running attempt, unless you pass `--force`. Without a deadline, the drain would keep the orchestrator down until the attempt ends.
 - Neither the shell nor `.env` sets the `admin_token_env` variable of a gateway in the running configuration. The new process would stop at startup without it.
+- The orchestrator has no readable instance record, and the command can't list the ports of its process, for example because another user started it. Run the command as that user, or run `usine stop` and then `usine up --detach`.
 
 ## `usine upgrade [<version>]`
 

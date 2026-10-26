@@ -7,7 +7,14 @@ import {
   environmentUp,
 } from "./cli.ts";
 import { startDetached, startedMessage } from "./detach.ts";
-import { type InstanceLaunch, type InstanceRecord, currentLaunch } from "./instance/record.ts";
+import { listRuns } from "./instance/operator-api.ts";
+import { listeningPorts } from "./instance/ports.ts";
+import {
+  type InstanceLaunch,
+  type InstanceRecord,
+  type ProcessId,
+  currentLaunch,
+} from "./instance/record.ts";
 import { probeInstance } from "./instance/state.ts";
 import {
   InstanceNotRunningError,
@@ -28,7 +35,32 @@ export const fallbackLaunch = (environment: CliEnvironment) =>
     ),
   );
 
-/** Returns the process that `usine restart` stops, its record if readable, and the next launch. */
+/**
+ * Returns the port on which the process answers the operator API, or `None` if none of its ports
+ * does. Fails if the OS can't list its ports.
+ */
+const operatorPort = Effect.fn("Cli.operatorPort")(function* (pid: ProcessId) {
+  const ports = yield* listeningPorts(pid);
+  const port = yield* Effect.findFirst(ports, (port) =>
+    listRuns(port).pipe(
+      Effect.tapError((error) =>
+        Effect.logDebug("A port of the instance process doesn't answer the operator API", {
+          pid,
+          port,
+          reason: error.reason,
+        }),
+      ),
+      Effect.isSuccess,
+    ),
+  );
+  yield* Effect.annotateCurrentSpan({ pid, ports, port: Option.getOrUndefined(port) });
+  return port;
+});
+
+/**
+ * Returns the process that `usine restart` stops, its record if readable, the port on which the
+ * checks ask it, and the next launch.
+ */
 const restartTarget = Effect.fn("Cli.restartTarget")(function* (
   directory: InstanceDirectory,
   fallback: Effect.Effect<InstanceLaunch, CliUsageError>,
@@ -39,38 +71,67 @@ const restartTarget = Effect.fn("Cli.restartTarget")(function* (
   }
   if (state._tag === "Running") {
     const { record } = state;
-    return { pid: record.pid, record: Option.some(record), launch: record.launch };
+    return {
+      pid: record.pid,
+      record: Option.some(record),
+      port: Option.some(record.launch.port),
+      launch: record.launch,
+    };
   }
   if (Option.isNone(state.pid)) {
     return yield* new UnrecordedInstanceError({ command: "restart", directory, pid: state.pid });
   }
   const pid = state.pid.value;
   const launch = yield* fallback;
+  const port = yield* operatorPort(pid).pipe(
+    Effect.tapError((error) =>
+      Effect.logWarning("Refusing to restart: the ports of the instance process are unknown", {
+        pid,
+        reason: error.reason,
+      }),
+    ),
+  );
   yield* Effect.logInfo("Restarting an instance without a readable record with this CLI's launch", {
     pid,
-    port: launch.port,
+    port: Option.getOrUndefined(port),
+    launchPort: launch.port,
     script: launch.script,
   });
   yield* Console.log(
-    `usine (pid ${pid}) runs without a readable .usine/instance.json, so usine restart uses the launch of usine up --detach, on port ${launch.port}.`,
+    Option.match(port, {
+      onNone: () =>
+        `usine (pid ${pid}) runs without a readable .usine/instance.json and answers on no port, so usine restart can't check its running attempts or gateway variables. usine restart starts usine up as usine up --detach would, on port ${launch.port}.`,
+      onSome: (current) =>
+        `usine (pid ${pid}) runs without a readable .usine/instance.json and answers on port ${current}. usine restart checks it there, then starts usine up as usine up --detach would, on port ${launch.port}.`,
+    }),
   );
-  return { pid, record: Option.none<InstanceRecord>(), launch };
+  return { pid, record: Option.none<InstanceRecord>(), port, launch };
 });
 
 /**
  * Stops the `usine up` of the instance folder and starts it again in the background, with the
  * Node.js binary, entry point, port, and flags that it recorded. Without a readable record, as from
  * a usine version that writes only `.usine/instance.pid`, stops the process in that file and starts
- * `fallback`. The checks then ask the fallback's port, and pass if nothing answers there.
+ * `fallback`. The checks then ask the port on which that process answers, and pass if none does.
+ * Fails with `ListeningPortsError`, before any signal, if the OS can't list that process's ports.
  */
 export const restart = Effect.fn("Cli.restart")(function* (
   directory: InstanceDirectory,
   options: LifecycleOptions,
   fallback: Effect.Effect<InstanceLaunch, CliUsageError>,
 ) {
-  const { pid, record, launch } = yield* restartTarget(directory, fallback);
-  yield* refuseMissingEnvironment("restart", launch.port);
-  yield* refuseLiveAttempts("restart", launch.port, options.force);
+  const { pid, record, port, launch } = yield* restartTarget(directory, fallback);
+  if (Option.isSome(port)) {
+    yield* refuseMissingEnvironment("restart", port.value);
+    yield* refuseLiveAttempts("restart", port.value, options.force);
+  } else {
+    yield* Effect.logWarning(
+      "Skipping the restart checks: the instance process answers on no port",
+      {
+        pid,
+      },
+    );
+  }
   yield* stopProcess("restart", pid, record, options);
   const started = yield* startDetached(directory, launch, options.timeout);
   yield* Console.log(startedMessage(started));
