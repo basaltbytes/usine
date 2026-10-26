@@ -19,6 +19,7 @@ import { agentsHarnessProbe, type HarnessProbe } from "../harness-preflight.ts";
 import { DEFAULT_SSH, remoteCommandsFor } from "../remote/commands.ts";
 import type { RemoteGrant } from "../remote/machine.ts";
 import { remoteExecutorFor } from "../remote/remote.ts";
+import { codexHomesFor } from "./codex-homes.ts";
 import { sshContainersFor } from "./container.ts";
 import { sshCredentialsFor } from "./credentials.ts";
 import { gatewayAttachmentsFor } from "./gateway/attachments.ts";
@@ -71,7 +72,8 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
       });
     };
     const credentials = yield* sshCredentialsFor(commands, machineFor);
-    const attachments = yield* gatewayAttachmentsFor(commands, workerFor);
+    const codexHomes = yield* codexHomesFor(commands);
+    const attachments = yield* gatewayAttachmentsFor(commands, workerFor, codexHomes.hold);
     const containers = yield* sshContainersFor(commands, machineFor, options.instance);
     const verifyMachine = sshMachinePreflightFor(commands, harnessProbe, logins, containers);
     const provisioned = yield* provisionedMachinesFor({
@@ -127,9 +129,39 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
                   machine.gateway.value,
                   operation,
                 );
-            return yield* withApiKeys(commands, machine, attemptId, access, operation);
+            return yield* withApiKeys(
+              commands,
+              codexHomes.hold,
+              machine,
+              attemptId,
+              access,
+              operation,
+            );
           }),
       } satisfies RemoteGrant<SshMachine>);
+
+    // A provisioned Worker's machines are deleted with their Attempts, Codex homes included.
+    const sweep = Effect.fn("SshExecutor.sweep")(function* () {
+      const machines = (yield* entries).flatMap(({ machine }) => Option.toArray(machine));
+      yield* Effect.forEach(
+        machines,
+        (machine) =>
+          codexHomes.sweep(machine).pipe(
+            Effect.tapError((error) =>
+              Effect.logWarning(
+                "Could not sweep the Codex homes on the SSH Worker; the next sweep tries again",
+                {
+                  worker: machine.address.name,
+                  host: machine.shell.destination,
+                  message: error.message,
+                },
+              ),
+            ),
+            Effect.ignore,
+          ),
+        { concurrency: "unbounded", discard: true },
+      );
+    });
 
     const attemptMachine = (
       worker: WorkerName,
@@ -190,6 +222,7 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
       grantFor,
       readOnlyAccessGap: Option.none(),
       reclaim,
+      sweep: sweep(),
       interruptGrace: options.interruptGrace ?? "10 seconds",
     });
     return Context.make(Executor, executor).pipe(

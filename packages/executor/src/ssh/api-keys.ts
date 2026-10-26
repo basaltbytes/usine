@@ -5,11 +5,8 @@ import { Effect, Option, Redacted } from "effect";
 import type { ExecutorOperation } from "../executor.ts";
 import { type RemoteCommands, sendingShell } from "../remote/commands.ts";
 import type { RemoteAccess } from "../remote/machine.ts";
-import {
-  attemptCodexHome,
-  removeCodexHomeOnClose,
-  writeMachineFiles,
-} from "./gateway/attachments.ts";
+import type { CodexHomes } from "./codex-homes.ts";
+import { writeMachineFiles } from "./gateway/attachments.ts";
 import type { MachineGateway, SshMachine, SshWorkerAddress } from "./model.ts";
 
 /** The provider each harness needs a credential from. Pi children run only on local Workers. */
@@ -65,11 +62,12 @@ export const provisionedApiKey = (
 
 /**
  * Returns `access` with the provisioner's API keys among the Attempt's secrets. With an OpenAI
- * key, also writes the Attempt's Codex home with `CODEX_API_KEY_CONFIG`, and removes it when the
- * caller's scope closes.
+ * key, also writes the Attempt's Codex home, which `holdCodexHome` gives it, with
+ * `CODEX_API_KEY_CONFIG`.
  */
 export const withApiKeys = Effect.fn("SshExecutor.withApiKeys")(function* (
   commands: RemoteCommands,
+  holdCodexHome: CodexHomes["hold"],
   machine: SshMachine,
   attemptId: AttemptId,
   access: RemoteAccess,
@@ -82,16 +80,17 @@ export const withApiKeys = Effect.fn("SshExecutor.withApiKeys")(function* (
     ...Option.toArray(Option.map(openai, (key) => [OPENAI_KEY_VARIABLE, key] as const)),
   ]);
   if (Object.keys(secrets).length === 0) return access;
-  const codexHome = Option.map(openai, () => attemptCodexHome(machine, attemptId));
-  if (Option.isSome(codexHome)) {
-    yield* removeCodexHomeOnClose(commands, machine, codexHome.value, {
-      attemptId,
-      worker: machine.address.name,
-    });
-    yield* writeMachineFiles(commands, operation, machine.shell, [
-      [`${codexHome.value}/config.toml`, CODEX_API_KEY_CONFIG],
-    ]);
-  }
+  const codexHome = yield* Effect.transposeOption(
+    Option.map(openai, () =>
+      holdCodexHome(machine, attemptId).pipe(
+        Effect.tap((home) =>
+          writeMachineFiles(commands, operation, machine.shell, [
+            [`${home}/config.toml`, CODEX_API_KEY_CONFIG],
+          ]),
+        ),
+      ),
+    ),
+  );
   const values = Object.values(secrets).map(Redacted.value);
   return {
     ...access,

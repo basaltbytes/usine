@@ -164,6 +164,11 @@ interface FakeMachineState {
   readonly refusedHosts: Set<string>;
   /** The Gateway configuration files written on the machine, by path. */
   readonly files: Map<string, string>;
+  /**
+   * The Codex homes on the machine, by path, with whether the Attempt of each has a checkout. A
+   * Codex home that the executor writes has none, so only its hold keeps a sweep from removing it.
+   */
+  readonly codexHomes: Map<string, boolean>;
   /** Whether the Gateway accepts the SSH connection of a forward to its admin API. */
   gatewayAcceptsSsh: boolean;
   /** Every forward the executor started, in order. */
@@ -296,6 +301,7 @@ export const fakeMachine = () => {
     forwardProxyReachable: true,
     refusedHosts: new Set(),
     files: new Map(),
+    codexHomes: new Map(),
     gatewayAcceptsSsh: true,
     forwards: [],
     docker: "absent",
@@ -451,12 +457,22 @@ export const fakeMachine = () => {
             0,
           )
         : oneShotHandle("", 6, "curl: (6) Could not resolve host: git.gw.test");
+    // Lists the Codex homes whose Attempt has no checkout.
+    if (line.includes("basename")) {
+      const listed = [...state.codexHomes].filter(([, checkout]) => !checkout);
+      return oneShotHandle(listed.map(([home]) => `${home}${NUL}`).join(""), 0);
+    }
     // Writes configuration files: path and contents pairs after the script and `$0`.
     if (line.includes('mv "$1.$$" "$1"')) {
       const words = remoteWords(line);
       const pairs = words.slice(words.findIndex((word) => word.includes("shift 2")) + 2);
-      for (let index = 0; index + 1 < pairs.length; index += 2)
-        state.files.set(pairs[index] ?? "", pairs[index + 1] ?? "");
+      for (let index = 0; index + 1 < pairs.length; index += 2) {
+        const path = pairs[index] ?? "";
+        state.files.set(path, pairs[index + 1] ?? "");
+        const codexHome = /^(.+\/codex\/[^/]+)\/config\.toml$/u.exec(path)?.[1];
+        if (codexHome !== undefined)
+          state.codexHomes.set(codexHome, state.codexHomes.get(codexHome) ?? false);
+      }
       return oneShotHandle("", 0);
     }
     if (line.includes("IFS= read -r token")) {
@@ -471,6 +487,7 @@ export const fakeMachine = () => {
     if (line.includes("pidfile")) return oneShotHandle("no-children\n", 0);
     if (line.startsWith("exec 'rm' '-rf' ")) {
       const target = line.slice("exec 'rm' '-rf' '".length, -1);
+      state.codexHomes.delete(target);
       for (const directory of state.credentials.keys())
         if (directory === target || directory.startsWith(`${target}/`))
           state.credentials.delete(directory);

@@ -1109,6 +1109,37 @@ describe("SSH Worker behind a Gateway", () => {
   );
 
   it.effect(
+    "sweeps the Codex homes that a crash left, and keeps those of a held Attempt or a kept checkout",
+    () => {
+      const machine = fakeMachine();
+      const gateway = fakeGateway(machine, CHATGPT_PROVIDERS);
+      const running = `${WORKER_ROOT}/codex/remote-run_execute_1`;
+      const crashed = `${WORKER_ROOT}/codex/crashed-run_execute_1`;
+      const kept = `${WORKER_ROOT}/codex/kept-run_execute_1`;
+      // An earlier process crashed: recovery removed one Attempt's checkout and kept another's.
+      machine.state.codexHomes.set(crashed, false);
+      machine.state.codexHomes.set(kept, true);
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const prepared = yield* executor.prepare(codexRequest);
+        yield* executor.sweep;
+        assert.sameMembers([...machine.state.codexHomes.keys()], [running, kept]);
+        machine.state.reachable = false;
+        yield* executor.sweep;
+        machine.state.reachable = true;
+        yield* prepared.launch(sink);
+        assert.sameMembers([...machine.state.codexHomes.keys()], [kept]);
+      }).pipe(
+        Effect.provide(
+          gatewayRuntime(machine, mintingProvider(), gateway, {
+            address: gatewayAddress({ llmProviders: ["openai"] }),
+          }),
+        ),
+      );
+    },
+  );
+
+  it.effect(
     "preflight reports an unsupported Codex, and a Gateway without the OpenAI credential that llm_providers lists",
     () => {
       const machine = fakeMachine();

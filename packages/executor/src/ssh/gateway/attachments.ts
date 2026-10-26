@@ -1,7 +1,7 @@
 import type { RemoteShell } from "@usine/agents/child-host";
 import type { AttemptId } from "@usine/core/attempt";
 import type { LoopPermissions } from "@usine/core/loop";
-import { type RepositoryName, safeSegment } from "@usine/core/repository";
+import type { RepositoryName } from "@usine/core/repository";
 import type { WorkerName } from "@usine/core/worker";
 import { AttachRequest, type AttachmentId, InstallationCredential } from "@usine/gateway/admin";
 import { Cache, DateTime, Effect, Option, Redacted, Ref, Semaphore } from "effect";
@@ -15,6 +15,7 @@ import {
 import { type RemoteCommands, sendingShell } from "../../remote/commands.ts";
 import type { RemoteAccess } from "../../remote/machine.ts";
 import { renewableCredential } from "../../renewable-credential.ts";
+import { attemptCodexHome, type CodexHomes } from "../codex-homes.ts";
 import type { MachineGateway, SshMachine } from "../model.ts";
 import {
   GH_GATEWAY_SOCKET_DIRECTORY,
@@ -52,33 +53,6 @@ export const writeMachineFiles = (
   files: ReadonlyArray<readonly [path: string, contents: string]>,
 ) => commands.run(operation, shell, "sh", ["-c", WRITE_FILES_SCRIPT, "sh", ...files.flat()]);
 
-/** Returns the Attempt's Codex home on `machine`, which Codex also writes its sessions to. */
-export const attemptCodexHome = (machine: SshMachine, attemptId: AttemptId): string =>
-  `${machine.workerDirectory}/codex/${safeSegment(attemptId)}`;
-
-/** Removes the Attempt's Codex home at `codexHome` when the caller's scope closes. */
-export const removeCodexHomeOnClose = (
-  commands: RemoteCommands,
-  machine: SshMachine,
-  codexHome: string,
-  fields: { readonly attemptId: AttemptId; readonly worker: WorkerName },
-) =>
-  Effect.addFinalizer(() =>
-    commands.run("cleanup", machine.shell, "rm", ["-rf", codexHome]).pipe(
-      Effect.tap(() =>
-        Effect.logDebug("Removed the Attempt's Codex home", { ...fields, codexHome }),
-      ),
-      Effect.tapError((error) =>
-        Effect.logWarning("Could not remove the Attempt's Codex home", {
-          ...fields,
-          codexHome,
-          message: error.message,
-        }),
-      ),
-      Effect.ignore,
-    ),
-  );
-
 /**
  * Returns the directory of gh's configuration on a Worker behind a Gateway, and the Attempt's
  * Codex home. Neither contains a token.
@@ -91,14 +65,16 @@ const configDirectories = (machine: SshMachine, attemptId: AttemptId) => ({
 /**
  * Grants each Attempt repository access through the Gateway without a token on the machine
  * (ADR 0027). Attaches the token, renews it before expiry, re-stores it every two minutes, and
- * detaches it when the scope closes. On first use of a Worker, detaches attachments left by an
- * earlier process.
+ * detaches it when the scope closes. If the Gateway holds the OpenAI credential, gives the
+ * Attempt its Codex home through `holdCodexHome`. On first use of a Worker, detaches attachments
+ * left by an earlier process.
  */
 export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFor")(function* (
   commands: RemoteCommands,
   workerFor: (
     worker: WorkerName,
   ) => Effect.Effect<{ readonly gateway: Option.Option<MachineGateway> }, ExecutorError>,
+  holdCodexHome: CodexHomes["hold"],
 ) {
   const provider = yield* CredentialProvider;
 
@@ -174,7 +150,7 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
     yield* Effect.annotateCurrentSpan(fields);
     const directories = configDirectories(machine, attemptId);
     const codex = settings.llmProviders.includes("openai");
-    if (codex) yield* removeCodexHomeOnClose(commands, machine, directories.codexHome, fields);
+    if (codex) yield* holdCodexHome(machine, attemptId);
     yield* writeMachineFiles(
       commands,
       operation,
