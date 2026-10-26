@@ -346,6 +346,8 @@ describe("SSH Worker behind a Gateway", () => {
               Option.exists(body, ({ credential }) => credential.token === `${TOKEN_PREFIX}2`),
           );
         yield* eventually(renewedThroughSecond);
+        // The Gateway records the renewal before its handler stores the new expiration.
+        yield* gateway.settled;
         assert.strictEqual(machine.state.forwards.length, 2, "one reopen");
         assert(
           gateway.calls.some(

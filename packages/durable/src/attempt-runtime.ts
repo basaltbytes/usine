@@ -3,10 +3,10 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptId } from "@usine/core/attempt";
 import { AgentFailure, AttemptFailure } from "@usine/core/attempt/failure";
 import { StepResult, type StepResultFact } from "@usine/core/step/result";
-import { GatewayCredentialKind, WorkerName } from "@usine/core/worker";
+import { GatewayCredentialKind, MachineId, WorkerName } from "@usine/core/worker";
 import { Context, type Duration, Effect, type Option, Result, Schema } from "effect";
 
-/** The persisted part of an Attempt's request, without `host` and `environment`. */
+/** The persisted part of an Attempt's request, without `host`, `machine`, and `environment`. */
 export class StoredRequest extends Schema.Class<StoredRequest>("@usine/durable/StoredRequest")({
   spec: AttemptChannel.RunSpec,
   worker: WorkerName,
@@ -17,6 +17,11 @@ export class StoredRequest extends Schema.Class<StoredRequest>("@usine/durable/S
 export class AttemptRequest extends Schema.Class<AttemptRequest>("@usine/durable/AttemptRequest")({
   ...StoredRequest.fields,
   host: ChildHost,
+  /**
+   * The provider's ID of the machine that a provisioned Worker created for the Attempt, or `None`
+   * on other Workers.
+   */
+  machine: Schema.Option(MachineId),
   /**
    * The environment variables passed to the children: the Worker's allowlisted variables plus the
    * Attempt's credential configuration (ADR 0011).

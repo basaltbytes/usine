@@ -14,7 +14,7 @@ Runs an attempt's Pi parent in the orchestrator on [`@earendil-works/pi-durable`
 import { layer as durableLayer } from "@usine/durable/live";
 
 // Provides AttemptRuntime and DurableHarness; requires ChildProcessSpawner and ClaudeLoginLock,
-// the per-Worker lock the executor's preflight shares (claudeLoginLockLayer from @usine/executor).
+// the Claude login lock the executor's preflight shares (claudeLoginLockLayer from @usine/executor).
 const attempts = durableLayer(instanceDirectory);
 ```
 

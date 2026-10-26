@@ -3,8 +3,8 @@ import { RemoteShell } from "@usine/agents/child-host";
 import { ClaudeLoginLock } from "@usine/agents/runtime";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { HarnessReady } from "@usine/core/agent/capability";
-import { WorkerName } from "@usine/core/worker";
-import { Deferred, Effect, Fiber, Sink, Stream } from "effect";
+import { MachineId, WorkerName } from "@usine/core/worker";
+import { Deferred, Effect, Fiber, Option, Sink, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import type { StandardCommand } from "effect/unstable/process/ChildProcess";
@@ -113,42 +113,77 @@ describe("harness probe on a remote host", () => {
 });
 
 describe("harness readiness on a Worker", () => {
-  it.effect("checks Claude on one Worker one probe at a time, and other Workers alongside", () =>
-    Effect.gen(function* () {
-      const logins = yield* ClaudeLoginLock;
-      const probe = Effect.fn(function* () {
-        const entered = yield* Deferred.make<void>();
-        const release = yield* Deferred.make<void>();
-        const check: HarnessProbe = () =>
-          Deferred.succeed(entered, undefined).pipe(
-            Effect.andThen(Deferred.await(release)),
-            Effect.as(new HarnessReady({ harness: "claude" })),
-          );
-        return { entered, release, check };
-      });
-      const [first, second, elsewhere] = yield* Effect.all([probe(), probe(), probe()]);
-      const worker = WorkerName.make("worker-1");
-      const checks = yield* Effect.forkChild(
-        Effect.all(
-          [
-            verifyHarnessReadiness(worker, [claude], first.check, logins),
-            verifyHarnessReadiness(worker, [claude], second.check, logins),
-            verifyHarnessReadiness(WorkerName.make("worker-2"), [claude], elsewhere.check, logins),
-          ],
-          { concurrency: "unbounded" },
-        ),
-      );
-      yield* Deferred.await(first.entered);
-      yield* Deferred.await(elsewhere.entered);
-      assert.isFalse(
-        yield* Deferred.isDone(second.entered),
-        "a second Claude check on the Worker waits while the first one runs",
-      );
-      yield* Deferred.succeed(first.release, undefined);
-      yield* Deferred.await(second.entered);
-      yield* Deferred.succeed(second.release, undefined);
-      yield* Deferred.succeed(elsewhere.release, undefined);
-      yield* Fiber.join(checks);
-    }).pipe(Effect.provide(claudeLoginLockLayer)),
+  it.effect(
+    "checks Claude on one Worker one probe at a time, and other Workers and the machines of a provisioned Worker alongside",
+    () =>
+      Effect.gen(function* () {
+        const logins = yield* ClaudeLoginLock;
+        const probe = Effect.fn(function* () {
+          const entered = yield* Deferred.make<void>();
+          const release = yield* Deferred.make<void>();
+          const check: HarnessProbe = () =>
+            Deferred.succeed(entered, undefined).pipe(
+              Effect.andThen(Deferred.await(release)),
+              Effect.as(new HarnessReady({ harness: "claude" })),
+            );
+          return { entered, release, check };
+        });
+        const [first, second, elsewhere, onOneMachine, onOtherMachine] = yield* Effect.all([
+          probe(),
+          probe(),
+          probe(),
+          probe(),
+          probe(),
+        ]);
+        const worker = WorkerName.make("worker-1");
+        const provisioned = WorkerName.make("provisioned");
+        const machine = (id: string) => Option.some(MachineId.make(id));
+        const checks = yield* Effect.forkChild(
+          Effect.all(
+            [
+              verifyHarnessReadiness(worker, Option.none(), [claude], first.check, logins),
+              verifyHarnessReadiness(worker, Option.none(), [claude], second.check, logins),
+              verifyHarnessReadiness(
+                WorkerName.make("worker-2"),
+                Option.none(),
+                [claude],
+                elsewhere.check,
+                logins,
+              ),
+              verifyHarnessReadiness(
+                provisioned,
+                machine("52341896"),
+                [claude],
+                onOneMachine.check,
+                logins,
+              ),
+              verifyHarnessReadiness(
+                provisioned,
+                machine("52341897"),
+                [claude],
+                onOtherMachine.check,
+                logins,
+              ),
+            ],
+            { concurrency: "unbounded" },
+          ),
+        );
+        yield* Deferred.await(first.entered);
+        yield* Deferred.await(elsewhere.entered);
+        yield* Deferred.await(onOneMachine.entered);
+        yield* Deferred.await(onOtherMachine.entered);
+        assert.isFalse(
+          yield* Deferred.isDone(second.entered),
+          "a second Claude check on the Worker waits while the first one runs",
+        );
+        yield* Deferred.succeed(first.release, undefined);
+        yield* Deferred.await(second.entered);
+        yield* Effect.forEach(
+          [second, elsewhere, onOneMachine, onOtherMachine],
+          ({ release }) => Deferred.succeed(release, undefined),
+          { discard: true },
+        );
+        yield* Fiber.join(checks);
+      }).pipe(Effect.provide(claudeLoginLockLayer)),
   );
 });

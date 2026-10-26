@@ -61,8 +61,8 @@ export const runtimeLayer = (instanceDirectory: InstanceDirectory) => {
     Layer.provide(polling),
     Layer.provide(MarcbachmannCelLayer),
   );
-  // One Claude login lock per Worker, shared by the executor's preflight and the Attempts' Claude
-  // children.
+  // One Claude login lock per Worker, or per machine of a provisioned Worker, shared by the
+  // executor's preflight and the Attempts' Claude children.
   const attemptRuntime = durableAttemptRuntimeLayer(instanceDirectory).pipe(
     Layer.provideMerge(claudeLoginLockLayer),
     Layer.provide(NodeServices.layer),
