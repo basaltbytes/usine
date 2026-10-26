@@ -201,14 +201,17 @@ export class HarnessPreflightView extends Schema.Class<HarnessPreflightView>(
   check: PreflightCheckView,
 }) {}
 
-/** The container of each Attempt on an SSH Worker with Docker, from `usine.yaml`. */
+/**
+ * The container of each Attempt on an SSH Worker with Docker, from `usine.yaml`. Each limit is
+ * null if `usine.yaml` leaves it unset, so preflight derives it from the machine.
+ */
 export class ContainerView extends Schema.Class<ContainerView>("@usine/orchestrator/ContainerView")(
   {
     /** Null for the default image of this usine release. */
     image: Schema.NullOr(ContainerImage),
-    cpus: ContainerCpus,
-    memoryMib: ContainerMemoryMib,
-    pids: ContainerPids,
+    cpus: Schema.NullOr(ContainerCpus),
+    memoryMib: Schema.NullOr(ContainerMemoryMib),
+    pids: Schema.NullOr(ContainerPids),
   },
 ) {}
 
@@ -390,9 +393,9 @@ const workerConnection = (worker: Worker) =>
         }),
         container: new ContainerView({
           image: Option.getOrNull(worker.container.image),
-          cpus: worker.container.cpus,
-          memoryMib: worker.container.memoryMib,
-          pids: worker.container.pids,
+          cpus: Option.getOrNull(worker.container.cpus),
+          memoryMib: Option.getOrNull(worker.container.memoryMib),
+          pids: Option.getOrNull(worker.container.pids),
         }),
       }
     : {

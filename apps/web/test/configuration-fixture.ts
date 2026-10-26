@@ -196,7 +196,7 @@ export const configurationJson = {
         adminTokenEnv: "USINE_GATEWAY_ADMIN_TOKEN",
         llmProviders: ["anthropic"],
       },
-      container: { image: null, cpus: 2, memoryMib: 4096, pids: 4096 },
+      container: { image: null, cpus: null, memoryMib: 3584, pids: null },
       containerLimits: null,
       ...unprovisioned,
       slots: { capacity: 3, leased: 0 },
@@ -246,7 +246,7 @@ export const configurationJson = {
         adminTokenEnv: "USINE_GATEWAY_ADMIN_TOKEN",
         llmProviders: ["anthropic"],
       },
-      container: { image: null, cpus: 2, memoryMib: 4096, pids: 4096 },
+      container: { image: null, cpus: null, memoryMib: null, pids: null },
       containerLimits: null,
       provisioner: {
         _tag: "hetzner",

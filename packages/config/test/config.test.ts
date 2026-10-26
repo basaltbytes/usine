@@ -171,13 +171,20 @@ describe("ConfigParser", () => {
       expect(gateway?.adminPort).toBe(7071);
       expect(gateway?.adminTokenEnv).toBe("USINE_GATEWAY_ADMIN_TOKEN");
       expect(gateway?.llmProviders).toEqual(["anthropic"]);
-      expect({ ...first.container, image: Option.getOrNull(first.container.image) }).toEqual({
-        image: null,
-        cpus: 2,
-        memoryMib: 4096,
-        pids: 4096,
+      const containerOf = ({ image, cpus, memoryMib, pids }: typeof first.container) => ({
+        image: Option.getOrNull(image),
+        cpus: Option.getOrNull(cpus),
+        memoryMib: Option.getOrNull(memoryMib),
+        pids: Option.getOrNull(pids),
       });
-      expect({ ...second.container, image: Option.getOrNull(second.container.image) }).toEqual({
+      // Unset limits are derived from the machine at preflight.
+      expect(containerOf(first.container)).toEqual({
+        image: null,
+        cpus: null,
+        memoryMib: null,
+        pids: null,
+      });
+      expect(containerOf(second.container)).toEqual({
         image: "registry.example:5000/usine/worker:custom",
         cpus: 1.5,
         memoryMib: 6144,

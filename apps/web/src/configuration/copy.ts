@@ -3,6 +3,7 @@ import type { ApprovalRequirement, LoopPermissions } from "@usine/core/loop";
 import type { WorkerKind } from "@usine/core/worker";
 import type {
   ConfigurationView,
+  ContainerView,
   PreflightCheckView,
   WorkerConfigurationView,
 } from "@usine/orchestrator/operator";
@@ -46,6 +47,52 @@ export const capabilityLabel = {
   container: "Docker",
   provider: "provider",
 } satisfies Record<Capability, string>;
+
+type ContainerLimit = "cpus" | "memoryMib" | "pids";
+
+const CONTAINER_LIMITS = [
+  "cpus",
+  "memoryMib",
+  "pids",
+] as const satisfies ReadonlyArray<ContainerLimit>;
+
+const containerLimitValue = {
+  cpus: (cpus: number) => `${cpus} ${cpus === 1 ? "CPU" : "CPUs"}`,
+  memoryMib: (mib: number) => `${mib} MiB`,
+  pids: (pids: number) => `${pids} processes`,
+} satisfies Record<ContainerLimit, (value: number) => string>;
+
+const containerLimitName = {
+  cpus: "CPUs",
+  memoryMib: "memory",
+  pids: "processes",
+} satisfies Record<ContainerLimit, string>;
+
+const conjunction = new Intl.ListFormat("en", { type: "conjunction" });
+
+/** Returns the limits of each Attempt container, such as `2 CPUs, 4096 MiB, 4096 processes`. */
+export const containerLimitsLabel = (limits: Readonly<Record<ContainerLimit, number>>): string =>
+  CONTAINER_LIMITS.map((limit) => containerLimitValue[limit](limits[limit])).join(", ");
+
+/**
+ * Returns the container limits that `usine.yaml` sets, such as `3584 MiB`, and the names of the
+ * ones that preflight derives from the machine, such as `CPUs and processes`. Each is null if
+ * there are none.
+ */
+export const containerLimitSources = (container: ContainerView) => {
+  const configured = CONTAINER_LIMITS.flatMap((limit) => {
+    const value = container[limit];
+    return value === null ? [] : [containerLimitValue[limit](value)];
+  });
+  const derived = CONTAINER_LIMITS.filter((limit) => container[limit] === null);
+  return {
+    configured: configured.length === 0 ? null : configured.join(", "),
+    derived:
+      derived.length === 0
+        ? null
+        : conjunction.format(derived.map((limit) => containerLimitName[limit])),
+  };
+};
 
 /** Returns the missing capability of a failed check, for example `harness login`, or `check failed` if the check itself failed. */
 export const failedCheckLabel = (check: Extract<PreflightCheckView, { _tag: "Failed" }>) =>

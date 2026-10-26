@@ -41,7 +41,7 @@ repos:
 
 ## Settings and workers
 
-`settings.max_children` (default 4) limits the child sessions, sequential and concurrent, that one attempt can start. Without a `workers` key, the parser adds a local worker named `local` that runs one attempt at a time. A worker's `kind` (`local`, `exe.dev`, or `ssh`) selects its executor.
+`settings.max_children` (default 4) limits the child sessions, sequential and concurrent, that one attempt can start. Without a `workers` key, the parser adds a local worker named `local` that runs one attempt at a time. A worker's `kind` (`local`, `exe.dev`, or `ssh`) selects its executor. An SSH worker's `container` (`WorkerContainer`) sets the image and the `cpus`, `memory_mib`, and `pids` limits of each attempt container; each limit is optional, and the executor derives an unset one from the machine at preflight.
 
 Issue and pull request loops accept `max_cycles`, a positive integer (default 3): the number of runs each loop can open on an item between operator resets. The first admission past it blocks runs from every loop on the item. Schedule loops are exempt. See [Write review and fix loops](https://docs.usine.dev/guides/review-fix-loops/).
 

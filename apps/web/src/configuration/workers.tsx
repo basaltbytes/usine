@@ -1,6 +1,7 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import type {
   ConfigurationView,
+  ContainerView,
   MachineView,
   PreflightCheckView,
   ProvisioningPauseView,
@@ -28,6 +29,8 @@ import {
   timestampLabel,
 } from "../operator-copy.ts";
 import {
+  containerLimitSources,
+  containerLimitsLabel,
   failedCheckLabel,
   harnessLabel,
   plural,
@@ -360,10 +363,7 @@ const WorkerFacts = ({ worker }: { readonly worker: WorkerConfigurationView }) =
             )}
           </Fact>
           <Fact label="Limits">
-            <span className="tabular-nums">
-              {worker.container.cpus} {worker.container.cpus === 1 ? "CPU" : "CPUs"},{" "}
-              {worker.container.memoryMib} MiB, {worker.container.pids} processes
-            </span>
+            <ContainerLimits container={worker.container} applied={worker.containerLimits} />
           </Fact>
         </Facts>
       </div>
@@ -397,6 +397,31 @@ const WorkerFacts = ({ worker }: { readonly worker: WorkerConfigurationView }) =
     )}
   </div>
 );
+
+/**
+ * Renders the limits of each Attempt container: the ones the last preflight of the machine
+ * applied, else the ones `usine.yaml` sets, and which ones preflight derives from the machine.
+ */
+const ContainerLimits = ({
+  container,
+  applied,
+}: {
+  readonly container: ContainerView;
+  readonly applied: WorkerConfigurationView["containerLimits"];
+}) => {
+  const { configured, derived } = containerLimitSources(container);
+  const shown = applied === null ? configured : containerLimitsLabel(applied);
+  const note =
+    applied === null
+      ? "Derived from the machine at preflight"
+      : "Derived from the machine at the last preflight";
+  return (
+    <span className="flex flex-col gap-1">
+      {shown !== null && <span className="tabular-nums">{shown}</span>}
+      {derived !== null && <Unset>{`${note}: ${derived}`}</Unset>}
+    </span>
+  );
+};
 
 const machineState = {
   creating: { state: "Queued", label: "Creating" },

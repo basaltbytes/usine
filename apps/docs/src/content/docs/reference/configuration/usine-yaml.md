@@ -83,11 +83,10 @@ workers:
       destination: usine-gateway
       admin_token_env: USINE_GATEWAY_ADMIN_TOKEN
       llm_providers: [anthropic]
-    # Each attempt's container, if the machine has Docker. All keys are optional.
+    # Each attempt's container, if the machine has Docker. All keys are optional;
+    # preflight derives each limit left out from the machine.
     container:
-      cpus: 2
       memory_mib: 4096
-      pids: 4096
   - name: worker-2
     kind: ssh
     destination: worker-2
@@ -319,11 +318,21 @@ Without Docker, the worker runs its attempts as the SSH user, as before containe
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
 | `image` | string | the release's image | The image to run, such as `ghcr.io/basaltbytes/usine-worker:claude-2.1.308-codex-0.159.2`. Without it, the image built from `infra/worker-image/Dockerfile` with the harness versions of the running usine release. Preflight pulls it. |
-| `cpus` | number > 0 | `2` | CPUs per container, passed as `docker run --cpus`. |
-| `memory_mib` | integer ≥ 256 | `4096` | Memory per container in MiB, passed as `docker run --memory`. A process that goes over it is ended by the kernel, not the whole machine. |
-| `pids` | integer ≥ 64 | `4096` | Processes and threads per container, passed as `docker run --pids-limit`. |
+| `cpus` | number > 0 | derived from the machine | CPUs per container, passed as `docker run --cpus`. |
+| `memory_mib` | integer ≥ 256 | derived from the machine | Memory per container in MiB, passed as `docker run --memory`. A process that goes over it is ended by the kernel, not the whole machine. |
+| `pids` | integer ≥ 64 | derived from the machine | Processes and threads per container, passed as `docker run --pids-limit`. |
 
-`max_concurrent_attempts` stays the number of attempts, and so of containers, that the worker runs at the same time. Size `cpus` and `memory_mib` so that `max_concurrent_attempts` containers fit the machine.
+`max_concurrent_attempts` stays the number of attempts, and so of containers, that the worker runs at the same time. For each limit that the file leaves out, preflight reads the machine and gives each container an equal share of it, after a reserve for the machine's own processes, such as sshd and Docker:
+
+| Limit | The machine's total | Reserve | Each container gets |
+| --- | --- | --- | --- |
+| `cpus` | the CPUs that `nproc` counts | 0.5 CPU | (total − 0.5) ÷ `max_concurrent_attempts`, rounded down to a hundredth |
+| `memory_mib` | `MemTotal` in `/proc/meminfo` | 1024 MiB | (total − 1024) ÷ `max_concurrent_attempts`, rounded down to a MiB |
+| `pids` | the lower of `/proc/sys/kernel/threads-max` and `/proc/sys/kernel/pid_max` | 1024 | (total − 1024) ÷ `max_concurrent_attempts`, rounded down |
+
+A machine with 4 CPUs and 8 GiB of memory gives each container 3.5 CPUs and 7168 MiB with `max_concurrent_attempts: 1`, and 1.16 CPUs and 2389 MiB with `max_concurrent_attempts: 3`. No derived limit goes below 0.01 CPU, 256 MiB, or 64 processes. A provisioned worker's machines each run one attempt, so its first machine each day gets the limits for one attempt, and the worker's machines keep them until the next day's first machine.
+
+Preflight logs the limits with the worker's preflight line, `SSH Worker preflight verified`: `cpus`, `memoryMib`, `pids`, `derivedLimits` (the ones it derived), `slots`, and the machine's `machineCpus`, `machineMemoryMib`, and `machineTasks`. The **Workers** page shows the limits that the last preflight applied and which ones it derived. A value in the file always wins over a derived one. A reload that raises `max_concurrent_attempts` runs preflight, which derives the limits again for new containers; one that lowers it runs no preflight, so new containers keep the smaller limits until the next preflight.
 
 A custom image needs what the default one has: a `usine` user whose user ID is the SSH user's, with the home directory `/home/usine`, and Git, gh, curl, Node.js, and the harnesses on the `PATH`. Preflight compares the user IDs.
 
@@ -334,8 +343,8 @@ workers:
     destination: worker-2
     root: /home/usine/.usine
     max_concurrent_attempts: 2
+    # 3584 MiB per container; preflight derives cpus and pids from the machine.
     container:
-      cpus: 2
       memory_mib: 3584
 ```
 
