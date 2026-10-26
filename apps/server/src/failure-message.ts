@@ -202,7 +202,7 @@ export const failureMessage = (failure: CliFailure): string =>
         onNone: () =>
           `usine ${command} did nothing: a process holds ${directory}/.usine/instance.lock, but .usine/instance.pid names no running process. Wait for it to finish starting, then run usine ${command} again.`,
         onSome: (holder) =>
-          `usine ${command} did nothing: usine (pid ${holder}) runs in ${directory} without .usine/instance.json, so its port and command line are unknown. It is a usine version that doesn't write one, or it is still starting. Stop it with usine stop, then start it with usine up --detach.`,
+          `usine ${command} did nothing: usine (pid ${holder}) runs in ${directory} without a readable .usine/instance.json, so its port and command line are unknown. It is a usine version that doesn't write one, or it is still starting. Stop it with usine stop, then start it with usine up --detach.`,
       }),
     MissingEnvironmentError: ({ command, variables }) =>
       `usine ${command} left the instance running: neither this shell nor .env sets ${variables.join(", ")}, which the new usine up reads at startup for its ${variables.length === 1 ? "gateway" : "gateways"}. The new process gets the environment of the shell that runs usine ${command}, and reads .env in the instance folder. Add ${variables.length === 1 ? "it" : "them"} to .env, then run usine ${command} again.`,

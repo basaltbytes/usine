@@ -300,6 +300,9 @@ const upCommand = (
     });
   });
 
+/** Returns the settings of a `usine up` without flags: those of the environment, or the defaults. */
+export const environmentUp = (environment: CliEnvironment) => upCommand([], environment);
+
 const SecondsFromString = Schema.NumberFromString.pipe(
   Schema.decodeTo(Schema.Int.check(Schema.isGreaterThan(0))),
 );

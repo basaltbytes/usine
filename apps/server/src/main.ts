@@ -28,7 +28,8 @@ const cliEnvironment: Config.Config<CliEnvironment> = Config.all({
 // Untraced: a span around `usine up`, which never returns, would parent every span it exports.
 const runCommand = Effect.fnUntraced(function* (directory: InstanceDirectory) {
   // An environment and a parsed .env don't fail to load, so a ConfigError here is a defect.
-  const command = yield* parseCli(process.argv.slice(2), yield* Effect.orDie(cliEnvironment));
+  const environment = yield* Effect.orDie(cliEnvironment);
+  const command = yield* parseCli(process.argv.slice(2), environment);
   return yield* Match.valueTags(command, {
     HelpCommand: () => Console.log(CLI_USAGE),
     VersionCommand: () => Effect.flatMap(packageVersion(), Console.log),
@@ -75,7 +76,7 @@ const runCommand = Effect.fnUntraced(function* (directory: InstanceDirectory) {
     RestartCommand: ({ options }) =>
       Effect.flatMap(
         Effect.promise(() => import("./restart.ts")),
-        ({ restart }) => restart(directory, options),
+        ({ restart, fallbackLaunch }) => restart(directory, options, fallbackLaunch(environment)),
       ),
     UpgradeCommand: (upgradeCommand) =>
       Effect.flatMap(

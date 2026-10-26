@@ -62,6 +62,9 @@ const run = <A, E>(
 const options = (seconds: number, force = false) =>
   new LifecycleOptions({ timeout: Duration.seconds(seconds), force });
 
+/** The fallback launch of a restart that must find the instance record. */
+const recordedOnly = Effect.die(new Error("usine restart used the fallback launch"));
+
 /** Starts the fixture in the background, the way `usine restart` starts `usine up`. */
 const startFixture = async (
   directory: InstanceDirectory,
@@ -130,7 +133,7 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
     const files = instanceFiles(directory);
     const first = await startFixture(directory, FIXTURE, "Debug");
 
-    await run(restart(directory, options(20)));
+    await run(restart(directory, options(20), recordedOnly));
 
     const state = await run(probeInstance(directory));
     assert(state._tag === "Running");
@@ -159,16 +162,51 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
     );
     writeFileSync(join(directory, "fixture-drain"), "never");
 
-    const refused = await run(restart(directory, options(20)).pipe(Effect.flip));
+    const refused = await run(restart(directory, options(20), recordedOnly).pipe(Effect.flip));
     assert(refused._tag === "LiveAttemptsError");
     assert.deepStrictEqual(refused.runs, [RunId.make("run-live")]);
     assert.isTrue(alive(first.pid), "a refused restart leaves the instance running");
 
-    await run(restart(directory, options(20, true)));
+    await run(restart(directory, options(20, true), recordedOnly));
     const state = await run(probeInstance(directory));
     assert(state._tag === "Running");
     pids.add(state.record.pid);
     assert.isFalse(alive(first.pid));
+    await run(stop(directory, options(20, true)));
+  });
+
+  it("restarts an instance without a readable record from its pid file", async () => {
+    const directory = instanceFolder();
+    const files = instanceFiles(directory);
+    const first = await startFixture(directory);
+    writeFileSync(files.record, JSON.stringify({ pid: "unreadable" }));
+    writeFileSync(
+      join(directory, "fixture-runs.json"),
+      JSON.stringify([{ id: "run-live", state: "Running" }]),
+    );
+    const fallback = Effect.succeed(
+      new InstanceLaunch({
+        node: first.launch.node,
+        nodeOptions: first.launch.nodeOptions,
+        script: FIXTURE,
+        port: first.launch.port,
+        logLevel: "Debug",
+        allowVolatileInstance: false,
+      }),
+    );
+
+    // The checks ask the fallback port, where the instance answers.
+    const refused = await run(restart(directory, options(20), fallback).pipe(Effect.flip));
+    assert(refused._tag === "LiveAttemptsError");
+    assert.isTrue(alive(first.pid), "a refused restart leaves the instance running");
+
+    await run(restart(directory, options(20, true), fallback));
+    const state = await run(probeInstance(directory));
+    assert(state._tag === "Running");
+    pids.add(state.record.pid);
+    assert.notStrictEqual(state.record.pid, first.pid);
+    assert.isFalse(alive(first.pid));
+    assert.strictEqual(state.record.launch.logLevel, "Debug");
     await run(stop(directory, options(20, true)));
   });
 
@@ -199,7 +237,7 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
     const variable = `USINE_TEST_GATEWAY_TOKEN_${process.pid}`;
     writeFileSync(join(directory, "fixture-gateway-env"), variable);
 
-    const refused = await run(restart(directory, options(20)).pipe(Effect.flip));
+    const refused = await run(restart(directory, options(20), recordedOnly).pipe(Effect.flip));
     assert(refused._tag === "MissingEnvironmentError");
     assert.deepStrictEqual(refused.variables, [variable]);
     assert.isTrue(alive(first.pid));

@@ -296,7 +296,7 @@ From the instance folder, run `usine stop`, or press Ctrl+C once in the terminal
 
 ## Restart and upgrade
 
-`usine restart` stops the orchestrator and starts it again in the background, with the same Node.js binary, entry point, port, and flags, and its output in `.usine/usine.log`. To start it in the background the first time, run `usine up --detach`.
+`usine restart` stops the orchestrator and starts it again in the background, with the same Node.js binary, entry point, port, and flags, and its output in `.usine/usine.log`. If an earlier usine version started the orchestrator without a record that the new one reads, `usine restart` starts it as `usine up --detach` would, on the port that your shell or `.env` sets. To start it in the background the first time, run `usine up --detach`.
 
 `usine restart` and `usine upgrade` refuse while a run has a running attempt, so that the drain doesn't keep the orchestrator down. Wait for the attempt to end, or pass `--force` to stop without waiting; the new process reattaches the attempt. The new process gets the environment of your shell and reads `.env` in the instance folder. Keep the variables that `usine up` needs, such as a gateway's `admin_token_env`, in `.env`, so that the commands work from any shell. `usine restart` refuses if neither your shell nor `.env` sets a gateway's variable. See [Environment file](/reference/configuration/cli/#environment-file).
 

@@ -165,10 +165,12 @@ Takes the same flags as `usine stop`. It applies `--timeout` to the stop and aga
 
 Stops the orchestrator as `usine stop` does, then starts it as a [background start](#background-start) with the Node.js binary, Node.js options, entry point, port, and flags from the instance record. After a rebuild of a checkout, the entry point is the rebuilt one. The new process inherits the environment of the shell that runs `usine restart`, not the environment of the process that it replaces, and reads the [environment file](#environment-file) again. A variable in `.env` doesn't need to be set in that shell.
 
+If the orchestrator has no instance record that this `usine` can read, for example because an earlier usine version started it, the command stops the process in `.usine/instance.pid`. It then starts `usine up` as `usine up --detach` without flags would: with the `usine` that you run, and the port, log level, and volatile flag that the shell or `.env` sets, else the defaults. It prints that port first. The checks below ask the orchestrator on that port, and pass if it doesn't answer.
+
 The command changes nothing and exits with status 1 in these cases:
 
 - No `usine up` runs in the folder. Start it with `usine up --detach`.
-- The orchestrator wrote no instance record, because an earlier usine version started it. Stop it with `usine stop`, and start it with `usine up --detach`.
+- A process holds the instance lock, but `.usine/instance.pid` names no running process, because the orchestrator is still starting. Run the command again after it starts.
 - A run has a running attempt, unless you pass `--force`. Without a deadline, the drain would keep the orchestrator down until the attempt ends.
 - Neither the shell nor `.env` sets the `admin_token_env` variable of a gateway in the running configuration. The new process would stop at startup without it.
 
@@ -233,8 +235,8 @@ The `usine` process reads these variables from its environment, or from the [env
 
 | Variable | Read by | Description |
 | --- | --- | --- |
-| `USINE_PORT` | `usine up` | The HTTP port if `--port` is absent. If the value isn't a whole number from 1 to 65535, `usine up` exits with status 1. `usine restart` passes the recorded port with `--port`, so this variable doesn't change it. |
-| `USINE_LOG_LEVEL` | `usine up` | The log level if `--log-level` is absent. If the value isn't `trace`, `debug`, `info`, `warn`, or `error`, in any case, `usine up` exits with status 1. `usine restart` passes the recorded level with `--log-level`, so this variable doesn't change it. |
+| `USINE_PORT` | `usine up` | The HTTP port if `--port` is absent. If the value isn't a whole number from 1 to 65535, `usine up` exits with status 1. `usine restart` passes the recorded port with `--port`, so this variable doesn't change it unless the instance record is missing or unreadable. |
+| `USINE_LOG_LEVEL` | `usine up` | The log level if `--log-level` is absent. If the value isn't `trace`, `debug`, `info`, `warn`, or `error`, in any case, `usine up` exits with status 1. `usine restart` passes the recorded level with `--log-level`, so this variable doesn't change it unless the instance record is missing or unreadable. |
 | `USINE_ALLOW_VOLATILE_INSTANCE` | `usine up` | `1` has the same effect as `--allow-volatile-instance`. usine ignores other values. |
 | `TMPDIR` | `usine up` | Added to the temporary directories of the volatile path check. |
 | `USINE_GITHUB_APP_ID` | `usine up` | The GitHub App ID, a positive integer. Takes precedence over `app_id` in the secrets file. |
