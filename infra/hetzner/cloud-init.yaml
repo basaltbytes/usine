@@ -26,6 +26,7 @@ packages:
   - chromium
   - curl
   - docker.io
+  - docker-cli
   - git
   - gnupg
   - jq
