@@ -46,6 +46,7 @@ import {
   capturedLogs,
   fakeMachine,
   INSTANCE,
+  INSTANCE_ID,
   LOCAL_TEMPORARY_DIRECTORY,
   mintingProvider,
   request,
@@ -99,6 +100,7 @@ const runtimeOf = (
   sshLayer({
     workers: [address],
     instance: INSTANCE,
+    instanceId: INSTANCE_ID,
     interruptGrace: "2 seconds",
     providerEndpoints: { hetzner: HETZNER_TEST_API, boat: BOAT_TEST_API },
     machinePollInterval: "1 millis",
@@ -197,6 +199,7 @@ const gatewayRuntimeOf = (
   sshLayer({
     workers: [address],
     instance: INSTANCE,
+    instanceId: INSTANCE_ID,
     interruptGrace: "2 seconds",
     providerEndpoints: { hetzner: HETZNER_TEST_API },
     machinePollInterval: "1 millis",

@@ -1,7 +1,7 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { UsineConfig } from "@usine/config/factory";
-import { InstanceDirectory } from "@usine/core/instance";
+import { InstanceDirectory, InstanceId } from "@usine/core/instance";
 import { stubAttemptRuntime, StubStorage } from "@usine/durable/testing";
 import { Effect, FileSystem, Layer, Schema } from "effect";
 import { workerEngineLayer } from "../src/worker-engine.ts";
@@ -37,7 +37,12 @@ const startupFailure = (workers: (typeof UsineConfig.Encoded)["workers"]) =>
     );
     const config = Schema.decodeUnknownSync(UsineConfig)({ version: 1, repos: [], workers });
     return yield* Layer.build(
-      workerEngineLayer(directory, config, []).pipe(
+      workerEngineLayer(
+        directory,
+        InstanceId.make("0b4e7f3c-5a2d-4c1e-9f6b-8d7a2e1c3b4f"),
+        config,
+        [],
+      ).pipe(
         Layer.provide(credentialLayer),
         Layer.provide(stubAttemptRuntime(new StubStorage())),
         Layer.provide(claudeLoginLockLayer),

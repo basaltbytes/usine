@@ -56,3 +56,11 @@ Which checkouts a container had is recorded in a file beside the worker's direct
 The harness login files are mounted read-write, as the shared user had them: the harnesses rewrite them when they refresh an OAuth token, and on the operator's subscriptions a refresh that can't be saved may leave every later attempt with a revoked login. An attempt can read and replace the operator's login, as before; the login lock still serializes Claude starts on the worker.
 
 A machine without Docker runs attempts as the shared user, as before, and preflight reports the worker as degraded. A machine whose SSH user can use Docker never does: there, the shared user is root-equivalent ([ADR 0027](./0027-gateway-credential-proxy.md), amended 2026-10-25).
+
+## Amendment (2026-10-26, #589): an instance ID tells apart instances that share the App
+
+Attempt containers were labeled with `github-app-<App ID>` only, and each process removes the containers with that label that it didn't start. Two instance folders that share the App and a worker machine, such as a staging and a production instance, then removed each other's running containers at startup. The App stays the identity on GitHub. Each instance folder now also has an instance ID, a UUID that the first `usine up` writes to `.usine/instance-id` while it holds the instance lock, and that every later `usine up` reads. Each attempt container gets a `dev.usine.instance-id` label too, and a process removes only the containers that have both its labels.
+
+The ID is a file in the gitignored `.usine/`, not a setting in `usine.yaml`, because two instances made from one published instance repo would share a setting. It moves and is backed up with the folder, which [ADR 0010](./0010-single-sqlite-runtime-store.md) says to copy whole. A deleted or changed file gives the instance a new ID, and usine then doesn't remove the containers that it left before, so a startup refuses a file that doesn't contain a UUID instead of replacing it.
+
+A container that an earlier usine version left after a crash has no ID label, so no later process removes it; remove such containers with `docker rm` once. Provisioned machines and Cloudflare sandboxes still carry only the App's identity.

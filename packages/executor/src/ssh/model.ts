@@ -1,4 +1,5 @@
 import type { SshCommand } from "@usine/agents/child-host";
+import type { InstanceId } from "@usine/core/instance";
 import type {
   BoatSize,
   ContainerCpus,
@@ -126,10 +127,15 @@ export interface SshWorkerAddress {
 export interface SshExecutorOptions {
   readonly workers: ReadonlyArray<SshWorkerAddress>;
   /**
-   * The identity of this usine instance on the Workers' machines. It labels each Attempt
-   * container, so that a later process removes only this instance's containers.
+   * The identity of this usine instance on the Workers' machines, which the instances that share
+   * a GitHub App share too. It labels each Attempt container, and tags each provisioned machine.
    */
   readonly instance: string;
+  /**
+   * Tells apart the instances that share a GitHub App. It labels each Attempt container too, so
+   * that a later process removes only this instance's containers.
+   */
+  readonly instanceId: InstanceId;
   /** The local SSH command and the options placed before each Worker's port and identity file. Defaults to `ssh` in batch mode with keepalives. */
   readonly ssh?: SshCommand;
   /** The timeout for the parent task's cancellation, then separately for the Attempt to finish. Defaults to 10 seconds. */

@@ -3,6 +3,7 @@
 An `ssh` worker is any Linux machine that the orchestrator reaches over SSH. These files create one on Hetzner Cloud in Falkenstein (`fsn1`), Nuremberg (`nbg1`), or Helsinki (`hel1`). [Add a worker](https://docs.usine.dev/guides/add-a-worker/) covers the same steps. [ADR 0026](../../docs/adr/0026-eu-ssh-worker.md) records why usine runs its own workers on EU machines.
 
 - `cloud-init.yaml` builds a Debian 13 machine: the `usine` user, with SSH by key only, Docker, Git, gh, Node.js 24, pnpm, Claude Code, Codex pinned to a supported version, and Chromium. It also builds a worker behind the gateway of `gateway/`, where `gateway/gateway.sh worker-user-data` adds the gateway's worker settings.
+- `render-cloud-init.sh` prints that file with the public keys to authorize for `usine` and the Node.js major version of the attempt image, `NODE_MAJOR` in `../worker-image/Dockerfile`, which the scripts here send as the server's user data.
 - `create-worker.sh` creates the server with that file, labels it `usine=worker`, and attaches a Hetzner firewall that allows SSH only from the orchestrator's address.
 - `snapshot.sh` builds the snapshot from which a [provisioned worker](#provisioned-workers) creates a server for each attempt.
 - `../worker-image/Dockerfile` is the image of each attempt's container. CI builds it and pushes it to `ghcr.io/basaltbytes/usine-worker`, tagged with its Claude Code and Codex versions.
@@ -77,7 +78,7 @@ Without `TURBO_CACHE_DIR` and a `cacheDir`, Turborepo 2.10 puts a linked worktre
 
 ## Upgrade the harnesses
 
-The attempt image has the Claude Code and Codex versions that the usine release supports, and its tag names them. A usine release with new versions names a new tag, which preflight pulls at the next `usine up` or reload that preflights the worker; nothing changes on the machine. A worker with `container.image` in `usine.yaml` gets new versions when you change that tag. CI pushes an image for every change to `infra/worker-image/`. A change that keeps the versions overwrites their tag, and workers get it at their next preflight.
+The attempt image has the Claude Code and Codex versions that the usine release supports, and its tag names them. A usine release with new versions names a new tag, which preflight pulls at the next `usine up` or reload that preflights the worker; nothing changes on the machine. A worker with `container.image` in `usine.yaml` gets new versions when you change that tag. CI pushes an image for every change to `infra/worker-image/`. A change that keeps the versions overwrites their tag, and workers get it at their next preflight. A change to `NODE_MAJOR` in the Dockerfile is one: the image gets the new Node.js at once, and the worker machines get it with servers created or snapshots built after it.
 
 The first image pushed to GHCR is private. Make the `usine-worker` package public in its package settings on GitHub, or run `docker login ghcr.io` as `usine` on each worker.
 
