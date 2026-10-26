@@ -3,8 +3,8 @@ import { preflight } from "@usine/agents/preflight";
 import type { ClaudeLoginLock } from "@usine/agents/runtime";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import type { HarnessReadiness } from "@usine/core/agent/capability";
-import type { WorkerName } from "@usine/core/worker";
-import { Array as Arr, Effect } from "effect";
+import type { MachineId, WorkerName } from "@usine/core/worker";
+import { Array as Arr, Effect, Option } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { logPreflightFailure, ExecutorOperationError, WorkerCapabilityError } from "./executor.ts";
 
@@ -17,24 +17,30 @@ export type HarnessProbe = (
 ) => Effect.Effect<HarnessReadiness, ExecutorOperationError | WorkerCapabilityError>;
 
 /**
- * Probes each distinct brain and fails with a capability error if a harness is unavailable. A
- * Claude probe holds `worker`'s lock in `logins`, so two preparations on one Worker never
- * refresh the Claude login concurrently or while a Claude child starts (#453).
+ * Probes each distinct brain on `worker`, or on its provisioned `machine` if `Some`, and fails with
+ * a capability error if a harness is unavailable. A Claude probe holds that login's lock in
+ * `logins`, so two preparations never refresh one Claude login concurrently or while a Claude
+ * child starts (#453).
  */
 export const verifyHarnessReadiness = Effect.fn("Executor.verifyHarnessReadiness")(function* (
   worker: WorkerName,
+  machine: Option.Option<MachineId>,
   brains: ReadonlyArray<BrainSpec>,
   probe: HarnessProbe,
   logins: ClaudeLoginLock["Service"],
 ) {
-  yield* Effect.annotateCurrentSpan({ worker });
+  const fields = {
+    worker,
+    ...Option.match(machine, { onNone: () => ({}), onSome: (id) => ({ machine: id }) }),
+  };
+  yield* Effect.annotateCurrentSpan(fields);
   const distinct = Arr.dedupe(brains);
   for (const brain of distinct) {
     const result = yield* brain.harness === "claude"
-      ? Effect.logDebug("Checking Claude under the Worker's Claude login lock", {
-          worker,
+      ? Effect.logDebug("Checking Claude under its Claude login lock", {
+          ...fields,
           model: brain.model,
-        }).pipe(Effect.andThen(logins.withLock(worker)(probe(brain))))
+        }).pipe(Effect.andThen(logins.withLock(worker, machine)(probe(brain))))
       : probe(brain);
     if (result._tag === "HarnessUnavailableError")
       return yield* new WorkerCapabilityError({

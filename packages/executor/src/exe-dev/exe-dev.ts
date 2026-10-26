@@ -58,6 +58,7 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
       return {
         shell: commands.childHost(vm.sshDest),
         workerDirectory: `${vm.home}/.usine/workers/${safeSegment(worker)}`,
+        provisioned: Option.none(),
       } satisfies RemoteMachine;
     });
 

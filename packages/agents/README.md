@@ -26,7 +26,7 @@ const childBackendLayer = childDispatcherLayer.pipe(
 );
 ```
 
-The Claude backend also needs `ClaudeLoginLock` (`/runtime`), one per worker, which every Claude command that can refresh the worker's login takes. Give the same instance (`claudeLoginLockLayer` from `@usine/executor`) to the backends and the executor running preflight.
+The Claude backend also needs `ClaudeLoginLock` (`/runtime`), which every Claude command that can refresh a Claude login takes: one lock per worker, or per machine of a provisioned worker, whose machines each have their own login. Give the same instance (`claudeLoginLockLayer` from `@usine/executor`) to the backends and the executor running preflight.
 
 ## Harnesses and credentials
 
@@ -60,7 +60,7 @@ Child output becomes typed events: `SessionStarted`, `TextOutput` for completed 
 
 ## Claude login lock
 
-A Claude child holds the worker's `ClaudeLoginLock` from process start until its first messages prove the login (a rate-limit or thinking update, an API retry, a model answer, or the turn result), for one minute at most. `launch` returns then.
+A Claude child holds the `ClaudeLoginLock` of its worker, or of its machine (`ChildRequest.machine`) on a provisioned worker, from process start until its first messages prove the login (a rate-limit or thinking update, an API retry, a model answer, or the turn result), for one minute at most. `launch` returns then.
 
 If the first turn ends with `Failed to refresh OAuth token: another Claude Code process ...` and no tokens spent, another process had the refresh lock. The backend stops the process and relaunches after 15, 30, then 60 seconds, logging each retry at info. Only the running launch is transcribed. If the last launch fails the same way, the parent gets Claude's error as the child's report.
 

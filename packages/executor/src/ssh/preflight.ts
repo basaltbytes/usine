@@ -112,7 +112,13 @@ export const sshMachinePreflightFor = (
     const containerCheck = yield* containers.verify(machine, maxConcurrentAttempts);
     const harnesses = Arr.dedupe(brains.map(({ harness }) => harness));
     const probe = (shell: RemoteShell) =>
-      verifyHarnessReadiness(worker, brains, harnessProbe(machine, shell), logins);
+      verifyHarnessReadiness(
+        worker,
+        machine.provisioned,
+        brains,
+        harnessProbe(machine, shell),
+        logins,
+      );
     yield* containerCheck._tag === "Container" && harnesses.length > 0
       ? Effect.scoped(
           containers

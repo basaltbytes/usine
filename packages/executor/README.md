@@ -49,7 +49,7 @@ Every adapter runs the `@usine/agents/preflight` checks where children run: loca
 
 `prepare` repeats the assigned brain's probe before acquiring credentials or a checkout, to catch roster changes and logouts. A capability gap returns `WorkerCapabilityError`, which needs the operator. Transport failures, such as an SSH client that can't reach the VM, and probe timeouts are retryable infrastructure failures.
 
-A Claude check holds the worker's `ClaudeLoginLock` (`@usine/agents/runtime`) until it returns, so two preparing attempts, or a preparing attempt and a starting Claude child, never refresh the login at once. The local, exe.dev, and SSH layers need that service: build `claudeLoginLockLayer` from the root once and give it to the executor and the attempt runtime.
+A Claude check holds the worker's `ClaudeLoginLock` (`@usine/agents/runtime`) until it returns, so two preparing attempts, or a preparing attempt and a starting Claude child, never refresh the login at once. On a provisioned worker, each machine has its own login and lock, so attempts on different machines don't wait for each other. The local, exe.dev, and SSH layers need that service: build `claudeLoginLockLayer` from the root once and give it to the executor and the attempt runtime.
 
 It replaces exe.dev's `HarnessLoginCheck` and `harnessLoginChecks` options.
 
