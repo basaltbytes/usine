@@ -176,7 +176,7 @@ Under the outline, a red count with previous and next controls steps through loa
 - For a worker that `usine.yaml` no longer declares, it uses the local form and says so.
 - For a Codex child that saved its session in the attempt's own Codex home, as behind a gateway with `openai` in `llm_providers`, it sets `CODEX_HOME` to that directory before `codex resume`.
 
-**Copy command** copies the wrapped command as one line. Resuming needs the attempt's harness login and its worktree, which attempt cleanup removes. For a child whose model requests used the gateway's credential, the line under the command reads `The gateway credential isn't available from your shell` instead of naming the login. Older transcripts and Pi children say no harness session was saved.
+**Copy command** copies the wrapped command as one line. Resuming needs the attempt's harness login and its worktree, which attempt cleanup removes. For a child whose model requests used the gateway's credential, the line under the command reads `The gateway credential isn't available from your shell` instead of naming the login. On a provisioned worker, where such a child used the gateway's credential or the provisioner's API key, a second line under the machine note reads `The gateway credential or API key isn't available from your shell`. Older transcripts and Pi children say no harness session was saved.
 
 ### Reader
 

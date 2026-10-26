@@ -91,7 +91,13 @@ export const SessionHandoff = ({
         </CodeBlockHeader>
       </CodeBlock>
       {workerAccess?._tag === "Provisioned" ? (
-        <p>{`Run it on the attempt's ${providerLabel[workerAccess.provider]} machine, which is deleted with the attempt`}</p>
+        <>
+          <p>{`Run it on the attempt's ${providerLabel[workerAccess.provider]} machine, which is deleted with the attempt`}</p>
+          {/* A provisioned machine's child used its gateway's credential or the provisioner's API key. */}
+          {gatewayCredential && (
+            <p>The gateway credential or API key isn't available from your shell</p>
+          )}
+        </>
       ) : gatewayCredential ? (
         <p>
           The gateway credential isn't available from your shell. The worktree is removed at attempt

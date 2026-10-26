@@ -855,7 +855,8 @@ const resumeCases: ReadonlyArray<{
   readonly access: WorkerAccess | null;
   readonly facts: ReadonlyArray<string>;
   readonly command: string;
-  readonly note?: string;
+  /** The lines under the command, all of them. */
+  readonly notes?: ReadonlyArray<string>;
   /** The child's model requests used the gateway's credential, with Codex in the attempt's own home. */
   readonly gateway?: { readonly home: string };
 }> = [
@@ -880,7 +881,9 @@ const resumeCases: ReadonlyArray<{
     gateway: { home: "/worker/codex/attempt-1" },
     facts: ["Worktree /worker/Philippe's repo on usine-worker-1"],
     command: String.raw`ssh -t usine-worker-1 'cd -- '\''/worker/Philippe'\''\'\'''\''s repo'\'' && CODEX_HOME='\''/worker/codex/attempt-1'\'' codex resume -- '\''native-session'\'''`,
-    note: "The gateway credential isn't available from your shell. The worktree is removed at attempt cleanup",
+    notes: [
+      "The gateway credential isn't available from your shell. The worktree is removed at attempt cleanup",
+    ],
   },
   {
     worker: "usine-worker-1",
@@ -905,13 +908,25 @@ const resumeCases: ReadonlyArray<{
     access: Schema.decodeUnknownSync(WorkerAccess)({ _tag: "Provisioned", provider: "hetzner" }),
     facts: ["Worktree /worker/Philippe's repo on hz-pool"],
     command: String.raw`cd -- '/worker/Philippe'\''s repo' && claude --resume 'native-session'`,
-    note: "Run it on the attempt's Hetzner machine, which is deleted with the attempt",
+    notes: ["Run it on the attempt's Hetzner machine, which is deleted with the attempt"],
+  },
+  {
+    worker: "hz-pool",
+    harness: "codex",
+    access: Schema.decodeUnknownSync(WorkerAccess)({ _tag: "Provisioned", provider: "hetzner" }),
+    gateway: { home: "/worker/codex/attempt-1" },
+    facts: ["Worktree /worker/Philippe's repo on hz-pool"],
+    command: String.raw`cd -- '/worker/Philippe'\''s repo' && CODEX_HOME='/worker/codex/attempt-1' codex resume -- 'native-session'`,
+    notes: [
+      "Run it on the attempt's Hetzner machine, which is deleted with the attempt",
+      "The gateway credential or API key isn't available from your shell",
+    ],
   },
 ];
 
 it.each(resumeCases)(
   "gives a finished $harness child on $worker one copyable command for the operator's terminal",
-  async ({ worker, harness, access, facts, command, note = sameLogin, gateway }) => {
+  async ({ worker, harness, access, facts, command, notes = [sameLogin], gateway }) => {
     const child = new ChildSession({
       id: AgentSessionId.make("saved-child"),
       parentId: parent.id,
@@ -943,7 +958,13 @@ it.each(resumeCases)(
       await expect.element(page.getByText(fact, { exact: true })).toBeVisible();
     }
     await expect.element(page.getByText("Resume this session", { exact: true })).toBeVisible();
-    await expect.element(page.getByText(note, { exact: true })).toBeVisible();
+    for (const note of notes) {
+      await expect.element(page.getByText(note, { exact: true })).toBeVisible();
+    }
+    if (gateway === undefined)
+      await expect
+        .element(page.getByText(/isn't available from your shell/u))
+        .not.toBeInTheDocument();
     // The command wraps in the popover instead of scrolling sideways.
     const code = page.getByRole("dialog").element().querySelector("pre");
     expect(code?.textContent).toBe(command);
