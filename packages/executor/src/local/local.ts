@@ -559,6 +559,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         launch: (io: AttemptChannel.Sink) =>
           session.launch(prepared.workspace, io, {
             host: new LocalProcess(),
+            machine: Option.none(),
             environment,
             // Local Workers have no Gateway; every harness uses its own login.
             gatewayCredential: Effect.succeedNone,

@@ -947,6 +947,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
               });
               return yield* session.launch(prepared, io, {
                 host: shell,
+                machine: machine.provisioned,
                 environment: childEnvironment(
                   access.environment,
                   request.commitAuthor,

@@ -1121,6 +1121,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
       const launchIn = (io: AttemptChannel.Sink) =>
         session.launch(prepared, io, {
           host: shell,
+          machine: Option.none(),
           environment: childEnvironment(
             sandboxEnvironment(worker),
             request.commitAuthor,

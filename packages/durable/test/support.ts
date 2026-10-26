@@ -53,6 +53,7 @@ export const attemptRequest = (
     worker: WorkerName.make("local"),
     cwd: "/workspace/usine",
     host,
+    machine: Option.none(),
     environment: workerEnvironment,
     gatewayCredential: Effect.succeedNone,
   });

@@ -4,7 +4,7 @@ import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
 import { AgentName } from "@usine/core/agent";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { WorkerName } from "@usine/core/worker";
-import { Effect, Layer, Stream } from "effect";
+import { Effect, Layer, Option, Stream } from "effect";
 import { LocalProcess } from "../../src/child-host/child-host.ts";
 import {
   ChildBackend,
@@ -21,6 +21,7 @@ import { childDispatcherLayer } from "../../src/pi/children.ts";
 const request = (harness: Harness) =>
   new ChildRequest({
     worker: WorkerName.make("worker-1"),
+    machine: Option.none(),
     environment: { HOME: "/home/worker", PATH: "/usr/bin:/bin" },
     session: new ChildSession({
       id: AgentSessionId.make(`child-${harness}`),

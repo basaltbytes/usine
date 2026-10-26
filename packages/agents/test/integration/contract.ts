@@ -111,6 +111,7 @@ const controlledChild = <A, E, R>(
         .launch(
           new ChildRequest({
             worker: WorkerName.make("worker-1"),
+            machine: Option.none(),
             cwd: WorkingDirectory.make(cwd),
             environment: child.environment,
             host: child.host,
