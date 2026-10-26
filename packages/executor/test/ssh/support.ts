@@ -118,6 +118,8 @@ interface FakeContainer {
   readonly labels: ReadonlyMap<string, string>;
   /** The `--env-file` content read from standard input. */
   readonly environment: string;
+  /** Whether its init runs. A stopped container reads as one that the kernel killed for memory. */
+  running: boolean;
 }
 
 /** A fake SSH client that forwards a local port to a Gateway's admin API. */
@@ -349,16 +351,42 @@ export const fakeMachine = () => {
           return [[key, value.join("=")] as const];
         }),
       );
-      state.containers.set(name, { args: words.slice(1), labels, environment: input });
+      state.containers.set(name, {
+        args: words.slice(1),
+        labels,
+        environment: input,
+        running: true,
+      });
       return oneShotHandle("4f0c2d\n", 0);
     }
     if (line.startsWith("exec 'docker' 'rm' '--force' ")) {
       for (const name of words.slice(3)) state.containers.delete(name);
       return oneShotHandle("", 0);
     }
+    if (line.startsWith("exec 'docker' 'container' 'inspect' ")) {
+      const name = words.at(-1) ?? "";
+      const container = state.containers.get(name);
+      if (container === undefined) return oneShotHandle("", 1, `Error: No such container: ${name}`);
+      return oneShotHandle(container.running ? "running 0 false\n" : "exited 137 true\n", 0);
+    }
+    if (line.startsWith("exec 'docker' 'start' ")) {
+      const name = words.at(-1) ?? "";
+      const container = state.containers.get(name);
+      if (container === undefined)
+        return oneShotHandle("", 1, `Error response from daemon: No such container: ${name}`);
+      container.running = true;
+      return oneShotHandle(`${name}\n`, 0);
+    }
     if (line.includes("container inspect")) {
-      const name = words[5] ?? "";
-      return oneShotHandle(state.containers.has(name) ? "no-children\n" : "no-container\n", 0);
+      const container = state.containers.get(words[5] ?? "");
+      return oneShotHandle(
+        container === undefined
+          ? "no-container\n"
+          : container.running
+            ? "no-children\n"
+            : "container-stopped\n",
+        0,
+      );
     }
     if (line.includes("ps --all")) {
       const label = words[5] ?? "";
@@ -553,9 +581,16 @@ export const fakeMachine = () => {
       if (line.startsWith("exec 'docker' 'exec' '-i' ")) {
         const [, , , container = "", , , inner = ""] = remoteWords(line);
         state.calls.push({ command, line: inner, input, container });
-        return state.containers.has(container)
+        const running = state.containers.get(container)?.running;
+        if (running === undefined)
+          return oneShotHandle(
+            "",
+            1,
+            `Error response from daemon: No such container: ${container}`,
+          );
+        return running
           ? respond(command, inner, input)
-          : oneShotHandle("", 1, `Error response from daemon: No such container: ${container}`);
+          : oneShotHandle("", 1, "Error response from daemon: container 4f0c2d is not running");
       }
       // Records `docker run` behind the pipe that gives it standard input as the docker command.
       const piped = `exec 'sh' '-c' ${quote('cat | "$@"')} 'sh' `;

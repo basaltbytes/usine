@@ -20,7 +20,7 @@ import {
   Stopped,
   Unrecorded,
   probeInstance,
-  terminate,
+  signalProcess,
 } from "../../src/instance/state.ts";
 
 const folders: Array<string> = [];
@@ -169,13 +169,15 @@ describe("instance state", () => {
   it.skipIf(process.getuid?.() === 0 || pid1OwnedByThisUser())(
     "reports a process that it may not signal",
     async () => {
-      const error = await Effect.runPromise(terminate(ProcessId.make(1)).pipe(Effect.flip));
+      const error = await Effect.runPromise(
+        signalProcess(ProcessId.make(1), "SIGTERM").pipe(Effect.flip),
+      );
       assert.instanceOf(error, SignalError);
       assert.strictEqual(error.signal, "SIGTERM");
     },
   );
 
   it("succeeds when the process exited before the signal", async () => {
-    await Effect.runPromise(terminate(ProcessId.make(exitedPid())));
+    await Effect.runPromise(signalProcess(ProcessId.make(exitedPid()), "SIGTERM"));
   });
 });

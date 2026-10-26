@@ -195,6 +195,8 @@ export const failureMessage = (failure: CliFailure): string =>
     SignalError: ({ pid, signal, reason }) =>
       `Could not send ${signal} to pid ${pid} (${clause(reason)}). Run the command as the user that started usine.`,
     StopTimeoutError: ({ command, pid, timeout, runs }) => stopTimeout(command, pid, timeout, runs),
+    KillTimeoutError: ({ command, pid, timeout }) =>
+      `usine (pid ${pid}) still runs ${Duration.format(timeout)} after usine ${command} sent it SIGKILL. Check the process with ps -p ${pid}, then run usine ${command} again.`,
     InstanceNotRunningError: ({ command, directory }) =>
       `usine ${command} did nothing: usine is not running in ${directory}. Start it with usine up --detach.`,
     UnrecordedInstanceError: ({ command, directory, pid }) =>
