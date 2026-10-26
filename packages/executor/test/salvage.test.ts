@@ -272,6 +272,10 @@ const gitCheckout = Effect.gen(function* () {
     write("packages/app/node_modules/.bin/tool", "#!/bin/sh\n"),
     write(".turbo/cache/run.json", "{}\n"),
   ]);
+  const writeLargeFile = (file: string) =>
+    fileSystem
+      .writeFileString(`${worktree}/${file}`, "")
+      .pipe(Effect.andThen(fileSystem.truncate(`${worktree}/${file}`, 100 * 1024 * 1024 + 1)));
   const salvage = salvageWorktree({
     attemptId: AttemptId.make("run/execute/1"),
     worker: WorkerName.make("local"),
@@ -282,58 +286,68 @@ const gitCheckout = Effect.gen(function* () {
     rejected: Option.none(),
     git,
   });
-  return { fileSystem, git, remote, worktree, write, installDependencies, salvage };
+  /** The salvage ref's commit in `origin` and its files. */
+  const pushed = Effect.gen(function* () {
+    const commit = (yield* git(["--git-dir", remote, "rev-parse", REF])).trim();
+    const files = yield* git(["--git-dir", remote, "ls-tree", "-r", "--name-only", commit]);
+    return { commit, files: files.trim().split("\n") };
+  });
+  return { git, remote, worktree, write, writeLargeFile, installDependencies, salvage, pushed };
 });
 
 describe("salvageWorktree in a git checkout", () => {
   it.live(
-    "leaves package stores, build caches, and files larger than GitHub accepts out of the salvage commit",
+    "pushes the work without package stores, build caches, and files larger than GitHub accepts, and keeps the checkout that has those files",
     () =>
       Effect.gen(function* () {
-        const { fileSystem, git, remote, worktree, write, installDependencies, salvage } =
+        const { worktree, write, writeLargeFile, installDependencies, salvage, pushed } =
           yield* gitCheckout;
         yield* write("src/feature.ts", "export const feature = 1;\n");
         yield* installDependencies;
-        yield* fileSystem.writeFileString(`${worktree}/model.bin`, "");
-        yield* fileSystem.truncate(`${worktree}/model.bin`, 100 * 1024 * 1024 + 1);
+        yield* writeLargeFile("model.bin");
 
         const result = yield* salvage;
 
-        assert(Option.isSome(result) && result.value._tag === "Pushed");
-        const pushed = yield* git(["--git-dir", remote, "rev-parse", `refs/heads/${REF}`]);
-        assert.strictEqual(pushed.trim(), result.value.commit);
-        const files = yield* git([
-          "--git-dir",
-          remote,
-          "ls-tree",
-          "-r",
-          "--name-only",
-          result.value.commit,
-        ]);
-        assert.deepStrictEqual(files.trim().split("\n"), ["README.md", "src/feature.ts"]);
+        const { commit, files } = yield* pushed;
+        assert.deepStrictEqual(files, ["README.md", "src/feature.ts"]);
+        assert(Option.isSome(result) && result.value._tag === "Retained");
+        assert.strictEqual(result.value.path, worktree);
+        assert.deepStrictEqual(result.value.commit, Option.some(CommitSha.make(commit)));
+        assert.include(result.value.message, "model.bin (100.0 MiB)");
+        assert.include(result.value.message, `pushed to ${REF} at ${commit}`);
       }).pipe(Effect.provide(NodeServices.layer)),
   );
 
   it.live("leaves out package stores and build caches that the Attempt staged itself", () =>
     Effect.gen(function* () {
-      const { git, remote, worktree, write, installDependencies, salvage } = yield* gitCheckout;
+      const { git, worktree, write, installDependencies, salvage, pushed } = yield* gitCheckout;
       yield* write("src/feature.ts", "export const feature = 1;\n");
       yield* installDependencies;
       yield* git(["-C", worktree, "add", "--all"]);
 
       const result = yield* salvage;
 
+      const { commit, files } = yield* pushed;
+      assert.deepStrictEqual(files, ["README.md", "src/feature.ts"]);
       assert(Option.isSome(result) && result.value._tag === "Pushed");
-      const files = yield* git([
-        "--git-dir",
-        remote,
-        "ls-tree",
-        "-r",
-        "--name-only",
-        result.value.commit,
-      ]);
-      assert.deepStrictEqual(files.trim().split("\n"), ["README.md", "src/feature.ts"]);
+      assert.strictEqual(result.value.commit, commit);
     }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.live(
+    "keeps a checkout at its base whose only change is a file larger than GitHub accepts",
+    () =>
+      Effect.gen(function* () {
+        const { git, remote, worktree, writeLargeFile, salvage } = yield* gitCheckout;
+        yield* writeLargeFile("model.bin");
+
+        const result = yield* salvage;
+
+        assert(Option.isSome(result) && result.value._tag === "Retained");
+        assert.strictEqual(result.value.path, worktree);
+        assert.include(result.value.message, "model.bin (100.0 MiB)");
+        assert.strictEqual(yield* git(["--git-dir", remote, "branch", "--list"]), "");
+      }).pipe(Effect.provide(NodeServices.layer)),
   );
 
   it.live(

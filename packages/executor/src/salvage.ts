@@ -82,12 +82,20 @@ const oversizedIn = (listing: string, staged: ReadonlySet<string>): ReadonlyArra
       : [];
   });
 
+const describeFiles = (files: ReadonlyArray<OversizedFile>): string =>
+  files.map(({ path, size }) => `${path} (${(size / 1024 / 1024).toFixed(1)} MiB)`).join(", ");
+
+/** Returns the operator-facing reason that a salvage keeps the checkout of `files`. */
+const leftOutMessage = (files: ReadonlyArray<OversizedFile>): string =>
+  `The checkout has files larger than GitHub's 100 MiB limit, which the salvage can't push: ${describeFiles(files)}`;
+
 /**
  * Commits the changes in an unsuccessful Attempt's checkout and pushes HEAD to its salvage ref
- * before the worktree is removed. The commit leaves out what Git ignores, package stores and
- * build caches even if the Attempt staged them, and files larger than GitHub accepts. Skips a checkout with nothing to push beyond its
- * base commit, or whose commit the remote rejected in `rejected`. If the push fails, keeps the
- * worktree and reports its path. Never fails; skipped and failed stages are logged.
+ * before the worktree is removed. The commit leaves out what Git ignores, package stores, and
+ * build caches, even if the Attempt staged them. Skips a checkout with nothing to push beyond its
+ * base commit, or whose commit the remote rejected in `rejected`. If the push fails, or the
+ * commit leaves out a file larger than GitHub accepts, keeps the worktree and reports its path.
+ * Never fails; skipped and failed stages are logged.
  */
 export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <E extends Error>(
   options: SalvageOptions<E>,
@@ -120,58 +128,53 @@ export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <
   const dirty = inspected.success.status.trim().length > 0;
 
   /**
-   * Stages the salvaged paths without the files larger than GitHub accepts, and returns the
-   * number of staged changes.
+   * Commits the salvaged paths without the files larger than GitHub accepts, and returns the
+   * checkout's head and the files left out.
    */
-  const stage = Effect.gen(function* () {
-    yield* git(["add", "--all", "--", ...SALVAGED_PATHS]);
-    // Exclusion pathspecs don't unstage the caches that the Attempt's own `git add` staged.
-    yield* git(["reset", "--quiet", "--", ...CACHE_PATHS]);
-    const staged = (yield* git(["diff", "--cached", "--name-only", "--no-renames", "-z"]))
-      .split("\0")
-      .filter((path) => path.length > 0);
-    if (staged.length === 0) return 0;
-    const tree = (yield* git(["write-tree"])).trim();
-    const oversized = oversizedIn(yield* git(["ls-tree", "-r", "-l", "-z", tree]), new Set(staged));
-    if (oversized.length > 0) {
-      yield* git([
-        "--literal-pathspecs",
-        "reset",
-        "--quiet",
-        "--",
-        ...oversized.map(({ path }) => path),
-      ]);
-      yield* Effect.logWarning(
-        "Left files larger than GitHub's 100 MiB limit out of the salvage commit",
-        {
-          ...fields,
-          files: oversized
-            .map(({ path, size }) => `${path} (${(size / 1024 / 1024).toFixed(1)} MiB)`)
-            .join(", "),
-        },
+  const snapshot = (current: CommitSha) =>
+    Effect.gen(function* () {
+      yield* git(["add", "--all", "--", ...SALVAGED_PATHS]);
+      // Exclusion pathspecs don't unstage the caches that the Attempt's own `git add` staged.
+      yield* git(["reset", "--quiet", "--", ...CACHE_PATHS]);
+      const staged = (yield* git(["diff", "--cached", "--name-only", "--no-renames", "-z"]))
+        .split("\0")
+        .filter((path) => path.length > 0);
+      if (staged.length === 0) return { commit: current, leftOut: [] };
+      const tree = (yield* git(["write-tree"])).trim();
+      const oversized = oversizedIn(
+        yield* git(["ls-tree", "-r", "-l", "-z", tree]),
+        new Set(staged),
       );
-    }
-    return staged.length - oversized.length;
-  });
+      if (oversized.length > 0) {
+        yield* git([
+          "--literal-pathspecs",
+          "reset",
+          "--quiet",
+          "--",
+          ...oversized.map(({ path }) => path),
+        ]);
+        yield* Effect.logWarning(
+          "Left files larger than GitHub's 100 MiB limit out of the salvage commit",
+          { ...fields, files: describeFiles(oversized) },
+        );
+      }
+      if (staged.length === oversized.length) return { commit: current, leftOut: oversized };
+      yield* git([
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "--quiet",
+        "--no-verify",
+        "--message",
+        `wip(usine): salvage attempt ${options.attemptId}`,
+      ]);
+      return { commit: yield* head(), leftOut: oversized };
+    });
 
   let commit = inspected.success.head;
+  let leftOut: ReadonlyArray<OversizedFile> = [];
   if (dirty) {
-    const committed = yield* stage.pipe(
-      Effect.flatMap((staged) =>
-        staged === 0
-          ? Effect.succeed(commit)
-          : git([
-              "-c",
-              "commit.gpgsign=false",
-              "commit",
-              "--quiet",
-              "--no-verify",
-              "--message",
-              `wip(usine): salvage attempt ${options.attemptId}`,
-            ]).pipe(Effect.andThen(head())),
-      ),
-      Effect.result,
-    );
+    const committed = yield* snapshot(commit).pipe(Effect.result);
     if (Result.isFailure(committed)) {
       const message = failureMessage(committed.failure);
       yield* Effect.logError("Could not commit the Attempt's uncommitted changes", {
@@ -181,13 +184,22 @@ export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <
       return Option.some<AttemptSalvage>(
         new SalvageRetained({ path: options.worktree, commit: Option.some(commit), message }),
       );
-    } else {
-      commit = committed.success;
     }
+    ({ commit, leftOut } = committed.success);
   }
   if (Option.contains(options.baseCommit, commit)) {
-    yield* Effect.logInfo("Nothing to salvage from the Attempt worktree", fields);
-    return Option.none<AttemptSalvage>();
+    if (leftOut.length === 0) {
+      yield* Effect.logInfo("Nothing to salvage from the Attempt worktree", fields);
+      return Option.none<AttemptSalvage>();
+    }
+    const message = leftOutMessage(leftOut);
+    yield* Effect.logWarning(
+      "Nothing to push but files larger than GitHub's limit; retaining the Attempt worktree",
+      { ...fields, commit, message },
+    );
+    return Option.some<AttemptSalvage>(
+      new SalvageRetained({ path: options.worktree, commit: Option.some(commit), message }),
+    );
   }
   const rejected = Option.filter(options.rejected, (salvage) => salvage.commit === commit);
   if (Option.isSome(rejected)) {
@@ -231,6 +243,16 @@ export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <
       commit,
       message,
     });
+    return Option.some<AttemptSalvage>(
+      new SalvageRetained({ path: options.worktree, commit: Option.some(commit), message }),
+    );
+  }
+  if (leftOut.length > 0) {
+    const message = `${leftOutMessage(leftOut)}. The rest of the work is pushed to ${options.ref} at ${commit}.`;
+    yield* Effect.logWarning(
+      "Salvaged the Attempt's work without files larger than GitHub's limit; retaining the Attempt worktree, which has their only copy",
+      { ...fields, ref: options.ref, commit, message },
+    );
     return Option.some<AttemptSalvage>(
       new SalvageRetained({ path: options.worktree, commit: Option.some(commit), message }),
     );

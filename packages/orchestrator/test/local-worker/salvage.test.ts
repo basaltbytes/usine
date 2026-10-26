@@ -519,4 +519,52 @@ describe("local worker salvage", () => {
       }).pipe(Effect.provide(NodeServices.layer)),
     LIVE_TEST_TIMEOUT,
   );
+
+  it.live(
+    "pushes the rest of a canceled Attempt's work and keeps the checkout of a file larger than GitHub accepts, also after a restart",
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-large-file-" });
+        const instance = InstanceDirectory.make(root);
+        const remote = yield* makeRemote(root);
+        const storage = new StubStorage();
+        const runtime = () =>
+          localRuntime(instance, remote, {
+            attemptRuntime: stubAttemptRuntime(storage, worksFor(60_000)),
+          });
+        const saved = yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const accepted = yield* engine.submit(submission(1));
+          assert(accepted._tag === "Claimed");
+          const running = yield* waitFor(engine, accepted.runId, "Running");
+          const attempt = running.attempts[0];
+          assert(attempt !== undefined);
+          const worktree = `${root}/.usine/workers/local/attempts/${attempt.id.replaceAll("/", "_")}`;
+          yield* waitForStarted(engine, attempt.id);
+          yield* fileSystem.writeFileString(`${worktree}/progress.txt`, "recover this work\n");
+          yield* fileSystem.writeFileString(`${worktree}/dataset.csv`, "");
+          yield* fileSystem.truncate(`${worktree}/dataset.csv`, 100 * 1024 * 1024 + 1);
+          yield* engine.cancel(accepted.runId);
+          const salvage = yield* waitForSalvage(engine, accepted.runId);
+          assert(salvage._tag === "Retained");
+          assert.include(salvage.message, "dataset.csv (100.0 MiB)");
+          return { runId: accepted.runId, worktree, salvage };
+        }).pipe(Effect.provide(runtime()));
+        assert(yield* fileSystem.exists(`${saved.worktree}/dataset.csv`));
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const salvage = (yield* engine.inspect(saved.runId)).attempts[0]?.salvage;
+          assert.deepStrictEqual(salvage, Option.some(saved.salvage));
+        }).pipe(Effect.provide(runtime()));
+        assert(yield* fileSystem.exists(`${saved.worktree}/dataset.csv`));
+        assert(Option.isSome(saved.salvage.commit));
+        const commit = saved.salvage.commit.value;
+        assert.strictEqual(
+          (yield* output("git", ["--git-dir", remote, "ls-tree", "--name-only", commit])).trim(),
+          "README.md\nprogress.txt",
+        );
+      }).pipe(Effect.provide(NodeServices.layer)),
+    LIVE_TEST_TIMEOUT,
+  );
 });
