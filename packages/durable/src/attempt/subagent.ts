@@ -134,6 +134,7 @@ export const subagentTool = (services: ExtensionServices) => {
         message: `Attempt tried to spawn child ${attemptedChildren} after reaching its ${spec.maxChildren}-child budget`,
       });
     }
+    const sessionId = AgentSessionId.make(`${parentId}:child:${attemptedChildren}`);
     if (!(yield* Deferred.isDone(hub.attached))) {
       yield* Effect.logInfo(
         "Waiting for execute to supply the Attempt's child host and environment before spawning a child",
@@ -142,10 +143,22 @@ export const subagentTool = (services: ExtensionServices) => {
         },
       );
     }
-    const request = yield* Deferred.await(hub.attached);
+    // An abort, such as the harness closing at shutdown, ends a wait for a released Attempt.
+    const request = yield* Effect.raceFirst(
+      Deferred.await(hub.attached),
+      aborted(context, sessionId).pipe(
+        Effect.tap(() =>
+          Effect.logInfo(
+            "Abandoning the child spawn of an aborted tool call; no execute call supplied the child host",
+            { attemptId: spec.attemptId, sessionId },
+          ),
+        ),
+        Effect.andThen(Effect.interrupt),
+      ),
+    );
     // Read when each child starts, so a preflight that ran after the Attempt launched applies.
     const session = new ChildSession({
-      id: AgentSessionId.make(`${parentId}:child:${attemptedChildren}`),
+      id: sessionId,
       parentId,
       agent: spec.agent.name,
       brain: spec.agent.brain,
