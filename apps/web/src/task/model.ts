@@ -270,10 +270,7 @@ export const taskDuration = (
     usage.durationMillis,
   );
 
-/**
- * Returns whether some of the Task's usage in a pool with a dollar rate has no price yet, so the cost
- * is a lower bound.
- */
+/** Returns whether some of the Task's usage has no price yet, so the cost is a lower bound. */
 export const costUnpriced = (usage: Pick<TaskUsageView, "pools">): boolean =>
   usage.pools.some(({ unpriced }) => unpriced);
 

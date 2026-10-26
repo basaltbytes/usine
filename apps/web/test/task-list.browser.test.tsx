@@ -109,7 +109,7 @@ it("lists only the tasks with runs, in flight first, with their status and last 
   // Totals of all listed tasks: 41, 15, 10, and 30 min of attempts, and the priced tasks' dollars.
   await expect
     .element(
-      page.getByText("7 runs, 1 h 36 min elapsed, 87.3K tokens, $5.50 estimated", { exact: true }),
+      page.getByText("7 runs, 1 h 36 min elapsed, 87.3K tokens, $5.90 estimated", { exact: true }),
     )
     .toBeVisible();
   expect(columns()).toEqual([
@@ -150,7 +150,7 @@ it("lists only the tasks with runs, in flight first, with their status and last 
     .toHaveAttribute("href", "https://github.com/board-test/repo/pull/31");
   // The pull request, then the time, tokens, and dollars of a priced Run and a ChatGPT plan Run,
   // each in its own cell.
-  await expect.element(redesign).toHaveTextContent(/#3141 min27\.3K\$2\.00$/u);
+  await expect.element(redesign).toHaveTextContent(/#3141 min27\.3K\$2\.40$/u);
   await expect.element(rowOf(/Show the salvage branch/u)).toHaveTextContent(/#630 min48K\$3\.10$/u);
   // No Attempt started on the waiting task, and the canceled one reported no tokens.
   expect(cellTexts(/Retry salvage pushes/u).slice(4)).toEqual(["", "", ""]);
@@ -166,11 +166,11 @@ it("opens the tokens per pool, summed over the task's runs, from the tokens or t
   await expect.element(pools).toBeVisible();
   await expect.element(pools).toHaveTextContent("API keys1,500$0.75");
   await expect.element(pools).toHaveTextContent("Claude plan20,000$1.25 estimate");
-  await expect.element(pools).toHaveTextContent("ChatGPT plan5,800No dollar rate");
+  await expect.element(pools).toHaveTextContent("ChatGPT plan5,800$0.40 estimate");
   await page.getByRole("heading", { name: "Tasks", level: 1 }).hover();
   await expect.element(pools).not.toBeInTheDocument();
 
-  await redesign.getByRole("button", { name: "Estimated cost: $2.00. Show per pool" }).hover();
+  await redesign.getByRole("button", { name: "Estimated cost: $2.40. Show per pool" }).hover();
   await expect.element(pools).toHaveTextContent("Claude plan20,000$1.25 estimate");
 });
 
@@ -210,7 +210,7 @@ it("marks the elapsed time with an asterisk while an attempt has no recorded tim
   // The canceled task's 10 min are unknown, and every run is priced.
   await expect
     .element(
-      page.getByText("7 runs, 1 h 26 min* elapsed, 87.3K tokens, $5.50 estimated", {
+      page.getByText("7 runs, 1 h 26 min* elapsed, 87.3K tokens, $5.90 estimated", {
         exact: true,
       }),
     )

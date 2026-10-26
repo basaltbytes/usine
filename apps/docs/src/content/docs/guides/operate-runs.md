@@ -25,7 +25,7 @@ A task is done when its pull request merges in the window, and counts if usine r
 - **Tasks done**: the count and the median time from issue to merge. The time starts when the task's first run opened, which its trigger label caused. The chart has a dot per task, by merge day and time on a log scale, and a line at the median; select a dot to open the task. A window longer than 62 days shows tasks per week over the median per week instead.
 - **Time per task**: one bar that splits a task's time between the loops' attempts and waiting, which covers approval, the queue, and the time between runs, averaged over the tasks. Each line under it gives a loop's median run time, such as `finish-pr about 15 min`.
 - **First time right**: the share of tasks where no loop succeeded twice on one item, so no review round sent the task back, and the operator actions per task: approvals, retries, failures marked resolved, and cycle budget resets. A sparkline beside each shows its trend over the window.
-- **Tokens per task**: the median tokens and their split by loop. The median cost shows only if every session of every task has a price; a `~` marks a Claude plan estimate.
+- **Tokens per task**: the median tokens and their split by loop. The median cost shows only if every session of every task has a price; a `~` marks an estimate from the Claude or ChatGPT plan.
 
 The line under the blocks names the tasks left out, such as `19 tasks before 19 Oct lack timing and are left out`: their attempts ended before usine recorded end times, or their runs reported no tokens.
 
@@ -33,7 +33,7 @@ Select **Details** for the run statistics, read only once you open it:
 
 - **Runs closed**, **Median run time**, **Median attempt time**, **Runs in one attempt**: run time is from a run's opening to its close; attempt time is from an attempt's start to its end.
 - **Runs closed per day**, stacked by outcome, and **Needs attention entries per day**, with the median wait for an approval and from a failure to your retry. **Mark resolved** records no time.
-- **Runs per loop**, **Runs per agent**, **Attempts per model**: outcomes, median time, tokens, and cost. A run has a price only if each of its API key and Claude plan sessions has one; ChatGPT plan sessions add tokens but no cost.
+- **Runs per loop**, **Runs per agent**, **Attempts per model**: outcomes, median time, tokens, and cost. A run has a price only if each of its sessions has one.
 - **Attempts per run**, **Queue wait** per worker, and **Worker utilization**: the share of the window that each worker's slots held attempts.
 
 ### Stall reasons
@@ -77,13 +77,13 @@ Click a card to open its task page at `/projects/<owner>/<name>/tasks/<number>`.
 
 ### Read the run page
 
-The run page adds **Tokens** to the drawer's header: the output plus uncached input tokens of all the run's sessions and attempts, as each harness reports them. Select it for a breakdown per pool and per session. A pool with a dollar rate also shows a price:
+The run page adds **Tokens** to the drawer's header: the output plus uncached input tokens of all the run's sessions and attempts, as each harness reports them. Select it for a breakdown per pool and per session, each with a price:
 
-- API keys at Pi's catalog price. A Claude Code child whose gateway injects an Anthropic API key counts here, at the Agent SDK's price.
+- API keys at Pi's catalog price. A Claude Code child whose gateway injects an Anthropic API key counts here, at the Agent SDK's price, and a Codex child whose gateway injects an OpenAI API key, at OpenAI's API price.
 - The Claude plan at the Agent SDK's price, marked **estimate** because the plan doesn't bill per token.
-- The ChatGPT plan has no dollar rate and shows **No dollar rate**.
+- The ChatGPT plan at Pi's catalog price for the parent and OpenAI's API price for Codex children, marked **estimate** for the same reason.
 
-A pool shows no price if one of its sessions was recorded before usine stored prices.
+usine prices Codex sessions from a table of OpenAI's API rates that it bundles. A pool shows no price if one of its sessions was recorded before usine stored prices, or ran a Codex model that the table lacks; the log names each such model once.
 
 The conversation is next to an outline of the task, the event, and the attempts. Each attempt shows why it started, when, and for how long:
 

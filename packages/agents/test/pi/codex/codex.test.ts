@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, Effort, ModelId } from "@usine/core/agent/brain";
-import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
+import { AgentSessionId, ChildSession, TokenBreakdown } from "@usine/core/agent/session";
 import { AgentName } from "@usine/core/agent";
 import {
   Cause,
@@ -629,6 +629,66 @@ describe("Codex child backend", () => {
         ]);
         assert.strictEqual(result.message, "The fix is done.");
         assert.strictEqual(events.filter((event) => event._tag === "TextOutput").length, 3);
+      }).pipe(Effect.provide(codexChildBackendLayer), Effect.provide(server)),
+    );
+  });
+
+  it.effect("reports the thread's tokens with their split per billing rate", () => {
+    const notifications: ReadonlyArray<CodexNotification> = [
+      {
+        method: "thread/tokenUsage/updated",
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          tokenUsage: {
+            total: {
+              totalTokens: 130_400,
+              inputTokens: 130_000,
+              cachedInputTokens: 100_000,
+              cacheWriteInputTokens: 20_000,
+              outputTokens: 400,
+              reasoningOutputTokens: 100,
+            },
+          },
+        },
+      },
+      {
+        method: "item/completed",
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: { type: "agentMessage", id: "m-1", text: "Done." },
+        },
+      },
+      {
+        method: "turn/completed",
+        params: { turn: { id: "turn-1", status: "completed", error: null } },
+      },
+    ];
+    const server = connectionLayer(
+      successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
+      notifications,
+    );
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const backend = yield* CodexChildBackend;
+        const running = yield* backend.launch(request());
+        const [events] = yield* Effect.all([Stream.runCollect(running.events), running.result]);
+        const report = events.find((event) => event._tag === "SessionTokensUpdated");
+        assert(report !== undefined);
+        assert.strictEqual(report.totalTokens, 30_400);
+        assert(Option.isNone(report.costUsd));
+        assert.deepStrictEqual(
+          report.breakdown,
+          Option.some(
+            new TokenBreakdown({
+              input: 10_000,
+              cachedInput: 100_000,
+              cacheWrite: 20_000,
+              output: 400,
+            }),
+          ),
+        );
       }).pipe(Effect.provide(codexChildBackendLayer), Effect.provide(server)),
     );
   });

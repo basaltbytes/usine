@@ -150,7 +150,7 @@ Once a question or blocker is marked answered or resolved, the run's actions are
 
 ## Run page
 
-At `/projects/<owner>/<name>/runs/<run>`: the whole run under the drawer's header and actions. The line under the title adds the tokens the sessions used, such as `159.6K tokens`; the total opens a breakdown per billing pool and per session under each attempt, priced by the harness for pools with a dollar rate: API keys, and the Claude plan as an estimate. The ChatGPT plan says it has no dollar rate.
+At `/projects/<owner>/<name>/runs/<run>`: the whole run under the drawer's header and actions. The line under the title adds the tokens the sessions used, such as `159.6K tokens`; the total opens a breakdown per billing pool and per session under each attempt, priced by the harness or, for Codex, at OpenAI's API rates, with the Claude and ChatGPT plans as estimates.
 
 **Run again**, on a succeeded or canceled run (or in the card menu for the task's latest run), opens a new run of its loop on the same item content with the run's task and agent; **Edit and run again**, under **More actions**, lets you change them first. The drawer or page then shows the new run, whose event says who ran it again, when, and from which run, linked by short id in the event document and on the task page. If the item's cycle budget is used up, no run opens and the actions say so. For **Edit and retry**, see [Intervening in a run](#intervening-in-a-run).
 

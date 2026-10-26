@@ -122,15 +122,30 @@ export class SessionResumed extends Schema.TaggedClass<SessionResumed>("Agent/Se
   { session: AgentSession },
 ) {}
 
-/** An estimated amount in US dollars from the harness's own rate table, not a bill (ADR 0013). */
+/** An estimated amount in US dollars from a rate table, not a bill (ADR 0013). */
 export const UsdAmount = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)).pipe(
   Schema.brand("UsdAmount"),
 );
 export type UsdAmount = typeof UsdAmount.Type;
 
+const TokenTally = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+
+/** A session's cumulative tokens per billing rate; each token counts in one field only. */
+export class TokenBreakdown extends Schema.Class<TokenBreakdown>("Agent/TokenBreakdown")({
+  /** Input tokens that are neither read from nor written to the prompt cache. */
+  input: TokenTally,
+  /** Input tokens read from the prompt cache. */
+  cachedInput: TokenTally,
+  /** Input tokens written to the prompt cache. */
+  cacheWrite: TokenTally,
+  /** Output tokens, including reasoning tokens. */
+  output: TokenTally,
+}) {}
+
 /**
  * The session's cumulative token count and price, including later operator turns. `costUsd` is
  * `None` for harnesses that don't price usage, such as Codex, and for older transcripts.
+ * `breakdown` is `None` for harnesses other than Codex and for older transcripts.
  */
 export class SessionTokensUpdated extends Schema.TaggedClass<SessionTokensUpdated>(
   "Agent/SessionTokensUpdated",
@@ -139,6 +154,9 @@ export class SessionTokensUpdated extends Schema.TaggedClass<SessionTokensUpdate
   totalTokens: TokenCount,
   costUsd: Schema.OptionFromOptionalKey(UsdAmount).pipe(
     Schema.withConstructorDefault(Effect.succeed(Option.none<UsdAmount>())),
+  ),
+  breakdown: Schema.OptionFromOptionalKey(TokenBreakdown).pipe(
+    Schema.withConstructorDefault(Effect.succeed(Option.none<TokenBreakdown>())),
   ),
 }) {}
 

@@ -333,11 +333,11 @@ describe("Tasks list model", () => {
     assert.strictEqual(totals.unmeasured, 0);
     assert.strictEqual(totals.tokens, 27_300 + 12_000 + 48_000);
     assert(totals.usd !== null);
-    assert.closeTo(totals.usd, 5.5, 1e-9);
+    assert.closeTo(totals.usd, 5.9, 1e-9);
     assert.isFalse(totals.unpriced);
     assert.strictEqual(
       totalsLine(boardOverview()),
-      "7 runs, 1 h 36 min elapsed, 87.3K tokens, $5.50 estimated",
+      "7 runs, 1 h 36 min elapsed, 87.3K tokens, $5.90 estimated",
     );
   });
 
@@ -357,7 +357,7 @@ describe("Tasks list model", () => {
     // #18's 10 min are unknown.
     assert.strictEqual(
       totalsLine(boardOverviewUntimed()),
-      "7 runs, 1 h 26 min* elapsed, 87.3K tokens, $5.50 estimated",
+      "7 runs, 1 h 26 min* elapsed, 87.3K tokens, $5.90 estimated",
     );
   });
 });

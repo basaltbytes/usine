@@ -170,13 +170,17 @@ export const RateLimitsUpdated = Schema.Struct({
   }),
 });
 
-/** The Codex thread token usage, cumulative across turns; `inputTokens` includes cached input. */
+/**
+ * The Codex thread token usage, cumulative across turns; `inputTokens` includes cache reads and
+ * cache writes.
+ */
 export const CodexTokenUsage = Schema.Struct({
   threadId: Schema.NonEmptyString,
   tokenUsage: Schema.Struct({
     total: Schema.Struct({
       inputTokens: UsageCount,
       cachedInputTokens: UsageCount,
+      cacheWriteInputTokens: UsageCount,
       outputTokens: UsageCount,
     }),
   }),
