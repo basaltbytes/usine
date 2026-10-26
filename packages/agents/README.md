@@ -39,6 +39,8 @@ Logs record the verified authentication method and pool. On completion or interr
 
 `/pi/authentication` exports the parent's rules for other runtimes: `splitPiModel` (parses `provider/model`), `piAuthentication` (a provider's credential check), `requiredPiPool` (a provider's pool), and `resolvePiPool` (its credential's pool).
 
+`/openai-prices` exports `openAiPrice`, which prices the token breakdown of a Codex session's `SessionTokensUpdated` at OpenAI's API rates. It returns `None` for a model that the bundled table lacks. The table covers the listed models of each supported Codex CLI version.
+
 ## Child hosts
 
 `ChildRequest.host` (`/child-host`) sets where a child runs, and `ChildRequest.worker` names that machine's worker:

@@ -25,6 +25,7 @@ import {
   type OperatorObservation,
   type EditAndRetry,
   type SessionIntervention,
+  type RunStatisticsView,
   type StatisticsView,
   type StatisticsWindow,
   type TaskView,
@@ -81,6 +82,9 @@ export class FactoryBackend extends Context.Service<
     readonly configuration: Effect.Effect<ConfigurationView, BackendError>;
     readonly desk: Effect.Effect<DeskView, BackendError>;
     readonly statistics: (window: StatisticsWindow) => Effect.Effect<StatisticsView, BackendError>;
+    readonly runStatistics: (
+      window: StatisticsWindow,
+    ) => Effect.Effect<RunStatisticsView, BackendError>;
   }
 >()("@usine/server/FactoryBackend") {}
 
@@ -126,6 +130,8 @@ export const liveBackendLayer = (
     desk: Effect.flatMap(instances.get, operator.desk),
     statistics: (window) =>
       Effect.flatMap(instances.get, (instance) => operator.statistics(instance, window)),
+    runStatistics: (window) =>
+      Effect.flatMap(instances.get, (instance) => operator.runStatistics(instance, window)),
   });
 
 /**
@@ -174,5 +180,7 @@ export const needsSetupBackendLayer = (
     desk: Effect.flatMap(instances.get, observation.desk),
     statistics: (window) =>
       Effect.flatMap(instances.get, (instance) => observation.statistics(instance, window)),
+    runStatistics: (window) =>
+      Effect.flatMap(instances.get, (instance) => observation.runStatistics(instance, window)),
   });
 };

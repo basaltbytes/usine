@@ -78,8 +78,8 @@ const LoadingBlock = ({ id, title }: { readonly id: string; readonly title: stri
 );
 
 /**
- * Renders the Overview page at `/`. Needs attention reads the overview query, Statistics its own
- * query, and the other sections the desk query.
+ * Renders the Overview page at `/`, with Statistics first. Needs attention reads the overview
+ * query, Statistics its own queries, and the other sections the desk query.
  */
 export const Desk = () => {
   const { data: overview } = useSuspenseQuery(overviewQuery());
@@ -94,6 +94,7 @@ export const Desk = () => {
           counts={desk.data === undefined ? undefined : deskCounts(desk.data)}
         />
         {overview.projects.length === 0 && <NoProjects />}
+        <Statistics />
         <DeskNeedsYou needs={overview.needsYou} polls={desk.data?.polls ?? []} now={now} />
         {desk.data === undefined ? (
           desk.isError ? (
@@ -124,7 +125,6 @@ export const Desk = () => {
             {desk.data.workers.length > 0 && <WorkersLine workers={desk.data.workers} now={now} />}
           </>
         )}
-        <Statistics />
       </div>
     </Page>
   );

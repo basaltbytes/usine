@@ -9,28 +9,32 @@ sidebar:
 
 **Overview**, at `/`, has these sections:
 
+- **Statistics**: the tasks done over the last 7 days, the last 30 days (the default), or all stored runs, with the run statistics under **Details**. See [Read the statistics](#read-the-statistics).
 - **Needs attention**: what waits for you. If it's empty, its heading shows when usine last finished polling each repository.
 - **Running**: one row per running attempt, with the item, loop, agent, worker, start time, last activity, and any [connectivity warning](#connectivity-warnings). If nothing runs, it shows the free worker slots.
 - **Stalled**: each item that a trigger matches but that no attempt works on, with the reason and the action that moves it again.
 - **Recent runs**: the 10 most recently closed runs, with their outcome and pull request.
 - **Workers**: each worker's slots in use and its last preflight.
-- **Statistics**: how the factory ran over the last 7 days, the last 30 days (the default), or all stored runs. See [Read the statistics](#read-the-statistics).
 
 Select a run's row to open its run page.
 
 ### Read the statistics
 
-Each block has a one-line reading, or says what is missing, such as `No closed runs in the last 7 days`. Days are UTC days. A window longer than 62 days counts per week. Runs that a newer event or an item change canceled before any attempt are left out.
+A task is done when its pull request merges in the window, and counts if usine ran on it. Days are UTC days, and a window longer than 62 days counts per week. Runs that a newer event or an item change canceled before any attempt are left out. A window without a task done says so in one line.
 
-- **Runs closed**, **Median run time**, **Median attempt time**: run time is from a run's opening to its close, so it includes the wait for approval and for a worker slot; attempt time is from an attempt's start to its end. The p90 and the mean are below each median. Attempts that ended before usine recorded end times count in neither.
-- **Cost per run** and **Tokens per run**: the mean over runs with an attempt. A run has a price only if each of its API key and Claude plan sessions has one; Claude plan prices are estimates. ChatGPT plan sessions have no dollar rate, so they add tokens but no cost.
-- **Runs closed per day**: closed runs stacked by outcome. **Outcomes** gives the shares.
-- **Merged pull requests**: the pull requests merged in the window whose task has a run. **First pass** is the share where no loop ran twice on an item of the task, so no review round sent it back. **Lead time** runs from the task's first run, which its trigger label opened, to the merge.
-- **Runs per loop**, **Runs per agent**, **Attempts per model**: outcomes, median and p90 time, tokens, and cost for each loop or agent, or for each harness, model, and effort.
-- **Attempts per run**: how many closed runs needed a retry.
-- **Queue wait**: per worker, the time from a run's opening, or its approval, to its first attempt's start.
-- **Worker utilization**: the share of the window that each worker's slots held attempts.
-- **Needs attention**: approvals asked for and failed attempts that no automatic retry followed, per day, with the median wait for an approval and from a failure to your retry. **Mark resolved** records no time, so failures you resolve that way count as entries but not in the wait.
+- **Tasks done**: the count and the median time from issue to merge. The time starts when the task's first run opened, which its trigger label caused. The chart has a dot per task, by merge day and time on a log scale, and a line at the median; select a dot to open the task. A window longer than 62 days shows tasks per week over the median per week instead.
+- **Time per task**: one bar that splits a task's time between the loops' attempts and waiting, which covers approval, the queue, and the time between runs, averaged over the tasks. Each line under it gives a loop's median run time, such as `finish-pr about 15 min`.
+- **First time right**: the share of tasks where no loop succeeded twice on one item, so no review round sent the task back, and the operator actions per task: approvals, retries, failures marked resolved, and cycle budget resets. A sparkline beside each shows its trend over the window.
+- **Tokens per task**: the median tokens and their split by loop. The median cost shows only if every session of every task has a price; a `~` marks an estimate from the Claude or ChatGPT plan.
+
+The line under the blocks names the tasks left out, such as `19 tasks before 19 Oct lack timing and are left out`: their attempts ended before usine recorded end times, or their runs reported no tokens.
+
+Select **Details** for the run statistics, read only once you open it:
+
+- **Runs closed**, **Median run time**, **Median attempt time**, **Runs in one attempt**: run time is from a run's opening to its close; attempt time is from an attempt's start to its end.
+- **Runs closed per day**, stacked by outcome, and **Needs attention entries per day**, with the median wait for an approval and from a failure to your retry. **Mark resolved** records no time.
+- **Runs per loop**, **Runs per agent**, **Attempts per model**: outcomes, median time, tokens, and cost. A run has a price only if each of its sessions has one.
+- **Attempts per run**, **Queue wait** per worker, and **Worker utilization**: the share of the window that each worker's slots held attempts.
 
 ### Stall reasons
 
@@ -73,13 +77,13 @@ Click a card to open its task page at `/projects/<owner>/<name>/tasks/<number>`.
 
 ### Read the run page
 
-The run page adds **Tokens** to the drawer's header: the output plus uncached input tokens of all the run's sessions and attempts, as each harness reports them. Select it for a breakdown per pool and per session. A pool with a dollar rate also shows a price:
+The run page adds **Tokens** to the drawer's header: the output plus uncached input tokens of all the run's sessions and attempts, as each harness reports them. Select it for a breakdown per pool and per session, each with a price:
 
-- API keys at Pi's catalog price. A Claude Code child whose gateway injects an Anthropic API key counts here, at the Agent SDK's price.
+- API keys at Pi's catalog price. A Claude Code child whose gateway injects an Anthropic API key counts here, at the Agent SDK's price, and a Codex child whose gateway injects an OpenAI API key, at OpenAI's API price.
 - The Claude plan at the Agent SDK's price, marked **estimate** because the plan doesn't bill per token.
-- The ChatGPT plan has no dollar rate and shows **No dollar rate**.
+- The ChatGPT plan at Pi's catalog price for the parent and OpenAI's API price for Codex children, marked **estimate** for the same reason.
 
-A pool shows no price if one of its sessions was recorded before usine stored prices.
+usine prices Codex sessions from a table of OpenAI's API rates that it bundles. A pool shows no price if one of its sessions was recorded before usine stored prices, or ran a Codex model that the table lacks; the log names each such model once.
 
 The conversation is next to an outline of the task, the event, and the attempts. Each attempt shows why it started, when, and for how long:
 

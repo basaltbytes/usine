@@ -32,7 +32,7 @@ A malformed item projection is quarantined and reported on the board and the nee
 
 - the newest attempt's worker;
 - `RunDurationView`: ended attempts' time, the running one's start, and how many ended without a recorded end or transcript row;
-- `RunUsageView`: each session's highest token report, summed per session, pool, and run, priced where the pool has a dollar rate, as an estimate on the Claude plan and never on the ChatGPT plan (ADR 0013). Pools come from `sessionPool` (`@usine/core/agent/session`), so a Claude Code child on its gateway's API key counts in API keys at the model's rate. Ended attempts' reports are kept in memory until restart, so polling reads only the attempt in flight.
+- `RunUsageView`: each session's highest token report, summed per session, pool, and run, at the harness's price or, for a Codex session, at OpenAI's API rates for its token breakdown (`@usine/agents/openai-prices`), as an estimate on the Claude and ChatGPT plans (ADR 0013). A Codex model without rates stays unpriced, with one warning per model. Pools come from `sessionPool` (`@usine/core/agent/session`), so a Claude Code child on its gateway's API key counts in API keys at the model's rate. Ended attempts' reports are kept in memory until restart, so polling reads only the attempt in flight.
 
 Each `AttemptView` has `start`, the last reattach time, and `workerAccess`: `LocalWorkerAccess`, `SshWorkerAccess` with `destination` and `port` from `usine.yaml` (exe.dev reads as `<name>.exe.xyz`), or null if the worker is no longer declared. `detail`, like the overview, task, and desk reads, takes the loaded instance. `Operator.retry` and `Operator.editAndRetry` pass the instance's `operator` login to the next attempt.
 

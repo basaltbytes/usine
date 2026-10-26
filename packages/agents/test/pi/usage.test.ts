@@ -1,9 +1,11 @@
 import { assert, describe, it } from "@effect/vitest";
+import { TokenBreakdown } from "@usine/core/agent/session";
 import { Option, Schema } from "effect";
 import {
   addUsage,
   claudeTokenMeter,
   codexThreadTokens,
+  codexTokenBreakdown,
   piMessageUsage,
 } from "../../src/pi/usage.ts";
 import { CodexTokenUsage } from "../../src/protocol/codex.ts";
@@ -78,6 +80,7 @@ describe("Codex thread tokens", () => {
           totalTokens: 2_000_400,
           inputTokens: 2_000_000,
           cachedInputTokens: 1_950_000,
+          cacheWriteInputTokens: 20_000,
           outputTokens: 400,
           reasoningOutputTokens: 100,
         },
@@ -86,8 +89,39 @@ describe("Codex thread tokens", () => {
     });
     assert.strictEqual(codexThreadTokens(usage.tokenUsage.total), 50_400);
     assert.strictEqual(
-      codexThreadTokens({ inputTokens: 10, cachedInputTokens: 30, outputTokens: 7 }),
+      codexThreadTokens({
+        inputTokens: 10,
+        cachedInputTokens: 30,
+        cacheWriteInputTokens: 0,
+        outputTokens: 7,
+      }),
       7,
+    );
+  });
+
+  it("splits input into cache reads, cache writes, and the rest", () => {
+    assert.deepStrictEqual(
+      codexTokenBreakdown({
+        inputTokens: 2_000_000,
+        cachedInputTokens: 1_950_000,
+        cacheWriteInputTokens: 20_000,
+        outputTokens: 400,
+      }),
+      new TokenBreakdown({
+        input: 30_000,
+        cachedInput: 1_950_000,
+        cacheWrite: 20_000,
+        output: 400,
+      }),
+    );
+    assert.strictEqual(
+      codexTokenBreakdown({
+        inputTokens: 10,
+        cachedInputTokens: 30,
+        cacheWriteInputTokens: 5,
+        outputTokens: 7,
+      }).input,
+      0,
     );
   });
 });
