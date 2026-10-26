@@ -32,7 +32,7 @@ export type SandboxName = typeof SandboxName.Type;
 /** The ID of one command a sandbox ran through its exec stream, which names its process files. */
 export const ProcessId = Schema.String.check(
   Schema.isPattern(/^[0-9a-f]{32}$/u, { message: "Expected 32 lowercase hexadecimal digits" }),
-).pipe(Schema.brand("SandboxProcessId"));
+).pipe(Schema.brand("ProcessId"));
 export type ProcessId = typeof ProcessId.Type;
 
 /** Returns the path of the WebSocket that runs one command in the sandbox (`stream.ts`). */
