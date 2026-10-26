@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NodeServices } from "@effect/platform-node";
@@ -61,6 +61,16 @@ const exitedPid = (): number => {
 const probe = (directory: InstanceDirectory) =>
   Effect.runPromise(probeInstance(directory).pipe(Effect.provide(NodeServices.layer)));
 
+const pid1OwnedByThisUser = () => {
+  if (process.platform !== "linux") return false;
+  try {
+    const uid = /^Uid:\s+(\d+)/mu.exec(readFileSync("/proc/1/status", "utf8"))?.[1];
+    return uid !== undefined && Number(uid) === process.getuid?.();
+  } catch {
+    return false;
+  }
+};
+
 describe("instance state", () => {
   it("reports a folder that never ran usine as stopped", async () => {
     const state = await probe(instanceFolder());
@@ -118,12 +128,17 @@ describe("instance state", () => {
     );
   });
 
-  // Signaling pid 1 as another user fails with EPERM; as root, it would reach init.
-  it.skipIf(process.getuid?.() === 0)("reports a process that it may not signal", async () => {
-    const error = await Effect.runPromise(terminate(ProcessId.make(1)).pipe(Effect.flip));
-    assert.instanceOf(error, SignalError);
-    assert.strictEqual(error.signal, "SIGTERM");
-  });
+  // Signaling pid 1 as another user fails with EPERM. As root, or in a container whose init runs
+  // as this user (the attempt image's tini runs as `usine`), the signal would reach init and stop
+  // it, so the case runs only where pid 1 belongs to someone else.
+  it.skipIf(process.getuid?.() === 0 || pid1OwnedByThisUser())(
+    "reports a process that it may not signal",
+    async () => {
+      const error = await Effect.runPromise(terminate(ProcessId.make(1)).pipe(Effect.flip));
+      assert.instanceOf(error, SignalError);
+      assert.strictEqual(error.signal, "SIGTERM");
+    },
+  );
 
   it("succeeds when the process exited before the signal", async () => {
     await Effect.runPromise(terminate(ProcessId.make(exitedPid())));
