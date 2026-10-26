@@ -1,11 +1,14 @@
 import {
+  CONTAINER_LIMITS,
   ContainerCpus,
+  type ContainerLimit,
   ContainerLimits,
   ContainerMemoryMib,
   ContainerPids,
 } from "@usine/core/worker";
-import { Option, Schema } from "effect";
+import { Match, Option, Schema } from "effect";
 import { memoryFromMeminfo } from "../memory-preflight.ts";
+import type { SshWorkerContainer } from "./model.ts";
 
 const MIB = 1024 ** 2;
 
@@ -52,7 +55,7 @@ const SMALLEST = { cpus: 0.01, memoryMib: 256, pids: 64 } as const;
  * machine's total less a reserve for its own processes, divided by `slots`, rounded down to a
  * hundredth of a CPU, a MiB, and a task, and no lower than the smallest limits Docker accepts.
  */
-export const deriveLimits = (machine: MachineResources, slots: number): ContainerLimits =>
+const deriveLimits = (machine: MachineResources, slots: number): ContainerLimits =>
   new ContainerLimits({
     cpus: ContainerCpus.make(
       Math.max(SMALLEST.cpus, Math.floor(((machine.cpus - HOST_RESERVE.cpus) / slots) * 100) / 100),
@@ -67,3 +70,68 @@ export const deriveLimits = (machine: MachineResources, slots: number): Containe
       Math.max(SMALLEST.pids, Math.floor((machine.tasks - HOST_RESERVE.tasks) / slots)),
     ),
   });
+
+/** The limits of a Worker's containers and where they come from. */
+export type ResolvedLimits =
+  /** `usine.yaml` sets every limit. */
+  | { readonly _tag: "Configured"; readonly limits: ContainerLimits }
+  /** `derived` come from `machine` for `slots` concurrent Attempts; `usine.yaml` sets the others. */
+  | {
+      readonly _tag: "Derived";
+      readonly limits: ContainerLimits;
+      readonly derived: ReadonlyArray<ContainerLimit>;
+      readonly machine: MachineResources;
+      readonly slots: number;
+    };
+
+/** Returns the limits of `container` if `usine.yaml` sets every one, or `None`. */
+export const configuredLimits = (container: SshWorkerContainer): Option.Option<ResolvedLimits> =>
+  Option.map(
+    Option.all({ cpus: container.cpus, memoryMib: container.memoryMib, pids: container.pids }),
+    (limits) => ({ _tag: "Configured", limits: new ContainerLimits(limits) }),
+  );
+
+/**
+ * Returns the limits of `container` when `slots` Attempts run on `machine` at once: the ones
+ * `usine.yaml` sets, and the others from `deriveLimits`.
+ */
+export const resolveLimits = (
+  container: SshWorkerContainer,
+  machine: MachineResources,
+  slots: number,
+): ResolvedLimits => {
+  const derived = deriveLimits(machine, slots);
+  const unset = {
+    cpus: Option.isNone(container.cpus),
+    memoryMib: Option.isNone(container.memoryMib),
+    pids: Option.isNone(container.pids),
+  } satisfies Record<ContainerLimit, boolean>;
+  return {
+    _tag: "Derived",
+    limits: new ContainerLimits({
+      cpus: Option.getOrElse(container.cpus, () => derived.cpus),
+      memoryMib: Option.getOrElse(container.memoryMib, () => derived.memoryMib),
+      pids: Option.getOrElse(container.pids, () => derived.pids),
+    }),
+    derived: CONTAINER_LIMITS.filter((limit) => unset[limit]),
+    machine,
+    slots,
+  };
+};
+
+/** Returns the log fields of the limits of a Worker's containers. */
+export const limitFields = (resolved: ResolvedLimits) => ({
+  cpus: resolved.limits.cpus,
+  memoryMib: resolved.limits.memoryMib,
+  pids: resolved.limits.pids,
+  ...Match.valueTags(resolved, {
+    Configured: () => ({ derivedLimits: "none" }),
+    Derived: ({ derived, machine, slots }) => ({
+      derivedLimits: derived.join(","),
+      slots,
+      machineCpus: machine.cpus,
+      machineMemoryMib: Math.floor(machine.memoryBytes / MIB),
+      machineTasks: machine.tasks,
+    }),
+  }),
+});

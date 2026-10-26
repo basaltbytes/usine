@@ -2,7 +2,7 @@ import type { RemoteShell } from "@usine/agents/child-host";
 import type { ClaudeLoginLock } from "@usine/agents/runtime";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import type { WorkerName } from "@usine/core/worker";
-import { Array as Arr, Effect, Option } from "effect";
+import { Array as Arr, Effect, Match, Option } from "effect";
 import {
   type ExecutorError,
   logPreflightFailure,
@@ -13,9 +13,10 @@ import {
 import { type HarnessProbe, verifyHarnessReadiness } from "../harness-preflight.ts";
 import { verifyLinuxMemory } from "../memory-preflight.ts";
 import type { RemoteCommands } from "../remote/commands.ts";
-import { limitFields, type SshContainers } from "./container.ts";
+import type { SshContainers } from "./container.ts";
 import { gatewayExportedEnvironment } from "./gateway/environment.ts";
 import { verifyGateway } from "./gateway/preflight.ts";
+import { limitFields } from "./limits.ts";
 import type { SshMachine } from "./model.ts";
 import type { SshWorkerEntry } from "./workers.ts";
 
@@ -112,12 +113,12 @@ export const sshMachinePreflightFor = (
     const harnesses = Arr.dedupe(brains.map(({ harness }) => harness));
     const probe = (shell: RemoteShell) =>
       verifyHarnessReadiness(worker, brains, harnessProbe(machine, shell), logins);
-    yield* containerCheck.isolation._tag === "Container" && harnesses.length > 0
+    yield* containerCheck._tag === "Container" && harnesses.length > 0
       ? Effect.scoped(
           containers
             .preflightShell(
               machine,
-              containerCheck.isolation.settings,
+              containerCheck.settings,
               harnesses,
               Option.match(machine.gateway, {
                 onNone: () => ({}),
@@ -128,20 +129,31 @@ export const sshMachinePreflightFor = (
             .pipe(Effect.flatMap(probe)),
         )
       : probe(machine.shell);
-    yield* Effect.logInfo("SSH Worker preflight verified", {
+    const fields = {
       worker,
       host,
       root,
       gitVersion,
-      isolation: containerCheck.isolation._tag,
+      isolation: containerCheck._tag,
       harnesses: harnesses.join(","),
-      ...Option.match(containerCheck.limits, { onNone: () => ({}), onSome: limitFields }),
+    };
+    return yield* Match.valueTags(containerCheck, {
+      Container: ({ limits }) =>
+        Effect.as(
+          Effect.logInfo("SSH Worker preflight verified", { ...fields, ...limitFields(limits) }),
+          {
+            degraded: Option.none(),
+            deferred: Option.none(),
+            containerLimits: Option.some(limits.limits),
+          } satisfies PreflightReport,
+        ),
+      SharedUser: ({ degraded }) =>
+        Effect.as(Effect.logInfo("SSH Worker preflight verified", fields), {
+          degraded: Option.some(degraded),
+          deferred: Option.none(),
+          containerLimits: Option.none(),
+        } satisfies PreflightReport),
     });
-    return {
-      degraded: containerCheck.degraded,
-      deferred: Option.none(),
-      containerLimits: Option.map(containerCheck.limits, ({ limits }) => limits),
-    } satisfies PreflightReport;
   });
 
 /**

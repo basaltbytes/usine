@@ -1,6 +1,6 @@
 import type { Harness } from "@usine/core/agent/brain";
 import type { ApprovalRequirement, LoopPermissions } from "@usine/core/loop";
-import type { WorkerKind } from "@usine/core/worker";
+import { CONTAINER_LIMITS, type ContainerLimit, type WorkerKind } from "@usine/core/worker";
 import type {
   ConfigurationView,
   ContainerView,
@@ -47,14 +47,6 @@ export const capabilityLabel = {
   container: "Docker",
   provider: "provider",
 } satisfies Record<Capability, string>;
-
-type ContainerLimit = "cpus" | "memoryMib" | "pids";
-
-const CONTAINER_LIMITS = [
-  "cpus",
-  "memoryMib",
-  "pids",
-] as const satisfies ReadonlyArray<ContainerLimit>;
 
 const containerLimitValue = {
   cpus: (cpus: number) => `${cpus} ${cpus === 1 ? "CPU" : "CPUs"}`,

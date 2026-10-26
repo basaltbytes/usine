@@ -1,7 +1,7 @@
 import type { Harness } from "@usine/core/agent/brain";
 import { safeSegment } from "@usine/core/repository";
-import { ContainerImage, ContainerLimits, type WorkerName } from "@usine/core/worker";
-import { Cache, Effect, Match, Option, Random, Ref } from "effect";
+import { ContainerImage, type WorkerName } from "@usine/core/worker";
+import { Cache, Effect, Option, Random, Ref } from "effect";
 import { type ExecutorError, WorkerCapabilityError } from "../executor.ts";
 import type { RemoteCommands } from "../remote/commands.ts";
 import {
@@ -12,9 +12,11 @@ import {
   sharedUser,
 } from "../remote/container.ts";
 import {
-  deriveLimits,
-  type MachineResources,
+  configuredLimits,
+  limitFields,
   RESOURCES_SCRIPT,
+  resolveLimits,
+  type ResolvedLimits,
   resourcesFromOutput,
 } from "./limits.ts";
 import type { SshMachine } from "./model.ts";
@@ -55,47 +57,16 @@ printf '%s %s\n' "$(id -u)" "$image_uid"
 
 const SSH_FAILURE = 255;
 
-/** A limit of each Attempt container that `usine.yaml` can leave unset. */
-type ContainerLimit = "cpus" | "memoryMib" | "pids";
-
-/** The limits of a Worker's containers and where they come from. */
-type ResolvedLimits =
-  /** `usine.yaml` sets every limit. */
-  | { readonly _tag: "Configured"; readonly limits: ContainerLimits }
-  /** `derived` are derived from `machine` for `slots` concurrent Attempts; `usine.yaml` sets the others. */
-  | {
-      readonly _tag: "Derived";
-      readonly limits: ContainerLimits;
-      readonly derived: ReadonlyArray<ContainerLimit>;
-      readonly machine: MachineResources;
-      readonly slots: number;
-    };
-
-/** Returns the log fields of the limits of a Worker's containers. */
-export const limitFields = (resolved: ResolvedLimits) => ({
-  cpus: resolved.limits.cpus,
-  memoryMib: resolved.limits.memoryMib,
-  pids: resolved.limits.pids,
-  ...Match.valueTags(resolved, {
-    Configured: () => ({ derivedLimits: "none" }),
-    Derived: ({ derived, machine, slots }) => ({
-      derivedLimits: derived.join(","),
-      slots,
-      machineCpus: machine.cpus,
-      machineMemoryMib: Math.floor(machine.memoryBytes / 1024 ** 2),
-      machineTasks: machine.tasks,
-    }),
-  }),
-});
-
 /** What a preflight found about the containers of a Worker. */
-interface ContainerCheck {
-  readonly isolation: AttemptIsolation;
-  /** The limits of each container, or `None` if the Worker runs Attempts without containers. */
-  readonly limits: Option.Option<ResolvedLimits>;
-  /** Why the Worker runs Attempts without containers, if it does. */
-  readonly degraded: Option.Option<string>;
-}
+type ContainerCheck =
+  /** Each Attempt runs in its own container from `settings`. */
+  | {
+      readonly _tag: "Container";
+      readonly settings: ContainerSettings;
+      readonly limits: ResolvedLimits;
+    }
+  /** Attempts run as the SSH user, for the `degraded` reason. */
+  | { readonly _tag: "SharedUser"; readonly degraded: string };
 
 const containerGap = (worker: WorkerName, message: string, cause: unknown) =>
   new WorkerCapabilityError({ worker, capability: "container", message, cause });
@@ -150,32 +121,10 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
     machine: SshMachine,
     slots: number,
   ) {
-    const configured = machine.address.container;
-    const set = Option.all({
-      cpus: configured.cpus,
-      memoryMib: configured.memoryMib,
-      pids: configured.pids,
-    });
-    if (Option.isSome(set))
-      return {
-        _tag: "Configured",
-        limits: new ContainerLimits(set.value),
-      } satisfies ResolvedLimits;
-    const resources = yield* readResources(machine);
-    const derived = deriveLimits(resources, slots);
-    return {
-      _tag: "Derived",
-      limits: new ContainerLimits({
-        cpus: Option.getOrElse(configured.cpus, () => derived.cpus),
-        memoryMib: Option.getOrElse(configured.memoryMib, () => derived.memoryMib),
-        pids: Option.getOrElse(configured.pids, () => derived.pids),
-      }),
-      derived: (["cpus", "memoryMib", "pids"] as const).filter((limit) =>
-        Option.isNone<number>(configured[limit]),
-      ),
-      machine: resources,
-      slots,
-    } satisfies ResolvedLimits;
+    yield* Effect.annotateCurrentSpan({ worker: machine.address.name, slots });
+    const configured = configuredLimits(machine.address.container);
+    if (Option.isSome(configured)) return configured.value;
+    return resolveLimits(machine.address.container, yield* readResources(machine), slots);
   });
 
   /**
@@ -242,11 +191,9 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
         { worker, host },
       );
       return {
-        isolation: sharedUser,
-        limits: Option.none(),
-        degraded: Option.some(
+        _tag: "SharedUser",
+        degraded:
           "Docker isn't installed, so attempts run as the SSH user and can read each other's credentials. Install Docker to run each attempt in its own container.",
-        ),
       } satisfies ContainerCheck;
     }
     const pulled = yield* commands.inspect("preflight", machine.shell, CONTAINER_RUNTIME, [
@@ -294,11 +241,8 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
         new Error(`user IDs ${hostId} and ${imageId}`),
       );
     const limits = yield* limitsFor(machine, slots);
-    const isolation: AttemptIsolation = {
-      _tag: "Container",
-      settings: { image, limits: limits.limits, instance },
-    };
-    yield* record(worker, isolation);
+    const settings: ContainerSettings = { image, limits: limits.limits, instance };
+    yield* record(worker, { _tag: "Container", settings });
     yield* Effect.logInfo("SSH Worker runs each Attempt in its own container", {
       worker,
       host,
@@ -306,11 +250,7 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
       image,
       ...limitFields(limits),
     });
-    return {
-      isolation,
-      limits: Option.some(limits),
-      degraded: Option.none(),
-    } satisfies ContainerCheck;
+    return { _tag: "Container", settings, limits } satisfies ContainerCheck;
   });
 
   /**
