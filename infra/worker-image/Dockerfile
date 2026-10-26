@@ -44,11 +44,16 @@ RUN useradd --uid "${USINE_UID}" --create-home --shell /bin/bash usine \
 
 COPY --chmod=0755 container-init.sh /usr/local/bin/usine-container-init
 
+# The attempt's checkout is a bind mount on another filesystem than the home
+# directory, so pnpm would create its store in the checkout (#581). pnpm 11
+# reads pnpm_config_store_dir, and earlier versions npm_config_store_dir.
 ENV DISABLE_AUTOUPDATER=1 \
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
     GH_NO_UPDATE_NOTIFIER=1 \
     PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium \
-    TURBO_CACHE_DIR=/home/usine/.cache/turbo
+    TURBO_CACHE_DIR=/home/usine/.cache/turbo \
+    npm_config_store_dir=/home/usine/.local/share/pnpm/store \
+    pnpm_config_store_dir=/home/usine/.local/share/pnpm/store
 
 USER usine
 WORKDIR /home/usine
