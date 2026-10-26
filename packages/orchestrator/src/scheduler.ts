@@ -283,6 +283,11 @@ export interface StepExecutorOptions {
    * no Worker is provisioned.
    */
   readonly machines?: WorkerMachines["Service"];
+  /**
+   * Removes what discarded Attempts left on a Worker outside their checkouts; see
+   * `StepExecutor.discard`. If omitted, removes nothing.
+   */
+  readonly discard?: StepExecutor["Service"]["discard"];
 }
 
 /** The machine a lease holds, which its release deletes. */
@@ -1104,7 +1109,11 @@ export const stepExecutorLayer = (
         outcome: executor.outcome,
         reserve,
         occupy,
-        sweep: machines === undefined ? Effect.void : machines.sweep,
+        sweep: Effect.andThen(
+          executor.sweep,
+          machines === undefined ? Effect.void : machines.sweep,
+        ),
+        discard: options.discard ?? (() => Effect.void),
         intervene: executor.intervene,
         recover: (attempt, record) =>
           executor

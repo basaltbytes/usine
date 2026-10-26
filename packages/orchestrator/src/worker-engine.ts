@@ -1,6 +1,6 @@
 import type { UsineConfig } from "@usine/config/factory";
 import type { BrainSpec } from "@usine/core/agent/brain";
-import type { InstanceDirectory } from "@usine/core/instance";
+import type { InstanceDirectory, InstanceId } from "@usine/core/instance";
 import { GitHubCredentials } from "@usine/github/github-app";
 import { Effect, Layer, Option } from "effect";
 import {
@@ -9,15 +9,22 @@ import {
   layer as cloudflareLayer,
 } from "./cloudflare.ts";
 import { layer as localLayer } from "./local.ts";
-import { layer as sshLayer, sshWorkerAddressesOf, sshWorkersOf } from "./ssh.ts";
+import {
+  layer as sshLayer,
+  sshWorkerAddressesOf,
+  sshWorkerRecordsDirectory,
+  sshWorkersOf,
+} from "./ssh.ts";
 
 /**
  * Provides the engine for the Workers in `config`: the SSH executor if every Worker is `ssh`, the
  * Cloudflare executor if every Worker is `cloudflare`, otherwise the local one. Fails at startup
- * with `UnsupportedWorkerError` on any other mix.
+ * with `UnsupportedWorkerError` on any other mix. The SSH executor labels its Attempt containers
+ * with `instanceId`, so that instances that share the GitHub App and a machine keep each other's.
  */
 export const workerEngineLayer = (
   instanceDirectory: InstanceDirectory,
+  instanceId: InstanceId,
   config: UsineConfig,
   brains: ReadonlyArray<BrainSpec>,
 ) =>
@@ -33,6 +40,7 @@ export const workerEngineLayer = (
         yield* Effect.logInfo("Running Attempts on SSH Workers", {
           workers,
           instance,
+          instanceId,
           behindGateway: addresses
             .filter(({ gateway }) => Option.isSome(gateway))
             .map(({ name }) => name)
@@ -45,7 +53,9 @@ export const workerEngineLayer = (
         return sshLayer(instanceDirectory, config, brains, {
           workers: addresses,
           instance,
+          instanceId,
           knownHostsDirectory: `${instanceDirectory}/.usine/known-hosts`,
+          workerRecordsDirectory: sshWorkerRecordsDirectory(instanceDirectory),
         });
       }
       if (cloudflareWorkersOf(config).length === config.workers.length) {

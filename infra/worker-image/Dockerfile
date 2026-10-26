@@ -6,7 +6,9 @@
 # checks them, and .github/workflows/worker-image.yml tags the image with them.
 FROM debian:trixie-slim
 
-ARG NODE_MAJOR=22
+# The Node.js major version of the image and of the worker machine:
+# ../hetzner/render-cloud-init.sh puts it in ../hetzner/cloud-init.yaml.
+ARG NODE_MAJOR=24
 ARG PNPM_VERSION=11.20.0
 ARG CLAUDE_CODE_VERSION=2.1.308
 ARG CODEX_VERSION=0.159.2

@@ -62,6 +62,13 @@ export type HarnessSessionId = typeof HarnessSessionId.Type;
 export class HarnessSession extends Schema.Class<HarnessSession>("Agent/HarnessSession")({
   id: HarnessSessionId,
   cwd: Schema.NonEmptyString,
+  /**
+   * The directory the harness saved the conversation in, if the Attempt set one in place of the
+   * harness's default: Codex's `CODEX_HOME`. `None` for the default or an older record.
+   */
+  home: Schema.OptionFromOptionalKey(Schema.NonEmptyString).pipe(
+    Schema.withConstructorDefault(Effect.succeed(Option.none<string>())),
+  ),
 }) {}
 
 /** The session identity and the brain selected at launch. */

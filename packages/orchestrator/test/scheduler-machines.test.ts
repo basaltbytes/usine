@@ -96,6 +96,8 @@ const fakeMachines = () =>
   });
 
 const prepared: Array<AttemptId> = [];
+let executorSweeps = 0;
+const discarded: Array<string> = [];
 
 const executor = Layer.succeed(Executor)({
   kind: "local",
@@ -117,11 +119,18 @@ const executor = Layer.succeed(Executor)({
     ),
   cancel: unused,
   intervene: unused,
+  sweep: Effect.sync(() => {
+    executorSweeps += 1;
+  }),
 });
 
 const scheduler = (machines: WorkerMachines["Service"]) =>
   Layer.build(
-    stepExecutorLayer(config, [], { machines }).pipe(
+    stepExecutorLayer(config, [], {
+      machines,
+      discard: (worker, attempts) =>
+        Effect.sync(() => void discarded.push(`${worker} ${attempts.join(",")}`)),
+    }).pipe(
       Layer.provide(executor),
       Layer.provide(fixedConfigLayer(config)),
       Layer.provide(testAppLayer),
@@ -183,7 +192,7 @@ const settle = Effect.forEach(Array.from({ length: 20 }), () => Effect.yieldNow,
 
 describe("Worker scheduler on a provisioned Worker", () => {
   it.effect(
-    "creates the machine before the lease, gives it to the Attempt, and deletes it with the lease",
+    "creates the machine before the lease, gives it to the Attempt, deletes it with the lease, and passes on sweeps and discards",
     () =>
       Effect.gen(function* () {
         const fake = yield* fakeMachines();
@@ -218,8 +227,12 @@ describe("Worker scheduler on a provisioned Worker", () => {
         // The slot is free again.
         const next = yield* steps.reserve(RunId.make("run-2"), submission(2), Option.none());
         assert.strictEqual(next.worker, POOL);
+        const sweepsBefore = executorSweeps;
         yield* steps.sweep;
         assert.strictEqual(fake.calls.at(-1), "sweep");
+        assert.strictEqual(executorSweeps, sweepsBefore + 1, "the executor sweeps its Workers too");
+        yield* steps.discard(WorkerName.make("retired"), [attempt]);
+        assert.deepStrictEqual(discarded, [`retired ${attempt}`]);
       }).pipe(Effect.scoped),
   );
 

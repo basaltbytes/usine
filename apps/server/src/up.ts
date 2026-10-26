@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { NodeServices } from "@effect/platform-node";
 import { InstanceFolder } from "@usine/config/instance-folder";
 import { ConfigParser } from "@usine/config/parser";
-import { InstanceDirectory } from "@usine/core/instance";
+import { InstanceDirectory, type InstanceId } from "@usine/core/instance";
 import { RunEngine, RunEngineShutdown } from "@usine/engine/engine";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { GitHubCredentials } from "@usine/github/github-app";
@@ -41,8 +41,9 @@ import {
   volatileRoots,
 } from "./cli.ts";
 import { serverLayer } from "./http.ts";
+import { instanceIdOf } from "./instance/id.ts";
 import { holdInstance } from "./instance/lock.ts";
-import { InstanceRecord, ProcessId, currentLaunch } from "./instance/record.ts";
+import { InstanceRecord, ProcessId, currentLaunch, instanceFiles } from "./instance/record.ts";
 import { reloadOnHangup } from "./reload-signal.ts";
 import { withGracefulShutdown } from "./shutdown.ts";
 import { tracingLayer } from "./tracing.ts";
@@ -118,6 +119,7 @@ const refuseVolatileInstance = Effect.fn("Server.refuseVolatileInstance")(functi
 /** Serves setup mode if the GitHub App credentials are absent, otherwise runs the factory. */
 const start = Effect.fnUntraced(function* (
   directory: InstanceDirectory,
+  instanceId: InstanceId,
   instances: CurrentInstance["Service"],
   port: Port,
 ) {
@@ -148,7 +150,7 @@ const start = Effect.fnUntraced(function* (
 
   const shutdown = yield* Deferred.make<void>();
   const startup = Effect.gen(function* () {
-    const runtime = runtimeLayer(directory).pipe(
+    const runtime = runtimeLayer(directory, instanceId).pipe(
       Layer.provide(Layer.succeed(GitHubCredentials, credentials.success)),
       Layer.provide(Layer.succeed(CurrentInstance, instances)),
     );
@@ -211,6 +213,9 @@ export const up = (port: Port, logLevel: UpLogLevel, allowVolatileInstance: bool
       });
       // Acquired before any store opens and released after every store closes.
       yield* holdInstance(directory, record).pipe(Effect.provide(NodeServices.layer));
+      const instanceId = yield* instanceIdOf(instanceFiles(directory)).pipe(
+        Effect.provide(NodeServices.layer),
+      );
       yield* refuseTakenPort(port).pipe(Effect.provide(NodeServices.layer));
       const instances = yield* loadInstance(directory);
       const { config } = yield* instances.get;
@@ -218,6 +223,8 @@ export const up = (port: Port, logLevel: UpLogLevel, allowVolatileInstance: bool
       const tracer = yield* Layer.build(tracingLayer(config.tracing)).pipe(
         Effect.provide(NodeServices.layer),
       );
-      return yield* start(directory, instances, port).pipe(Effect.provideContext(tracer));
+      return yield* start(directory, instanceId, instances, port).pipe(
+        Effect.provideContext(tracer),
+      );
     }),
   ).pipe(Effect.provideService(References.MinimumLogLevel, logLevel));

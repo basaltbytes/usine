@@ -203,6 +203,7 @@ const gatedExecutor = Layer.succeed(StepExecutor)({
   interrupt: () => Effect.void,
   occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
   sweep: Effect.void,
+  discard: () => Effect.void,
   reserve: () => Effect.die("an approval-gated test run must not reserve a worker"),
   execute: () => Effect.die("an approval-gated test run must not start an Attempt"),
 });
@@ -572,6 +573,7 @@ describe("PollingTriggers", () => {
         interrupt: () => Effect.void,
         occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
         sweep: Effect.void,
+        discard: () => Effect.void,
         reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
         execute: () =>
           Effect.gen(function* () {
@@ -1685,6 +1687,7 @@ describe("PollingTriggers", () => {
           interrupt: () => Effect.void,
           occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
           sweep: Effect.void,
+          discard: () => Effect.void,
           reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
           execute: (execution) =>
             Effect.sync(() => {

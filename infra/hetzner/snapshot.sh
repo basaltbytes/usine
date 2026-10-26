@@ -71,11 +71,7 @@ trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
 
 if [ -z "$NETWORK" ]; then
-  AUTHORIZED_KEYS=$(head -n 1 "$public_key_file" | jq -Rc '[.]') awk '
-    BEGIN { placeholder = "\"@AUTHORIZED_KEYS@\"" }
-    (at = index($0, placeholder)) { $0 = substr($0, 1, at - 1) ENVIRON["AUTHORIZED_KEYS"] substr($0, at + length(placeholder)) }
-    { print }
-  ' "$here/cloud-init.yaml" > "$work/user-data"
+  "$here/render-cloud-init.sh" "$(head -n 1 "$public_key_file" | jq -Rc '[.]')" > "$work/user-data"
   set -- --without-ipv6
 else
   "$here/gateway/gateway.sh" worker-user-data "$public_key_file" > "$work/user-data"

@@ -6,6 +6,7 @@ import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { HarnessReady, HarnessUnavailableError } from "@usine/core/agent/capability";
 import type { AttemptSalvage } from "@usine/core/attempt/salvage";
 import { LoopName } from "@usine/core/loop";
+import { AttemptId } from "@usine/core/attempt";
 import { RepositoryName } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
@@ -27,10 +28,13 @@ import { DateTime, Deferred, Effect, Fiber, Option, Redacted } from "effect";
 import { TestClock } from "effect/testing";
 import { CheckoutRequest, Executor } from "../../../src/executor.ts";
 import { SSH_ENVIRONMENT_ALLOWLIST } from "../../../src/remote/commands.ts";
+import { sshWorkerRecordsFor, SshWorkers } from "../../../src/ssh/ssh.ts";
 import {
   aloneOnItem,
   COMMIT_AUTHOR,
+  DESTINATION,
   GIT_DIRECTORY,
+  LOCAL_TEMPORARY_DIRECTORY,
   TEST_AGENT,
   TOKEN_PREFIX,
   WORKER,
@@ -1105,6 +1109,88 @@ describe("SSH Worker behind a Gateway", () => {
             address: gatewayAddress({ llmProviders: ["openai"] }),
             parent,
             probes: { harnessReadiness },
+          }),
+        ),
+      );
+    },
+  );
+
+  it.effect(
+    "sweeps the Codex homes that a crash left, and keeps those of a held Attempt or a kept checkout",
+    () => {
+      const machine = fakeMachine();
+      const gateway = fakeGateway(machine, CHATGPT_PROVIDERS);
+      const running = `${WORKER_ROOT}/codex/remote-run_execute_1`;
+      const crashed = `${WORKER_ROOT}/codex/crashed-run_execute_1`;
+      const kept = `${WORKER_ROOT}/codex/kept-run_execute_1`;
+      // An earlier process crashed: recovery removed one Attempt's checkout and kept another's.
+      machine.state.codexHomes.set(crashed, false);
+      machine.state.codexHomes.set(kept, true);
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const prepared = yield* executor.prepare(codexRequest);
+        yield* executor.sweep;
+        assert.sameMembers([...machine.state.codexHomes.keys()], [running, kept]);
+        machine.state.reachable = false;
+        yield* executor.sweep;
+        machine.state.reachable = true;
+        yield* prepared.launch(sink);
+        assert.sameMembers([...machine.state.codexHomes.keys()], [kept]);
+      }).pipe(
+        Effect.provide(
+          gatewayRuntime(machine, mintingProvider(), gateway, {
+            address: gatewayAddress({ llmProviders: ["openai"] }),
+          }),
+        ),
+      );
+    },
+  );
+
+  it.effect(
+    "removes the Codex homes of discarded Attempts after usine.yaml stops declaring the Worker",
+    () => {
+      const machine = fakeMachine();
+      const gateway = fakeGateway(machine, CHATGPT_PROVIDERS);
+      const crashed = `${WORKER_ROOT}/codex/crashed-run_execute_1`;
+      const kept = `${WORKER_ROOT}/codex/kept-run_execute_1`;
+      const other = `${WORKER_ROOT}/codex/other-run_execute_1`;
+      machine.state.codexHomes.set(crashed, false);
+      machine.state.codexHomes.set(kept, true);
+      machine.state.codexHomes.set(other, false);
+      const record = `${LOCAL_TEMPORARY_DIRECTORY}/${WORKER}.json`;
+      return Effect.gen(function* () {
+        // The executor recorded the Worker when it added it; a reload then removed it.
+        yield* (yield* SshWorkers).removeWorker(WORKER);
+        const recorded = machine.state.localFiles.get(record) ?? "";
+        assert.include(recorded, DESTINATION);
+        assert.notInclude(recorded, "admin-token");
+        const records = yield* sshWorkerRecordsFor(LOCAL_TEMPORARY_DIRECTORY).pipe(
+          Effect.provide(machine.layer),
+        );
+        const commands = machine.state.calls.length;
+        // A Worker with no record, such as one dropped before records existed, keeps its files.
+        yield* records.discard(WorkerName.make("never-recorded"), [
+          AttemptId.make("crashed-run/execute/1"),
+        ]);
+        assert.strictEqual(machine.state.calls.length, commands);
+        yield* records.discard(WORKER, [
+          AttemptId.make("crashed-run/execute/1"),
+          AttemptId.make("kept-run/execute/1"),
+        ]);
+        assert.sameMembers([...machine.state.codexHomes.keys()], [other]);
+        const removal = machine.state.calls.at(-1);
+        assert.includeMembers(
+          [...(removal?.command.args ?? [])],
+          ["-p", "2222", "-i", "~/.ssh/usine_worker", DESTINATION],
+        );
+        // An unreachable machine doesn't fail the discard.
+        machine.state.reachable = false;
+        yield* records.discard(WORKER, [AttemptId.make("other-run/execute/1")]);
+        assert.sameMembers([...machine.state.codexHomes.keys()], [other]);
+      }).pipe(
+        Effect.provide(
+          gatewayRuntime(machine, mintingProvider(), gateway, {
+            address: gatewayAddress({ llmProviders: ["openai"] }),
           }),
         ),
       );

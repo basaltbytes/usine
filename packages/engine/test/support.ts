@@ -61,6 +61,7 @@ export const executorLayer = (plans: Ref.Ref<ReadonlyArray<AttemptPlan>>) =>
     interrupt: () => Effect.void,
     occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
     sweep: Effect.void,
+    discard: () => Effect.void,
     reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
     execute: () =>
       Ref.modify(plans, (remaining) => {
@@ -106,6 +107,7 @@ export const slottedExecutor = Effect.fn("test.slottedExecutor")(function* (
       }),
     occupy: () => TxRef.update(leased, (count) => count + 1).pipe(Effect.map(lease)),
     sweep: Effect.void,
+    discard: () => Effect.void,
     reserve: () =>
       Effect.tx(
         Effect.gen(function* () {

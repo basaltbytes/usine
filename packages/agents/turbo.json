@@ -6,6 +6,7 @@
       "inputs": [
         "$TURBO_EXTENDS$",
         "$TURBO_ROOT$/infra/hetzner/cloud-init.yaml",
+        "$TURBO_ROOT$/infra/hetzner/render-cloud-init.sh",
         "$TURBO_ROOT$/infra/worker-image/Dockerfile"
       ]
     }

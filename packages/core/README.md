@@ -21,7 +21,7 @@ Domain model for [usine](https://github.com/basaltbytes/usine): event, run, step
 | `@usine/core/agent`, `/agent/brain`, `/agent/session` | `Agent`, `AgentName`, `AgentPersona`, parent model resolution, `githubSignature` (the last line of an agent's GitHub comments); `BrainSpec`, `ModelId`, `Harness`, `Effort`; `AgentSessionId`, session descriptors, `AgentSessionEvent`, `ChildSessionBudget`, `ChildSessionCount` |
 | `@usine/core/agent/capability` | `HarnessCapability`, `HarnessReady`, `HarnessUnavailableError`, and the credential-free `HarnessReadiness` preflight response |
 | `@usine/core/repository` | `RepositoryName`, `RepositoryRevision`, `CommitSha`, `safeSegment`, `splitRepositoryName`, `canonicalRepositoryName` |
-| `@usine/core/worker`, `/item`, `/loop`, `/instance` | `WorkerName`, `WorkerKind`, `GatewayCredentialKind`; `ItemKey`, `ItemNumber`; `LoopName`, `ApprovalRequirement`; `InstanceDirectory` |
+| `@usine/core/worker`, `/item`, `/loop`, `/instance` | `WorkerName`, `WorkerKind`, `GatewayCredentialKind`; `ItemKey`, `ItemNumber`; `LoopName`, `ApprovalRequirement`; `InstanceDirectory`, `InstanceId` |
 | `@usine/core/cycle-budget` | `CycleLimit`, `CycleGeneration`, `CycleCount`, `LoopCycleCount`, `CycleBudgetAsk` |
 
 Branded schemas are exported under their brand name, as a value and a type. `PullRequest` and `Comment` facts use `URL` values in memory and strings in JSON, so step results round-trip through the channel and durable storage.
@@ -57,6 +57,6 @@ Outbound `SessionEvent` envelopes keep parent and first-level child session iden
 
 `ChildSession.gatewayCredential` is the `GatewayCredentialKind` the gateway in front of the child's worker used for its model requests: none if the child used its harness's login, and in older transcripts. `brainPool(brain, gatewayCredential)` returns a started session's billing pool; `sessionPool(session)` reads a recorded one's. A Claude Code child is in `apiKeys` if its gateway used an API key, otherwise in `claudePlan`; a Codex child is in `apiKeys` if its gateway used an API key, otherwise in `chatgptPlan` (ADR 0013, ADR 0021). `GatewayLlmProvider` is `anthropic` (Claude Code) or `openai` (Codex).
 
-The optional `SessionStarted.harnessSession` (`HarnessSession`) records the harness's `HarnessSessionId` and the worker `cwd`, apart from usine's session identity. Older transcripts decode it to `Option.none()`.
+The optional `SessionStarted.harnessSession` (`HarnessSession`) records the harness's `HarnessSessionId` and the worker `cwd`, apart from usine's session identity. Its optional `home` is the directory the harness saved the session in when the attempt set one, Codex's `CODEX_HOME`. Older transcripts decode `harnessSession`, and a `HarnessSession` without `home`, to `Option.none()`.
 
 Envelopes include `PROTOCOL_VERSION` (7), which the transcript store uses to read older envelopes. Version 7 added the previous attempt's pushed salvage to `RunSpec` (`resume`); version 6 added harness session metadata.

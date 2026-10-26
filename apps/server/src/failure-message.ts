@@ -162,6 +162,10 @@ export const failureMessage = (failure: CliFailure): string =>
       `usine up did not start: another usine process${holderOf(holder)} is running in ${directory}. It might still be finishing its attempts. Wait for it to exit, or stop it, then run usine up again.`,
     InstanceLockError: ({ directory, reason }) =>
       `usine up did not start: could not lock ${directory}/.usine/instance.lock (${reason}). Check that the folder is writable.`,
+    InstanceIdError: ({ operation, path, reason }) =>
+      operation === "create"
+        ? `usine up did not start: could not create ${path} (${clause(reason)}). Check that the folder is writable.`
+        : `usine up did not start: could not read the instance ID in ${path} (${clause(reason)}). Restore the file, or delete it so that usine up creates a new ID. With a new ID, usine no longer removes the attempt containers that it left on SSH workers before; remove those with docker rm.`,
     PortInUseError: ({ port, holder }) =>
       `usine up stopped: port ${port} is already in use${holderOf(holder)}. Stop that process, or run usine up --port <port> with another port.`,
     ServerStartError: ({ port, cause }) =>

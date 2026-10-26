@@ -20,7 +20,7 @@ Entries:
 - **Cycle budget used up** on an item, with the loops and their counts. **Reset cycle budget** records an explicit answer and refreshes the overview; the runtime fetches current trigger input before opening more work.
 - **Child-session budget used up**, with the configured and attempted counts, also shown in the drawer and reader.
 - **Loop file not loaded** or **Agent file not loaded**: a file that failed to load at startup or reload, with the reason, until fixed and reloaded.
-- **Worker not configured**: a worker no longer in `usine.yaml` that has recorded attempts, with their count and the full detail, actions below. Startup doesn't reconcile them. Declare the worker again and restart `usine up`, or choose **Discard leftovers** and **Confirm discard** to stop tracking them, which removes nothing from the worker. While attempts a reload left there still run, the entry says how many (`2 attempts still running on it. Discard the leftovers after they end`), and **Discard leftovers** appears after the last ends. A refused discard, for example because the worker is declared again, shows the reason.
+- **Worker not configured**: a worker no longer in `usine.yaml` that has recorded attempts, with their count and the full detail, actions below. Startup doesn't reconcile them. Declare the worker again and restart `usine up`, or choose **Discard leftovers** and **Confirm discard** to stop tracking them. The discard removes the attempts' Codex homes from an SSH worker that usine recorded, and leaves their checkouts for you to remove. While attempts a reload left there still run, the entry says how many (`2 attempts still running on it. Discard the leftovers after they end`), and **Discard leftovers** appears after the last ends. A refused discard, for example because the worker is declared again, shows the reason.
 
 A failed run, question, or blocker on an item that is closed or merged isn't listed and doesn't mark the project or its card; the run stays under **Recent runs** and in its drawer, which marks the item closed or merged. A cycle budget entry leaves at the first poll after its item closes or merges. A run in a repository that `usine.yaml` no longer lists isn't listed either, since it has no project to mark.
 
@@ -174,8 +174,9 @@ Under the outline, a red count with previous and next controls steps through loa
 - For an SSH worker, it runs that over `ssh -t` to the worker's `destination`, with `-p` if `usine.yaml` sets `port`, quoted again for the remote shell; the worktree line names the worker.
 - For a provisioned worker, which has no `destination`, it uses the local form to run on the attempt's machine and says that the machine is deleted with the attempt; the worktree line names the worker.
 - For a worker that `usine.yaml` no longer declares, it uses the local form and says so.
+- For a Codex child that saved its session in the attempt's own Codex home, as behind a gateway with `openai` in `llm_providers`, it sets `CODEX_HOME` to that directory before `codex resume`.
 
-**Copy command** copies the wrapped command as one line. Resuming needs the attempt's harness login and its worktree, which attempt cleanup removes. Older transcripts and Pi children say no harness session was saved.
+**Copy command** copies the wrapped command as one line. Resuming needs the attempt's harness login and its worktree, which attempt cleanup removes. For a child whose model requests used the gateway's credential, the line under the command reads `The gateway credential isn't available from your shell` instead of naming the login. On a provisioned worker, where such a child used the gateway's credential or the provisioner's API key, a second line under the machine note reads `The gateway credential or API key isn't available from your shell`. Older transcripts and Pi children say no harness session was saved.
 
 ### Reader
 

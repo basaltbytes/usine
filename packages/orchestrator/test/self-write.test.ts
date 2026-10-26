@@ -208,6 +208,7 @@ describe("Board self-writes", () => {
             interrupt: () => Effect.void,
             occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
             sweep: Effect.void,
+            discard: () => Effect.void,
             reserve: () => Effect.die("approval must precede worker reservation"),
             execute: () => Effect.die("approval must precede an Attempt"),
           });

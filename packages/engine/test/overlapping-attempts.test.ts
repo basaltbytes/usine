@@ -37,6 +37,7 @@ const executorWith = (
     interrupt,
     occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
     sweep: Effect.void,
+    discard: () => Effect.void,
     reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
     execute,
   });

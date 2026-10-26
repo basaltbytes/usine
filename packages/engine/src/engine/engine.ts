@@ -242,9 +242,10 @@ const makeRunEngine = Effect.gen(function* () {
     const attempts = yield* store.discardLeftovers(worker);
     yield* Effect.logInfo(
       "Discarded the leftovers of the Attempts on a Worker that is not configured; startup no longer reconciles them",
-      { worker, attempts },
+      { worker, attempts: attempts.length },
     );
-    return attempts;
+    yield* stepExecutor.discard(worker, attempts);
+    return attempts.length;
   });
 
   // Startup reconciliation runs here because this layer is memoized; `Layer.tap` would run it
@@ -301,9 +302,10 @@ export class RunEngine extends Context.Service<
      */
     readonly cancel: (runId: RunId) => Effect.Effect<void, RunEngineError>;
     /**
-     * Stops reconciling the Attempts recorded on `worker`, leaving their files in place, and
-     * returns the number of Attempts marked. Fails with `LeftoversDiscardRejectedError` if
-     * `worker` is in `StepExecutor.workers`.
+     * Stops reconciling the Attempts recorded on `worker`, then removes with
+     * `StepExecutor.discard` what they left outside their checkouts, and returns the number of
+     * Attempts marked. Leaves their checkouts in place. Fails with
+     * `LeftoversDiscardRejectedError` if `worker` is in `StepExecutor.workers`.
      */
     readonly discardLeftovers: (
       worker: WorkerName,

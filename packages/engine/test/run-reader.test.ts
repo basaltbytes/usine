@@ -51,6 +51,7 @@ describe("Run evidence reader", () => {
         intervene: () => Effect.void,
         occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
         sweep: Effect.void,
+        discard: () => Effect.void,
         reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
         interrupt: () => Effect.void,
         execute: (execution, io) =>

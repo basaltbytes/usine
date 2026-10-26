@@ -197,6 +197,7 @@ describe("operator read latency", () => {
         reserve: () => Effect.succeed({ worker: WorkerName.make("worker"), release: Effect.void }),
         occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
         sweep: Effect.void,
+        discard: () => Effect.void,
         execute: () => Deferred.succeed(preparing, undefined).pipe(Effect.andThen(Effect.never)),
       });
       const engine = engineLayer(InstanceDirectory.make(root)).pipe(

@@ -595,6 +595,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       outcome: session.outcome,
       preflight,
       prepare,
+      sweep: Effect.void,
     });
   });
 

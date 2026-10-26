@@ -98,7 +98,7 @@ Agents share the installation's GitHub App identity. The instructions require co
 
 ## Resume a harness session
 
-Claude children save sessions, and Codex threads aren't ephemeral. `SessionStarted.harnessSession` and launch logs (`harnessSessionId`, `sessionId`, `cwd`) give the id and directory. While the worktree and session files exist, run `claude --resume <id>` or `codex resume <id>` there, on the same worker and account.
+Claude children save sessions, and Codex threads aren't ephemeral. `SessionStarted.harnessSession` and launch logs (`harnessSessionId`, `sessionId`, `cwd`) give the id and directory. While the worktree and session files exist, run `claude --resume <id>` or `codex resume <id>` there, on the same worker and account. A Codex child whose environment sets `CODEX_HOME` saves its sessions there, and `HarnessSession.home` and the launch log's `home` record that directory: run `CODEX_HOME=<home> codex resume <id>`. An attempt behind a gateway gets its own `CODEX_HOME`, and its model credential isn't in your shell.
 
 ## Preflight
 

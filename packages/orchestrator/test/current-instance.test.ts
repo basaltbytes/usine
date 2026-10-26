@@ -85,6 +85,7 @@ const startWorkers = (preflighted: Array<string>) =>
       prepare: unused,
       cancel: unused,
       intervene: unused,
+      sweep: Effect.void,
       preflight: (worker, brains) =>
         Effect.gen(function* () {
           preflighted.push(...brains.map(({ harness, model }) => `${worker}: ${harness}/${model}`));

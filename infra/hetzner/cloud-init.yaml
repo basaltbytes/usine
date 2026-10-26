@@ -3,10 +3,13 @@
 # Claude Code, Codex, Chromium, and Docker, and SSH that admits only that user
 # by key. With Docker, each attempt runs in its own container from the image
 # of ../worker-image; the harnesses here serve the logins.
-# create-worker.sh and `gateway/gateway.sh worker-user-data` replace
-# "@AUTHORIZED_KEYS@" with the public keys to authorize, as a list. Behind the
-# gateway, `worker-user-data` adds gateway/worker-cloud-init.yaml, which puts
-# the forward proxy in /etc/environment for the setup script below.
+# For create-worker.sh, snapshot.sh, and `gateway/gateway.sh worker-user-data`,
+# render-cloud-init.sh replaces "@AUTHORIZED_KEYS@" with the public keys to
+# authorize, as a list, and @NODE_MAJOR@ with NODE_MAJOR of
+# ../worker-image/Dockerfile, so the machine runs the attempt image's Node.js
+# major version. Behind the gateway, `worker-user-data` adds
+# gateway/worker-cloud-init.yaml, which puts the forward proxy in
+# /etc/environment for the setup script below.
 
 disable_root: true
 ssh_pwauth: false
@@ -96,7 +99,7 @@ write_files:
       curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
       chmod 0644 /etc/apt/keyrings/githubcli-archive-keyring.gpg /etc/apt/keyrings/nodesource.gpg
       echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list
-      echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_24.x nodistro main" > /etc/apt/sources.list.d/nodesource.list
+      echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_@NODE_MAJOR@.x nodistro main" > /etc/apt/sources.list.d/nodesource.list
       apt-get update
       DEBIAN_FRONTEND=noninteractive apt-get install -y gh nodejs
       # Codex must be one of supportedCodexVersions in @usine/agents/preflight; packages/agents/test/preflight.test.ts checks it.

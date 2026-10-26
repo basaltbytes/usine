@@ -127,6 +127,7 @@ const runtimeLayer = (directory: InstanceDirectory, app: GitHubApp["Service"]) =
     interrupt: () => Effect.void,
     occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
     sweep: Effect.void,
+    discard: () => Effect.void,
     reserve: () => Effect.die("the approval-gated integration run must not reserve a worker"),
     execute: () => Effect.die("the approval-gated integration run must not execute"),
   });

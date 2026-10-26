@@ -441,6 +441,7 @@ describe("Codex child backend", () => {
         assert(Option.isSome(started.harnessSession));
         assert.strictEqual(started.harnessSession.value.id, "thread-1");
         assert.strictEqual(started.harnessSession.value.cwd, request().cwd);
+        assert(Option.isNone(started.harnessSession.value.home), "Codex uses its default home");
         const turn = calls.find(({ method }) => method === "turn/start")?.params;
         assert(Schema.is(Schema.Struct({ effort: Schema.String }))(turn));
         assert.strictEqual(turn.effort, "none");
@@ -871,8 +872,10 @@ describe("Codex child backend", () => {
           calls,
         );
         const base = request();
+        const codexHome = "/srv/usine/workers/eu-one/codex/run-1_execute_1";
         const throughGateway = new ChildRequest({
           ...base,
+          environment: { ...base.environment, CODEX_HOME: codexHome },
           session: new ChildSession({
             ...base.session,
             gatewayCredential: Option.some(credential),
@@ -894,6 +897,11 @@ describe("Codex child backend", () => {
             const started = events[0];
             assert(started?._tag === "SessionStarted" && started.session._tag === "ChildSession");
             assert.deepStrictEqual(started.session.gatewayCredential, Option.some(credential));
+            assert.deepStrictEqual(
+              Option.flatMap(started.harnessSession, ({ home }) => home),
+              Option.some(codexHome),
+              "the session is saved in the Attempt's Codex home",
+            );
           }).pipe(Effect.provide(codexChildBackendLayer), Effect.provide(server)),
         );
       },

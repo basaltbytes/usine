@@ -5,6 +5,7 @@ import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget } from "@usine/core/agent/session";
 import { AttemptTask, AttemptId, AttemptWindow, AttemptWindows } from "@usine/core/attempt";
 import { InfraFailure } from "@usine/core/attempt/failure";
+import { InstanceId } from "@usine/core/instance";
 import { SalvageRef } from "@usine/core/attempt/salvage";
 import { LoopName, type LoopPermissions } from "@usine/core/loop";
 import { RepositoryName, CommitSha, RepositoryRevision } from "@usine/core/repository";
@@ -168,6 +169,11 @@ interface FakeMachineState {
   readonly refusedHosts: Set<string>;
   /** The Gateway configuration files written on the machine, by path. */
   readonly files: Map<string, string>;
+  /**
+   * The Codex homes on the machine, by path, with whether the Attempt of each has a checkout. A
+   * Codex home that the executor writes has none, so only its hold keeps a sweep from removing it.
+   */
+  readonly codexHomes: Map<string, boolean>;
   /** Whether the Gateway accepts the SSH connection of a forward to its admin API. */
   gatewayAcceptsSsh: boolean;
   /** Every forward the executor started, in order. */
@@ -303,6 +309,7 @@ export const fakeMachine = () => {
     forwardProxyReachable: true,
     refusedHosts: new Set(),
     files: new Map(),
+    codexHomes: new Map(),
     gatewayAcceptsSsh: true,
     forwards: [],
     docker: "absent",
@@ -396,10 +403,10 @@ export const fakeMachine = () => {
       );
     }
     if (line.includes("ps --all")) {
-      const label = words[5] ?? "";
-      const [key = "", value = ""] = label.split("=");
-      const listed = [...state.containers].filter(
-        ([, container]) => container.labels.get(key) === value,
+      // sh -c <script> sh docker <label> <label>; a container must have both, as with docker ps.
+      const filters = words.slice(5, 7).map((label) => label.split("="));
+      const listed = [...state.containers].filter(([, container]) =>
+        filters.every(([key = "", value = ""]) => container.labels.get(key) === value),
       );
       return oneShotHandle(
         listed
@@ -458,12 +465,22 @@ export const fakeMachine = () => {
             0,
           )
         : oneShotHandle("", 6, "curl: (6) Could not resolve host: git.gw.test");
+    // Lists the Codex homes whose Attempt has no checkout.
+    if (line.includes("basename")) {
+      const listed = [...state.codexHomes].filter(([, checkout]) => !checkout);
+      return oneShotHandle(listed.map(([home]) => `${home}${NUL}`).join(""), 0);
+    }
     // Writes configuration files: path and contents pairs after the script and `$0`.
     if (line.includes('mv "$1.$$" "$1"')) {
       const words = remoteWords(line);
       const pairs = words.slice(words.findIndex((word) => word.includes("shift 2")) + 2);
-      for (let index = 0; index + 1 < pairs.length; index += 2)
-        state.files.set(pairs[index] ?? "", pairs[index + 1] ?? "");
+      for (let index = 0; index + 1 < pairs.length; index += 2) {
+        const path = pairs[index] ?? "";
+        state.files.set(path, pairs[index + 1] ?? "");
+        const codexHome = /^(.+\/codex\/[^/]+)\/config\.toml$/u.exec(path)?.[1];
+        if (codexHome !== undefined)
+          state.codexHomes.set(codexHome, state.codexHomes.get(codexHome) ?? false);
+      }
       return oneShotHandle("", 0);
     }
     if (line.includes("IFS= read -r token")) {
@@ -482,10 +499,12 @@ export const fakeMachine = () => {
       );
     if (line.includes("pidfile")) return oneShotHandle("no-children\n", 0);
     if (line.startsWith("exec 'rm' '-rf' ")) {
-      const target = line.slice("exec 'rm' '-rf' '".length, -1);
-      for (const directory of state.credentials.keys())
-        if (directory === target || directory.startsWith(`${target}/`))
-          state.credentials.delete(directory);
+      for (const target of remoteWords(line).slice(2)) {
+        state.codexHomes.delete(target);
+        for (const directory of state.credentials.keys())
+          if (directory === target || directory.startsWith(`${target}/`))
+            state.credentials.delete(directory);
+      }
       return oneShotHandle("", 0);
     }
     if (line === "exec 'git' '--version'") return oneShotHandle("git version 2.47.3\n", 0);
@@ -640,6 +659,12 @@ export const fakeMachine = () => {
         state.localFiles.set(path, data);
         state.localWrites.push({ path, afterCalls: state.calls.length });
       }),
+    rename: (oldPath, newPath) =>
+      Effect.sync(() => {
+        const content = state.localFiles.get(oldPath);
+        state.localFiles.delete(oldPath);
+        if (content !== undefined) state.localFiles.set(newPath, content);
+      }),
     exists: (path) => Effect.succeed(state.localFiles.has(path)),
     remove: (path) => Effect.sync(() => void state.localFiles.delete(path)),
   });
@@ -736,6 +761,8 @@ export const ADDRESS: SshWorkerAddress = {
 
 /** The instance label of the test executor's containers. */
 export const INSTANCE = "github-app-4242";
+/** The instance ID label of the test executor's containers. */
+export const INSTANCE_ID = InstanceId.make("0b4e7f3c-5a2d-4c1e-9f6b-8d7a2e1c3b4f");
 
 /** An HTTP client layer for a Worker without a Gateway; never called. */
 export const noGateway = Layer.succeed(
@@ -758,7 +785,13 @@ export const executorLayer = (
   /** Replaces the executor's own login and binary checks. */
   probes: Pick<SshExecutorOptions, "harnessReadiness"> = {},
 ) =>
-  sshLayer({ workers: [address], instance: INSTANCE, interruptGrace: "2 seconds", ...probes }).pipe(
+  sshLayer({
+    workers: [address],
+    instance: INSTANCE,
+    instanceId: INSTANCE_ID,
+    interruptGrace: "2 seconds",
+    ...probes,
+  }).pipe(
     Layer.provide(machine.layer),
     Layer.provide(credentials.layer),
     Layer.provide(stubAttemptRuntime(storage, parent)),

@@ -1,7 +1,7 @@
 import { BrainSpec } from "@usine/core/agent/brain";
 import { NodeServices } from "@effect/platform-node";
 import { ConfigParser } from "@usine/config/parser";
-import type { InstanceDirectory } from "@usine/core/instance";
+import type { InstanceDirectory, InstanceId } from "@usine/core/instance";
 import { layer as durableAttemptRuntimeLayer } from "@usine/durable/live";
 import { observationLayer as localObservationLayer } from "@usine/engine/local-sqlite";
 import { claudeLoginLockLayer } from "@usine/executor";
@@ -46,7 +46,7 @@ export const operatorObservationLayer = (instanceDirectory: InstanceDirectory) =
  * Provides the full Node composition for one factory: trigger streams, the durable engine, Worker
  * execution, and the operator surface. Requires the GitHub credentials and `CurrentInstance`.
  */
-export const runtimeLayer = (instanceDirectory: InstanceDirectory) => {
+export const runtimeLayer = (instanceDirectory: InstanceDirectory, instanceId: InstanceId) => {
   const app = GitHubApp.layer.pipe(
     Layer.provide(externalHttpClientLayer),
     Layer.provide(NodeServices.layer),
@@ -72,6 +72,7 @@ export const runtimeLayer = (instanceDirectory: InstanceDirectory) => {
       const startup = yield* (yield* CurrentInstance).get;
       return workerEngineLayer(
         instanceDirectory,
+        instanceId,
         startup.config,
         startup.agents.map(
           ({ harness, model, effort }) => new BrainSpec({ harness, model, effort }),

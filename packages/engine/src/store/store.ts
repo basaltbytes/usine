@@ -1062,8 +1062,10 @@ export class RunStore extends Context.Service<
     readonly salvageCandidate: (
       attemptId: AttemptId,
     ) => Effect.Effect<Option.Option<SalvageCandidate>, RunStoreError>;
-    /** Marks the Attempts on `worker` so reconciliation skips them, and returns the number marked. */
-    readonly discardLeftovers: (worker: WorkerName) => Effect.Effect<number, RunStoreError>;
+    /** Marks the Attempts on `worker` so reconciliation skips them, and returns the Attempts marked. */
+    readonly discardLeftovers: (
+      worker: WorkerName,
+    ) => Effect.Effect<ReadonlyArray<AttemptId>, RunStoreError>;
     /** Returns the number of Attempts on `worker` without an outcome, excluding discarded leftovers. */
     readonly openAttempts: (worker: WorkerName) => Effect.Effect<number, RunStoreError>;
     /**

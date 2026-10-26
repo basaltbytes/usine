@@ -27,7 +27,8 @@ const directChildSchema = (parent: string): Schema.Codec<string> => {
   );
 };
 
-const directChildren = (
+/** Returns the NUL-separated paths in `output`. Fails if one isn't directly under `parent`. */
+export const directChildren = (
   operation: ExecutorOperation,
   parent: string,
   output: string,
