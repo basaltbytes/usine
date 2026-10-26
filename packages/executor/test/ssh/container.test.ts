@@ -413,6 +413,7 @@ describe("SSH Worker with Docker", () => {
           ["dev.usine.worker", worker],
         ]),
         environment: "",
+        running: true,
       });
       machine.state.containers.set("usine-crashed", leftover(WORKER));
       machine.state.containers.set("usine-of-a-removed-worker", leftover("eu-gone"));
@@ -561,6 +562,52 @@ describe("SSH Worker with Docker", () => {
         assert.deepStrictEqual(hostGitInCheckout(machine, before), []);
         assert.deepStrictEqual([...machine.state.markers], []);
       });
+    },
+  );
+
+  it.effect(
+    "salvages an Attempt whose container stopped, such as after an out-of-memory kill, in the container started again",
+    () => {
+      const machine = dockerMachine();
+      const logs = capturedLogs();
+      // The children die with the container: the kernel killed it for memory, or a test signaled
+      // its init (#575).
+      const stopsItsContainer: StubParent = (context) =>
+        Effect.sync(() => {
+          const container = machine.state.containers.get(CONTAINER);
+          if (container !== undefined) container.running = false;
+        }).pipe(Effect.andThen(fails(context)));
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        machine.state.salvage = "dirty";
+        const prepared = yield* executor.prepare(request);
+        const recorded: Array<AttemptSalvage> = [];
+        yield* prepared
+          .launch({ ...sink, salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)) })
+          .pipe(Effect.flip);
+        assert.strictEqual(recorded[0]?._tag, "Pushed");
+        const lines = linesOf(machine);
+        const push = lines.findIndex((line) => line.includes("'push' '--force'"));
+        assert.strictEqual(machine.state.calls[push]?.container, CONTAINER);
+        const { childrenStopped, containerGone } = releaseSteps(machine);
+        assertInOrder([
+          ["the children's stop", childrenStopped],
+          ["the container's start", lines.indexOf(`exec 'docker' 'start' '${CONTAINER}'`)],
+          ["the salvage push", push],
+          ["the container's removal", containerGone],
+        ]);
+        assert.deepStrictEqual(hostGitInCheckout(machine, 0), []);
+        assert(
+          logs.lines.some(
+            (line) => line.includes("starting it again") && line.includes('"oomKilled":"true"'),
+          ),
+          "the log says why the container stopped",
+        );
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(runtime(machine, mintingProvider(), stopsItsContainer)),
+        Effect.provide(logs.layer),
+      );
     },
   );
 
