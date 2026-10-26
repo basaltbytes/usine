@@ -18,15 +18,18 @@ const GITHUB_FILE_LIMIT_BYTES = 100 * 1024 * 1024;
 /** GitHub's code for a push refused for a file over its size limit, in the push's stderr. */
 const LARGE_FILES_REFUSAL = /\bGH001\b/u;
 
+/** The package stores and build caches that the salvage commit leaves out at any depth. */
+const CACHE_DIRECTORIES = [".pnpm-store", "node_modules", ".turbo"];
+
+const CACHE_PATHS = CACHE_DIRECTORIES.map((directory) => `:(glob)**/${directory}/**`);
+
 /**
  * The checkout's paths that the salvage commits: everything that Git doesn't ignore, except
- * package stores and build caches at any depth.
+ * package stores and build caches.
  */
 const SALVAGED_PATHS = [
   ".",
-  ...[".pnpm-store", "node_modules", ".turbo"].map(
-    (directory) => `:(exclude,glob)**/${directory}/**`,
-  ),
+  ...CACHE_DIRECTORIES.map((directory) => `:(exclude,glob)**/${directory}/**`),
 ];
 
 export interface SalvageOptions<E extends Error> {
@@ -81,8 +84,8 @@ const oversizedIn = (listing: string, staged: ReadonlySet<string>): ReadonlyArra
 
 /**
  * Commits the changes in an unsuccessful Attempt's checkout and pushes HEAD to its salvage ref
- * before the worktree is removed. The commit leaves out what Git ignores, package stores, build
- * caches, and files larger than GitHub accepts. Skips a checkout with nothing to push beyond its
+ * before the worktree is removed. The commit leaves out what Git ignores, package stores and
+ * build caches even if the Attempt staged them, and files larger than GitHub accepts. Skips a checkout with nothing to push beyond its
  * base commit, or whose commit the remote rejected in `rejected`. If the push fails, keeps the
  * worktree and reports its path. Never fails; skipped and failed stages are logged.
  */
@@ -122,6 +125,8 @@ export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <
    */
   const stage = Effect.gen(function* () {
     yield* git(["add", "--all", "--", ...SALVAGED_PATHS]);
+    // Exclusion pathspecs don't unstage the caches that the Attempt's own `git add` staged.
+    yield* git(["reset", "--quiet", "--", ...CACHE_PATHS]);
     const staged = (yield* git(["diff", "--cached", "--name-only", "--no-renames", "-z"]))
       .split("\0")
       .filter((path) => path.length > 0);

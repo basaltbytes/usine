@@ -66,6 +66,7 @@ const fakeGit = (script: Scripted) => {
         return script.add === "fails"
           ? Effect.fail(new Error("index.lock exists"))
           : Effect.succeed("");
+      if (command[0] === "reset") return Effect.succeed("");
       if (command[0] === "diff") return Effect.succeed("src/index.ts\0");
       if (command[0] === "write-tree") return Effect.succeed(`${"d".repeat(40)}\n`);
       if (command[0] === "ls-tree")
@@ -311,6 +312,28 @@ describe("salvageWorktree in a git checkout", () => {
         ]);
         assert.deepStrictEqual(files.trim().split("\n"), ["README.md", "src/feature.ts"]);
       }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.live("leaves out package stores and build caches that the Attempt staged itself", () =>
+    Effect.gen(function* () {
+      const { git, remote, worktree, write, installDependencies, salvage } = yield* gitCheckout;
+      yield* write("src/feature.ts", "export const feature = 1;\n");
+      yield* installDependencies;
+      yield* git(["-C", worktree, "add", "--all"]);
+
+      const result = yield* salvage;
+
+      assert(Option.isSome(result) && result.value._tag === "Pushed");
+      const files = yield* git([
+        "--git-dir",
+        remote,
+        "ls-tree",
+        "-r",
+        "--name-only",
+        result.value.commit,
+      ]);
+      assert.deepStrictEqual(files.trim().split("\n"), ["README.md", "src/feature.ts"]);
+    }).pipe(Effect.provide(NodeServices.layer)),
   );
 
   it.live(
