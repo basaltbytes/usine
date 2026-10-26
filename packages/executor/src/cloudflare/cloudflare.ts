@@ -488,7 +488,8 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
     /**
      * Gives the Attempt's existing sandbox a new installation token and the provider keys, and
      * publishes a new token before each expiry until the caller's scope closes. Then revokes the
-     * sandbox's credentials, unless `destroyed` is set by then.
+     * sandbox's credentials, before the caller holds or destroys the sandbox, so a sandbox that
+     * stays, or whose destroy fails, holds none.
      */
     const acquireSandbox = Effect.fn("CloudflareExecutor.acquireSandbox")(function* (
       worker: CloudflareWorker,
@@ -497,24 +498,21 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
       repository: RepositoryName,
       permissions: LoopPermissions,
       operation: ExecutorOperation,
-      destroyed: Ref.Ref<boolean>,
     ) {
       const fields = { worker: worker.address.name, sandbox: name, attemptId, repository };
       yield* Effect.annotateCurrentSpan(fields);
       yield* Effect.addFinalizer(() =>
-        Effect.gen(function* () {
-          if (yield* Ref.get(destroyed)) return;
-          yield* worker.client.credentials(name, noCredentials(yield* issueTime)).pipe(
-            Effect.tap(() => Effect.logInfo("Revoked the credentials of the kept sandbox", fields)),
-            Effect.tapError((error) =>
-              Effect.logError(
-                "Could not revoke the credentials of the kept sandbox; the installation token expires within the hour",
-                { ...fields, message: error.message },
-              ),
+        issueTime.pipe(
+          Effect.flatMap((issuedAt) => worker.client.credentials(name, noCredentials(issuedAt))),
+          Effect.tap(() => Effect.logInfo("Revoked the sandbox's credentials", fields)),
+          Effect.tapError((error) =>
+            Effect.logError(
+              "Could not revoke the sandbox's credentials; the installation token expires within the hour",
+              { ...fields, message: error.message },
             ),
-            Effect.ignore,
-          );
-        }),
+          ),
+          Effect.ignore,
+        ),
       );
       const publish = (token: Redacted.Redacted<string>) =>
         issueTime.pipe(
@@ -622,7 +620,6 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
         return false;
       }
       const author = yield* commitAuthor;
-      const destroyed = yield* Ref.make(false);
       yield* Effect.scoped(
         Effect.gen(function* () {
           const access = yield* acquireSandbox(
@@ -632,7 +629,6 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
             attempt.repository,
             attempt.permissions,
             "cleanup",
-            destroyed,
           );
           yield* stopCommands("cleanup", worker, name);
           yield* reconcile(
@@ -761,7 +757,6 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
                         attempt.repository,
                         attempt.permissions,
                         "cleanup",
-                        yield* Ref.make(false),
                       );
                       return yield* harvestPostedComments(
                         spec,
@@ -941,10 +936,10 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
 
       /** Set when the sandbox must stay: its checkout is kept, or its work isn't all pushed. */
       const keep = yield* Ref.make(false);
-      const destroyed = yield* Ref.make(false);
       const salvaged = yield* Deferred.make<Option.Option<AttemptSalvage>, AttemptFailure>();
 
-      // Runs after the credential stops renewing and before it's revoked; see `acquireSandbox`.
+      // Added before `acquire`, so it runs last: after the checkout's release, and after
+      // `acquireSandbox` revoked the credentials, so a sandbox that stays holds none.
       yield* Effect.addFinalizer(() =>
         Effect.gen(function* () {
           const salvage = (yield* Deferred.isDone(salvaged))
@@ -970,7 +965,6 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
             return;
           }
           yield* destroySandbox(worker, name, "the Attempt's resources were released").pipe(
-            Effect.andThen(Ref.set(destroyed, true)),
             Effect.tapError((error) =>
               Effect.logError(
                 "Could not destroy the Attempt's sandbox; the next start reconciles it",
@@ -1001,7 +995,6 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
           request.repository,
           request.permissions,
           "prepare",
-          destroyed,
         );
         const host = {
           removePath: (operation: ExecutorOperation, target: string) =>

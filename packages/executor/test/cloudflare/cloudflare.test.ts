@@ -179,6 +179,7 @@ describe("cloudflare Worker", () => {
         const credentials = mintingProvider();
         const output: Array<string> = [];
         const seen: Array<AttemptRequest> = [];
+        const sandboxes: Array<FakeSandbox> = [];
         yield* Effect.gen(function* () {
           const cloudflare = yield* Executor;
           assert.strictEqual(cloudflare.kind, "cloudflare");
@@ -187,6 +188,7 @@ describe("cloudflare Worker", () => {
           assert.strictEqual(prepared.workspace.worktree, WORKTREE);
           const sandbox = worker.state.sandboxes.get(SANDBOX);
           assert(sandbox !== undefined);
+          sandboxes.push(sandbox);
           // The sandbox starts without credentials; the token comes after the harness check.
           assert.deepStrictEqual(sandbox.github, [null, `${TOKEN_PREFIX}1`]);
           yield* prepared.launch(sink);
@@ -210,6 +212,13 @@ describe("cloudflare Worker", () => {
           [`DELETE /v1/sandboxes/${OWNER}.preflight`, `DELETE /v1/sandboxes/${SANDBOX}`],
         );
         assert.strictEqual(worker.state.sandboxes.size, 0);
+        // The credentials are revoked before the destroy, so a sandbox whose destroy fails holds none.
+        const [sandbox] = sandboxes;
+        assert.deepStrictEqual(sandbox?.github, [null, `${TOKEN_PREFIX}1`, null]);
+        assert.isBelow(
+          worker.state.requests.lastIndexOf(`PUT /v1/sandboxes/${SANDBOX}/credentials`),
+          worker.state.requests.indexOf(`DELETE /v1/sandboxes/${SANDBOX}`),
+        );
         const [given] = seen;
         assert(given !== undefined && given.host instanceof RemoteShell);
         assert.strictEqual(given.host.destination, SANDBOX);
