@@ -62,7 +62,9 @@ Options:
 Environment:
   USINE_PORT                     Listen on this port if --port is not set
   USINE_LOG_LEVEL                Log at this level if --log-level is not set
-  USINE_ALLOW_VOLATILE_INSTANCE  Set to 1 for the same effect as --allow-volatile-instance`;
+  USINE_ALLOW_VOLATILE_INSTANCE  Set to 1 for the same effect as --allow-volatile-instance
+
+Every command reads .env in the instance folder for the variables that the environment doesn't set.`;
 
 export class CliUsageError extends Schema.TaggedError<CliUsageError>("@usine/server/CliUsageError")(
   "CliUsageError",

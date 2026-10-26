@@ -8,7 +8,7 @@ Run it from an instance folder:
 usine up
 ```
 
-It prints `http://127.0.0.1:7331` and stays attached to the terminal. `--port <port>` or `USINE_PORT` changes the port; if the port is taken, the CLI names the conflict and suggests the override. `--log-level <level>` or `USINE_LOG_LEVEL` sets the lowest level it logs, `info` by default; `debug` adds the lines that say why something was skipped. `usine --version` prints the `@usine/server` version that the instance pins.
+It prints `http://127.0.0.1:7331` and stays attached to the terminal. Every command reads `.env` in the instance folder for the variables that the environment doesn't set, as dotenv does, so keep tokens there to run the commands from any shell. `--port <port>` or `USINE_PORT` changes the port; if the port is taken, the CLI names the conflict and suggests the override. `--log-level <level>` or `USINE_LOG_LEVEL` sets the lowest level it logs, `info` by default; `debug` adds the lines that say why something was skipped. `usine --version` prints the `@usine/server` version that the instance pins.
 
 One `usine up` runs per instance folder. It holds `.usine/instance.lock` from startup until every store closes, writes its pid to `.usine/instance.pid`, and writes its pid, port, version, start time, and command line to `.usine/instance.json`. It removes both files when it exits. A second `usine up` there names the running process and exits nonzero before opening a store. A draining process keeps the folder until it exits.
 
@@ -22,7 +22,7 @@ usine restart       # stop, then start the recorded command line in the backgrou
 usine upgrade       # back up, move the @usine/server pin, install, commit, and restart
 ```
 
-`stop`, `restart`, and `upgrade` wait `--timeout` seconds (120 by default) for each stop and start. `restart` and `upgrade` refuse while a run has a running attempt, unless `--force`, and when the shell lacks a gateway's admin token variable, because the new process inherits the shell's environment. `upgrade` applies to an instance that installs `@usine/server` from its own `package.json` pin; for a checkout, pull and build it, then run `usine restart`.
+`stop`, `restart`, and `upgrade` wait `--timeout` seconds (120 by default) for each stop and start. `restart` and `upgrade` refuse while a run has a running attempt, unless `--force`, and when neither the shell nor `.env` sets a gateway's admin token variable, because the new process inherits the shell's environment and reads `.env`. `upgrade` applies to an instance that installs `@usine/server` from its own `package.json` pin; for a checkout, pull and build it, then run `usine restart`.
 
 Without GitHub App credentials, it logs the typed error, leaves both trigger streams idle, and opens the setup screen in the default browser. The browser command times out after two seconds; a failed opener only logs a warning. Runs, transcripts, and loop pause state stay readable, and the instance folder can be reloaded, but interventions are unavailable. Supply `USINE_GITHUB_APP_ID` and `USINE_GITHUB_PRIVATE_KEY`, or `app_id` and `private_key` in a mode-0600 `.usine/github-app.json`. Credentials are read only at startup, so restart `usine up` after adding them, as the setup screen says.
 

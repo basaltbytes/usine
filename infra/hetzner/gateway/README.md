@@ -300,11 +300,12 @@ workers:
 - `domain` is the gateway's `DOMAIN`.
 - `destination` is the gateway's SSH destination, here its `Host` alias. The executor's admin forward goes through it, reopened after one second, doubling up to one minute, or at once when an admin request needs it; a request that finds it closed or unanswered is retried once through a new forward.
 - `admin_port` is the admin API's port on the gateway, `USINE_GATEWAY_ADMIN_PORT` in `/etc/usine-gateway/settings.env`, default 7070.
-- `admin_token_env` names the orchestrator's variable with the admin token from `/etc/usine-gateway/secrets.env`, never the token itself; `usine up` stops if it's unset. For example, keep it in a file only the orchestrator user can read:
+- `admin_token_env` names the orchestrator's variable with the admin token from `/etc/usine-gateway/secrets.env`, never the token itself; `usine up` stops if it's unset. For example, keep it in the instance folder's `.env`, which every `usine` command reads, readable only by the orchestrator user:
 
   ```sh
-  (umask 077; ssh root@<gateway> "sed -n 's/^USINE_GATEWAY_ADMIN_TOKEN=//p' /etc/usine-gateway/secrets.env" > .usine/gateway-admin-token)
-  USINE_GATEWAY_ADMIN_TOKEN=$(cat .usine/gateway-admin-token) usine up
+  (umask 077; ssh root@<gateway> "grep '^USINE_GATEWAY_ADMIN_TOKEN=' /etc/usine-gateway/secrets.env" >> .env)
+  chmod 600 .env
+  usine up
   ```
 
 - `llm_providers` lists the providers whose credential the gateway has (empty by default), such as `[anthropic, openai]`; other harnesses use their login on the worker. With `anthropic`, Claude Code children call `llm.<domain>/anthropic` with the caller token, preflight checks only the `claude` binary, and the Claude Code hosts must come off `egress-allowlist`. With `openai`, the executor writes Codex's `model_provider` to each attempt's Codex home, `<root>/workers/<worker>/codex/<attempt>/config.toml`, and gives the attempt's Codex children that directory as `CODEX_HOME`, mounted read-write in its container, so they call `llm.<domain>/openai/v1` with the caller token; preflight checks only the `codex` binary and version, and the Codex hosts must come off `egress-allowlist`. Preflight logs each provider's mode in `SSH Worker Gateway verified`: `gateway-subscription`, `gateway-api-key`, or `worker-login`.
