@@ -4,11 +4,13 @@ import { Config, Console, Duration, Effect, Option, Schema } from "effect";
 import type { LifecycleOptions } from "./cli.ts";
 import { type InstanceRecord, ProcessId } from "./instance/record.ts";
 import { gatewayTokenVariables, hasLiveAttempt, listRuns } from "./instance/operator-api.ts";
-import { probeInstance, processAlive, terminate } from "./instance/state.ts";
+import { probeInstance, processAlive, signalProcess } from "./instance/state.ts";
 
 const EXIT_POLL_INTERVAL = "200 millis";
 /** Separates the two signals of `--force`, so that the OS doesn't merge them into one. */
 const SECOND_SIGNAL_DELAY = "250 millis";
+/** How long `--force` waits for the process to exit after `SIGKILL`. */
+const KILL_EXIT_TIMEOUT = Duration.seconds(5);
 
 /** The CLI command that stops the instance. */
 export const LifecycleCommandName = Schema.Literals(["stop", "restart", "upgrade"]);
@@ -23,6 +25,15 @@ export class StopTimeoutError extends Schema.TaggedError<StopTimeoutError>(
   timeout: Schema.Duration,
   /** The Runs whose Attempts were live when the stop started. */
   runs: Schema.Array(RunId),
+}) {}
+
+/** The instance process still ran `timeout` after `--force` sent it `SIGKILL`. */
+export class KillTimeoutError extends Schema.TaggedError<KillTimeoutError>(
+  "@usine/server/KillTimeoutError",
+)("KillTimeoutError", {
+  command: LifecycleCommandName,
+  pid: ProcessId,
+  timeout: Schema.Duration,
 }) {}
 
 /** No `usine up` runs in the instance folder. */
@@ -135,9 +146,32 @@ const waitForExit = (pid: ProcessId, timeout: Duration.Duration) =>
   }).pipe(Effect.timeoutOption(timeout), Effect.map(Option.isSome));
 
 /**
+ * Sends `SIGKILL` to a process that a forced stop didn't end within `timeout`, and waits for it to
+ * exit.
+ */
+const killProcess = Effect.fn("Cli.killProcess")(function* (
+  command: LifecycleCommandName,
+  pid: ProcessId,
+  timeout: Duration.Duration,
+) {
+  yield* signalProcess(pid, "SIGKILL");
+  yield* Console.log(
+    `usine (pid ${pid}) did not exit within ${Duration.format(timeout)}. Sent SIGKILL: the next start reattaches the running attempts.`,
+  );
+  if (yield* waitForExit(pid, KILL_EXIT_TIMEOUT)) return;
+  yield* Effect.logWarning("The instance process did not exit after SIGKILL", {
+    command,
+    pid,
+    timeoutSeconds: Duration.toSeconds(KILL_EXIT_TIMEOUT),
+  });
+  return yield* new KillTimeoutError({ command, pid, timeout: KILL_EXIT_TIMEOUT });
+});
+
+/**
  * Sends `SIGTERM` to the instance process, which starts its drain, and waits for the process to
  * exit. With `force`, sends a second `SIGTERM`, which ends the drain without waiting for running
- * Attempts. Doesn't repeat the first signal to a process that records that it is stopping.
+ * Attempts, and sends `SIGKILL` if the process still runs after the timeout. Doesn't repeat the
+ * first signal to a process that records that it is stopping.
  */
 export const stopProcess = Effect.fn("Cli.stopProcess")(function* (
   command: LifecycleCommandName,
@@ -152,12 +186,12 @@ export const stopProcess = Effect.fn("Cli.stopProcess")(function* (
     yield* Console.log(`usine (pid ${pid}) is already stopping. Waiting for it to exit.`);
   } else {
     yield* Console.log(`Stopping usine (pid ${pid}).`);
-    yield* terminate(pid);
+    yield* signalProcess(pid, "SIGTERM");
   }
   if (options.force) {
     yield* Effect.sleep(SECOND_SIGNAL_DELAY);
     if (yield* processAlive(pid)) {
-      yield* terminate(pid);
+      yield* signalProcess(pid, "SIGTERM");
       yield* Console.log(
         "Sent a second SIGTERM: usine stops without waiting for running attempts, and the next start reattaches them.",
       );
@@ -171,9 +205,13 @@ export const stopProcess = Effect.fn("Cli.stopProcess")(function* (
     yield* Effect.logWarning("The instance process did not exit before the timeout", {
       command,
       pid,
+      force: options.force,
       timeoutSeconds: Duration.toSeconds(options.timeout),
     });
-    return yield* new StopTimeoutError({ command, pid, timeout: options.timeout, runs });
+    if (!options.force) {
+      return yield* new StopTimeoutError({ command, pid, timeout: options.timeout, runs });
+    }
+    yield* killProcess(command, pid, options.timeout);
   }
   yield* Effect.logInfo("The instance process exited", { command, pid });
   yield* Console.log("usine stopped.");
