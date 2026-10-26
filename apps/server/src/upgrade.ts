@@ -238,8 +238,8 @@ export const upgrade = Effect.fn("Cli.upgrade")(function* (
     return yield* Effect.die(new Error(`Could not rewrite the ${SERVER_PACKAGE} pin`));
   }
   if (Option.isSome(running)) {
-    yield* refuseMissingEnvironment("upgrade", running.value);
-    yield* refuseLiveAttempts("upgrade", running.value, command.options.force);
+    yield* refuseMissingEnvironment("upgrade", running.value.launch.port);
+    yield* refuseLiveAttempts("upgrade", running.value.launch.port, command.options.force);
   }
   yield* Effect.logInfo("Upgrading the engine pin of the instance", {
     from: previous,

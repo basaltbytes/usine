@@ -50,6 +50,25 @@ const recordFor = (pid: number) =>
     }),
   });
 
+/** `.usine/instance.json` as `@usine/server` 0.3.0 at e22d67c wrote it, before `launch.logLevel`. */
+const previousVersionRecord = (pid: number) =>
+  `${JSON.stringify(
+    {
+      pid,
+      version: "0.3.0",
+      startedAt: "2026-10-25T18:00:00.000Z",
+      launch: {
+        node: process.execPath,
+        nodeOptions: [],
+        script: "/opt/usine/apps/server/dist/main.js",
+        port: 8_113,
+        allowVolatileInstance: false,
+      },
+    },
+    null,
+    2,
+  )}\n`;
+
 /** Returns the PID of a process that has exited. */
 const exitedPid = (): number => {
   const result = spawnSync(process.execPath, ["-e", "process.stdout.write(String(process.pid))"], {
@@ -101,6 +120,22 @@ describe("instance state", () => {
         assert.instanceOf(state, Running);
         assert.strictEqual(state.record.pid, process.pid);
         assert.strictEqual(state.record.launch.port, 8_112);
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    );
+  });
+
+  it("reads the record that the previous engine version wrote", async () => {
+    const directory = instanceFolder();
+    const files = instanceFiles(directory);
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* holdInstance(directory, recordFor(process.pid));
+        writeFileSync(files.record, previousVersionRecord(process.pid));
+        const state = yield* probeInstance(directory);
+        assert.instanceOf(state, Running);
+        assert.strictEqual(state.record.version, "0.3.0");
+        assert.strictEqual(state.record.launch.port, 8_113);
+        assert.strictEqual(state.record.launch.logLevel, "Info");
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
     );
   });

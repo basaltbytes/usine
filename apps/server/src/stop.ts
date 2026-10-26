@@ -1,7 +1,7 @@
 import type { InstanceDirectory } from "@usine/core/instance";
 import { RunId } from "@usine/core/run";
 import { Config, Console, Duration, Effect, Option, Schema } from "effect";
-import type { LifecycleOptions } from "./cli.ts";
+import type { LifecycleOptions, Port } from "./cli.ts";
 import { type InstanceRecord, ProcessId } from "./instance/record.ts";
 import { gatewayTokenVariables, hasLiveAttempt, listRuns } from "./instance/operator-api.ts";
 import { probeInstance, processAlive, signalProcess } from "./instance/state.ts";
@@ -68,14 +68,14 @@ export class MissingEnvironmentError extends Schema.TaggedError<MissingEnvironme
 
 /**
  * Fails with `MissingEnvironmentError` if the current `ConfigProvider` lacks a gateway admin token
- * variable of the running instance. The new `usine up` inherits this process's environment and
- * reads the instance folder's `.env`, and doesn't start without them.
+ * variable of the instance that listens on `port`. The new `usine up` inherits this process's
+ * environment and reads the instance folder's `.env`, and doesn't start without them.
  */
 export const refuseMissingEnvironment = Effect.fn("Cli.refuseMissingEnvironment")(function* (
   command: LifecycleCommandName,
-  record: InstanceRecord,
+  port: Port,
 ) {
-  const names = yield* gatewayTokenVariables(record.launch.port).pipe(
+  const names = yield* gatewayTokenVariables(port).pipe(
     Effect.tapError((error) =>
       Effect.logWarning("Could not read the gateway token variables of the instance", {
         url: error.url,
@@ -100,8 +100,8 @@ export const refuseMissingEnvironment = Effect.fn("Cli.refuseMissingEnvironment"
 });
 
 /** Returns the Runs with a live Attempt, or none if the operator API doesn't answer. */
-const liveRuns = (record: InstanceRecord) =>
-  listRuns(record.launch.port).pipe(
+const liveRuns = (port: Port) =>
+  listRuns(port).pipe(
     Effect.map((runs) => runs.filter(hasLiveAttempt).map(({ id }) => id)),
     Effect.tapError((error) =>
       Effect.logWarning("Could not list the running runs; the drain still waits for them", {
@@ -112,31 +112,23 @@ const liveRuns = (record: InstanceRecord) =>
     Effect.orElseSucceed((): ReadonlyArray<RunId> => []),
   );
 
-/** Fails with `LiveAttemptsError` if a Run has a live Attempt, unless `force` is set. */
+/**
+ * Fails with `LiveAttemptsError` if a Run of the instance that listens on `port` has a live
+ * Attempt, unless `force` is set.
+ */
 export const refuseLiveAttempts = Effect.fn("Cli.refuseLiveAttempts")(function* (
   command: LifecycleCommandName,
-  record: InstanceRecord,
+  port: Port,
   force: boolean,
 ) {
   if (force) return;
-  const runs = yield* liveRuns(record);
+  const runs = yield* liveRuns(port);
   if (runs.length === 0) return;
   yield* Effect.logInfo("Refusing to stop the instance while runs have live attempts", {
     command,
     runs,
   });
   return yield* new LiveAttemptsError({ command, runs });
-});
-
-/** Returns the record of the running instance, or fails if none runs or it wrote no record. */
-export const runningRecord = Effect.fn("Cli.runningRecord")(function* (
-  command: LifecycleCommandName,
-  directory: InstanceDirectory,
-) {
-  const state = yield* probeInstance(directory);
-  if (state._tag === "Running") return state.record;
-  if (state._tag === "Stopped") return yield* new InstanceNotRunningError({ command, directory });
-  return yield* new UnrecordedInstanceError({ command, directory, pid: state.pid });
 });
 
 /** Returns `true` once the process has exited, or `false` after `timeout`. */
@@ -182,7 +174,7 @@ export const stopProcess = Effect.fn("Cli.stopProcess")(function* (
 ) {
   yield* Effect.annotateCurrentSpan({ command, pid, force: options.force });
   const stopping = Option.exists(record, ({ stoppingSince }) => stoppingSince !== undefined);
-  const runs = Option.isSome(record) ? yield* liveRuns(record.value) : [];
+  const runs = Option.isSome(record) ? yield* liveRuns(record.value.launch.port) : [];
   if (stopping) {
     yield* Console.log(`usine (pid ${pid}) is already stopping. Waiting for it to exit.`);
   } else {

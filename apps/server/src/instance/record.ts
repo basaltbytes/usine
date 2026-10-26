@@ -1,7 +1,7 @@
 import { renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DateTime, Effect, FileSystem, Option, Schema } from "effect";
-import { Port, UpLogLevel } from "../cli.ts";
+import { DEFAULT_LOG_LEVEL, Port, UpLogLevel } from "../cli.ts";
 
 /** An operating system process ID. */
 export const ProcessId = Schema.Int.check(Schema.isGreaterThan(0)).pipe(Schema.brand("ProcessId"));
@@ -16,7 +16,8 @@ export class InstanceLaunch extends Schema.Class<InstanceLaunch>("@usine/server/
   /** The CLI entry point, from `process.argv[1]`. */
   script: Schema.NonEmptyString,
   port: Port,
-  logLevel: UpLogLevel,
+  /** Decodes as `Info` from a record that a `usine up` without `--log-level` wrote. */
+  logLevel: UpLogLevel.pipe(Schema.withDecodingDefaultKey(Effect.succeed(DEFAULT_LOG_LEVEL))),
   allowVolatileInstance: Schema.Boolean,
 }) {}
 
@@ -31,7 +32,11 @@ export const currentLaunch = (port: Port, logLevel: UpLogLevel, allowVolatileIns
     allowVolatileInstance,
   }).pipe(Effect.orDie);
 
-/** The running `usine up` of an instance folder, as written to `.usine/instance.json`. */
+/**
+ * The running `usine up` of an instance folder, as written to `.usine/instance.json`. A newer CLI
+ * reads the record that an older engine wrote, so a field added after the first version decodes
+ * with a default.
+ */
 export class InstanceRecord extends Schema.Class<InstanceRecord>("@usine/server/InstanceRecord")({
   pid: ProcessId,
   /** The `@usine/server` version of the process. */

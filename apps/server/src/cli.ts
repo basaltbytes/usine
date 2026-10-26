@@ -24,6 +24,8 @@ const PortFromString = Schema.NumberFromString.pipe(Schema.decodeTo(Port));
 export const UpLogLevel = Schema.Literals(["Trace", "Debug", "Info", "Warn", "Error"]);
 export type UpLogLevel = typeof UpLogLevel.Type;
 
+export const DEFAULT_LOG_LEVEL: UpLogLevel = "Info";
+
 const LogLevelName = Schema.Literals(["trace", "debug", "info", "warn", "error"]);
 
 const LOG_LEVEL_NAMES = {
@@ -285,7 +287,7 @@ const upCommand = (
     const resolvedLogLevel = yield* Option.match(logLevel, {
       onNone: () =>
         Option.match(environment.logLevel, {
-          onNone: () => Effect.succeed<UpLogLevel>("Info"),
+          onNone: () => Effect.succeed(DEFAULT_LOG_LEVEL),
           onSome: (value) => decodeLogLevel("USINE_LOG_LEVEL", value),
         }),
       onSome: (value) => decodeLogLevel("--log-level", value),
@@ -297,6 +299,9 @@ const upCommand = (
       detach,
     });
   });
+
+/** Returns the settings of a `usine up` without flags: those of the environment, or the defaults. */
+export const environmentUp = (environment: CliEnvironment) => upCommand([], environment);
 
 const SecondsFromString = Schema.NumberFromString.pipe(
   Schema.decodeTo(Schema.Int.check(Schema.isGreaterThan(0))),
