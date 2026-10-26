@@ -400,7 +400,10 @@ export const containersFor = (commands: RemoteCommands) => {
     ))
       .trim()
       .split(" ");
-    if (status === "running") return;
+    if (status === "running") {
+      yield* Effect.logDebug("The container still runs", fields);
+      return;
+    }
     yield* Effect.logWarning("The container stopped; starting it again", {
       ...fields,
       status,
