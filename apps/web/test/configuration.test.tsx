@@ -207,13 +207,61 @@ describe("Agents page", () => {
 describe("Workers page", () => {
   it("lists each Worker with its slots in use and last preflight, then removed Workers", async () => {
     const page = text(await render(() => <WorkersList configuration={configurationFixture()} />));
-    assert.include(page, "3 workers");
+    assert.include(page, "5 workers");
     assert.include(page, "1 of 2");
     assert.include(page, "usine@eu-1");
     assert.include(page, "Failed");
     assert.include(page, "Not checked");
     assert.include(page, "Degraded");
     assert.include(page, "spare removed by a reload, 1 attempt still running");
+  });
+
+  it("places a provisioned Worker by its machines, with a paused creation and deferred harness checks", async () => {
+    const page = text(await render(() => <WorkersList configuration={configurationFixture()} />));
+    assert.include(page, "hetzner cx33 in nbg1, one machine per attempt");
+    assert.include(page, "boat default, one machine per attempt");
+    assert.include(page, "Machine creation failed: quota reached. Next try at ");
+    assert.match(page, /boat-pool .* Deferred 20 Oct/u);
+  });
+
+  it("shows a Hetzner Worker's provisioner by variable names only, and where its harnesses are checked", async () => {
+    const page = text(
+      await render(() => <WorkerDetail name="hz-pool" configuration={configurationFixture()} />),
+    );
+    for (const fact of [
+      "Max attempts 3 at the same time, one machine each",
+      "Provider Hetzner",
+      "Server type cx33",
+      "Location nbg1",
+      "Image usine-worker-2026-10-24",
+      "Network usine-private",
+      "Firewall None",
+      "SSH key usine-orchestrator",
+      "SSH user usine",
+      "Labels team=platform",
+      "API token Read from HCLOUD_TOKEN",
+      "Anthropic key Not set",
+      "Provider, gateway, and credentials",
+      "Harness checks run on the first machine of each day.",
+      "Deferred",
+      "Checked on the worker's first machine each day",
+    ]) {
+      assert.include(page, fact);
+    }
+    assert.notInclude(page, "Port");
+    assert.strictEqual(page.split("Destination").length, 2, "only the Gateway has a destination");
+  });
+
+  it("shows a Boat Worker's size and key variables, and that it has no machines", async () => {
+    const page = text(
+      await render(() => <WorkerDetail name="boat-pool" configuration={configurationFixture()} />),
+    );
+    assert.include(page, "Provider Boat");
+    assert.include(page, "Size default");
+    assert.include(page, "API token Read from BOAT_API_KEY");
+    assert.include(page, "Anthropic key Read from ANTHROPIC_API_KEY");
+    assert.include(page, "Machines Created for each attempt and deleted afterwards No machines");
+    assert.notInclude(page, "Machine creation failed");
   });
 
   it("shows a Worker's slots and its last preflight per harness", async () => {

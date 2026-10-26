@@ -1,5 +1,6 @@
 import type { SshCommand } from "@usine/agents/child-host";
 import type {
+  BoatSize,
   ContainerCpus,
   ContainerImage,
   ContainerMemoryMib,
@@ -8,13 +9,21 @@ import type {
   GatewayCredentialKind,
   GatewayDomain,
   GatewayLlmProvider,
+  HetznerImage,
+  HetznerLabels,
+  HetznerLocation,
+  HetznerResourceName,
+  HetznerServerType,
+  MachineId,
+  MachineProvider,
   SshDestination,
   SshIdentityFile,
   SshPort,
+  SshUser,
   WorkerName,
   WorkerRoot,
 } from "@usine/core/worker";
-import type { Effect, Option, Redacted, Ref } from "effect";
+import type { Duration, Effect, Option, Redacted, Ref } from "effect";
 import type { HarnessProbe } from "../harness-preflight.ts";
 import type { RemoteMachine } from "../remote/machine.ts";
 import type { GatewayAdmin } from "./gateway/admin.ts";
@@ -44,17 +53,64 @@ export interface SshWorkerContainer {
   readonly pids: ContainerPids;
 }
 
+/** The LLM provider API keys that each Attempt on a provisioned Worker gets in its environment. */
+export interface ProviderApiKeys {
+  /** Claude Code's `ANTHROPIC_API_KEY`. */
+  readonly anthropic: Option.Option<Redacted.Redacted<string>>;
+  /** Codex's `OPENAI_API_KEY`. */
+  readonly openai: Option.Option<Redacted.Redacted<string>>;
+}
+
+/** Creates each Attempt's machine as a Hetzner Cloud server from a snapshot. */
+export interface HetznerProvisioner {
+  readonly provider: "hetzner";
+  /** The Hetzner Cloud API token, with read and write access to the project. */
+  readonly token: Redacted.Redacted<string>;
+  readonly serverType: HetznerServerType;
+  readonly location: HetznerLocation;
+  /** A snapshot's ID or description, or a system image's name. */
+  readonly image: HetznerImage;
+  /** The private network to attach each server to. Behind a Gateway, each server gets no public address. */
+  readonly network: Option.Option<HetznerResourceName>;
+  /** The project's firewall to apply to each server. */
+  readonly firewall: Option.Option<HetznerResourceName>;
+  /** The project's SSH key that each server authorizes. */
+  readonly sshKey: HetznerResourceName;
+  readonly sshUser: SshUser;
+  readonly labels: HetznerLabels;
+  readonly apiKeys: ProviderApiKeys;
+}
+
+/** Creates each Attempt's machine as a Boat sandbox. */
+export interface BoatProvisioner {
+  readonly provider: "boat";
+  /** The Boat API key. */
+  readonly token: Redacted.Redacted<string>;
+  readonly size: BoatSize;
+  readonly apiKeys: ProviderApiKeys;
+}
+
+export type SshProvisioner = HetznerProvisioner | BoatProvisioner;
+
+/** How the executor finds a Worker's machines: one long-lived machine, or one per Attempt. */
+export type SshWorkerMachine =
+  | {
+      readonly _tag: "Fixed";
+      /** The `ssh` destination: `user@host` or a Host alias. */
+      readonly destination: SshDestination;
+    }
+  | { readonly _tag: "Provisioned"; readonly provisioner: SshProvisioner };
+
 export interface SshWorkerAddress {
   /**
    * The Worker's name in `usine.yaml`; its state is in `workers/<name>` under `root`. A request
    * for a Worker without an address fails with a `machine` capability error.
    */
   readonly name: WorkerName;
-  /** The `ssh` destination: `user@host` or a Host alias. */
-  readonly destination: SshDestination;
+  readonly machine: SshWorkerMachine;
   /** The private key for authentication. If `None`, the SSH agent and configuration are used. */
   readonly identityFile: Option.Option<SshIdentityFile>;
-  /** The SSH server port. If `None`, the SSH configuration's port is used. */
+  /** The SSH server port. If `None`, the SSH configuration's port, or a provisioned machine's, is used. */
   readonly port: Option.Option<SshPort>;
   /** The machine directory that contains `workers/<name>`. */
   readonly root: WorkerRoot;
@@ -77,6 +133,17 @@ export interface SshExecutorOptions {
   readonly interruptGrace?: Parameters<typeof Effect.timeoutOption>[1];
   /** Probes a brain's binary and login on a Worker's machine. Defaults to the `@usine/agents/preflight` checks over SSH, which send no prompt. Behind a Gateway, the Gateway checks also apply. */
   readonly harnessReadiness?: (machine: SshMachine) => HarnessProbe;
+  /**
+   * The local directory for the host keys of provisioned machines, one file per machine, which
+   * the executor creates. Defaults to a temporary directory removed with the executor.
+   */
+  readonly knownHostsDirectory?: string;
+  /** The provider API endpoints, which tests replace. Defaults to the providers' own. */
+  readonly providerEndpoints?: Partial<Record<MachineProvider, string>>;
+  /** The longest wait for a created machine to answer over SSH. Defaults to 10 minutes. */
+  readonly machineReadyTimeout?: Duration.Input;
+  /** The pause between checks of a machine being created. Defaults to 3 seconds. */
+  readonly machinePollInterval?: Duration.Input;
 }
 
 export interface MachineGateway {
@@ -102,4 +169,6 @@ export interface SshMachine extends RemoteMachine {
   /** The Worker's address from `usine.yaml`; preflight checks its root. */
   readonly address: SshWorkerAddress;
   readonly gateway: Option.Option<MachineGateway>;
+  /** The provider's ID of a machine created for one Attempt, or `None` for a long-lived machine. */
+  readonly provisioned: Option.Option<MachineId>;
 }

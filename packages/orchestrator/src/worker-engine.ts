@@ -37,8 +37,16 @@ export const workerEngineLayer = (
             .filter(({ gateway }) => Option.isSome(gateway))
             .map(({ name }) => name)
             .join(","),
+          provisioned: addresses
+            .filter(({ machine }) => machine._tag === "Provisioned")
+            .map(({ name }) => name)
+            .join(","),
         });
-        return sshLayer(instanceDirectory, config, brains, { workers: addresses, instance });
+        return sshLayer(instanceDirectory, config, brains, {
+          workers: addresses,
+          instance,
+          knownHostsDirectory: `${instanceDirectory}/.usine/known-hosts`,
+        });
       }
       if (cloudflareWorkersOf(config).length === config.workers.length) {
         const addresses = yield* cloudflareWorkerAddressesOf(config);

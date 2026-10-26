@@ -3,15 +3,26 @@ import { createMemoryHistory, createRouter, RouterContextProvider } from "@tanst
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { WorkerName } from "@usine/core/worker";
-import { DegradedCheckView, WorkerSlotsView, WorkerView } from "@usine/orchestrator/operator";
+import {
+  DegradedCheckView,
+  PassedCheckView,
+  PreflightCheckView,
+  QueuedForWorkerView,
+  StalledItemView,
+  WorkerSlotsView,
+  WorkerView,
+} from "@usine/orchestrator/operator";
+import { Schema } from "effect";
 import { assert, describe, it } from "vitest";
 import { DeskNeedsYou } from "../src/desk/desk.tsx";
 import { LastOutcomes } from "../src/desk/last-outcomes.tsx";
 import { NotMoving } from "../src/desk/not-moving.tsx";
 import { RunningNow } from "../src/desk/running-now.tsx";
 import { WorkersLine } from "../src/desk/workers-line.tsx";
+import { nextCreationLine } from "../src/operator-copy.ts";
 import { routeTree } from "../src/route-tree.gen.ts";
 import { deskFixture } from "./desk-fixture.ts";
+import { machineFixture, pauseFixture } from "./machine-fixture.ts";
 
 const now = Date.parse("2026-10-20T10:00:00.000Z");
 const { desk, empty, overview } = deskFixture(now);
@@ -156,5 +167,68 @@ describe("Desk", () => {
     assert.include(text(html), "hz-worker-2 0 of 1 slot in use Preflight degraded 6h ago");
     assert.include(html, "Docker isn&#x27;t installed");
     assert.notInclude(html, "text-destructive");
+  });
+
+  it("counts a provisioned Worker's machines and says when machine creation is paused", () => {
+    const pause = pauseFixture();
+    const provisioned = new WorkerView({
+      name: WorkerName.make("hz-pool"),
+      slots: new WorkerSlotsView({ capacity: 3, leased: 2 }),
+      preflight: new PassedCheckView({ checkedAt: "2026-10-20T08:00:00.000Z" }),
+      machines: [
+        machineFixture({ state: "ready", id: "52341896", attemptId: "attempt-1" }),
+        machineFixture({ runId: "run-other" }),
+      ],
+      provisioning: pause,
+    });
+    const html = render(<WorkersLine workers={[provisioned]} now={now} />);
+    assert.include(
+      text(html),
+      `hz-pool 2 of 3 slots in use, 2 machines Preflight passed 2h ago Machine creation failed: no capacity. ${nextCreationLine(pause, now)}`,
+    );
+    assert.include(html, "Hetzner Cloud has no cx33 servers in nbg1 right now");
+    const resumed = new WorkerView({
+      ...provisioned,
+      machines: [],
+      provisioning: pauseFixture({ blocked: false }),
+    });
+    assert.strictEqual(
+      text(render(<WorkersLine workers={[resumed]} now={now} />)),
+      "Workers hz-pool 2 of 3 slots in use Preflight passed 2h ago",
+    );
+  });
+
+  it("shows harness checks deferred to a provisioned Worker's first machine", () => {
+    const deferred = new WorkerView({
+      name: WorkerName.make("boat-pool"),
+      slots: new WorkerSlotsView({ capacity: 2, leased: 0 }),
+      preflight: Schema.decodeUnknownSync(PreflightCheckView)({
+        _tag: "Deferred",
+        checkedAt: "2026-10-20T09:00:00.000Z",
+        message: "Checked on the worker's first machine each day",
+      }),
+    });
+    const html = render(<WorkersLine workers={[deferred]} now={now} />);
+    assert.include(text(html), "boat-pool 0 of 2 slots in use Preflight deferred 1h ago");
+    assert.include(html, "Checked on the worker&#x27;s first machine each day");
+    assert.notInclude(html, "text-destructive");
+  });
+
+  it("says a queued Run's machine is being created instead of waiting for a slot", () => {
+    const queued = desk.notMoving.find(({ reason }) => reason._tag === "QueuedForWorker");
+    if (queued?.reason._tag !== "QueuedForWorker") throw new Error("Expected a queued Run");
+    const creating = new StalledItemView({
+      ...queued,
+      reason: new QueuedForWorkerView({
+        run: queued.reason.run,
+        ahead: 0,
+        creating: machineFixture({ since: "2026-10-20T09:58:00.000Z" }),
+      }),
+    });
+    const visible = text(
+      render(<NotMoving stalled={[creating]} now={now} readOnly={false} polled />),
+    );
+    assert.include(visible, "Creating a Hetzner machine, started 2m ago");
+    assert.notInclude(visible, "worker slot");
   });
 });

@@ -9,7 +9,7 @@ These files create the gateway host of [#223](https://github.com/basaltbytes/usi
 | `gateway-nftables.conf` | The gateway's firewall rules. |
 | `egress-allowlist` | The hosts that workers can reach through the forward proxy: package hosts and the harness login hosts. |
 | `worker-cloud-init.yaml` | What a worker VM needs behind the gateway; `gateway.sh worker-user-data` sends it after the worker file of `../cloud-init.yaml`. |
-| `worker-nftables.conf` | A worker's firewall rules: the gateway only. |
+| `worker-nftables.conf` | A worker's firewall rules: the gateway only, and the metadata service for root. |
 
 ## Traffic paths
 
@@ -310,6 +310,14 @@ workers:
 - `llm_providers` lists the providers whose credential the gateway has (empty by default), such as `[anthropic, openai]`; other harnesses use their login on the worker. With `anthropic`, Claude Code children call `llm.<domain>/anthropic` with the caller token, preflight checks only the `claude` binary, and the Claude Code hosts must come off `egress-allowlist`. With `openai`, the executor writes Codex's `model_provider` to each attempt's Codex home, `<root>/workers/<worker>/codex/<attempt>/config.toml`, and gives the attempt's Codex children that directory as `CODEX_HOME`, mounted read-write in its container, so they call `llm.<domain>/openai/v1` with the caller token; preflight checks only the `codex` binary and version, and the Codex hosts must come off `egress-allowlist`. Preflight logs each provider's mode in `SSH Worker Gateway verified`: `gateway-subscription`, `gateway-api-key`, or `worker-login`.
 
 Preflight attaches nothing. It checks that the admin forward opens (or gives the `ssh` command showing why), the admin API accepts the token, sshd accepts the caller token variables, the worker reaches `git.<domain>`, and, with Docker on the worker, that Docker answers and pulls the attempt image. For each harness using its worker login, it checks the login and that each login host answers through the forward proxy, in a container from the attempt image if the worker has Docker; a refused host fails with the host to add to `egress-allowlist`. During an attempt, the executor stores its attachment again every two minutes, so a restarted gateway, which keeps attachments in memory, recovers them within two minutes.
+
+## Provisioned workers behind the gateway
+
+A provisioned worker ([`../README.md`](../README.md#provisioned-workers)) creates a server for each attempt from a snapshot that `../snapshot.sh` builds in this network. Each server joins the network when usine creates it (`provisioner.network`), with no public address, and the executor connects to its private address through the gateway with `ssh -J <gateway.destination>`, so the servers need no `Host` entry. The gateway needs no change for them: it decides by caller token, not by address, and each attempt's attachment has a caller token of its own.
+
+A server created from a snapshot gets only the executor's user data, which sets its host key, so the resolver line of `worker-cloud-init.yaml`'s `bootcmd` doesn't run on it. The same file writes `/etc/cloud/cloud.cfg.d/90-usine-gateway-resolver.cfg`, whose `bootcmd` cloud-init runs at every boot, so the snapshot's servers resolve names with the gateway too.
+
+The servers have no harness login. For each harness, give the gateway the provider's credential, a subscription login or an API key, list the provider in the worker's `llm_providers`, and remove the harness's hosts from `egress-allowlist`. Or set the provider's key in `provisioner.api_keys` and allow the provider's API host, `api.anthropic.com` or `api.openai.com`, which the harness then reaches through the forward proxy with the key. `api.openai.com` isn't in the default allowlist.
 
 ## Add the time server to an existing gateway and worker
 

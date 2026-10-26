@@ -3,6 +3,7 @@ import type { AttemptView, WorkerAccess } from "@usine/orchestrator/operator";
 import { Option } from "effect";
 import { CodeBlock, CodeBlockHeader, CodeBlockTitle } from "@/components/ai-elements/code-block";
 import { CopyButton } from "@/components/ai-elements/copy-button";
+import { providerLabel } from "../operator-copy.ts";
 import type { TranscriptSession } from "./model.ts";
 
 // Returns the value single-quoted for a POSIX shell, with apostrophes escaped.
@@ -16,14 +17,11 @@ const RESUME_COMMANDS = {
 } satisfies Record<Harness, Option.Option<string>>;
 
 /**
- * Returns `command` for the operator's terminal: unchanged for a local or undeclared Worker, or
- * quoted again and wrapped in `ssh -t` for an SSH Worker.
+ * Returns `command` for the operator's terminal: unchanged for a local, provisioned, or undeclared
+ * Worker, or quoted again and wrapped in `ssh -t` for an SSH Worker with a destination.
  */
-const fromOperatorTerminal = (
-  access: Exclude<WorkerAccess, { readonly _tag: "Sandbox" }> | null,
-  command: string,
-): string => {
-  if (access === null || access._tag === "Local") return command;
+const fromOperatorTerminal = (access: WorkerAccess | null, command: string): string => {
+  if (access === null || access._tag !== "Ssh") return command;
   const port = access.port === null ? [] : ["-p", String(access.port)];
   return ["ssh", "-t", ...port, access.destination, shellArgument(command)].join(" ");
 };
@@ -62,7 +60,7 @@ export const SessionHandoff = ({
       </p>
       <p className="wrap-anywhere">
         Worktree <span className="font-mono">{saved.cwd}</span>
-        {workerAccess?._tag === "Ssh" && (
+        {(workerAccess?._tag === "Ssh" || workerAccess?._tag === "Provisioned") && (
           <>
             {" on "}
             <span className="font-mono">{worker}</span>
@@ -80,7 +78,11 @@ export const SessionHandoff = ({
           <CopyButton value={command} label="Copy command" />
         </CodeBlockHeader>
       </CodeBlock>
-      <p>Same harness login as the attempt. The worktree is removed at attempt cleanup</p>
+      {workerAccess?._tag === "Provisioned" ? (
+        <p>{`Run it on the attempt's ${providerLabel[workerAccess.provider]} machine, which is deleted with the attempt`}</p>
+      ) : (
+        <p>Same harness login as the attempt. The worktree is removed at attempt cleanup</p>
+      )}
     </div>
   );
 };

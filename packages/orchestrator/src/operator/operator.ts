@@ -121,6 +121,8 @@ import { TaskReader, type TaskReadError, type TaskView } from "./task.ts";
 import { type DeskView, OperatorDesk } from "./desk.ts";
 import { OperatorStatistics } from "./statistics/statistics.ts";
 import type { StatisticsView, StatisticsWindow } from "./statistics/view.ts";
+import { machineView } from "./machines.ts";
+import { WorkerStatus } from "../worker-status.ts";
 
 export type BoardMoveError =
   | BoardItemNotFoundError
@@ -206,6 +208,7 @@ const makeOperatorObservation = Effect.gen(function* () {
   const cache = yield* SynchronizedRef.make(Option.none<CachedOverview>());
   const usageReader = yield* RunUsageReader;
   const stops = yield* UnconfirmedStops;
+  const workerStatus = yield* WorkerStatus;
 
   const projectOverview = Effect.fn("Operator.projectOverview")(function* (
     instance: LoadedInstance,
@@ -686,10 +689,20 @@ const makeOperatorObservation = Effect.gen(function* () {
     request: TranscriptRequest = new ColdTranscriptRequest(),
   ) {
     yield* Effect.annotateCurrentSpan({ runId });
-    const [snapshot, states, unconfirmedStops] = yield* Effect.all(
-      [reader.inspect(runId), controls.states, stops.list] as const,
+    const [snapshot, states, unconfirmedStops, inFlight] = yield* Effect.all(
+      [reader.inspect(runId), controls.states, stops.list, workerStatus.machines] as const,
       { concurrency: "unbounded" },
     );
+    const openAttempt = snapshot.attempts.find((attempt) => Option.isNone(attempt.outcome));
+    // The machines are oldest first, so the last is the newest Attempt's.
+    const machine = [...inFlight]
+      .reverse()
+      .find(
+        (candidate) =>
+          candidate.state !== "deleting" &&
+          (Option.contains(candidate.runId, runId) ||
+            (openAttempt !== undefined && Option.contains(candidate.attemptId, openAttempt.id))),
+      );
     const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
     const [transcript, sessionState, usage, unrecordedEnds, settled, unconfirmedStop] =
       yield* Effect.all(
@@ -721,6 +734,7 @@ const makeOperatorObservation = Effect.gen(function* () {
       duration: runDuration(snapshot.attempts, unrecordedEnds),
       usage,
       unconfirmedStop,
+      machine: machine === undefined ? null : machineView(machine),
     });
   });
 
@@ -1233,10 +1247,18 @@ export {
   AttemptOutcomeView,
   LocalWorkerAccess,
   SshWorkerAccess,
+  ProvisionedWorkerAccess,
   SandboxWorkerAccess,
   WorkerAccess,
   AttemptView,
 } from "./attempt.ts";
+export {
+  MachineView,
+  ProvisioningPauseView,
+  HetznerProvisionerView,
+  BoatProvisionerView,
+  ProvisionerView,
+} from "./machines.ts";
 export {
   BoardLaneId,
   BoardLaneOrigin,
@@ -1285,6 +1307,7 @@ export {
   WorkerSlotsView,
   PassedCheckView,
   DegradedCheckView,
+  DeferredCheckView,
   FailedCheckView,
   PreflightCheckView,
   ContainerView,

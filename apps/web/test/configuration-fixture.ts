@@ -40,8 +40,27 @@ const startDevPrompt = `Implement issue #{{ item.number }}, **{{ item.title }}**
 3. Open a pull request that closes #{{ item.number }}.
 `;
 
-/** The configuration view JSON, with loaded and quarantined Loops, a roster with an invalid Agent, a
- * local and an SSH Worker, and two repositories. */
+/** Returns the ISO instant `minutes` before the fixture loads, or after it for a negative count. */
+const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+
+const deferredHarness = (harness: string, checkedAt: string) => ({
+  harness,
+  check: {
+    _tag: "Deferred",
+    checkedAt,
+    message:
+      "Checked on the worker's first machine each day, since no machine exists before an attempt.",
+  },
+});
+
+/** A worker without a provisioner, as every kind but a provisioned SSH Worker has. */
+const unprovisioned = { provisioner: null, machines: [], provisioning: null };
+
+/**
+ * The configuration view JSON, with loaded and quarantined Loops, a roster with an invalid Agent, a
+ * local Worker, two SSH Workers with a destination, a Hetzner Worker with machines in flight and a
+ * failed creation, a Boat Worker, and two repositories. Machine times are relative to the load.
+ */
 export const configurationJson = {
   loops: [
     {
@@ -145,6 +164,7 @@ export const configurationJson = {
       root: null,
       gateway: null,
       container: null,
+      ...unprovisioned,
       slots: { capacity: 2, leased: 1 },
       prerequisites: { _tag: "Passed", checkedAt: "2026-10-20T08:00:00.000Z" },
       harnesses: [
@@ -176,6 +196,7 @@ export const configurationJson = {
         llmProviders: ["anthropic"],
       },
       container: { image: null, cpus: 2, memoryMib: 4096, pids: 4096 },
+      ...unprovisioned,
       slots: { capacity: 3, leased: 0 },
       prerequisites: null,
       harnesses: [],
@@ -195,6 +216,7 @@ export const configurationJson = {
         memoryMib: 6144,
         pids: 2048,
       },
+      ...unprovisioned,
       slots: { capacity: 1, leased: 0 },
       prerequisites: {
         _tag: "Degraded",
@@ -205,6 +227,100 @@ export const configurationJson = {
       harnesses: [
         { harness: "claude", check: { _tag: "Passed", checkedAt: "2026-10-20T08:00:00.000Z" } },
       ],
+    },
+    {
+      name: "hz-pool",
+      kind: "ssh",
+      maxConcurrentAttempts: 3,
+      destination: null,
+      port: null,
+      identityFile: "~/.ssh/usine_hetzner",
+      root: "/srv/usine",
+      gateway: {
+        domain: "gw.internal",
+        destination: "usine-gateway",
+        adminPort: 7070,
+        adminTokenEnv: "USINE_GATEWAY_ADMIN_TOKEN",
+        llmProviders: ["anthropic"],
+      },
+      container: { image: null, cpus: 2, memoryMib: 4096, pids: 4096 },
+      provisioner: {
+        _tag: "hetzner",
+        tokenEnv: "HCLOUD_TOKEN",
+        serverType: "cx33",
+        location: "nbg1",
+        image: "usine-worker-2026-10-24",
+        network: "usine-private",
+        firewall: null,
+        sshKey: "usine-orchestrator",
+        sshUser: "usine",
+        labels: { team: "platform" },
+        anthropicKeyEnv: null,
+        openaiKeyEnv: null,
+      },
+      machines: [
+        {
+          worker: "hz-pool",
+          provider: "hetzner",
+          state: "deleting",
+          id: "52341001",
+          runId: null,
+          attemptId: "7c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d4e5",
+          since: minutesAgo(95),
+        },
+        {
+          worker: "hz-pool",
+          provider: "hetzner",
+          state: "ready",
+          id: "52341896",
+          runId: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+          attemptId: "3e4f5a6b-7c8d-4e9f-a0b1-c2d3e4f5a6b7",
+          since: minutesAgo(12),
+        },
+        {
+          worker: "hz-pool",
+          provider: "hetzner",
+          state: "creating",
+          id: null,
+          runId: "9f8e7d6c-5b4a-4392-8170-6f5e4d3c2b1a",
+          attemptId: null,
+          since: minutesAgo(1),
+        },
+      ],
+      provisioning: {
+        reason: "quota",
+        message: "Hetzner Cloud refused the server: server limit reached (resource_limit_exceeded)",
+        failures: 3,
+        failedAt: minutesAgo(2),
+        retryAt: minutesAgo(-6),
+        blocked: true,
+      },
+      slots: { capacity: 3, leased: 2 },
+      prerequisites: { _tag: "Passed", checkedAt: "2026-10-20T08:00:00.000Z" },
+      harnesses: [deferredHarness("claude", "2026-10-20T08:00:00.000Z")],
+    },
+    {
+      name: "boat-pool",
+      kind: "ssh",
+      maxConcurrentAttempts: 2,
+      destination: null,
+      port: null,
+      identityFile: "~/.ssh/usine_boat",
+      root: "/home/usine",
+      gateway: null,
+      container: null,
+      provisioner: {
+        _tag: "boat",
+        tokenEnv: "BOAT_API_KEY",
+        size: "default",
+        anthropicKeyEnv: "ANTHROPIC_API_KEY",
+        openaiKeyEnv: null,
+      },
+      machines: [],
+      provisioning: null,
+      slots: { capacity: 2, leased: 0 },
+      prerequisites: { _tag: "Passed", checkedAt: "2026-10-20T08:00:00.000Z" },
+      harnesses: [deferredHarness("claude", "2026-10-20T09:30:00.000Z")],
     },
   ],
   removedWorkers: [{ name: "spare", running: 1 }],

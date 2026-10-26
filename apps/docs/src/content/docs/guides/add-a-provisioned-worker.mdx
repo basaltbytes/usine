@@ -1,0 +1,270 @@
+---
+title: Add a provisioned worker
+description: Configure an SSH worker that creates a Hetzner Cloud server or a Boat sandbox for each attempt and deletes it afterwards, give its harnesses a credential that outlives the machine, and delete leftover machines.
+sidebar:
+  order: 6
+---
+
+import { Steps } from "@astrojs/starlight/components";
+
+A provisioned worker is an `ssh` worker that creates a machine at a cloud provider for each attempt and deletes it after the attempt ([ADR 0029](https://github.com/basaltbytes/usine/blob/main/docs/adr/0029-worker-kinds-and-adapter-set.md)). Each machine runs one attempt, in the attempt's own container, as on a [long-lived SSH worker](/guides/add-a-worker/#a-container-per-attempt). In `usine.yaml`, the worker has a [`provisioner`](/reference/configuration/usine-yaml/#workersprovisioner) instead of a `destination`.
+
+| Provider                        | Machine                                                                 | Network access   | GitHub token on the machine                         |
+| ------------------------------- | ----------------------------------------------------------------------- | ---------------- | --------------------------------------------------- |
+| Hetzner Cloud with a gateway    | a server from your snapshot in the gateway's network, no public address | the gateway only | none: the gateway adds the token to GitHub requests |
+| Hetzner Cloud without a gateway | a server from your snapshot with a public IPv4 address                  | any host         | a token file, mode 600, removed after the attempt   |
+| Boat                            | a Boat sandbox in Germany, Finland, or France, with Boat's Ubuntu image | any host         | a token file, mode 600, removed after the attempt   |
+
+## Prerequisites
+
+- Every worker in `usine.yaml` has `kind: ssh`.
+- An SSH key pair for the worker on the orchestrator machine. The worker's `identity_file` is its private key.
+- A credential for each harness that your agents use, outside the machine. See [Harness credentials](#harness-credentials).
+- For Hetzner Cloud: the `hcloud` CLI with an active context for the project, and `jq`. For a worker behind a gateway, the gateway of [SSH workers behind a gateway](/guides/add-a-worker/#ssh-workers-behind-a-gateway).
+- For Boat: a Boat account and the `boat` CLI.
+
+## Harness credentials
+
+A machine created for one attempt keeps no harness login: a login saved in a snapshot contains one refresh token, and the first machine that refreshes it invalidates it for the others. So at `usine up`, and at the reload that adds the worker, preflight refuses a provisioned worker if a harness that its agents use has no credential outside the machine.
+
+| Harness     | Credential                                                                                                                                                                                                                                                                                            |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Code | `anthropic` in the gateway's [`llm_providers`](/reference/configuration/usine-yaml/#workersgateway), with a subscription token or an API key on the gateway. Or `provisioner.api_keys.anthropic`, which each attempt's container gets as `ANTHROPIC_API_KEY`. If both are set, the gateway's applies. |
+| Codex       | `openai` in the gateway's `llm_providers`, with a ChatGPT login or an API key on the gateway. Or `provisioner.api_keys.openai`, which each attempt's container gets as `OPENAI_API_KEY`. If both are set, the gateway's applies.                                                                      |
+| Pi          | Not available. Pi children run only on local workers.                                                                                                                                                                                                                                                 |
+
+A Boat worker can't have a gateway, so its Claude Code and Codex agents need `api_keys`. With an OpenAI key, each attempt gets its own `CODEX_HOME` with a `config.toml` that points Codex at `api.openai.com` with the key from `OPENAI_API_KEY`, so Codex needs no login. Behind a gateway that doesn't hold the provider's credential, the machine reaches the provider through the gateway's forward proxy, and the first machine's checks fail if the egress allowlist doesn't have `api.anthropic.com` or `api.openai.com`; `api.openai.com` isn't in the default allowlist.
+
+The run page counts children that use an API key under API keys, and those that use a subscription on the gateway under the Claude or ChatGPT plan.
+
+## Hetzner Cloud
+
+Each attempt gets a server created from a snapshot that you build with `infra/hetzner/snapshot.sh`. Behind a gateway, the server joins the gateway's private network with no public address, and the executor connects to it through the gateway with `ssh -J`. [`infra/hetzner/README.md`](https://github.com/basaltbytes/usine/blob/main/infra/hetzner/README.md#provisioned-workers) describes the files.
+
+<Steps>
+
+1. Create an API token for the Hetzner Cloud project. In the Hetzner Cloud Console, open the project, select **Security** > **API tokens** > **Generate API token**, and select **Read & Write**. The console shows the token once. Paste it into a file in the instance folder that only you can read, and press Control-D:
+
+   ```sh title="Instance folder"
+   (umask 077; cat > .usine/hcloud-token)
+   ```
+
+   A Hetzner Cloud token applies to every resource of its project. usine deletes only servers that have its `usine-instance` and `usine-worker` labels.
+
+2. Create the worker's key pair and register the public key in the project. Skip the second command if the gateway's setup registered the same key:
+
+   ```sh title="Orchestrator machine"
+   ssh-keygen -t ed25519 -f ~/.ssh/usine_worker -C usine-worker
+   hcloud ssh-key create --name usine-worker --public-key-from-file ~/.ssh/usine_worker.pub
+   ```
+
+   The snapshot authorizes this key for the `usine` user, whom the executor connects as. Hetzner adds the registered key for root, which the server's sshd refuses; it keeps Hetzner from emailing a root password for each server.
+
+3. Set up the gateway: steps 1 to 5 and 9 of [SSH workers behind a gateway](/guides/add-a-worker/#ssh-workers-behind-a-gateway). Its network is `usine-gateway` by default. Step 5 gives the gateway a credential for each harness that your agents use, and removes the login hosts from its egress allowlist. The gateway's use of a subscription token is untested against Anthropic ([#234](https://github.com/basaltbytes/usine/issues/234)).
+
+4. Build the snapshot in the gateway's network. Use the public key of the worker's `identity_file`; its private key must be next to it. `GATEWAY_SSH` is the gateway's `Host` alias:
+
+   ```sh title="usine checkout"
+   SSH_KEY=usine-worker NETWORK=usine-gateway GATEWAY_SSH=usine-gateway \
+     ./infra/hetzner/snapshot.sh ~/.ssh/usine_worker.pub
+   ```
+
+   The script creates a temporary server from `infra/hetzner/cloud-init.yaml` and `infra/hetzner/gateway/worker-cloud-init.yaml`, waits for cloud-init, pulls the attempt image, and saves the server as a snapshot labeled `usine=snapshot`. It then deletes the server and prints the snapshot's ID and description, such as `usine-worker-claude-2.1.308-codex-0.159.2`. The snapshot has the gateway's address and domain, so it works only in that gateway's network. It has no harness login and no token. If you created the gateway with other `GATEWAY_IP`, `DOMAIN`, or `NETWORK_CIDR` values, set the same ones for `snapshot.sh`.
+
+   Run the script from a checkout of the usine release that you run, so that the snapshot has that release's attempt image. The image must be public on GHCR, because a machine created for one attempt has no `docker login`.
+
+5. Add the worker to `usine.yaml`:
+
+   ```yaml title="usine.yaml"
+   workers:
+     - name: hetzner-pool
+       kind: ssh
+       max_concurrent_attempts: 4
+       root: /home/usine/.usine
+       identity_file: ~/.ssh/usine_worker
+       gateway:
+         domain: gw.internal
+         destination: usine-gateway
+         admin_token_env: USINE_GATEWAY_ADMIN_TOKEN
+         llm_providers: [anthropic, openai]
+       provisioner:
+         provider: hetzner
+         token_env: HCLOUD_TOKEN
+         server_type: cx33
+         location: fsn1
+         image: usine-worker-claude-2.1.308-codex-0.159.2
+         network: usine-gateway
+         ssh_key: usine-worker
+   ```
+
+   - `max_concurrent_attempts` is the number of servers in flight, counting those being created.
+   - Each server runs one attempt, so the memory check counts one attempt per server. A `cx33` or `cpx32` has the 8 GB that usine's own gates need ([#270](https://github.com/basaltbytes/usine/issues/270)).
+   - `location` must be in the network's zone. The gateway's network is in `eu-central`, which has `fsn1`, `nbg1`, and `hel1`.
+   - `image` is the description or ID that `snapshot.sh` printed. With a description, each server is created from the newest available snapshot that has it.
+   - `network` is required with a `gateway`.
+
+6. Start the orchestrator with the token in its environment:
+
+   ```sh title="Instance folder"
+   HCLOUD_TOKEN=$(cat .usine/hcloud-token) \
+     USINE_GATEWAY_ADMIN_TOKEN=$(cat .usine/gateway-admin-token) usine up
+   ```
+
+   Preflight creates no server. It checks the token, the server type in the location, the image, the SSH key, the network, the gateway's admin API, and each harness's credential. If the server type is out of stock in the location, preflight logs a warning and `usine up` starts; servers are created once Hetzner has it again. Hetzner documents no endpoint for the project's server limit, so preflight reads none. The first server of each day checks the rest. See [Machine checks](#machine-checks).
+
+</Steps>
+
+### Without a gateway
+
+Without a `gateway`, each server gets a public IPv4 address, and the executor connects to it there. If you set `network`, the executor connects to the server's private address instead, which works only from an orchestrator in that network. Build the snapshot without `NETWORK`:
+
+```sh title="usine checkout"
+SSH_KEY=usine-worker ./infra/hetzner/snapshot.sh ~/.ssh/usine_worker.pub
+```
+
+The attempt's GitHub token is written to the server, as on an [SSH worker](/guides/add-a-worker/#ssh-workers) without a gateway, Claude Code needs `api_keys.anthropic`, and Codex needs `api_keys.openai`.
+
+The server's sshd accepts only the `usine` user's key, from any address. To accept SSH only from the orchestrator's address, create a Hetzner firewall and set its name in `provisioner.firewall`, so that each server gets it when it's created:
+
+```json title="firewall.json"
+[
+  {
+    "direction": "in",
+    "protocol": "tcp",
+    "port": "22",
+    "source_ips": ["203.0.113.10/32"],
+    "description": "SSH from the usine orchestrator"
+  }
+]
+```
+
+```sh title="Orchestrator machine"
+hcloud firewall create --name usine-hetzner-pool --rules-file firewall.json
+```
+
+```yaml title="usine.yaml"
+provisioner:
+  provider: hetzner
+  firewall: usine-hetzner-pool
+```
+
+### Update the snapshot
+
+Build a new snapshot when a usine release changes the attempt image or `infra/hetzner/cloud-init.yaml`. Its description names the new harness versions, so change `image` in `usine.yaml` and restart `usine up`; a reload refuses a changed `provisioner` with `RestartRequiredError`. A new snapshot with the same description, from `DESCRIPTION`, needs no restart, because each server is created from the newest one. Delete the old snapshots, which Hetzner bills by size:
+
+```sh title="Orchestrator machine"
+hcloud image list --type snapshot --selector usine=snapshot
+hcloud image delete <id>
+```
+
+## Boat
+
+Each attempt gets a Boat sandbox: a VM with Boat's Ubuntu 24.04 image, which has Git, gh, Node.js, Docker, and the harnesses. usine connects to it over SSH as Boat's user `user` and runs the attempt in a container from the attempt image, whose `usine` user must have the user ID of `user`; the [machine checks](#machine-checks) compare them.
+
+<Steps>
+
+1. Create a Boat API key and save it in a file that only you can read. Boat shows the key once:
+
+   ```sh title="Instance folder"
+   boat api-key create usine-boat-pool --ttl 365d
+   (umask 077; cat > .usine/boat-api-key)
+   ```
+
+   usine reads the account and its limits, creates, renames, lists, and deletes sandboxes, and adds an SSH key to each. Boat doesn't document the actions of each `--preset`, and a key without `--preset` or `--actions` has full access to the account. A key expires after its `--ttl` (90 days by default, `never` for no expiry), and preflight then fails.
+
+2. Create the worker's key pair. usine adds `<identity_file>.pub` to each sandbox:
+
+   ```sh title="Orchestrator machine"
+   ssh-keygen -t ed25519 -f ~/.ssh/usine_boat -C usine-boat
+   ```
+
+3. Add the worker to `usine.yaml`:
+
+   ```yaml title="usine.yaml"
+   workers:
+     - name: boat-pool
+       kind: ssh
+       max_concurrent_attempts: 4
+       root: /home/user/.usine
+       identity_file: ~/.ssh/usine_boat
+       provisioner:
+         provider: boat
+         token_env: BOAT_API_KEY
+         size: default
+         api_keys:
+           anthropic: USINE_ANTHROPIC_API_KEY
+   ```
+
+   - `size` is `small`, `default` (4 vCPU, 8 GB), `large`, or `xlarge`, which needs a Boat plan of $100 per month or more.
+   - `identity_file` is required. A `gateway` and a `region` are refused: Boat has no network rules, and it documents no region choice.
+
+4. Start the orchestrator with both keys in its environment:
+
+   ```sh title="Instance folder"
+   BOAT_API_KEY=$(cat .usine/boat-api-key) \
+     USINE_ANTHROPIC_API_KEY=$(cat .usine/anthropic-api-key) usine up
+   ```
+
+   Preflight creates no sandbox. It checks that Boat accepts the key and reads the account's limits: a size that Boat doesn't offer the account fails preflight, and an account that can't start sandboxes now, or whose active-sandbox cap is below `max_concurrent_attempts`, logs a warning.
+
+</Steps>
+
+On a Boat worker:
+
+- A sandbox can reach any host. The installation token is in a file on the machine, readable by the attempt, which an agent can use from anywhere until the token expires, within the hour ([ADR 0026](https://github.com/basaltbytes/usine/blob/main/docs/adr/0026-eu-ssh-worker.md)). The API keys are in the attempt container's environment, where an agent can read them and spend them.
+- usine creates each sandbox with none of the account's secrets (`noEnv`), so it can't act on your account or other sandboxes. It turns off snapshots, because Boat can store snapshot copies outside the EU and no attempt resumes a sandbox. It also turns off command monitoring and the automatic stop, since usine deletes the sandbox. A creation succeeds only if a machine of the size is ready (`failFast`); otherwise Boat creates and bills nothing.
+- Boat has no labels, so the sandbox name carries usine's tags: `usine <instance> <worker> <run> <process> <attempt>`.
+
+## Machine lifecycle
+
+1. When a slot is free on the worker, the scheduler takes the next waiting run in [queue order](/reference/configuration/loop-files/#priority) and creates its machine. The run stays `Pending` or `Queued` until the machine answers over SSH, for up to 10 minutes.
+2. The executor waits for cloud-init, creates `root`, and waits for Docker. The first machine of the day also gets the [machine checks](#machine-checks).
+3. The attempt starts on the machine and runs as on a long-lived SSH worker. Hetzner servers get the attempt's label.
+4. After the attempt releases its checkout, the release of its slot deletes the machine. If usine can't confirm that the attempt's parent task stopped, the slot and the machine stay until a reconcile confirms the stop.
+5. After a restart, recovery finds each attempt's machine by its tags. After recovery, and at each reconcile every 3 minutes, usine deletes the machines of the instance that no attempt or creation of the running process holds. It keeps a machine whose recovery failed, for the next process.
+
+A failed creation isn't an attempt failure. The slot is freed, the run keeps its place in the queue, and the worker creates no machine for 30 seconds, then for twice as long after each further failure, up to 10 minutes; a creation that succeeds resets the pause. The **Workers** page and the log show the reason and the time of the next try:
+
+| Reason                     | Hetzner Cloud                                                                    | Boat                              |
+| -------------------------- | -------------------------------------------------------------------------------- | --------------------------------- |
+| No machine of the type now | `resource_unavailable`, or a plan shown as currently unavailable                 | 503: no machine of the size ready |
+| Account limit              | `resource_limit_exceeded`                                                        | 402 or 429                        |
+| Refused or failed request  | an API error                                                                     | an API error, or no host key      |
+| No answer                  | the API doesn't respond, or the server doesn't answer over SSH within 10 minutes | the same                          |
+
+### Host keys
+
+The executor connects to a machine only with a host key that it knows before the first connection, and never trusts the key that a first connection presents:
+
+- Hetzner Cloud: the executor generates an Ed25519 host key pair for each server and passes it in the server's cloud-init user data (`ssh_keys`), which replaces the image's host keys at first boot. cloud-init runs the user data on a server created from a snapshot too, because the new server has an instance ID of its own. A server whose image has no cloud-init never presents the key, so the executor's connections fail until the creation times out. Hetzner's metadata service serves the user data to the server, so the server's nftables rules let only root, which cloud-init runs as, reach it: the `usine` user, the attempt's container, and its agent can't read the private key. `snapshot.sh` builds the snapshot from `infra/hetzner/cloud-init.yaml` and, behind a gateway, `infra/hetzner/gateway/worker-nftables.conf`, which have the rules, so they reach every server created from it. A snapshot built before the rules has none; build a new one.
+- Boat: the executor uses the host key that `POST /sandboxes/{id}/sshkey` returns. If Boat returns none, the creation fails, and the sandbox is deleted without a connection.
+
+The executor writes each key to `.usine/known-hosts/<provider>-<id>` in the instance folder before its first connection, and connects with `StrictHostKeyChecking=yes`. The files stay across restarts, so recovery connects to an earlier process's machine with the key that process wrote. For a machine with no file, recovery fails without connecting, and usine keeps the machine for a later process; to reconnect, write `usine-<provider>-<id> <host key>` to the file, or delete the machine by hand (see [Leftover machines](#leftover-machines)).
+
+### Machine checks
+
+Preflight at `usine up` has no machine, so the checks that need one run on the worker's first machine each day (UTC), and on its first machine after `usine up`: Git, the memory for one attempt, the gateway from the machine, Docker and the attempt image, and each harness. A failure shows as a preflight failure does, the machine is deleted, and the worker pauses its creations as for a failed creation. The **Workers** page says that the harnesses are checked on the first machine each day.
+
+### Machines in the web UI
+
+- Until the attempt starts, the run page says that the run's machine is being created, with the provider and the time since the creation started.
+- The **Workers** page and the **Overview** list the machines in flight, with the provider's ID, age, and attempt of each.
+
+## Leftover machines
+
+usine deletes the machines that no attempt holds after startup recovery and every 3 minutes, so machines are left only while no `usine up` runs for the instance, or while the provider refuses to delete them, which the log shows. Delete machines by hand only while no `usine up` runs for the instance, so that you don't delete a running attempt's machine. The instance tag is `github-app-<App ID>`, with the GitHub App's ID.
+
+- Hetzner Cloud: list the servers by label, add `,usine-worker=<worker>` for one worker, and delete them:
+
+  ```sh title="Orchestrator machine"
+  hcloud server list -l usine-instance=github-app-123456
+  hcloud server delete <id>...
+  ```
+
+- Boat: the sandboxes' names start with `usine github-app-<App ID> <worker>`. Delete them in the [Boat dashboard](https://boat.dev/dashboard), with `boat delete <id> --yes`, or with `DELETE /sandboxes/{id}` on Boat's API.
+
+## Costs
+
+- Hetzner Cloud bills every started hour that a server exists, so an attempt of a few minutes costs an hour. On 2026-10-25, a `cx33` cost €0.0144 per hour, and Hetzner showed its Cost-Optimized and Regular Performance plans as currently unavailable ([research note](https://github.com/basaltbytes/usine/blob/main/docs/research/hosted-sandboxes.md#hetzner)). Hetzner also bills each snapshot by its size.
+- Boat bills each second that a sandbox runs, and a deleted sandbox costs nothing more. On 2026-10-25, `default` cost $0.036 per hour, and a plan from $20 per seat per month included 555 hours of it.
+- Claude Code and Codex children with `api_keys` or a gateway API key are billed by Anthropic and OpenAI at API rates.

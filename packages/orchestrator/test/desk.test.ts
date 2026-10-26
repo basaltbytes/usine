@@ -421,6 +421,8 @@ const deskLayer = (
       queued("review-21", 21, 1),
       queued("queued-4", 4, 2),
     ]),
+    machines: Effect.succeed([]),
+    provisioning: Effect.succeed([]),
     preflights: Effect.succeed([
       {
         worker: WorkerName.make("local"),

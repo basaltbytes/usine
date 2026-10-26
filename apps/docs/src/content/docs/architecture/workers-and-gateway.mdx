@@ -8,14 +8,14 @@ sidebar:
 import { FileTree, TabItem, Tabs } from "@astrojs/starlight/components";
 
 :::note
-This page describes commit [`7c0c3d3`](https://github.com/basaltbytes/usine/tree/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9) of basaltbytes/usine as it was on 2026-10-16, with later changes: the executor's own admin API forward ([#249][], 2026-10-19), refused GitHub tokens ([#431][], 2026-10-20), SSH workers that a reload adds or removes ([#387][], 2026-10-20), the recorded kind of the gateway's Anthropic credential ([#248][], 2026-10-22), SSH to the gateway over a tailnet ([#492][], 2026-10-24), the Claude Code 2.1.308 and Codex 0.159.2 pins in `cloud-init.yaml` ([#229][], 2026-10-24), release downloads and GitHub redirects through `git.<domain>` ([#237][], 2026-10-24), a renamed repository's new name ([#528][], 2026-10-25), and a container per attempt on an SSH worker with Docker ([#548](https://github.com/basaltbytes/usine/issues/548), 2026-10-25).
+This page describes commit [`7c0c3d3`](https://github.com/basaltbytes/usine/tree/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9) of basaltbytes/usine as it was on 2026-10-16, with later changes: the executor's own admin API forward ([#249][], 2026-10-19), refused GitHub tokens ([#431][], 2026-10-20), SSH workers that a reload adds or removes ([#387][], 2026-10-20), the recorded kind of the gateway's Anthropic credential ([#248][], 2026-10-22), SSH to the gateway over a tailnet ([#492][], 2026-10-24), the Claude Code 2.1.308 and Codex 0.159.2 pins in `cloud-init.yaml` ([#229][], 2026-10-24), release downloads and GitHub redirects through `git.<domain>` ([#237][], 2026-10-24), a renamed repository's new name ([#528][], 2026-10-25), a container per attempt on an SSH worker with Docker ([#548](https://github.com/basaltbytes/usine/issues/548), 2026-10-25), and a machine per attempt on an SSH worker with a provisioner ([#550][], 2026-10-25).
 :::
 
 A worker has an attempt's checkout and runs its children; the Pi parent runs in the orchestrator. [`infra/hetzner/README.md`](https://github.com/basaltbytes/usine/blob/main/infra/hetzner/README.md) and [`infra/hetzner/gateway/README.md`](https://github.com/basaltbytes/usine/blob/main/infra/hetzner/gateway/README.md) give the operating procedures.
 
 ## Worker kinds in `usine.yaml`
 
-`Worker` is a union of three classes ([factory.ts:150][]); without a `workers` key, the factory has one worker named `local` ([factory.ts:214][]). The kinds are `local` ([local.ts][]), whose children run as processes on the orchestrator's machine; `ssh` ([ssh/ssh.ts][]), optionally with a `gateway` (`admin_port` default 7070, `llm_providers` only `anthropic`); and `exe.dev` ([exe-dev.ts][]), whose edge adds the GitHub credential. Remote children run as one SSH command each. [ADR 0029](https://github.com/basaltbytes/usine/blob/main/docs/adr/0029-worker-kinds-and-adapter-set.md) records why usine has these kinds and what it adds: a container per attempt on an `ssh` worker ([#548][]), and one machine per attempt through an `ssh` provisioner ([#550][]) or Cloudflare Sandboxes ([#551][]), none of them built yet. [`usine.yaml`](/reference/configuration/usine-yaml/) lists each kind's keys; the Hetzner READMEs use these forms:
+`Worker` is a union of three classes ([factory.ts:150][]); without a `workers` key, the factory has one worker named `local` ([factory.ts:214][]). The kinds are `local` ([local.ts][]), whose children run as processes on the orchestrator's machine; `ssh` ([ssh/ssh.ts][]), optionally with a `gateway` (`admin_port` default 7070, `llm_providers` only `anthropic`) and with a `provisioner` instead of a `destination`; and `exe.dev` ([exe-dev.ts][]), whose edge adds the GitHub credential. Remote children run as one SSH command each. [ADR 0029](https://github.com/basaltbytes/usine/blob/main/docs/adr/0029-worker-kinds-and-adapter-set.md) records why usine has these kinds and what it adds: a container per attempt on an `ssh` worker ([#548][]) and one machine per attempt through an `ssh` provisioner ([#550][]), which are built, and Cloudflare Sandboxes ([#551][]), which aren't. [`usine.yaml`](/reference/configuration/usine-yaml/) lists each kind's keys; the Hetzner READMEs use these forms:
 
 <Tabs>
   <TabItem label="ssh">
@@ -60,6 +60,33 @@ Host worker-one
   ProxyJump usine-gateway
   IdentityFile ~/.ssh/usine_worker
 ```
+
+  </TabItem>
+  <TabItem label="ssh with a provisioner">
+
+```yaml title="usine.yaml"
+workers:
+  - name: hetzner-pool
+    kind: ssh
+    max_concurrent_attempts: 4
+    root: /home/usine/.usine
+    identity_file: ~/.ssh/usine_worker
+    gateway:
+      domain: gw.internal
+      destination: usine-gateway
+      admin_token_env: USINE_GATEWAY_ADMIN_TOKEN
+      llm_providers: [anthropic]
+    provisioner:
+      provider: hetzner
+      token_env: HCLOUD_TOKEN
+      server_type: cx33
+      location: fsn1
+      image: usine-worker-claude-2.1.308-codex-0.159.2
+      network: usine-gateway
+      ssh_key: usine-worker
+```
+
+The worker has no `destination`: each attempt's server is created from the snapshot that `infra/hetzner/snapshot.sh` built, and the executor reaches its private address through `gateway.destination` ([ssh with a provisioner](#ssh-with-a-provisioner)).
 
   </TabItem>
 </Tabs>
@@ -161,6 +188,82 @@ Before a process starts its first container on a worker, it removes the containe
 
 Before a container first starts for a checkout, the executor writes `<worker directory>/container-checkouts/<attempt id>`, which no container mounts, and removes it with the checkout. A reattachment or recovery decides from that marker, never from the checkout, which the attempt can change: a marked checkout runs in a new container, with the new credential; an unmarked one runs as the SSH user, and only on a machine without Docker. Any other case, such as a checkout from before Docker on a machine that now has it, fails and leaves the checkout for the operator. Preflight degrades only a machine whose SSH user has no Docker access; a Docker that doesn't answer fails it.
 
+### ssh with a provisioner
+
+A worker with a `provisioner` has no machine of its own: its `SshWorkerAddress.machine` is `Provisioned` instead of `Fixed` ([ssh/model.ts][]). `provisionedMachinesFor` ([provisioner/machines.ts][]) creates a machine for each attempt through the provider's driver ([provisioner/hetzner.ts][], [provisioner/boat.ts][]), keeps it while the attempt's slot holds it, and gives the scheduler the `WorkerMachines` port ([executor.ts][]). [Machine per attempt](/architecture/execution/#machine-per-attempt) describes when the scheduler creates and releases machines. On the machine, the attempt runs as on a long-lived SSH worker, in its own container if the machine has Docker ([ssh with Docker](#ssh-with-docker)).
+
+#### Machine lifecycle
+
+Each driver calls its provider's JSON API with the token from `token_env` as a bearer token and a 30-second timeout per request ([provisioner/http.ts][]). No failure contains the token.
+
+| Step            | Hetzner Cloud                                                                                                                                                                                                                                           | Boat                                                                                                                                                                                                                    |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Create          | `POST /servers` with `server_type`, `location`, the ID of `image`, the ID of `ssh_key`, the ID of `network`, `enable_ipv4` only without a gateway, `enable_ipv6: false`, the [labels](#labels-and-names), and the [host key](#host-keys) in `user_data` | `POST /sandboxes` with `type` (`size`), `noEnv: true`, `snapshots: false`, `monitoring: false`, `ttlSeconds: null`, `failFast: true`, and the tags as `name`                                                            |
+| Wait            | `GET /servers/{id}` every 3 seconds until the server is `running` and has an address: its private one behind a gateway or with `network`, or else its public IPv4                                                                                       | `GET /sandboxes/{id}` every 3 seconds until `ready`, `idle`, or `running`, then `POST /sandboxes/{id}/sshkey` with `<identity_file>.pub`, which returns the address, and the SSH user and host key if Boat reports them |
+| Connect         | `<ssh_user>@<address>`, with `-J <gateway.destination>` behind a gateway                                                                                                                                                                                | `user@<machineIp>` on port 22, or Boat's `sshEndpoint` with its port                                                                                                                                                    |
+| Ready           | The executor's ready script over SSH, retried while `ssh` exits with 255: `cloud-init status --wait`, `mkdir -p <root>`, then up to a minute until `docker version` answers                                                                             | the same                                                                                                                                                                                                                |
+| Tag the attempt | `PUT /servers/{id}` with the labels and `usine-attempt`                                                                                                                                                                                                 | `PATCH /sandboxes/{id}` with the new name                                                                                                                                                                               |
+| Delete          | `DELETE /servers/{id}`; a 404 counts as deleted                                                                                                                                                                                                         | `DELETE /sandboxes/{id}`; a 404 counts as deleted                                                                                                                                                                       |
+| List            | `GET /servers` with `label_selector=usine-instance=<instance>,usine-worker=<worker>`                                                                                                                                                                    | `GET /sandboxes`, filtered by the name prefix `usine <instance> <worker> `                                                                                                                                              |
+
+`image` resolves to a numeric ID as given, then to a system image with that name, then to the newest available snapshot with that description, at each creation. A Boat sandbox that ends in `error`, `cancelled`, `archiving`, or `archived` before it's ready, or a server that Hetzner removes, fails the creation. The whole wait, from creation until the ready script succeeds, is bounded by 10 minutes (`machineReadyTimeout`). On any failure or interruption, the executor deletes the machine.
+
+The SSH command of a machine has the shared options, `-o UserKnownHostsFile=<known-hosts directory>/<provider>-<id>`, `-o HostKeyAlias=usine-<provider>-<id>`, `-o StrictHostKeyChecking=yes`, `-J <gateway.destination>` behind a gateway, the provider's port, and `-i <identity_file> -o IdentitiesOnly=yes` ([ssh/workers.ts][]). The known-hosts directory is `.usine/known-hosts/` in the instance folder, and a machine's file is removed with the machine.
+
+#### Host keys
+
+The executor connects to a machine only with a host key that it wrote to the machine's known-hosts file before the first connection, under the alias rather than the address ([provisioner/machines.ts][]). No connection trusts the key that it's first shown: on a public address, a first connection can reach another machine, and behind the gateway, an attempt on another machine of the network could answer for the address.
+
+- Hetzner reports no host key, so the driver generates an Ed25519 key pair for each server ([provisioner/host-key.ts](https://github.com/basaltbytes/usine/blob/main/packages/executor/src/ssh/provisioner/host-key.ts)) and passes it in `user_data`: cloud-config with `ssh_deletekeys: true`, `ssh_genkeytypes: []`, and `ssh_keys` with `ed25519_private` and `ed25519_public`. cloud-init's `ssh` module runs once per instance, so it replaces the image's host keys on a server created from a snapshot, whose instance ID is new. The creation returns the public key, which the executor writes before it waits for the server. The private key stays in the server's user data, which Hetzner's metadata service at `169.254.169.254` serves; the server's nftables output rules admit only root, which cloud-init runs as, so the `usine` user and the attempt's container can't read it.
+- Boat returns the sandbox's host key in the `sshkey` answer, which the executor writes. An answer without one fails the creation with reason `provider`, and the sandbox is deleted.
+- For a machine of an earlier process, the executor uses the file that process wrote. Without one, the lookup fails with reason `provider` before any connection, and recovery keeps the machine, as after any failed lookup.
+
+#### Labels and names
+
+Hetzner servers carry these labels, and a Boat sandbox's name carries the same tags in one string: `usine <instance> <worker> <run> <process> <attempt>`, with `-` before the attempt is assigned ([provisioner/model.ts][]). Boat's names have at most 120 characters, so the instance and worker tags have at most 24, the run 32, and the process 12.
+
+| Label            | Value                                                                                                                      |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `usine-instance` | `github-app-<App ID>`, as on the attempt containers                                                                        |
+| `usine-worker`   | the worker's name                                                                                                          |
+| `usine-run`      | the run that the machine was created for                                                                                   |
+| `usine-process`  | 12 random hex digits per executor, which tell this process's machines in creation from an earlier process's leftovers      |
+| `usine-attempt`  | `h` and the 64-bit FNV-1a hash of the attempt ID, which contains `/`; set when the attempt's preparation takes the machine |
+| any other        | `provisioner.labels`, whose keys can't start with `usine-`                                                                 |
+
+A value that is longer than the limit or has characters other than letters, digits, `_`, `.`, and `-` becomes `h` and its hash. Hetzner server names are `usine-<worker>-<8 random hex digits>`, at most 63 characters.
+
+#### Held machines and the sweep
+
+The executor keeps each machine that it created, or found for an attempt from before a restart, in memory with its state (`creating`, `ready`, or `deleting`) and its holder: the attempt's lease, startup recovery, or `retained` after a failed recovery. `WorkerMachines.machines` lists them, oldest first, for the **Workers** page and the **Overview**.
+
+After a restart, the executor lists each provisioned worker's machines once and finds each earlier attempt's machine by its `usine-attempt` label or tag. Recovery reconciles the attempt's checkout on it and then deletes it, unless a lease holds it; after a failed recovery, it keeps the machine for the next process. `WorkerMachines.sweep` lists every provisioned worker's machines and deletes those that this process doesn't hold, except those with this process's `usine-process` value, which are still being created. A deletion that fails leaves the machine `deleting`, and the next sweep tries again. The engine runs the sweep after startup recovery and at each reconcile.
+
+A provisioned worker's machines are new, so the executor reclaims nothing on them before its first attempt; it detaches only the gateway attachments that earlier processes left.
+
+#### Harness credentials
+
+A machine created for one attempt keeps no harness login, so `harnessCredentialGap` refuses a provisioned worker whose roster has a harness without a credential outside the machine ([provisioner/machines.ts][]):
+
+| Harness     | Passes if                                                                                  | Otherwise                                                |
+| ----------- | ------------------------------------------------------------------------------------------ | -------------------------------------------------------- |
+| Claude Code | the gateway has `anthropic` in `llm_providers`, or `provisioner.api_keys.anthropic` is set | `harness-login` capability error naming the two settings |
+| Codex       | the gateway has `openai` in `llm_providers`, or `provisioner.api_keys.openai` is set       | `harness-login` capability error naming the two settings |
+| Pi          | never: Pi children run only on local workers                                               | `harness-login` capability error                         |
+
+With `api_keys.anthropic` and no gateway credential for Anthropic, the attempt's secrets get `ANTHROPIC_API_KEY`, which reaches the container in its variables on `docker run`'s standard input, and the executor removes the key from the output that it keeps ([ssh/api-keys.ts](https://github.com/basaltbytes/usine/blob/main/packages/executor/src/ssh/api-keys.ts)). With `api_keys.openai` and no gateway credential for OpenAI, the secrets get `OPENAI_API_KEY` the same way, and the executor writes `<root>/workers/<name>/codex/<attempt>/config.toml` with a `model_provider` for `https://api.openai.com/v1` whose `env_key` is `OPENAI_API_KEY`, sets `CODEX_HOME` to that directory, mounts it read-write in the container, and removes it with the attempt. The harness check runs `claude --version` or `codex --version`, which must be a supported version, instead of the login check, and behind a gateway also checks that `api.anthropic.com` or `api.openai.com` answers through the forward proxy. The attempt's credential kind is `api-key`, so usage counts those children in the API keys pool. With the gateway's credential, the attempt follows the gateway's path for the harness, as on a long-lived worker.
+
+#### Preflight of a provisioned worker
+
+`verifyProvisioned` ([provisioner/machines.ts][]) runs at `usine up` and at the reload that adds the worker, without a machine:
+
+- Hetzner: the server type exists and is offered in the location, which logs a warning if it isn't available now; the image resolves; the SSH key and the network exist. Hetzner documents no endpoint for the project's server limit.
+- Boat: `GET /me` accepts the key, and `GET /limits` offers the `size`. If the account can't start sandboxes now, or its active-sandbox cap is below `max_concurrent_attempts`, it logs a warning.
+- The gateway's admin API accepts the admin token, as for a long-lived worker, without the checks from the machine.
+- The harness credentials above.
+
+A refused token, a missing resource, or an unreachable API is a `provider` capability error. The report's `deferred` says that the harnesses are checked on the first machine each day. The executor runs the long-lived worker's machine preflight, with one attempt for the memory check, on the worker's first machine of each UTC day in each process, before the attempt starts. A failure there deletes the machine and fails the creation with the capability error.
+
 ### Code shared by remote kinds
 
 `remoteExecutorFor` ([remote.ts:44][]) has the checkout, salvage, recovery, and reattach code of SSH and exe.dev. Before a worktree is kept or removed, `CHILD_KILL_SCRIPT` sends each child in a `<worktree>.child-<n>.pid` file ([child-host.ts:96][]) TERM, then KILL after up to five seconds ([child-host.ts:106][]), in the attempt's container if it has one.
@@ -200,6 +303,8 @@ flowchart TD
   login --> hosts["each login host responds<br/>through the forward proxy"]
   harness -->|pi| refused["refused: Pi children<br/>do not run remotely"]
 ```
+
+A provisioned worker has no machine at preflight, so it gets the checks of [Preflight of a provisioned worker](#preflight-of-a-provisioned-worker) instead, and the checks above run on its first machine each day.
 
 If the forward doesn't open, the error gives an `ssh` command that shows why. With the Anthropic key on the gateway, the executor records the credential kind that `GET /v1/providers` reports, `api-key` or `subscription` (never the credential, as of the last reload), with the worker, so usage counts its Claude Code children in the billed pool ([#248][], [gateway/preflight.ts:71][], [ADR 0013](https://github.com/basaltbytes/usine/blob/main/docs/adr/0013-cost-accounting-native-meters-guardrails.md)). No Anthropic credential fails the preflight; a gateway too old to answer keeps the Claude plan pool, with a warning once per worker.
 
@@ -526,7 +631,7 @@ chatgpt.com
 auth.openai.com
 ```
 
-With `llm_providers: [anthropic]`, Claude Code children call `llm.<domain>/anthropic`, and the gateway sends its own key; its use of a Claude subscription token there is untested against Anthropic ([#234][]), and it has no ChatGPT login ([#235][]). [ADR 0027](https://github.com/basaltbytes/usine/blob/main/docs/adr/0027-gateway-credential-proxy.md), amendment of 2026-10-15, explains why logins stay on the worker.
+With `llm_providers: [anthropic]`, Claude Code children call `llm.<domain>/anthropic`, and the gateway sends its own key; its use of a Claude subscription token there is untested against Anthropic ([#234][]), and it has no ChatGPT login ([#235][]). [ADR 0027](https://github.com/basaltbytes/usine/blob/main/docs/adr/0027-gateway-credential-proxy.md), amendment of 2026-10-15, explains why logins stay on the worker. A machine of a provisioned worker has no login; see [Harness credentials](#harness-credentials).
 
 ## cloud-init files
 
@@ -535,6 +640,7 @@ With `llm_providers: [anthropic]`, Claude Code children call `llm.<domain>/anthr
 - infra/hetzner/
   - cloud-init.yaml the worker machine
   - create-worker.sh
+  - snapshot.sh the snapshot of a provisioned worker
   - gateway/
     - egress-allowlist
     - gateway-cloud-init.yaml the gateway VM
@@ -551,6 +657,7 @@ With `llm_providers: [anthropic]`, Claude Code children call `llm.<domain>/anthr
 | `infra/hetzner/gateway/worker-cloud-init.yaml`  | For a worker behind the gateway: the gateway as only resolver, apt and Docker through the forward proxy, Docker without its own nftables rules, gateway-only nftables, the settings below, and a systemd socket from `/run/usine-gateway/http.sock` to the gateway's port 80.                                                                                                                                                                                                                                                                                    |
 | `infra/hetzner/gateway/gateway-cloud-init.yaml` | The gateway VM: nftables, dnsmasq, the bastion sshd settings, Tailscale (not logged in), Node.js, the `usine-gateway` systemd service, the secrets file.                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `infra/hetzner/create-worker.sh`                | Creates a server from `cloud-init.yaml`, labels it `usine=worker`, and attaches a firewall that allows SSH from one address.                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `infra/hetzner/snapshot.sh`                     | Creates a temporary server from `cloud-init.yaml`, or from `gateway.sh worker-user-data` in the gateway's network, waits for cloud-init, checks Docker, pulls the attempt image, and saves the server as a snapshot labeled `usine=snapshot`, described `usine-worker-<image tag>`. Deletes the server and prints the snapshot for `provisioner.image`.                                                                                                                                                                                                          |
 | `infra/hetzner/gateway/gateway.sh`              | `create`, `delete`, `tailnet-up`, `install <tarballs>`, and `worker-user-data`, which renders the two worker files as one MIME cloud-init.                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `infra/worker-image/Dockerfile`                 | The attempt image: Debian 13, Node.js 22, pnpm, Git, gh, Chromium, Claude Code, and Codex at the versions of `cloud-init.yaml`, and the `usine` user with ID 1000. `.github/workflows/worker-image.yml` pushes it to `ghcr.io/basaltbytes/usine-worker`.                                                                                                                                                                                                                                                                                                         |
 
@@ -681,4 +788,11 @@ GATEWAY_PACKAGE=${GATEWAY_PACKAGE:-@usine/gateway}
 [#528]: https://github.com/basaltbytes/usine/issues/528
 [#548]: https://github.com/basaltbytes/usine/issues/548
 [#550]: https://github.com/basaltbytes/usine/issues/550
+[ssh/model.ts]: https://github.com/basaltbytes/usine/blob/main/packages/executor/src/ssh/model.ts
+[executor.ts]: https://github.com/basaltbytes/usine/blob/main/packages/executor/src/executor.ts
+[provisioner/machines.ts]: https://github.com/basaltbytes/usine/blob/main/packages/executor/src/ssh/provisioner/machines.ts
+[provisioner/hetzner.ts]: https://github.com/basaltbytes/usine/blob/main/packages/executor/src/ssh/provisioner/hetzner.ts
+[provisioner/boat.ts]: https://github.com/basaltbytes/usine/blob/main/packages/executor/src/ssh/provisioner/boat.ts
+[provisioner/http.ts]: https://github.com/basaltbytes/usine/blob/main/packages/executor/src/ssh/provisioner/http.ts
+[provisioner/model.ts]: https://github.com/basaltbytes/usine/blob/main/packages/executor/src/ssh/provisioner/model.ts
 [#551]: https://github.com/basaltbytes/usine/issues/551

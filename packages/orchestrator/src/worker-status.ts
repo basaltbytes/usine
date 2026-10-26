@@ -4,7 +4,13 @@ import type { ItemKey } from "@usine/core/item";
 import type { LoopName } from "@usine/core/loop";
 import type { RunId } from "@usine/core/run";
 import type { WorkerName } from "@usine/core/worker";
-import type { ExecutorError, PreflightReport, WorkerCapability } from "@usine/executor";
+import type {
+  ExecutorError,
+  MachineStatus,
+  MachineUnavailableReason,
+  PreflightReport,
+  WorkerCapability,
+} from "@usine/executor";
 import {
   Array as Arr,
   Context,
@@ -58,6 +64,17 @@ export interface PreflightDegraded {
   readonly message: string;
 }
 
+/**
+ * A check that the preflight left for later, such as a provisioned Worker's harness checks,
+ * which run on its first machine each day.
+ */
+export interface PreflightDeferred {
+  readonly _tag: "Deferred";
+  readonly checkedAt: DateTime.Utc;
+  /** When the check runs instead, for operators. */
+  readonly message: string;
+}
+
 /** A preflight check that found a missing prerequisite or couldn't run. */
 export interface PreflightFailed {
   readonly _tag: "Failed";
@@ -69,7 +86,28 @@ export interface PreflightFailed {
 }
 
 /** The last outcome of one preflight check and when it ended. */
-export type PreflightCheck = PreflightPassed | PreflightDegraded | PreflightFailed;
+export type PreflightCheck =
+  | PreflightPassed
+  | PreflightDegraded
+  | PreflightDeferred
+  | PreflightFailed;
+
+/**
+ * A provisioned Worker that couldn't create a machine, and when it tries again. The Runs it
+ * would serve keep waiting.
+ */
+export interface ProvisioningPause {
+  readonly worker: WorkerName;
+  /** Why the creation failed, or `check` if the first machine of the day failed its preflight. */
+  readonly reason: MachineUnavailableReason | "check";
+  readonly message: string;
+  /** The number of failed creations in a row. */
+  readonly failures: number;
+  readonly failedAt: DateTime.Utc;
+  readonly retryAt: DateTime.Utc;
+  /** Whether the Worker still waits for `retryAt` before it creates a machine. */
+  readonly blocked: boolean;
+}
 
 /** The last preflight of one harness on a Worker. */
 export interface HarnessPreflight {
@@ -108,8 +146,9 @@ const withHarnesses = (
 
 /**
  * Returns `previous` updated with one preflight of `brains`. A degraded report passes every
- * harness and records the prerequisites as degraded. An unavailable harness fails that harness
- * and passes the ones checked before it; any other failure fails only the prerequisites.
+ * harness and records the prerequisites as degraded, and a deferred report records every
+ * harness as deferred. An unavailable harness fails that harness and passes the ones checked
+ * before it; any other failure fails only the prerequisites.
  */
 export const recordPreflight = (
   previous: WorkerPreflight,
@@ -128,7 +167,14 @@ export const recordPreflight = (
           onSome: (message): PreflightCheck => ({ _tag: "Degraded", checkedAt, message }),
         }),
       ),
-      harnesses: withHarnesses(previous.harnesses, harnesses, passed),
+      harnesses: withHarnesses(
+        previous.harnesses,
+        harnesses,
+        Option.match(outcome.success.deferred, {
+          onNone: () => passed,
+          onSome: (message): PreflightCheck => ({ _tag: "Deferred", checkedAt, message }),
+        }),
+      ),
     };
   }
   const error = outcome.failure;
@@ -164,7 +210,10 @@ export const unchecked = (worker: WorkerName): WorkerPreflight => ({
   harnesses: [],
 });
 
-/** The scheduler's current slot usage, queued Runs, and last preflight of each Worker. */
+/**
+ * The scheduler's current slot usage, queued Runs, last preflight of each Worker, and the
+ * provisioned Workers' machines and pauses.
+ */
 export class WorkerStatus extends Context.Service<
   WorkerStatus,
   {
@@ -180,6 +229,10 @@ export class WorkerStatus extends Context.Service<
      * preflight.
      */
     readonly preflights: Effect.Effect<ReadonlyArray<WorkerPreflight>>;
+    /** The machines of the provisioned Workers in flight, oldest first. */
+    readonly machines: Effect.Effect<ReadonlyArray<MachineStatus>>;
+    /** The provisioned Workers whose last machine creation failed. */
+    readonly provisioning: Effect.Effect<ReadonlyArray<ProvisioningPause>>;
   }
 >()("@usine/orchestrator/WorkerStatus") {
   /** A status with no Workers, no queued Runs, and no preflights, as in setup mode. */
@@ -187,5 +240,7 @@ export class WorkerStatus extends Context.Service<
     slots: Effect.succeed([]),
     queue: Effect.succeed([]),
     preflights: Effect.succeed([]),
+    machines: Effect.succeed([]),
+    provisioning: Effect.succeed([]),
   });
 }

@@ -224,6 +224,8 @@ const workers = Layer.succeed(WorkerStatus)({
     { worker: WorkerName.make("retired"), capacity: 0, leased: 1 },
   ]),
   queue: Effect.succeed([]),
+  machines: Effect.succeed([]),
+  provisioning: Effect.succeed([]),
   preflights: Effect.sync(() => {
     const codex = new BrainSpec({
       harness: "codex",

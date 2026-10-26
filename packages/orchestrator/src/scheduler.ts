@@ -15,7 +15,12 @@ import {
   Executor,
   ExecutorError,
   ExecutorOperationError,
+  fullPreflight,
+  type MachineHold,
+  type MachineUnavailableError,
   type PreflightReport,
+  type WorkerCapabilityError,
+  type WorkerMachines,
 } from "@usine/executor";
 import type { Submission } from "@usine/engine/engine";
 import { StepExecutor, type WorkerLease } from "@usine/engine/step-executor";
@@ -25,8 +30,10 @@ import {
   Context,
   DateTime,
   Deferred,
+  Duration,
   Effect,
   Exit,
+  FiberMap,
   Layer,
   Match,
   Option,
@@ -59,6 +66,7 @@ import {
   pipelinePosition,
 } from "./lease-order.ts";
 import {
+  type ProvisioningPause,
   type QueuedRun,
   recordPreflight,
   unchecked,
@@ -75,6 +83,8 @@ export class UnsupportedWorkerError extends Schema.TaggedError<UnsupportedWorker
 
 type ReservationState =
   | { readonly _tag: "Pending" }
+  /** A provisioned Worker creates the machine of the Run's next Attempt. */
+  | { readonly _tag: "Creating"; readonly worker: WorkerName }
   | { readonly _tag: "Assigned"; readonly lease: WorkerLease }
   | { readonly _tag: "Canceled" };
 
@@ -148,13 +158,30 @@ const isFree = (pool: SlotPool, worker: WorkerName): boolean => {
 
 /**
  * Returns the Worker with a free slot for `reservation`: its specified Worker, or else the first
- * free one.
+ * free one that isn't `paused` from creating machines.
  */
-const workerFor = (pool: SlotPool, reservation: Reservation): Option.Option<WorkerName> =>
+const workerFor = (
+  pool: SlotPool,
+  paused: ReadonlyMap<WorkerName, ProvisioningPause>,
+  reservation: Reservation,
+): Option.Option<WorkerName> =>
   Option.match(reservation.worker, {
-    onNone: () => Option.fromNullishOr([...pool.keys()].find((worker) => isFree(pool, worker))),
+    onNone: () =>
+      Option.fromNullishOr(
+        [...pool.keys()].find(
+          (worker) => isFree(pool, worker) && paused.get(worker)?.blocked !== true,
+        ),
+      ),
     onSome: (worker) => (isFree(pool, worker) ? Option.some(worker) : Option.none()),
   });
+
+/** The first pause after a machine creation fails on a Worker. It doubles up to `MAX_PAUSE`. */
+const FIRST_PAUSE = Duration.seconds(30);
+const MAX_PAUSE = Duration.minutes(10);
+
+/** Returns the pause after the `failures`th consecutive failed machine creation. */
+const pauseAfter = (failures: number): Duration.Duration =>
+  Duration.min(Duration.times(FIRST_PAUSE, 2 ** Math.min(failures - 1, 10)), MAX_PAUSE);
 
 const withLeased = (pool: SlotPool, worker: WorkerName, change: number): SlotPool => {
   const slots = pool.get(worker);
@@ -251,7 +278,15 @@ export interface StepExecutorOptions {
    * runs any Worker of its kind by name, like the local executor.
    */
   readonly workers?: ExecutorWorkers;
+  /**
+   * The machines of provisioned Workers, which create one machine per Attempt (#550). If omitted,
+   * no Worker is provisioned.
+   */
+  readonly machines?: WorkerMachines["Service"];
 }
+
+/** The machine a lease holds, which its release deletes. */
+type LeaseMachine = Ref.Ref<Option.Option<MachineHold>>;
 
 /** The Worker set of an executor that runs any Worker of its kind by name. */
 const anyWorker: ExecutorWorkers = { add: () => Effect.void, remove: () => Effect.void };
@@ -284,6 +319,14 @@ export const stepExecutorLayer = (
       // addition.
       const membership = yield* Semaphore.make(1);
       const adding = yield* Ref.make<ReadonlySet<WorkerName>>(new Set());
+      const machines = options.machines;
+      const paused = yield* TxRef.make<ReadonlyMap<WorkerName, ProvisioningPause>>(new Map());
+      // The machine of each Run's lease, which `execute` gives to the Run's Attempt.
+      const runMachines = yield* Ref.make<ReadonlyMap<RunId, LeaseMachine>>(new Map());
+      // The machine creation of each reservation, by its order.
+      const creations = yield* FiberMap.make<number>();
+      const provisions = (worker: WorkerName) =>
+        machines === undefined ? Effect.succeed(false) : machines.provisions(worker);
 
       const recordPreflightExit = Effect.fn("WorkerScheduler.recordPreflight")(function* (
         worker: WorkerName,
@@ -499,12 +542,53 @@ export const stepExecutorLayer = (
           ),
         );
 
-      const makeLease = Effect.fn("WorkerScheduler.makeLease")(function* (worker: WorkerName) {
+      /** Deletes the machine that `machine` holds, if any, before the slot frees. */
+      const releaseMachine = (worker: WorkerName, machine: LeaseMachine) =>
+        Ref.getAndSet(machine, Option.none()).pipe(
+          Effect.flatMap((hold) =>
+            Option.match(hold, {
+              onNone: () => Effect.void,
+              onSome: (held) =>
+                machines === undefined
+                  ? Effect.void
+                  : Effect.logDebug("Deleting the machine of the released slot", {
+                      worker,
+                      hold: held,
+                    }).pipe(Effect.andThen(machines.release(held))),
+            }),
+          ),
+        );
+
+      const makeLease = Effect.fn("WorkerScheduler.makeLease")(function* (
+        worker: WorkerName,
+        hold: Option.Option<MachineHold> = Option.none(),
+        runId: Option.Option<RunId> = Option.none(),
+      ) {
         const released = yield* Ref.make(false);
+        const machine: LeaseMachine = yield* Ref.make(hold);
+        if (Option.isSome(runId))
+          yield* Ref.update(runMachines, (current) => new Map(current).set(runId.value, machine));
+        const forget = Option.match(runId, {
+          onNone: () => Effect.void,
+          onSome: (run) =>
+            Ref.update(runMachines, (current) => {
+              if (current.get(run) !== machine) return current;
+              const next = new Map(current);
+              next.delete(run);
+              return next;
+            }),
+        });
         return {
           worker,
           release: Ref.modify(released, (done) => [!done, true] as const).pipe(
-            Effect.flatMap((first) => (first ? releaseSlot(worker) : Effect.void)),
+            Effect.flatMap((first) =>
+              first
+                ? forget.pipe(
+                    Effect.andThen(releaseMachine(worker, machine)),
+                    Effect.andThen(releaseSlot(worker)),
+                  )
+                : Effect.void,
+            ),
           ),
         } satisfies WorkerLease;
       });
@@ -514,9 +598,13 @@ export const stepExecutorLayer = (
       const nextAssignment = Effect.tx(
         Effect.gen(function* () {
           const current = yield* TxRef.get(pool);
+          const pauses = yield* TxRef.get(paused);
           const waiting = yield* TxPriorityQueue.toArray(pending);
           const next = EffectArray.findFirst(waiting, (reservation) =>
-            Option.map(workerFor(current, reservation), (worker) => ({ worker, reservation })),
+            Option.map(workerFor(current, pauses, reservation), (worker) => ({
+              worker,
+              reservation,
+            })),
           );
           if (Option.isNone(next)) return yield* Effect.txRetry;
           const { worker, reservation } = next.value;
@@ -526,10 +614,167 @@ export const stepExecutorLayer = (
         }),
       );
 
+      /** Pauses machine creation on `worker` after `failure`, and resumes it when the pause ends. */
+      const pauseWorker = Effect.fn("WorkerScheduler.pauseWorker")(function* (
+        worker: WorkerName,
+        failure: MachineUnavailableError | WorkerCapabilityError,
+      ) {
+        const failedAt = yield* DateTime.now;
+        const pause = yield* Effect.tx(
+          TxRef.modify(paused, (current) => {
+            const failures = (current.get(worker)?.failures ?? 0) + 1;
+            const delay = pauseAfter(failures);
+            const next: ProvisioningPause = {
+              worker,
+              reason: failure._tag === "MachineUnavailableError" ? failure.reason : "check",
+              message: failure.message,
+              failures,
+              failedAt,
+              retryAt: DateTime.addDuration(failedAt, delay),
+              blocked: true,
+            };
+            return [next, new Map(current).set(worker, next)] as const;
+          }),
+        );
+        yield* Effect.logWarning(
+          "A provisioned Worker could not create a machine; its Runs keep waiting, and it tries again after a pause",
+          {
+            worker,
+            reason: pause.reason,
+            message: pause.message,
+            failures: pause.failures,
+            retryAt: DateTime.formatIso(pause.retryAt),
+          },
+        );
+        yield* Effect.sleep(DateTime.distance(failedAt, pause.retryAt)).pipe(
+          Effect.andThen(
+            Effect.tx(
+              TxRef.update(paused, (current) => {
+                const latest = current.get(worker);
+                return latest === undefined || latest.failures !== pause.failures
+                  ? current
+                  : new Map(current).set(worker, { ...latest, blocked: false });
+              }),
+            ),
+          ),
+          Effect.andThen(
+            Effect.logInfo("A provisioned Worker's pause ended; it creates machines again", {
+              worker,
+              failures: pause.failures,
+            }),
+          ),
+          Effect.forkScoped,
+        );
+      });
+
+      /**
+       * Creates the machine of `reservation`'s next Attempt on `worker`, whose slot it holds, and
+       * then assigns the lease with the machine. On failure, frees the slot, pauses the Worker,
+       * and puts the reservation back in the queue, so the Run keeps waiting.
+       */
+      const provision = Effect.fn("WorkerScheduler.provision")(function* (
+        worker: WorkerName,
+        reservation: Reservation,
+        passed: number,
+      ) {
+        const fields = {
+          runId: reservation.runId,
+          loop: reservation.loop,
+          itemKey: reservation.itemKey,
+          worker,
+        };
+        yield* Effect.annotateCurrentSpan(fields);
+        if (machines === undefined) return yield* Effect.die(new Error("no machines to create"));
+        const { agents } = yield* instances.get;
+        const roster = EffectArray.dedupe(agents.map(({ agent }) => agent.brain));
+        yield* Effect.logInfo("Worker slot taken in lease order; creating the Attempt's machine", {
+          ...fields,
+          ...positionFields(reservation.position),
+          passed,
+        });
+        const created = yield* machines.create(worker, reservation.runId, roster).pipe(
+          Effect.result,
+          Effect.onInterrupt(() =>
+            Effect.logInfo(
+              "The Run stopped waiting while its machine was created; the slot is free again",
+              fields,
+            ).pipe(Effect.andThen(releaseSlot(worker))),
+          ),
+        );
+        yield* Effect.uninterruptible(
+          Effect.gen(function* () {
+            if (Result.isFailure(created)) {
+              const failure = created.failure;
+              yield* releaseSlot(worker);
+              if (failure._tag === "WorkerCapabilityError")
+                yield* recordPreflightExit(worker, roster, Exit.fail(failure));
+              yield* pauseWorker(worker, failure);
+              const requeued = yield* Ref.modify(reservation.state, (state) =>
+                state._tag === "Creating"
+                  ? [true, { _tag: "Pending" } satisfies ReservationState]
+                  : [false, state],
+              );
+              if (requeued) yield* Effect.tx(TxPriorityQueue.offer(pending, reservation));
+              return;
+            }
+            const grant = created.success;
+            yield* Effect.tx(
+              TxRef.update(paused, (current) => {
+                if (!current.has(worker)) return current;
+                const next = new Map(current);
+                next.delete(worker);
+                return next;
+              }),
+            );
+            if (Option.isSome(grant.checked))
+              yield* recordPreflightExit(worker, grant.checked.value, Exit.succeed(fullPreflight));
+            const lease = yield* makeLease(
+              worker,
+              Option.some(grant.hold),
+              Option.some(reservation.runId),
+            );
+            const assign = yield* Ref.modify(reservation.state, (state) =>
+              state._tag === "Creating"
+                ? [true, { _tag: "Assigned", lease } satisfies ReservationState]
+                : [false, state],
+            );
+            if (!assign) {
+              yield* Effect.logInfo(
+                "The Run stopped waiting while its machine was created; the machine is deleted and the slot is free again",
+                { ...fields, machine: grant.id },
+              );
+              return yield* lease.release;
+            }
+            yield* Effect.logInfo("Worker slot leased with a new machine", {
+              ...fields,
+              machine: grant.id,
+              provider: grant.provider,
+            });
+            yield* Deferred.succeed(reservation.deferred, lease);
+          }),
+        );
+      });
+
       const dispatch = Effect.forever(
         Effect.gen(function* () {
           const { worker, reservation, passed } = yield* nextAssignment;
-          const lease = yield* makeLease(worker);
+          // A reattached Attempt keeps its machine, so only a new Attempt gets one.
+          if (Option.isNone(reservation.worker) && (yield* provisions(worker))) {
+            const creating = yield* Ref.modify(reservation.state, (state) =>
+              state._tag === "Pending"
+                ? [true, { _tag: "Creating", worker } satisfies ReservationState]
+                : [false, state],
+            );
+            if (creating)
+              yield* FiberMap.run(
+                creations,
+                reservation.order,
+                provision(worker, reservation, passed),
+              );
+            else yield* releaseSlot(worker);
+            return;
+          }
+          const lease = yield* makeLease(worker, Option.none(), Option.some(reservation.runId));
           const assign = yield* Ref.modify(reservation.state, (state) =>
             state._tag === "Pending"
               ? [true, { _tag: "Assigned", lease } satisfies ReservationState]
@@ -560,8 +805,8 @@ export const stepExecutorLayer = (
       yield* Effect.forkScoped(dispatch);
 
       const occupy: StepExecutor["Service"]["occupy"] = Effect.fn("WorkerScheduler.occupy")(
-        function* (worker) {
-          yield* Effect.annotateCurrentSpan({ worker });
+        function* (worker, attemptId) {
+          yield* Effect.annotateCurrentSpan({ worker, attemptId });
           // The Attempt runs on the Worker even without a free slot, so count it now. A slot over
           // capacity retires when an Attempt there ends.
           const slots = yield* TxRef.modify(
@@ -586,7 +831,11 @@ export const stepExecutorLayer = (
               "An Attempt that already runs on the Worker occupies a slot beyond its max_concurrent_attempts; the Worker takes no new Attempt until enough of its Attempts end",
               fields,
             );
-          return yield* makeLease(worker);
+          const hold =
+            machines !== undefined && (yield* provisions(worker))
+              ? yield* machines.adopt(worker, attemptId)
+              : Option.none<MachineHold>();
+          return yield* makeLease(worker, hold);
         },
       );
 
@@ -683,6 +932,8 @@ export const stepExecutorLayer = (
                   ? [Option.some(current.lease), { _tag: "Canceled" } satisfies ReservationState]
                   : [Option.none<WorkerLease>(), { _tag: "Canceled" } satisfies ReservationState],
               ).pipe(
+                // Stops a machine creation for the Run, which deletes the machine and frees the slot.
+                Effect.tap(() => FiberMap.remove(creations, reservation.order)),
                 // Remove a canceled reservation from the queue, so one whose Worker never frees a
                 // slot doesn't stay there.
                 Effect.tap(() =>
@@ -696,6 +947,44 @@ export const stepExecutorLayer = (
           );
         },
       );
+
+      /**
+       * Gives a provisioned Worker's machine to the Attempt of `execution`: the machine its Run's
+       * lease created, or for a reattachment the machine it ran on before the restart.
+       */
+      const machineForAttempt = Effect.fn("WorkerScheduler.machineForAttempt")(function* (
+        execution: Parameters<StepExecutor["Service"]["execute"]>[0],
+      ) {
+        const worker = execution.attempt.worker;
+        if (machines === undefined || !(yield* provisions(worker))) return;
+        const attemptId = execution.attempt.id;
+        const fields = { runId: execution.run.id, attemptId, worker };
+        const machine = (yield* Ref.get(runMachines)).get(execution.run.id);
+        if (execution.reattach) {
+          const adopted = yield* machines.adopt(worker, attemptId);
+          if (machine !== undefined && Option.isNone(yield* Ref.get(machine)))
+            yield* Ref.set(machine, adopted);
+          return yield* Effect.logDebug("The reattached Attempt keeps its machine", {
+            ...fields,
+            found: Option.isSome(adopted),
+          });
+        }
+        const hold = machine === undefined ? Option.none() : yield* Ref.get(machine);
+        if (Option.isNone(hold))
+          return yield* new InfraFailure({
+            message: `Worker "${worker}" created no machine for the attempt`,
+            cause: new Error("no machine in the Run's lease"),
+          });
+        yield* machines.assign(hold.value, attemptId).pipe(
+          Effect.mapError(
+            (error) =>
+              new InfraFailure({
+                message: `Can't give the machine to the attempt: ${error.message}`,
+                cause: error,
+              }),
+          ),
+        );
+      });
 
       // Every Worker kind commits as the App's bot account; only exe.dev writes to GitHub through
       // another bot.
@@ -732,6 +1021,7 @@ export const stepExecutorLayer = (
           });
           const { settings } = (yield* instances.get).config;
           const { commitAuthor, botLogin } = yield* writerFor(execution.attempt.id);
+          yield* machineForAttempt(execution);
           const prepared = yield* executor
             .prepare(
               new CheckoutRequest({
@@ -796,6 +1086,8 @@ export const stepExecutorLayer = (
           Effect.map(([queued, current]) => queuedRuns(queued, current)),
         ),
         preflights: Ref.get(preflights).pipe(Effect.map((current) => [...current.values()])),
+        machines: machines === undefined ? Effect.succeed([]) : machines.machines,
+        provisioning: TxRef.get(paused).pipe(Effect.map((current) => [...current.values()])),
       });
 
       const stepExecutor = StepExecutor.of({
@@ -806,6 +1098,7 @@ export const stepExecutorLayer = (
         outcome: executor.outcome,
         reserve,
         occupy,
+        sweep: machines === undefined ? Effect.void : machines.sweep,
         intervene: executor.intervene,
         recover: (attempt, record) =>
           executor

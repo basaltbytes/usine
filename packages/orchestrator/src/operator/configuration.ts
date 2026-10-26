@@ -42,6 +42,14 @@ import { Context, DateTime, Effect, Layer, Match, Option, Schema } from "effect"
 import { LabelPreflightFinding } from "../label-reconciler.ts";
 import { PollingTriggers } from "../polling-triggers.ts";
 import { type PreflightCheck, WorkerStatus } from "../worker-status.ts";
+import {
+  MachineView,
+  machineView,
+  ProvisionerView,
+  ProvisioningPauseView,
+  provisioningPauseView,
+  provisionerView,
+} from "./machines.ts";
 
 /** A Loop's selector as written: the repositories and registry tags. */
 export class LoopSelectorView extends Schema.Class<LoopSelectorView>(
@@ -158,6 +166,14 @@ export class DegradedCheckView extends Schema.TaggedClass<DegradedCheckView>(
   "@usine/orchestrator/DegradedCheckView",
 )("Degraded", { checkedAt: Schema.String, message: Schema.String }) {}
 
+/**
+ * A check that the preflight left for later, at an ISO instant, such as a provisioned Worker's
+ * harness checks, which run on its first machine each day.
+ */
+export class DeferredCheckView extends Schema.TaggedClass<DeferredCheckView>(
+  "@usine/orchestrator/DeferredCheckView",
+)("Deferred", { checkedAt: Schema.String, message: Schema.String }) {}
+
 /** A preflight check that found a missing prerequisite or couldn't run, at an ISO instant. */
 export class FailedCheckView extends Schema.TaggedClass<FailedCheckView>(
   "@usine/orchestrator/FailedCheckView",
@@ -171,6 +187,7 @@ export class FailedCheckView extends Schema.TaggedClass<FailedCheckView>(
 export const PreflightCheckView = Schema.Union([
   PassedCheckView,
   DegradedCheckView,
+  DeferredCheckView,
   FailedCheckView,
 ]);
 export type PreflightCheckView = typeof PreflightCheckView.Type;
@@ -209,6 +226,16 @@ export class WorkerConfigurationView extends Schema.Class<WorkerConfigurationVie
   gateway: Schema.NullOr(GatewayView),
   /** An SSH Worker's Attempt container, used if its machine has Docker; null for the other kinds. */
   container: Schema.NullOr(ContainerView),
+  /** A provisioned SSH Worker's provisioner, which creates one machine per Attempt, or null. */
+  provisioner: Schema.NullOr(ProvisionerView).pipe(
+    Schema.withConstructorDefault(Effect.succeed(null)),
+  ),
+  /** A provisioned Worker's machines in flight, oldest first. */
+  machines: Schema.Array(MachineView).pipe(Schema.withConstructorDefault(Effect.succeed([]))),
+  /** A provisioned Worker's last failed machine creation, or null after a success. */
+  provisioning: Schema.NullOr(ProvisioningPauseView).pipe(
+    Schema.withConstructorDefault(Effect.succeed(null)),
+  ),
   /** Null while the scheduler runs no Attempts, as in setup mode. */
   slots: Schema.NullOr(WorkerSlotsView),
   /**
@@ -323,6 +350,8 @@ export const checkView = (check: PreflightCheck): PreflightCheckView =>
     Passed: ({ checkedAt }) => new PassedCheckView({ checkedAt: DateTime.formatIso(checkedAt) }),
     Degraded: ({ checkedAt, message }) =>
       new DegradedCheckView({ checkedAt: DateTime.formatIso(checkedAt), message }),
+    Deferred: ({ checkedAt, message }) =>
+      new DeferredCheckView({ checkedAt: DateTime.formatIso(checkedAt), message }),
     Failed: ({ checkedAt, capability, message }) =>
       new FailedCheckView({
         checkedAt: DateTime.formatIso(checkedAt),
@@ -334,7 +363,8 @@ export const checkView = (check: PreflightCheck): PreflightCheckView =>
 const workerConnection = (worker: Worker) =>
   worker.kind === "ssh"
     ? {
-        destination: worker.destination,
+        destination: Option.getOrNull(worker.destination),
+        provisioner: provisionerView(worker),
         port: Option.getOrNull(worker.port),
         identityFile: Option.getOrNull(worker.identityFile),
         root: worker.root,
@@ -358,6 +388,7 @@ const workerConnection = (worker: Worker) =>
       }
     : {
         destination: null,
+        provisioner: null,
         port: null,
         identityFile: null,
         root: null,
@@ -434,8 +465,15 @@ const makeOperatorConfiguration = Effect.gen(function* () {
 
   const view = Effect.fn("OperatorConfiguration.view")(function* (instance: LoadedInstance) {
     const { config } = instance;
-    const [states, latestPoll, slots, preflights] = yield* Effect.all(
-      [controls.states, polling.latest, workerStatus.slots, workerStatus.preflights] as const,
+    const [states, latestPoll, slots, preflights, inFlight, pauses] = yield* Effect.all(
+      [
+        controls.states,
+        polling.latest,
+        workerStatus.slots,
+        workerStatus.preflights,
+        workerStatus.machines,
+        workerStatus.provisioning,
+      ] as const,
       { concurrency: "unbounded" },
     );
     const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
@@ -524,6 +562,13 @@ const makeOperatorConfiguration = Effect.gen(function* () {
             : Option.getOrNull(Option.map(preflight.prerequisites, checkView)),
         harnesses: (preflight?.harnesses ?? []).map(
           ({ harness, check }) => new HarnessPreflightView({ harness, check: checkView(check) }),
+        ),
+        machines: inFlight.filter((machine) => machine.worker === worker.name).map(machineView),
+        provisioning: Option.getOrNull(
+          Option.map(
+            Option.fromNullishOr(pauses.find((pause) => pause.worker === worker.name)),
+            provisioningPauseView,
+          ),
         ),
       });
     });

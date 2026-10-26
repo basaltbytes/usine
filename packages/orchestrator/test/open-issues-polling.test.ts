@@ -115,6 +115,7 @@ const gatedExecutor = Layer.succeed(StepExecutor)({
   intervene: () => Effect.void,
   interrupt: () => Effect.void,
   occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
+  sweep: Effect.void,
   reserve: () => Effect.die("an approval-gated test run must not reserve a worker"),
   execute: () => Effect.die("an approval-gated test run must not start an Attempt"),
 });

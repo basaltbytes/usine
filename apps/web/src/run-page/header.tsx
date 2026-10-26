@@ -19,7 +19,12 @@ import { PullRequestMarks } from "@/components/item/pull-request-marks";
 import { PageFact, PageHeader } from "@/components/page";
 import { StateMark } from "@/components/status-badge";
 import { useNow } from "@/hooks/use-now";
-import { durationLabel, runStateLine } from "../operator-copy.ts";
+import {
+  durationLabel,
+  providerLabel,
+  providerMachineNoun,
+  runStateLine,
+} from "../operator-copy.ts";
 import { type RunItem, runHeaderItems, runItem } from "./item.ts";
 import { UsageFact } from "./usage.tsx";
 
@@ -53,6 +58,21 @@ const Duration = ({ duration }: { readonly duration: RunDurationView }) => (
     )}
   </span>
 );
+
+/** Renders the provider ID of the machine that the newest Attempt runs on, if it has one. */
+const AttemptMachine = ({ detail }: { readonly detail: RunDetailView }) => {
+  const { machine, run } = detail;
+  if (machine === null || machine.state !== "ready" || machine.id === null) return null;
+  if (machine.attemptId === null || machine.attemptId !== run.attempts.at(-1)?.id) return null;
+  return (
+    <span
+      className="font-mono text-xs"
+      title={`${providerLabel[machine.provider]} ${providerMachineNoun[machine.provider]} ${machine.id}`}
+    >
+      {machine.id}
+    </span>
+  );
+};
 
 /**
  * Renders a Run's header: the Loop and Agent, the Task's name, then the state, the Run's pull
@@ -111,7 +131,7 @@ export const RunHeader = ({
             style={shared ? { viewTransitionName: "run-state" } : undefined}
           >
             <StateMark state={run.state} />
-            {runStateLine(run, detail.unconfirmedStop)}
+            {runStateLine(run, detail.unconfirmedStop, detail.machine)}
           </span>
           <PullRequestMarks pullRequests={Option.toArray(items.pullRequest)} />
           {detail.worker !== null && (
@@ -126,6 +146,7 @@ export const RunHeader = ({
               )}
               <PageFact icon={HardDrivesIcon} title="Worker">
                 {detail.worker}
+                <AttemptMachine detail={detail} />
               </PageFact>
             </>
           )}
