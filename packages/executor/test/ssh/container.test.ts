@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { RemoteShell } from "@usine/agents/child-host";
+import { CHILD_KILL_SCRIPT, RemoteShell } from "@usine/agents/child-host";
 import { Agent } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptId } from "@usine/core/attempt";
@@ -73,6 +73,27 @@ const mountsOf = (words: ReadonlyArray<string>) =>
 
 const linesOf = (machine: ReturnType<typeof fakeMachine>) =>
   machine.state.calls.map(({ line }) => line);
+
+/** Returns the index of each step that releases the Attempt's resources, or -1 if it didn't run. */
+const releaseSteps = (machine: ReturnType<typeof fakeMachine>) => {
+  const lines = linesOf(machine);
+  return {
+    childrenStopped: lines.findIndex((line) => wordsOf(line).includes(CHILD_KILL_SCRIPT)),
+    checkoutGone: lines.findIndex(
+      (line) => line.includes('rm -f "$2"') && line.includes(`'${WORKTREE}' '${MARKER}'`),
+    ),
+    containerGone: lines.indexOf(`exec 'docker' 'rm' '--force' '${CONTAINER}'`),
+    credentialGone: lines.indexOf(`exec 'rm' '-rf' '${CREDENTIALS}'`),
+  };
+};
+
+/** Asserts that each named call index exists and comes after the one before it. */
+const assertInOrder = (steps: ReadonlyArray<readonly [string, number]>) =>
+  steps.forEach(([name, index], position) => {
+    assert(index >= 0, `${name} didn't run`);
+    const previous = steps[position - 1];
+    if (previous !== undefined) assert(index > previous[1], `${name} ran before ${previous[0]}`);
+  });
 
 describe("SSH Worker with Docker", () => {
   // turbo.json lists the Dockerfile as an input of this package's tests.
@@ -161,11 +182,7 @@ describe("SSH Worker with Docker", () => {
         );
         assert(marked >= 0 && marked < started, "the marker exists before the container");
         assert.deepStrictEqual([...machine.state.markers], [], "the marker goes with the checkout");
-        const checkoutGone = lines.findIndex(
-          (line) => line.includes('rm -f "$2"') && line.includes(`'${WORKTREE}' '${MARKER}'`),
-        );
-        const containerGone = lines.indexOf(`exec 'docker' 'rm' '--force' '${CONTAINER}'`);
-        const credentialGone = lines.indexOf(`exec 'rm' '-rf' '${CREDENTIALS}'`);
+        const { checkoutGone, containerGone, credentialGone } = releaseSteps(machine);
         assert(
           checkoutGone >= 0 && containerGone > checkoutGone,
           "the container outlives the checkout",
@@ -353,7 +370,7 @@ describe("SSH Worker with Docker", () => {
   );
 
   it.effect(
-    "salvages an unsuccessful Attempt in its container before removing the container",
+    "ends an unsuccessful Attempt by stopping its children and salvaging in its container, then removes the checkout, the container, and the credential",
     () => {
       const machine = dockerMachine();
       return Effect.gen(function* () {
@@ -365,10 +382,22 @@ describe("SSH Worker with Docker", () => {
           .launch({ ...sink, salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)) })
           .pipe(Effect.flip);
         assert.strictEqual(recorded[0]?._tag, "Pushed");
-        const push = machine.state.calls.findIndex(({ line }) => line.includes("'push' '--force'"));
-        assert.strictEqual(machine.state.calls[push]?.container, CONTAINER);
-        const lines = linesOf(machine);
-        assert(lines.indexOf(`exec 'docker' 'rm' '--force' '${CONTAINER}'`) > push);
+        const salvage = machine.state.calls.flatMap(({ line, container }, index) =>
+          line.includes(`'-C' '${WORKTREE}'`) ? [{ line, container, index }] : [],
+        );
+        for (const { line, container } of salvage)
+          assert.strictEqual(container, CONTAINER, `${line} runs in the container`);
+        const push = salvage.find(({ line }) => line.includes("'push' '--force'"));
+        const { childrenStopped, checkoutGone, containerGone, credentialGone } =
+          releaseSteps(machine);
+        assertInOrder([
+          ["the children's stop", childrenStopped],
+          ["the salvage's first git command", salvage[0]?.index ?? -1],
+          ["the salvage push", push?.index ?? -1],
+          ["the checkout's removal", checkoutGone],
+          ["the container's removal", containerGone],
+          ["the credential's removal", credentialGone],
+        ]);
       }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider(), fails)));
     },
   );
