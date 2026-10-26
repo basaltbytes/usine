@@ -90,27 +90,40 @@ else
 fi
 
 # Runs a command as usine on the temporary server, which gets a known-hosts file of its own.
+# Exits with 255 if the connection fails, or stops answering for about a minute.
 remote() {
   if [ -n "$NETWORK" ]; then set -- -J "$GATEWAY_SSH" "$@"; fi
-  ssh -o BatchMode=yes -o ConnectTimeout=10 -i "$identity" -o IdentitiesOnly=yes \
+  ssh -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
+    -i "$identity" -o IdentitiesOnly=yes \
     -o UserKnownHostsFile="$work/known_hosts" -o StrictHostKeyChecking=accept-new "$@"
 }
 
-echo "Created $SERVER_NAME ($SERVER_TYPE, $IMAGE, $LOCATION) at $address. Waiting for cloud-init, which takes a few minutes." >&2
-tries=0
+wait_minutes=20
+deadline=$(($(date +%s) + wait_minutes * 60))
+echo "Created $SERVER_NAME ($SERVER_TYPE, $IMAGE, $LOCATION) at $address. Waiting up to $wait_minutes minutes for SSH and cloud-init, which take a few minutes." >&2
 until remote "usine@$address" true 2> /dev/null; do
-  tries=$((tries + 1))
-  [ "$tries" -lt 60 ] || { echo "$SERVER_NAME didn't accept SSH as usine within 10 minutes" >&2; exit 1; }
+  [ "$(date +%s)" -lt "$deadline" ] || { echo "$SERVER_NAME didn't accept SSH as usine within $wait_minutes minutes" >&2; exit 1; }
   sleep 10
 done
-waited=0
-remote "usine@$address" cloud-init status --wait > /dev/null || waited=$?
+# cloud-init loads the server's nftables rules at the end of its run, which can drop the connection that waits for it.
+while :; do
+  remaining=$((deadline - $(date +%s)))
+  [ "$remaining" -gt 0 ] || { waited=124; break; }
+  waited=0
+  remote "usine@$address" timeout "$remaining" cloud-init status --wait > /dev/null || waited=$?
+  [ "$waited" -eq 255 ] || break
+  echo "Lost the SSH connection to $SERVER_NAME while waiting for cloud-init; reconnecting" >&2
+  sleep 10
+done
 case "$waited" in
   0) ;;
   2) echo "cloud-init finished with recoverable errors on $SERVER_NAME" >&2 ;;
   *)
     remote "usine@$address" 'cloud-init status --long; tail -n 40 /var/log/cloud-init-output.log' >&2 || true
-    echo "cloud-init failed on $SERVER_NAME" >&2
+    case "$waited" in
+      124) echo "cloud-init didn't finish on $SERVER_NAME within $wait_minutes minutes" >&2 ;;
+      *) echo "cloud-init failed on $SERVER_NAME" >&2 ;;
+    esac
     exit 1
     ;;
 esac
