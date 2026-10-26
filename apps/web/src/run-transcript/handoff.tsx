@@ -42,6 +42,13 @@ export const SessionHandoff = ({
     return <p className="text-xs text-muted-foreground">No saved harness session</p>;
   const { resume, saved } = handoff.value;
   const { worker, workerAccess } = attempt;
+  if (workerAccess?._tag === "Sandbox")
+    return (
+      <p className="text-xs text-muted-foreground">
+        Session <span className="font-mono">{saved.id}</span> ran in a Cloudflare sandbox, which
+        accepts no terminal and is destroyed at attempt cleanup
+      </p>
+    );
   const command = fromOperatorTerminal(
     workerAccess,
     `cd -- ${shellArgument(saved.cwd)} && ${resume} ${shellArgument(saved.id)}`,

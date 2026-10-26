@@ -21,6 +21,7 @@ export const workerKindLabel = {
   local: "Local",
   "exe.dev": "exe.dev",
   ssh: "SSH",
+  cloudflare: "Cloudflare",
 } satisfies Record<WorkerKind, string>;
 
 export const approvalLabel = {
@@ -69,6 +70,8 @@ export const workerPlace = (worker: WorkerConfigurationView): string => {
           : `boat ${provisioner.size}`;
       return `${machine}, one machine per attempt`;
     }
+    case "cloudflare":
+      return "A Cloudflare sandbox per attempt";
   }
 };
 

@@ -18,6 +18,10 @@
     "packages/agents": {
       "entry": ["protocol-conformance/check.ts"]
     },
+    "packages/cloudflare": {
+      "entry": ["src/worker.ts"],
+      "ignoreDependencies": ["cloudflare"]
+    },
     "tooling/oxlint": {
       "project": ["**/*.ts"]
     },

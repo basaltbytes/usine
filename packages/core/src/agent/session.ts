@@ -41,8 +41,9 @@ export class ChildSession extends Schema.TaggedClass<ChildSession>("Agent/ChildS
     agent: AgentName,
     brain: BrainSpec,
     /**
-     * The credential kind the Gateway used for the child's model requests (ADR 0027), or `None`
-     * if the child used its harness's own login or the record is older.
+     * The credential kind the Gateway (ADR 0027) or a Cloudflare Worker's outbound handler used
+     * for the child's model requests, or `None` if the child used its harness's own login or the
+     * record is older.
      */
     gatewayCredential: Schema.OptionFromOptionalKey(GatewayCredentialKind).pipe(
       Schema.withConstructorDefault(Effect.succeed(Option.none<GatewayCredentialKind>())),
@@ -164,10 +165,11 @@ export const BillingPool = Schema.Literals(["apiKeys", "claudePlan", "chatgptPla
 export type BillingPool = typeof BillingPool.Type;
 
 /**
- * Returns the billing pool of a session with `brain` and the Gateway credential kind, if any.
+ * Returns the billing pool of a session with `brain` and the kind of the credential that a
+ * Gateway or a Cloudflare Worker's outbound handler injects, if any.
  *
- * - Claude Code: `apiKeys` if the Gateway injects an API key, otherwise `claudePlan` (ADR 0013).
- * - Codex: `apiKeys` if the Gateway injects an API key, otherwise `chatgptPlan`.
+ * - Claude Code: `apiKeys` if an API key is injected, otherwise `claudePlan` (ADR 0013).
+ * - Codex: `apiKeys` if an API key is injected, otherwise `chatgptPlan`.
  * - Pi: `chatgptPlan` for `openai-codex/` models, otherwise `apiKeys` (ADR 0021).
  */
 export const brainPool = (

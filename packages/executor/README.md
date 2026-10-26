@@ -1,6 +1,6 @@
 # @usine/executor
 
-Worker execution for [usine](https://github.com/basaltbytes/usine). The platform-free root defines worker preflight, scoped attempt preparation, and cancellation, plus the credential provider, worker capability errors, and adapter-neutral request types. Each prepared attempt runs its Pi parent in this process as a durable task, tells it where the worker runs children (local processes, or SSH on an exe.dev VM or any Linux machine), and releases its resources at completion or when its scope closes. [Attempt execution](https://docs.usine.dev/architecture/execution/) and [Workers and the gateway](https://docs.usine.dev/architecture/workers-and-gateway/) cover the executors.
+Worker execution for [usine](https://github.com/basaltbytes/usine). The platform-free root defines worker preflight, scoped attempt preparation, and cancellation, plus the credential provider, worker capability errors, and adapter-neutral request types. Each prepared attempt runs its Pi parent in this process as a durable task, tells it where the worker runs children (local processes, SSH on an exe.dev VM or any Linux machine, or a Cloudflare sandbox), and releases its resources at completion or when its scope closes. [Attempt execution](https://docs.usine.dev/architecture/execution/) and [Workers and the gateway](https://docs.usine.dev/architecture/workers-and-gateway/) cover the executors.
 
 0.x APIs can change. Supply `effect` at the workspace's pinned version.
 
@@ -199,6 +199,43 @@ const executorLayer = layer({
         memoryMib: ContainerMemoryMib.make(4096),
         pids: ContainerPids.make(4096),
       },
+    },
+  ],
+})
+```
+
+## Cloudflare worker
+
+`@usine/executor/cloudflare` runs the same contract in Cloudflare sandboxes, through the Worker that the operator deploys from `@usine/cloudflare` ([#551](https://github.com/basaltbytes/usine/issues/551)). Each worker address has the Worker's origin, the Cloudflare Access service token, the image name, the instance type, and the provider API keys. The executor calls the Worker's sandbox API with `HttpApiClient` and the token's headers; a request fails with `SandboxRequestError`, whose message contains no credential.
+
+Each attempt gets its own sandbox, named `<instance>.<worker>.<attempt>`, where `CloudflareExecutorOptions.instance` identifies the usine instance, so that instances that share a deployed Worker never use or remove each other's sandboxes. Prepare creates it without credentials and runs the assigned harness's version probe in it, as preflight does, so an unsupported Codex fails with a `WorkerCapabilityError` before any token is issued. Then it gives the sandbox the attempt's installation token and the provider keys, which only the Worker's outbound handlers hold, and clones and checks out under `/home/usine/workspace` in the sandbox. Renewal publishes a new token to the sandbox before each expiry. Each credential change carries the time the executor issued it, later than the change before even if the clock goes back, and the Worker refuses credentials older than the ones the sandbox holds, so a renewal that's still on its way can't undo the revocation that follows it. Every child, git, gh, and probe command runs through the sandbox shell, `cloudflare/shell/shell.js`: a stand-in for `ssh` that the executor gives `RemoteShell` as its SSH command. It opens the Worker's exec WebSocket, relays stdin, stdout, and stderr, and exits with the command's exit code, or 255 if it can't reach the sandbox. If the stream drops after the command started, it attaches to the command's process files from the bytes it already wrote, up to five times. The Worker's origin and the token reach it in its environment, never in its arguments.
+
+Cleanup stops every command in the sandbox, with the processes that the commands left running (`POST .../stop`), salvages and removes the checkout, and destroys the sandbox. A checkout kept for reattachment, or with unpushed work, keeps its sandbox: the executor holds it (`POST .../hold`), so the Worker keeps its container running until usine reconciles or destroys it, and replaces its credentials with none, so its handlers refuse GitHub and every provider. A reattached attempt reads its stored request, checks that its checkout exists in the running sandbox, stops the commands left from before the restart, and publishes a new token. If the reattachment fails after that check, for example because no token can be issued, the executor holds the sandbox with its checkout, and the engine's `recover` salvages it. A process's first use of a worker lists the Worker's sandboxes for this instance and worker, and destroys each one that no attempt of this process uses and that holds no checkout; one with a checkout stays for `recover`.
+
+While an attempt runs, the executor asks the Worker every 30 seconds (`CloudflareExecutorOptions.drainPollInterval`) whether the platform sent the sandbox's container SIGTERM, which it does up to 15 minutes before it stops the container. If it did, the executor drains the attempt through the durable session: the attempt fails with a retryable `InfraFailure`, and its release salvages the checkout and destroys the sandbox, so the next attempt resumes from the salvage on a new sandbox.
+
+Preflight calls `GET /v1/health`, checks that the Worker has the image, that the worker has an API key for each harness in the roster (`anthropic` for Claude Code, `openai` for Codex; Pi can't run), and runs `claude --version` and `codex --version` in a preflight sandbox that it destroys afterwards. A refused token is a `credentials` capability error, a missing image a `toolchain` one, and a missing key a `harness-login` one. Each child's `gatewayCredential` is `api-key` when the worker holds its harness's key, so usage counts it in the API keys pool.
+
+The Cloudflare layer needs a `ChildProcessSpawner`, a `CredentialProvider`, an `AttemptRuntime`, a `ClaudeLoginLock`, and an `HttpClient` for the sandbox API.
+
+```ts
+import { CloudflareImageName, WorkerName } from "@usine/core/worker"
+import { layer } from "@usine/executor/cloudflare"
+import { Redacted } from "effect"
+
+const executorLayer = layer({
+  instance: "github-app-123",
+  workers: [
+    {
+      name: WorkerName.make("cf-one"),
+      workerUrl: new URL("https://usine-sandboxes.acme.workers.dev"),
+      accessClientId: Redacted.make(process.env.USINE_CF_ACCESS_CLIENT_ID ?? ""),
+      accessClientSecret: Redacted.make(process.env.USINE_CF_ACCESS_CLIENT_SECRET ?? ""),
+      image: CloudflareImageName.make("usine"),
+      instanceType: "standard-4",
+      providers: [
+        { provider: "anthropic", apiKey: Redacted.make(process.env.ANTHROPIC_API_KEY ?? "") },
+      ],
     },
   ],
 })

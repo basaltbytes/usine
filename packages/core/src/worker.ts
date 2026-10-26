@@ -8,13 +8,13 @@ export const WorkerName = Schema.String.check(
 
 export type WorkerName = typeof WorkerName.Type;
 
-export const WORKER_KINDS = ["local", "exe.dev", "ssh"] as const;
+export const WORKER_KINDS = ["local", "exe.dev", "ssh", "cloudflare"] as const;
 export const WorkerKind = Schema.Literals(WORKER_KINDS);
 export type WorkerKind = typeof WorkerKind.Type;
 
 /**
- * The GitHub bot login that an Attempt writes as: the factory's GitHub App on local and SSH
- * Workers, or the exe.dev GitHub integration on exe.dev Workers (ADR 0011).
+ * The GitHub bot login that an Attempt writes as: the factory's GitHub App on local, SSH, and
+ * Cloudflare Workers, or the exe.dev GitHub integration on exe.dev Workers (ADR 0011).
  */
 export const BotLogin = Schema.String.check(
   Schema.isPattern(/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\[bot\]$/u, {
@@ -110,9 +110,10 @@ export const GatewayLlmProvider = Schema.Literals(["anthropic", "openai"]);
 export type GatewayLlmProvider = typeof GatewayLlmProvider.Type;
 
 /**
- * The kind of LLM provider credential that the Gateway stores, as reported by its admin API.
- * `api-key` is billed at API rates; `subscription` uses a plan: a Claude plan from
- * `claude setup-token`, or a ChatGPT plan from `codex login`
+ * The kind of LLM provider credential that the Gateway stores, as reported by its admin API, or
+ * that a Cloudflare Worker's outbound handler holds, always `api-key`. `api-key` is billed at
+ * API rates; `subscription` uses a plan: a Claude plan from `claude setup-token`, or a ChatGPT
+ * plan from `codex login`
  * ([ADR 0013](../../../docs/adr/0013-cost-accounting-native-meters-guardrails.md)).
  */
 export const GatewayCredentialKind = Schema.Literals(["api-key", "subscription"]);
@@ -148,6 +149,39 @@ export const ContainerPids = Schema.Int.check(Schema.isGreaterThanOrEqualTo(64))
   Schema.brand("ContainerPids"),
 );
 export type ContainerPids = typeof ContainerPids.Type;
+
+/**
+ * A Cloudflare container instance type. From `lite` (1/16 vCPU, 256 MiB, 2 GB disk) to
+ * `standard-4` (4 vCPU, 12 GiB, 20 GB disk).
+ */
+export const CloudflareInstanceType = Schema.Literals([
+  "lite",
+  "basic",
+  "standard-1",
+  "standard-2",
+  "standard-3",
+  "standard-4",
+]);
+export type CloudflareInstanceType = typeof CloudflareInstanceType.Type;
+
+/**
+ * The name of an image in the Cloudflare Worker's `containers[].images`, which the Worker starts
+ * each Attempt's sandbox from.
+ */
+export const CloudflareImageName = Schema.String.check(
+  Schema.isPattern(/^[A-Za-z_][A-Za-z0-9_]{0,62}$/u, {
+    message:
+      "Expected an image name of letters, digits, and underscores that doesn't start with a digit",
+  }),
+).pipe(Schema.brand("CloudflareImageName"));
+export type CloudflareImageName = typeof CloudflareImageName.Type;
+
+/**
+ * An LLM provider whose API key the Cloudflare Worker's outbound handlers hold for an Attempt:
+ * `anthropic` for Claude Code and `openai` for Codex.
+ */
+export const CloudflareLlmProvider = Schema.Literals(["anthropic", "openai"]);
+export type CloudflareLlmProvider = typeof CloudflareLlmProvider.Type;
 
 /** The cloud provider that creates one machine per Attempt for a provisioned SSH Worker. */
 export const MachineProvider = Schema.Literals(["hetzner", "boat"]);

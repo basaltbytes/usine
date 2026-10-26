@@ -1,25 +1,26 @@
 ---
 title: Add a worker
-description: Configure local and SSH workers in usine.yaml, pass worker preflight, and run SSH workers on a private network behind a gateway.
+description: Configure local, SSH, and Cloudflare workers in usine.yaml, pass worker preflight, and run SSH workers on a private network behind a gateway.
 sidebar:
   order: 5
 ---
 
 import { Steps } from "@astrojs/starlight/components";
 
-A worker is the machine that has an attempt's checkout and runs its Claude Code or Codex children. The Pi parent always runs in the orchestrator. The [`workers`](/reference/configuration/usine-yaml/#workers) list of `usine.yaml` declares the workers.
+A worker is the machine or sandbox that has an attempt's checkout and runs its Claude Code or Codex children. The Pi parent always runs in the orchestrator. The [`workers`](/reference/configuration/usine-yaml/#workers) list of `usine.yaml` declares the workers.
 
 ## Worker kinds
 
-| `kind`                   | Where children run                                                                         | GitHub credential on the machine                                     |
-| ------------------------ | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
-| `local`                  | as processes on the orchestrator machine                                                   | a token file in a private temporary folder, removed with the attempt |
-| `ssh`                    | on a Linux machine, in the attempt's own Docker container                                  | a token file under the worker's root, removed with the attempt       |
-| `ssh` with `gateway`     | on a Linux machine with no public address, through a gateway                               | none: the gateway adds the token to the machine's GitHub requests    |
-| `ssh` with `provisioner` | on a machine that Hetzner Cloud or Boat creates for the attempt and usine deletes after it | as for `ssh`, or `ssh` with `gateway` on Hetzner Cloud               |
-| `exe.dev`                | not available: `usine up` refuses this kind at this commit                                 |                                                                      |
+| `kind`                   | Where children run                                                                         | GitHub credential on the machine                                             |
+| ------------------------ | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| `local`                  | as processes on the orchestrator machine                                                   | a token file in a private temporary folder, removed with the attempt         |
+| `ssh`                    | on a Linux machine, in the attempt's own Docker container                                  | a token file under the worker's root, removed with the attempt               |
+| `ssh` with `gateway`     | on a Linux machine with no public address, through a gateway                               | none: the gateway adds the token to the machine's GitHub requests            |
+| `ssh` with `provisioner` | on a machine that Hetzner Cloud or Boat creates for the attempt and usine deletes after it | as for `ssh`, or `ssh` with `gateway` on Hetzner Cloud                       |
+| `cloudflare`             | in a Cloudflare container per attempt, through the sandbox Worker that you deploy          | none: the Worker's outbound handlers add the token and the provider API keys |
+| `exe.dev`                | not available: `usine up` refuses this kind at this commit                                 |                                                                              |
 
-[Add a provisioned worker](/guides/add-a-provisioned-worker/) covers `ssh` workers with a `provisioner`. All workers in one `usine.yaml` must have the same kind. `max_concurrent_attempts` sets how many attempts a worker runs at once, and the worker needs at least 1.5 GiB of memory per attempt, 3 GiB to avoid a warning.
+[Add a provisioned worker](/guides/add-a-provisioned-worker/) covers `ssh` workers with a `provisioner`, and [Run attempts in Cloudflare sandboxes](/guides/cloudflare-sandboxes/) covers `cloudflare` workers. All workers in one `usine.yaml` must have the same kind. `max_concurrent_attempts` sets how many attempts a worker runs at once, and the worker needs at least 1.5 GiB of memory per attempt, 3 GiB to avoid a warning.
 
 ## Local workers
 
@@ -47,6 +48,7 @@ Worker [preflight](/reference/configuration/agent-files/#preflight) never instal
 | `local`              | `git --version`, the memory for `max_concurrent_attempts`, and each harness with the children's environment ([harness checks](/reference/configuration/agent-files/#preflight)).                                                                                                               |
 | `ssh`                | The SSH connection, a writable `root`, `git --version`, the memory for `max_concurrent_attempts`, Docker and the attempt image, and each harness in a container from that image. Without Docker, each harness over SSH, and the worker is degraded. A Pi agent in the roster fails this check. |
 | `ssh` with `gateway` | The `ssh` checks, and also: the admin API accepts the admin token, the worker's sshd accepts the caller token variables, the worker can connect to `git.<domain>`, and for each harness that uses its login on the worker, the login's hosts respond through the forward proxy.                |
+| `cloudflare`         | The Worker's health route accepts the Access service token, the Worker has the image, the worker has an API key for each harness, and each harness's version in a preflight sandbox ([details](/guides/cloudflare-sandboxes/#preflight)). A Pi agent in the roster fails this check.           |
 
 The `memory` check is described under [`workers`](/reference/configuration/usine-yaml/#workers).
 

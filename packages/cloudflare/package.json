@@ -1,0 +1,62 @@
+{
+  "name": "@usine/cloudflare",
+  "version": "0.0.0",
+  "description": "The Cloudflare Worker that runs each usine Attempt in its own sandbox, and the sandbox API the executor calls.",
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/basaltbytes/usine.git",
+    "directory": "packages/cloudflare"
+  },
+  "files": [
+    "dist",
+    "!dist/tsconfig.tsbuildinfo",
+    "image",
+    "wrangler.jsonc"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/api/api.d.ts",
+      "default": "./dist/api/api.js"
+    },
+    "./harness": {
+      "types": "./dist/api/harness.d.ts",
+      "default": "./dist/api/harness.js"
+    },
+    "./stream": {
+      "types": "./dist/api/stream.d.ts",
+      "default": "./dist/api/stream.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "check": "tsc -p tsconfig.check.json",
+    "test": "vitest run",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@cloudflare/sandbox": "1.0.3",
+    "@usine/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261019.1",
+    "@effect/vitest": "catalog:",
+    "@types/node": "^26.6.5",
+    "@usine/tsconfig": "workspace:*",
+    "effect": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "wrangler": "4.151.2"
+  },
+  "peerDependencies": {
+    "effect": "catalog:"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

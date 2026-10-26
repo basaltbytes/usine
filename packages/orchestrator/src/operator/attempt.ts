@@ -108,11 +108,20 @@ export class ProvisionedWorkerAccess extends Schema.TaggedClass<ProvisionedWorke
   "@usine/orchestrator/ProvisionedWorkerAccess",
 )("Provisioned", { provider: MachineProvider }) {}
 
+/**
+ * A Worker that runs each Attempt in its own Cloudflare sandbox, which accepts no operator terminal
+ * and is destroyed when the Attempt ends.
+ */
+export class SandboxWorkerAccess extends Schema.TaggedClass<SandboxWorkerAccess>(
+  "@usine/orchestrator/SandboxWorkerAccess",
+)("Sandbox", {}) {}
+
 /** How the operator accesses a Worker's machine, from its `usine.yaml` entry. */
 export const WorkerAccess = Schema.Union([
   LocalWorkerAccess,
   SshWorkerAccess,
   ProvisionedWorkerAccess,
+  SandboxWorkerAccess,
 ]);
 export type WorkerAccess = typeof WorkerAccess.Type;
 

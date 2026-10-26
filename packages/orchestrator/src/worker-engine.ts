@@ -3,12 +3,18 @@ import type { BrainSpec } from "@usine/core/agent/brain";
 import type { InstanceDirectory } from "@usine/core/instance";
 import { GitHubCredentials } from "@usine/github/github-app";
 import { Effect, Layer, Option } from "effect";
+import {
+  cloudflareWorkerAddressesOf,
+  cloudflareWorkersOf,
+  layer as cloudflareLayer,
+} from "./cloudflare.ts";
 import { layer as localLayer } from "./local.ts";
 import { layer as sshLayer, sshWorkerAddressesOf, sshWorkersOf } from "./ssh.ts";
 
 /**
- * Provides the engine for the Workers in `config`: the SSH executor if every Worker is `ssh`,
- * otherwise the local one. Fails at startup with `UnsupportedWorkerError` on any other mix.
+ * Provides the engine for the Workers in `config`: the SSH executor if every Worker is `ssh`, the
+ * Cloudflare executor if every Worker is `cloudflare`, otherwise the local one. Fails at startup
+ * with `UnsupportedWorkerError` on any other mix.
  */
 export const workerEngineLayer = (
   instanceDirectory: InstanceDirectory,
@@ -41,6 +47,18 @@ export const workerEngineLayer = (
           instance,
           knownHostsDirectory: `${instanceDirectory}/.usine/known-hosts`,
         });
+      }
+      if (cloudflareWorkersOf(config).length === config.workers.length) {
+        const addresses = yield* cloudflareWorkerAddressesOf(config);
+        // The GitHub App is the instance's identity (ADR 0011).
+        const { appId } = yield* GitHubCredentials;
+        const instance = `github-app-${String(appId)}`;
+        yield* Effect.logInfo("Running Attempts in Cloudflare sandboxes", {
+          workers,
+          instance,
+          workerUrls: addresses.map(({ workerUrl }) => workerUrl.origin).join(","),
+        });
+        return cloudflareLayer(instanceDirectory, config, brains, { workers: addresses, instance });
       }
       yield* Effect.logInfo("Running Attempts with the local executor", { workers });
       return localLayer(instanceDirectory, config, brains, {});

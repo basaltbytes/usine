@@ -1,0 +1,160 @@
+---
+title: Run attempts in Cloudflare sandboxes
+description: Deploy the usine sandbox Worker to your Cloudflare account, declare cloudflare workers in usine.yaml, and run each attempt in its own container.
+sidebar:
+  order: 6
+---
+
+import { Steps } from "@astrojs/starlight/components";
+
+A `cloudflare` worker runs each attempt in its own Cloudflare container, called a sandbox. You deploy the sandbox Worker from the `@usine/cloudflare` package to your Cloudflare account. The orchestrator calls it over HTTPS with a Cloudflare Access service token. The Pi parent still runs in the orchestrator, and each child, git, and gh command runs in the attempt's sandbox.
+
+The container has no credential and no internet access. Its requests for GitHub and the LLM providers go to outbound handlers in the Worker, which add the attempt's installation token or the provider's API key. The container reaches no other host, except the hosts in the Worker's `ALLOWED_HOSTS`.
+
+## What a sandbox does
+
+| Stage                   | What happens                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Preparation             | The executor creates the sandbox `<instance>.<worker>.<attempt>` from the image that `image` names, with the `instance_type` of the worker and no credential. It runs `claude --version` or `codex --version` in the sandbox for the attempt's harness, as preflight does, and an unsupported Codex version fails the attempt without a retry. Then it gives the outbound handlers the attempt's installation token and the provider keys, and clones the repository into `/home/usine/workspace` in the sandbox. |
+| Each command            | The executor runs the command through the Worker's exec stream, with stdin, stdout, stderr, and the exit code on one WebSocket. The command writes its process ID, output, and exit code to files in the sandbox, so a dropped stream can attach to the command again.                                                                                                                                                                                                                                            |
+| Token renewal           | Before the installation token expires, the executor gives the handlers a new one.                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Platform stop           | When Cloudflare restarts the sandbox's host or replaces its instance, it sends the container SIGTERM and stops it up to 15 minutes later, and a new container has an empty disk. The image's init records the SIGTERM, and the executor, which asks every 30 seconds, drains the attempt: it stops the attempt, salvages the checkout, and destroys the sandbox. The attempt fails with an infrastructure failure, and the next attempt resumes from the salvage.                                                 |
+| End of the attempt      | The executor stops every command that still runs in the sandbox, and every process that a command left running, salvages the checkout, and destroys the sandbox. If the salvage push fails, the sandbox stays and is held, with its credentials revoked.                                                                                                                                                                                                                                                          |
+| Restart of `usine up`   | A live attempt's sandbox stays and is held, and the executor revokes its credentials. After the restart, the attempt reattaches to the same sandbox and checkout with a new token. If the reattachment fails, for example because GitHub issues no token, the sandbox stays held, and usine salvages its checkout.                                                                                                                                                                                                |
+| First use after a start | The executor lists this instance's sandboxes of the worker and destroys each one that no attempt uses and that holds no checkout. A sandbox with a checkout stays for its attempt's recovery.                                                                                                                                                                                                                                                                                                                     |
+
+`<instance>` is `github-app-<App ID>`, the identity of the usine instance, so that instances that share a deployed Worker never use or remove each other's sandboxes.
+
+A keepalive alarm keeps a container running for two hours after the last sandbox creation, credential change, or command. A held sandbox keeps running until usine reconciles or destroys it, at the next start of `usine up` or when the run's cancel confirms the stop, so its checkout survives; you pay for its container meanwhile. A container that stops loses its disk, so an attempt whose sandbox stopped can't reattach, and the run starts a new attempt.
+
+## Limitations
+
+- Every worker in `usine.yaml` must be a `cloudflare` worker. `usine up` refuses a mix with `UnsupportedWorkerError`.
+- A sandbox holds no harness login. Claude Code needs an Anthropic API key, and Codex needs an OpenAI API key. Their children count under API keys on the run page. Pi children don't run in a sandbox.
+- A sandbox accepts no terminal, so the run page shows no resume command for its child sessions.
+- `usine up` reads the Access service token and the provider keys when it starts. A [reload](/reference/configuration/cli/#reload) can't add a `cloudflare` worker that `usine up` didn't start with.
+- A held sandbox survives only as long as its container. If Cloudflare stops it while `usine up` isn't running, its checkout is lost, and the run starts a new attempt from the last salvage, if any.
+- Sandboxes can't be kept in the EU. The Sandbox SDK 1.0 needs the `durable_object` scheduling policy, which rejects placement constraints, including `jurisdiction: "eu"`. If your attempts must stay in the EU, wait until Cloudflare adds placement to that policy, and use [SSH workers](/guides/add-a-worker/#ssh-workers) until then.
+
+## Before you begin
+
+You need:
+
+- A Cloudflare account with the Workers Paid plan, which Containers require, and access to Cloudflare Zero Trust.
+- [Wrangler](https://developers.cloudflare.com/workers/wrangler/), logged in to the account, and Docker on the machine that deploys. Wrangler builds the linux/amd64 image with your local Docker.
+- An Anthropic API key for Claude Code agents, an OpenAI API key for Codex agents, or both.
+- A usine checkout, built as in [Install usine](/guides/#install-usine).
+
+## Deploy the Worker
+
+<Steps>
+
+1. In the usine checkout, build the Worker and its dependencies:
+
+   ```sh title="usine checkout"
+   pnpm --filter @usine/cloudflare... build
+   cd packages/cloudflare
+   ```
+
+2. In `wrangler.jsonc`, set `name` to your Worker's name. Set `ALLOWED_HOSTS` to the hosts that attempts reach without a credential, separated by commas, such as the package registries that your repositories install from. `ALLOWED_HOSTS` can't give access to GitHub or an LLM provider; the Worker ignores those hosts in it.
+
+   ```jsonc title="packages/cloudflare/wrangler.jsonc"
+   "name": "acme-usine-sandboxes",
+   "vars": {
+     "ALLOWED_HOSTS": "registry.npmjs.org,registry.yarnpkg.com",
+   },
+   ```
+
+3. In Cloudflare Zero Trust, go to **Access** > **Service credentials** > **Service Tokens**, and create a service token. Store its client ID and client secret on the Worker:
+
+   ```sh title="packages/cloudflare"
+   npx wrangler secret put ACCESS_CLIENT_ID
+   npx wrangler secret put ACCESS_CLIENT_SECRET
+   ```
+
+   The Worker refuses every request without these two values in the `CF-Access-Client-Id` and `CF-Access-Client-Secret` headers. To also check the token at Cloudflare's edge, add an Access application for the Worker's hostname with a Service Auth policy that allows the token.
+
+4. Deploy the Worker and its image:
+
+   ```sh title="packages/cloudflare"
+   npx wrangler deploy
+   ```
+
+   Wrangler prints the Worker's URL, such as `https://acme-usine-sandboxes.acme.workers.dev`. The containers use the `durable_object` scheduling policy, which you can't undo for the container application.
+
+</Steps>
+
+The image in `packages/cloudflare/image/Dockerfile` installs Node.js 22, pnpm, Git, gh, Claude Code, and Codex at the versions of the Hetzner worker image. To add tools, edit the Dockerfile, or add another image to `containers[].images` in `wrangler.jsonc` and name it in `image`. Image names contain letters, digits, and underscores.
+
+## Configure the instance
+
+<Steps>
+
+1. Add the worker to `usine.yaml`. [`kind: cloudflare`](/reference/configuration/usine-yaml/#kind-cloudflare) describes every key.
+
+   ```yaml title="usine.yaml"
+   workers:
+     - name: cf-one
+       kind: cloudflare
+       worker_url: https://acme-usine-sandboxes.acme.workers.dev
+       access_client_id_env: USINE_CF_ACCESS_CLIENT_ID
+       access_client_secret_env: USINE_CF_ACCESS_CLIENT_SECRET
+       image: usine
+       instance_type: standard-4
+       max_concurrent_attempts: 4
+       llm_providers:
+         - provider: anthropic
+           api_key_env: ANTHROPIC_API_KEY
+         - provider: openai
+           api_key_env: OPENAI_API_KEY
+   ```
+
+   `max_concurrent_attempts` sets how many sandboxes the worker runs at once, one per attempt.
+
+2. Start the orchestrator with the service token and the provider keys in its environment:
+
+   ```sh title="Instance folder"
+   USINE_CF_ACCESS_CLIENT_ID=... USINE_CF_ACCESS_CLIENT_SECRET=... \
+     ANTHROPIC_API_KEY=... OPENAI_API_KEY=... usine up
+   ```
+
+   If a variable isn't set, `usine up` stops and gives its name.
+
+</Steps>
+
+## Preflight
+
+Preflight runs when `usine up` starts, and at a reload that adds a worker, slots, or brains (see [`workers`](/reference/configuration/usine-yaml/#workers)). For a `cloudflare` worker, preflight does the following:
+
+1. It calls the Worker's `/v1/health` route with the service token. A refused token fails the `credentials` check.
+2. It checks that the Worker has the image that `image` names. A missing image fails the `toolchain` check and lists the Worker's images.
+3. It checks that the worker has an API key for each harness in the roster. A Claude Code agent without `anthropic`, or a Codex agent without `openai`, fails the `harness-login` check. A Pi agent fails the `toolchain` check.
+4. If the roster has agents, it creates the sandbox `<instance>.<worker>.preflight`, runs `claude --version` and `codex --version` in it for the harnesses that the roster uses, and destroys it. A Codex version that usine doesn't support fails the `version` check. Preparation repeats the check for the attempt's harness in each new sandbox, so an image that changes after `usine up` starts can't run an attempt with an unsupported Codex.
+
+## How a sandbox reaches GitHub and the providers
+
+| Host in the sandbox                       | Handler                                                                                               |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `github.com`, `api.github.com` over HTTPS | Adds the attempt's installation token.                                                                |
+| `anthropic.usine.internal` over HTTP      | Replaces the placeholder key with the Anthropic API key, and forwards to `https://api.anthropic.com`. |
+| `openai.usine.internal` over HTTP         | Replaces the placeholder key with the OpenAI API key, and forwards to `https://api.openai.com`.       |
+| Each host in `ALLOWED_HOSTS` over HTTPS   | Forwards the request unchanged.                                                                       |
+
+The executor sets this environment for each command in the sandbox. It contains no secret:
+
+- `GIT_SSL_CAINFO`, `CURL_CA_BUNDLE`, `SSL_CERT_FILE`, and `NODE_EXTRA_CA_CERTS` point at Cloudflare's container certificate authority, which signs the certificates of the hosts that the Worker intercepts over HTTPS. Cloudflare's coding-agent runner sets the same variables.
+- `GH_TOKEN` is a placeholder, which the GitHub handler replaces.
+- For Claude Code, `ANTHROPIC_BASE_URL` is `http://anthropic.usine.internal`, and `ANTHROPIC_API_KEY` is a placeholder.
+- For Codex, `OPENAI_API_KEY` is a placeholder. The image's Codex configuration selects a `usine` model provider whose base URL is `http://openai.usine.internal/v1`.
+
+A provider handler forwards only the requests that Claude Code and Codex send: Anthropic's `POST /v1/messages`, `POST /v1/messages/count_tokens`, and `GET /v1/models`, and OpenAI's `POST /v1/responses`, `POST /v1/responses/compact`, and `GET /v1/models`. It refuses every other request, such as one for the provider's files or organization administration API, with status 404, and the request never gets the key.
+
+While a sandbox waits for a restart, or keeps a checkout after its attempt, its handlers hold no credential, and they refuse its requests for GitHub and the providers with status 403. A sandbox that preflight creates never gets a credential.
+
+A token renewal that's still on its way when the executor revokes the credentials can't restore them. Each credential change carries the time the executor issued it. The Worker applies a sandbox's changes one at a time, and refuses credentials issued before the ones the sandbox holds.
+
+## Troubleshooting
+
+- **The Worker refused the Access service token**: the variables that `access_client_id_env` and `access_client_secret_env` name don't match the Worker's `ACCESS_CLIENT_ID` and `ACCESS_CLIENT_SECRET` secrets. Fix the values, then restart `usine up`.
+- **A command fails with `usine sandbox shell: lost sandbox`**: the exec stream dropped, and five attaches to the command's output failed. The command's sandbox may have stopped. Check the Worker's logs in the Cloudflare dashboard.
+- **A sandbox stays after its attempt**: its checkout holds work that the salvage couldn't push. The next start of `usine up` reconciles it. To delete it by hand, send `DELETE /v1/sandboxes/<sandbox>` to the Worker with the service token headers, where `<sandbox>` is the `sandbox` field of the log line `Keeping the Attempt's sandbox with its checkout`.

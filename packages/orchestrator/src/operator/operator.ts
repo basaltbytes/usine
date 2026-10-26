@@ -1256,6 +1256,7 @@ export {
   LocalWorkerAccess,
   SshWorkerAccess,
   ProvisionedWorkerAccess,
+  SandboxWorkerAccess,
   WorkerAccess,
   AttemptView,
 } from "./attempt.ts";

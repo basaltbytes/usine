@@ -27,6 +27,7 @@
   "devDependencies": {
     "@astrojs/check": "0.9.11",
     "@usine/agents": "workspace:*",
+    "@usine/cloudflare": "workspace:*",
     "@usine/config": "workspace:*",
     "@usine/core": "workspace:*",
     "@usine/durable": "workspace:*",

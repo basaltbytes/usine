@@ -19,6 +19,10 @@
       "types": "./dist/board/projection.d.ts",
       "default": "./dist/board/projection.js"
     },
+    "./cloudflare": {
+      "types": "./dist/cloudflare.d.ts",
+      "default": "./dist/cloudflare.js"
+    },
     "./credentials": {
       "types": "./dist/credentials.d.ts",
       "default": "./dist/credentials.js"
@@ -42,6 +46,14 @@
     "./local": {
       "types": "./dist/local.d.ts",
       "default": "./dist/local.js"
+    },
+    "./operator": {
+      "types": "./dist/operator/operator.d.ts",
+      "default": "./dist/operator/operator.js"
+    },
+    "./operator/http": {
+      "types": "./dist/operator/http.d.ts",
+      "default": "./dist/operator/http.js"
     },
     "./orchestrator": {
       "types": "./dist/orchestrator.d.ts",
@@ -70,14 +82,6 @@
     "./worker-status": {
       "types": "./dist/worker-status.d.ts",
       "default": "./dist/worker-status.js"
-    },
-    "./operator": {
-      "types": "./dist/operator/operator.d.ts",
-      "default": "./dist/operator/operator.js"
-    },
-    "./operator/http": {
-      "types": "./dist/operator/http.d.ts",
-      "default": "./dist/operator/http.js"
     }
   },
   "publishConfig": {

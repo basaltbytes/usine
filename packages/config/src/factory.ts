@@ -4,6 +4,9 @@ import { OperatorLogin } from "@usine/core/operator";
 import { RepositoryName } from "@usine/core/repository";
 import {
   BoatSize,
+  CloudflareImageName,
+  CloudflareInstanceType,
+  CloudflareLlmProvider,
   ContainerCpus,
   ContainerImage,
   ContainerMemoryMib,
@@ -274,9 +277,69 @@ const sshMachineConflict = (worker: SshWorker): string | undefined => {
         : undefined;
   }
 };
+const HttpsUrl = Schema.URLFromString.check(
+  Schema.makeFilter((url: URL) => url.protocol === "https:", { message: "Expected an https URL" }),
+  Schema.makeFilter(
+    (url: URL) =>
+      url.username === "" &&
+      url.password === "" &&
+      url.search === "" &&
+      url.hash === "" &&
+      url.pathname === "/",
+    { message: "Expected the Worker's origin, without a path, credentials, or query string" },
+  ),
+);
+
+/**
+ * An LLM provider whose API key the Cloudflare Worker's outbound handlers hold for each Attempt.
+ * `apiKeyEnv` is the orchestrator environment variable with the key, read when `usine up` starts.
+ */
+export class CloudflareLlmProviderKey extends Schema.Class<CloudflareLlmProviderKey>(
+  "@usine/config/CloudflareLlmProviderKey",
+)({
+  provider: CloudflareLlmProvider,
+  apiKeyEnv: EnvironmentVariableName,
+}) {}
+
+const uniqueProviders = Schema.makeFilter<ReadonlyArray<CloudflareLlmProviderKey>>(
+  (values) => new Set(values.map(({ provider }) => provider)).size === values.length,
+  { message: "Expected each provider once" },
+);
+
+/**
+ * A Worker that runs each Attempt in its own Cloudflare sandbox, through the Worker that the
+ * operator deploys from `@usine/cloudflare`.
+ *
+ * - `workerUrl`: the deployed Worker's origin.
+ * - `accessClientIdEnv` and `accessClientSecretEnv`: the orchestrator environment variables with
+ *   the Cloudflare Access service token that the Worker accepts, read when `usine up` starts.
+ * - `image`: the name of the image in the Worker's `containers[].images`.
+ * - `instanceType`: the container instance type of each sandbox.
+ * - `llmProviders`: the providers whose API key the Worker's outbound handlers inject. Claude Code
+ *   needs `anthropic` and Codex needs `openai`; a sandbox holds no harness login.
+ */
+export class CloudflareWorker extends Schema.Class<CloudflareWorker>(
+  "@usine/config/CloudflareWorker",
+)({
+  name: WorkerName,
+  kind: Schema.Literal("cloudflare"),
+  maxConcurrentAttempts: MaxConcurrentAttempts,
+  workerUrl: HttpsUrl,
+  accessClientIdEnv: EnvironmentVariableName,
+  accessClientSecretEnv: EnvironmentVariableName,
+  image: CloudflareImageName,
+  instanceType: CloudflareInstanceType.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed("standard-4")),
+  ),
+  llmProviders: Schema.Array(
+    CloudflareLlmProviderKey.pipe(Schema.encodeKeys({ apiKeyEnv: "api_key_env" })),
+  )
+    .check(uniqueProviders)
+    .pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
+}) {}
 
 /** A configured Worker; `kind` selects the adapter. */
-export const Worker = Schema.Union([LocalWorker, ExeDevWorker, SshWorker]);
+export const Worker = Schema.Union([LocalWorker, ExeDevWorker, SshWorker, CloudflareWorker]);
 export type Worker = typeof Worker.Type;
 
 export class Settings extends Schema.Class<Settings>("@usine/config/Settings")({
@@ -348,6 +411,16 @@ const WorkerFromYaml = Schema.Union([
       identityFile: "identity_file",
     }),
   ).check(Schema.makeFilter((worker: SshWorker) => sshMachineConflict(worker) ?? true)),
+  CloudflareWorker.pipe(
+    Schema.encodeKeys({
+      maxConcurrentAttempts: "max_concurrent_attempts",
+      workerUrl: "worker_url",
+      accessClientIdEnv: "access_client_id_env",
+      accessClientSecretEnv: "access_client_secret_env",
+      instanceType: "instance_type",
+      llmProviders: "llm_providers",
+    }),
+  ),
 ]);
 
 const ManagedRepos = Schema.Array(ManagedRepo).check(

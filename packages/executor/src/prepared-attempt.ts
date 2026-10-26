@@ -12,7 +12,12 @@ import type { ProvisionedWorktree } from "./provision.ts";
 
 export type AttemptStop =
   | { readonly _tag: "Cancel" }
-  | { readonly _tag: "Runaway"; readonly ceiling: RunawayCeiling };
+  | { readonly _tag: "Runaway"; readonly ceiling: RunawayCeiling }
+  /**
+   * The Worker is losing the Attempt's machine, such as a sandbox whose host the platform
+   * restarts. The Attempt fails with a retryable `InfraFailure` carrying `message`.
+   */
+  | { readonly _tag: "Drain"; readonly message: string };
 
 /** The result of an executor's `acquire`: the prepared Attempt and its salvage handles. */
 export interface AcquiredAttempt extends PreparedAttempt {
