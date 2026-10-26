@@ -41,7 +41,7 @@ This replaces the 0.x `Executor.launch(prepared, io)` and `Executor.cleanup(prep
 
 ## Worker preflight
 
-Call `executor.preflight(worker, brains, maxConcurrentAttempts)` with the roster's `BrainSpec` values and the worker's `max_concurrent_attempts` before scheduling. It returns a `PreflightReport`, whose `degraded` gives the reason when the worker runs attempts without a capability that keeps them apart, such as an SSH worker without Docker; `fullPreflight` is the report without one.
+Call `executor.preflight(worker, brains, maxConcurrentAttempts)` with the roster's `BrainSpec` values and the worker's `max_concurrent_attempts` before scheduling. It returns a `PreflightReport`, whose `degraded` gives the reason when the worker runs attempts without a capability that keeps them apart, such as an SSH worker without Docker, and whose `containerLimits` gives the CPU, memory, and process limits of each attempt container on an SSH worker with Docker; `fullPreflight` is the report without either.
 
 Every adapter compares the machine's memory with `maxConcurrentAttempts`. The local adapter reads `/proc/meminfo` on Linux and physical memory on macOS, where swap grows on demand; exe.dev and SSH read `/proc/meminfo` over SSH. Under 1.5 GiB per concurrent attempt, or no swap with more than one, is a `memory` `WorkerCapabilityError`; under 3 GiB logs a warning ([#270](https://github.com/basaltbytes/usine/issues/270)).
 
@@ -124,11 +124,21 @@ Salvage inspection, staging, or snapshot failures keep the checkout, uncommitted
 
 `@usine/executor/ssh` runs the same contract on any Linux machine that the orchestrator reaches over SSH ([ADR 0026](../../docs/adr/0026-eu-ssh-worker.md)); `infra/hetzner` creates one on Hetzner Cloud. Each worker has an SSH destination, an optional identity file and port, and a root under which it keeps `workers/<name>/repos`, `attempts`, and `credentials`. The machine needs Git, Docker, and the roster's harness logins for the SSH user.
 
-Preflight checks the SSH connection, a writable root, Git, memory for `maxConcurrentAttempts`, Docker, and the roster's harnesses where children run. With Docker, it pulls the attempt image, checks that the image's user has the SSH user's ID, and probes the harnesses in a container from the image that removes itself. Without Docker, it probes them over SSH and reports the worker as degraded. A Docker that doesn't answer the SSH user, the `docker` group or a writable socket without the `docker` CLI, an image that can't be pulled and isn't on the machine, or another user ID is a `container` `WorkerCapabilityError`: an SSH user that can use Docker never runs an attempt.
+Preflight checks the SSH connection, a writable root, Git, memory for `maxConcurrentAttempts`, Docker, and the roster's harnesses where children run. With Docker, it pulls the attempt image, checks that the image's user has the SSH user's ID, finds the container limits, and probes the harnesses in a container from the image that removes itself. Without Docker, it probes them over SSH and reports the worker as degraded. A Docker that doesn't answer the SSH user, the `docker` group or a writable socket without the `docker` CLI, an image that can't be pulled and isn't on the machine, or another user ID is a `container` `WorkerCapabilityError`: an SSH user that can use Docker never runs an attempt.
 
 ### Attempt containers
 
-With Docker on the machine, each attempt runs in its own container from `SshWorkerAddress.container.image`, or `ATTEMPT_IMAGE`, the image of `infra/worker-image/Dockerfile` with this release's harness versions, with the address's CPU, memory, and process limits. The container mounts only the attempt's checkout and the SSH user's login files for the attempt's harness read-write, and its cached clone and credential directory read-only; behind a gateway, also gh's configuration directory and socket read-only. It uses the machine's network, and gets the attempt's variables, secrets included, on `docker run`'s standard input. Every command for the attempt runs in it through the shell's `container` (`docker exec -i <name> sh -c <command line>`): the children, the checkout's git, the harvest, the salvage, the pre-push hook, and the attempt's harness probe, which runs once the checkout exists. Only the container's start and removal and the cached clone's fetch run as the SSH user.
+With Docker on the machine, each attempt runs in its own container from `SshWorkerAddress.container.image`, or `ATTEMPT_IMAGE`, the image of `infra/worker-image/Dockerfile` with this release's harness versions, with CPU, memory, and process limits. The container mounts only the attempt's checkout and the SSH user's login files for the attempt's harness read-write, and its cached clone and credential directory read-only; behind a gateway, also gh's configuration directory and socket read-only. It uses the machine's network, and gets the attempt's variables, secrets included, on `docker run`'s standard input. Every command for the attempt runs in it through the shell's `container` (`docker exec -i <name> sh -c <command line>`): the children, the checkout's git, the harvest, the salvage, the pre-push hook, and the attempt's harness probe, which runs once the checkout exists. Only the container's start and removal and the cached clone's fetch run as the SSH user.
+
+`SshWorkerAddress.container` sets each limit as an `Option`. Preflight derives each one that is `None` from the machine: it runs `nproc` and reads `/proc/sys/kernel/threads-max`, `/proc/sys/kernel/pid_max`, and `/proc/meminfo` over SSH, and divides the machine's total, less a reserve for the machine's own processes, by `maxConcurrentAttempts`:
+
+| Limit | Machine total | Reserve | Rounded down to |
+| --- | --- | --- | --- |
+| `cpus` (`docker run --cpus`) | the CPUs that `nproc` counts | 0.5 CPU | a hundredth of a CPU, at least 0.01 |
+| `memoryMib` (`--memory`) | `MemTotal` | 1024 MiB | a MiB, at least 256 |
+| `pids` (`--pids-limit`) | the lower of `threads-max` and `pid_max` | 1024 tasks | a task, at least 64 |
+
+A machine with 4 CPUs and 8 GiB gets 3.5 CPUs and 7168 MiB with one slot, and 1.16 CPUs and 2389 MiB with three. Preflight reads the machine only if a limit is unset, and fails with a `container` `WorkerCapabilityError` if it can't. It logs the limits, which ones it derived, and the machine's totals with `SSH Worker runs each Attempt in its own container` and `SSH Worker preflight verified`, and returns them as the report's `containerLimits`. The worker's containers get these limits until its next preflight; a container started before any preflight on the worker, such as the recovery of a provisioned worker's machine, gets limits derived for one attempt on the machine, which `SSH Worker runs each Attempt in its own container` logs the same way.
 
 The checkout is a repository of its own whose objects come from the cached clone through an alternate, so commits never write the read-only clone. The container is named `usine-<attempt id>` and labeled with `SshExecutorOptions.instance`, the worker, and the attempt. It's removed after the checkout's release, which salvages in it, and before the credential. If the container stopped before the release, for example because the kernel killed it for memory or a command signaled its init, the release starts it again and salvages in it, and logs the container's status, exit code, and whether it was killed for memory. The salvage never runs git in the checkout as the SSH user. A process's first use of a worker removes the containers with its instance label that belong to that worker, or to a worker that started no container in this process, so a running attempt's container on a shared machine stays. Before its first container starts, the executor writes `<root>/workers/<name>/container-checkouts/<attempt>`, outside every container's mounts, and removes it with the checkout. A reattachment or recovery reads that marker, never the checkout, which the attempt can change: with it, commands run in a new container; without it, as the SSH user, on a machine without Docker only. A mismatch, such as a checkout from before Docker on a machine that now has it, fails with an `ExecutorOperationError` and leaves the checkout.
 
@@ -156,7 +166,7 @@ A gateway released before that endpoint answers 404: the worker's first such pre
 
 A worker whose address has `machine: { _tag: "Provisioned" }` has no machine of its own: it creates a Hetzner Cloud server or a Boat sandbox for each attempt and deletes it afterwards ([#550](https://github.com/basaltbytes/usine/issues/550)). The layer provides `WorkerMachines` for the scheduler:
 
-- `create(worker, runId, brains)` creates the machine, tagged with `SshExecutorOptions.instance`, the worker, the run, and a random value of this process, and waits up to `machineReadyTimeout` (10 minutes by default) until it answers over SSH. It then waits for cloud-init, creates the root, and waits for Docker. The worker's first machine each day, and its first after the layer starts, also gets the machine preflight with `brains`, whose failure is a `WorkerCapabilityError`. A provider's refusal, no capacity or quota, no answer, or a timeout is a `MachineUnavailableError` with its `reason`. On failure or interruption, the machine is deleted.
+- `create(worker, runId, brains)` creates the machine, tagged with `SshExecutorOptions.instance`, the worker, the run, and a random value of this process, and waits up to `machineReadyTimeout` (10 minutes by default) until it answers over SSH. It then waits for cloud-init, creates the root, and waits for Docker. The worker's first machine each day, and its first after the layer starts, also gets the machine preflight with `brains`, whose failure is a `WorkerCapabilityError`. Each machine runs one attempt, so that preflight derives the unset container limits for one slot, and the worker's machines get them until the next such preflight. The grant's `checked` is then a `MachineCheck` with the brains and the limits. A provider's refusal, no capacity or quota, no answer, or a timeout is a `MachineUnavailableError` with its `reason`. On failure or interruption, the machine is deleted.
 - `assign(hold, attemptId)` tags the machine with a hash of the attempt ID; `prepare` uses it from then on.
 - `adopt(worker, attemptId)` holds the machine of an attempt from an earlier process, found by that tag in one listing per worker. If the provider can't be read, the hold still keeps `sweep` from deleting the machine, and the next use looks it up again.
 - `release(hold)` deletes the machine, unless it has the attempt's checkout: one kept for a reattachment, until its parent task's stop is confirmed, or with unpreserved work. That machine stays for the next process. A failed deletion is retried by `sweep`.
@@ -172,9 +182,7 @@ The SSH layer needs a `ChildProcessSpawner`, a `CredentialProvider`, an `Attempt
 
 ```ts
 import {
-  ContainerCpus,
   ContainerMemoryMib,
-  ContainerPids,
   SshDestination,
   SshIdentityFile,
   WorkerName,
@@ -193,11 +201,12 @@ const executorLayer = layer({
       port: Option.none(),
       root: WorkerRoot.make("/home/usine/.usine"),
       gateway: Option.none(),
+      // Each attempt container gets 6 GiB; preflight derives its CPUs and processes.
       container: {
         image: Option.none(),
-        cpus: ContainerCpus.make(2),
-        memoryMib: ContainerMemoryMib.make(4096),
-        pids: ContainerPids.make(4096),
+        cpus: Option.none(),
+        memoryMib: Option.some(ContainerMemoryMib.make(6144)),
+        pids: Option.none(),
       },
     },
   ],

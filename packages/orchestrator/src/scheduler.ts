@@ -726,8 +726,14 @@ export const stepExecutorLayer = (
                 return next;
               }),
             );
-            if (Option.isSome(grant.checked))
-              yield* recordPreflightExit(worker, grant.checked.value, Exit.succeed(fullPreflight));
+            if (Option.isSome(grant.checked)) {
+              const { brains, containerLimits } = grant.checked.value;
+              yield* recordPreflightExit(
+                worker,
+                brains,
+                Exit.succeed({ ...fullPreflight, containerLimits }),
+              );
+            }
             const lease = yield* makeLease(
               worker,
               Option.some(grant.hold),

@@ -42,14 +42,18 @@ export interface SshWorkerGateway {
   readonly llmProviders: ReadonlyArray<GatewayLlmProvider>;
 }
 
-/** The container of each Attempt on an SSH Worker whose machine has Docker. */
+/**
+ * The container of each Attempt on an SSH Worker whose machine has Docker. Each limit that is
+ * `None` is derived from the machine at preflight: its total less a reserve for the machine's own
+ * processes, divided by the Attempts that run on it at once.
+ */
 export interface SshWorkerContainer {
   /** The image to run. If `None`, `ATTEMPT_IMAGE`. */
   readonly image: Option.Option<ContainerImage>;
-  readonly cpus: ContainerCpus;
-  readonly memoryMib: ContainerMemoryMib;
+  readonly cpus: Option.Option<ContainerCpus>;
+  readonly memoryMib: Option.Option<ContainerMemoryMib>;
   /** The maximum number of processes and threads. */
-  readonly pids: ContainerPids;
+  readonly pids: Option.Option<ContainerPids>;
 }
 
 /** The LLM provider API keys that each Attempt on a provisioned Worker gets in its environment. */

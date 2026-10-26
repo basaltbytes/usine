@@ -244,7 +244,9 @@ The executor writes each key to `.usine/known-hosts/<provider>-<id>` in the inst
 
 ### Machine checks
 
-Preflight at `usine up` has no machine, so the checks that need one run on the worker's first machine each day (UTC), and on its first machine after `usine up`: Git, the memory for one attempt, the gateway from the machine, Docker and the attempt image, and each harness. A failure shows as a preflight failure does, the machine is deleted, and the worker pauses its creations as for a failed creation. The **Workers** page says that the harnesses are checked on the first machine each day.
+Preflight at `usine up` has no machine, so the checks that need one run on the worker's first machine each day (UTC), and on its first machine after `usine up`: Git, the memory for one attempt, the gateway from the machine, Docker and the attempt image, the container limits, and each harness. A failure shows as a preflight failure does, the machine is deleted, and the worker pauses its creations as for a failed creation. The **Workers** page says that the harnesses are checked on the first machine each day.
+
+Each machine runs one attempt, so the check derives each container limit that [`workers[].container`](/reference/configuration/usine-yaml/#workerscontainer) leaves out for one attempt: the machine's total, less a reserve for its own processes. The worker's machines keep those limits until the next day's first machine, and the **Workers** page shows them.
 
 ### Machines in the web UI
 

@@ -13,6 +13,7 @@ import { StepName } from "@usine/core/step";
 import {
   ContainerCpus,
   ContainerImage,
+  ContainerLimits,
   ContainerMemoryMib,
   ContainerPids,
   GatewayAdminPort,
@@ -200,14 +201,17 @@ export class HarnessPreflightView extends Schema.Class<HarnessPreflightView>(
   check: PreflightCheckView,
 }) {}
 
-/** The container of each Attempt on an SSH Worker with Docker, from `usine.yaml`. */
+/**
+ * The container of each Attempt on an SSH Worker with Docker, from `usine.yaml`. Each limit is
+ * null if `usine.yaml` leaves it unset, so preflight derives it from the machine.
+ */
 export class ContainerView extends Schema.Class<ContainerView>("@usine/orchestrator/ContainerView")(
   {
     /** Null for the default image of this usine release. */
     image: Schema.NullOr(ContainerImage),
-    cpus: ContainerCpus,
-    memoryMib: ContainerMemoryMib,
-    pids: ContainerPids,
+    cpus: Schema.NullOr(ContainerCpus),
+    memoryMib: Schema.NullOr(ContainerMemoryMib),
+    pids: Schema.NullOr(ContainerPids),
   },
 ) {}
 
@@ -226,6 +230,14 @@ export class WorkerConfigurationView extends Schema.Class<WorkerConfigurationVie
   gateway: Schema.NullOr(GatewayView),
   /** An SSH Worker's Attempt container, used if its machine has Docker; null for the other kinds. */
   container: Schema.NullOr(ContainerView),
+  /**
+   * The limits of each Attempt container from the last passed preflight that checked the
+   * Worker's machine: the ones `usine.yaml` sets and the ones derived from the machine. Null
+   * before one, for a machine without Docker, and for the other kinds.
+   */
+  containerLimits: Schema.NullOr(ContainerLimits).pipe(
+    Schema.withConstructorDefault(Effect.succeed(null)),
+  ),
   /** A provisioned SSH Worker's provisioner, which creates one machine per Attempt, or null. */
   provisioner: Schema.NullOr(ProvisionerView).pipe(
     Schema.withConstructorDefault(Effect.succeed(null)),
@@ -381,9 +393,9 @@ const workerConnection = (worker: Worker) =>
         }),
         container: new ContainerView({
           image: Option.getOrNull(worker.container.image),
-          cpus: worker.container.cpus,
-          memoryMib: worker.container.memoryMib,
-          pids: worker.container.pids,
+          cpus: Option.getOrNull(worker.container.cpus),
+          memoryMib: Option.getOrNull(worker.container.memoryMib),
+          pids: Option.getOrNull(worker.container.pids),
         }),
       }
     : {
@@ -563,6 +575,8 @@ const makeOperatorConfiguration = Effect.gen(function* () {
         harnesses: (preflight?.harnesses ?? []).map(
           ({ harness, check }) => new HarnessPreflightView({ harness, check: checkView(check) }),
         ),
+        containerLimits:
+          preflight === undefined ? null : Option.getOrNull(preflight.containerLimits),
         machines: inFlight.filter((machine) => machine.worker === worker.name).map(machineView),
         provisioning: Option.getOrNull(
           Option.map(
