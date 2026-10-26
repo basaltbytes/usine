@@ -272,11 +272,12 @@ export const ProjectBoard = ({
         onDragCancel={endDrag}
       >
         <div
-          className="@container min-h-0 flex-1 overflow-auto overscroll-contain"
+          className="min-h-0 flex-1 overflow-auto overscroll-contain [container-type:size]"
           aria-label={`${project.repository} project board`}
         >
           <div className="flex w-max min-w-full flex-col gap-6 px-4 pb-4 md:px-5">
-            <div className="flex gap-3">
+            {/* Fills the visible height so each lane scrolls its own cards. */}
+            <div className="flex h-[calc(100cqh-1rem)] min-h-80 shrink-0 gap-3">
               {lanes.map((lane) => (
                 <BoardColumn
                   key={lane.id}
