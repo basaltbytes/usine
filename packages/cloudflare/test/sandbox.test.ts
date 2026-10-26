@@ -261,6 +261,16 @@ describe("sandbox routes", () => {
     expect(state.execs).toEqual([stopCommand]);
   });
 
+  it("fails the stop when a process survives the stop script", async () => {
+    const { state, call } = served();
+    await call("PUT", `/v1/sandboxes/${NAME}`, createBody());
+    state.run = () => finishedProcess("", 1);
+    const response = await call("POST", `/v1/sandboxes/${NAME}/stop`);
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ _tag: "ContainerUnavailable" });
+  });
+
   it("destroys the container, its storage, and its registry entry", async () => {
     const { state, call } = served();
     await call("PUT", `/v1/sandboxes/${NAME}`, createBody());

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, existsSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SANDBOX_HOME } from "../src/api/harness.ts";
@@ -49,6 +49,15 @@ const stop = (root: string) =>
     child.on("close", () => resolve(stdout));
   });
 
+/** Returns whether the process `pid` runs, which a zombie that waits to be reaped doesn't. */
+const running = (pid: number) => {
+  try {
+    return !/^\d+ \(.*\) [ZX]/s.test(readFileSync(`/proc/${String(pid)}/stat`, "utf8"));
+  } catch {
+    return false;
+  }
+};
+
 const waitFor = async (path: string) => {
   for (let tries = 0; tries < 100 && !existsSync(path); tries++)
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -94,7 +103,7 @@ describe("sandbox process files", () => {
     expect(readFileSync(join(directory, "exit"), "utf8")).toBe("0");
   });
 
-  it("stops every running command's process group and counts them", async () => {
+  it("stops every running command's session and counts them", async () => {
     const root = mkdtempSync(join(tmpdir(), "usine-process-"));
     const directory = join(root, "c".repeat(32));
     const { finished } = runProcess(directory, "sleep 30 & sleep 30; echo unreachable", "");
@@ -107,5 +116,49 @@ describe("sandbox process files", () => {
     expect(result.stdout).toBe("");
     expect(existsSync(join(directory, "exit"))).toBe(true);
     expect(stoppedCount(await stop(root))).toEqual(expect.objectContaining({ value: 0 }));
+  });
+
+  it("stops what a command left running after it exited, in its session or in a new one", async () => {
+    const root = mkdtempSync(join(tmpdir(), "usine-process-"));
+    const directory = join(root, "e".repeat(32));
+    const background = join(root, "background");
+    const job = join(root, "job");
+    const detached = join(root, "detached");
+    // A background process, a job in its own process group, and a process in its own session.
+    const { finished } = runProcess(
+      directory,
+      `sleep 30 >/dev/null 2>&1 & echo $! > "${background}"; ` +
+        `bash -c 'set -m; sleep 30 >/dev/null 2>&1 & echo $! > "${job}"'; ` +
+        `setsid sleep 30 >/dev/null 2>&1 & echo $! > "${detached}"`,
+      "",
+    );
+    expect((await finished).exitCode).toBe(0);
+    const left = [background, job, detached].map((file) => Number(readFileSync(file, "utf8")));
+    expect(left.filter(running)).toEqual(left);
+
+    expect(stoppedCount(await stop(root))).toEqual(expect.objectContaining({ value: 2 }));
+    expect(left.filter(running)).toEqual([]);
+    expect(stoppedCount(await stop(root))).toEqual(expect.objectContaining({ value: 0 }));
+  });
+
+  it("leaves a process that reuses an exited command's ID, or that another directory marks", async () => {
+    const root = mkdtempSync(join(tmpdir(), "usine-process-"));
+    const directory = join(root, "f".repeat(32));
+    expect((await runProcess(directory, "exit 0", "").finished).exitCode).toBe(0);
+    const reused = spawn("sleep", ["30"], { detached: true, stdio: "ignore" });
+    const elsewhere = spawn("sleep", ["30"], {
+      detached: true,
+      stdio: "ignore",
+      env: { ...process.env, USINE_PROCESS: join(`${root}-other`, "g".repeat(32)) },
+    });
+    try {
+      writeFileSync(join(directory, "pid"), String(reused.pid));
+
+      expect(stoppedCount(await stop(root))).toEqual(expect.objectContaining({ value: 0 }));
+      expect([reused.pid, elsewhere.pid].map(Number).filter(running)).toHaveLength(2);
+    } finally {
+      reused.kill("SIGKILL");
+      elsewhere.kill("SIGKILL");
+    }
   });
 });

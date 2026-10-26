@@ -331,11 +331,15 @@ const stop = Effect.fn("Sandbox.stop")(function* (name: SandboxName) {
     .pipe(Effect.mapError(unavailable(name)));
   const result = yield* collect(process).pipe(Effect.mapError(unavailable(name)));
   const count = stoppedCount(result.stdout);
-  if (result.exitCode !== 0 || Option.isNone(count))
-    return yield* new ContainerUnavailable({
-      name,
-      message: `The stop script exited with code ${String(result.exitCode)}: ${result.stderr.trim()}`,
+  if (result.exitCode !== 0 || Option.isNone(count)) {
+    const message = `The stop script exited with code ${String(result.exitCode)}: ${result.stderr.trim()}`;
+    yield* Effect.logError("Could not stop the sandbox's commands", {
+      sandbox: name,
+      attempt: sandbox.attempt,
+      message,
     });
+    return yield* new ContainerUnavailable({ name, message });
+  }
   yield* Effect.logInfo("Stopped the sandbox's commands", {
     sandbox: name,
     attempt: sandbox.attempt,

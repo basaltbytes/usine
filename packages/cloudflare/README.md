@@ -38,13 +38,15 @@ Every request needs the `CF-Access-Client-Id` and `CF-Access-Client-Secret` head
 | `GET /v1/sandboxes/<name>` | One sandbox. |
 | `PUT /v1/sandboxes/<name>/credentials` | Replaces the handlers' credentials, such as a renewed installation token, or revokes them with none. |
 | `POST /v1/sandboxes/<name>/hold` | Keeps the container running past its lease until the sandbox is destroyed. |
-| `POST /v1/sandboxes/<name>/stop` | Stops every command that still runs in the sandbox. |
+| `POST /v1/sandboxes/<name>/stop` | Stops every command that still runs in the sandbox, and every process that a command left running. |
 | `DELETE /v1/sandboxes/<name>` | Destroys the container and forgets the sandbox. |
 | `GET /v1/sandboxes/<name>/processes/<process>` | A command's state and output size, from its process files. |
 | `GET /v1/sandboxes/<name>/exec` (WebSocket) | Runs one command with `sh -c`, with its stdin, stdout, stderr, and exit code on the stream. |
 | `GET /v1/sandboxes/<name>/processes/<process>/attach?stdout=<n>&stderr=<n>` (WebSocket) | Resumes a command's output after the given byte offsets, then sends its exit code. |
 
 Each command runs as the `usine` user in `/home/usine`, with `HOME` set, since the platform passes a command only the image's `PATH`. It runs in its own session, with its process ID, output, and exit code in files under `/home/usine/.usine/processes/<process>`. If the stream that started a command closes, the command's stdin closes, and its output keeps going to the files, so a later request can attach or read its state. The Worker closes the stream without an exit code when it can't read the command's output or exit code from the container, so the client attaches from the bytes it received.
+
+A command, and every process that it starts, gets `USINE_PROCESS`, the command's process directory, in its environment. A stop sends TERM to every process in each command's session, and in the session of each process with `USINE_PROCESS`, so it includes what a command left running after it exited. Five seconds later, it sends KILL to the processes that still run. It fails if a process still runs five seconds after that, so usine doesn't salvage or reattach a checkout that a process can still change. A process that leaves its command's session and also drops `USINE_PROCESS` from its environment isn't stopped.
 
 Each set of credentials carries `issuedAt`, the time usine issued it. A sandbox applies one create or credential change at a time, and refuses credentials issued before the ones it holds with status 409 and `StaleCredentials`. A renewal that's still on its way when usine revokes the credentials therefore can't restore them.
 
