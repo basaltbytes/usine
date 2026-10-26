@@ -1,5 +1,5 @@
 import { RepositoryName } from "@usine/core/repository";
-import { Encoding, Option, Redacted, Schema } from "effect";
+import { Encoding, Option, Redacted, Result, Schema } from "effect";
 import { Headers } from "effect/unstable/http";
 import type { AttachmentCredential } from "../attachment/attachment.ts";
 import { UpstreamBase } from "../upstream.ts";
@@ -92,7 +92,12 @@ const apiRoute = (base: UpstreamBase, rest: string, search: string): Option.Opti
   }));
 };
 
-const afterPrefix = (pathname: string, prefix: string): Option.Option<string> =>
+/** Returns `value` as a URL if it is an absolute URL. */
+export const absoluteUrl = (value: string): Option.Option<URL> =>
+  Result.getSuccess(Result.try(() => new URL(value)));
+
+/** Returns `pathname` after `prefix`, if it is `prefix` or a path under it. */
+export const afterPrefix = (pathname: string, prefix: string): Option.Option<string> =>
   pathname === prefix || pathname.startsWith(`${prefix}/`)
     ? Option.some(pathname.slice(prefix.length))
     : Option.none();
@@ -150,7 +155,7 @@ export const gatewayLocation = (
  * bearer token for the API. An anonymous attachment adds nothing.
  */
 export const withGitHubCredential = (
-  route: GitHubRoute,
+  protocol: GitHubRoute["protocol"],
   credential: AttachmentCredential,
   headers: Headers.Headers,
 ): Headers.Headers => {
@@ -162,7 +167,7 @@ export const withGitHubCredential = (
       return Headers.set(
         headers,
         "authorization",
-        route.protocol === "api"
+        protocol === "api"
           ? `Bearer ${token}`
           : `Basic ${Encoding.encodeBase64(`x-access-token:${token}`)}`,
       );

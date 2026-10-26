@@ -79,6 +79,21 @@ const redirecting =
       : new Response("", { status, headers: { location } });
   };
 
+/**
+ * GitHub's API for repository 42, the attached `acme/demo` under its new name `current`: the
+ * former name redirects to the repository's id. Other URLs get `otherwise`.
+ */
+const renamedRepository =
+  (current: string, otherwise: Answer = ok): Answer =>
+  (url) =>
+    url.toString() === "https://api.github.com/repositories/42"
+      ? Response.json({ id: 42, full_name: current })
+      : redirecting(
+          301,
+          { "https://api.github.com/repos/acme/demo": "https://api.github.com/repositories/42" },
+          otherwise,
+        )(url);
+
 /** The requests the fake upstream received, and its answer to each. */
 class Upstream extends Context.Service<
   Upstream,
@@ -625,21 +640,25 @@ describe("GatewayProxy", () => {
         Effect.provide(
           gateway(
             NO_PROVIDERS,
-            redirecting(301, {
-              "https://api.github.com/repos/acme/demo/pulls?state=open":
-                "https://api.github.com/repositories/42/pulls?state=open",
-              "https://github.com/acme/demo/releases/latest/download/tool.tar.gz":
-                "https://github.com/acme/demo/releases/download/v1.2.0/tool.tar.gz",
-              "https://github.com/acme/demo.git/info/refs?service=git-upload-pack":
-                "https://github.com/acme/renamed.git/info/refs?service=git-upload-pack",
-            }),
+            redirecting(
+              301,
+              {
+                "https://api.github.com/repos/acme/demo/pulls?state=open":
+                  "https://api.github.com/repositories/42/pulls?state=open",
+                "https://github.com/acme/demo/releases/latest/download/tool.tar.gz":
+                  "https://github.com/acme/demo/releases/download/v1.2.0/tool.tar.gz",
+                "https://github.com/acme/demo.git/info/refs?service=git-upload-pack":
+                  "https://github.com/acme/renamed.git/info/refs?service=git-upload-pack",
+              },
+              renamedRepository("acme/renamed"),
+            ),
           ),
         ),
       ),
   );
 
   it.effect(
-    "only a permanent redirect of a request that names the repository teaches a new name, and only to that attachment",
+    "only a permanent redirect of the repository itself to another name teaches a new name, and only to that attachment",
     () =>
       Effect.gen(function* () {
         const caller = yield* attach(installation);
@@ -649,12 +668,17 @@ describe("GatewayProxy", () => {
             send(`http://git.gw.test${path}`, { "x-usine-gateway-token": token }),
             (response) => [response.status, response.headers.get(REFUSAL_HEADER)],
           );
-        yield* outcome("/acme/demo.git/info/refs", caller);
-        yield* outcome("/acme/demo/releases/download/v1.2.0/tool.tar.gz", caller);
-        yield* outcome("/api/v3/repositories/42", caller);
+        for (const path of [
+          "/acme/demo.git/info/refs",
+          "/acme/demo/info/refs",
+          "/acme/demo/releases/download/v1.2.0/tool.tar.gz",
+          "/api/v3/repositories/7",
+        ])
+          yield* outcome(path, caller);
         assert.deepStrictEqual(yield* outcome("/acme/renamed.git/info/refs", caller), [200, null]);
         for (const [path, token] of [
           ["/acme/renamed.git/info/refs", otherAttempt],
+          ["/acme/temporary/info/refs", caller],
           ["/acme/moved/releases/download/v1.2.0/tool.tar.gz", caller],
           ["/api/v3/repos/acme/elsewhere", caller],
         ] as const)
@@ -668,16 +692,84 @@ describe("GatewayProxy", () => {
               {
                 "https://github.com/acme/demo.git/info/refs":
                   "https://github.com/acme/renamed.git/info/refs",
-                "https://api.github.com/repositories/42":
-                  "https://api.github.com/repos/acme/elsewhere",
-              },
-              redirecting(302, {
                 "https://github.com/acme/demo/releases/download/v1.2.0/tool.tar.gz":
                   "https://github.com/acme/moved/releases/download/v1.2.0/tool.tar.gz",
-              }),
+                "https://api.github.com/repositories/7":
+                  "https://api.github.com/repos/acme/elsewhere",
+              },
+              redirecting(
+                302,
+                {
+                  "https://github.com/acme/demo/info/refs":
+                    "https://github.com/acme/temporary/info/refs",
+                },
+                renamedRepository("acme/renamed"),
+              ),
             ),
           ),
         ),
+      ),
+  );
+
+  it.effect(
+    "a rename teaches no name unless GitHub's API, called with the installation token, has the attached repository under that name",
+    () =>
+      Effect.forEach(
+        [
+          ["other-current-name", renamedRepository("acme/renamed")],
+          ["former-name-not-redirected", ok],
+        ] as const,
+        ([reason, api]) =>
+          Effect.gen(function* () {
+            lines.length = 0;
+            const caller = yield* attach(installation);
+            const outcome = (path: string) =>
+              Effect.map(
+                send(`http://git.gw.test${path}`, { "x-usine-gateway-token": caller }),
+                (response) => [response.status, response.headers.get(REFUSAL_HEADER)],
+              );
+            assert.deepStrictEqual(yield* outcome("/acme/demo.git/info/refs"), [301, null]);
+            assert.deepStrictEqual(
+              yield* outcome("/acme/impostor.git/info/refs"),
+              [403, "repository-mismatch"],
+              reason,
+            );
+            const confirmation = (yield* sent).filter(({ url }) =>
+              url.startsWith("https://api.github.com/"),
+            );
+            assert.isNotEmpty(confirmation, reason);
+            for (const request of confirmation)
+              assert.deepStrictEqual(
+                Headers.get(request.headers, "authorization"),
+                Option.some(`Bearer ${INSTALLATION_TOKEN}`),
+              );
+            const unconfirmed = lines.find((line) =>
+              line.includes("GitHub's API didn't confirm the new name of an attached repository"),
+            );
+            assert(unconfirmed !== undefined, lines.join("\n"));
+            for (const field of [`"reason":"${reason}"`, '"newName":"acme/impostor"'])
+              assert.include(unconfirmed, field);
+            for (const value of [caller, INSTALLATION_TOKEN])
+              assert.isFalse(
+                lines.some((line) => line.includes(value)),
+                `a log line contains ${value.slice(0, 8)}`,
+              );
+          }).pipe(
+            Effect.provide(
+              gateway(
+                NO_PROVIDERS,
+                redirecting(
+                  301,
+                  {
+                    "https://github.com/acme/demo.git/info/refs":
+                      "https://github.com/acme/impostor.git/info/refs",
+                  },
+                  api,
+                ),
+              ),
+            ),
+          ),
+        { discard: true },
       ),
   );
 

@@ -54,7 +54,7 @@ Options:
   --log-level <level>          Log at this level and above: trace, debug, info, warn, or error (default: info)
   --allow-volatile-instance    Start even when the instance folder is in a temporary directory
   --detach                     Start in the background, with the output in .usine/usine.log
-  --timeout <seconds>          Wait this long for the instance to stop, and again to start (default: ${DEFAULT_LIFECYCLE_TIMEOUT_SECONDS})
+  --timeout <seconds>          Wait this long for the instance to stop, and for the new one to listen or log a line (default: ${DEFAULT_LIFECYCLE_TIMEOUT_SECONDS})
   --force                      Stop without waiting for running attempts; the next start reattaches them
   --check                      Print the running and the latest @usine/server version, and change nothing
   -o, --output <path>          Write the run evidence to this file (default: run-<encoded-runId>.json)
