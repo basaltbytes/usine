@@ -1,5 +1,5 @@
 import { RepositoryName } from "@usine/core/repository";
-import { Encoding, Option, Redacted, Schema } from "effect";
+import { Encoding, Option, Redacted, Result, Schema } from "effect";
 import { Headers } from "effect/unstable/http";
 import type { AttachmentCredential } from "../attachment/attachment.ts";
 import { UpstreamBase } from "../upstream.ts";
@@ -91,6 +91,10 @@ const apiRoute = (base: UpstreamBase, rest: string, search: string): Option.Opti
     repository: named,
   }));
 };
+
+/** Returns `value` as a URL if it is an absolute URL. */
+export const absoluteUrl = (value: string): Option.Option<URL> =>
+  Result.getSuccess(Result.try(() => new URL(value)));
 
 /** Returns `pathname` after `prefix`, if it is `prefix` or a path under it. */
 export const afterPrefix = (pathname: string, prefix: string): Option.Option<string> =>

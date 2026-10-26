@@ -1,6 +1,8 @@
-import { RepositoryName } from "@usine/core/repository";
-import { Option, Schema } from "effect";
-import { afterPrefix, type GitHubOrigins } from "./github.ts";
+import { canonicalRepositoryName, RepositoryName } from "@usine/core/repository";
+import { Data, Effect, Option, Schema } from "effect";
+import { Headers, HttpClient, HttpClientRequest } from "effect/unstable/http";
+import type { Attachment } from "../attachment/attachment.ts";
+import { absoluteUrl, afterPrefix, type GitHubOrigins, withGitHubCredential } from "./github.ts";
 
 /** The statuses GitHub uses to redirect a renamed or transferred repository's former name. */
 export const PERMANENT_REDIRECTS: ReadonlySet<number> = new Set([301, 308]);
@@ -55,3 +57,86 @@ export const redirectedName = (
       Option.map(({ repository }) => repository),
     ),
   );
+
+/** Why GitHub's API didn't confirm that the attached repository has a redirect's name. */
+class RenameUnconfirmed extends Data.TaggedError("RenameUnconfirmed")<{
+  readonly reason:
+    | "former-name-not-redirected"
+    | "repository-unreadable"
+    | "other-current-name"
+    | "github-unreachable";
+  readonly detail: string;
+}> {}
+
+/** Where GitHub's API redirects a renamed or transferred repository's former name. */
+const REPOSITORY_BY_ID_PATH = /^\/repositories\/[1-9][0-9]*$/u;
+
+const decodeCurrentName = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Struct({ full_name: RepositoryName })),
+);
+
+const API_HEADERS = Headers.fromInput({
+  accept: "application/vnd.github+json",
+  "user-agent": "usine-gateway",
+});
+
+/**
+ * Confirms with GitHub's API, using the attachment's credential, that `newName` is the attached
+ * repository's current name: `/repos/OWNER/REPO` for the attached name must answer a permanent
+ * redirect to `/repositories/ID`, and the `full_name` of repository ID must be `newName`. Fails
+ * with `RenameUnconfirmed` otherwise, or if GitHub can't be reached.
+ */
+export const confirmRename = Effect.fn("GitHubRename.confirm")(function* (
+  client: HttpClient.HttpClient,
+  origins: GitHubOrigins,
+  attachment: Attachment,
+  newName: RepositoryName,
+) {
+  yield* Effect.annotateCurrentSpan({ attachment: attachment.id, newName });
+  const get = (url: string) =>
+    client
+      .execute(
+        HttpClientRequest.get(url).pipe(
+          HttpClientRequest.setHeaders(
+            withGitHubCredential("api", attachment.credential, API_HEADERS),
+          ),
+        ),
+      )
+      .pipe(
+        Effect.flatMap((response) =>
+          Effect.map(response.text, (body) => ({
+            status: response.status,
+            location: Headers.get(response.headers, "location"),
+            body,
+          })),
+        ),
+        Effect.provideService(HttpClient.TracerDisabledWhen, () => true),
+        Effect.mapError(
+          (error) =>
+            new RenameUnconfirmed({ reason: "github-unreachable", detail: error.reason._tag }),
+        ),
+      );
+  const former = yield* get(`${origins.api}/repos/${attachment.repository}`);
+  const byId = Option.flatMap(former.location, (location) =>
+    Option.flatMap(absoluteUrl(location), (url) =>
+      afterPrefix(`${url.origin}${url.pathname}`, origins.api),
+    ),
+  ).pipe(Option.filter((path) => REPOSITORY_BY_ID_PATH.test(path)));
+  if (!PERMANENT_REDIRECTS.has(former.status) || Option.isNone(byId))
+    return yield* new RenameUnconfirmed({
+      reason: "former-name-not-redirected",
+      detail: `/repos/${attachment.repository} answered ${String(former.status)}`,
+    });
+  const current = yield* get(`${origins.api}${byId.value}`);
+  const name = current.status === 200 ? decodeCurrentName(current.body) : Option.none();
+  if (Option.isNone(name))
+    return yield* new RenameUnconfirmed({
+      reason: "repository-unreadable",
+      detail: `${byId.value} answered ${String(current.status)}`,
+    });
+  if (canonicalRepositoryName(name.value.full_name) !== canonicalRepositoryName(newName))
+    return yield* new RenameUnconfirmed({
+      reason: "other-current-name",
+      detail: `${byId.value} is ${name.value.full_name}`,
+    });
+});
