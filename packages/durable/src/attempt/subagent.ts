@@ -64,6 +64,18 @@ const aborted = (context: ChordContext, sessionId: AgentSessionId): Effect.Effec
       }),
   });
 
+/** Runs `effect` until the tool call aborts. On abort, runs `onAbort` and interrupts the call. */
+const untilAborted = <A, E, R>(
+  effect: Effect.Effect<A, E, R>,
+  context: ChordContext,
+  sessionId: AgentSessionId,
+  onAbort: Effect.Effect<void, E>,
+) =>
+  Effect.raceFirst(
+    effect,
+    aborted(context, sessionId).pipe(Effect.andThen(onAbort), Effect.andThen(Effect.interrupt)),
+  );
+
 /** Registers the child in `hub.children` until the scope closes. */
 const register = (hub: AttemptHub, child: RunningSession) =>
   Effect.acquireRelease(
@@ -144,16 +156,13 @@ export const subagentTool = (services: ExtensionServices) => {
       );
     }
     // An abort, such as the harness closing at shutdown, ends a wait for a released Attempt.
-    const request = yield* Effect.raceFirst(
+    const request = yield* untilAborted(
       Deferred.await(hub.attached),
-      aborted(context, sessionId).pipe(
-        Effect.tap(() =>
-          Effect.logInfo(
-            "Abandoning the child spawn of an aborted tool call; no execute call supplied the child host",
-            { attemptId: spec.attemptId, sessionId },
-          ),
-        ),
-        Effect.andThen(Effect.interrupt),
+      context,
+      sessionId,
+      Effect.logInfo(
+        "Abandoning the child spawn of an aborted tool call; no execute call supplied the child host",
+        { attemptId: spec.attemptId, sessionId },
       ),
     );
     // Read when each child starts, so a preflight that ran after the Attempt launched applies.
@@ -186,18 +195,15 @@ export const subagentTool = (services: ExtensionServices) => {
     });
     // Annotate logs with the Attempt because this tool runs outside the Attempt's fiber. An abort
     // interrupts a launch that is still waiting through retry delays.
-    const child = yield* Effect.raceFirst(
+    const child = yield* untilAborted(
       services.backend
         .launch(childRequest)
         .pipe(Effect.annotateLogs({ attemptId: spec.attemptId, worker: request.worker })),
-      aborted(context, session.id).pipe(
-        Effect.tap(() =>
-          Effect.logInfo("Abandoning the child launch of an aborted tool call", {
-            sessionId: session.id,
-          }),
-        ),
-        Effect.andThen(Effect.interrupt),
-      ),
+      context,
+      session.id,
+      Effect.logInfo("Abandoning the child launch of an aborted tool call", {
+        sessionId: session.id,
+      }),
     );
     yield* register(hub, child);
     yield* Effect.addFinalizer((exit) =>
@@ -243,22 +249,18 @@ export const subagentTool = (services: ExtensionServices) => {
       ),
       Effect.forkScoped,
     );
-    const outcome = yield* Effect.raceFirst(
+    const outcome = yield* untilAborted(
       child.result.pipe(
         Effect.map(Result.succeed),
         Effect.catchTag(["AgentResultError", "AgentBlockedError", "AgentQuestionError"], (report) =>
           Effect.succeed(Result.fail(report)),
         ),
       ),
-      aborted(context, session.id).pipe(
-        Effect.tap(() =>
-          Effect.logInfo("Interrupting the child of an aborted tool call", {
-            sessionId: session.id,
-          }),
-        ),
-        Effect.andThen(child.interrupt),
-        Effect.andThen(Effect.interrupt),
-      ),
+      context,
+      session.id,
+      Effect.logInfo("Interrupting the child of an aborted tool call", {
+        sessionId: session.id,
+      }).pipe(Effect.andThen(child.interrupt)),
     );
     yield* Fiber.join(forwarding);
     yield* call("wait for the child's Hold to end", async (signal) => {
