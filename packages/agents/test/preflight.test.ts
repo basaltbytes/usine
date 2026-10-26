@@ -4,7 +4,9 @@ import { HarnessReady, HarnessUnavailableError } from "@usine/core/agent/capabil
 import { Deferred, Effect, Fiber, Layer, Option, Schema, Sink, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { TestClock } from "effect/testing";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { LocalProcess, RemoteShell } from "../src/child-host/child-host.ts";
 import { CodexAppServer, type CodexConnection } from "../src/pi/codex/app-server.ts";
 import { PiSdk, type PiStartOptions, type PiStartResult } from "../src/pi/sdk.ts";
@@ -137,13 +139,15 @@ describe("worker harness readiness", () => {
   });
 
   // turbo.json lists the Dockerfile as an input too.
+  const argument = (name: string) =>
+    [
+      ...readFileSync(
+        new URL("../../../infra/worker-image/Dockerfile", import.meta.url),
+        "utf8",
+      ).matchAll(new RegExp(`^ARG ${name}=(\\S+)$`, "gmu")),
+    ].map(([, value]) => value);
+
   it("pins the attempt container image's pnpm and harnesses at the Hetzner worker versions", () => {
-    const dockerfile = readFileSync(
-      new URL("../../../infra/worker-image/Dockerfile", import.meta.url),
-      "utf8",
-    );
-    const argument = (name: string) =>
-      [...dockerfile.matchAll(new RegExp(`^ARG ${name}=(\\S+)$`, "gmu"))].map(([, value]) => value);
     assert.deepStrictEqual(
       {
         pnpm: argument("PNPM_VERSION"),
@@ -155,6 +159,22 @@ describe("worker harness readiness", () => {
         claude: cloudInitPins(/@anthropic-ai\/claude-code@(\S+)/gu),
         codex: cloudInitPins(/@openai\/codex@(\S+)/gu),
       },
+    );
+  });
+
+  // turbo.json lists the script as an input too.
+  it("renders the Hetzner worker's cloud-init with the attempt image's Node.js major version", () => {
+    const rendered = execFileSync(
+      "sh",
+      [
+        fileURLToPath(new URL("../../../infra/hetzner/render-cloud-init.sh", import.meta.url)),
+        "[]",
+      ],
+      { encoding: "utf8" },
+    );
+    assert.deepStrictEqual(
+      [...rendered.matchAll(/deb\.nodesource\.com\/node_(\S+)\.x/gu)].map(([, major]) => major),
+      argument("NODE_MAJOR"),
     );
   });
 
