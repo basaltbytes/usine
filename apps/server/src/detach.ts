@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 import type { InstanceDirectory } from "@usine/core/instance";
-import { Console, Deferred, Duration, Effect, FileSystem, Option, Schema } from "effect";
+import { Console, Deferred, Duration, Effect, FileSystem, Option, Schedule, Schema } from "effect";
 import { DEFAULT_LIFECYCLE_TIMEOUT_SECONDS, Port, SERVER_HOST, type UpLogLevel } from "./cli.ts";
 import { InstanceInUseError } from "./instance/lock.ts";
 import { type InstanceLaunch, ProcessId, currentLaunch, instanceFiles } from "./instance/record.ts";
@@ -12,12 +12,18 @@ const READY_POLL_INTERVAL = "250 millis";
 const LOG_TAIL_LINES = 20;
 const LOG_TAIL_BYTES = 64 * 1024;
 
-/** A `usine up` started in the background exited before it listened, or didn't listen in time. */
+/**
+ * A `usine up` started in the background exited before it listened, or stopped writing to its log
+ * without listening.
+ */
 export class DetachedStartError extends Schema.TaggedError<DetachedStartError>(
   "@usine/server/DetachedStartError",
 )("DetachedStartError", {
-  /** `exited` if the process ended, `timeout` if it still runs without listening. */
-  outcome: Schema.Literals(["exited", "timeout"]),
+  /**
+   * `exited` if the process ended. `silent` if it still runs, but neither listened nor wrote to
+   * its log for `timeout`.
+   */
+  outcome: Schema.Literals(["exited", "silent"]),
   pid: Schema.Option(ProcessId),
   /** How the process ended, such as `status 1` or `SIGKILL`. */
   exit: Schema.Option(Schema.String),
@@ -83,12 +89,15 @@ export class StartedInstance extends Schema.Class<StartedInstance>("@usine/serve
 
 type StartOutcome =
   | { readonly _tag: "Listening"; readonly started: StartedInstance }
-  | { readonly _tag: "Exited"; readonly exit: string };
+  | { readonly _tag: "Exited"; readonly exit: string }
+  | { readonly _tag: "Silent" };
 
 /**
  * Starts `usine up` in the background with `launch`, in its own session and with its output
  * appended to `.usine/usine.log`. Waits until the new process holds the instance and answers HTTP
- * requests. A usine version that writes only `.usine/instance.pid` also counts.
+ * requests. A usine version that writes only `.usine/instance.pid` also counts. Fails with
+ * `DetachedStartError` if the process exits first, or if it neither answers nor writes to the log
+ * for `timeout`.
  */
 export const startDetached = Effect.fn("Cli.startDetached")(function* (
   directory: InstanceDirectory,
@@ -108,10 +117,11 @@ export const startDetached = Effect.fn("Cli.startDetached")(function* (
   yield* fileSystem
     .makeDirectory(files.folder, { recursive: true })
     .pipe(Effect.mapError(spawnError));
-  const offset = yield* fileSystem.stat(files.log).pipe(
+  const logSize = fileSystem.stat(files.log).pipe(
     Effect.map(({ size }) => Number(size)),
     Effect.orElseSucceed(() => 0),
   );
+  const offset = yield* logSize;
   const ended = yield* Deferred.make<string>();
   const child = yield* Effect.try({
     try: () => {
@@ -165,21 +175,53 @@ export const startDetached = Effect.fn("Cli.startDetached")(function* (
   const exited = Deferred.await(ended).pipe(
     Effect.map((exit) => ({ _tag: "Exited", exit }) satisfies StartOutcome),
   );
-  const outcome = yield* Effect.raceFirst(listening, exited).pipe(Effect.timeoutOption(timeout));
-  if (Option.isSome(outcome) && outcome.value._tag === "Listening") {
+  /** Returns `Silent` once the log size, starting from `bytes`, stays the same for `timeout`. */
+  const silence = (bytes: number): Effect.Effect<StartOutcome> =>
+    logSize.pipe(
+      Effect.repeat({
+        schedule: Schedule.spaced(READY_POLL_INTERVAL),
+        until: (size) => size !== bytes,
+      }),
+      Effect.timeoutOption(timeout),
+      Effect.flatMap(
+        Option.match({
+          onNone: () => Effect.succeed({ _tag: "Silent" } satisfies StartOutcome),
+          onSome: silence,
+        }),
+      ),
+    );
+  // Never completes. At `timeout`, a log that grew since the spawn restarted `silence`, so the
+  // command says that it keeps waiting.
+  const stillStarting = Effect.sleep(timeout).pipe(
+    Effect.andThen(logSize),
+    Effect.flatMap((size) =>
+      size === offset
+        ? Effect.void
+        : Effect.logInfo(
+            "The background usine up isn't listening yet; waiting while it writes to its log",
+            {
+              pid: Option.getOrUndefined(pid),
+              port: launch.port,
+              log: files.log,
+              timeoutSeconds: Duration.toSeconds(timeout),
+            },
+          ),
+    ),
+    Effect.andThen(Effect.never),
+  );
+  const outcome = yield* Effect.raceAll([listening, exited, silence(offset), stillStarting]);
+  if (outcome._tag === "Listening") {
     yield* Effect.logInfo("The background usine up is listening", {
-      pid: outcome.value.started.pid,
+      pid: outcome.started.pid,
       port: launch.port,
     });
-    return outcome.value.started;
+    return outcome.started;
   }
   const tail = yield* logTail(files.log, offset);
   const error = new DetachedStartError({
-    outcome: Option.isSome(outcome) ? "exited" : "timeout",
+    outcome: outcome._tag === "Exited" ? "exited" : "silent",
     pid,
-    exit: Option.flatMap(outcome, (ended) =>
-      ended._tag === "Exited" ? Option.some(ended.exit) : Option.none(),
-    ),
+    exit: outcome._tag === "Exited" ? Option.some(outcome.exit) : Option.none(),
     timeout,
     port: launch.port,
     log: files.log,

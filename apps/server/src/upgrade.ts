@@ -341,7 +341,7 @@ export const upgrade = Effect.fn("Cli.upgrade")(function* (
             )
           : failure(
               "listen",
-              `it didn't answer on port ${error.port} within ${Duration.format(error.timeout)}`,
+              `it didn't answer on port ${error.port}, and wrote nothing to its log for ${Duration.format(error.timeout)}`,
               commit,
               error.tail,
             ),
