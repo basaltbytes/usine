@@ -16,6 +16,7 @@ import {
   withoutCallerCredentials,
 } from "../caller/caller.ts";
 import {
+  absoluteUrl,
   GITHUB_HOSTS,
   type GitHubHost,
   type GitHubRoute,
@@ -23,6 +24,7 @@ import {
   githubRoute,
   withGitHubCredential,
 } from "../github/github.ts";
+import { confirmRename, PERMANENT_REDIRECTS, redirectedName } from "../github/rename.ts";
 import { type ChatGptLoginUnavailable, ChatGptLogins } from "../chatgpt/logins.ts";
 import {
   type ChatGptLogin,
@@ -195,12 +197,56 @@ export class GatewayProxy extends Context.Service<
       });
 
       /**
-       * Points a `Location` at github.com or api.github.com to `git.<domain>`, and logs the rewrite.
-       * GitHub answers a renamed or transferred repository's former name with a permanent
-       * redirect to its new name, so if `requested` named the repository, a 301 or 308 teaches
-       * the attachment the repository its `Location` names. A path that names no repository, such
-       * as `/repositories/ID/...`, teaches nothing: the gateway can't tell which repository it was.
+       * Teaches the attachment the new name in GitHub's permanent redirect of a request for the
+       * repository itself, once GitHub's API confirms it with the attachment's credential. GitHub
+       * answers a renamed or transferred repository's former name that way; a redirect of anything
+       * else can point at another repository without a rename.
        */
+      const learnFromRedirect = Effect.fn("GatewayProxy.learnFromRedirect")(function* (
+        live: LiveAttachment,
+        requested: GitHubRoute,
+        location: URL,
+      ) {
+        const { attachment } = live;
+        yield* Effect.annotateCurrentSpan({
+          attachment: attachment.id,
+          repository: attachment.repository,
+        });
+        const fields = {
+          attachment: attachment.id,
+          worker: attachment.worker,
+          repository: attachment.repository,
+        };
+        const newName = Option.flatMap(absoluteUrl(requested.upstream), (upstream) =>
+          redirectedName(settings.github, upstream, location),
+        );
+        if (Option.isNone(newName))
+          return yield* Effect.logDebug("Learned no name from a redirect that isn't a rename", {
+            ...fields,
+            path: location.pathname,
+          });
+        const renamed = { ...fields, newName: newName.value };
+        if (live.serves(newName.value))
+          return yield* Effect.logDebug(
+            "The attachment already serves the redirect's name",
+            renamed,
+          );
+        yield* confirmRename(client, settings.github, attachment, newName.value).pipe(
+          Effect.andThen(attachments.learnNewName(attachment.id, newName.value)),
+          Effect.catchTag("RenameUnconfirmed", ({ reason, detail }) =>
+            Effect.logWarning(
+              "GitHub's API didn't confirm the new name of an attached repository",
+              {
+                ...renamed,
+                reason,
+                detail,
+              },
+            ),
+          ),
+        );
+      });
+
+      /** Points a `Location` at github.com or api.github.com to `git.<domain>`, and logs the rewrite. */
       const throughGateway = Effect.fn("GatewayProxy.throughGateway")(function* (
         answer: HttpServerResponse.HttpServerResponse,
         live: LiveAttachment,
@@ -217,11 +263,8 @@ export class GatewayProxy extends Context.Service<
           from: from.value.host,
           path: to.value.pathname,
         });
-        if (Option.isSome(requested.repository) && PERMANENT_REDIRECTS.has(answer.status)) {
-          const named = githubRoute(settings.github, "gateway", to.value.pathname, to.value.search);
-          const newName = Option.flatMap(named, ({ repository }) => repository);
-          if (Option.isSome(newName)) yield* attachments.learnNewName(attachment.id, newName.value);
-        }
+        if (PERMANENT_REDIRECTS.has(answer.status))
+          yield* learnFromRedirect(live, requested, from.value);
         return HttpServerResponse.setHeader(answer, "location", to.value.href);
       });
 
@@ -247,7 +290,7 @@ export class GatewayProxy extends Context.Service<
             `The caller token was issued for ${claims.repository}, not ${named.value}.`,
           );
         const headers = withGitHubCredential(
-          route.value,
+          route.value.protocol,
           attachment.credential,
           withoutCallerCredentials(endToEndHeaders(request.headers)),
         );
@@ -388,17 +431,11 @@ export class GatewayProxy extends Context.Service<
   );
 }
 
-/** The statuses GitHub uses to redirect a renamed or transferred repository's former name. */
-const PERMANENT_REDIRECTS: ReadonlySet<number> = new Set([301, 308]);
-
 const refusalResponse = (error: Refused): HttpServerResponse.HttpServerResponse =>
   HttpServerResponse.jsonUnsafe(
     { message: `usine gateway: ${error.message}`, reason: error.reason },
     { status: error.status, headers: { [REFUSAL_HEADER]: error.reason } },
   );
-
-const absoluteUrl = (value: string): Option.Option<URL> =>
-  Result.getSuccess(Result.try(() => new URL(value)));
 
 /** Returns the host a response redirects to, without the `Location` path and query, which can hold a signature. */
 const redirectTarget = (response: HttpServerResponse.HttpServerResponse) =>
