@@ -348,6 +348,8 @@ On the overview, board, tasks list, and configuration pages: the 20px semibold t
 ### Flat table
 The registry table on the panel ground: a 36px heading row of 12px subtext0 labels, 44px rows split by hairlines, 8px cell padding, numbers right-aligned in tabular figures. A row that opens something fills surface0 at 60% on hover and while its link has focus, with a 2px mauve outline on the link; other rows have no hover fill. Row actions are subtext0 ghost buttons, only those that apply, such as Pause or Resume.
 
+One column, usually the item or the detail, takes the remaining width, and its text wraps or is cut short inside it. The other columns take their content's width on one line. A column whose text wraps has a minimum width instead.
+
 ### Frontmatter block
 Keys and values copied from a file, such as a loop's `on:` and `if:`: a mantle box with a hairline ring and 8px radius, 12px mono, keys in subtext0, values in text colour, wrapping anywhere. Ligatures are off, so `==` reads as written.
 

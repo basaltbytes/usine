@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import type { TaskView } from "@usine/orchestrator/operator";
+import { FillCell } from "@/components/fill-cell";
 import { ItemMark } from "@/components/item/mark";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import { dayTimeLabel, timestampLabel } from "../operator-copy.ts";
@@ -44,7 +45,7 @@ export const TaskComments = ({ task }: { readonly task: TaskView }) => {
                 const time = commentTime(comment);
                 return (
                   <TableRow key={comment.url} className={linkedRow}>
-                    <TableCell className="w-full py-3 whitespace-normal">
+                    <FillCell className="py-3 whitespace-normal">
                       <a
                         data-row-link
                         href={comment.url}
@@ -59,7 +60,7 @@ export const TaskComments = ({ task }: { readonly task: TaskView }) => {
                           </span>
                         )}
                       </a>
-                    </TableCell>
+                    </FillCell>
                     <TableCell className="py-3">
                       {run !== undefined && (
                         <Link

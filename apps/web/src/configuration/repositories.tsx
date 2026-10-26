@@ -6,6 +6,7 @@ import type {
   LaneSourceView,
   RepositoryConfigurationView,
 } from "@usine/orchestrator/operator";
+import { FillCell } from "@/components/fill-cell";
 import { LabelBadge } from "@/components/label-badge";
 import { RepositoryMark } from "@/components/repository-mark";
 import { Badge } from "@/components/ui/badge";
@@ -96,9 +97,9 @@ const RepositoryRow = ({ repository }: { readonly repository: RepositoryConfigur
       <TableCell className={standing.problem ? "text-destructive" : "text-muted-foreground"}>
         {standing.text}
       </TableCell>
-      <TableCell className="hidden w-full whitespace-normal text-muted-foreground sm:table-cell">
+      <FillCell className="hidden whitespace-normal text-muted-foreground sm:table-cell">
         {repository.loops.length === 0 ? "No loop" : repository.loops.join(", ")}
-      </TableCell>
+      </FillCell>
     </OpeningRow>
   );
 };
@@ -126,7 +127,7 @@ export const RepositoriesList = ({
               <TableHead className="hidden md:table-cell">Tags</TableHead>
               <TableHead className="text-right">Lanes</TableHead>
               <TableHead>Labels</TableHead>
-              <TableHead className="hidden w-full sm:table-cell">Loops</TableHead>
+              <TableHead className="hidden sm:table-cell">Loops</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -174,7 +175,7 @@ const LanesTable = ({ repository }: { readonly repository: RepositoryConfigurati
         <TableRow className="hover:bg-transparent">
           <TableHead className="text-right">#</TableHead>
           <TableHead>Lane</TableHead>
-          <TableHead className="w-full">Items with</TableHead>
+          <TableHead>Items with</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -184,7 +185,7 @@ const LanesTable = ({ repository }: { readonly repository: RepositoryConfigurati
               {index + 1}
             </TableCell>
             <TableCell className="py-3 align-top font-medium">{lane.name}</TableCell>
-            <TableCell className="py-3 whitespace-normal">
+            <FillCell className="py-3 whitespace-normal">
               <ul className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
                 {lane.sources.map((source) => (
                   <li key={source._tag === "Label" ? source.label.name : source.state}>
@@ -192,7 +193,7 @@ const LanesTable = ({ repository }: { readonly repository: RepositoryConfigurati
                   </li>
                 ))}
               </ul>
-            </TableCell>
+            </FillCell>
           </TableRow>
         ))}
       </TableBody>

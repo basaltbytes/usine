@@ -8,6 +8,7 @@ import type {
   WorkerConfigurationView,
   WorkerSlotsView,
 } from "@usine/orchestrator/operator";
+import { FillCell } from "@/components/fill-cell";
 import { StatusBadge } from "@/components/status-badge";
 import {
   Table,
@@ -140,7 +141,7 @@ const WorkerRow = ({ worker }: { readonly worker: WorkerConfigurationView }) => 
           </span>
         )}
       </TableCell>
-      <TableCell className="w-full">
+      <FillCell className="whitespace-normal">
         <PreflightState worker={worker} />
         {worker.provisioning?.blocked === true && (
           <p className="text-xs text-destructive tabular-nums" title={worker.provisioning.message}>
@@ -148,7 +149,7 @@ const WorkerRow = ({ worker }: { readonly worker: WorkerConfigurationView }) => 
             {nextCreationLine(worker.provisioning, now)}
           </p>
         )}
-      </TableCell>
+      </FillCell>
     </OpeningRow>
   );
 };
@@ -169,7 +170,7 @@ export const WorkersList = ({ configuration }: { readonly configuration: Configu
               <TableHead>Kind</TableHead>
               <TableHead className="hidden md:table-cell">Location</TableHead>
               <TableHead>Slots in use</TableHead>
-              <TableHead className="w-full">Last preflight</TableHead>
+              <TableHead>Last preflight</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -226,9 +227,9 @@ const CheckRow = ({
     <TableCell className="py-3 align-top font-mono text-xs text-muted-foreground tabular-nums">
       {dayTimeLabel(check.checkedAt)}
     </TableCell>
-    <TableCell className="w-full py-3 align-top whitespace-normal wrap-anywhere">
+    <FillCell className="py-3 align-top whitespace-normal wrap-anywhere">
       {check._tag === "Passed" ? null : check.message}
-    </TableCell>
+    </FillCell>
   </TableRow>
 );
 
@@ -467,7 +468,7 @@ const Machines = ({ worker }: { readonly worker: WorkerConfigurationView }) => {
                 <TableHead className="max-sm:w-full">Machine</TableHead>
                 <TableHead>State</TableHead>
                 <TableHead className="text-right">Age</TableHead>
-                <TableHead className="w-full max-sm:hidden">For</TableHead>
+                <TableHead className="max-sm:hidden">For</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -495,9 +496,9 @@ const Machines = ({ worker }: { readonly worker: WorkerConfigurationView }) => {
                   >
                     {elapsedLabel(machine.since, now)}
                   </TableCell>
-                  <TableCell className="w-full max-sm:hidden">
+                  <FillCell className="max-sm:hidden">
                     <MachineFor machine={machine} />
-                  </TableCell>
+                  </FillCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -587,7 +588,7 @@ export const WorkerDetail = ({
                     <TableHead>Check</TableHead>
                     <TableHead>Result</TableHead>
                     <TableHead>Checked</TableHead>
-                    <TableHead className="w-full">Detail</TableHead>
+                    <TableHead>Detail</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>

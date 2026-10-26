@@ -1,6 +1,7 @@
 import { WarningIcon } from "@phosphor-icons/react";
 import type { FactoryOverview, RunningAttemptView, WorkerView } from "@usine/orchestrator/operator";
 import { Option } from "effect";
+import { FillCell } from "@/components/fill-cell";
 import { ItemHeading } from "@/components/item/heading";
 import { itemIdentity, useOverview } from "@/components/item/identity";
 import {
@@ -36,7 +37,7 @@ const RunningRow = ({
   const origin = item === null ? null : itemIdentity(overview, item).origin;
   return (
     <RunRow run={run}>
-      <TableCell className="w-full max-w-0 py-3 whitespace-normal align-top">
+      <FillCell className="py-3 whitespace-normal align-top">
         <RunPageLink run={run}>
           {origin === null ? (
             <span className="block truncate text-sm font-medium">
@@ -73,7 +74,7 @@ const RunningRow = ({
             </span>
           </p>
         ))}
-      </TableCell>
+      </FillCell>
       <TableCell className="py-3 max-md:hidden align-top">{run.loop}</TableCell>
       <TableCell className="py-3 max-lg:hidden align-top">{run.agent}</TableCell>
       <TableCell className="py-3 max-lg:hidden align-top">{attempt.worker}</TableCell>

@@ -8,6 +8,7 @@ import type {
   QuarantinedLoopView,
 } from "@usine/orchestrator/operator";
 import { ErrorAlert } from "@/components/error-alert";
+import { FillCell } from "@/components/fill-cell";
 import { RepositoryMark } from "@/components/repository-mark";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
@@ -100,14 +101,14 @@ const LoopRow = ({
         </Link>
       </TableCell>
       <TableCell>{triggerLabel(loop.stream)}</TableCell>
-      <TableCell className="hidden max-w-0 lg:table-cell">
+      <FillCell className="hidden lg:table-cell">
         <code
           className="block truncate font-mono text-xs text-muted-foreground [font-variant-ligatures:none]"
           title={loop.condition}
         >
           {loop.condition}
         </code>
-      </TableCell>
+      </FillCell>
       <TableCell className="hidden sm:table-cell">{loop.agent}</TableCell>
       <TableCell className="hidden md:table-cell">{approvalLabel[loop.approval]}</TableCell>
       <TableCell>
@@ -170,7 +171,7 @@ export const LoopsList = ({
             <TableRow className="hover:bg-transparent">
               <TableHead className="lg:w-56">Loop</TableHead>
               <TableHead>Trigger</TableHead>
-              <TableHead className="hidden w-full lg:table-cell">Condition</TableHead>
+              <TableHead className="hidden lg:table-cell">Condition</TableHead>
               <TableHead className="hidden sm:table-cell">Agent</TableHead>
               <TableHead className="hidden md:table-cell">Approval</TableHead>
               <TableHead>State</TableHead>

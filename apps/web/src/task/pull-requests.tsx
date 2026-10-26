@@ -1,5 +1,6 @@
 import { ArrowSquareOutIcon } from "@phosphor-icons/react";
 import type { TaskView } from "@usine/orchestrator/operator";
+import { FillCell } from "@/components/fill-cell";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import { ItemMark } from "@/components/item/mark";
 import { linkedRow, rowLink, SectionEmpty, SectionHeading } from "./section.tsx";
@@ -22,7 +23,7 @@ export const TaskPullRequests = ({ task }: { readonly task: TaskView }) => {
                   <TableCell className="w-0 py-3">
                     <ItemMark item={pullRequest} linked={false} />
                   </TableCell>
-                  <TableCell className="w-full py-3 whitespace-normal">
+                  <FillCell className="py-3 whitespace-normal">
                     <a
                       data-row-link
                       href={pullRequest.url}
@@ -36,7 +37,7 @@ export const TaskPullRequests = ({ task }: { readonly task: TaskView }) => {
                         aria-label="Opens on GitHub"
                       />
                     </a>
-                  </TableCell>
+                  </FillCell>
                   <TableCell className="py-3 text-right">
                     {pullRequest.conflicting && (
                       <span className="text-xs text-destructive">Conflicts with base</span>
