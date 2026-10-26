@@ -59,13 +59,15 @@ An expected startup failure prints one line with the file, setting, or worker at
 
 ### Background start
 
-`usine up --detach` checks that no `usine up` runs in the folder. It then starts `usine up` with the same Node.js binary, Node.js options, entry point, port, log level, and `--allow-volatile-instance` flag, in a new session and with no terminal. The new process appends its output to `.usine/usine.log`, which has owner-only permissions; usine doesn't rotate it. The command waits up to 120 seconds for the process to write its instance record and answer HTTP requests, and then prints:
+`usine up --detach` checks that no `usine up` runs in the folder. It then starts `usine up` with the same Node.js binary, Node.js options, entry point, port, log level, and `--allow-volatile-instance` flag, in a new session and with no terminal. The new process appends its output to `.usine/usine.log`, which has owner-only permissions; usine doesn't rotate it. The command waits for the process to write its instance record and answer HTTP requests, and then prints:
 
 ```text
 usine is running at http://127.0.0.1:7331 (pid 48120), with its output in .usine/usine.log.
 ```
 
-If the process exits first, the command prints how it exited and the last 20 lines of the log, and exits with status 1. If the process still runs without answering after 120 seconds, the command says so and exits with status 1. The process inherits the environment of the shell that runs the command, and reads the [environment file](#environment-file) itself.
+The process answers only after startup recovery, which reconciles the checkouts that earlier attempts left on workers and can take minutes. So the command keeps waiting while the process writes to the log, and gives up after 120 seconds without a new line. At log level `warn` or `error`, startup recovery writes few lines, so a long recovery can exceed the wait.
+
+If the process exits first, the command prints how it exited and the last 20 lines of the log, and exits with status 1. If the process neither answers nor writes to the log for 120 seconds, the command says so and exits with status 1, and the process keeps running. The process inherits the environment of the shell that runs the command, and reads the [environment file](#environment-file) itself.
 
 ### Instance record
 
@@ -161,7 +163,7 @@ If the process still runs after the timeout, the command exits with status 1, an
 
 ## `usine restart`
 
-Takes the same flags as `usine stop`. It applies `--timeout` to the stop and again to the start.
+Takes the same flags as `usine stop`. It applies `--timeout` to the stop, and to the start as the time without a new log line.
 
 Stops the orchestrator as `usine stop` does, then starts it as a [background start](#background-start) with the Node.js binary, Node.js options, entry point, port, and flags from the instance record. After a rebuild of a checkout, the entry point is the rebuilt one. The new process inherits the environment of the shell that runs `usine restart`, not the environment of the process that it replaces, and reads the [environment file](#environment-file) again. A variable in `.env` doesn't need to be set in that shell.
 
