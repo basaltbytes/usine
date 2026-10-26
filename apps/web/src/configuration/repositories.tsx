@@ -80,7 +80,7 @@ const RepositoryRow = ({ repository }: { readonly repository: RepositoryConfigur
           {repository.name}
         </Link>
       </TableCell>
-      <TableCell className="hidden md:table-cell">
+      <TableCell className="hidden @2xl:table-cell">
         {repository.tags.length === 0 ? (
           <span className="text-muted-foreground">None</span>
         ) : (
@@ -94,7 +94,12 @@ const RepositoryRow = ({ repository }: { readonly repository: RepositoryConfigur
           repository.lanes.length
         )}
       </TableCell>
-      <TableCell className={standing.problem ? "text-destructive" : "text-muted-foreground"}>
+      <TableCell
+        className={cn(
+          "max-sm:whitespace-normal",
+          standing.problem ? "text-destructive" : "text-muted-foreground",
+        )}
+      >
         {standing.text}
       </TableCell>
       <FillCell className="hidden whitespace-normal text-muted-foreground sm:table-cell">
@@ -119,12 +124,12 @@ export const RepositoriesList = ({
         configuration.
       </Missing>
     ) : (
-      <div className="-mx-2">
+      <div className="@container -mx-2">
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
               <TableHead>Repository</TableHead>
-              <TableHead className="hidden md:table-cell">Tags</TableHead>
+              <TableHead className="hidden @2xl:table-cell">Tags</TableHead>
               <TableHead className="text-right">Lanes</TableHead>
               <TableHead>Labels</TableHead>
               <TableHead className="hidden sm:table-cell">Loops</TableHead>

@@ -94,6 +94,13 @@ it("keeps each worker's slot cells on one line, at every width, without scrollin
   }
 });
 
+it("keeps the Repositories list within its width on a phone and beside the sidebar", async () => {
+  for (const width of [390, 768]) {
+    await mount("/configuration/repositories", width);
+    fitsWithoutScrolling();
+  }
+});
+
 it("gives a preflight check's description its own width, and the detail the rest of a wide table", async () => {
   await mount("/configuration/workers/eu-2", 1600);
   expect(headers()).toEqual(["Check", "Result", "Checked", "Detail"]);
