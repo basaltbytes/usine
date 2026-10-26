@@ -15,7 +15,6 @@ import type {
   HetznerLocation,
   HetznerResourceName,
   HetznerServerType,
-  MachineId,
   MachineProvider,
   SshDestination,
   SshIdentityFile,
@@ -175,6 +174,4 @@ export interface SshMachine extends RemoteMachine {
   /** The Worker's address from `usine.yaml`; preflight checks its root. */
   readonly address: SshWorkerAddress;
   readonly gateway: Option.Option<MachineGateway>;
-  /** The provider's ID of a machine created for one Attempt, or `None` for a long-lived machine. */
-  readonly provisioned: Option.Option<MachineId>;
 }

@@ -395,6 +395,8 @@ describe("Provisioned SSH Worker", () => {
         );
         yield* prepared.launch(sink);
         assert(given !== undefined && given.host instanceof RemoteShell);
+        // Its Claude children take this machine's login lock, not the Worker's.
+        assert.deepStrictEqual(given.machine, Option.some(grant.id));
         const destination = `usine@${server.publicIp ?? ""}`;
         assert.strictEqual(given.host.destination, destination);
         const knownHosts = `${LOCAL_TEMPORARY_DIRECTORY}/hetzner-${grant.id}`;

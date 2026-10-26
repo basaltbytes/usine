@@ -12,7 +12,7 @@ import {
   RunawayFailure,
 } from "@usine/core/attempt/failure";
 import { CommitSha } from "@usine/core/repository";
-import type { GatewayCredentialKind } from "@usine/core/worker";
+import { type GatewayCredentialKind, MachineId } from "@usine/core/worker";
 import { Commit, StepResult } from "@usine/core/step/result";
 import { LocalProcess, RemoteShell } from "@usine/agents/child-host";
 import { ChildBackend } from "@usine/agents/runtime";
@@ -957,7 +957,7 @@ describe("durable AttemptRuntime", () => {
   );
 
   it.live(
-    "gives every child the child host its execute call supplies, and records on each child's session the Gateway credential in force when it starts",
+    "gives every child the child host and machine its execute call supplies, and records on each child's session the Gateway credential in force when it starts",
     () =>
       Effect.gen(function* () {
         const database = yield* temporaryDatabase;
@@ -966,18 +966,22 @@ describe("durable AttemptRuntime", () => {
           sshEnvironment: { SSH_AUTH_SOCK: "/tmp/agent.sock" },
           destination: "worker.exe.xyz",
         });
+        // A provisioned machine, whose Claude children share only its own login.
+        const machine = Option.some(MachineId.make("52341896"));
         // Gateway credential kind recorded by the Worker's preflight.
         const recorded = yield* Ref.make(Option.some<GatewayCredentialKind>("api-key"));
         yield* Effect.gen(function* () {
           const runtime = yield* AttemptRuntime;
           const request = new AttemptRequest({
             ...attemptRequest("run/step/11", 3, host),
+            machine,
             gatewayCredential: Ref.get(recorded),
           });
           const execution = yield* Effect.forkChild(runtime.execute(request, recordingSink().sink));
           const children = yield* StubChildren;
           const first = yield* children.next;
           assert.deepStrictEqual(first.request.host, host);
+          assert.deepStrictEqual(first.request.machine, machine);
           assert.deepStrictEqual(first.request.session.gatewayCredential, Option.some("api-key"));
           // A preflight during the Attempt records a subscription token on the Gateway.
           yield* Ref.set(recorded, Option.some("subscription"));

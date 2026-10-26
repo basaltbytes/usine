@@ -138,6 +138,7 @@ const delayedPiStart = () => {
 describe("Pi child backend", () => {
   const childRequest = new ChildRequest({
     worker: WorkerName.make("worker-1"),
+    machine: Option.none(),
     environment: { HOME: "/home/worker", PATH: "/usr/bin:/bin" },
     host: new LocalProcess(),
     session: new ChildSession({
