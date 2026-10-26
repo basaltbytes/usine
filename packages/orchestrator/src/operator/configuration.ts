@@ -13,6 +13,7 @@ import { StepName } from "@usine/core/step";
 import {
   ContainerCpus,
   ContainerImage,
+  ContainerLimits,
   ContainerMemoryMib,
   ContainerPids,
   GatewayAdminPort,
@@ -226,6 +227,14 @@ export class WorkerConfigurationView extends Schema.Class<WorkerConfigurationVie
   gateway: Schema.NullOr(GatewayView),
   /** An SSH Worker's Attempt container, used if its machine has Docker; null for the other kinds. */
   container: Schema.NullOr(ContainerView),
+  /**
+   * The limits of each Attempt container from the last passed preflight that checked the
+   * Worker's machine: the ones `usine.yaml` sets and the ones derived from the machine. Null
+   * before one, for a machine without Docker, and for the other kinds.
+   */
+  containerLimits: Schema.NullOr(ContainerLimits).pipe(
+    Schema.withConstructorDefault(Effect.succeed(null)),
+  ),
   /** A provisioned SSH Worker's provisioner, which creates one machine per Attempt, or null. */
   provisioner: Schema.NullOr(ProvisionerView).pipe(
     Schema.withConstructorDefault(Effect.succeed(null)),
@@ -563,6 +572,8 @@ const makeOperatorConfiguration = Effect.gen(function* () {
         harnesses: (preflight?.harnesses ?? []).map(
           ({ harness, check }) => new HarnessPreflightView({ harness, check: checkView(check) }),
         ),
+        containerLimits:
+          preflight === undefined ? null : Option.getOrNull(preflight.containerLimits),
         machines: inFlight.filter((machine) => machine.worker === worker.name).map(machineView),
         provisioning: Option.getOrNull(
           Option.map(

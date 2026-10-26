@@ -164,6 +164,7 @@ export const configurationJson = {
       root: null,
       gateway: null,
       container: null,
+      containerLimits: null,
       ...unprovisioned,
       slots: { capacity: 2, leased: 1 },
       prerequisites: { _tag: "Passed", checkedAt: "2026-10-20T08:00:00.000Z" },
@@ -196,6 +197,7 @@ export const configurationJson = {
         llmProviders: ["anthropic"],
       },
       container: { image: null, cpus: 2, memoryMib: 4096, pids: 4096 },
+      containerLimits: null,
       ...unprovisioned,
       slots: { capacity: 3, leased: 0 },
       prerequisites: null,
@@ -216,6 +218,7 @@ export const configurationJson = {
         memoryMib: 6144,
         pids: 2048,
       },
+      containerLimits: null,
       ...unprovisioned,
       slots: { capacity: 1, leased: 0 },
       prerequisites: {
@@ -244,6 +247,7 @@ export const configurationJson = {
         llmProviders: ["anthropic"],
       },
       container: { image: null, cpus: 2, memoryMib: 4096, pids: 4096 },
+      containerLimits: null,
       provisioner: {
         _tag: "hetzner",
         tokenEnv: "HCLOUD_TOKEN",
@@ -309,6 +313,7 @@ export const configurationJson = {
       root: "/home/usine",
       gateway: null,
       container: null,
+      containerLimits: null,
       provisioner: {
         _tag: "boat",
         tokenEnv: "BOAT_API_KEY",

@@ -6,7 +6,13 @@ import { HarnessUnavailableError } from "@usine/core/agent/capability";
 import { InstanceDirectory } from "@usine/core/instance";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
-import { WorkerName } from "@usine/core/worker";
+import {
+  ContainerCpus,
+  ContainerLimits,
+  ContainerMemoryMib,
+  ContainerPids,
+  WorkerName,
+} from "@usine/core/worker";
 import { LoopControl, LoopRuntimeState } from "@usine/engine/loop-control";
 import {
   RepositoryLabelProjection,
@@ -243,12 +249,23 @@ const workers = Layer.succeed(WorkerStatus)({
       startedAt,
       Result.succeed(fullPreflight),
     );
+    const limits = new ContainerLimits({
+      cpus: ContainerCpus.make(1.16),
+      memoryMib: ContainerMemoryMib.make(2389),
+      pids: ContainerPids.make(20325),
+    });
     return [
       recordPreflight(
         started,
         [codex, claude],
         DateTime.addDuration(startedAt, "1 hour"),
         Result.fail(claudeLoggedOut),
+      ),
+      recordPreflight(
+        unchecked(WorkerName.make("eu-1")),
+        [claude],
+        startedAt,
+        Result.succeed({ ...fullPreflight, containerLimits: Option.some(limits) }),
       ),
     ];
   }),
@@ -383,7 +400,12 @@ describe("Configuration view", () => {
       assert.strictEqual(onSsh.identityFile, "~/.ssh/usine_worker");
       assert.isNull(onSsh.port);
       assert.isNull(onSsh.slots);
-      assert.isNull(onSsh.prerequisites);
+      assert.deepStrictEqual(onSsh.prerequisites, {
+        _tag: "Passed",
+        checkedAt: "2026-10-20T08:00:00.000Z",
+      });
+      assert.deepStrictEqual(onSsh.containerLimits, { cpus: 1.16, memoryMib: 2389, pids: 20325 });
+      assert.isNull(onLocal.containerLimits);
       assert.deepStrictEqual(onSsh.gateway, {
         domain: "gw.internal",
         destination: "usine-gateway",
