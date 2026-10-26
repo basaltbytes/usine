@@ -9,4 +9,4 @@ The CLI manages a running instance. `usine up` writes `.usine/instance.json` wit
 - `usine restart` stops the instance and starts its recorded command line in the background, with the output in `.usine/usine.log`. `usine up --detach` does the same start for a stopped instance.
 - `usine upgrade [<version>] [--check]` backs up the stores into `.usine/backups/`, moves the `@usine/*` pins in `package.json`, installs them with the instance's package manager, commits the change, and restarts. For an engine outside the instance, such as a checkout, it changes nothing and says how to update it.
 
-`restart` and `upgrade` refuse while a run has a running attempt, unless `--force`, and when the shell lacks a gateway's admin token variable.
+`restart` and `upgrade` refuse while a run has a running attempt, unless `--force`, and when neither the shell nor the instance folder's `.env` sets a gateway's admin token variable.

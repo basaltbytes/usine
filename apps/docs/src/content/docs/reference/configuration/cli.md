@@ -5,7 +5,7 @@ sidebar:
   order: 5
 ---
 
-The `@usine/server` package provides the `usine` binary ([`main.ts`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/main.ts#L47)). Run every command from the instance folder, the folder that contains `usine.yaml`.
+The `@usine/server` package provides the `usine` binary ([`main.ts`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/main.ts#L47)). Run every command from the instance folder, the folder that contains `usine.yaml`. Each command first reads the [environment file](#environment-file), `.env`, in that folder.
 
 ```sh title="Usage"
 usine up [--port <port>] [--log-level <level>] [--allow-volatile-instance] [--detach]
@@ -65,7 +65,7 @@ An expected startup failure prints one line with the file, setting, or worker at
 usine is running at http://127.0.0.1:7331 (pid 48120), with its output in .usine/usine.log.
 ```
 
-If the process exits first, the command prints how it exited and the last 20 lines of the log, and exits with status 1. If the process still runs without answering after 120 seconds, the command says so and exits with status 1. The process inherits the environment of the shell that runs the command.
+If the process exits first, the command prints how it exited and the last 20 lines of the log, and exits with status 1. If the process still runs without answering after 120 seconds, the command says so and exits with status 1. The process inherits the environment of the shell that runs the command, and reads the [environment file](#environment-file) itself.
 
 ### Instance record
 
@@ -163,14 +163,14 @@ If the process still runs after the timeout, the command exits with status 1, an
 
 Takes the same flags as `usine stop`. It applies `--timeout` to the stop and again to the start.
 
-Stops the orchestrator as `usine stop` does, then starts it as a [background start](#background-start) with the Node.js binary, Node.js options, entry point, port, and flags from the instance record. After a rebuild of a checkout, the entry point is the rebuilt one. The new process inherits the environment of the shell that runs `usine restart`, not the environment of the process that it replaces.
+Stops the orchestrator as `usine stop` does, then starts it as a [background start](#background-start) with the Node.js binary, Node.js options, entry point, port, and flags from the instance record. After a rebuild of a checkout, the entry point is the rebuilt one. The new process inherits the environment of the shell that runs `usine restart`, not the environment of the process that it replaces, and reads the [environment file](#environment-file) again. A variable in `.env` doesn't need to be set in that shell.
 
 The command changes nothing and exits with status 1 in these cases:
 
 - No `usine up` runs in the folder. Start it with `usine up --detach`.
 - The orchestrator wrote no instance record, because an earlier usine version started it. Stop it with `usine stop`, and start it with `usine up --detach`.
 - A run has a running attempt, unless you pass `--force`. Without a deadline, the drain would keep the orchestrator down until the attempt ends.
-- The shell doesn't set the `admin_token_env` variable of a gateway in the running configuration. The new process would stop at startup without it.
+- Neither the shell nor `.env` sets the `admin_token_env` variable of a gateway in the running configuration. The new process would stop at startup without it.
 
 ## `usine upgrade [<version>]`
 
@@ -183,7 +183,7 @@ The command changes nothing and exits with status 1 in these cases:
 Moves the `@usine/server` pin in the instance's `package.json` and restarts the orchestrator on the new version. It applies to an instance that pins `@usine/server` to a registry version and runs the engine from its own `node_modules`. The command runs these steps in order:
 
 1. **Version.** It resolves `<version>` with `npm view` in the instance folder, so the folder's `.npmrc` applies. Other `@usine/*` packages with a registry version in `package.json` move to the version that the new `@usine/server` depends on, or to their latest version.
-2. **Checks.** It refuses, as `usine restart` does, while a run has a running attempt or the shell lacks a gateway's admin token variable.
+2. **Checks.** It refuses, as `usine restart` does, while a run has a running attempt or neither the shell nor `.env` sets a gateway's admin token variable.
 3. **Backup.** It copies `.usine/runtime.sqlite` and `.usine/durable.sqlite` into `.usine/backups/`, as `usine backup` does, named `runtime-<UTC time>-<running version>.sqlite` and `runtime-<UTC time>-<running version>.durable.sqlite`.
 4. **Stop.** It stops the orchestrator as `usine stop` does.
 5. **Install.** It rewrites the version of each pin in `package.json` and keeps the rest of the file as it is. Then it runs `install` with the instance's package manager: the one in the `packageManager` field, else the one whose lockfile exists (pnpm, npm, Yarn, or Bun), else npm. If the install fails, it restores `package.json` and the lockfile, and the orchestrator stays stopped.
@@ -229,7 +229,7 @@ The file has mode `0600` and the top-level keys `version` (`1`), `exportedAt`, `
 
 ## Environment variables
 
-The `usine` process reads these variables:
+The `usine` process reads these variables from its environment, or from the [environment file](#environment-file) if the environment doesn't set them:
 
 | Variable | Read by | Description |
 | --- | --- | --- |
@@ -246,12 +246,37 @@ usine starts in setup mode, without falling back to the file, if a GitHub App va
 
 Child processes don't inherit the orchestrator's environment. Git and `gh` commands for a local worker receive only `HOME`, `LANG`, `LC_ALL`, `PATH`, `SHELL`, `TMPDIR`, and `USER`. The `ssh` client for an SSH worker receives those and `SSH_AGENT_PID` and `SSH_AUTH_SOCK` ([`SSH_ENVIRONMENT_ALLOWLIST`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/remote/commands.ts#L70)). Only the orchestrator process has the App private key and the gateway admin tokens.
 
+### Environment file
+
+Each `usine` command reads `.env` in the instance folder when it starts, before it reads any variable ([`instanceEnvironment`](https://github.com/basaltbytes/usine/blob/main/apps/server/src/instance/environment.ts)). As with [dotenv](https://github.com/motdotla/dotenv), a variable that the environment sets keeps its value, and `.env` sets the others. So `USINE_PORT=8080 usine up` overrides a `USINE_PORT` in `.env` for one start. Without `.env`, usine reads the environment alone. If `.env` exists but can't be read, the command exits with status 1 and names the file.
+
+```sh title=".env"
+# The variable that admin_token_env names in usine.yaml
+USINE_GATEWAY_ADMIN_TOKEN=4f0c...
+export HCLOUD_TOKEN=...
+USINE_GITHUB_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----\n"
+```
+
+- Each line is `KEY=value`, optionally after `export`. A `#` outside quotes starts a comment, so quote a value that contains `#`.
+- A value can be in single, double, or backtick quotes. In double quotes, `\n` is a newline.
+- usine doesn't expand variables or run commands: `${HOME}` and `$(cat token)` stay as written.
+- An empty value, as in `KEY=`, counts as unset.
+- `usine up` reads `.env` only when it starts, and a reload doesn't read it. After you change it, run `usine restart`.
+- usine doesn't add the variables to its process environment. A child process gets a variable from `.env` only if its list above includes it, such as `PATH`.
+
+Unlike the [gateway's environment files](#usine-gateway), `.env` doesn't override the environment. It contains secrets, so make it readable only by you, and keep it out of git:
+
+```sh title="Instance folder"
+chmod 600 .env
+echo .env >> .gitignore
+```
+
 ## Exit status
 
 | Status | When |
 | --- | --- |
 | `0` | `--help`, `--version`, a completed `backup`, `export-run`, `stop`, `restart`, or `upgrade`, a background start that listens, or `status` while a process holds the instance. |
-| `1` | A usage error, a refused start (volatile path, instance in use, port in use, lock failure), an invalid `usine.yaml`, any other startup failure, a failed `backup` or `export-run`, or a refused, timed-out, or failed `stop`, `restart`, or `upgrade`. The message is on standard error. |
+| `1` | A usage error, an unreadable `.env`, a refused start (volatile path, instance in use, port in use, lock failure), an invalid `usine.yaml`, any other startup failure, a failed `backup` or `export-run`, or a refused, timed-out, or failed `stop`, `restart`, or `upgrade`. The message is on standard error. |
 | `3` | `status` while no process holds the instance. |
 | `130` | `usine up` stopped by `SIGINT` or `SIGTERM`. |
 

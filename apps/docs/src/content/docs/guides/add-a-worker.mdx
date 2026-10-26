@@ -274,11 +274,14 @@ The scripts are in `infra/hetzner/gateway/`, and its `README.md` describes every
      IdentityFile ~/.ssh/usine_worker
    ```
 
-9. In the instance folder, copy the admin token into a file that only you can read:
+9. In the instance folder, copy the admin token line into `.env`, the [environment file](/reference/configuration/cli/#environment-file) that usine reads at startup, and make it readable only by you:
 
    ```sh title="Instance folder"
-   (umask 077; ssh usine-gateway "sed -n 's/^USINE_GATEWAY_ADMIN_TOKEN=//p' /etc/usine-gateway/secrets.env" > .usine/gateway-admin-token)
+   (umask 077; ssh usine-gateway "grep '^USINE_GATEWAY_ADMIN_TOKEN=' /etc/usine-gateway/secrets.env" >> .env)
+   chmod 600 .env
    ```
+
+   Add `.env` to `.gitignore`, so that it stays out of git.
 
 10. Add a [`gateway`](/reference/configuration/usine-yaml/#workersgateway) to the worker in `usine.yaml`, with the `Host` aliases as destinations, the gateway's `DOMAIN`, and the name of the variable that will contain the admin token:
 
@@ -297,13 +300,13 @@ The scripts are in `infra/hetzner/gateway/`, and its `README.md` describes every
 
     `llm_providers` lists the providers whose credential the gateway holds from step 5: `anthropic` for Claude Code, `openai` for Codex. Their children call the gateway with the caller token instead of using a login on the worker. Leave out a provider whose harness logs in on the worker.
 
-11. Start the orchestrator with the token in its environment:
+11. Start the orchestrator. It reads the token from `.env`, and so do `usine restart` and `usine upgrade` from any shell:
 
     ```sh title="Instance folder"
-    USINE_GATEWAY_ADMIN_TOKEN=$(cat .usine/gateway-admin-token) usine up
+    usine up
     ```
 
-    If the variable isn't set, `usine up` stops and gives its name. If the admin API forward doesn't open, preflight gives the `ssh` command that shows why. If the forward proxy refuses a login host, preflight gives the host to add to `/etc/usine-gateway/egress-allowlist`.
+    If neither the environment nor `.env` sets the variable, `usine up` stops and gives its name. If the admin API forward doesn't open, preflight gives the `ssh` command that shows why. If the forward proxy refuses a login host, preflight gives the host to add to `/etc/usine-gateway/egress-allowlist`.
 
 </Steps>
 

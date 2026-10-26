@@ -50,6 +50,7 @@ To update usine, pull, run `pnpm install --frozen-lockfile` and `pnpm build` aga
   - loops/
     - start-dev.md one loop per file
   - .gitignore
+  - .env secrets that usine reads, such as tokens
   - .usine/ runtime state that usine up writes
     - runtime.sqlite
     - durable.sqlite
@@ -107,10 +108,11 @@ To update usine, pull, run `pnpm install --frozen-lockfile` and `pnpm build` aga
 
 3. Add at least one [agent](/guides/write-an-agent/) and one [loop](/guides/write-a-loop/).
 
-4. Keep the runtime state out of git:
+4. Keep the runtime state and the [environment file](/reference/configuration/cli/#environment-file) out of git:
 
    ```text title=".gitignore"
    .usine/
+   .env
    ```
 
 </Steps>

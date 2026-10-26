@@ -43,10 +43,10 @@ Each attempt gets a server created from a snapshot that you build with `infra/he
 
 <Steps>
 
-1. Create an API token for the Hetzner Cloud project. In the Hetzner Cloud Console, open the project, select **Security** > **API tokens** > **Generate API token**, and select **Read & Write**. The console shows the token once. Paste it into a file in the instance folder that only you can read, and press Control-D:
+1. Create an API token for the Hetzner Cloud project. In the Hetzner Cloud Console, open the project, select **Security** > **API tokens** > **Generate API token**, and select **Read & Write**. The console shows the token once. Add it to `.env` in the instance folder, the [environment file](/reference/configuration/cli/#environment-file) that usine reads at startup: run this command, paste the token, and press Enter.
 
    ```sh title="Instance folder"
-   (umask 077; cat > .usine/hcloud-token)
+   (umask 077; read -r token && echo "HCLOUD_TOKEN=$token" >> .env)
    ```
 
    A Hetzner Cloud token applies to every resource of its project. usine deletes only servers that have its `usine-instance` and `usine-worker` labels.
@@ -103,11 +103,10 @@ Each attempt gets a server created from a snapshot that you build with `infra/he
    - `image` is the description or ID that `snapshot.sh` printed. With a description, each server is created from the newest available snapshot that has it.
    - `network` is required with a `gateway`.
 
-6. Start the orchestrator with the token in its environment:
+6. Start the orchestrator. It reads `HCLOUD_TOKEN` and the gateway's `USINE_GATEWAY_ADMIN_TOKEN` from `.env`:
 
    ```sh title="Instance folder"
-   HCLOUD_TOKEN=$(cat .usine/hcloud-token) \
-     USINE_GATEWAY_ADMIN_TOKEN=$(cat .usine/gateway-admin-token) usine up
+   usine up
    ```
 
    Preflight creates no server. It checks the token, the server type in the location, the image, the SSH key, the network, the gateway's admin API, and each harness's credential. If the server type is out of stock in the location, preflight logs a warning and `usine up` starts; servers are created once Hetzner has it again. Hetzner documents no endpoint for the project's server limit, so preflight reads none. The first server of each day checks the rest. See [Machine checks](#machine-checks).
@@ -163,11 +162,11 @@ Each attempt gets a Boat sandbox: a VM with Boat's Ubuntu 24.04 image, which has
 
 <Steps>
 
-1. Create a Boat API key and save it in a file that only you can read. Boat shows the key once:
+1. Create a Boat API key. Boat shows the key once. Add it to `.env` in the instance folder, the [environment file](/reference/configuration/cli/#environment-file) that usine reads at startup: run the second command, paste the key, and press Enter.
 
    ```sh title="Instance folder"
    boat api-key create usine-boat-pool --ttl 365d
-   (umask 077; cat > .usine/boat-api-key)
+   (umask 077; read -r key && echo "BOAT_API_KEY=$key" >> .env)
    ```
 
    usine reads the account and its limits, creates, renames, lists, and deletes sandboxes, and adds an SSH key to each. Boat doesn't document the actions of each `--preset`, and a key without `--preset` or `--actions` has full access to the account. A key expires after its `--ttl` (90 days by default, `never` for no expiry), and preflight then fails.
@@ -198,11 +197,11 @@ Each attempt gets a Boat sandbox: a VM with Boat's Ubuntu 24.04 image, which has
    - `size` is `small`, `default` (4 vCPU, 8 GB), `large`, or `xlarge`, which needs a Boat plan of $100 per month or more.
    - `identity_file` is required. A `gateway` and a `region` are refused: Boat has no network rules, and it documents no region choice.
 
-4. Start the orchestrator with both keys in its environment:
+4. Add the Anthropic API key to `.env` the same way, and start the orchestrator, which reads both keys from `.env`:
 
    ```sh title="Instance folder"
-   BOAT_API_KEY=$(cat .usine/boat-api-key) \
-     USINE_ANTHROPIC_API_KEY=$(cat .usine/anthropic-api-key) usine up
+   (umask 077; read -r key && echo "USINE_ANTHROPIC_API_KEY=$key" >> .env)
+   usine up
    ```
 
    Preflight creates no sandbox. It checks that Boat accepts the key and reads the account's limits: a size that Boat doesn't offer the account fails preflight, and an account that can't start sandboxes now, or whose active-sandbox cap is below `max_concurrent_attempts`, logs a warning.
