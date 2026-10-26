@@ -130,6 +130,8 @@ export interface RemoteWorker<M extends RemoteMachine> {
   readonly readOnlyAccessGap: Option.Option<string>;
   /** Removes leftovers of earlier processes that no Attempt can use. Runs before the Worker's checkouts are listed. */
   readonly reclaim: (worker: WorkerName) => Effect.Effect<void>;
+  /** See `Executor.sweep`. Defaults to removing nothing. */
+  readonly sweep?: Effect.Effect<void>;
   /** The timeout for the parent task's cancellation, then separately for the Attempt to finish. */
   readonly interruptGrace: Parameters<typeof Effect.timeoutOption>[1];
 }

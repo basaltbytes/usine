@@ -1200,6 +1200,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
       outcome: session.outcome,
       preflight,
       prepare,
+      sweep: Effect.void,
     });
   });
 

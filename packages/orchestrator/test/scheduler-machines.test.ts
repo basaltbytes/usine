@@ -84,6 +84,7 @@ const fakeMachines = () =>
   });
 
 const prepared: Array<AttemptId> = [];
+let executorSweeps = 0;
 
 const executor = Layer.succeed(Executor)({
   kind: "local",
@@ -105,6 +106,9 @@ const executor = Layer.succeed(Executor)({
     ),
   cancel: unused,
   intervene: unused,
+  sweep: Effect.sync(() => {
+    executorSweeps += 1;
+  }),
 });
 
 const scheduler = (machines: WorkerMachines["Service"]) =>
@@ -195,8 +199,10 @@ describe("Worker scheduler on a provisioned Worker", () => {
         // The slot is free again.
         const next = yield* steps.reserve(RunId.make("run-2"), submission(2), Option.none());
         assert.strictEqual(next.worker, POOL);
+        const sweepsBefore = executorSweeps;
         yield* steps.sweep;
         assert.strictEqual(fake.calls.at(-1), "sweep");
+        assert.strictEqual(executorSweeps, sweepsBefore + 1, "the executor sweeps its Workers too");
       }).pipe(Effect.scoped),
   );
 

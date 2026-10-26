@@ -1098,7 +1098,10 @@ export const stepExecutorLayer = (
         outcome: executor.outcome,
         reserve,
         occupy,
-        sweep: machines === undefined ? Effect.void : machines.sweep,
+        sweep: Effect.andThen(
+          executor.sweep,
+          machines === undefined ? Effect.void : machines.sweep,
+        ),
         intervene: executor.intervene,
         recover: (attempt, record) =>
           executor

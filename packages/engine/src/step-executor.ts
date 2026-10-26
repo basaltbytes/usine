@@ -115,8 +115,9 @@ export class StepExecutor extends Context.Service<
     readonly occupy: (worker: WorkerName, attemptId: AttemptId) => Effect.Effect<WorkerLease>;
     /**
      * Removes the Worker resources that no Attempt holds, such as the machines that a provisioned
-     * Worker created for Attempts of an earlier process (#550). The engine runs it after startup
-     * recovery and at each reconcile. Never fails; the executor logs what it couldn't remove.
+     * Worker created for Attempts of an earlier process (#550), or the Codex homes that a crash
+     * left on an SSH Worker. The engine runs it after startup recovery and at each reconcile.
+     * Never fails; the executor logs what it couldn't remove.
      */
     readonly sweep: Effect.Effect<void>;
     /**
