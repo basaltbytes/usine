@@ -54,10 +54,10 @@ import {
 const slotsLabel = ({ capacity, leased }: WorkerSlotsView): string =>
   `${leased} of ${plural(capacity, "slot")} in use`;
 
-/** Renders one cell per slot, filled while an Attempt uses it. If a reload lowers
+/** Renders one cell per slot on one line, filled while an Attempt uses it. If a reload lowers
  * `max_concurrent_attempts`, Attempts still running above the limit add filled cells. */
 const SlotCells = ({ slots }: { readonly slots: WorkerSlotsView }) => (
-  <span aria-hidden="true" className="inline-flex flex-wrap gap-1">
+  <span aria-hidden="true" className="inline-flex gap-1">
     {Array.from({ length: Math.max(slots.capacity, slots.leased) }, (_, index) => (
       <span
         key={index}
@@ -81,7 +81,7 @@ const PreflightState = ({ worker }: { readonly worker: WorkerConfigurationView }
   const { state, checkedAt } = preflightSummary(worker);
   if (state === "unchecked") return <span className="text-muted-foreground">Not checked</span>;
   return (
-    <span className="inline-flex items-baseline gap-2">
+    <span className="inline-flex flex-wrap items-baseline gap-x-2">
       <StatusBadge {...summaryBadge[state]} />
       {checkedAt !== null && (
         <span className="font-mono text-xs text-muted-foreground tabular-nums">
@@ -126,7 +126,7 @@ const WorkerRow = ({ worker }: { readonly worker: WorkerConfigurationView }) => 
         </Link>
       </TableCell>
       <TableCell>{workerKindLabel[worker.kind]}</TableCell>
-      <TableCell className="hidden font-mono text-xs md:table-cell">
+      <TableCell className="hidden font-mono text-xs @2xl:table-cell">
         {workerPlace(worker)}
       </TableCell>
       <TableCell className="tabular-nums">
@@ -162,13 +162,13 @@ export const WorkersList = ({ configuration }: { readonly configuration: Configu
       {!running && (
         <p className="text-muted-foreground">No attempts run until the GitHub App is set up.</p>
       )}
-      <div className="-mx-2">
+      <div className="@container -mx-2">
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
               <TableHead>Worker</TableHead>
               <TableHead>Kind</TableHead>
-              <TableHead className="hidden md:table-cell">Location</TableHead>
+              <TableHead className="hidden @2xl:table-cell">Location</TableHead>
               <TableHead>Slots in use</TableHead>
               <TableHead>Last preflight</TableHead>
             </TableRow>
@@ -207,6 +207,8 @@ const CheckResult = ({ check }: { readonly check: PreflightCheckView }) => {
   }
 };
 
+/** Renders one preflight check; below a 42rem table, its time and message fold into the first two
+ * cells. */
 const CheckRow = ({
   subject,
   detail,
@@ -215,23 +217,31 @@ const CheckRow = ({
   readonly subject: string;
   readonly detail: string;
   readonly check: PreflightCheckView;
-}) => (
-  <TableRow className="hover:bg-transparent">
-    <TableCell className="py-3 align-top whitespace-normal">
-      <p className="font-medium">{subject}</p>
-      <p className="text-xs text-muted-foreground">{detail}</p>
-    </TableCell>
-    <TableCell className="py-3 align-top">
-      <CheckResult check={check} />
-    </TableCell>
-    <TableCell className="py-3 align-top font-mono text-xs text-muted-foreground tabular-nums">
-      {dayTimeLabel(check.checkedAt)}
-    </TableCell>
-    <FillCell className="py-3 align-top whitespace-normal wrap-anywhere">
-      {check._tag === "Passed" ? null : check.message}
-    </FillCell>
-  </TableRow>
-);
+}) => {
+  const message = check._tag === "Passed" ? null : check.message;
+  const checkedLabel = dayTimeLabel(check.checkedAt);
+  return (
+    <TableRow className="hover:bg-transparent">
+      <TableCell className="py-3 align-top whitespace-normal @2xl:min-w-56">
+        <p className="font-medium">{subject}</p>
+        <p className="text-xs text-muted-foreground">{detail}</p>
+        {message !== null && <p className="mt-1 wrap-anywhere @2xl:hidden">{message}</p>}
+      </TableCell>
+      <TableCell className="py-3 align-top">
+        <CheckResult check={check} />
+        <p className="mt-1 font-mono text-xs text-muted-foreground tabular-nums @2xl:hidden">
+          {checkedLabel}
+        </p>
+      </TableCell>
+      <TableCell className="hidden py-3 align-top font-mono text-xs text-muted-foreground tabular-nums @2xl:table-cell">
+        {checkedLabel}
+      </TableCell>
+      <FillCell className="hidden py-3 align-top whitespace-normal wrap-anywhere @2xl:table-cell">
+        {message}
+      </FillCell>
+    </TableRow>
+  );
+};
 
 /** Renders the name of the orchestrator environment variable that holds a secret, never its value. */
 const Variable = ({ name }: { readonly name: string | null }) =>
@@ -562,7 +572,7 @@ export const WorkerDetail = ({
           {worker.slots === null ? (
             <p className="text-muted-foreground">No attempts run until the GitHub App is set up.</p>
           ) : (
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
               <SlotCells slots={worker.slots} />
               <p className="tabular-nums">{slotsLabel(worker.slots)}</p>
             </div>
@@ -581,14 +591,14 @@ export const WorkerDetail = ({
           {checks.length === 0 ? (
             <p className="text-muted-foreground">No preflight since usine up started.</p>
           ) : (
-            <div className="-mx-2">
+            <div className="@container -mx-2">
               <Table>
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
                     <TableHead>Check</TableHead>
                     <TableHead>Result</TableHead>
-                    <TableHead>Checked</TableHead>
-                    <TableHead>Detail</TableHead>
+                    <TableHead className="hidden @2xl:table-cell">Checked</TableHead>
+                    <TableHead className="hidden @2xl:table-cell">Detail</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
