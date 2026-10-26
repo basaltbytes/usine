@@ -474,7 +474,7 @@ describe("local worker salvage", () => {
   );
 
   it.live(
-    "restart keeps a checkout whose push GitHub refused for a large file without pushing it again",
+    "restart keeps a checkout whose push GitHub refused for a large file without pushing it again, also after a recovery that couldn't inspect it",
     () =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
@@ -509,11 +509,19 @@ describe("local worker salvage", () => {
           assert.include(salvage.message, "GH001: Large files detected.");
           return { runId: accepted.runId, worktree, salvage };
         }).pipe(Effect.provide(runtime()));
-        yield* Effect.gen(function* () {
-          const engine = yield* RunEngine;
-          const salvage = (yield* engine.inspect(saved.runId)).attempts[0]?.salvage;
-          assert.deepStrictEqual(salvage, Option.some(saved.salvage));
-        }).pipe(Effect.provide(runtime()));
+        const restart = () =>
+          Effect.gen(function* () {
+            const engine = yield* RunEngine;
+            const salvage = (yield* engine.inspect(saved.runId)).attempts[0]?.salvage;
+            assert.deepStrictEqual(salvage, Option.some(saved.salvage));
+          }).pipe(Effect.provide(runtime()));
+        // A worktree whose git directory is gone fails the recovery's inspection.
+        const gitFile = `${saved.worktree}/.git`;
+        const gitLink = yield* fileSystem.readFileString(gitFile);
+        yield* fileSystem.writeFileString(gitFile, `gitdir: ${root}/missing-git-directory\n`);
+        yield* restart();
+        yield* fileSystem.writeFileString(gitFile, gitLink);
+        yield* restart();
         assert.strictEqual(yield* fileSystem.readFileString(refusals), "refused\n");
         assert(yield* fileSystem.exists(saved.worktree));
       }).pipe(Effect.provide(NodeServices.layer)),

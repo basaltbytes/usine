@@ -92,10 +92,12 @@ const leftOutMessage = (files: ReadonlyArray<OversizedFile>): string =>
 
 /**
  * Commits the changes in an unsuccessful Attempt's checkout and pushes HEAD to its salvage ref
- * before the worktree is removed. The commit leaves out what Git ignores, package stores, and
- * build caches, even if the Attempt staged them. Skips a checkout with nothing to push beyond its
+ * before the worktree is removed. The commit leaves out package stores and build caches, even if
+ * the Attempt staged them, and what Git ignores. Skips a checkout with nothing to push beyond its
  * base commit, or whose commit the remote rejected in `rejected`. If the push fails, or the
  * commit leaves out a file larger than GitHub accepts, keeps the worktree and reports its path.
+ * If the inspection or the commit fails while the checkout's head can still be the rejected
+ * commit, returns `rejected` again, so that the next recovery doesn't push that commit either.
  * Never fails; skipped and failed stages are logged.
  */
 export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <E extends Error>(
@@ -112,6 +114,27 @@ export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <
   const head = () =>
     git(["rev-parse", "HEAD"]).pipe(Effect.flatMap((output) => decodeCommit(output.trim())));
 
+  /**
+   * Returns what the salvage keeps of a checkout that it couldn't inspect or commit, at `current`
+   * if its head is known. While `current` can be the commit of the recorded rejection, that's the
+   * rejection; otherwise it's the retained checkout, at the base commit if the head is unknown.
+   */
+  const unsalvaged = (message: string, current: Option.Option<CommitSha>) => {
+    const rejected = Option.filter(
+      options.rejected,
+      ({ commit }) => Option.isNone(current) || Option.contains(current, commit),
+    );
+    if (Option.isSome(rejected))
+      return Effect.logWarning(
+        "Keeping the recorded rejection of the Attempt's salvage, so that recovery doesn't push its commit again",
+        { ...fields, ref: options.ref, commit: rejected.value.commit, message },
+      ).pipe(Effect.as(Option.some<AttemptSalvage>(rejected.value)));
+    const commit = Option.orElse(current, () => options.baseCommit);
+    return Effect.succeed(
+      Option.some<AttemptSalvage>(new SalvageRetained({ path: options.worktree, commit, message })),
+    );
+  };
+
   const inspected = yield* Effect.all({
     head: head(),
     status: git(["status", "--porcelain", "--untracked-files=all", "--", ...SALVAGED_PATHS]),
@@ -122,9 +145,7 @@ export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <
       ...fields,
       message,
     });
-    return Option.some<AttemptSalvage>(
-      new SalvageRetained({ path: options.worktree, commit: options.baseCommit, message }),
-    );
+    return yield* unsalvaged(message, Option.none());
   }
   const dirty = inspected.success.status.trim().length > 0;
 
@@ -182,9 +203,7 @@ export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <
         ...fields,
         message,
       });
-      return Option.some<AttemptSalvage>(
-        new SalvageRetained({ path: options.worktree, commit: Option.some(commit), message }),
-      );
+      return yield* unsalvaged(message, Option.some(commit));
     }
     ({ commit, leftOut } = committed.success);
   }

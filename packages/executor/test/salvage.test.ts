@@ -14,6 +14,7 @@ import { salvageWorktree } from "../src/salvage.ts";
 const BASE = CommitSha.make("a".repeat(40));
 const AHEAD = CommitSha.make("b".repeat(40));
 const SNAPSHOT = CommitSha.make("c".repeat(40));
+const REFUSED = CommitSha.make("f".repeat(40));
 const WORKTREE = "/workers/local/attempts/run_execute_1";
 const REF = SalvageRef.make("usine/salvage/run/1");
 
@@ -223,6 +224,44 @@ describe("salvageWorktree", () => {
       assert(Option.isSome(changed.result) && changed.result.value._tag === "Pushed");
       assert.strictEqual(changed.result.value.commit, SNAPSHOT);
     }),
+  );
+
+  it.effect.each(["inspect", "add", "commit"] as const)(
+    "keeps the recorded rejection when %s fails, so that the next recovery doesn't push the refused commit",
+    (stage) =>
+      Effect.gen(function* () {
+        const rejected = new SalvageRejected({ path: WORKTREE, commit: AHEAD, message: "GH001" });
+        const failed = yield* salvage(
+          { head: () => AHEAD, status: "?? unfinished.ts\n", [stage]: "fails" },
+          Option.some(rejected),
+        );
+        assert.deepStrictEqual(failed.result, Option.some(rejected));
+        assert(!commandsOf(failed.calls).includes("push"));
+
+        // The next startup's recovery gets the recorded salvage back as its rejection.
+        const recorded = Option.filter(
+          failed.result,
+          (result): result is SalvageRejected => result._tag === "Rejected",
+        );
+        const healthy = yield* salvage({ head: () => AHEAD, status: "" }, recorded);
+        assert.deepStrictEqual(healthy.result, Option.some(rejected));
+        assert(!commandsOf(healthy.calls).includes("push"));
+      }),
+  );
+
+  it.effect(
+    "retains a checkout whose head moved past the rejected commit when its commit fails",
+    () =>
+      Effect.gen(function* () {
+        const rejected = new SalvageRejected({ path: WORKTREE, commit: REFUSED, message: "GH001" });
+        const { result } = yield* salvage(
+          { head: () => AHEAD, status: "?? unfinished.ts\n", commit: "fails" },
+          Option.some(rejected),
+        );
+        assert(Option.isSome(result) && result.value._tag === "Retained");
+        assert.deepStrictEqual(result.value.commit, Option.some(AHEAD));
+        assert.include(result.value.message, "nothing added");
+      }),
   );
 
   it.effect("names the stalled push instead of a bare timeout", () =>

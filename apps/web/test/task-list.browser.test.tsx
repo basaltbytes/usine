@@ -91,11 +91,20 @@ const columns = () =>
     .filter((header) => header.checkVisibility())
     .map((header) => header.textContent);
 const crumbs = () => page.getByRole("navigation", { name: "breadcrumb" });
+/**
+ * Returns each crumb's text without the repository mark, which is hidden from assistive technology
+ * and shows a letter instead once its image fails to load, as without network access.
+ */
 const crumbTexts = () =>
   crumbs()
     .getByRole("listitem")
     .elements()
-    .map((item) => item.textContent);
+    .map((item) => {
+      const label = item.cloneNode(true);
+      if (!(label instanceof Element)) throw new Error("Crumb is not an element");
+      for (const hidden of label.querySelectorAll("[aria-hidden=true]")) hidden.remove();
+      return label.textContent;
+    });
 const sidebarLink = (name: string) => {
   const sidebar = document.querySelector("[data-slot=sidebar-inner]");
   if (!(sidebar instanceof HTMLElement)) throw new Error("No sidebar");
