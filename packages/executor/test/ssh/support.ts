@@ -518,6 +518,8 @@ export const fakeMachine = () => {
         return oneShotHandle(`${state.salvageCommitted ? SALVAGE_COMMIT : COMMIT}\n`, 0);
       if (line.includes("'status'"))
         return oneShotHandle(state.salvage === "clean" ? "" : " M src/index.ts\n", 0);
+      if (line.includes("'diff' '--cached'"))
+        return oneShotHandle(state.salvage === "clean" ? "" : "src/index.ts\0", 0);
       if (line.includes("'commit'")) state.salvageCommitted = true;
       return oneShotHandle("", 0);
     }

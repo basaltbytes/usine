@@ -396,10 +396,18 @@ describe("cloudflare Worker", () => {
     () =>
       Effect.gen(function* () {
         const worker = yield* fakeWorker;
-        worker.state.respond = (_sandbox, words) =>
-          words[0] === "git" && words.includes("status")
-            ? Option.some({ stdout: " M src/index.ts\n", exitCode: 0 })
+        // A dirty checkout, whose salvage commit moves HEAD.
+        let committed = false;
+        worker.state.respond = (_sandbox, words) => {
+          if (words[0] !== "git") return Option.none();
+          if (words.includes("status"))
+            return Option.some({ stdout: " M src/index.ts\n", exitCode: 0 });
+          if (words.includes("diff")) return Option.some({ stdout: "src/index.ts\0", exitCode: 0 });
+          if (words.includes("commit")) committed = true;
+          return committed && words.includes("HEAD")
+            ? Option.some({ stdout: `${"c".repeat(40)}\n`, exitCode: 0 })
             : Option.none();
+        };
         const working = yield* Deferred.make<void>();
         const parent: StubParent = () =>
           Deferred.succeed(working, undefined).pipe(Effect.andThen(Effect.never));

@@ -1,10 +1,13 @@
+import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { AttemptId } from "@usine/core/attempt";
 import { SalvageRef } from "@usine/core/attempt/salvage";
 import { CommitSha } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
-import { Effect, Fiber, Option } from "effect";
+import { Effect, Fiber, FileSystem, Option } from "effect";
 import { TestClock } from "effect/testing";
+import { ChildProcessSpawner } from "effect/unstable/process";
+import { collectCommand, requireSuccess } from "../src/child-command.ts";
 import { ExecutorOperationError } from "../src/executor.ts";
 import { salvageWorktree } from "../src/salvage.ts";
 
@@ -49,6 +52,10 @@ const fakeGit = (script: Scripted) => {
         return script.add === "fails"
           ? Effect.fail(new Error("index.lock exists"))
           : Effect.succeed("");
+      if (command[0] === "diff") return Effect.succeed("src/index.ts\0");
+      if (command[0] === "write-tree") return Effect.succeed(`${"d".repeat(40)}\n`);
+      if (command[0] === "ls-tree")
+        return Effect.succeed(`100644 blob ${"e".repeat(40)}      42\tsrc/index.ts\0`);
       if (command.includes("commit")) {
         if (script.commit === "fails") return Effect.fail(new Error("nothing added"));
         committed = true;
@@ -181,5 +188,95 @@ describe("salvageWorktree", () => {
       assert(Option.isSome(result) && result.value._tag === "Retained");
       assert.include(result.value.message, "git push didn't finish");
     }),
+  );
+});
+
+/**
+ * Creates a checkout at its base commit with a bare `origin`, in a directory removed with the
+ * test's scope. `git` runs git as the local executor does.
+ */
+const gitCheckout = Effect.gen(function* () {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const git = (args: ReadonlyArray<string>) =>
+    collectCommand(spawner, "cleanup", "git", args, {}).pipe(
+      Effect.flatMap((result) => requireSuccess("cleanup", "local", "git", args, result)),
+    );
+  const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-salvage-" });
+  const remote = `${root}/origin.git`;
+  const worktree = `${root}/checkout`;
+  yield* git(["init", "--quiet", "--bare", remote]);
+  yield* git(["init", "--quiet", worktree]);
+  yield* git(["-C", worktree, "config", "user.name", "Usine Test"]);
+  yield* git(["-C", worktree, "config", "user.email", "usine@example.invalid"]);
+  yield* git(["-C", worktree, "remote", "add", "origin", remote]);
+  yield* fileSystem.writeFileString(`${worktree}/README.md`, "# fixture\n");
+  yield* git(["-C", worktree, "add", "README.md"]);
+  yield* git(["-C", worktree, "commit", "--quiet", "--message", "fixture"]);
+  const base = CommitSha.make((yield* git(["-C", worktree, "rev-parse", "HEAD"])).trim());
+  const write = (file: string, content: string) =>
+    fileSystem
+      .makeDirectory(`${worktree}/${file.slice(0, file.lastIndexOf("/"))}`, { recursive: true })
+      .pipe(Effect.andThen(fileSystem.writeFileString(`${worktree}/${file}`, content)));
+  // pnpm's store is in the checkout when its default store is on another filesystem.
+  const installDependencies = Effect.all([
+    write(".pnpm-store/v11/files/00/abc-exec", "binary\n"),
+    write("node_modules/left-pad/index.js", "module.exports = 1;\n"),
+    write("packages/app/node_modules/.bin/tool", "#!/bin/sh\n"),
+    write(".turbo/cache/run.json", "{}\n"),
+  ]);
+  const salvage = salvageWorktree({
+    attemptId: AttemptId.make("run/execute/1"),
+    worker: WorkerName.make("local"),
+    host: "local",
+    worktree,
+    baseCommit: Option.some(base),
+    ref: REF,
+    git,
+  });
+  return { fileSystem, git, remote, worktree, write, installDependencies, salvage };
+});
+
+describe("salvageWorktree in a git checkout", () => {
+  it.live(
+    "leaves package stores, build caches, and files larger than GitHub accepts out of the salvage commit",
+    () =>
+      Effect.gen(function* () {
+        const { fileSystem, git, remote, worktree, write, installDependencies, salvage } =
+          yield* gitCheckout;
+        yield* write("src/feature.ts", "export const feature = 1;\n");
+        yield* installDependencies;
+        yield* fileSystem.writeFileString(`${worktree}/model.bin`, "");
+        yield* fileSystem.truncate(`${worktree}/model.bin`, 100 * 1024 * 1024 + 1);
+
+        const result = yield* salvage;
+
+        assert(Option.isSome(result) && result.value._tag === "Pushed");
+        const pushed = yield* git(["--git-dir", remote, "rev-parse", `refs/heads/${REF}`]);
+        assert.strictEqual(pushed.trim(), result.value.commit);
+        const files = yield* git([
+          "--git-dir",
+          remote,
+          "ls-tree",
+          "-r",
+          "--name-only",
+          result.value.commit,
+        ]);
+        assert.deepStrictEqual(files.trim().split("\n"), ["README.md", "src/feature.ts"]);
+      }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.live(
+    "finds nothing to salvage in a checkout at its base with only installed dependencies",
+    () =>
+      Effect.gen(function* () {
+        const { git, remote, installDependencies, salvage } = yield* gitCheckout;
+        yield* installDependencies;
+
+        const result = yield* salvage;
+
+        assert(Option.isNone(result));
+        assert.strictEqual(yield* git(["--git-dir", remote, "branch", "--list"]), "");
+      }).pipe(Effect.provide(NodeServices.layer)),
   );
 });
