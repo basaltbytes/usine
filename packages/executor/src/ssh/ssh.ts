@@ -85,7 +85,12 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
     const credentials = yield* sshCredentialsFor(commands, machineFor);
     const codexHomes = yield* codexHomesFor(commands);
     const attachments = yield* gatewayAttachmentsFor(commands, workerFor, codexHomes.hold);
-    const containers = yield* sshContainersFor(commands, machineFor, options.instance);
+    const containers = yield* sshContainersFor(
+      commands,
+      machineFor,
+      options.instance,
+      options.instanceId,
+    );
     const verifyMachine = sshMachinePreflightFor(commands, harnessProbe, logins, containers);
     const provisioned = yield* provisionedMachinesFor({
       instance: options.instance,

@@ -58,6 +58,7 @@ To update usine, pull, run `pnpm install --frozen-lockfile` and `pnpm build` aga
     - instance.lock
     - instance.pid
     - instance.json
+    - instance-id
     - usine.log
     - backups/
     - workers/
@@ -197,6 +198,7 @@ usine writes its state to `.usine/` in the instance folder:
 | `.usine/github-app.json`                      | The App credentials, if you use the file.                                                                                                                                                                                                                            |
 | `.usine/instance.lock`, `.usine/instance.pid` | The lock that prevents a second `usine up`, and the process ID of the running one.                                                                                                                                                                                   |
 | `.usine/instance.json`                        | The [instance record](/reference/configuration/cli/#instance-record) of the running `usine up`.                                                                                                                                                                      |
+| `.usine/instance-id`                          | The instance's ID, which labels its attempt containers on SSH workers.                                                                                                                                                                                               |
 | `.usine/usine.log`                            | The output of an orchestrator that `usine up --detach`, `usine restart`, or `usine upgrade` started.                                                                                                                                                                 |
 | `.usine/backups/`                             | The copies of the stores that `usine upgrade` makes before it moves the pin.                                                                                                                                                                                         |
 | `.usine/workers/<worker>/`                    | For a local worker: cached clones in `repos/`, attempt worktrees in `attempts/`, and the Turborepo cache in `turbo/`.                                                                                                                                                |

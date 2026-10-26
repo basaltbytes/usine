@@ -8,7 +8,7 @@ import { HarnessReady } from "@usine/core/agent/capability";
 import { AgentSessionId } from "@usine/core/agent/session";
 import { AttemptTask } from "@usine/core/attempt";
 import { DedupKey, Event, EventId } from "@usine/core/event";
-import { InstanceDirectory } from "@usine/core/instance";
+import { InstanceDirectory, InstanceId } from "@usine/core/instance";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName, RepositoryRevision, safeSegment } from "@usine/core/repository";
@@ -44,6 +44,8 @@ import { gitHubCredentialLayer } from "../../src/credentials.ts";
 import { layer as sshLayer, sshWorkerAddressesOf } from "../../src/ssh.ts";
 import { fixedConfigLayer } from "../support/current-instance.ts";
 import { alwaysHoldsLayer } from "../support/polling.ts";
+
+const INSTANCE_ID = InstanceId.make("0b4e7f3c-5a2d-4c1e-9f6b-8d7a2e1c3b4f");
 
 // `USINE_SSH_INTEGRATION_DESTINATION` sets the machine; without it, there is nothing to run
 // against.
@@ -258,6 +260,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
         const runtime = sshLayer(instanceDirectory, config, [agent.brain], {
           workers: yield* sshWorkerAddressesOf(config),
           instance: "ssh-integration",
+          instanceId: INSTANCE_ID,
           ssh: sshFor(values),
           // Logins are the operator's; this test needs none, the preflight test checks them.
           harnessReadiness: () => (brain) =>
@@ -379,6 +382,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
         const executor = sshExecutorLayer({
           workers: yield* sshWorkerAddressesOf(config),
           instance: "ssh-integration",
+          instanceId: INSTANCE_ID,
           ssh: sshFor(values),
         }).pipe(
           Layer.provide(unused),
@@ -629,6 +633,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
         const runtime = sshLayer(instanceDirectory, config, [agent.brain], {
           workers: yield* sshWorkerAddressesOf(config),
           instance: "ssh-integration",
+          instanceId: INSTANCE_ID,
           ssh: gatewaySshFor(values),
           // The logins are the operator's; the Gateway's check of their hosts still runs.
           harnessReadiness: () => (brain) =>
@@ -727,6 +732,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
         const executor = sshExecutorLayer({
           workers: yield* sshWorkerAddressesOf(config),
           instance: "ssh-integration",
+          instanceId: INSTANCE_ID,
           ssh: gatewaySshFor(values),
         }).pipe(
           Layer.provide(unused),

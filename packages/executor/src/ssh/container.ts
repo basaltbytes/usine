@@ -1,4 +1,5 @@
 import type { Harness } from "@usine/core/agent/brain";
+import type { InstanceId } from "@usine/core/instance";
 import { safeSegment } from "@usine/core/repository";
 import { ContainerImage, type WorkerName } from "@usine/core/worker";
 import { Cache, Effect, Option, Random, Ref } from "effect";
@@ -80,6 +81,7 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
   commands: RemoteCommands,
   machineFor: (worker: WorkerName) => Effect.Effect<SshMachine, ExecutorError>,
   instance: string,
+  instanceId: InstanceId,
 ) {
   const containers = containersFor(commands);
   const isolations = yield* Ref.make(new Map<WorkerName, AttemptIsolation>());
@@ -197,7 +199,7 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
     const image = imageFor(machine);
     yield* Effect.annotateCurrentSpan({ worker, image, slots });
     const limits = yield* limitsFor(machine, slots);
-    const settings: ContainerSettings = { image, limits: limits.limits, instance };
+    const settings: ContainerSettings = { image, limits: limits.limits, instance, instanceId };
     yield* record(worker, { _tag: "Container", settings });
     yield* Effect.logInfo("SSH Worker runs each Attempt in its own container", {
       worker,
@@ -324,7 +326,7 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
     const machine = yield* machineFor(worker);
     yield* Effect.annotateCurrentSpan({ worker, host: machine.shell.destination });
     yield* Ref.update(reclaimed, (current) => new Set(current).add(worker));
-    yield* containers.sweep(machine.shell, instance, worker, yield* Ref.get(reclaimed));
+    yield* containers.sweep(machine.shell, instance, instanceId, worker, yield* Ref.get(reclaimed));
   });
   // Runs once per Worker in this process, before its first container starts. A failure is
   // logged; the containers stay until the next process.

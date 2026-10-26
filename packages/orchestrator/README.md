@@ -161,21 +161,26 @@ Provide `CredentialProvider` and `CurrentInstance` to `EngineLive`, then request
 
 All three compositions run each attempt's Pi parent in the orchestrator as a durable task (`@usine/durable`). `layer` needs the `AttemptRuntime` and the `ClaudeLoginLock` shared by its Claude children and the worker's preflight, and builds the runtime before the engine, so tasks are resumed before run recovery and a restart reattaches live attempts. Stored v3–v6 transcripts stay readable.
 
-`runtimeLayer(instanceDirectory)` (`/runtime`) composes the whole application, adding GitHub polling, schedule triggers, CEL parsing, `Orchestrator`, and `Operator`. It uses the SSH composition if every worker is `ssh`, the Cloudflare composition if every worker is `cloudflare`, otherwise the local one, which refuses other kinds at startup. One `ClaudeLoginLock` serves both the attempt runtime and the worker composition. Preflight requirements come from the instance's agents at build time. It needs `GitHubCredentials` and `CurrentInstance`, which the host loads. `operatorObservationLayer(instanceDirectory)` is the read-only Node composition for setup and maintenance: it provides `OperatorObservation` and `OperatorConfiguration` from durable runs and loop state, with triggers idle and no worker running attempts.
+`runtimeLayer(instanceDirectory, instanceId)` (`/runtime`) composes the whole application, adding GitHub polling, schedule triggers, CEL parsing, `Orchestrator`, and `Operator`. It uses the SSH composition if every worker is `ssh`, the Cloudflare composition if every worker is `cloudflare`, otherwise the local one, which refuses other kinds at startup. One `ClaudeLoginLock` serves both the attempt runtime and the worker composition. Preflight requirements come from the instance's agents at build time. It needs `GitHubCredentials` and `CurrentInstance`, which the host loads. `operatorObservationLayer(instanceDirectory)` is the read-only Node composition for setup and maintenance: it provides `OperatorObservation` and `OperatorConfiguration` from durable runs and loop state, with triggers idle and no worker running attempts.
 
-`/ssh` composes the scheduler with the SSH executor, and also needs a `CredentialProvider` for the token each attempt writes on its machine or attaches to its gateway. `sshWorkersOf(config)` returns the declared SSH workers; `sshWorkerAddressesOf(config)` turns them into executor addresses, with their `container` settings, reading each gateway's admin token from its `admin_token_env` variable, and fails with a `gateway` capability error naming an unset one. Admin APIs are called with `fetch` through the executor's forward to each gateway's `destination`. `workerEngineLayer` labels the SSH executor's attempt containers with `github-app-<App ID>` from `GitHubCredentials`, the instance's identity (ADR 0011).
+`/ssh` composes the scheduler with the SSH executor, and also needs a `CredentialProvider` for the token each attempt writes on its machine or attaches to its gateway. `sshWorkersOf(config)` returns the declared SSH workers; `sshWorkerAddressesOf(config)` turns them into executor addresses, with their `container` settings, reading each gateway's admin token from its `admin_token_env` variable, and fails with a `gateway` capability error naming an unset one. Admin APIs are called with `fetch` through the executor's forward to each gateway's `destination`. `workerEngineLayer` labels the SSH executor's attempt containers with `github-app-<App ID>` from `GitHubCredentials`, the instance's identity (ADR 0011), and with the `InstanceId` that the host passes, which tells apart instances that share the App.
 
 `sshStepExecutorLayer(config, brains)` lets a reload resize, add, and remove SSH workers through `SshWorkers`. An added worker joins the executor before preflight, and its gateway's token is read then; an unset variable refuses the reload with `ReloadPreflightError` naming it, since a running process doesn't see variables set after it started. A removed worker leaves the executor once its last attempt ends, and its gateway's forward closes if no other worker uses it.
 
 `/cloudflare` composes the scheduler with the Cloudflare executor, with the GitHub App's ID as the instance that owns the sandboxes. `cloudflareWorkersOf(config)` returns the declared Cloudflare workers; `cloudflareWorkerAddressesOf(config)` turns them into executor addresses, reading each worker's Access service token and provider API keys from the variables that it names, and fails with a `credentials` capability error naming an unset one. The executor reads these secrets once, so a reload can resize or remove a Cloudflare worker, and add back only one that `usine up` started with; any other addition refuses the reload with `ReloadPreflightError`.
 
 ```ts
+import { InstanceId } from "@usine/core/instance"
 import { layer as sshLayer, sshWorkerAddressesOf } from "@usine/orchestrator/ssh"
 import { Effect, Layer } from "effect"
 
 const EngineLive = Layer.unwrap(
   Effect.map(sshWorkerAddressesOf(config), (workers) =>
-    sshLayer(instanceDirectory, config, brains, { workers, instance: "github-app-123456" }),
+    sshLayer(instanceDirectory, config, brains, {
+      workers,
+      instance: "github-app-123456",
+      instanceId: InstanceId.make("0b4e7f3c-5a2d-4c1e-9f6b-8d7a2e1c3b4f"),
+    }),
   ),
 )
 ```
