@@ -123,14 +123,16 @@ export class WorkerGateway extends Schema.Class<WorkerGateway>("@usine/config/Wo
  *
  * - `image`: the image to run. If `None`, the executor's image for the harness versions of this
  *   release.
- * - `cpus`, `memoryMib`, and `pids`: the limits of each Attempt's container.
+ * - `cpus`, `memoryMib`, and `pids`: the limits of each Attempt's container. If `None`, the
+ *   executor derives the limit from the machine at preflight: the machine's total less a reserve
+ *   for its own processes, divided by `maxConcurrentAttempts`.
  */
 export class WorkerContainer extends Schema.Class<WorkerContainer>("@usine/config/WorkerContainer")(
   {
     image: Schema.OptionFromOptionalKey(ContainerImage),
-    cpus: ContainerCpus.pipe(Schema.withDecodingDefaultKey(Effect.succeed(2))),
-    memoryMib: ContainerMemoryMib.pipe(Schema.withDecodingDefaultKey(Effect.succeed(4096))),
-    pids: ContainerPids.pipe(Schema.withDecodingDefaultKey(Effect.succeed(4096))),
+    cpus: Schema.OptionFromOptionalKey(ContainerCpus),
+    memoryMib: Schema.OptionFromOptionalKey(ContainerMemoryMib),
+    pids: Schema.OptionFromOptionalKey(ContainerPids),
   },
 ) {}
 

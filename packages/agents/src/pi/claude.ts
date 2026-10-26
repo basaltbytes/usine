@@ -339,8 +339,8 @@ const LOGIN_RETRY_DELAYS: ReadonlyArray<Duration.Duration> = [
 ];
 
 /**
- * The maximum time a launch keeps the Worker's Claude login lock while waiting for a message that
- * decides the login state. If no such message arrives, the launch continues as a started session.
+ * The maximum time a launch keeps its Claude login lock while waiting for a message that decides
+ * the login state. If no such message arrives, the launch continues as a started session.
  */
 const LOGIN_WINDOW = Duration.seconds(60);
 
@@ -434,16 +434,24 @@ const makeClaudeChild = Effect.gen(function* () {
   const logins = yield* ClaudeLoginLock;
 
   /**
-   * Acquires the request Worker's login lock in a fiber of the current scope and returns an effect
+   * Acquires the request's Claude login lock in a fiber of the current scope and returns an effect
    * that releases it. The lock is also released after `LOGIN_WINDOW`, so a hung launch does not
-   * block other Claude launches and preflights on the Worker.
+   * block other Claude launches and preflights on that login.
    */
   const holdLogin = Effect.fn("ClaudeChildBackend.holdLogin")(function* (request: ChildRequest) {
-    yield* Effect.annotateCurrentSpan({ sessionId: request.session.id, worker: request.worker });
+    const fields = {
+      sessionId: request.session.id,
+      worker: request.worker,
+      ...Option.match(request.machine, { onNone: () => ({}), onSome: (machine) => ({ machine }) }),
+    };
+    yield* Effect.annotateCurrentSpan(fields);
     const held = yield* Deferred.make<void>();
     const released = yield* Deferred.make<void>();
     yield* Effect.forkScoped(
-      logins.withLock(request.worker)(
+      logins.withLock(
+        request.worker,
+        request.machine,
+      )(
         Deferred.succeed(held, undefined).pipe(
           Effect.andThen(Deferred.await(released)),
           Effect.timeoutOption(LOGIN_WINDOW),
@@ -452,8 +460,8 @@ const makeClaudeChild = Effect.gen(function* () {
               onSome: () => Effect.void,
               onNone: () =>
                 Effect.logWarning(
-                  "Claude child showed no sign of its login in time; releasing the Worker's Claude login lock",
-                  { sessionId: request.session.id, worker: request.worker },
+                  "Claude child showed no sign of its login in time; releasing its Claude login lock",
+                  fields,
                 ),
             }),
           ),
@@ -461,10 +469,7 @@ const makeClaudeChild = Effect.gen(function* () {
       ),
     );
     yield* Deferred.await(held);
-    yield* Effect.logDebug("Holding the Worker's Claude login lock to launch the child", {
-      sessionId: request.session.id,
-      worker: request.worker,
-    });
+    yield* Effect.logDebug("Holding the Claude login lock to launch the child", fields);
     return Deferred.succeed(released, undefined).pipe(Effect.asVoid);
   });
 
@@ -487,7 +492,7 @@ const makeClaudeChild = Effect.gen(function* () {
   });
 
   /**
-   * Launches Claude Code once for `request` and sends the task, keeping the Worker's login lock until
+   * Launches Claude Code once for `request` and sends the task, keeping its Claude login lock until
    * the first messages decide the login state. Resources are added to the current scope.
    */
   const launchOnce = Effect.fn("ClaudeChildBackend.launchOnce")(function* (
@@ -567,7 +572,7 @@ const makeClaudeChild = Effect.gen(function* () {
       const delay = LOGIN_RETRY_DELAYS[retry];
       if (delay === undefined) {
         yield* Effect.logWarning(
-          "Claude child still could not refresh the Worker's Claude login; returning the error to the parent",
+          "Claude child still could not refresh its Claude login; returning the error to the parent",
           {
             sessionId: request.session.id,
             parentSessionId: request.session.parentId,
@@ -578,17 +583,14 @@ const makeClaudeChild = Effect.gen(function* () {
         return opened;
       }
       yield* Scope.close(launchScope, Exit.void);
-      yield* Effect.logInfo(
-        "Claude child could not refresh the Worker's Claude login; launching it again",
-        {
-          sessionId: request.session.id,
-          parentSessionId: request.session.parentId,
-          worker: request.worker,
-          retry: retry + 1,
-          maxRetries: LOGIN_RETRY_DELAYS.length,
-          delay: Duration.format(delay),
-        },
-      );
+      yield* Effect.logInfo("Claude child could not refresh its Claude login; launching it again", {
+        sessionId: request.session.id,
+        parentSessionId: request.session.parentId,
+        worker: request.worker,
+        retry: retry + 1,
+        maxRetries: LOGIN_RETRY_DELAYS.length,
+        delay: Duration.format(delay),
+      });
       yield* Effect.sleep(delay);
     }
   });

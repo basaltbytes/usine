@@ -150,6 +150,19 @@ export const ContainerPids = Schema.Int.check(Schema.isGreaterThanOrEqualTo(64))
 );
 export type ContainerPids = typeof ContainerPids.Type;
 
+/** The CPU, memory, and process limits of one Attempt container. */
+export class ContainerLimits extends Schema.Class<ContainerLimits>("ContainerLimits")({
+  cpus: ContainerCpus,
+  memoryMib: ContainerMemoryMib,
+  pids: ContainerPids,
+}) {}
+
+/** The fields of `ContainerLimits`, in the order that logs and the web UI give them. */
+export const CONTAINER_LIMITS = ["cpus", "memoryMib", "pids"] as const satisfies ReadonlyArray<
+  keyof typeof ContainerLimits.fields
+>;
+export type ContainerLimit = (typeof CONTAINER_LIMITS)[number];
+
 /**
  * A Cloudflare container instance type. From `lite` (1/16 vCPU, 256 MiB, 2 GB disk) to
  * `standard-4` (4 vCPU, 12 GiB, 20 GB disk).

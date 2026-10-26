@@ -4,7 +4,7 @@ import type { AttemptId } from "@usine/core/attempt";
 import type { AttemptRecovery } from "@usine/core/attempt/salvage";
 import type { LoopPermissions } from "@usine/core/loop";
 import type { RepositoryName } from "@usine/core/repository";
-import type { GatewayCredentialKind, WorkerKind, WorkerName } from "@usine/core/worker";
+import type { GatewayCredentialKind, MachineId, WorkerKind, WorkerName } from "@usine/core/worker";
 import type { Effect, Option, Redacted, Scope } from "effect";
 import type {
   CredentialUnavailableError,
@@ -27,6 +27,8 @@ export interface RemoteMachine {
   readonly shell: RemoteShell;
   /** The Worker directory on the machine, with cached clones under `repos` and checkouts under `attempts`. */
   readonly workerDirectory: string;
+  /** The provider's ID of a machine created for one Attempt, or `None` for a long-lived machine. */
+  readonly provisioned: Option.Option<MachineId>;
 }
 
 export interface RemoteAccess {

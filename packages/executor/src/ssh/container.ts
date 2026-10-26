@@ -11,6 +11,14 @@ import {
   containersFor,
   sharedUser,
 } from "../remote/container.ts";
+import {
+  configuredLimits,
+  limitFields,
+  RESOURCES_SCRIPT,
+  resolveLimits,
+  type ResolvedLimits,
+  resourcesFromOutput,
+} from "./limits.ts";
 import type { SshMachine } from "./model.ts";
 
 /**
@@ -50,11 +58,15 @@ printf '%s %s\n' "$(id -u)" "$image_uid"
 const SSH_FAILURE = 255;
 
 /** What a preflight found about the containers of a Worker. */
-interface ContainerCheck {
-  readonly isolation: AttemptIsolation;
-  /** Why the Worker runs Attempts without containers, if it does. */
-  readonly degraded: Option.Option<string>;
-}
+type ContainerCheck =
+  /** Each Attempt runs in its own container from `settings`. */
+  | {
+      readonly _tag: "Container";
+      readonly settings: ContainerSettings;
+      readonly limits: ResolvedLimits;
+    }
+  /** Attempts run as the SSH user, for the `degraded` reason. */
+  | { readonly _tag: "SharedUser"; readonly degraded: string };
 
 const containerGap = (worker: WorkerName, message: string, cause: unknown) =>
   new WorkerCapabilityError({ worker, capability: "container", message, cause });
@@ -75,12 +87,44 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
   // belong to this process, so another Worker's removal keeps them.
   const reclaimed = yield* Ref.make(new Set<string>());
 
-  const settingsFor = (machine: SshMachine): ContainerSettings => ({
-    image: Option.getOrElse(machine.address.container.image, () => ATTEMPT_IMAGE),
-    cpus: machine.address.container.cpus,
-    memoryMib: machine.address.container.memoryMib,
-    pids: machine.address.container.pids,
-    instance,
+  const imageFor = (machine: SshMachine): ContainerImage =>
+    Option.getOrElse(machine.address.container.image, () => ATTEMPT_IMAGE);
+
+  /** Reads the CPUs, memory, and task limit of the machine's kernel. */
+  const readResources = Effect.fn("SshExecutor.readMachineResources")(function* (
+    machine: SshMachine,
+  ) {
+    const worker = machine.address.name;
+    const host = machine.shell.destination;
+    yield* Effect.annotateCurrentSpan({ worker, host });
+    const read = yield* commands.inspect("preflight", machine.shell, "sh", [
+      "-c",
+      RESOURCES_SCRIPT,
+    ]);
+    const resources = resourcesFromOutput(read.stdout);
+    if (read.exitCode === 0 && Option.isSome(resources)) return resources.value;
+    return yield* containerGap(
+      worker,
+      read.exitCode === SSH_FAILURE
+        ? `Can't reach SSH worker "${worker}" at ${host} to read its CPUs and memory`
+        : `Can't read the CPUs, memory, and task limit of SSH worker "${worker}" to derive the limits of its containers. Set cpus, memory_mib, and pids under the worker's container in usine.yaml.`,
+      new Error(read.stderr.trim() || `exit code ${read.exitCode}`),
+    );
+  });
+
+  /**
+   * Returns the limits of each container on the machine when `slots` Attempts run on it at once:
+   * the ones `usine.yaml` sets, and the others derived from the machine. Reads the machine only
+   * if a limit is unset.
+   */
+  const limitsFor = Effect.fn("SshExecutor.containerLimits")(function* (
+    machine: SshMachine,
+    slots: number,
+  ) {
+    yield* Effect.annotateCurrentSpan({ worker: machine.address.name, slots });
+    const configured = configuredLimits(machine.address.container);
+    if (Option.isSome(configured)) return configured.value;
+    return resolveLimits(machine.address.container, yield* readResources(machine), slots);
   });
 
   /**
@@ -125,34 +169,74 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
     Ref.update(isolations, (current) => new Map(current).set(worker, isolation));
 
   /**
-   * Checks the machine's Docker for preflight, pulls the Attempt image, and checks that the
-   * image's user has the SSH user's ID, so the containers can write the checkouts. Only a
-   * machine without Docker runs Attempts as the SSH user, which the result reports as
-   * degraded; with Docker, any failure fails the preflight.
+   * Records that the machine's Worker runs its Attempts as the SSH user, since the machine has no
+   * Docker, and logs it.
    */
-  const verify = Effect.fn("SshExecutor.verifyContainers")(function* (machine: SshMachine) {
+  const recordSharedUser = (machine: SshMachine) =>
+    record(machine.address.name, sharedUser).pipe(
+      Effect.andThen(
+        Effect.logWarning(
+          "SSH Worker has no Docker; its Attempts run as the SSH user and can read each other's credentials",
+          { worker: machine.address.name, host: machine.shell.destination },
+        ),
+      ),
+      Effect.as(sharedUser),
+    );
+
+  /**
+   * Records that each Attempt of the machine's Worker runs in its own container from the image,
+   * with the limits for `slots` Attempts on the machine at once, and logs them. `docker` is the
+   * server version of the machine's Docker.
+   */
+  const recordContainer = Effect.fn("SshExecutor.recordContainer")(function* (
+    machine: SshMachine,
+    docker: string,
+    slots: number,
+  ) {
+    const worker = machine.address.name;
+    const image = imageFor(machine);
+    yield* Effect.annotateCurrentSpan({ worker, image, slots });
+    const limits = yield* limitsFor(machine, slots);
+    const settings: ContainerSettings = { image, limits: limits.limits, instance };
+    yield* record(worker, { _tag: "Container", settings });
+    yield* Effect.logInfo("SSH Worker runs each Attempt in its own container", {
+      worker,
+      host: machine.shell.destination,
+      docker,
+      image,
+      ...limitFields(limits),
+    });
+    return { _tag: "Container", settings, limits } satisfies ContainerCheck;
+  });
+
+  /**
+   * Checks the machine's Docker for preflight, pulls the Attempt image, checks that the image's
+   * user has the SSH user's ID, so the containers can write the checkouts, and finds the limits
+   * of each container when `slots` Attempts run on the machine at once. Only a machine without
+   * Docker runs Attempts as the SSH user, which the result reports as degraded; with Docker, any
+   * failure fails the preflight.
+   */
+  const verify = Effect.fn("SshExecutor.verifyContainers")(function* (
+    machine: SshMachine,
+    slots: number,
+  ) {
     const worker = machine.address.name;
     const host = machine.shell.destination;
-    const settings = settingsFor(machine);
-    yield* Effect.annotateCurrentSpan({ worker, host, image: settings.image });
+    const image = imageFor(machine);
+    yield* Effect.annotateCurrentSpan({ worker, host, image, slots });
     const version = yield* detect(machine);
     if (Option.isNone(version)) {
-      yield* record(worker, sharedUser);
-      yield* Effect.logWarning(
-        "SSH Worker has no Docker; its Attempts run as the SSH user and can read each other's credentials",
-        { worker, host },
-      );
+      yield* recordSharedUser(machine);
       return {
-        isolation: sharedUser,
-        degraded: Option.some(
+        _tag: "SharedUser",
+        degraded:
           "Docker isn't installed, so attempts run as the SSH user and can read each other's credentials. Install Docker to run each attempt in its own container.",
-        ),
       } satisfies ContainerCheck;
     }
     const pulled = yield* commands.inspect("preflight", machine.shell, CONTAINER_RUNTIME, [
       "pull",
       "--quiet",
-      settings.image,
+      image,
     ]);
     if (pulled.exitCode !== 0) {
       const local = yield* commands.inspect("preflight", machine.shell, CONTAINER_RUNTIME, [
@@ -160,17 +244,17 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
         "inspect",
         "--format",
         "{{.Id}}",
-        settings.image,
+        image,
       ]);
       if (local.exitCode !== 0)
         return yield* containerGap(
           worker,
-          `SSH worker "${worker}" can't pull the attempt image ${settings.image}`,
+          `SSH worker "${worker}" can't pull the attempt image ${image}`,
           new Error(pulled.stderr.trim() || `docker pull exited with code ${pulled.exitCode}`),
         );
       yield* Effect.logWarning(
         "SSH Worker could not pull the Attempt image; its Attempts use the image already on the machine",
-        { worker, host, image: settings.image, message: pulled.stderr.trim() },
+        { worker, host, image, message: pulled.stderr.trim() },
       );
     }
     const ids = yield* commands.inspect("preflight", machine.shell, "sh", [
@@ -178,60 +262,53 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
       USER_IDS_SCRIPT,
       "sh",
       CONTAINER_RUNTIME,
-      settings.image,
+      image,
     ]);
     const [hostId, imageId] = ids.stdout.trim().split(" ");
     if (ids.exitCode !== 0 || hostId === undefined || imageId === undefined)
       return yield* containerGap(
         worker,
-        `SSH worker "${worker}" can't run the attempt image ${settings.image}`,
+        `SSH worker "${worker}" can't run the attempt image ${image}`,
         new Error(ids.stderr.trim() || `exit code ${ids.exitCode}`),
       );
     if (hostId !== imageId)
       return yield* containerGap(
         worker,
-        `The attempt image ${settings.image} runs as user ID ${imageId}, and the SSH user of worker "${worker}" has ID ${hostId}, so its containers can't write the checkouts. Build the image with --build-arg USINE_UID=${hostId}.`,
+        `The attempt image ${image} runs as user ID ${imageId}, and the SSH user of worker "${worker}" has ID ${hostId}, so its containers can't write the checkouts. Build the image with --build-arg USINE_UID=${hostId}.`,
         new Error(`user IDs ${hostId} and ${imageId}`),
       );
-    const isolation: AttemptIsolation = { _tag: "Container", settings };
-    yield* record(worker, isolation);
-    yield* Effect.logInfo("SSH Worker runs each Attempt in its own container", {
-      worker,
-      host,
-      docker: version.value,
-      image: settings.image,
-      cpus: settings.cpus,
-      memoryMib: settings.memoryMib,
-      pids: settings.pids,
-    });
-    return { isolation, degraded: Option.none() } satisfies ContainerCheck;
-  });
-
-  /** Returns how new Attempts on the machine run, as its last preflight found, or detects it. */
-  const isolationOf = Effect.fn("SshExecutor.isolation")(function* (machine: SshMachine) {
-    const recorded = (yield* Ref.get(isolations)).get(machine.address.name);
-    if (recorded !== undefined) return recorded;
-    const isolation: AttemptIsolation = Option.isSome(yield* detect(machine))
-      ? { _tag: "Container", settings: settingsFor(machine) }
-      : sharedUser;
-    yield* record(machine.address.name, isolation);
-    return isolation;
+    return yield* recordContainer(machine, version.value, slots);
   });
 
   /**
-   * Starts a container for a preflight's harness probes, with the login files of `harnesses`
-   * and `environment`, until the caller's scope closes. It removes itself after 15 minutes if
-   * this process can't.
+   * Returns how new Attempts on the machine run, as the Worker's last preflight found, or detects
+   * and logs it. Before any preflight on the Worker, as for the recovery of a provisioned Worker's
+   * machine, it derives the unset limits for one Attempt on the machine.
+   */
+  const isolationOf = Effect.fn("SshExecutor.isolation")(function* (machine: SshMachine) {
+    const recorded = (yield* Ref.get(isolations)).get(machine.address.name);
+    if (recorded !== undefined) return recorded;
+    const version = yield* detect(machine);
+    if (Option.isNone(version)) return yield* recordSharedUser(machine);
+    const { settings } = yield* recordContainer(machine, version.value, 1);
+    return { _tag: "Container", settings } satisfies AttemptIsolation;
+  });
+
+  /**
+   * Starts a container from `settings` for a preflight's harness probes, with the login files
+   * of `harnesses` and `environment`, until the caller's scope closes. It removes itself after
+   * 15 minutes if this process can't.
    */
   const preflightShell = Effect.fn("SshExecutor.preflightContainer")(function* (
     machine: SshMachine,
+    settings: ContainerSettings,
     harnesses: ReadonlyArray<Harness>,
     environment: Readonly<Record<string, string>>,
   ) {
     const suffix = yield* Random.nextIntBetween(0, 1_000_000_000);
     return yield* containers.start("preflight", machine.shell, {
       name: `usine-preflight-${safeSegment(machine.address.name)}-${suffix}`,
-      settings: settingsFor(machine),
+      settings,
       worker: machine.address.name,
       attemptId: Option.none(),
       checkout: Option.none(),

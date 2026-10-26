@@ -121,7 +121,7 @@ const GATEWAY_PROVIDERS: LlmProviders = {
  * only through a live forward of `machine` on its port; otherwise it fails as a refused
  * connection.
  *
- * - `calls` records each request the executor sent.
+ * - `calls` records each request the executor sent, before the admin API handles it.
  * - A detach of an attachment in `refusedDetaches` returns a server error.
  * - While `answering` is false, requests get no response.
  * - While `reportsProviders` is false, the provider list returns 404.

@@ -1,7 +1,13 @@
 import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, type Harness, ModelId } from "@usine/core/agent/brain";
 import { HarnessUnavailableError } from "@usine/core/agent/capability";
-import { WorkerName } from "@usine/core/worker";
+import {
+  ContainerCpus,
+  ContainerLimits,
+  ContainerMemoryMib,
+  ContainerPids,
+  WorkerName,
+} from "@usine/core/worker";
 import { ExecutorOperationError, fullPreflight, WorkerCapabilityError } from "@usine/executor";
 import { DateTime, Option, Result } from "effect";
 import { recordPreflight, unchecked, type WorkerPreflight } from "../src/worker-status.ts";
@@ -55,7 +61,10 @@ describe("Worker preflight record", () => {
       unchecked(worker),
       [codex],
       at(8),
-      Result.succeed({ degraded: Option.some("Docker isn't installed"), deferred: Option.none() }),
+      Result.succeed({
+        ...fullPreflight,
+        degraded: Option.some("Docker isn't installed"),
+      }),
     );
     assert.deepStrictEqual(summary(record), {
       prerequisites: "Degraded 2026-10-20T08:00:00.000Z",
@@ -64,6 +73,38 @@ describe("Worker preflight record", () => {
     const prerequisites = Option.getOrUndefined(record.prerequisites);
     assert(prerequisites?._tag === "Degraded", "degraded");
     assert.strictEqual(prerequisites.message, "Docker isn't installed");
+  });
+
+  it("keeps the container limits of the last machine check through a preflight without a machine", () => {
+    const limits = new ContainerLimits({
+      cpus: ContainerCpus.make(3.5),
+      memoryMib: ContainerMemoryMib.make(7168),
+      pids: ContainerPids.make(60976),
+    });
+    const withoutMachine = {
+      ...fullPreflight,
+      deferred: Option.some("Checked on the worker's first machine each day."),
+    };
+    const started = recordPreflight(
+      unchecked(worker),
+      [codex],
+      at(8),
+      Result.succeed(withoutMachine),
+    );
+    assert.isTrue(Option.isNone(started.containerLimits));
+    const checked = recordPreflight(
+      started,
+      [codex],
+      at(9),
+      Result.succeed({ ...fullPreflight, containerLimits: Option.some(limits) }),
+    );
+    const reloaded = recordPreflight(
+      checked,
+      [codex, claude],
+      at(10),
+      Result.succeed(withoutMachine),
+    );
+    assert.deepStrictEqual(reloaded.containerLimits, Option.some(limits));
   });
 
   it("fails an unavailable harness, passes the ones checked before it, and keeps the rest", () => {
