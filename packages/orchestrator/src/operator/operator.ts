@@ -120,7 +120,7 @@ import {
 import { TaskReader, type TaskReadError, type TaskView } from "./task.ts";
 import { type DeskView, OperatorDesk } from "./desk.ts";
 import { OperatorStatistics } from "./statistics/statistics.ts";
-import type { StatisticsView, StatisticsWindow } from "./statistics/view.ts";
+import type { RunStatisticsView, StatisticsView, StatisticsWindow } from "./statistics/view.ts";
 import { machineView } from "./machines.ts";
 import { WorkerStatus } from "../worker-status.ts";
 
@@ -740,9 +740,9 @@ const makeOperatorObservation = Effect.gen(function* () {
 
   const tasks = yield* TaskReader;
   const { desk } = yield* OperatorDesk;
-  const { statistics } = yield* OperatorStatistics;
+  const { statistics, runStatistics } = yield* OperatorStatistics;
 
-  return { detail, overview, task: tasks.read, desk, statistics } as const;
+  return { detail, overview, task: tasks.read, desk, statistics, runStatistics } as const;
 });
 
 /** The read-only operator surface, which needs no trigger execution. */
@@ -782,14 +782,22 @@ export class OperatorObservation extends Context.Service<
      */
     readonly desk: (instance: LoadedInstance) => Effect.Effect<DeskView, OperatorObservationError>;
     /**
-     * Computes how the factory ran in `window`: closed Runs by outcome, Loop, Agent, and brain,
-     * with time, tokens, and cost, and the throughput, pull request, Worker, retry, and Needs
-     * attention measures.
+     * Computes the tasks done in `window`: their count and duration from first Run to merge, the
+     * split of that time and of their tokens by Loop, the first-time-right share, and the operator
+     * actions per task.
      */
     readonly statistics: (
       instance: LoadedInstance,
       window: StatisticsWindow,
     ) => Effect.Effect<StatisticsView, OperatorObservationError>;
+    /**
+     * Computes how the Runs went in `window`: closed Runs by outcome, Loop, Agent, and brain, with
+     * time, tokens, and cost, and the throughput, Worker, retry, and Needs attention measures.
+     */
+    readonly runStatistics: (
+      instance: LoadedInstance,
+      window: StatisticsWindow,
+    ) => Effect.Effect<RunStatisticsView, OperatorObservationError>;
   }
 >()("@usine/orchestrator/OperatorObservation") {
   static readonly layer = Layer.effect(OperatorObservation, makeOperatorObservation).pipe(
@@ -1347,6 +1355,15 @@ export {
 export {
   StatisticsWindow,
   StatisticsBucket,
+  TaskDoneView,
+  TaskPeriodView,
+  LoopShareView,
+  LoopRunTimeView,
+  TaskTimeView,
+  TaskCostView,
+  TaskTokensView,
+  UntimedTasksView,
+  StatisticsView,
   DurationSummaryView,
   OutcomeCountsView,
   PoolTokensView,
@@ -1356,13 +1373,12 @@ export {
   AgentStatisticsView,
   BrainStatisticsView,
   ThroughputPeriodView,
-  FirstPassView,
   WorkerQueueWaitView,
   AttemptCountView,
   WorkerUtilizationView,
   NeedsAttentionPeriodView,
   NeedsAttentionView,
-  StatisticsView,
+  RunStatisticsView,
 } from "./statistics/view.ts";
 export {
   FailedTranscriptView,

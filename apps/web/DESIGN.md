@@ -7,6 +7,7 @@ colors:
   base: "#1e1e2e"
   surface0: "#313244"
   surface1: "#45475a"
+  surface2: "#585b70"
   overlay0: "#6c7086"
   subtext0: "#a6adc8"
   subtext1: "#bac2de"
@@ -191,7 +192,7 @@ Catppuccin Mocha as published: neutral grounds from crust to text, one action ac
 - **Peach** (`{colors.peach}`): a run waiting for approval, and Needs attention (sidebar counts, items, card ring at 45%).
 - **Red** (`{colors.red}`): failed runs, error text, destructive actions. Fills are 8 to 25% alpha, never solid.
 - **Green** (`{colors.green}`): succeeded runs, a clear project, an active loop, and the live connection dot.
-- **Sapphire** (`{colors.sapphire}`): a chart series that is no state, such as attempts per run; nothing else.
+- **Sapphire** (`{colors.sapphire}`): a chart series that is no state, such as tasks done or attempts per run, and its five-step ramp for loops in the order they run; nothing else.
 
 ### Neutral
 - **Crust** (`{colors.crust}`): text on mauve buttons; the scrim under sheets and dialogs.
@@ -240,7 +241,7 @@ Page gutters are 16px, 20px from `md`. The page shell is prose (content stops at
 
 **Board.** Needs attention items form a two-column grid from `lg` (one column below) with 10px gaps. Then the project title and counts, then the lanes: 272px wide, 12px apart, scrolling sideways together, with headings sticky on the base ground. Folded lanes are 40px rails with the name set vertically and the count.
 
-**Overview** (`/`). The page heading with counts (`2 running, 7 stalled`), then Needs attention, Running, Stalled, and Recent runs, 36px apart, each a 16px semibold title with its count in 13px subtext0 over a flat table, then the Workers line, then Statistics. An empty block is one 13px subtext0 fragment, such as `Nothing running`.
+**Overview** (`/`). The page heading with counts (`2 running, 7 stalled`), then Statistics, Needs attention, Running, Stalled, and Recent runs, 36px apart, each a 16px semibold title with its count in 13px subtext0, then the Workers line. An empty block is one 13px subtext0 fragment, such as `Nothing running`.
 
 **Tasks list** (`repository › Tasks`). The page heading with counts, a 13px subtext0 totals line, and a flat table; with no runs, `No runs yet` in 13px subtext0. The [README](README.md#tasks-list) lists what each column and status says.
 
@@ -364,11 +365,14 @@ A 22 by 8 one-pixel arrow at the end of an authored lane's heading, crossing the
 Flat tables; only rows about a run open something (its run page). An item cell is the task's item heading, row form; multi-line rows align to the top. A connectivity warning is 12px yellow with a filled warning icon under the item, the harness's message below. Stalled has the reason as a 13px fragment and the action as a subtext0 ghost button. The Workers line ends the live sections under a hairline: `Workers` in 12px medium text colour, then each worker's name in mono, slots in use, and last preflight as a state dot and words, red if failed.
 
 ### Statistics
-The last overview section: its 16px title, the window's start in 12px subtext0, and the window switch (`7 days`, `30 days`, `All`) as a small outline toggle group at the right. Below, flat on the panel with no cards and no rules: a row of figures, each a 12px subtext0 label, a 20px semibold value, and a 12px subtext0 detail; then blocks 36px apart, two or three per row from `lg` and `xl`, one on phones. A block is a 13px medium title, a one-line 12px subtext0 reading, and its chart. Charts follow the dataviz rules: bars at most 24px thick on hairline grids, a 2px base-coloured gap between stacked segments, a legend for two or more series, a tooltip on surface0 with the Raised shadow, and a screen-reader table of the values.
+The first overview section: its 16px title, the window's start in 12px subtext0, and the window switch (`7 days`, `30 days`, `All`) as a small outline toggle group at the right. Below, flat on the panel with no cards and no rules, four blocks 36px apart: Tasks done across the width, then Time per task and Tokens per task in a wide column with First time right beside them from `lg`, one column on phones. A block is a 14px medium title, its figures, and its chart; no reading or caption. A figure is a 20px semibold value followed by its unit in 13px subtext0 (`45 tasks`, `2 h 35 min median from issue to merge`). The only sentences are Time per task's loop lines (`finish-pr about 15 min`, the loop in text colour) and one 12px subtext0 line under the blocks naming the tasks left out. Charts follow the dataviz rules: bars at most 24px thick on hairline grids, a 2px base-coloured gap between stacked segments, a legend for two or more series, a tooltip on surface0 with the Raised shadow, and a screen-reader table or label of the values. Durations are medians; no mean or percentile appears.
 
+- **Tasks done:** a dot per task (8px sapphire with a 2px base ring and a 24px hit area) by merge day across and time from issue to merge up a log axis with ticks at `15 min`, `1 h`, `4 h`, `1 d`, `1 w`, and `4 w`, and a 2px subtext0 line at the median; the legend reads `task` and `median`. A window counted per week shows tasks per week as columns over the median per week as a line.
+- **Share bars:** Time per task and Tokens per task are one 12px bar split into segments 2px apart, with a legend of swatch, name, and share under it. Loops take the sapphire ramp (`--loop-1` to `--loop-5`) light to dark in the order they run; waiting is surface2. Hovering a segment or legend entry dims the others.
+- **Sparklines:** 96 by 28, a 1.5px subtext0 line over at most eight points with the last one a sapphire dot, beside each First time right figure.
+- **Details:** a ghost `Details` button with a caret below the blocks, collapsed by default, opens the run statistics: 12px subtext0 labels over 16px semibold values, then 13px medium block titles over the run charts and the runs per loop, agent, or model table.
 - **Outcome colour:** succeeded green, failed red, canceled overlay0, the run state tones, in that order in every stack and legend.
 - **One-series colour:** sapphire (`--chart-1`, `#74c7ec`) for magnitudes that are no state, such as attempts per run and the slot-use meters (fill on a 15% sapphire track). Needs attention entries use peach.
-- **Breakdown:** runs per loop or agent, or attempts per model, as horizontal bars stacked by outcome over a flat table; a toggle group at the block's right picks the grouping. Model names are mono.
 
 ### Page header
 One header for the run page, the run drawer, and the task page: an optional 12px subtext0 line with 14px between facts, each fact after its Phosphor icon at text size in overlay0 with its kind as tooltip; the item heading; a 13px subtext0 facts line with 20px between facts; and the actions, right of the heading from `lg` on the run page and `sm` on the task page, under it in the drawer.

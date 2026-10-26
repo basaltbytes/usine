@@ -44,15 +44,15 @@ import {
 } from "@usine/engine/item-projection";
 import { RunReader } from "@usine/engine/run-reader";
 import { TranscriptEntry, TranscriptSequence } from "@usine/engine/transcript";
+import { CycleGeneration } from "@usine/core/cycle-budget";
+import { CycleBudgets } from "@usine/engine/cycle-budget";
 import { DateTime, Effect, Layer, Option, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { OperatorStatistics } from "../src/operator/statistics/statistics.ts";
 import { gitHubItemKey } from "../src/polling/repository-sync.ts";
-import {
-  durationSummary,
-  type PullRequestMerge,
-  statisticsView,
-} from "../src/operator/statistics/compute.ts";
+import { durationSummary, runStatisticsView } from "../src/operator/statistics/runs.ts";
+import { type MergedTask, taskStatisticsView } from "../src/operator/statistics/tasks.ts";
+import { emptyCycleBudgets } from "./support/polling.ts";
 import {
   RunUsageReader,
   RunUsageView,
@@ -322,6 +322,7 @@ const usage = new Map([
       session("only-review/1", "claudePlan", 2_000, 0.25),
     ]),
   ],
+  [RunId.make("unrecorded-end"), usageOf([session("unrecorded-end/1", "claudePlan", 80_000, 4)])],
 ]);
 
 const earlierImplementation = summary({
@@ -344,17 +345,17 @@ const onlyReview = summary({
   closedAt: "23T08:30",
   attempts: [{ worker: "w1", startedAt: "23T08:01", outcome: succeeded, endedAt: "23T08:30" }],
 });
-const merges: ReadonlyArray<PullRequestMerge> = [
-  // Two reviews on one pull request: a second round.
-  { mergedAt: at("22T08:00"), runs: [implemented, firstReview, fixed, secondReview] },
-  // The first Run on the Task opened before the window.
-  { mergedAt: at("24T08:00"), runs: [earlierImplementation, onlyReview, superseded] },
-  // Merged before the window.
-  { mergedAt: at("10T08:00"), runs: [earlierImplementation] },
-  // A pull request no Loop ran on, or only a superseded Run.
-  { mergedAt: at("24T09:00"), runs: [] },
-  { mergedAt: at("24T10:00"), runs: [superseded] },
-];
+// Its Attempt ended before usine recorded end times.
+const unrecordedEnd = summary({
+  id: "unrecorded-end",
+  item: 12,
+  loop: startDev,
+  agent: developer,
+  state: new RunState.Succeeded(),
+  openedAt: "19T09:00",
+  closedAt: "19T10:00",
+  attempts: [{ worker: "w1", startedAt: "19T09:01", outcome: succeeded }],
+});
 
 const now = at("25T12:00");
 const runs = [
@@ -374,9 +375,159 @@ const workers = [
   { name: WorkerName.make("w2"), slots: 1 },
   { name: WorkerName.make("idle"), slots: 1 },
 ];
-const week = statisticsView({ window: "7d", now, runs, usage, merges, workers });
+const week = runStatisticsView({ window: "7d", now, runs, usage, workers });
 
-describe("Statistics", () => {
+const mergedTask = (
+  number: number,
+  mergedAt: DateTime.Utc,
+  taskRuns: ReadonlyArray<RunSummary>,
+  budgetResets = 0,
+): MergedTask => ({
+  repository,
+  number: ItemNumber.make(number),
+  mergedAt,
+  runs: taskRuns,
+  budgetResets,
+});
+const tasks = [
+  // A review round, an approval, an operator retry, and a cycle-budget reset.
+  mergedTask(1, at("22T08:00"), [implemented, firstReview, fixed, secondReview], 1),
+  // The first Run opened before the window, and the superseded Run is left out.
+  mergedTask(8, at("24T08:00"), [earlierImplementation, onlyReview, superseded]),
+  mergedTask(12, at("23T12:00"), [unrecordedEnd]),
+  // Merged before the window.
+  mergedTask(9, at("10T08:00"), [earlierImplementation]),
+  // Only a superseded Run.
+  mergedTask(4, at("24T10:00"), [superseded]),
+];
+const done = taskStatisticsView({ window: "7d", now, tasks, usage });
+
+describe("Task statistics", () => {
+  it("counts the tasks merged in the window, from the first Run's opening to the merge", () => {
+    assert.strictEqual(done.from, "2026-10-19T00:00:00.000Z");
+    assert.deepStrictEqual(
+      done.tasks.map(({ number, mergedAt, durationMillis }) => [number, mergedAt, durationMillis]),
+      [
+        [1, "2026-10-22T08:00:00.000Z", 48 * HOUR],
+        [12, "2026-10-23T12:00:00.000Z", 99 * HOUR],
+        [8, "2026-10-24T08:00:00.000Z", 216 * HOUR],
+      ],
+    );
+    assert.strictEqual(done.medianMillis, 99 * HOUR);
+    assert.deepStrictEqual(
+      done.periods.flatMap(({ start, tasks, medianMillis, firstTimeRight, operatorActions }) =>
+        tasks === 0 ? [] : [[start, tasks, medianMillis, firstTimeRight, operatorActions]],
+      ),
+      [
+        ["2026-10-22", 1, 48 * HOUR, 0, 3],
+        ["2026-10-23", 1, 99 * HOUR, 1, 0],
+        ["2026-10-24", 1, 216 * HOUR, 1, 0],
+      ],
+    );
+  });
+
+  it("counts a second successful Run of a Loop as a round, and the operator's actions", () => {
+    assert.strictEqual(done.firstTimeRight, 2);
+    // The approval, the retry after the agent failure, and the reset.
+    assert.strictEqual(done.operatorActions, 3);
+  });
+
+  it("splits task time between the Loops' Attempts and the waits, in the Loops' order", () => {
+    // 2,880 minutes from the first Run to the merge, and 12,960 for the task that opened earlier.
+    const first = (minutes: number) => (minutes * MINUTE) / (48 * HOUR);
+    const second = (minutes: number) => (minutes * MINUTE) / (216 * HOUR);
+    assert.strictEqual(done.time?.tasks, 2);
+    // Ranked 0, 0.5, and 1 in the first task, and 0 and 1 in the second.
+    assert.deepStrictEqual(done.loops, [startDev, reviewPr, actOnFindings]);
+    assert.deepStrictEqual(
+      done.time?.loops.map(({ loop }) => loop),
+      [startDev, reviewPr, actOnFindings],
+    );
+    const shares = new Map(done.time?.loops.map(({ loop, share }) => [loop, share]));
+    assert.closeTo(shares.get(startDev) ?? 0, (first(60) + second(59)) / 2, 1e-9);
+    assert.closeTo(shares.get(reviewPr) ?? 0, (first(29) + second(29)) / 2, 1e-9);
+    assert.closeTo(shares.get(actOnFindings) ?? 0, first(58) / 2, 1e-9);
+    assert.closeTo(done.time?.waiting ?? 0, (first(2733) + second(12872)) / 2, 1e-9);
+    assert.deepStrictEqual(
+      done.time?.runs.map(({ loop, runs, medianMillis }) => [loop, runs, medianMillis]),
+      [
+        [startDev, 2, 59.5 * MINUTE],
+        [reviewPr, 3, 19 * MINUTE],
+        [actOnFindings, 1, 58 * MINUTE],
+      ],
+    );
+    assert.deepStrictEqual({ ...done.untimed }, { tasks: 1, before: "2026-10-20" });
+  });
+
+  it("measures tokens per task without a money figure unless every session has a price", () => {
+    assert.strictEqual(done.unmetered, 1);
+    assert.strictEqual(done.tokens?.tasks, 2);
+    assert.strictEqual(done.tokens?.medianTokens, (241_000 + 80_000) / 2);
+    const shares = new Map(done.tokens?.loops.map(({ loop, share }) => [loop, share]));
+    assert.closeTo(shares.get(startDev) ?? 0, (100 / 241 + 1) / 2, 1e-9);
+    assert.closeTo(shares.get(reviewPr) ?? 0, 90 / 241 / 2, 1e-9);
+    assert.closeTo(shares.get(actOnFindings) ?? 0, 51 / 241 / 2, 1e-9);
+    assert.isNull(done.tokens?.cost);
+  });
+
+  it("shares overlapping Attempts, prices fully priced tasks, and splits a long history into weeks", () => {
+    const develop = summary({
+      id: "develop",
+      item: 20,
+      loop: startDev,
+      agent: developer,
+      state: new RunState.Succeeded(),
+      openedAt: "25T08:00",
+      closedAt: "25T10:00",
+      attempts: [{ worker: "w1", startedAt: "25T08:00", outcome: succeeded, endedAt: "25T10:00" }],
+    });
+    const review = summary({
+      id: "review",
+      item: 21,
+      loop: reviewPr,
+      agent: reviewer,
+      state: new RunState.Succeeded(),
+      openedAt: "25T09:00",
+      closedAt: "25T11:00",
+      attempts: [{ worker: "w1", startedAt: "25T09:00", outcome: succeeded, endedAt: "25T11:00" }],
+    });
+    const history = taskStatisticsView({
+      window: "all",
+      now: DateTime.makeUnsafe("2027-01-20T12:00:00.000Z"),
+      tasks: [mergedTask(20, at("25T20:00"), [develop, review])],
+      usage: new Map([
+        [develop.run.id, usageOf([session("develop/1", "claudePlan", 10_000, 1)])],
+        [review.run.id, usageOf([session("review/1", "apiKeys", 5_000, 0.5)])],
+      ]),
+    });
+    assert.strictEqual(history.from, "2026-10-25T00:00:00.000Z");
+    assert.strictEqual(history.bucket, "week");
+    // 2026-10-19 is the Monday of the week of 2026-10-25.
+    assert.deepStrictEqual(
+      [history.periods[0]?.start, history.periods[0]?.tasks, history.periods.at(-1)?.start],
+      ["2026-10-19", 1, "2027-01-18"],
+    );
+    // Each Loop ran 60 minutes alone and shared 60 more, out of 720.
+    assert.deepStrictEqual(
+      history.time?.loops.map(({ loop, share }) => [loop, share]),
+      [
+        [startDev, 90 / 720],
+        [reviewPr, 90 / 720],
+      ],
+    );
+    assert.strictEqual(history.time?.waiting, 540 / 720);
+    assert.deepStrictEqual({ ...history.tokens?.cost }, { medianUsd: 1.5, estimate: true });
+
+    const empty = taskStatisticsView({ window: "all", now, tasks: [], usage });
+    assert.strictEqual(empty.from, "2026-10-25T00:00:00.000Z");
+    assert.deepStrictEqual(
+      [empty.medianMillis, empty.time, empty.tokens, empty.untimed],
+      [null, null, null, null],
+    );
+  });
+});
+
+describe("Run statistics", () => {
   it("counts the closed Runs of the window by outcome and day, leaving out superseded Runs", () => {
     assert.strictEqual(week.from, "2026-10-19T00:00:00.000Z");
     assert.strictEqual(week.bucket, "day");
@@ -400,48 +551,32 @@ describe("Statistics", () => {
     );
   });
 
-  it("summarizes Run and Attempt time with the median and 90th percentile beside the mean", () => {
+  it("summarizes Run and Attempt time by their median", () => {
     // Run times: 75, 20, 120, 11, 10, 60, and 30 minutes.
-    assert.deepStrictEqual(
-      { ...week.runTime },
-      {
-        count: 7,
-        meanMillis: Math.round((326 / 7) * MINUTE),
-        medianMillis: 30 * MINUTE,
-        p90Millis: Math.round(93 * MINUTE),
-      },
-    );
+    assert.deepStrictEqual({ ...week.runTime }, { count: 7, medianMillis: 30 * MINUTE });
     assert.strictEqual(week.attemptTime?.count, 9);
     assert.strictEqual(week.unmeasuredAttempts, 0);
     assert.deepStrictEqual(
       { ...durationSummary([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) },
       {
         count: 10,
-        meanMillis: 6,
         medianMillis: 6,
-        p90Millis: 9,
       },
     );
     assert.isNull(durationSummary([]));
   });
 
-  it("prices Runs whose dollar-rate sessions all have a price, and keeps tokens per pool", () => {
-    assert.strictEqual(week.usage.tokens, 100_000 + 50_000 + 51_000 + 40_000 + 9_000 + 12_000);
-    assert.strictEqual(week.usage.measured, 7);
+  it("prices Runs whose dollar-rate sessions all have a price, per Loop", () => {
+    const cost = (loop: LoopName) => week.loops.find((group) => group.loop === loop)?.usage.cost;
+    // The Claude plan Run and the API key Run; the canceled Run has no session.
     assert.deepStrictEqual(
-      week.usage.pools.map(({ pool, tokens }) => [pool, tokens]),
-      [
-        ["apiKeys", 60_000],
-        ["claudePlan", 102_000],
-        ["chatgptPlan", 100_000],
-      ],
+      [cost(startDev)?.usd, cost(startDev)?.estimate, cost(startDev)?.priced],
+      [3, true, 2],
     );
-    // Priced: the Claude plan Run, the API key Run, and the ChatGPT plan Run whose Claude plan
-    // child has a price. Not priced: the Run with an unpriced API key session, the ChatGPT plan
-    // Runs, and the canceled Run with no session.
-    const cost = week.usage.cost;
-    assert.deepStrictEqual([cost?.usd, cost?.estimate, cost?.priced], [3.25, true, 3]);
-    assert.closeTo(cost?.meanUsd ?? 0, 3.25 / 3, 1e-9);
+    // One API key session has no price.
+    assert.isNull(cost(actOnFindings));
+    // Only the ChatGPT plan Run whose Claude plan child has a price.
+    assert.deepStrictEqual([cost(reviewPr)?.usd, cost(reviewPr)?.priced], [0.25, 1]);
   });
 
   it("breaks down Runs per Loop and Agent, and Attempts per harness, model, and effort", () => {
@@ -454,7 +589,6 @@ describe("Statistics", () => {
       ],
     );
     const review = week.loops.find(({ loop }) => loop === reviewPr);
-    assert.deepStrictEqual([review?.usage.cost?.usd, review?.usage.cost?.priced], [0.25, 1]);
     assert.strictEqual(review?.usage.meanTokens, 34_000);
     assert.deepStrictEqual(
       week.agents.map(({ agent, outcomes }) => [
@@ -480,19 +614,6 @@ describe("Statistics", () => {
     );
     // Per Attempt, the API key Attempts with a price count as priced on their own.
     assert.strictEqual(week.brains[0]?.usage.cost?.priced, 4);
-  });
-
-  it("measures lead time to merge and first-pass merges from each Task's full Run history", () => {
-    assert.deepStrictEqual({ ...week.firstPass }, { merged: 2, firstPass: 1 });
-    assert.deepStrictEqual(
-      { ...week.leadTime },
-      {
-        count: 2,
-        meanMillis: 132 * HOUR,
-        medianMillis: 132 * HOUR,
-        p90Millis: Math.round((48 + 0.9 * 168) * HOUR),
-      },
-    );
   });
 
   it("measures queue wait from approval, Attempts per Run, and the share of slot time used", () => {
@@ -569,12 +690,11 @@ describe("Statistics", () => {
       closedAt: "25T09:00",
       attempts: [{ worker: "w1", startedAt: "25T08:01", outcome: succeeded, endedAt: "25T09:00" }],
     });
-    const history = statisticsView({
+    const history = runStatisticsView({
       window: "all",
       now: DateTime.makeUnsafe("2027-01-20T12:00:00.000Z"),
       runs: [old],
       usage: new Map(),
-      merges: [],
       workers,
     });
     assert.strictEqual(history.from, "2026-10-25T00:00:00.000Z");
@@ -584,17 +704,15 @@ describe("Statistics", () => {
     assert.strictEqual(history.throughput[0]?.succeeded, 1);
     assert.strictEqual(history.throughput.at(-1)?.start, "2027-01-18");
 
-    const empty = statisticsView({
+    const empty = runStatisticsView({
       window: "all",
       now,
       runs: [],
       usage: new Map(),
-      merges: [],
       workers: [],
     });
     assert.strictEqual(empty.from, "2026-10-25T00:00:00.000Z");
     assert.isNull(empty.runTime);
-    assert.isNull(empty.usage.meanTokens);
     assert.deepStrictEqual(empty.attemptsPerRun, []);
   });
 });
@@ -711,7 +829,7 @@ const instance = new LoadedInstance({
 
 describe("OperatorStatistics", () => {
   it.effect(
-    "reads the window's closed Runs once, the open Runs, usage, and merges linked through issues",
+    "reads tasks merged through linked issues with their budget resets, and the window's Runs once",
     () =>
       Effect.gen(function* () {
         const since: Array<Option.Option<DateTime.Utc>> = [];
@@ -759,26 +877,38 @@ describe("OperatorStatistics", () => {
               }),
             ]),
         });
+        const budgets = Layer.succeed(CycleBudgets)({
+          ...emptyCycleBudgets,
+          generation: (itemKey) =>
+            Effect.succeed(CycleGeneration.make(itemKey === gitHubItemKey(repository, 1) ? 1 : 0)),
+        });
         yield* TestClock.setTime(DateTime.toEpochMillis(now));
-        const statistics = yield* OperatorStatistics.use(({ statistics }) =>
-          statistics(instance, "7d"),
+        const [tasksDone, runsClosed] = yield* OperatorStatistics.use(
+          ({ statistics, runStatistics }) =>
+            Effect.all([statistics(instance, "7d"), runStatistics(instance, "7d")]),
         ).pipe(
           Effect.provide(
             OperatorStatistics.layer.pipe(
               Layer.provide(RunUsageReader.layer),
-              Layer.provide(Layer.merge(reader, items)),
+              Layer.provide(Layer.mergeAll(reader, items, budgets)),
             ),
           ),
         );
 
-        assert.deepStrictEqual(since, [Option.some(at("19T00:00"))]);
-        assert.deepStrictEqual({ ...statistics.runs }, { succeeded: 3, failed: 0, canceled: 0 });
-        assert.strictEqual(statistics.usage.tokens, 100_000);
-        assert.deepStrictEqual({ ...statistics.firstPass }, { merged: 1, firstPass: 1 });
-        assert.strictEqual(statistics.leadTime?.medianMillis, 48 * HOUR);
-        assert.strictEqual(statistics.needsAttention.approvals, 3);
+        // Issue 1 and pull request 2 form the task; its review reported no tokens.
         assert.deepStrictEqual(
-          statistics.utilization.map(({ worker, slots }) => [worker, slots]),
+          tasksDone.tasks.map(({ number, durationMillis }) => [number, durationMillis]),
+          [[1, 48 * HOUR]],
+        );
+        assert.deepStrictEqual(
+          [tasksDone.firstTimeRight, tasksDone.operatorActions, tasksDone.unmetered],
+          [1, 2, 1],
+        );
+        assert.deepStrictEqual(since, [Option.some(at("19T00:00"))]);
+        assert.deepStrictEqual({ ...runsClosed.runs }, { succeeded: 3, failed: 0, canceled: 0 });
+        assert.strictEqual(runsClosed.needsAttention.approvals, 3);
+        assert.deepStrictEqual(
+          runsClosed.utilization.map(({ worker, slots }) => [worker, slots]),
           [["w1", 2]],
         );
       }),

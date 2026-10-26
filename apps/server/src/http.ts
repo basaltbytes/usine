@@ -238,8 +238,9 @@ const handlers = HttpApiBuilder.group(OperatorApi, "operator", (routes) =>
     )
     .handle("configuration", () => fromBackend((backend) => backend.configuration))
     .handle("desk", () => fromBackend((backend) => backend.desk))
-    .handle("statistics", ({ query }) =>
-      fromBackend((backend) => backend.statistics(query.window)),
+    .handle("statistics", ({ query }) => fromBackend((backend) => backend.statistics(query.window)))
+    .handle("runStatistics", ({ query }) =>
+      fromBackend((backend) => backend.runStatistics(query.window)),
     ),
 );
 
