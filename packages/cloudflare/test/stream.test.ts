@@ -1,5 +1,6 @@
 import { assert, describe, expect, it } from "@effect/vitest";
-import { type Cause, DateTime, Duration, Effect, Fiber, Option, Queue } from "effect";
+import { type Cause, DateTime, Deferred, Duration, Effect, Fiber, Option, Queue } from "effect";
+import { HttpRouter } from "effect/unstable/http";
 import { TestClock } from "effect/testing";
 import { ProcessId } from "../src/api/api.ts";
 import {
@@ -10,7 +11,7 @@ import {
   StdinEnd,
 } from "../src/api/stream.ts";
 import { processCommand, processFiles } from "../src/sandbox/process.ts";
-import { LEASE } from "../src/sandbox/sandbox.ts";
+import { LEASE, restore, sandboxRoutes } from "../src/sandbox/sandbox.ts";
 import { attachStream, execStream, type StreamSocket } from "../src/sandbox/stream.ts";
 import { controlledProcess, fakeSandbox, NAME, storedSandbox, text } from "./support.ts";
 
@@ -203,6 +204,101 @@ describe("sandbox attach stream", () => {
       }).pipe(Effect.provide(sandbox.layer));
     },
   );
+
+  /**
+   * Attaches to a command that exited with 0, and runs `during` through the sandbox routes while
+   * the attach stream waits for the container to read the command's pid file.
+   */
+  const attachWhileReading = (
+    sandbox: ReturnType<typeof running>,
+    during: (
+      call: (method: string, path: string, body?: string) => Effect.Effect<Response>,
+    ) => Effect.Effect<void>,
+  ) => {
+    const process = ProcessId.make("0123456789abcdef0123456789abcdef");
+    const files = processFiles(process);
+    sandbox.state.files.set(files.pid, text("4242"));
+    sandbox.state.files.set(files.exit, text("0"));
+    const web = HttpRouter.toWebHandler(
+      sandboxRoutes.pipe(HttpRouter.provideRequest(sandbox.layer)),
+      { disableLogger: true },
+    );
+    const call = (method: string, path: string, body?: string) =>
+      Effect.promise(() =>
+        web.handler(
+          new Request(`https://sandboxes.test/v1/sandboxes/${NAME}${path}`, {
+            method,
+            body: body ?? null,
+            headers: { "content-type": "application/json" },
+          }),
+        ),
+      );
+    return Effect.gen(function* () {
+      const reading = yield* Deferred.make<void>();
+      const read = yield* Deferred.make<void>();
+      sandbox.state.beforeRead = (path) =>
+        path === files.pid
+          ? Deferred.succeed(reading, undefined).pipe(Effect.andThen(Deferred.await(read)))
+          : Effect.void;
+      const client = yield* fakeSocket;
+      const stream = yield* Effect.forkChild(
+        attachStream(NAME, process, { stdout: 0, stderr: 0 }, client.socket),
+      );
+      yield* Deferred.await(reading);
+      yield* during(call);
+      yield* Deferred.succeed(read, undefined);
+      yield* Fiber.join(stream);
+      return client;
+    });
+  };
+
+  it.effect(
+    "keeps a credential revocation and a hold that complete while it reads the process files",
+    () => {
+      const sandbox = running();
+      return Effect.gen(function* () {
+        const client = yield* attachWhileReading(sandbox, (call) =>
+          Effect.gen(function* () {
+            const revoked = yield* call("PUT", "/credentials", JSON.stringify({ providers: [] }));
+            const held = yield* call("POST", "/hold");
+            expect([revoked.status, held.status]).toEqual([200, 200]);
+          }),
+        );
+
+        expect(client.control()).toEqual([
+          expect.objectContaining({ _tag: "Exited", exitCode: 0 }),
+        ]);
+        assert(Option.isSome(sandbox.state.stored));
+        expect(sandbox.state.stored.value.held).toBe(true);
+        expect(Option.isNone(sandbox.state.stored.value.credentials.github)).toBe(true);
+        expect(sandbox.state.stored.value.credentials.providers).toEqual([]);
+        // The Durable Object restarts and registers the stored credentials again.
+        const before = sandbox.state.interceptions.length;
+        yield* restore();
+        expect(
+          sandbox.state.interceptions.slice(before).map(({ _tag, host }) => `${_tag}:${host}`),
+        ).toEqual([
+          "Denied:github.com",
+          "Denied:api.github.com",
+          "Denied:anthropic.usine.internal",
+          "Denied:openai.usine.internal",
+          "Allowed:registry.npmjs.org",
+        ]);
+      }).pipe(Effect.provide(sandbox.layer));
+    },
+  );
+
+  it.effect("refuses to attach to a sandbox destroyed while it reads the process files", () => {
+    const sandbox = running();
+    return Effect.gen(function* () {
+      const client = yield* attachWhileReading(sandbox, (call) =>
+        call("DELETE", "").pipe(Effect.map(({ status }) => expect(status).toBe(200))),
+      );
+
+      expect(client.control().map(({ _tag }) => _tag)).toEqual(["StreamFailed"]);
+      expect(Option.isNone(sandbox.state.stored)).toBe(true);
+    }).pipe(Effect.provide(sandbox.layer));
+  });
 
   it.effect("refuses to attach to a command the sandbox never ran", () => {
     const sandbox = running();

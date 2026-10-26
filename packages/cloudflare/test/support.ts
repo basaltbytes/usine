@@ -111,6 +111,10 @@ interface FakeSandboxState {
   readonly forgotten: Array<SandboxName>;
   /** Returns the process for a command; the default prints nothing and exits 0. */
   run: (command: ReadonlyArray<string>) => ContainerProcess;
+  /** Runs before the container reads a file; the default returns at once. */
+  beforeRead: (path: string) => Effect.Effect<void>;
+  /** Runs before the container registers an outbound handler; the default returns at once. */
+  beforeIntercept: () => Effect.Effect<void>;
 }
 
 export const fakeSandbox = (allowedHosts: ReadonlyArray<string> = ["registry.npmjs.org"]) => {
@@ -128,6 +132,8 @@ export const fakeSandbox = (allowedHosts: ReadonlyArray<string> = ["registry.npm
     recorded: [],
     forgotten: [],
     run: () => finishedProcess(""),
+    beforeRead: () => Effect.void,
+    beforeIntercept: () => Effect.void,
   };
   const layer = Layer.mergeAll(
     Layer.succeed(SandboxContainer)({
@@ -143,7 +149,10 @@ export const fakeSandbox = (allowedHosts: ReadonlyArray<string> = ["registry.npm
           state.execs.push(command);
           return state.run(command);
         }),
-      read: (path) => Effect.sync(() => Option.fromNullishOr(state.files.get(path))),
+      read: (path) =>
+        state
+          .beforeRead(path)
+          .pipe(Effect.andThen(Effect.sync(() => Option.fromNullishOr(state.files.get(path))))),
       readFrom: (path, offset) =>
         Effect.sync(() =>
           Option.map(Option.fromNullishOr(state.files.get(path)), (bytes) =>
@@ -163,15 +172,21 @@ export const fakeSandbox = (allowedHosts: ReadonlyArray<string> = ["registry.npm
           state.keepAlives += 1;
         }),
       intercept: (interception) =>
-        Effect.sync(() => {
-          state.interceptions.push(interception);
-        }),
+        state.beforeIntercept().pipe(
+          Effect.andThen(
+            Effect.sync(() => {
+              state.interceptions.push(interception);
+            }),
+          ),
+        ),
     }),
     Layer.succeed(SandboxStorage)({
       load: Effect.sync(() => state.stored),
-      save: (sandbox) =>
+      modify: (change) =>
         Effect.sync(() => {
-          state.stored = Option.some(sandbox);
+          const [result, changed] = change(state.stored);
+          if (Option.isSome(changed)) state.stored = changed;
+          return result;
         }),
       clear: Effect.sync(() => {
         state.stored = Option.none();

@@ -103,7 +103,14 @@ export class SandboxStorage extends Context.Service<
   SandboxStorage,
   {
     readonly load: Effect.Effect<Option.Option<StoredSandbox>>;
-    readonly save: (sandbox: StoredSandbox) => Effect.Effect<void>;
+    /**
+     * Passes the stored sandbox, or `None`, to `change`, saves the sandbox that `change` returns
+     * with its result, and returns the result. Saves nothing when that sandbox is `None`. No other
+     * request runs between the read and the write.
+     */
+    readonly modify: <A>(
+      change: (stored: Option.Option<StoredSandbox>) => readonly [A, Option.Option<StoredSandbox>],
+    ) => Effect.Effect<A>;
     /** Deletes the stored sandbox and its alarm. */
     readonly clear: Effect.Effect<void>;
     /** Replaces the sandbox's alarm. */

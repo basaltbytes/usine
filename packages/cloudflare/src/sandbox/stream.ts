@@ -117,14 +117,16 @@ export const execStream = Effect.fn("Sandbox.execStream")(function* (
     return yield* refuse(socket, "The first message must be ExecStart");
   }
   const command = start.value.command;
-  const sandbox = yield* runningSandboxFor(name).pipe(Effect.option);
+  const sandbox = yield* runningSandboxFor(name).pipe(
+    Effect.andThen(extendLease(name)),
+    Effect.option,
+  );
   if (Option.isNone(sandbox)) {
     yield* Effect.logWarning("Refused a command for a sandbox without a running container", {
       sandbox: name,
     });
     return yield* refuse(socket, `Sandbox ${name} doesn't exist or its container isn't running`);
   }
-  yield* extendLease(sandbox.value);
   const container = yield* SandboxContainer;
   const process = newProcessId();
   const fields = { sandbox: name, attempt: sandbox.value.attempt, process };
@@ -195,7 +197,10 @@ export const attachStream = Effect.fn("Sandbox.attachStream")(function* (
     yield* Effect.logWarning("Refused to attach to an unknown command", fields);
     return yield* refuse(socket, `Sandbox ${name} has no command ${process}`);
   }
-  yield* extendLease(sandbox.value);
+  if (Option.isNone(yield* extendLease(name).pipe(Effect.option))) {
+    yield* Effect.logWarning("Refused to attach: the sandbox was destroyed", fields);
+    return yield* refuse(socket, `Sandbox ${name} was destroyed`);
+  }
   yield* Effect.logInfo("Attached to a command's output", { ...fields, ...offsets });
   let sent = { stdout: offsets.stdout, stderr: offsets.stderr };
   const forward = (channel: OutputChannel) =>

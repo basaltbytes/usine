@@ -132,6 +132,32 @@ describe("sandbox routes", () => {
     expect(DateTime.isGreaterThan(state.stored.value.leaseUntil, firstLease)).toBe(true);
   });
 
+  it.each([
+    ["a reattachment's credentials", "", createBody()],
+    ["renewed credentials", "/credentials", JSON.stringify(encodeCredentials("ghs_second"))],
+  ])("keeps a hold that completes while it registers %s", async (_, path, body) => {
+    const { state, call } = served();
+    await call("PUT", `/v1/sandboxes/${NAME}`, createBody());
+    let registering: () => void = () => undefined;
+    const reached = new Promise<void>((resolve) => (registering = resolve));
+    let register: () => void = () => undefined;
+    const registered = new Promise<void>((resolve) => (register = resolve));
+    state.beforeIntercept = () => {
+      state.beforeIntercept = () => Effect.void;
+      registering();
+      return Effect.promise(() => registered);
+    };
+    const pending = call("PUT", `/v1/sandboxes/${NAME}${path}`, body);
+    await reached;
+    const held = await call("POST", `/v1/sandboxes/${NAME}/hold`);
+    register();
+    const response = await pending;
+
+    expect([held.status, response.status]).toEqual([200, 200]);
+    assert(Option.isSome(state.stored));
+    expect(state.stored.value.held).toBe(true);
+  });
+
   it("refuses to renew the credentials of a sandbox whose container stopped", async () => {
     const { state, call } = served();
     await call("PUT", `/v1/sandboxes/${NAME}`, createBody());

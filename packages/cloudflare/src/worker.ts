@@ -230,7 +230,15 @@ const storageOf = (storage: DurableObjectStorage): SandboxStorage["Service"] => 
   load: Effect.promise(() => storage.get(STORED_KEY)).pipe(
     Effect.map((value) => (value === undefined ? Option.none() : decodeStored(value))),
   ),
-  save: (sandbox) => Effect.promise(() => storage.put(STORED_KEY, encodeStored(sandbox))),
+  // No other request runs between the read and the write: the input gate holds events while a
+  // storage read runs, and nothing but storage is awaited until the write.
+  modify: (change) =>
+    Effect.promise(async () => {
+      const value = await storage.get(STORED_KEY);
+      const [result, changed] = change(value === undefined ? Option.none() : decodeStored(value));
+      if (Option.isSome(changed)) await storage.put(STORED_KEY, encodeStored(changed.value));
+      return result;
+    }),
   clear: Effect.promise(async () => {
     await storage.deleteAlarm();
     await storage.deleteAll();

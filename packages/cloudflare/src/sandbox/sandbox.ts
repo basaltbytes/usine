@@ -134,26 +134,33 @@ const intercept = Effect.fn("Sandbox.intercept")(function* (
   });
 });
 
-/** Returns `sandbox` with its lease extended from now, and saves it. */
-export const extendLease = Effect.fn("Sandbox.extendLease")(function* (
-  sandbox: StoredSandbox,
-  credentials: SandboxCredentials = sandbox.credentials,
+/**
+ * Applies `change` to the sandbox as it's stored now, saves the result, and returns it, or fails
+ * with `SandboxNotFound` if the sandbox was destroyed.
+ */
+const updateStored = Effect.fn("Sandbox.updateStored")(function* (
+  name: SandboxName,
+  change: (sandbox: StoredSandbox) => StoredSandbox,
 ) {
   const storage = yield* SandboxStorage;
-  const now = yield* DateTime.now;
-  const extended = new StoredSandbox({
-    name: sandbox.name,
-    owner: sandbox.owner,
-    attempt: sandbox.attempt,
-    image: sandbox.image,
-    instanceType: sandbox.instanceType,
-    createdAt: sandbox.createdAt,
-    leaseUntil: DateTime.addDuration(now, LEASE),
-    held: sandbox.held,
-    credentials,
+  const updated = yield* storage.modify((stored) => {
+    const changed = Option.map(stored, change);
+    return [changed, changed] as const;
   });
-  yield* storage.save(extended);
-  return extended;
+  if (Option.isNone(updated)) return yield* new SandboxNotFound({ name });
+  return updated.value;
+});
+
+/**
+ * Extends the sandbox's lease from now and returns the stored sandbox, or fails with
+ * `SandboxNotFound` if it was destroyed.
+ */
+export const extendLease = Effect.fn("Sandbox.extendLease")(function* (name: SandboxName) {
+  const now = yield* DateTime.now;
+  return yield* updateStored(
+    name,
+    (sandbox) => new StoredSandbox({ ...sandbox, leaseUntil: DateTime.addDuration(now, LEASE) }),
+  );
 });
 
 const create = Effect.fn("Sandbox.create")(function* (name: SandboxName, request: CreateSandbox) {
@@ -199,19 +206,22 @@ const create = Effect.fn("Sandbox.create")(function* (name: SandboxName, request
     yield* container.start(image, request.instanceType).pipe(Effect.mapError(unavailable(name)));
   yield* container.keepAlive(INACTIVITY_TIMEOUT).pipe(Effect.mapError(unavailable(name)));
   yield* intercept(name, request.credentials).pipe(Effect.mapError(unavailable(name)));
-  const sandbox = new StoredSandbox({
-    name,
-    owner: request.owner,
-    attempt: request.attempt,
-    image: request.image,
-    instanceType: request.instanceType,
-    createdAt: Option.match(existing, { onNone: () => now, onSome: ({ createdAt }) => createdAt }),
-    leaseUntil: DateTime.addDuration(now, LEASE),
-    // A hold lasts until the sandbox is destroyed, through a reattachment.
-    held: Option.exists(existing, ({ held }) => held),
-    credentials: request.credentials,
+  // Reads the stored sandbox again: a hold may have arrived while the container started.
+  const sandbox = yield* storage.modify((current) => {
+    const created = new StoredSandbox({
+      name,
+      owner: request.owner,
+      attempt: request.attempt,
+      image: request.image,
+      instanceType: request.instanceType,
+      createdAt: Option.match(current, { onNone: () => now, onSome: ({ createdAt }) => createdAt }),
+      leaseUntil: DateTime.addDuration(now, LEASE),
+      // A hold lasts until the sandbox is destroyed, through a reattachment.
+      held: Option.exists(current, ({ held }) => held),
+      credentials: request.credentials,
+    });
+    return [created, Option.some(created)] as const;
   });
-  yield* storage.save(sandbox);
   yield* storage.alarmAt(DateTime.addDuration(now, KEEPALIVE_INTERVAL));
   const summary = yield* summarize(sandbox);
   yield* directory.record(summary);
@@ -238,7 +248,16 @@ const credentials = Effect.fn("Sandbox.credentials")(function* (
   yield* Effect.annotateCurrentSpan({ sandbox: name });
   const sandbox = yield* runningSandboxFor(name);
   yield* intercept(name, renewed).pipe(Effect.mapError(unavailable(name)));
-  const extended = yield* extendLease(sandbox, renewed);
+  const now = yield* DateTime.now;
+  const extended = yield* updateStored(
+    name,
+    (current) =>
+      new StoredSandbox({
+        ...current,
+        leaseUntil: DateTime.addDuration(now, LEASE),
+        credentials: renewed,
+      }),
+  );
   yield* Effect.logInfo("Renewed the sandbox's credentials", {
     sandbox: name,
     attempt: sandbox.attempt,
@@ -257,8 +276,10 @@ const hold = Effect.fn("Sandbox.hold")(function* (name: SandboxName) {
   const sandbox = yield* runningSandboxFor(name);
   const storage = yield* SandboxStorage;
   const now = yield* DateTime.now;
-  const held = new StoredSandbox({ ...sandbox, held: true });
-  yield* storage.save(held);
+  const held = yield* updateStored(
+    name,
+    (current) => new StoredSandbox({ ...current, held: true }),
+  );
   yield* storage.alarmAt(DateTime.addDuration(now, KEEPALIVE_INTERVAL));
   yield* Effect.logInfo(
     sandbox.held
