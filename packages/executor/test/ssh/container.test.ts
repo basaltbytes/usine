@@ -643,6 +643,74 @@ describe("SSH Worker with Docker", () => {
   );
 
   it.effect(
+    "derives the limits for one Attempt, and logs them, when a container starts before any preflight on the Worker",
+    () => {
+      const machine = dockerMachine();
+      const credentials = mintingProvider();
+      const logs = capturedLogs();
+      machine.state.memoryGib = 8;
+      const address: SshWorkerAddress = {
+        ...ADDRESS,
+        container: {
+          image: Option.none(),
+          cpus: Option.none(),
+          memoryMib: Option.none(),
+          pids: Option.none(),
+        },
+      };
+      return Effect.gen(function* () {
+        yield* stopWhileRunning(machine, credentials, new StubStorage());
+        const before = machine.state.calls.length;
+        yield* Effect.gen(function* () {
+          const executor = yield* Executor;
+          yield* executor.recover(
+            {
+              attemptId: request.attemptId,
+              repository: request.repository,
+              worker: WORKER,
+              ref: request.salvageRef,
+              permissions: "write",
+              succeeded: false,
+              open: false,
+            },
+            { salvage: () => Effect.void, comments: () => Effect.void, windows: aloneOnItem() },
+            Effect.succeed(request.commitAuthor),
+          );
+        }).pipe(
+          Effect.scoped,
+          Effect.provide(
+            executorLayer(machine, credentials, address).pipe(Layer.provide(noGateway)),
+          ),
+          Effect.provide(logs.layer),
+        );
+        assert.lengthOf(
+          linesOf(machine)
+            .slice(before)
+            .filter((line) => line.includes("nproc")),
+          1,
+          "the recovery read the machine once",
+        );
+        const contained = logs.lines.find((line) =>
+          line.includes("SSH Worker runs each Attempt in its own container"),
+        );
+        assert(contained !== undefined, "the recovery logged the limits it applied");
+        assert.deepInclude(JSON.parse(contained)[1], {
+          worker: WORKER,
+          cpus: 3.5,
+          memoryMib: 7168,
+          pids: 60_976,
+          derivedLimits: "cpus,memoryMib,pids",
+          slots: 1,
+          machineCpus: 4,
+          machineMemoryMib: 8192,
+          machineTasks: 62_000,
+        });
+        assert.notInclude(logs.lines.join("\n"), "SSH Worker preflight verified");
+      });
+    },
+  );
+
+  it.effect(
     "salvages an Attempt whose container stopped, such as after an out-of-memory kill, in the container started again",
     () => {
       const machine = dockerMachine();
