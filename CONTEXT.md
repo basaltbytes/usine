@@ -31,7 +31,7 @@ The kanban view of a project's tasks, grouped into lanes. Dragging a card change
 _Avoid_: kanban, pipeline
 
 **Overview**:
-The page at `/` that lists, across all projects, items that need attention, running attempts, stalled items, recent runs, worker slots, and statistics. In code and in the API, it's called the desk (`/api/desk`); its statistics come from `/api/statistics`.
+The page at `/` that lists, across all projects, statistics, items that need attention, running attempts, stalled items, recent runs, and worker slots. In code and in the API, it's called the desk (`/api/desk`); its statistics come from `/api/statistics` and `/api/statistics/runs`.
 _Avoid_: desk (in the UI), home, dashboard
 
 **Task**:

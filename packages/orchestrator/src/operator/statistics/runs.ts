@@ -5,7 +5,7 @@ import type { RunId } from "@usine/core/run";
 import * as RunState from "@usine/core/run/state";
 import type { WorkerName } from "@usine/core/worker";
 import type { RunSummary } from "@usine/engine/run-reader";
-import { Array as EffectArray, DateTime, Option, Order } from "effect";
+import { Array as EffectArray, DateTime, Option } from "effect";
 import type { RunUsageView, SessionUsageView } from "../usage.ts";
 import {
   AgentStatisticsView,
@@ -13,33 +13,33 @@ import {
   BrainStatisticsView,
   CostSummaryView,
   DurationSummaryView,
-  FirstPassView,
   LoopStatisticsView,
   NeedsAttentionPeriodView,
   NeedsAttentionView,
   OutcomeCountsView,
   PoolTokensView,
   type StatisticsBucket,
-  StatisticsView,
+  RunStatisticsView,
   type StatisticsWindow,
   ThroughputPeriodView,
   UsageSummaryView,
   WorkerQueueWaitView,
   WorkerUtilizationView,
 } from "./view.ts";
+import {
+  epoch,
+  median,
+  periodStart,
+  periodStarts,
+  replacedBeforeStart,
+  spanBucket,
+  startOfUtcDay,
+  sum,
+  utcDay,
+  windowStart,
+} from "./window.ts";
 
-const DAY = 86_400_000;
-const WEEK = 7 * DAY;
-/** The longest span, in days, that the time series still split into days. */
-const DAILY_SPAN_DAYS = 62;
-const WINDOW_DAYS = { "7d": 7, "30d": 30 } as const;
 const POOLS: ReadonlyArray<BillingPool> = ["apiKeys", "claudePlan", "chatgptPlan"];
-
-/** A pull request merge and every Run on the Items of its Task. */
-export interface PullRequestMerge {
-  readonly mergedAt: DateTime.Utc;
-  readonly runs: ReadonlyArray<RunSummary>;
-}
 
 /** A Worker that `usine.yaml` declares, with its `max_concurrent_attempts`. */
 interface DeclaredWorker {
@@ -47,43 +47,16 @@ interface DeclaredWorker {
   readonly slots: number;
 }
 
-/** The stored facts that `statisticsView` reduces. */
-export interface StatisticsFacts {
+/** The stored facts that `runStatisticsView` reduces. */
+export interface RunStatisticsFacts {
   readonly window: StatisticsWindow;
   readonly now: DateTime.Utc;
   /** The Runs that closed in the window and the open Runs. */
   readonly runs: ReadonlyArray<RunSummary>;
   /** The usage of each closed Run in `runs`. */
   readonly usage: ReadonlyMap<RunId, RunUsageView>;
-  readonly merges: ReadonlyArray<PullRequestMerge>;
   readonly workers: ReadonlyArray<DeclaredWorker>;
 }
-
-const startOfUtcDay = (epochMillis: number): number => epochMillis - (epochMillis % DAY);
-
-/** Returns the start of `window`, or `None` for `all`, whose start depends on the stored Runs. */
-export const windowStart = (
-  window: StatisticsWindow,
-  now: DateTime.Utc,
-): Option.Option<DateTime.Utc> =>
-  window === "all"
-    ? Option.none()
-    : Option.some(
-        DateTime.makeUnsafe(
-          startOfUtcDay(DateTime.toEpochMillis(now)) - (WINDOW_DAYS[window] - 1) * DAY,
-        ),
-      );
-
-/**
- * Whether the engine canceled the Run before any Attempt because a newer Event or an Item change
- * replaced it.
- */
-const replacedBeforeStart = ({ run, attempts }: RunSummary): boolean =>
-  attempts.length === 0 &&
-  run.state._tag === "Canceled" &&
-  run.state.reason._tag !== "OperatorCanceled";
-
-const epoch = DateTime.toEpochMillis;
 
 /** Returns when a closed Run closed; the fallback only covers the nullable stored field. */
 const closedAt = (summary: RunSummary): number =>
@@ -100,27 +73,13 @@ const closedAt = (summary: RunSummary): number =>
     },
   });
 
-const sum = (values: ReadonlyArray<number>): number =>
-  values.reduce((total, value) => total + value, 0);
-
-const quantile = (sorted: EffectArray.NonEmptyReadonlyArray<number>, q: number): number => {
-  const position = (sorted.length - 1) * q;
-  const lower = sorted[Math.floor(position)] ?? sorted[0];
-  const upper = sorted[Math.ceil(position)] ?? lower;
-  return lower + (upper - lower) * (position - Math.floor(position));
-};
-
-/** Returns the mean, median, and 90th percentile of `durations`, or null if there are none. */
-export const durationSummary = (durations: ReadonlyArray<number>): DurationSummaryView | null => {
-  if (!EffectArray.isReadonlyArrayNonEmpty(durations)) return null;
-  const sorted = EffectArray.sort(durations, Order.Number);
-  return new DurationSummaryView({
-    count: sorted.length,
-    meanMillis: Math.round(sum(sorted) / sorted.length),
-    medianMillis: Math.round(quantile(sorted, 0.5)),
-    p90Millis: Math.round(quantile(sorted, 0.9)),
+/** Returns the median of `durations`, or null if there are none. */
+export const durationSummary = (durations: ReadonlyArray<number>): DurationSummaryView | null =>
+  Option.match(median(durations), {
+    onNone: () => null,
+    onSome: (middle) =>
+      new DurationSummaryView({ count: durations.length, medianMillis: Math.round(middle) }),
   });
-};
 
 type Outcome = "succeeded" | "failed" | "canceled";
 
@@ -152,7 +111,7 @@ const outcomeCounts = (outcomes: ReadonlyArray<Outcome | null>): OutcomeCountsVi
   });
 
 /** Returns the Attempt's wall time, or `None` while it runs or if its end wasn't recorded. */
-const attemptMillis = (attempt: Attempt): Option.Option<number> =>
+export const attemptMillis = (attempt: Attempt): Option.Option<number> =>
   Option.isNone(attempt.outcome)
     ? Option.none()
     : Option.map(attempt.endedAt, (endedAt) =>
@@ -270,26 +229,6 @@ const brainGroups = (
     );
 };
 
-const utcDay = (epochMillis: number): string => new Date(epochMillis).toISOString().slice(0, 10);
-
-/** Returns the start of the period that holds `epochMillis`. Weeks start on Monday. */
-const periodStart = (bucket: StatisticsBucket, epochMillis: number): number => {
-  const day = startOfUtcDay(epochMillis);
-  return bucket === "day" ? day : day - ((new Date(day).getUTCDay() + 6) % 7) * DAY;
-};
-
-/** Returns the start of each period from `from` to `to`, oldest first. */
-const periodStarts = (
-  bucket: StatisticsBucket,
-  from: number,
-  to: number,
-): ReadonlyArray<number> => {
-  const step = bucket === "day" ? DAY : WEEK;
-  const starts: Array<number> = [];
-  for (let start = periodStart(bucket, from); start <= to; start += step) starts.push(start);
-  return starts;
-};
-
 /** Counts `instants` per period of `starts`; instants outside every period are left out. */
 const perPeriod = (
   bucket: StatisticsBucket,
@@ -305,12 +244,6 @@ const perPeriod = (
   return counts;
 };
 
-/** Whether each Run of a Loop on one of the Task's Items is the only one. */
-const onePass = (runs: ReadonlyArray<RunSummary>): boolean =>
-  Object.values(
-    EffectArray.groupBy(runs, ({ itemKey, run }) => JSON.stringify([itemKey, run.loop])),
-  ).every((members) => members.length === 1);
-
 const firstAttempt = (summary: RunSummary): Attempt | undefined =>
   summary.attempts.reduce<Attempt | undefined>(
     (first, attempt) => (first === undefined || attempt.number < first.number ? attempt : first),
@@ -321,7 +254,8 @@ const automaticRestart = (attempt: Attempt | undefined): boolean =>
   attempt !== undefined &&
   Option.exists(attempt.start, ({ _tag }) => _tag === "InfraRetry" || _tag === "AfterRestart");
 
-const operatorRetry = (attempt: Attempt | undefined): attempt is Attempt =>
+/** Whether the operator started the Attempt by retrying the failed Run, with or without an edit. */
+export const operatorRetry = (attempt: Attempt | undefined): attempt is Attempt =>
   attempt !== undefined &&
   Option.exists(attempt.start, ({ _tag }) => _tag === "OperatorRetry" || _tag === "EditAndRetry");
 
@@ -382,17 +316,17 @@ const needsAttention = (
 };
 
 /**
- * Reduces the stored facts to the statistics of `window`. Run measures cover the Runs that closed
- * in the window; queue wait, Worker utilization, and Needs attention also cover the open Runs.
+ * Reduces the stored facts to the Run statistics of `window`. Run measures cover the Runs that
+ * closed in the window; queue wait, Worker utilization, and Needs attention also cover the open
+ * Runs.
  */
-export const statisticsView = ({
+export const runStatisticsView = ({
   window,
   now,
   runs: stored,
   usage,
-  merges,
   workers,
-}: StatisticsFacts): StatisticsView => {
+}: RunStatisticsFacts): RunStatisticsView => {
   const to = epoch(now);
   const runs = stored.filter((summary) => !replacedBeforeStart(summary));
   const from = Option.match(windowStart(window, now), {
@@ -410,8 +344,7 @@ export const statisticsView = ({
       ),
   });
   const closed = runs.filter(({ run }) => !RunState.isOpen(run.state));
-  const spanDays = (startOfUtcDay(to) - from) / DAY + 1;
-  const bucket: StatisticsBucket = spanDays <= DAILY_SPAN_DAYS ? "day" : "week";
+  const bucket = spanBucket(from, to);
   const starts = periodStarts(bucket, from, to);
 
   const throughputCounts = new Map(
@@ -426,17 +359,6 @@ export const statisticsView = ({
   const ended = closed.flatMap(({ attempts }) =>
     attempts.filter(({ outcome }) => Option.isSome(outcome)),
   );
-
-  const counted = merges.flatMap(({ mergedAt, runs: taskRuns }) => {
-    const merged = epoch(mergedAt);
-    const task = taskRuns.filter((summary) => !replacedBeforeStart(summary));
-    if (merged < from || merged > to || !EffectArray.isReadonlyArrayNonEmpty(task)) return [];
-    const opened = task.reduce(
-      (earliest, { run }) => Math.min(earliest, epoch(run.openedAt)),
-      Number.POSITIVE_INFINITY,
-    );
-    return [{ leadMillis: Math.max(0, merged - opened), firstPass: onePass(task) }];
-  });
 
   const waits = new Map<WorkerName, Array<number>>();
   for (const summary of runs) {
@@ -478,7 +400,7 @@ export const statisticsView = ({
       ),
     );
 
-  return new StatisticsView({
+  return new RunStatisticsView({
     window,
     from: new Date(from).toISOString(),
     to: DateTime.formatIso(now),
@@ -489,7 +411,6 @@ export const statisticsView = ({
       ended.flatMap((attempt) => Option.toArray(attemptMillis(attempt))),
     ),
     unmeasuredAttempts: ended.filter(({ endedAt }) => Option.isNone(endedAt)).length,
-    usage: runGroup(closed, usage).usage,
     throughput: starts.map(
       (start) =>
         new ThroughputPeriodView({
@@ -497,11 +418,6 @@ export const statisticsView = ({
           ...(throughputCounts.get(start) ?? { succeeded: 0, failed: 0, canceled: 0 }),
         }),
     ),
-    firstPass: new FirstPassView({
-      merged: counted.length,
-      firstPass: counted.filter(({ firstPass }) => firstPass).length,
-    }),
-    leadTime: durationSummary(counted.map(({ leadMillis }) => leadMillis)),
     loops: groupRuns(closed, ({ run }) => run.loop).map(
       ([loop, members]) => new LoopStatisticsView({ loop, ...runGroup(members, usage) }),
     ),

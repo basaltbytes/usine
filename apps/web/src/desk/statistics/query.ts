@@ -4,10 +4,18 @@ import { api } from "../../api.ts";
 
 const STATISTICS_REFRESH_MS = 60_000;
 
-/** Reads the statistics of `window`, keeping the previous window's while the next one loads. */
+/** Reads the tasks done in `window`, keeping the previous window's while the next one loads. */
 export const statisticsQuery = (window: StatisticsWindow) => ({
   queryKey: ["statistics", window] as const,
   queryFn: () => api((client) => client.statistics({ query: { window } })),
+  refetchInterval: STATISTICS_REFRESH_MS,
+  placeholderData: keepPreviousData,
+});
+
+/** Reads the run statistics of `window` for the Details disclosure. */
+export const runStatisticsQuery = (window: StatisticsWindow) => ({
+  queryKey: ["statistics", "runs", window] as const,
+  queryFn: () => api((client) => client.runStatistics({ query: { window } })),
   refetchInterval: STATISTICS_REFRESH_MS,
   placeholderData: keepPreviousData,
 });

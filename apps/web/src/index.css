@@ -42,6 +42,13 @@
   --chart-3: oklch(0.666 0.179 58.318);
   --chart-4: oklch(0.555 0.163 48.998);
   --chart-5: oklch(0.473 0.137 46.201);
+  /* A sapphire ramp, light to dark, for loops in the order they run; waiting is surface2. */
+  --loop-1: #5aaec2;
+  --loop-2: #2f95ab;
+  --loop-3: #1f7a90;
+  --loop-4: #175f73;
+  --loop-5: #0f4556;
+  --loop-waiting: #acb0be;
   --radius: 0.5rem;
   --sidebar: #e6e9ef;
   --sidebar-foreground: #5c5f77; /* subtext1 */
@@ -100,6 +107,12 @@
   --needs-you: #fab387; /* peach */
   --warning: #f9e2af; /* yellow */
   --chart-1: #74c7ec; /* sapphire, the one hue for a single data series */
+  --loop-1: #a8e0f7;
+  --loop-2: #74c7ec;
+  --loop-3: #3fa6d8;
+  --loop-4: #2b85bf;
+  --loop-5: #2a649c;
+  --loop-waiting: #585b70; /* surface2 */
 }
 
 /* One type scale: 12 captions and meta, 13 body, 14 emphasised UI, 16 section titles, 20 screen
@@ -206,6 +219,12 @@
   --color-chart-3: var(--chart-3);
   --color-chart-2: var(--chart-2);
   --color-chart-1: var(--chart-1);
+  --color-loop-1: var(--loop-1);
+  --color-loop-2: var(--loop-2);
+  --color-loop-3: var(--loop-3);
+  --color-loop-4: var(--loop-4);
+  --color-loop-5: var(--loop-5);
+  --color-loop-waiting: var(--loop-waiting);
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);

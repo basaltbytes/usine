@@ -21,7 +21,12 @@ interface ApprovalExchange {
   lateOverviews: number;
 }
 const approvals = new WeakMap<Page, ApprovalExchange>();
-const statisticsWindows = new WeakMap<Page, Array<string | null>>();
+/** The `window` of each task and run statistics request, in arrival order. */
+interface StatisticsRequests {
+  readonly tasks: Array<string | null>;
+  readonly runs: Array<string | null>;
+}
+const statisticsWindows = new WeakMap<Page, StatisticsRequests>();
 // The overview response delay after approval, as on a busy instance (#463).
 const SLOW_OVERVIEW_MS = 5_000;
 
@@ -287,36 +292,46 @@ export default mergeConfig(
                     route.fulfill({ status: 409, contentType: "application/json", body }),
                   );
                 },
-                // Serves the overview, the desk, and the statistics of each window, and records
-                // the `window` of each statistics request.
+                // Serves the overview, the desk, and the task and run statistics of each window,
+                // and records the `window` of each statistics request.
                 statisticsResponses: async (
                   { page },
                   overview: string,
                   desk: string,
                   statistics: Readonly<Record<"7d" | "30d" | "all", string>>,
+                  runStatistics: Readonly<Record<"7d" | "30d" | "all", string>>,
                 ) => {
-                  const windows: Array<string | null> = [];
-                  statisticsWindows.set(page, windows);
+                  const requests: StatisticsRequests = { tasks: [], runs: [] };
+                  statisticsWindows.set(page, requests);
                   await page.unroute("**/api/overview");
                   await page.unroute("**/api/desk");
                   await page.unroute("**/api/statistics*");
+                  await page.unroute("**/api/statistics/runs*");
                   await page.route("**/api/overview", (route) =>
                     route.fulfill({ contentType: "application/json", body: overview }),
                   );
                   await page.route("**/api/desk", (route) =>
                     route.fulfill({ contentType: "application/json", body: desk }),
                   );
-                  await page.route("**/api/statistics*", (route) => {
-                    const window = new URL(route.request().url()).searchParams.get("window");
-                    windows.push(window);
-                    return route.fulfill(
-                      window === "7d" || window === "30d" || window === "all"
-                        ? { contentType: "application/json", body: statistics[window] }
-                        : { status: 400 },
-                    );
-                  });
+                  const serve =
+                    (
+                      bodies: Readonly<Record<"7d" | "30d" | "all", string>>,
+                      windows: Array<string | null>,
+                    ) =>
+                    (route: Route) => {
+                      const window = new URL(route.request().url()).searchParams.get("window");
+                      windows.push(window);
+                      return route.fulfill(
+                        window === "7d" || window === "30d" || window === "all"
+                          ? { contentType: "application/json", body: bodies[window] }
+                          : { status: 400 },
+                      );
+                    };
+                  await page.route("**/api/statistics*", serve(statistics, requests.tasks));
+                  await page.route("**/api/statistics/runs*", serve(runStatistics, requests.runs));
                 },
-                statisticsRequests: async ({ page }) => statisticsWindows.get(page) ?? [],
+                statisticsRequests: async ({ page }) =>
+                  statisticsWindows.get(page) ?? { tasks: [], runs: [] },
                 boardResponses: async ({ page }, overview: string, moveStatus: 200 | 503) => {
                   await page.unroute("**/api/overview");
                   await page.unroute("**/api/projects/board-test/repo/items/*/lane");

@@ -1,19 +1,15 @@
 import type {
   AttemptCountView,
-  DurationSummaryView,
-  FirstPassView,
-  NeedsAttentionView,
   OutcomeCountsView,
   StatisticsBucket,
   StatisticsWindow,
-  ThroughputPeriodView,
-  UsageSummaryView,
-  WorkerQueueWaitView,
-  WorkerUtilizationView,
+  UntimedTasksView,
 } from "@usine/orchestrator/operator";
-import { durationLabel, poolLabel, tokensLabel, usdLabel } from "../../operator-copy.ts";
+import { durationLabel } from "../../operator-copy.ts";
 
-const DAY = 86_400_000;
+const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 export const windowLabels = {
@@ -32,6 +28,10 @@ export const utcDayLabel = (day: string): string => {
   return `${date.getUTCDate()} ${MONTHS[date.getUTCMonth()]}`;
 };
 
+/** Returns an instant as its UTC day, such as `22 Oct`. */
+export const instantDayLabel = (epochMillis: number): string =>
+  utcDayLabel(new Date(epochMillis).toISOString().slice(0, 10));
+
 /** Returns a period start as `22 Oct`, or `Week of 19 Oct` for weekly periods. */
 export const periodLabel = (start: string, bucket: StatisticsBucket): string =>
   bucket === "day" ? utcDayLabel(start) : `Week of ${utcDayLabel(start)}`;
@@ -47,12 +47,25 @@ export const windowNote = (from: string, bucket: StatisticsBucket): string =>
 export const spanLabel = (milliseconds: number): string => {
   if (milliseconds < 1000) return "under 1s";
   if (milliseconds < 2 * DAY) return durationLabel(milliseconds);
-  const hours = Math.round(milliseconds / 3_600_000);
+  const hours = Math.round(milliseconds / HOUR);
   return hours % 24 === 0 ? `${hours / 24} d` : `${Math.floor(hours / 24)} d ${hours % 24} h`;
+};
+
+/**
+ * Returns a duration rounded for speech: to the minute under 10 minutes, to 5 minutes under an
+ * hour, to 10 minutes under 10 hours, then to the hour, for example `about 25 min`.
+ */
+export const aboutLabel = (milliseconds: number): string => {
+  const minutes = milliseconds / MINUTE;
+  const step = minutes < 10 ? 1 : minutes < 60 ? 5 : minutes < 600 ? 10 : 60;
+  return `about ${spanLabel(Math.max(1, Math.round(minutes / step)) * step * MINUTE)}`;
 };
 
 export const percentLabel = (part: number, whole: number): string =>
   whole === 0 ? "0%" : `${Math.round((part / whole) * 100)}%`;
+
+export const shareLabel = (share: number): string =>
+  share > 0 && share < 0.005 ? "under 1%" : `${Math.round(share * 100)}%`;
 
 export const outcomeTotal = ({ succeeded, failed, canceled }: OutcomeCountsView): number =>
   succeeded + failed + canceled;
@@ -60,104 +73,31 @@ export const outcomeTotal = ({ succeeded, failed, canceled }: OutcomeCountsView)
 export const countLabel = (count: number, one: string, many: string): string =>
   `${count.toLocaleString("en")} ${count === 1 ? one : many}`;
 
-/** Returns text such as `81% succeeded, 12% failed, 7% canceled`. */
-export const outcomeReading = (outcomes: OutcomeCountsView): string => {
-  const total = outcomeTotal(outcomes);
-  return `${percentLabel(outcomes.succeeded, total)} succeeded, ${percentLabel(outcomes.failed, total)} failed, ${percentLabel(outcomes.canceled, total)} canceled`;
-};
+/** Returns a count per task to one decimal, such as `1.4`. */
+export const perTaskLabel = (count: number, tasks: number): string =>
+  tasks === 0 ? "0" : (count / tasks).toLocaleString("en", { maximumFractionDigits: 1 });
 
-/** Returns the median duration for a figure value, such as `18 min`. */
-export const medianLabel = (summary: DurationSummaryView): string =>
-  spanLabel(summary.medianMillis);
+export const noTasksLine = (window: StatisticsWindow): string =>
+  `No tasks done ${windowPhrase(window)}`;
 
-/** Returns text such as `p90 1 h 4 min, mean 26 min`. */
-export const spreadLabel = (summary: DurationSummaryView): string =>
-  `p90 ${spanLabel(summary.p90Millis)}, mean ${spanLabel(summary.meanMillis)}`;
+/** Returns text such as `19 tasks before 19 Oct lack timing and are left out`. */
+export const untimedLine = ({ tasks, before }: UntimedTasksView): string =>
+  tasks === 1
+    ? `1 task before ${utcDayLabel(before)} lacks timing and is left out`
+    : `${tasks.toLocaleString("en")} tasks before ${utcDayLabel(before)} lack timing and are left out`;
 
-/** Returns text such as `31 runs on 22 Oct, the busiest day`. */
-export const throughputReading = (
-  periods: ReadonlyArray<ThroughputPeriodView>,
-  bucket: StatisticsBucket,
-): string => {
-  const busiest = periods.reduce<{ readonly start: string; readonly runs: number } | null>(
-    (most, period) => {
-      const runs = outcomeTotal(period);
-      return most === null || runs > most.runs ? { start: period.start, runs } : most;
-    },
-    null,
-  );
-  if (busiest === null) return "No closed runs";
-  return `${countLabel(busiest.runs, "run", "runs")} ${bucket === "day" ? "on" : "in the week of"} ${utcDayLabel(busiest.start)}, the busiest ${bucket}`;
-};
-
-/** Returns the cost figure: the mean dollars per priced run, or `No price`. */
-export const costValue = (usage: UsageSummaryView): string =>
-  usage.cost === null ? "No price" : usdLabel(usage.cost.meanUsd);
-
-/**
- * Returns text such as `Estimate, 31 of 142 runs priced`, or why no run has a price. ChatGPT plan
- * usage, which has no dollar rate, is named when present.
- */
-export const costDetail = (usage: UsageSummaryView, unit: "run" | "attempt"): string => {
-  const chatgpt = usage.pools.some(({ pool }) => pool === "chatgptPlan")
-    ? "; ChatGPT plan has no dollar rate"
-    : "";
-  if (usage.cost === null)
-    return usage.measured === 0
-      ? `No ${unit}s with an attempt`
-      : `No ${unit} has a price for every session${chatgpt}`;
-  const priced = `${usage.cost.priced.toLocaleString("en")} of ${countLabel(usage.measured, unit, `${unit}s`)} priced`;
-  return `${usage.cost.estimate ? `Estimate, ${priced}` : priced}${chatgpt}`;
-};
-
-/** Returns text such as `8.2M in all: API keys 1.2M, Claude plan 7M`. */
-export const tokensDetail = (usage: UsageSummaryView): string =>
-  usage.pools.length === 0
-    ? "No token reports"
-    : `${tokensLabel(usage.tokens)} in all: ${usage.pools
-        .map(({ pool, tokens }) => `${poolLabel(pool)} ${tokensLabel(tokens)}`)
-        .join(", ")}`;
-
-/** Returns text such as `9 of 14 merged pull requests with no loop run twice on an item`. */
-export const firstPassReading = ({ merged, firstPass }: FirstPassView): string =>
-  `${firstPass.toLocaleString("en")} of ${countLabel(merged, "merged pull request", "merged pull requests")} with no loop run twice on an item`;
-
-/** Returns text such as `92% of runs in one attempt, at most 4`. */
-export const attemptsReading = (counts: ReadonlyArray<AttemptCountView>): string => {
-  const total = counts.reduce((sum, { runs }) => sum + runs, 0);
-  const once = counts.find(({ attempts }) => attempts === 1)?.runs ?? 0;
-  const most = counts.at(-1)?.attempts ?? 1;
-  return most === 1
-    ? "Every run in one attempt"
-    : `${percentLabel(once, total)} of runs in one attempt, at most ${most}`;
-};
+/** Returns text such as `3 tasks lack token reports and are left out of tokens`. */
+export const unmeteredLine = (tasks: number): string =>
+  tasks === 1
+    ? "1 task lacks token reports and is left out of tokens"
+    : `${tasks.toLocaleString("en")} tasks lack token reports and are left out of tokens`;
 
 export const attemptCountLabel = (attempts: number): string =>
   countLabel(attempts, "attempt", "attempts");
 
-/** Returns text such as `Longest median wait 4s, on usine-worker-1`. */
-export const queueWaitReading = (waits: ReadonlyArray<WorkerQueueWaitView>): string => {
-  const longest = waits.reduce<WorkerQueueWaitView | null>(
-    (most, wait) =>
-      most === null || wait.wait.medianMillis > most.wait.medianMillis ? wait : most,
-    null,
+/** Returns the share of closed runs that took one attempt, such as `92%`. */
+export const oneAttemptShare = (counts: ReadonlyArray<AttemptCountView>): string =>
+  percentLabel(
+    counts.find(({ attempts }) => attempts === 1)?.runs ?? 0,
+    counts.reduce((sum, { runs }) => sum + runs, 0),
   );
-  return longest === null
-    ? "No attempts started"
-    : `Longest median wait ${spanLabel(longest.wait.medianMillis)}, on ${longest.worker}`;
-};
-
-/** Returns text such as `Slots held 38% of the time on usine-worker-1`. */
-export const utilizationReading = (workers: ReadonlyArray<WorkerUtilizationView>): string => {
-  const busiest = workers.reduce<WorkerUtilizationView | null>(
-    (most, worker) => (most === null || worker.share > most.share ? worker : most),
-    null,
-  );
-  return busiest === null
-    ? "No workers in usine.yaml"
-    : `Slots held ${percentLabel(busiest.share, 1)} of the time on ${busiest.worker}`;
-};
-
-/** Returns text such as `12 approvals and 4 failures to answer`. */
-export const needsAttentionReading = ({ approvals, failures }: NeedsAttentionView): string =>
-  `${countLabel(approvals, "approval", "approvals")} and ${countLabel(failures, "failure", "failures")} to answer`;

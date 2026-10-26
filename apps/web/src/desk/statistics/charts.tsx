@@ -1,7 +1,6 @@
 import type {
   AttemptCountView,
   NeedsAttentionPeriodView,
-  OutcomeCountsView,
   StatisticsBucket,
   ThroughputPeriodView,
   WorkerUtilizationView,
@@ -16,53 +15,40 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
-import { cn } from "@/lib/utils";
 import {
   attemptCountLabel,
   countLabel,
-  outcomeTotal,
   percentLabel,
   periodLabel,
   spanLabel,
   utcDayLabel,
 } from "./copy.ts";
 
-export const OUTCOMES = ["succeeded", "failed", "canceled"] as const;
+const OUTCOMES = ["succeeded", "failed", "canceled"] as const;
 
 /** The run state tones of ADR 0015, so an outcome has the same colour as its state mark. */
-export const outcomeConfig = {
+const outcomeConfig = {
   succeeded: { label: "Succeeded", color: "var(--run-succeeded)" },
   failed: { label: "Failed", color: "var(--run-failed)" },
   canceled: { label: "Canceled", color: "var(--run-canceled)" },
 } satisfies ChartConfig;
 
-const outcomeFill = {
-  succeeded: "bg-run-succeeded",
-  failed: "bg-run-failed",
-  canceled: "bg-run-canceled",
-} as const;
-
 const tooltipClass = "border-0 bg-popover shadow-raised";
 
-/** A titled block of the Statistics section: a 13px title, a one-line reading, and its chart. */
+/** A titled block of the Details panel: a 13px title and its chart. */
 export const StatisticsBlock = ({
   title,
-  reading,
   actions,
   children,
 }: {
   readonly title: string;
-  readonly reading: string;
   /** Controls at the end of the header. */
   readonly actions?: ReactNode;
   readonly children?: ReactNode;
 }) => (
-  <section className="flex min-w-0 flex-col gap-3">
-    <header className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
-      <div className="flex min-w-0 flex-col gap-0.5">
-        <h3 className="text-sm font-medium">{title}</h3>
-        <p className="text-xs text-muted-foreground">{reading}</p>
-      </div>
+  <section className="flex min-w-0 flex-col gap-2.5">
+    <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+      <h4 className="text-sm font-medium">{title}</h4>
       {actions}
     </header>
     {children}
@@ -70,7 +56,7 @@ export const StatisticsBlock = ({
 );
 
 /** The values of a chart as a table for screen readers. */
-const ChartTable = ({
+export const ChartTable = ({
   caption,
   head,
   rows,
@@ -103,34 +89,6 @@ const ChartTable = ({
   </table>
 );
 
-/** One horizontal bar split by outcome, 2px apart, with each outcome's share under it. */
-export const OutcomeMix = ({ outcomes }: { readonly outcomes: OutcomeCountsView }) => {
-  const total = outcomeTotal(outcomes);
-  const present = OUTCOMES.filter((outcome) => outcomes[outcome] > 0);
-  return (
-    <div className="flex flex-col gap-2">
-      <div aria-hidden="true" className="flex h-2 gap-0.5 overflow-hidden rounded-sm">
-        {present.map((outcome) => (
-          <div
-            key={outcome}
-            className={outcomeFill[outcome]}
-            style={{ flexGrow: outcomes[outcome] }}
-          />
-        ))}
-      </div>
-      <ul className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
-        {OUTCOMES.map((outcome) => (
-          <li key={outcome} className="inline-flex items-center gap-1.5 tabular-nums">
-            <span aria-hidden="true" className={cn("size-2 rounded-[2px]", outcomeFill[outcome])} />
-            <span className="text-foreground">{outcomeConfig[outcome].label}</span>
-            {outcomes[outcome].toLocaleString("en")} ({percentLabel(outcomes[outcome], total)})
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-};
-
 /** Closed runs per period as columns stacked by outcome. */
 export const ThroughputChart = ({
   periods,
@@ -140,7 +98,7 @@ export const ThroughputChart = ({
   readonly bucket: StatisticsBucket;
 }) => (
   <>
-    <ChartContainer config={outcomeConfig} className="aspect-auto h-56 w-full">
+    <ChartContainer config={outcomeConfig} className="aspect-auto h-44 w-full">
       <BarChart
         data={[...periods]}
         margin={{ top: 4, right: 0, bottom: 0, left: 0 }}
@@ -208,7 +166,7 @@ export const AttemptsChart = ({ counts }: { readonly counts: ReadonlyArray<Attem
       <ChartContainer
         config={attemptsConfig}
         className="aspect-auto w-full"
-        style={{ height: Math.max(2, data.length) * 32 + 8 }}
+        style={{ height: Math.max(2, data.length) * 28 + 8 }}
       >
         <BarChart data={data} layout="vertical" margin={{ top: 4, right: 40, bottom: 4, left: 0 }}>
           <XAxis type="number" hide allowDecimals={false} />
@@ -221,7 +179,7 @@ export const AttemptsChart = ({ counts }: { readonly counts: ReadonlyArray<Attem
             dataKey="runs"
             fill="var(--color-runs)"
             radius={[0, 4, 4, 0]}
-            maxBarSize={20}
+            maxBarSize={18}
             isAnimationActive={false}
           >
             <LabelList
@@ -263,7 +221,7 @@ export const NeedsAttentionChart = ({
   const kinds = new Map(data.map((period) => [period.start, period]));
   return (
     <>
-      <ChartContainer config={needsAttentionConfig} className="aspect-auto h-40 w-full">
+      <ChartContainer config={needsAttentionConfig} className="aspect-auto h-32 w-full">
         <BarChart data={data} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
           <CartesianGrid vertical={false} />
           <XAxis

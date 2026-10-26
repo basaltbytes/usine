@@ -26,7 +26,7 @@ import { RunGitHubChangesView } from "./github-changes.ts";
 import { TaskView } from "./task.ts";
 import { ConfigurationView } from "./configuration.ts";
 import { DeskView } from "./desk.ts";
-import { StatisticsView, StatisticsWindow } from "./statistics/view.ts";
+import { RunStatisticsView, StatisticsView, StatisticsWindow } from "./statistics/view.ts";
 
 const errorStatuses = {
   SchemaError: 400,
@@ -258,6 +258,12 @@ const repositoryPart = Schema.String.check(
 const acknowledged = Schema.Struct({ ok: Schema.Literal(true) });
 const runParams = { runId: RunId };
 const loopParams = { loop: LoopName };
+const statisticsQuery = Schema.Struct({
+  window: queryValue.pipe(
+    Schema.decodeTo(StatisticsWindow),
+    Schema.withDecodingDefaultKey(Effect.succeed("30d" as const)),
+  ),
+});
 
 /**
  * The operator's HTTP API contract for reads and interventions, shared by server handlers and
@@ -359,13 +365,12 @@ export const OperatorApi = HttpApi.make("OperatorApi").add(
     .add(HttpApiEndpoint.get("desk", "/api/desk", { success: DeskView }))
     .add(
       HttpApiEndpoint.get("statistics", "/api/statistics", {
-        query: Schema.Struct({
-          window: queryValue.pipe(
-            Schema.decodeTo(StatisticsWindow),
-            Schema.withDecodingDefaultKey(Effect.succeed("30d" as const)),
-          ),
-        }),
+        query: statisticsQuery,
         success: StatisticsView,
+      }),
+      HttpApiEndpoint.get("runStatistics", "/api/statistics/runs", {
+        query: statisticsQuery,
+        success: RunStatisticsView,
       }),
     )
     .middleware(OperatorHttpPolicy),
