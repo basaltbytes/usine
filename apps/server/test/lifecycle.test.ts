@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -243,6 +244,35 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
     pids.add(error.pid.value);
     assert.strictEqual(error.outcome, "silent");
     assert.isTrue(alive(error.pid.value), "the command leaves the process running");
+  });
+
+  it("fails a background start as soon as its readiness probe fails", async () => {
+    const directory = instanceFolder();
+    const files = instanceFiles(directory);
+    mkdirSync(files.folder, { recursive: true });
+    writeFileSync(files.lock, "not a database");
+    const port = await freePort();
+    // Another server answers on the port, so the probe reads the instance lock and fails.
+    const server = createHttpServer((_, response) => response.end("ok"));
+    await new Promise<void>((resolve) => server.listen({ host: SERVER_HOST, port }, resolve));
+    try {
+      const launch = new InstanceLaunch({
+        node: process.execPath,
+        // Runs without listening for longer than the probe takes, then exits on its own.
+        nodeOptions: ["--eval", "setTimeout(() => {}, 5000)"],
+        script: FIXTURE,
+        port,
+        logLevel: "Info",
+        allowVolatileInstance: false,
+      });
+      const error = await run(
+        startDetached(directory, launch, Duration.seconds(20)).pipe(Effect.flip),
+      );
+      assert(error._tag === "InstanceLockError", error._tag);
+      assert.strictEqual(error.directory, files.folder);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 
   it("reports a background start whose process exits before it listens", async () => {

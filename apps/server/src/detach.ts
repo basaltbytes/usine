@@ -209,7 +209,9 @@ export const startDetached = Effect.fn("Cli.startDetached")(function* (
     ),
     Effect.andThen(Effect.never),
   );
-  const outcome = yield* Effect.raceAll([listening, exited, silence(offset), stillStarting]);
+  // `raceAllFirst` ends the wait on the first result, including a failed readiness probe.
+  // `raceAll` would hide that failure until the log fell silent.
+  const outcome = yield* Effect.raceAllFirst([listening, exited, silence(offset), stillStarting]);
   if (outcome._tag === "Listening") {
     yield* Effect.logInfo("The background usine up is listening", {
       pid: outcome.started.pid,
