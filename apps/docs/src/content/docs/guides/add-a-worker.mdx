@@ -124,7 +124,7 @@ A worker created before cloud-init installed Docker runs its attempts as the SSH
 2. As root on the worker, install Docker and add `usine` to the `docker` group. `usine` has no sudo; [`infra/hetzner/README.md`](https://github.com/basaltbytes/usine/blob/main/infra/hetzner/README.md) shows how to become root:
 
    ```sh title="Worker, as root"
-   apt-get install -y docker.io
+   apt-get install -y docker.io docker-cli
    usermod -aG docker usine
    ```
 

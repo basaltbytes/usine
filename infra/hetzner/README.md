@@ -107,7 +107,7 @@ A worker created before `cloud-init.yaml` installed Docker runs attempts as `usi
 
 ```sh
 set -a; . /etc/environment; set +a
-apt-get install -y docker.io
+apt-get install -y docker.io docker-cli
 usermod -aG docker usine
 passwd -l root
 ```
