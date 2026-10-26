@@ -15,6 +15,7 @@ import {
 import { AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
 import { SessionEvent, WorkerUnresponsive } from "@usine/core/attempt/channel";
 import {
+  SalvagePartlyPushed,
   SalvagePushed,
   SalvageRef,
   SalvageRejected,
@@ -611,6 +612,26 @@ describe("salvage line", () => {
     assert.include(markup, "usine/salvage/run/1");
     assert.include(markup, "0123456");
     assert.notInclude(markup, "0123456789abcdef");
+  });
+
+  it("names the pushed ref and the checkout that keeps the files the push left out", () => {
+    const markup = renderToStaticMarkup(
+      <SalvageLine
+        salvage={
+          new SalvagePartlyPushed({
+            ref: SalvageRef.make("usine/salvage/run/1"),
+            commit: CommitSha.make("0123456789abcdef0123456789abcdef01234567"),
+            path: "/workers/local/attempts/run_execute_1",
+            message:
+              "The checkout has files larger than GitHub's 100 MiB limit, which the salvage can't push: dataset.csv (100.0 MiB)",
+          })
+        }
+      />,
+    );
+    assert.include(markup, "usine/salvage/run/1");
+    assert.include(markup, "0123456");
+    assert.include(markup, "/workers/local/attempts/run_execute_1");
+    assert.include(markup, "dataset.csv (100.0 MiB)");
   });
 
   it("shows where retained work lives, that startup retries it, and why the last try failed", () => {

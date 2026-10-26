@@ -547,7 +547,7 @@ describe("local worker salvage", () => {
           yield* fileSystem.truncate(`${worktree}/dataset.csv`, 100 * 1024 * 1024 + 1);
           yield* engine.cancel(accepted.runId);
           const salvage = yield* waitForSalvage(engine, accepted.runId);
-          assert(salvage._tag === "Retained");
+          assert(salvage._tag === "PartlyPushed");
           assert.include(salvage.message, "dataset.csv (100.0 MiB)");
           return { runId: accepted.runId, worktree, salvage };
         }).pipe(Effect.provide(runtime()));
@@ -558,10 +558,14 @@ describe("local worker salvage", () => {
           assert.deepStrictEqual(salvage, Option.some(saved.salvage));
         }).pipe(Effect.provide(runtime()));
         assert(yield* fileSystem.exists(`${saved.worktree}/dataset.csv`));
-        assert(Option.isSome(saved.salvage.commit));
-        const commit = saved.salvage.commit.value;
         assert.strictEqual(
-          (yield* output("git", ["--git-dir", remote, "ls-tree", "--name-only", commit])).trim(),
+          (yield* output("git", [
+            "--git-dir",
+            remote,
+            "ls-tree",
+            "--name-only",
+            saved.salvage.commit,
+          ])).trim(),
           "README.md\nprogress.txt",
         );
       }).pipe(Effect.provide(NodeServices.layer)),

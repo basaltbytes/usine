@@ -36,6 +36,13 @@ export const SalvageLine = ({ salvage }: { readonly salvage: AttemptSalvage | nu
               <span className="font-mono">{commit.slice(0, 7)}</span>
             </>
           ),
+          PartlyPushed: ({ ref, commit, path, message }) => (
+            <>
+              Unfinished work pushed to <span className="font-mono">{ref}</span> at{" "}
+              <span className="font-mono">{commit.slice(0, 7)}</span>, except files kept at{" "}
+              <span className="font-mono">{path}</span>. {message}
+            </>
+          ),
           Retained: ({ path, message }) => (
             <>
               Salvage incomplete: unfinished work at <span className="font-mono">{path}</span>,

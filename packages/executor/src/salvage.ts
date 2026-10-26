@@ -2,6 +2,7 @@ import type { AttemptId } from "@usine/core/attempt";
 import {
   type AttemptSalvage,
   type SalvageRef,
+  SalvagePartlyPushed,
   SalvagePushed,
   SalvageRejected,
   SalvageRetained,
@@ -248,13 +249,13 @@ export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <
     );
   }
   if (leftOut.length > 0) {
-    const message = `${leftOutMessage(leftOut)}. The rest of the work is pushed to ${options.ref} at ${commit}.`;
+    const message = leftOutMessage(leftOut);
     yield* Effect.logWarning(
       "Salvaged the Attempt's work without files larger than GitHub's limit; retaining the Attempt worktree, which has their only copy",
       { ...fields, ref: options.ref, commit, message },
     );
     return Option.some<AttemptSalvage>(
-      new SalvageRetained({ path: options.worktree, commit: Option.some(commit), message }),
+      new SalvagePartlyPushed({ ref: options.ref, commit, path: options.worktree, message }),
     );
   }
   yield* Effect.logInfo("Salvaged the Attempt's work", { ...fields, ref: options.ref, commit });

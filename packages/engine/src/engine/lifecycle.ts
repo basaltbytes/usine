@@ -1,7 +1,7 @@
 import { Attempt, AttemptId, AttemptNumber, shouldAutoRetry } from "@usine/core/attempt";
 import { AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
 import { AttemptCanceled, AttemptFailed, AttemptSucceeded } from "@usine/core/attempt/outcome";
-import type { SalvagePushed } from "@usine/core/attempt/salvage";
+import { type AttemptSalvage, SalvagePushed } from "@usine/core/attempt/salvage";
 import {
   type AttemptStart,
   type OperatorRetryStart,
@@ -13,7 +13,7 @@ import { EventId } from "@usine/core/event";
 import { Run, RunId } from "@usine/core/run";
 import * as RunState from "@usine/core/run/state";
 import { StepResult } from "@usine/core/step/result";
-import { Array as EffectArray, Option, Result } from "effect";
+import { Array as EffectArray, Match, Option, Result } from "effect";
 import type { IgnoreReason } from "./submission.ts";
 
 const MAX_AUTO_ATTEMPTS = AttemptNumber.make(3);
@@ -116,14 +116,18 @@ type StartDecision =
   | RunFailed
   | { readonly _tag: "RunClosed"; readonly state: RunState.RunState };
 
+/** Returns the part of `salvage` that another Worker can fetch, if any. */
+const pushedPart = (salvage: AttemptSalvage): Option.Option<SalvagePushed> =>
+  Match.valueTags(salvage, {
+    Pushed: (pushed) => Option.some(pushed),
+    PartlyPushed: ({ ref, commit }) => Option.some(new SalvagePushed({ ref, commit })),
+    Retained: () => Option.none(),
+    Rejected: () => Option.none(),
+  });
+
 // Only a pushed salvage can be fetched on another Worker, so a retry resumes from the newest one.
 const newestPushedSalvage = (attempts: ReadonlyArray<Attempt>): Option.Option<SalvagePushed> =>
-  EffectArray.findLast(attempts, (attempt) =>
-    Option.filter(
-      attempt.salvage,
-      (salvage): salvage is SalvagePushed => salvage._tag === "Pushed",
-    ),
-  );
+  EffectArray.findLast(attempts, (attempt) => Option.flatMap(attempt.salvage, pushedPart));
 
 /**
  * Returns how the next Attempt starts after a Worker reservation. If an open Attempt's parent

@@ -22,6 +22,20 @@ export class SalvagePushed extends Schema.TaggedClass<SalvagePushed>("AttemptSal
   },
 ) {}
 
+/**
+ * Unfinished work pushed to `ref` at `commit`, without files that the salvage can't push, such as
+ * a file over GitHub's size limit. The workspace at `path` on the Worker keeps their only copy,
+ * and `message` names them.
+ */
+export class SalvagePartlyPushed extends Schema.TaggedClass<SalvagePartlyPushed>(
+  "AttemptSalvage/PartlyPushed",
+)("PartlyPushed", {
+  ref: SalvageRef,
+  commit: CommitSha,
+  path: Schema.NonEmptyString,
+  message: Schema.String,
+}) {}
+
 /** A failed salvage that left the workspace at `path` on the Worker. `commit` is `None` if inspection failed. */
 export class SalvageRetained extends Schema.TaggedClass<SalvageRetained>("AttemptSalvage/Retained")(
   "Retained",
@@ -47,7 +61,12 @@ export class SalvageRejected extends Schema.TaggedClass<SalvageRejected>("Attemp
 ) {}
 
 /** What the executor kept of the workspace of an unsuccessful Attempt. */
-export const AttemptSalvage = Schema.Union([SalvagePushed, SalvageRetained, SalvageRejected]);
+export const AttemptSalvage = Schema.Union([
+  SalvagePushed,
+  SalvagePartlyPushed,
+  SalvageRetained,
+  SalvageRejected,
+]);
 export type AttemptSalvage = typeof AttemptSalvage.Type;
 
 /** A persisted Attempt whose checkout can still exist on its Worker. */

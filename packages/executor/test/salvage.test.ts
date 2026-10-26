@@ -310,11 +310,11 @@ describe("salvageWorktree in a git checkout", () => {
 
         const { commit, files } = yield* pushed;
         assert.deepStrictEqual(files, ["README.md", "src/feature.ts"]);
-        assert(Option.isSome(result) && result.value._tag === "Retained");
+        assert(Option.isSome(result) && result.value._tag === "PartlyPushed");
+        assert.strictEqual(result.value.ref, REF);
+        assert.strictEqual(result.value.commit, commit);
         assert.strictEqual(result.value.path, worktree);
-        assert.deepStrictEqual(result.value.commit, Option.some(CommitSha.make(commit)));
         assert.include(result.value.message, "model.bin (100.0 MiB)");
-        assert.include(result.value.message, `pushed to ${REF} at ${commit}`);
       }).pipe(Effect.provide(NodeServices.layer)),
   );
 
