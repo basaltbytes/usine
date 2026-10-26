@@ -182,14 +182,18 @@ const DRAIN_MESSAGE =
 
 /** A probe that checks a harness's binary and version in a sandbox. Pi never reaches it. */
 const versionProbe =
-  (commands: RemoteCommands, shell: RemoteShell): HarnessProbe =>
+  (
+    operation: "preflight" | "prepare",
+    commands: RemoteCommands,
+    shell: RemoteShell,
+  ): HarnessProbe =>
   (brain) =>
     Effect.gen(function* () {
       const command = brain.harness === "codex" ? "codex" : "claude";
-      const result = yield* commands.inspect("preflight", shell, command, ["--version"]);
+      const result = yield* commands.inspect(operation, shell, command, ["--version"]);
       if (result.exitCode === SHELL_FAILURE)
         return yield* new ExecutorOperationError({
-          operation: "preflight",
+          operation,
           message: `Can't reach sandbox ${shell.destination} to run ${command}`,
           cause: new Error(
             result.stderr.trim() || `the sandbox shell exited with ${SHELL_FAILURE}`,
@@ -428,9 +432,42 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
     });
 
     /**
-     * Creates the Attempt's sandbox with a new installation token, or gives the existing one a new
-     * token, and publishes a new token before each expiry until the caller's scope closes. Then
-     * revokes the sandbox's credentials, unless `destroyed` is set by then.
+     * Creates the sandbox `name` for `attempt` from the Worker's image with `NO_CREDENTIALS`, so
+     * that it reaches neither GitHub nor a provider until `acquireSandbox` grants credentials.
+     */
+    const createSandbox = Effect.fn("CloudflareExecutor.createSandbox")(function* (
+      operation: "preflight" | "prepare",
+      worker: CloudflareWorker,
+      name: SandboxName,
+      attempt: AttemptId,
+    ) {
+      const fields = {
+        worker: worker.address.name,
+        sandbox: name,
+        attemptId: attempt,
+        image: worker.address.image,
+        instanceType: worker.address.instanceType,
+      };
+      yield* Effect.annotateCurrentSpan(fields);
+      yield* worker.client
+        .create(
+          name,
+          new CreateSandbox({
+            owner: worker.owner,
+            attempt,
+            image: worker.address.image,
+            instanceType: worker.address.instanceType,
+            credentials: NO_CREDENTIALS,
+          }),
+        )
+        .pipe(Effect.mapError(operationError(operation)));
+      yield* Effect.logInfo("Created the sandbox without credentials", fields);
+    });
+
+    /**
+     * Gives the Attempt's existing sandbox a new installation token and the provider keys, and
+     * publishes a new token before each expiry until the caller's scope closes. Then revokes the
+     * sandbox's credentials, unless `destroyed` is set by then.
      */
     const acquireSandbox = Effect.fn("CloudflareExecutor.acquireSandbox")(function* (
       worker: CloudflareWorker,
@@ -439,15 +476,13 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
       repository: RepositoryName,
       permissions: LoopPermissions,
       operation: ExecutorOperation,
-      existing: boolean,
       destroyed: Ref.Ref<boolean>,
     ) {
       const fields = { worker: worker.address.name, sandbox: name, attemptId, repository };
       yield* Effect.annotateCurrentSpan(fields);
-      const created = yield* Ref.make(existing);
       yield* Effect.addFinalizer(() =>
         Effect.gen(function* () {
-          if ((yield* Ref.get(destroyed)) || !(yield* Ref.get(created))) return;
+          if (yield* Ref.get(destroyed)) return;
           yield* worker.client.credentials(name, NO_CREDENTIALS).pipe(
             Effect.tap(() => Effect.logInfo("Revoked the credentials of the kept sandbox", fields)),
             Effect.tapError((error) =>
@@ -461,27 +496,9 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
         }),
       );
       const publish = (token: Redacted.Redacted<string>) =>
-        Effect.gen(function* () {
-          const credentials = credentialsFor(worker.address, token);
-          if (yield* Ref.get(created)) return yield* worker.client.credentials(name, credentials);
-          const summary = yield* worker.client.create(
-            name,
-            new CreateSandbox({
-              owner: worker.owner,
-              attempt: attemptId,
-              image: worker.address.image,
-              instanceType: worker.address.instanceType,
-              credentials,
-            }),
-          );
-          yield* Ref.set(created, true);
-          yield* Effect.logInfo("Created the Attempt's sandbox", {
-            ...fields,
-            image: worker.address.image,
-            instanceType: worker.address.instanceType,
-          });
-          return summary;
-        }).pipe(Effect.mapError(operationError(operation)));
+        worker.client
+          .credentials(name, credentialsFor(worker.address, token))
+          .pipe(Effect.mapError(operationError(operation)));
       const credential = yield* renewableCredential(
         credentialProvider.issue,
         repository,
@@ -591,7 +608,6 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
             attempt.repository,
             attempt.permissions,
             "cleanup",
-            true,
             destroyed,
           );
           yield* stopCommands("cleanup", worker, name);
@@ -721,7 +737,6 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
                         attempt.repository,
                         attempt.permissions,
                         "cleanup",
-                        true,
                         yield* Ref.make(false),
                       );
                       return yield* harvestPostedComments(
@@ -815,22 +830,11 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
                 Effect.ignore,
               ),
             );
-            yield* worker.client
-              .create(
-                name,
-                new CreateSandbox({
-                  owner: worker.owner,
-                  attempt: PREFLIGHT_ATTEMPT,
-                  image: address.image,
-                  instanceType: address.instanceType,
-                  credentials: NO_CREDENTIALS,
-                }),
-              )
-              .pipe(Effect.mapError(operationError("preflight")));
+            yield* createSandbox("preflight", worker, name, PREFLIGHT_ATTEMPT);
             yield* verifyHarnessReadiness(
               workerName,
               distinct,
-              versionProbe(commands, worker.shellFor(name)),
+              versionProbe("preflight", commands, worker.shellFor(name)),
               logins,
             );
           }),
@@ -953,6 +957,17 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
       );
 
       const acquire = Effect.gen(function* () {
+        // A new sandbox's harness is checked before any credential is granted; a reattached
+        // sandbox is the container that was checked when it was created.
+        if (!request.reattach) {
+          yield* createSandbox("prepare", worker, name, request.attemptId);
+          yield* verifyHarnessReadiness(
+            request.worker,
+            [request.agent.brain],
+            versionProbe("prepare", commands, shell),
+            logins,
+          );
+        }
         const access = yield* acquireSandbox(
           worker,
           name,
@@ -960,7 +975,6 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
           request.repository,
           request.permissions,
           "prepare",
-          request.reattach,
           destroyed,
         );
         const host = {

@@ -75,21 +75,26 @@ describe("sandbox outbound handlers", () => {
   });
 
   it("forwards a provider request to its upstream over HTTPS with the API key", async () => {
-    const anthropic = providerRequest(
-      new Request(`http://${PROVIDER_HOSTS.anthropic.sandbox}/v1/messages?beta=true`, {
-        method: "POST",
-        headers: { "x-api-key": "usine-placeholder", "anthropic-version": "2023-06-01" },
-        body: '{"model":"claude"}',
-      }),
-      "anthropic",
-      new ApiKeyCredential({ key: Redacted.make("sk-ant-key") }),
+    const anthropic = Option.getOrThrow(
+      providerRequest(
+        new Request(`http://${PROVIDER_HOSTS.anthropic.sandbox}/v1/messages?beta=true`, {
+          method: "POST",
+          headers: { "x-api-key": "usine-placeholder", "anthropic-version": "2023-06-01" },
+          body: '{"model":"claude"}',
+        }),
+        "anthropic",
+        new ApiKeyCredential({ key: Redacted.make("sk-ant-key") }),
+      ),
     );
-    const openai = providerRequest(
-      new Request(`http://${PROVIDER_HOSTS.openai.sandbox}/v1/responses`, {
-        headers: { authorization: "Bearer usine-placeholder" },
-      }),
-      "openai",
-      new ApiKeyCredential({ key: Redacted.make("sk-openai-key") }),
+    const openai = Option.getOrThrow(
+      providerRequest(
+        new Request(`http://${PROVIDER_HOSTS.openai.sandbox}/v1/responses`, {
+          method: "POST",
+          headers: { authorization: "Bearer usine-placeholder" },
+        }),
+        "openai",
+        new ApiKeyCredential({ key: Redacted.make("sk-openai-key") }),
+      ),
     );
 
     expect(anthropic.url).toBe("https://api.anthropic.com/v1/messages?beta=true");
@@ -101,19 +106,47 @@ describe("sandbox outbound handlers", () => {
     expect(openai.headers.get("authorization")).toBe("Bearer sk-openai-key");
   });
 
-  it("never lets a request path choose the host that receives a credential", () => {
+  it("adds the API key only to the routes Claude Code and Codex call", () => {
     const key = new ApiKeyCredential({ key: Redacted.make("sk-key") });
-    const paths = ["//attacker.example/collect", "/\\attacker.example/collect"];
-    for (const path of paths) {
-      for (const provider of ["anthropic", "openai"] as const) {
-        const forwarded = providerRequest(
-          new Request(`http://${PROVIDER_HOSTS[provider].sandbox}${path}?q=1`),
+    const forward = (provider: "anthropic" | "openai", method: string, path: string) =>
+      Option.map(
+        providerRequest(
+          new Request(`http://${PROVIDER_HOSTS[provider].sandbox}${path}`, { method }),
           provider,
           key,
-        );
-        expect(new URL(forwarded.url).host).toBe(PROVIDER_HOSTS[provider].upstream);
-        expect(new URL(forwarded.url).search).toBe("?q=1");
-      }
+        ),
+        (forwarded) => `${forwarded.method} ${forwarded.url}`,
+      );
+
+    expect(forward("anthropic", "GET", "/v1/models/claude-opus-4-5?beta=true")).toEqual(
+      Option.some("GET https://api.anthropic.com/v1/models/claude-opus-4-5?beta=true"),
+    );
+    expect(forward("anthropic", "POST", "/v1/messages/count_tokens")).toEqual(
+      Option.some("POST https://api.anthropic.com/v1/messages/count_tokens"),
+    );
+    expect(forward("openai", "POST", "/v1/responses/compact")).toEqual(
+      Option.some("POST https://api.openai.com/v1/responses/compact"),
+    );
+    const refused = [
+      forward("openai", "GET", "/v1/files"),
+      forward("openai", "DELETE", "/v1/files/file-abc123"),
+      forward("openai", "DELETE", "/v1/models"),
+      forward("openai", "GET", "/v1/responses"),
+      forward("openai", "POST", "/v1/responses/../files"),
+      forward("openai", "POST", "/v1/responses%2F..%2Ffiles"),
+      forward("anthropic", "GET", "/v1/files"),
+      forward("anthropic", "POST", "/v1/messages/batches"),
+      forward("anthropic", "GET", "/v1/organizations/api_keys"),
+      forward("anthropic", "DELETE", "/v1/models/claude-opus-4-5"),
+      forward("anthropic", "POST", "//attacker.example/v1/messages"),
+      forward("anthropic", "POST", "/\\attacker.example/v1/messages"),
+    ];
+    expect(refused.filter(Option.isSome)).toEqual([]);
+  });
+
+  it("never lets a request path choose the host that receives a credential", () => {
+    const paths = ["//attacker.example/collect", "/\\attacker.example/collect"];
+    for (const path of paths) {
       const git = gitHubRequest(
         new Request(`https://github.com${path}`),
         "github.com",

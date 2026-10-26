@@ -47,6 +47,10 @@ const ANTHROPIC: CloudflareProviderKey = {
   provider: "anthropic",
   apiKey: Redacted.make("sk-ant-test-key"),
 };
+const OPENAI: CloudflareProviderKey = {
+  provider: "openai",
+  apiKey: Redacted.make("sk-openai-test-key"),
+};
 
 const request = new CheckoutRequest({ ...sshRequest, worker: WORKER });
 
@@ -160,7 +164,8 @@ describe("cloudflare Worker", () => {
           assert.strictEqual(prepared.workspace.worktree, WORKTREE);
           const sandbox = worker.state.sandboxes.get(SANDBOX);
           assert(sandbox !== undefined);
-          assert.deepStrictEqual(sandbox.github, [`${TOKEN_PREFIX}1`]);
+          // The sandbox starts without credentials; the token comes after the harness check.
+          assert.deepStrictEqual(sandbox.github, [null, `${TOKEN_PREFIX}1`]);
           yield* prepared.launch(sink);
           assert.deepStrictEqual(output, ["hello from the parent"]);
           assert.strictEqual(sandbox.stops, 1);
@@ -250,9 +255,9 @@ describe("cloudflare Worker", () => {
 
         const kept = worker.state.sandboxes.get(SANDBOX);
         assert(kept !== undefined);
-        assert.deepStrictEqual(kept.github, [`${TOKEN_PREFIX}1`, null]);
+        assert.deepStrictEqual(kept.github, [null, `${TOKEN_PREFIX}1`, null]);
         // The revocation also removes the provider keys, and the hold keeps the checkout.
-        assert.deepStrictEqual(kept.providers, [1, 0]);
+        assert.deepStrictEqual(kept.providers, [0, 1, 0]);
         assert.isTrue(kept.held);
         const createsBefore = worker.state.requests.filter(
           (line) => line === `PUT /v1/sandboxes/${SANDBOX}`,
@@ -271,7 +276,8 @@ describe("cloudflare Worker", () => {
           worker.state.requests.filter((line) => line === `PUT /v1/sandboxes/${SANDBOX}`).length,
           createsBefore,
         );
-        assert.deepStrictEqual(kept.github.slice(0, 3), [
+        assert.deepStrictEqual(kept.github.slice(0, 4), [
+          null,
           `${TOKEN_PREFIX}1`,
           null,
           `${TOKEN_PREFIX}2`,
@@ -367,6 +373,37 @@ describe("cloudflare Worker", () => {
       }).pipe(Effect.scoped, Effect.provide(executor(worker, mintingProvider())));
 
       assert.strictEqual(worker.state.sandboxes.size, 0);
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("checks the assigned harness in each new sandbox before it grants credentials", () =>
+    Effect.gen(function* () {
+      const worker = yield* fakeWorker;
+      const credentials = mintingProvider();
+      const codex = new CheckoutRequest({ ...request, agent: brain("codex") });
+      const refused = yield* Effect.gen(function* () {
+        const cloudflare = yield* Executor;
+        yield* cloudflare.preflight(WORKER, [codex.agent.brain], 1);
+        // The Worker's image is redeployed under the same name, with a Codex usine doesn't support.
+        worker.state.respond = (_sandbox, words) =>
+          words[0] === "codex"
+            ? Option.some({ stdout: "codex-cli 0.150.0\n", exitCode: 0 })
+            : Option.none();
+        return yield* cloudflare.prepare(codex).pipe(Effect.flip);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(executor(worker, credentials, completes, new StubStorage(), [OPENAI])),
+      );
+
+      assert(refused instanceof WorkerCapabilityError);
+      assert.strictEqual(refused.capability, "toolchain");
+      assert.include(refused.message, "codex-cli 0.150.0");
+      assert.deepStrictEqual(credentials.minted, []);
+      assert.deepStrictEqual(
+        worker.state.requests.filter((line) => line.startsWith(`PUT /v1/sandboxes/${SANDBOX}`)),
+        [`PUT /v1/sandboxes/${SANDBOX}`],
+      );
+      assert.isFalse(worker.state.sandboxes.has(SANDBOX));
     }).pipe(Effect.scoped),
   );
 

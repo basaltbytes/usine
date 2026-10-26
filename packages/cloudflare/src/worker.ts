@@ -483,11 +483,29 @@ export class GitHubOutbound extends WorkerEntrypoint<Env, typeof GitHubProps.Enc
   }
 }
 
-/** Sends the sandbox's plain HTTP requests for a provider to the provider, with its API key. */
+/**
+ * Sends the sandbox's plain HTTP requests for a provider to the provider, with its API key.
+ * Refuses a request for a route that the harnesses don't call with status 404.
+ */
 export class ProviderOutbound extends WorkerEntrypoint<Env, typeof ProviderProps.Encoded> {
   override async fetch(request: Request): Promise<Response> {
     const props = Schema.decodeUnknownSync(ProviderProps)(this.ctx.props);
-    const response = await fetch(providerRequest(request, props.provider, props.credential));
+    const forwarded = providerRequest(request, props.provider, props.credential);
+    if (Option.isNone(forwarded)) {
+      await run(
+        Effect.logWarning("Refused a sandbox request for a route the harnesses don't call", {
+          handler: props.provider,
+          method: request.method,
+          host: new URL(request.url).host,
+          path: new URL(request.url).pathname,
+        }),
+      );
+      return plain(
+        404,
+        `usine forwards only the routes Claude Code and Codex call to ${props.provider}.\n`,
+      );
+    }
+    const response = await fetch(forwarded.value);
     await logForwarded(props.provider, request, response);
     return response;
   }

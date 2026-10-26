@@ -117,16 +117,46 @@ export const gitHubRequest = (
   return new Request(upstreamUrl(request, host), new Request(request, { headers }));
 };
 
+/** A request that Claude Code or Codex sends to its provider: a method, and a pattern of its path. */
+interface HarnessRoute {
+  readonly method: "GET" | "POST";
+  readonly path: RegExp;
+}
+
+/**
+ * The routes each provider's handler forwards: the paths that the Gateway's `llm.<domain>` serves
+ * (ADR 0027), each with the method that the harnesses use. Each pattern matches whole plain
+ * segments, so a percent-encoded separator or a dot segment never matches, and the rest of the
+ * provider's API, such as files or organization administration, can't be reached with the key.
+ */
+const HARNESS_ROUTES = {
+  anthropic: [
+    { method: "POST", path: /^\/v1\/messages$/u },
+    { method: "POST", path: /^\/v1\/messages\/count_tokens$/u },
+    { method: "GET", path: /^\/v1\/models$/u },
+    { method: "GET", path: /^\/v1\/models\/[A-Za-z0-9][A-Za-z0-9._-]*$/u },
+  ],
+  openai: [
+    { method: "POST", path: /^\/v1\/responses$/u },
+    { method: "POST", path: /^\/v1\/responses\/compact$/u },
+    { method: "GET", path: /^\/v1\/models$/u },
+  ],
+} as const satisfies Record<CloudflareLlmProvider, ReadonlyArray<HarnessRoute>>;
+
 /**
  * Returns `request`, sent over plain HTTP to the provider's sandbox host, for the provider's
  * upstream over HTTPS with the provider credential in place of the sandbox's placeholder.
+ * Returns `None` for a request that isn't one of the provider's `HARNESS_ROUTES`.
  */
 export const providerRequest = (
   request: Request,
   provider: CloudflareLlmProvider,
   credential: ProviderCredential,
-): Request => {
+): Option.Option<Request> => {
   const upstream = upstreamUrl(request, PROVIDER_HOSTS[provider].upstream);
+  const routes: ReadonlyArray<HarnessRoute> = HARNESS_ROUTES[provider];
+  if (!routes.some(({ method, path }) => method === request.method && path.test(upstream.pathname)))
+    return Option.none();
   const headers = withoutCredentials(request);
   headers.delete("host");
   Match.valueTags(credential, {
@@ -141,5 +171,5 @@ export const providerRequest = (
       }
     },
   });
-  return new Request(upstream, new Request(request, { headers }));
+  return Option.some(new Request(upstream, new Request(request, { headers })));
 };

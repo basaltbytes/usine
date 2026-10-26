@@ -13,6 +13,8 @@ Each sandbox is a Durable Object that owns one container, started from an image 
 
 While a sandbox has no installation token or no key for a provider, such as a sandbox that the executor keeps after its Attempt, the handler for that host refuses every request with status 403. `ALLOWED_HOSTS` can't name a GitHub or provider host.
 
+A provider handler adds the key only to the requests that Claude Code and Codex send: Anthropic's `POST /v1/messages`, `POST /v1/messages/count_tokens`, and `GET /v1/models`, and OpenAI's `POST /v1/responses`, `POST /v1/responses/compact`, and `GET /v1/models`. These are the paths that the Gateway's `llm.<domain>` serves ([ADR 0027](../../docs/adr/0027-gateway-credential-proxy.md)), each with the method that the harnesses use. The handler refuses every other method and path, such as the files or organization administration APIs, with status 404, before it adds the key.
+
 HTTPS interception needs the container to trust Cloudflare's container certificate authority. The executor sets `GIT_SSL_CAINFO`, `CURL_CA_BUNDLE`, `SSL_CERT_FILE`, and `NODE_EXTRA_CA_CERTS` to it for every command, as Cloudflare's coding-agent runner does. Claude Code and Codex use plain HTTP to their handlers, with a placeholder key.
 
 ## Entry points
