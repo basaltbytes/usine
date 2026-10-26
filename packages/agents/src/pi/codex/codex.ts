@@ -182,7 +182,14 @@ const makeCodexChild = Effect.gen(function* () {
         label: "Codex child session",
         sessionId: session.id,
       });
-      const harnessSession = new HarnessSession({ id: thread.thread.id, cwd: request.cwd });
+      const harnessSession = new HarnessSession({
+        id: thread.thread.id,
+        cwd: request.cwd,
+        // Codex saves its sessions under CODEX_HOME, which `codex resume` needs to find them.
+        home: Option.fromNullishOr(request.environment.CODEX_HOME).pipe(
+          Option.filter((home) => home.length > 0),
+        ),
+      });
       yield* channel.emit(
         new SessionStarted({ session, harnessSession: Option.some(harnessSession) }),
       );
@@ -191,6 +198,7 @@ const makeCodexChild = Effect.gen(function* () {
         parentSessionId: session.parentId,
         harnessSessionId: harnessSession.id,
         cwd: harnessSession.cwd,
+        ...Option.match(harnessSession.home, { onNone: () => ({}), onSome: (home) => ({ home }) }),
       });
       const turnParams: TurnStartParams = {
         threadId: thread.thread.id,
