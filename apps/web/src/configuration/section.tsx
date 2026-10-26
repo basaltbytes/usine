@@ -9,6 +9,7 @@ import { SectionReloadButton, SectionReloadResult } from "./reload.tsx";
 /** `file` is the authored file shown on a detail page. */
 export const ConfigurationPage = ({
   title,
+  leading,
   counts,
   marks,
   file,
@@ -16,6 +17,7 @@ export const ConfigurationPage = ({
   children,
 }: {
   readonly title: string;
+  readonly leading?: ReactNode;
   readonly counts?: string;
   readonly marks?: ReactNode;
   readonly file?: string;
@@ -25,7 +27,7 @@ export const ConfigurationPage = ({
   <Page width="full">
     <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
       <div className="flex min-w-0 flex-col gap-1">
-        <PageHeading title={title} counts={counts}>
+        <PageHeading title={title} leading={leading} counts={counts}>
           {marks}
         </PageHeading>
         {file !== undefined && <p className="font-mono text-xs text-muted-foreground">{file}</p>}

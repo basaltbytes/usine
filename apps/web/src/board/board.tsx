@@ -29,6 +29,7 @@ import type {
 import { useState } from "react";
 import { ErrorAlert } from "@/components/error-alert";
 import { PageHeading } from "@/components/page";
+import { RepositoryMark } from "@/components/repository-mark";
 import { NeedsYouBadge, StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -241,6 +242,7 @@ export const ProjectBoard = ({
     <div className="flex min-h-96 flex-1 flex-col gap-4 pt-5">
       <PageHeading
         title={project.repository}
+        leading={<RepositoryMark repository={project.repository} size="title" />}
         counts={`${lanes.length} lane${lanes.length === 1 ? "" : "s"}, ${itemCount} item${itemCount === 1 ? "" : "s"}`}
         className="px-4 md:px-5"
       >

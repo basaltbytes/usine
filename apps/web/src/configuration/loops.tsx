@@ -8,6 +8,7 @@ import type {
   QuarantinedLoopView,
 } from "@usine/orchestrator/operator";
 import { ErrorAlert } from "@/components/error-alert";
+import { RepositoryMark } from "@/components/repository-mark";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -198,8 +199,9 @@ const RepositoryLink = ({ repository }: { readonly repository: RepositoryName })
     <Link
       to="/configuration/repositories/$owner/$name"
       params={{ owner, name }}
-      className="text-primary hover:underline"
+      className="flex w-fit items-center gap-2 text-primary hover:underline"
     >
+      <RepositoryMark repository={repository} />
       {repository}
     </Link>
   );
