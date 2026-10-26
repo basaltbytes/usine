@@ -3,10 +3,11 @@
 # Claude Code, Codex, Chromium, and Docker, and SSH that admits only that user
 # by key. With Docker, each attempt runs in its own container from the image
 # of ../worker-image; the harnesses here serve the logins.
-# create-worker.sh and `gateway/gateway.sh worker-user-data` replace
-# "@AUTHORIZED_KEYS@" with the public keys to authorize, as a list. Behind the
-# gateway, `worker-user-data` adds gateway/worker-cloud-init.yaml, which puts
-# the forward proxy in /etc/environment for the setup script below.
+# render-cloud-init.sh replaces "@AUTHORIZED_KEYS@" with the public keys to
+# authorize, as a list, for create-worker.sh, snapshot.sh, and
+# `gateway/gateway.sh worker-user-data`. Behind the gateway, `worker-user-data`
+# adds gateway/worker-cloud-init.yaml, which puts the forward proxy in
+# /etc/environment for the setup script below.
 
 disable_root: true
 ssh_pwauth: false

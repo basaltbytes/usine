@@ -164,11 +164,7 @@ worker_user_data() {
   boundary=usine-worker-user-data
   printf 'Content-Type: multipart/mixed; boundary="%s"\nMIME-Version: 1.0\n\n' "$boundary"
   printf -- '--%s\nContent-Type: text/cloud-config; charset="utf-8"\nContent-Disposition: attachment; filename="cloud-init.yaml"\n\n' "$boundary"
-  AUTHORIZED_KEYS=$keys awk '
-    BEGIN { placeholder = "\"@AUTHORIZED_KEYS@\"" }
-    (at = index($0, placeholder)) { $0 = substr($0, 1, at - 1) ENVIRON["AUTHORIZED_KEYS"] substr($0, at + length(placeholder)) }
-    { print }
-  ' "$here/../cloud-init.yaml"
+  "$here/../render-cloud-init.sh" "$keys"
   printf -- '--%s\nContent-Type: text/cloud-config; charset="utf-8"\nContent-Disposition: attachment; filename="worker-cloud-init.yaml"\nMerge-Type: list(append)+dict(no_replace,recurse_list)+str()\n\n' "$boundary"
   render "$here/worker-cloud-init.yaml"
   printf -- '--%s--\n' "$boundary"

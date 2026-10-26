@@ -39,11 +39,7 @@ case "$location" in fsn1 | nbg1 | hel1) ;; *) echo "Location must be fsn1, nbg1,
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-AUTHORIZED_KEYS=$(head -n 1 "$public_key_file" | jq -Rc '[.]') awk '
-  BEGIN { placeholder = "\"@AUTHORIZED_KEYS@\"" }
-  (at = index($0, placeholder)) { $0 = substr($0, 1, at - 1) ENVIRON["AUTHORIZED_KEYS"] substr($0, at + length(placeholder)) }
-  { print }
-' "$here/cloud-init.yaml" > "$work/user-data.yaml"
+"$here/render-cloud-init.sh" "$(head -n 1 "$public_key_file" | jq -Rc '[.]')" > "$work/user-data.yaml"
 
 # Hetzner emails a root password for a server created without an SSH key, so
 # the same public key is registered once and reused.
