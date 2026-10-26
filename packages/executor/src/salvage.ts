@@ -3,6 +3,7 @@ import {
   type AttemptSalvage,
   type SalvageRef,
   SalvagePushed,
+  SalvageRejected,
   SalvageRetained,
 } from "@usine/core/attempt/salvage";
 import { CommitSha } from "@usine/core/repository";
@@ -13,6 +14,9 @@ const PUSH_TIMEOUT = "2 minutes";
 
 /** GitHub refuses a push with a file larger than 100 MiB. */
 const GITHUB_FILE_LIMIT_BYTES = 100 * 1024 * 1024;
+
+/** GitHub's code for a push refused for a file over its size limit, in the push's stderr. */
+const LARGE_FILES_REFUSAL = /\bGH001\b/u;
 
 /**
  * The checkout's paths that the salvage commits: everything that Git doesn't ignore, except
@@ -33,6 +37,8 @@ export interface SalvageOptions<E extends Error> {
   readonly worktree: string;
   readonly baseCommit: Option.Option<CommitSha>;
   readonly ref: SalvageRef;
+  /** An earlier salvage that the remote rejected; its commit isn't pushed again. */
+  readonly rejected: Option.Option<SalvageRejected>;
   /**
    * Runs git with the Worker's repository credentials and the Attempt's `commitIdentity`, which
    * authors and commits the salvage commit. `salvageWorktree` prepends `-C <worktree>`.
@@ -77,8 +83,8 @@ const oversizedIn = (listing: string, staged: ReadonlySet<string>): ReadonlyArra
  * Commits the changes in an unsuccessful Attempt's checkout and pushes HEAD to its salvage ref
  * before the worktree is removed. The commit leaves out what Git ignores, package stores, build
  * caches, and files larger than GitHub accepts. Skips a checkout with nothing to push beyond its
- * base commit. If the push fails, keeps the worktree and reports its path. Never fails; skipped
- * and failed stages are logged.
+ * base commit, or whose commit the remote rejected in `rejected`. If the push fails, keeps the
+ * worktree and reports its path. Never fails; skipped and failed stages are logged.
  */
 export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <E extends Error>(
   options: SalvageOptions<E>,
@@ -178,6 +184,14 @@ export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <
     yield* Effect.logInfo("Nothing to salvage from the Attempt worktree", fields);
     return Option.none<AttemptSalvage>();
   }
+  const rejected = Option.filter(options.rejected, (salvage) => salvage.commit === commit);
+  if (Option.isSome(rejected)) {
+    yield* Effect.logInfo(
+      "The remote rejected this salvage commit before; retaining the Attempt worktree without pushing it again",
+      { ...fields, ref: options.ref, commit },
+    );
+    return Option.some<AttemptSalvage>(rejected.value);
+  }
 
   const pushFailure = yield* git([
     "push",
@@ -197,6 +211,15 @@ export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <
   );
   if (Option.isSome(pushFailure)) {
     const message = pushFailure.value;
+    if (LARGE_FILES_REFUSAL.test(message)) {
+      yield* Effect.logError(
+        "GitHub refused the salvage push for a file over its size limit; retaining the Attempt worktree, which recovery doesn't push again until its commit changes",
+        { ...fields, ref: options.ref, commit, message },
+      );
+      return Option.some<AttemptSalvage>(
+        new SalvageRejected({ path: options.worktree, commit, message }),
+      );
+    }
     yield* Effect.logError("Salvage push failed; retaining the Attempt worktree", {
       ...fields,
       ref: options.ref,

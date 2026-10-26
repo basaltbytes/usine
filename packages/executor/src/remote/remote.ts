@@ -430,7 +430,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       record: RecoverySink<E>,
       commitAuthor: Effect.Effect<BotAccount, A>,
     ) {
-      yield* Effect.annotateCurrentSpan({ ...attempt });
+      yield* Effect.annotateCurrentSpan({ ...attempt, rejected: Option.isSome(attempt.rejected) });
       yield* session.stopForRecovery(attempt);
       const located = yield* leftoversOf(attempt);
       if (Option.isNone(located)) {

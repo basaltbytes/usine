@@ -42,6 +42,13 @@ export const SalvageLine = ({ salvage }: { readonly salvage: AttemptSalvage | nu
               retried at each startup while the worker is configured. Last error: {message}
             </>
           ),
+          Rejected: ({ path, message }) => (
+            <>
+              Salvage rejected: unfinished work at <span className="font-mono">{path}</span>. The
+              remote refused its push, so startup doesn't retry it until its commit changes. Error:{" "}
+              {message}
+            </>
+          ),
         })}
   </p>
 );

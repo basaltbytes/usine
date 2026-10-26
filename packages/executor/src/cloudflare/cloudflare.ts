@@ -598,7 +598,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
       const layout = layoutFor(attempt.repository, attempt.attemptId);
       const retained = yield* Ref.make(false);
       const recordSalvage = (salvage: AttemptSalvage) =>
-        Ref.set(retained, salvage._tag === "Retained").pipe(Effect.andThen(record(salvage)));
+        Ref.set(retained, salvage._tag !== "Pushed").pipe(Effect.andThen(record(salvage)));
       const reconcile = (
         git: (args: ReadonlyArray<string>) => Effect.Effect<string, ExecutorError>,
       ) =>
@@ -729,7 +729,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
       record: RecoverySink<E>,
       commitAuthor: Effect.Effect<BotAccount, A>,
     ) {
-      yield* Effect.annotateCurrentSpan({ ...attempt });
+      yield* Effect.annotateCurrentSpan({ ...attempt, rejected: Option.isSome(attempt.rejected) });
       yield* session.stopForRecovery(attempt);
       const worker = yield* workerFor("cleanup", attempt.worker);
       const name = sandboxName(worker.owner, attempt.attemptId);
@@ -952,8 +952,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
               // existed before, with the Attempt's work, and the engine's recovery salvages it.
               onNone: () => request.reattach,
               onSome: (exit) =>
-                Exit.isFailure(exit) ||
-                Option.exists(exit.value, ({ _tag }) => _tag === "Retained"),
+                Exit.isFailure(exit) || Option.exists(exit.value, ({ _tag }) => _tag !== "Pushed"),
             });
           if (retained) {
             yield* Effect.logInfo("Keeping the Attempt's sandbox with its checkout", {

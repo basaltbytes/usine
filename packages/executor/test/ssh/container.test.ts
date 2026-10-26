@@ -547,6 +547,7 @@ describe("SSH Worker with Docker", () => {
               permissions: "write",
               succeeded: false,
               open: false,
+              rejected: Option.none(),
             },
             {
               salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),

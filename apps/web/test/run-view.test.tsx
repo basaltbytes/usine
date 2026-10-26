@@ -14,7 +14,12 @@ import {
 } from "@usine/core/agent/session";
 import { AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
 import { SessionEvent, WorkerUnresponsive } from "@usine/core/attempt/channel";
-import { SalvagePushed, SalvageRef, SalvageRetained } from "@usine/core/attempt/salvage";
+import {
+  SalvagePushed,
+  SalvageRef,
+  SalvageRejected,
+  SalvageRetained,
+} from "@usine/core/attempt/salvage";
 import {
   StartedAfterRestart,
   StartedByEditAndRetry,
@@ -623,6 +628,24 @@ describe("salvage line", () => {
     assert.include(markup, "/workers/local/attempts/run_execute_1");
     assert.include(markup, "retried at each startup");
     assert.include(markup, "remote: Repository not found.");
+  });
+
+  it("shows where rejected work lives, that startup doesn't retry it, and the remote's refusal", () => {
+    const markup = renderToStaticMarkup(
+      <SalvageLine
+        salvage={
+          new SalvageRejected({
+            path: "/workers/local/attempts/run_execute_1",
+            commit: CommitSha.make("0123456789abcdef0123456789abcdef01234567"),
+            message: "git exited with code 1: remote: error: GH001: Large files detected.",
+          })
+        }
+      />,
+    );
+    assert.include(markup, "/workers/local/attempts/run_execute_1");
+    assert.include(markup, "doesn&#x27;t retry it");
+    assert.notInclude(markup, "retried at each startup");
+    assert.include(markup, "GH001: Large files detected.");
   });
 
   it("says when no salvage branch exists", () => {

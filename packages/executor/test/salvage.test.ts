@@ -1,7 +1,7 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { AttemptId } from "@usine/core/attempt";
-import { SalvageRef } from "@usine/core/attempt/salvage";
+import { SalvageRef, SalvageRejected } from "@usine/core/attempt/salvage";
 import { CommitSha } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
 import { Effect, Fiber, FileSystem, Option } from "effect";
@@ -23,7 +23,7 @@ interface Scripted {
   readonly inspect?: "fails";
   readonly add?: "fails";
   readonly commit?: "fails";
-  readonly push?: "fails" | "stalls";
+  readonly push?: "fails" | "refuses-large-file" | "stalls";
 }
 
 /** A failed git command as an executor reports it: the exit code in the message and git's stderr as the cause. */
@@ -31,6 +31,20 @@ const PUSH_REJECTED = new ExecutorOperationError({
   operation: "cleanup",
   message: "git exited with code 128",
   cause: new Error("remote: Repository not found.\n"),
+});
+
+/** GitHub's refusal of a push with a file over its size limit, as git reports it. */
+const LARGE_FILE_REFUSED = new ExecutorOperationError({
+  operation: "cleanup",
+  message: "git exited with code 1",
+  cause: new Error(
+    [
+      "remote: error: File .pnpm-store/v11/files/3f/0a1b-exec is 279.12 MB; this exceeds GitHub's file size limit of 100.00 MB",
+      "remote: error: GH001: Large files detected. You may want to try Git Large File Storage - https://git-lfs.github.com.",
+      " ! [remote rejected] HEAD -> usine/salvage/run/1 (pre-receive hook declined)",
+      "error: failed to push some refs to 'https://github.com/acme/demo.git'",
+    ].join("\n"),
+  ),
 });
 
 /** Returns a git that responds from `script` and records every call in order. */
@@ -63,6 +77,7 @@ const fakeGit = (script: Scripted) => {
       }
       if (command[0] === "push") {
         if (script.push === "fails") return Effect.fail(PUSH_REJECTED);
+        if (script.push === "refuses-large-file") return Effect.fail(LARGE_FILE_REFUSED);
         return script.push === "stalls" ? Effect.never : Effect.succeed("");
       }
       return Effect.die(`unexpected git ${command.join(" ")}`);
@@ -70,7 +85,7 @@ const fakeGit = (script: Scripted) => {
   return { git, calls };
 };
 
-const salvage = (script: Scripted) => {
+const salvage = (script: Scripted, rejected = Option.none<SalvageRejected>()) => {
   const { git, calls } = fakeGit(script);
   return salvageWorktree({
     attemptId: AttemptId.make("run/execute/1"),
@@ -79,6 +94,7 @@ const salvage = (script: Scripted) => {
     worktree: WORKTREE,
     baseCommit: Option.some(BASE),
     ref: REF,
+    rejected,
     git,
   }).pipe(Effect.map((result) => ({ result, calls })));
 };
@@ -178,6 +194,36 @@ describe("salvageWorktree", () => {
     }),
   );
 
+  it.effect("records a push that GitHub refuses for a file over its size limit as rejected", () =>
+    Effect.gen(function* () {
+      const { result } = yield* salvage({
+        head: () => AHEAD,
+        status: "",
+        push: "refuses-large-file",
+      });
+      assert(Option.isSome(result) && result.value._tag === "Rejected");
+      assert.strictEqual(result.value.path, WORKTREE);
+      assert.strictEqual(result.value.commit, AHEAD);
+      assert.include(result.value.message, "GH001: Large files detected");
+    }),
+  );
+
+  it.effect("pushes a rejected checkout again only once its commit changes", () =>
+    Effect.gen(function* () {
+      const rejected = new SalvageRejected({ path: WORKTREE, commit: AHEAD, message: "GH001" });
+      const unchanged = yield* salvage({ head: () => AHEAD, status: "" }, Option.some(rejected));
+      assert.deepStrictEqual(unchanged.result, Option.some(rejected));
+      assert(!commandsOf(unchanged.calls).includes("push"));
+
+      const changed = yield* salvage(
+        { head: () => AHEAD, status: " M src/index.ts\n" },
+        Option.some(rejected),
+      );
+      assert(Option.isSome(changed.result) && changed.result.value._tag === "Pushed");
+      assert.strictEqual(changed.result.value.commit, SNAPSHOT);
+    }),
+  );
+
   it.effect("names the stalled push instead of a bare timeout", () =>
     Effect.gen(function* () {
       const fiber = yield* Effect.forkChild(
@@ -232,6 +278,7 @@ const gitCheckout = Effect.gen(function* () {
     worktree,
     baseCommit: Option.some(base),
     ref: REF,
+    rejected: Option.none(),
     git,
   });
   return { fileSystem, git, remote, worktree, write, installDependencies, salvage };

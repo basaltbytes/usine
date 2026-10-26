@@ -5,7 +5,7 @@ import { SalvageRef } from "@usine/core/attempt/salvage";
 import { InstanceDirectory } from "@usine/core/instance";
 import { RepositoryName } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
-import { Effect, FileSystem, Layer, Result } from "effect";
+import { Effect, FileSystem, Layer, Option, Result } from "effect";
 import { claudeLoginLockLayer, CredentialProvider, Executor } from "@usine/executor";
 import { layer } from "@usine/executor/local";
 import { stubAttemptRuntime, StubStorage } from "@usine/durable/testing";
@@ -18,6 +18,7 @@ const attempt = (worker: string, number: number) => ({
   permissions: "write" as const,
   succeeded: number % 2 === 0,
   open: false,
+  rejected: Option.none(),
 });
 
 const ignored = {

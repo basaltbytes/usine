@@ -674,6 +674,7 @@ describe("Provisioned SSH Worker", () => {
         permissions: "write",
         succeeded: true,
         open: false,
+        rejected: Option.none(),
       };
       yield* executor.recover(attempt, sink, Effect.succeed(request.commitAuthor));
       assert.isTrue(
@@ -726,6 +727,7 @@ describe("Provisioned SSH Worker", () => {
               permissions: "write",
               succeeded: true,
               open: false,
+              rejected: Option.none(),
             },
             sink,
             Effect.succeed(request.commitAuthor),

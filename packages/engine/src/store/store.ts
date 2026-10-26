@@ -531,6 +531,7 @@ const makeRunStore = Effect.gen(function* () {
       Match.valueTags(salvage, {
         Pushed: ({ ref, commit }) => ({ attemptId, ref, commit }),
         Retained: ({ path, commit }) => ({ attemptId, path, commit }),
+        Rejected: ({ path, commit }) => ({ attemptId, path, commit }),
       }),
     );
   }, persistence("record attempt salvage"));

@@ -1,4 +1,4 @@
-import { type Effect, Schema } from "effect";
+import { type Effect, type Option, Schema } from "effect";
 import type { LoopPermissions } from "../loop.ts";
 import { CommitSha, safeSegment, type RepositoryName } from "../repository.ts";
 import type { RunId } from "../run/run.ts";
@@ -32,8 +32,22 @@ export class SalvageRetained extends Schema.TaggedClass<SalvageRetained>("Attemp
   },
 ) {}
 
+/**
+ * A salvage whose push the remote refused for a reason that pushing again can't fix, such as a
+ * file over GitHub's size limit. It left the workspace at `path` on the Worker, and recovery
+ * doesn't push `commit` again.
+ */
+export class SalvageRejected extends Schema.TaggedClass<SalvageRejected>("AttemptSalvage/Rejected")(
+  "Rejected",
+  {
+    path: Schema.NonEmptyString,
+    commit: CommitSha,
+    message: Schema.String,
+  },
+) {}
+
 /** What the executor kept of the workspace of an unsuccessful Attempt. */
-export const AttemptSalvage = Schema.Union([SalvagePushed, SalvageRetained]);
+export const AttemptSalvage = Schema.Union([SalvagePushed, SalvageRetained, SalvageRejected]);
 export type AttemptSalvage = typeof AttemptSalvage.Type;
 
 /** A persisted Attempt whose checkout can still exist on its Worker. */
@@ -48,6 +62,8 @@ export interface AttemptRecovery {
   readonly succeeded: boolean;
   /** Whether the Attempt has no outcome yet, so a restart can reattach it if its parent task runs. */
   readonly open: boolean;
+  /** The recorded salvage that the remote rejected, whose commit recovery doesn't push again. */
+  readonly rejected: Option.Option<SalvageRejected>;
 }
 
 /** The storage that startup reconciliation uses for a persisted Attempt's salvage, comments, and windows. */

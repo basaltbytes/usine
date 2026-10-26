@@ -13,7 +13,12 @@ import {
   TextOutput,
 } from "@usine/core/agent/session";
 import { type Attempt, AttemptId, AttemptTask } from "@usine/core/attempt";
-import { SalvagePushed, SalvageRef, SalvageRetained } from "@usine/core/attempt/salvage";
+import {
+  SalvagePushed,
+  SalvageRef,
+  SalvageRejected,
+  SalvageRetained,
+} from "@usine/core/attempt/salvage";
 import { CommitSha } from "@usine/core/repository";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
@@ -1238,17 +1243,28 @@ describe("cursor store", () => {
             fresh.execution.attempt,
             Result.succeed(new StepResult({ message: "delivered", facts: [] })),
           );
+          // A recovery whose push GitHub refused records the rejection, and the next startup's
+          // recovery gets it, so it doesn't push the same commit again.
+          const rejected = new SalvageRejected({
+            path: "/workers/local/attempts/salvaged-retry",
+            commit: CommitSha.make("c".repeat(40)),
+            message: "remote: error: GH001: Large files detected.",
+          });
+          yield* store.recordSalvage(resumed.execution.attempt.id, rejected);
           const candidates = yield* store.salvageCandidates;
           assert.strictEqual(candidates.length, 4);
           assert.deepStrictEqual(
             Object.fromEntries(
-              candidates.map(({ attemptId, succeeded }) => [attemptId, succeeded]),
+              candidates.map(({ attemptId, succeeded, rejected }) => [
+                attemptId,
+                { succeeded, rejected },
+              ]),
             ),
             {
-              [first.execution.attempt.id]: false,
-              [started.execution.attempt.id]: false,
-              [resumed.execution.attempt.id]: false,
-              [fresh.execution.attempt.id]: true,
+              [first.execution.attempt.id]: { succeeded: false, rejected: Option.none() },
+              [started.execution.attempt.id]: { succeeded: false, rejected: Option.none() },
+              [resumed.execution.attempt.id]: { succeeded: false, rejected: Option.some(rejected) },
+              [fresh.execution.attempt.id]: { succeeded: true, rejected: Option.none() },
             },
           );
         }),

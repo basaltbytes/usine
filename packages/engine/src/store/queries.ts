@@ -222,6 +222,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
           number: attempts.attemptNumber,
           permissions: triggerEvents.permissions,
           outcome: sql<string>`coalesce(json_extract(${attempts.outcomeJson}, '$._tag'), '')`,
+          salvage: attempts.salvageJson,
         })
         .from(attempts)
         .innerJoin(runs, eq(runs.runId, attempts.runId))
@@ -240,14 +241,16 @@ export const queriesFor = (database: RunDatabaseClient) => {
             number: AttemptNumber,
             permissions: LoopPermissions,
             outcome: Schema.String,
+            salvage: Schema.NullOr(AttemptSalvage),
           }),
         ),
       )(rows);
-      return decoded.map(({ number, outcome, ...attempt }) => ({
+      return decoded.map(({ number, outcome, salvage, ...attempt }) => ({
         ...attempt,
         ref: salvageRefFor(attempt.runId, number),
         succeeded: outcome === "Succeeded",
         open: outcome === "",
+        rejected: salvage?._tag === "Rejected" ? Option.some(salvage) : Option.none(),
       }));
     });
 
