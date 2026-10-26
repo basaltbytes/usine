@@ -174,8 +174,9 @@ Under the outline, a red count with previous and next controls steps through loa
 - For an SSH worker, it runs that over `ssh -t` to the worker's `destination`, with `-p` if `usine.yaml` sets `port`, quoted again for the remote shell; the worktree line names the worker.
 - For a provisioned worker, which has no `destination`, it uses the local form to run on the attempt's machine and says that the machine is deleted with the attempt; the worktree line names the worker.
 - For a worker that `usine.yaml` no longer declares, it uses the local form and says so.
+- For a Codex child that saved its session in the attempt's own Codex home, as behind a gateway with `openai` in `llm_providers`, it sets `CODEX_HOME` to that directory before `codex resume`.
 
-**Copy command** copies the wrapped command as one line. Resuming needs the attempt's harness login and its worktree, which attempt cleanup removes. Older transcripts and Pi children say no harness session was saved.
+**Copy command** copies the wrapped command as one line. Resuming needs the attempt's harness login and its worktree, which attempt cleanup removes. For a child whose model requests used the gateway's credential, the line under the command reads `The gateway credential isn't available from your shell` instead of naming the login. Older transcripts and Pi children say no harness session was saved.
 
 ### Reader
 

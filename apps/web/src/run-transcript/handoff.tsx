@@ -9,12 +9,18 @@ import type { TranscriptSession } from "./model.ts";
 // Returns the value single-quoted for a POSIX shell, with apostrophes escaped.
 const shellArgument = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
 
+interface ResumeCommand {
+  readonly command: string;
+  /** The variable that points the harness at a saved session's `home`. */
+  readonly homeVariable: Option.Option<string>;
+}
+
 /** The resume command per harness; `None` for Pi, which has no resumable session. */
 const RESUME_COMMANDS = {
-  claude: Option.some("claude --resume"),
-  codex: Option.some("codex resume --"),
+  claude: Option.some({ command: "claude --resume", homeVariable: Option.none() }),
+  codex: Option.some({ command: "codex resume --", homeVariable: Option.some("CODEX_HOME") }),
   pi: Option.none(),
-} satisfies Record<Harness, Option.Option<string>>;
+} satisfies Record<Harness, Option.Option<ResumeCommand>>;
 
 /**
  * Returns `command` for the operator's terminal: unchanged for a local, provisioned, or undeclared
@@ -42,6 +48,8 @@ export const SessionHandoff = ({
     return <p className="text-xs text-muted-foreground">No saved harness session</p>;
   const { resume, saved } = handoff.value;
   const { worker, workerAccess } = attempt;
+  const gatewayCredential =
+    session.session._tag === "ChildSession" && Option.isSome(session.session.gatewayCredential);
   if (workerAccess?._tag === "Sandbox")
     return (
       <p className="text-xs text-muted-foreground">
@@ -49,9 +57,13 @@ export const SessionHandoff = ({
         accepts no terminal and is destroyed at attempt cleanup
       </p>
     );
+  const home = Option.match(Option.all([resume.homeVariable, saved.home]), {
+    onNone: () => "",
+    onSome: ([variable, directory]) => `${variable}=${shellArgument(directory)} `,
+  });
   const command = fromOperatorTerminal(
     workerAccess,
-    `cd -- ${shellArgument(saved.cwd)} && ${resume} ${shellArgument(saved.id)}`,
+    `cd -- ${shellArgument(saved.cwd)} && ${home}${resume.command} ${shellArgument(saved.id)}`,
   );
   return (
     <div className="space-y-2 text-xs text-muted-foreground">
@@ -80,6 +92,11 @@ export const SessionHandoff = ({
       </CodeBlock>
       {workerAccess?._tag === "Provisioned" ? (
         <p>{`Run it on the attempt's ${providerLabel[workerAccess.provider]} machine, which is deleted with the attempt`}</p>
+      ) : gatewayCredential ? (
+        <p>
+          The gateway credential isn't available from your shell. The worktree is removed at attempt
+          cleanup
+        </p>
       ) : (
         <p>Same harness login as the attempt. The worktree is removed at attempt cleanup</p>
       )}
