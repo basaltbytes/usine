@@ -132,6 +132,13 @@ components:
     backgroundColor: "{colors.mantle}"
     textColor: "{colors.subtext1}"
     width: "232px"
+  repository-mark:
+    backgroundColor: "{colors.surface1}"
+    textColor: "{colors.text}"
+    typography: "{typography.caption}"
+    rounded: "{rounded.sm}"
+    width: "16px"
+    height: "16px"
   run-outline:
     typography: "{typography.body}"
     padding: "0 12px 16px"
@@ -199,9 +206,9 @@ Catppuccin Mocha as published: neutral grounds from crust to text, one action ac
 - **Mantle** (`{colors.mantle}`): page ground, sidebar, cards, inputs.
 - **Base** (`{colors.base}`): the inset work panel and its sticky lane headings.
 - **Surface0** (`{colors.surface0}`): popovers, menus, secondary buttons, the active sidebar row.
-- **Surface1** (`{colors.surface1}`): secondary button hover, menu item focus, scrollbar thumb.
+- **Surface1** (`{colors.surface1}`): secondary button hover, menu item focus, scrollbar thumb, the repository mark's ground.
 - **Overlay0** (`{colors.overlay0}`): graphics only (idle flow arrows, canceled and paused state dots, the offline dot); too faint for text.
-- **Subtext0** (`{colors.subtext0}`): secondary text, counts, meta.
+- **Subtext0** (`{colors.subtext0}`): secondary text, counts, meta, sidebar icons at rest.
 - **Subtext1** (`{colors.subtext1}`): sidebar text.
 - **Text** (`{colors.text}`): primary text.
 - **Hairline** (`{colors.hairline}`): every border and card ring; inputs use a 10% stroke, the sidebar 6%.
@@ -331,12 +338,12 @@ Compact and quiet, mostly 28px tall.
 - **Error / Disabled:** red stroke with a red ring at 25%; disabled at 50% opacity.
 
 ### Navigation
-- **Sidebar:** 232px mantle column: the wordmark `usine` in 14px semibold, 12px subtext0 group names, 32px rows in 13px subtext1, and under each project, Board and Tasks as 28px rows on a hairline rail. Hover fills surface0 at 60%; the active row is surface0 with text colour and medium weight. Needs attention counts are peach at the row's right. The footer has the live dot and word.
+- **Sidebar:** 232px mantle column: the wordmark `usine` in 14px semibold, then groups 20px apart, each a 12px subtext0 name over 32px rows in 13px subtext1. A row starts with a 16px regular-weight Phosphor icon, or a project's repository mark, so the wordmark, icons, marks, and group names share one column and the labels another. Under each project, Board and Tasks are 28px rows with their icons under the project name; projects are 6px apart. Icons are subtext0 at rest and text colour on hover and when active: Overview `SquaresFour`, Board `Kanban`, Tasks `ListChecks`, Loops `ArrowsClockwise`, Agents `Robot`, Workers `HardDrives`, Repositories `BookBookmark`, Settings `GearSix`. Hover fills surface0 at 60%; the active row is surface0 across the row's width, with text colour and medium weight. Needs attention counts are peach, 8px from the row's right edge, on hover too. The footer has the live dot, centred in the icon column, and `Live` or `Idle`.
 - **Header:** 48px, hairline bottom border, sidebar toggle and breadcrumb only.
 - **Menus:** surface0 popup, 8px radius, 4px padding, Raised shadow; 28px items in 13px, focus fills surface1; destructive items red with a red 15% focus fill. Menus list only actions that apply.
 
 ### Page heading
-On the overview, board, tasks list, and configuration pages: the 20px semibold title, its counts in 13px subtext0 on the same baseline (`9 lanes, 233 items`, `5 loops, 1 paused`), any mark such as Needs attention, and the screen's actions at the right.
+On the overview, board, tasks list, and configuration pages: the 20px semibold title, after the repository mark on a repository's page, its counts in 13px subtext0 on the same baseline (`9 lanes, 233 items`, `5 loops, 1 paused`), any mark such as Needs attention, and the screen's actions at the right.
 
 ### Flat table
 The registry table on the panel ground: a 36px heading row of 12px subtext0 labels, 44px rows split by hairlines, 8px cell padding, numbers right-aligned in tabular figures. A row that opens something fills surface0 at 60% on hover and while its link has focus, with a 2px mauve outline on the link; other rows have no hover fill. Row actions are subtext0 ghost buttons, only those that apply, such as Pause or Resume.
@@ -394,6 +401,9 @@ The only way an issue or pull request number appears: its Octicon and `#number` 
 | Pull request | Merged | `GitMerge` | mauve |
 | Pull request | Closed | `GitPullRequestClosed` | red |
 | Either | Unknown | the kind's open icon | subtext0 |
+
+### Repository mark
+How a repository appears where it names a page or a navigation entry: the sidebar's project rows, the project breadcrumb, the board heading, and in the configuration section the Repositories list, a repository's heading and breadcrumb, and a loop's Repositories fact. The owner's GitHub avatar as a square tile with a 4px radius and a hairline ring, 8px before the name (6px in a breadcrumb): 16px beside 13px text, 20px beside a 20px heading, centred on the first line. GitHub has no per-repository image, so repositories with one owner share the avatar. If it doesn't load, the tile is the name's first letter or digit in 12px semibold text colour on surface1. The mark is hidden from screen readers. Run lines, Needs attention entries, and other mentions in running text show the name alone.
 
 ### Item heading
 A task's name: its item mark inline in the title's text, a space, then the title, so a wrapped line starts under the icon. The [README](README.md#issues-and-pull-requests) says which item names a task. Page form: the 20px semibold title, the mark's number on its first baseline; the run page heading keeps the `run-title` view transition name. Row form: one 13px medium line that truncates the title and keeps the mark, with the title as tooltip.

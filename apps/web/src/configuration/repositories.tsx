@@ -7,6 +7,7 @@ import type {
   RepositoryConfigurationView,
 } from "@usine/orchestrator/operator";
 import { LabelBadge } from "@/components/label-badge";
+import { RepositoryMark } from "@/components/repository-mark";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -16,6 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 import { projectParams } from "../overview.ts";
 import {
   ConfigurationPage,
@@ -71,8 +73,9 @@ const RepositoryRow = ({ repository }: { readonly repository: RepositoryConfigur
           to="/configuration/repositories/$owner/$name"
           params={params}
           onClick={(event) => event.stopPropagation()}
-          className={rowLinkClass}
+          className={cn(rowLinkClass, "flex w-fit items-center gap-2")}
         >
+          <RepositoryMark repository={repository.name} />
           {repository.name}
         </Link>
       </TableCell>
@@ -259,7 +262,10 @@ export const RepositoryDetail = ({
       </ConfigurationPage>
     );
   return (
-    <ConfigurationPage title={repository.name}>
+    <ConfigurationPage
+      title={repository.name}
+      leading={<RepositoryMark repository={repository.name} size="title" />}
+    >
       <DetailColumns facts={<RepositoryFacts repository={repository} />}>
         <DetailSection
           title="Lanes"

@@ -4,12 +4,15 @@ import { cn } from "@/lib/utils";
 
 export const PageHeading = ({
   title,
+  leading,
   counts,
   children,
   actions,
   className,
 }: {
   readonly title: string;
+  /** Content before the title, centred on its first line, such as a repository mark. */
+  readonly leading?: ReactNode;
   /** The count text next to the title, for example `5 loops`. */
   readonly counts?: string | undefined;
   readonly children?: ReactNode;
@@ -17,7 +20,12 @@ export const PageHeading = ({
   readonly className?: string;
 }) => (
   <header className={cn("flex flex-wrap items-baseline gap-x-3 gap-y-1", className)}>
-    <h1 className="text-xl font-semibold wrap-anywhere">{title}</h1>
+    <h1 className="flex items-baseline gap-2 text-xl font-semibold wrap-anywhere">
+      {leading !== undefined && (
+        <span className="flex h-7 shrink-0 items-center self-start">{leading}</span>
+      )}
+      <span className="min-w-0">{title}</span>
+    </h1>
     {counts !== undefined && <p className="text-sm text-muted-foreground tabular-nums">{counts}</p>}
     {children}
     {actions !== undefined && (

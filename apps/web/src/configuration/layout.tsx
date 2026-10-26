@@ -1,3 +1,10 @@
+import {
+  ArrowsClockwiseIcon,
+  BookBookmarkIcon,
+  GearSixIcon,
+  HardDrivesIcon,
+  RobotIcon,
+} from "@phosphor-icons/react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import {
   type ErrorComponentProps,
@@ -7,8 +14,11 @@ import {
   useParams,
   useRouter,
 } from "@tanstack/react-router";
+import { RepositoryName } from "@usine/core/repository";
+import { Schema } from "effect";
 import { ErrorAlert } from "@/components/error-alert";
 import { Page } from "@/components/page";
+import { RepositoryMark } from "@/components/repository-mark";
 import {
   BreadcrumbItem,
   BreadcrumbLink,
@@ -24,11 +34,11 @@ import { usePauseLoop } from "./query.ts";
 import { SectionReloadProvider } from "./reload.tsx";
 
 const CONFIGURATION_PAGES = [
-  { to: "/configuration/loops", label: "Loops" },
-  { to: "/configuration/agents", label: "Agents" },
-  { to: "/configuration/workers", label: "Workers" },
-  { to: "/configuration/repositories", label: "Repositories" },
-  { to: "/configuration/settings", label: "Settings" },
+  { to: "/configuration/loops", label: "Loops", icon: ArrowsClockwiseIcon },
+  { to: "/configuration/agents", label: "Agents", icon: RobotIcon },
+  { to: "/configuration/workers", label: "Workers", icon: HardDrivesIcon },
+  { to: "/configuration/repositories", label: "Repositories", icon: BookBookmarkIcon },
+  { to: "/configuration/settings", label: "Settings", icon: GearSixIcon },
 ] as const;
 
 /** The open page's entry is active only when `inSection` is true. */
@@ -36,12 +46,13 @@ export const ConfigurationMenu = ({ inSection }: { readonly inSection: boolean }
   const matchRoute = useMatchRoute();
   return (
     <SidebarMenu>
-      {CONFIGURATION_PAGES.map(({ to, label }) => (
+      {CONFIGURATION_PAGES.map(({ to, label, icon: Glyph }) => (
         <SidebarMenuItem key={to}>
           <SidebarMenuButton
             isActive={inSection && matchRoute({ to, fuzzy: true }) !== false}
             render={<Link to={to} />}
           >
+            <Glyph aria-hidden="true" />
             <span>{label}</span>
           </SidebarMenuButton>
         </SidebarMenuItem>
@@ -98,13 +109,11 @@ export const ConfigurationCrumbs = () => {
   const matchRoute = useMatchRoute();
   const params = useParams({ strict: false });
   const page = CONFIGURATION_PAGES.find(({ to }) => matchRoute({ to, fuzzy: true }) !== false);
-  const entry =
-    params.loop ??
-    params.agent ??
-    params.worker ??
-    (params.owner !== undefined && params.name !== undefined
+  const repository =
+    params.owner !== undefined && params.name !== undefined
       ? `${params.owner}/${params.name}`
-      : undefined);
+      : undefined;
+  const entry = params.loop ?? params.agent ?? params.worker ?? repository;
   return (
     <>
       <BreadcrumbItem>
@@ -126,7 +135,12 @@ export const ConfigurationCrumbs = () => {
         <>
           <BreadcrumbSeparator />
           <BreadcrumbItem>
-            <BreadcrumbPage className="wrap-anywhere">{entry}</BreadcrumbPage>
+            <BreadcrumbPage className="flex items-center gap-1.5 wrap-anywhere">
+              {repository !== undefined && Schema.is(RepositoryName)(repository) && (
+                <RepositoryMark repository={repository} />
+              )}
+              {entry}
+            </BreadcrumbPage>
           </BreadcrumbItem>
         </>
       )}

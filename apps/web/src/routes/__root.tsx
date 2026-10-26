@@ -17,6 +17,7 @@ import { AppSidebar, type OperatorView, useOperatorView } from "@/components/app
 import { BootScreen } from "@/components/boot-screen";
 import { cardIdentity } from "@/components/item/identity";
 import { itemLabel } from "@/components/item/mark";
+import { RepositoryMark } from "@/components/repository-mark";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Breadcrumb,
@@ -91,11 +92,16 @@ const Crumbs = ({
     <>
       <BreadcrumbItem>
         {view === "board" ? (
-          <BreadcrumbPage>{project}</BreadcrumbPage>
+          <BreadcrumbPage className="flex items-center gap-1.5">
+            <RepositoryMark repository={project} />
+            {project}
+          </BreadcrumbPage>
         ) : (
           <BreadcrumbLink
+            className="flex items-center gap-1.5"
             render={<Link to="/projects/$owner/$name" params={projectParams(project)} />}
           >
+            <RepositoryMark repository={project} />
             {project}
           </BreadcrumbLink>
         )}

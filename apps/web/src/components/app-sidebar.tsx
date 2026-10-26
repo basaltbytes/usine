@@ -1,6 +1,8 @@
+import { KanbanIcon, ListChecksIcon, SquaresFourIcon } from "@phosphor-icons/react";
 import { Link, useMatchRoute } from "@tanstack/react-router";
 import type { RepositoryName } from "@usine/core/repository";
 import type { ProjectView } from "@usine/orchestrator/operator";
+import { RepositoryMark } from "@/components/repository-mark";
 import {
   Sidebar,
   SidebarContent,
@@ -33,6 +35,13 @@ export const useOperatorView = (): OperatorView => {
   if (matchRoute({ to: "/projects/$owner/$name" }) !== false) return "board";
   return "project";
 };
+
+const AttentionCount = ({ count }: { readonly count: number }) => (
+  <SidebarMenuBadge className="right-2 min-w-0 px-0 text-needs-you peer-hover/menu-button:text-needs-you peer-data-active/menu-button:text-needs-you">
+    {count}
+    <span className="sr-only"> need attention</span>
+  </SidebarMenuBadge>
+);
 
 export const AppSidebar = ({
   projects,
@@ -74,22 +83,18 @@ export const AppSidebar = ({
                 className={cn(needsYouTotal > 0 && "pr-8")}
                 render={<Link to="/" />}
               >
+                <SquaresFourIcon aria-hidden="true" />
                 <span>Overview</span>
               </SidebarMenuButton>
-              {needsYouTotal > 0 && (
-                <SidebarMenuBadge className="text-needs-you peer-data-active/menu-button:text-needs-you">
-                  {needsYouTotal}
-                  <span className="sr-only"> need attention</span>
-                </SidebarMenuBadge>
-              )}
+              {needsYouTotal > 0 && <AttentionCount count={needsYouTotal} />}
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarGroupContent>
       </SidebarGroup>
-      <SidebarGroup className="pt-3">
+      <SidebarGroup className="pt-4">
         <SidebarGroupLabel>Projects</SidebarGroupLabel>
         <SidebarGroupContent>
-          <SidebarMenu>
+          <SidebarMenu className="gap-1.5">
             {projects.map((entry) => {
               const count = needsYou.get(entry.repository) ?? 0;
               const params = projectParams(entry.repository);
@@ -103,28 +108,29 @@ export const AppSidebar = ({
                     className={cn(count > 0 && "pr-8")}
                     render={<Link to="/projects/$owner/$name" params={params} />}
                   >
+                    <RepositoryMark repository={entry.repository} />
                     <span>{entry.repository}</span>
                   </SidebarMenuButton>
-                  {count > 0 && (
-                    <SidebarMenuBadge className="text-needs-you peer-data-active/menu-button:text-needs-you">
-                      {count}
-                      <span className="sr-only"> need attention</span>
-                    </SidebarMenuBadge>
-                  )}
-                  <SidebarMenuSub>
+                  {count > 0 && <AttentionCount count={count} />}
+                  {/* Sub-row icons line up with the project name, and fills span the full row. */}
+                  <SidebarMenuSub className="mx-0 translate-x-0 gap-px border-l-0 px-0 py-px">
                     <SidebarMenuSubItem>
                       <SidebarMenuSubButton
                         isActive={current && view === "board"}
+                        className="translate-x-0 pl-8"
                         render={<Link to="/projects/$owner/$name" params={params} />}
                       >
+                        <KanbanIcon aria-hidden="true" />
                         <span>Board</span>
                       </SidebarMenuSubButton>
                     </SidebarMenuSubItem>
                     <SidebarMenuSubItem>
                       <SidebarMenuSubButton
                         isActive={current && view === "tasks"}
+                        className="translate-x-0 pl-8"
                         render={<Link to="/projects/$owner/$name/tasks" params={params} />}
                       >
+                        <ListChecksIcon aria-hidden="true" />
                         <span>Tasks</span>
                       </SidebarMenuSubButton>
                     </SidebarMenuSubItem>
@@ -135,21 +141,20 @@ export const AppSidebar = ({
           </SidebarMenu>
         </SidebarGroupContent>
       </SidebarGroup>
-      <SidebarGroup className="pt-3">
+      <SidebarGroup className="pt-4">
         <SidebarGroupLabel>Configuration</SidebarGroupLabel>
         <SidebarGroupContent>
           <ConfigurationMenu inSection={view === "configuration"} />
         </SidebarGroupContent>
       </SidebarGroup>
     </SidebarContent>
-    <SidebarFooter className="px-4 pb-3">
+    <SidebarFooter className="px-2 pb-3">
       {/* Shows trigger stream state, not server state, so idle pollers are not shown as running. */}
-      <p className="flex items-center gap-2 text-xs text-muted-foreground">
-        <span
-          aria-hidden="true"
-          className={cn("size-1.5 rounded-full", live ? "bg-run-succeeded" : "bg-faint")}
-        />
-        {live ? "live" : "idle"}
+      <p className="flex h-8 items-center gap-2 px-2 text-xs text-muted-foreground">
+        <span aria-hidden="true" className="flex size-4 items-center justify-center">
+          <span className={cn("size-1.5 rounded-full", live ? "bg-run-succeeded" : "bg-faint")} />
+        </span>
+        {live ? "Live" : "Idle"}
       </p>
     </SidebarFooter>
   </Sidebar>
