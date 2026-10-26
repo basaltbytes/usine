@@ -486,11 +486,12 @@ export const fakeMachine = () => {
       return oneShotHandle(meminfo(state.memoryGib, state.swapGib), 0);
     if (line.includes("pidfile")) return oneShotHandle("no-children\n", 0);
     if (line.startsWith("exec 'rm' '-rf' ")) {
-      const target = line.slice("exec 'rm' '-rf' '".length, -1);
-      state.codexHomes.delete(target);
-      for (const directory of state.credentials.keys())
-        if (directory === target || directory.startsWith(`${target}/`))
-          state.credentials.delete(directory);
+      for (const target of remoteWords(line).slice(2)) {
+        state.codexHomes.delete(target);
+        for (const directory of state.credentials.keys())
+          if (directory === target || directory.startsWith(`${target}/`))
+            state.credentials.delete(directory);
+      }
       return oneShotHandle("", 0);
     }
     if (line === "exec 'git' '--version'") return oneShotHandle("git version 2.47.3\n", 0);
@@ -642,6 +643,12 @@ export const fakeMachine = () => {
       Effect.sync(() => {
         state.localFiles.set(path, data);
         state.localWrites.push({ path, afterCalls: state.calls.length });
+      }),
+    rename: (oldPath, newPath) =>
+      Effect.sync(() => {
+        const content = state.localFiles.get(oldPath);
+        state.localFiles.delete(oldPath);
+        if (content !== undefined) state.localFiles.set(newPath, content);
       }),
     exists: (path) => Effect.succeed(state.localFiles.has(path)),
     remove: (path) => Effect.sync(() => void state.localFiles.delete(path)),

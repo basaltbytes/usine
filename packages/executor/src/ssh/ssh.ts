@@ -6,7 +6,7 @@ import type { AttemptRecovery } from "@usine/core/attempt/salvage";
 import { type RepositoryName, safeSegment } from "@usine/core/repository";
 import type { GatewayCredentialKind, WorkerName } from "@usine/core/worker";
 import type { AttemptRuntime } from "@usine/durable/attempt-runtime";
-import { Context, Effect, type FileSystem, Layer, Option, type Path } from "effect";
+import { Context, Effect, FileSystem, Layer, Option, type Path } from "effect";
 import type { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import {
@@ -31,9 +31,10 @@ import {
   harnessBinaryProbe,
   verifyGatewayAdmin,
 } from "./gateway/preflight.ts";
-import type { SshExecutorOptions, SshMachine } from "./model.ts";
+import type { SshExecutorOptions, SshMachine, SshWorkerAddress } from "./model.ts";
 import { sshMachinePreflightFor, sshPreflightFor } from "./preflight.ts";
 import { provisionedMachinesFor } from "./provisioner/machines.ts";
+import { sshWorkerRecordsFor } from "./worker-records.ts";
 import { sshMachinesFor, SshWorkers } from "./workers.ts";
 
 const makeSshExecutor = (options: SshExecutorOptions) =>
@@ -48,8 +49,18 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
       base,
       commands,
     );
+    const fs = yield* FileSystem.FileSystem;
+    const records = yield* sshWorkerRecordsFor(
+      options.workerRecordsDirectory ??
+        (yield* fs.makeTempDirectoryScoped({ prefix: "usine-ssh-workers-" }).pipe(Effect.orDie)),
+      base,
+    );
+    // Records each long-lived Worker it adds, so its leftovers can be discarded once usine.yaml
+    // drops it.
+    const addWorker = (address: SshWorkerAddress) =>
+      workers.addWorker(address).pipe(Effect.andThen(records.remember(address)));
     // Worker names are distinct, so adding them can't fail.
-    yield* Effect.forEach(options.workers, workers.addWorker, { discard: true }).pipe(Effect.orDie);
+    yield* Effect.forEach(options.workers, addWorker, { discard: true }).pipe(Effect.orDie);
 
     // Probes with no extra environment; the harness login is on the machine or at its Gateway,
     // or a provisioned machine's Attempts get an API key.
@@ -226,7 +237,7 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
       interruptGrace: options.interruptGrace ?? "10 seconds",
     });
     return Context.make(Executor, executor).pipe(
-      Context.add(SshWorkers, workers),
+      Context.add(SshWorkers, SshWorkers.of({ addWorker, removeWorker: workers.removeWorker })),
       Context.add(WorkerMachines, provisioned.port),
     );
   });
@@ -267,4 +278,5 @@ export type {
   SshWorkerMachine,
 } from "./model.ts";
 export { ATTEMPT_IMAGE } from "./container.ts";
+export { type SshWorkerRecords, sshWorkerRecordsFor } from "./worker-records.ts";
 export { SshWorkers } from "./workers.ts";

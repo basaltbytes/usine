@@ -121,6 +121,16 @@ export class StepExecutor extends Context.Service<
      */
     readonly sweep: Effect.Effect<void>;
     /**
+     * Removes what `attempts`, whose leftovers the operator discarded, left on `worker` outside
+     * their checkouts, such as their Codex homes on an SSH Worker. `worker` isn't in `workers`.
+     * The engine runs it after it stops tracking the Attempts. Never fails; the executor logs
+     * what it couldn't remove.
+     */
+    readonly discard: (
+      worker: WorkerName,
+      attempts: ReadonlyArray<AttemptId>,
+    ) => Effect.Effect<void>;
+    /**
      * Runs the reserved Attempt, or reattaches to it if `execution.reattach` is set, records channel
      * activity through `io`, and returns its result. Runs `io.checkoutAcquired` after preparing the
      * checkout, and never if preparation fails.

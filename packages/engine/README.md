@@ -70,7 +70,7 @@ The engine handles that checkout's recovery until the reattaching execution runs
 
 If `interrupt` can't confirm the stop, the checkout and slot stay, the fiber stops before the next attempt and logs `Could not confirm that the parent task of an Attempt its Run does not reattach stopped`, and each reconcile tries again: it reattaches if the task is live, or retries the stop. This applies after another restart too.
 
-Attempts on a worker that `StepExecutor.workers` doesn't list aren't reconciled. `RunEngine.discardLeftovers(worker)` stops tracking them and changes nothing on the worker. For a listed worker (declared, or removed with attempts still running), it fails with `LeftoversDiscardRejectedError`, which names the worker and counts its open attempts.
+Attempts on a worker that `StepExecutor.workers` doesn't list aren't reconciled. `RunEngine.discardLeftovers(worker)` stops tracking them, then passes them to `StepExecutor.discard`, which removes what they left outside their checkouts, such as their Codex homes on an SSH worker, and never fails. Their checkouts stay. For a listed worker (declared, or removed with attempts still running), it fails with `LeftoversDiscardRejectedError`, which names the worker and counts its open attempts.
 
 ### Transcripts
 

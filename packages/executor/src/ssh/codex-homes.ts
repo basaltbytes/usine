@@ -18,9 +18,13 @@ for home in "$1"/* "$1"/.[!.]* "$1"/..?*; do
 done
 `.trim();
 
+/** Returns the Codex home of `attemptId` in the Worker directory `workerDirectory`. */
+export const codexHomeIn = (workerDirectory: string, attemptId: AttemptId): string =>
+  `${workerDirectory}/codex/${safeSegment(attemptId)}`;
+
 /** Returns the Attempt's Codex home on `machine`, which Codex also writes its sessions to. */
 export const attemptCodexHome = (machine: SshMachine, attemptId: AttemptId): string =>
-  `${machine.workerDirectory}/codex/${safeSegment(attemptId)}`;
+  codexHomeIn(machine.workerDirectory, attemptId);
 
 /**
  * Tracks the Codex homes that Attempts in this process use. `hold` gives an Attempt its Codex

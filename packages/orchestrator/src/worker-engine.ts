@@ -9,7 +9,12 @@ import {
   layer as cloudflareLayer,
 } from "./cloudflare.ts";
 import { layer as localLayer } from "./local.ts";
-import { layer as sshLayer, sshWorkerAddressesOf, sshWorkersOf } from "./ssh.ts";
+import {
+  layer as sshLayer,
+  sshWorkerAddressesOf,
+  sshWorkerRecordsDirectory,
+  sshWorkersOf,
+} from "./ssh.ts";
 
 /**
  * Provides the engine for the Workers in `config`: the SSH executor if every Worker is `ssh`, the
@@ -46,6 +51,7 @@ export const workerEngineLayer = (
           workers: addresses,
           instance,
           knownHostsDirectory: `${instanceDirectory}/.usine/known-hosts`,
+          workerRecordsDirectory: sshWorkerRecordsDirectory(instanceDirectory),
         });
       }
       if (cloudflareWorkersOf(config).length === config.workers.length) {
