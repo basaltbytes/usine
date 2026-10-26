@@ -247,7 +247,7 @@ export class GatewayProxy extends Context.Service<
             `The caller token was issued for ${claims.repository}, not ${named.value}.`,
           );
         const headers = withGitHubCredential(
-          route.value,
+          route.value.protocol,
           attachment.credential,
           withoutCallerCredentials(endToEndHeaders(request.headers)),
         );

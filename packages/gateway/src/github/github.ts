@@ -150,7 +150,7 @@ export const gatewayLocation = (
  * bearer token for the API. An anonymous attachment adds nothing.
  */
 export const withGitHubCredential = (
-  route: GitHubRoute,
+  protocol: GitHubRoute["protocol"],
   credential: AttachmentCredential,
   headers: Headers.Headers,
 ): Headers.Headers => {
@@ -162,7 +162,7 @@ export const withGitHubCredential = (
       return Headers.set(
         headers,
         "authorization",
-        route.protocol === "api"
+        protocol === "api"
           ? `Bearer ${token}`
           : `Basic ${Encoding.encodeBase64(`x-access-token:${token}`)}`,
       );
