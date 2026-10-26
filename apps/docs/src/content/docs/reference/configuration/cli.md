@@ -122,7 +122,7 @@ The first `SIGINT` or `SIGTERM` (Ctrl+C) starts a graceful drain: usine logs `Or
 
 A second signal, or the deadline, stops the orchestrator without waiting. Running attempts stay recorded as open, and the next `usine up` reattaches them. Runs that wait for a worker and pending automatic retries continue at the next start. The process exits with status 130. Until it exits, the instance lock blocks a new `usine up`.
 
-`usine stop` sends these signals for you and waits for the process to exit.
+`usine stop` sends these signals for you and waits for the process to exit. With `--force`, it sends `SIGKILL` if the process still runs after its timeout.
 
 ## `usine status`
 
@@ -153,11 +153,13 @@ The command exits with status 0 if a process holds the instance, and 3 if none d
 | Flag | Value | Default | Description |
 | --- | --- | --- | --- |
 | `--timeout <seconds>`, `--timeout=<seconds>` | whole number above 0 | `120` | How long to wait for the process to exit. |
-| `--force` | none | off | Sends a second `SIGTERM`, which stops the orchestrator without waiting for running attempts. The next `usine up` reattaches them. |
+| `--force` | none | off | Sends a second `SIGTERM`, which stops the orchestrator without waiting for running attempts, and `SIGKILL` if the process still runs after the timeout. The next `usine up` reattaches the attempts. |
 
 Sends `SIGTERM` to the orchestrator, which starts the [drain](#shutdown), and waits until the process exits. It names the runs whose attempts the drain waits for. If no `usine up` runs, it prints `usine is not running in <folder>.` and exits with status 0. It also stops an orchestrator of an earlier usine version, through `.usine/instance.pid`.
 
 If the process still runs after the timeout, the command exits with status 1, and the drain continues. Run `usine stop` again to keep waiting: the instance record shows the drain, so the command doesn't send the second signal. Run `usine stop --force` to stop without waiting.
+
+With `--force`, a process that still runs after the timeout gets `SIGKILL`, and the command prints `usine (pid <pid>) did not exit within <timeout>. Sent SIGKILL: the next start reattaches the running attempts.` It then waits up to 5 seconds for the process to exit, and exits with status 1 if the process still runs.
 
 ## `usine restart`
 

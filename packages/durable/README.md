@@ -32,7 +32,7 @@ After the terminal envelope, `finished(attemptId)` returns `ParentReported` with
 
 `AttemptRequest.host` (`@usine/agents/child-host`) is where the worker runs children: `LocalProcess` here or `RemoteShell` over SSH. The `subagent` tool passes it and the worker's name to every child, and tags child logs with the attempt id. `AttemptRequest.environment` is the whole environment of every local child and its commands; on `RemoteShell`, it's exported over the machine's own.
 
-The task doesn't store the host or environment. It stores the run spec, worker, and worktree as a `StoredRequest`, which `request(attemptId)` returns, so a reattachment knows its run spec, base commit, and worktree. After a restart, the parent waits for the next `execute` to supply the host and environment before launching another child.
+The task doesn't store the host or environment. It stores the run spec, worker, and worktree as a `StoredRequest`, which `request(attemptId)` returns, so a reattachment knows its run spec, base commit, and worktree. After a restart, or after the executor releases the attempt, the parent waits for the next `execute` to supply the host and environment before launching another child. An abort of the tool call ends that wait, for example when a stopping orchestrator closes the harness. The next start then resumes the call as interrupted.
 
 `AttemptRequest.gatewayCredential`, supplied the same way, is the credential kind that the worker's gateway uses for the children, from the worker's latest preflight, or none if they use their harness's login. The `subagent` tool records it on each child's `ChildSession` at start, so usage counts the child in the right pool. A preflight during the attempt applies to its next child.
 
