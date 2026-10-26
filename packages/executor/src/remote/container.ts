@@ -1,6 +1,7 @@
 import { CHILD_KILL_SCRIPT, RemoteShell, type ShellContainer } from "@usine/agents/child-host";
 import type { Harness } from "@usine/core/agent/brain";
 import type { AttemptId } from "@usine/core/attempt";
+import type { InstanceId } from "@usine/core/instance";
 import { safeSegment } from "@usine/core/repository";
 import type {
   ContainerCpus,
@@ -18,6 +19,7 @@ export const CONTAINER_RUNTIME = "docker";
 
 /** The labels on each container, so a later process finds the ones it left. */
 const INSTANCE_LABEL = "dev.usine.instance";
+const INSTANCE_ID_LABEL = "dev.usine.instance-id";
 const WORKER_LABEL = "dev.usine.worker";
 const ATTEMPT_LABEL = "dev.usine.attempt";
 /** The label of a preflight's container, which removes itself and never needs a sweep. */
@@ -36,8 +38,10 @@ export interface ContainerSettings {
   readonly cpus: ContainerCpus;
   readonly memoryMib: ContainerMemoryMib;
   readonly pids: ContainerPids;
-  /** The value of the instance label, which identifies the containers of this usine instance. */
+  /** The value of the instance label, which the instances that share a GitHub App share too. */
   readonly instance: string;
+  /** The value of the instance ID label, which tells apart the instances that share the App. */
+  readonly instanceId: InstanceId;
 }
 
 /** How a Worker runs an Attempt's commands on its machine. */
@@ -139,12 +143,12 @@ exec "$1" exec "$2" sh -c "$3" sh "$4"
 const STATE_FORMAT = "{{.State.Status}} {{.State.ExitCode}} {{.State.OOMKilled}}";
 
 /**
- * A script that lists the containers labeled `$2`, one `<name> <worker>` line each. Prints
- * nothing if the machine has no container CLI.
+ * A script that lists the containers with both labels `$2` and `$3`, one `<name> <worker>` line
+ * each. Prints nothing if the machine has no container CLI.
  */
 const LIST_SCRIPT = String.raw`
 command -v "$1" >/dev/null 2>&1 || exit 0
-exec "$1" ps --all --filter "label=$2" --format '{{.Names}} {{.Label "dev.usine.worker"}}'
+exec "$1" ps --all --filter "label=$2" --filter "label=$3" --format '{{.Names}} {{.Label "dev.usine.worker"}}'
 `.trim();
 
 /**
@@ -289,6 +293,7 @@ export const containersFor = (commands: RemoteCommands) => {
       onSome: (attemptId) => ({
         labels: [
           `${INSTANCE_LABEL}=${spec.settings.instance}`,
+          `${INSTANCE_ID_LABEL}=${spec.settings.instanceId}`,
           `${WORKER_LABEL}=${spec.worker}`,
           `${ATTEMPT_LABEL}=${attemptId}`,
         ],
@@ -414,22 +419,24 @@ export const containersFor = (commands: RemoteCommands) => {
   });
 
   /**
-   * Removes the containers labeled with `instance` on the machine of `shell` whose Worker
-   * label is `worker` or not in `kept`. Returns the names removed.
+   * Removes the containers labeled with `instance` and `instanceId` on the machine of `shell`
+   * whose Worker label is `worker` or not in `kept`. Returns the names removed.
    */
   const sweep = Effect.fn("RemoteExecutor.sweepContainers")(function* (
     shell: RemoteShell,
     instance: string,
+    instanceId: InstanceId,
     worker: WorkerName,
     kept: ReadonlySet<string>,
   ) {
-    yield* Effect.annotateCurrentSpan({ host: shell.destination, worker, instance });
+    yield* Effect.annotateCurrentSpan({ host: shell.destination, worker, instance, instanceId });
     const listed = (yield* commands.run("cleanup", shell, "sh", [
       "-c",
       LIST_SCRIPT,
       "sh",
       CONTAINER_RUNTIME,
       `${INSTANCE_LABEL}=${instance}`,
+      `${INSTANCE_ID_LABEL}=${instanceId}`,
     ]))
       .split("\n")
       .flatMap((line) => {
@@ -443,6 +450,7 @@ export const containersFor = (commands: RemoteCommands) => {
       yield* Effect.logDebug("No earlier process left a container on the Worker's machine", {
         worker,
         host: shell.destination,
+        instanceId,
         running: listed.length,
       });
       return left;
@@ -451,6 +459,7 @@ export const containersFor = (commands: RemoteCommands) => {
     yield* Effect.logInfo("Removed the containers an earlier process left on the machine", {
       worker,
       host: shell.destination,
+      instanceId,
       containers: left.join(","),
     });
     return left;

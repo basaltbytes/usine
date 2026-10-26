@@ -21,6 +21,7 @@ import {
   fails,
   fakeMachine,
   INSTANCE,
+  INSTANCE_ID,
   mintingProvider,
   request,
   runtime,
@@ -146,6 +147,7 @@ describe("SSH Worker with Docker", () => {
         );
         assert.includeMembers(words, [
           `dev.usine.instance=${INSTANCE}`,
+          `dev.usine.instance-id=${INSTANCE_ID}`,
           `dev.usine.worker=${WORKER}`,
           `dev.usine.attempt=${request.attemptId}`,
         ]);
@@ -403,13 +405,14 @@ describe("SSH Worker with Docker", () => {
   );
 
   it.effect(
-    "removes the containers an earlier process left before a Worker's first Attempt, and keeps a running Attempt's on a shared machine",
+    "removes the containers an earlier process left before a Worker's first Attempt, and keeps a running Attempt's on a shared machine and another instance's",
     () => {
       const machine = dockerMachine();
-      const leftover = (worker: string, instance = INSTANCE) => ({
+      const leftover = (worker: string, instance = INSTANCE, instanceId: string = INSTANCE_ID) => ({
         args: [],
         labels: new Map([
           ["dev.usine.instance", instance],
+          ["dev.usine.instance-id", instanceId],
           ["dev.usine.worker", worker],
         ]),
         environment: "",
@@ -418,6 +421,11 @@ describe("SSH Worker with Docker", () => {
       machine.state.containers.set("usine-crashed", leftover(WORKER));
       machine.state.containers.set("usine-of-a-removed-worker", leftover("eu-gone"));
       machine.state.containers.set("usine-of-another-instance", leftover(WORKER, "github-app-7"));
+      // Another instance folder with the same GitHub App, running on the same machine.
+      machine.state.containers.set(
+        "usine-of-an-instance-sharing-the-app",
+        leftover(WORKER, INSTANCE, "5d0c9a1e-2f4b-4e8a-b7c6-3a9d1e0f2b8c"),
+      );
       const second = WorkerName.make("eu-two");
       const secondRequest = new CheckoutRequest({
         ...request,
@@ -442,6 +450,7 @@ describe("SSH Worker with Docker", () => {
         );
         yield* Deferred.await(working);
         assert.deepStrictEqual([...machine.state.containers.keys()].sort(), [
+          "usine-of-an-instance-sharing-the-app",
           "usine-of-another-instance",
           CONTAINER,
         ]);
@@ -451,7 +460,10 @@ describe("SSH Worker with Docker", () => {
         assert(machine.state.containers.has(CONTAINER), "the running Attempt keeps its container");
         yield* Deferred.succeed(done, undefined);
         yield* Fiber.join(first);
-        assert.deepStrictEqual([...machine.state.containers.keys()], ["usine-of-another-instance"]);
+        assert.deepStrictEqual([...machine.state.containers.keys()].sort(), [
+          "usine-of-an-instance-sharing-the-app",
+          "usine-of-another-instance",
+        ]);
       }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider(), parent)));
     },
   );

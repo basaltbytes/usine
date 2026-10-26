@@ -62,6 +62,8 @@ export interface InstanceFiles {
   /** The output of an instance that `usine up --detach` or `usine restart` started. */
   readonly log: string;
   readonly backups: string;
+  /** The instance's ID, which every `usine up` of the folder reuses. */
+  readonly id: string;
 }
 
 export const instanceFiles = (directory: string): InstanceFiles => {
@@ -73,6 +75,7 @@ export const instanceFiles = (directory: string): InstanceFiles => {
     record: join(folder, "instance.json"),
     log: join(folder, "usine.log"),
     backups: join(folder, "backups"),
+    id: join(folder, "instance-id"),
   };
 };
 

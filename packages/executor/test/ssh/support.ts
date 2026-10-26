@@ -5,6 +5,7 @@ import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget } from "@usine/core/agent/session";
 import { AttemptTask, AttemptId, AttemptWindow, AttemptWindows } from "@usine/core/attempt";
 import { InfraFailure } from "@usine/core/attempt/failure";
+import { InstanceId } from "@usine/core/instance";
 import { SalvageRef } from "@usine/core/attempt/salvage";
 import { LoopName, type LoopPermissions } from "@usine/core/loop";
 import { RepositoryName, CommitSha, RepositoryRevision } from "@usine/core/repository";
@@ -389,10 +390,10 @@ export const fakeMachine = () => {
       );
     }
     if (line.includes("ps --all")) {
-      const label = words[5] ?? "";
-      const [key = "", value = ""] = label.split("=");
-      const listed = [...state.containers].filter(
-        ([, container]) => container.labels.get(key) === value,
+      // sh -c <script> sh docker <label> <label>; a container must have both, as with docker ps.
+      const filters = words.slice(5, 7).map((label) => label.split("="));
+      const listed = [...state.containers].filter(([, container]) =>
+        filters.every(([key = "", value = ""]) => container.labels.get(key) === value),
       );
       return oneShotHandle(
         listed
@@ -722,6 +723,8 @@ export const ADDRESS: SshWorkerAddress = {
 
 /** The instance label of the test executor's containers. */
 export const INSTANCE = "github-app-4242";
+/** The instance ID label of the test executor's containers. */
+export const INSTANCE_ID = InstanceId.make("0b4e7f3c-5a2d-4c1e-9f6b-8d7a2e1c3b4f");
 
 /** An HTTP client layer for a Worker without a Gateway; never called. */
 const noGateway = Layer.succeed(
@@ -744,7 +747,13 @@ export const executorLayer = (
   /** Replaces the executor's own login and binary checks. */
   probes: Pick<SshExecutorOptions, "harnessReadiness"> = {},
 ) =>
-  sshLayer({ workers: [address], instance: INSTANCE, interruptGrace: "2 seconds", ...probes }).pipe(
+  sshLayer({
+    workers: [address],
+    instance: INSTANCE,
+    instanceId: INSTANCE_ID,
+    interruptGrace: "2 seconds",
+    ...probes,
+  }).pipe(
     Layer.provide(machine.layer),
     Layer.provide(credentials.layer),
     Layer.provide(stubAttemptRuntime(storage, parent)),
