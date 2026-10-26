@@ -3,6 +3,7 @@ import type { backup } from "./backup.ts";
 import type { CliUsageError, CliVersionError } from "./cli.ts";
 import type { upDetached } from "./detach.ts";
 import type { exportRun } from "./export-run.ts";
+import type { instanceEnvironment } from "./instance/environment.ts";
 import type { restart } from "./restart.ts";
 import type { status } from "./status.ts";
 import type { LifecycleCommandName, stop } from "./stop.ts";
@@ -13,6 +14,7 @@ import type { UpgradeFailedError, upgrade } from "./upgrade.ts";
 export type CliFailure =
   | CliUsageError
   | CliVersionError
+  | Effect.Error<ReturnType<typeof instanceEnvironment>>
   | Effect.Error<ReturnType<typeof up>>
   | Effect.Error<ReturnType<typeof upDetached>>
   | Effect.Error<ReturnType<typeof status>>
@@ -142,6 +144,8 @@ export const failureMessage = (failure: CliFailure): string =>
     CliUsageError: ({ message }) => message,
     CliVersionError: ({ cause }) =>
       `Could not read the installed @usine/server version${because(cause)}. Reinstall @usine/server.`,
+    EnvironmentFileError: ({ path, reason }) =>
+      `usine did nothing: could not read ${path} (${clause(reason)}). usine reads it for the variables that the environment doesn't set. Make it readable, or remove it.`,
     RunNotFoundError: ({ runId }) => `Run ${runId} was not found.`,
     RunExportError: ({ runId, operation, path, reason }) =>
       `Could not ${operation} the evidence for run ${runId} at ${path} (${reason}). Check the instance database, and choose a new writable output path.`,
@@ -201,7 +205,7 @@ export const failureMessage = (failure: CliFailure): string =>
           `usine ${command} did nothing: usine (pid ${holder}) runs in ${directory} without .usine/instance.json, so its port and command line are unknown. It is a usine version that doesn't write one, or it is still starting. Stop it with usine stop, then start it with usine up --detach.`,
       }),
     MissingEnvironmentError: ({ command, variables }) =>
-      `usine ${command} left the instance running: this shell doesn't set ${variables.join(", ")}, which the new usine up reads at startup for its ${variables.length === 1 ? "gateway" : "gateways"}. The new process gets the environment of the shell that runs usine ${command}. Set ${variables.length === 1 ? "it" : "them"}, then run usine ${command} again.`,
+      `usine ${command} left the instance running: neither this shell nor .env sets ${variables.join(", ")}, which the new usine up reads at startup for its ${variables.length === 1 ? "gateway" : "gateways"}. The new process gets the environment of the shell that runs usine ${command}, and reads .env in the instance folder. Add ${variables.length === 1 ? "it" : "them"} to .env, then run usine ${command} again.`,
     LiveAttemptsError: ({ command, runs }) =>
       `usine ${command} left the instance running: ${runList(runs)} ${runs.length === 1 ? "has a running attempt" : "have running attempts"}. Wait for ${runs.length === 1 ? "it" : "them"} to end, or run usine ${command} --force to stop without waiting; the next start reattaches the attempts.`,
     DetachedStartError: ({ outcome, pid, exit, timeout, port, log, tail }) =>

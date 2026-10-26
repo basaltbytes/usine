@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { NodeRuntime, NodeServices } from "@effect/platform-node";
 import { InstanceDirectory } from "@usine/core/instance";
-import { Console, Effect, Layer, Match, Option } from "effect";
+import { Config, ConfigProvider, Console, Effect, Layer, Match } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
-import { CLI_USAGE, packageVersion, parseCli } from "./cli.ts";
+import { CLI_USAGE, type CliEnvironment, packageVersion, parseCli } from "./cli.ts";
 import { failureMessage } from "./failure-message.ts";
+import { instanceEnvironment } from "./instance/environment.ts";
 
 /** The exit status of `usine status` when no `usine up` runs, as for LSB init scripts. */
 const NOT_RUNNING_STATUS = 3;
@@ -18,13 +19,16 @@ const exitWith = (message: string) =>
     ),
   );
 
-const main = Effect.gen(function* () {
-  const command = yield* parseCli(process.argv.slice(2), {
-    port: Option.fromNullishOr(process.env.USINE_PORT),
-    logLevel: Option.fromNullishOr(process.env.USINE_LOG_LEVEL),
-    allowVolatileInstance: Option.fromNullishOr(process.env.USINE_ALLOW_VOLATILE_INSTANCE),
-  });
-  const directory = InstanceDirectory.make(process.cwd());
+const cliEnvironment: Config.Config<CliEnvironment> = Config.all({
+  port: Config.option(Config.string("USINE_PORT")),
+  logLevel: Config.option(Config.string("USINE_LOG_LEVEL")),
+  allowVolatileInstance: Config.option(Config.string("USINE_ALLOW_VOLATILE_INSTANCE")),
+});
+
+// Untraced: a span around `usine up`, which never returns, would parent every span it exports.
+const runCommand = Effect.fnUntraced(function* (directory: InstanceDirectory) {
+  // An environment and a parsed .env don't fail to load, so a ConfigError here is a defect.
+  const command = yield* parseCli(process.argv.slice(2), yield* Effect.orDie(cliEnvironment));
   return yield* Match.valueTags(command, {
     HelpCommand: () => Console.log(CLI_USAGE),
     VersionCommand: () => Effect.flatMap(packageVersion(), Console.log),
@@ -79,6 +83,14 @@ const main = Effect.gen(function* () {
         ({ upgrade }) => upgrade(directory, upgradeCommand),
       ),
   });
+});
+
+const main = Effect.gen(function* () {
+  const directory = InstanceDirectory.make(process.cwd());
+  const environment = yield* instanceEnvironment(directory, yield* ConfigProvider.ConfigProvider);
+  return yield* runCommand(directory).pipe(
+    Effect.provideService(ConfigProvider.ConfigProvider, environment),
+  );
 }).pipe(
   Effect.provide(Layer.merge(NodeServices.layer, FetchHttpClient.layer)),
   // Only typed failures are caught: a defect still crashes with its full cause.

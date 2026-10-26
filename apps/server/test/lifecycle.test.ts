@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -6,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { NodeServices } from "@effect/platform-node";
 import { InstanceDirectory } from "@usine/core/instance";
 import { RunId } from "@usine/core/run";
-import { ConfigProvider, Duration, Effect, Layer, Option, Schema } from "effect";
+import { Duration, Effect, Layer, Option, Schema } from "effect";
 import { FetchHttpClient, type HttpClient } from "effect/unstable/http";
 import { afterEach, assert, describe, it } from "vitest";
 import { LifecycleOptions, Port, SERVER_HOST, type UpLogLevel } from "../src/cli.ts";
@@ -18,6 +19,7 @@ import { stop } from "../src/stop.ts";
 
 const SCENARIO_TIMEOUT_MS = 60_000;
 const FIXTURE = fileURLToPath(new URL("./fixtures/instance.mjs", import.meta.url));
+const CLI = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 
 const folders: Array<string> = [];
 const pids = new Set<number>();
@@ -78,6 +80,20 @@ const startFixture = async (
   pids.add(pid);
   return { pid, launch };
 };
+
+/**
+ * Runs the `usine` CLI in `directory` and returns its standard output, or rejects with its standard
+ * error if it fails. Asynchronous, so this process reaps the instance processes it started.
+ */
+const runCli = (directory: InstanceDirectory, args: ReadonlyArray<string>) =>
+  new Promise<string>((resolve, reject) => {
+    execFile(
+      process.execPath,
+      ["--experimental-strip-types", "--no-warnings", CLI, ...args],
+      { cwd: directory, timeout: SCENARIO_TIMEOUT_MS },
+      (error, stdout, stderr) => (error === null ? resolve(stdout) : reject(new Error(stderr))),
+    );
+  });
 
 const alive = (pid: number) => {
   try {
@@ -177,7 +193,7 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
     assert.isFalse(alive(record.pid));
   });
 
-  it("refuses to restart from a shell that lacks a gateway token variable", async () => {
+  it("refuses to restart while neither the shell nor .env sets a gateway token variable", async () => {
     const directory = instanceFolder();
     const first = await startFixture(directory);
     const variable = `USINE_TEST_GATEWAY_TOKEN_${process.pid}`;
@@ -188,14 +204,10 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
     assert.deepStrictEqual(refused.variables, [variable]);
     assert.isTrue(alive(first.pid));
 
-    await run(
-      restart(directory, options(20)).pipe(
-        Effect.provideService(
-          ConfigProvider.ConfigProvider,
-          ConfigProvider.fromEnv({ env: { [variable]: "token" } }),
-        ),
-      ),
-    );
+    // The CLI runs from a shell without the variable, as a bare `usine restart` does.
+    writeFileSync(join(directory, ".env"), `${variable}=token\n`);
+    const output = await runCli(directory, ["restart", "--timeout", "20"]);
+    assert.match(output, /usine is running at http:\/\/127\.0\.0\.1:\d+ \(pid \d+\)/u);
     const state = await run(probeInstance(directory));
     assert(state._tag === "Running");
     pids.add(state.record.pid);
