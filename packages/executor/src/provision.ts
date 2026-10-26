@@ -645,6 +645,12 @@ export const keptCheckoutRecovery = (request: CheckoutRequest): AttemptRecovery 
   rejected: Option.none(),
 });
 
+/** Returns the span and log fields of `attempt`, with whether its recorded salvage was rejected. */
+export const recoveryFields = (attempt: AttemptRecovery) => ({
+  ...attempt,
+  rejected: Option.isSome(attempt.rejected),
+});
+
 /**
  * Reconciles a checkout left by an earlier process, or kept while its parent task's stop was
  * unconfirmed: salvages it without a known base, records the result, and removes the worktree
@@ -659,7 +665,7 @@ export const recoverWorktree = Effect.fn("Executor.recoverWorktree")(function* <
   record: (salvage: AttemptSalvage) => Effect.Effect<void, RecordError>,
 ) {
   const { attempt, host, worktree } = options;
-  const fields = { ...attempt, rejected: Option.isSome(attempt.rejected), host, worktree };
+  const fields = { ...recoveryFields(attempt), host, worktree };
   yield* Effect.annotateCurrentSpan(fields);
   if (attempt.succeeded || attempt.permissions === "read") {
     yield* options.removeCheckout;

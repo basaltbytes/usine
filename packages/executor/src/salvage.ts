@@ -20,8 +20,7 @@ const LARGE_FILES_REFUSAL = /\bGH001\b/u;
 
 /**
  * The checkout's paths that the salvage commits: everything that Git doesn't ignore, except
- * package stores and build caches at any depth. pnpm puts its store in the checkout when its
- * default store is on another filesystem (#581).
+ * package stores and build caches at any depth.
  */
 const SALVAGED_PATHS = [
   ".",
@@ -72,9 +71,10 @@ const oversizedIn = (listing: string, staged: ReadonlySet<string>): ReadonlyArra
   listing.split("\0").flatMap((entry) => {
     // <mode> SP <type> SP <object> SP <padded size> TAB <path>
     const tab = entry.indexOf("\t");
+    if (tab < 0) return [];
     const [, type, , size] = entry.slice(0, tab).split(/ +/u);
     const path = entry.slice(tab + 1);
-    return tab > 0 && type === "blob" && Number(size) > GITHUB_FILE_LIMIT_BYTES && staged.has(path)
+    return type === "blob" && Number(size) > GITHUB_FILE_LIMIT_BYTES && staged.has(path)
       ? [{ path, size: Number(size) }]
       : [];
   });

@@ -66,6 +66,7 @@ import {
   provisionWorktree,
   reattachWorktree,
   recoverWorktree,
+  recoveryFields,
   type WorkspaceOps,
 } from "../provision.ts";
 import { type RemoteCommands, remoteCommandsFor } from "../remote/commands.ts";
@@ -729,7 +730,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
       record: RecoverySink<E>,
       commitAuthor: Effect.Effect<BotAccount, A>,
     ) {
-      yield* Effect.annotateCurrentSpan({ ...attempt, rejected: Option.isSome(attempt.rejected) });
+      yield* Effect.annotateCurrentSpan(recoveryFields(attempt));
       yield* session.stopForRecovery(attempt);
       const worker = yield* workerFor("cleanup", attempt.worker);
       const name = sandboxName(worker.owner, attempt.attemptId);
