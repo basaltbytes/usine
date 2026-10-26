@@ -65,12 +65,17 @@ const restartTarget = Effect.fn("Cli.restartTarget")(function* (
   directory: InstanceDirectory,
   fallback: Effect.Effect<InstanceLaunch, CliUsageError>,
 ) {
+  yield* Effect.annotateCurrentSpan({ instanceDirectory: directory });
   const state = yield* probeInstance(directory);
   if (state._tag === "Stopped") {
+    yield* Effect.logInfo("Refusing to restart: usine is not running in the instance folder", {
+      instanceDirectory: directory,
+    });
     return yield* new InstanceNotRunningError({ command: "restart", directory });
   }
   if (state._tag === "Running") {
     const { record } = state;
+    yield* Effect.annotateCurrentSpan({ pid: record.pid });
     return {
       pid: record.pid,
       record: Option.some(record),
@@ -79,9 +84,14 @@ const restartTarget = Effect.fn("Cli.restartTarget")(function* (
     };
   }
   if (Option.isNone(state.pid)) {
+    yield* Effect.logInfo(
+      "Refusing to restart: a process holds the instance lock, but the pid file names no running process",
+      { instanceDirectory: directory },
+    );
     return yield* new UnrecordedInstanceError({ command: "restart", directory, pid: state.pid });
   }
   const pid = state.pid.value;
+  yield* Effect.annotateCurrentSpan({ pid });
   const launch = yield* fallback;
   const port = yield* operatorPort(pid).pipe(
     Effect.tapError((error) =>
