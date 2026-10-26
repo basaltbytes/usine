@@ -232,6 +232,19 @@ StateDirectoryMode=0700
 systemctl daemon-reload && systemctl restart usine-gateway
 ```
 
+### Provider terms
+
+Anthropic's [legal and compliance page for Claude Code](https://code.claude.com/docs/en/legal-and-compliance) (read 2026-10-26) allows a subscriber to sign in to the unmodified Claude Code binary with their own plan, including where a platform runs Claude Code in sandboxes, and allows customers to keep their own credentials in a secrets manager or machine image for their own authorized users. It forbids third-party developers from offering Claude.ai login in their own applications, from routing requests through Free, Pro or Max plan credentials on behalf of their users, and from collecting, storing or intermediating other people's Claude.ai credentials or session tokens. Plan limits assume ordinary individual usage. OpenAI documents Sign in with ChatGPT as the default login of the [Codex CLI](https://developers.openai.com/codex/auth); its terms of use were not read for this page.
+
+The gateway stays inside those terms as long as four things remain true:
+
+- The gateway stores the credentials of the operator who runs the instance and signs only that operator's agents' requests. usine is software you run yourself; an instance that stored or relayed other people's subscription logins would be the forbidden case.
+- Every user of an instance authenticates with their own login or key. Nobody's attempts run on another person's plan.
+- Claude Code and Codex run unmodified, with the sign-in methods they ship. The gateway replaces a bearer token in transit and changes nothing in the binaries.
+- A subscription at the gateway is subject to the plan's usage limits, which assume one person's use. A factory that runs many attempts at once runs into those limits sooner than a person would; an operator who needs more buys a Team or Enterprise plan or uses an API key.
+
+The ChatGPT login is the one place where usine itself, not a harness, talks to a provider's authentication endpoint: the gateway refreshes the token with the OAuth client the Codex CLI uses, and writes the rotated refresh token back to its file.
+
 ## Create a worker behind the gateway
 
 `worker-user-data` takes a file of public keys to authorize for `usine`, one per line:

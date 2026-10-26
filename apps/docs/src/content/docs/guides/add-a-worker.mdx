@@ -300,6 +300,8 @@ The scripts are in `infra/hetzner/gateway/`, and its `README.md` describes every
 
     `llm_providers` lists the providers whose credential the gateway holds from step 5: `anthropic` for Claude Code, `openai` for Codex. Their children call the gateway with the caller token instead of using a login on the worker. Leave out a provider whose harness logs in on the worker.
 
+    A subscription at the gateway is your own login used by your own agents. Anthropic's [legal and compliance page](https://code.claude.com/docs/en/legal-and-compliance) allows that, and forbids storing or relaying other people's subscription logins, so an instance with several users gives each user their own credential. The harness binaries run unmodified, and the plan's usage limits, meant for one person, apply to every attempt the gateway signs. [Provider terms](https://github.com/basaltbytes/usine/blob/main/infra/hetzner/gateway/README.md#provider-terms) in the gateway README has the full note.
+
 11. Start the orchestrator. It reads the token from `.env`, and so do `usine restart` and `usine upgrade` from any shell:
 
     ```sh title="Instance folder"
