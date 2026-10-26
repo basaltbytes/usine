@@ -23,6 +23,7 @@ import {
   githubRoute,
   withGitHubCredential,
 } from "../github/github.ts";
+import { PERMANENT_REDIRECTS, redirectedName } from "../github/rename.ts";
 import { type ChatGptLoginUnavailable, ChatGptLogins } from "../chatgpt/logins.ts";
 import {
   type ChatGptLogin,
@@ -195,12 +196,30 @@ export class GatewayProxy extends Context.Service<
       });
 
       /**
-       * Points a `Location` at github.com or api.github.com to `git.<domain>`, and logs the rewrite.
-       * GitHub answers a renamed or transferred repository's former name with a permanent
-       * redirect to its new name, so if `requested` named the repository, a 301 or 308 teaches
-       * the attachment the repository its `Location` names. A path that names no repository, such
-       * as `/repositories/ID/...`, teaches nothing: the gateway can't tell which repository it was.
+       * Teaches the attachment the new name in GitHub's permanent redirect of a request for the
+       * repository itself. GitHub answers a renamed or transferred repository's former name that
+       * way; a redirect of anything else can name another repository without a rename.
        */
+      const learnFromRedirect = Effect.fn("GatewayProxy.learnFromRedirect")(function* (
+        live: LiveAttachment,
+        requested: GitHubRoute,
+        location: URL,
+      ) {
+        const { attachment } = live;
+        const newName = Option.flatMap(absoluteUrl(requested.upstream), (upstream) =>
+          redirectedName(settings.github, upstream, location),
+        );
+        if (Option.isNone(newName))
+          return yield* Effect.logDebug("Learned no name from a redirect that isn't a rename", {
+            attachment: attachment.id,
+            worker: attachment.worker,
+            repository: attachment.repository,
+            path: location.pathname,
+          });
+        yield* attachments.learnNewName(attachment.id, newName.value);
+      });
+
+      /** Points a `Location` at github.com or api.github.com to `git.<domain>`, and logs the rewrite. */
       const throughGateway = Effect.fn("GatewayProxy.throughGateway")(function* (
         answer: HttpServerResponse.HttpServerResponse,
         live: LiveAttachment,
@@ -217,11 +236,8 @@ export class GatewayProxy extends Context.Service<
           from: from.value.host,
           path: to.value.pathname,
         });
-        if (Option.isSome(requested.repository) && PERMANENT_REDIRECTS.has(answer.status)) {
-          const named = githubRoute(settings.github, "gateway", to.value.pathname, to.value.search);
-          const newName = Option.flatMap(named, ({ repository }) => repository);
-          if (Option.isSome(newName)) yield* attachments.learnNewName(attachment.id, newName.value);
-        }
+        if (PERMANENT_REDIRECTS.has(answer.status))
+          yield* learnFromRedirect(live, requested, from.value);
         return HttpServerResponse.setHeader(answer, "location", to.value.href);
       });
 
@@ -387,9 +403,6 @@ export class GatewayProxy extends Context.Service<
     }),
   );
 }
-
-/** The statuses GitHub uses to redirect a renamed or transferred repository's former name. */
-const PERMANENT_REDIRECTS: ReadonlySet<number> = new Set([301, 308]);
 
 const refusalResponse = (error: Refused): HttpServerResponse.HttpServerResponse =>
   HttpServerResponse.jsonUnsafe(

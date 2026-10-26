@@ -6,6 +6,7 @@ import {
   gatewayLocation,
   githubRoute,
 } from "../src/github/github.ts";
+import { redirectedName } from "../src/github/rename.ts";
 
 const route = (host: GitHubHost, path: string) => {
   const url = new URL(path, "http://git.gw.test");
@@ -119,5 +120,42 @@ describe("gatewayLocation", () => {
       "https://github.com.example.net/acme/demo.git/info/refs",
     ])
       assert.isTrue(Option.isNone(rewritten(location)), location);
+  });
+});
+
+describe("redirectedName", () => {
+  const named = (requested: string, location: string) =>
+    Option.map(redirectedName(GITHUB_ORIGINS, new URL(requested), new URL(location)), String);
+
+  it("reads a new name from a redirect of the repository itself to the same path under another name", () => {
+    for (const [requested, location] of [
+      [
+        "https://github.com/acme/demo.git/info/refs?service=git-upload-pack",
+        "https://github.com/other/renamed.git/info/refs?service=git-upload-pack",
+      ],
+      ["https://github.com/acme/demo/info/refs", "https://github.com/acme/renamed.git/info/refs"],
+      ["https://api.github.com/repos/acme/demo", "https://api.github.com/repos/other/renamed"],
+    ] as const)
+      assert.isTrue(Option.isSome(named(requested, location)), requested);
+    assert.deepStrictEqual(
+      named("https://api.github.com/repos/acme/demo", "https://api.github.com/repos/acme/renamed"),
+      Option.some("acme/renamed"),
+    );
+  });
+
+  it("reads no name from a redirect of a sub-resource or to another kind of path", () => {
+    for (const [requested, location] of [
+      [
+        "https://api.github.com/repos/acme/demo/pulls",
+        "https://api.github.com/repos/acme/elsewhere/pulls",
+      ],
+      [
+        "https://github.com/acme/demo.git/git-upload-pack",
+        "https://github.com/acme/elsewhere.git/git-upload-pack",
+      ],
+      ["https://github.com/acme/demo.git/info/refs", "https://api.github.com/repos/acme/elsewhere"],
+      ["https://api.github.com/repos/acme/demo", "https://api.github.com/repositories/42"],
+    ] as const)
+      assert.isTrue(Option.isNone(named(requested, location)), `${requested} -> ${location}`);
   });
 });

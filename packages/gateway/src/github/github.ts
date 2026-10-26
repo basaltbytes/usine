@@ -92,7 +92,8 @@ const apiRoute = (base: UpstreamBase, rest: string, search: string): Option.Opti
   }));
 };
 
-const afterPrefix = (pathname: string, prefix: string): Option.Option<string> =>
+/** Returns `pathname` after `prefix`, if it is `prefix` or a path under it. */
+export const afterPrefix = (pathname: string, prefix: string): Option.Option<string> =>
   pathname === prefix || pathname.startsWith(`${prefix}/`)
     ? Option.some(pathname.slice(prefix.length))
     : Option.none();

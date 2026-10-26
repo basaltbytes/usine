@@ -639,7 +639,7 @@ describe("GatewayProxy", () => {
   );
 
   it.effect(
-    "only a permanent redirect of a request that names the repository teaches a new name, and only to that attachment",
+    "only a permanent redirect of the repository itself to another name teaches a new name, and only to that attachment",
     () =>
       Effect.gen(function* () {
         const caller = yield* attach(installation);
@@ -649,12 +649,17 @@ describe("GatewayProxy", () => {
             send(`http://git.gw.test${path}`, { "x-usine-gateway-token": token }),
             (response) => [response.status, response.headers.get(REFUSAL_HEADER)],
           );
-        yield* outcome("/acme/demo.git/info/refs", caller);
-        yield* outcome("/acme/demo/releases/download/v1.2.0/tool.tar.gz", caller);
-        yield* outcome("/api/v3/repositories/42", caller);
+        for (const path of [
+          "/acme/demo.git/info/refs",
+          "/acme/demo/info/refs",
+          "/acme/demo/releases/download/v1.2.0/tool.tar.gz",
+          "/api/v3/repositories/42",
+        ])
+          yield* outcome(path, caller);
         assert.deepStrictEqual(yield* outcome("/acme/renamed.git/info/refs", caller), [200, null]);
         for (const [path, token] of [
           ["/acme/renamed.git/info/refs", otherAttempt],
+          ["/acme/temporary/info/refs", caller],
           ["/acme/moved/releases/download/v1.2.0/tool.tar.gz", caller],
           ["/api/v3/repos/acme/elsewhere", caller],
         ] as const)
@@ -668,12 +673,14 @@ describe("GatewayProxy", () => {
               {
                 "https://github.com/acme/demo.git/info/refs":
                   "https://github.com/acme/renamed.git/info/refs",
+                "https://github.com/acme/demo/releases/download/v1.2.0/tool.tar.gz":
+                  "https://github.com/acme/moved/releases/download/v1.2.0/tool.tar.gz",
                 "https://api.github.com/repositories/42":
                   "https://api.github.com/repos/acme/elsewhere",
               },
               redirecting(302, {
-                "https://github.com/acme/demo/releases/download/v1.2.0/tool.tar.gz":
-                  "https://github.com/acme/moved/releases/download/v1.2.0/tool.tar.gz",
+                "https://github.com/acme/demo/info/refs":
+                  "https://github.com/acme/temporary/info/refs",
               }),
             ),
           ),
