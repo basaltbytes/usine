@@ -6,11 +6,12 @@ import { fileURLToPath } from "node:url";
 import { NodeServices } from "@effect/platform-node";
 import { InstanceDirectory } from "@usine/core/instance";
 import { RunId } from "@usine/core/run";
-import { ConfigProvider, Duration, Effect, Layer, Option, Schema } from "effect";
+import { Duration, Effect, Layer, Option, Schema } from "effect";
 import { FetchHttpClient, type HttpClient } from "effect/unstable/http";
 import { afterEach, assert, describe, it } from "vitest";
 import { LifecycleOptions, Port, SERVER_HOST, type UpLogLevel } from "../src/cli.ts";
 import { startDetached } from "../src/detach.ts";
+import { withInstanceEnvironment } from "../src/instance/environment.ts";
 import { InstanceLaunch, instanceFiles } from "../src/instance/record.ts";
 import { probeInstance } from "../src/instance/state.ts";
 import { restart } from "../src/restart.ts";
@@ -177,25 +178,22 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
     assert.isFalse(alive(record.pid));
   });
 
-  it("refuses to restart from a shell that lacks a gateway token variable", async () => {
+  it("restarts from a shell that lacks a gateway token variable only if .env sets it", async () => {
     const directory = instanceFolder();
     const first = await startFixture(directory);
     const variable = `USINE_TEST_GATEWAY_TOKEN_${process.pid}`;
     writeFileSync(join(directory, "fixture-gateway-env"), variable);
 
-    const refused = await run(restart(directory, options(20)).pipe(Effect.flip));
+    const refused = await run(
+      restart(directory, options(20)).pipe(withInstanceEnvironment(directory), Effect.flip),
+    );
     assert(refused._tag === "MissingEnvironmentError");
     assert.deepStrictEqual(refused.variables, [variable]);
     assert.isTrue(alive(first.pid));
 
-    await run(
-      restart(directory, options(20)).pipe(
-        Effect.provideService(
-          ConfigProvider.ConfigProvider,
-          ConfigProvider.fromEnv({ env: { [variable]: "token" } }),
-        ),
-      ),
-    );
+    // The new fixture exits at startup unless it reads the variable from .env too.
+    writeFileSync(join(directory, ".env"), `${variable}=token\n`);
+    await run(restart(directory, options(20)).pipe(withInstanceEnvironment(directory)));
     const state = await run(probeInstance(directory));
     assert(state._tag === "Running");
     pids.add(state.record.pid);

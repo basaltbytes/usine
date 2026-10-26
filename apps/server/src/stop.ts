@@ -44,7 +44,10 @@ export class LiveAttemptsError extends Schema.TaggedError<LiveAttemptsError>(
   "@usine/server/LiveAttemptsError",
 )("LiveAttemptsError", { command: LifecycleCommandName, runs: Schema.Array(RunId) }) {}
 
-/** The shell that would start the new `usine up` lacks variables that its startup needs. */
+/**
+ * Neither the shell that would start the new `usine up` nor `.env` in the instance folder sets
+ * variables that its startup needs.
+ */
 export class MissingEnvironmentError extends Schema.TaggedError<MissingEnvironmentError>(
   "@usine/server/MissingEnvironmentError",
 )("MissingEnvironmentError", {
@@ -53,8 +56,9 @@ export class MissingEnvironmentError extends Schema.TaggedError<MissingEnvironme
 }) {}
 
 /**
- * Fails with `MissingEnvironmentError` if this process lacks a gateway admin token variable of the
- * running instance. The new `usine up` inherits this environment and doesn't start without them.
+ * Fails with `MissingEnvironmentError` if the current `ConfigProvider` lacks a gateway admin token
+ * variable of the running instance. The new `usine up` inherits this process's environment and
+ * reads the same `.env`, and doesn't start without them.
  */
 export const refuseMissingEnvironment = Effect.fn("Cli.refuseMissingEnvironment")(function* (
   command: LifecycleCommandName,

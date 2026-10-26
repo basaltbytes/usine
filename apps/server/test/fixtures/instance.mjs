@@ -1,14 +1,16 @@
 // A stand-in for `usine up` that holds the instance like the real one: it parses its arguments as
 // `usine up` does, writes the instance record, drains on the first SIGTERM, and answers
 // GET /api/overview and /api/configuration. It reads the runs to list from `fixture-runs.json` in
-// its working directory, and a gateway admin token variable from `fixture-gateway-env`. If
+// its working directory, and the name of a gateway admin token variable from `fixture-gateway-env`.
+// Like `usine up`, it exits at startup if neither its environment nor `.env` sets that variable. If
 // `fixture-drain` contains `never`, only a second signal ends its drain.
 import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { NodeRuntime, NodeServices } from "@effect/platform-node";
-import { Console, DateTime, Deferred, Duration, Effect, Option } from "effect";
+import { Config, Console, DateTime, Deferred, Duration, Effect, Option } from "effect";
 import { parseCli } from "../../src/cli.ts";
+import { withInstanceEnvironment } from "../../src/instance/environment.ts";
 import { holdInstance } from "../../src/instance/lock.ts";
 import { InstanceRecord, ProcessId, currentLaunch } from "../../src/instance/record.ts";
 import { withGracefulShutdown } from "../../src/shutdown.ts";
@@ -22,16 +24,15 @@ const runs = () =>
 const drainsForever = () =>
   existsSync(fixtureFile("fixture-drain")) &&
   readFileSync(fixtureFile("fixture-drain"), "utf8").trim() === "never";
-const workers = () =>
+const gatewayVariable = () =>
   existsSync(fixtureFile("fixture-gateway-env"))
-    ? [
-        {
-          gateway: {
-            adminTokenEnv: readFileSync(fixtureFile("fixture-gateway-env"), "utf8").trim(),
-          },
-        },
-      ]
-    : [{ gateway: null }];
+    ? Option.some(readFileSync(fixtureFile("fixture-gateway-env"), "utf8").trim())
+    : Option.none();
+const workers = () =>
+  Option.match(gatewayVariable(), {
+    onNone: () => [{ gateway: null }],
+    onSome: (adminTokenEnv) => [{ gateway: { adminTokenEnv } }],
+  });
 
 const responses = {
   "/api/overview": () => ({ _tag: "Ready", projects: [{ runs: runs() }], loops: [], needsYou: [] }),
@@ -76,6 +77,8 @@ NodeRuntime.runMain(
         launch: yield* currentLaunch(port, logLevel, allowVolatileInstance),
       });
       yield* holdInstance(directory, record);
+      const variable = gatewayVariable();
+      if (Option.isSome(variable)) yield* Config.redacted(variable.value);
       const requested = yield* Deferred.make();
       yield* withGracefulShutdown(
         Effect.gen(function* () {
@@ -90,5 +93,5 @@ NodeRuntime.runMain(
         Effect.succeed(Duration.infinity),
       );
     }),
-  ).pipe(Effect.provide(NodeServices.layer)),
+  ).pipe(withInstanceEnvironment(directory), Effect.provide(NodeServices.layer)),
 );

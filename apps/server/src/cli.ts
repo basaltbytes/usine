@@ -3,7 +3,16 @@ import { tmpdir } from "node:os";
 import { resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RunId } from "@usine/core/run";
-import { Array as Arr, Console, Duration, Effect, FileSystem, Option, Schema } from "effect";
+import {
+  Array as Arr,
+  Config,
+  Console,
+  Duration,
+  Effect,
+  FileSystem,
+  Option,
+  Schema,
+} from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import type { ServeError } from "effect/unstable/http/HttpServerError";
 
@@ -62,7 +71,9 @@ Options:
 Environment:
   USINE_PORT                     Listen on this port if --port is not set
   USINE_LOG_LEVEL                Log at this level if --log-level is not set
-  USINE_ALLOW_VOLATILE_INSTANCE  Set to 1 for the same effect as --allow-volatile-instance`;
+  USINE_ALLOW_VOLATILE_INSTANCE  Set to 1 for the same effect as --allow-volatile-instance
+
+Every command reads .env in the instance folder for the variables that the shell doesn't set.`;
 
 export class CliUsageError extends Schema.TaggedError<CliUsageError>("@usine/server/CliUsageError")(
   "CliUsageError",
@@ -175,6 +186,15 @@ export interface CliEnvironment {
   readonly logLevel: Option.Option<string>;
   readonly allowVolatileInstance: Option.Option<string>;
 }
+
+/** Reads the variables that `parseCli` falls back to from the current `ConfigProvider`. */
+export const cliEnvironment: Effect.Effect<CliEnvironment> = Effect.orDie(
+  Config.all({
+    port: Config.option(Config.string("USINE_PORT")),
+    logLevel: Config.option(Config.string("USINE_LOG_LEVEL")),
+    allowVolatileInstance: Config.option(Config.string("USINE_ALLOW_VOLATILE_INSTANCE")),
+  }),
+);
 
 export const CliCommand = Schema.Union([
   HelpCommand,
