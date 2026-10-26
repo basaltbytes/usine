@@ -213,7 +213,7 @@ export const failureMessage = (failure: CliFailure): string =>
     DetachedStartError: ({ outcome, pid, exit, timeout, port, log, tail }) =>
       outcome === "exited"
         ? `usine up exited (${Option.getOrElse(exit, () => "unknown status")}) before it listened on port ${port}. ${logLines(tail)}`
-        : `usine up${holderOf(pid)} didn't answer on port ${port} within ${Duration.format(timeout)}. It still runs. Check ${log}, or stop it with usine stop.`,
+        : `usine up${holderOf(pid)} didn't answer on port ${port}, and wrote nothing to ${log} for ${Duration.format(timeout)}. It still runs. Check ${log}, or stop it with usine stop.`,
     DetachedSpawnError: ({ command, reason }) =>
       `Could not start ${command} in the background (${clause(reason)}).`,
     EngineOutsideInstanceError: ({ script, version, packaged }) =>

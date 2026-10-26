@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -62,13 +63,8 @@ const run = <A, E>(
 const options = (seconds: number, force = false) =>
   new LifecycleOptions({ timeout: Duration.seconds(seconds), force });
 
-/** Starts the fixture in the background, the way `usine restart` starts `usine up`. */
-const startFixture = async (
-  directory: InstanceDirectory,
-  script = FIXTURE,
-  logLevel: UpLogLevel = "Info",
-) => {
-  const launch = new InstanceLaunch({
+const fixtureLaunch = async (script = FIXTURE, logLevel: UpLogLevel = "Info") =>
+  new InstanceLaunch({
     node: process.execPath,
     nodeOptions: ["--experimental-strip-types", "--no-warnings"],
     script,
@@ -76,6 +72,14 @@ const startFixture = async (
     logLevel,
     allowVolatileInstance: false,
   });
+
+/** Starts the fixture in the background, the way `usine restart` starts `usine up`. */
+const startFixture = async (
+  directory: InstanceDirectory,
+  script = FIXTURE,
+  logLevel: UpLogLevel = "Info",
+) => {
+  const launch = await fixtureLaunch(script, logLevel);
   const { pid } = await run(startDetached(directory, launch, Duration.seconds(30)));
   pids.add(pid);
   return { pid, launch };
@@ -231,6 +235,62 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
     pids.add(state.record.pid);
     assert.notStrictEqual(state.record.pid, first.pid);
     await run(stop(directory, options(20)));
+  });
+
+  it("keeps waiting past the timeout while the starting process writes to its log", async () => {
+    const directory = instanceFolder();
+    // Six seconds of startup recovery, which logs a line every 500 milliseconds.
+    writeFileSync(join(directory, "fixture-startup"), "12 500");
+
+    const started = await run(startDetached(directory, await fixtureLaunch(), Duration.seconds(4)));
+    pids.add(started.pid);
+
+    const log = readFileSync(instanceFiles(directory).log, "utf8");
+    assert.match(log, /fixture reconciled checkout 12\n[\s\S]*fixture listening/u, log);
+    await run(stop(directory, options(20)));
+  });
+
+  it("reports a background start that neither listens nor writes to its log within the timeout", async () => {
+    const directory = instanceFolder();
+    writeFileSync(join(directory, "fixture-startup"), "never");
+
+    const error = await run(
+      startDetached(directory, await fixtureLaunch(), Duration.seconds(2)).pipe(Effect.flip),
+    );
+    assert(error._tag === "DetachedStartError");
+    assert(Option.isSome(error.pid));
+    pids.add(error.pid.value);
+    assert.strictEqual(error.outcome, "silent");
+    assert.isTrue(alive(error.pid.value), "the command leaves the process running");
+  });
+
+  it("fails a background start as soon as its readiness probe fails", async () => {
+    const directory = instanceFolder();
+    const files = instanceFiles(directory);
+    mkdirSync(files.folder, { recursive: true });
+    writeFileSync(files.lock, "not a database");
+    const port = await freePort();
+    // Another server answers on the port, so the probe reads the instance lock and fails.
+    const server = createHttpServer((_, response) => response.end("ok"));
+    await new Promise<void>((resolve) => server.listen({ host: SERVER_HOST, port }, resolve));
+    try {
+      const launch = new InstanceLaunch({
+        node: process.execPath,
+        // Runs without listening for longer than the probe takes, then exits on its own.
+        nodeOptions: ["--eval", "setTimeout(() => {}, 5000)"],
+        script: FIXTURE,
+        port,
+        logLevel: "Info",
+        allowVolatileInstance: false,
+      });
+      const error = await run(
+        startDetached(directory, launch, Duration.seconds(20)).pipe(Effect.flip),
+      );
+      assert(error._tag === "InstanceLockError", error._tag);
+      assert.strictEqual(error.directory, files.folder);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 
   it("reports a background start whose process exits before it listens", async () => {
