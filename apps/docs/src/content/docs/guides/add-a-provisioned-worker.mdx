@@ -73,6 +73,8 @@ Each attempt gets a server created from a snapshot that you build with `infra/he
 
    Run the script from a checkout of the usine release that you run, so that the snapshot has that release's attempt image. The image must be public on GHCR, because a machine created for one attempt has no `docker login`.
 
+   The temporary server is a `cx23` in `fsn1` unless you set `SERVER_TYPE` and `LOCATION`. The type must be available in the location, and Hetzner's Cost-Optimized types, such as `cx23` and `cx33`, often aren't; a snapshot built on a `cpx12` runs `cpx32` servers. A server created from the snapshot needs a disk at least as large as the temporary server's, so build it on the smallest type that you set in `server_type`.
+
 5. Add the worker to `usine.yaml`:
 
    ```yaml title="usine.yaml"

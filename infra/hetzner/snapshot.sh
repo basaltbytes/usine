@@ -19,8 +19,9 @@ Usage: snapshot.sh <public-key-file>
 Environment:
   SSH_KEY        name or ID of the project's SSH key for the temporary server, required
   LOCATION       location of the temporary server, default fsn1
-  SERVER_TYPE    type of the temporary server, default cx23; servers created from
-                 the snapshot need a disk at least as large as this type's
+  SERVER_TYPE    type of the temporary server, default cx23, available in LOCATION;
+                 servers created from the snapshot need a disk at least as large
+                 as this type's
   IMAGE          base image, default debian-13
   NETWORK        the gateway's network; builds the snapshot behind the gateway
   GATEWAY_SSH    the gateway's SSH destination, such as its Host alias; required with NETWORK
