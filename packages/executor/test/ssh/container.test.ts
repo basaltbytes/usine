@@ -4,24 +4,26 @@ import { Agent } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptId } from "@usine/core/attempt";
 import { type AttemptSalvage, SalvageRef } from "@usine/core/attempt/salvage";
-import { WorkerName } from "@usine/core/worker";
+import { ContainerMemoryMib, WorkerName } from "@usine/core/worker";
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
 import { completes, type StubParent, StubStorage } from "@usine/durable/testing";
 import { ChatGptLogin, HostFilePath, OpenAiProvider, UpstreamBase } from "@usine/gateway";
-import { Deferred, Effect, Fiber, Option } from "effect";
+import { Deferred, Effect, Fiber, Layer, Option } from "effect";
 import { readFileSync } from "node:fs";
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
-import { ATTEMPT_IMAGE, SshWorkers } from "../../src/ssh/ssh.ts";
+import { ATTEMPT_IMAGE, type SshWorkerAddress, SshWorkers } from "../../src/ssh/ssh.ts";
 import { fakeGateway, gatewayAddress, gatewayRuntime } from "./gateway/support.ts";
 import {
   ADDRESS,
   aloneOnItem,
   capturedLogs,
   CREDENTIALS,
+  executorLayer,
   fails,
   fakeMachine,
   INSTANCE,
   mintingProvider,
+  noGateway,
   request,
   runtime,
   TEST_AGENT,
@@ -190,6 +192,81 @@ describe("SSH Worker with Docker", () => {
         assert(credentialGone > containerGone, "the credential outlives the container");
         assert.strictEqual(machine.state.containers.size, 0);
       }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider(), parent)));
+    },
+  );
+
+  it.effect.each([
+    {
+      case: "one slot",
+      slots: 1,
+      memoryMib: Option.none(),
+      limits: ["3.5", "7168m", "60976"],
+      derived: "cpus,memoryMib,pids",
+    },
+    {
+      case: "three slots",
+      slots: 3,
+      memoryMib: Option.none(),
+      limits: ["1.16", "2389m", "20325"],
+      derived: "cpus,memoryMib,pids",
+    },
+    {
+      case: "three slots and memory_mib in usine.yaml",
+      slots: 3,
+      memoryMib: Option.some(ContainerMemoryMib.make(3072)),
+      limits: ["1.16", "3072m", "20325"],
+      derived: "cpus,pids",
+    },
+  ])(
+    "derives the limits that usine.yaml leaves unset from a 4 CPU, 8 GiB machine with $case",
+    ({ slots, memoryMib, limits, derived }) => {
+      const machine = dockerMachine();
+      const logs = capturedLogs();
+      machine.state.memoryGib = 8;
+      const address: SshWorkerAddress = {
+        ...ADDRESS,
+        container: { image: Option.none(), cpus: Option.none(), memoryMib, pids: Option.none() },
+      };
+      const limitsIn = (words: ReadonlyArray<string>) => [
+        optionOf(words, "--cpus"),
+        optionOf(words, "--memory"),
+        optionOf(words, "--pids-limit"),
+      ];
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const report = yield* executor.preflight(WORKER, [TEST_AGENT.brain], slots);
+        assert(Option.isSome(report.containerLimits));
+        const { cpus, memoryMib, pids } = report.containerLimits.value;
+        assert.deepStrictEqual([String(cpus), `${memoryMib}m`, String(pids)], limits);
+        const verified = logs.lines.find((line) => line.includes("SSH Worker preflight verified"));
+        assert(verified !== undefined, "the preflight logged its outcome");
+        assert.deepInclude(JSON.parse(verified)[1], {
+          cpus,
+          memoryMib,
+          pids,
+          derivedLimits: derived,
+          slots,
+          machineCpus: 4,
+          machineMemoryMib: 8192,
+          machineTasks: 62_000,
+        });
+        const probe = machine.state.calls.find(
+          ({ line }) =>
+            line.startsWith("exec 'docker' 'run' ") && line.includes("'usine-preflight-"),
+        );
+        assert(probe !== undefined, "the preflight's container started");
+        assert.deepStrictEqual(limitsIn(wordsOf(probe.line)), limits);
+
+        const prepared = yield* executor.prepare(request);
+        yield* prepared.launch(sink);
+        assert.deepStrictEqual(limitsIn(runOf(machine, CONTAINER).words), limits);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          executorLayer(machine, mintingProvider(), address).pipe(Layer.provide(noGateway)),
+        ),
+        Effect.provide(logs.layer),
+      );
     },
   );
 
@@ -562,6 +639,75 @@ describe("SSH Worker with Docker", () => {
         assert.strictEqual(push?.container, CONTAINER);
         assert.deepStrictEqual(hostGitInCheckout(machine, before), []);
         assert.deepStrictEqual([...machine.state.markers], []);
+      });
+    },
+  );
+
+  it.effect(
+    "derives the limits for one Attempt, and logs them, when a container starts before any preflight on the Worker",
+    () => {
+      const machine = dockerMachine();
+      const credentials = mintingProvider();
+      const logs = capturedLogs();
+      machine.state.memoryGib = 8;
+      const address: SshWorkerAddress = {
+        ...ADDRESS,
+        container: {
+          image: Option.none(),
+          cpus: Option.none(),
+          memoryMib: Option.none(),
+          pids: Option.none(),
+        },
+      };
+      return Effect.gen(function* () {
+        yield* stopWhileRunning(machine, credentials, new StubStorage());
+        const before = machine.state.calls.length;
+        yield* Effect.gen(function* () {
+          const executor = yield* Executor;
+          yield* executor.recover(
+            {
+              attemptId: request.attemptId,
+              repository: request.repository,
+              worker: WORKER,
+              ref: request.salvageRef,
+              permissions: "write",
+              succeeded: false,
+              open: false,
+              rejected: Option.none(),
+            },
+            { salvage: () => Effect.void, comments: () => Effect.void, windows: aloneOnItem() },
+            Effect.succeed(request.commitAuthor),
+          );
+        }).pipe(
+          Effect.scoped,
+          Effect.provide(
+            executorLayer(machine, credentials, address).pipe(Layer.provide(noGateway)),
+          ),
+          Effect.provide(logs.layer),
+        );
+        assert.lengthOf(
+          linesOf(machine)
+            .slice(before)
+            .filter((line) => line.includes("nproc")),
+          1,
+          "the recovery read the machine once",
+        );
+        const contained = logs.lines.find((line) =>
+          line.includes("SSH Worker runs each Attempt in its own container"),
+        );
+        assert(contained !== undefined, "the recovery logged the limits it applied");
+        assert.deepInclude(JSON.parse(contained)[1], {
+          worker: WORKER,
+          cpus: 3.5,
+          memoryMib: 7168,
+          pids: 60_976,
+          derivedLimits: "cpus,memoryMib,pids",
+          slots: 1,
+          machineCpus: 4,
+          machineMemoryMib: 8192,
+          machineTasks: 62_000,
+        });
+        assert.notInclude(logs.lines.join("\n"), "SSH Worker preflight verified");
       });
     },
   );

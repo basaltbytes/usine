@@ -145,6 +145,10 @@ interface FakeMachineState {
   /** The machine's physical memory and swap in GiB, as `/proc/meminfo` reports them. */
   memoryGib: number;
   swapGib: number;
+  /** The CPUs that `nproc` counts, and the kernel's `threads-max` and `pid_max`. */
+  cpus: number;
+  threadsMax: number;
+  pidMax: number;
   cacheExists: boolean;
   /** Whether a clone fails with git's token in its stderr. */
   cloneEchoesToken: boolean;
@@ -284,6 +288,9 @@ export const fakeMachine = () => {
     rootWritable: true,
     memoryGib: 7.7,
     swapGib: 2,
+    cpus: 4,
+    threadsMax: 62_000,
+    pidMax: 4_194_304,
     cacheExists: false,
     cloneEchoesToken: false,
     salvage: "clean",
@@ -468,6 +475,11 @@ export const fakeMachine = () => {
       return oneShotHandle("", state.rootWritable ? 0 : 1);
     if (line === "exec 'cat' '/proc/meminfo'")
       return oneShotHandle(meminfo(state.memoryGib, state.swapGib), 0);
+    if (line.includes("nproc"))
+      return oneShotHandle(
+        `${state.cpus}\n${state.threadsMax}\n${state.pidMax}\n${meminfo(state.memoryGib, state.swapGib)}`,
+        0,
+      );
     if (line.includes("pidfile")) return oneShotHandle("no-children\n", 0);
     if (line.startsWith("exec 'rm' '-rf' ")) {
       const target = line.slice("exec 'rm' '-rf' '".length, -1);
@@ -716,9 +728,9 @@ export const ADDRESS: SshWorkerAddress = {
   gateway: Option.none(),
   container: {
     image: Option.none(),
-    cpus: ContainerCpus.make(2),
-    memoryMib: ContainerMemoryMib.make(4096),
-    pids: ContainerPids.make(4096),
+    cpus: Option.some(ContainerCpus.make(2)),
+    memoryMib: Option.some(ContainerMemoryMib.make(4096)),
+    pids: Option.some(ContainerPids.make(4096)),
   },
 };
 
@@ -726,7 +738,7 @@ export const ADDRESS: SshWorkerAddress = {
 export const INSTANCE = "github-app-4242";
 
 /** An HTTP client layer for a Worker without a Gateway; never called. */
-const noGateway = Layer.succeed(
+export const noGateway = Layer.succeed(
   HttpClient.HttpClient,
   HttpClient.make(() => Effect.die(new Error("A Worker without a Gateway made an HTTP request"))),
 );

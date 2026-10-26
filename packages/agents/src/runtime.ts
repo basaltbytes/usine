@@ -9,7 +9,7 @@ import {
   ChildSessionCount,
 } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { WorkerName } from "@usine/core/worker";
+import { MachineId, WorkerName } from "@usine/core/worker";
 import {
   AgentFailure,
   AttemptFailure,
@@ -39,8 +39,13 @@ export class ChildRequest extends Schema.Class<ChildRequest>("@usine/agents/Chil
    */
   environment: Schema.Record(Schema.String, Schema.String),
   host: ChildHost,
-  /** The Worker that `host` runs on; Claude children on one Worker share its Claude login. */
+  /** The Worker that `host` runs on. */
   worker: WorkerName,
+  /**
+   * The provider's ID of the machine that a provisioned Worker created for the Attempt, or `None`
+   * on other Workers, whose Attempts share one Claude login.
+   */
+  machine: Schema.Option(MachineId),
 }) {}
 
 /** The final message a parent or child session returns. */
@@ -274,17 +279,23 @@ export class ChildBackend extends Context.Service<ChildBackend, ChildBackendServ
 ) {}
 
 /**
- * A per-Worker lock for Claude commands that can refresh the Worker's shared Claude login: the
- * preflight login check and the start of a Claude child. Claude Code ends a process that finds
- * another process refreshing the login (#453). Provide one instance to both the executor and the
- * Attempt runtime.
+ * A lock per Claude login for the Claude commands that can refresh it: the preflight login check
+ * and the start of a Claude child. Claude Code ends a process that finds another process
+ * refreshing the login (#453). Each machine of a provisioned Worker has its own login; on other
+ * Workers, all Attempts share one. Provide one instance to both the executor and the Attempt
+ * runtime.
  */
 export class ClaudeLoginLock extends Context.Service<
   ClaudeLoginLock,
   {
-    /** Runs `effect` with `worker`'s lock, after waiting for any other effect that has the lock. */
+    /**
+     * Runs `effect` with the lock of the login on `worker`'s provisioned `machine`, or of the
+     * Worker's shared login if `machine` is `None`, after waiting for any other effect that has
+     * the lock.
+     */
     readonly withLock: (
       worker: WorkerName,
+      machine: Option.Option<MachineId>,
     ) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
   }
 >()("@usine/agents/ClaudeLoginLock") {}

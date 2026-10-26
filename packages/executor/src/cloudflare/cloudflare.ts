@@ -853,6 +853,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
             yield* createSandbox("preflight", worker, name, PREFLIGHT_ATTEMPT);
             yield* verifyHarnessReadiness(
               workerName,
+              Option.none(),
               distinct,
               versionProbe("preflight", commands, worker.shellFor(name)),
               logins,
@@ -983,6 +984,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
           yield* createSandbox("prepare", worker, name, request.attemptId);
           yield* verifyHarnessReadiness(
             request.worker,
+            Option.none(),
             [request.agent.brain],
             versionProbe("prepare", commands, shell),
             logins,
@@ -1121,6 +1123,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
       const launchIn = (io: AttemptChannel.Sink) =>
         session.launch(prepared, io, {
           host: shell,
+          machine: Option.none(),
           environment: childEnvironment(
             sandboxEnvironment(worker),
             request.commitAuthor,

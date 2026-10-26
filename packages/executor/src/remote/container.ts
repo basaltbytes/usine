@@ -2,13 +2,7 @@ import { CHILD_KILL_SCRIPT, RemoteShell, type ShellContainer } from "@usine/agen
 import type { Harness } from "@usine/core/agent/brain";
 import type { AttemptId } from "@usine/core/attempt";
 import { safeSegment } from "@usine/core/repository";
-import type {
-  ContainerCpus,
-  ContainerImage,
-  ContainerMemoryMib,
-  ContainerPids,
-  WorkerName,
-} from "@usine/core/worker";
+import type { ContainerImage, ContainerLimits, WorkerName } from "@usine/core/worker";
 import { Effect, Option, Redacted } from "effect";
 import { type ExecutorOperation, ExecutorOperationError } from "../executor.ts";
 import type { RemoteCommands } from "./commands.ts";
@@ -33,9 +27,7 @@ const SEED_DIRECTORY = "/usr/local/share/usine/seed";
 /** The image and limits of each Attempt container on a Worker. */
 export interface ContainerSettings {
   readonly image: ContainerImage;
-  readonly cpus: ContainerCpus;
-  readonly memoryMib: ContainerMemoryMib;
-  readonly pids: ContainerPids;
+  readonly limits: ContainerLimits;
   /** The value of the instance label, which identifies the containers of this usine instance. */
   readonly instance: string;
 }
@@ -324,11 +316,11 @@ export const containersFor = (commands: RemoteCommands) => {
       "--network",
       "host",
       "--cpus",
-      String(spec.settings.cpus),
+      String(spec.settings.limits.cpus),
       "--memory",
-      `${spec.settings.memoryMib}m`,
+      `${spec.settings.limits.memoryMib}m`,
       "--pids-limit",
-      String(spec.settings.pids),
+      String(spec.settings.limits.pids),
       "--env-file",
       "/dev/stdin",
       ...mounts.flatMap((mount) => ["--mount", mount]),

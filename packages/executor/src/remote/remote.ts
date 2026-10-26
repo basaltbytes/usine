@@ -754,6 +754,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       const probeBrain = (shell: RemoteShell) =>
         verifyHarnessReadiness(
           request.worker,
+          machine.provisioned,
           [request.agent.brain],
           worker.harnessProbe(machine, shell),
           logins,
@@ -948,6 +949,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
               });
               return yield* session.launch(prepared, io, {
                 host: shell,
+                machine: machine.provisioned,
                 environment: childEnvironment(
                   access.environment,
                   request.commitAuthor,

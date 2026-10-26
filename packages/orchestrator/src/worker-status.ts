@@ -3,7 +3,7 @@ import { HarnessUnavailableError } from "@usine/core/agent/capability";
 import type { ItemKey } from "@usine/core/item";
 import type { LoopName } from "@usine/core/loop";
 import type { RunId } from "@usine/core/run";
-import type { WorkerName } from "@usine/core/worker";
+import type { ContainerLimits, WorkerName } from "@usine/core/worker";
 import type {
   ExecutorError,
   MachineStatus,
@@ -117,7 +117,7 @@ export interface HarnessPreflight {
 
 /**
  * The last preflight of a Worker: its own prerequisites (machine, Git, memory, Gateway, and
- * credentials) and each checked harness.
+ * credentials), each checked harness, and the limits of its Attempt containers.
  */
 export interface WorkerPreflight {
   readonly worker: WorkerName;
@@ -125,6 +125,11 @@ export interface WorkerPreflight {
   readonly prerequisites: Option.Option<PreflightCheck>;
   /** In harness name order. */
   readonly harnesses: ReadonlyArray<HarnessPreflight>;
+  /**
+   * The limits of each Attempt container from the last passed preflight that checked the
+   * Worker's machine. `None` before one, or if that machine had no Docker.
+   */
+  readonly containerLimits: Option.Option<ContainerLimits>;
 }
 
 const isHarnessUnavailable = Schema.is(HarnessUnavailableError);
@@ -147,8 +152,9 @@ const withHarnesses = (
 /**
  * Returns `previous` updated with one preflight of `brains`. A degraded report passes every
  * harness and records the prerequisites as degraded, and a deferred report records every
- * harness as deferred. An unavailable harness fails that harness and passes the ones checked
- * before it; any other failure fails only the prerequisites.
+ * harness as deferred and keeps the container limits, since it checked no machine. An
+ * unavailable harness fails that harness and passes the ones checked before it; any other
+ * failure fails only the prerequisites.
  */
 export const recordPreflight = (
   previous: WorkerPreflight,
@@ -175,6 +181,9 @@ export const recordPreflight = (
           onSome: (message): PreflightCheck => ({ _tag: "Deferred", checkedAt, message }),
         }),
       ),
+      containerLimits: Option.isSome(outcome.success.deferred)
+        ? previous.containerLimits
+        : outcome.success.containerLimits,
     };
   }
   const error = outcome.failure;
@@ -194,12 +203,14 @@ export const recordPreflight = (
         [unavailable],
         failed,
       ),
+      containerLimits: previous.containerLimits,
     };
   }
   return {
     worker: previous.worker,
     prerequisites: Option.some(failed),
     harnesses: previous.harnesses,
+    containerLimits: previous.containerLimits,
   };
 };
 
@@ -208,6 +219,7 @@ export const unchecked = (worker: WorkerName): WorkerPreflight => ({
   worker,
   prerequisites: Option.none(),
   harnesses: [],
+  containerLimits: Option.none(),
 });
 
 /**

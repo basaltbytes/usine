@@ -2,7 +2,7 @@ import type { RemoteShell } from "@usine/agents/child-host";
 import { ClaudeLoginLock } from "@usine/agents/runtime";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import { SshDestination, WorkerName } from "@usine/core/worker";
-import { Effect, Ref, Schema } from "effect";
+import { Effect, Option, Ref, Schema } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import {
   ExecutorOperationError,
@@ -127,6 +127,7 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
 
     yield* verifyHarnessReadiness(
       worker,
+      Option.none(),
       brains,
       harnessProbe(commands.childHost(vm.sshDest)),
       logins,

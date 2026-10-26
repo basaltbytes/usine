@@ -8,7 +8,7 @@ import {
   RunawayFailure,
 } from "@usine/core/attempt/failure";
 import type { AttemptRecovery, RecoverySink } from "@usine/core/attempt/salvage";
-import type { GatewayCredentialKind } from "@usine/core/worker";
+import type { GatewayCredentialKind, MachineId } from "@usine/core/worker";
 import type { AttemptWindowsRead, HarvestSpec } from "@usine/core/step/harvest";
 import type { Comment, StepResult, StepResultFact } from "@usine/core/step/result";
 import {
@@ -54,6 +54,11 @@ interface ActiveAttempt {
 export interface DurableCheckout {
   /** The host with the checkout, where the children run. */
   readonly host: ChildHost;
+  /**
+   * The provider's ID of the machine that a provisioned Worker created for the Attempt, or `None`
+   * on other Workers.
+   */
+  readonly machine: Option.Option<MachineId>;
   /** The complete environment for the children and harvesting commands (ADR 0011). */
   readonly environment: Record<string, string>;
   /**
@@ -312,6 +317,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
             worker: prepared.worker,
             cwd: prepared.worktree,
             host: checkout.host,
+            machine: checkout.machine,
             environment: checkout.environment,
             gatewayCredential: checkout.gatewayCredential,
           }),

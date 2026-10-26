@@ -72,6 +72,7 @@ const request = (
 ) =>
   new ChildRequest({
     worker: WorkerName.make("worker-1"),
+    machine: Option.none(),
     environment: { HOME: "/home/worker", PATH: "/usr/bin:/bin" },
     host,
     session: new ChildSession({
@@ -282,7 +283,7 @@ describe("Claude child backend", () => {
           const backend = yield* ChildBackend;
           const logins = yield* ClaudeLoginLock;
           const worker = request().worker;
-          const preflight = () => logins.withLock(worker)(Effect.void);
+          const preflight = () => logins.withLock(worker, Option.none())(Effect.void);
 
           const answering = yield* Effect.forkChild(backend.launch(request()));
           while (outputs.length < 1) yield* Effect.yieldNow;
