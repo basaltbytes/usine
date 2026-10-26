@@ -1,5 +1,5 @@
 import { canonicalRepositoryName, RepositoryName } from "@usine/core/repository";
-import { Data, Effect, Option, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 import { Headers, HttpClient, HttpClientRequest } from "effect/unstable/http";
 import type { Attachment } from "../attachment/attachment.ts";
 import { absoluteUrl, afterPrefix, type GitHubOrigins, withGitHubCredential } from "./github.ts";
@@ -59,14 +59,15 @@ export const redirectedName = (
   );
 
 /** Why GitHub's API didn't confirm that the attached repository has a redirect's name. */
-class RenameUnconfirmed extends Data.TaggedError("RenameUnconfirmed")<{
-  readonly reason:
-    | "former-name-not-redirected"
-    | "repository-unreadable"
-    | "other-current-name"
-    | "github-unreachable";
-  readonly detail: string;
-}> {}
+class RenameUnconfirmed extends Schema.TaggedError<RenameUnconfirmed>()("RenameUnconfirmed", {
+  reason: Schema.Literals([
+    "former-name-not-redirected",
+    "repository-unreadable",
+    "other-current-name",
+    "github-unreachable",
+  ]),
+  detail: Schema.String,
+}) {}
 
 /** Where GitHub's API redirects a renamed or transferred repository's former name. */
 const REPOSITORY_BY_ID_PATH = /^\/repositories\/[1-9][0-9]*$/u;
