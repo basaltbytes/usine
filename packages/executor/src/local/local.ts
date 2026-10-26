@@ -403,7 +403,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
             maxConcurrentAttempts,
             executeCommand("preflight", "cat", ["/proc/meminfo"]),
           );
-      yield* verifyHarnessReadiness(worker, brains, harnessReadiness, logins);
+      yield* verifyHarnessReadiness(worker, Option.none(), brains, harnessReadiness, logins);
       yield* Effect.logInfo("Worker preflight verified", {
         worker,
         host: "local",
@@ -456,6 +456,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       });
       yield* verifyHarnessReadiness(
         request.worker,
+        Option.none(),
         [request.agent.brain],
         harnessReadiness,
         logins,

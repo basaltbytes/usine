@@ -753,6 +753,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       const probeBrain = (shell: RemoteShell) =>
         verifyHarnessReadiness(
           request.worker,
+          machine.provisioned,
           [request.agent.brain],
           worker.harnessProbe(machine, shell),
           logins,
