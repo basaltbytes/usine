@@ -76,7 +76,7 @@ If the process exits first, the command prints how it exited and the last 20 lin
 | `pid` | The process ID, which `.usine/instance.pid` also contains. |
 | `version` | The `@usine/server` version of the process. |
 | `startedAt` | When the process took the instance lock, in ISO 8601 format. |
-| `launch` | How the process started: `node` (the Node.js binary), `nodeOptions`, `script` (the CLI entry point), `port`, and `allowVolatileInstance`. `usine restart` starts the new process with these values. |
+| `launch` | How the process started: `node` (the Node.js binary), `nodeOptions`, `script` (the CLI entry point), `port`, `logLevel`, and `allowVolatileInstance`. `usine restart` starts the new process with these values, and at `info` if a version before `--log-level` wrote the record without `logLevel`. |
 | `stoppingSince` | When the process received its first `SIGINT` or `SIGTERM`. Absent until then. |
 
 The record says which process holds the instance, but the instance lock says whether one does. If a process stops without removing its files, for example after `SIGKILL`, `usine status` reports them as stale, and the next `usine up` replaces them.
