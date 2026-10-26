@@ -27,6 +27,7 @@ import { homedir } from "node:os";
 import {
   type ExecutorError,
   ExecutorOperationError,
+  MachineCheck,
   MachineGrant,
   MachineHold,
   MachineStatus,
@@ -527,7 +528,8 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
 
   /**
    * Runs the machine preflight on the first machine of `worker` each day, which a provisioned
-   * Worker's preflight at `usine up` can't. Returns the brains it checked.
+   * Worker's preflight at `usine up` can't. Each machine runs one Attempt, so the container
+   * limits it derives are for one Attempt; the Worker's machines get them until the next check.
    */
   const checkDaily = Effect.fn("SshExecutor.checkMachineOfTheDay")(function* (
     machine: SshMachine,
@@ -535,13 +537,12 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
   ) {
     const worker = machine.address.name;
     const today = DateTime.formatIsoDateUtc(yield* DateTime.now);
-    if ((yield* Ref.get(checkedOn)).get(worker) === today)
-      return Option.none<ReadonlyArray<BrainSpec>>();
+    if ((yield* Ref.get(checkedOn)).get(worker) === today) return Option.none<MachineCheck>();
     yield* Effect.logInfo(
-      "Checking the first machine of the day on a provisioned Worker: Git, memory, the Gateway, Docker, and the harnesses",
+      "Checking the first machine of the day on a provisioned Worker: Git, memory, the Gateway, Docker, the container limits, and the harnesses",
       { worker, host: machine.shell.destination, brains: brains.length },
     );
-    yield* options.verifyMachine(machine, brains, 1).pipe(
+    const report = yield* options.verifyMachine(machine, brains, 1).pipe(
       Effect.catchTags({
         ExecutorOperationError: (error) =>
           Effect.fail(
@@ -564,7 +565,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
       }),
     );
     yield* Ref.update(checkedOn, (current) => new Map(current).set(worker, today));
-    return Option.some(brains);
+    return Option.some(new MachineCheck({ brains, containerLimits: report.containerLimits }));
   });
 
   const timedOut = (worker: WorkerName, provider: MachineProvider) =>
@@ -1037,6 +1038,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
       deferred: Option.some(
         "Checked on the worker's first machine each day, since no machine exists before an attempt.",
       ),
+      containerLimits: Option.none(),
     } satisfies PreflightReport;
   });
 

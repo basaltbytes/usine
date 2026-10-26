@@ -13,7 +13,7 @@ import {
 import { type HarnessProbe, verifyHarnessReadiness } from "../harness-preflight.ts";
 import { verifyLinuxMemory } from "../memory-preflight.ts";
 import type { RemoteCommands } from "../remote/commands.ts";
-import type { SshContainers } from "./container.ts";
+import { limitFields, type SshContainers } from "./container.ts";
 import { gatewayExportedEnvironment } from "./gateway/environment.ts";
 import { verifyGateway } from "./gateway/preflight.ts";
 import type { SshMachine } from "./model.ts";
@@ -33,9 +33,10 @@ const capabilityError = (
  * Verifies an SSH Worker's machine: SSH connects, the root is a writable directory, Git runs,
  * memory is enough for the concurrent Attempts, the Gateway (if any) responds and is reachable,
  * Docker and the Attempt image work if the machine has Docker, and each brain is ready. Pulls
- * the Attempt image and changes nothing else. With Docker, brains are probed in a container
- * from the image; without, as the SSH user, which the report gives as degraded. Claude brains
- * are checked under the Worker's lock in `logins`.
+ * the Attempt image and changes nothing else. With Docker, it derives the container limits that
+ * `usine.yaml` leaves unset for `maxConcurrentAttempts` containers, which the report gives, and
+ * brains are probed in a container from the image; without, as the SSH user, which the report
+ * gives as degraded. Claude brains are checked under the Worker's lock in `logins`.
  */
 export const sshMachinePreflightFor = (
   commands: RemoteCommands,
@@ -107,7 +108,7 @@ export const sshMachinePreflightFor = (
 
     if (Option.isSome(machine.gateway))
       yield* verifyGateway(commands, worker, machine, machine.gateway.value);
-    const containerCheck = yield* containers.verify(machine);
+    const containerCheck = yield* containers.verify(machine, maxConcurrentAttempts);
     const harnesses = Arr.dedupe(brains.map(({ harness }) => harness));
     const probe = (shell: RemoteShell) =>
       verifyHarnessReadiness(worker, brains, harnessProbe(machine, shell), logins);
@@ -116,6 +117,7 @@ export const sshMachinePreflightFor = (
           containers
             .preflightShell(
               machine,
+              containerCheck.isolation.settings,
               harnesses,
               Option.match(machine.gateway, {
                 onNone: () => ({}),
@@ -133,8 +135,13 @@ export const sshMachinePreflightFor = (
       gitVersion,
       isolation: containerCheck.isolation._tag,
       harnesses: harnesses.join(","),
+      ...Option.match(containerCheck.limits, { onNone: () => ({}), onSome: limitFields }),
     });
-    return { degraded: containerCheck.degraded, deferred: Option.none() } satisfies PreflightReport;
+    return {
+      degraded: containerCheck.degraded,
+      deferred: Option.none(),
+      containerLimits: Option.map(containerCheck.limits, ({ limits }) => limits),
+    } satisfies PreflightReport;
   });
 
 /**

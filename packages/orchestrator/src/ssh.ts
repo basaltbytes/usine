@@ -143,9 +143,9 @@ const sshWorkerAddressOf = (worker: SshWorker, missing: MissingSecret) =>
       gateway,
       container: {
         image: worker.container.image,
-        cpus: worker.container.cpus,
-        memoryMib: worker.container.memoryMib,
-        pids: worker.container.pids,
+        cpus: Option.some(worker.container.cpus),
+        memoryMib: Option.some(worker.container.memoryMib),
+        pids: Option.some(worker.container.pids),
       },
     } satisfies SshWorkerAddress;
   });

@@ -33,7 +33,7 @@ const kibibytes = (meminfo: string, pattern: RegExp): Option.Option<number> =>
   Option.map(Option.fromNullishOr(pattern.exec(meminfo)?.[1]), Number);
 
 /** Parses `/proc/meminfo`. Returns `None` if MemTotal or SwapTotal is missing. */
-const memoryFromMeminfo = (meminfo: string): Option.Option<WorkerMemory> =>
+export const memoryFromMeminfo = (meminfo: string): Option.Option<WorkerMemory> =>
   Option.flatMap(
     Option.all({
       total: kibibytes(meminfo, /^MemTotal:\s+(\d+) kB$/mu),

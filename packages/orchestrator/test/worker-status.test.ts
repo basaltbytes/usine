@@ -55,7 +55,10 @@ describe("Worker preflight record", () => {
       unchecked(worker),
       [codex],
       at(8),
-      Result.succeed({ degraded: Option.some("Docker isn't installed"), deferred: Option.none() }),
+      Result.succeed({
+        ...fullPreflight,
+        degraded: Option.some("Docker isn't installed"),
+      }),
     );
     assert.deepStrictEqual(summary(record), {
       prerequisites: "Degraded 2026-10-20T08:00:00.000Z",

@@ -12,6 +12,7 @@ import { RunId } from "@usine/core/run";
 import {
   BotAccount,
   BotLogin,
+  ContainerLimits,
   MachineId,
   MachineProvider,
   WorkerName,
@@ -149,10 +150,19 @@ export interface PreflightReport {
    * preflight checked them.
    */
   readonly deferred: Option.Option<string>;
+  /**
+   * The limits of each Attempt container, the ones `usine.yaml` sets and the ones derived from
+   * the machine. `None` if the Worker runs no containers or the preflight checked no machine.
+   */
+  readonly containerLimits: Option.Option<ContainerLimits>;
 }
 
-/** The report of a Worker that runs Attempts as designed. */
-export const fullPreflight: PreflightReport = { degraded: Option.none(), deferred: Option.none() };
+/** The report of a Worker that runs Attempts as designed, without containers. */
+export const fullPreflight: PreflightReport = {
+  degraded: Option.none(),
+  deferred: Option.none(),
+  containerLimits: Option.none(),
+};
 
 /** Logs each preflight failure at error level. */
 export const logPreflightFailure = <A, R>(
@@ -371,17 +381,24 @@ export class Executor extends Context.Service<
 export const MachineHold = Schema.NonEmptyString.pipe(Schema.brand("MachineHold"));
 export type MachineHold = typeof MachineHold.Type;
 
+/** The machine preflight of a provisioned Worker's first machine each day. */
+export class MachineCheck extends Schema.Class<MachineCheck>("@usine/executor/MachineCheck")({
+  brains: Schema.Array(BrainSpec),
+  /**
+   * The limits of each Attempt container that the Worker's machines get until the next check,
+   * or `None` if the machine has no Docker.
+   */
+  containerLimits: Schema.Option(ContainerLimits),
+}) {}
+
 /** A machine that a provisioned Worker created for an Attempt and holds until `release`. */
 export class MachineGrant extends Schema.Class<MachineGrant>("@usine/executor/MachineGrant")({
   hold: MachineHold,
   id: MachineId,
   worker: WorkerName,
   provider: MachineProvider,
-  /**
-   * The brains that this machine's check verified, the first check on the Worker each day, or
-   * `None` if it ran no such check.
-   */
-  checked: Schema.Option(Schema.Array(BrainSpec)),
+  /** The check that this machine got as the Worker's first each day, or `None` if it got none. */
+  checked: Schema.Option(MachineCheck),
 }) {}
 
 /**
