@@ -404,25 +404,26 @@ const tasks = [
 const done = taskStatisticsView({ window: "7d", now, tasks, usage });
 
 describe("Task statistics", () => {
-  it("counts the tasks merged in the window, from the first Run's opening to the merge", () => {
+  it("counts the tasks merged in the window, from the first Run's opening to the last Run's close", () => {
     assert.strictEqual(done.from, "2026-10-19T00:00:00.000Z");
     assert.deepStrictEqual(
       done.tasks.map(({ number, mergedAt, durationMillis }) => [number, mergedAt, durationMillis]),
       [
-        [1, "2026-10-22T08:00:00.000Z", 48 * HOUR],
-        [12, "2026-10-23T12:00:00.000Z", 99 * HOUR],
-        [8, "2026-10-24T08:00:00.000Z", 216 * HOUR],
+        // The wait from the last Run's close to the merge is left out.
+        [1, "2026-10-22T08:00:00.000Z", 1756 * MINUTE],
+        [12, "2026-10-23T12:00:00.000Z", 1 * HOUR],
+        [8, "2026-10-24T08:00:00.000Z", 192.5 * HOUR],
       ],
     );
-    assert.strictEqual(done.medianMillis, 99 * HOUR);
+    assert.strictEqual(done.medianMillis, 1756 * MINUTE);
     assert.deepStrictEqual(
       done.periods.flatMap(({ start, tasks, medianMillis, firstTimeRight, operatorActions }) =>
         tasks === 0 ? [] : [[start, tasks, medianMillis, firstTimeRight, operatorActions]],
       ),
       [
-        ["2026-10-22", 1, 48 * HOUR, 0, 3],
-        ["2026-10-23", 1, 99 * HOUR, 1, 0],
-        ["2026-10-24", 1, 216 * HOUR, 1, 0],
+        ["2026-10-22", 1, 1756 * MINUTE, 0, 3],
+        ["2026-10-23", 1, 1 * HOUR, 1, 0],
+        ["2026-10-24", 1, 192.5 * HOUR, 1, 0],
       ],
     );
   });
@@ -434,9 +435,9 @@ describe("Task statistics", () => {
   });
 
   it("splits task time between the Loops' Attempts and the waits, in the Loops' order", () => {
-    // 2,880 minutes from the first Run to the merge, and 12,960 for the task that opened earlier.
-    const first = (minutes: number) => (minutes * MINUTE) / (48 * HOUR);
-    const second = (minutes: number) => (minutes * MINUTE) / (216 * HOUR);
+    // 1,756 minutes from the first Run to the last close, and 11,550 for the task that opened earlier.
+    const first = (minutes: number) => (minutes * MINUTE) / (1756 * MINUTE);
+    const second = (minutes: number) => (minutes * MINUTE) / (192.5 * HOUR);
     assert.strictEqual(done.time?.tasks, 2);
     // Ranked 0, 0.5, and 1 in the first task, and 0 and 1 in the second.
     assert.deepStrictEqual(done.loops, [startDev, reviewPr, actOnFindings]);
@@ -448,7 +449,7 @@ describe("Task statistics", () => {
     assert.closeTo(shares.get(startDev) ?? 0, (first(60) + second(59)) / 2, 1e-9);
     assert.closeTo(shares.get(reviewPr) ?? 0, (first(29) + second(29)) / 2, 1e-9);
     assert.closeTo(shares.get(actOnFindings) ?? 0, first(58) / 2, 1e-9);
-    assert.closeTo(done.time?.waiting ?? 0, (first(2733) + second(12872)) / 2, 1e-9);
+    assert.closeTo(done.time?.waiting ?? 0, (first(1609) + second(11462)) / 2, 1e-9);
     assert.deepStrictEqual(
       done.time?.runs.map(({ loop, runs, medianMillis }) => [loop, runs, medianMillis]),
       [
@@ -460,7 +461,7 @@ describe("Task statistics", () => {
     assert.deepStrictEqual({ ...done.untimed }, { tasks: 1, before: "2026-10-20" });
   });
 
-  it("measures tokens per task without a money figure unless every session has a price", () => {
+  it("measures tokens per task, and prices only the tasks whose sessions all have a price", () => {
     assert.strictEqual(done.unmetered, 1);
     assert.strictEqual(done.tokens?.tasks, 2);
     assert.strictEqual(done.tokens?.medianTokens, (241_000 + 80_000) / 2);
@@ -468,7 +469,8 @@ describe("Task statistics", () => {
     assert.closeTo(shares.get(startDev) ?? 0, (100 / 241 + 1) / 2, 1e-9);
     assert.closeTo(shares.get(reviewPr) ?? 0, 90 / 241 / 2, 1e-9);
     assert.closeTo(shares.get(actOnFindings) ?? 0, 51 / 241 / 2, 1e-9);
-    assert.isNull(done.tokens?.cost);
+    // Task 1 has unpriced sessions; task 12 is priced.
+    assert.deepStrictEqual({ ...done.tokens?.cost }, { tasks: 1, medianUsd: 4, estimate: true });
   });
 
   it("shares overlapping Attempts, prices fully priced tasks, and splits a long history into weeks", () => {
@@ -508,16 +510,19 @@ describe("Task statistics", () => {
       [history.periods[0]?.start, history.periods[0]?.tasks, history.periods.at(-1)?.start],
       ["2026-10-19", 1, "2027-01-18"],
     );
-    // Each Loop ran 60 minutes alone and shared 60 more, out of 720.
+    // Each Loop ran 60 minutes alone and shared 60 more, out of the 180 before the last close.
     assert.deepStrictEqual(
       history.time?.loops.map(({ loop, share }) => [loop, share]),
       [
-        [startDev, 90 / 720],
-        [reviewPr, 90 / 720],
+        [startDev, 90 / 180],
+        [reviewPr, 90 / 180],
       ],
     );
-    assert.strictEqual(history.time?.waiting, 540 / 720);
-    assert.deepStrictEqual({ ...history.tokens?.cost }, { medianUsd: 1.5, estimate: true });
+    assert.strictEqual(history.time?.waiting, 0);
+    assert.deepStrictEqual(
+      { ...history.tokens?.cost },
+      { tasks: 1, medianUsd: 1.5, estimate: true },
+    );
 
     const empty = taskStatisticsView({ window: "all", now, tasks: [], usage });
     assert.strictEqual(empty.from, "2026-10-25T00:00:00.000Z");
@@ -899,10 +904,10 @@ describe("OperatorStatistics", () => {
           ),
         );
 
-        // Issue 1 and pull request 2 form the task; its review reported no tokens.
+        // Issue 1 and pull request 2 form the task, up to its review's close; the review reported no tokens.
         assert.deepStrictEqual(
           tasksDone.tasks.map(({ number, durationMillis }) => [number, durationMillis]),
-          [[1, 48 * HOUR]],
+          [[1, 26 * HOUR + 20 * MINUTE]],
         );
         assert.deepStrictEqual(
           [tasksDone.firstTimeRight, tasksDone.operatorActions, tasksDone.unmetered],

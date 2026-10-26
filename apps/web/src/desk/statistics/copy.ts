@@ -92,6 +92,12 @@ export const unmeteredLine = (tasks: number): string =>
     ? "1 task lacks token reports and is left out of tokens"
     : `${tasks.toLocaleString("en")} tasks lack token reports and are left out of tokens`;
 
+/** Returns text such as `3 tasks lack a price and are left out of the median price`. */
+export const unpricedLine = (tasks: number): string =>
+  tasks === 1
+    ? "1 task lacks a price and is left out of the median price"
+    : `${tasks.toLocaleString("en")} tasks lack a price and are left out of the median price`;
+
 export const attemptCountLabel = (attempts: number): string =>
   countLabel(attempts, "attempt", "attempts");
 

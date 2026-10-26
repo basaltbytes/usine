@@ -26,7 +26,8 @@ export type StatisticsBucket = typeof StatisticsBucket.Type;
 
 /**
  * A task whose pull request merged in the window. `durationMillis` runs from the opening of the
- * task's first Run to the merge.
+ * task's first Run to the close of its last Run, or to the merge if a Run was open at the merge or
+ * closed after it. The wait between the last Run and the merge is left out.
  */
 export class TaskDoneView extends Schema.Class<TaskDoneView>("@usine/orchestrator/TaskDoneView")({
   repository: RepositoryName,
@@ -69,15 +70,19 @@ export class TaskTimeView extends Schema.Class<TaskTimeView>("@usine/orchestrato
   runs: Schema.Array(LoopRunTimeView),
 }) {}
 
-/** The median cost of a task. `estimate` is true if a session is in the Claude or ChatGPT plan. */
+/**
+ * The median cost of the priced tasks: those whose sessions all have a price. `estimate` is true if
+ * a session of a priced task is in the Claude or ChatGPT plan.
+ */
 export class TaskCostView extends Schema.Class<TaskCostView>("@usine/orchestrator/TaskCostView")({
+  tasks: PositiveCount,
   medianUsd: UsdAmount,
   estimate: Schema.Boolean,
 }) {}
 
 /**
  * The tokens of the tasks done whose Runs with an Attempt all reported tokens, with each Loop's
- * share. `cost` is null unless every session of every such task has a price.
+ * share. `cost` is null if no such task is priced.
  */
 export class TaskTokensView extends Schema.Class<TaskTokensView>(
   "@usine/orchestrator/TaskTokensView",
