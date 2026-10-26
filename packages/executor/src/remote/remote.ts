@@ -91,6 +91,11 @@ interface CheckoutHost {
   readonly isolation: AttemptIsolation;
   /** Returns the shell for commands in the checkout, starting the Attempt's container on first use. */
   readonly shell: Effect.Effect<RemoteShell, ExecutorError>;
+  /**
+   * Returns the shell for the salvage once the Attempt's commands end. The first call starts the
+   * Attempt's container again if it stopped while the Attempt ran.
+   */
+  readonly salvageShell: Effect.Effect<RemoteShell, ExecutorError>;
 }
 
 /**
@@ -237,7 +242,8 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       harnesses: ReadonlyArray<Harness>,
     ) {
       if (isolation._tag === "SharedUser") {
-        const shared: CheckoutHost = { isolation, shell: Effect.succeed(access.shell) };
+        const shell = Effect.succeed(access.shell);
+        const shared: CheckoutHost = { isolation, shell, salvageShell: shell };
         return shared;
       }
       const started = yield* SynchronizedRef.make(Option.none<RemoteShell>());
@@ -254,7 +260,11 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
             ),
         }),
       );
-      const contained: CheckoutHost = { isolation, shell };
+      // The kernel can kill the container for memory, or an Attempt can signal its init (#575).
+      const salvageShell = yield* Effect.cached(
+        Effect.tap(shell, () => containers.ensureRunning("cleanup", machine.shell, spec)),
+      );
+      const contained: CheckoutHost = { isolation, shell, salvageShell };
       return contained;
     });
 
@@ -579,7 +589,8 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         args: ReadonlyArray<string>,
       ) =>
         access.refresh.pipe(
-          Effect.andThen(checkout.shell),
+          // The only cleanup command in the checkout is the salvage's git.
+          Effect.andThen(operation === "cleanup" ? checkout.salvageShell : checkout.shell),
           Effect.flatMap((shell) =>
             commands.run(operation, shell, command, args, {
               environment: { ...access.gitEnvironment, ...commitIdentity(request.commitAuthor) },
