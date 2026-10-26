@@ -65,6 +65,7 @@ describe("Worker scheduler startup", () => {
         prepare: unused,
         cancel: unused,
         intervene: unused,
+        sweep: Effect.void,
       });
       const config = Schema.decodeUnknownSync(UsineConfig)({ version: 1, repos: [] });
       const failure = yield* Layer.build(
@@ -194,6 +195,7 @@ const recordingExecutor = (
     prepare: unused,
     cancel: unused,
     intervene: unused,
+    sweep: Effect.void,
     preflight: (worker, brains, maxConcurrentAttempts) =>
       Effect.gen(function* () {
         preflighted.push(
@@ -1201,6 +1203,7 @@ describe("Worker status", () => {
             prepare: unused,
             cancel: unused,
             intervene: unused,
+            sweep: Effect.void,
             preflight: (worker, brains) =>
               brains.some(({ harness }) => harness === "claude")
                 ? Effect.fail(

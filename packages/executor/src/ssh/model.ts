@@ -147,6 +147,12 @@ export interface SshExecutorOptions {
    * the executor creates. Defaults to a temporary directory removed with the executor.
    */
   readonly knownHostsDirectory?: string;
+  /**
+   * The local directory where the executor records how to reach each long-lived Worker's machine
+   * when it adds the Worker, which `sshWorkerRecordsFor` reads. Defaults to a temporary
+   * directory removed with the executor.
+   */
+  readonly workerRecordsDirectory?: string;
   /** The provider API endpoints, which tests replace. Defaults to the providers' own. */
   readonly providerEndpoints?: Partial<Record<MachineProvider, string>>;
   /** The longest wait for a created machine to answer over SSH. Defaults to 10 minutes. */

@@ -374,6 +374,13 @@ export class Executor extends Context.Service<
       attemptId: AttemptId,
       intervention: AttemptChannel.Intervention,
     ) => Effect.Effect<void, AttemptFailure>;
+    /**
+     * Removes the files on the Workers that no Attempt holds or can use, such as the Codex home
+     * of an Attempt without a checkout on an SSH Worker, which a crash or a failed cleanup left.
+     * Run it after startup recovery, which keeps the checkouts of Attempts that a Run may
+     * reattach. Never fails; logs what it couldn't remove.
+     */
+    readonly sweep: Effect.Effect<void>;
   }
 >()("@usine/executor/Executor") {}
 

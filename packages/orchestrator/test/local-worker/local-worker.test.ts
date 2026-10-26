@@ -959,6 +959,7 @@ describe("local worker", () => {
             },
             cancel: () => Effect.die("unused"),
             intervene: () => Effect.die("unused"),
+            sweep: Effect.void,
           });
           const single = Schema.decodeUnknownSync(UsineConfig)({
             version: 1,

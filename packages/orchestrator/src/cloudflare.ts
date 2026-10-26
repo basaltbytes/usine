@@ -12,6 +12,7 @@ import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
 import { Config, Effect, Layer } from "effect";
 import { externalHttpClientLayer } from "./http-client.ts";
 import { stepExecutorLayer } from "./scheduler.ts";
+import { withSshWorkerDiscard } from "./ssh.ts";
 
 /** Returns the Cloudflare Workers that `usine.yaml` declares, in declared order. */
 export const cloudflareWorkersOf = (config: UsineConfig): ReadonlyArray<CloudflareWorker> =>
@@ -78,20 +79,24 @@ export const layer = (
     Layer.provide(externalHttpClientLayer),
   );
   const started = new Set(workers.map(({ name }) => name));
-  const stepExecutor = stepExecutorLayer(config, brains, {
-    workers: {
-      add: (worker) =>
-        started.has(worker.name)
-          ? Effect.void
-          : Effect.fail(
-              new ExecutorOperationError({
-                operation: "preflight",
-                message: `A reload can't add cloudflare worker "${worker.name}", whose secrets usine up reads when it starts. Restart usine up to add it.`,
-                cause: new Error(worker.name),
-              }),
-            ),
-      remove: () => Effect.void,
-    },
-  }).pipe(Layer.provide(executor));
+  // Discarding leftovers still removes the Codex homes on an SSH Worker that `usine.yaml` dropped.
+  const stepExecutor = withSshWorkerDiscard(instanceDirectory, (discard) =>
+    stepExecutorLayer(config, brains, {
+      discard,
+      workers: {
+        add: (worker) =>
+          started.has(worker.name)
+            ? Effect.void
+            : Effect.fail(
+                new ExecutorOperationError({
+                  operation: "preflight",
+                  message: `A reload can't add cloudflare worker "${worker.name}", whose secrets usine up reads when it starts. Restart usine up to add it.`,
+                  cause: new Error(worker.name),
+                }),
+              ),
+        remove: () => Effect.void,
+      },
+    }),
+  ).pipe(Layer.provide(executor));
   return localEngineLayer(instanceDirectory).pipe(Layer.provideMerge(stepExecutor));
 };

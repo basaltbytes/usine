@@ -69,10 +69,14 @@ const deliverOneAttempt = (directory: InstanceDirectory, number: number) =>
     return delivered;
   });
 
-/** Returns a restarted runtime's executor that runs `workers`, starts nothing, and records each `recover` call. */
+/**
+ * Returns a restarted runtime's executor that runs `workers`, starts nothing, and records each
+ * `recover` call, and each `discard` call in `discarded`.
+ */
 const recordingExecutor = (
   workers: ReadonlyArray<string>,
   recovered: Ref.Ref<ReadonlyArray<AttemptId>>,
+  discarded?: Ref.Ref<ReadonlyArray<readonly [WorkerName, ReadonlyArray<AttemptId>]>>,
 ) =>
   Layer.succeed(StepExecutor)({
     workers: Effect.succeed(workers.map((worker) => WorkerName.make(worker))),
@@ -84,6 +88,10 @@ const recordingExecutor = (
     reserve: () => Effect.never,
     occupy: () => Effect.die("no open Attempt survives the restart"),
     sweep: Effect.void,
+    discard: (worker, attempts) =>
+      discarded === undefined
+        ? Effect.void
+        : Ref.update(discarded, (calls) => [...calls, [worker, attempts] as const]),
     execute: () => Effect.die("no Attempt starts after the restart"),
   });
 
@@ -211,6 +219,7 @@ const restartedExecutor = Effect.fn("test.restartedExecutor")(function* (
     reserve: () => Deferred.await(state.gate).pipe(Effect.andThen(freeSlot), Effect.as(lease)),
     occupy: () => TxRef.update(state.leased, (count) => count + 1).pipe(Effect.as(lease)),
     sweep: Effect.void,
+    discard: () => Effect.void,
     execute: (execution, io) =>
       Effect.gen(function* () {
         const { id } = execution.attempt;
@@ -380,6 +389,7 @@ describe("engine restart", () => {
           interrupt: () => Effect.void,
           occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
           sweep: Effect.void,
+          discard: () => Effect.void,
           reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
           execute: (execution) =>
             Ref.updateAndGet(executions, (seen) => [
@@ -463,6 +473,7 @@ describe("engine restart", () => {
                     interrupt: () => Effect.void,
                     occupy: () => Effect.die("no open Attempt survives into the first runtime"),
                     sweep: Effect.void,
+                    discard: () => Effect.void,
                     reserve: (_, { itemKey }) =>
                       Effect.succeed({
                         worker: itemKey === onLocal.itemKey ? local : spare,
@@ -548,6 +559,7 @@ describe("engine restart", () => {
             interrupt: () => Effect.void,
             occupy: (worker) => counted(worker, 1).pipe(Effect.as(leaseOn(worker))),
             sweep: Effect.void,
+            discard: () => Effect.void,
             reserve: (_, __, worker) => freeSlot(worker).pipe(Effect.map(leaseOn)),
             execute: (execution, io) =>
               Effect.gen(function* () {
@@ -662,6 +674,7 @@ describe("engine restart", () => {
             interrupt: () => Effect.void,
             occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
             sweep: Effect.void,
+            discard: () => Effect.void,
             reserve: () =>
               Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
             // The parent finishes and its result is stored, then the process stops before the Run records it.
@@ -1268,15 +1281,21 @@ describe("engine restart", () => {
     () =>
       withInstance((directory) =>
         Effect.gen(function* () {
-          yield* deliverOneAttempt(directory, 59);
+          const delivered = yield* deliverOneAttempt(directory, 59);
           const recovered = yield* Ref.make<ReadonlyArray<AttemptId>>([]);
+          const discarded = yield* Ref.make<
+            ReadonlyArray<readonly [WorkerName, ReadonlyArray<AttemptId>]>
+          >([]);
           const warnings: Array<string> = [];
           const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
             if (logLevel === "Warn") warnings.push(JSON.stringify(message));
           });
 
           // `usine.yaml` now declares only `usine-worker-1`.
-          const switched = engineLayer(directory, recordingExecutor(["usine-worker-1"], recovered));
+          const switched = engineLayer(
+            directory,
+            recordingExecutor(["usine-worker-1"], recovered, discarded),
+          );
           const firstScope = yield* Scope.make();
           const context = yield* Scope.provide(Layer.build(switched), firstScope).pipe(
             Effect.provide(Logger.layer([logger])),
@@ -1302,8 +1321,13 @@ describe("engine restart", () => {
               running: 0,
             }),
           );
+          assert.deepStrictEqual(yield* Ref.get(discarded), []);
           assert.strictEqual(yield* engine.discardLeftovers(WorkerName.make("local")), 1);
           assert.deepStrictEqual(yield* reader.attemptsByWorker(), []);
+          // The executor removes what the discarded Attempts left outside their checkouts.
+          assert.deepStrictEqual(yield* Ref.get(discarded), [
+            [WorkerName.make("local"), delivered.attempts.map(({ id }) => id)],
+          ]);
           yield* Scope.close(firstScope, Exit.void);
 
           // Configuring `local` again does not bring the discarded Attempt back.

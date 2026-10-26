@@ -9,11 +9,32 @@ import {
   type SshExecutorOptions,
   type SshWorkerAddress,
   type SshWorkerMachine,
+  sshWorkerRecordsFor,
   SshWorkers,
 } from "@usine/executor/ssh";
 import { Config, ConfigProvider, Effect, Layer, Option } from "effect";
 import { externalHttpClientLayer } from "./http-client.ts";
-import { stepExecutorLayer } from "./scheduler.ts";
+import { type StepExecutorOptions, stepExecutorLayer } from "./scheduler.ts";
+
+/** Returns where the SSH executor records how to reach each long-lived SSH Worker's machine. */
+export const sshWorkerRecordsDirectory = (instanceDirectory: InstanceDirectory): string =>
+  `${instanceDirectory}/.usine/ssh-workers`;
+
+/**
+ * Returns the layer that `make` builds with a `StepExecutor.discard` that removes the Codex homes
+ * of the discarded Attempts on an SSH Worker whose machine `sshWorkerRecordsDirectory` records.
+ * Every executor kind uses it, since `usine.yaml` can replace the SSH Workers with Workers of
+ * another kind.
+ */
+export const withSshWorkerDiscard = <A, E, R>(
+  instanceDirectory: InstanceDirectory,
+  make: (discard: NonNullable<StepExecutorOptions["discard"]>) => Layer.Layer<A, E, R>,
+) =>
+  Layer.unwrap(
+    Effect.map(sshWorkerRecordsFor(sshWorkerRecordsDirectory(instanceDirectory)), ({ discard }) =>
+      make(discard),
+    ),
+  ).pipe(Layer.provide(NodeServices.layer));
 
 /** Returns the SSH Workers that `usine.yaml` declares, in declared order. */
 export const sshWorkersOf = (config: UsineConfig): ReadonlyArray<SshWorker> =>
@@ -170,9 +191,13 @@ export const sshWorkerAddressesOf = Effect.fn("Orchestrator.sshWorkerAddressesOf
 /**
  * Provides the scheduler over the SSH executor, so reloads can resize, add, and remove SSH Workers.
  * A reload that adds a Worker fails with a `gateway` capability error if its `admin_token_env`
- * variable is unset.
+ * variable is unset. `options.discard` is `StepExecutor.discard`.
  */
-export const sshStepExecutorLayer = (config: UsineConfig, brains: ReadonlyArray<BrainSpec>) =>
+export const sshStepExecutorLayer = (
+  config: UsineConfig,
+  brains: ReadonlyArray<BrainSpec>,
+  options: Pick<StepExecutorOptions, "discard"> = {},
+) =>
   Layer.unwrap(
     Effect.gen(function* () {
       const machines = yield* SshWorkers;
@@ -192,6 +217,7 @@ export const sshStepExecutorLayer = (config: UsineConfig, brains: ReadonlyArray<
         yield* machines.addWorker(address);
       });
       return stepExecutorLayer(config, brains, {
+        ...options,
         workers: { add, remove: machines.removeWorker },
         ...Option.match(provisioned, { onNone: () => ({}), onSome: (machines) => ({ machines }) }),
       });
@@ -213,6 +239,8 @@ export const layer = (
     Layer.provide(NodeServices.layer),
     Layer.provide(externalHttpClientLayer),
   );
-  const stepExecutor = sshStepExecutorLayer(config, brains).pipe(Layer.provide(executor));
+  const stepExecutor = withSshWorkerDiscard(instanceDirectory, (discard) =>
+    sshStepExecutorLayer(config, brains, { discard }),
+  ).pipe(Layer.provide(executor));
   return localEngineLayer(instanceDirectory).pipe(Layer.provideMerge(stepExecutor));
 };

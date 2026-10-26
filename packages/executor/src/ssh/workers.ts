@@ -25,7 +25,8 @@ export class SshWorkers extends Context.Service<
      * Adds the machine at `address` for preflight and Attempts. Behind a Gateway, shares the admin
      * API forward with other Workers that have the same `destination` and `adminPort`, or opens it.
      * Adding a Worker again with the same address does nothing; with a different address, fails
-     * with a `machine` capability error.
+     * with a `machine` capability error. The SSH executor's `addWorker` also records how to reach
+     * a long-lived Worker's machine in `SshExecutorOptions.workerRecordsDirectory`.
      */
     readonly addWorker: (address: SshWorkerAddress) => Effect.Effect<void, WorkerCapabilityError>;
     /**
@@ -66,11 +67,15 @@ const placeOf = (address: SshWorkerAddress): string =>
     ? address.machine.destination
     : `a ${address.machine.provisioner.provider} machine per attempt`;
 
-const workerDirectoryOf = (address: SshWorkerAddress): string =>
+/** Returns the directory of a Worker's state on its machine, `<root>/workers/<name>`. */
+export const workerDirectoryOf = (address: Pick<SshWorkerAddress, "root" | "name">): string =>
   `${address.root}/workers/${safeSegment(address.name)}`;
 
 /** Returns the SSH command for one Worker: the shared options, then its port and key. */
-const sshCommandFor = (base: SshCommand, address: SshWorkerAddress): SshCommand => ({
+export const sshCommandFor = (
+  base: SshCommand,
+  address: Pick<SshWorkerAddress, "port" | "identityFile">,
+): SshCommand => ({
   command: base.command,
   args: [
     ...base.args,

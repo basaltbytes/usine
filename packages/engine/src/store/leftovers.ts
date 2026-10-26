@@ -34,7 +34,7 @@ export const leftoverQueries = (database: RunDatabaseClient) => {
     return counted.find((count) => count.worker === worker)?.running ?? 0;
   });
 
-  /** Stops tracking every Attempt on `worker` and returns the number marked. */
+  /** Stops tracking every Attempt on `worker` and returns the Attempts marked. */
   const discardLeftovers = Effect.fn("RunStoreQueries.discardLeftovers")(function* (
     worker: WorkerName,
     discardedAt: DateTime.Utc,
@@ -45,7 +45,7 @@ export const leftoverQueries = (database: RunDatabaseClient) => {
       .where(and(eq(attempts.workerName, worker), tracked))
       .returning({ attemptId: attempts.attemptId })
       .execute();
-    return discarded.length;
+    return discarded.map(({ attemptId }) => attemptId);
   });
 
   return { attemptCountsByWorker, openAttempts, discardLeftovers } as const;

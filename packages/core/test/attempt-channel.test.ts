@@ -251,15 +251,32 @@ describe("attempt channel", () => {
     const started = new SessionStarted({
       session,
       harnessSession: Option.some(
-        new HarnessSession({ id: HarnessSessionId.make("native-1"), cwd: "/worker/repo" }),
+        new HarnessSession({
+          id: HarnessSessionId.make("native-1"),
+          cwd: "/worker/repo",
+          home: Option.some("/worker/codex/native-1"),
+        }),
       ),
     });
-    assert.deepStrictEqual(
-      Schema.decodeUnknownSync(SessionStarted)(Schema.encodeSync(SessionStarted)(started)),
-      started,
-    );
+    const encoded = Schema.encodeSync(SessionStarted)(started);
+    assert.deepStrictEqual(Schema.decodeUnknownSync(SessionStarted)(encoded), started);
+    // A record from before the home was saved.
+    const withoutHome = Schema.decodeUnknownSync(SessionStarted)({
+      ...encoded,
+      harnessSession: { id: "native-1", cwd: "/worker/repo" },
+    });
+    assert(Option.isSome(withoutHome.harnessSession));
+    assert(Option.isNone(withoutHome.harnessSession.value.home));
     assert.throws(() => HarnessSessionId.make(""));
     assert.throws(() => new HarnessSession({ id: HarnessSessionId.make("native-1"), cwd: "" }));
+    assert.throws(
+      () =>
+        new HarnessSession({
+          id: HarnessSessionId.make("native-1"),
+          cwd: "/worker/repo",
+          home: Option.some(""),
+        }),
+    );
   });
 
   describe("outbound protocol reducer", () => {

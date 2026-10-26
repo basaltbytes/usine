@@ -982,5 +982,6 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       outcome: session.outcome,
       preflight: worker.preflight,
       prepare,
+      sweep: worker.sweep ?? Effect.void,
     });
   });

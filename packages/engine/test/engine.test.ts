@@ -96,6 +96,7 @@ describe("durable run engine", () => {
             interrupt: () => Effect.void,
             occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
             sweep: Effect.void,
+            discard: () => Effect.void,
             reserve: () =>
               Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
             execute: (execution) =>
@@ -182,6 +183,7 @@ describe("durable run engine", () => {
           recover: () => Effect.void,
           occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
           sweep: Effect.void,
+          discard: () => Effect.void,
           reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
           execute: () => Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
           interrupt: () => Effect.void,
@@ -859,6 +861,7 @@ describe("durable run engine", () => {
               }),
             occupy: () => Effect.die("no Attempt survives a restart in this test"),
             sweep: Effect.void,
+            discard: () => Effect.void,
             reserve: () =>
               Effect.tx(
                 Effect.gen(function* () {
@@ -1140,6 +1143,7 @@ describe("durable run engine", () => {
           interrupt: () => Effect.void,
           occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
           sweep: Effect.void,
+          discard: () => Effect.void,
           reserve: () =>
             Deferred.succeed(reserveEntered, undefined).pipe(
               Effect.andThen(Effect.never),

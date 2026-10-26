@@ -220,6 +220,7 @@ it.live(
         intervene: () => Effect.void,
         occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
         sweep: Effect.void,
+        discard: () => Effect.void,
         reserve: () => Effect.succeed({ worker: WorkerName.make("test"), release: Effect.void }),
         interrupt: () => Effect.void,
         execute: () => Effect.succeed(new StepResult({ message: "Reviewed", facts: [] })),
