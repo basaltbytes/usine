@@ -5,12 +5,20 @@ import { InfraFailure } from "@usine/core/attempt/failure";
 import { Run, RunId } from "@usine/core/run";
 import * as RunState from "@usine/core/run/state";
 import { Step } from "@usine/core/step";
-import { MachineId, WorkerName } from "@usine/core/worker";
+import {
+  ContainerCpus,
+  ContainerLimits,
+  ContainerMemoryMib,
+  ContainerPids,
+  MachineId,
+  WorkerName,
+} from "@usine/core/worker";
 import { StepExecution, StepExecutor } from "@usine/engine/step-executor";
 import {
   Executor,
   ExecutorOperationError,
   fullPreflight,
+  MachineCheck,
   MachineGrant,
   MachineHold,
   MachineStatus,
@@ -34,11 +42,15 @@ const config = Schema.decodeUnknownSync(UsineConfig)({
   workers: [{ name: "pool", kind: "local", max_concurrent_attempts: 1 }],
 });
 
-/** A fake `WorkerMachines` that records each call and fails the creations in `failures`. */
+/**
+ * A fake `WorkerMachines` that records each call, fails the creations in `failures`, and gives
+ * the next successful creations the machine checks in `checks`.
+ */
 const fakeMachines = () =>
   Effect.gen(function* () {
     const calls: Array<string> = [];
     const failures: Array<MachineUnavailableError> = [];
+    const checks: Array<MachineCheck> = [];
     const gate = yield* Ref.make(Option.none<Deferred.Deferred<void>>());
     let next = 0;
     const machines = WorkerMachines.of({
@@ -56,7 +68,7 @@ const fakeMachines = () =>
             id: MachineId.make(String(100 + next)),
             worker,
             provider: "hetzner",
-            checked: Option.none(),
+            checked: Option.fromNullishOr(checks.shift()),
           });
         }).pipe(Effect.onInterrupt(() => Effect.sync(() => calls.push(`interrupted ${runId}`)))),
       assign: (hold, attemptId) =>
@@ -80,7 +92,7 @@ const fakeMachines = () =>
         }),
       ]),
     });
-    return { calls, failures, gate, machines };
+    return { calls, failures, checks, gate, machines };
   });
 
 const prepared: Array<AttemptId> = [];
@@ -175,6 +187,14 @@ describe("Worker scheduler on a provisioned Worker", () => {
     () =>
       Effect.gen(function* () {
         const fake = yield* fakeMachines();
+        const limits = new ContainerLimits({
+          cpus: ContainerCpus.make(3.5),
+          memoryMib: ContainerMemoryMib.make(7168),
+          pids: ContainerPids.make(60976),
+        });
+        fake.checks.push(
+          new MachineCheck({ brains: [testAgent.brain], containerLimits: Option.some(limits) }),
+        );
         const context = yield* scheduler(fake.machines);
         const steps = Context.get(context, StepExecutor);
         const status = Context.get(context, WorkerStatus);
@@ -183,6 +203,9 @@ describe("Worker scheduler on a provisioned Worker", () => {
         assert.strictEqual(lease.worker, POOL);
         assert.deepStrictEqual(fake.calls, [`create pool ${run}`]);
         assert.lengthOf(yield* status.machines, 1);
+        // The first machine's check gives the Worker page the limits its containers get.
+        const checked = (yield* status.preflights).find(({ worker }) => worker === POOL);
+        assert.deepStrictEqual(checked?.containerLimits, Option.some(limits));
 
         const attempt = AttemptId.make("run-1/execute/1");
         const failure = yield* steps.execute(executionOf(run, attempt), sink).pipe(Effect.flip);

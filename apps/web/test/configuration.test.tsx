@@ -17,7 +17,13 @@ import { SectionReloadProvider } from "../src/configuration/reload.tsx";
 import { RepositoriesList, RepositoryDetail } from "../src/configuration/repositories.tsx";
 import { SettingsPage } from "../src/configuration/settings.tsx";
 import { WorkerDetail, WorkersList } from "../src/configuration/workers.tsx";
-import { configurationFixture, emptyConfiguration } from "./configuration-fixture.ts";
+import { ConfigurationView } from "@usine/orchestrator/operator";
+import { Schema } from "effect";
+import {
+  configurationFixture,
+  configurationJson,
+  emptyConfiguration,
+} from "./configuration-fixture.ts";
 
 const render = async (page: () => ReactNode): Promise<string> => {
   const queryClient = new QueryClient();
@@ -283,7 +289,35 @@ describe("Workers page", () => {
     assert.include(page, "/srv/usine");
     assert.include(page, "No preflight since usine up started.");
     assert.include(page, "Default for this release");
-    assert.include(page, "2 CPUs, 4096 MiB, 4096 processes");
+  });
+
+  it("shows the container limits from usine.yaml, then the ones the last preflight derived", async () => {
+    const configuration = configurationFixture();
+    const before = text(
+      await render(() => <WorkerDetail name="eu-1" configuration={configuration} />),
+    );
+    assert.include(
+      before,
+      "Limits 3584 MiB Derived from the machine at preflight: CPUs and processes",
+    );
+
+    const checked = Schema.decodeUnknownSync(ConfigurationView)({
+      ...configurationJson,
+      workers: configurationJson.workers.map((worker) =>
+        worker.name === "eu-1"
+          ? {
+              ...worker,
+              prerequisites: { _tag: "Passed", checkedAt: "2026-10-20T08:00:00.000Z" },
+              containerLimits: { cpus: 1.16, memoryMib: 3584, pids: 20325 },
+            }
+          : worker,
+      ),
+    });
+    const after = text(await render(() => <WorkerDetail name="eu-1" configuration={checked} />));
+    assert.include(
+      after,
+      "Limits 1.16 CPUs, 3584 MiB, 20325 processes Derived from the machine at the last preflight: CPUs and processes",
+    );
   });
 
   it("shows an SSH Worker without Docker as degraded, with the reason, and its container settings", async () => {

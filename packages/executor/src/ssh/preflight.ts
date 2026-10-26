@@ -2,7 +2,7 @@ import type { RemoteShell } from "@usine/agents/child-host";
 import type { ClaudeLoginLock } from "@usine/agents/runtime";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import type { WorkerName } from "@usine/core/worker";
-import { Array as Arr, Effect, Option } from "effect";
+import { Array as Arr, Effect, Match, Option } from "effect";
 import {
   type ExecutorError,
   logPreflightFailure,
@@ -16,6 +16,7 @@ import type { RemoteCommands } from "../remote/commands.ts";
 import type { SshContainers } from "./container.ts";
 import { gatewayExportedEnvironment } from "./gateway/environment.ts";
 import { verifyGateway } from "./gateway/preflight.ts";
+import { limitFields } from "./limits.ts";
 import type { SshMachine } from "./model.ts";
 import type { SshWorkerEntry } from "./workers.ts";
 
@@ -33,9 +34,10 @@ const capabilityError = (
  * Verifies an SSH Worker's machine: SSH connects, the root is a writable directory, Git runs,
  * memory is enough for the concurrent Attempts, the Gateway (if any) responds and is reachable,
  * Docker and the Attempt image work if the machine has Docker, and each brain is ready. Pulls
- * the Attempt image and changes nothing else. With Docker, brains are probed in a container
- * from the image; without, as the SSH user, which the report gives as degraded. Claude brains
- * are checked under the Worker's lock in `logins`.
+ * the Attempt image and changes nothing else. With Docker, it derives the container limits that
+ * `usine.yaml` leaves unset for `maxConcurrentAttempts` containers, which the report gives, and
+ * brains are probed in a container from the image; without, as the SSH user, which the report
+ * gives as degraded. Claude brains are checked under the Worker's lock in `logins`.
  */
 export const sshMachinePreflightFor = (
   commands: RemoteCommands,
@@ -107,7 +109,7 @@ export const sshMachinePreflightFor = (
 
     if (Option.isSome(machine.gateway))
       yield* verifyGateway(commands, worker, machine, machine.gateway.value);
-    const containerCheck = yield* containers.verify(machine);
+    const containerCheck = yield* containers.verify(machine, maxConcurrentAttempts);
     const harnesses = Arr.dedupe(brains.map(({ harness }) => harness));
     const probe = (shell: RemoteShell) =>
       verifyHarnessReadiness(
@@ -117,11 +119,12 @@ export const sshMachinePreflightFor = (
         harnessProbe(machine, shell),
         logins,
       );
-    yield* containerCheck.isolation._tag === "Container" && harnesses.length > 0
+    yield* containerCheck._tag === "Container" && harnesses.length > 0
       ? Effect.scoped(
           containers
             .preflightShell(
               machine,
+              containerCheck.settings,
               harnesses,
               Option.match(machine.gateway, {
                 onNone: () => ({}),
@@ -132,15 +135,31 @@ export const sshMachinePreflightFor = (
             .pipe(Effect.flatMap(probe)),
         )
       : probe(machine.shell);
-    yield* Effect.logInfo("SSH Worker preflight verified", {
+    const fields = {
       worker,
       host,
       root,
       gitVersion,
-      isolation: containerCheck.isolation._tag,
+      isolation: containerCheck._tag,
       harnesses: harnesses.join(","),
+    };
+    return yield* Match.valueTags(containerCheck, {
+      Container: ({ limits }) =>
+        Effect.as(
+          Effect.logInfo("SSH Worker preflight verified", { ...fields, ...limitFields(limits) }),
+          {
+            degraded: Option.none(),
+            deferred: Option.none(),
+            containerLimits: Option.some(limits.limits),
+          } satisfies PreflightReport,
+        ),
+      SharedUser: ({ degraded }) =>
+        Effect.as(Effect.logInfo("SSH Worker preflight verified", fields), {
+          degraded: Option.some(degraded),
+          deferred: Option.none(),
+          containerLimits: Option.none(),
+        } satisfies PreflightReport),
     });
-    return { degraded: containerCheck.degraded, deferred: Option.none() } satisfies PreflightReport;
   });
 
 /**
