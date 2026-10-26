@@ -29,6 +29,7 @@ import {
   Option,
   Ref,
   Result,
+  Scope,
 } from "effect";
 import {
   AttemptReport,
@@ -72,9 +73,15 @@ const capturedLogs = () => {
   const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
     lines.push({ level: logLevel, text: JSON.stringify(message) });
   });
+  const matching = (pattern: RegExp) => lines.filter(({ text }) => pattern.test(text));
   return {
     layer: Logger.layer([logger]),
-    matching: (pattern: RegExp) => lines.filter(({ text }) => pattern.test(text)),
+    matching,
+    /** Waits until a line matches `pattern`, or fails after 5 seconds. */
+    logged: (pattern: RegExp) =>
+      Effect.gen(function* () {
+        while (matching(pattern).length === 0) yield* Effect.sleep("20 millis");
+      }).pipe(Effect.timeout("5 seconds")),
   };
 };
 
@@ -1056,6 +1063,48 @@ describe("durable AttemptRuntime", () => {
         assert(Exit.isFailure(yield* Fiber.await(execution)));
       }).pipe(Effect.provide(services));
     }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "closes the harness while a released Attempt's parent waits for an execute call to spawn a child",
+    () => {
+      const logs = capturedLogs();
+      return Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        const request = attemptRequest("run/step/573");
+        const scope = yield* Scope.make();
+        const services = yield* Layer.buildWithScope(
+          layer({ database, parent: [delegate("First part"), delegate("Second part")] }),
+          scope,
+        );
+        const runtime = Context.get(services, AttemptRuntime);
+        const execution = yield* Effect.forkChild(runtime.execute(request, recordingSink().sink));
+        const first = yield* Context.get(services, StubChildren).next;
+        // Releases the Attempt as a forced shutdown does; its parent task keeps running.
+        yield* Fiber.interrupt(execution);
+        yield* first.reply("The first part is done.");
+        yield* logs.logged(/Waiting for execute to supply/u);
+
+        const closing = yield* Effect.forkDetach(Scope.close(scope, Exit.void));
+        const closed = yield* Fiber.await(closing).pipe(Effect.timeoutOption("2 seconds"));
+        assert(Option.isSome(closed), "The durable harness did not close");
+        assert.lengthOf(logs.matching(/Abandoning the child spawn of an aborted tool call/u), 1);
+
+        // The next process resumes the Attempt: the abandoned call ends as interrupted.
+        const report = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const reopened = yield* Layer.build(
+              layer({ database, parent: [answer("Finished after the restart.")] }),
+            );
+            return yield* Context.get(reopened, AttemptRuntime).execute(
+              request,
+              recordingSink().sink,
+            );
+          }),
+        );
+        assert.strictEqual(report.message, "Finished after the restart.");
+      }).pipe(Effect.scoped, Effect.provide(logs.layer));
+    },
   );
 
   it.live("leaves no live Attempt once the executor canceled it after a failed relay", () =>

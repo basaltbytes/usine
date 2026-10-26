@@ -49,13 +49,16 @@ export const processAlive = (pid: ProcessId) =>
     }
   });
 
-/** Sends `SIGTERM` to the process. Succeeds if the process has already exited. */
-export const terminate = Effect.fn("Instance.terminate")(function* (pid: ProcessId) {
-  yield* Effect.annotateCurrentSpan({ pid });
+/** Sends `signal` to the process. Succeeds if the process has already exited. */
+export const signalProcess = Effect.fn("Instance.signal")(function* (
+  pid: ProcessId,
+  signal: "SIGTERM" | "SIGKILL",
+) {
+  yield* Effect.annotateCurrentSpan({ pid, signal });
   const sent = yield* Effect.try({
     try: () => {
       try {
-        return process.kill(pid, "SIGTERM");
+        return process.kill(pid, signal);
       } catch (cause) {
         if (Schema.is(NoSuchProcess)(cause)) return false;
         throw cause;
@@ -64,13 +67,13 @@ export const terminate = Effect.fn("Instance.terminate")(function* (pid: Process
     catch: (cause) =>
       new SignalError({
         pid,
-        signal: "SIGTERM",
+        signal,
         reason: cause instanceof Error ? cause.message : String(cause),
       }),
   });
   yield* sent
-    ? Effect.logInfo("Sent SIGTERM to the instance process", { pid })
-    : Effect.logInfo("The instance process exited before the signal", { pid });
+    ? Effect.logInfo("Sent a signal to the instance process", { pid, signal })
+    : Effect.logInfo("The instance process exited before the signal", { pid, signal });
 });
 
 /**

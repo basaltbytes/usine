@@ -135,6 +135,9 @@ if [ "$state" != true ]; then echo container-stopped; exit 0; fi
 exec "$1" exec "$2" sh -c "$3" sh "$4"
 `.trim();
 
+/** The `container inspect` format of a container's status, exit code, and out-of-memory kill. */
+const STATE_FORMAT = "{{.State.Status}} {{.State.ExitCode}} {{.State.OOMKilled}}";
+
 /**
  * A script that lists the containers labeled `$2`, one `<name> <worker>` line each. Prints
  * nothing if the machine has no container CLI.
@@ -182,6 +185,18 @@ const environmentFile = (
   );
 };
 
+/** Returns the log fields of the container of `spec` on the machine of `shell`. */
+const containerFields = (shell: RemoteShell, spec: ContainerSpec) => ({
+  worker: spec.worker,
+  host: shell.destination,
+  container: spec.name,
+  image: spec.settings.image,
+  ...Option.match(spec.attemptId, {
+    onNone: () => ({}),
+    onSome: (attemptId) => ({ attemptId }),
+  }),
+});
+
 /** Returns the shell that runs commands in the container `name` on the machine of `shell`. */
 const containerShell = (shell: RemoteShell, name: string): RemoteShell => {
   const container: ShellContainer = { runtime: CONTAINER_RUNTIME, name };
@@ -227,17 +242,7 @@ export const containersFor = (commands: RemoteCommands) => {
     shell: RemoteShell,
     spec: ContainerSpec,
   ) {
-    const host = shell.destination;
-    const fields = {
-      worker: spec.worker,
-      host,
-      container: spec.name,
-      image: spec.settings.image,
-      ...Option.match(spec.attemptId, {
-        onNone: () => ({}),
-        onSome: (attemptId) => ({ attemptId }),
-      }),
-    };
+    const fields = containerFields(shell, spec);
     yield* Effect.annotateCurrentSpan(fields);
     const logins = spec.harnesses.flatMap((harness) => [
       ...LOGIN_FILES[harness].mounted.map((file) => ({ file, mounted: true })),
@@ -377,6 +382,38 @@ export const containersFor = (commands: RemoteCommands) => {
   });
 
   /**
+   * Starts the container of `spec` again if it stopped, such as after an out-of-memory kill or a
+   * signal to its init. The scope that started it still removes it. Fails if it doesn't exist.
+   */
+  const ensureRunning = Effect.fn("RemoteExecutor.ensureContainerRunning")(function* (
+    operation: ExecutorOperation,
+    shell: RemoteShell,
+    spec: ContainerSpec,
+  ) {
+    const fields = containerFields(shell, spec);
+    yield* Effect.annotateCurrentSpan(fields);
+    const [status = "", exitCode = "", oomKilled = ""] = (yield* commands.run(
+      operation,
+      shell,
+      CONTAINER_RUNTIME,
+      ["container", "inspect", "--format", STATE_FORMAT, spec.name],
+    ))
+      .trim()
+      .split(" ");
+    if (status === "running") {
+      yield* Effect.logDebug("The container still runs", fields);
+      return;
+    }
+    yield* Effect.logWarning("The container stopped; starting it again", {
+      ...fields,
+      status,
+      exitCode,
+      oomKilled,
+    });
+    yield* commands.run(operation, shell, CONTAINER_RUNTIME, ["start", spec.name]);
+  });
+
+  /**
    * Removes the containers labeled with `instance` on the machine of `shell` whose Worker
    * label is `worker` or not in `kept`. Returns the names removed.
    */
@@ -446,5 +483,5 @@ export const containersFor = (commands: RemoteCommands) => {
     });
   });
 
-  return { start, stopChildren, sweep, remove, mark, marked };
+  return { start, ensureRunning, stopChildren, sweep, remove, mark, marked };
 };

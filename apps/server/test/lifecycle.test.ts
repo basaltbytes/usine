@@ -197,6 +197,24 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
     assert.isFalse(alive(record.pid));
   });
 
+  it("sends SIGKILL to a forced stop that doesn't exit before the timeout, and says so", async () => {
+    const directory = instanceFolder();
+    const record = await startFixture(directory);
+    writeFileSync(join(directory, "fixture-drain"), "never");
+    writeFileSync(join(directory, "fixture-close"), "never");
+
+    const output = await runCli(directory, ["stop", "--force", "--timeout", "1"]);
+
+    assert.match(
+      output,
+      new RegExp(`usine \\(pid ${record.pid}\\) did not exit within 1s\\. Sent SIGKILL`, "u"),
+    );
+    assert.match(output, /usine stopped\./u);
+    assert.isFalse(alive(record.pid));
+    const state = await run(probeInstance(directory));
+    assert(state._tag === "Stopped");
+  });
+
   it("refuses to restart while neither the shell nor .env sets a gateway token variable", async () => {
     const directory = instanceFolder();
     const first = await startFixture(directory);

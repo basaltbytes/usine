@@ -290,7 +290,7 @@ usine skips attempts on a worker that `usine.yaml` no longer declares, for examp
 
 ## Stop the orchestrator
 
-From the instance folder, run `usine stop`, or press Ctrl+C once in the terminal of `usine up`. usine stops starting attempts and waits for running attempts to end, for at most `max_attempt_minutes`. `usine stop` names the runs that it waits for and returns when the process exits, or after `--timeout` seconds (120 by default) while the drain continues. `usine stop --force`, or a second Ctrl+C, stops the orchestrator without waiting, and the next `usine up` reattaches the running attempts. See [Shutdown](/reference/configuration/cli/#shutdown).
+From the instance folder, run `usine stop`, or press Ctrl+C once in the terminal of `usine up`. usine stops starting attempts and waits for running attempts to end, for at most `max_attempt_minutes`. `usine stop` names the runs that it waits for and returns when the process exits, or after `--timeout` seconds (120 by default) while the drain continues. `usine stop --force`, or a second Ctrl+C, stops the orchestrator without waiting, and the next `usine up` reattaches the running attempts. If the process still runs after `--timeout`, `usine stop --force` sends it `SIGKILL`. See [Shutdown](/reference/configuration/cli/#shutdown).
 
 `usine status` tells whether the orchestrator runs, with its PID, address, engine version, uptime, and open runs. It exits with status 3 if the orchestrator doesn't run.
 

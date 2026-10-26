@@ -2,7 +2,8 @@
 // `usine up` does, writes the instance record, drains on the first SIGTERM, and answers
 // GET /api/overview and /api/configuration. It reads the runs to list from `fixture-runs.json` in
 // its working directory, and a gateway admin token variable from `fixture-gateway-env`. If
-// `fixture-drain` contains `never`, only a second signal ends its drain. If `fixture-startup`
+// `fixture-drain` contains `never`, only a second signal ends its drain. If `fixture-close`
+// contains `never`, its runtime scope never closes, so only SIGKILL stops it. If `fixture-startup`
 // contains `<lines> <milliseconds>`, it logs that many lines at that interval before it listens, as
 // startup recovery does; if it contains `never`, it never listens.
 import { existsSync, readFileSync } from "node:fs";
@@ -21,9 +22,8 @@ const runs = () =>
   existsSync(fixtureFile("fixture-runs.json"))
     ? JSON.parse(readFileSync(fixtureFile("fixture-runs.json"), "utf8"))
     : [];
-const drainsForever = () =>
-  existsSync(fixtureFile("fixture-drain")) &&
-  readFileSync(fixtureFile("fixture-drain"), "utf8").trim() === "never";
+const never = (name) =>
+  existsSync(fixtureFile(name)) && readFileSync(fixtureFile(name), "utf8").trim() === "never";
 const startup = () => {
   const plan = existsSync(fixtureFile("fixture-startup"))
     ? readFileSync(fixtureFile("fixture-startup"), "utf8").trim()
@@ -98,10 +98,13 @@ NodeRuntime.runMain(
         Effect.gen(function* () {
           yield* startup();
           yield* listen(port);
+          yield* Effect.addFinalizer(() =>
+            Effect.suspend(() => (never("fixture-close") ? Effect.never : Effect.void)),
+          );
           yield* Console.log(`fixture listening on ${port}`);
           return {
             running: Effect.never,
-            drain: Effect.suspend(() => (drainsForever() ? Effect.never : Effect.void)),
+            drain: Effect.suspend(() => (never("fixture-drain") ? Effect.never : Effect.void)),
           };
         }),
         requested,
