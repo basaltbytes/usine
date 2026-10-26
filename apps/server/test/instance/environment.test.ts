@@ -21,12 +21,16 @@ const instanceFolder = () => {
 
 const shell = ConfigProvider.fromEnv({ env: { TOKEN_B: "from-shell" } });
 
-const read = (directory: InstanceDirectory, names: ReadonlyArray<string>) =>
+const read = (
+  directory: InstanceDirectory,
+  names: ReadonlyArray<string>,
+  environment: ConfigProvider.ConfigProvider = shell,
+) =>
   Effect.runPromise(
     Effect.gen(function* () {
-      const environment = yield* instanceEnvironment(directory, shell);
+      const provider = yield* instanceEnvironment(directory, environment);
       return yield* Effect.forEach(names, (name) =>
-        Config.option(Config.string(name)).parse(environment),
+        Config.option(Config.string(name)).parse(provider),
       );
     }).pipe(Effect.provide(NodeServices.layer)),
   );
@@ -44,6 +48,17 @@ describe("instance environment", () => {
     assert.deepStrictEqual(a, Option.some("from-file"));
     assert.deepStrictEqual(b, Option.some("from-shell"));
     assert.deepStrictEqual(absent, Option.none());
+  });
+
+  it("fills a variable from .env when the environment sets only a longer name it prefixes", async () => {
+    const directory = instanceFolder();
+    writeFileSync(join(directory, ".env"), "TOKEN=from-file\nTOKEN_OTHER=from-file\n");
+    const environment = ConfigProvider.fromEnv({ env: { TOKEN_OTHER: "from-shell" } });
+
+    const [token, other] = await read(directory, ["TOKEN", "TOKEN_OTHER"], environment);
+
+    assert.deepStrictEqual(token, Option.some("from-file"));
+    assert.deepStrictEqual(other, Option.some("from-shell"));
   });
 
   it("reads the environment alone without .env, and refuses a .env it can't read", async () => {
