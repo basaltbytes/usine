@@ -923,22 +923,24 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
       // Runs after the credential stops renewing and before it's revoked; see `acquireSandbox`.
       yield* Effect.addFinalizer(() =>
         Effect.gen(function* () {
-          // No salvage result means preparation failed before the checkout existed.
           const salvage = (yield* Deferred.isDone(salvaged))
             ? Option.some(yield* Effect.exit(Deferred.await(salvaged)))
             : Option.none();
           const retained =
             (yield* Ref.get(keep)) ||
-            Option.exists(
-              salvage,
-              (exit) =>
+            Option.match(salvage, {
+              // Preparation failed before it acquired the checkout. A reattachment's checkout
+              // existed before, with the Attempt's work, and the engine's recovery salvages it.
+              onNone: () => request.reattach,
+              onSome: (exit) =>
                 Exit.isFailure(exit) ||
                 Option.exists(exit.value, ({ _tag }) => _tag === "Retained"),
-            );
+            });
           if (retained) {
             yield* Effect.logInfo("Keeping the Attempt's sandbox with its checkout", {
               ...fields,
               sandbox: name,
+              salvaged: Option.isSome(salvage),
             });
             yield* holdSandbox(worker, name, "the Attempt's checkout stays");
             return;

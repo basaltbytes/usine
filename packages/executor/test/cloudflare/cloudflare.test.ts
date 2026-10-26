@@ -3,6 +3,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { RemoteShell, sshArguments } from "@usine/agents/child-host";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { Agent } from "@usine/core/agent";
+import type { AttemptSalvage } from "@usine/core/attempt/salvage";
 import { CloudflareImageName, WorkerName } from "@usine/core/worker";
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
 import {
@@ -21,11 +22,15 @@ import { SHELL_ENVIRONMENT } from "../../src/cloudflare/shell/environment.ts";
 import {
   CheckoutRequest,
   claudeLoginLockLayer,
+  CredentialProvider,
+  CredentialUnavailableError,
   Executor,
   WorkerCapabilityError,
 } from "../../src/executor.ts";
+import { keptCheckoutRecovery } from "../../src/provision.ts";
 import {
   aloneOnItem,
+  COMMIT_AUTHOR,
   mintingProvider,
   request as sshRequest,
   TOKEN_PREFIX,
@@ -53,6 +58,23 @@ const OPENAI: CloudflareProviderKey = {
 };
 
 const request = new CheckoutRequest({ ...sshRequest, worker: WORKER });
+
+/** A credential provider that can't reach GitHub, so it issues no token. */
+const unreachableGitHub: ReturnType<typeof mintingProvider> = {
+  minted: [],
+  permissions: [],
+  layer: Layer.succeed(CredentialProvider)({
+    issue: (repository) =>
+      Effect.fail(
+        new CredentialUnavailableError({
+          repository,
+          reason: "unreachable",
+          message: "GitHub didn't answer the installation token request",
+          cause: new Error("ETIMEDOUT"),
+        }),
+      ),
+  }),
+};
 
 const sink = {
   append: () => Effect.void,
@@ -285,6 +307,67 @@ describe("cloudflare Worker", () => {
         assert.isTrue(
           kept.stops >= 2,
           "reattachment stops the commands left from before the restart",
+        );
+        assert.isFalse(worker.state.sandboxes.has(SANDBOX));
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "keeps the sandbox when a reattachment can't be prepared, so recovery salvages its checkout",
+    () =>
+      Effect.gen(function* () {
+        const worker = yield* fakeWorker;
+        const storage = new StubStorage();
+        const working = yield* Deferred.make<void>();
+        const blocks: StubParent = () =>
+          Deferred.succeed(working, undefined).pipe(Effect.andThen(Effect.never));
+        yield* Effect.gen(function* () {
+          const cloudflare = yield* Executor;
+          const prepared = yield* cloudflare.prepare(request);
+          const running = yield* Effect.forkChild(prepared.launch(sink));
+          yield* Deferred.await(working);
+          yield* Fiber.interrupt(running);
+        }).pipe(
+          Effect.scoped,
+          Effect.provide(executor(worker, mintingProvider(), blocks, storage)),
+        );
+
+        // After the restart, GitHub doesn't answer when the reattachment asks for a token.
+        const refused = yield* Executor.pipe(
+          Effect.flatMap((cloudflare) =>
+            cloudflare.prepare(new CheckoutRequest({ ...request, reattach: true })),
+          ),
+          Effect.flip,
+          Effect.scoped,
+          Effect.provide(executor(worker, unreachableGitHub, completes, storage)),
+        );
+        assert.strictEqual(refused._tag, "CredentialUnavailableError");
+        const kept = worker.state.sandboxes.get(SANDBOX);
+        assert(kept !== undefined, "the sandbox and its checkout stay");
+        assert.isTrue(kept.held);
+        assert.isTrue(kept.paths.has(WORKTREE));
+        assert.notInclude(worker.state.requests, `DELETE /v1/sandboxes/${SANDBOX}`);
+
+        const salvages: Array<AttemptSalvage> = [];
+        yield* Executor.pipe(
+          Effect.flatMap((cloudflare) =>
+            cloudflare.recover(
+              keptCheckoutRecovery(request),
+              { ...sink, salvage: (salvage) => Effect.sync(() => void salvages.push(salvage)) },
+              Effect.succeed(COMMIT_AUTHOR),
+            ),
+          ),
+          Effect.scoped,
+          Effect.provide(executor(worker, mintingProvider(), completes, storage)),
+        );
+        assert.deepStrictEqual(
+          salvages.map(({ _tag }) => _tag),
+          ["Pushed"],
+        );
+        assert.isTrue(
+          kept.commands.some(
+            (line) => line.includes("'push'") && line.includes(request.salvageRef),
+          ),
         );
         assert.isFalse(worker.state.sandboxes.has(SANDBOX));
       }).pipe(Effect.scoped),
