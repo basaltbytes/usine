@@ -1,5 +1,15 @@
 # @usine/expression
 
+## 0.4.0
+
+### Minor Changes
+
+- 9c7ea97: Requires `effect` 4.0.6 instead of 4.0.0-rc.111 ([#494](https://github.com/basaltbytes/usine/issues/494)).
+
+### Patch Changes
+
+- 1f7b315: Change the license from MIT to AGPL-3.0-only. Versions published before this one stay under MIT.
+
 ## 0.3.0
 
 ### Minor Changes
