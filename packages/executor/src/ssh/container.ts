@@ -3,7 +3,7 @@ import type { Harness } from "@usine/core/agent/brain";
 import type { InstanceId } from "@usine/core/instance";
 import { safeSegment } from "@usine/core/repository";
 import { ContainerImage, type WorkerName } from "@usine/core/worker";
-import { Cache, Effect, Option, Random, Ref } from "effect";
+import { Cache, Effect, Option, Random, Ref, Schema } from "effect";
 import { type ExecutorError, WorkerCapabilityError } from "../executor.ts";
 import type { RemoteCommands } from "../remote/commands.ts";
 import {
@@ -11,6 +11,9 @@ import {
   CONTAINER_RUNTIME,
   type ContainerSettings,
   containersFor,
+  PNPM_STORE_MOUNT,
+  PNPM_STORE_PATH,
+  PNPM_STORE_VOLUME,
   sharedUser,
 } from "../remote/container.ts";
 import {
@@ -56,6 +59,10 @@ const USER_IDS_SCRIPT = String.raw`
 image_uid=$("$1" run --rm --network none --entrypoint id "$2" -u) || exit 1
 printf '%s %s\n' "$(id -u)" "$image_uid"
 `.trim();
+
+const decodeStoreSize = Schema.decodeUnknownEffect(
+  Schema.NumberFromString.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+);
 
 /** What a preflight found about the containers of a Worker. */
 type ContainerCheck =
@@ -272,12 +279,51 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
         `SSH worker "${worker}" can't run the attempt image ${image}`,
         new Error(ids.stderr.trim() || `exit code ${ids.exitCode}`),
       );
+    if (imageId !== "1000")
+      return yield* containerGap(
+        worker,
+        `The attempt image ${image} runs as user ID ${imageId}; the shared pnpm store requires UID 1000. Build the image with --build-arg USINE_UID=1000.`,
+        new Error(`image user ID ${imageId}`),
+      );
     if (hostId !== imageId)
       return yield* containerGap(
         worker,
-        `The attempt image ${image} runs as user ID ${imageId}, and the SSH user of worker "${worker}" has ID ${hostId}, so its containers can't write the checkouts. Build the image with --build-arg USINE_UID=${hostId}.`,
+        `The attempt image ${image} runs as user ID ${imageId}, and the SSH user of worker "${worker}" has ID ${hostId}, so its containers can't write the checkouts. Use an SSH user with UID 1000.`,
         new Error(`user IDs ${hostId} and ${imageId}`),
       );
+    yield* containers
+      .prepareStore("preflight", machine.shell, image, worker)
+      .pipe(
+        Effect.mapError((error) =>
+          containerGap(worker, `Can't prepare the shared pnpm store: ${error.message}`, error),
+        ),
+      );
+    const size = yield* commands
+      .run("preflight", machine.shell, CONTAINER_RUNTIME, [
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        "--mount",
+        PNPM_STORE_MOUNT,
+        "--entrypoint",
+        "du",
+        image,
+        "-sk",
+        PNPM_STORE_PATH,
+      ])
+      .pipe(
+        Effect.flatMap((output) => decodeStoreSize(output.trim().split(/\s+/u)[0])),
+        Effect.mapError((error) =>
+          containerGap(worker, `Can't measure the shared pnpm store on worker "${worker}"`, error),
+        ),
+      );
+    yield* Effect.logInfo("Shared pnpm store disk usage", {
+      worker,
+      host,
+      volume: PNPM_STORE_VOLUME,
+      sizeKiB: size,
+    });
     return yield* recordContainer(machine, version.value, slots);
   });
 

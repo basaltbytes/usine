@@ -193,6 +193,8 @@ interface FakeMachineState {
   imageOnMachine: boolean;
   /** The user ID inside the Attempt image. The SSH user's is 1000. */
   imageUserId: string;
+  storePreparationFails: boolean;
+  storeSizeKiB: string;
   /** The containers on the machine, by name. */
   readonly containers: Map<string, FakeContainer>;
   /** The number of containers that `docker run` created, which gives each its ID. */
@@ -326,6 +328,8 @@ export const fakeMachine = () => {
     pullFails: false,
     imageOnMachine: true,
     imageUserId: "1000",
+    storePreparationFails: false,
+    storeSizeKiB: "4096",
     containers: new Map(),
     containersCreated: 0,
     homeFiles: new Set([".claude/.credentials.json", ".claude.json"]),
@@ -358,6 +362,11 @@ export const fakeMachine = () => {
         state.imageOnMachine ? "sha256:0123\n" : "",
         state.imageOnMachine ? 0 : 1,
       );
+    if (line.includes("volume create"))
+      return state.storePreparationFails
+        ? oneShotHandle("", 1, "pnpm store: permission denied")
+        : oneShotHandle("", 0);
+    if (words.includes("du")) return oneShotHandle(`${state.storeSizeKiB}\t/store\n`, 0);
     if (line.includes("--entrypoint")) return oneShotHandle(`1000 ${state.imageUserId}\n`, 0);
     if (line.includes("absolute=$3")) {
       // sh -c <script> sh docker <name> <count> <absolute paths...> <home files...>

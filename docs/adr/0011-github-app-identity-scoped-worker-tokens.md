@@ -64,3 +64,9 @@ Attempt containers were labeled with `github-app-<App ID>` only, and each proces
 The ID is a file in the gitignored `.usine/`, not a setting in `usine.yaml`, because two instances made from one published instance repo would share a setting. It moves and is backed up with the folder, which [ADR 0010](./0010-single-sqlite-runtime-store.md) says to copy whole. A deleted or changed file gives the instance a new ID, and usine then doesn't remove the containers that it left before, so a startup refuses a file that doesn't contain a UUID instead of replacing it.
 
 A container that an earlier usine version left after a crash has no ID label, so no later process removes it; remove such containers with `docker rm` once. Provisioned machines and Cloudflare sandboxes still carry only the App's identity.
+
+## Amendment (2026-10-27, #617): shared pnpm store on each worker machine
+
+Attempt containers share the Docker volume `usine-pnpm-store` read-write at `/home/usine/.local/share/pnpm/store`, so later attempts on a long-lived worker reuse package downloads. This adds trusted shared package state to the mounts described above; checkout and credential directories remain scoped to each attempt. Worker entries and instances on the same Docker daemon share the volume. pnpm integrity checks do not provide isolation against an untrusted store writer.
+
+Preflight requires the image's default user and its `usine` account to have UID 1000, initializes the volume with that owner, and logs its disk usage. Container startup repeats initialization for provisioned machines that skip the daily preflight. Initialization changes only the volume root, and container removal preserves the volume. Operators reclaim it with `docker volume rm usine-pnpm-store` after removing containers that reference it; there is no automatic pruning. A provisioned machine deletes the volume after its one attempt. Turborepo's cache stays local to the container.

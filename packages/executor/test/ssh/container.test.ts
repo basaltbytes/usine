@@ -132,9 +132,10 @@ describe("SSH Worker with Docker", () => {
   });
 
   it.effect(
-    "runs the Attempt's children and checkout commands in its own container, which mounts only the Attempt's paths",
+    "runs the Attempt's commands in its own container with its paths and the shared pnpm store",
     () => {
       const machine = dockerMachine();
+      const logs = capturedLogs();
       let given: AttemptRequest | undefined;
       let running: ReadonlyArray<string> = [];
       const parent: StubParent = (context) => {
@@ -146,6 +147,7 @@ describe("SSH Worker with Docker", () => {
         const executor = yield* Executor;
         const report = yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
         assert.isTrue(Option.isNone(report.degraded));
+        assert.include(logs.lines.join("\n"), '"sizeKiB":4096');
         assert.include(linesOf(machine), `exec 'docker' 'pull' '--quiet' '${ATTEMPT_IMAGE}'`);
         const probes = machine.state.calls.filter(({ line }) => line.includes("'claude'"));
         assert.isNotEmpty(probes);
@@ -173,6 +175,7 @@ describe("SSH Worker with Docker", () => {
         ]);
         assert.strictEqual(words.at(-1), ATTEMPT_IMAGE);
         assert.deepStrictEqual(mountsOf(words), [
+          "type=volume,source=usine-pnpm-store,destination=/home/usine/.local/share/pnpm/store,volume-nocopy",
           `type=tmpfs,"destination=${WORKER_ROOT}/attempts",tmpfs-mode=1777`,
           `type=bind,"source=${WORKTREE}","destination=${WORKTREE}"`,
           `type=bind,"source=${CACHE}","destination=${CACHE}",readonly`,
@@ -211,7 +214,11 @@ describe("SSH Worker with Docker", () => {
         );
         assert(credentialGone > containerGone, "the credential outlives the container");
         assert.strictEqual(machine.state.containers.size, 0);
-      }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider(), parent)));
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(runtime(machine, mintingProvider(), parent)),
+        Effect.provide(logs.layer),
+      );
     },
   );
 
@@ -430,6 +437,21 @@ describe("SSH Worker with Docker", () => {
   );
 
   it.effect(
+    "refuses container startup when store initialization fails without a preceding preflight",
+    () => {
+      const machine = dockerMachine();
+      machine.state.storePreparationFails = true;
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const failure = yield* executor.prepare(request).pipe(Effect.flip);
+        assert.strictEqual(failure._tag, "ExecutorOperationError");
+        assert.include(failure.message, "permission denied");
+        assert.strictEqual(machine.state.containers.size, 0);
+      }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider())));
+    },
+  );
+
+  it.effect(
     "fails preflight when Docker doesn't answer, the image can't be pulled, or its user ID differs",
     () =>
       Effect.gen(function* () {
@@ -447,7 +469,11 @@ describe("SSH Worker with Docker", () => {
           machine.state.imageOnMachine = false;
         });
         const otherUser = yield* failureOf((machine) => (machine.state.imageUserId = "1001"));
-        for (const failure of [unusable, unpulled, otherUser]) {
+        const storeFailed = yield* failureOf(
+          (machine) => (machine.state.storePreparationFails = true),
+        );
+        const invalidSize = yield* failureOf((machine) => (machine.state.storeSizeKiB = "invalid"));
+        for (const failure of [unusable, unpulled, otherUser, storeFailed, invalidSize]) {
           assert.strictEqual(failure._tag, "WorkerCapabilityError");
           if (failure._tag === "WorkerCapabilityError")
             assert.strictEqual(failure.capability, "container");
@@ -455,6 +481,8 @@ describe("SSH Worker with Docker", () => {
         assert.include(unusable.message, "add the user to the docker group");
         assert.include(unpulled.message, `can't pull the attempt image ${ATTEMPT_IMAGE}`);
         assert.include(otherUser.message, "--build-arg USINE_UID=1000");
+        assert.include(storeFailed.message, "Can't prepare the shared pnpm store");
+        assert.include(invalidSize.message, "Can't measure the shared pnpm store");
 
         const cached = dockerMachine();
         cached.state.pullFails = true;

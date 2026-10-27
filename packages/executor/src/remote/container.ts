@@ -17,6 +17,28 @@ import type { RemoteCommands } from "./commands.ts";
 /** The container CLI on the machine. */
 export const CONTAINER_RUNTIME = "docker";
 
+export const PNPM_STORE_VOLUME = "usine-pnpm-store";
+export const PNPM_STORE_PATH = "/home/usine/.local/share/pnpm/store";
+export const PNPM_STORE_MOUNT = `type=volume,source=${PNPM_STORE_VOLUME},destination=${PNPM_STORE_PATH},volume-nocopy`;
+
+/** Initializes volume `$3` using runtime `$1`, image `$2`, mount `$4`, and path `$5`. */
+export const PREPARE_PNPM_STORE_SCRIPT = String.raw`
+set -eu
+"$1" run --rm --network none --entrypoint sh "$2" -ec '
+  current=$(id -u)
+  owner=$(id -u usine)
+  if [ "$current" != 1000 ] || [ "$owner" != 1000 ]; then
+    echo "The pnpm store requires the image to run as usine with UID 1000; build with --build-arg USINE_UID=1000 (default UID: $current, usine UID: $owner)." >&2
+    exit 1
+  fi
+'
+"$1" volume create "$3" >/dev/null
+exec "$1" run --rm --network none --user 0 --mount "$4" --entrypoint sh "$2" -ec '
+  chown -h 1000 "$1"
+  chmod 0755 "$1"
+' sh "$5"
+`.trim();
+
 /** The labels on each container, so a later process finds the ones it left. */
 const INSTANCE_LABEL = "dev.usine.instance";
 const INSTANCE_ID_LABEL = "dev.usine.instance-id";
@@ -238,6 +260,36 @@ const containerShell = (shell: RemoteShell, name: string): RemoteShell => {
  * process left.
  */
 export const containersFor = (commands: RemoteCommands) => {
+  const prepareStore = Effect.fn("RemoteExecutor.preparePnpmStore")(function* (
+    operation: ExecutorOperation,
+    shell: RemoteShell,
+    image: ContainerImage,
+    worker: WorkerName,
+  ) {
+    const fields = { worker, host: shell.destination, image, volume: PNPM_STORE_VOLUME };
+    yield* Effect.annotateCurrentSpan(fields);
+    const prepared = yield* commands.inspect(operation, shell, "sh", [
+      "-c",
+      PREPARE_PNPM_STORE_SCRIPT,
+      "sh",
+      CONTAINER_RUNTIME,
+      image,
+      PNPM_STORE_VOLUME,
+      PNPM_STORE_MOUNT,
+      PNPM_STORE_PATH,
+    ]);
+    if (prepared.exitCode !== 0) {
+      const message = `Can't prepare pnpm store volume ${PNPM_STORE_VOLUME}: ${prepared.stderr.trim() || `exit code ${prepared.exitCode}`}`;
+      yield* Effect.logWarning(message, { ...fields, exitCode: prepared.exitCode });
+      return yield* new ExecutorOperationError({
+        operation,
+        message,
+        cause: new Error(prepared.stderr),
+      });
+    }
+    yield* Effect.logInfo("Prepared shared pnpm store volume", fields);
+  });
+
   const remove = Effect.fn("RemoteExecutor.removeContainer")(function* (
     shell: RemoteShell,
     name: string,
@@ -268,6 +320,7 @@ export const containersFor = (commands: RemoteCommands) => {
   ) {
     const fields = containerFields(shell, spec);
     yield* Effect.annotateCurrentSpan(fields);
+    yield* prepareStore(operation, shell, spec.settings.image, spec.worker);
     const logins = spec.harnesses.flatMap((harness) => [
       ...LOGIN_FILES[harness].mounted.map((file) => ({ file, mounted: true })),
       ...LOGIN_FILES[harness].seeded.map((file) => ({ file, mounted: false })),
@@ -322,6 +375,7 @@ export const containersFor = (commands: RemoteCommands) => {
       }),
     });
     const mounts = [
+      PNPM_STORE_MOUNT,
       ...Option.match(spec.checkout, {
         onNone: () => [],
         onSome: ({ path, parent }) => [
@@ -609,5 +663,5 @@ export const containersFor = (commands: RemoteCommands) => {
     });
   });
 
-  return { start, trackMemory, stopChildren, sweep, remove, mark, marked };
+  return { start, trackMemory, stopChildren, sweep, remove, mark, marked, prepareStore };
 };
