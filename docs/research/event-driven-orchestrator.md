@@ -22,7 +22,7 @@ Neither is repeated here.
 return: the HTTP server on `127.0.0.1:7331`, and `Orchestrator.run`, which races
 `PollingTriggers.run` and `ScheduleTriggers.run`. Every other long-running part is a fiber that a
 layer forks into its scope at startup. SIGHUP reloads the instance folder (`reload-signal.ts`).
-SIGINT and SIGTERM close Attempt admission and wait for admitted Attempts, for at most
+SIGINT and SIGTERM close attempt admission and wait for admitted attempts, for at most
 `max_attempt_minutes`, which has no limit by default (`shutdown.ts`).
 
 ### Orchestrator (`apps/server`, `packages/orchestrator`)
@@ -30,11 +30,11 @@ SIGINT and SIGTERM close Attempt admission and wait for admitted Attempts, for a
 | Part | Kept in memory | Kept alive by | After a crash |
 | --- | --- | --- | --- |
 | Process shell: `up.ts`, `shutdown.ts`, `reload-signal.ts` | The instance lock and record, the shutdown latch | The HTTP server and `Orchestrator.run`, raced; listeners for SIGHUP, SIGINT, and SIGTERM | A restart takes the lock again; nothing else resumes |
-| `CurrentInstance` (`current-instance/current-instance.ts`) | The loaded instance folder in a `SubscriptionRef`, and the registered Worker reload | Nothing of its own: SIGHUP and `POST /api/instance/reload` call `reload` | Loads the folder from disk again |
-| `PollingTriggers` (`polling/polling.ts`, `polling/hints.ts`) | The last cycle; each repository's last completed poll; the repositories whose failing Items were retried in this process; each repository's last open-issue check; up to 128 self-write hints, coalesced, and dropped when the queue is full; GitHub's backoff deadline | An `Effect.forever` cycle over 4 repositories and 4 Items at a time, then a race between a sleep until `poll_interval` (60 s by default) or the time GitHub asked for, the next hint, and a reload | Yes: the poll cursor, the open pull requests, their base heads, and the failing Items are rows in the runtime store (`CursorStore`). The next poll repairs lost hints. The open-issue check, otherwise every 10 minutes, runs again at once |
-| `ScheduleTriggers` (`schedule-triggers.ts`) | The last cycle and each Loop's last fired tick | An `Effect.forever` cycle that sleeps until the earliest next tick, for at most 60 s, or until a reload | Yes: with an empty map, the latest missed tick fires, and the dedup ledger drops a repeat ([ADR 0007](../adr/0007-polling-triggers-content-hashed-events.md)) |
-| Worker scheduler (`scheduler.ts`) | The slots of each Worker (`TxRef`), reservations in lease order (`TxPriorityQueue`), Worker preflights, provisioning pauses, the machine of each lease, and the machine creations (`FiberMap`) | A forked dispatch loop, and a forked sleep for each paused Worker: 30 s, doubling to 10 minutes | Rebuilt: startup occupies the slots of open Attempts, and each Run's fiber reserves again. Pauses and preflight results start empty |
-| Operator service and HTTP API (`operator/`, `apps/server/src/http.ts`) | The overview cache and each Attempt's cache of GitHub changes | Nothing: JSON request and response. The web UI polls, every second for the transcript of a Run it can cancel | The caches fill again on the next request |
+| `CurrentInstance` (`current-instance/current-instance.ts`) | The loaded instance folder in a `SubscriptionRef`, and the registered worker reload | Nothing of its own: SIGHUP and `POST /api/instance/reload` call `reload` | Loads the folder from disk again |
+| `PollingTriggers` (`polling/polling.ts`, `polling/hints.ts`) | The last cycle; each repository's last completed poll; the repositories whose failing items were retried in this process; each repository's last open-issue check; up to 128 self-write hints, coalesced, and dropped when the queue is full; GitHub's backoff deadline | An `Effect.forever` cycle over 4 repositories and 4 items at a time, then a race between a sleep until `poll_interval` (60 s by default) or the time GitHub asked for, the next hint, and a reload | Yes: the poll cursor, the open pull requests, their base heads, and the failing items are rows in the runtime store (`CursorStore`). The next poll repairs lost hints. The open-issue check, otherwise every 10 minutes, runs again at once |
+| `ScheduleTriggers` (`schedule-triggers.ts`) | The last cycle and each loop's last fired tick | An `Effect.forever` cycle that sleeps until the earliest next tick, for at most 60 s, or until a reload | Yes: with an empty map, the latest missed tick fires, and the dedup ledger drops a repeat ([ADR 0007](../adr/0007-polling-triggers-content-hashed-events.md)) |
+| Worker scheduler (`scheduler.ts`) | The slots of each worker (`TxRef`), reservations in lease order (`TxPriorityQueue`), worker preflights, provisioning pauses, the machine of each lease, and the machine creations (`FiberMap`) | A forked dispatch loop, and a forked sleep for each paused worker: 30 s, doubling to 10 minutes | Rebuilt: startup occupies the slots of open attempts, and each run's fiber reserves again. Pauses and preflight results start empty |
+| Operator service and HTTP API (`operator/`, `apps/server/src/http.ts`) | The overview cache and each attempt's cache of GitHub changes | Nothing: JSON request and response. The web UI polls, every second for the transcript of a run it can cancel | The caches fill again on the next request |
 | GitHub App credentials (`credentials.ts`, `@usine/github`) | The installation of each project | Nothing: tokens are minted on demand, with JWTs signed through WebCrypto (`packages/github/src/jwt.ts`) | Nothing to resume |
 
 The `webhooks` block of `usine.yaml` parses, but no code path at this commit receives a GitHub
@@ -44,9 +44,9 @@ delivery. `ItemHints` contains only the hints of usine's own writes.
 
 | Part | Kept in memory | Kept alive by | After a crash |
 | --- | --- | --- | --- |
-| `RunDriver` (`engine/run-driver.ts`) | One fiber per open Run (`FiberMap`), each fiber's slot, the parent-task stops not yet confirmed, and the checkouts kept for reattachment (`checkout-recovery.ts`) | Each Run's fiber, which waits for a slot and then blocks in `StepExecutor.execute` for the Attempt's whole life. A Run waiting for approval has no fiber; `approve` starts one | Yes: at startup, `recoverWorkspaces` and `reconcile` start a fiber per open Run. An open Attempt is reattached if its parent task is live, finished with its stored result if the task finished, and otherwise closed as interrupted |
-| Periodic reconcile (`engine/engine.ts`) | Nothing | A forked loop every `ReconcileInterval`, 3 minutes by default | It is the recovery: it restarts Runs whose fiber stopped and retries unconfirmed stops |
-| `AttemptAdmission` (`engine/admission.ts`) | The admitted Runs and the drain latch | Nothing | Admission is open again after a restart ([ADR 0023](../adr/0023-graceful-attempt-drain.md)) |
+| `RunDriver` (`engine/run-driver.ts`) | One fiber per open run (`FiberMap`), each fiber's slot, the parent-task stops not yet confirmed, and the checkouts kept for reattachment (`checkout-recovery.ts`) | Each run's fiber, which waits for a slot and then blocks in `StepExecutor.execute` for the attempt's whole life. A run waiting for approval has no fiber; `approve` starts one | Yes: at startup, `recoverWorkspaces` and `reconcile` start a fiber per open run. An open attempt is reattached if its parent task is live, finished with its stored result if the task finished, and otherwise closed as interrupted |
+| Periodic reconcile (`engine/engine.ts`) | Nothing | A forked loop every `ReconcileInterval`, 3 minutes by default | It is the recovery: it restarts runs whose fiber stopped and retries unconfirmed stops |
+| `AttemptAdmission` (`engine/admission.ts`) | The admitted runs and the drain latch | Nothing | Admission is open again after a restart ([ADR 0023](../adr/0023-graceful-attempt-drain.md)) |
 | `RunStore` and its projections (`store/`, `database/`) | Nothing | Nothing | The source of truth: 20 Drizzle tables in `.usine/runtime.sqlite` through `@effect/sql-sqlite-node`, which uses `node:sqlite`. 30 migrations, multi-statement transactions, and `json_extract` in the transcript queries |
 
 ### Pi parent and children (`packages/durable`, `packages/agents`)
@@ -54,9 +54,9 @@ delivery. `ItemHints` contains only the hints of usine's own writes.
 | Part | Kept in memory | Kept alive by | After a crash |
 | --- | --- | --- | --- |
 | `DurableHarness` (`harness.ts`, `live.ts`) | The open pi-durable 1.2.0 Harness and its generation; Pi's model runtime and the Pi user's global settings, read from the Pi agent directory | pi-durable's task scheduler, whose sleeps and idle-context expiry are `setTimeout` timers. After a storage failure, the harness reopens, unless the reopened one fails within 60 s | Yes: `resume()` continues every unfinished task in `.usine/durable.sqlite`, opened with `openNodeSqliteStorage` |
-| `AttemptRuntime` and its hubs (`attempt/runtime.ts`, `attempt/hubs.ts`) | Per Attempt: a relay queue, emission and routing semaphores, the live children by session, the queued operator inputs, and the attached channel | The engine's `execute` call, which relays the Attempt for its whole life | Yes: the relay position is in the Attempt's record, and a reattached `execute` resends from it. The engine keeps the first copy of a resent envelope ([ADR 0010](../adr/0010-single-sqlite-runtime-store.md), amendment of 2026-10-08) |
+| `AttemptRuntime` and its hubs (`attempt/runtime.ts`, `attempt/hubs.ts`) | Per attempt: a relay queue, emission and routing semaphores, the live children by session, the queued operator inputs, and the attached channel | The engine's `execute` call, which relays the attempt for its whole life | Yes: the relay position is in the attempt's record, and a reattached `execute` resends from it. The engine keeps the first copy of a resent envelope ([ADR 0010](../adr/0010-single-sqlite-runtime-store.md), amendment of 2026-10-08) |
 | `subagent` tool (`attempt/subagent.ts`) | Each child's running session and the fiber that forwards its events | The child's event stream, for the child's whole life: minutes to hours. Calls run in parallel (`executionMode: "parallel"`) | No: the tool is `replay: "unsafe"`, so a call that a restart cut off ends as interrupted. The parent's instructions tell it to delegate again (`attempt/extension.ts`) |
-| Claude Code child (`agents/src/pi/claude/claude.ts`) | A Claude Agent SDK 0.3.308 session in the orchestrator process, and its saved session ID | `spawn` from `node:child_process`, of `claude` on a local Worker or of `ssh … claude` on a remote one, with a PID file next to the worktree | While the orchestrator runs, yes: when a remote child's SSH client exits with 255, the backend stops what's left of the process through its PID file and launches Claude again with the SDK's `resume` option, after 5 s, 15 s, 30 s, 1, 2, and 5 minutes ([#606](https://github.com/basaltbytes/usine/pull/606)). After an orchestrator restart, no: the `subagent` call ends as interrupted |
+| Claude Code child (`agents/src/pi/claude/claude.ts`) | A Claude Agent SDK 0.3.308 session in the orchestrator process, and its saved session ID | `spawn` from `node:child_process`, of `claude` on a local worker or of `ssh … claude` on a remote one, with a PID file next to the worktree | While the orchestrator runs, yes: when a remote child's SSH client exits with 255, the backend stops what's left of the process through its PID file and launches Claude again with the SDK's `resume` option, after 5 s, 15 s, 30 s, 1, 2, and 5 minutes ([#606](https://github.com/basaltbytes/usine/pull/606)). After an orchestrator restart, no: the `subagent` call ends as interrupted |
 | Codex child (`agents/src/pi/codex/app-server.ts`) | The JSON-RPC client of `codex app-server` | Effect's `ChildProcess` spawner, local or over `ssh` | No: a lost SSH connection fails the child. Cleanup stops the remote process through its PID file (`CHILD_KILL_SCRIPT` in `child-host/child-host.ts`) |
 | Pi child (`agents/src/pi/pi.ts`) | The whole Pi coding agent session, tools included | In process; it refuses a remote host, because its tools run in the orchestrator | No |
 
@@ -64,15 +64,15 @@ delivery. `ItemHints` contains only the hints of usine's own writes.
 
 | Part | Kept in memory | Kept alive by | After a crash |
 | --- | --- | --- | --- |
-| SSH Workers (`ssh/ssh.ts`, `ssh/workers.ts`, `remote/remote.ts`) | The machines of each Worker, the Gateway forwards and credentials, container isolations, the Codex homes in use, and per-key locks | One OpenSSH client process per command: checkout, git, Docker, preflight, salvage. Known hosts are files under `.usine/known-hosts` | Yes: `recover` stops leftover children through their PID files, harvests posted comments, and salvages or removes the checkout. Sweeps remove abandoned worktrees and containers |
-| Worker liveness (`remote/liveness.ts`) | The liveness of each machine and the Attempts that watch it | An SSH probe every minute, with a 20 s connect timeout and a 45 s probe timeout | Starts again as Attempts launch or reattach |
-| Attempt guard (`guard.ts`) | The unsupervised time and tokens used, and the warnings sent | Persists the unsupervised time every 30 s; warns at 80 % of `max_attempt_minutes` and `max_attempt_tokens` | Seeded again from the persisted time and the Attempt's transcript |
-| Credential renewal (`renewable-credential.ts`) | Every token issued, for scrubbing | A check every 30 s, which renews a token within 5 minutes of its expiry | A reattached Attempt gets a new token |
-| Gateway admin forward (`ssh/gateway/forward.ts`, `attachments.ts`, `admin.ts`) | The forward's state and generation, and the current attachment | An `ssh -L` client to the Gateway's admin port, reopened after 1 s, doubling to 60 s; attachments restored every 2 minutes; 30 s per admin request | Opens with the first Worker behind the Gateway; the restore sends the attachments again |
-| Provisioned machines (`ssh/provisioner/machines.ts`) | The machine of each lease, each Worker's earlier machines, and the day of each Worker's last machine check | The Hetzner and Boat REST APIs; after a create, a check every 3 s until SSH answers, for up to 10 minutes | Yes: an Attempt's machine is found again by its provider label. A machine whose recovery failed is kept; orphans are deleted at reconcile |
-| Durable session (`durable-session.ts`) | The active Attempts, the unconfirmed stops, and the launch registrations | Nothing of its own | Reads each parent task's liveness from `AttemptRuntime` |
-| Cloudflare sandboxes (`cloudflare/`, `packages/cloudflare`) | In the orchestrator: the time of each sandbox's last credential | In the orchestrator: a sandbox-shell Node process per command that relays standard streams over the Worker's exec WebSocket and attaches again after 0.5 to 8 s; a drain check every 30 s. In the Worker: one `AttemptSandbox` Durable Object per Attempt, with a keepalive alarm every 4 minutes during a two-hour lease, and exec and attach WebSockets accepted with `accept()` | Yes: each command runs in its own session, with its output and exit code in files, so a later attach resumes from byte offsets |
-| Local Workers (`local/`) | Nothing beyond the durable session | Local processes, and worktrees under `.usine/workers/` | Same recovery as SSH Workers, on the local disk |
+| SSH workers (`ssh/ssh.ts`, `ssh/workers.ts`, `remote/remote.ts`) | The machines of each worker, the gateway forwards and credentials, container isolations, the Codex homes in use, and per-key locks | One OpenSSH client process per command: checkout, git, Docker, preflight, salvage. Known hosts are files under `.usine/known-hosts` | Yes: `recover` stops leftover children through their PID files, harvests posted comments, and salvages or removes the checkout. Sweeps remove abandoned worktrees and containers |
+| Worker liveness (`remote/liveness.ts`) | The liveness of each machine and the attempts that watch it | An SSH probe every minute, with a 20 s connect timeout and a 45 s probe timeout | Starts again as attempts launch or reattach |
+| Attempt guard (`guard.ts`) | The unsupervised time and tokens used, and the warnings sent | Persists the unsupervised time every 30 s; warns at 80 % of `max_attempt_minutes` and `max_attempt_tokens` | Seeded again from the persisted time and the attempt's transcript |
+| Credential renewal (`renewable-credential.ts`) | Every token issued, for scrubbing | A check every 30 s, which renews a token within 5 minutes of its expiry | A reattached attempt gets a new token |
+| Gateway admin forward (`ssh/gateway/forward.ts`, `attachments.ts`, `admin.ts`) | The forward's state and generation, and the current attachment | An `ssh -L` client to the gateway's admin port, reopened after 1 s, doubling to 60 s; attachments restored every 2 minutes; 30 s per admin request | Opens with the first worker behind the gateway; the restore sends the attachments again |
+| Provisioned machines (`ssh/provisioner/machines.ts`) | The machine of each lease, each worker's earlier machines, and the day of each worker's last machine check | The Hetzner and Boat REST APIs; after a create, a check every 3 s until SSH answers, for up to 10 minutes | Yes: an attempt's machine is found again by its provider label. A machine whose recovery failed is kept; orphans are deleted at reconcile |
+| Durable session (`durable-session.ts`) | The active attempts, the unconfirmed stops, and the launch registrations | Nothing of its own | Reads each parent task's liveness from `AttemptRuntime` |
+| Cloudflare sandboxes (`cloudflare/`, `packages/cloudflare`) | In the orchestrator: the time of each sandbox's last credential | In the orchestrator: a sandbox-shell Node process per command that relays standard streams over the Worker's exec WebSocket and attaches again after 0.5 to 8 s; a drain check every 30 s. In the Worker: one `AttemptSandbox` Durable Object per attempt, with a keepalive alarm every 4 minutes during a two-hour lease, and exec and attach WebSockets accepted with `accept()` | Yes: each command runs in its own session, with its output and exit code in files, so a later attach resumes from byte offsets |
+| Local workers (`local/`) | Nothing beyond the durable session | Local processes, and worktrees under `.usine/workers/` | Same recovery as SSH workers, on the local disk |
 
 ### Kinds of long-running work
 
@@ -81,7 +81,7 @@ The long-running work is of three kinds:
 - **Clocks.** Polls, schedule ticks, reconciles, credential renewals, liveness probes, provisioning
   pauses, and machine checks. Each one is short work on a timer, and its state is either in the
   runtime store or cheap to rebuild.
-- **Waiting state machines.** A Run's fiber waiting for approval, a slot, or its Attempt's outcome,
+- **Waiting state machines.** A run's fiber waiting for approval, a slot, or its attempt's outcome,
   and the scheduler's reservations. The state is in the runtime store; only the waiting is in
   memory, and startup recovery rebuilds it.
 - **Child streams.** Each child's standard streams, opened by the process that spawned it, for
@@ -94,8 +94,8 @@ The long-running work is of three kinds:
 
 | Dependency | Used by | On Workers | Replacement |
 | --- | --- | --- | --- |
-| `node:child_process`, and Effect's `ChildProcess` on top of it | Claude Code and Codex children, every SSH command, the Gateway forward, the sandbox shell, and local Workers | A non-functional stub: it imports, but doesn't work ([Node.js compatibility](https://developers.cloudflare.com/workers/runtime-apis/nodejs/)) | For compute, the Cloudflare Sandboxes adapter's exec and attach WebSockets (`@usine/cloudflare/stream`), opened by the object itself instead of a sandbox-shell process. For Hetzner Workers, the Gateway as an HTTP-to-SSH relay that serves the same exec and attach protocol; the Gateway has no such endpoint at this commit |
-| OpenSSH: the `ssh` binary, `-L` forwards, known-hosts and identity files | The SSH executor, liveness probes, machine readiness, and the Gateway forward | None. `connect()` opens outbound TCP, with port 25 and Cloudflare's own addresses blocked ([TCP sockets](https://developers.cloudflare.com/workers/runtime-apis/tcp-sockets/)); an SSH client in JavaScript on Workers: not checked | The Gateway relay above, over HTTPS. Workers VPC's `connect()` reaches private hosts through a Cloudflare Tunnel, as plaintext TCP only ([changelog](https://developers.cloudflare.com/changelog/post/2026-06-16-tcp-connect-vpc-networks/)) |
+| `node:child_process`, and Effect's `ChildProcess` on top of it | Claude Code and Codex children, every SSH command, the gateway forward, the sandbox shell, and local workers | A non-functional stub: it imports, but doesn't work ([Node.js compatibility](https://developers.cloudflare.com/workers/runtime-apis/nodejs/)) | For compute, the Cloudflare Sandboxes adapter's exec and attach WebSockets (`@usine/cloudflare/stream`), opened by the object itself instead of a sandbox-shell process. For Hetzner workers, the gateway as an HTTP-to-SSH relay that serves the same exec and attach protocol; the gateway has no such endpoint at this commit |
+| OpenSSH: the `ssh` binary, `-L` forwards, known-hosts and identity files | The SSH executor, liveness probes, machine readiness, and the gateway forward | None. `connect()` opens outbound TCP, with port 25 and Cloudflare's own addresses blocked ([TCP sockets](https://developers.cloudflare.com/workers/runtime-apis/tcp-sockets/)); an SSH client in JavaScript on Workers: not checked | The gateway relay above, over HTTPS. Workers VPC's `connect()` reaches private hosts through a Cloudflare Tunnel, as plaintext TCP only ([changelog](https://developers.cloudflare.com/changelog/post/2026-06-16-tcp-connect-vpc-networks/)) |
 | Claude Agent SDK 0.3.308 | Claude Code children | Its bundle imports `child_process`, `fs`, `readline`, `os`, and `path` (read from the installed package) | A client for `claude --print --output-format stream-json` over the exec stream, the way Cloudflare's Claude Code guide runs it (`hosted-sandboxes.md`, section 2) |
 | Pi coding agent (`createAgentSession`) | Pi children | Its tools need the checkout's filesystem and a shell in the same process | None |
 | SQLite files through `node:sqlite` | `.usine/runtime.sqlite`, `.usine/durable.sqlite`, and `usine backup` | A non-functional stub ([Node.js compatibility](https://developers.cloudflare.com/workers/runtime-apis/nodejs/)) | The run store: Durable Object SQLite through Drizzle's `effect-sqlite-do` driver, which the pinned `1.0.0-rc.5-5935859` ships and which runs a transaction body with `Effect.runSyncExit` inside `ctx.storage.transactionSync`, so the body must be synchronous; not tested against the store. D1 through `effect-d1` is the other driver. The Pi parent: pi-durable's `openDurableObjectSqliteStorage`. Backups: Durable Object point-in-time recovery over 30 days ([SQLite storage API](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/)) |
@@ -188,19 +188,19 @@ HTTP.
   byte offsets, as the sandbox Worker allows, or by resuming the child's saved session, as the
   Claude backend does after a lost SSH connection. Either way, the `subagent` call has to outlive
   the object's restart, and at this commit it doesn't.
-- **The Pi parent fits one object per Attempt, awake for the whole Attempt.** pi-durable 1.2.0
+- **The Pi parent fits one object per attempt, awake for the whole attempt.** pi-durable 1.2.0
   stores a Harness in one object's SQLite and runs without Node APIs (README, "Storage"). Its
   sleeps are `setTimeout` timers and its generations are outbound `fetch` streams, so the object
-  can't hibernate while the Attempt runs, and it pays duration for it. After an eviction, only an
+  can't hibernate while the attempt runs, and it pays duration for it. After an eviction, only an
   alarm or a request wakes it to call `resume()`.
 - **Clocks fit alarms.** A poll cycle, a reconcile, and a machine's 10-minute readiness wait each fit
   in a 15-minute alarm handler, and GitHub's requested wait becomes the next alarm's time.
 - **One thread per object sets the split.** The scheduler's slot pool and queue need one ordered
   owner, which one object per instance gives. Ten Pi parents in one object would share one thread,
-  the 30 s CPU budget per event, and the 1,000 requests per second, so each Attempt needs its own
+  the 30 s CPU budget per event, and the 1,000 requests per second, so each attempt needs its own
   object.
 - **A durable-function step can't supervise a child either.** Inngest fails a step after 2 hours,
-  and an Attempt has no time limit unless `max_attempt_minutes` is set. A Workflows step has no
+  and an attempt has no time limit unless `max_attempt_minutes` is set. A Workflows step has no
   wall-time limit, but the docs advise 30 minutes or less, and an evicted step starts again from the
   beginning. What fits both is a child supervised next to the child, which sends the step an event
   when the child reports.
@@ -211,26 +211,26 @@ HTTP.
 | --- | --- | --- |
 | Process shell | A Worker `fetch` handler with the web assets, behind Cloudflare Access; one engine object per instance in place of the instance lock | Nothing: the process stays on the VM |
 | `CurrentInstance` | The parsed instance in the engine object's storage, read from the instance repository through GitHub's API; a reload request or a push replaces SIGHUP | Stays |
-| `PollingTriggers` | A poller object with an alarm at the later of `poll_interval` and GitHub's requested time; a hint calls `setAlarm()` for now; the cursor stays in the store | Workflows: an instance per cycle, or one instance that loops with `step.sleep`. Inngest: a scheduled function. Or it stays |
+| `PollingTriggers` | A poller object with an alarm at the later of `poll_interval` and GitHub's requested time; a hint calls `setAlarm()` for now, or for GitHub's requested time if that is later, the deadline that `refreshHint` waits for today; the cursor stays in the store | Workflows: an instance per cycle, or one instance that loops with `step.sleep`. Inngest: a scheduled function. Or it stays |
 | `ScheduleTriggers` | An alarm at the next tick, or a Cron Trigger each minute | A scheduled function in either runtime |
-| Run fibers | A Run's state in the engine object's SQLite. Approval, a slot grant, and an Attempt's outcome arrive as RPC calls; no fiber waits through an Attempt | Workflows: an instance per Run, with `waitForEvent` for approval, the slot, and the outcome, each with a timeout set, since the 24-hour default fails the instance. Inngest: the same with `waitForEvent`, within the plan's run length |
+| Run fibers | A run's state in the engine object's SQLite. Approval, a slot grant, and an attempt's outcome arrive as RPC calls; no fiber waits through an attempt | Workflows: an instance per run, with `waitForEvent` for approval, the slot, and the outcome, each with a timeout set, since the 24-hour default fails the instance. Inngest: the same with `waitForEvent`, within the plan's run length |
 | Periodic reconcile | An alarm every 3 minutes on the engine object | A `step.sleep` loop or a scheduled function |
-| Worker scheduler | One scheduler object, with the slots and the queue in its SQLite; a pause becomes an alarm | Nothing: Inngest's concurrency counts executing steps, not Attempts, and Workflows has no per-Worker limit, so the slots stay in a process |
+| Worker scheduler | One scheduler object, with the slots and the queue in its SQLite; a pause becomes an alarm | Nothing: Inngest's concurrency counts executing steps, not attempts, and Workflows has no per-worker limit, so the slots stay in a process |
 | Machine creation | An alarm chain in the scheduler object: create, check every 3 s, give up after 10 minutes; orphan sweeps in the reconcile alarm. SSH readiness goes through the relay | Workflows: an instance per machine, with `step.sleep("3 seconds")` between checks. Inngest: the same with `step.sleep` |
-| Run store | The engine object's SQLite, up to 10 GB, with each Attempt's transcript in its own Attempt object, because v1 prunes nothing (ADR 0010). D1 has the same 10 GB per database and no documented read-then-write transaction | Stays on the VM |
+| Run store | The engine object's SQLite, up to 10 GB, with each attempt's transcript in its own attempt object, because v1 prunes nothing (ADR 0010). D1 has the same 10 GB per database and no documented read-then-write transaction | Stays on the VM |
 | Operator API | Worker routes that call the engine object; the UI's polling stays, or each browser opens a hibernatable WebSocket | Stays |
-| Credential renewal | An alarm in the Attempt object | A `step.sleep` loop per Attempt |
-| Pi parent | One Attempt object per Attempt, on pi-durable's Durable Object storage, with a keepalive alarm so that `resume()` runs after an eviction | Workflows: a generation per `step.do`. Inngest: a generation per `step.run`, each under 2 hours. Both put a second durable store beside `durable.sqlite`, whose tasks already resume |
-| Children | Nothing available. Compute: the sandbox exec and attach streams, opened by the Attempt object, which reattaches by byte offset after every drop. Hetzner Workers: the Gateway relay. Claude Code: a `stream-json` client in place of the Agent SDK. Pi children: none | Stay on the VM; the parent's step waits for the child's report with `waitForEvent` |
-| SSH executor, liveness, salvage | Through the Gateway relay; liveness as an alarm per machine | Stay |
+| Credential renewal | An alarm in the attempt object | A `step.sleep` loop per attempt |
+| Pi parent | One attempt object per attempt, on pi-durable's Durable Object storage, with a keepalive alarm so that `resume()` runs after an eviction | Workflows: a generation per `step.do`. Inngest: a generation per `step.run`, each under 2 hours. Both put a second durable store beside `durable.sqlite`, whose tasks already resume |
+| Children | Nothing available. Compute: the sandbox exec and attach streams, opened by the attempt object, which reattaches by byte offset after every drop. Hetzner workers: the gateway relay. Claude Code: a `stream-json` client in place of the Agent SDK. Pi children: none | Stay on the VM; the parent's step waits for the child's report with `waitForEvent` |
+| SSH executor, liveness, salvage | Through the gateway relay; liveness as an alarm per machine | Stay |
 | Gateway admin forward | The admin API over HTTPS behind Access, or through a Cloudflare Tunnel | Stays |
-| Cloudflare sandboxes | Already Durable Objects; the Attempt object calls `AttemptSandbox` directly in place of the sandbox-shell process | Stay |
-| Hints and webhook deliveries | A Queue: messages up to 128 KB, retried, delayed up to 24 hours. It is the only part that maps to a Queue; every other part needs ordered state per instance, Run, or Attempt, which an object gives | A send event, in either runtime |
+| Cloudflare sandboxes | Already Durable Objects; the attempt object calls `AttemptSandbox` directly in place of the sandbox-shell process | Stay |
+| Hints and webhook deliveries | A Queue: messages up to 128 KB, retried, delayed up to 24 hours. It is the only part that maps to a Queue; every other part needs ordered state per instance, run, or attempt, which an object gives | A send event, in either runtime |
 
 ## 5. Costs for one operator with up to ten concurrent Attempts
 
-The ceiling is ten Attempts running through a whole month of 730 hours: 7,300 Attempt-hours. The
-compute that runs children, SSH Workers or Cloudflare sandboxes, costs the same in every option and
+The ceiling is ten attempts running through a whole month of 730 hours: 7,300 attempt-hours. The
+compute that runs children, SSH workers or Cloudflare sandboxes, costs the same in every option and
 is left out; `hosted-sandboxes.md` prices it. Model usage is left out too.
 
 ### Option 1: one long-running orchestrator on a small VM
@@ -242,9 +242,9 @@ is left out; `hosted-sandboxes.md` prices it. Model usage is left out too.
 | Or a CPX32 when no Cost-Optimized server is in stock: €35.49, plus €0.50 for IPv4 | €35.99 | [Price adjustment](https://docs.hetzner.com/general/infrastructure-and-availability/price-adjustment/), [IPv4 pricing](https://docs.hetzner.com/general/infrastructure-and-availability/ipv4-pricing/) |
 
 The orchestrator runs the Pi parents, the Claude Agent SDK sessions, and the SSH clients; the
-repositories' builds run on the Workers. Its memory with ten Attempts is not measured. The Gateway
+repositories' builds run on the workers. Its memory with ten attempts is not measured. The gateway
 VM, a CX23 by default in `infra/hetzner/gateway/gateway.sh`, costs €5.99 in every option that has
-Workers behind a Gateway. The prices took effect on 2026-06-15, and Hetzner bills the cheaper of
+workers behind a gateway. The prices took effect on 2026-06-15, and Hetzner bills the cheaper of
 hourly and monthly.
 
 ### Option 2: the VM, with the Pi parent on a durable-function runtime
@@ -252,26 +252,26 @@ hourly and monthly.
 | Item | Price per month | Source |
 | --- | --- | --- |
 | The VM of option 1 | €8.99 | As above |
-| Inngest Pro, because ten Attempts, each with a running step, exceed Free's 5 concurrent steps. Its 1 million executions cover 50 steps per Attempt for 20,000 Attempts | from $99 | [Pricing](https://www.inngest.com/pricing), [usage limits](https://www.inngest.com/docs/usage-limits/inngest) |
+| Inngest Pro, because ten attempts, each with a running step, exceed Free's 5 concurrent steps. Its 1 million executions cover 50 steps per attempt for 20,000 attempts | from $99 | [Pricing](https://www.inngest.com/pricing), [usage limits](https://www.inngest.com/docs/usage-limits/inngest) |
 | Or Cloudflare Workflows: the Workers Paid minimum, with 500,000 steps and 1 GB-month of storage included, then $0.80 per 100,000 steps and $0.20 per GB-month | from $5 | [Workflows pricing](https://developers.cloudflare.com/workflows/reference/pricing/) |
 
 ### Option 3: the orchestrator rebuilt on Durable Objects
 
-Each running Attempt keeps one Attempt object in memory, billed at 128 MB, and the engine object
+Each running attempt keeps one attempt object in memory, billed at 128 MB, and the engine object
 is in memory all month.
 
 | Item | Calculation | Price per month |
 | --- | --- | --- |
 | Workers Paid minimum | | $5.00 |
 | Duration | Attempt objects: 7,300 h × 3,600 s × 0.128 GB = 3,363,840 GB-s. Engine object: 730 h × 3,600 s × 0.128 GB = 336,384 GB-s. Less the 400,000 GB-s included: 3,300,224 GB-s × $12.50 per million | $41.25 |
-| Requests | A keepalive alarm every 30 s per Attempt (876,000), the poll and schedule alarms every minute (87,600), and one incoming child message per second per Attempt, billed at 20 to 1 (1,314,000): 2,277,600, less the 1 million included, × $0.15 per million | $0.19 |
+| Requests | A keepalive alarm every 30 s per attempt (876,000), the poll and schedule alarms every minute (87,600), and one incoming child message per second per attempt, billed at 20 to 1 (1,314,000): 2,277,600, less the 1 million included, × $0.15 per million | $0.19 |
 | SQLite storage | 5 GB-month included, then $0.20 per GB-month; 50 million rows written included, then $1.00 per million | depends on transcript size |
-| Gateway relay for Hetzner Workers | The Gateway VM | €5.99 |
+| Gateway relay for Hetzner workers | The gateway VM | €5.99 |
 | Total at the ceiling | | $46.44 and storage, plus €5.99 |
 
 Sources: [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/) and
 [Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/). The
-child-message rate is an assumption of this note. At 1,760 Attempt-hours, ten Attempts for 8 hours
+child-message rate is an assumption of this note. At 1,760 attempt-hours, ten attempts for 8 hours
 on 22 days, the duration line is $9.34.
 
 ## Conflicts between vendor pages
@@ -312,14 +312,14 @@ Keep one long-running orchestrator on a small VM for the next year.
   or twice a day, close it. Inngest fails a step after 2 hours, and Workflows advises steps of 30
   minutes or less. Each restart ends the running `subagent` calls as interrupted, and the parent
   delegates their work again. A VM restarts when the operator restarts it.
-- **The rest already resumes after a crash.** The poll cursor, the dedup ledger, the Run and Attempt
+- **The rest already resumes after a crash.** The poll cursor, the dedup ledger, the run and attempt
   rows, the pi-durable tasks, the machine labels, and the sandboxes' process files survive a
   restart, and startup recovery rebuilds what's in memory. A durable-function runtime for the Pi
   parent duplicates pi-durable's task resume, adds a second durable store and a vendor, and leaves
-  the children, OpenSSH, and the Gateway forward on the VM.
+  the children, OpenSSH, and the gateway forward on the VM.
 - **A Durable Object rebuild still needs a VM.** Hetzner, the operator's first provider, is reached
-  over OpenSSH, which Workers don't have, so the Gateway VM would become an HTTP-to-SSH relay.
+  over OpenSSH, which Workers don't have, so the gateway VM would become an HTTP-to-SSH relay.
   Claude Code children would lose the Agent SDK, and Pi children would have no host.
 - **The VM costs least.** €8.99 per month for the orchestrator on a CX33, against the VM plus $99
   per month for Inngest or $5 per month for Workflows, and $46.44 per month plus storage and the
-  €5.99 relay for Durable Objects at ten Attempts around the clock.
+  €5.99 relay for Durable Objects at ten attempts around the clock.
