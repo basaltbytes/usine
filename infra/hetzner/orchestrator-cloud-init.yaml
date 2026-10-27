@@ -1,15 +1,17 @@
 #cloud-config
 # The usine orchestrator on Debian: `usine up` as the usine user in the
 # usine.service systemd unit, from the instance folder /home/usine/factory, in
-# the gateway's private network, with SSH and the web UI reachable only over
-# the operator's tailnet and the private network.
+# the gateway's private network, with SSH reachable only over the operator's
+# tailnet and the web UI published there by tailscale serve.
 # `gateway/gateway.sh orchestrator-user-data` renders this file:
 # render-cloud-init.sh replaces "@AUTHORIZED_KEYS@" with the public keys to
 # authorize for usine, as a list, and @NODE_MAJOR@ with NODE_MAJOR of
 # ../worker-image/Dockerfile; gateway.sh replaces the @@NAME@@ placeholders
 # with the gateway's settings. No secret is in this file: the instance folder
 # and its credentials are copied in over SSH, and
-# `gateway.sh orchestrator-tailnet-up` logs Tailscale in over SSH.
+# `gateway.sh orchestrator-tailnet-up` logs Tailscale in over SSH through the
+# gateway, publishes the UI, and then enables nftables, whose rules refuse that
+# path.
 
 ssh_pwauth: false
 # Hetzner authorizes the project's SSH keys for root, who administers the server.
@@ -56,14 +58,11 @@ write_files:
     content: |
       server @@GATEWAY_IP@@ iburst prefer
 
-  # usine up listens on the tailnet address that USINE_LISTEN names. With nonlocal binds, it starts at boot before tailscaled has set that address, and serves 127.0.0.1 while the tailnet is down.
   - path: /etc/sysctl.d/90-usine-orchestrator.conf
     permissions: "0644"
     content: |
       net.ipv4.ip_forward = 0
       net.ipv6.conf.all.forwarding = 0
-      net.ipv4.ip_nonlocal_bind = 1
-      net.ipv6.ip_nonlocal_bind = 1
 
   # The gateway's copy of Tailscale's package repository signing key, fingerprint 2596 A99E AAB3 3821 893C 0A79 458C A832 957F 5868.
   - path: /etc/apt/keyrings/tailscale.asc
@@ -135,7 +134,7 @@ write_files:
       runuser -l usine -c 'npm install --global @usine/server'
       install -d -o usine -g usine -m 0700 /home/usine/factory /home/usine/.ssh
       sysctl --system > /dev/null
-      systemctl enable --now nftables
+      # nftables stays off until gateway.sh orchestrator-tailnet-up enables it, because its rules refuse SSH through the gateway, the only path to the server before it joins the tailnet.
       systemctl restart chrony
       systemctl reload ssh
       systemctl daemon-reload

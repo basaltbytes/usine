@@ -111,17 +111,31 @@ describe("the orchestrator's Hetzner server", () => {
     );
   });
 
-  it("loads the orchestrator's nftables ruleset with the gateway's network", () => {
+  it("loads the orchestrator's nftables ruleset once the server is on the tailnet", () => {
     assert.strictEqual(
       fileOf(userData, "/etc/nftables.conf"),
       read("hetzner/orchestrator-nftables.conf"),
     );
+    // The rules refuse SSH through the gateway, the only path to the server before it joins the tailnet.
+    assert.notMatch(
+      fileOf(userData, "/usr/local/sbin/usine-orchestrator-setup"),
+      /^\s*systemctl\b.*\bnftables\b/mu,
+    );
+    const tailnetUp = read("hetzner/gateway/gateway.sh").match(
+      /^orchestrator_tailnet_up\(\) \{\n[\s\S]+?\n\}$/mu,
+    )?.[0];
+    assert(tailnetUp !== undefined);
+    assert.match(
+      tailnetUp,
+      new RegExp(
+        `tailscale_up [^\\n]+--advertise-tags=[\\s\\S]+tailscale serve --bg ${DEFAULT_PORT}\\n[\\s\\S]+systemctl enable --now nftables`,
+        "u",
+      ),
+    );
   });
 
-  it("accepts SSH and the web UI port only from the tailnet and the private network", () => {
+  it("accepts new connections only from the tailnet, to SSH, and none from the private network", () => {
     const rules = read("hetzner/orchestrator-nftables.conf");
-    assert.match(rules, new RegExp(`^define ui_port = ${DEFAULT_PORT}$`, "mu"));
-    assert.match(rules, /^define network = 10\.42\.0\.0\/16$/mu);
     assert.match(rules, /^flush ruleset$/mu, "a reload replaces every rule");
     assert.match(rules, /chain input \{\n\t+type filter hook input priority filter; policy drop;/u);
     assert.match(
@@ -132,10 +146,13 @@ describe("the orchestrator's Hetzner server", () => {
       rules
         .split("\n")
         .map((line) => line.trim())
-        .filter((line) => line.includes("tcp dport")),
+        .filter((line) => line.endsWith(" accept")),
       [
-        'iifname "tailscale0" tcp dport { 22, $ui_port } accept',
-        "ip saddr $network tcp dport { 22, $ui_port } accept",
+        "iif lo accept",
+        "ct state established,related accept",
+        "meta l4proto { icmp, ipv6-icmp } accept",
+        'iifname "tailscale0" tcp dport 22 accept',
+        "udp sport 67 udp dport 68 accept",
       ],
     );
   });

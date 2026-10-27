@@ -13,7 +13,7 @@
 #   ./gateway.sh install -i ~/.ssh/usine_worker ./usine-core-0.3.0.tgz ./usine-gateway-0.0.0.tgz
 #   ./gateway.sh worker-user-data ~/.ssh/id_ed25519.pub > worker.mime        # cloud-init for a Worker behind it
 #   SSH_KEY=my-key ./gateway.sh orchestrator ~/.ssh/id_ed25519.pub            # the orchestrator's server in its network
-#   ./gateway.sh orchestrator-tailnet-up -i ~/.ssh/usine_worker               # log the orchestrator in to the tailnet
+#   ./gateway.sh orchestrator-tailnet-up -i ~/.ssh/usine_worker               # log it in to the tailnet and publish its UI
 #   ./gateway.sh delete
 set -eu
 
@@ -31,6 +31,7 @@ LABEL=${LABEL:-usine=gateway}
 ORCHESTRATOR_NAME=${ORCHESTRATOR_NAME:-usine-orchestrator}
 ORCHESTRATOR_TYPE=${ORCHESTRATOR_TYPE:-cpx12}
 ORCHESTRATOR_LABEL=${ORCHESTRATOR_LABEL:-usine=orchestrator}
+ORCHESTRATOR_TAG=${ORCHESTRATOR_TAG:-tag:usine-orchestrator}
 
 encoded() {
   base64 | tr -d '\n'
@@ -39,7 +40,7 @@ encoded() {
 render() {
   gateway_rules=$(sed "s|^define network = .*|define network = $NETWORK_CIDR|" "$here/gateway-nftables.conf" | encoded)
   worker_rules=$(sed "s|^define gateway = .*|define gateway = $GATEWAY_IP|" "$here/worker-nftables.conf" | encoded)
-  orchestrator_rules=$(sed "s|^define network = .*|define network = $NETWORK_CIDR|" "$here/../orchestrator-nftables.conf" | encoded)
+  orchestrator_rules=$(encoded < "$here/../orchestrator-nftables.conf")
   allowlist=$(encoded < "$here/egress-allowlist")
   # The orchestrator installs Tailscale with the signing key that the gateway's file pins.
   tailscale_key=$(sed -n '/BEGIN PGP PUBLIC KEY BLOCK/,/END PGP PUBLIC KEY BLOCK/s/^ *//p' "$here/gateway-cloud-init.yaml" | encoded)
@@ -114,14 +115,16 @@ with_identity() {
   if [ -n "$identity" ]; then "$tool" -i "$identity" -o IdentitiesOnly=yes "$@"; else "$tool" "$@"; fi
 }
 
-# Logs a host in to a tailnet under the name $1, with the auth key in
-# $TAILSCALE_AUTH_KEY, sent on standard input, or else with the login URL that
-# tailscale up prints, and sets address to its tailnet IPv4 address. The other
-# arguments are ssh's options and destination.
+# Logs a host in to a tailnet under the name $1, with the further tailscale up
+# flags in $2, and with the auth key in $TAILSCALE_AUTH_KEY, sent on standard
+# input, or else with the login URL that tailscale up prints. Sets address to
+# its tailnet IPv4 address. The other arguments are ssh's options and
+# destination.
 tailscale_up() {
   hostname=$1
-  shift
-  up="tailscale up --hostname=$hostname --netfilter-mode=off --accept-dns=false"
+  flags=$2
+  shift 2
+  up="tailscale up --hostname=$hostname --netfilter-mode=off --accept-dns=false$flags"
   if [ -n "${TAILSCALE_AUTH_KEY:-}" ]; then
     printf '%s' "$TAILSCALE_AUTH_KEY" | with_identity ssh "$@" "$up --auth-key=file:/dev/stdin"
   else
@@ -136,7 +139,7 @@ tailnet_up() {
   shift "$skipped"
   [ "$#" -eq 0 ] || { echo "tailnet-up takes no arguments other than -i <identity-file>" >&2; exit 2; }
   gateway_destination
-  tailscale_up "$NAME" "$destination"
+  tailscale_up "$NAME" "" "$destination"
   echo "Gateway $NAME is at $address on the tailnet."
 }
 
@@ -204,7 +207,8 @@ orchestrator_address() {
 
 # Creates the orchestrator's server in the gateway's network. It has public
 # addresses for its own connections, and a firewall that admits only ICMP: its
-# SSH and web UI are reachable over the tailnet and the private network.
+# SSH and web UI are reachable over the tailnet, and its SSH over the private
+# network until orchestrator-tailnet-up enables nftables.
 orchestrator() {
   : "${SSH_KEY:?Set SSH_KEY to the names or ids of SSH keys in the hcloud project, for root, separated by commas}"
   [ "$#" -eq 1 ] || { echo "Pass a file with the public keys to authorize for the usine user" >&2; exit 2; }
@@ -227,8 +231,10 @@ KEYS
   echo "Then log it in to your tailnet: $0 orchestrator-tailnet-up [-i <identity-file>]"
 }
 
-# Logs the orchestrator in to a tailnet over SSH to root through the gateway,
-# then prints its tailnet IPv4 address for USINE_LISTEN.
+# Logs the orchestrator in to a tailnet with the tag $ORCHESTRATOR_TAG, over SSH
+# to root through the gateway, and publishes the web UI with tailscale serve.
+# Then enables nftables, which from then on refuses SSH from the private
+# network, and prints the server's tailnet address and the UI's URL.
 orchestrator_tailnet_up() {
   identity_option "$@"
   shift "$skipped"
@@ -239,9 +245,15 @@ orchestrator_tailnet_up() {
   else
     jump="ProxyJump=$destination"
   fi
-  tailscale_up "$ORCHESTRATOR_NAME" -o "$jump" "root@$(orchestrator_address)"
-  echo "Orchestrator $ORCHESTRATOR_NAME is at $address on the tailnet."
-  echo "To serve the web UI there, add USINE_LISTEN=$address to /home/usine/factory/.env."
+  root="root@$(orchestrator_address)"
+  tailscale_up "$ORCHESTRATOR_NAME" " --advertise-tags=$ORCHESTRATOR_TAG" -o "$jump" "$root"
+  # HTTPS at the server's tailnet name, proxied to usine up's default port on 127.0.0.1, also after a reboot.
+  with_identity ssh -t -o "$jump" "$root" tailscale serve --bg 7331
+  url=$(with_identity ssh -o "$jump" "$root" tailscale status --json | jq -r '"https://" + (.Self.DNSName | rtrimstr("."))')
+  with_identity ssh -o "$jump" "$root" systemctl enable --now nftables
+  echo "Orchestrator $ORCHESTRATOR_NAME is at $address on the tailnet, and serves the web UI at $url."
+  echo "nftables now refuses SSH from the private network: connect to the server over the tailnet."
+  echo "Add USINE_ORIGIN=$url to /home/usine/factory/.env, so that the UI's pages there can use the operator API."
 }
 
 delete() {
