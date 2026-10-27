@@ -1153,6 +1153,38 @@ describe("Operator", () => {
       }),
   );
 
+  it.effect("compares the loaded agent with the saved definition, including amendments", () =>
+    Effect.gen(function* () {
+      const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+      const moved = yield* Ref.make<ItemLabelMutation | null>(null);
+      const reads = yield* Ref.make(0);
+      const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+      const replacement = new AgentFile({ ...agentFile, harness: "claude" });
+      const reloaded = new LoadedInstance({ ...instance, agents: [replacement] });
+      const amended = new RunSnapshot({ ...snapshot, agent: replacement.agent });
+      const changedPersona = new LoadedInstance({
+        ...instance,
+        agents: [
+          new AgentFile({ ...agentFile, persona: AgentPersona.make("Changed instructions") }),
+        ],
+      });
+      const missing = new LoadedInstance({ ...instance, agents: [], loops: [] });
+      for (const [saved, loaded, changed] of [
+        [new RunSnapshot({ ...snapshot, attempts: [] }), instance, false],
+        [snapshot, reloaded, true],
+        [snapshot, changedPersona, true],
+        [amended, reloaded, false],
+        [snapshot, missing, false],
+      ] as const) {
+        const detail = yield* Effect.gen(function* () {
+          return yield* (yield* Operator).detail(loaded, runId);
+        }).pipe(Effect.provide(testLayer(approved, moved, reads, revision, saved)));
+        assert.deepStrictEqual(detail.run.agentBrain, saved.agent.brain);
+        assert.strictEqual(detail.agentDefinitionChanged, changed);
+      }
+    }),
+  );
+
   it.effect(
     "derives retry context from the selected roster agent and attributes input to the configured operator",
     () =>
@@ -1216,6 +1248,20 @@ describe("Operator", () => {
             Option.some(OperatorLogin.make("Philippe")),
           ]);
           assert.strictEqual(edits.length, 1);
+          const reloadedAgent = new AgentFile({ ...replacement, name: agentFile.name });
+          yield* operator.editAndRetry(
+            new LoadedInstance({ ...configured, agents: [reloadedAgent] }),
+            runId,
+            new EditAndRetry({ task: snapshot.task, agent: agentFile.name }),
+          );
+          assert.deepStrictEqual(
+            edits[1],
+            new AttemptContext({
+              task: snapshot.task,
+              agent: reloadedAgent.agent,
+              parentModel: reloadedAgent.parentModel,
+            }),
+          );
           const input = Schema.decodeUnknownSync(SessionIntervention)({
             attemptId,
             action: { _tag: "Steer", message: "Continue" },

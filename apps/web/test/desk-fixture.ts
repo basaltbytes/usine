@@ -145,6 +145,7 @@ export const deskFixture = (now: number) => {
     pullRequest: number | null = null,
   ) =>
     new RunView({
+      agentBrain: brain,
       id: RunId.make(id),
       itemKey: item.itemKey,
       loop: LoopName.make(loop),

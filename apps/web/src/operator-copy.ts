@@ -33,6 +33,9 @@ export interface NeedCopy {
 export const brainLine = (brain: BrainSpec): string =>
   `${brain.harness} · ${brain.model} · ${brain.effort}`;
 
+export const retryDescription = (brain: BrainSpec): string =>
+  `Retry uses ${brain.harness} · ${brain.model} from the saved agent definition.`;
+
 export const runActionLabel = {
   approve: "Approve",
   retry: "Retry",

@@ -157,7 +157,9 @@ The engine retries automatically only after an `InfraFailure`, such as an unreac
 
 When an attempt fails, usine stops its parent task. If usine can't confirm the stop, the attempt keeps its slot on the worker and its worktree, as after a [cancel](#cancel-a-run). Until a retried stop succeeds, no other attempt starts in that slot, the run's automatic retry starts on no worker, the run page shows **Waiting for attempt \<n\> to stop on \<worker\>**, and **Needs attention** shows **\<loop\>: parent task not stopped**. usine then salvages the worktree, and the retry starts from that salvage.
 
-**Retry** starts a new attempt, as many times as you want. When an attempt doesn't succeed, usine commits its changes and pushes the worktree to `usine/salvage/<run>/<attempt number>`, a branch that usine never deletes. If the push fails, the worktree stays on the worker and the attempt shows its path.
+**Retry** starts a new attempt with the run's saved agent definition: the definition from when the run opened, or from the most recent **Edit and retry**. Reloading the configuration doesn't change that definition. The Retry control names the saved harness and model in its description; the drawer and run page also show them beside the actions. If the loaded agent definition differs, they show a notice beside **Edit and retry**.
+
+You can retry as many times as you want. When an attempt doesn't succeed, usine commits its changes and pushes the worktree to `usine/salvage/<run>/<attempt number>`, a branch that usine never deletes. If the push fails, the worktree stays on the worker and the attempt shows its path.
 
 The next attempt fetches the run's revision again (for an issue run, the current default branch), rebases the newest salvage onto it, and gives the salvage branch in its prompt. A salvage without changes is dropped. If a salvage conflicts, the attempt starts from the base, and its first line, **Attempt started**, gives the salvage branch.
 
@@ -186,11 +188,13 @@ As with a question, the blocker comment opens no run. After you remove the block
 
 ## Edit and retry a run
 
-**Edit and retry** opens the run's task and the roster's agents, including agents that a reload added. **Save and retry** replaces the task, the agent, and the parent model that usine picks for it, and retries. Every later attempt of the run uses the change, including automatic retries, until you edit again. Each attempt records the task and agent that it ran. The event doesn't change.
+**Edit and retry** opens the run's task and the roster's agents, including agents that a reload added. **Save and retry** takes the selected agent's current loaded definition, replaces the task, the agent, and the parent model that usine picks for it, and retries. To use a reloaded agent definition, keep the same task and agent name and select **Save and retry**. Every later attempt of the run uses the change, including automatic retries, until you edit again. Each attempt records the task and agent that it ran. The event doesn't change.
 
 ## Cancel a run
 
-Select **Cancel run**, then **Confirm cancel**. usine stops a running attempt, pushes its work to a salvage branch, and closes the run as `Canceled`. Polling the same item content starts nothing.
+Canceling a `Failed` or `Succeeded` run returns HTTP 409 with a message and preserves the outcome. Use **Retry** or **Edit and retry** for a failed run. Canceling an already `Canceled` run succeeds without changing it.
+
+For an open run, select **Cancel run**, then **Confirm cancel**. usine stops a running attempt, pushes its work to a salvage branch, and closes the run as `Canceled`. Polling the same item content starts nothing.
 
 If usine can't confirm that the attempt's parent task stopped, the cancel returns an error, and the attempt keeps its slot on the worker, so no other attempt starts there in its place. The worktree stays on the worker without salvage, and no attempt of the loop starts on the item, so a queued event's run waits too. **Needs attention** shows **\<loop\>: parent task not stopped**. usine retries the stop at each reconcile, every three minutes, also after the next `usine up`. Once a stop succeeds, usine salvages the worktree and frees the slot.
 

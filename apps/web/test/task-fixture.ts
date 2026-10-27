@@ -102,6 +102,7 @@ const run = (
   > = {},
 ) =>
   new RunView({
+    agentBrain: brain,
     id: RunId.make(id),
     itemKey: keyOf(number),
     loop: LoopName.make(loop),

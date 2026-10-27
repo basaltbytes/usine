@@ -25,6 +25,7 @@ import {
   elapsedLabel,
   failureMessage,
   moveProgressMessage,
+  retryDescription,
   runActionLabel,
   runActionProgress,
   runAgainBlocked,
@@ -220,6 +221,7 @@ const RetryButton = ({
       variant="outline"
       size="xs"
       className="relative z-10"
+      title={retryDescription(failure.run.agentBrain)}
       onClick={() => action.mutate({ runId: failure.run.id, request: { action: "retry" } })}
     >
       {runActionLabel.retry}

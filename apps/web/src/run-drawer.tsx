@@ -163,7 +163,9 @@ export const RunDrawer = ({
                 placement="drawer"
                 shared={open}
                 as={SheetTitle}
-                actions={<ContextualActions run={run} onEdit={setEditing} openRun={openRun} />}
+                actions={
+                  <ContextualActions detail={detail.data} onEdit={setEditing} openRun={openRun} />
+                }
               />
               <SheetDescription className="sr-only">
                 Run {run.id} of {run.loop} on {run.repository}
