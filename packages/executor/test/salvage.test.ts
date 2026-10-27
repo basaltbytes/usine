@@ -4,7 +4,7 @@ import { AttemptId } from "@usine/core/attempt";
 import { SalvageRef, SalvageRejected } from "@usine/core/attempt/salvage";
 import { CommitSha } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
-import { Effect, Fiber, FileSystem, Option } from "effect";
+import { Cause, Effect, Fiber, FileSystem, Option } from "effect";
 import { TestClock } from "effect/testing";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { collectCommand, requireSuccess } from "../src/child-command.ts";
@@ -21,7 +21,7 @@ const REF = SalvageRef.make("usine/salvage/run/1");
 interface Scripted {
   readonly head: () => string;
   readonly status: string;
-  readonly inspect?: "fails";
+  readonly inspect?: "fails" | "fails without a cause message";
   readonly add?: "fails";
   readonly commit?: "fails";
   readonly push?: "fails" | "refuses-large-file" | "stalls";
@@ -48,6 +48,13 @@ const LARGE_FILE_REFUSED = new ExecutorOperationError({
   ),
 });
 
+/** A failed git command whose cause is an `Error` without a message, such as Effect's `TimeoutError`. */
+const NO_CAUSE_MESSAGE = new ExecutorOperationError({
+  operation: "cleanup",
+  message: "Can't run ssh",
+  cause: new Cause.TimeoutError(),
+});
+
 /** Returns a git that responds from `script` and records every call in order. */
 const fakeGit = (script: Scripted) => {
   const calls: Array<ReadonlyArray<string>> = [];
@@ -59,10 +66,12 @@ const fakeGit = (script: Scripted) => {
       const command = args.slice(2);
       if (command[0] === "rev-parse")
         return Effect.succeed(`${committed ? SNAPSHOT : script.head()}\n`);
-      if (command[0] === "status")
-        return script.inspect === "fails"
-          ? Effect.fail(new Error("inspection failed"))
-          : Effect.succeed(script.status);
+      if (command[0] === "status") {
+        if (script.inspect === "fails") return Effect.fail(new Error("inspection failed"));
+        if (script.inspect === "fails without a cause message")
+          return Effect.fail(NO_CAUSE_MESSAGE);
+        return Effect.succeed(script.status);
+      }
       if (command[0] === "add")
         return script.add === "fails"
           ? Effect.fail(new Error("index.lock exists"))
@@ -178,6 +187,21 @@ describe("salvageWorktree", () => {
         assert.strictEqual(result.value.path, WORKTREE);
         assert(!commandsOf(calls).includes("push"));
       }),
+  );
+
+  // A defect here skipped the checkout's removal, so the machine stayed and the Run failed with
+  // a step executor defect (#602).
+  it.effect("retains the worktree when a git failure's cause has no message", () =>
+    Effect.gen(function* () {
+      const { result } = yield* salvage({
+        head: () => AHEAD,
+        status: "",
+        inspect: "fails without a cause message",
+      });
+      assert(Option.isSome(result) && result.value._tag === "Retained");
+      assert.strictEqual(result.value.path, WORKTREE);
+      assert.strictEqual(result.value.message, "Can't run ssh");
+    }),
   );
 
   it.effect("reports the retained worktree and git's own diagnostic when the push fails", () =>
