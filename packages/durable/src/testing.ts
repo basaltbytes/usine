@@ -20,6 +20,7 @@ import {
   type OnDelivery,
   reportText,
   type RunningSession,
+  SessionOperationError,
   SessionResult,
 } from "@usine/agents/runtime";
 import { ModelId } from "@usine/core/agent/brain";
@@ -117,6 +118,11 @@ export interface StubChild {
    * reports otherwise.
    */
   readonly fail: (message: string) => Effect.Effect<void>;
+  /**
+   * Ends without a result, as a Claude child whose output stream fails: the parent's `subagent`
+   * call fails with a `stream` `SessionOperationError` whose message is `message`.
+   */
+  readonly crash: (message: string) => Effect.Effect<void>;
   /** Completes when the parent's tool call interrupts the child (abort, cancel, or shutdown). */
   readonly interrupted: Effect.Effect<void>;
   readonly interventions: Effect.Effect<ReadonlyArray<AttemptChannel.OperatorAction>>;
@@ -132,7 +138,7 @@ export class StubChildren extends Context.Service<
 
 const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: ChildRequest) {
   const session = request.session;
-  const events = yield* Queue.make<AgentSessionEvent, AgentReport | Cause.Done>();
+  const events = yield* Queue.make<AgentSessionEvent, AgentSessionError | Cause.Done>();
   const result = yield* Deferred.make<SessionResult, AgentSessionError>();
   const interrupted = yield* Deferred.make<void>();
   const interventions: Array<AttemptChannel.OperatorAction> = [];
@@ -187,6 +193,17 @@ const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: Chil
     report(new AgentQuestionError({ sessionId: Option.some(session.id), message: question }));
   const fail = (message: string) =>
     report(new AgentResultError({ sessionId: Option.some(session.id), message }));
+  const crash = (message: string) =>
+    Effect.gen(function* () {
+      const error = new SessionOperationError({
+        operation: "stream",
+        sessionId: Option.some(session.id),
+        message,
+        cause: new Error("unexpected end of output"),
+      });
+      yield* Deferred.fail(result, error);
+      yield* Queue.fail(events, error);
+    });
   // A message to an idle or paused child starts its next turn; a working child queues it.
   const intervene = (action: AttemptChannel.OperatorAction, onDelivery: OnDelivery) =>
     Effect.gen(function* () {
@@ -230,6 +247,7 @@ const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: Chil
     block,
     ask,
     fail,
+    crash,
     interrupted: Deferred.await(interrupted),
     interventions: Effect.sync(() => [...interventions]),
   };
