@@ -1,7 +1,7 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { configurationQuery } from "../../../../configuration/query.ts";
-import { RepositoryDetail } from "../../../../configuration/repositories.tsx";
+import { configurationQuery } from "~/features/configuration/queries";
+import { RepositoryDetail } from "~/features/configuration/components/repositories/detail";
 
 const Repository = () => {
   const { owner, name } = Route.useParams();

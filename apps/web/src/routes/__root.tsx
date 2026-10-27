@@ -13,12 +13,12 @@ import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import type { FactoryOverview } from "@usine/orchestrator/operator";
 import { Schema } from "effect";
-import { AppSidebar, type OperatorView, useOperatorView } from "@/components/app-sidebar";
-import { BootScreen } from "@/components/boot-screen";
-import { cardIdentity } from "@/components/item/identity";
-import { itemLabel } from "@/components/item/mark";
-import { RepositoryMark } from "@/components/repository-mark";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { AppSidebar, type OperatorView, useOperatorView } from "~/components/app-sidebar";
+import { BootScreen } from "~/components/boot-screen";
+import { cardIdentity } from "~/components/item/identity";
+import { itemLabel } from "~/components/item/mark";
+import { RepositoryMark } from "~/components/repository-mark";
+import { Alert, AlertDescription, AlertTitle } from "~/components/ui/alert";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -26,18 +26,18 @@ import {
   BreadcrumbList,
   BreadcrumbPage,
   BreadcrumbSeparator,
-} from "@/components/ui/breadcrumb";
-import { Button } from "@/components/ui/button";
-import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
-import { ConfigurationCrumbs } from "../configuration/layout.tsx";
-import { NeedsYou } from "../needs-you/needs-you.tsx";
-import { rejectionMessage } from "../api.ts";
-import { needsYouByProject, overviewQuery, projectParams } from "../overview.ts";
+} from "~/components/ui/breadcrumb";
+import { Button } from "~/components/ui/button";
+import { SidebarInset, SidebarProvider, SidebarTrigger } from "~/components/ui/sidebar";
+import { ConfigurationCrumbs } from "~/components/configuration/navigation";
+import { NeedsYou } from "~/components/needs-you/needs-you";
+import { rejectionMessage } from "~/lib/api";
+import { needsYouByProject, overviewQuery, projectParams } from "~/lib/overview";
 import { Suspense, lazy, useState } from "react";
 
 // Loaded on first open; it includes the transcript, Markdown, and message components.
 const RunDrawer = lazy(() =>
-  import("../run-drawer.tsx").then(({ RunDrawer: drawer }) => ({ default: drawer })),
+  import("~/components/runs/drawer").then(({ RunDrawer: drawer }) => ({ default: drawer })),
 );
 
 /** `run` is in the root search so the Run drawer can open over any route. */
@@ -47,7 +47,9 @@ interface RouterContext {
   readonly queryClient: QueryClient;
 }
 
-const Unreachable = ({ error }: ErrorComponentProps) => {
+type UnreachableProps = Readonly<ErrorComponentProps>;
+
+const Unreachable = ({ error }: UnreachableProps) => {
   const router = useRouter();
   return (
     <BootScreen title="Server unreachable" description={rejectionMessage(error)} tone="error">
@@ -69,18 +71,15 @@ const taskCrumb = (overview: FactoryOverview, repository: RepositoryName, number
     : itemLabel({ ...cardIdentity(card).origin, state: null });
 };
 
-const Crumbs = ({
-  view,
-  project,
-  runId,
-  task,
-}: {
+type CrumbsProps = {
   readonly view: OperatorView;
   readonly project: RepositoryName | undefined;
   readonly runId: RunId | undefined;
   /** The open Task page's originating item, such as `Issue #481`. */
   readonly task: string | undefined;
-}) => {
+};
+
+const Crumbs = ({ view, project, runId, task }: CrumbsProps) => {
   if (view === "configuration") return <ConfigurationCrumbs />;
   if (project === undefined)
     return (

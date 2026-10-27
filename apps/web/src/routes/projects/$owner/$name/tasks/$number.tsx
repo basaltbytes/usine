@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { TaskPage } from "../../../../../task/page.tsx";
+import { TaskPage } from "~/features/tasks/task.page";
 
 const TaskRoute = () => {
   const { repository, number } = Route.useParams();

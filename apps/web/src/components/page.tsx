@@ -1,15 +1,8 @@
 import type { Icon } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
-import { cn } from "@/lib/utils";
+import { cn } from "~/lib/utils";
 
-export const PageHeading = ({
-  title,
-  leading,
-  counts,
-  children,
-  actions,
-  className,
-}: {
+type PageHeadingProps = {
   readonly title: string;
   /** Content before the title, centred on its first line, such as a repository mark. */
   readonly leading?: ReactNode;
@@ -18,7 +11,16 @@ export const PageHeading = ({
   readonly children?: ReactNode;
   readonly actions?: ReactNode;
   readonly className?: string;
-}) => (
+};
+
+export const PageHeading = ({
+  title,
+  leading,
+  counts,
+  children,
+  actions,
+  className,
+}: PageHeadingProps) => (
   <header className={cn("flex flex-wrap items-baseline gap-x-3 gap-y-1", className)}>
     <h1 className="flex items-baseline gap-2 text-xl font-semibold wrap-anywhere">
       {leading !== undefined && (
@@ -35,15 +37,14 @@ export const PageHeading = ({
 );
 
 /** The content width: `prose` is at most 768px; `full` fills the work panel. */
-export type PageWidth = "prose" | "full";
+type PageWidth = "prose" | "full";
 
-export const Page = ({
-  children,
-  width = "prose",
-}: {
+type PageProps = {
   readonly children: ReactNode;
   readonly width?: PageWidth;
-}) => (
+};
+
+export const Page = ({ children, width = "prose" }: PageProps) => (
   <main className="px-4 pt-5 pb-6 md:px-5">
     <div className={cn("flex flex-col gap-4", width === "prose" && "max-w-3xl")}>{children}</div>
   </main>
@@ -54,6 +55,15 @@ const beside = {
   sm: "sm:flex-row sm:items-start sm:justify-between sm:gap-6",
   never: "",
 } as const;
+
+type PageHeaderProps = {
+  readonly eyebrow?: ReactNode;
+  readonly heading: ReactNode;
+  readonly facts?: ReactNode;
+  readonly actions?: ReactNode;
+  readonly actionsBeside: keyof typeof beside;
+  readonly className?: string;
+};
 
 /**
  * Renders the header of a run or task: an optional 12px line above the heading, the heading, a
@@ -66,14 +76,7 @@ export const PageHeader = ({
   actions,
   actionsBeside,
   className,
-}: {
-  readonly eyebrow?: ReactNode;
-  readonly heading: ReactNode;
-  readonly facts?: ReactNode;
-  readonly actions?: ReactNode;
-  readonly actionsBeside: keyof typeof beside;
-  readonly className?: string;
-}) => (
+}: PageHeaderProps) => (
   <header className={cn("flex flex-col gap-3", beside[actionsBeside], className)}>
     <div className="min-w-0 space-y-1">
       {eyebrow !== undefined && (
@@ -92,16 +95,14 @@ export const PageHeader = ({
   </header>
 );
 
-/** Renders a fact after its Phosphor icon at text size, with `title` as tooltip, such as `Loop`. */
-export const PageFact = ({
-  icon: Glyph,
-  title,
-  children,
-}: {
+type PageFactProps = {
   readonly icon: Icon;
   readonly title?: string;
   readonly children: ReactNode;
-}) => (
+};
+
+/** Renders a fact after its Phosphor icon at text size, with `title` as tooltip, such as `Loop`. */
+export const PageFact = ({ icon: Glyph, title, children }: PageFactProps) => (
   <span className="inline-flex items-center gap-1.5" title={title}>
     <Glyph aria-hidden="true" className="size-[1em] shrink-0 text-faint" />
     {children}

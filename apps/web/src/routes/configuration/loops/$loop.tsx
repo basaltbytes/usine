@@ -1,8 +1,8 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { useLoopPause } from "../../../configuration/layout.tsx";
-import { LoopDetail } from "../../../configuration/loops.tsx";
-import { configurationQuery } from "../../../configuration/query.ts";
+import { useLoopPause } from "~/features/configuration/configuration.page";
+import { LoopDetail } from "~/features/configuration/components/loops/detail";
+import { configurationQuery } from "~/features/configuration/queries";
 
 const Loop = () => {
   const { loop } = Route.useParams();

@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { RunId } from "@usine/core/run";
-import { RunPage } from "../../../../../run-page/page.tsx";
+import { RunPage } from "~/features/runs/run.page";
 
 const RunRoute = () => {
   const { run } = Route.useParams();

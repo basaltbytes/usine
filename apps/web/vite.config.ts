@@ -21,7 +21,7 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      "@": fileURLToPath(new URL("./src", import.meta.url)),
+      "~": fileURLToPath(new URL("./src", import.meta.url)),
       "ansi-to-react-component": fileURLToPath(
         new URL("./src/components/ai-elements/ansi.cjs", import.meta.url),
       ),

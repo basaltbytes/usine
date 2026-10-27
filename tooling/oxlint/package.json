@@ -4,6 +4,9 @@
   "private": true,
   "description": "usine's local oxlint rules (carried over from balade), loaded as a JS plugin by the root .oxlintrc.json.",
   "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
   "devDependencies": {
     "@oxlint/plugins": "catalog:"
   }

@@ -3,9 +3,9 @@ import { TerminalIcon } from "@phosphor-icons/react";
 import Ansi from "ansi-to-react-component";
 import { createContext, useContext, type ComponentProps } from "react";
 
-import { cn } from "@/lib/utils";
+import { cn } from "~/lib/utils";
 
-import { CopyButton } from "./copy-button";
+import { CopyButton } from "~/components/ai-elements/copy-button";
 
 const TerminalContext = createContext("");
 

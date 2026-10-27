@@ -7,7 +7,7 @@ import {
   IssueOpenedIcon,
 } from "@primer/octicons-react";
 import type { LaneItemState } from "@usine/config/board";
-import { cn } from "@/lib/utils";
+import { cn } from "~/lib/utils";
 
 /** A GitHub issue or pull request; a `null` state is unknown. */
 export interface ItemRef {
@@ -45,6 +45,15 @@ export const itemLabel = (item: Pick<ItemRef, "kind" | "number" | "state">): str
   return `${kindWord(item.kind)} #${item.number}${word === null ? "" : `, ${word}`}`;
 };
 
+type ItemMarkProps = {
+  readonly item: ItemRef;
+  readonly size?: "inline" | "title";
+  readonly linked?: boolean;
+  /** Whether to show `#number` after the icon; an icon alone still has `itemLabel` as its name. */
+  readonly numbered?: boolean;
+  readonly className?: string;
+};
+
 /**
  * Renders the item's GitHub icon and `#number` in its state colour, with `itemLabel` as tooltip and
  * accessible name. `linked` marks open GitHub in a new tab; pass `false` inside another link,
@@ -56,14 +65,7 @@ export const ItemMark = ({
   linked = true,
   numbered = true,
   className,
-}: {
-  readonly item: ItemRef;
-  readonly size?: "inline" | "title";
-  readonly linked?: boolean;
-  /** Whether to show `#number` after the icon; an icon alone still has `itemLabel` as its name. */
-  readonly numbered?: boolean;
-  readonly className?: string;
-}) => {
+}: ItemMarkProps) => {
   const { icon: Glyph, tone } = lookOf(item);
   const label = itemLabel(item);
   const classes = cn(

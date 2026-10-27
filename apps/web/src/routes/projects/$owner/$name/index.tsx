@@ -1,10 +1,10 @@
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { ProjectNotFound } from "@/components/project-not-found";
-import { ProjectBoard } from "../../../../board/board.tsx";
-import { deskQuery } from "../../../../desk/query.ts";
-import { overviewQuery } from "../../../../overview.ts";
-import { useOpenRun } from "../../../../open-run.ts";
+import { ProjectNotFound } from "~/components/project-not-found";
+import { ProjectBoard } from "~/features/projects/board.page";
+import { deskQuery } from "~/lib/desk/queries";
+import { overviewQuery } from "~/lib/overview";
+import { useOpenRun } from "~/hooks/use-open-run";
 
 const BoardRoute = () => {
   const { repository } = Route.useParams();

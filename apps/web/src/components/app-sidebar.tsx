@@ -2,7 +2,7 @@ import { KanbanIcon, ListChecksIcon, SquaresFourIcon } from "@phosphor-icons/rea
 import { Link, useMatchRoute } from "@tanstack/react-router";
 import type { RepositoryName } from "@usine/core/repository";
 import type { ProjectView } from "@usine/orchestrator/operator";
-import { RepositoryMark } from "@/components/repository-mark";
+import { RepositoryMark } from "~/components/repository-mark";
 import {
   Sidebar,
   SidebarContent,
@@ -18,10 +18,10 @@ import {
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
-} from "@/components/ui/sidebar";
-import { cn } from "@/lib/utils";
-import { ConfigurationMenu } from "../configuration/layout.tsx";
-import { projectParams } from "../overview.ts";
+} from "~/components/ui/sidebar";
+import { cn } from "~/lib/utils";
+import { ConfigurationMenu } from "~/components/configuration/navigation";
+import { projectParams } from "~/lib/overview";
 
 /** `tasks` covers the Tasks list and Task pages; `project` covers other Project pages, such as a
  * Run page. */
@@ -36,21 +36,16 @@ export const useOperatorView = (): OperatorView => {
   return "project";
 };
 
-const AttentionCount = ({ count }: { readonly count: number }) => (
+type AttentionCountProps = { readonly count: number };
+
+const AttentionCount = ({ count }: AttentionCountProps) => (
   <SidebarMenuBadge className="right-2 min-w-0 px-0 text-needs-you peer-hover/menu-button:text-needs-you peer-data-active/menu-button:text-needs-you">
     {count}
     <span className="sr-only"> need attention</span>
   </SidebarMenuBadge>
 );
 
-export const AppSidebar = ({
-  projects,
-  view,
-  project,
-  needsYou,
-  needsYouTotal,
-  live,
-}: {
+type AppSidebarProps = {
   readonly projects: ReadonlyArray<ProjectView>;
   readonly view: OperatorView;
   readonly project: RepositoryName | undefined;
@@ -59,7 +54,16 @@ export const AppSidebar = ({
   /** Total Needs you entries, including those without a Project. */
   readonly needsYouTotal: number;
   readonly live: boolean;
-}) => (
+};
+
+export const AppSidebar = ({
+  projects,
+  view,
+  project,
+  needsYou,
+  needsYouTotal,
+  live,
+}: AppSidebarProps) => (
   <Sidebar variant="inset">
     <SidebarHeader className="px-2 pt-2 pb-3">
       <SidebarMenu>

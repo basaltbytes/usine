@@ -1,4 +1,4 @@
-import { cn } from "@/lib/utils";
+import { cn } from "~/lib/utils";
 
 /** Returns the tone class for a Run, Attempt, Project, or Loop state (ADR 0015). An unpaused Loop
  * is `live`. Issue and pull request states use `ItemMark`. */
@@ -27,14 +27,13 @@ const stateTone = (state: string): string => {
   }
 };
 
-/** Renders a dot in the state's tone that pulses while the state is `Running`. */
-export const StateMark = ({
-  state,
-  className,
-}: {
+type StateMarkProps = {
   readonly state: string;
   readonly className?: string;
-}) => (
+};
+
+/** Renders a dot in the state's tone that pulses while the state is `Running`. */
+export const StateMark = ({ state, className }: StateMarkProps) => (
   <span
     data-slot="state-mark"
     aria-hidden="true"
@@ -47,14 +46,13 @@ export const StateMark = ({
   />
 );
 
-/** `label` replaces the state name when the state key is not its sentence-case name. */
-export const StatusBadge = ({
-  state,
-  label = state,
-}: {
+type StatusBadgeProps = {
   readonly state: string;
   readonly label?: string;
-}) => (
+};
+
+/** `label` replaces the state name when the state key is not its sentence-case name. */
+export const StatusBadge = ({ state, label = state }: StatusBadgeProps) => (
   <span className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground">
     <StateMark state={state} />
     {label}
