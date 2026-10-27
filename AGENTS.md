@@ -37,5 +37,5 @@ Rules:
 - Import definitions from their owning package. Use named imports, except for tagged-union namespaces (`RunState.Failed`).
 - Give a core branded schema, its brand, and its exported type the same name (`RepositoryName`).
 - Comment only what the name and signature don't say, such as a unit, an error case, or a side effect. Put design rationale in the commit, the PR body, or an ADR.
-- Build the web UI from the shadcn registry on Tailwind tokens. Before you change `apps/web`, read "How to add UI" in `apps/web/README.md`.
+- Build the web UI from the shadcn registry on Tailwind tokens. Before you change `apps/web`, read "How to add UI" in `apps/web/README.md` and load the `react-app-structure` skill for file placement.
 - Use snake_case keys in authored YAML (`usine.yaml`, loop and agent frontmatter) and camelCase in domain fields. Rename keys once, at the parse boundary, with `Schema.encodeKeys`; see `Settings` in `@usine/config`.
