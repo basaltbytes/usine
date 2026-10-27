@@ -2,24 +2,11 @@ import { useQuery } from "@tanstack/react-query";
 import type { StatisticsView, StatisticsWindow } from "@usine/orchestrator/operator";
 import { type ReactNode, useState } from "react";
 import { ErrorAlert } from "~/components/error-alert";
+import { DeskSection, EmptyLine } from "~/components/overview/section";
 import { Skeleton } from "~/components/ui/skeleton";
 import { ToggleGroup, ToggleGroupItem } from "~/components/ui/toggle-group";
-import { cn } from "~/lib/utils";
-import { tokensLabel, usdLabel } from "~/lib/strings";
-import { DeskSection, EmptyLine } from "~/components/overview/section";
-import {
-  aboutLabel,
-  noTasksLine,
-  spanLabel,
-  unpricedLine,
-  unmeteredLine,
-  untimedLine,
-  windowLabels,
-  windowNote,
-} from "~/features/overview/lib/statistics/strings";
 import { Details } from "~/features/overview/components/statistics/details";
 import { FirstTimeRight } from "~/features/overview/components/statistics/first-time-right";
-import { statisticsQuery } from "~/features/overview/queries";
 import {
   loopParts,
   ShareBar,
@@ -27,6 +14,19 @@ import {
 } from "~/features/overview/components/statistics/share-bar";
 import { TasksDoneChart } from "~/features/overview/components/statistics/tasks-done/chart";
 import { TasksDoneLegend } from "~/features/overview/components/statistics/tasks-done/legend";
+import { statisticsQuery } from "~/features/overview/queries";
+import {
+  aboutLabel,
+  noTasksLine,
+  spanLabel,
+  unmeteredLine,
+  unpricedLine,
+  untimedLine,
+  windowLabels,
+  windowNote,
+} from "~/features/overview/strings";
+import { tokensLabel, usdLabel } from "~/lib/strings";
+import { cn } from "~/lib/utils";
 
 const WINDOWS: ReadonlyArray<StatisticsWindow> = ["7d", "30d", "all"];
 

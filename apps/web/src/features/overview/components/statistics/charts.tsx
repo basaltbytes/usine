@@ -23,7 +23,7 @@ import {
   periodLabel,
   spanLabel,
   utcDayLabel,
-} from "~/features/overview/lib/statistics/strings";
+} from "~/features/overview/strings";
 
 const OUTCOMES = ["succeeded", "failed", "canceled"] as const;
 

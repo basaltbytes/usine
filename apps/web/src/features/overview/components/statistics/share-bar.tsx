@@ -1,8 +1,8 @@
 import type { LoopName } from "@usine/core/loop";
 import type { LoopShareView } from "@usine/orchestrator/operator";
 import { useState } from "react";
+import { shareLabel } from "~/features/overview/strings";
 import { cn } from "~/lib/utils";
-import { shareLabel } from "~/features/overview/lib/statistics/strings";
 
 /** The steps of the loop ramp in `index.css`. */
 const RAMP_STEPS = 5;

@@ -1,10 +1,6 @@
 import type { StatisticsView, TaskPeriodView } from "@usine/orchestrator/operator";
 import type { ReactNode } from "react";
-import {
-  percentLabel,
-  periodLabel,
-  perTaskLabel,
-} from "~/features/overview/lib/statistics/strings";
+import { percentLabel, periodLabel, perTaskLabel } from "~/features/overview/strings";
 
 /** The most points a sparkline shows; longer windows merge neighbouring periods. */
 const SPARK_POINTS = 8;

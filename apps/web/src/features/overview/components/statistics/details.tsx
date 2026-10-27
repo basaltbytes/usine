@@ -9,7 +9,6 @@ import { ErrorAlert } from "~/components/error-alert";
 import { Button } from "~/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "~/components/ui/collapsible";
 import { Skeleton } from "~/components/ui/skeleton";
-import { cn } from "~/lib/utils";
 import { Breakdown } from "~/features/overview/components/statistics/breakdown";
 import {
   AttemptsChart,
@@ -18,6 +17,7 @@ import {
   ThroughputChart,
   UtilizationMeters,
 } from "~/features/overview/components/statistics/charts";
+import { runStatisticsQuery } from "~/features/overview/queries";
 import {
   countLabel,
   oneAttemptShare,
@@ -25,8 +25,8 @@ import {
   percentLabel,
   spanLabel,
   windowPhrase,
-} from "~/features/overview/lib/statistics/strings";
-import { runStatisticsQuery } from "~/features/overview/queries";
+} from "~/features/overview/strings";
+import { cn } from "~/lib/utils";
 
 type FigureProps = {
   readonly label: string;

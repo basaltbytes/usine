@@ -10,7 +10,7 @@ import {
   ladderLabel,
   tooltipClass,
 } from "~/features/overview/lib/statistics/chart";
-import { instantDayLabel, spanLabel } from "~/features/overview/lib/statistics/strings";
+import { instantDayLabel, spanLabel } from "~/features/overview/strings";
 import { projectParams } from "~/lib/overview";
 
 /** Returns a tick every day for a week or less, else every 7 days, from the window's start. */

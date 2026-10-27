@@ -8,7 +8,7 @@ import {
   ladderLabel,
   tooltipClass,
 } from "~/features/overview/lib/statistics/chart";
-import { periodLabel, spanLabel, utcDayLabel } from "~/features/overview/lib/statistics/strings";
+import { periodLabel, spanLabel, utcDayLabel } from "~/features/overview/strings";
 
 type WeeklyTasksProps = { readonly statistics: StatisticsView };
 
