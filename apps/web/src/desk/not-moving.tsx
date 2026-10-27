@@ -1,5 +1,6 @@
 import type { FactoryOverview, StalledItemView } from "@usine/orchestrator/operator";
 import { Option } from "effect";
+import { FillCell } from "@/components/fill-cell";
 import { ItemHeading } from "@/components/item/heading";
 import { itemIdentity, useOverview } from "@/components/item/identity";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -45,12 +46,12 @@ const StalledRow = ({
   if (narrow)
     return (
       <RunRow run={run}>
-        <TableCell className="w-full max-w-0 py-3 align-top whitespace-normal">
+        <FillCell className="py-3 align-top whitespace-normal">
           {item}
           <p className="mt-0.5 truncate text-xs text-muted-foreground">{stalled.loop}</p>
           <p className="mt-1 text-sm text-foreground/90">{stallSentence(stalled, now)}</p>
           <div className="-ml-2.5 empty:hidden [&>span]:items-start">{action}</div>
-        </TableCell>
+        </FillCell>
       </RunRow>
     );
   return (

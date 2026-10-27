@@ -129,9 +129,9 @@ it("shows harness checks as deferred to the first machine of each day", async ()
   await expect.element(claude.getByText("Deferred", { exact: true })).toBeVisible();
   await expect
     .element(
-      claude.getByText(
-        "Checked on the worker's first machine each day, since no machine exists before an attempt.",
-      ),
+      claude.getByRole("cell", {
+        name: "Checked on the worker's first machine each day, since no machine exists before an attempt.",
+      }),
     )
     .toBeVisible();
 });

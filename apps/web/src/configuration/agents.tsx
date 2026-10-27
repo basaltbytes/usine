@@ -4,6 +4,7 @@ import type {
   ConfigurationView,
   InvalidAgentView,
 } from "@usine/orchestrator/operator";
+import { FillCell } from "@/components/fill-cell";
 import { Markdown } from "@/components/markdown";
 import {
   Table,
@@ -59,9 +60,9 @@ const AgentRow = ({ agent }: { readonly agent: AgentFileView }) => {
           <span className="font-sans text-sm text-muted-foreground">Chosen by Pi</span>
         )}
       </TableCell>
-      <TableCell className="hidden w-full whitespace-normal text-muted-foreground md:table-cell">
+      <FillCell className="hidden whitespace-normal text-muted-foreground md:table-cell">
         {agent.loops.length === 0 ? "No loop" : agent.loops.join(", ")}
-      </TableCell>
+      </FillCell>
     </OpeningRow>
   );
 };
@@ -110,7 +111,7 @@ export const AgentsList = ({ configuration }: { readonly configuration: Configur
               <TableHead>Model</TableHead>
               <TableHead className="hidden sm:table-cell">Effort</TableHead>
               <TableHead className="hidden lg:table-cell">Parent model</TableHead>
-              <TableHead className="hidden w-full md:table-cell">Loops</TableHead>
+              <TableHead className="hidden md:table-cell">Loops</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>

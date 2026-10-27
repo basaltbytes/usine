@@ -244,7 +244,7 @@ GitHub label colours come unchanged from the repository, in the label chip (see 
 
 A 232px mantle sidebar, then the base work panel, inset 8px from the window's top, right, and bottom, with a 10px radius and a hairline border. Below `md`, the panel fills the screen and the sidebar becomes a sheet. The panel starts with a 48px breadcrumb-only header, then the Needs attention row (on the overview, the screen's first block), then the screen.
 
-Page gutters are 16px, 20px from `md`. The page shell is prose (content stops at 768px) or full (fills the panel: the overview and every configuration page). List screens, such as Loops, are flat on the panel with no card: the page heading, then a table whose text aligns with the heading, so its hairlines and row fills extend 8px past it on each side. Below `sm`, tables drop or fold their least important columns instead of scrolling sideways.
+Page gutters are 16px, 20px from `md`. The page shell is prose (content stops at 768px) or full (fills the panel: the overview and every configuration page). List screens, such as Loops, are flat on the panel with no card: the page heading, then a table whose text aligns with the heading, so its hairlines and row fills extend 8px past it on each side. Below `sm`, tables drop or fold their least important columns instead of scrolling sideways. The Workers list shows **Location**, and the Repositories list **Tags**, from a 672px table.
 
 **Board.** Needs attention items form a two-column grid from `lg` (one column below) with 10px gaps. Then the project title and counts, then the lanes: 272px wide, 12px apart, scrolling sideways together, with headings sticky on the base ground. Folded lanes are 40px rails with the name set vertically and the count.
 
@@ -260,7 +260,7 @@ Page gutters are 16px, 20px from `md`. The page shell is prose (content stops at
 
 Columns follow the table's width, not the window's: **Tokens** and **Estimated cost** from 896px, **Runs** and **Pull request** from 1024px, **Elapsed time** always. The title takes the remaining width on one line, cut short only when the table is narrower than its columns. From a 448px table, **Status** and **Runs** take their own width up to an equal share of what remains after 416px for the title and header width for the figure columns (112px to 208px). Past that, **Status** wraps and **Runs** truncates before the title is cut, and a status word wider than the share, such as the loop `dependency_updates`, breaks. A short status such as `Done · 28m ago` takes only its own width. On a phone, **Status** wraps to its longest word.
 
-**Configuration detail page.** From `lg`, the file's long parts (trigger, selector, prompt, persona, lanes, preflight) are in a main column and its short facts in a 21rem rail on the right behind a hairline; below `lg`, the rail comes first. The heading row has the name, state mark, and file path (12px mono, under the name), with actions at the right that wrap under the path on phones.
+**Configuration detail page.** From `lg`, the file's long parts (trigger, selector, prompt, persona, lanes, preflight) are in a main column and its short facts in a 21rem rail on the right behind a hairline; below `lg`, the rail comes first. The heading row has the name, state mark, and file path (12px mono, under the name), with actions at the right that wrap under the path on phones. A worker's preflight table shows **Checked** and **Detail** from a 672px table; in a narrower one, each check's time folds under its result and its message under the check.
 
 **Task page** (`repository › Tasks › Issue #<number>`, the breadcrumb naming the originating item in plain words). At most 1024px wide, flat, with the page gutters, 20px above and 40px below. Header: the page header with the task's item heading; facts are the task's other pull requests as item marks, the lane after `Kanban` (tooltip `Lane`), chips, and Needs attention; Move to is an outline button right of the heading from `sm`. Then Runs, Pull requests, and Comments and reviews, 32px apart, each a 16px semibold title with its count in 13px subtext0, 8px above a flat table. Runs shows every column from `xl`; below, agent, attempts, duration, opened, and pull request fold into one 12px line under the loop, and below `sm` the state's dot joins that line before the loop. Run row cells align to the top, so a failure, approval, or Run again line under the loop doesn't move other cells. An empty section is a hairline, a 13px medium title, and one sentence on how it fills.
 
@@ -348,6 +348,8 @@ On the overview, board, tasks list, and configuration pages: the 20px semibold t
 ### Flat table
 The registry table on the panel ground: a 36px heading row of 12px subtext0 labels, 44px rows split by hairlines, 8px cell padding, numbers right-aligned in tabular figures. A row that opens something fills surface0 at 60% on hover and while its link has focus, with a 2px mauve outline on the link; other rows have no hover fill. Row actions are subtext0 ghost buttons, only those that apply, such as Pause or Resume.
 
+One column, usually the item or the detail, takes the remaining width, and its text wraps or is cut short inside it. The other columns take their content's width on one line. A column whose text wraps has a minimum width instead, such as 224px for a preflight check and its description.
+
 ### Frontmatter block
 Keys and values copied from a file, such as a loop's `on:` and `if:`: a mantle box with a hairline ring and 8px radius, 12px mono, keys in subtext0, values in text colour, wrapping anywhere. Ligatures are off, so `==` reads as written.
 
@@ -358,7 +360,7 @@ A definition list beside a detail page: 13px subtext0 labels in a 6.5rem column,
 A `{{ }}` expression in a rendered prompt is outlined, not filled: mono, no fill, a 10% white ring, braces in subtext0. Inline code keeps the surface0 fill, so literals and per-item values look different.
 
 ### Slot cells
-One 10px cell per worker slot, 4px apart: running blue while an attempt uses it, an empty ring otherwise, with the count beside them.
+One 10px cell per worker slot, 4px apart on one line: running blue while an attempt uses it, an empty ring otherwise, with the count beside them.
 
 ### Needs attention item
 8px radius, peach border at 25%, peach fill at 5% (8% on hover), 14px by 10px padding. Title in 13px medium, context in 12px, actions (primary and ghost buttons) at the right; the whole row opens the related run. An entry about an item starts its context with the item mark: an approval's is the task's name, a cycle budget's the item and its counts.

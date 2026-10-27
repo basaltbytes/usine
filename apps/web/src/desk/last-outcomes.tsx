@@ -1,5 +1,6 @@
 import type { ClosedRunView, FactoryOverview } from "@usine/orchestrator/operator";
 import { Option } from "effect";
+import { FillCell } from "@/components/fill-cell";
 import { ItemHeading } from "@/components/item/heading";
 import { cardIdentity, pullRequestAt, taskCard, useOverview } from "@/components/item/identity";
 import { ItemMark } from "@/components/item/mark";
@@ -38,7 +39,7 @@ const OutcomeRow = ({
   );
   return (
     <RunRow run={run}>
-      <TableCell className="w-full max-w-0 py-3">
+      <FillCell className="py-3">
         <RunPageLink run={run}>
           {origin === null ? (
             <span className="block truncate text-sm font-medium">
@@ -54,7 +55,7 @@ const OutcomeRow = ({
           )}
         </RunPageLink>
         <p className="mt-0.5 truncate text-xs text-muted-foreground md:hidden">{run.loop}</p>
-      </TableCell>
+      </FillCell>
       <TableCell className="py-3 max-md:hidden">{run.loop}</TableCell>
       <TableCell className="py-3">
         <StatusBadge state={run.state} />

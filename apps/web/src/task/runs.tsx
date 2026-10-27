@@ -4,6 +4,7 @@ import type { RunId } from "@usine/core/run";
 import type { RunView, TaskItemView, TaskView } from "@usine/orchestrator/operator";
 import { Option } from "effect";
 import { type ReactNode, useState } from "react";
+import { FillCell } from "@/components/fill-cell";
 import { pullRequestAt } from "@/components/item/identity";
 import { ItemMark, type ItemRef } from "@/components/item/mark";
 import { StateMark } from "@/components/status-badge";
@@ -289,7 +290,7 @@ const RunRow = ({
             {run.state}
           </span>
         </TableCell>
-        <TableCell className="w-full py-3 whitespace-normal">
+        <FillCell className="py-3 whitespace-normal">
           <div className="flex min-w-0 flex-col gap-1">
             <p className="flex min-w-0 items-baseline gap-2">
               <StateMark state={run.state} className="self-center sm:hidden" />
@@ -313,7 +314,7 @@ const RunRow = ({
               </p>
             )}
           </div>
-        </TableCell>
+        </FillCell>
         <TableCell className="hidden py-3 xl:table-cell">{run.agent}</TableCell>
         <TableCell className="hidden py-3 text-right tabular-nums xl:table-cell">
           {run.attempts.length}

@@ -5,6 +5,7 @@ import type {
   UsageSummaryView,
 } from "@usine/orchestrator/operator";
 import { useState } from "react";
+import { FillCell } from "@/components/fill-cell";
 import {
   Table,
   TableBody,
@@ -97,16 +98,12 @@ export const Breakdown = ({ statistics }: { readonly statistics: RunStatisticsVi
             <TableBody>
               {rows.map(({ name, outcomes, time, usage }) => (
                 <TableRow key={name} className="hover:bg-transparent">
-                  <TableCell
-                    className={
-                      dimension === "model"
-                        ? "w-full max-w-0 truncate font-mono text-xs"
-                        : "w-full max-w-0 truncate"
-                    }
+                  <FillCell
+                    className={dimension === "model" ? "truncate font-mono text-xs" : "truncate"}
                     title={name}
                   >
                     {name}
-                  </TableCell>
+                  </FillCell>
                   <TableCell className="text-right tabular-nums">
                     {outcomeTotal(outcomes).toLocaleString("en")}
                   </TableCell>

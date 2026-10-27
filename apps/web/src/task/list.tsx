@@ -8,6 +8,7 @@ import type {
 } from "@usine/orchestrator/operator";
 import { Match, Option } from "effect";
 import { Fragment, type ReactNode } from "react";
+import { FillCell } from "@/components/fill-cell";
 import { ItemHeading } from "@/components/item/heading";
 import { cardIdentity } from "@/components/item/identity";
 import { ItemMark } from "@/components/item/mark";
@@ -249,7 +250,7 @@ const TaskListRow = ({
   readonly now: number;
 }) => (
   <TableRow className={linkedRow}>
-    <TableCell className="w-full max-w-0 py-3 align-top">
+    <FillCell className="py-3 align-top">
       <Link
         data-row-link
         to="/projects/$owner/$name/tasks/$number"
@@ -263,7 +264,7 @@ const TaskListRow = ({
           linked={false}
         />
       </Link>
-    </TableCell>
+    </FillCell>
     <TableCell className={SIDE_COLUMN}>
       <Status row={row} now={now} />
     </TableCell>
