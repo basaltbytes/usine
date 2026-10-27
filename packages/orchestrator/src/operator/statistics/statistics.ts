@@ -11,6 +11,7 @@ import { type ProjectedItem, projectedItem } from "../../board/items.ts";
 import { taskCards } from "../../board/tasks.ts";
 import { runView } from "../projection.ts";
 import { RunUsageReader } from "../usage.ts";
+import { cacheStatistics } from "./cache.ts";
 import { runStatisticsView } from "./runs.ts";
 import { type MergedTask, taskStatisticsView } from "./tasks.ts";
 import type { RunStatisticsView, StatisticsView, StatisticsWindow } from "./view.ts";
@@ -181,7 +182,10 @@ const makeStatistics = Effect.gen(function* () {
     return view;
   });
 
-  return { statistics, runStatistics };
+  return {
+    statistics: cacheStatistics(reader.revision, statistics),
+    runStatistics: cacheStatistics(reader.revision, runStatistics),
+  };
 });
 
 /** Computes the operator's statistics from the stored Items, Runs, usage, and cycle budgets. */
