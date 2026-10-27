@@ -3,14 +3,18 @@ import type { Harness } from "@usine/core/agent/brain";
 import type { InstanceId } from "@usine/core/instance";
 import { safeSegment } from "@usine/core/repository";
 import { ContainerImage, type WorkerName } from "@usine/core/worker";
-import { Cache, Effect, Option, Random, Ref } from "effect";
+import { Cache, Effect, Option, Random, Ref, Schema } from "effect";
 import { type ExecutorError, WorkerCapabilityError } from "../executor.ts";
+import { keyedLockFor } from "../keyed-lock.ts";
 import type { RemoteCommands } from "../remote/commands.ts";
 import {
   type AttemptIsolation,
   CONTAINER_RUNTIME,
   type ContainerSettings,
   containersFor,
+  PNPM_STORE_MOUNT,
+  PNPM_STORE_PATH,
+  PNPM_STORE_VOLUME,
   sharedUser,
 } from "../remote/container.ts";
 import {
@@ -57,6 +61,10 @@ image_uid=$("$1" run --rm --network none --entrypoint id "$2" -u) || exit 1
 printf '%s %s\n' "$(id -u)" "$image_uid"
 `.trim();
 
+const decodeStoreSize = Schema.decodeUnknownEffect(
+  Schema.NumberFromString.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+);
+
 /** What a preflight found about the containers of a Worker. */
 type ContainerCheck =
   /** Each Attempt runs in its own container from `settings`. */
@@ -83,6 +91,21 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
   instanceId: InstanceId,
 ) {
   const containers = containersFor(commands);
+  const preparedStores = new WeakSet<SshMachine>();
+  const storeLocks = yield* keyedLockFor<WorkerName>();
+  const prepareStore = Effect.fn("SshExecutor.preparePnpmStore")(
+    function* (machine: SshMachine, image: ContainerImage) {
+      const fields = { worker: machine.address.name, host: machine.shell.destination, image };
+      yield* Effect.annotateCurrentSpan(fields);
+      if (preparedStores.has(machine)) {
+        yield* Effect.logDebug("Shared pnpm store already prepared on this machine", fields);
+        return;
+      }
+      yield* containers.prepareStore("prepare", machine.shell, image, machine.address.name);
+      preparedStores.add(machine);
+    },
+    (effect, machine) => effect.pipe(storeLocks.withLock(machine.address.name)),
+  );
   const isolations = yield* Ref.make(new Map<WorkerName, AttemptIsolation>());
   // Workers whose earlier containers this process removed. Their containers on a shared machine
   // belong to this process, so another Worker's removal keeps them.
@@ -278,6 +301,40 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
         `The attempt image ${image} runs as user ID ${imageId}, and the SSH user of worker "${worker}" has ID ${hostId}, so its containers can't write the checkouts. Build the image with --build-arg USINE_UID=${hostId}.`,
         new Error(`user IDs ${hostId} and ${imageId}`),
       );
+    yield* containers
+      .prepareStore("preflight", machine.shell, image, worker)
+      .pipe(
+        Effect.mapError((error) =>
+          containerGap(worker, `Can't prepare the shared pnpm store: ${error.message}`, error),
+        ),
+      );
+    preparedStores.add(machine);
+    const size = yield* commands
+      .run("preflight", machine.shell, CONTAINER_RUNTIME, [
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        "--mount",
+        PNPM_STORE_MOUNT,
+        "--entrypoint",
+        "du",
+        image,
+        "-sk",
+        PNPM_STORE_PATH,
+      ])
+      .pipe(
+        Effect.flatMap((output) => decodeStoreSize(output.trim().split(/\s+/u)[0])),
+        Effect.mapError((error) =>
+          containerGap(worker, `Can't measure the shared pnpm store on worker "${worker}"`, error),
+        ),
+      );
+    yield* Effect.logInfo("Shared pnpm store disk usage", {
+      worker,
+      host,
+      volume: PNPM_STORE_VOLUME,
+      sizeKiB: size,
+    });
     return yield* recordContainer(machine, version.value, slots);
   });
 
@@ -288,9 +345,13 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
    */
   const isolationOf = Effect.fn("SshExecutor.isolation")(function* (machine: SshMachine) {
     const recorded = (yield* Ref.get(isolations)).get(machine.address.name);
-    if (recorded !== undefined) return recorded;
+    if (recorded !== undefined) {
+      if (recorded._tag === "Container") yield* prepareStore(machine, recorded.settings.image);
+      return recorded;
+    }
     const version = yield* detect(machine);
     if (Option.isNone(version)) return yield* recordSharedUser(machine);
+    yield* prepareStore(machine, imageFor(machine));
     const { settings } = yield* recordContainer(machine, version.value, 1);
     return { _tag: "Container", settings } satisfies AttemptIsolation;
   });
