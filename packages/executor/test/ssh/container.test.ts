@@ -499,6 +499,7 @@ describe("SSH Worker with Docker", () => {
         ]),
         environment: "",
         running: true,
+        oomKills: 0,
       });
       machine.state.containers.set("usine-crashed", leftover(WORKER));
       machine.state.containers.set("usine-of-a-removed-worker", leftover("eu-gone"));

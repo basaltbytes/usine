@@ -2,9 +2,7 @@
   "version": "7",
   "dialect": "sqlite",
   "id": "80189296-38e4-4241-b91e-773d7f3773da",
-  "prevIds": [
-    "f988a7b1-3051-499e-9a9e-7fab2a7a527f"
-  ],
+  "prevIds": ["f988a7b1-3051-499e-9a9e-7fab2a7a527f"],
   "ddl": [
     {
       "name": "usine_approvals",
@@ -1227,13 +1225,9 @@
       "table": "usine_trigger_events"
     },
     {
-      "columns": [
-        "run_id"
-      ],
+      "columns": ["run_id"],
       "tableTo": "usine_runs",
-      "columnsTo": [
-        "run_id"
-      ],
+      "columnsTo": ["run_id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -1242,13 +1236,9 @@
       "table": "usine_approvals"
     },
     {
-      "columns": [
-        "event_id"
-      ],
+      "columns": ["event_id"],
       "tableTo": "usine_events",
-      "columnsTo": [
-        "event_id"
-      ],
+      "columnsTo": ["event_id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -1257,13 +1247,9 @@
       "table": "usine_approvals"
     },
     {
-      "columns": [
-        "attempt_id"
-      ],
+      "columns": ["attempt_id"],
       "tableTo": "usine_attempts",
-      "columnsTo": [
-        "attempt_id"
-      ],
+      "columnsTo": ["attempt_id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -1272,15 +1258,9 @@
       "table": "usine_attempt_transcripts"
     },
     {
-      "columns": [
-        "run_id",
-        "step_name"
-      ],
+      "columns": ["run_id", "step_name"],
       "tableTo": "usine_steps",
-      "columnsTo": [
-        "run_id",
-        "step_name"
-      ],
+      "columnsTo": ["run_id", "step_name"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -1289,13 +1269,9 @@
       "table": "usine_attempts"
     },
     {
-      "columns": [
-        "item_key"
-      ],
+      "columns": ["item_key"],
       "tableTo": "usine_item_cycle_budgets",
-      "columnsTo": [
-        "item_key"
-      ],
+      "columnsTo": ["item_key"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -1304,13 +1280,9 @@
       "table": "usine_cycle_ask_closures"
     },
     {
-      "columns": [
-        "run_id"
-      ],
+      "columns": ["run_id"],
       "tableTo": "usine_runs",
-      "columnsTo": [
-        "run_id"
-      ],
+      "columnsTo": ["run_id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -1319,13 +1291,9 @@
       "table": "usine_cycle_reservations"
     },
     {
-      "columns": [
-        "item_key"
-      ],
+      "columns": ["item_key"],
       "tableTo": "usine_item_cycle_budgets",
-      "columnsTo": [
-        "item_key"
-      ],
+      "columnsTo": ["item_key"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -1334,13 +1302,9 @@
       "table": "usine_cycle_reservations"
     },
     {
-      "columns": [
-        "event_id"
-      ],
+      "columns": ["event_id"],
       "tableTo": "usine_events",
-      "columnsTo": [
-        "event_id"
-      ],
+      "columnsTo": ["event_id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -1349,13 +1313,9 @@
       "table": "usine_cycle_resets"
     },
     {
-      "columns": [
-        "item_key"
-      ],
+      "columns": ["item_key"],
       "tableTo": "usine_item_cycle_budgets",
-      "columnsTo": [
-        "item_key"
-      ],
+      "columnsTo": ["item_key"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -1364,13 +1324,9 @@
       "table": "usine_cycle_resets"
     },
     {
-      "columns": [
-        "event_id"
-      ],
+      "columns": ["event_id"],
       "tableTo": "usine_trigger_events",
-      "columnsTo": [
-        "event_id"
-      ],
+      "columnsTo": ["event_id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -1379,13 +1335,9 @@
       "table": "usine_ignored_events"
     },
     {
-      "columns": [
-        "observed_event_id"
-      ],
+      "columns": ["observed_event_id"],
       "tableTo": "usine_events",
-      "columnsTo": [
-        "event_id"
-      ],
+      "columnsTo": ["event_id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -1394,13 +1346,9 @@
       "table": "usine_loop_items"
     },
     {
-      "columns": [
-        "suppressed_by_run_id"
-      ],
+      "columns": ["suppressed_by_run_id"],
       "tableTo": "usine_runs",
-      "columnsTo": [
-        "run_id"
-      ],
+      "columnsTo": ["run_id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -1409,13 +1357,9 @@
       "table": "usine_loop_items"
     },
     {
-      "columns": [
-        "suppressed_event_id"
-      ],
+      "columns": ["suppressed_event_id"],
       "tableTo": "usine_events",
-      "columnsTo": [
-        "event_id"
-      ],
+      "columnsTo": ["event_id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -1424,13 +1368,9 @@
       "table": "usine_loop_items"
     },
     {
-      "columns": [
-        "event_id"
-      ],
+      "columns": ["event_id"],
       "tableTo": "usine_trigger_events",
-      "columnsTo": [
-        "event_id"
-      ],
+      "columnsTo": ["event_id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -1439,13 +1379,9 @@
       "table": "usine_run_again_events"
     },
     {
-      "columns": [
-        "from_run_id"
-      ],
+      "columns": ["from_run_id"],
       "tableTo": "usine_runs",
-      "columnsTo": [
-        "run_id"
-      ],
+      "columnsTo": ["run_id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -1454,13 +1390,9 @@
       "table": "usine_run_again_events"
     },
     {
-      "columns": [
-        "event_id"
-      ],
+      "columns": ["event_id"],
       "tableTo": "usine_trigger_events",
-      "columnsTo": [
-        "event_id"
-      ],
+      "columnsTo": ["event_id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -1469,13 +1401,9 @@
       "table": "usine_runs"
     },
     {
-      "columns": [
-        "run_id"
-      ],
+      "columns": ["run_id"],
       "tableTo": "usine_runs",
-      "columnsTo": [
-        "run_id"
-      ],
+      "columnsTo": ["run_id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -1484,13 +1412,9 @@
       "table": "usine_steps"
     },
     {
-      "columns": [
-        "event_id"
-      ],
+      "columns": ["event_id"],
       "tableTo": "usine_events",
-      "columnsTo": [
-        "event_id"
-      ],
+      "columnsTo": ["event_id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -1499,13 +1423,9 @@
       "table": "usine_trigger_events"
     },
     {
-      "columns": [
-        "reopens_event_id"
-      ],
+      "columns": ["reopens_event_id"],
       "tableTo": "usine_events",
-      "columnsTo": [
-        "event_id"
-      ],
+      "columnsTo": ["event_id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -1514,182 +1434,140 @@
       "table": "usine_trigger_events"
     },
     {
-      "columns": [
-        "loop_name",
-        "item_key"
-      ],
+      "columns": ["loop_name", "item_key"],
       "nameExplicit": false,
       "name": "usine_loop_items_pk",
       "entityType": "pks",
       "table": "usine_loop_items"
     },
     {
-      "columns": [
-        "run_id",
-        "step_name"
-      ],
+      "columns": ["run_id", "step_name"],
       "nameExplicit": false,
       "name": "usine_steps_pk",
       "entityType": "pks",
       "table": "usine_steps"
     },
     {
-      "columns": [
-        "run_id"
-      ],
+      "columns": ["run_id"],
       "nameExplicit": false,
       "name": "usine_approvals_pk",
       "table": "usine_approvals",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "sequence"
-      ],
+      "columns": ["sequence"],
       "nameExplicit": false,
       "name": "usine_attempt_transcripts_pk",
       "table": "usine_attempt_transcripts",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "attempt_id"
-      ],
+      "columns": ["attempt_id"],
       "nameExplicit": false,
       "name": "usine_attempts_pk",
       "table": "usine_attempts",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "move_id"
-      ],
+      "columns": ["move_id"],
       "nameExplicit": false,
       "name": "usine_board_moves_pk",
       "table": "usine_board_moves",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "cursor_key"
-      ],
+      "columns": ["cursor_key"],
       "nameExplicit": false,
       "name": "usine_cursors_pk",
       "table": "usine_cursors",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "ask_id"
-      ],
+      "columns": ["ask_id"],
       "nameExplicit": false,
       "name": "usine_cycle_ask_closures_pk",
       "table": "usine_cycle_ask_closures",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "run_id"
-      ],
+      "columns": ["run_id"],
       "nameExplicit": false,
       "name": "usine_cycle_reservations_pk",
       "table": "usine_cycle_reservations",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "ask_id"
-      ],
+      "columns": ["ask_id"],
       "nameExplicit": false,
       "name": "usine_cycle_resets_pk",
       "table": "usine_cycle_resets",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "event_id"
-      ],
+      "columns": ["event_id"],
       "nameExplicit": false,
       "name": "usine_events_pk",
       "table": "usine_events",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "event_id"
-      ],
+      "columns": ["event_id"],
       "nameExplicit": false,
       "name": "usine_ignored_events_pk",
       "table": "usine_ignored_events",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "item_key"
-      ],
+      "columns": ["item_key"],
       "nameExplicit": false,
       "name": "usine_item_cycle_budgets_pk",
       "table": "usine_item_cycle_budgets",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "item_key"
-      ],
+      "columns": ["item_key"],
       "nameExplicit": false,
       "name": "usine_item_projections_pk",
       "table": "usine_item_projections",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "loop_name"
-      ],
+      "columns": ["loop_name"],
       "nameExplicit": false,
       "name": "usine_loop_runtime_pk",
       "table": "usine_loop_runtime",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "singleton"
-      ],
+      "columns": ["singleton"],
       "nameExplicit": false,
       "name": "usine_projection_revision_pk",
       "table": "usine_projection_revision",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "repository"
-      ],
+      "columns": ["repository"],
       "nameExplicit": false,
       "name": "usine_repository_label_projections_pk",
       "table": "usine_repository_label_projections",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "event_id"
-      ],
+      "columns": ["event_id"],
       "nameExplicit": false,
       "name": "usine_run_again_events_pk",
       "table": "usine_run_again_events",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "run_id"
-      ],
+      "columns": ["run_id"],
       "nameExplicit": false,
       "name": "usine_runs_pk",
       "table": "usine_runs",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "event_id"
-      ],
+      "columns": ["event_id"],
       "nameExplicit": false,
       "name": "usine_trigger_events_pk",
       "table": "usine_trigger_events",
@@ -1880,36 +1758,28 @@
       "table": "usine_trigger_events"
     },
     {
-      "columns": [
-        "event_id"
-      ],
+      "columns": ["event_id"],
       "nameExplicit": false,
       "name": "usine_approvals_event_id_unique",
       "entityType": "uniques",
       "table": "usine_approvals"
     },
     {
-      "columns": [
-        "event_id"
-      ],
+      "columns": ["event_id"],
       "nameExplicit": false,
       "name": "usine_cycle_resets_event_id_unique",
       "entityType": "uniques",
       "table": "usine_cycle_resets"
     },
     {
-      "columns": [
-        "dedup_key"
-      ],
+      "columns": ["dedup_key"],
       "nameExplicit": false,
       "name": "usine_events_dedup_key_unique",
       "entityType": "uniques",
       "table": "usine_events"
     },
     {
-      "columns": [
-        "event_id"
-      ],
+      "columns": ["event_id"],
       "nameExplicit": false,
       "name": "usine_runs_event_id_unique",
       "entityType": "uniques",

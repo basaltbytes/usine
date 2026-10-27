@@ -280,6 +280,7 @@ describe("SSH Worker", () => {
           .launch({
             append: () => Effect.void,
             comments: () => Effect.void,
+            outOfMemory: () => Effect.void,
             transcript: Effect.succeed([]),
             windows: aloneOnItem(),
             salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
