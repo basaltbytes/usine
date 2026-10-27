@@ -1,7 +1,6 @@
 ---
 "@usine/orchestrator": patch
 "@usine/server": patch
-"@usine/web": patch
 ---
 
 `GET /api/statistics` now returns the tasks done in the window, a task being done when its pull request merges: each task's time from its first run to the merge with the median, the split of task time between the loops' attempts and waiting, each loop's median run time, the share of tasks with no second round, the operator actions per task, and the tokens per task by loop, with a cost only when every session has a price. The run statistics move to `GET /api/statistics/runs`, which reports medians only.

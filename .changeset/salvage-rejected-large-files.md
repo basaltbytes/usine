@@ -2,7 +2,7 @@
 "@usine/core": patch
 "@usine/engine": patch
 "@usine/executor": patch
-"@usine/web": patch
+"@usine/server": patch
 ---
 
 A salvage push that GitHub refuses for a file over its size limit (`GH001`) is now recorded as `Rejected`, and startup recovery doesn't push the same commit again. Before, the salvage recorded it as `Retained`, and every startup pushed the checkout again before the HTTP server listened, about a minute each time, and GitHub refused it each time (#581).

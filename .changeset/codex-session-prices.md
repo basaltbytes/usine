@@ -2,7 +2,7 @@
 "@usine/agents": patch
 "@usine/core": patch
 "@usine/orchestrator": patch
-"@usine/web": patch
+"@usine/server": patch
 ---
 
 Codex sessions now have a price. `SessionTokensUpdated` has an optional `breakdown` of input, cached input, cache write, and output tokens, which Codex children report. `@usine/agents/openai-prices` exports `openAiPrice`, which prices a breakdown at OpenAI's API rates for the models that the supported Codex CLI versions list.

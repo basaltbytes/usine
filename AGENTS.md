@@ -22,6 +22,8 @@ The repo has one context: `CONTEXT.md` and `docs/adr/` at the root. See `docs/ag
 
 Write all prose in the [Google developer documentation style](https://developers.google.com/style): code comments, docs, the glossary, ADRs, changesets, and PR text. For doc comments, follow [API reference code comments](https://developers.google.com/style/api-reference-comments).
 
+In changesets, release web changes as `@usine/server`; never name `@usine/web` or another private package.
+
 ### Coding
 
 Before you write or review code, load the `coding-guidelines` skill. When you touch TypeScript, also load the `effect-ts` skill: the monorepo uses Effect v4 throughout, with services, layers, typed errors, and Schema at every boundary.

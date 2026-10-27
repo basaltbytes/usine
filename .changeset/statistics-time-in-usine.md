@@ -1,6 +1,6 @@
 ---
 "@usine/orchestrator": patch
-"@usine/web": patch
+"@usine/server": patch
 ---
 
 A task's time in the overview statistics now ends at its last run's close instead of its merge, so the wait for the operator to merge a ready pull request is left out. A run still open at the merge counts until the merge. The time split per loop uses the same span.
