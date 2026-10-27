@@ -1,4 +1,5 @@
-import { ChildProcess } from "effect/unstable/process";
+import { Effect, Stream } from "effect";
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { homedir } from "node:os";
 import { type ChildHost, type HostInvocation, sshArguments } from "./child-host.ts";
 
@@ -28,3 +29,36 @@ export const hostCommand = (
       });
   }
 };
+
+/** The trimmed standard output and the exit code of a command on a host. */
+interface HostOutput {
+  readonly stdout: string;
+  readonly exitCode: number;
+}
+
+/**
+ * Runs `invocation` on `host` and returns its trimmed stdout and exit code; stderr is discarded. On
+ * a remote host, `SSH_FAILURE` means that SSH failed, not the command.
+ */
+export const hostOutput = Effect.fn("ChildHost.output")(function* (
+  host: ChildHost,
+  invocation: HostInvocation & { readonly environment: Readonly<Record<string, string>> },
+) {
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  return yield* Effect.scoped(
+    Effect.gen(function* () {
+      const handle = yield* spawner.spawn(
+        hostCommand(host, invocation, { detached: false, forceKillAfter: "2 seconds" }),
+      );
+      const [stdout, , exitCode] = yield* Effect.all(
+        [
+          handle.stdout.pipe(Stream.decodeText(), Stream.mkString),
+          handle.stderr.pipe(Stream.runDrain),
+          handle.exitCode,
+        ],
+        { concurrency: "unbounded" },
+      );
+      return { stdout: stdout.trim(), exitCode } satisfies HostOutput;
+    }),
+  );
+});

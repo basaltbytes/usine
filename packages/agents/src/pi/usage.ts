@@ -100,6 +100,31 @@ export const claudeTokenMeter = () => {
   };
 };
 
+const NO_USAGE: SessionUsage = { totalTokens: TokenCount.make(0), costUsd: Option.none() };
+
+/**
+ * Returns a Claude token meter for a session that another process can resume. `read` returns the
+ * session's usage: the current process's, as `claudeTokenMeter` reads it, plus the earlier
+ * processes'. `restart` starts on a new process, which Claude counts from zero.
+ */
+export const claudeSessionMeter = () => {
+  let earlier = NO_USAGE;
+  let current = NO_USAGE;
+  let meter = claudeTokenMeter();
+  return {
+    read: (message: Schema.Json): Option.Option<SessionUsage> =>
+      Option.map(meter(message), (usage) => {
+        current = usage;
+        return addUsage(earlier, usage);
+      }),
+    restart: () => {
+      earlier = addUsage(earlier, current);
+      current = NO_USAGE;
+      meter = claudeTokenMeter();
+    },
+  };
+};
+
 /**
  * Returns a Codex thread's consumption: output plus uncached input. The thread's `totalTokens` counts
  * the whole context on every turn, so it is not used.

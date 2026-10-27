@@ -177,6 +177,15 @@ usine stop      # stop after the drain
 
 See [Operate runs](/guides/operate-runs/#stop-the-orchestrator) for the drain and for upgrades.
 
+### Keep the machine awake
+
+The orchestrator must keep running while runs are open. A sleep closes its SSH connections to workers and to the gateway: after the machine wakes, a remote Claude Code child resumes its session, and a Codex child fails. On macOS, `usine up` warns at startup if the Mac can sleep. Keep it awake in one of these ways:
+
+- Run `caffeinate -s` in another terminal while runs are open. It keeps a Mac on AC power awake until you stop it. To stop it with the orchestrator, run `caffeinate -s -w "$(cat .usine/instance.pid)"` from the instance folder.
+- Turn off system sleep on AC power with `sudo pmset -c sleep 0`.
+
+Closing a laptop's lid also puts it to sleep, unless it runs in closed-display mode with power and an external display.
+
 ## Open the web UI
 
 The UI is at `http://127.0.0.1:7331`, or on the port you set. The server listens only on the loopback interface and has no login. It refuses browser requests from pages on non-loopback origins, so other websites can't use it through your browser. To use the UI from another computer, forward the port over SSH:

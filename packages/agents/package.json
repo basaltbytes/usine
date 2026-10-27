@@ -28,8 +28,8 @@
       "default": "./dist/pi/children.js"
     },
     "./claude": {
-      "types": "./dist/pi/claude.d.ts",
-      "default": "./dist/pi/claude.js"
+      "types": "./dist/pi/claude/claude.d.ts",
+      "default": "./dist/pi/claude/claude.js"
     },
     "./codex": {
       "types": "./dist/pi/codex/codex.d.ts",

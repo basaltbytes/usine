@@ -44,6 +44,8 @@ For any other form, the parser prints the usage on standard error and exits with
 
 If a flag repeats, the last value wins.
 
+Each log line starts with its time as an ISO 8601 timestamp in UTC, such as `[2026-10-27T02:25:13.123Z] INFO`, whatever the machine's time zone.
+
 ### Startup
 
 `usine up` runs these steps in order and stops at the first failure ([`up`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/up.ts#L104)):
@@ -54,6 +56,8 @@ If a flag repeats, the last value wins.
 4. **Instance load.** usine reads `usine.yaml`, `agents/`, and `loops/`, and exits with status 1 if `usine.yaml` is invalid or a folder is missing. Invalid loop and agent files don't stop startup ([Validation and quarantine](/reference/configuration/loop-files/#validation-and-quarantine)).
 5. **GitHub App credentials.** usine reads `USINE_GITHUB_APP_ID` and `USINE_GITHUB_PRIVATE_KEY`, and fills a missing one from `.usine/github-app.json` ([`loadLocalCredentials`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/github/src/local-secrets.ts#L69)). If both variables are set, usine doesn't read the file. It accepts PKCS#1 keys (`BEGIN RSA PRIVATE KEY`, as GitHub downloads them) and PKCS#8 keys.
 6. **Runtime.** usine opens the stores, reads each gateway's admin token, runs preflight on every worker, starts polling and schedules, and reattaches the attempts that an earlier process left running. It prints `usine is running at http://127.0.0.1:<port>`.
+
+On macOS, after the port check, usine reads `pmset -g` and logs a warning if system sleep is on and `caffeinate` doesn't prevent it, since a sleep drops the SSH connections to workers and the gateway. The check doesn't stop startup. See [Keep the machine awake](/guides/#keep-the-machine-awake).
 
 An expected startup failure prints one line with the file, setting, or worker at fault, such as a preflight check like `machine` or `harness-login`, and what to do, and exits with status 1. Only a defect in usine prints a full trace.
 

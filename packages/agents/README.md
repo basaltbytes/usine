@@ -26,7 +26,7 @@ const childBackendLayer = childDispatcherLayer.pipe(
 );
 ```
 
-The Claude backend also needs `ClaudeLoginLock` (`/runtime`), which every Claude command that can refresh a Claude login takes: one lock per worker, or per machine of a provisioned worker, whose machines each have their own login. Give the same instance (`claudeLoginLockLayer` from `@usine/executor`) to the backends and the executor running preflight.
+The Claude backend also needs `ClaudeLoginLock` (`/runtime`), which every Claude command that can refresh a Claude login takes: one lock per worker, or per machine of a provisioned worker, whose machines each have their own login. Give the same instance (`claudeLoginLockLayer` from `@usine/executor`) to the backends and the executor running preflight. Like Codex's app server, it also needs a `ChildProcessSpawner`, to stop a child on its worker before it resumes the child.
 
 ## Harnesses and credentials
 
@@ -69,6 +69,12 @@ If the first turn ends with `Failed to refresh OAuth token: another Claude Code 
 Claude children use the CLI's background-task snapshots and session-idle signal to wait for background work and its follow-up answer, without an operator hold. Queued user turns delay completion; ambient watchers don't. An output stream that closes without a completed answer fails with `SessionOperationError`.
 
 The prompts tell parents and children, before returning, to run gates, tests, and CI watches in the foreground, wait for background results and pending checks, finish dependent steps, record real blockers on the issue or pull request, and push commits, since cleanup removes the worktree. This also covers older CLIs without background-task or session-state messages.
+
+## Lost connections
+
+If the SSH connection to a remote Claude child breaks, for example while the orchestrator's machine sleeps, the SSH client exits with `SSH_FAILURE` (255) and the output stream fails. The backend then resumes the child instead of failing it: it stops the Claude process left on the worker with `CHILD_STOP_SCRIPT` and the child's pid file, and starts Claude with the saved session in the same child session, so the parent spends no child budget. A working child gets a message that asks it to check the worktree and continue, followed by the operator messages that it hadn't read. A paused or idle child waits for the operator. Open tool calls end as errors, and token usage and cost carry over.
+
+The backend tries after 5 s, 15 s, 30 s, 1 min, 2 min, and 5 min; a message from Claude resets the count. After the last try, on a local host, or if Claude itself exited, the child fails with `SessionOperationError` as before. A Codex child whose SSH connection breaks fails.
 
 ## Outcome markers
 

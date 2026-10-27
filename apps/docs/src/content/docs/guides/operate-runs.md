@@ -270,6 +270,8 @@ If an attempt's worker stops responding, or a child can't reach its model provid
 
 While a warning is open, the current activity in the conversation and the drawer says what isn't responding and since when. **Needs attention** doesn't list these warnings.
 
+If the SSH connection to a remote Claude Code child breaks, for example while the orchestrator's machine sleeps, the child doesn't fail. usine logs `Claude child lost its SSH connection to the Worker; resuming its session`, stops what is left of the child's Claude process on the worker, and starts Claude again with the saved session in the same child, so the attempt uses no extra child. A working child gets a message to check the worktree and continue. The log shows `Resumed the Claude child's session` when it works. If the worker doesn't answer for about 9 minutes, the child fails. See [Keep the machine awake](/guides/#keep-the-machine-awake).
+
 ## Restarts
 
 When the orchestrator stops, a running attempt's Pi parent task stays in `.usine/durable.sqlite`, and its worktree stays on its worker. The next `usine up` reattaches the attempt, which isn't a retry. The attempt keeps the time and tokens that it used, with no second 80% warning. If you lowered a limit below its usage, it stops at the reattach, and past 80% of it, the parent gets the warning then. Stopped time doesn't count, nor do up to the last 30 seconds before a crash, so an attempt can run up to 30 seconds past its limit per crash. If usine can't read the usage, it stops the parent task, salvages the worktree, and fails the attempt with an `InfraFailure` that says what it couldn't read. The run retries from the salvage.

@@ -1,3 +1,4 @@
+import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { RemoteShell } from "@usine/agents/child-host";
 import { ClaudeSdk, claudeChildLayer } from "@usine/agents/claude";
@@ -90,7 +91,12 @@ describe("Claude login lock", () => {
           );
           yield* Fiber.joinAll([first, sameMachine, otherMachine]);
         }).pipe(
-          Effect.provide(claudeChildLayer.pipe(Layer.provide(claudeLoginLockLayer))),
+          Effect.provide(
+            claudeChildLayer.pipe(
+              Layer.provide(claudeLoginLockLayer),
+              Layer.provide(NodeServices.layer),
+            ),
+          ),
           Effect.provide(sdk),
           Effect.scoped,
         );
