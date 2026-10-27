@@ -3,6 +3,7 @@ import { AttemptId } from "@usine/core/attempt";
 import { Intervention } from "@usine/core/attempt/channel";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
+import type { OperatorLogin } from "@usine/core/operator";
 import { RunId } from "@usine/core/run";
 import { ApprovalSource } from "@usine/core/run/approval";
 import type { WorkerName } from "@usine/core/worker";
@@ -203,8 +204,10 @@ const makeRunEngine = Effect.gen(function* () {
   const resolveFailure = Effect.fn("RunEngine.resolveFailure")(function* (
     runId: RunId,
     attemptId: AttemptId,
+    operator: Option.Option<OperatorLogin>,
   ) {
-    if (!(yield* store.resolveFailure(runId, attemptId))) return;
+    yield* Effect.annotateCurrentSpan({ runId, attemptId });
+    if (!(yield* store.resolveFailure(runId, attemptId, operator))) return;
     yield* Effect.logInfo(
       "The operator resolved the Agent's question or blocker; the Item's queued Events get their turn",
       {
@@ -333,6 +336,7 @@ export class RunEngine extends Context.Service<
     readonly resolveFailure: (
       runId: RunId,
       attemptId: AttemptId,
+      operator: Option.Option<OperatorLogin>,
     ) => Effect.Effect<void, RunEngineError>;
     /**
      * Requests another Attempt for a failed Run with its existing Event, applying the request's

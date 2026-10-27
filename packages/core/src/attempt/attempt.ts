@@ -1,6 +1,8 @@
 import { Array as EffectArray, DateTime, Effect, Option, Schema } from "effect";
 import { Agent, AgentName } from "../agent/agent.ts";
 import { BrainSpec, ModelId } from "../agent/brain.ts";
+import { closedStruct } from "../closed-struct.ts";
+import { OperatorLogin } from "../operator.ts";
 import { RunId } from "../run/run.ts";
 import { Comment } from "../step/result.ts";
 import { StepName } from "../step/step.ts";
@@ -40,6 +42,14 @@ export class AttemptContext extends Schema.Class<AttemptContext>("AttemptContext
   agent: Agent,
   parentModel: Schema.OptionFromNullOr(ModelId),
 }) {}
+
+/** An operator's resolution of a failed attempt; the login is absent if none is configured. */
+export class FailureResolution extends Schema.Class<FailureResolution>("FailureResolution")(
+  closedStruct({
+    resolvedAt: Schema.DateTimeUtcFromString,
+    operator: Schema.OptionFromNullOr(OperatorLogin),
+  }),
+) {}
 
 const Kills = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 
@@ -101,6 +111,9 @@ export class Attempt extends Schema.Class<Attempt>("Attempt")({
   outcome: Schema.Option(AttemptOutcome),
   endedAt: Schema.Option(Schema.DateTimeUtc),
   salvage: Schema.Option(AttemptSalvage),
+  failureResolution: Schema.Option(FailureResolution).pipe(
+    Schema.withConstructorDefault(Effect.succeed(Option.none<FailureResolution>())),
+  ),
   start: Schema.Option(AttemptStart).pipe(
     Schema.withConstructorDefault(Effect.succeed(Option.none<AttemptStart>())),
   ),

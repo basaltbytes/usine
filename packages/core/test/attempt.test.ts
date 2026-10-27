@@ -3,6 +3,7 @@ import { DateTime, Option, Schema } from "effect";
 import { ChildSessionBudget, ChildSessionCount } from "../src/agent/session.ts";
 import {
   AttemptId,
+  FailureResolution,
   AttemptNumber,
   AttemptWindow,
   shouldAutoRetry,
@@ -55,6 +56,14 @@ describe("auto-retry law (ADR 0002, ADR 0013)", () => {
 });
 
 describe("construction is the only door", () => {
+  it("rejects a resolution with an invalid time, operator, or unknown field", () => {
+    const decode = Schema.decodeUnknownSync(FailureResolution);
+    const resolution = { resolvedAt: "2026-10-27T00:00:00Z", operator: "Philippe" };
+    expect(() => decode({ ...resolution, resolvedAt: "not-a-time" })).toThrow();
+    expect(() => decode({ ...resolution, operator: "" })).toThrow();
+    expect(() => decode({ ...resolution, retry: true })).toThrow();
+  });
+
   it("attempt numbers below 1 or fractional are unconstructible", () => {
     expect(() => decodeAttemptNumber(0)).toThrow();
     expect(() => decodeAttemptNumber(-1)).toThrow();

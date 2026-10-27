@@ -8,7 +8,13 @@ import {
   TokenCount,
   UsdAmount,
 } from "@usine/core/agent/session";
-import { Attempt, AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
+import {
+  Attempt,
+  AttemptId,
+  AttemptNumber,
+  AttemptTask,
+  FailureResolution,
+} from "@usine/core/attempt";
 import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
 import {
   AttemptCanceled,
@@ -686,6 +692,43 @@ describe("Run statistics", () => {
       [attention.retryWait?.count, attention.retryWait?.medianMillis],
       [1, HOUR],
     );
+  });
+
+  it("counts resolutions and retries separately, without unanswered failures or double counting", () => {
+    const view = (runs: ReadonlyArray<RunSummary>) =>
+      runStatisticsView({ window: "7d", now, runs, usage, workers }).needsAttention;
+    const resolve = (run: RunSummary, number: number, resolvedAt: string) =>
+      new RunSummary({
+        ...run,
+        attempts: run.attempts.map((attempt) =>
+          attempt.number !== number
+            ? attempt
+            : new Attempt({
+                ...attempt,
+                failureResolution: Option.some(
+                  new FailureResolution({ resolvedAt: at(resolvedAt), operator: Option.none() }),
+                ),
+              }),
+        ),
+      });
+    assert.strictEqual(view([abandoned]).failureWait, null);
+    const legacy = new RunSummary({
+      ...abandoned,
+      resolvedFailureAttemptId: Option.some(AttemptId.make("abandoned/1")),
+    });
+    assert.strictEqual(view([legacy]).failureWait, null);
+    const resolved = resolve(abandoned, 1, "23T15:15");
+    const measured = view([resolved]);
+    assert.deepStrictEqual({ ...measured.failureWait }, { count: 1, medianMillis: 15 * MINUTE });
+    assert.deepStrictEqual(measured.resolutionWait, measured.failureWait);
+    assert.strictEqual(measured.retryWait, null);
+    const laterRetry = view([resolve(fixed, 2, "21T11:45")]);
+    assert.deepStrictEqual(laterRetry.failureWait, measured.failureWait);
+    assert.strictEqual(laterRetry.retryWait, null);
+    const both = view([resolved, fixed]);
+    assert.deepStrictEqual({ ...both.failureWait }, { count: 2, medianMillis: 37.5 * MINUTE });
+    assert.deepStrictEqual({ ...both.retryWait }, { count: 1, medianMillis: 60 * MINUTE });
+    assert.deepStrictEqual(both.resolutionWait, measured.resolutionWait);
   });
 
   it("starts the whole history at the first Run's day and splits a long one into weeks", () => {

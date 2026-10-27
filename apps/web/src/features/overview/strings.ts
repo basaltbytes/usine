@@ -165,3 +165,7 @@ export const oneAttemptShare = (counts: ReadonlyArray<AttemptCountView>): string
     counts.find(({ attempts }) => attempts === 1)?.runs ?? 0,
     counts.reduce((sum, { runs }) => sum + runs, 0),
   );
+
+export const medianFailureWait = "Median failure to answer";
+export const medianRetryWait = "Median failure to retry";
+export const medianResolutionWait = "Median failure to resolution";

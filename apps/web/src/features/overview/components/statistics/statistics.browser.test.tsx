@@ -150,6 +150,20 @@ it("leads the Overview with the tasks done and reads the run statistics only beh
 
   await statistics.getByRole("button", { name: "Details" }).click();
   await expect.element(statistics.getByRole("heading", { name: "Runs per loop" })).toBeVisible();
+  for (const [label, value] of [
+    ["Median failure to answer", "30 min"],
+    ["Median failure to retry", "45 min"],
+    ["Median failure to resolution", "15 min"],
+  ] as const) {
+    await expect.element(statistics.getByRole("term").filter({ hasText: label })).toBeVisible();
+    await expect
+      .poll(
+        () =>
+          statistics.getByRole("term").filter({ hasText: label }).element().nextElementSibling
+            ?.textContent,
+      )
+      .toBe(value);
+  }
   await expect
     .element(statistics.getByRole("definition").filter({ hasText: /^36$/u }))
     .toBeVisible();

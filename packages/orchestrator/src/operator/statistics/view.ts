@@ -239,8 +239,9 @@ export class NeedsAttentionPeriodView extends Schema.Class<NeedsAttentionPeriodV
 
 /**
  * The approvals asked for and the failed Attempts that no automatic retry followed, with their
- * waits: from a Run's opening to its approval, and from a failure to the operator's retry. Marking
- * a failure resolved records no time, so `retryWait` leaves those out.
+ * waits: from a run's opening to its approval, and from a failure to its first recorded operator
+ * answer (retry or resolution). Each answered failure contributes once to `failureWait` and to
+ * either `retryWait` or `resolutionWait`. Older resolutions without a timestamp are excluded.
  */
 export class NeedsAttentionView extends Schema.Class<NeedsAttentionView>(
   "@usine/orchestrator/NeedsAttentionView",
@@ -250,6 +251,8 @@ export class NeedsAttentionView extends Schema.Class<NeedsAttentionView>(
   periods: Schema.Array(NeedsAttentionPeriodView),
   approvalWait: Schema.NullOr(DurationSummaryView),
   retryWait: Schema.NullOr(DurationSummaryView),
+  resolutionWait: Schema.NullOr(DurationSummaryView),
+  failureWait: Schema.NullOr(DurationSummaryView),
 }) {}
 
 /**

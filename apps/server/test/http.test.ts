@@ -307,6 +307,8 @@ const runStatisticsOf = (window: StatisticsWindow) =>
       periods: [],
       approvalWait: null,
       retryWait: null,
+      resolutionWait: null,
+      failureWait: null,
     }),
   });
 const observation: OperatorObservation["Service"] = {

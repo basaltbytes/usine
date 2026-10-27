@@ -50,7 +50,7 @@ The default adapter stores the event ledger and run records in `<instance>/.usin
 
 An attempt ending with `QuestionFailure` or `BlockedFailure` starts a suppression of the item for its loop. The loop's next event, usually the agent's own comment, returns `Suppressed` and opens no run; queued events wait. An event with other content, a non-matching sighting, an operator retry, or `RunEngine.resolveFailure` lifts the suppression, and resolving gives the newest queued event its turn.
 
-`RunEngine.resolveFailure(runId, attemptId)` stores the resolution of the current failed attempt. Repeats are safe; another attempt or a run no longer failed is rejected. Snapshots and summaries include `resolvedFailureAttemptId`, and resolution updates the revision. Outcomes, attempts, transcripts, and retry stay as they were.
+`RunEngine.resolveFailure(runId, attemptId, operator)` stores the time and operator login of the current failed attempt's resolution in `Attempt.failureResolution`. Pass `Option.none()` if no operator login is configured. Repeats preserve the first resolution time and operator; another attempt or a run no longer failed is rejected. Snapshots and summaries include `resolvedFailureAttemptId`, and resolution updates the revision. The failed outcome and transcript stay in history, and retry remains available.
 
 ### Run fibers and restarts
 
