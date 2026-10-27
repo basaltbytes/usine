@@ -11,6 +11,7 @@ import {
   Predicate,
   Redacted,
   Schedule,
+  Schema,
   Scope,
   Tracer,
 } from "effect";
@@ -296,19 +297,32 @@ describe("the Node gateway", () => {
       }).pipe(Effect.provide(gateway)),
   );
 
-  it.live("the admin API refuses a wrong admin token and an expired attachment", () =>
-    Effect.gen(function* () {
-      gatewayLines.length = 0;
-      const intruder = yield* admin("not-the-admin-token-0123456789abcdef");
-      const refused = yield* Effect.flip(intruder.attachments.list());
-      assert.strictEqual(refused._tag, "Unauthorized");
-      assert.include(yield* refusalLogged("bad-admin-token"), '"endpoint":"list"');
-      const client = yield* admin(ADMIN_TOKEN_VALUE);
-      const expired = yield* Effect.flip(
-        client.attachments.attach({ payload: yield* attachment(-1) }),
-      );
-      assert.strictEqual(expired._tag, "AttachmentAlreadyExpired");
-    }).pipe(Effect.provide(gatewayRecordingLogs)),
+  it.live(
+    "the admin API refuses a wrong admin token, an expired attachment, and an attach body with an unknown key",
+    () =>
+      Effect.gen(function* () {
+        gatewayLines.length = 0;
+        const intruder = yield* admin("not-the-admin-token-0123456789abcdef");
+        const refused = yield* Effect.flip(intruder.attachments.list());
+        assert.strictEqual(refused._tag, "Unauthorized");
+        assert.include(yield* refusalLogged("bad-admin-token"), '"endpoint":"list"');
+        const client = yield* admin(ADMIN_TOKEN_VALUE);
+        const expired = yield* Effect.flip(
+          client.attachments.attach({ payload: yield* attachment(-1) }),
+        );
+        assert.strictEqual(expired._tag, "AttachmentAlreadyExpired");
+        const { admin: address } = yield* GatewayAddresses;
+        const body = yield* Schema.encodeEffect(AttachRequest)(yield* attachment(5));
+        const attach = (json: string) =>
+          HttpClient.execute(
+            HttpClientRequest.post(`http://${address.host}:${address.port}/v1/attachments`).pipe(
+              HttpClientRequest.bearerToken(ADMIN_TOKEN_VALUE),
+              HttpClientRequest.bodyText(json, "application/json"),
+            ),
+          );
+        assert.strictEqual((yield* attach(JSON.stringify(body))).status, 200);
+        assert.strictEqual((yield* attach(JSON.stringify({ ...body, typo: true }))).status, 400);
+      }).pipe(Effect.provide(gatewayRecordingLogs)),
   );
 
   it.live(
