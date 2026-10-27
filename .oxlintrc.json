@@ -38,6 +38,13 @@
   },
   "overrides": [
     {
+      "files": ["apps/web/src/**"],
+      "rules": {
+        "usine/web-import-direction": "error",
+        "import/no-default-export": "error"
+      }
+    },
+    {
       "files": ["tooling/oxlint/**"],
       "rules": {
         "usine/no-chained-type-assertions": "off",
@@ -76,7 +83,8 @@
         "usine/no-unknown-type-aliases": "off",
         "usine/no-unsafe-dictionary-type": "off",
         "usine/no-widen-then-assert": "off",
-        "usine/require-safety-comment-for-type-assertion": "off"
+        "usine/require-safety-comment-for-type-assertion": "off",
+        "import/no-default-export": "off"
       }
     }
   ],

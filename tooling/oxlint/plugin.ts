@@ -16,6 +16,7 @@ import { noUnknownTypeAliasesRule } from "./rules/no-unknown-type-aliases.ts";
 import { noUnsafeDictionaryTypeRule } from "./rules/no-unsafe-dictionary-type.ts";
 import { noWidenThenAssertRule } from "./rules/no-widen-then-assert.ts";
 import { requireSafetyCommentForTypeAssertionRule } from "./rules/require-safety-comment-for-type-assertion.ts";
+import { webImportDirectionRule } from "./rules/web-import-direction.ts";
 
 /**
  * Local Oxlint rules, vendored from https://github.com/dmmulroy/anti-slop at upstream commit
@@ -26,6 +27,7 @@ import { requireSafetyCommentForTypeAssertionRule } from "./rules/require-safety
 const usinePlugin = eslintCompatPlugin({
   meta: { name: "usine" },
   rules: {
+    "web-import-direction": webImportDirectionRule,
     "no-chained-type-assertions": noChainedTypeAssertionsRule,
     "no-conditional-empty-object-spread": noConditionalEmptyObjectSpreadRule,
     "no-known-value-widening": noKnownValueWideningRule,
