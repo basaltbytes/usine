@@ -45,7 +45,7 @@ import {
   type ClaudeQuery,
   type ClaudeQueryOptions,
   type ClaudeUserMessage,
-} from "../../src/pi/claude.ts";
+} from "../../src/pi/claude/claude.ts";
 
 /** A single login lock for all Workers, since each test launches its children on one Worker. */
 const loginLock = Layer.effect(
