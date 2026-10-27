@@ -68,6 +68,8 @@ const mount = async (path: string, width = 1440) => {
     ),
   );
   await expect.element(page.getByRole("heading", { name: "Tasks", level: 1 })).toBeVisible();
+  // The columns widen when Inter replaces the fallback font, which moves what a measured click hits.
+  await document.fonts.ready;
 };
 
 const table = () => page.getByRole("table", { name: "board-test/repo tasks" });
