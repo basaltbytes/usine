@@ -552,6 +552,8 @@ describe("Provisioned SSH Worker", () => {
           machine.state.calls.filter(({ line }) => matches(line)).length;
         const memoryChecks = () => count((line) => line === "exec 'cat' '/proc/meminfo'");
         const resourceReads = () => count((line) => line.includes("nproc"));
+        const storePreparations = () => count((line) => line.includes("volume create"));
+        assert.strictEqual(storePreparations(), 1);
         assert.strictEqual(memoryChecks(), 1);
         // Each machine runs one Attempt, so the limits are the machine's less the host's reserve.
         assert.deepStrictEqual(
@@ -575,10 +577,12 @@ describe("Provisioned SSH Worker", () => {
         assert.isTrue(Option.isNone(second.checked));
         assert.strictEqual(memoryChecks(), 1);
         assert.strictEqual(resourceReads(), 1);
+        assert.strictEqual(storePreparations(), 1);
         assert.strictEqual(providers.hetzner.servers.size, 2);
         yield* machines.assign(second.hold, request.attemptId);
         const prepared = yield* executor.prepare(request);
         yield* prepared.launch(sink);
+        assert.strictEqual(storePreparations(), 2);
         const run = machine.state.calls.find(({ line }) =>
           line.startsWith("exec 'docker' 'run' '--detach' '--name' 'usine-remote-run_execute_1'"),
         );

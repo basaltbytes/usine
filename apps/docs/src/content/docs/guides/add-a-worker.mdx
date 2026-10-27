@@ -82,9 +82,9 @@ Without Docker on the machine, attempts run as the SSH user and can read each ot
 
 ### Shared pnpm store
 
-Preflight creates the Docker volume `usine-pnpm-store` if absent and sets its owner to UID 1000. Every attempt container mounts it read-write at `/home/usine/.local/share/pnpm/store`, the store directory configured in the image. Later attempts reuse downloaded packages. Containers copy packages into the checkout when it is on a different filesystem.
+Preflight creates the Docker volume `usine-pnpm-store` if absent and sets its owner to the image's `usine` UID. Every attempt container mounts it read-write at `/home/usine/.local/share/pnpm/store`, the store directory configured in the image. Later attempts reuse downloaded packages. Containers copy packages into the checkout when it is on a different filesystem.
 
-The image must run as `usine` with UID 1000, and the SSH user must also have UID 1000. Preflight refuses an incompatible image with a `container` capability error; build custom images with `--build-arg USINE_UID=1000`. Container startup also prepares the volume, including on provisioned machines that skip the full daily preflight.
+The image must run with the SSH user's UID; build custom images with `--build-arg USINE_UID=<SSH UID>`. Preflight refuses a store owned by another UID with a `container` capability error. Remove the volume before using an image with a different UID. On machines that skip the full daily preflight, first use prepares the volume; later attempts on the same machine reuse that preparation.
 
 The volume belongs to the machine's Docker daemon. Worker entries or instances that use the same daemon share it. Use it only for trusted jobs: pnpm's store integrity checks detect corruption, but do not isolate mutually untrusted writers. pnpm 11.20.0 supports concurrent installs without an additional sharing flag; its [11.0.0 release notes](https://github.com/pnpm/pnpm/releases/tag/v11.0.0) describe SQLite WAL for concurrent store access, and [11.5.2](https://github.com/pnpm/pnpm/releases/tag/v11.5.2) fixes concurrent package imports.
 
@@ -94,7 +94,7 @@ Preflight logs `Shared pnpm store disk usage` with `worker`, `host`, `volume`, a
 docker volume rm usine-pnpm-store
 ```
 
-Docker refuses to remove a volume while a container references it, including a stopped container. Preflight or the next container startup recreates an empty store. A provisioned worker deletes the volume with its machine after each attempt, so it does not reuse packages between machines. Turborepo's cache remains local to each container.
+Docker refuses to remove a volume while a container references it, including a stopped container. Run preflight again after removal to recreate an empty store. A provisioned worker deletes the volume with its machine after each attempt, so it does not reuse packages between machines. Turborepo's cache remains local to each container.
 
 ### Create a worker on Hetzner Cloud
 

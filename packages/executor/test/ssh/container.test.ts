@@ -135,6 +135,8 @@ describe("SSH Worker with Docker", () => {
     "runs the Attempt's commands in its own container with its paths and the shared pnpm store",
     () => {
       const machine = dockerMachine();
+      machine.state.hostUserId = "2345";
+      machine.state.imageUserId = "2345";
       const logs = capturedLogs();
       let given: AttemptRequest | undefined;
       let running: ReadonlyArray<string> = [];
@@ -214,6 +216,10 @@ describe("SSH Worker with Docker", () => {
         );
         assert(credentialGone > containerGone, "the credential outlives the container");
         assert.strictEqual(machine.state.containers.size, 0);
+        assert.lengthOf(
+          linesOf(machine).filter((line) => line.includes("volume create")),
+          1,
+        );
       }).pipe(
         Effect.scoped,
         Effect.provide(runtime(machine, mintingProvider(), parent)),
@@ -468,7 +474,7 @@ describe("SSH Worker with Docker", () => {
           machine.state.pullFails = true;
           machine.state.imageOnMachine = false;
         });
-        const otherUser = yield* failureOf((machine) => (machine.state.imageUserId = "1001"));
+        const otherUser = yield* failureOf((machine) => (machine.state.hostUserId = "2345"));
         const storeFailed = yield* failureOf(
           (machine) => (machine.state.storePreparationFails = true),
         );
@@ -480,7 +486,7 @@ describe("SSH Worker with Docker", () => {
         }
         assert.include(unusable.message, "add the user to the docker group");
         assert.include(unpulled.message, `can't pull the attempt image ${ATTEMPT_IMAGE}`);
-        assert.include(otherUser.message, "--build-arg USINE_UID=1000");
+        assert.include(otherUser.message, "--build-arg USINE_UID=2345");
         assert.include(storeFailed.message, "Can't prepare the shared pnpm store");
         assert.include(invalidSize.message, "Can't measure the shared pnpm store");
 

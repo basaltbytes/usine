@@ -5,6 +5,7 @@ import { safeSegment } from "@usine/core/repository";
 import { ContainerImage, type WorkerName } from "@usine/core/worker";
 import { Cache, Effect, Option, Random, Ref, Schema } from "effect";
 import { type ExecutorError, WorkerCapabilityError } from "../executor.ts";
+import { keyedLockFor } from "../keyed-lock.ts";
 import type { RemoteCommands } from "../remote/commands.ts";
 import {
   type AttemptIsolation,
@@ -90,6 +91,21 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
   instanceId: InstanceId,
 ) {
   const containers = containersFor(commands);
+  const preparedStores = new WeakSet<SshMachine>();
+  const storeLocks = yield* keyedLockFor<WorkerName>();
+  const prepareStore = Effect.fn("SshExecutor.preparePnpmStore")(
+    function* (machine: SshMachine, image: ContainerImage) {
+      const fields = { worker: machine.address.name, host: machine.shell.destination, image };
+      yield* Effect.annotateCurrentSpan(fields);
+      if (preparedStores.has(machine)) {
+        yield* Effect.logDebug("Shared pnpm store already prepared on this machine", fields);
+        return;
+      }
+      yield* containers.prepareStore("prepare", machine.shell, image, machine.address.name);
+      preparedStores.add(machine);
+    },
+    (effect, machine) => effect.pipe(storeLocks.withLock(machine.address.name)),
+  );
   const isolations = yield* Ref.make(new Map<WorkerName, AttemptIsolation>());
   // Workers whose earlier containers this process removed. Their containers on a shared machine
   // belong to this process, so another Worker's removal keeps them.
@@ -279,16 +295,10 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
         `SSH worker "${worker}" can't run the attempt image ${image}`,
         new Error(ids.stderr.trim() || `exit code ${ids.exitCode}`),
       );
-    if (imageId !== "1000")
-      return yield* containerGap(
-        worker,
-        `The attempt image ${image} runs as user ID ${imageId}; the shared pnpm store requires UID 1000. Build the image with --build-arg USINE_UID=1000.`,
-        new Error(`image user ID ${imageId}`),
-      );
     if (hostId !== imageId)
       return yield* containerGap(
         worker,
-        `The attempt image ${image} runs as user ID ${imageId}, and the SSH user of worker "${worker}" has ID ${hostId}, so its containers can't write the checkouts. Use an SSH user with UID 1000.`,
+        `The attempt image ${image} runs as user ID ${imageId}, and the SSH user of worker "${worker}" has ID ${hostId}, so its containers can't write the checkouts. Build the image with --build-arg USINE_UID=${hostId}.`,
         new Error(`user IDs ${hostId} and ${imageId}`),
       );
     yield* containers
@@ -298,6 +308,7 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
           containerGap(worker, `Can't prepare the shared pnpm store: ${error.message}`, error),
         ),
       );
+    preparedStores.add(machine);
     const size = yield* commands
       .run("preflight", machine.shell, CONTAINER_RUNTIME, [
         "run",
@@ -334,9 +345,13 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
    */
   const isolationOf = Effect.fn("SshExecutor.isolation")(function* (machine: SshMachine) {
     const recorded = (yield* Ref.get(isolations)).get(machine.address.name);
-    if (recorded !== undefined) return recorded;
+    if (recorded !== undefined) {
+      if (recorded._tag === "Container") yield* prepareStore(machine, recorded.settings.image);
+      return recorded;
+    }
     const version = yield* detect(machine);
     if (Option.isNone(version)) return yield* recordSharedUser(machine);
+    yield* prepareStore(machine, imageFor(machine));
     const { settings } = yield* recordContainer(machine, version.value, 1);
     return { _tag: "Container", settings } satisfies AttemptIsolation;
   });

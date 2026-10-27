@@ -4,6 +4,7 @@ import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, stat, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { onTestFinished } from "vitest";
 import { PREPARE_PNPM_STORE_SCRIPT } from "../../src/remote/container.ts";
 
 const run = promisify(execFile);
@@ -23,55 +24,68 @@ shift 2
 exec "$entrypoint" "$@"
 `;
 
-it("initializes a reusable store without removing packages during concurrent setup", async (context) => {
-  const directory = await mkdtemp("/tmp/usine-pnpm-store-");
-  context.onTestFinished(() => rm(directory, { recursive: true, force: true }));
-  const store = join(directory, "store");
-  const docker = join(directory, "docker");
-  await writeFile(docker, runtime, { mode: 0o755 });
-  await writeFile(
-    join(directory, "id"),
-    '#!/bin/sh\nif [ "${2:-}" = usine ]; then echo "$IMAGE_UID"; else echo "$DEFAULT_UID"; fi\n',
-    { mode: 0o755 },
-  );
-  // The real chown needs root on CI hosts whose test user isn't UID 1000.
-  await writeFile(
-    join(directory, "chown"),
-    '#!/bin/sh\n[ "$1" = -h ] && [ "$2" = 1000 ] && [ "$3" = "$STORE" ]\n',
-    { mode: 0o755 },
-  );
-  const prepare = (defaultUid = "1000", imageUid = "1000", failStage = "none") =>
-    run(
-      "sh",
-      ["-c", PREPARE_PNPM_STORE_SCRIPT, "sh", docker, "image", "usine-pnpm-store", "mount", store],
-      {
-        env: {
-          PATH: `${directory}:${process.env.PATH}`,
-          STORE: store,
-          DEFAULT_UID: defaultUid,
-          IMAGE_UID: imageUid,
-          FAIL_STAGE: failStage,
+it.each(["1000", "2345"])(
+  "initializes and reuses a store for image UID %s without changing another owner",
+  async (imageUid) => {
+    const directory = await mkdtemp("/tmp/usine-pnpm-store-");
+    onTestFinished(() => rm(directory, { recursive: true, force: true }));
+    const store = join(directory, "store");
+    const docker = join(directory, "docker");
+    await writeFile(docker, runtime, { mode: 0o755 });
+    await writeFile(
+      join(directory, "id"),
+      '#!/bin/sh\n[ "$1" = -u ] && [ "$2" = usine ]\necho "$IMAGE_UID"\n',
+      { mode: 0o755 },
+    );
+    // Simulates ownership changes without root privileges.
+    await writeFile(
+      join(directory, "chown"),
+      '#!/bin/sh\nset -eu\n[ "$1" = -h ] && [ "$2" = "$IMAGE_UID" ] && [ "$3" = "$STORE" ]\necho "$2" > "$OWNER_FILE"\n',
+      { mode: 0o755 },
+    );
+    const ownerFile = join(directory, "owner");
+    await writeFile(ownerFile, "0");
+    await writeFile(
+      join(directory, "stat"),
+      '#!/bin/sh\n[ "$1" = -c ] && [ "$2" = %u ] && [ "$3" = "$STORE" ]\ncat "$OWNER_FILE"\n',
+      { mode: 0o755 },
+    );
+    const prepare = (uid = imageUid, failStage = "none") =>
+      run(
+        "sh",
+        [
+          "-c",
+          PREPARE_PNPM_STORE_SCRIPT,
+          "sh",
+          docker,
+          "image",
+          "usine-pnpm-store",
+          "mount",
+          store,
+        ],
+        {
+          env: {
+            PATH: `${directory}:${process.env.PATH}`,
+            STORE: store,
+            IMAGE_UID: uid,
+            OWNER_FILE: ownerFile,
+            FAIL_STAGE: failStage,
+          },
         },
-      },
-    );
+      );
 
-  for (const [defaultUid, imageUid] of [
-    ["1001", "1001"],
-    ["0", "1000"],
-    ["1000", "1001"],
-  ]) {
-    await assert.rejects(
-      prepare(defaultUid, imageUid),
-      /requires the image to run as usine with UID 1000/u,
-    );
+    await assert.rejects(prepare(imageUid, "volume"), /volume create failed/u);
     await assert.rejects(stat(store), /ENOENT/u);
-  }
-  await assert.rejects(prepare("1000", "1000", "volume"), /volume create failed/u);
-  await assert.rejects(stat(store), /ENOENT/u);
-  await prepare();
-  assert.strictEqual((await stat(store)).mode & 0o777, 0o755);
-  await mkdir(join(store, "v11"));
-  await writeFile(join(store, "v11", "package"), "cached package");
-  await Promise.all([prepare(), prepare()]);
-  assert.strictEqual(await readFile(join(store, "v11", "package"), "utf8"), "cached package");
-});
+    await prepare();
+    assert.strictEqual((await readFile(ownerFile, "utf8")).trim(), imageUid);
+    assert.strictEqual((await stat(store)).mode & 0o777, 0o755);
+    await mkdir(join(store, "v11"));
+    await writeFile(join(store, "v11", "package"), "cached package");
+    await Promise.all([prepare(), prepare()]);
+    await assert.rejects(prepare("7001"), /docker volume rm usine-pnpm-store/u);
+    assert.strictEqual((await readFile(ownerFile, "utf8")).trim(), imageUid);
+    await writeFile(ownerFile, "0");
+    await assert.rejects(prepare(), /docker volume rm usine-pnpm-store/u);
+    assert.strictEqual(await readFile(join(store, "v11", "package"), "utf8"), "cached package");
+  },
+);

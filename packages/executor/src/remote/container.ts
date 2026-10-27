@@ -24,19 +24,18 @@ export const PNPM_STORE_MOUNT = `type=volume,source=${PNPM_STORE_VOLUME},destina
 /** Initializes volume `$3` using runtime `$1`, image `$2`, mount `$4`, and path `$5`. */
 export const PREPARE_PNPM_STORE_SCRIPT = String.raw`
 set -eu
-"$1" run --rm --network none --entrypoint sh "$2" -ec '
-  current=$(id -u)
-  owner=$(id -u usine)
-  if [ "$current" != 1000 ] || [ "$owner" != 1000 ]; then
-    echo "The pnpm store requires the image to run as usine with UID 1000; build with --build-arg USINE_UID=1000 (default UID: $current, usine UID: $owner)." >&2
-    exit 1
-  fi
-'
 "$1" volume create "$3" >/dev/null
 exec "$1" run --rm --network none --user 0 --mount "$4" --entrypoint sh "$2" -ec '
-  chown -h 1000 "$1"
+  owner=$(id -u usine)
+  current=$(stat -c %u "$1")
+  if [ "$current" = "$owner" ]; then exit 0; fi
+  if [ "$current" != 0 ] || [ -n "$(find "$1" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
+    echo "The pnpm store belongs to UID $current, but the image usine user has UID $owner. Remove containers that reference it, then run: docker volume rm $2" >&2
+    exit 1
+  fi
   chmod 0755 "$1"
-' sh "$5"
+  chown -h "$owner" "$1"
+' sh "$5" "$3"
 `.trim();
 
 /** The labels on each container, so a later process finds the ones it left. */
@@ -320,7 +319,6 @@ export const containersFor = (commands: RemoteCommands) => {
   ) {
     const fields = containerFields(shell, spec);
     yield* Effect.annotateCurrentSpan(fields);
-    yield* prepareStore(operation, shell, spec.settings.image, spec.worker);
     const logins = spec.harnesses.flatMap((harness) => [
       ...LOGIN_FILES[harness].mounted.map((file) => ({ file, mounted: true })),
       ...LOGIN_FILES[harness].seeded.map((file) => ({ file, mounted: false })),

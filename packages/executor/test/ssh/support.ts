@@ -191,7 +191,8 @@ interface FakeMachineState {
   /** Whether `docker pull` of the Attempt image fails, and whether the image is on the machine anyway. */
   pullFails: boolean;
   imageOnMachine: boolean;
-  /** The user ID inside the Attempt image. The SSH user's is 1000. */
+  /** The user IDs on the machine and inside the Attempt image. */
+  hostUserId: string;
   imageUserId: string;
   storePreparationFails: boolean;
   storeSizeKiB: string;
@@ -328,6 +329,7 @@ export const fakeMachine = () => {
     pullFails: false,
     imageOnMachine: true,
     imageUserId: "1000",
+    hostUserId: "1000",
     storePreparationFails: false,
     storeSizeKiB: "4096",
     containers: new Map(),
@@ -367,7 +369,8 @@ export const fakeMachine = () => {
         ? oneShotHandle("", 1, "pnpm store: permission denied")
         : oneShotHandle("", 0);
     if (words.includes("du")) return oneShotHandle(`${state.storeSizeKiB}\t/store\n`, 0);
-    if (line.includes("--entrypoint")) return oneShotHandle(`1000 ${state.imageUserId}\n`, 0);
+    if (line.includes("--entrypoint"))
+      return oneShotHandle(`${state.hostUserId} ${state.imageUserId}\n`, 0);
     if (line.includes("absolute=$3")) {
       // sh -c <script> sh docker <name> <count> <absolute paths...> <home files...>
       const [, , , , , name = "", count = "0", ...rest] = words;
