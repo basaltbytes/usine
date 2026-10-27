@@ -41,6 +41,16 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
       - run: pnpm install --frozen-lockfile
+      - name: Validate changesets
+        if: github.event_name == 'pull_request' && hashFiles('.changeset/*.md') != ''
+        run: |
+          changeset_dir=$(mktemp -d)
+          trap 'rm -rf "$changeset_dir"' EXIT
+          git archive HEAD | tar -x -C "$changeset_dir"
+          ln -s "$PWD/node_modules" "$changeset_dir/node_modules"
+          cd "$changeset_dir"
+          # Reuse the installed dependencies without reinstalling in the scratch copy.
+          pnpm_config_verify_deps_before_run=false pnpm changeset version
       - run: pnpm lint
       - run: pnpm format:check
       - run: pnpm knip
