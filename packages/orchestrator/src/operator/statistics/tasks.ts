@@ -83,6 +83,7 @@ interface TaskTokens {
 
 interface MeasuredTask {
   readonly view: TaskDoneView;
+  readonly start: number;
   readonly mergedAt: number;
   readonly firstTimeRight: boolean;
   readonly operatorActions: number;
@@ -220,6 +221,20 @@ const taskTokens = (
   });
 };
 
+/**
+ * Returns the end of usine's work on a task: the last Run's close, or the merge if a Run was still
+ * open or closed after it. The wait for the operator to merge a ready pull request is left out.
+ */
+const workEnd = (runs: ReadonlyArray<RunSummary>, mergedAt: number): number =>
+  Math.min(
+    mergedAt,
+    Math.max(
+      ...runs.map(({ closedAt }) =>
+        Option.match(closedAt, { onNone: () => mergedAt, onSome: epoch }),
+      ),
+    ),
+  );
+
 const measure = (
   task: MergedTask,
   usage: ReadonlyMap<RunId, RunUsageView>,
@@ -231,7 +246,8 @@ const measure = (
   // caused, stands for the label.
   const start = Math.min(...runs.map(({ run }) => epoch(run.openedAt)));
   const mergedAt = epoch(task.mergedAt);
-  const duration = Math.max(0, mergedAt - start);
+  const end = workEnd(runs, mergedAt);
+  const duration = Math.max(0, end - start);
   return Option.some({
     view: new TaskDoneView({
       repository: task.repository,
@@ -239,10 +255,11 @@ const measure = (
       mergedAt: DateTime.formatIso(task.mergedAt),
       durationMillis: duration,
     }),
+    start,
     mergedAt,
     firstTimeRight: firstTimeRight(runs),
     operatorActions: runActions(runs) + task.budgetResets,
-    timing: taskTiming(runs, start, mergedAt, now),
+    timing: taskTiming(runs, start, end, now),
     tokens: taskTokens(runs, usage),
     loops: loopsByFirstRun(runs),
   });
@@ -303,17 +320,15 @@ const tokensView = (
           tokens.flatMap(({ total, loops }) => (total > 0 ? [{ whole: total, loops }] : [])),
           order,
         ),
-        cost:
-          costs.length < tokens.length
-            ? null
-            : Option.match(median(costs), {
-                onNone: () => null,
-                onSome: (usd) =>
-                  new TaskCostView({
-                    medianUsd: UsdAmount.make(usd),
-                    estimate: tokens.some(({ estimate }) => estimate),
-                  }),
-              }),
+        cost: Option.match(median(costs), {
+          onNone: () => null,
+          onSome: (usd) =>
+            new TaskCostView({
+              tasks: costs.length,
+              medianUsd: UsdAmount.make(usd),
+              estimate: tokens.some(({ usd, estimate }) => Option.isSome(usd) && estimate),
+            }),
+        }),
       });
     },
   });
@@ -348,12 +363,7 @@ export const taskStatisticsView = ({
   const from = Option.match(windowStart(window, now), {
     onSome: epoch,
     onNone: () =>
-      startOfUtcDay(
-        measured.reduce(
-          (earliest, { mergedAt, view }) => Math.min(earliest, mergedAt - view.durationMillis),
-          to,
-        ),
-      ),
+      startOfUtcDay(measured.reduce((earliest, { start }) => Math.min(earliest, start), to)),
   });
   const tasks = measured
     .filter(({ mergedAt }) => mergedAt >= from && mergedAt <= to)

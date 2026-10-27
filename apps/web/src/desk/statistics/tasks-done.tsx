@@ -104,7 +104,7 @@ const tooltipClass =
 const taskName = (task: TaskDoneView, repositories: number) =>
   repositories > 1 ? `${task.repository} #${task.number}` : `#${task.number}`;
 
-/** One dot per task done: merge day across, duration from issue to merge up a log axis. */
+/** One dot per task done: merge day across, time in usine up a log axis. */
 const TaskScatter = ({ statistics }: { readonly statistics: StatisticsView }) => {
   const navigate = useNavigate();
   const from = Date.parse(statistics.from);
@@ -285,7 +285,7 @@ export const TasksDoneChart = ({ statistics }: { readonly statistics: Statistics
       <WeeklyTasks statistics={statistics} />
     )}
     <ChartTable
-      caption="Tasks done, from issue to merge"
+      caption="Tasks done, time in usine"
       head={["Task", "Merged", "Duration"]}
       rows={statistics.tasks.map((task) => [
         `${task.repository} #${task.number}`,

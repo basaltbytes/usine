@@ -72,6 +72,7 @@ import {
   TaskDoneView,
   TaskPeriodView,
   TaskTimeView,
+  TaskCostView,
   TaskTokensView,
   ThroughputPeriodView,
   UntimedTasksView,
@@ -566,7 +567,14 @@ export const statisticsFixture = (now: number, window: "7d" | "30d") => {
         new LoopShareView({ loop: startDev, share: 0.7 }),
         new LoopShareView({ loop: reviewFix, share: 0.3 }),
       ],
-      cost: null,
+      cost:
+        window === "7d"
+          ? null
+          : new TaskCostView({
+              tasks: tasks.length - 2,
+              medianUsd: UsdAmount.make(3.1),
+              estimate: true,
+            }),
     }),
     untimed:
       window === "7d" ? null : new UntimedTasksView({ tasks: 3, before: utcDay(from + 12 * DAY) }),

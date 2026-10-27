@@ -107,7 +107,7 @@ it("leads the Overview with the tasks done and reads the run statistics only beh
     .toHaveAttribute("aria-pressed", "true");
   await expect.element(statistics.getByText("12 tasks", { exact: true })).toBeVisible();
   await expect
-    .element(statistics.getByText("2 h 6 min median from issue to merge", { exact: true }))
+    .element(statistics.getByText("2 h 6 min median time in usine", { exact: true }))
     .toBeVisible();
   await expect.element(page.getByRole("heading", { name: "Recent runs" })).toBeVisible();
   expect(
@@ -119,10 +119,7 @@ it("leads the Overview with the tasks done and reads the run statistics only beh
   // One row per task done in the screen-reader table, after its heading row.
   await expect
     .element(
-      statistics
-        .getByRole("table", { name: "Tasks done, from issue to merge" })
-        .getByRole("row")
-        .nth(12),
+      statistics.getByRole("table", { name: "Tasks done, time in usine" }).getByRole("row").nth(12),
     )
     .toBeInTheDocument();
   await expect
@@ -139,10 +136,15 @@ it("leads the Overview with the tasks done and reads the run statistics only beh
     .element(statistics.getByText("1.5 operator actions per task", { exact: true }))
     .toBeVisible();
   await expect.element(statistics.getByText("620K median", { exact: true })).toBeVisible();
+  await expect.element(statistics.getByText("~$3.10 median price", { exact: true })).toBeVisible();
   await expect
-    .element(statistics.getByText(/^3 tasks before \d+ \w+ lack timing and are left out$/u))
+    .element(
+      statistics.getByText(
+        /^3 tasks before \d+ \w+ lack timing and are left out; 2 tasks lack a price and are left out of the median price$/u,
+      ),
+    )
     .toBeVisible();
-  expect(statistics.getByText(/p90|9 in 10|\$/u).elements()).toHaveLength(0);
+  expect(statistics.getByText(/p90|9 in 10/u).elements()).toHaveLength(0);
   expect((await commands.statisticsRequests()).runs).toEqual([]);
 
   await statistics.getByRole("button", { name: "Details" }).click();
@@ -159,6 +161,7 @@ it("leads the Overview with the tasks done and reads the run statistics only beh
 
   await statistics.getByRole("button", { name: "7 days" }).click();
   await expect.element(statistics.getByText("4 tasks", { exact: true })).toBeVisible();
+  expect(statistics.getByText("median price", { exact: true }).elements()).toHaveLength(0);
   await expect
     .element(statistics.getByRole("definition").filter({ hasText: /^12$/u }))
     .toBeVisible();

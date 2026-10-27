@@ -11,6 +11,7 @@ import {
   aboutLabel,
   noTasksLine,
   spanLabel,
+  unpricedLine,
   unmeteredLine,
   untimedLine,
   windowLabels,
@@ -84,15 +85,7 @@ const TokensPerTask = ({ statistics }: { readonly statistics: StatisticsView }) 
         <EmptyLine>No token reports</EmptyLine>
       ) : (
         <>
-          <div className="flex flex-wrap items-baseline gap-x-8 gap-y-1">
-            <Figure value={tokensLabel(tokens.medianTokens)} unit="median" />
-            {tokens.cost !== null && (
-              <Figure
-                value={`${tokens.cost.estimate ? "~" : ""}${usdLabel(tokens.cost.medianUsd)}`}
-                unit="median"
-              />
-            )}
-          </div>
+          <Figure value={tokensLabel(tokens.medianTokens)} unit="median" />
           <ShareBar label="Tokens per task" parts={loopParts(statistics.loops, tokens.loops)} />
         </>
       )}
@@ -102,9 +95,13 @@ const TokensPerTask = ({ statistics }: { readonly statistics: StatisticsView }) 
 
 const StatisticsBody = ({ statistics }: { readonly statistics: StatisticsView }) => {
   if (statistics.tasks.length === 0) return <EmptyLine>{noTasksLine(statistics.window)}</EmptyLine>;
+  const { tokens } = statistics;
+  const cost = tokens?.cost ?? null;
+  const unpriced = tokens === null ? 0 : tokens.tasks - (cost?.tasks ?? 0);
   const gaps = [
     statistics.untimed === null ? null : untimedLine(statistics.untimed),
     statistics.unmetered === 0 ? null : unmeteredLine(statistics.unmetered),
+    unpriced === 0 ? null : unpricedLine(unpriced),
   ].filter((gap) => gap !== null);
   return (
     <div className="flex flex-col gap-9">
@@ -117,9 +114,12 @@ const StatisticsBody = ({ statistics }: { readonly statistics: StatisticsView })
                 unit={statistics.tasks.length === 1 ? "task" : "tasks"}
               />
               {statistics.medianMillis !== null && (
+                <Figure value={spanLabel(statistics.medianMillis)} unit="median time in usine" />
+              )}
+              {cost !== null && (
                 <Figure
-                  value={spanLabel(statistics.medianMillis)}
-                  unit="median from issue to merge"
+                  value={`${cost.estimate ? "~" : ""}${usdLabel(cost.medianUsd)}`}
+                  unit="median price"
                 />
               )}
             </div>
