@@ -231,7 +231,7 @@ Install the pinned Chromium once with `pnpm --filter @usine/web exec playwright 
 
 If the machine has its own Chromium, such as a worker built by [`infra/hetzner/cloud-init.yaml`](../../infra/hetzner/cloud-init.yaml), set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to its path instead. `vitest.config.ts` passes it to Playwright as `executablePath`, and `turbo.json` lists it in the `test` task's `env`, so `pnpm test` from the repository root sees it.
 
-The tests use up to about 4.7 GiB of memory, roughly half in Vitest's process and most of the rest in Chromium. That's also the peak of `pnpm test` from the repository root, which runs one package's tests at a time. Give an attempt container that runs them at least 6 GiB (`memory_mib: 6144`), and run one such attempt at a time on a machine with 7.7 GiB, such as a Hetzner cx33 or cpx32. Two runs at once on that machine make it swap even when each container's limit allows them: browser tests time out, and the kernel kills processes for memory. The run page says how many processes the kernel killed in an attempt's container.
+The tests use up to about 4.7 GiB of memory, roughly half in Vitest's process and most of the rest in Chromium. That's also the peak of `pnpm test` from the repository root, which runs one package's tests at a time. Give an attempt container that runs them at least 6 GiB (`memory_mib: 6144`), and run one such attempt at a time on a machine with 7.7 GiB, such as a Hetzner cx33 or cpx32. Two runs at once on that machine make it swap even when each container's limit allows them: browser tests time out, and the kernel kills processes for memory. The run page says how many processes the kernel killed in an attempt's containers.
 
 ## Stack
 

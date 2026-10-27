@@ -278,10 +278,36 @@ describe("run transcript", () => {
         [new AttemptView({ ...liveAttempt, outcome: new CanceledAttemptView(), outOfMemory })],
       ).replace(/<[^>]+>/gu, "");
     assert.include(
-      ended(new OutOfMemoryKills({ kills: 2, memoryMib: ContainerMemoryMib.make(7168) })),
+      ended(
+        new OutOfMemoryKills({ kills: 2, containers: 1, memoryMib: ContainerMemoryMib.make(7168) }),
+      ),
       "Warning: The kernel killed 2 processes in the attempt container when it reached its 7168 MiB memory limit",
     );
     assert.notInclude(ended(null), "The kernel killed");
+  });
+
+  it("gives the total of an Attempt's containers apart from the memory limit of the last one", () => {
+    // Two kills at an earlier container's 4096 MiB limit, then one in the container that
+    // reattached the Attempt at 7168 MiB.
+    const text = reader(
+      [event(1, "Running the test gate.")],
+      [
+        new AttemptView({
+          ...liveAttempt,
+          outcome: new CanceledAttemptView(),
+          outOfMemory: new OutOfMemoryKills({
+            kills: 3,
+            containers: 2,
+            memoryMib: ContainerMemoryMib.make(7168),
+          }),
+        }),
+      ],
+    ).replace(/<[^>]+>/gu, "");
+    assert.include(
+      text,
+      "Warning: The kernel killed 3 processes in 2 attempt containers when they reached their memory limits. The last of these containers had a 7168 MiB limit",
+    );
+    assert.notInclude(text, "when it reached its 7168 MiB memory limit");
   });
 
   it("keeps a finished child's handoff when its launch is outside the loaded page", () => {

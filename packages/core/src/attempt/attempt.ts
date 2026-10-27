@@ -41,14 +41,19 @@ export class AttemptContext extends Schema.Class<AttemptContext>("AttemptContext
   parentModel: Schema.OptionFromNullOr(ModelId),
 }) {}
 
-const Kills = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
+const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 
 /**
- * The processes that the kernel killed in an Attempt's containers because a container reached
- * its memory limit, `memoryMib`: the limit of the last container that recorded kills.
+ * The processes that the kernel killed for memory in an Attempt's containers, all of them
+ * together.
+ *
+ * - `containers`: how many of the Attempt's containers had kills.
+ * - `memoryMib`: the memory limit of the last container that had kills. The kills of an earlier
+ *   container can have happened at another limit.
  */
 export class OutOfMemoryKills extends Schema.Class<OutOfMemoryKills>("OutOfMemoryKills")({
-  kills: Kills,
+  kills: PositiveInt,
+  containers: PositiveInt,
   memoryMib: ContainerMemoryMib,
 }) {}
 
@@ -60,16 +65,20 @@ export class ContainerOutOfMemoryKills extends Schema.Class<ContainerOutOfMemory
   "ContainerOutOfMemoryKills",
 )({
   container: ContainerId,
-  kills: Kills,
+  kills: PositiveInt,
   memoryMib: ContainerMemoryMib,
 }) {}
 
-/** Returns the kills in `containers` together, with the memory limit of the last one. */
+/**
+ * Returns the kills in `containers` together, with the memory limit of the last one. Each entry
+ * of `containers` is a different container.
+ */
 export const totalOutOfMemoryKills = (
   containers: EffectArray.NonEmptyReadonlyArray<ContainerOutOfMemoryKills>,
 ): OutOfMemoryKills =>
   new OutOfMemoryKills({
     kills: containers.reduce((total, { kills }) => total + kills, 0),
+    containers: containers.length,
     memoryMib: EffectArray.lastNonEmpty(containers).memoryMib,
   });
 

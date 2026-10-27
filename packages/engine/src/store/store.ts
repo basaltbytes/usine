@@ -577,6 +577,7 @@ const makeRunStore = Effect.gen(function* () {
       kills: kills.kills,
       memoryMib: kills.memoryMib,
       attemptKills: attempt.kills,
+      attemptContainers: attempt.containers,
     });
   }, persistence("record attempt out-of-memory kills"));
 

@@ -1383,7 +1383,11 @@ describe("cursor store", () => {
           assert.deepStrictEqual(
             attempts[0]?.outOfMemory,
             Option.some(
-              new OutOfMemoryKills({ kills: 3, memoryMib: ContainerMemoryMib.make(7168) }),
+              new OutOfMemoryKills({
+                kills: 3,
+                containers: 2,
+                memoryMib: ContainerMemoryMib.make(7168),
+              }),
             ),
           );
           assert.deepStrictEqual(attempts[1]?.outOfMemory, Option.none());

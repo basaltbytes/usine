@@ -150,7 +150,7 @@ export class AttemptView extends Schema.Class<AttemptView>("@usine/orchestrator/
   reattachedAt: Schema.NullOr(Schema.String).pipe(
     Schema.withConstructorDefault(Effect.succeed(null)),
   ),
-  /** The processes the kernel killed in the Attempt's container for memory, or null if none. */
+  /** The processes the kernel killed in the Attempt's containers for memory, or null if none. */
   outOfMemory: Schema.NullOr(OutOfMemoryKills).pipe(
     Schema.withConstructorDefault(Effect.succeed(null)),
   ),

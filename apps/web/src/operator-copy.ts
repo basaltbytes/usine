@@ -302,8 +302,14 @@ export const queuedMessageLabel = (session: QueuedFor): string =>
 export const conflictingSalvageMessage = ({ ref, commit }: SalvagePushed): string =>
   `Not applied: the previous attempt's work on ${ref} at ${commit.slice(0, 7)} conflicts with the current revision. It is still on ${ref}`;
 
-export const outOfMemoryLine = ({ kills, memoryMib }: OutOfMemoryKills): string =>
-  `The kernel killed ${kills} ${kills === 1 ? "process" : "processes"} in the attempt container when it reached its ${memoryMib} MiB memory limit`;
+/**
+ * Returns the line under an attempt's outcome about the processes the kernel killed for memory.
+ * Kills in several containers give the last one's memory limit apart from the total.
+ */
+export const outOfMemoryLine = ({ kills, containers, memoryMib }: OutOfMemoryKills): string =>
+  containers === 1
+    ? `The kernel killed ${kills} ${kills === 1 ? "process" : "processes"} in the attempt container when it reached its ${memoryMib} MiB memory limit`
+    : `The kernel killed ${kills} processes in ${containers} attempt containers when they reached their memory limits. The last of these containers had a ${memoryMib} MiB limit`;
 
 /** Returns a used-up cycle budget's rounds and Runs per Loop, for example `3 completed rounds. start-dev: 2 runs`. */
 export const cycleBudgetCounts = (ask: CycleBudgetNeed["ask"]): string =>
