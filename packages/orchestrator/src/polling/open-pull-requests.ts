@@ -12,7 +12,7 @@ import { repositoryFailureLogFields } from "./cycle.ts";
 
 const BASE_REF_CONCURRENCY = 4;
 
-/** An open pull request that the poll cursor keeps, with the base branch and mergeability of its last snapshot. */
+/** An open pull request's last observed base branch, mergeability, and check refresh state. */
 export class OpenPullRequest extends Schema.Class<OpenPullRequest>(
   "@usine/orchestrator/OpenPullRequest",
 )({
@@ -21,6 +21,8 @@ export class OpenPullRequest extends Schema.Class<OpenPullRequest>(
   /** `None` in a cursor written before polling recorded base branches. */
   baseRefName: Schema.OptionFromOptionalKey(BaseRefName),
   mergeable: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed("UNKNOWN"))),
+  /** Older cursors refresh once to learn whether checks have settled. */
+  checksUnsettled: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(true))),
 }) {}
 
 /** Returns the cursor entry for a fetched Item, or `None` unless the Item is an open pull request. */
@@ -35,6 +37,11 @@ export const openPullRequest = (
           updatedAt: item.updatedAt,
           baseRefName: Option.some(snapshot.payload.baseRefName),
           mergeable: snapshot.payload.mergeable,
+          checksUnsettled:
+            snapshot.payload.statusCheckRollup?.state === "PENDING" ||
+            snapshot.payload.statusCheckRollup?.state === "EXPECTED" ||
+            (snapshot.payload.statusCheckRollup === null &&
+              snapshot.payload.mergeStateStatus === "BLOCKED"),
         }),
       )
     : Option.none();
@@ -46,7 +53,12 @@ type BaseRefRead =
   | { readonly _tag: "Unreadable"; readonly recorded: Option.Option<BaseRefHead> };
 
 /** Why a poll fetches an open pull request that change detection didn't report. */
-type RefreshReason = "baseUnrecorded" | "baseMoved" | "baseUnreadable" | "mergeableUnknown";
+type RefreshReason =
+  | "baseUnrecorded"
+  | "baseMoved"
+  | "baseUnreadable"
+  | "mergeableUnknown"
+  | "checksUnsettled";
 
 /** The open pull requests that a poll fetches again, and the base branch heads to record. */
 interface OpenPullRequestRefresh {
@@ -111,14 +123,15 @@ const refreshReason = (
   if (read?._tag === "Moved") return Option.some("baseMoved");
   if (read?._tag === "Unreadable") return Option.some("baseUnreadable");
   if (pullRequest.mergeable === "UNKNOWN") return Option.some("mergeableUnknown");
+  if (pullRequest.checksUnsettled) return Option.some("checksUnsettled");
   return Option.none();
 };
 
 /**
  * Reads the head of each base branch that `openPullRequests` target, with one conditional request
  * per branch, and returns the pull requests to fetch again: those whose base branch isn't recorded,
- * moved, or couldn't be read, and those whose mergeability is `UNKNOWN`. Leaves out the numbers in
- * `fetched`, which the poll fetches anyway. Fails only if GitHub rate-limits a read.
+ * moved, or couldn't be read, and those whose mergeability or checks are unsettled. Leaves out the
+ * numbers in `fetched`, which the poll fetches anyway. Fails only if GitHub rate-limits a read.
  */
 export const openPullRequestRefresh = Effect.fn("PollingTriggers.openPullRequestRefresh")(
   function* (
