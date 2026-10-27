@@ -77,7 +77,7 @@ class RunnerAddress extends Schema.Class<RunnerAddress>("RunnerAddress")({
   }
 
   [Hash.symbol]() {
-    return Hash.cached(this, Hash.string(`${this.host}:${this.port}`))
+    return Hash.string(`${this.host}:${this.port}`)
   }
 
   get endpoint(): string {

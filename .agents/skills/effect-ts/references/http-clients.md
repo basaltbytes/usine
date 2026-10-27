@@ -14,7 +14,7 @@
 ## Minimal Example
 
 ```typescript
-import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/unstable/http"
+import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/http"
 import { Effect, Schema } from "effect"
 
 const Repo = Schema.Struct({
@@ -42,7 +42,7 @@ program.pipe(Effect.provide(FetchHttpClient.layer), Effect.runPromise)
 ### Headers
 
 ```typescript
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http"
 
 const request = HttpClientRequest.get("https://api.github.com/repos/Effect-TS/effect").pipe(
   HttpClientRequest.setHeader("Accept", "application/vnd.github.v3+json"),
@@ -174,7 +174,7 @@ const ResilientClient = Layer.effect(
 ## Worked Example: Typed API Service
 
 ```typescript
-import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
+import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http"
 import { Context, Effect, Layer, Schema } from "effect"
 
 const UserId = Schema.Number.pipe(Schema.brand("UserId"))

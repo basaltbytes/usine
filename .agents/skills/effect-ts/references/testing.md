@@ -146,6 +146,8 @@ it.effect("time-based test", () =>
 )
 ```
 
+Under `it.effect`, `TestClock.adjust` returns only after each fiber it wakes, and the work that fiber schedules, has run until it suspends. An assertion right after `adjust` sees the state after all of that work, not after one scheduler turn as on rc.111. To assert a state before a deadline fires, adjust to just short of it, for example `adjust("1999 millis")` before a 2-second timeout, then adjust the rest.
+
 ## Test Modifiers
 
 ```typescript

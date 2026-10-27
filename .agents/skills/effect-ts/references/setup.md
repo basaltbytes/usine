@@ -163,7 +163,7 @@ name when it describes a concept the module implements.
 
 Use the pinned Effect source as a reference: `src/Option.ts` defines the type and
 its operations, `src/internal/` contains implementation helpers, and
-`src/unstable/schema/Model.ts` implements database and JSON model variants.
+`src/schema/Model.ts` implements database and JSON model variants.
 These examples illustrate ownership; the repository's architecture determines
 its filenames and public imports.
 

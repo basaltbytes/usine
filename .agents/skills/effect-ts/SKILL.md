@@ -1,6 +1,6 @@
 ---
 name: effect-ts
-description: "Write idiomatic Effect v4 TypeScript following official best practices from effect-solutions and the Effect source. Use when writing, reviewing, or refactoring Effect code: services (Context.Service), layers and dependency injection, error handling (Schema.TaggedError), data modeling (Schema.Class, branded types, variants), concurrency and runtime (fibers, queues, locks, bridging into callbacks), testing (@effect/vitest), HTTP clients (effect/unstable/http), CLI tools (effect/unstable/cli), child processes, config, observability, and project setup. Triggers on: 'Effect', 'effect-ts', '@effect/', 'Schema', 'ServiceMap', 'Context.Service', 'Layer', 'Effect.gen', 'Effect.fn', 'TaggedError', 'branded types', 'Fiber', 'Queue', 'Semaphore', 'runPromise', or any Effect-TS related code."
+description: "Write idiomatic Effect v4 TypeScript following official best practices from effect-solutions and the Effect source. Use when writing, reviewing, or refactoring Effect code: services (Context.Service), layers and dependency injection, error handling (Schema.TaggedError), data modeling (Schema.Class, branded types, variants), concurrency and runtime (fibers, queues, locks, bridging into callbacks), testing (@effect/vitest), HTTP clients (effect/http), CLI tools (effect/cli), child processes, config, observability, and project setup. Triggers on: 'Effect', 'effect-ts', '@effect/', 'Schema', 'ServiceMap', 'Context.Service', 'Layer', 'Effect.gen', 'Effect.fn', 'TaggedError', 'branded types', 'Fiber', 'Queue', 'Semaphore', 'runPromise', or any Effect-TS related code."
 ---
 
 # Effect-TS (v4)
@@ -9,7 +9,7 @@ Patterns from [effect-solutions](https://effect.solutions) and the [Effect sourc
 
 ## Version Pin
 
-Every API name in this skill is verified against `effect@4.0.0-rc.111`, the version pinned by this workspace. Names have churned during the v4 RC line — `ServiceMap.Service` and `Schema.TaggedErrorClass` existed on earlier v4 RCs and were renamed back to `Context.Service` and `Schema.TaggedError` — so if this skill and the source mirror ever disagree, the mirror wins (see Source-First Rule) and this skill must be updated in the same change.
+Every API name in this skill is verified against `effect@4.0.6`, the version pinned by this workspace. Names have churned during v4: `ServiceMap.Service` and `Schema.TaggedErrorClass` existed on earlier v4 RCs and were renamed back to `Context.Service` and `Schema.TaggedError`, the stable 4.0 releases moved the `effect/unstable/*` modules to `effect/*` (`effect/unstable/httpapi` is `effect/http-api`), and `Config`'s constructors are capitalized (`Config.String`). So if this skill and the source mirror ever disagree, the mirror wins (see Source-First Rule) and this skill must be updated in the same change.
 
 ## Source-First Rule
 
@@ -281,14 +281,14 @@ Write logs so that a reader can tell from them why nothing happened, not just wh
 | Do Not | Do Instead |
 |--------|-----------|
 | `console.log(...)` | `Effect.log(...)` with structured data |
-| `process.env.KEY` | `Config.string("KEY")` or `Config.redacted("KEY")` |
+| `process.env.KEY` | `Config.String("KEY")` or `Config.Redacted("KEY")` |
 | `throw new Error()` inside `Effect.gen` | `yield* new TaggedError({...})` or `Effect.fail(...)` |
 | `Effect.runSync(...)` inside services | Keep everything effectful |
 | `Effect.catchAll(() => ...)` losing type info | `Effect.catchTag` / `Effect.catchTags` |
 | `null` / `undefined` in domain types | `Option<T>` with `Option.match` |
 | `Option.getOrThrow(...)` | `Option.match({ onNone, onSome })` or `Option.getOrElse` |
-| `Effect.Service` (v3) / `ServiceMap.Service` (earlier v4 RC) | `Context.Service` (rc.111) |
-| `Schema.TaggedErrorClass(...)` (earlier v4 RC) | `Schema.TaggedError<Self>("Tag")("Tag", {...})` (rc.111) |
+| `Effect.Service` (v3) / `ServiceMap.Service` (earlier v4 RC) | `Context.Service` |
+| `Schema.TaggedErrorClass(...)` (earlier v4 RC) | `Schema.TaggedError<Self>("Tag")("Tag", {...})` |
 | `Effect.fork` / `Effect.forkDaemon` (v3 — fails at runtime) | `Effect.forkChild` / `forkScoped` / `forkIn` / `forkDetach` |
 | `Option.fromNullable` (v3) | `Option.fromNullishOr` (or `fromNullOr` for null-only) |
 | `Schema.pattern` / `minLength` / `maxLength` (v3) | `.check(Schema.isPattern(re, { message }))` / `isMinLength` / `isMaxLength` |
@@ -297,7 +297,11 @@ Write logs so that a reader can tell from them why nothing happened, not just wh
 | `Schema.NullOr` for maybe-absent keys | `Schema.optionalKey` — `NullOr` keys stay required |
 | `Effect.catchTag("RequestError" / "ResponseError")` | `Effect.catchTag("HttpClientError", ...)`, branch on `reason` / `response` |
 | `Effect.runPromise` inside vendor callbacks | Context-carrying runner ([runtime-and-concurrency](references/runtime-and-concurrency.md)) |
-| `import { Command } from "@effect/platform"` (v3) | `effect/unstable/process` `ChildProcess` + `ChildProcessSpawner` |
+| `import { Command } from "@effect/platform"` (v3) | `effect/process` `ChildProcess` + `ChildProcessSpawner` |
+| `Config.string` / `Config.redacted` / `Config.int` (v4 RC) | `Config.String` / `Config.Redacted` / `Config.Int` |
+| `Encoding.encodeBase64(...)` (v4 RC) | `Base64.encode(...)` from `effect/encoding`; `Base64Url` and `Hex` likewise |
+| `.annotate({ parseOptions: { onExcessProperty: "error" } })` (v4 RC; 4.0 parsing ignores it) | `{ onExcessProperty: "error" }` at the decode site, or `HttpApi.PayloadParseOptions` on an `HttpApi` group |
+| Wiping the `Redacted` you passed to a `Schema.Redacted` field | Wipe the field's value: decoding and construction store a copy. To keep the instance, declare the field with `Schema.declare` over `Redacted.isRedacted` |
 | Scatter `Effect.provide` calls | Provide once at app entry |
 | Call parameterized layer constructors inline | Store layers in constants (memoization) |
 
