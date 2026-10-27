@@ -29,14 +29,17 @@ import {
 } from "effect";
 import { liveBackendLayer, needsSetupBackendLayer } from "./backend.ts";
 import {
+  type ListenAddress,
   type Port,
-  type UpLogLevel,
+  SERVER_HOST,
+  type UpCommand,
   VolatileInstanceDirectoryError,
   openBrowser,
   packageVersion,
   portInUse,
   refuseTakenPort,
-  serverStartError,
+  serverHosts,
+  serverUrl,
   volatileRoot,
   volatileRoots,
 } from "./cli.ts";
@@ -69,17 +72,20 @@ const serve = Effect.fnUntraced(function* (options: {
   readonly backend: ReturnType<typeof liveBackendLayer>;
   readonly webRoot: string;
   readonly port: Port;
+  readonly listen: Option.Option<ListenAddress>;
   readonly url: string;
   readonly openSetupPage: boolean;
 }) {
-  yield* Layer.build(serverLayer(options.backend, options.webRoot, options.port)).pipe(
-    Effect.mapError((error) => serverStartError(options.port, error)),
-    Effect.catchTag("PortInUseError", ({ port }) => portInUse(port)),
-  );
+  yield* Layer.build(
+    serverLayer(options.backend, options.webRoot, options.port, options.listen),
+  ).pipe(Effect.catchTag("PortInUseError", ({ host, port }) => portInUse(host, port)));
+  const urls = serverHosts(options.listen)
+    .map((host) => serverUrl(host, options.port))
+    .join(" and ");
   yield* Console.log(
     options.openSetupPage
-      ? `usine is running in setup mode at ${options.url}`
-      : `usine is running at ${options.url}`,
+      ? `usine is running in setup mode at ${urls}`
+      : `usine is running at ${urls}`,
   );
   if (options.openSetupPage) {
     yield* openBrowser(options.url).pipe(
@@ -123,6 +129,7 @@ const start = Effect.fnUntraced(function* (
   instanceId: InstanceId,
   instances: CurrentInstance["Service"],
   port: Port,
+  listen: Option.Option<ListenAddress>,
 ) {
   yield* reloadOnHangup(instances);
   const credentials = yield* loadLocalCredentials(directory).pipe(
@@ -130,7 +137,7 @@ const start = Effect.fnUntraced(function* (
     Effect.result,
   );
   const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "web");
-  const url = `http://127.0.0.1:${port}`;
+  const url = serverUrl(SERVER_HOST, port);
 
   if (Result.isFailure(credentials)) {
     const error = credentials.failure;
@@ -146,7 +153,7 @@ const start = Effect.fnUntraced(function* (
       Context.get(observationContext, OperatorObservation),
       Context.get(observationContext, OperatorConfiguration),
     );
-    return yield* serve({ backend, webRoot, port, url, openSetupPage: true });
+    return yield* serve({ backend, webRoot, port, listen, url, openSetupPage: true });
   }
 
   const shutdown = yield* Deferred.make<void>();
@@ -172,6 +179,7 @@ const start = Effect.fnUntraced(function* (
           ),
           webRoot,
           port,
+          listen,
           url,
           openSetupPage: false,
         }),
@@ -199,25 +207,28 @@ const start = Effect.fnUntraced(function* (
   );
 });
 
-export const up = (port: Port, logLevel: UpLogLevel, allowVolatileInstance: boolean) =>
+export const up = (command: UpCommand) =>
   Effect.scoped(
     Effect.gen(function* () {
+      const { port, listen } = command;
       const directory = InstanceDirectory.make(process.cwd());
-      yield* refuseVolatileInstance(directory, allowVolatileInstance).pipe(
+      yield* refuseVolatileInstance(directory, command.allowVolatileInstance).pipe(
         Effect.provide(NodeServices.layer),
       );
       const record = new InstanceRecord({
         pid: ProcessId.make(process.pid),
         version: yield* packageVersion().pipe(Effect.provide(NodeServices.layer)),
         startedAt: yield* DateTime.now,
-        launch: yield* currentLaunch(port, logLevel, allowVolatileInstance),
+        launch: yield* currentLaunch(command),
       });
       // Acquired before any store opens and released after every store closes.
       yield* holdInstance(directory, record).pipe(Effect.provide(NodeServices.layer));
       const instanceId = yield* instanceIdOf(instanceFiles(directory)).pipe(
         Effect.provide(NodeServices.layer),
       );
-      yield* refuseTakenPort(port).pipe(Effect.provide(NodeServices.layer));
+      for (const host of serverHosts(listen)) {
+        yield* refuseTakenPort(host, port).pipe(Effect.provide(NodeServices.layer));
+      }
       if (process.platform === "darwin")
         yield* warnIfSystemSleeps().pipe(Effect.provide(NodeServices.layer));
       const instances = yield* loadInstance(directory);
@@ -226,8 +237,8 @@ export const up = (port: Port, logLevel: UpLogLevel, allowVolatileInstance: bool
       const tracer = yield* Layer.build(tracingLayer(config.tracing)).pipe(
         Effect.provide(NodeServices.layer),
       );
-      return yield* start(directory, instanceId, instances, port).pipe(
+      return yield* start(directory, instanceId, instances, port, listen).pipe(
         Effect.provideContext(tracer),
       );
     }),
-  ).pipe(Effect.provideService(References.MinimumLogLevel, logLevel));
+  ).pipe(Effect.provideService(References.MinimumLogLevel, command.logLevel));

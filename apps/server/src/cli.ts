@@ -1,4 +1,4 @@
-import { createServer } from "node:net";
+import { createServer, isIP } from "node:net";
 import { tmpdir } from "node:os";
 import { resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,6 +20,55 @@ export type Port = typeof Port.Type;
 
 const PortFromString = Schema.NumberFromString.pipe(Schema.decodeTo(Port));
 
+/**
+ * Returns the IP address as the hostname of a URL, which brackets an IPv6 address and writes it in
+ * its shortest form, or `None` if it isn't an IP address. An IPv6 zone ID has no URL form.
+ */
+export const urlHostname = (address: string): Option.Option<string> => {
+  switch (isIP(address)) {
+    case 4:
+      return Option.some(address);
+    case 6:
+      return URL.canParse(`http://[${address}]`)
+        ? Option.some(new URL(`http://[${address}]`).hostname)
+        : Option.none();
+    default:
+      return Option.none();
+  }
+};
+
+/** The URL hostnames of the addresses that would expose the server on every interface. */
+const WILDCARD_HOSTNAMES: ReadonlySet<string> = new Set(["0.0.0.0", "[::]"]);
+
+/**
+ * An IP address that `usine up` listens on besides `SERVER_HOST`, such as the machine's tailnet
+ * address.
+ */
+export const ListenAddress = Schema.String.check(
+  Schema.makeFilter(
+    (address: string) =>
+      Option.exists(
+        urlHostname(address),
+        (hostname) => !WILDCARD_HOSTNAMES.has(hostname) && hostname !== SERVER_HOST,
+      ),
+    { message: `Expected an IP address other than ${SERVER_HOST}, 0.0.0.0, or ::` },
+  ),
+).pipe(Schema.brand("ListenAddress"));
+export type ListenAddress = typeof ListenAddress.Type;
+
+/** Returns `host:port`, with an IPv6 address in brackets. */
+export const hostPort = (host: string, port: Port): string =>
+  `${Option.getOrElse(urlHostname(host), () => host)}:${port}`;
+
+/** Returns the URL of the server at `host` and `port`. */
+export const serverUrl = (host: string, port: Port): string => `http://${hostPort(host, port)}`;
+
+/** Returns the addresses that `usine up` listens on: `SERVER_HOST`, and `listen` if set. */
+export const serverHosts = (listen: Option.Option<ListenAddress>): ReadonlyArray<string> => [
+  SERVER_HOST,
+  ...Option.toArray(listen),
+];
+
 /** The minimum level of the lines `usine up` logs. */
 export const UpLogLevel = Schema.Literals(["Trace", "Debug", "Info", "Warn", "Error"]);
 export type UpLogLevel = typeof UpLogLevel.Type;
@@ -39,7 +88,7 @@ const LOG_LEVEL_NAMES = {
 export const DEFAULT_LIFECYCLE_TIMEOUT_SECONDS = 120;
 
 export const CLI_USAGE = `Usage:
-  usine up [--port <port>] [--log-level <level>] [--allow-volatile-instance] [--detach]
+  usine up [--port <port>] [--listen <address>] [--log-level <level>] [--allow-volatile-instance] [--detach]
   usine status
   usine stop [--timeout <seconds>] [--force]
   usine restart [--timeout <seconds>] [--force]
@@ -51,6 +100,7 @@ export const CLI_USAGE = `Usage:
 
 Options:
   -p, --port <port>            Listen on this port (default: 7331)
+  --listen <address>           Also listen on this IP address, such as the machine's tailnet address
   --log-level <level>          Log at this level and above: trace, debug, info, warn, or error (default: info)
   --allow-volatile-instance    Start even when the instance folder is in a temporary directory
   --detach                     Start in the background, with the output in .usine/usine.log
@@ -63,6 +113,7 @@ Options:
 
 Environment:
   USINE_PORT                     Listen on this port if --port is not set
+  USINE_LISTEN                   Also listen on this address if --listen is not set
   USINE_LOG_LEVEL                Log at this level if --log-level is not set
   USINE_ALLOW_VOLATILE_INSTANCE  Set to 1 for the same effect as --allow-volatile-instance
 
@@ -81,6 +132,8 @@ export class CliVersionError extends Schema.TaggedError<CliVersionError>(
 export class PortInUseError extends Schema.TaggedError<PortInUseError>(
   "@usine/server/PortInUseError",
 )("PortInUseError", {
+  /** The address that the server couldn't listen on. */
+  host: Schema.String,
   port: Port,
   /** The PID of the listening process, or `None` if lsof can't find it. */
   holder: Schema.Option(Schema.Int),
@@ -88,7 +141,7 @@ export class PortInUseError extends Schema.TaggedError<PortInUseError>(
 
 export class ServerStartError extends Schema.TaggedError<ServerStartError>(
   "@usine/server/ServerStartError",
-)("ServerStartError", { port: Port, cause: Schema.Defect() }) {}
+)("ServerStartError", { host: Schema.String, port: Port, cause: Schema.Defect() }) {}
 
 /** The instance folder is in a directory the OS may clear, which would delete the run history. */
 export class VolatileInstanceDirectoryError extends Schema.TaggedError<VolatileInstanceDirectoryError>(
@@ -118,6 +171,8 @@ export class UpCommand extends Schema.TaggedClass<UpCommand>("@usine/server/UpCo
   "UpCommand",
   {
     port: Port,
+    /** The address to listen on besides `SERVER_HOST`. */
+    listen: Schema.Option(ListenAddress),
     logLevel: UpLogLevel,
     allowVolatileInstance: Schema.Boolean,
     detach: Schema.Boolean,
@@ -176,6 +231,7 @@ export class BackupCommand extends Schema.TaggedClass<BackupCommand>("@usine/ser
 
 export interface CliEnvironment {
   readonly port: Option.Option<string>;
+  readonly listen: Option.Option<string>;
   readonly logLevel: Option.Option<string>;
   readonly allowVolatileInstance: Option.Option<string>;
 }
@@ -202,6 +258,18 @@ const decodePort = (
   Schema.decodeUnknownEffect(PortFromString)(value).pipe(
     Effect.mapError(() =>
       usageError(`${source} must be a whole number between 1 and 65535.\n\n${CLI_USAGE}`),
+    ),
+  );
+
+const decodeListenAddress = (
+  source: "--listen" | "USINE_LISTEN",
+  value: string,
+): Effect.Effect<ListenAddress, CliUsageError> =>
+  Schema.decodeUnknownEffect(ListenAddress)(value).pipe(
+    Effect.mapError(() =>
+      usageError(
+        `${source} must be one IP address of this machine other than ${SERVER_HOST}, 0.0.0.0, or ::, such as its tailnet address.\n\n${CLI_USAGE}`,
+      ),
     ),
   );
 
@@ -249,6 +317,7 @@ const upCommand = (
 ): Effect.Effect<UpCommand, CliUsageError> =>
   Effect.gen(function* () {
     let port: Option.Option<string> = Option.none();
+    let listen: Option.Option<string> = Option.none();
     let logLevel: Option.Option<string> = Option.none();
     let allowVolatileInstance = Option.exists(environment.allowVolatileInstance, (v) => v === "1");
     let detach = false;
@@ -261,6 +330,13 @@ const upCommand = (
         index += 1;
       } else if (arg?.startsWith("--port=")) {
         port = Option.some(arg.slice("--port=".length));
+      } else if (arg === "--listen") {
+        const value = args[index + 1];
+        if (value === undefined) return yield* usageError();
+        listen = Option.some(value);
+        index += 1;
+      } else if (arg?.startsWith("--listen=")) {
+        listen = Option.some(arg.slice("--listen=".length));
       } else if (arg === "--log-level") {
         const value = args[index + 1];
         if (value === undefined) return yield* usageError();
@@ -284,6 +360,14 @@ const upCommand = (
         }),
       onSome: (value) => decodePort("--port", value),
     });
+    const resolvedListen = yield* Option.match(listen, {
+      onNone: () =>
+        Option.match(environment.listen, {
+          onNone: () => Effect.succeedNone,
+          onSome: (value) => Effect.asSome(decodeListenAddress("USINE_LISTEN", value)),
+        }),
+      onSome: (value) => Effect.asSome(decodeListenAddress("--listen", value)),
+    });
     const resolvedLogLevel = yield* Option.match(logLevel, {
       onNone: () =>
         Option.match(environment.logLevel, {
@@ -294,6 +378,7 @@ const upCommand = (
     });
     return new UpCommand({
       port: resolvedPort,
+      listen: resolvedListen,
       logLevel: resolvedLogLevel,
       allowVolatileInstance,
       detach,
@@ -466,10 +551,10 @@ export const packageVersion = Effect.fn("Cli.packageVersion")(function* () {
 const AddressInUse = Schema.Struct({ code: Schema.Literal("EADDRINUSE") });
 
 /** Returns `PortInUseError` for `EADDRINUSE`, otherwise `ServerStartError`. */
-export const serverStartError = (port: Port, error: ServeError) =>
+export const serverStartError = (host: string, port: Port, error: ServeError) =>
   Schema.is(AddressInUse)(error.cause)
-    ? new PortInUseError({ port, holder: Option.none() })
-    : new ServerStartError({ port, cause: error.cause });
+    ? new PortInUseError({ host, port, holder: Option.none() })
+    : new ServerStartError({ host, port, cause: error.cause });
 
 const ProcessIdFromString = Schema.NumberFromString.pipe(Schema.decodeTo(Schema.Int));
 
@@ -499,37 +584,40 @@ const portHolder = Effect.fn("Cli.portHolder")(function* (port: Port) {
 });
 
 /** Fails with `PortInUseError`, with the listening PID if found. */
-export const portInUse = Effect.fn("Cli.portInUse")(function* (port: Port) {
+export const portInUse = Effect.fn("Cli.portInUse")(function* (host: string, port: Port) {
   const holder = yield* portHolder(port);
   yield* Effect.logWarning("Another process listens on the HTTP port", {
+    host,
     port,
     holder: Option.getOrUndefined(holder),
   });
-  return yield* new PortInUseError({ port, holder });
+  return yield* new PortInUseError({ host, port, holder });
 });
 
-const portTaken = (port: Port) =>
+const portTaken = (host: string, port: Port) =>
   Effect.callback<boolean, ServerStartError>((resume) => {
     const server = createServer();
     server.once("error", (cause) =>
       resume(
         Schema.is(AddressInUse)(cause)
           ? Effect.succeed(true)
-          : Effect.fail(new ServerStartError({ port, cause })),
+          : Effect.fail(new ServerStartError({ host, port, cause })),
       ),
     );
-    server.listen({ host: SERVER_HOST, port }, () =>
-      server.close(() => resume(Effect.succeed(false))),
-    );
+    server.listen({ host, port }, () => server.close(() => resume(Effect.succeed(false))));
     return Effect.sync(() => server.close());
   });
 
 /**
- * Fails with `PortInUseError` if another process is listening on `port`. Call it before `usine up`
- * builds its runtime.
+ * Fails with `PortInUseError` if another process is listening on `port` at `host`, and with
+ * `ServerStartError` if `usine up` can't listen there for another reason, such as an address that
+ * the machine doesn't have. Call it before `usine up` builds its runtime.
  */
-export const refuseTakenPort = Effect.fn("Cli.refuseTakenPort")(function* (port: Port) {
-  if (yield* portTaken(port)) return yield* portInUse(port);
+export const refuseTakenPort = Effect.fn("Cli.refuseTakenPort")(function* (
+  host: string,
+  port: Port,
+) {
+  if (yield* portTaken(host, port)) return yield* portInUse(host, port);
 });
 
 const browserCommand = (url: string) => {

@@ -8,7 +8,7 @@ sidebar:
 The `@usine/server` package provides the `usine` binary ([`main.ts`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/main.ts#L47)). Run every command from the instance folder, the folder that contains `usine.yaml`. Each command first reads the [environment file](#environment-file), `.env`, in that folder.
 
 ```sh title="Usage"
-usine up [--port <port>] [--log-level <level>] [--allow-volatile-instance] [--detach]
+usine up [--port <port>] [--listen <address>] [--log-level <level>] [--allow-volatile-instance] [--detach]
 usine status
 usine stop [--timeout <seconds>] [--force]
 usine restart [--timeout <seconds>] [--force]
@@ -37,7 +37,8 @@ For any other form, the parser prints the usage on standard error and exits with
 
 | Flag | Value | Default | Description |
 | --- | --- | --- | --- |
-| `-p <port>`, `--port <port>`, `--port=<port>` | integer 1 to 65535 | `USINE_PORT`, then `7331` | The HTTP port. The server listens only on `127.0.0.1`. |
+| `-p <port>`, `--port <port>`, `--port=<port>` | integer 1 to 65535 | `USINE_PORT`, then `7331` | The HTTP port. The server listens on `127.0.0.1`, and on the `--listen` address if you set one. |
+| `--listen <address>`, `--listen=<address>` | an IPv4 or IPv6 address other than `127.0.0.1`, `0.0.0.0`, and `::` | `USINE_LISTEN`, then none | One more address to listen on, at the same port, such as the machine's tailnet address. The operator API accepts browser requests from pages at this address as from the loopback names. See [Origin check](/architecture/operator-surfaces/#http-server). |
 | `--log-level <level>`, `--log-level=<level>` | `trace`, `debug`, `info`, `warn`, or `error`, in any case | `USINE_LOG_LEVEL`, then `info` | The lowest level of the lines that usine logs. `debug` adds the lines that say why usine skipped or deferred something, such as an entry left out of **Needs attention**. A change takes effect at the next `usine up`; `usine restart` keeps the recorded level. |
 | `--allow-volatile-instance` | none | off | Starts even if the instance folder is under a temporary directory. |
 | `--detach` | none | off | Starts the orchestrator in the background. See [Background start](#background-start). |
@@ -52,10 +53,10 @@ Each log line starts with its time as an ISO 8601 timestamp in UTC, such as `[20
 
 1. **Volatile path check.** usine refuses an instance folder under `os.tmpdir()`, `$TMPDIR`, `/tmp`, `/private/tmp`, or `/var/folders`, by the given path or its real path, because the runtime store is the only copy of every run and transcript. With `--allow-volatile-instance`, usine logs a warning and continues.
 2. **Instance lock.** usine holds an exclusive SQLite transaction on `.usine/instance.lock`, writes its process ID to `.usine/instance.pid`, and writes the [instance record](#instance-record) to `.usine/instance.json` ([`holdInstance`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/instance-lock.ts#L44)). A second `usine up` in the folder exits and prints that ID. The lock ends with the process, however it exits. usine removes both files when it exits, unless the OS kills it, for example with `SIGKILL`. usine then reads the instance ID from `.usine/instance-id`, or writes a new UUID there at the first start. The ID labels the instance's attempt containers on SSH workers, so that another instance folder with the same GitHub App doesn't remove them ([`instanceIdOf`](https://github.com/basaltbytes/usine/blob/main/apps/server/src/instance/id.ts)). If the file doesn't contain a UUID, usine exits.
-3. **Port check.** usine refuses a port that another process listens on, and prints that process if `lsof` finds it.
+3. **Port check.** usine refuses a port that another process listens on, at `127.0.0.1` or at the `--listen` address, and prints that process if `lsof` finds it. It also refuses a `--listen` address that it can't listen on, for example because the machine doesn't have it.
 4. **Instance load.** usine reads `usine.yaml`, `agents/`, and `loops/`, and exits with status 1 if `usine.yaml` is invalid or a folder is missing. Invalid loop and agent files don't stop startup ([Validation and quarantine](/reference/configuration/loop-files/#validation-and-quarantine)).
 5. **GitHub App credentials.** usine reads `USINE_GITHUB_APP_ID` and `USINE_GITHUB_PRIVATE_KEY`, and fills a missing one from `.usine/github-app.json` ([`loadLocalCredentials`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/github/src/local-secrets.ts#L69)). If both variables are set, usine doesn't read the file. It accepts PKCS#1 keys (`BEGIN RSA PRIVATE KEY`, as GitHub downloads them) and PKCS#8 keys.
-6. **Runtime.** usine opens the stores, reads each gateway's admin token, runs preflight on every worker, starts polling and schedules, and reattaches the attempts that an earlier process left running. It prints `usine is running at http://127.0.0.1:<port>`.
+6. **Runtime.** usine opens the stores, reads each gateway's admin token, runs preflight on every worker, starts polling and schedules, and reattaches the attempts that an earlier process left running. It prints `usine is running at http://127.0.0.1:<port>`, followed by `and http://<address>:<port>` with `--listen`.
 
 On macOS, after the port check, usine reads `pmset -g` and logs a warning if system sleep is on and `caffeinate` doesn't prevent it, since a sleep drops the SSH connections to workers and the gateway. The check doesn't stop startup. See [Keep the machine awake](/guides/#keep-the-machine-awake).
 
@@ -63,7 +64,7 @@ An expected startup failure prints one line with the file, setting, or worker at
 
 ### Background start
 
-`usine up --detach` checks that no `usine up` runs in the folder. It then starts `usine up` with the same Node.js binary, Node.js options, entry point, port, log level, and `--allow-volatile-instance` flag, in a new session and with no terminal. The new process appends its output to `.usine/usine.log`, which has owner-only permissions; usine doesn't rotate it. The command waits for the process to write its instance record and answer HTTP requests, and then prints:
+`usine up --detach` checks that no `usine up` runs in the folder. It then starts `usine up` with the same Node.js binary, Node.js options, entry point, port, listen address, log level, and `--allow-volatile-instance` flag, in a new session and with no terminal. The new process appends its output to `.usine/usine.log`, which has owner-only permissions; usine doesn't rotate it. The command waits for the process to write its instance record and answer HTTP requests, and then prints:
 
 ```text
 usine is running at http://127.0.0.1:7331 (pid 48120), with its output in .usine/usine.log.
@@ -82,7 +83,7 @@ If the process exits first, the command prints how it exited and the last 20 lin
 | `pid` | The process ID, which `.usine/instance.pid` also contains. |
 | `version` | The `@usine/server` version of the process. |
 | `startedAt` | When the process took the instance lock, in ISO 8601 format. |
-| `launch` | How the process started: `node` (the Node.js binary), `nodeOptions`, `script` (the CLI entry point), `port`, `logLevel`, and `allowVolatileInstance`. `usine restart` starts the new process with these values, and at `info` if a version before `--log-level` wrote the record without `logLevel`. |
+| `launch` | How the process started: `node` (the Node.js binary), `nodeOptions`, `script` (the CLI entry point), `port`, `listen` (absent without `--listen`), `logLevel`, and `allowVolatileInstance`. `usine restart` starts the new process with these values, and at `info` if a version before `--log-level` wrote the record without `logLevel`. |
 | `stoppingSince` | When the process received its first `SIGINT` or `SIGTERM`. Absent until then. |
 
 The record says which process holds the instance, but the instance lock says whether one does. If a process stops without removing its files, for example after `SIGKILL`, `usine status` reports them as stale, and the next `usine up` replaces them.
@@ -245,6 +246,7 @@ The `usine` process reads these variables from its environment, or from the [env
 | Variable | Read by | Description |
 | --- | --- | --- |
 | `USINE_PORT` | `usine up` | The HTTP port if `--port` is absent. If the value isn't a whole number from 1 to 65535, `usine up` exits with status 1. `usine restart` passes the recorded port with `--port`, so this variable doesn't change it unless the instance record is missing or unreadable. |
+| `USINE_LISTEN` | `usine up` | The address of `--listen` if the flag is absent. If the value isn't an IP address, or is `127.0.0.1`, `0.0.0.0`, or `::`, `usine up` exits with status 1. `usine restart` passes the recorded address with `--listen`. |
 | `USINE_LOG_LEVEL` | `usine up` | The log level if `--log-level` is absent. If the value isn't `trace`, `debug`, `info`, `warn`, or `error`, in any case, `usine up` exits with status 1. `usine restart` passes the recorded level with `--log-level`, so this variable doesn't change it unless the instance record is missing or unreadable. |
 | `USINE_ALLOW_VOLATILE_INSTANCE` | `usine up` | `1` has the same effect as `--allow-volatile-instance`. usine ignores other values. |
 | `TMPDIR` | `usine up` | Added to the temporary directories of the volatile path check. |

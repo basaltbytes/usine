@@ -74,6 +74,7 @@ const listen = (port) =>
 
 const noEnvironment = {
   port: Option.none(),
+  listen: Option.none(),
   logLevel: Option.none(),
   allowVolatileInstance: Option.none(),
 };
@@ -85,12 +86,12 @@ NodeRuntime.runMain(
       if (command._tag !== "UpCommand") {
         return yield* Effect.die(new Error(`Unexpected arguments: ${process.argv}`));
       }
-      const { port, logLevel, allowVolatileInstance } = command;
+      const { port } = command;
       const record = new InstanceRecord({
         pid: ProcessId.make(process.pid),
         version: "0.0.0-fixture",
         startedAt: yield* DateTime.now,
-        launch: yield* currentLaunch(port, logLevel, allowVolatileInstance),
+        launch: yield* currentLaunch(command),
       });
       yield* holdInstance(directory, record);
       const requested = yield* Deferred.make();

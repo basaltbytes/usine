@@ -22,6 +22,7 @@ import {
 
 const noEnvironment = {
   port: Option.none<string>(),
+  listen: Option.none<string>(),
   logLevel: Option.none<string>(),
   allowVolatileInstance: Option.none<string>(),
 };
@@ -230,6 +231,45 @@ describe("usine CLI", () => {
     assert.match(environmentError.message, /^USINE_LOG_LEVEL/);
   });
 
+  it("reads the listen address from the flag, then the environment, and refuses a wildcard, loopback, or name", async () => {
+    const listen = async (args: ReadonlyArray<string>, environment = Option.none<string>()) => {
+      const command = await Effect.runPromise(
+        parseCli(["up", ...args], { ...noEnvironment, listen: environment }),
+      );
+      assert(command._tag === "UpCommand");
+      return command.listen;
+    };
+    assert.deepStrictEqual(await listen([]), Option.none());
+    assert.deepStrictEqual(
+      await listen([], Option.some("100.64.0.20")),
+      Option.some("100.64.0.20"),
+    );
+    assert.deepStrictEqual(
+      await listen(["--listen", "fd7a:115c:a1e0::1"], Option.some("100.64.0.20")),
+      Option.some("fd7a:115c:a1e0::1"),
+    );
+    assert.deepStrictEqual(await listen(["--listen=100.64.0.21"]), Option.some("100.64.0.21"));
+    for (const address of [
+      "0.0.0.0",
+      "::",
+      "0:0::0",
+      SERVER_HOST,
+      "orchestrator",
+      "100.64.0.20:7331",
+    ]) {
+      const error = await Effect.runPromise(
+        parseCli(["up", "--listen", address], noEnvironment).pipe(Effect.flip),
+      );
+      assert(error instanceof CliUsageError, address);
+      assert.match(error.message, /^--listen must be one IP address of this machine/u);
+    }
+    const environmentError = await Effect.runPromise(
+      parseCli(["up"], { ...noEnvironment, listen: Option.some("0.0.0.0") }).pipe(Effect.flip),
+    );
+    assert(environmentError instanceof CliUsageError);
+    assert.match(environmentError.message, /^USINE_LISTEN/u);
+  });
+
   it("reads the version pinned in the installed server package", async () => {
     const version = await Effect.runPromise(
       packageVersion().pipe(Effect.provide(NodeServices.layer)),
@@ -243,6 +283,7 @@ describe("usine CLI", () => {
       code: "EADDRINUSE",
     });
     const error = serverStartError(
+      SERVER_HOST,
       port,
       new ServeError({
         cause: bindFailure,
@@ -259,13 +300,15 @@ describe("usine CLI", () => {
     const { port } = Schema.decodeUnknownSync(Schema.Struct({ port: Port }))(listener.address());
 
     const refused = await Effect.runPromise(
-      refuseTakenPort(port).pipe(Effect.flip, Effect.provide(NodeServices.layer)),
+      refuseTakenPort(SERVER_HOST, port).pipe(Effect.flip, Effect.provide(NodeServices.layer)),
     );
     assert(refused instanceof PortInUseError);
     assert.deepStrictEqual(refused.holder, Option.some(process.pid));
 
     await new Promise((resolve) => listener.close(resolve));
-    await Effect.runPromise(refuseTakenPort(port).pipe(Effect.provide(NodeServices.layer)));
+    await Effect.runPromise(
+      refuseTakenPort(SERVER_HOST, port).pipe(Effect.provide(NodeServices.layer)),
+    );
   });
 
   it("bounds a browser opener that never exits and configures forced cleanup", async () => {

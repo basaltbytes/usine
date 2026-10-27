@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 import type { InstanceDirectory } from "@usine/core/instance";
 import { Console, Deferred, Duration, Effect, FileSystem, Option, Schedule, Schema } from "effect";
-import { DEFAULT_LIFECYCLE_TIMEOUT_SECONDS, Port, SERVER_HOST, type UpLogLevel } from "./cli.ts";
+import { DEFAULT_LIFECYCLE_TIMEOUT_SECONDS, Port, SERVER_HOST, type UpCommand } from "./cli.ts";
 import { InstanceInUseError } from "./instance/lock.ts";
 import { type InstanceLaunch, ProcessId, currentLaunch, instanceFiles } from "./instance/record.ts";
 import { answers } from "./instance/operator-api.ts";
@@ -52,6 +52,7 @@ const launchArguments = (launch: InstanceLaunch): ReadonlyArray<string> => {
     "--log-level",
     launch.logLevel.toLowerCase(),
   ];
+  if (Option.isSome(launch.listen)) args.push("--listen", launch.listen.value);
   if (launch.allowVolatileInstance) args.push("--allow-volatile-instance");
   return args;
 };
@@ -244,9 +245,7 @@ export const startedMessage = ({ pid, port }: StartedInstance): string =>
 /** Starts `usine up` in the background in the instance folder, unless it runs already. */
 export const upDetached = Effect.fn("Cli.upDetached")(function* (
   directory: InstanceDirectory,
-  port: Port,
-  logLevel: UpLogLevel,
-  allowVolatileInstance: boolean,
+  command: UpCommand,
 ) {
   const state = yield* probeInstance(directory);
   if (state._tag !== "Stopped") {
@@ -255,7 +254,7 @@ export const upDetached = Effect.fn("Cli.upDetached")(function* (
       holder: state._tag === "Running" ? Option.some(state.record.pid) : state.pid,
     });
   }
-  const launch = yield* currentLaunch(port, logLevel, allowVolatileInstance);
+  const launch = yield* currentLaunch(command);
   const started = yield* startDetached(
     directory,
     launch,

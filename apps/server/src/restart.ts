@@ -29,11 +29,7 @@ import {
  * starts for an instance without a readable record.
  */
 export const fallbackLaunch = (environment: CliEnvironment) =>
-  environmentUp(environment).pipe(
-    Effect.flatMap(({ port, logLevel, allowVolatileInstance }) =>
-      currentLaunch(port, logLevel, allowVolatileInstance),
-    ),
-  );
+  environmentUp(environment).pipe(Effect.flatMap(currentLaunch));
 
 /**
  * Returns the port on which the process answers the operator API, or `None` if none of its ports

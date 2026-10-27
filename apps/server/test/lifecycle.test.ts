@@ -19,7 +19,7 @@ import { RunId } from "@usine/core/run";
 import { DateTime, Duration, Effect, Layer, Option, Schema } from "effect";
 import { FetchHttpClient, type HttpClient } from "effect/unstable/http";
 import { afterEach, assert, describe, it } from "vitest";
-import { LifecycleOptions, Port, SERVER_HOST, type UpLogLevel } from "../src/cli.ts";
+import { LifecycleOptions, ListenAddress, Port, SERVER_HOST, type UpLogLevel } from "../src/cli.ts";
 import { startDetached } from "../src/detach.ts";
 import { holdInstance } from "../src/instance/lock.ts";
 import { ListeningPortsError } from "../src/instance/ports.ts";
@@ -81,12 +81,17 @@ const options = (seconds: number, force = false) =>
 /** The fallback launch of a restart that must find the instance record. */
 const recordedOnly = Effect.die(new Error("usine restart used the fallback launch"));
 
-const fixtureLaunch = async (script = FIXTURE, logLevel: UpLogLevel = "Info") =>
+const fixtureLaunch = async (
+  script = FIXTURE,
+  logLevel: UpLogLevel = "Info",
+  listen = Option.none<ListenAddress>(),
+) =>
   new InstanceLaunch({
     node: process.execPath,
     nodeOptions: ["--experimental-strip-types", "--no-warnings"],
     script,
     port: await freePort(),
+    listen,
     logLevel,
     allowVolatileInstance: false,
   });
@@ -96,8 +101,9 @@ const startFixture = async (
   directory: InstanceDirectory,
   script = FIXTURE,
   logLevel: UpLogLevel = "Info",
+  listen = Option.none<ListenAddress>(),
 ) => {
-  const launch = await fixtureLaunch(script, logLevel);
+  const launch = await fixtureLaunch(script, logLevel, listen);
   const { pid } = await run(startDetached(directory, launch, Duration.seconds(30)));
   pids.add(pid);
   return { pid, launch };
@@ -150,10 +156,16 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
     assert.deepStrictEqual(state.stale, Option.none());
   });
 
-  it("restarts into a new process with the recorded launch, port, and log level", async () => {
+  it("restarts into a new process with the recorded launch, port, listen address, and log level", async () => {
     const directory = instanceFolder();
     const files = instanceFiles(directory);
-    const first = await startFixture(directory, FIXTURE, "Debug");
+    // The fixture records --listen without listening there.
+    const first = await startFixture(
+      directory,
+      FIXTURE,
+      "Debug",
+      Option.some(ListenAddress.make("100.64.0.20")),
+    );
 
     await run(restart(directory, options(20), recordedOnly));
 
@@ -164,8 +176,9 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
     assert.isFalse(alive(first.pid));
     assert.strictEqual(state.record.launch.port, first.launch.port);
     assert.deepStrictEqual(state.record.launch.nodeOptions, first.launch.nodeOptions);
-    // Both starts passed --log-level to the fixture, which recorded it as usine up does.
+    // Both starts passed --log-level and --listen to the fixture, which recorded them as usine up does.
     assert.strictEqual(state.record.launch.logLevel, "Debug");
+    assert.deepStrictEqual(state.record.launch.listen, first.launch.listen);
     assert.strictEqual(readFileSync(files.pid, "utf8").trim(), String(state.record.pid));
     const log = readFileSync(files.log, "utf8");
     assert.strictEqual(log.match(/fixture listening/gu)?.length, 2, log);

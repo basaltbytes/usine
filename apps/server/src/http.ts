@@ -9,11 +9,17 @@ import {
   OperatorHttpPolicy,
   reloadRefusal,
 } from "@usine/orchestrator/operator/http";
-import { Effect, Layer, Schema, type Types } from "effect";
+import { Effect, Layer, Option, Schema, type Types } from "effect";
 import { Headers, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi";
 import { FactoryBackend, type BackendError } from "./backend.ts";
-import { SERVER_HOST } from "./cli.ts";
+import {
+  type ListenAddress,
+  type Port,
+  SERVER_HOST,
+  serverStartError,
+  urlHostname,
+} from "./cli.ts";
 
 const operatorFailure = (error: BackendError) => {
   const message = (() => {
@@ -75,68 +81,78 @@ const operatorFailure = (error: BackendError) => {
   return new OperatorHttpError({ error: error._tag, message });
 };
 
-const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
+const LOOPBACK_HOSTS = ["127.0.0.1", "localhost", "[::1]", "::1"];
+
+/** Returns the origin hostnames of the UI's pages: the loopback names, and the `--listen` address. */
+const pageHosts = (listen: Option.Option<ListenAddress>): ReadonlySet<string> =>
+  new Set([...LOOPBACK_HOSTS, ...Option.toArray(Option.flatMap(listen, urlHostname))]);
 
 /**
- * Whether the request has a non-loopback `Origin`, which marks a cross-site request. Requests
+ * Whether the request has an `Origin` outside `pages`, which marks a cross-site request. Requests
  * without `Origin` (curl, same-origin GETs) are allowed.
  */
-const crossSiteOrigin = (request: HttpServerRequest.HttpServerRequest): boolean => {
+const crossSiteOrigin = (
+  request: HttpServerRequest.HttpServerRequest,
+  pages: ReadonlySet<string>,
+): boolean => {
   const origin = request.headers.origin;
   if (origin === undefined) return false;
   try {
-    return !LOOPBACK_HOSTS.has(new URL(origin).hostname);
+    return !pages.has(new URL(origin).hostname);
   } catch {
     return true;
   }
 };
 
-const policy = Layer.succeed(OperatorHttpPolicy)((handler, { endpoint }) =>
-  Effect.gen(function* () {
-    const request = yield* HttpServerRequest.HttpServerRequest;
-    if (crossSiteOrigin(request)) {
-      yield* Effect.logWarning("Cross-site request to the operator API was refused", {
-        origin: request.headers.origin,
-        url: request.url,
-      });
-      return yield* new OperatorHttpError({
-        error: "CrossSiteRequestError",
-        message: "Cross-site requests are not allowed.",
-      });
-    }
-    // JSON is accepted regardless of Content-Type, including simple browser POSTs;
-    // `crossSiteOrigin` guards against CSRF.
-    const decoded =
-      endpoint.payload.size === 0
-        ? handler
-        : handler.pipe(
-            Effect.provideService(
-              HttpServerRequest.HttpServerRequest,
-              request.modify({
-                headers: Headers.set(request.headers, "content-type", "application/json"),
-              }),
-            ),
+const policy = (listen: Option.Option<ListenAddress>) => {
+  const pages = pageHosts(listen);
+  return Layer.succeed(OperatorHttpPolicy)((handler, { endpoint }) =>
+    Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      if (crossSiteOrigin(request, pages)) {
+        yield* Effect.logWarning("Cross-site request to the operator API was refused", {
+          origin: request.headers.origin,
+          url: request.url,
+        });
+        return yield* new OperatorHttpError({
+          error: "CrossSiteRequestError",
+          message: "Cross-site requests are not allowed.",
+        });
+      }
+      // JSON is accepted regardless of Content-Type, including simple browser POSTs;
+      // `crossSiteOrigin` guards against CSRF.
+      const decoded =
+        endpoint.payload.size === 0
+          ? handler
+          : handler.pipe(
+              Effect.provideService(
+                HttpServerRequest.HttpServerRequest,
+                request.modify({
+                  headers: Headers.set(request.headers, "content-type", "application/json"),
+                }),
+              ),
+            );
+      return yield* decoded.pipe(
+        Effect.catch((error): Effect.Effect<never, OperatorHttpError | Types.unhandled> => {
+          if (!HttpApiError.HttpApiSchemaError.is(error)) return Effect.fail(error);
+          const responseEncoding = error.kind === "Body" || error.kind === "ResponseHeaders";
+          return Effect.fail(
+            new OperatorHttpError({
+              error: responseEncoding
+                ? "HttpBodyError"
+                : error.kind === "Payload"
+                  ? "InvalidRequestError"
+                  : "SchemaError",
+              message: responseEncoding
+                ? "The server could not encode its response."
+                : `Invalid request: ${error.cause.message}`,
+            }),
           );
-    return yield* decoded.pipe(
-      Effect.catch((error): Effect.Effect<never, OperatorHttpError | Types.unhandled> => {
-        if (!HttpApiError.HttpApiSchemaError.is(error)) return Effect.fail(error);
-        const responseEncoding = error.kind === "Body" || error.kind === "ResponseHeaders";
-        return Effect.fail(
-          new OperatorHttpError({
-            error: responseEncoding
-              ? "HttpBodyError"
-              : error.kind === "Payload"
-                ? "InvalidRequestError"
-                : "SchemaError",
-            message: responseEncoding
-              ? "The server could not encode its response."
-              : `Invalid request: ${error.cause.message}`,
-          }),
-        );
-      }),
-    );
-  }),
-);
+        }),
+      );
+    }),
+  );
+};
 
 const acknowledge = <E, R>(effect: Effect.Effect<void, E, R>) =>
   Effect.as(effect, { ok: true } as const);
@@ -244,11 +260,16 @@ const handlers = HttpApiBuilder.group(OperatorApi, "operator", (routes) =>
     ),
 );
 
-export const apiRoutes = HttpApiBuilder.layer(OperatorApi).pipe(
-  Layer.provide(handlers),
-  Layer.provide(policy),
-  Layer.provide(NodeHttpServer.layerHttpServices),
-);
+/**
+ * Returns the operator API, which accepts browser requests from the UI's pages on the loopback
+ * names and on `listen`.
+ */
+export const apiRoutes = (listen: Option.Option<ListenAddress>) =>
+  HttpApiBuilder.layer(OperatorApi).pipe(
+    Layer.provide(handlers),
+    Layer.provide(policy(listen)),
+    Layer.provide(NodeHttpServer.layerHttpServices),
+  );
 
 export const staticRoutes = (webRoot: string) => {
   const assetsRoot = resolve(webRoot, "assets");
@@ -295,15 +316,23 @@ export const staticRoutes = (webRoot: string) => {
   ]);
 };
 
+/**
+ * Serves the operator API and the UI on `SERVER_HOST` and on `listen`, at `port`. Fails with
+ * `PortInUseError` or `ServerStartError` for the first address it can't listen on.
+ */
 export const serverLayer = (
   backend: Layer.Layer<FactoryBackend>,
   webRoot: string,
-  port: number,
+  port: Port,
+  listen: Option.Option<ListenAddress>,
 ) => {
-  const routes = Layer.mergeAll(apiRoutes, staticRoutes(webRoot)).pipe(
+  const routes = Layer.mergeAll(apiRoutes(listen), staticRoutes(webRoot)).pipe(
     HttpRouter.provideRequest(backend),
   );
-  return HttpRouter.serve(routes).pipe(
-    Layer.provide(NodeHttpServer.layer(createServer, { host: SERVER_HOST, port })),
-  );
+  const serveOn = (host: string) =>
+    HttpRouter.serve(routes).pipe(
+      Layer.provide(NodeHttpServer.layer(createServer, { host, port })),
+      Layer.catch((error) => Layer.effectDiscard(Effect.fail(serverStartError(host, port, error)))),
+    );
+  return Layer.mergeAll(serveOn(SERVER_HOST), ...Option.toArray(Option.map(listen, serveOn)));
 };

@@ -1,6 +1,6 @@
 import type { InstanceDirectory } from "@usine/core/instance";
 import { DateTime, Duration, Effect, Option } from "effect";
-import { SERVER_HOST, packageVersion } from "./cli.ts";
+import { packageVersion, serverHosts, serverUrl } from "./cli.ts";
 import {
   SERVER_PACKAGE,
   compareVersions,
@@ -89,7 +89,12 @@ const runningLines = Effect.fn("Cli.statusRunning")(function* (
       ? `usine is running in ${directory}.`
       : `usine is stopping in ${directory}. Its drain started at ${DateTime.formatIso(record.stoppingSince)} (${ago(record.stoppingSince, now)}).`,
     field("pid", String(record.pid)),
-    field("address", `http://${SERVER_HOST}:${record.launch.port}`),
+    field(
+      "address",
+      serverHosts(record.launch.listen)
+        .map((host) => serverUrl(host, record.launch.port))
+        .join(", "),
+    ),
     field(
       "engine",
       `${SERVER_PACKAGE} ${record.version}, ${installed ? "installed in the instance" : `from ${record.launch.script}`}`,
