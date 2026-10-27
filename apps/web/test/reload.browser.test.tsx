@@ -105,6 +105,7 @@ it("reloads the configuration from any Configuration page and shows what changed
     context: { queryClient },
     history: createMemoryHistory({ initialEntries: ["/configuration/loops"] }),
   });
+  await router.load();
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
