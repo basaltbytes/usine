@@ -26,3 +26,7 @@ With Effect Cluster removed (ADR 0003 amendment of the same date), the database 
 ## Amendment (2026-10-19, #336): Drizzle `1.0.0-rc.5-5935859` without a patch
 
 Both Drizzle packages are pinned at `1.0.0-rc.5-5935859`, the `rc5` npm tag's build. Its Effect integration calls `Schema.TaggedError`, which `effect` 4.0.0-rc.111 exports, so the patch is gone. A pnpm patch applies only in the workspace, so npm installs of `@usine/engine` got unpatched RC.4 files and couldn't load `@usine/engine/local-sqlite`. `.execute()` stays.
+
+## Amendment (2026-10-27, #494): Drizzle `1.0.0-rc.5` on Effect 4.0.x
+
+Both Drizzle packages are pinned at `1.0.0-rc.5`, the `rc` npm tag, whose peer range is `effect >=4.0.0`. The `1.0.0-rc.5-5935859` build imports `effect/unstable/sql/SqlError`, which Effect 4.0.x removed when SQL moved to `effect/sql`, so its transaction errors were typed `any`. `.execute()` stays.
