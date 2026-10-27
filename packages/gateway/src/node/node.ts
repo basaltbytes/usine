@@ -13,7 +13,8 @@ import {
   HttpServer,
   HttpServerRequest,
   HttpServerResponse,
-} from "effect/unstable/http";
+} from "effect/http";
+import { NetAddress } from "effect/net";
 import { adminRoutes } from "../admin/server.ts";
 import { gatewayServices } from "../gateway.ts";
 import { GatewayProxy } from "../proxy/proxy.ts";
@@ -45,8 +46,10 @@ export class GatewayAddresses extends Context.Service<
   { readonly proxy: Listener; readonly egress: Listener; readonly admin: Listener }
 >()("@usine/gateway/node/GatewayAddresses") {}
 
-const boundTo = (address: HttpServer.Address, requested: Listener): Listener =>
-  address._tag === "TcpAddress" ? { host: address.hostname, port: address.port } : requested;
+const boundTo = (address: NetAddress.SocketAddress, requested: Listener): Listener =>
+  address._tag === "UnixPathAddress"
+    ? requested
+    : { host: NetAddress.formatHost(address), port: address.port };
 
 /** Returns an address this process can connect to for `listener`, which may be bound to all interfaces. */
 const reachable = (listener: Listener): Listener =>

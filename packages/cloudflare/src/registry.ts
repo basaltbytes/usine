@@ -1,6 +1,6 @@
 import { Context, Effect, Layer, Option, Schema } from "effect";
-import { HttpServer } from "effect/unstable/http";
-import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi";
+import { HttpServer } from "effect/http";
+import { HttpApi, HttpApiBuilder } from "effect/http-api";
 import {
   registryGroup,
   SandboxName,

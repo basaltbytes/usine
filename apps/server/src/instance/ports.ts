@@ -1,5 +1,5 @@
 import { Effect, FileSystem, Option, type PlatformError, Schema } from "effect";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { Port } from "../cli.ts";
 import { ProcessId } from "./record.ts";
 

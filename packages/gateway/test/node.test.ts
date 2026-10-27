@@ -14,8 +14,8 @@ import {
   Scope,
   Tracer,
 } from "effect";
-import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
-import { HttpApiClient } from "effect/unstable/httpapi";
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
+import { HttpApiClient } from "effect/http-api";
 import { AttachRequest, GatewayAdminApi } from "../src/admin/api.ts";
 import { AnonymousCredential } from "../src/attachment/attachment.ts";
 import { CallerTokens } from "../src/caller/caller.ts";

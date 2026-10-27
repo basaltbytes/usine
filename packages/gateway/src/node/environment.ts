@@ -54,7 +54,7 @@ export const readSettingsSource = Effect.fn("GatewayNode.readSettingsSource")(fu
   base: ConfigProvider.ConfigProvider,
 ) {
   const fs = yield* FileSystem.FileSystem;
-  const named = yield* Config.option(Config.string("USINE_GATEWAY_ENVIRONMENT_FILES")).parse(base);
+  const named = yield* Config.option(Config.String("USINE_GATEWAY_ENVIRONMENT_FILES")).parse(base);
   const files = Option.match(named, {
     onNone: (): ReadonlyArray<string> => [],
     onSome: (value) => value.split(":").filter((path) => path !== ""),
@@ -158,7 +158,7 @@ const providerCredentials = ({ anthropic, openai }: LlmProviders) => ({
   openai: Option.match(openai, { onNone: () => "none", onSome: (held) => held.credential._tag }),
 });
 
-export const egressAllowlistPath = Config.string("USINE_GATEWAY_EGRESS_ALLOWLIST").pipe(
+export const egressAllowlistPath = Config.String("USINE_GATEWAY_EGRESS_ALLOWLIST").pipe(
   Config.withDefault(DEFAULT_EGRESS_ALLOWLIST_PATH),
 );
 
@@ -185,8 +185,8 @@ export interface GatewayListeners {
 
 const listener = (prefix: string, host: string, port: number) =>
   Config.all({
-    host: Config.string(`${prefix}_HOST`).pipe(Config.withDefault(host)),
-    port: Config.port(`${prefix}_PORT`).pipe(Config.withDefault(port)),
+    host: Config.String(`${prefix}_HOST`).pipe(Config.withDefault(host)),
+    port: Config.Port(`${prefix}_PORT`).pipe(Config.withDefault(port)),
   });
 
 /**

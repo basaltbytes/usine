@@ -1,7 +1,8 @@
 import { RepositoryName } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
-import { Context, Effect, Encoding, Layer, Option, Redacted, Result, Schema } from "effect";
-import { Headers } from "effect/unstable/http";
+import { Context, Effect, Layer, Option, Redacted, Result, Schema } from "effect";
+import { Base64, Base64Url } from "effect/encoding";
+import { Headers } from "effect/http";
 import { AttachmentId } from "../attachment/attachment.ts";
 import { GatewaySettings } from "../settings.ts";
 
@@ -90,18 +91,18 @@ export class CallerTokens extends Context.Service<
           worker: claims.worker,
           repository: claims.repository,
         });
-        const signed = `ugw1.${Encoding.encodeBase64Url(encodeClaims(claims))}`;
+        const signed = `ugw1.${Base64Url.encode(encodeClaims(claims))}`;
         const mac = yield* Effect.promise(() =>
           crypto.subtle.sign("HMAC", key, toArrayBuffer(encoder.encode(signed))),
         );
-        return Redacted.make(`${signed}.${Encoding.encodeBase64Url(new Uint8Array(mac))}`);
+        return Redacted.make(`${signed}.${Base64Url.encode(new Uint8Array(mac))}`);
       });
 
       const verify = Effect.fn("CallerTokens.verify")(function* (token: CallerToken) {
         const match = TOKEN_FORMAT.exec(Redacted.value(token));
         const payload = match?.[1];
         const mac = Option.fromNullishOr(match?.[2]).pipe(
-          Option.flatMap((value) => Result.getSuccess(Encoding.decodeBase64Url(value))),
+          Option.flatMap((value) => Result.getSuccess(Base64Url.decode(value))),
         );
         if (payload === undefined || Option.isNone(mac))
           return yield* new CallerTokenRejected({ reason: "malformed" });
@@ -114,7 +115,7 @@ export class CallerTokens extends Context.Service<
           ),
         );
         if (!authentic) return yield* new CallerTokenRejected({ reason: "bad-signature" });
-        const claims = Result.getSuccess(Encoding.decodeBase64UrlString(payload)).pipe(
+        const claims = Result.getSuccess(Base64Url.decodeString(payload)).pipe(
           Option.flatMap(decodeClaims),
         );
         if (Option.isNone(claims)) return yield* new CallerTokenRejected({ reason: "malformed" });
@@ -170,7 +171,7 @@ export const tokenFromAuthorization = (value: string): Option.Option<CallerToken
   if (scheme === undefined || parameter === undefined) return Option.none();
   if (scheme === "bearer" || scheme === "token") return Option.some(Redacted.make(parameter));
   if (scheme !== "basic") return Option.none();
-  return Result.getSuccess(Encoding.decodeBase64String(parameter)).pipe(
+  return Result.getSuccess(Base64.decodeString(parameter)).pipe(
     Option.flatMap((pair) => {
       const separator = pair.indexOf(":");
       const user = separator === -1 ? pair : pair.slice(0, separator);

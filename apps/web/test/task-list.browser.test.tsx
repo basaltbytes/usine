@@ -155,14 +155,16 @@ it("lists only the tasks with runs, in flight first, with their status and last 
 
   const redesign = rowOf(/Redesign the Board columns/u);
   // Each Loop once, in first-run order, with its last Run's state, then the Run count.
-  await expect.element(redesign).toHaveTextContent("plan Succeeded · implement Running2");
+  await expect.element(redesign).toMatchTextContent("plan Succeeded · implement Running2");
   await expect
     .element(redesign.getByRole("link", { name: "Pull request #31, open", exact: true }))
     .toHaveAttribute("href", "https://github.com/board-test/repo/pull/31");
   // The pull request, then the time, tokens, and dollars of a priced Run and a ChatGPT plan Run,
   // each in its own cell.
-  await expect.element(redesign).toHaveTextContent(/#3141 min27\.3K\$2\.40$/u);
-  await expect.element(rowOf(/Show the salvage branch/u)).toHaveTextContent(/#630 min48K\$3\.10$/u);
+  await expect.element(redesign).toMatchTextContent(/#3141 min27\.3K\$2\.40$/u);
+  await expect
+    .element(rowOf(/Show the salvage branch/u))
+    .toMatchTextContent(/#630 min48K\$3\.10$/u);
   // No Attempt started on the waiting task, and the canceled one reported no tokens.
   expect(cellTexts(/Retry salvage pushes/u).slice(4)).toEqual(["", "", ""]);
   expect(cellTexts(/Cache the label catalog/u).slice(4)).toEqual(["10 min", "", ""]);
@@ -175,14 +177,14 @@ it("opens the tokens per pool, summed over the task's runs, from the tokens or t
   await redesign.getByRole("button", { name: "Tokens: 27.3K. Show per pool" }).hover();
   const pools = page.getByRole("region", { name: "Tokens per pool" });
   await expect.element(pools).toBeVisible();
-  await expect.element(pools).toHaveTextContent("API keys1,500$0.75");
-  await expect.element(pools).toHaveTextContent("Claude plan20,000$1.25 estimate");
-  await expect.element(pools).toHaveTextContent("ChatGPT plan5,800$0.40 estimate");
+  await expect.element(pools).toMatchTextContent("API keys1,500$0.75");
+  await expect.element(pools).toMatchTextContent("Claude plan20,000$1.25 estimate");
+  await expect.element(pools).toMatchTextContent("ChatGPT plan5,800$0.40 estimate");
   await page.getByRole("heading", { name: "Tasks", level: 1 }).hover();
   await expect.element(pools).not.toBeInTheDocument();
 
   await redesign.getByRole("button", { name: "Estimated cost: $2.40. Show per pool" }).hover();
-  await expect.element(pools).toHaveTextContent("Claude plan20,000$1.25 estimate");
+  await expect.element(pools).toMatchTextContent("Claude plan20,000$1.25 estimate");
 });
 
 it("marks the priced dollars with an asterisk while a run has no price yet, and says why", async () => {
@@ -199,13 +201,13 @@ it("marks the priced dollars with an asterisk while a run has no price yet, and 
     .element(page.getByText("$13.45*", { exact: true }))
     .toHaveAttribute("title", "Some sessions have no price yet; the real figure is higher");
   const redesign = rowOf(/Redesign the Board columns/u);
-  await expect.element(redesign).toHaveTextContent(/#3141 min27\.5K\$9\.95\*$/u);
+  await expect.element(redesign).toMatchTextContent(/#3141 min27\.5K\$9\.95\*$/u);
   await redesign
     .getByRole("button", { name: "Estimated cost: at least $9.95. Show per pool" })
     .hover();
   const pools = page.getByRole("region", { name: "Tokens per pool" });
-  await expect.element(pools).toHaveTextContent("API keys1,500$0.75");
-  await expect.element(pools).toHaveTextContent("Claude plan26,000at least $9.20 estimate");
+  await expect.element(pools).toMatchTextContent("API keys1,500$0.75");
+  await expect.element(pools).toMatchTextContent("Claude plan26,000at least $9.20 estimate");
   // The breakdown starts with the reason the figure is marked.
   expect(pools.element().parentElement?.textContent).toMatch(
     /^Some sessions have no price yet; the real figure is higher\.Tokens per pool/u,
@@ -233,7 +235,7 @@ it("marks the elapsed time with an asterisk while an attempt has no recorded tim
   const time = rowOf(/Cache the label catalog/u)
     .getByRole("cell")
     .nth(4);
-  await expect.element(time).toHaveTextContent(/^0s\*$/u);
+  await expect.element(time).toMatchTextContent(/^0s\*$/u);
   await expect.element(time.getByTitle(why)).toBeVisible();
 });
 
@@ -244,12 +246,12 @@ it("says Needs attention for a failure no stall explains, then the last run's ou
     .element(page.getByText("3 in flight, 1 needs attention, 1 done", { exact: true }))
     .toBeVisible();
   const pinned = rowOf(/Pin GitHub Actions/u);
-  await expect.element(pinned.getByRole("cell").nth(1)).toHaveTextContent("Needs attention");
+  await expect.element(pinned.getByRole("cell").nth(1)).toMatchTextContent("Needs attention");
   // It ended 80m ago, so it comes before #18, whose run was canceled a day ago.
   await expect.element(pinned).toBe(table().getByRole("row").nth(4).element());
 
   queryClient.setQueryData(["overview"], boardOverviewResolved());
-  await expect.element(pinned.getByRole("cell").nth(1)).toHaveTextContent(/^Failed · 1h ago$/u);
+  await expect.element(pinned.getByRole("cell").nth(1)).toMatchTextContent(/^Failed · 1h ago$/u);
   await expect.element(page.getByText("3 in flight, 1 done", { exact: true })).toBeVisible();
 });
 
@@ -316,8 +318,8 @@ it("keeps every title on one line beside all the columns and wide figures, the l
   await mount(list);
   expect(columns()).toHaveLength(7);
   const merged = rowOf(/@usine\/config/u);
-  await expect.element(merged.getByRole("cell").nth(1)).toHaveTextContent(/^Done · 28m ago$/u);
-  await expect.element(merged).toHaveTextContent(/1 h 21 min1\.3M\$12\.62\*$/u);
+  await expect.element(merged.getByRole("cell").nth(1)).toMatchTextContent(/^Done · 28m ago$/u);
+  await expect.element(merged).toMatchTextContent(/1 h 21 min1\.3M\$12\.62\*$/u);
   // The titles differ only in the package name near the end, so each one is shown in full.
   const titles = table()
     .getByTitle(/^Document the public API of @usine\//u)
@@ -339,7 +341,7 @@ it("breaks a status word wider than the Status column inside it, beside the whol
   await mount(list);
   expect(columns()).toHaveLength(7);
   const row = rowOf(/@usine\/core/u);
-  await expect.element(row).toHaveTextContent("Running dependency_updates");
+  await expect.element(row).toMatchTextContent("Running dependency_updates");
   const [status, runs] = row.getByRole("cell").elements().slice(1, 3);
   const words = status?.firstElementChild;
   // `dependency_updates` wraps instead of overflowing into the Runs column.
@@ -369,7 +371,7 @@ it("keeps only the elapsed time of the figures on a phone, without scrolling sid
         .getByRole("cell")
         .nth(1),
     )
-    .toHaveTextContent(/^Done · 1d ago$/u);
+    .toMatchTextContent(/^Done · 1d ago$/u);
   // A long status wraps instead of shrinking the title.
   const title = rowOf(/Pin GitHub Actions/u).getByRole("link", { name: /Pin GitHub Actions/u });
   expect(title.element().getBoundingClientRect().width).toBeGreaterThan(100);

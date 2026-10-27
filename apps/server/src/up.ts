@@ -103,7 +103,7 @@ const refuseVolatileInstance = Effect.fn("Server.refuseVolatileInstance")(functi
   const realDirectory = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
     fileSystem.realPath(directory),
   ).pipe(Effect.orElseSucceed(() => directory));
-  const roots = volatileRoots(yield* Effect.orDie(Config.option(Config.string("TMPDIR"))));
+  const roots = volatileRoots(yield* Effect.orDie(Config.option(Config.String("TMPDIR"))));
   const root = Option.orElse(volatileRoot(directory, roots), () =>
     volatileRoot(realDirectory, roots),
   );

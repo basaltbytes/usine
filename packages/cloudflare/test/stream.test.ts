@@ -1,6 +1,6 @@
 import { assert, describe, expect, it } from "@effect/vitest";
 import { type Cause, DateTime, Deferred, Duration, Effect, Fiber, Option, Queue } from "effect";
-import { HttpRouter } from "effect/unstable/http";
+import { HttpRouter } from "effect/http";
 import { TestClock } from "effect/testing";
 import { ProcessId } from "../src/api/api.ts";
 import {

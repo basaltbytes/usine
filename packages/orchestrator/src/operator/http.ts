@@ -11,7 +11,7 @@ import { RunAgainResult } from "@usine/engine/engine";
 import { TranscriptSequence } from "@usine/engine/transcript";
 import { ExecutorOperation, WorkerCapability } from "@usine/executor";
 import { Effect, Match, Record, Schema, SchemaTransformation } from "effect";
-import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware } from "effect/unstable/httpapi";
+import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware } from "effect/http-api";
 import { InstanceReload, RestartBlock } from "../current-instance/changes.ts";
 import type { InstanceReloadError } from "../current-instance/current-instance.ts";
 import { BoardLaneId } from "./board.ts";
@@ -276,23 +276,21 @@ export const OperatorApi = HttpApi.make("OperatorApi").add(
       HttpApiEndpoint.get("agents", "/api/agents", { success: Schema.Array(AgentName) }),
       HttpApiEndpoint.post("editAndRetry", "/api/runs/:runId/edit-and-retry", {
         params: runParams,
-        payload: EditAndRetry.annotate({ parseOptions: { onExcessProperty: "error" } }),
+        payload: EditAndRetry,
         success: acknowledged,
       }),
       HttpApiEndpoint.post("runAgain", "/api/runs/:runId/run-again", {
         params: runParams,
-        payload: EditAndRetry.annotate({ parseOptions: { onExcessProperty: "error" } }),
+        payload: EditAndRetry,
         success: RunAgainResult,
       }),
       HttpApiEndpoint.post("intervene", "/api/runs/:runId/intervene", {
         params: runParams,
-        payload: SessionIntervention.annotate({ parseOptions: { onExcessProperty: "error" } }),
+        payload: SessionIntervention,
         success: acknowledged,
       }),
       HttpApiEndpoint.post("resetCycleBudget", "/api/cycle-budgets/reset", {
-        payload: Schema.Struct({ askId: CycleBudgetAskId }).annotate({
-          parseOptions: { onExcessProperty: "error" },
-        }),
+        payload: Schema.Struct({ askId: CycleBudgetAskId }),
         success: acknowledged,
       }),
       HttpApiEndpoint.get("detail", "/api/runs/:runId", {
@@ -310,9 +308,7 @@ export const OperatorApi = HttpApi.make("OperatorApi").add(
       }),
       HttpApiEndpoint.post("resolveFailure", "/api/runs/:runId/resolve-failure", {
         params: runParams,
-        payload: Schema.Struct({ attemptId: AttemptId }).annotate({
-          parseOptions: { onExcessProperty: "error" },
-        }),
+        payload: Schema.Struct({ attemptId: AttemptId }),
         success: acknowledged,
       }),
       HttpApiEndpoint.post("retry", "/api/runs/:runId/retry", {
@@ -329,9 +325,7 @@ export const OperatorApi = HttpApi.make("OperatorApi").add(
           repository: repositoryPart,
           item: Schema.FiniteFromString.pipe(Schema.decodeTo(ItemNumber)),
         },
-        payload: Schema.Struct({ toLane: BoardLaneId }).annotate({
-          parseOptions: { onExcessProperty: "error" },
-        }),
+        payload: Schema.Struct({ toLane: BoardLaneId }),
         success: acknowledged,
       }),
       HttpApiEndpoint.post("discardLeftovers", "/api/workers/:worker/discard-leftovers", {
@@ -373,5 +367,6 @@ export const OperatorApi = HttpApi.make("OperatorApi").add(
         success: RunStatisticsView,
       }),
     )
+    .annotate(HttpApi.PayloadParseOptions, { onExcessProperty: "error" })
     .middleware(OperatorHttpPolicy),
 );

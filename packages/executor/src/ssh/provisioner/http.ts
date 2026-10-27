@@ -1,6 +1,6 @@
 import type { MachineProvider } from "@usine/core/worker";
 import { Data, Effect, Option, type Redacted, Schema } from "effect";
-import { HttpClient, HttpClientError, HttpClientRequest } from "effect/unstable/http";
+import { HttpClient, HttpClientError, HttpClientRequest } from "effect/http";
 
 /** The timeout for one provider API request. */
 const REQUEST_TIMEOUT = "30 seconds";

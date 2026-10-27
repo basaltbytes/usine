@@ -30,7 +30,7 @@ const read = (
     Effect.gen(function* () {
       const provider = yield* instanceEnvironment(directory, environment);
       return yield* Effect.forEach(names, (name) =>
-        Config.option(Config.string(name)).parse(provider),
+        Config.option(Config.String(name)).parse(provider),
       );
     }).pipe(Effect.provide(NodeServices.layer)),
   );

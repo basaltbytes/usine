@@ -1,6 +1,6 @@
 import { type GatewayCredentialKind, GatewayLlmProvider } from "@usine/core/worker";
 import { Option, Redacted, Schema } from "effect";
-import { Headers } from "effect/unstable/http";
+import { Headers } from "effect/http";
 import { UpstreamBase } from "../upstream.ts";
 
 const Secret = Schema.Redacted(Schema.NonEmptyString);

@@ -13,8 +13,8 @@ import {
   stubAttemptRuntime,
 } from "@usine/durable/testing";
 import { Deferred, Effect, Exit, Fiber, Layer, Option, Redacted, Stream } from "effect";
-import { FetchHttpClient } from "effect/unstable/http";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { FetchHttpClient } from "effect/http";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { fileURLToPath } from "node:url";
 import { layer as cloudflareLayer } from "../../src/cloudflare/cloudflare.ts";
 import type { CloudflareProviderKey } from "../../src/cloudflare/model.ts";

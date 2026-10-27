@@ -169,7 +169,7 @@ const groupRuns = <K extends string>(
   runs: ReadonlyArray<RunSummary>,
   key: (summary: RunSummary) => K,
 ): ReadonlyArray<readonly [K, EffectArray.NonEmptyReadonlyArray<RunSummary>]> =>
-  Object.values<EffectArray.NonEmptyArray<RunSummary>>(EffectArray.groupBy(runs, key))
+  Object.values(EffectArray.groupBy(runs, (summary): string => key(summary)))
     .map((members) => [key(members[0]), members] as const)
     .sort(
       ([leftName, left], [rightName, right]) =>

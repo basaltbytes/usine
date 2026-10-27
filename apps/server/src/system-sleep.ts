@@ -1,5 +1,5 @@
 import { Duration, Effect, Option, Schema } from "effect";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 const PMSET_TIMEOUT = Duration.seconds(5);
 

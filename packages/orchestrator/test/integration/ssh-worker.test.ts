@@ -37,9 +37,9 @@ import {
   Schema,
   Stream,
 } from "effect";
-import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
-import { HttpApiClient } from "effect/unstable/httpapi";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
+import { HttpApiClient } from "effect/http-api";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { gitHubCredentialLayer } from "../../src/credentials.ts";
 import { layer as sshLayer, sshWorkerAddressesOf } from "../../src/ssh.ts";
 import { fixedConfigLayer } from "../support/current-instance.ts";
@@ -61,14 +61,14 @@ const PLAIN_SSH = [
 ];
 
 const settings = Effect.all({
-  destination: Config.string("USINE_SSH_INTEGRATION_DESTINATION"),
-  root: Config.string("USINE_SSH_INTEGRATION_ROOT").pipe(Config.withDefault("/home/usine/.usine")),
-  identityFile: Config.option(Config.string("USINE_SSH_INTEGRATION_IDENTITY_FILE")),
-  port: Config.option(Config.int("USINE_SSH_INTEGRATION_PORT")),
-  knownHosts: Config.option(Config.string("USINE_SSH_INTEGRATION_KNOWN_HOSTS")),
-  repository: Config.string("USINE_SSH_INTEGRATION_REPO"),
-  revision: Config.string("USINE_SSH_INTEGRATION_REVISION").pipe(Config.withDefault("main")),
-  credentialsDirectory: Config.string("USINE_GITHUB_INTEGRATION_INSTANCE_DIRECTORY"),
+  destination: Config.String("USINE_SSH_INTEGRATION_DESTINATION"),
+  root: Config.String("USINE_SSH_INTEGRATION_ROOT").pipe(Config.withDefault("/home/usine/.usine")),
+  identityFile: Config.option(Config.String("USINE_SSH_INTEGRATION_IDENTITY_FILE")),
+  port: Config.option(Config.Int("USINE_SSH_INTEGRATION_PORT")),
+  knownHosts: Config.option(Config.String("USINE_SSH_INTEGRATION_KNOWN_HOSTS")),
+  repository: Config.String("USINE_SSH_INTEGRATION_REPO"),
+  revision: Config.String("USINE_SSH_INTEGRATION_REVISION").pipe(Config.withDefault("main")),
+  credentialsDirectory: Config.String("USINE_GITHUB_INTEGRATION_INSTANCE_DIRECTORY"),
 });
 
 const configFor = (values: Effect.Success<typeof settings>) =>
@@ -424,18 +424,18 @@ const gatewayDestination = process.env.USINE_GATEWAY_INTEGRATION_DESTINATION;
 const GATEWAY_WORKER = WorkerName.make("gateway-integration");
 
 const gatewaySettings = Effect.all({
-  destination: Config.string("USINE_GATEWAY_INTEGRATION_DESTINATION"),
-  sshConfig: Config.option(Config.string("USINE_GATEWAY_INTEGRATION_SSH_CONFIG")),
-  root: Config.string("USINE_GATEWAY_INTEGRATION_ROOT").pipe(
+  destination: Config.String("USINE_GATEWAY_INTEGRATION_DESTINATION"),
+  sshConfig: Config.option(Config.String("USINE_GATEWAY_INTEGRATION_SSH_CONFIG")),
+  root: Config.String("USINE_GATEWAY_INTEGRATION_ROOT").pipe(
     Config.withDefault("/home/usine/.usine"),
   ),
-  domain: Config.string("USINE_GATEWAY_INTEGRATION_DOMAIN").pipe(Config.withDefault("gw.internal")),
-  gateway: Config.string("USINE_GATEWAY_INTEGRATION_GATEWAY").pipe(
+  domain: Config.String("USINE_GATEWAY_INTEGRATION_DOMAIN").pipe(Config.withDefault("gw.internal")),
+  gateway: Config.String("USINE_GATEWAY_INTEGRATION_GATEWAY").pipe(
     Config.withDefault("usine-gateway"),
   ),
-  repository: Config.string("USINE_GATEWAY_INTEGRATION_REPO"),
-  revision: Config.string("USINE_GATEWAY_INTEGRATION_REVISION").pipe(Config.withDefault("main")),
-  credentialsDirectory: Config.string("USINE_GITHUB_INTEGRATION_INSTANCE_DIRECTORY"),
+  repository: Config.String("USINE_GATEWAY_INTEGRATION_REPO"),
+  revision: Config.String("USINE_GATEWAY_INTEGRATION_REVISION").pipe(Config.withDefault("main")),
+  credentialsDirectory: Config.String("USINE_GITHUB_INTEGRATION_INSTANCE_DIRECTORY"),
 });
 
 /**
@@ -508,7 +508,7 @@ const gatewayAttachments = Effect.fn("GatewayIntegration.attachments")(function*
     baseUrl: `http://127.0.0.1:${String(CHECK_PORT)}`,
     transformClient: HttpClient.mapRequest(
       HttpClientRequest.bearerToken(
-        yield* Config.redacted("USINE_GATEWAY_INTEGRATION_ADMIN_TOKEN"),
+        yield* Config.Redacted("USINE_GATEWAY_INTEGRATION_ADMIN_TOKEN"),
       ),
     ),
   });

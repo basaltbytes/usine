@@ -12,7 +12,7 @@ import {
   Schema,
   SynchronizedRef,
 } from "effect";
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { appJwtSigner } from "./jwt.ts";
 import {
   API_ROOT,

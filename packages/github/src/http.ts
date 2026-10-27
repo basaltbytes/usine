@@ -1,6 +1,6 @@
 import { DateTime, Effect, Option, Redacted, Schema } from "effect";
-import { HttpClientRequest, type HttpClientResponse } from "effect/unstable/http";
-import type { HttpClientError } from "effect/unstable/http/HttpClientError";
+import { HttpClientRequest, type HttpClientResponse } from "effect/http";
+import type { HttpClientError } from "effect/http/HttpClientError";
 import {
   GitHubApiError,
   GitHubRateLimitError,

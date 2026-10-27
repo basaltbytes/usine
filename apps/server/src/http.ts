@@ -10,8 +10,8 @@ import {
   reloadRefusal,
 } from "@usine/orchestrator/operator/http";
 import { Effect, Layer, Schema, type Types } from "effect";
-import { Headers, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
-import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi";
+import { Headers, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
+import { HttpApiBuilder, HttpApiError } from "effect/http-api";
 import { FactoryBackend, type BackendError } from "./backend.ts";
 import { SERVER_HOST } from "./cli.ts";
 

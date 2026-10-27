@@ -1,4 +1,5 @@
-import { Effect, Encoding, Redacted } from "effect";
+import { Effect, Redacted } from "effect";
+import { Base64 } from "effect/encoding";
 
 /** A machine's SSH host key pair, which the executor generates before it creates the machine. */
 export interface HostKeyPair {
@@ -68,7 +69,7 @@ const openSshKeyFile = (seed: Uint8Array, publicKey: Uint8Array, check: Uint8Arr
   );
   return [
     "-----BEGIN OPENSSH PRIVATE KEY-----",
-    ...(Encoding.encodeBase64(body).match(/.{1,70}/gu) ?? []),
+    ...(Base64.encode(body).match(/.{1,70}/gu) ?? []),
     "-----END OPENSSH PRIVATE KEY-----",
     "",
   ].join("\n");
@@ -91,7 +92,7 @@ export const generateHostKey: Effect.Effect<HostKeyPair> = Effect.gen(function* 
   if (publicKey.length !== 32 || seed.length !== 32)
     return yield* Effect.die(new Error("WebCrypto exported an Ed25519 key of an unexpected size"));
   return {
-    publicKey: `${KEY_TYPE} ${Encoding.encodeBase64(concat(sshText(KEY_TYPE), sshBytes(publicKey)))}`,
+    publicKey: `${KEY_TYPE} ${Base64.encode(concat(sshText(KEY_TYPE), sshBytes(publicKey)))}`,
     privateKey: Redacted.make(
       openSshKeyFile(seed, publicKey, crypto.getRandomValues(new Uint8Array(4))),
     ),

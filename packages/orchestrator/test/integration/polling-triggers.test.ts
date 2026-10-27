@@ -36,7 +36,7 @@ import {
   Schema,
   Scope,
 } from "effect";
-import { FetchHttpClient } from "effect/unstable/http";
+import { FetchHttpClient } from "effect/http";
 import { LabelReconciler } from "../../src/label-reconciler.ts";
 import { PollingTriggers } from "../../src/polling-triggers.ts";
 import { alwaysHoldsLayer } from "../support/polling.ts";
@@ -183,8 +183,8 @@ describe("live GitHub polling", () => {
   it.live("deduplicates across restart and sees a label flip within one interval", () =>
     Effect.gen(function* () {
       const settings = yield* Effect.all({
-        credentialsDirectory: Config.string("USINE_GITHUB_INTEGRATION_INSTANCE_DIRECTORY"),
-        repository: Config.string("USINE_GITHUB_INTEGRATION_REPO"),
+        credentialsDirectory: Config.String("USINE_GITHUB_INTEGRATION_INSTANCE_DIRECTORY"),
+        repository: Config.String("USINE_GITHUB_INTEGRATION_REPO"),
         issueNumber: Config.schema(PositiveIntFromString, "USINE_GITHUB_INTEGRATION_ISSUE_NUMBER"),
       });
       const repository = RepositoryName.make(settings.repository);

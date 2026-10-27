@@ -1,5 +1,5 @@
 import { Effect, Layer } from "effect";
-import { FetchHttpClient, HttpClient } from "effect/unstable/http";
+import { FetchHttpClient, HttpClient } from "effect/http";
 
 /**
  * The fetch HTTP client for GitHub and the Gateways' admin APIs. Each request still gets a client

@@ -1,8 +1,8 @@
 import { createServer } from "node:net";
 import { NodeServices } from "@effect/platform-node";
 import { Duration, Effect, Layer, Option, Schema } from "effect";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
-import { ServeError } from "effect/unstable/http/HttpServerError";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
+import { ServeError } from "effect/http/HttpServerError";
 import { assert, describe, it } from "vitest";
 import {
   CLI_USAGE,

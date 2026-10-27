@@ -6,7 +6,7 @@ import {
   type HttpClientError,
   HttpServerRequest,
   HttpServerResponse,
-} from "effect/unstable/http";
+} from "effect/http";
 import type { Attachment, LiveAttachment } from "../attachment/attachment.ts";
 import { Attachments } from "../attachment/store.ts";
 import {

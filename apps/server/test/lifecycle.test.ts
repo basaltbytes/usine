@@ -17,7 +17,7 @@ import { NodeServices } from "@effect/platform-node";
 import { InstanceDirectory } from "@usine/core/instance";
 import { RunId } from "@usine/core/run";
 import { DateTime, Duration, Effect, Layer, Option, Schema } from "effect";
-import { FetchHttpClient, type HttpClient } from "effect/unstable/http";
+import { FetchHttpClient, type HttpClient } from "effect/http";
 import { afterEach, assert, describe, it } from "vitest";
 import { LifecycleOptions, Port, SERVER_HOST, type UpLogLevel } from "../src/cli.ts";
 import { startDetached } from "../src/detach.ts";

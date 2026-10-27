@@ -500,7 +500,7 @@ it("lists the current Run's applicable actions and moves the card through Move t
   await expect.element(lane("In progress").getByText(/^Retry salvage/u)).toBeVisible();
   await expect
     .element(lane("In progress").getByRole("status"))
-    .toHaveTextContent("Saved on GitHub");
+    .toMatchTextContent("Saved on GitHub");
   await expect.element(lane("Ready").getByText(/^Retry salvage/u)).not.toBeInTheDocument();
 });
 

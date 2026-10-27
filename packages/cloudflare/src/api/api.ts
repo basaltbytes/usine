@@ -7,7 +7,7 @@ import {
   type WorkerName,
 } from "@usine/core/worker";
 import { Schema } from "effect";
-import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi";
+import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import { ProcessId, SandboxName, SandboxOwner } from "./names.ts";
 
 export {
@@ -185,7 +185,6 @@ export class ContainerUnavailable extends Schema.TaggedError<ContainerUnavailabl
   { httpApiStatus: 503 },
 ) {}
 
-const strict = { parseOptions: { onExcessProperty: "error" } } as const;
 const sandbox = { name: SandboxName };
 
 /** `GET /v1/health`, served by any sandbox Durable Object. */
@@ -202,45 +201,47 @@ export const registryGroup = HttpApiGroup.make("registry").add(
 );
 
 /** The routes of one sandbox, served by its Durable Object. */
-export const sandboxGroup = HttpApiGroup.make("sandbox").add(
-  HttpApiEndpoint.put("create", "/v1/sandboxes/:name", {
-    params: sandbox,
-    payload: CreateSandbox.annotate(strict),
-    success: SandboxSummary,
-    error: [SandboxConflict, StaleCredentials, ImageNotFound, ContainerUnavailable],
-  }),
-  HttpApiEndpoint.get("get", "/v1/sandboxes/:name", {
-    params: sandbox,
-    success: SandboxSummary,
-    error: SandboxNotFound,
-  }),
-  HttpApiEndpoint.put("credentials", "/v1/sandboxes/:name/credentials", {
-    params: sandbox,
-    payload: SandboxCredentials.annotate(strict),
-    success: SandboxSummary,
-    error: [SandboxNotFound, StaleCredentials, ContainerUnavailable],
-  }),
-  HttpApiEndpoint.post("hold", "/v1/sandboxes/:name/hold", {
-    params: sandbox,
-    success: SandboxSummary,
-    error: [SandboxNotFound, ContainerUnavailable],
-  }),
-  HttpApiEndpoint.post("stop", "/v1/sandboxes/:name/stop", {
-    params: sandbox,
-    success: Stopped,
-    error: [SandboxNotFound, ContainerUnavailable],
-  }),
-  HttpApiEndpoint.delete("destroy", "/v1/sandboxes/:name", {
-    params: sandbox,
-    success: Destroyed,
-    error: ContainerUnavailable,
-  }),
-  HttpApiEndpoint.get("process", "/v1/sandboxes/:name/processes/:process", {
-    params: { ...sandbox, process: ProcessId },
-    success: ProcessStatus,
-    error: [SandboxNotFound, ProcessNotFound, ContainerUnavailable],
-  }),
-);
+export const sandboxGroup = HttpApiGroup.make("sandbox")
+  .add(
+    HttpApiEndpoint.put("create", "/v1/sandboxes/:name", {
+      params: sandbox,
+      payload: CreateSandbox,
+      success: SandboxSummary,
+      error: [SandboxConflict, StaleCredentials, ImageNotFound, ContainerUnavailable],
+    }),
+    HttpApiEndpoint.get("get", "/v1/sandboxes/:name", {
+      params: sandbox,
+      success: SandboxSummary,
+      error: SandboxNotFound,
+    }),
+    HttpApiEndpoint.put("credentials", "/v1/sandboxes/:name/credentials", {
+      params: sandbox,
+      payload: SandboxCredentials,
+      success: SandboxSummary,
+      error: [SandboxNotFound, StaleCredentials, ContainerUnavailable],
+    }),
+    HttpApiEndpoint.post("hold", "/v1/sandboxes/:name/hold", {
+      params: sandbox,
+      success: SandboxSummary,
+      error: [SandboxNotFound, ContainerUnavailable],
+    }),
+    HttpApiEndpoint.post("stop", "/v1/sandboxes/:name/stop", {
+      params: sandbox,
+      success: Stopped,
+      error: [SandboxNotFound, ContainerUnavailable],
+    }),
+    HttpApiEndpoint.delete("destroy", "/v1/sandboxes/:name", {
+      params: sandbox,
+      success: Destroyed,
+      error: ContainerUnavailable,
+    }),
+    HttpApiEndpoint.get("process", "/v1/sandboxes/:name/processes/:process", {
+      params: { ...sandbox, process: ProcessId },
+      success: ProcessStatus,
+      error: [SandboxNotFound, ProcessNotFound, ContainerUnavailable],
+    }),
+  )
+  .annotate(HttpApi.PayloadParseOptions, { onExcessProperty: "error" });
 
 /**
  * The JSON API of the Worker that usine ships (`@usine/cloudflare/worker`). Every request carries

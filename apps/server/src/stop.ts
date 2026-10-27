@@ -86,7 +86,7 @@ export const refuseMissingEnvironment = Effect.fn("Cli.refuseMissingEnvironment"
   );
   const missing: Array<string> = [];
   for (const name of names) {
-    const value = yield* Config.option(Config.string(name)).pipe(
+    const value = yield* Config.option(Config.String(name)).pipe(
       Effect.orElseSucceed(() => Option.none<string>()),
     );
     if (Option.isNone(value)) missing.push(name);
