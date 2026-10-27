@@ -1,3 +1,4 @@
+import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
 import { AgentName } from "@usine/core/agent";
@@ -41,6 +42,11 @@ const repository = RepositoryName.make("approval/project");
 const runId = RunId.make("approval-run");
 const loop = LoopName.make("start-dev");
 const waiting = new RunView({
+  agentBrain: new BrainSpec({
+    harness: "codex",
+    model: ModelId.make("test-model"),
+    effort: "high",
+  }),
   id: runId,
   itemKey: ItemKey.make("github:approval/project:367"),
   repository,
@@ -105,6 +111,7 @@ const detail = (run: RunView) =>
   JSON.stringify(
     Schema.encodeSync(RunDetailView)(
       new RunDetailView({
+        agentDefinitionChanged: false,
         run,
         eventDedupKey: "event",
         eventPayload: {},

@@ -50,6 +50,11 @@ const agent = AgentName.make("developer");
 const loop = LoopName.make("implement");
 const failure = new AgentFailureView({ message: "Work was completed separately" });
 const run = new RunView({
+  agentBrain: new BrainSpec({
+    harness: "codex",
+    model: ModelId.make("test-model"),
+    effort: "high",
+  }),
   id: runId,
   itemKey: ItemKey.make("github:resolution/project:1"),
   repository,
@@ -125,6 +130,7 @@ it("resolves a failure from Needs attention while retaining unrelated attention,
     ),
   });
   const detail = new RunDetailView({
+    agentDefinitionChanged: false,
     run,
     eventDedupKey: "event",
     eventPayload: {},
@@ -239,6 +245,7 @@ it("leaves a closed issue's failed run out of Needs attention and marks the issu
   const detail = JSON.stringify(
     Schema.encodeSync(RunDetailView)(
       new RunDetailView({
+        agentDefinitionChanged: false,
         run: onIssue,
         eventDedupKey: "event",
         eventPayload: {},

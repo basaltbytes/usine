@@ -1,7 +1,7 @@
 import { Button } from "~/components/ui/button";
 import { type RunFailure } from "~/lib/projects/failure";
 import { type RunActions } from "~/hooks/runs/actions";
-import { runActionLabel } from "~/lib/runs/strings";
+import { retryDescription, runActionLabel } from "~/lib/runs/strings";
 
 type RetryButtonProps = {
   readonly failure: RunFailure;
@@ -14,6 +14,7 @@ export const RetryButton = ({ failure, action }: RetryButtonProps) =>
       variant="outline"
       size="xs"
       className="relative z-10"
+      title={retryDescription(failure.run.agentBrain)}
       onClick={() => action.mutate({ runId: failure.run.id, request: { action: "retry" } })}
     >
       {runActionLabel.retry}

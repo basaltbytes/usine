@@ -92,6 +92,7 @@ const issueLink = (number: number, title: string) =>
 
 const runOnItem = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<AttemptView>) =>
   new RunView({
+    agentBrain: brain,
     id: RunId.make("run-33"),
     itemKey,
     loop: LoopName.make("review"),

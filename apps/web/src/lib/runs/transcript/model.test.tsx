@@ -629,8 +629,10 @@ describe("run transcript", () => {
   it("adds an earlier page without replacing a newer Run outcome or available actions", () => {
     const cursor = new TranscriptPageCursor({ attemptId, before: TranscriptSequence.make(2) });
     const stale = new RunDetailView({
+      agentDefinitionChanged: false,
       sessionState: [],
       run: new RunView({
+        agentBrain: brain,
         id: RunId.make("run-31"),
         itemKey: ItemKey.make("github:basaltbytes/usine:31"),
         loop: LoopName.make("develop"),
@@ -688,8 +690,10 @@ describe("run transcript", () => {
       ),
     ];
     const detail = new RunDetailView({
+      agentDefinitionChanged: false,
       sessionState: [],
       run: new RunView({
+        agentBrain: brain,
         id: RunId.make("run-31"),
         itemKey: ItemKey.make("github:basaltbytes/usine:31"),
         loop: LoopName.make("develop"),

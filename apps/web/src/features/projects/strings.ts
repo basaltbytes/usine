@@ -8,3 +8,7 @@ export const runLineTimeTitle = (state: RunView["state"], since: string): string
   if (state === "Failed") return `Failed at ${timestampLabel(since)}`;
   return openedTitle(since);
 };
+
+export const cardConflictLabel = "Conflicts with base";
+
+export const cardAttentionLabel = "Needs attention";

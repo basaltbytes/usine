@@ -242,6 +242,9 @@ describe("durable run engine", () => {
             ({ run }) => run.state._tag === "Succeeded",
           );
           assert.strictEqual(snapshot.run.state._tag, "Succeeded");
+          const cancelRejected = yield* Effect.flip(engine.cancel(accepted.runId));
+          assert.strictEqual(cancelRejected._tag, "RunOperationRejectedError");
+          assert.deepStrictEqual((yield* engine.inspect(accepted.runId)).run, snapshot.run);
           assert(Option.isSome(snapshot.step.result));
           assert.strictEqual(snapshot.step.result.value.message, "finished");
           assert.strictEqual(snapshot.attempts.length, 1);
@@ -571,6 +574,13 @@ describe("durable run engine", () => {
             ({ run }) => run.state._tag === "Failed",
           );
           assert.strictEqual(failed.attempts.length, 1);
+          const cancelRejected = yield* Effect.flip(engine.cancel(accepted.runId));
+          assert.strictEqual(cancelRejected._tag, "RunOperationRejectedError");
+          if (cancelRejected._tag === "RunOperationRejectedError") {
+            assert.strictEqual(cancelRejected.operation, "cancel");
+            assert.strictEqual(cancelRejected.state, "Failed");
+          }
+          assert.deepStrictEqual((yield* engine.inspect(accepted.runId)).run, failed.run);
           yield* Effect.sleep("25 millis");
           assert.strictEqual((yield* engine.inspect(accepted.runId)).attempts.length, 1);
 

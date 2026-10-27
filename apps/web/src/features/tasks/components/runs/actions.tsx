@@ -29,6 +29,7 @@ import {
 } from "~/hooks/runs/actions";
 import { dayTimeLabel } from "~/lib/strings";
 import {
+  retryDescription,
   runActionLabel,
   runActionProgress,
   runAgainBlocked,
@@ -41,6 +42,7 @@ const primaryAction = (run: RunView): "approve" | "retry" | null =>
 
 interface MenuEntry {
   readonly label: string;
+  readonly description?: string;
   readonly destructive?: boolean;
   readonly select: () => void;
 }
@@ -95,7 +97,11 @@ export const RowActions = ({ run, onEdit, openRun, status }: RowActionsProps) =>
   if (run.canApprove && primary !== "approve")
     entries.push({ label: runActionLabel.approve, select: () => act({ action: "approve" }) });
   if (run.canRetry && primary !== "retry")
-    entries.push({ label: runActionLabel.retry, select: () => act({ action: "retry" }) });
+    entries.push({
+      label: runActionLabel.retry,
+      description: retryDescription(run.agentBrain),
+      select: () => act({ action: "retry" }),
+    });
   if (run.canRetry) entries.push({ label: "Edit and retry", select: () => onEdit("retry") });
   if (run.canRunAgain) {
     entries.push({ label: runActionLabel.runAgain, select: runAgain });
@@ -115,7 +121,12 @@ export const RowActions = ({ run, onEdit, openRun, status }: RowActionsProps) =>
   return (
     <div className="relative z-10 flex items-center justify-end gap-1">
       {primary !== null && (
-        <Button variant="outline" size="sm" onClick={() => act({ action: primary })}>
+        <Button
+          variant="outline"
+          size="sm"
+          title={primary === "retry" ? retryDescription(run.agentBrain) : undefined}
+          onClick={() => act({ action: primary })}
+        >
           {runActionLabel[primary]}
         </Button>
       )}
@@ -135,9 +146,10 @@ export const RowActions = ({ run, onEdit, openRun, status }: RowActionsProps) =>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-auto min-w-44">
             <DropdownMenuGroup>
-              {entries.map(({ label, destructive, select }) => (
+              {entries.map(({ label, description, destructive, select }) => (
                 <DropdownMenuItem
                   key={label}
+                  title={description}
                   variant={destructive === true ? "destructive" : "default"}
                   onClick={select}
                 >

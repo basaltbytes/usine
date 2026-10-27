@@ -42,7 +42,7 @@ export const RunPage = ({ runId }: RunPageProps) => {
         placement="page"
         shared
         className="px-4 pt-4 pb-4 md:px-5"
-        actions={<ContextualActions run={run} onEdit={setEditing} openRun={openRun} />}
+        actions={<ContextualActions detail={detail.data} onEdit={setEditing} openRun={openRun} />}
       />
       {editing !== null && editApplies(run, editing) && (
         <EditAndRetry

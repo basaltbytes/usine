@@ -29,7 +29,7 @@ import {
 } from "~/components/ui/dropdown-menu";
 import { cn } from "~/lib/utils";
 import { elapsedLabel } from "~/lib/strings";
-import { openedTitle, runActionLabel } from "~/lib/runs/strings";
+import { openedTitle, retryDescription, runActionLabel } from "~/lib/runs/strings";
 import type { RunActions } from "~/hooks/runs/actions";
 import type { CardRunAgain } from "~/hooks/projects/run-again";
 
@@ -145,6 +145,7 @@ export const CardMenu = ({
           )}
           {run?.canRetry && (
             <DropdownMenuItem
+              title={retryDescription(run.agentBrain)}
               onClick={() => action.mutate({ runId: run.id, request: { action: "retry" } })}
             >
               {runActionLabel.retry}

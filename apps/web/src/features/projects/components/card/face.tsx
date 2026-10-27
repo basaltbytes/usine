@@ -1,3 +1,4 @@
+import { cardAttentionLabel, cardConflictLabel } from "~/features/projects/strings";
 import type { RepositoryName } from "@usine/core/repository";
 import type { BoardLaneView, BoardTaskView, StalledItemView } from "@usine/orchestrator/operator";
 import { ItemMark } from "~/components/item/mark";
@@ -101,8 +102,8 @@ export const CardFace = ({
       {runAgainError !== null && (
         <p className="text-xs text-destructive wrap-anywhere">{runAgainError}</p>
       )}
-      {item.conflicting && <p className="text-xs text-destructive">Conflicts with base</p>}
-      {unexplained && <p className="text-xs text-needs-you">Needs attention</p>}
+      {item.conflicting && <p className="text-xs text-destructive">{cardConflictLabel}</p>}
+      {unexplained && <p className="text-xs text-needs-you">{cardAttentionLabel}</p>}
     </div>
   );
 };

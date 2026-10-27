@@ -1,3 +1,4 @@
+import type { BrainSpec } from "@usine/core/agent/brain";
 import type { OutOfMemoryKills } from "@usine/core/attempt";
 import type { SalvagePushed } from "@usine/core/attempt/salvage";
 import type { AttemptStart } from "@usine/core/attempt/start";
@@ -10,6 +11,7 @@ import type {
 } from "@usine/orchestrator/operator";
 import { Match, Option } from "effect";
 import type { RunActionRequest } from "~/hooks/runs/actions";
+import type { Chapter } from "~/lib/runs/transcript/document/model";
 import type { QueuedFor } from "~/lib/runs/transcript/model";
 import { timestampLabel } from "~/lib/strings";
 import { providerLabel } from "~/lib/workers/strings";
@@ -141,3 +143,18 @@ export const conflictingSalvageMessage = ({ ref, commit }: SalvagePushed): strin
 
 export const outOfMemoryLine = ({ kills, memoryMib }: OutOfMemoryKills): string =>
   `The kernel killed ${kills} ${kills === 1 ? "process" : "processes"} for memory across containers in this attempt. The last container with recorded kills had a ${memoryMib} MiB memory limit`;
+
+export const retryDescription = (brain: BrainSpec): string =>
+  `Retry uses ${brain.harness} · ${brain.model} from the saved agent definition.`;
+
+export const transcriptHistoryLabel = {
+  loading: "Loading…",
+  loadEarlier: "Load earlier",
+  empty: "No activity recorded",
+} as const;
+
+export const transcriptAttemptLabel = (attempt: Chapter["attempt"]): string =>
+  Option.match(attempt, {
+    onNone: () => "Attempt",
+    onSome: ({ number }) => `Attempt ${number}`,
+  });

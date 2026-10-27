@@ -1,3 +1,4 @@
+import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { assert, describe, it } from "@effect/vitest";
 import { UsineConfig } from "@usine/config/factory";
 import { AgentName } from "@usine/core/agent";
@@ -115,6 +116,11 @@ const isOpen = (state: RunStateTag) =>
 
 const run = (item: ItemProjection, loop: string, state: RunStateTag) =>
   new RunView({
+    agentBrain: new BrainSpec({
+      harness: "codex",
+      model: ModelId.make("test-model"),
+      effort: "high",
+    }),
     id: RunId.make(`${loop}-${item.number}`),
     itemKey: item.itemKey,
     loop: LoopName.make(loop),

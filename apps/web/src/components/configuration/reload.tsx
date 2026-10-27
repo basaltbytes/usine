@@ -18,6 +18,7 @@ export const useReloadConfiguration = (): ConfigurationReload => {
       Promise.all([
         queryClient.invalidateQueries({ queryKey: ["overview"] }),
         queryClient.invalidateQueries({ queryKey: ["agents"] }),
+        queryClient.invalidateQueries({ queryKey: ["run"] }),
       ]),
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["configuration"] }),
   });

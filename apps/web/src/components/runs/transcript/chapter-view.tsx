@@ -1,4 +1,5 @@
-import { Match, Option } from "effect";
+import { transcriptAttemptLabel, transcriptHistoryLabel } from "~/lib/runs/strings";
+import { Match } from "effect";
 import { ErrorAlert } from "~/components/error-alert";
 import { CurrentActivity } from "~/components/runs/transcript/activity";
 import { AttemptMeta } from "~/components/runs/transcript/attempt-meta";
@@ -51,12 +52,7 @@ export const ChapterView = ({ chapter, first, runTask, history }: ChapterViewPro
     <>
       <MessageScrollerItem messageId={chapter.key} className={first ? undefined : "mt-10"}>
         <ReaderLine className={first ? undefined : "border-t pt-8"}>
-          <h2 className="text-md font-semibold">
-            {Option.match(chapter.attempt, {
-              onNone: () => "Attempt",
-              onSome: ({ number }) => `Attempt ${number}`,
-            })}
-          </h2>
+          <h2 className="text-md font-semibold">{transcriptAttemptLabel(chapter.attempt)}</h2>
           <AttemptMeta chapter={chapter} runTask={runTask} />
         </ReaderLine>
       </MessageScrollerItem>
@@ -69,7 +65,9 @@ export const ChapterView = ({ chapter, first, runTask, history }: ChapterViewPro
               disabled={history.loading}
               onClick={() => history.load(cursor)}
             >
-              {history.loading ? "Loading…" : "Load earlier"}
+              {history.loading
+                ? transcriptHistoryLabel.loading
+                : transcriptHistoryLabel.loadEarlier}
             </Button>
             {history.error !== null && <ErrorAlert className="mt-2" message={history.error} />}
           </ReaderLine>
@@ -78,7 +76,7 @@ export const ChapterView = ({ chapter, first, runTask, history }: ChapterViewPro
       {rows.length === 0 && cursor === undefined && !chapter.live && (
         <MessageScrollerItem messageId={`empty:${chapter.attemptId}`} className="mt-4">
           <ReaderLine>
-            <p className="text-xs text-muted-foreground">No activity recorded</p>
+            <p className="text-xs text-muted-foreground">{transcriptHistoryLabel.empty}</p>
           </ReaderLine>
         </MessageScrollerItem>
       )}

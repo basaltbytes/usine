@@ -4,7 +4,12 @@ import type { CycleBudgetUsedUpView, RunView, StalledItemView } from "@usine/orc
 import { Button } from "~/components/ui/button";
 import { cn } from "~/lib/utils";
 import { api } from "~/lib/api";
-import { runActionLabel, runActionProgress, runAgainBlocked } from "~/lib/runs/strings";
+import {
+  retryDescription,
+  runActionLabel,
+  runActionProgress,
+  runAgainBlocked,
+} from "~/lib/runs/strings";
 import {
   type RunActionRequest,
   unchangedRunAgain,
@@ -27,12 +32,20 @@ const useRefreshDesk = () => {
 type ActionButtonProps = {
   readonly appearance: StallActionAppearance;
   readonly label: string;
+  readonly description?: string;
   readonly disabled: boolean;
   readonly error: string | null;
   readonly onClick: () => void;
 };
 
-const ActionButton = ({ appearance, label, disabled, error, onClick }: ActionButtonProps) => (
+const ActionButton = ({
+  appearance,
+  label,
+  description,
+  disabled,
+  error,
+  onClick,
+}: ActionButtonProps) => (
   <span
     className={cn(
       "inline-flex flex-col gap-1",
@@ -43,6 +56,7 @@ const ActionButton = ({ appearance, label, disabled, error, onClick }: ActionBut
       variant={appearance === "row" ? "ghost" : "outline"}
       size={appearance === "row" ? "default" : "xs"}
       className={appearance === "row" ? "text-muted-foreground" : undefined}
+      title={description}
       disabled={disabled}
       onClick={(event) => {
         event.stopPropagation();
@@ -79,6 +93,7 @@ const RunAction = ({ appearance, run, request, label }: RunActionProps) => {
     <ActionButton
       appearance={appearance}
       label={action.isPending ? runActionProgress[request.action] : label}
+      {...(request.action === "retry" ? { description: retryDescription(run.agentBrain) } : {})}
       disabled={action.isPending}
       error={action.error?.message ?? null}
       onClick={() => action.mutate({ runId: run.id, request })}

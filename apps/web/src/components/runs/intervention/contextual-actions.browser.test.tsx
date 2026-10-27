@@ -1,3 +1,4 @@
+import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AgentName } from "@usine/core/agent";
 import { AgentSessionId } from "@usine/core/agent/session";
@@ -41,6 +42,11 @@ declare module "vitest/browser" {
 const runId = RunId.make("intervention-test");
 const attemptId = AttemptId.make("attempt-2");
 const failedRun = new RunView({
+  agentBrain: new BrainSpec({
+    harness: "codex",
+    model: ModelId.make("test-model"),
+    effort: "high",
+  }),
   id: runId,
   itemKey: ItemKey.make("issue-34"),
   loop: LoopName.make("implement"),
@@ -178,6 +184,58 @@ it("edits failed task text and selects the replacement roster agent", async () =
   expect(requests[0]?.headers).not.toContain("b3");
 });
 
+it("describes the saved retry brain and offers the current definition without changing the task or agent name", async () => {
+  const run = new RunView({
+    ...failedRun,
+    agentBrain: new BrainSpec({
+      harness: "claude",
+      model: ModelId.make("claude-opus-4-7"),
+      effort: "high",
+    }),
+  });
+  let closed = false;
+  host.style.width = "320px";
+  mount(
+    <ContextualActions
+      detail={{ run, agentDefinitionChanged: true }}
+      onEdit={() =>
+        mount(
+          <EditAndRetry
+            run={run}
+            intent="retry"
+            close={() => {
+              closed = true;
+            }}
+            openRun={() => {}}
+          />,
+        )
+      }
+      openRun={() => {}}
+    />,
+  );
+  const retry = page.getByRole("button", { name: "Retry", exact: true });
+  await expect
+    .element(retry)
+    .toHaveAccessibleDescription(
+      "Retry uses claude · claude-opus-4-7 from the saved agent definition.",
+    );
+  await expect
+    .element(page.getByText("The loaded definition of developer has changed.", { exact: false }))
+    .toBeVisible();
+  expect(host.scrollWidth).toBeLessThanOrEqual(host.clientWidth);
+  await retry.click();
+  await expect.poll(async () => (await commands.recordedInterventions()).length).toBe(1);
+  expect((await commands.recordedInterventions())[0]?.url).toContain("/retry");
+  await page.getByRole("button", { name: "Edit and retry", exact: true }).click();
+  await expect.element(page.getByLabelText("Task", { exact: true })).toHaveValue(run.task);
+  await expect.element(page.getByLabelText("Agent", { exact: true })).toHaveValue(run.agent);
+  await page.getByRole("button", { name: "Save and retry", exact: true }).click();
+  await expect.poll(() => closed).toBe(true);
+  const requests = await commands.recordedInterventions();
+  expect(requests[1]?.url).toContain("/edit-and-retry");
+  expect(requests[1]?.body).toEqual({ task: run.task, agent: run.agent });
+});
+
 it("runs a succeeded Run again as it ended or with an edited task and agent, and opens each new Run", async () => {
   const opened: Array<RunId> = [];
   await commands.runAgainResponse(
@@ -187,7 +245,7 @@ it("runs a succeeded Run again as it ended or with an edited task and agent, and
   );
   mount(
     <ContextualActions
-      run={succeededRun}
+      detail={{ run: succeededRun, agentDefinitionChanged: false }}
       onEdit={() => {}}
       openRun={(id) => void opened.push(id)}
     />,
@@ -255,7 +313,7 @@ it("says that running a Run again opened no Run once the Item's cycle budget is 
   );
   mount(
     <ContextualActions
-      run={succeededRun}
+      detail={{ run: succeededRun, agentDefinitionChanged: false }}
       onEdit={() => {}}
       openRun={(id) => void opened.push(id)}
     />,

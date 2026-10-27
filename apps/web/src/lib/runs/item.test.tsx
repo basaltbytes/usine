@@ -101,6 +101,7 @@ const attempt = (outcome: AttemptView["outcome"], salvage: AttemptView["salvage"
   });
 const run = (fields: Partial<ConstructorParameters<typeof RunView>[0]> = {}) =>
   new RunView({
+    agentBrain: brain,
     id: RunId.make("run-33"),
     itemKey,
     loop: LoopName.make("start-dev"),
@@ -125,6 +126,7 @@ const run = (fields: Partial<ConstructorParameters<typeof RunView>[0]> = {}) =>
   });
 const detail = (view: RunView, transcript: ReadonlyArray<TranscriptEventView> = []) =>
   new RunDetailView({
+    agentDefinitionChanged: false,
     run: view,
     eventDedupKey: '["start-dev","basaltbytes/usine",33]',
     eventPayload: {

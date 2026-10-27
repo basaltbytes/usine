@@ -215,7 +215,9 @@ A live attempt has a composer at the bottom of the reader for the parent, or for
 
 Messaging a child places a hold: the child can answer and take more turns in the same conversation while the parent waits for its result. **Release child** lets the result return once the child is idle. Each child has its own hold, a paused parent doesn't block messaging its children, and held children stay reachable even if their last activity isn't in the loaded transcript page. Holds pause the attempt's elapsed-time budget, but reported tokens still count toward `settings.max_attempt_tokens` if set. A failed or canceled attempt shows the salvage branch with its unfinished work, or the retained worktree path if the push failed.
 
-Failed runs offer **Edit and retry**, with a task editor and a roster agent picker; the agent supplies its persona and model settings. The new task and agent apply to later attempts, including automatic infrastructure retries. Each attempt shows the task and agent it used and whether the operator intervened. Transcript messages and delivery receipts name the configured operator; the triggering event is unchanged.
+**Retry** reuses the saved agent definition. Retry controls describe the saved harness and model; the drawer and run page show them beside the actions, with a notice if the loaded definition differs.
+
+Failed runs offer **Edit and retry**, with a task editor and a roster agent picker. Saving takes the current loaded definition of the selected agent, even if the task and name stay the same. The new task and agent apply to later attempts, including automatic infrastructure retries. Each attempt shows the task and agent it used and whether the operator intervened. Transcript messages and delivery receipts name the configured operator; the triggering event is unchanged.
 
 ## Returning to a conversation
 
