@@ -51,13 +51,18 @@ export interface SalvageOptions<E extends Error> {
 
 const decodeCommit = Schema.decodeUnknownEffect(CommitSha);
 
+const decodeCauseMessage = Schema.decodeUnknownOption(Schema.Struct({ message: Schema.String }));
+
 /**
  * Returns the operator-facing line for the run drawer: the failure's message followed by its
- * cause's message. For a failed command, the cause is the stderr, which local and SSH executors
- * scrub of the Attempt's token.
+ * cause's message, if the cause has one. For a failed command, the cause is the stderr, which
+ * local and SSH executors scrub of the Attempt's token.
  */
 export const failureMessage = (failure: Error): string => {
-  const detail = failure.cause instanceof Error ? failure.cause.message.trim() : "";
+  const detail = Option.match(decodeCauseMessage(failure.cause), {
+    onNone: () => "",
+    onSome: ({ message }) => message.trim(),
+  });
   return detail.length === 0 ? failure.message : `${failure.message}: ${detail}`;
 };
 
