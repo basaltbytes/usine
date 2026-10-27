@@ -55,6 +55,8 @@ If a flag repeats, the last value wins.
 5. **GitHub App credentials.** usine reads `USINE_GITHUB_APP_ID` and `USINE_GITHUB_PRIVATE_KEY`, and fills a missing one from `.usine/github-app.json` ([`loadLocalCredentials`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/github/src/local-secrets.ts#L69)). If both variables are set, usine doesn't read the file. It accepts PKCS#1 keys (`BEGIN RSA PRIVATE KEY`, as GitHub downloads them) and PKCS#8 keys.
 6. **Runtime.** usine opens the stores, reads each gateway's admin token, runs preflight on every worker, starts polling and schedules, and reattaches the attempts that an earlier process left running. It prints `usine is running at http://127.0.0.1:<port>`.
 
+On macOS, after the port check, usine reads `pmset -g` and logs a warning if system sleep is on and `caffeinate` doesn't prevent it, since a sleep drops the SSH connections to workers and the gateway. The check doesn't stop startup. See [Keep the machine awake](/guides/#keep-the-machine-awake).
+
 An expected startup failure prints one line with the file, setting, or worker at fault, such as a preflight check like `machine` or `harness-login`, and what to do, and exits with status 1. Only a defect in usine prints a full trace.
 
 ### Background start

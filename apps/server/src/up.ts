@@ -46,6 +46,7 @@ import { holdInstance } from "./instance/lock.ts";
 import { InstanceRecord, ProcessId, currentLaunch, instanceFiles } from "./instance/record.ts";
 import { reloadOnHangup } from "./reload-signal.ts";
 import { withGracefulShutdown } from "./shutdown.ts";
+import { warnIfSystemSleeps } from "./system-sleep.ts";
 import { tracingLayer } from "./tracing.ts";
 
 const instanceFolderLayer = InstanceFolder.layer.pipe(
@@ -217,6 +218,8 @@ export const up = (port: Port, logLevel: UpLogLevel, allowVolatileInstance: bool
         Effect.provide(NodeServices.layer),
       );
       yield* refuseTakenPort(port).pipe(Effect.provide(NodeServices.layer));
+      if (process.platform === "darwin")
+        yield* warnIfSystemSleeps().pipe(Effect.provide(NodeServices.layer));
       const instances = yield* loadInstance(directory);
       const { config } = yield* instances.get;
       // Built before the runtime, so the exporter flushes the runtime's last spans when it closes.
