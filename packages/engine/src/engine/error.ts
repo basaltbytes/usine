@@ -15,7 +15,7 @@ export class RunOperationRejectedError extends Schema.TaggedError<RunOperationRe
   "@usine/engine/RunOperationRejectedError",
 )("RunOperationRejectedError", {
   runId: RunId,
-  operation: Schema.Literals(["approve", "retry", "resolveFailure", "runAgain"]),
+  operation: Schema.Literals(["approve", "retry", "resolveFailure", "runAgain", "cancel"]),
   state: Schema.String,
 }) {}
 

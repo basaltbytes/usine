@@ -100,6 +100,7 @@ it("reloads the configuration from any Configuration page and shows what changed
   );
   await page.viewport(1280, 800);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  queryClient.setQueryData(["run", "failed-before-reload"], { agentDefinitionChanged: false });
   const router = createRouter({
     routeTree,
     context: { queryClient },
@@ -121,6 +122,7 @@ it("reloads the configuration from any Configuration page and shows what changed
     await reload.click();
     await expect.element(page.getByText(/^Configuration reloaded/u)).toBeVisible();
     await expect.element(page.getByText("Loops added: triage")).toBeVisible();
+    expect(queryClient.getQueryState(["run", "failed-before-reload"])?.isInvalidated).toBe(true);
     await expect.element(page.getByRole("link", { name: "triage", exact: true })).toBeVisible();
 
     // The reload result stays visible after navigating to another Configuration page.

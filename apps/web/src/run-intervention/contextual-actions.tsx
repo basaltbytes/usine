@@ -1,8 +1,8 @@
 import { DotsThreeIcon } from "@phosphor-icons/react";
 import type { RunId } from "@usine/core/run";
-import type { RunView } from "@usine/orchestrator/operator";
+import type { RunDetailView } from "@usine/orchestrator/operator";
 import { Match } from "effect";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { ErrorAlert } from "@/components/error-alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,7 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { runActionLabel, runAgainBlocked } from "../operator-copy.ts";
+import { retryDescription, runActionLabel, runAgainBlocked } from "../operator-copy.ts";
 import {
   type RunActionRequest,
   unchangedRunAgain,
@@ -25,18 +25,20 @@ import type { EditIntent } from "./edit-and-retry.tsx";
 
 /** Renders the Run's primary and secondary actions as buttons and the rest in a menu. If no action applies, renders nothing. */
 export const ContextualActions = ({
-  run,
+  detail,
   onEdit,
   openRun,
   className,
 }: {
-  readonly run: RunView;
+  readonly detail: Pick<RunDetailView, "run" | "agentDefinitionChanged">;
   /** Opens the task and Agent editor for a retry or a run again. */
   readonly onEdit: (intent: EditIntent) => void;
   /** Opens the Run that Run again created. */
   readonly openRun: (runId: RunId) => void;
   readonly className?: string;
 }) => {
+  const { run, agentDefinitionChanged } = detail;
+  const retryDescriptionId = useId();
   const mutation = useRunAction();
   const again = useRunAgain();
   const [confirmCancel, setConfirmCancel] = useState(false);
@@ -61,7 +63,7 @@ export const ContextualActions = ({
   const { primary, secondary, more } = actionPlan(run);
   if (primary === null && secondary === null && more.length === 0) return null;
   return (
-    <div className={cn("space-y-2", className)}>
+    <div className={cn("max-w-sm space-y-2", className)}>
       <div role="group" aria-label="Run actions" className="flex flex-wrap items-center gap-2">
         {confirmCancel ? (
           <>
@@ -75,7 +77,11 @@ export const ContextualActions = ({
         ) : (
           <>
             {primary !== null && (
-              <Button disabled={busy} onClick={() => select(primary)}>
+              <Button
+                disabled={busy}
+                aria-describedby={primary._tag === "Retry" ? retryDescriptionId : undefined}
+                onClick={() => select(primary)}
+              >
                 {actionLabel(primary)}
               </Button>
             )}
@@ -83,6 +89,7 @@ export const ContextualActions = ({
               <Button
                 variant={secondary._tag === "Cancel" ? "ghost" : "outline"}
                 disabled={busy}
+                aria-describedby={secondary._tag === "Retry" ? retryDescriptionId : undefined}
                 onClick={() => select(secondary)}
               >
                 {actionLabel(secondary)}
@@ -108,6 +115,7 @@ export const ContextualActions = ({
                     {more.map((action) => (
                       <DropdownMenuItem
                         key={action._tag}
+                        aria-describedby={action._tag === "Retry" ? retryDescriptionId : undefined}
                         variant={action._tag === "Cancel" ? "destructive" : "default"}
                         onClick={() => select(action)}
                       >
@@ -121,6 +129,17 @@ export const ContextualActions = ({
           </>
         )}
       </div>
+      {run.canRetry && (
+        <div className="space-y-1 text-xs wrap-anywhere text-muted-foreground">
+          <p id={retryDescriptionId}>{retryDescription(run.agentBrain)}</p>
+          {agentDefinitionChanged && (
+            <p>
+              The loaded definition of {run.agent} has changed. Edit and retry uses the current
+              definition.
+            </p>
+          )}
+        </div>
+      )}
       {again.data?._tag === "CycleBlocked" && (
         <p role="status" className="text-xs text-needs-you">
           {runAgainBlocked}

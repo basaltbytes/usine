@@ -37,6 +37,11 @@ const attempt = (outcome: AttemptView["outcome"]) =>
   });
 const run = (fields: Partial<ConstructorParameters<typeof RunView>[0]> = {}) =>
   new RunView({
+    agentBrain: new BrainSpec({
+      harness: "codex",
+      model: ModelId.make("test-model"),
+      effort: "high",
+    }),
     id: RunId.make("run-33"),
     itemKey: ItemKey.make('["github","basaltbytes/usine",33]'),
     loop: LoopName.make("start-dev"),

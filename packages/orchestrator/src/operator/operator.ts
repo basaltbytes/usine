@@ -1,7 +1,7 @@
 import { transcriptEvent } from "./projection.ts";
 import { TranscriptSessionsQuery } from "@usine/engine/transcript";
 import { GitHubLabelName } from "@usine/config/label";
-import { resolveParentModel } from "@usine/core/agent";
+import { Agent, resolveParentModel } from "@usine/core/agent";
 import { AttemptContext, AttemptId } from "@usine/core/attempt";
 import { Intervention } from "@usine/core/attempt/channel";
 import type { LoadedInstance } from "@usine/config/instance";
@@ -148,6 +148,8 @@ const OVERVIEW_CLOSED_RUNS = 100;
 
 /** The number of newest Items a Board shows. */
 const OVERVIEW_BOARD_ITEMS = 500;
+
+const sameAgent = Schema.toEquivalence(Agent);
 
 /**
  * Each Board Run's usage at projection time, and the Runs whose Attempt was running then. Token
@@ -722,8 +724,11 @@ const makeOperatorObservation = Effect.gen(function* () {
         ],
         { concurrency: "unbounded" },
       );
+    const currentAgent = instance.agents.find(({ name }) => name === snapshot.agent.name);
     return new RunDetailView({
       run: runView(snapshot, paused, workerAccesses(instance.config.workers)),
+      agentDefinitionChanged:
+        currentAgent !== undefined && !sameAgent(snapshot.agent, currentAgent.agent),
       eventDedupKey: snapshot.event.dedupKey,
       eventPayload: snapshot.event.payload,
       transcript: transcript.events,

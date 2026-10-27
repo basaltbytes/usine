@@ -1,3 +1,4 @@
+import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { OperatorMessage, ParentTarget } from "@usine/core/attempt/channel";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
@@ -117,6 +118,11 @@ const instance = new LoadedInstance({
   warnings: [],
 });
 const run = new RunView({
+  agentBrain: new BrainSpec({
+    harness: "codex",
+    model: ModelId.make("test-model"),
+    effort: "high",
+  }),
   id: runId,
   itemKey: ItemKey.make("issue:31"),
   loop: loopName,
@@ -139,6 +145,7 @@ const run = new RunView({
   canRunAgain: false,
 });
 const detail = new RunDetailView({
+  agentDefinitionChanged: false,
   sessionState: [],
   // An approved Run that the operator ran again, so the detail round trip includes both records.
   run: new RunView({
@@ -608,7 +615,10 @@ describe("operator HTTP API", () => {
             message: `Cannot retry run ${id}: run run-open of loop "fix-ci" is open on the same item. Cancel run run-open, or try again after it closes.`,
           }),
         ),
-      cancel: () => Effect.void,
+      cancel: (id) =>
+        Effect.fail(
+          new RunOperationRejectedError({ runId: id, operation: "cancel", state: "Failed" }),
+        ),
       discardLeftovers: () => Effect.void,
       moveBoardItem: (move) =>
         move.toLane === "proposed:ready"
@@ -663,6 +673,15 @@ describe("operator HTTP API", () => {
       assert.deepStrictEqual(await rejected.json(), {
         error: "RunOperationRejectedError",
         message: `Cannot approve run ${runId} while it is running.`,
+      });
+
+      const cancel = await rejectingApp.handler(
+        new Request(`http://localhost/api/runs/${runId}/cancel`, { method: "POST" }),
+      );
+      assert.strictEqual(cancel.status, 409);
+      assert.deepStrictEqual(await cancel.json(), {
+        error: "RunOperationRejectedError",
+        message: `Cannot cancel run ${runId} while it is failed.`,
       });
 
       const blocked = await rejectingApp.handler(

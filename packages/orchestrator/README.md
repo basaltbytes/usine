@@ -31,6 +31,8 @@ A malformed item projection is quarantined and reported on the board and the nee
 `Operator.detail` takes distinct cold, live-tail, and earlier-page requests. A cold read keeps the newest 500 rows per attempt, with an earlier cursor per truncated attempt for paging back. A live tail returns at most 500 rows across the run and advances its cursor from the last row. Each response also has:
 
 - the newest attempt's worker;
+- `run.agentBrain`: the saved agent definition's harness, model, and effort, which Retry reuses, including any edit-and-retry amendment;
+- `agentDefinitionChanged`: whether the loaded agent definition differs from the saved one (false if the agent is no longer loaded). Edit and retry takes the current loaded definition, even when the task and agent name stay the same;
 - `RunDurationView`: ended attempts' time, the running one's start, and how many ended without a recorded end or transcript row;
 - `RunUsageView`: each session's highest token report, summed per session, pool, and run, at the harness's price or, for a Codex session, at OpenAI's API rates for its token breakdown (`@usine/agents/openai-prices`), as an estimate on the Claude and ChatGPT plans (ADR 0013). A Codex model without rates stays unpriced, with one warning per model. Pools come from `sessionPool` (`@usine/core/agent/session`), so a Claude Code child on its gateway's API key counts in API keys at the model's rate. Ended attempts' reports are kept in memory until restart, so polling reads only the attempt in flight.
 

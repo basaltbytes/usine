@@ -863,6 +863,12 @@ const makeRunStore = Effect.gen(function* () {
           decision: decision._tag,
         });
         if (decision._tag === "AlreadyClosed") return decision;
+        if (decision._tag === "CancelRejected")
+          return yield* new RunOperationRejectedError({
+            runId,
+            operation: "cancel",
+            state: current.run.state._tag,
+          });
         const canceledAt = yield* DateTime.now;
         if (Option.isSome(decision.attempt)) {
           const { id, outcome } = decision.attempt.value;

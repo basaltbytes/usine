@@ -1,5 +1,6 @@
 import { SettledItemState } from "@usine/config/board";
 import { AgentName } from "@usine/core/agent";
+import { BrainSpec } from "@usine/core/agent/brain";
 import { TokenCount } from "@usine/core/agent/session";
 import { AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
 import { OperatorAction, SessionTarget } from "@usine/core/attempt/channel";
@@ -65,6 +66,8 @@ export class RunView extends Schema.Class<RunView>("@usine/orchestrator/RunView"
   loop: LoopName,
   repository: RepositoryName,
   agent: AgentName,
+  /** The saved agent definition's brain, including any edit-and-retry amendment. */
+  agentBrain: BrainSpec,
   state: RunStateTag,
   loopPaused: Schema.Boolean,
   openedAt: Schema.String,
@@ -135,6 +138,8 @@ export class UnconfirmedStopView extends Schema.Class<UnconfirmedStopView>(
 export class RunDetailView extends Schema.Class<RunDetailView>("@usine/orchestrator/RunDetailView")(
   {
     run: RunView,
+    /** Whether the loaded agent differs from the saved definition; false if no longer loaded. */
+    agentDefinitionChanged: Schema.Boolean,
     eventDedupKey: Schema.String,
     eventPayload: Schema.Json,
     transcript: Schema.Array(TranscriptEventView),

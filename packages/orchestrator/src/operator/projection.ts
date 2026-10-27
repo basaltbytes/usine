@@ -223,6 +223,7 @@ export const runView = (
     loop: snapshot.run.loop,
     repository: snapshot.repository,
     agent: snapshot.agent.name,
+    agentBrain: snapshot.agent.brain,
     state: snapshot.run.state._tag,
     loopPaused: pausedLoops.has(snapshot.run.loop),
     openedAt: DateTime.formatIso(snapshot.run.openedAt),

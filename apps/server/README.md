@@ -30,7 +30,9 @@ Without GitHub App credentials, it logs the typed error, leaves both trigger str
 
 ## Web UI
 
-Each project opens as a board of authored or proposed lanes; proposed lanes are read-only. To enable moves, define `repos[].lanes` in `usine.yaml` and reload (see the [lane example](../../packages/config/README.md)). Moving an item to an authored label-backed lane swaps only the labels in that map and keeps other labels; polling then evaluates label-driven loops. Cards show the latest run and open its drawer. The UI can approve, retry, or cancel a run, pause or unpause a loop, page back through older transcript rows, and tail parent and first-level child activity.
+Each project opens as a board of authored or proposed lanes; proposed lanes are read-only. To enable moves, define `repos[].lanes` in `usine.yaml` and reload (see the [lane example](../../packages/config/README.md)). Moving an item to an authored label-backed lane swaps only the labels in that map and keeps other labels; polling then evaluates label-driven loops. Cards show the latest run and open its drawer. Retry controls describe the saved harness and model. The drawer flags a changed agent definition, and **Edit and retry** uses the current loaded definition even with the same task and agent name. `POST /api/runs/:id/cancel` returns 409 for failed and succeeded runs and preserves their outcomes; repeating it on a canceled run succeeds.
+
+The UI can approve, retry, or cancel a run, pause or unpause a loop, page back through older transcript rows, and tail parent and first-level child activity.
 
 Run conversations remember the reader's filter, opened disclosures, and reading position across drawer reopens and page refreshes. Bookmarks are per run and browser origin, and unread activity stays pending while a saved position is restored. See [Returning to a conversation](../web/README.md#returning-to-a-conversation) for retention and history-recovery limits. Adjacent completed tools are summarized by their recorded actions, such as files read or changed and recognized test or build commands; expand a group to see each tool and result.
 
