@@ -1,5 +1,56 @@
 # @usine/durable
 
+## 0.2.0
+
+### Minor Changes
+
+- 9c7ea97: Requires `effect` 4.0.6 instead of 4.0.0-rc.111, and depends on `@effect/platform-node` and `@effect/platform-node-shared` 4.0.6 ([#494](https://github.com/basaltbytes/usine/issues/494)).
+- 266986a: The nine `@earendil-works/*` packages are at 1.2.0. pi-durable 1.2 closes the harness on any storage error, a read included, so `DurableHarness` now handles a failed harness instead of a poisoned session or a stuck step:
+  
+  - An attempt that is running when a storage error fails the harness fails with a retryable `InfraFailure` whose cause is the new `DurableStorageFailed`, and the engine retries it from salvage. The harness reopens the storage, aborts those attempts' tasks, and resumes the other tasks.
+  - A storage error before the harness resumes its tasks fails the layer with a `DurableHarnessError` that names the error, and `usine up` doesn't start.
+  - If the reopen fails, or the reopened harness fails within a minute, the harness stops until the orchestrator restarts.
+  
+  `HarnessListener` replaces `onReopen` and `onStop` with `onFailure`, `BeforeResume` also receives the storage, and `StuckStepReports` is removed. The `subagent` tool returns the child's report as `output`, the field that pi-durable 1.2 reads instead of `content`.
+
+### Patch Changes
+
+- 1f7b315: Change the license from MIT to AGPL-3.0-only. Versions published before this one stay under MIT.
+- 1514af9: On a provisioned worker, the Claude login lock covers one machine instead of the whole worker ([#591](https://github.com/basaltbytes/usine/issues/591)). Each machine has its own login, so a Claude child or preflight check on one machine no longer waits for a Claude start on another. A worker's long-lived machine keeps one lock for all its attempts.
+  
+  `ClaudeLoginLock.withLock(worker, machine)` takes the provider's `MachineId` of a provisioned machine, or `None` for the worker's shared login. `ChildRequest` and `AttemptRequest` require `machine`, which the executor sets from the attempt's machine. `AttemptRequest.machine` isn't stored; each `execute` call supplies it.
+- 9077f43: Fixes a forced stop that never exited after it released a running attempt ([#573](https://github.com/basaltbytes/usine/issues/573)). The attempt's Pi parent kept running until the durable harness closed. If it called `subagent` in that time, the call waited for an `execute` call to supply the child host, and no `execute` call follows in a stopping process. The harness close waits for every running call, so it never finished. An aborted `subagent` call now stops waiting and logs `Abandoning the child spawn of an aborted tool call`. The next start resumes the attempt, and the call ends as interrupted.
+- afbac5c: A salvage git command that doesn't finish within the 10-minute command timeout no longer crashes the release of a failed attempt's checkout. Before, the salvage read the message of the timeout's cause, which has none, and threw "Cannot read properties of undefined (reading 'trim')". The run then failed with "Step executor defect; operator intervention required" instead of the attempt's own failure, and the checkout and its provisioned machine stayed on the worker without a recorded salvage (#602). Now the run fails with the attempt's own failure, and the salvage records `Retained` with the worktree's path, so the checkout stays on the worker as it does after any other failed git command.
+  
+  A worker command that exceeds the timeout now fails with the message `<command> didn't finish within 10 minutes`, instead of `Can't run <command>`, which also named a command that couldn't start.
+  
+  `@usine/durable/testing` adds `StubChild.crash`, which ends a stub child without a result, as a Claude child whose output stream fails, so the parent's `subagent` call fails with a `stream` `SessionOperationError`.
+- Updated dependencies [1f7b315]
+- Updated dependencies [8ea9f5b]
+- Updated dependencies [d819599]
+- Updated dependencies [2f78d3a]
+- Updated dependencies [1514af9]
+- Updated dependencies [b3e696a]
+- Updated dependencies [4942c44]
+- Updated dependencies [113d150]
+- Updated dependencies [80f2eb6]
+- Updated dependencies [3d54b01]
+- Updated dependencies [9be864d]
+- Updated dependencies [b2df567]
+- Updated dependencies [9c7ea97]
+- Updated dependencies [9c7ea97]
+- Updated dependencies [d82c6cd]
+- Updated dependencies [266986a]
+- Updated dependencies [4c63872]
+- Updated dependencies [6388474]
+- Updated dependencies [fdbad56]
+- Updated dependencies [fdbad56]
+- Updated dependencies [2183c07]
+- Updated dependencies [9782e74]
+- Updated dependencies [e5d9dcb]
+  - @usine/agents@0.5.0
+  - @usine/core@0.5.0
+
 ## 0.1.0
 
 ### Minor Changes

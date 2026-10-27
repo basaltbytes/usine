@@ -1,5 +1,163 @@
 # @usine/server
 
+## 0.4.0
+
+### Minor Changes
+
+- e84a999: Every `usine` command reads `.env` in the instance folder when it starts, so `usine restart` and `usine upgrade` work from a shell that doesn't set a gateway's admin token or the other variables that `usine up` reads. As with dotenv, a variable that the environment sets keeps its value, and `.env` sets the others. usine doesn't expand variables or run commands in `.env`, and doesn't pass its variables to child processes beyond their allowlists. A `.env` that exists but can't be read stops the command with status 1.
+- e22d67c: The CLI manages a running instance. `usine up` writes `.usine/instance.json` with its PID, port, version, start time, and command line, next to `.usine/instance.pid`, and removes both when it exits.
+  
+  - `usine status` reports whether `usine up` runs, its PID, address, engine version, uptime, open runs, and a newer pinned version on npm. It exits with status 3 if none runs.
+  - `usine stop [--timeout <seconds>] [--force]` sends `SIGTERM` and waits for the drain. A repeated `stop` doesn't end the drain; `--force` does.
+  - `usine restart` stops the instance and starts its recorded command line in the background, with the output in `.usine/usine.log`. `usine up --detach` does the same start for a stopped instance.
+  - `usine upgrade [<version>] [--check]` backs up the stores into `.usine/backups/`, moves the `@usine/*` pins in `package.json`, installs them with the instance's package manager, commits the change, and restarts. For an engine outside the instance, such as a checkout, it changes nothing and says how to update it.
+  
+  `restart` and `upgrade` refuse while a run has a running attempt, unless `--force`, and when neither the shell nor the instance folder's `.env` sets a gateway's admin token variable.
+- 4c63872: `usine up` takes `--log-level <level>`, or `USINE_LOG_LEVEL`, with `trace`, `debug`, `info`, `warn`, or `error`, in any case. The default stays `info`. Use `debug` to see the lines that say why usine skipped or deferred something, such as a run left out of **Needs attention** or a pull request that a poll didn't fetch again. An unknown level stops `usine up` with the usage. `usine up --detach`, `usine restart`, and `usine upgrade` start the new process with the level of the recorded launch.
+- 77bf7eb: `usine up --origin <url>`, or `USINE_ORIGIN`, names the URL at which a proxy publishes the UI, such as the HTTPS URL of `tailscale serve` ([#609](https://github.com/basaltbytes/usine/issues/609)). The operator API accepts browser requests from pages at that origin, as it does from the loopback names, and refuses other origins. The server still listens only on `127.0.0.1`. `usine up` records the origin in `.usine/instance.json`, so `usine restart` passes it again, and `usine status` shows it.
+- 7d338a2: `usine up` can export its spans over OTLP/HTTP. Add a `tracing` block with `otlp_url`, the collector's traces endpoint without credentials or a query string, and an optional `service_name` to `usine.yaml`. Without the block, no spans are exported. A reload refuses a changed `tracing` block with `RestartRequiredError`.
+- 77bf7eb: `usine status`, `usine stop`, `usine restart`, and `usine upgrade` manage an orchestrator that a systemd service runs with `systemctl` ([#609](https://github.com/basaltbytes/usine/issues/609)). `usine up` records the system service whose cgroup it runs in, from `/proc/self/cgroup`, as `systemdUnit` in `.usine/instance.json`. If `systemctl show` reports the process as that service's main process, the commands start the drain with `systemctl stop --no-block`, so that systemd doesn't restart the service, and start it again with `systemctl start`, waiting until the new process answers. A start whose service fails or waits to restart is stopped with `systemctl stop --no-block`, so that a failing start, such as a failed migration, doesn't repeat, also when `systemctl start` itself fails. `usine status` adds a `service` line. A failed `systemctl` command, such as one that the user may not run, stops the command with status 1 and names it.
+
+### Patch Changes
+
+- 1f7b315: Change the license from MIT to AGPL-3.0-only. Versions published before this one stay under MIT.
+- 32535dd: Each board lane scrolls its own cards, so scrolling one lane no longer moves the others. The lanes fill the board's height, and a lane fades its top or bottom edge while cards are hidden there.
+- ceba675: Show the saved harness and model used by Retry and flag agent definition changes in run details. Edit and retry uses the current loaded definition, including when the task and agent name stay the same. Reject cancellation of failed and succeeded runs with a clear error while preserving repeated cancellation of canceled runs.
+- 392e165: Needs attention no longer lists entries about an issue that is closed or a pull request that is closed or merged. Each poll closes the item's cycle-budget ask with the reason `ItemClosed` and records it in the new `usine_cycle_ask_closures` table. The closure isn't a reset: the item keeps its generation and reservations, so a reopened item at its limit asks again. A failed run on such an item keeps `canResolveFailure` but isn't listed, and its drawer says `Issue closed`, `Pull request closed`, or `Pull request merged`.
+  
+  Adds `CycleBudgets.close` and `CycleBudgetAskCloseReason` to `@usine/engine/cycle-budget`, `ItemProjectionReader.get` to `@usine/engine/item-projection`, `RunDetailView.settledItemState` to `@usine/orchestrator/operator`, and `SettledItemState` to `@usine/config/board`.
+- 80f2eb6: The run page's **Resume this session** command finds a Codex child's session in the attempt's own Codex home, which an attempt behind a gateway with `openai` in `llm_providers` gets: it sets `CODEX_HOME` to that directory before `codex resume`. For a child whose model requests used the gateway's credential, the line under the command says that the gateway credential isn't available from your shell, instead of naming the attempt's harness login. On a provisioned worker, such a child gets that line under the note about the attempt's machine, as the gateway credential or API key.
+- 3d54b01: Codex sessions now have a price. `SessionTokensUpdated` has an optional `breakdown` of input, cached input, cache write, and output tokens, which Codex children report. `@usine/agents/openai-prices` exports `openAiPrice`, which prices a breakdown at OpenAI's API rates for the models that the supported Codex CLI versions list.
+  
+  Run and task usage prices a Codex session that its harness didn't price from that table, marked as an estimate in the ChatGPT plan and not in the API keys pool. ChatGPT plan sessions that Pi prices keep Pi's figure, now shown as an estimate. A Codex model without rates stays unpriced and is logged once. The run page shows ChatGPT plan prices instead of `No dollar rate`.
+- 9be864d: Two instance folders that share a GitHub App and an SSH worker machine no longer remove each other's attempt containers at startup.
+  
+  - `usine up` reads the instance ID from `.usine/instance-id`, and writes a new UUID there at its first start. A file that doesn't contain a UUID stops `usine up` with status 1 instead of being replaced, because with a new ID usine no longer removes the containers it left before.
+  - Each attempt container gets the label `dev.usine.instance-id=<instance ID>` beside `dev.usine.instance=github-app-<App ID>`, and a process removes only the containers that have both its labels. A container that an earlier version left after a crash has no ID label, so no process removes it; remove such containers once with `docker rm`.
+  - `@usine/core/instance` adds `InstanceId`. `SshExecutorOptions` requires `instanceId`, and `runtimeLayer` and `workerEngineLayer` in `@usine/orchestrator` take it after the instance directory.
+- b2df567: An SSH worker's attempt containers get CPU, memory, and process limits derived from the machine for each limit that `workers[].container` leaves out of `usine.yaml`. Preflight reads the machine's CPUs (`nproc`), `MemTotal`, and the lower of `kernel.threads-max` and `kernel.pid_max`, subtracts a reserve for the machine's own processes (0.5 CPU, 1024 MiB, 1024 tasks), and divides by `max_concurrent_attempts`. A machine with 4 CPUs and 8 GiB gives each container 3.5 CPUs and 7168 MiB with one slot, and 1.16 CPUs and 2389 MiB with three. A value in `usine.yaml` still wins. A provisioned worker derives the limits for one attempt on its first machine each day, and its machines keep them until the next day's first machine.
+  
+  - `SSH Worker runs each Attempt in its own container` logs the limits each time the executor records them, including for a container started before any preflight on the worker, and `SSH Worker preflight verified` logs them at preflight, with `derivedLimits`, `slots`, `machineCpus`, `machineMemoryMib`, and `machineTasks`. The **Workers** page shows the limits that the last preflight applied and which ones it derived.
+  - `WorkerContainer.cpus`, `memoryMib`, and `pids` in `@usine/config`, and the same fields of `SshWorkerAddress.container` in `@usine/executor/ssh`, are `Option`s; `None` derives the limit.
+  - `PreflightReport` has `containerLimits`, and `MachineGrant.checked` is a `MachineCheck` with the checked brains and the limits. `@usine/core/worker` exports `ContainerLimits` and `CONTAINER_LIMITS`, the names of its fields.
+  - `WorkerPreflight` keeps the last limits that a machine check applied, and `WorkerConfigurationView.containerLimits` returns them. `ContainerView` returns null for a limit that `usine.yaml` leaves out.
+- ce89267: `usine up --detach`, `usine restart`, and `usine upgrade` wait for a long startup recovery instead of reporting that the new process didn't answer. The orchestrator listens only after startup recovery reconciles the checkouts that earlier attempts left on workers, which can take minutes. A start now keeps waiting while the new process writes to `.usine/usine.log`, and gives up after `--timeout` seconds (120 by default) in which the process neither listens nor writes a line. The process keeps running when the command gives up.
+- 9c7ea97: Runs on `effect` 4.0.6 instead of 4.0.0-rc.111 ([#494](https://github.com/basaltbytes/usine/issues/494)). When `usine up` can't open `.usine/runtime.sqlite`, it stops with `runtime store error: could not open local database` and the reason, instead of a defect with SQLite's error.
+- 9077f43: `usine stop --force`, `usine restart --force`, and `usine upgrade --force` send `SIGKILL` to an orchestrator that still runs after `--timeout` ([#573](https://github.com/basaltbytes/usine/issues/573)), and print `usine (pid <pid>) did not exit within <timeout>. Sent SIGKILL: the next start reattaches the running attempts.` Before, the command exited with status 1 and suggested `--force`, which was already set. `restart` and `upgrade` then continue with the start. If the process still runs 5 seconds after `SIGKILL`, the command fails with `KillTimeoutError`.
+- b689685: Board items now include their GitHub state (`BoardItemLink.state`), so every view that lists an item can show whether it is open, closed, or merged.
+  
+  The web UI shows each issue and pull request the same way on every page: its GitHub icon and number in GitHub's state colour, linked to GitHub. A task is named after its earliest issue, or its pull request if it has no issue, with that item's number inline in the title. The run page, the run drawer, and the task page share one header. Run actions depend on the run's state: for a question from the agent, **Mark answered** is the primary action, and actions that apply less often are under **More actions**.
+- c6efd59: `usine status`, `usine stop`, `usine restart`, and `usine upgrade` read the `.usine/instance.json` of a `usine up` that started before `--log-level` existed. They ignored that record as unreadable, so `usine restart` refused the instance. `usine restart` now starts it again at the `info` log level.
+  
+  `usine restart` also restarts an instance whose record is missing or still unreadable, such as one that `@usine/server` 0.3.0 started, which writes only `.usine/instance.pid`. It checks for running attempts and gateway variables on the port where that process answers, stops it, and starts `usine up` as `usine up --detach` without flags would, on the port that the shell or `.env` sets. Before, it refused and said to run `usine stop`, then `usine up --detach`.
+- 77bf7eb: The macOS sleep warning of `usine up` also suggests running the orchestrator on an always-on server, and links to the new guide [Run the orchestrator on a server](https://docs.usine.dev/guides/run-the-orchestrator-on-a-server/) ([#609](https://github.com/basaltbytes/usine/issues/609)). The guide creates a Hetzner Cloud server in the gateway's private network with `infra/hetzner/gateway/gateway.sh orchestrator`, runs `usine up` in a systemd service, publishes the web UI on the tailnet with `tailscale serve`, and moves an instance there from a laptop.
+- cd25ce0: The operator API adds `GET /api/statistics?window=7d|30d|all` (30 days by default), which computes from the stored runs, their usage, and the stored items how the factory ran in the window: closed runs by outcome, loop, agent, and harness, model, and effort; run and attempt time with median and 90th percentile beside the mean; tokens per pool and the cost of priced runs; runs closed per day; first-pass merges and lead time to merge; queue wait, attempts per run, and slot use per worker; and Needs attention entries with their waits. `RunReader.closedSince` reads the runs closed since a time.
+  
+  The overview ends with a Statistics section that shows these as figures and charts, with a switch between 7 days, 30 days, and all runs.
+- b6f6afe: `GET /api/statistics` now returns the tasks done in the window, a task being done when its pull request merges: each task's time from its first run to the merge with the median, the split of task time between the loops' attempts and waiting, each loop's median run time, the share of tasks with no second round, the operator actions per task, and the tokens per task by loop, with a cost only when every session has a price. The run statistics move to `GET /api/statistics/runs`, which reports medians only.
+  
+  The Statistics section now leads the overview with four blocks: Tasks done, Time per task, First time right, and Tokens per task. The run statistics sit behind a collapsed Details disclosure and load when it opens.
+- 266986a: The nine `@earendil-works/*` packages are at 1.2.0. pi-durable 1.2 closes the harness on any storage error, a read included, so `DurableHarness` now handles a failed harness instead of a poisoned session or a stuck step:
+  
+  - An attempt that is running when a storage error fails the harness fails with a retryable `InfraFailure` whose cause is the new `DurableStorageFailed`, and the engine retries it from salvage. The harness reopens the storage, aborts those attempts' tasks, and resumes the other tasks.
+  - A storage error before the harness resumes its tasks fails the layer with a `DurableHarnessError` that names the error, and `usine up` doesn't start.
+  - If the reopen fails, or the reopened harness fails within a minute, the harness stops until the orchestrator restarts.
+  
+  `HarnessListener` replaces `onReopen` and `onStop` with `onFailure`, `BeforeResume` also receives the storage, and `StuckStepReports` is removed. The `subagent` tool returns the child's report as `output`, the field that pi-durable 1.2 reads instead of `content`.
+- 6388474: Record the time and configured operator of each failure resolution. Include resolutions in the failure-to-answer median, with separate retry and resolution figures, and refresh cached statistics after resolution. Preserve the first resolution across repeated requests and later retries.
+- 5bc5cf5: The Board places a running card by its Item's current labels first. While a Task's newest open Run is `Running` and its current Item is open, the card goes to the first label lane that matches the Item's current labels, so a card moves to In progress as soon as `start-dev` swaps `ready-for-agent` for `agent-in-progress`. The card stays in the lane its Run's trigger matched, read from the Run's Event, only if the current labels match no label lane, for example after a Loop removes its trigger label and sets no other. The Task page names the same lane, and a Board move records the lane the card showed in.
+- fdbad56: The salvage commit leaves out the `.pnpm-store`, `node_modules`, and `.turbo` directories at any depth, even if the agent staged them, as well as what Git ignores. It also leaves out each file larger than GitHub's 100 MiB limit. Before, `git add --all` staged pnpm's store when pnpm created it in the checkout, which it does when its default store is on another filesystem, as in an SSH worker's container. GitHub then refused the push for its files over 100 MB, so the salvage kept the checkout and pushed nothing (#581). A checkout whose only changes are in those directories now has nothing to salvage. A salvage that leaves out a file over the size limit pushes the rest and records `PartlyPushed`, with a message that names the files and their sizes, so the worktree that has their only copy stays on the worker.
+  
+  `@usine/core/attempt/salvage` adds `SalvagePartlyPushed` to `AttemptSalvage`, with the salvage `ref`, the pushed `commit`, the worktree's `path`, and a `message` that names the files left out. The engine resumes the run's next attempt from its `ref` and `commit`, as it does from a `Pushed` salvage. The executors keep its worktree, provisioned machine, or Cloudflare sandbox, as they do for a `Retained` one. The run drawer shows the pushed ref and commit, the worktree's path, and the files left out.
+- fdbad56: A salvage push that GitHub refuses for a file over its size limit (`GH001`) is now recorded as `Rejected`, and startup recovery doesn't push the same commit again. Before, the salvage recorded it as `Retained`, and every startup pushed the checkout again before the HTTP server listened, about a minute each time, and GitHub refused it each time (#581).
+  
+  `@usine/core/attempt/salvage` adds `SalvageRejected` to `AttemptSalvage`, with the worktree's `path`, the refused `commit`, and the remote's `message`. `AttemptRecovery` requires `rejected`, the attempt's recorded `SalvageRejected` or `None`, and the engine's salvage candidates fill it from the stored salvage. The executors keep the worktree, the provisioned machine, or the Cloudflare sandbox of a `Rejected` salvage as they do for a `Retained` one. Recovery records the same `Rejected` salvage while the checkout's head is the refused commit, and salvages and pushes again once the checkout changes. A recovery that can't inspect the checkout, or can't commit its changes on top of the refused commit, also records the same `Rejected` salvage instead of `Retained`, so that a later startup doesn't push the refused commit again. The run drawer shows the rejected work's path and GitHub's message.
+- ae53a5a: The web UI's sidebar shows each project after a repository mark: the owner's GitHub avatar, or the repository name's first letter if the avatar doesn't load. Overview, Board, Tasks, and each configuration page have an icon, and the icons and marks line up in one column. The project breadcrumb, the board heading, the Repositories list, a repository's page, and a loop's Repositories fact show the same mark.
+- 2183c07: An SSH worker whose machine has Docker runs each attempt in its own container, so attempts on one machine can't read each other's checkouts, tokens, caller tokens, or processes.
+  
+  - The container runs the image that `workers[].container.image` names in `usine.yaml`, or `ghcr.io/basaltbytes/usine-worker` at the harness versions of the release (`ATTEMPT_IMAGE` in `@usine/executor/ssh`). `cpus`, `memory_mib`, and `pids` limit each container.
+  - It mounts only the attempt's checkout and the SSH user's harness login files read-write, and its cached clone and credential directory read-only. It uses the machine's network and gets the attempt's variables, secrets included, on `docker run`'s standard input.
+  - Every command for the attempt runs in it with `docker exec`: the children, git in the checkout, the harvest, the salvage, the pre-push hook, and the attempt's harness check. The checkout is a repository of its own that reads the cached clone's objects through an alternate.
+  - The container is removed with the checkout. Before a process starts its first container on a worker, it removes the containers that earlier processes of the instance left on that machine.
+  - Preflight checks Docker, pulls the image, checks the image's user ID, and probes the harnesses in a container from the image. Only a machine without Docker, whose SSH user has no Docker access, runs attempts as the SSH user; preflight reports the worker as degraded in the log, on the Workers page, and on the desk. With Docker, a Docker that doesn't answer fails preflight.
+  - A file outside every container's mounts records each checkout that a container had, so a reattachment or recovery never runs git in it as the SSH user, whatever the attempt changed in the checkout. A checkout from before Docker on a machine that now has it, or a container's checkout on a machine that no longer has Docker, is refused and left for the operator.
+  
+  `Executor.preflight` returns a `PreflightReport`, `SshExecutorOptions` takes the `instance` label, `SshWorkerAddress` takes `container`, and `RemoteShell` takes an optional `container` that wraps each command line in `docker exec`. `infra/worker-image/Dockerfile` defines the image, and cloud-init installs Docker.
+- 9782e74: An SSH worker can set `provisioner` instead of `destination` in `usine.yaml` to create a machine for each attempt, a Hetzner Cloud server from a snapshot or a Boat sandbox, and delete it after the attempt. A failed creation isn't an attempt failure: the run keeps its place in the queue, and the worker pauses its creations with a backoff. Preflight checks the provider's token and resources without creating a machine, and refuses a harness without a credential outside the machine: the gateway's, or an API key from `provisioner.api_keys`: `anthropic` for Claude Code, `openai` for Codex. The executor connects to each machine only with a host key known before the first connection: one it generates and sets through a Hetzner server's user data, or the one that Boat's API returns. The other checks run on the worker's first machine each day. `infra/hetzner/snapshot.sh` builds the Hetzner snapshot.
+- 40be06c: A task's time in the overview statistics now ends at its last run's close instead of its merge, so the wait for the operator to merge a ready pull request is left out. A run still open at the merge counts until the merge. The time split per loop uses the same span.
+  
+  The median price of a task now covers the tasks whose sessions all have a price, instead of disappearing when one session lacks a price. `TaskCostView` has the count of priced tasks in `tasks`. The overview shows the median price beside the median time in usine, and the line under the blocks counts the tasks left out of it.
+- 2f78d3a: On macOS, `usine up` reads `pmset -g` at startup and logs a warning if system sleep is on and `caffeinate` doesn't prevent it ([#603](https://github.com/basaltbytes/usine/issues/603)). A sleep drops the orchestrator's SSH connections to workers and the gateway. Run `caffeinate -s` while runs are open, or turn off sleep on AC power with `sudo pmset -c sleep 0`. The check doesn't stop startup.
+- 6751a49: The web UI's tables give one column the remaining width and keep the other columns at their content's width. On the Workers list, a worker's slot cells stay on one line. In a worker's preflight table, each check's description wraps at 224px and **Detail** takes the rest of the table; in a narrower table, the time folds under the result and the message under the check. The Workers and Repositories lists fit beside the sidebar and on a phone without scrolling sideways, and a provisioned worker's Machines table wraps what each machine is for instead of scrolling sideways beside the facts rail.
+- a55ab58: Each run is now a trace of its own: its root span, `RunDriver.drive`, links to the span that launched the run, such as a poll cycle or an approval request. The **Settings** configuration page shows the `tracing` block, and a reload refused for a changed `tracing` block links to it. A malformed `OTEL_RESOURCE_ATTRIBUTES` now stops `usine up` with a message that names the key, instead of crashing it. The web UI no longer sends trace headers.
+- e5d9dcb: Fixes two cases where usine acted as if an attempt's parent task had stopped when it couldn't confirm the stop. The executor salvaged and removed the attempt's worktree under a parent task that could still run, and the run's retry, or the next run of the loop on the item, could start on another slot or worker beside it.
+  
+  While a stop is unconfirmed, the executor now keeps the worktree without salvage, and the next confirmed stop salvages and removes it. No run of the loop starts an attempt on the item until a reconcile confirms the stop. The run page and the item's stalled entry on **Overview** show **Waiting for attempt \<n\> to stop on \<worker\>**, and the **Needs attention** entry says that no new attempt starts on the item.
+  
+  `StepExecutor.interrupt` and `Executor.cancel` take a `StopReason` (`cancel`, `failed`, or `startup`, from `@usine/core/attempt`), which the executor logs. `UnconfirmedStop` records the run's loop and item and the reason, `RunDetailView.unconfirmedStop` names the attempt that an open run waits for, and the desk's stall reasons gain `WaitingForStopView`.
+- a5ed825: Fixes a canceled attempt that gave up its worker slot when usine couldn't confirm that its parent task stopped, so another attempt could start on that worker beside the task. The attempt now keeps its run's slot, also after its execution acquired the checkout and without a restart. Each reconcile retries the stop and frees the slot once the stop succeeds. After a restart, startup still occupies a slot for each closed attempt whose stop it can't confirm.
+  
+  `RunEngine.cancel` moves the slot of the run's fiber to the attempt before it stops the parent task. `UnconfirmedStops` in `@usine/engine/engine` lists the attempts whose stop the engine retries, and `UnconfirmedStops.empty` lists none; `OperatorObservation` requires it. **Needs attention** shows each attempt as an `UnconfirmedStopNeed`, **\<loop\>: parent task not stopped**.
+- 2f78d3a: Log lines start with an ISO 8601 timestamp in UTC, such as `[2026-10-27T02:25:13.123Z]`, instead of the local time of day ([#603](https://github.com/basaltbytes/usine/issues/603)). The local time had no date or offset and depended on the time zone that the process resolved, so after the change from summer time on 2026-10-25, a long-running orchestrator's log read one hour ahead of the machine's clock. Span events still go to the tracer.
+- Updated dependencies [1f7b315]
+- Updated dependencies [8ea9f5b]
+- Updated dependencies [d819599]
+- Updated dependencies [1514af9]
+- Updated dependencies [ceba675]
+- Updated dependencies [392e165]
+- Updated dependencies [b3e696a]
+- Updated dependencies [80f2eb6]
+- Updated dependencies [80f2eb6]
+- Updated dependencies [4942c44]
+- Updated dependencies [80f2eb6]
+- Updated dependencies [3d54b01]
+- Updated dependencies [9be864d]
+- Updated dependencies [b2df567]
+- Updated dependencies [9c7ea97]
+- Updated dependencies [9c7ea97]
+- Updated dependencies [9c7ea97]
+- Updated dependencies [9c7ea97]
+- Updated dependencies [9c7ea97]
+- Updated dependencies [9c7ea97]
+- Updated dependencies [9c7ea97]
+- Updated dependencies [4c63872]
+- Updated dependencies [bf21f9c]
+- Updated dependencies [b689685]
+- Updated dependencies [4c63872]
+- Updated dependencies [dfd0936]
+- Updated dependencies [cd25ce0]
+- Updated dependencies [b6f6afe]
+- Updated dependencies [962517f]
+- Updated dependencies [266986a]
+- Updated dependencies [ac701f0]
+- Updated dependencies [4c63872]
+- Updated dependencies [9077f43]
+- Updated dependencies [6388474]
+- Updated dependencies [4c63872]
+- Updated dependencies [5bc5cf5]
+- Updated dependencies [afbac5c]
+- Updated dependencies [f01e5f2]
+- Updated dependencies [fdbad56]
+- Updated dependencies [fdbad56]
+- Updated dependencies [4c63872]
+- Updated dependencies [770b9a4]
+- Updated dependencies [7d338a2]
+- Updated dependencies [2183c07]
+- Updated dependencies [9782e74]
+- Updated dependencies [40be06c]
+- Updated dependencies [905bbc4]
+- Updated dependencies [a55ab58]
+- Updated dependencies [e5d9dcb]
+- Updated dependencies [a5ed825]
+- Updated dependencies [4c63872]
+  - @usine/config@0.4.0
+  - @usine/core@0.5.0
+  - @usine/durable@0.2.0
+  - @usine/engine@0.5.0
+  - @usine/expression@0.4.0
+  - @usine/github@0.3.0
+  - @usine/orchestrator@0.4.0
+
 ## 0.3.0
 
 ### Minor Changes

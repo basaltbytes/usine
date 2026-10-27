@@ -1,5 +1,48 @@
 # @usine/gateway
 
+## 0.2.0
+
+### Minor Changes
+
+- 9c7ea97: Requires `effect` 4.0.6 instead of 4.0.0-rc.111, and depends on `@effect/platform-node` and `@effect/platform-node-shared` 4.0.6 ([#494](https://github.com/basaltbytes/usine/issues/494)).
+  
+  The admin API still answers an attach or renew body with an unknown key with 400, through `HttpApi.PayloadParseOptions` on the attachments group. Effect 4.0 ignores the payload annotation that did this before.
+  
+  Effect's Node server now aborts a reverse-proxy response whose upstream body fails after its headers, so the gateway no longer destroys the response itself. It still logs `The reverse proxy response body failed`. A listener bound to `::` reports its host as `::` instead of `0.0.0.0`.
+- 8425053: `git.<domain>` serves release downloads at `/OWNER/REPO/releases/download/TAG/FILE` and `/OWNER/REPO/releases/latest/download/FILE` for the attached repository, with the installation token as the `x-access-token` password. The gateway returns GitHub's redirect to the asset host unchanged, so `curl -L` on a worker fetches the asset through the forward proxy and the token reaches only github.com. A release download for another repository is refused with `repository-mismatch`.
+  
+  The gateway rewrites a `Location` header that points at github.com or api.github.com to `http://git.<domain>`, with API paths under `/api/v3`, and keeps the path and query, so a worker follows GitHub's redirects for a renamed repository through the gateway. `Location` headers on other hosts pass unchanged. Each release download logs `Served a GitHub release download`, each rewrite logs `Rewrote a GitHub Location header to the gateway`, and a forwarded response's log line has its `Location` host as `target`, without the path or query string.
+- 2fad241: A renamed or transferred repository's new name works through the gateway. If GitHub answers git's `/OWNER/REPO/info/refs` or the API's `/repos/OWNER/REPO` for the attached repository with a permanent redirect (301 or 308) to the same path under another owner or repository name, the gateway confirms the rename with GitHub's API and the attachment's credential: `/repos/OWNER/REPO` with the attached name must redirect to `/repositories/ID`, and the `full_name` of that repository must be the new name. The attachment then serves paths with the new name until it's detached or expires, and a renewal keeps the learned names. Other attachments, temporary redirects, redirects of anything else, such as a release download or `/repositories/ID/...`, and names that the API doesn't confirm teach no name. Each learned name logs `Learned the new name of an attached repository`, with `newName`, and each unconfirmed one logs `GitHub's API didn't confirm the new name of an attached repository` at warning level, with `newName` and the `reason`.
+  
+  `LiveAttachment` lists the learned names in `newNames` and answers `serves(repository)`, and `Attachments` has `learnNewName`.
+- 4942c44: The gateway holds a Codex ChatGPT login. `USINE_GATEWAY_CHATGPT_AUTH_FILE` names the `auth.json` that `codex login` writes; the gateway keeps its tokens in memory, refreshes the access token before it expires, one refresh at a time, and writes the rotated tokens back to the file through a temporary file with mode 0600. Codex's `/openai/v1/responses` goes to `USINE_GATEWAY_CHATGPT_UPSTREAM` (default `https://chatgpt.com/backend-api/codex`) with the access token and `ChatGPT-Account-ID`. A failed refresh is refused with `provider-login-unavailable` and sends nothing upstream: with 503 after a network or server error, which Codex retries, and with 401 once the token endpoint rejects the refresh token. A reload rereads the file and keeps the tokens in memory if the file has their refresh token or one they replaced. The admin API reports the login as a `subscription`.
+  
+  `llm.<domain>` serves only the routes Claude Code and Codex call, for every credential: `/anthropic/v1/messages`, `/anthropic/v1/messages/count_tokens`, `/anthropic/v1/models` and `/anthropic/v1/models/MODEL`, and `/openai/v1/responses`, `/openai/v1/responses/compact`, and `/openai/v1/models`. Other paths, percent-encoded separators, and dot segments are refused with `unsupported-path` before any credential is used.
+  
+  `OpenAiProvider` takes a `credential`, an `OpenAiApiKey` or a `ChatGptLogin`, instead of `key`. `ConflictingProviderCredentials` replaces `ConflictingAnthropicCredentials` and names the provider. `gatewayServices` includes `ChatGptLogins`, which needs a `FileSystem`; `gatewayLayer` provides Node's.
+
+### Patch Changes
+
+- 1f7b315: Change the license from MIT to AGPL-3.0-only. Versions published before this one stay under MIT.
+- 2fad241: The `unknown-host` refusal for a host on the egress allowlist says to download with `curl -fL -u ":$GH_TOKEN"` from `git.<domain>` instead, with the release download and archive URLs. gh gets this refusal when it follows GitHub's redirect to a download host through its socket, as in `gh release download`.
+- Updated dependencies [1f7b315]
+- Updated dependencies [8ea9f5b]
+- Updated dependencies [d819599]
+- Updated dependencies [b3e696a]
+- Updated dependencies [4942c44]
+- Updated dependencies [80f2eb6]
+- Updated dependencies [3d54b01]
+- Updated dependencies [9be864d]
+- Updated dependencies [b2df567]
+- Updated dependencies [9c7ea97]
+- Updated dependencies [6388474]
+- Updated dependencies [fdbad56]
+- Updated dependencies [fdbad56]
+- Updated dependencies [2183c07]
+- Updated dependencies [9782e74]
+- Updated dependencies [e5d9dcb]
+  - @usine/core@0.5.0
+
 ## 0.1.0
 
 ### Minor Changes

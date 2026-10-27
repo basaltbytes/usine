@@ -1,5 +1,40 @@
 # @usine/github
 
+## 0.3.0
+
+### Minor Changes
+
+- 9c7ea97: Requires `effect` 4.0.6 instead of 4.0.0-rc.111 ([#494](https://github.com/basaltbytes/usine/issues/494)).
+- dfd0936: Polling fetches an open pull request again only when change detection reports it, its base branch head moved or can't be read, or its `mergeable` is `UNKNOWN`, instead of on every poll. Each poll reads each base branch head with one conditional request. `GitHubPolling` adds `baseRefHead`, `@usine/github/polling` exports `BaseRefName` and `BaseRefHead`, and `PullRequestPayload.baseRefName` is a `BaseRefName`.
+
+### Patch Changes
+
+- 1f7b315: Change the license from MIT to AGPL-3.0-only. Versions published before this one stay under MIT.
+- d819599: Attempts commit as the GitHub App's bot account on every worker kind. Before, a local worker's commits took the identity in the operator's global git config, unless the agent passed one itself.
+  
+  `@usine/core/worker` adds `BotAccount`, a bot's `BotLogin` and `BotUserId`, with its ID-based noreply address in `noreplyEmail`. `GitHubApp.botAccount()` returns the App's bot account, read from `GET /users/<slug>[bot]` once per App slug; the bot's user ID differs from the App ID.
+  
+  `CheckoutRequest` requires `commitAuthor`. The local, SSH, and exe.dev executors set it as `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME`, and `GIT_COMMITTER_EMAIL` in the parent's and children's environment, which git prefers to `user.name` and `user.email` in any config. The values aren't secret, so remote workers export them in the command line and the machine's sshd needs no `AcceptEnv` change.
+  
+  The scheduler reads the bot account for each attempt and sets both `commitAuthor` and, on local and SSH workers, `botLogin` from it. If the account can't be read, the attempt fails before preparation: with an infrastructure failure, which is retried, or without a retry if GitHub refused, for example because the App has no installation.
+- Updated dependencies [1f7b315]
+- Updated dependencies [8ea9f5b]
+- Updated dependencies [d819599]
+- Updated dependencies [b3e696a]
+- Updated dependencies [4942c44]
+- Updated dependencies [80f2eb6]
+- Updated dependencies [3d54b01]
+- Updated dependencies [9be864d]
+- Updated dependencies [b2df567]
+- Updated dependencies [9c7ea97]
+- Updated dependencies [6388474]
+- Updated dependencies [fdbad56]
+- Updated dependencies [fdbad56]
+- Updated dependencies [2183c07]
+- Updated dependencies [9782e74]
+- Updated dependencies [e5d9dcb]
+  - @usine/core@0.5.0
+
 ## 0.2.0
 
 ### Minor Changes
