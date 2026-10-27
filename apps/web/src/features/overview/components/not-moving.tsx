@@ -17,20 +17,16 @@ import { stallSentence } from "~/lib/stall/strings";
 import { stallRun } from "~/lib/tasks/model";
 import { EmptyLine, RunPageLink, RunRow } from "~/components/overview/section";
 
-const StalledRow = ({
-  stalled,
-  overview,
-  now,
-  readOnly,
-  narrow,
-}: {
+type StalledRowProps = {
   readonly stalled: StalledItemView;
   readonly overview: FactoryOverview | undefined;
   readonly now: number;
   readonly readOnly: boolean;
   /** Whether to render the row as a single cell, as below the `md` breakpoint. */
   readonly narrow: boolean;
-}) => {
+};
+
+const StalledRow = ({ stalled, overview, now, readOnly, narrow }: StalledRowProps) => {
   const run = stallRun(stalled);
   const { origin } = itemIdentity(overview, stalled.item);
   const title = (
@@ -66,21 +62,18 @@ const StalledRow = ({
   );
 };
 
-/**
- * Renders the matched Items with no running Attempt; a row whose reason references a Run opens it.
- * `readOnly` hides the actions during setup; `polled` is false until the first repository poll ends.
- */
-export const NotMoving = ({
-  stalled,
-  now,
-  readOnly,
-  polled,
-}: {
+type NotMovingProps = {
   readonly stalled: ReadonlyArray<StalledItemView>;
   readonly now: number;
   readonly readOnly: boolean;
   readonly polled: boolean;
-}) => {
+};
+
+/**
+ * Renders the matched Items with no running Attempt; a row whose reason references a Run opens it.
+ * `readOnly` hides the actions during setup; `polled` is false until the first repository poll ends.
+ */
+export const NotMoving = ({ stalled, now, readOnly, polled }: NotMovingProps) => {
   const narrow = useIsMobile();
   const overview = useOverview();
   if (stalled.length === 0)

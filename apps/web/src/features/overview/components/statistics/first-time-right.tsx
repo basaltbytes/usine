@@ -37,18 +37,15 @@ const sparkPoints = (
   });
 };
 
-/** A line over the groups with a task done, its last point marked in sapphire. */
-const Sparkline = ({
-  label,
-  points,
-  ceiling,
-  format,
-}: {
+type SparklineProps = {
   readonly label: string;
   readonly points: ReadonlyArray<SparkPoint>;
   readonly ceiling: number;
   readonly format: (value: number) => string;
-}) => {
+};
+
+/** A line over the groups with a task done, its last point marked in sapphire. */
+const Sparkline = ({ label, points, ceiling, format }: SparklineProps) => {
   const step = points.length < 2 ? 0 : (WIDTH - 2 * INSET) / (points.length - 1);
   const placed = points.flatMap(({ value }, index) =>
     value === null
@@ -96,15 +93,13 @@ const Sparkline = ({
   );
 };
 
-const Figure = ({
-  value,
-  unit,
-  children,
-}: {
+type FigureProps = {
   readonly value: string;
   readonly unit: string;
   readonly children: ReactNode;
-}) => (
+};
+
+const Figure = ({ value, unit, children }: FigureProps) => (
   <div className="contents">
     <p className="flex min-w-0 items-baseline gap-1.5">
       <span className="text-xl font-semibold">{value}</span>{" "}
@@ -114,8 +109,10 @@ const Figure = ({
   </div>
 );
 
+type FirstTimeRightProps = { readonly statistics: StatisticsView };
+
 /** The share of tasks done with no second round, and the operator's actions per task. */
-export const FirstTimeRight = ({ statistics }: { readonly statistics: StatisticsView }) => {
+export const FirstTimeRight = ({ statistics }: FirstTimeRightProps) => {
   const tasks = statistics.tasks.length;
   const shares = sparkPoints(
     statistics,

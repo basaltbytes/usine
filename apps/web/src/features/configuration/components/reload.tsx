@@ -16,13 +16,16 @@ import {
 } from "~/components/configuration/reload";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "~/components/ui/alert";
 import { Button } from "~/components/ui/button";
-import { clockLabel, reloadChanges } from "~/lib/strings";
+import { clockLabel } from "~/lib/strings";
+import { reloadChanges } from "~/lib/configuration/strings";
 import { capabilityLabel, reloadRefusalLead } from "~/features/configuration/strings";
 
 const ReloadContext = createContext<ConfigurationReload | null>(null);
 
+type SectionReloadProviderProps = { readonly children: ReactNode };
+
 /** Provides one reload state to the Configuration section, so the result stays visible across its pages. */
-export const SectionReloadProvider = ({ children }: { readonly children: ReactNode }) => (
+export const SectionReloadProvider = ({ children }: SectionReloadProviderProps) => (
   <ReloadContext value={useReloadConfiguration()}>{children}</ReloadContext>
 );
 
@@ -99,8 +102,10 @@ const reloadRefusalOf = (error: Error): ReloadRefusal | null =>
     ? error
     : null;
 
+type RefusalSubjectsProps = { readonly refusal: ReloadRefusal };
+
 /** Renders a link to each field, Agent, Worker, or repository listed in a reload rejection. */
-const RefusalSubjects = ({ refusal }: { readonly refusal: ReloadRefusal }) => {
+const RefusalSubjects = ({ refusal }: RefusalSubjectsProps) => {
   switch (refusal.error) {
     case "FactoryConfigError":
       return null;

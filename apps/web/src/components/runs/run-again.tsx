@@ -5,17 +5,15 @@ import { cn } from "~/lib/utils";
 import { dayTimeLabel, timestampLabel } from "~/lib/strings";
 import { projectParams } from "~/lib/overview";
 
-/** If the Run was opened by its trigger, renders nothing. */
-export const RunAgainLine = ({
-  run,
-  source,
-  className,
-}: {
+type RunAgainLineProps = {
   readonly run: Pick<RunView, "runAgain" | "openedAt" | "repository">;
   /** `link` links the earlier Run's short ID to its Run page; `text` is for use inside another link or button. */
   readonly source: "link" | "text";
   readonly className?: string;
-}) => {
+};
+
+/** If the Run was opened by its trigger, renders nothing. */
+export const RunAgainLine = ({ run, source, className }: RunAgainLineProps) => {
   if (run.runAgain === null) return null;
   const { from, requestedBy } = run.runAgain;
   const id = from.slice(0, 8);

@@ -1,65 +1,13 @@
-import {
-  ArrowsClockwiseIcon,
-  BookBookmarkIcon,
-  GearSixIcon,
-  HardDrivesIcon,
-  RobotIcon,
-} from "@phosphor-icons/react";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import {
-  type ErrorComponentProps,
-  Link,
-  Outlet,
-  useMatchRoute,
-  useParams,
-  useRouter,
-} from "@tanstack/react-router";
-import { RepositoryName } from "@usine/core/repository";
-import { Schema } from "effect";
+import { type ErrorComponentProps, Outlet, useRouter } from "@tanstack/react-router";
 import { ErrorAlert } from "~/components/error-alert";
 import { Page } from "~/components/page";
-import { RepositoryMark } from "~/components/repository-mark";
-import {
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "~/components/ui/breadcrumb";
 import { Button } from "~/components/ui/button";
-import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "~/components/ui/sidebar";
 import { Skeleton } from "~/components/ui/skeleton";
+import { SectionReloadProvider } from "~/features/configuration/components/reload";
+import { usePauseLoop } from "~/features/configuration/queries";
 import { rejectionMessage } from "~/lib/api";
 import { overviewQuery } from "~/lib/overview";
-import { usePauseLoop } from "~/features/configuration/queries";
-import { SectionReloadProvider } from "~/features/configuration/components/reload";
-
-const CONFIGURATION_PAGES = [
-  { to: "/configuration/loops", label: "Loops", icon: ArrowsClockwiseIcon },
-  { to: "/configuration/agents", label: "Agents", icon: RobotIcon },
-  { to: "/configuration/workers", label: "Workers", icon: HardDrivesIcon },
-  { to: "/configuration/repositories", label: "Repositories", icon: BookBookmarkIcon },
-  { to: "/configuration/settings", label: "Settings", icon: GearSixIcon },
-] as const;
-
-/** The open page's entry is active only when `inSection` is true. */
-export const ConfigurationMenu = ({ inSection }: { readonly inSection: boolean }) => {
-  const matchRoute = useMatchRoute();
-  return (
-    <SidebarMenu>
-      {CONFIGURATION_PAGES.map(({ to, label, icon: Glyph }) => (
-        <SidebarMenuItem key={to}>
-          <SidebarMenuButton
-            isActive={inSection && matchRoute({ to, fuzzy: true }) !== false}
-            render={<Link to={to} />}
-          >
-            <Glyph aria-hidden="true" />
-            <span>{label}</span>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-      ))}
-    </SidebarMenu>
-  );
-};
 
 /** Shares one reload state across all Configuration pages. */
 export const ConfigurationSection = () => (
@@ -83,7 +31,9 @@ export const ConfigurationPending = () => (
   </Page>
 );
 
-export const ConfigurationUnavailable = ({ error }: ErrorComponentProps) => {
+type ConfigurationUnavailableProps = Readonly<ErrorComponentProps>;
+
+export const ConfigurationUnavailable = ({ error }: ConfigurationUnavailableProps) => {
   const router = useRouter();
   return (
     <Page width="full">
@@ -102,48 +52,4 @@ export const useLoopPause = () => {
   const pause = usePauseLoop();
   const { data } = useSuspenseQuery(overviewQuery());
   return data._tag === "NeedsSetup" ? null : pause;
-};
-
-/** Renders a breadcrumb such as `Configuration › Loops`, followed by the open entry. */
-export const ConfigurationCrumbs = () => {
-  const matchRoute = useMatchRoute();
-  const params = useParams({ strict: false });
-  const page = CONFIGURATION_PAGES.find(({ to }) => matchRoute({ to, fuzzy: true }) !== false);
-  const repository =
-    params.owner !== undefined && params.name !== undefined
-      ? `${params.owner}/${params.name}`
-      : undefined;
-  const entry = params.loop ?? params.agent ?? params.worker ?? repository;
-  return (
-    <>
-      <BreadcrumbItem>
-        <BreadcrumbLink render={<Link to="/configuration/loops" />}>Configuration</BreadcrumbLink>
-      </BreadcrumbItem>
-      {page !== undefined && (
-        <>
-          <BreadcrumbSeparator />
-          <BreadcrumbItem>
-            {entry === undefined ? (
-              <BreadcrumbPage>{page.label}</BreadcrumbPage>
-            ) : (
-              <BreadcrumbLink render={<Link to={page.to} />}>{page.label}</BreadcrumbLink>
-            )}
-          </BreadcrumbItem>
-        </>
-      )}
-      {entry !== undefined && (
-        <>
-          <BreadcrumbSeparator />
-          <BreadcrumbItem>
-            <BreadcrumbPage className="flex items-center gap-1.5 wrap-anywhere">
-              {repository !== undefined && Schema.is(RepositoryName)(repository) && (
-                <RepositoryMark repository={repository} />
-              )}
-              {entry}
-            </BreadcrumbPage>
-          </BreadcrumbItem>
-        </>
-      )}
-    </>
-  );
 };

@@ -55,8 +55,10 @@ export const laneFlows = (
 const loopsTitle = (loops: ReadonlyArray<WatchingLoop>): string =>
   loops.map(({ name, paused }) => (paused ? `${name} (paused)` : name)).join(", ");
 
+type FlowArrowProps = { readonly flow: LaneFlow };
+
 /** Renders an arrow to the next lane, labelled with the matching Loops; if no Loop matches, the arrow has no label. */
-export const FlowArrow = ({ flow }: { readonly flow: LaneFlow }) => {
+export const FlowArrow = ({ flow }: FlowArrowProps) => {
   const named = flow.loops.length > 0;
   return (
     <p

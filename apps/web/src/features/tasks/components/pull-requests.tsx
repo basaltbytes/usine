@@ -10,7 +10,9 @@ import {
   SectionHeading,
 } from "~/features/tasks/components/section";
 
-export const TaskPullRequests = ({ task }: { readonly task: TaskView }) => {
+type TaskPullRequestsProps = { readonly task: TaskView };
+
+export const TaskPullRequests = ({ task }: TaskPullRequestsProps) => {
   const pullRequests = task.items.filter(({ kind }) => kind === "pr");
   return (
     <section aria-labelledby="task-pull-requests" className="flex flex-col gap-2">

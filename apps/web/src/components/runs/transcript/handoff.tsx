@@ -3,7 +3,7 @@ import type { AttemptView, WorkerAccess } from "@usine/orchestrator/operator";
 import { Option } from "effect";
 import { CodeBlock, CodeBlockHeader, CodeBlockTitle } from "~/components/ai-elements/code-block";
 import { CopyButton } from "~/components/ai-elements/copy-button";
-import { providerLabel } from "~/lib/strings";
+import { providerLabel } from "~/lib/workers/strings";
 import type { TranscriptSession } from "~/lib/runs/transcript/model";
 
 // Returns the value single-quoted for a POSIX shell, with apostrophes escaped.
@@ -32,14 +32,13 @@ const fromOperatorTerminal = (access: WorkerAccess | null, command: string): str
   return ["ssh", "-t", ...port, access.destination, shellArgument(command)].join(" ");
 };
 
-/** Renders the command that resumes a child session from the operator's terminal on its Worker. */
-export const SessionHandoff = ({
-  session,
-  attempt,
-}: {
+type SessionHandoffProps = {
   readonly session: Pick<TranscriptSession, "session" | "harnessSession">;
   readonly attempt: Pick<AttemptView, "worker" | "workerAccess">;
-}) => {
+};
+
+/** Renders the command that resumes a child session from the operator's terminal on its Worker. */
+export const SessionHandoff = ({ session, attempt }: SessionHandoffProps) => {
   const handoff = Option.all({
     resume: RESUME_COMMANDS[session.session.brain.harness],
     saved: session.harnessSession,

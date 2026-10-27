@@ -26,7 +26,7 @@ import { commands, page, userEvent } from "vitest/browser";
 import { SessionComposer } from "~/components/runs/intervention/session-composer";
 import { ContextualActions } from "~/components/runs/intervention/contextual-actions";
 import { EditAndRetry } from "~/components/runs/intervention/edit-and-retry";
-import { runAgainBlocked } from "~/lib/strings";
+import { runAgainBlocked } from "~/lib/runs/strings";
 import "~/index.css";
 
 declare module "vitest/browser" {

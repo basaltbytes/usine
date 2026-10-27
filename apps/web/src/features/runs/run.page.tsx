@@ -14,7 +14,9 @@ import { useEarlierTranscript, useRunDetail } from "~/hooks/runs/transcript";
 import { RunHeader } from "~/components/runs/header";
 import { RunWorkspace } from "~/features/runs/components/workspace";
 
-export const RunPage = ({ runId }: { readonly runId: RunId }) => {
+type RunPageProps = { readonly runId: RunId };
+
+export const RunPage = ({ runId }: RunPageProps) => {
   const { data: overview } = useSuspenseQuery(overviewQuery());
   const detail = useRunDetail(runId, true);
   const earlier = useEarlierTranscript(runId);

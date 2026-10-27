@@ -14,23 +14,23 @@ import { Button } from "~/components/ui/button";
 import { itemIdentity, useOverview } from "~/components/item/identity";
 import { cn } from "~/lib/utils";
 import { useOpenRun } from "~/hooks/use-open-run";
-import { needCopy, runActionLabel, runActionProgress } from "~/lib/strings";
+import { needCopy } from "~/lib/needs-you/strings";
+import { runActionLabel, runActionProgress } from "~/lib/runs/strings";
 import { isRunOperationRejected, usePendingRunAction, useRunAction } from "~/hooks/runs/actions";
 import { CycleBudgetAsk } from "~/components/needs-you/cycle-budget-ask";
 import { NeedItem } from "~/components/needs-you/need-item";
 import { UnconfiguredWorkerAsk } from "~/components/needs-you/unconfigured-worker-ask";
 
+type ApprovalAskProps = {
+  readonly need: ApprovalNeed;
+  readonly compact: boolean;
+};
+
 /**
  * Disables the buttons while any screen sends an action on the Run. If the server rejects the action
  * because the Run changed state, shows no error.
  */
-const ApprovalAsk = ({
-  need,
-  compact,
-}: {
-  readonly need: ApprovalNeed;
-  readonly compact: boolean;
-}) => {
+const ApprovalAsk = ({ need, compact }: ApprovalAskProps) => {
   const openRun = useOpenRun();
   const action = useRunAction();
   const [confirmingCancel, setConfirmingCancel] = useState(false);
@@ -94,13 +94,12 @@ const ApprovalAsk = ({
   );
 };
 
-export const NeedEntry = ({
-  need,
-  compact,
-}: {
+type NeedEntryProps = {
   readonly need: NeedView;
   readonly compact: boolean;
-}) => {
+};
+
+export const NeedEntry = ({ need, compact }: NeedEntryProps) => {
   const openRun = useOpenRun();
   switch (need._tag) {
     case "ApprovalNeed":
@@ -123,14 +122,13 @@ export const NeedEntry = ({
   }
 };
 
-/** If there are no entries, renders nothing. `compact` renders one line per entry. */
-export const NeedsYou = ({
-  needs,
-  compact = false,
-}: {
+type NeedsYouProps = {
   readonly needs: ReadonlyArray<NeedView>;
   readonly compact?: boolean;
-}) =>
+};
+
+/** If there are no entries, renders nothing. `compact` renders one line per entry. */
+export const NeedsYou = ({ needs, compact = false }: NeedsYouProps) =>
   needs.length === 0 ? null : (
     <section aria-label="Needs attention" className={cn("px-4 md:px-5", compact ? "pt-3" : "pt-4")}>
       <ul

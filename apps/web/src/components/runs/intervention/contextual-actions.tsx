@@ -13,7 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "~/components/ui/dropdown-menu";
 import { cn } from "~/lib/utils";
-import { runActionLabel, runAgainBlocked } from "~/lib/strings";
+import { runActionLabel, runAgainBlocked } from "~/lib/runs/strings";
 import {
   type RunActionRequest,
   unchangedRunAgain,
@@ -23,20 +23,17 @@ import {
 import { actionLabel, actionPlan, type RunAction } from "~/lib/runs/intervention/action-plan";
 import type { EditIntent } from "~/components/runs/intervention/edit-and-retry";
 
-/** Renders the Run's primary and secondary actions as buttons and the rest in a menu. If no action applies, renders nothing. */
-export const ContextualActions = ({
-  run,
-  onEdit,
-  openRun,
-  className,
-}: {
+type ContextualActionsProps = {
   readonly run: RunView;
   /** Opens the task and Agent editor for a retry or a run again. */
   readonly onEdit: (intent: EditIntent) => void;
   /** Opens the Run that Run again created. */
   readonly openRun: (runId: RunId) => void;
   readonly className?: string;
-}) => {
+};
+
+/** Renders the Run's primary and secondary actions as buttons and the rest in a menu. If no action applies, renders nothing. */
+export const ContextualActions = ({ run, onEdit, openRun, className }: ContextualActionsProps) => {
   const mutation = useRunAction();
   const again = useRunAgain();
   const [confirmCancel, setConfirmCancel] = useState(false);

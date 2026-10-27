@@ -1,6 +1,7 @@
 import type { ProvisioningPauseView, WorkerView } from "@usine/orchestrator/operator";
 import { StateMark } from "~/components/status-badge";
-import { agoLabel, creationFailureTitle, nextCreationLine, timestampLabel } from "~/lib/strings";
+import { agoLabel, timestampLabel } from "~/lib/strings";
+import { creationFailureTitle, nextCreationLine } from "~/lib/workers/strings";
 
 const outcome = {
   Passed: { state: "Succeeded", label: "passed", className: undefined },
@@ -9,7 +10,9 @@ const outcome = {
   Failed: { state: "Failed", label: "failed", className: "text-destructive" },
 } as const;
 
-const Preflight = ({ worker, now }: { readonly worker: WorkerView; readonly now: number }) => {
+type PreflightProps = { readonly worker: WorkerView; readonly now: number };
+
+const Preflight = ({ worker, now }: PreflightProps) => {
   const preflight = worker.preflight;
   if (preflight === null) return <span>No preflight yet</span>;
   const { state, label, className } = outcome[preflight._tag];
@@ -24,13 +27,12 @@ const Preflight = ({ worker, now }: { readonly worker: WorkerView; readonly now:
   );
 };
 
-const CreationPaused = ({
-  pause,
-  now,
-}: {
+type CreationPausedProps = {
   readonly pause: ProvisioningPauseView;
   readonly now: number;
-}) => (
+};
+
+const CreationPaused = ({ pause, now }: CreationPausedProps) => (
   <span className="text-destructive" title={pause.message}>
     <StateMark state="Failed" className="mr-1.5 align-middle" />
     {creationFailureTitle(pause)}.{" "}
@@ -38,13 +40,12 @@ const CreationPaused = ({
   </span>
 );
 
-export const WorkersLine = ({
-  workers,
-  now,
-}: {
+type WorkersLineProps = {
   readonly workers: ReadonlyArray<WorkerView>;
   readonly now: number;
-}) => (
+};
+
+export const WorkersLine = ({ workers, now }: WorkersLineProps) => (
   <footer
     aria-label="Workers"
     className="flex flex-wrap items-baseline gap-x-8 gap-y-1.5 border-t pt-3 text-xs text-muted-foreground"

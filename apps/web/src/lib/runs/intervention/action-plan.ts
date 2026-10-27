@@ -1,7 +1,7 @@
 import type { AttemptId } from "@usine/core/attempt";
 import type { RunView } from "@usine/orchestrator/operator";
 import { Match } from "effect";
-import { runActionLabel } from "~/lib/strings";
+import { runActionLabel } from "~/lib/runs/strings";
 
 /** An operator action on a Run; resolving a failure includes the failed Attempt. */
 export type RunAction =

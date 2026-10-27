@@ -37,15 +37,13 @@ const NoProjects = () => {
   );
 };
 
-export const DeskNeedsYou = ({
-  needs,
-  polls,
-  now,
-}: {
+type DeskNeedsYouProps = {
   readonly needs: ReadonlyArray<NeedView>;
   readonly polls: ReadonlyArray<RepositoryPollView>;
   readonly now: number;
-}) => (
+};
+
+export const DeskNeedsYou = ({ needs, polls, now }: DeskNeedsYouProps) => (
   <DeskSection
     id="desk-needs-you"
     title="Needs attention"
@@ -65,7 +63,9 @@ export const DeskNeedsYou = ({
   </DeskSection>
 );
 
-const LoadingBlock = ({ id, title }: { readonly id: string; readonly title: string }) => (
+type LoadingBlockProps = { readonly id: string; readonly title: string };
+
+const LoadingBlock = ({ id, title }: LoadingBlockProps) => (
   <DeskSection id={id} title={title}>
     <div aria-hidden="true" className="flex flex-col border-t">
       {[0, 1, 2].map((row) => (

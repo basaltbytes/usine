@@ -14,8 +14,10 @@ const reviewed = {
   DISMISSED: (item) => <>Reviewed {item}, since dismissed</>,
 } satisfies Record<ReviewedView["state"], (item: ReactNode) => ReactNode>;
 
+type ItemLinkProps = { readonly url: string };
+
 /** Renders the item of a comment or review URL as a mark that links to the comment or review. */
-const ItemLink = ({ url }: { readonly url: string }) => {
+const ItemLink = ({ url }: ItemLinkProps) => {
   const match = /\/(issues|pull)\/(\d+)/u.exec(url);
   return match?.[1] === undefined || match[2] === undefined ? (
     <a
@@ -38,7 +40,9 @@ const ItemLink = ({ url }: { readonly url: string }) => {
   );
 };
 
-const Chips = ({ labels }: { readonly labels: ReadonlyArray<LabelView> }) =>
+type ChipsProps = { readonly labels: ReadonlyArray<LabelView> };
+
+const Chips = ({ labels }: ChipsProps) =>
   labels.map((label, index) => (
     <Fragment key={label.name}>
       {index > 0 && " "}
@@ -46,7 +50,9 @@ const Chips = ({ labels }: { readonly labels: ReadonlyArray<LabelView> }) =>
     </Fragment>
   ));
 
-const Labels = ({ change }: { readonly change: LabelChanges }) => {
+type LabelsProps = { readonly change: LabelChanges };
+
+const Labels = ({ change }: LabelsProps) => {
   const removed = change.removed.length > 0;
   return (
     <>
@@ -65,7 +71,9 @@ const Labels = ({ change }: { readonly change: LabelChanges }) => {
   );
 };
 
-export const GitHubChangeLine = ({ row }: { readonly row: GitHubChangeRow }) => (
+type GitHubChangeLineProps = { readonly row: GitHubChangeRow };
+
+export const GitHubChangeLine = ({ row }: GitHubChangeLineProps) => (
   <div
     title={`GitHub recorded this at ${timestampLabel(row.at)}`}
     className="flex min-h-7 min-w-0 items-start gap-2 py-1 text-xs text-muted-foreground"

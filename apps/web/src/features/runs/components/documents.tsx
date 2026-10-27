@@ -13,12 +13,14 @@ import { ItemMark } from "~/components/item/mark";
 import { Markdown } from "~/components/markdown";
 import { Button } from "~/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "~/components/ui/collapsible";
-import { ReaderLine } from "~/components/runs/transcript/transcript";
+import { ReaderLine } from "~/components/runs/transcript/reader-line";
 import { ApprovalLine } from "~/components/runs/approval";
 import { RunAgainLine } from "~/components/runs/run-again";
 import { eventItem, eventItemRef } from "~/lib/runs/item";
 
-const Page = ({ label, children }: { readonly label: string; readonly children: ReactNode }) => (
+type PageProps = { readonly label: string; readonly children: ReactNode };
+
+const Page = ({ label, children }: PageProps) => (
   <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
     <article
       aria-label={label}
@@ -29,7 +31,9 @@ const Page = ({ label, children }: { readonly label: string; readonly children: 
   </div>
 );
 
-export const TaskDocument = ({ task }: { readonly task: string }) => (
+type TaskDocumentProps = { readonly task: string };
+
+export const TaskDocument = ({ task }: TaskDocumentProps) => (
   <Page label="Task">
     <ReaderLine>
       <h2 className="text-lg font-semibold">Task</h2>
@@ -38,11 +42,11 @@ export const TaskDocument = ({ task }: { readonly task: string }) => (
   </Page>
 );
 
-export const EventDocument = ({
-  detail,
-}: {
+type EventDocumentProps = {
   readonly detail: Pick<RunDetailView, "eventDedupKey" | "eventPayload" | "run">;
-}) => {
+};
+
+export const EventDocument = ({ detail }: EventDocumentProps) => {
   const item = eventItem(detail.eventPayload);
   return (
     <Page label="Event">

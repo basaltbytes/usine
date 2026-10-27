@@ -15,7 +15,9 @@ import type { ToolPresentation, ToolSection } from "~/lib/runs/transcript/tool/p
 
 const JsonArray = Schema.Array(Schema.Json);
 
-const Value = ({ value }: { readonly value: Schema.Json }) => {
+type ValueProps = { readonly value: Schema.Json };
+
+const Value = ({ value }: ValueProps) => {
   if (value === null) return <span className="text-muted-foreground">None</span>;
   if (Schema.is(Schema.String)(value))
     return (
@@ -50,11 +52,11 @@ const Value = ({ value }: { readonly value: Schema.Json }) => {
   );
 };
 
-const Fields = ({
-  fields,
-}: {
+type FieldsProps = {
   readonly fields: Extract<ToolSection, { readonly _tag: "Fields" }>["fields"];
-}) => (
+};
+
+const Fields = ({ fields }: FieldsProps) => (
   <dl className="space-y-3 text-xs/relaxed">
     {fields.map(({ label, value }, index) => (
       <div
@@ -70,14 +72,13 @@ const Fields = ({
   </dl>
 );
 
-/** Renders tool sections; read results get no added line numbers because their text already has them. */
-export const ToolSections = ({
-  sections,
-  category,
-}: {
+type ToolSectionsProps = {
   readonly sections: ReadonlyArray<ToolSection>;
   readonly category: ToolPresentation["category"];
-}) =>
+};
+
+/** Renders tool sections; read results get no added line numbers because their text already has them. */
+export const ToolSections = ({ sections, category }: ToolSectionsProps) =>
   sections.map((section, index) => (
     <div key={`${section.label}:${index}`} className="min-w-0">
       {Match.valueTags(section, {

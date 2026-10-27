@@ -5,15 +5,7 @@ import { TableRow } from "~/components/ui/table";
 import { cn } from "~/lib/utils";
 import { projectParams } from "~/lib/overview";
 
-export const DeskSection = ({
-  id,
-  title,
-  count,
-  countTone = "muted",
-  note,
-  actions,
-  children,
-}: {
+type DeskSectionProps = {
   readonly id: string;
   readonly title: string;
   readonly count?: number | undefined;
@@ -23,7 +15,17 @@ export const DeskSection = ({
   /** Controls at the end of the header, after the note. */
   readonly actions?: ReactNode;
   readonly children: ReactNode;
-}) => (
+};
+
+export const DeskSection = ({
+  id,
+  title,
+  count,
+  countTone = "muted",
+  note,
+  actions,
+  children,
+}: DeskSectionProps) => (
   <section aria-labelledby={id} className="flex min-w-0 flex-col gap-2">
     <header className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
       <h2 id={id} className="text-lg font-semibold">
@@ -50,18 +52,19 @@ export const DeskSection = ({
   </section>
 );
 
-export const EmptyLine = ({ children }: { readonly children: ReactNode }) => (
+type EmptyLineProps = { readonly children: ReactNode };
+
+export const EmptyLine = ({ children }: EmptyLineProps) => (
   <p className="text-sm text-muted-foreground">{children}</p>
 );
 
-/** Renders a link to the Run page of `run`; the enclosing row opens the same page on click. */
-export const RunPageLink = ({
-  run,
-  children,
-}: {
+type RunPageLinkProps = {
   readonly run: Pick<RunView, "id" | "repository">;
   readonly children: ReactNode;
-}) => (
+};
+
+/** Renders a link to the Run page of `run`; the enclosing row opens the same page on click. */
+export const RunPageLink = ({ run, children }: RunPageLinkProps) => (
   <Link
     to="/projects/$owner/$name/runs/$run"
     params={{ ...projectParams(run.repository), run: run.id }}
@@ -72,19 +75,17 @@ export const RunPageLink = ({
   </Link>
 );
 
+type RunRowProps = {
+  readonly run: Pick<RunView, "id" | "repository"> | null;
+  readonly className?: string;
+  readonly children: ReactNode;
+};
+
 /**
  * Renders a table row that opens the Run page of `run` on a click outside its links and buttons; if
  * `run` is `null`, the row is not clickable.
  */
-export const RunRow = ({
-  run,
-  className,
-  children,
-}: {
-  readonly run: Pick<RunView, "id" | "repository"> | null;
-  readonly className?: string;
-  readonly children: ReactNode;
-}) => {
+export const RunRow = ({ run, className, children }: RunRowProps) => {
   const navigate = useNavigate();
   return (
     <TableRow

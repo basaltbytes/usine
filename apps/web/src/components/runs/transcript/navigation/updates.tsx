@@ -3,15 +3,7 @@ import { useEffect, useLayoutEffect } from "react";
 import { Button } from "~/components/ui/button";
 import { useMessageScroller, useMessageScrollerScrollable } from "~/components/ui/message-scroller";
 
-export const UpdateNavigation = ({
-  count,
-  active,
-  pendingLatest,
-  revealing,
-  onObserve,
-  onLatest,
-  onReachedLatest,
-}: {
+type UpdateNavigationProps = {
   readonly count: number;
   readonly active: boolean;
   readonly pendingLatest: boolean;
@@ -20,7 +12,17 @@ export const UpdateNavigation = ({
   readonly onObserve: (atLatest: boolean) => void;
   readonly onLatest: () => void;
   readonly onReachedLatest: () => void;
-}) => {
+};
+
+export const UpdateNavigation = ({
+  count,
+  active,
+  pendingLatest,
+  revealing,
+  onObserve,
+  onLatest,
+  onReachedLatest,
+}: UpdateNavigationProps) => {
   const { end } = useMessageScrollerScrollable();
   const { scrollToEnd } = useMessageScroller();
   useEffect(() => {

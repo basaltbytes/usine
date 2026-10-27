@@ -25,41 +25,41 @@ import {
   ShareBar,
   waitingPart,
 } from "~/features/overview/components/statistics/share-bar";
-import {
-  TasksDoneChart,
-  TasksDoneLegend,
-} from "~/features/overview/components/statistics/tasks-done";
+import { TasksDoneChart } from "~/features/overview/components/statistics/tasks-done/chart";
+import { TasksDoneLegend } from "~/features/overview/components/statistics/tasks-done/legend";
 
 const WINDOWS: ReadonlyArray<StatisticsWindow> = ["7d", "30d", "all"];
 
 const isWindow = (value: string | undefined): value is StatisticsWindow =>
   WINDOWS.some((window) => window === value);
 
+type FigureProps = { readonly value: string; readonly unit: string };
+
 /** A 20px value followed by its unit in 13px subtext0. */
-const Figure = ({ value, unit }: { readonly value: string; readonly unit: string }) => (
+const Figure = ({ value, unit }: FigureProps) => (
   <p className="flex min-w-0 items-baseline gap-1.5">
     <span className="text-xl font-semibold">{value}</span>{" "}
     <span className="text-sm text-muted-foreground">{unit}</span>
   </p>
 );
 
-/** A block of the section: a 14px title, then its figures and chart. */
-const TaskBlock = ({
-  title,
-  className,
-  children,
-}: {
+type TaskBlockProps = {
   readonly title: string;
   readonly className?: string;
   readonly children: ReactNode;
-}) => (
+};
+
+/** A block of the section: a 14px title, then its figures and chart. */
+const TaskBlock = ({ title, className, children }: TaskBlockProps) => (
   <section className={cn("flex min-w-0 flex-col gap-3", className)}>
     <h3 className="text-md font-medium">{title}</h3>
     {children}
   </section>
 );
 
-const TimePerTask = ({ statistics }: { readonly statistics: StatisticsView }) => {
+type TimePerTaskProps = { readonly statistics: StatisticsView };
+
+const TimePerTask = ({ statistics }: TimePerTaskProps) => {
   const { time } = statistics;
   return (
     <TaskBlock title="Time per task">
@@ -84,7 +84,9 @@ const TimePerTask = ({ statistics }: { readonly statistics: StatisticsView }) =>
   );
 };
 
-const TokensPerTask = ({ statistics }: { readonly statistics: StatisticsView }) => {
+type TokensPerTaskProps = { readonly statistics: StatisticsView };
+
+const TokensPerTask = ({ statistics }: TokensPerTaskProps) => {
   const { tokens } = statistics;
   return (
     <TaskBlock title="Tokens per task">
@@ -100,7 +102,9 @@ const TokensPerTask = ({ statistics }: { readonly statistics: StatisticsView }) 
   );
 };
 
-const StatisticsBody = ({ statistics }: { readonly statistics: StatisticsView }) => {
+type StatisticsBodyProps = { readonly statistics: StatisticsView };
+
+const StatisticsBody = ({ statistics }: StatisticsBodyProps) => {
   if (statistics.tasks.length === 0) return <EmptyLine>{noTasksLine(statistics.window)}</EmptyLine>;
   const { tokens } = statistics;
   const cost = tokens?.cost ?? null;

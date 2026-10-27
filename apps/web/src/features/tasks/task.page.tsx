@@ -15,19 +15,18 @@ import { TaskComments } from "~/features/tasks/components/comments";
 import { TaskHeader } from "~/features/tasks/components/header";
 import { TaskPullRequests } from "~/features/tasks/components/pull-requests";
 import { taskQuery } from "~/features/tasks/queries";
-import { TaskRuns } from "~/features/tasks/components/runs";
+import { TaskRuns } from "~/features/tasks/components/runs/runs";
 
 const decodeNumber = Schema.decodeUnknownOption(
   Schema.FiniteFromString.pipe(Schema.decodeTo(ItemNumber)),
 );
 
-const TaskNotFound = ({
-  repository,
-  number,
-}: {
+type TaskNotFoundProps = {
   readonly repository: RepositoryName;
   readonly number: string;
-}) => (
+};
+
+const TaskNotFound = ({ repository, number }: TaskNotFoundProps) => (
   <BootScreen
     title="Task not found"
     description={`#${number} is not among the newest items on the ${repository} board`}
@@ -59,19 +58,20 @@ const TaskSkeleton = () => (
   </div>
 );
 
-const TaskLayout = ({ children }: { readonly children: ReactNode }) => (
+type TaskLayoutProps = { readonly children: ReactNode };
+
+const TaskLayout = ({ children }: TaskLayoutProps) => (
   <main className="px-4 pt-5 pb-10 md:px-5">
     <div className="flex max-w-5xl flex-col gap-8">{children}</div>
   </main>
 );
 
-const TaskBody = ({
-  repository,
-  number,
-}: {
+type TaskBodyProps = {
   readonly repository: RepositoryName;
   readonly number: ItemNumber;
-}) => {
+};
+
+const TaskBody = ({ repository, number }: TaskBodyProps) => {
   const { data: overview } = useSuspenseQuery(overviewQuery());
   const project = overview.projects.find((candidate) => candidate.repository === repository);
   const openRun = useOpenRun();
@@ -110,15 +110,14 @@ const TaskBody = ({
   );
 };
 
-/** Opens for the number of any of the Task's Items; the URL then uses the originating Item's number. */
-export const TaskPage = ({
-  repository,
-  number,
-}: {
+type TaskPageProps = {
   readonly repository: RepositoryName;
   /** Item number from the URL, not yet validated. */
   readonly number: string;
-}) =>
+};
+
+/** Opens for the number of any of the Task's Items; the URL then uses the originating Item's number. */
+export const TaskPage = ({ repository, number }: TaskPageProps) =>
   Option.match(decodeNumber(number), {
     onNone: () => <TaskNotFound repository={repository} number={number} />,
     onSome: (item) => <TaskBody repository={repository} number={item} />,

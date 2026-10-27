@@ -22,14 +22,13 @@ export const elapsedActivity = (startedAt: string, now: number): string => {
     : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 };
 
-/** Renders the elapsed time since `since`, updated every second. */
-export const Elapsed = ({
-  since,
-  className,
-}: {
+type ElapsedProps = {
   readonly since: string;
   readonly className?: string;
-}) => {
+};
+
+/** Renders the elapsed time since `since`, updated every second. */
+export const Elapsed = ({ since, className }: ElapsedProps) => {
   const now = useNow(1_000);
   return (
     <time
@@ -86,7 +85,9 @@ const currentSession = (
   return children[0] ?? live.find(({ session }) => session._tag === "ParentSession");
 };
 
-export const CurrentActivity = ({ chapter }: { readonly chapter: Chapter }) => {
+type CurrentActivityProps = { readonly chapter: Chapter };
+
+export const CurrentActivity = ({ chapter }: CurrentActivityProps) => {
   const now = useNow(1_000);
   const session = currentSession(chapter.sessions);
   const activity: Activity =
@@ -146,13 +147,12 @@ export const CurrentActivity = ({ chapter }: { readonly chapter: Chapter }) => {
   );
 };
 
-const ConnectivityLine = ({
-  warning,
-  now,
-}: {
+type ConnectivityLineProps = {
   readonly warning: ConnectivityWarning;
   readonly now: number;
-}) => {
+};
+
+const ConnectivityLine = ({ warning, now }: ConnectivityLineProps) => {
   const line = Match.valueTags(warning, {
     WorkerSilent: ({ worker, lastAnsweredAt }) => ({
       text: `${worker} silent since ${clockLabel(lastAnsweredAt)}`,

@@ -19,7 +19,9 @@ import { PullRequestMarks } from "~/components/item/pull-request-marks";
 import { PageFact, PageHeader } from "~/components/page";
 import { StateMark } from "~/components/status-badge";
 import { useNow } from "~/hooks/use-now";
-import { durationLabel, providerLabel, providerMachineNoun, runStateLine } from "~/lib/strings";
+import { durationLabel } from "~/lib/strings";
+import { providerLabel, providerMachineNoun } from "~/lib/workers/strings";
+import { runStateLine } from "~/lib/runs/strings";
 import { type RunItem, runHeaderItems, runItem } from "~/lib/runs/item";
 import { UsageFact } from "~/components/runs/usage";
 
@@ -30,13 +32,17 @@ const runTitleText = (run: Pick<RunView, "loop" | "repository">, item: Option.Op
     () => `${run.loop} on ${run.repository}`,
   );
 
-const LiveDuration = ({ endedMillis, since }: { endedMillis: number; since: string }) => {
+type LiveDurationProps = { readonly endedMillis: number; readonly since: string };
+
+const LiveDuration = ({ endedMillis, since }: LiveDurationProps) => {
   const now = useNow(1_000);
   return <>{durationLabel(endedMillis + Math.max(0, now - Date.parse(since)))}</>;
 };
 
+type DurationProps = { readonly duration: RunDurationView };
+
 /** Renders the total Attempt time, which keeps counting while an Attempt runs. */
-const Duration = ({ duration }: { readonly duration: RunDurationView }) => (
+const Duration = ({ duration }: DurationProps) => (
   <span
     title={
       duration.unmeasured === 0
@@ -54,8 +60,10 @@ const Duration = ({ duration }: { readonly duration: RunDurationView }) => (
   </span>
 );
 
+type AttemptMachineProps = { readonly detail: RunDetailView };
+
 /** Renders the provider ID of the machine that the newest Attempt runs on, if it has one. */
-const AttemptMachine = ({ detail }: { readonly detail: RunDetailView }) => {
+const AttemptMachine = ({ detail }: AttemptMachineProps) => {
   const { machine, run } = detail;
   if (machine === null || machine.state !== "ready" || machine.id === null) return null;
   if (machine.attemptId === null || machine.attemptId !== run.attempts.at(-1)?.id) return null;
@@ -67,6 +75,19 @@ const AttemptMachine = ({ detail }: { readonly detail: RunDetailView }) => {
       {machine.id}
     </span>
   );
+};
+
+type RunHeaderProps = {
+  readonly detail: RunDetailView;
+  readonly overview: FactoryOverview | undefined;
+  /** `page` shows tokens and puts the actions beside the heading from `lg`; `drawer` puts them under it. */
+  readonly placement: "page" | "drawer";
+  /** Whether the title and state get the drawer-to-page view transition names; only one visible header can have them. */
+  readonly shared: boolean;
+  readonly actions: ReactNode;
+  /** The heading element, such as the drawer's dialog title; `h1` by default. */
+  readonly as?: ComponentProps<typeof ItemHeading>["as"];
+  readonly className?: string;
 };
 
 /**
@@ -81,18 +102,7 @@ export const RunHeader = ({
   actions,
   as,
   className,
-}: {
-  readonly detail: RunDetailView;
-  readonly overview: FactoryOverview | undefined;
-  /** `page` shows tokens and puts the actions beside the heading from `lg`; `drawer` puts them under it. */
-  readonly placement: "page" | "drawer";
-  /** Whether the title and state get the drawer-to-page view transition names; only one visible header can have them. */
-  readonly shared: boolean;
-  readonly actions: ReactNode;
-  /** The heading element, such as the drawer's dialog title; `h1` by default. */
-  readonly as?: ComponentProps<typeof ItemHeading>["as"];
-  readonly className?: string;
-}) => {
+}: RunHeaderProps) => {
   const { run } = detail;
   const item = runItem(run, overview, detail.eventPayload);
   const items = runHeaderItems(run, item, taskCard(overview, run.itemKey), detail.settledItemState);

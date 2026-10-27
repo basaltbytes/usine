@@ -73,7 +73,7 @@ import { RunHeader } from "~/components/runs/header";
 import { taskUsageOf } from "~/lib/projects/fixture";
 import { UsageBreakdown } from "~/components/runs/usage";
 import { eventPreview, runItem } from "~/lib/runs/item";
-import { Outline } from "~/features/runs/components/outline";
+import { Outline } from "~/features/runs/components/outline/outline";
 import { readerDocument } from "~/lib/runs/transcript/document/model";
 import { projectTranscript } from "~/lib/runs/transcript/model";
 import { SalvageLine } from "~/components/runs/transcript/outcome";

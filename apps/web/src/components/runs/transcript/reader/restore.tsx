@@ -9,12 +9,21 @@ import { locateReadingAnchor, type ReadingRow } from "~/lib/runs/transcript/read
 import { VISIBLE_ROW_EDGE } from "~/components/runs/transcript/scroll-position";
 import type { ReadingAnchor } from "~/lib/runs/transcript/reader/memory";
 
-export interface ReaderHistory {
+interface ReaderHistory {
   readonly earlier: TranscriptPageCursor | undefined;
   readonly loading: boolean;
   readonly error: string | null;
   readonly load: () => void;
 }
+
+type RestoreReaderProps = {
+  readonly target: ReadingAnchor | null;
+  readonly rows: ReadonlyArray<ReadingRow>;
+  readonly history: ReaderHistory;
+  readonly viewportRef: RefObject<HTMLDivElement | null>;
+  readonly active: boolean;
+  readonly onRestored: () => void;
+};
 
 /** Restores the scroll position after ancestor disclosures have mounted; a navigation by the reader cancels the restore. */
 export const RestoreReader = ({
@@ -24,14 +33,7 @@ export const RestoreReader = ({
   viewportRef,
   active,
   onRestored,
-}: {
-  readonly target: ReadingAnchor | null;
-  readonly rows: ReadonlyArray<ReadingRow>;
-  readonly history: ReaderHistory;
-  readonly viewportRef: RefObject<HTMLDivElement | null>;
-  readonly active: boolean;
-  readonly onRestored: () => void;
-}) => {
+}: RestoreReaderProps) => {
   const { scrollToMessage, scrollToStart } = useMessageScroller();
   const { state, reveal } = useTranscriptDisclosure();
   const requested = useRef(new Set<string>());

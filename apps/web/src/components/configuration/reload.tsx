@@ -5,7 +5,7 @@ import { ErrorAlert } from "~/components/error-alert";
 import { Alert, AlertDescription, AlertTitle } from "~/components/ui/alert";
 import { Button } from "~/components/ui/button";
 import { api } from "~/lib/api";
-import { reloadSummary } from "~/lib/strings";
+import { reloadSummary } from "~/lib/configuration/strings";
 
 export type ConfigurationReload = UseMutationResult<InstanceReload, Error, void>;
 
@@ -23,15 +23,19 @@ export const useReloadConfiguration = (): ConfigurationReload => {
   });
 };
 
-export const ReloadConfigurationButton = ({ reload }: { readonly reload: ConfigurationReload }) => (
+type ReloadConfigurationButtonProps = { readonly reload: ConfigurationReload };
+
+export const ReloadConfigurationButton = ({ reload }: ReloadConfigurationButtonProps) => (
   <Button variant="outline" disabled={reload.isPending} onClick={() => reload.mutate()}>
     <ArrowClockwiseIcon data-icon="inline-start" aria-hidden="true" />
     {reload.isPending ? "Reloading…" : "Reload configuration"}
   </Button>
 );
 
+type ReloadOutcomeProps = { readonly reload: ConfigurationReload };
+
 /** Renders the changes from the last reload, or the reason it was rejected; renders nothing before the first reload. */
-export const ReloadOutcome = ({ reload }: { readonly reload: ConfigurationReload }) => {
+export const ReloadOutcome = ({ reload }: ReloadOutcomeProps) => {
   if (reload.isError)
     return <ErrorAlert title="Configuration not reloaded" message={reload.error.message} />;
   if (!reload.isSuccess) return null;

@@ -28,7 +28,9 @@ export const burstSpan = (tools: ReadonlyArray<TranscriptTool>): Option.Option<n
   return Number.isFinite(span) && span >= 1000 ? Option.some(span) : Option.none();
 };
 
-export const ToolBurst = ({ burst }: { readonly burst: Burst }) => {
+type ToolBurstProps = { readonly burst: Burst };
+
+export const ToolBurst = ({ burst }: ToolBurstProps) => {
   const { state, change } = useTranscriptDisclosure();
   const { scrollToMessage } = useMessageScroller();
   const keys = burst.tools.map((tool) => tool.key);

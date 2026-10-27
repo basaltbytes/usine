@@ -16,15 +16,13 @@ import {
 import { agoLabel, timestampLabel } from "~/lib/strings";
 import { EmptyLine, RunPageLink, RunRow } from "~/components/overview/section";
 
-const OutcomeRow = ({
-  closed,
-  overview,
-  now,
-}: {
+type OutcomeRowProps = {
   readonly closed: ClosedRunView;
   readonly overview: FactoryOverview | undefined;
   readonly now: number;
-}) => {
+};
+
+const OutcomeRow = ({ closed, overview, now }: OutcomeRowProps) => {
   const { run, item, closedAt } = closed;
   const card = taskCard(overview, run.itemKey);
   const origin = Option.match(card, {
@@ -83,14 +81,13 @@ const OutcomeRow = ({
   );
 };
 
-/** Renders the most recently closed Runs, newest first; each row links to its Run page. */
-export const LastOutcomes = ({
-  outcomes,
-  now,
-}: {
+type LastOutcomesProps = {
   readonly outcomes: ReadonlyArray<ClosedRunView>;
   readonly now: number;
-}) => {
+};
+
+/** Renders the most recently closed Runs, newest first; each row links to its Run page. */
+export const LastOutcomes = ({ outcomes, now }: LastOutcomesProps) => {
   const overview = useOverview();
   return outcomes.length === 0 ? (
     <EmptyLine>No recent runs</EmptyLine>

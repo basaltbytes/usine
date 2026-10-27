@@ -26,7 +26,9 @@ const commentTime = (comment: TaskView["comments"][number]) => {
   return null;
 };
 
-export const TaskComments = ({ task }: { readonly task: TaskView }) => {
+type TaskCommentsProps = { readonly task: TaskView };
+
+export const TaskComments = ({ task }: TaskCommentsProps) => {
   const runs = new Map(task.runs.map((run) => [run.id, run]));
   const items = new Map(task.items.map((item) => [item.itemKey, item]));
   return (

@@ -5,16 +5,15 @@ import { Match, Option } from "effect";
 import { Markdown } from "~/components/markdown";
 import { StateMark } from "~/components/status-badge";
 import { cn } from "~/lib/utils";
-import { failureMessage, failureReason, outOfMemoryLine } from "~/lib/strings";
+import { failureMessage, failureReason, outOfMemoryLine } from "~/lib/runs/strings";
 import type { AttemptEnd } from "~/lib/runs/transcript/document/model";
 
-const FailureNote = ({
-  failure,
-  className,
-}: {
+type FailureNoteProps = {
   readonly failure: FailureView;
   readonly className?: string;
-}) => (
+};
+
+const FailureNote = ({ failure, className }: FailureNoteProps) => (
   <div
     className={cn(
       "rounded-lg border border-destructive/25 bg-destructive/8 px-3 pt-2 pb-2.5 text-sm",
@@ -26,7 +25,9 @@ const FailureNote = ({
   </div>
 );
 
-export const SalvageLine = ({ salvage }: { readonly salvage: AttemptSalvage | null }) => (
+type SalvageLineProps = { readonly salvage: AttemptSalvage | null };
+
+export const SalvageLine = ({ salvage }: SalvageLineProps) => (
   <p className="text-xs text-muted-foreground wrap-anywhere">
     {salvage === null
       ? "No salvage branch"
@@ -61,7 +62,9 @@ export const SalvageLine = ({ salvage }: { readonly salvage: AttemptSalvage | nu
   </p>
 );
 
-const End = ({ end }: { readonly end: AttemptEnd }) =>
+type EndProps = { readonly end: AttemptEnd };
+
+const End = ({ end }: EndProps) =>
   Match.valueTags(end, {
     Failed: ({ failure, salvage }) => (
       <div className="space-y-2">
@@ -92,20 +95,21 @@ const End = ({ end }: { readonly end: AttemptEnd }) =>
     ),
   });
 
-const OutOfMemoryLine = ({ kills }: { readonly kills: OutOfMemoryKills }) => (
+type OutOfMemoryLineProps = { readonly kills: OutOfMemoryKills };
+
+const OutOfMemoryLine = ({ kills }: OutOfMemoryLineProps) => (
   <p className="text-xs text-warning wrap-anywhere">
     <span className="sr-only">Warning: </span>
     {outOfMemoryLine(kills)}
   </p>
 );
 
-export const Outcome = ({
-  end,
-  outOfMemory,
-}: {
+type OutcomeProps = {
   readonly end: AttemptEnd;
   readonly outOfMemory: OutOfMemoryKills | null;
-}) =>
+};
+
+export const Outcome = ({ end, outOfMemory }: OutcomeProps) =>
   outOfMemory === null ? (
     <End end={end} />
   ) : (

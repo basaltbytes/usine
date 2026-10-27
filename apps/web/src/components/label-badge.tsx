@@ -26,15 +26,13 @@ export const labelTextColor = (hex: string): string => {
   return `rgb(${mix(0)} ${mix(2)} ${mix(4)})`;
 };
 
-export const LabelBadge = ({
-  name,
-  label,
-  className,
-}: {
+type LabelBadgeProps = {
   readonly name: string;
   readonly label: LabelView | undefined;
   readonly className?: string;
-}) => {
+};
+
+export const LabelBadge = ({ name, label, className }: LabelBadgeProps) => {
   if (label === undefined || label.color === null)
     return (
       <Badge variant="outline" className={className}>

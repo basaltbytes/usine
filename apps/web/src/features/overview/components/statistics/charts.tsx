@@ -15,6 +15,7 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "~/components/ui/chart";
+import { ChartTable } from "~/features/overview/components/statistics/chart-table";
 import {
   attemptCountLabel,
   countLabel,
@@ -35,17 +36,15 @@ const outcomeConfig = {
 
 const tooltipClass = "border-0 bg-popover shadow-raised";
 
-/** A titled block of the Details panel: a 13px title and its chart. */
-export const StatisticsBlock = ({
-  title,
-  actions,
-  children,
-}: {
+type StatisticsBlockProps = {
   readonly title: string;
   /** Controls at the end of the header. */
   readonly actions?: ReactNode;
   readonly children?: ReactNode;
-}) => (
+};
+
+/** A titled block of the Details panel: a 13px title and its chart. */
+export const StatisticsBlock = ({ title, actions, children }: StatisticsBlockProps) => (
   <section className="flex min-w-0 flex-col gap-2.5">
     <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
       <h4 className="text-sm font-medium">{title}</h4>
@@ -55,48 +54,13 @@ export const StatisticsBlock = ({
   </section>
 );
 
-/** The values of a chart as a table for screen readers. */
-export const ChartTable = ({
-  caption,
-  head,
-  rows,
-}: {
-  readonly caption: string;
-  readonly head: ReadonlyArray<string>;
-  readonly rows: ReadonlyArray<readonly [string, ...ReadonlyArray<string>]>;
-}) => (
-  <table className="sr-only">
-    <caption>{caption}</caption>
-    <thead>
-      <tr>
-        {head.map((cell) => (
-          <th key={cell} scope="col">
-            {cell}
-          </th>
-        ))}
-      </tr>
-    </thead>
-    <tbody>
-      {rows.map(([name, ...cells]) => (
-        <tr key={name}>
-          <th scope="row">{name}</th>
-          {cells.map((cell, index) => (
-            <td key={head[index + 1] ?? index}>{cell}</td>
-          ))}
-        </tr>
-      ))}
-    </tbody>
-  </table>
-);
-
-/** Closed runs per period as columns stacked by outcome. */
-export const ThroughputChart = ({
-  periods,
-  bucket,
-}: {
+type ThroughputChartProps = {
   readonly periods: ReadonlyArray<ThroughputPeriodView>;
   readonly bucket: StatisticsBucket;
-}) => (
+};
+
+/** Closed runs per period as columns stacked by outcome. */
+export const ThroughputChart = ({ periods, bucket }: ThroughputChartProps) => (
   <>
     <ChartContainer config={outcomeConfig} className="aspect-auto h-44 w-full">
       <BarChart
@@ -158,8 +122,10 @@ const attemptsConfig = {
   runs: { label: "Runs", color: "var(--chart-1)" },
 } satisfies ChartConfig;
 
+type AttemptsChartProps = { readonly counts: ReadonlyArray<AttemptCountView> };
+
 /** Closed runs per number of attempts, as horizontal bars with their counts at the tips. */
-export const AttemptsChart = ({ counts }: { readonly counts: ReadonlyArray<AttemptCountView> }) => {
+export const AttemptsChart = ({ counts }: AttemptsChartProps) => {
   const data = counts.map(({ attempts, runs }) => ({ label: attemptCountLabel(attempts), runs }));
   return (
     <>
@@ -204,14 +170,13 @@ const needsAttentionConfig = {
   entries: { label: "Entries", color: "var(--needs-you)" },
 } satisfies ChartConfig;
 
-/** Needs attention entries per period as one series in the Needs attention tone. */
-export const NeedsAttentionChart = ({
-  periods,
-  bucket,
-}: {
+type NeedsAttentionChartProps = {
   readonly periods: ReadonlyArray<NeedsAttentionPeriodView>;
   readonly bucket: StatisticsBucket;
-}) => {
+};
+
+/** Needs attention entries per period as one series in the Needs attention tone. */
+export const NeedsAttentionChart = ({ periods, bucket }: NeedsAttentionChartProps) => {
   const data = periods.map(({ start, approvals, failures }) => ({
     start,
     approvals,
@@ -271,12 +236,12 @@ export const NeedsAttentionChart = ({
   );
 };
 
-/** One meter per worker: the share of the window its slots held attempts. */
-export const UtilizationMeters = ({
-  workers,
-}: {
+type UtilizationMetersProps = {
   readonly workers: ReadonlyArray<WorkerUtilizationView>;
-}) => (
+};
+
+/** One meter per worker: the share of the window its slots held attempts. */
+export const UtilizationMeters = ({ workers }: UtilizationMetersProps) => (
   <ul className="flex flex-col gap-3">
     {workers.map(({ worker, slots, occupiedMillis, share }) => (
       <li key={worker} className="flex flex-col gap-1.5">

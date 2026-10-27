@@ -37,7 +37,9 @@ const agentCounts = (configuration: ConfigurationView): string =>
       : []),
   ].join(", ");
 
-const AgentRow = ({ agent }: { readonly agent: AgentFileView }) => {
+type AgentRowProps = { readonly agent: AgentFileView };
+
+const AgentRow = ({ agent }: AgentRowProps) => {
   const navigate = useNavigate();
   const params = { agent: agent.name };
   return (
@@ -67,7 +69,9 @@ const AgentRow = ({ agent }: { readonly agent: AgentFileView }) => {
   );
 };
 
-const InvalidAgentRow = ({ agent }: { readonly agent: InvalidAgentView }) => {
+type InvalidAgentRowProps = { readonly agent: InvalidAgentView };
+
+const InvalidAgentRow = ({ agent }: InvalidAgentRowProps) => {
   const navigate = useNavigate();
   const params = { agent: agent.name };
   return (
@@ -94,7 +98,9 @@ const InvalidAgentRow = ({ agent }: { readonly agent: InvalidAgentView }) => {
   );
 };
 
-export const AgentsList = ({ configuration }: { readonly configuration: ConfigurationView }) => (
+type AgentsListProps = { readonly configuration: ConfigurationView };
+
+export const AgentsList = ({ configuration }: AgentsListProps) => (
   <ConfigurationPage title="Agents" counts={agentCounts(configuration)}>
     {configuration.agents.length === 0 && configuration.invalidAgents.length === 0 ? (
       <Missing title="No agents">
@@ -128,18 +134,19 @@ export const AgentsList = ({ configuration }: { readonly configuration: Configur
   </ConfigurationPage>
 );
 
+type SourceProps = { readonly children: string };
+
 /** Renders the source of a parent setting: this file, `settings` in `usine.yaml`, or the fallback. */
-const Source = ({ children }: { readonly children: string }) => (
+const Source = ({ children }: SourceProps) => (
   <p className="mt-0.5 text-xs text-muted-foreground">{children}</p>
 );
 
-const AgentFacts = ({
-  agent,
-  configuration,
-}: {
+type AgentFactsProps = {
   readonly agent: AgentFileView;
   readonly configuration: ConfigurationView;
-}) => (
+};
+
+const AgentFacts = ({ agent, configuration }: AgentFactsProps) => (
   <Facts>
     <Fact label="Harness">{harnessLabel[agent.harness]}</Fact>
     <Fact label="Model">
@@ -192,14 +199,13 @@ const AgentFacts = ({
   </Facts>
 );
 
-/** `name` is the Agent file name without `.md`. */
-export const AgentDetail = ({
-  name,
-  configuration,
-}: {
+type AgentDetailProps = {
   readonly name: string;
   readonly configuration: ConfigurationView;
-}) => {
+};
+
+/** `name` is the Agent file name without `.md`. */
+export const AgentDetail = ({ name, configuration }: AgentDetailProps) => {
   const agent = configuration.agents.find((candidate) => candidate.name === name);
   if (agent !== undefined)
     return (

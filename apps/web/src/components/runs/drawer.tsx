@@ -17,7 +17,9 @@ import {
   SheetTitle,
 } from "~/components/ui/sheet";
 import { useNow } from "~/hooks/use-now";
-import { clockLabel, machineCreationLine, queuedMessageLabel, timestampLabel } from "~/lib/strings";
+import { clockLabel, timestampLabel } from "~/lib/strings";
+import { machineCreationLine } from "~/lib/workers/strings";
+import { queuedMessageLabel } from "~/lib/runs/strings";
 import { overviewQuery, projectParams } from "~/lib/overview";
 import { RunHeader } from "~/components/runs/header";
 import { ContextualActions } from "~/components/runs/intervention/contextual-actions";
@@ -34,7 +36,9 @@ import { projectTranscript } from "~/lib/runs/transcript/model";
 import { Outcome } from "~/components/runs/transcript/outcome";
 import { useRunDetail } from "~/hooks/runs/transcript";
 
-const LiveSummary = ({ detail }: { readonly detail: RunDetailView }) => {
+type LiveSummaryProps = { readonly detail: RunDetailView };
+
+const LiveSummary = ({ detail }: LiveSummaryProps) => {
   const document = useMemo(
     () =>
       readerDocument(
@@ -89,12 +93,16 @@ const finalEnd = (run: RunDetailView["run"]): Option.Option<AttemptEnd> => {
   return Option.none();
 };
 
-const MachineCreation = ({ machine }: { readonly machine: MachineView }) => {
+type MachineCreationProps = { readonly machine: MachineView };
+
+const MachineCreation = ({ machine }: MachineCreationProps) => {
   const now = useNow(15_000);
   return <p className="text-muted-foreground">{machineCreationLine(machine, now)}</p>;
 };
 
-export const RunSummary = ({ detail }: { readonly detail: RunDetailView }) => {
+type RunSummaryProps = { readonly detail: RunDetailView };
+
+export const RunSummary = ({ detail }: RunSummaryProps) => {
   const run = detail.run;
   switch (run.state) {
     case "Pending":
@@ -121,16 +129,14 @@ export const RunSummary = ({ detail }: { readonly detail: RunDetailView }) => {
   }
 };
 
-export const RunDrawer = ({
-  runId,
-  open,
-  close,
-}: {
+type RunDrawerProps = {
   readonly runId: RunId;
   /** If `false`, the last Run stays mounted until the Sheet's exit transition ends. */
   readonly open: boolean;
   readonly close: () => void;
-}) => {
+};
+
+export const RunDrawer = ({ runId, open, close }: RunDrawerProps) => {
   const { data: overview } = useSuspenseQuery(overviewQuery());
   const detail = useRunDetail(runId, open);
   const [editing, setEditing] = useState<EditIntent | null>(null);

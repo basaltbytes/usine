@@ -56,8 +56,10 @@ const rowsOf = (
 const isDimension = (value: string | undefined): value is Dimension =>
   dimensions.some((dimension) => dimension.value === value);
 
+type BreakdownProps = { readonly statistics: RunStatisticsView };
+
 /** Closed runs per loop or agent, or ended attempts per model, with time, tokens, and cost. */
-export const Breakdown = ({ statistics }: { readonly statistics: RunStatisticsView }) => {
+export const Breakdown = ({ statistics }: BreakdownProps) => {
   const [dimension, setDimension] = useState<Dimension>("loop");
   const rows = rowsOf(statistics, dimension);
   const unit = dimension === "model" ? "attempt" : "run";

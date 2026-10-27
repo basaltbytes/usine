@@ -11,7 +11,8 @@ import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { useScrollEdges } from "~/hooks/use-scroll-edges";
 import { cn } from "~/lib/utils";
-import { BoardCard, type LabelCatalog } from "~/features/projects/components/card";
+import { BoardCard } from "~/features/projects/components/card/card";
+import { type LabelCatalog } from "~/lib/projects/card";
 import { FlowArrow, type LaneFlow } from "~/features/projects/components/flow";
 import type { BoardMoveProgress } from "~/hooks/projects/moves";
 
@@ -21,13 +22,12 @@ export const foldsByDefault = (lane: BoardLaneView): boolean =>
   (lane.sources.length > 0 &&
     lane.sources.every((source) => "state" in source && isSettledItemState(source.state)));
 
-const LaneSources = ({
-  sources,
-  catalog,
-}: {
+type LaneSourcesProps = {
   readonly sources: BoardLaneView["sources"];
   readonly catalog: LabelCatalog;
-}) => (
+};
+
+const LaneSources = ({ sources, catalog }: LaneSourcesProps) => (
   <ul aria-label="Lane sources" className="flex flex-wrap gap-1">
     {sources.map((source) => (
       <li
@@ -46,7 +46,9 @@ const LaneSources = ({
   </ul>
 );
 
-const LaneRail = ({ lane, open }: { readonly lane: BoardLaneView; readonly open: () => void }) => (
+type LaneRailProps = { readonly lane: BoardLaneView; readonly open: () => void };
+
+const LaneRail = ({ lane, open }: LaneRailProps) => (
   <section aria-label={`${lane.name} lane`} className="w-10 shrink-0">
     <button
       type="button"
@@ -65,6 +67,21 @@ const LaneRail = ({ lane, open }: { readonly lane: BoardLaneView; readonly open:
   </section>
 );
 
+type BoardColumnProps = {
+  readonly lane: BoardLaneView;
+  readonly lanes: ReadonlyArray<BoardLaneView>;
+  readonly flow: LaneFlow | undefined;
+  readonly catalog: LabelCatalog;
+  readonly targeted: boolean;
+  readonly pending: boolean;
+  readonly readOnly: boolean;
+  readonly moves: ReadonlyArray<BoardMoveProgress>;
+  readonly stallOf: (task: BoardTaskView) => StalledItemView | null;
+  readonly openRun: (runId: RunId) => void;
+  readonly onMove: (item: BoardTaskView, lane: BoardLaneView) => void;
+  readonly repository: RepositoryName;
+};
+
 /** `stallOf` returns a Task's stall reason, if any; `readOnly` hides the actions during setup. */
 export const BoardColumn = ({
   lane,
@@ -79,20 +96,7 @@ export const BoardColumn = ({
   openRun,
   onMove,
   repository,
-}: {
-  readonly lane: BoardLaneView;
-  readonly lanes: ReadonlyArray<BoardLaneView>;
-  readonly flow: LaneFlow | undefined;
-  readonly catalog: LabelCatalog;
-  readonly targeted: boolean;
-  readonly pending: boolean;
-  readonly readOnly: boolean;
-  readonly moves: ReadonlyArray<BoardMoveProgress>;
-  readonly stallOf: (task: BoardTaskView) => StalledItemView | null;
-  readonly openRun: (runId: RunId) => void;
-  readonly onMove: (item: BoardTaskView, lane: BoardLaneView) => void;
-  readonly repository: RepositoryName;
-}) => {
+}: BoardColumnProps) => {
   const foldable = foldsByDefault(lane);
   const [folded, setFolded] = useState(foldable);
   const writable = lane._tag === "WritableBoardLane";

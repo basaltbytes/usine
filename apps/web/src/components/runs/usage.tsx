@@ -11,8 +11,10 @@ import { poolLabel, tokensLabel, usdLabel } from "~/lib/strings";
 
 const count = new Intl.NumberFormat("en");
 
+type CostProps = { readonly cost: UsageCostView | null };
+
 /** Renders the cost in dollars, followed by `estimate` if the cost is an estimate. */
-const Cost = ({ cost }: { readonly cost: UsageCostView | null }) =>
+const Cost = ({ cost }: CostProps) =>
   cost === null ? null : (
     <>
       <span className="font-mono text-foreground tabular-nums">{usdLabel(cost.usd)}</span>
@@ -32,11 +34,13 @@ type PoolLine = PoolUsageView | TaskPoolUsageView;
 
 const unpriced = (pool: PoolLine): boolean => "unpriced" in pool && pool.unpriced;
 
+type PoolBreakdownProps = { readonly pools: ReadonlyArray<PoolLine> };
+
 /**
  * Renders tokens per billing pool, with a price if the pool has one. A Task pool with unpriced
  * usage shows its price as `at least`.
  */
-export const PoolBreakdown = ({ pools }: { readonly pools: ReadonlyArray<PoolLine> }) => {
+export const PoolBreakdown = ({ pools }: PoolBreakdownProps) => {
   const lowerBound = pools.some((pool) => unpriced(pool) && pool.cost !== null);
   return (
     <section aria-label="Tokens per pool">
@@ -59,14 +63,13 @@ export const PoolBreakdown = ({ pools }: { readonly pools: ReadonlyArray<PoolLin
   );
 };
 
-/** Renders usage per billing pool, then per session under each Attempt. */
-export const UsageBreakdown = ({
-  usage,
-  attempts,
-}: {
+type UsageBreakdownProps = {
   readonly usage: RunUsageView;
   readonly attempts: ReadonlyArray<Pick<AttemptView, "id" | "number">>;
-}) => (
+};
+
+/** Renders usage per billing pool, then per session under each Attempt. */
+export const UsageBreakdown = ({ usage, attempts }: UsageBreakdownProps) => (
   <>
     <PoolBreakdown pools={usage.pools} />
     <section aria-label="Tokens per session" className="border-t pt-2.5">
@@ -103,14 +106,13 @@ export const UsageBreakdown = ({
   </>
 );
 
-/** Renders the token total, such as `27.3K tokens`, which opens the breakdown per pool and session. */
-export const UsageFact = ({
-  usage,
-  attempts,
-}: {
+type UsageFactProps = {
   readonly usage: RunUsageView;
   readonly attempts: ReadonlyArray<Pick<AttemptView, "id" | "number">>;
-}) => (
+};
+
+/** Renders the token total, such as `27.3K tokens`, which opens the breakdown per pool and session. */
+export const UsageFact = ({ usage, attempts }: UsageFactProps) => (
   <Popover>
     <PopoverTrigger
       aria-label={`Tokens: ${count.format(usage.tokens)}. Show per pool and session`}

@@ -10,6 +10,17 @@ import {
   type ReaderPosition,
 } from "~/lib/runs/transcript/reader/memory";
 
+type RememberReaderProps = {
+  readonly runId: RunId;
+  readonly readThrough: TranscriptSequence | null;
+  readonly rows: ReadonlyArray<ReadingRow>;
+  readonly viewportRef: RefObject<HTMLDivElement | null>;
+  readonly active: boolean;
+  readonly restoring: boolean;
+  readonly allowLatest: boolean;
+  readonly initialPosition: ReaderPosition;
+};
+
 /** Captures the scroll position on every scroll and debounces the browser storage writes; flushes on close and on page exit. */
 export const RememberReader = ({
   runId,
@@ -20,16 +31,7 @@ export const RememberReader = ({
   restoring,
   allowLatest,
   initialPosition,
-}: {
-  readonly runId: RunId;
-  readonly readThrough: TranscriptSequence | null;
-  readonly rows: ReadonlyArray<ReadingRow>;
-  readonly viewportRef: RefObject<HTMLDivElement | null>;
-  readonly active: boolean;
-  readonly restoring: boolean;
-  readonly allowLatest: boolean;
-  readonly initialPosition: ReaderPosition;
-}) => {
+}: RememberReaderProps) => {
   const { state } = useTranscriptDisclosure();
   const bookmark = useRef<ReaderBookmark | null>(null);
   const position = useRef(initialPosition);

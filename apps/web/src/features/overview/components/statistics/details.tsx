@@ -28,16 +28,14 @@ import {
 } from "~/features/overview/lib/statistics/strings";
 import { runStatisticsQuery } from "~/features/overview/queries";
 
-/** A label over a value and an optional number with its unit. */
-const Figure = ({
-  label,
-  value,
-  detail,
-}: {
+type FigureProps = {
   readonly label: string;
   readonly value: string;
   readonly detail?: string | undefined;
-}) => (
+};
+
+/** A label over a value and an optional number with its unit. */
+const Figure = ({ label, value, detail }: FigureProps) => (
   <div className="flex min-w-0 flex-col gap-0.5">
     <dt className="text-xs text-muted-foreground">{label}</dt>
     <dd className="text-lg font-semibold">{value}</dd>
@@ -50,11 +48,15 @@ const Figure = ({
 const median = (summary: DurationSummaryView | null): string =>
   summary === null ? "None" : spanLabel(summary.medianMillis);
 
-const Empty = ({ children }: { readonly children: string }) => (
+type EmptyProps = { readonly children: string };
+
+const Empty = ({ children }: EmptyProps) => (
   <p className="text-sm text-muted-foreground">{children}</p>
 );
 
-const RunDetails = ({ statistics }: { readonly statistics: RunStatisticsView }) => {
+type RunDetailsProps = { readonly statistics: RunStatisticsView };
+
+const RunDetails = ({ statistics }: RunDetailsProps) => {
   const closed = outcomeTotal(statistics.runs);
   const phrase = windowPhrase(statistics.window);
   const attention = statistics.needsAttention;
@@ -157,7 +159,9 @@ const LoadingDetails = () => (
   </div>
 );
 
-const DetailsPanel = ({ window }: { readonly window: StatisticsWindow }) => {
+type DetailsPanelProps = { readonly window: StatisticsWindow };
+
+const DetailsPanel = ({ window }: DetailsPanelProps) => {
   const query = useQuery(runStatisticsQuery(window));
   const statistics = query.data;
   if (statistics === undefined)
@@ -179,8 +183,10 @@ const DetailsPanel = ({ window }: { readonly window: StatisticsWindow }) => {
   );
 };
 
+type DetailsProps = { readonly window: StatisticsWindow };
+
 /** The run statistics behind a disclosure, read only once it opens. */
-export const Details = ({ window }: { readonly window: StatisticsWindow }) => (
+export const Details = ({ window }: DetailsProps) => (
   <Collapsible className="flex flex-col gap-4">
     <CollapsibleTrigger
       render={

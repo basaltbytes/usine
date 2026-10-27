@@ -19,7 +19,7 @@ import { LastOutcomes } from "~/features/overview/components/last-outcomes";
 import { NotMoving } from "~/features/overview/components/not-moving";
 import { RunningNow } from "~/features/overview/components/running-now";
 import { WorkersLine } from "~/features/overview/components/workers-line";
-import { nextCreationLine } from "~/lib/strings";
+import { nextCreationLine } from "~/lib/workers/strings";
 import { routeTree } from "~/route-tree.gen";
 import { deskFixture } from "~/lib/desk/fixture";
 import { machineFixture, pauseFixture } from "~/lib/runs/machine-fixture";

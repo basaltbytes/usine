@@ -10,13 +10,12 @@ const stageLabel = {
   reference: "Unknown agent, repository, or tag",
 } satisfies Record<FileStage, string>;
 
-export const FileError = ({
-  error,
-  consequence,
-}: {
+type FileErrorProps = {
   readonly error: ConfigFileError;
   readonly consequence: string;
-}) => {
+};
+
+export const FileError = ({ error, consequence }: FileErrorProps) => {
   const expression = Option.getOrUndefined(error.expression);
   return (
     <div className="flex max-w-[72ch] flex-col gap-3">

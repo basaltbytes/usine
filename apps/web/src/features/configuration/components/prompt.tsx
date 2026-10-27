@@ -41,7 +41,9 @@ const markInterpolations = (node: MarkdownNode): void => {
 // Only text nodes are marked; code spans and code blocks are left as written.
 const remarkInterpolations = () => markInterpolations;
 
-const Interpolation = ({ children }: { readonly children?: ReactNode }) => (
+type InterpolationProps = { readonly children?: ReactNode };
+
+const Interpolation = ({ children }: InterpolationProps) => (
   <mark
     className="bg-transparent p-0 text-inherit"
     title="Filled in from the item when a run opens"
@@ -54,8 +56,10 @@ const Interpolation = ({ children }: { readonly children?: ReactNode }) => (
   </mark>
 );
 
+type PromptMarkdownProps = { readonly template: string };
+
 /** Renders a Loop's prompt template as Markdown with each `{{ }}` expression in prose outlined. */
-export const PromptMarkdown = ({ template }: { readonly template: string }) => (
+export const PromptMarkdown = ({ template }: PromptMarkdownProps) => (
   <Markdown
     className="max-w-[72ch] text-md"
     remarkPlugins={[remarkInterpolations]}

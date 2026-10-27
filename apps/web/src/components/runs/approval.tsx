@@ -1,16 +1,16 @@
 import type { ApprovalView } from "@usine/orchestrator/operator";
 import { Option } from "effect";
 import { cn } from "~/lib/utils";
-import { approvalChannelLabel, dayTimeLabel, timestampLabel } from "~/lib/strings";
+import { dayTimeLabel, timestampLabel } from "~/lib/strings";
+import { approvalChannelLabel } from "~/lib/runs/strings";
 
-/** Renders nothing if there is no approval; without a recorded source, shows only that the Run was approved and when. */
-export const ApprovalLine = ({
-  approval,
-  className,
-}: {
+type ApprovalLineProps = {
   readonly approval: ApprovalView | null;
   readonly className?: string;
-}) => {
+};
+
+/** Renders nothing if there is no approval; without a recorded source, shows only that the Run was approved and when. */
+export const ApprovalLine = ({ approval, className }: ApprovalLineProps) => {
   if (approval === null) return null;
   const source = Option.fromNullishOr(approval.source);
   const approver = Option.flatMap(source, ({ approver }) => approver);

@@ -2,7 +2,7 @@ import type { Query } from "@tanstack/react-query";
 import { RepositoryName, splitRepositoryName } from "@usine/core/repository";
 import type { FactoryOverview, NeedView } from "@usine/orchestrator/operator";
 import { api } from "~/lib/api";
-import { needCopy } from "~/lib/strings";
+import { needCopy } from "~/lib/needs-you/strings";
 
 /** Returns the path params for `/projects/$owner/$name`. */
 export const projectParams = (repository: RepositoryName) => ({

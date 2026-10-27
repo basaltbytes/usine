@@ -11,7 +11,7 @@ import type {
   TranscriptEventView,
 } from "@usine/orchestrator/operator";
 import { Match, Option } from "effect";
-import { conflictingSalvageMessage, failureMessage } from "~/lib/strings";
+import { conflictingSalvageMessage, failureMessage } from "~/lib/runs/strings";
 import { poolMeters, type PoolMeter } from "~/lib/runs/transcript/cache";
 import {
   type NoticeTone,

@@ -44,16 +44,18 @@ const DisclosureContext = createContext<{
   readonly reveal: (change: DisclosureChange) => void;
 } | null>(null);
 
+type TranscriptDisclosureProviderProps = {
+  readonly children: ReactNode;
+  readonly initialState?: TranscriptDisclosure;
+  readonly onInspect?: () => void;
+};
+
 /** Provides disclosure state; mount it outside the scroller's filter `key` so the state survives filtering and regrouping. */
 export const TranscriptDisclosureProvider = ({
   children,
   initialState = new Map<string, Disclosure>(),
   onInspect,
-}: {
-  readonly children: ReactNode;
-  readonly initialState?: TranscriptDisclosure;
-  readonly onInspect?: () => void;
-}) => {
+}: TranscriptDisclosureProviderProps) => {
   const [state, reveal] = useReducer(changeDisclosure, initialState);
   const change = useCallback(
     (choice: DisclosureChange) => {

@@ -22,11 +22,12 @@ import {
   type ReaderTarget,
 } from "~/components/runs/transcript/navigation/errors";
 import { errorTally, type NavigableRow } from "~/lib/runs/transcript/navigation/model";
-import { ReaderLine, type TranscriptHistory } from "~/components/runs/transcript/transcript";
+import { type TranscriptHistory } from "~/components/runs/transcript/transcript";
+import { ReaderLine } from "~/components/runs/transcript/reader-line";
 import { EventDocument, TaskDocument } from "~/features/runs/components/documents";
 import { useRunGitHubChanges } from "~/features/runs/hooks/github-changes";
 import { eventPreview } from "~/lib/runs/item";
-import { Outline, type OutlineSelection } from "~/features/runs/components/outline";
+import { Outline, type OutlineSelection } from "~/features/runs/components/outline/outline";
 
 const rowKeys = (row: ChapterRow): ReadonlyArray<string> => {
   switch (row._tag) {
@@ -62,13 +63,12 @@ const rowSession = (row: ChapterRow): string | null => {
   }
 };
 
-export const RunWorkspace = ({
-  detail,
-  history,
-}: {
+type RunWorkspaceProps = {
   readonly detail: RunDetailView;
   readonly history: TranscriptHistory;
-}) => {
+};
+
+export const RunWorkspace = ({ detail, history }: RunWorkspaceProps) => {
   const run = detail.run;
   const outlineId = useId();
   const githubChanges = useRunGitHubChanges(run);

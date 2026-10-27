@@ -17,21 +17,19 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/components/ui/dropdown-menu";
-import { cardLabels, type LabelCatalog } from "~/features/projects/components/card";
+import { cardLabels, type LabelCatalog } from "~/lib/projects/card";
 import { useBoardMoves } from "~/hooks/projects/moves";
-import { moveProgressMessage } from "~/lib/strings";
+import { moveProgressMessage } from "~/lib/projects/strings";
 
-/** Shows Move to only if another writable lane exists and no move of this Task is pending. */
-export const TaskHeader = ({
-  task,
-  project,
-  disabled,
-}: {
+type TaskHeaderProps = {
   readonly task: TaskView;
   readonly project: ProjectView;
   /** Whether operator actions are unavailable, as in setup mode. */
   readonly disabled: boolean;
-}) => {
+};
+
+/** Shows Move to only if another writable lane exists and no move of this Task is pending. */
+export const TaskHeader = ({ task, project, disabled }: TaskHeaderProps) => {
   const moves = useBoardMoves(project);
   const [first] = task.items;
   const current = task.items.find(({ itemKey }) => itemKey === task.current) ?? first;

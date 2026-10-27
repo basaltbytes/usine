@@ -24,15 +24,13 @@ const startLabel = (instant: string, now: number): string => {
     : dayTimeLabel(instant);
 };
 
-const RunningRow = ({
-  running,
-  overview,
-  now,
-}: {
+type RunningRowProps = {
   readonly running: RunningAttemptView;
   readonly overview: FactoryOverview | undefined;
   readonly now: number;
-}) => {
+};
+
+const RunningRow = ({ running, overview, now }: RunningRowProps) => {
   const { run, attempt, item, lastActivityAt, warnings } = running;
   const origin = item === null ? null : itemIdentity(overview, item).origin;
   return (
@@ -104,15 +102,13 @@ const RunningRow = ({
   );
 };
 
-export const RunningNow = ({
-  running,
-  workers,
-  now,
-}: {
+type RunningNowProps = {
   readonly running: ReadonlyArray<RunningAttemptView>;
   readonly workers: ReadonlyArray<WorkerView>;
   readonly now: number;
-}) => {
+};
+
+export const RunningNow = ({ running, workers, now }: RunningNowProps) => {
   const overview = useOverview();
   return running.length === 0 ? (
     <EmptyLine>{nothingRunning(workers)}</EmptyLine>

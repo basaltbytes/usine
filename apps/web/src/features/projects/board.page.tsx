@@ -1,21 +1,14 @@
 import {
-  type CollisionDetection,
   DndContext,
   type DragEndEvent,
   type DragOverEvent,
   DragOverlay,
   type DragStartEvent,
-  type KeyboardCoordinateGetter,
   KeyboardSensor,
   PointerSensor,
-  pointerWithin,
-  rectIntersection,
-  type UniqueIdentifier,
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
-import { ArrowUpRightIcon } from "@phosphor-icons/react";
 import { RunId } from "@usine/core/run";
 import type {
   BoardLaneId,
@@ -23,190 +16,47 @@ import type {
   BoardTaskView,
   LoopView,
   ProjectView,
-  RunView,
   StalledItemView,
 } from "@usine/orchestrator/operator";
 import { useState } from "react";
 import { ErrorAlert } from "~/components/error-alert";
 import { PageHeading } from "~/components/page";
 import { RepositoryMark } from "~/components/repository-mark";
-import { NeedsYouBadge, StatusBadge } from "~/components/status-badge";
-import { Button } from "~/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "~/components/ui/table";
-import { taskStall } from "~/lib/tasks/model";
-import { DraggedCard, type LabelCatalog } from "~/features/projects/components/card";
+import { NeedsYouBadge } from "~/components/status-badge";
 import { BoardColumn } from "~/features/projects/components/column";
+import { DraggedCard } from "~/features/projects/components/card/dragged";
 import { laneFlows } from "~/features/projects/components/flow";
-import { type BoardMoveProgress, useBoardMoves } from "~/hooks/projects/moves";
-
-/** Returns writable lanes first, then read-only lanes, each in configured order, with the fallback
- * lane last. */
-export const orderLanes = (lanes: ReadonlyArray<BoardLaneView>): ReadonlyArray<BoardLaneView> => [
-  ...lanes.filter(({ _tag }) => _tag === "WritableBoardLane"),
-  ...lanes.filter(({ _tag, origin }) => _tag !== "WritableBoardLane" && origin !== "fallback"),
-  ...lanes.filter(({ origin }) => origin === "fallback"),
-];
-
-/** Returns the lane of a drop target, which is either a lane or one of its cards. */
-export const laneUnder = (
-  over: UniqueIdentifier,
-  lanes: ReadonlyArray<BoardLaneView>,
-): BoardLaneView | undefined =>
-  lanes.find((lane) => lane.id === over) ??
-  lanes.find((lane) => lane.items.some(({ itemKey }) => itemKey === over));
-
-/** Uses the lane under the pointer, or under the dragged card's top-left corner for a keyboard drag,
- * then falls back to intersection. Corner distance isn't used because it assigns a drop on a tall
- * empty lane to the next lane's cards. */
-const dropCollision: CollisionDetection = (args) => {
-  const within = pointerWithin(args);
-  if (within.length > 0) return within;
-  if (args.pointerCoordinates === null) {
-    const corner = pointerWithin({
-      ...args,
-      pointerCoordinates: { x: args.collisionRect.left + 1, y: args.collisionRect.top + 1 },
-    });
-    if (corner.length > 0) return corner;
-  }
-  return rectIntersection(args);
-};
-
-/** Returns a keyboard coordinate getter: Left and Right move a drag to the top of the nearest lane
- * on that side that accepts drops; Up and Down move it between cards. */
-const laneKeyboardCoordinates =
-  (lanes: ReadonlyArray<BoardLaneView>): KeyboardCoordinateGetter =>
-  (event, args) => {
-    const right = event.code === "ArrowRight";
-    if (!right && event.code !== "ArrowLeft") return sortableKeyboardCoordinates(event, args);
-    event.preventDefault();
-    const { collisionRect, droppableRects, droppableContainers } = args.context;
-    if (collisionRect === null) return undefined;
-    const ids = new Set<UniqueIdentifier>(lanes.map(({ id }) => id));
-    const [next] = droppableContainers
-      .getEnabled()
-      .flatMap(({ id }) => {
-        const rect = droppableRects.get(id);
-        return rect !== undefined && ids.has(id) ? [rect] : [];
-      })
-      .filter(({ left }) => (right ? left > collisionRect.left : left < collisionRect.left))
-      .sort((a, b) => (right ? a.left - b.left : b.left - a.left));
-    return next === undefined ? undefined : { x: next.left, y: next.top };
-  };
-
-/** Returns `lanes` with the moved card in its target lane, for display while the move is pending. */
-const applyMove = (
-  lanes: ReadonlyArray<BoardLaneView>,
-  move: BoardMoveProgress,
-): ReadonlyArray<BoardLaneView> => {
-  const moved = lanes.flatMap(({ items }) => items).find(({ itemKey }) => itemKey === move.itemKey);
-  if (moved === undefined) return lanes;
-  const laneLabels = new Set(
-    lanes.flatMap((lane) => (lane._tag === "WritableBoardLane" ? lane.labels : [])),
-  );
-  // Removes the stale lane labels from the moved card; other labels come from the live snapshot.
-  const card = { ...moved, labels: moved.labels.filter((label) => !laneLabels.has(label)) };
-  return lanes.map((lane) => {
-    const items = lane.items.filter(({ itemKey }) => itemKey !== move.itemKey);
-    return lane.id === move.toLane ? { ...lane, items: [card, ...items] } : { ...lane, items };
-  });
-};
-
-/** Returns the Runs whose Item has no card, such as schedule Runs and Runs on quarantined Items. */
-export const runsWithoutCard = (project: ProjectView): ReadonlyArray<RunView> => {
-  const carded = new Set(
-    project.board.lanes.flatMap(({ items }) =>
-      items.flatMap(({ items }) => items.map(({ itemKey }) => itemKey)),
-    ),
-  );
-  return project.runs.filter(({ itemKey }) => !carded.has(itemKey));
-};
-
-const UncardedRuns = ({
-  runs,
-  openRun,
-}: {
-  readonly runs: ReadonlyArray<RunView>;
-  readonly openRun: (runId: RunId) => void;
-}) => (
-  // Sticks to the left edge of the Board's scroll area and is no wider than the scroll container.
-  <Card className="sticky left-4 w-[min(64rem,calc(100cqw-2rem))] md:left-5 md:w-[min(64rem,calc(100cqw-2.5rem))]">
-    <CardHeader>
-      <CardTitle>Runs without a card</CardTitle>
-      <CardDescription>
-        {runs.length} run{runs.length === 1 ? "" : "s"} with no card on this board
-      </CardDescription>
-    </CardHeader>
-    <CardContent>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Loop</TableHead>
-            <TableHead>Agent</TableHead>
-            <TableHead>Item</TableHead>
-            <TableHead>State</TableHead>
-            <TableHead className="w-0" />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {runs.map((run) => (
-            <TableRow key={run.id} className="cursor-pointer" onClick={() => openRun(run.id)}>
-              <TableCell className="font-medium">{run.loop}</TableCell>
-              <TableCell>{run.agent}</TableCell>
-              <TableCell className="max-w-64 truncate font-mono text-xs">{run.itemKey}</TableCell>
-              <TableCell>
-                <StatusBadge state={run.state} />
-              </TableCell>
-              <TableCell className="text-right">
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={`Open run ${run.id}`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    openRun(run.id);
-                  }}
-                >
-                  <ArrowUpRightIcon aria-hidden="true" />
-                </Button>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </CardContent>
-  </Card>
-);
+import { UncardedRuns } from "~/features/projects/components/uncarded-runs";
+import {
+  applyMove,
+  dropCollision,
+  laneKeyboardCoordinates,
+  laneUnder,
+  orderLanes,
+  runsWithoutCard,
+} from "~/features/projects/lib/board";
+import { useBoardMoves } from "~/hooks/projects/moves";
+import { type LabelCatalog } from "~/lib/projects/card";
+import { taskStall } from "~/lib/tasks/model";
 
 interface DragSource {
   readonly item: BoardTaskView;
   readonly lane: BoardLaneView;
 }
 
-/**
- * `stalled` is the desk's list of stalled Items, whose reasons are shown on their cards; `disabled`
- * turns off moves and actions during setup.
- */
-export const ProjectBoard = ({
-  project,
-  loops,
-  stalled,
-  disabled,
-  openRun,
-}: {
+type ProjectBoardProps = {
   readonly project: ProjectView;
   readonly loops: ReadonlyArray<LoopView>;
   readonly stalled: ReadonlyArray<StalledItemView>;
   readonly disabled: boolean;
   readonly openRun: (runId: RunId) => void;
-}) => {
+};
+
+/**
+ * `stalled` is the desk's list of stalled Items, whose reasons are shown on their cards; `disabled`
+ * turns off moves and actions during setup.
+ */
+export const ProjectBoard = ({ project, loops, stalled, disabled, openRun }: ProjectBoardProps) => {
   const [active, setActive] = useState<DragSource | null>(null);
   const [over, setOver] = useState<BoardLaneId | null>(null);
   const { moves, moveItem, isPending, error } = useBoardMoves(project);

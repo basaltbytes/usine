@@ -2,7 +2,19 @@ import { CaretRightIcon } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
 import { ItemMark, type ItemRef } from "~/components/item/mark";
 import { cn } from "~/lib/utils";
-import type { NeedCopy } from "~/lib/strings";
+import type { NeedCopy } from "~/lib/needs-you/strings";
+
+type NeedItemProps = {
+  readonly copy: Pick<NeedCopy, "title" | "detail" | "repository">;
+  /** The item the entry is about, marked before the detail; linked only if `open` is absent. */
+  readonly item?: ItemRef | undefined;
+  readonly open?: (() => void) | undefined;
+  readonly actions?: ReactNode;
+  /** The error message of the last failed action on this entry. */
+  readonly error?: string | null;
+  readonly fullDetail?: boolean;
+  readonly compact?: boolean;
+};
 
 /** `open` makes the whole entry clickable, for example to open the Run drawer. `fullDetail` wraps the detail
  * and puts the actions below it. `compact` keeps the entry on one line, with the detail truncated
@@ -15,17 +27,7 @@ export const NeedItem = ({
   error,
   fullDetail = false,
   compact = false,
-}: {
-  readonly copy: Pick<NeedCopy, "title" | "detail" | "repository">;
-  /** The item the entry is about, marked before the detail; linked only if `open` is absent. */
-  readonly item?: ItemRef | undefined;
-  readonly open?: (() => void) | undefined;
-  readonly actions?: ReactNode;
-  /** The error message of the last failed action on this entry. */
-  readonly error?: string | null;
-  readonly fullDetail?: boolean;
-  readonly compact?: boolean;
-}) => {
+}: NeedItemProps) => {
   const wraps = fullDetail && !compact;
   // A compact entry never truncates the title: below sm the detail wraps to two lines under it;
   // from sm the detail is truncated beside the title.

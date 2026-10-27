@@ -36,6 +36,14 @@ const wording = {
   },
 } as const;
 
+type ErrorControlsProps = {
+  readonly errors: ReadonlyArray<NavigableRow>;
+  readonly kind?: keyof typeof wording;
+  readonly selectedKey: string | null;
+  readonly earlier: boolean;
+  readonly onSelect: (target: NavigableRow) => void;
+};
+
 /** Renders controls that step through the loaded errors and recovered tool failures in conversation order (see `errorTally`). */
 export const ErrorControls = ({
   errors,
@@ -43,13 +51,7 @@ export const ErrorControls = ({
   selectedKey,
   earlier,
   onSelect,
-}: {
-  readonly errors: ReadonlyArray<NavigableRow>;
-  readonly kind?: keyof typeof wording;
-  readonly selectedKey: string | null;
-  readonly earlier: boolean;
-  readonly onSelect: (target: NavigableRow) => void;
-}) => {
+}: ErrorControlsProps) => {
   const first = errors[0];
   const last = errors.at(-1);
   if (first === undefined || last === undefined) return null;
@@ -94,14 +96,13 @@ export const ErrorControls = ({
   );
 };
 
-/** Scrolls to `target` and opens its disclosures; the caller keeps the request until `onRevealed` is called. */
-export const RevealTarget = ({
-  target,
-  onRevealed,
-}: {
+type RevealTargetProps = {
   readonly target: ReaderTarget | null;
   readonly onRevealed: () => void;
-}) => {
+};
+
+/** Scrolls to `target` and opens its disclosures; the caller keeps the request until `onRevealed` is called. */
+export const RevealTarget = ({ target, onRevealed }: RevealTargetProps) => {
   const { state, reveal } = useTranscriptDisclosure();
   const { scrollToMessage } = useMessageScroller();
   useEffect(() => {

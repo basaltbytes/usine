@@ -28,13 +28,12 @@ const icons = {
   tool: WrenchIcon,
 };
 
-export const ToolDetails = ({
-  entry,
-  view,
-}: {
+type ToolDetailsProps = {
   readonly entry: TranscriptTool;
   readonly view: ToolPresentation;
-}) => {
+};
+
+export const ToolDetails = ({ entry, view }: ToolDetailsProps) => {
   const state = entry.state;
   const patchFirst =
     view.category === "edit" &&
@@ -128,7 +127,9 @@ export const useToolDisclosure = (key: string) => {
   };
 };
 
-export const TranscriptToolRow = ({ entry }: { readonly entry: TranscriptTool }) => {
+type TranscriptToolRowProps = { readonly entry: TranscriptTool };
+
+export const TranscriptToolRow = ({ entry }: TranscriptToolRowProps) => {
   const disclosure = useToolDisclosure(entry.key);
   const view = presentTool(entry);
   const Icon = icons[view.category];

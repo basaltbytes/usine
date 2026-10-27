@@ -4,12 +4,24 @@ import { cn } from "~/lib/utils";
 import { ItemMark, type ItemRef } from "~/components/item/mark";
 
 /** The props an `ItemHeading` passes to the element it renders. */
-interface HeadingElementProps {
+type HeadingElementProps = {
   readonly className?: string;
   readonly style?: CSSProperties;
   readonly title?: string;
   readonly children?: ReactNode;
-}
+};
+
+type ItemHeadingProps = {
+  readonly item: Option.Option<ItemRef>;
+  readonly title: string;
+  readonly variant: "page" | "row";
+  /** Whether the mark links to GitHub; pass `false` inside another link or button. */
+  readonly linked?: boolean;
+  /** The element to render, such as a dialog title component; `h1` for `page`, `span` for `row`. */
+  readonly as?: "h1" | "h2" | "h3" | "p" | "span" | ComponentType<HeadingElementProps>;
+  readonly className?: string;
+  readonly style?: CSSProperties;
+};
 
 /**
  * Renders a title with its item's mark inline before it, in the text flow, so a wrapped line
@@ -24,17 +36,7 @@ export const ItemHeading = ({
   as: Element = variant === "page" ? "h1" : "span",
   className,
   style,
-}: {
-  readonly item: Option.Option<ItemRef>;
-  readonly title: string;
-  readonly variant: "page" | "row";
-  /** Whether the mark links to GitHub; pass `false` inside another link or button. */
-  readonly linked?: boolean;
-  /** The element to render, such as a dialog title component; `h1` for `page`, `span` for `row`. */
-  readonly as?: "h1" | "h2" | "h3" | "p" | "span" | ComponentType<HeadingElementProps>;
-  readonly className?: string;
-  readonly style?: CSSProperties;
-}) => (
+}: ItemHeadingProps) => (
   <Element
     className={cn(
       variant === "page"

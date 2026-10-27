@@ -4,7 +4,7 @@ import type { CycleBudgetUsedUpView, RunView, StalledItemView } from "@usine/orc
 import { Button } from "~/components/ui/button";
 import { cn } from "~/lib/utils";
 import { api } from "~/lib/api";
-import { runActionLabel, runActionProgress, runAgainBlocked } from "~/lib/strings";
+import { runActionLabel, runActionProgress, runAgainBlocked } from "~/lib/runs/strings";
 import {
   type RunActionRequest,
   unchangedRunAgain,
@@ -24,19 +24,15 @@ const useRefreshDesk = () => {
     ]);
 };
 
-const ActionButton = ({
-  appearance,
-  label,
-  disabled,
-  error,
-  onClick,
-}: {
+type ActionButtonProps = {
   readonly appearance: StallActionAppearance;
   readonly label: string;
   readonly disabled: boolean;
   readonly error: string | null;
   readonly onClick: () => void;
-}) => (
+};
+
+const ActionButton = ({ appearance, label, disabled, error, onClick }: ActionButtonProps) => (
   <span
     className={cn(
       "inline-flex flex-col gap-1",
@@ -69,18 +65,15 @@ const ActionButton = ({
   </span>
 );
 
-/** Renders Approve, Retry, Mark resolved, or Mark answered for the Run that blocks the Item. */
-const RunAction = ({
-  appearance,
-  run,
-  request,
-  label,
-}: {
+type RunActionProps = {
   readonly appearance: StallActionAppearance;
   readonly run: RunView;
   readonly request: RunActionRequest;
   readonly label: string;
-}) => {
+};
+
+/** Renders Approve, Retry, Mark resolved, or Mark answered for the Run that blocks the Item. */
+const RunAction = ({ appearance, run, request, label }: RunActionProps) => {
   const action = useRunAction();
   return (
     <ActionButton
@@ -93,13 +86,12 @@ const RunAction = ({
   );
 };
 
-const RunAgainAction = ({
-  appearance,
-  run,
-}: {
+type RunAgainActionProps = {
   readonly appearance: StallActionAppearance;
   readonly run: RunView;
-}) => {
+};
+
+const RunAgainAction = ({ appearance, run }: RunAgainActionProps) => {
   const again = useRunAgain();
   const blocked = again.data?._tag === "CycleBlocked";
   return (
@@ -113,13 +105,12 @@ const RunAgainAction = ({
   );
 };
 
-const ResetBudgetAction = ({
-  appearance,
-  reason,
-}: {
+type ResetBudgetActionProps = {
   readonly appearance: StallActionAppearance;
   readonly reason: CycleBudgetUsedUpView;
-}) => {
+};
+
+const ResetBudgetAction = ({ appearance, reason }: ResetBudgetActionProps) => {
   const refresh = useRefreshDesk();
   const reset = useMutation({
     mutationFn: () =>
@@ -137,13 +128,12 @@ const ResetBudgetAction = ({
   );
 };
 
-const ResumeAction = ({
-  appearance,
-  loop,
-}: {
+type ResumeActionProps = {
   readonly appearance: StallActionAppearance;
   readonly loop: LoopName;
-}) => {
+};
+
+const ResumeAction = ({ appearance, loop }: ResumeActionProps) => {
   const refresh = useRefreshDesk();
   const resume = useMutation({
     mutationFn: () => api((client) => client.unpause({ params: { loop } })),
@@ -160,16 +150,14 @@ const ResumeAction = ({
   );
 };
 
-/** Renders the action that unblocks a stalled Item, or nothing if there is none or `readOnly` is set. */
-export const StallAction = ({
-  stalled,
-  readOnly,
-  appearance,
-}: {
+type StallActionProps = {
   readonly stalled: StalledItemView;
   readonly readOnly: boolean;
   readonly appearance: StallActionAppearance;
-}) => {
+};
+
+/** Renders the action that unblocks a stalled Item, or nothing if there is none or `readOnly` is set. */
+export const StallAction = ({ stalled, readOnly, appearance }: StallActionProps) => {
   if (readOnly) return null;
   const reason = stalled.reason;
   switch (reason._tag) {

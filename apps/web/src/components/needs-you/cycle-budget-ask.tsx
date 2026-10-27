@@ -4,18 +4,17 @@ import { Option } from "effect";
 import { taskCard, useOverview } from "~/components/item/identity";
 import { Button } from "~/components/ui/button";
 import { api } from "~/lib/api";
-import { cycleBudgetCounts, needCopy } from "~/lib/strings";
+import { cycleBudgetCounts, needCopy } from "~/lib/needs-you/strings";
 import { overviewQuery } from "~/lib/overview";
 import { NeedItem } from "~/components/needs-you/need-item";
 
-/** Renders the cycle budget Ask of an Item; resetting the budget does not create a Run. */
-export const CycleBudgetAsk = ({
-  need,
-  compact,
-}: {
+type CycleBudgetAskProps = {
   readonly need: CycleBudgetNeed;
   readonly compact: boolean;
-}) => {
+};
+
+/** Renders the cycle budget Ask of an Item; resetting the budget does not create a Run. */
+export const CycleBudgetAsk = ({ need, compact }: CycleBudgetAskProps) => {
   const queries = useQueryClient();
   const reset = useMutation({
     mutationFn: () => api((client) => client.resetCycleBudget({ payload: { askId: need.ask.id } })),

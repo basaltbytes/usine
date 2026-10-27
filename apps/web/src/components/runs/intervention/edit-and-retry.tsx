@@ -5,7 +5,7 @@ import type { RunId } from "@usine/core/run";
 import { EditAndRetry as Amendment, type RunView } from "@usine/orchestrator/operator";
 import { useId, useState } from "react";
 import { api } from "~/lib/api";
-import { runAgainBlocked } from "~/lib/strings";
+import { runAgainBlocked } from "~/lib/runs/strings";
 import { useRunAgain } from "~/hooks/runs/actions";
 import { Button } from "~/components/ui/button";
 import { Textarea } from "~/components/ui/textarea";
@@ -49,21 +49,17 @@ const useRetryWith = (run: RunView, close: () => void) => {
   });
 };
 
-/** Renders an editor for the task and Agent choice. For a run again, calls `openRun` with the new Run. */
-export const EditAndRetry = ({
-  run,
-  intent,
-  close,
-  openRun,
-  className,
-}: {
+type EditAndRetryProps = {
   readonly run: RunView;
   readonly intent: EditIntent;
   readonly close: () => void;
   /** Opens the Run that Run again created. */
   readonly openRun: (runId: RunId) => void;
   readonly className?: string;
-}) => {
+};
+
+/** Renders an editor for the task and Agent choice. For a run again, calls `openRun` with the new Run. */
+export const EditAndRetry = ({ run, intent, close, openRun, className }: EditAndRetryProps) => {
   const [task, setTask] = useState(run.task);
   const [agent, setAgent] = useState<string>(run.agent);
   const id = useId();

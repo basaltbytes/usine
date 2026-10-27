@@ -96,7 +96,9 @@ const overview = (
 let host: HTMLDivElement;
 let root: Root;
 let queryClient: QueryClient;
-const Board = ({ selected = repository }: { readonly selected?: RepositoryName }) => {
+type BoardProps = Readonly<{ readonly selected?: RepositoryName }>;
+
+const Board = ({ selected = repository }: BoardProps) => {
   const { data } = useSuspenseQuery(overviewQuery());
   const project = data.projects.find(({ repository }) => repository === selected);
   if (!project) return null;

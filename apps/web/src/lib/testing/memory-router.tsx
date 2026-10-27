@@ -13,8 +13,10 @@ export const memoryRouter = (component: () => ReactNode, path = "/") =>
     history: createMemoryHistory({ initialEntries: [path] }),
   });
 
+type WithRouterProps = { readonly children: ReactNode };
+
 /** Provides a router to `children` without rendering routes, so links render as static markup. */
-export const WithRouter = ({ children }: { readonly children: ReactNode }) => {
+export const WithRouter = ({ children }: WithRouterProps) => {
   const [router] = useState(() => memoryRouter(() => null));
   return <RouterContextProvider router={router}>{children}</RouterContextProvider>;
 };

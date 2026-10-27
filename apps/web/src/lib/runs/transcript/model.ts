@@ -8,13 +8,8 @@ import type {
 import type { AttemptId } from "@usine/core/attempt";
 import type { AttemptView, TranscriptEventView } from "@usine/orchestrator/operator";
 import { DateTime, Match, Option, type Schema } from "effect";
-import {
-  brainLine,
-  clockLabel,
-  conflictingSalvageMessage,
-  durationLabel,
-  failureMessage,
-} from "~/lib/strings";
+import { brainLine, clockLabel, durationLabel } from "~/lib/strings";
+import { conflictingSalvageMessage, failureMessage } from "~/lib/runs/strings";
 import {
   indexSessions,
   type SessionEvents,

@@ -16,19 +16,21 @@ import { Textarea } from "~/components/ui/textarea";
 import { Label } from "~/components/ui/label";
 import { ErrorAlert } from "~/components/error-alert";
 
+type SessionComposerProps = {
+  readonly runId: RunId;
+  readonly attemptId: AttemptId;
+  readonly target: SessionTarget;
+  readonly paused: boolean;
+  readonly held: boolean;
+};
+
 export const SessionComposer = ({
   runId,
   attemptId,
   target,
   paused,
   held,
-}: {
-  readonly runId: RunId;
-  readonly attemptId: AttemptId;
-  readonly target: SessionTarget;
-  readonly paused: boolean;
-  readonly held: boolean;
-}) => {
+}: SessionComposerProps) => {
   const [message, setMessage] = useState("");
   const id = useId();
   const queryClient = useQueryClient();

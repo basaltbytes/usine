@@ -1,13 +1,13 @@
 import { Component, type ReactNode, type RefObject } from "react";
 
-interface Props {
+type PreserveReadingPositionProps = {
   readonly viewportRef: RefObject<HTMLDivElement | null>;
   /** A value that changes whenever transcript rows change size or content. */
   readonly revision: number;
   /** Whether the viewport is shown; while `false`, the last visible row is kept. */
   readonly active: boolean;
   readonly children: ReactNode;
-}
+};
 
 interface ReadingPosition {
   readonly viewport: HTMLDivElement;
@@ -43,13 +43,13 @@ export const visibleTranscriptRow = (viewport: HTMLDivElement): HTMLElement | un
 
 /** Keeps a visible transcript row in place as content changes; anchors are elements with `data-transcript-id`. */
 export class PreserveReadingPosition extends Component<
-  Props,
+  PreserveReadingPositionProps,
   Record<string, never>,
   ReadingPosition | null
 > {
   private pendingPosition: ReadingPosition | null = null;
 
-  override getSnapshotBeforeUpdate(previous: Props): ReadingPosition | null {
+  override getSnapshotBeforeUpdate(previous: PreserveReadingPositionProps): ReadingPosition | null {
     if (
       !previous.active ||
       (previous.active === this.props.active && previous.revision === this.props.revision)
@@ -76,7 +76,7 @@ export class PreserveReadingPosition extends Component<
   }
 
   override componentDidUpdate(
-    _previous: Props,
+    _previous: PreserveReadingPositionProps,
     _state: Record<string, never>,
     position: ReadingPosition | null,
   ) {

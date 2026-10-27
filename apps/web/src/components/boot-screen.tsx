@@ -11,6 +11,14 @@ import {
 import { Spinner } from "~/components/ui/spinner";
 import { cn } from "~/lib/utils";
 
+type BootScreenProps = {
+  readonly title: string;
+  readonly description: string;
+  readonly tone?: "loading" | "error";
+  readonly inPanel?: boolean;
+  readonly children?: ReactNode;
+};
+
 /** Renders the loading, unreachable, or not-found screen in the viewport, or in the work panel below Needs you if `inPanel` is set. */
 export const BootScreen = ({
   title,
@@ -18,13 +26,7 @@ export const BootScreen = ({
   tone = "loading",
   inPanel = false,
   children,
-}: {
-  readonly title: string;
-  readonly description: string;
-  readonly tone?: "loading" | "error";
-  readonly inPanel?: boolean;
-  readonly children?: ReactNode;
-}) => (
+}: BootScreenProps) => (
   <main className={cn("grid place-items-center p-6", inPanel ? "flex-1" : "min-h-svh")}>
     <Empty className="max-w-md p-0">
       <EmptyHeader className="gap-2">

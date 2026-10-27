@@ -1,6 +1,8 @@
 import type { RunView, StalledItemView } from "@usine/orchestrator/operator";
 import { Match } from "effect";
-import { agoLabel, failureReason, machineCreationLine, stopWaitLine } from "~/lib/strings";
+import { agoLabel } from "~/lib/strings";
+import { machineCreationLine } from "~/lib/workers/strings";
+import { failureReason, stopWaitLine } from "~/lib/runs/strings";
 import { runActivityAt } from "~/lib/tasks/model";
 
 const isQuestion = (run: RunView): boolean => {

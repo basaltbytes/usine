@@ -42,18 +42,17 @@ export const waitingPart = (share: number): SharePart => ({
   fill: "var(--loop-waiting)",
 });
 
+type ShareBarProps = {
+  /** The bar's accessible name, such as `Time per task`. */
+  readonly label: string;
+  readonly parts: ReadonlyArray<SharePart>;
+};
+
 /**
  * Renders one horizontal bar split into `parts`, 2px apart, with a legend of each part's name and
  * share under it. Hovering a segment or its legend entry dims the others.
  */
-export const ShareBar = ({
-  label,
-  parts,
-}: {
-  /** The bar's accessible name, such as `Time per task`. */
-  readonly label: string;
-  readonly parts: ReadonlyArray<SharePart>;
-}) => {
+export const ShareBar = ({ label, parts }: ShareBarProps) => {
   const [hovered, setHovered] = useState<string | null>(null);
   const dimmed = (name: string) => hovered !== null && hovered !== name;
   return (

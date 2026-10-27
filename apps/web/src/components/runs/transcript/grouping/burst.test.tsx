@@ -41,7 +41,7 @@ import type { Schema } from "effect";
 import { renderToStaticMarkup } from "react-dom/server";
 import { assert, it } from "vitest";
 import { MessageScrollerProvider } from "~/components/ui/message-scroller";
-import { Outline } from "~/features/runs/components/outline";
+import { Outline } from "~/features/runs/components/outline/outline";
 import { readerDocument, type Burst } from "~/lib/runs/transcript/document/model";
 import { burstSummary } from "~/lib/runs/transcript/grouping/summary";
 import { projectTranscript, type TranscriptTool } from "~/lib/runs/transcript/model";
