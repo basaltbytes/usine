@@ -1,7 +1,8 @@
 import { renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DateTime, Effect, FileSystem, Option, Schema } from "effect";
-import { DEFAULT_LOG_LEVEL, Port, UpLogLevel } from "../cli.ts";
+import { DEFAULT_LOG_LEVEL, Port, UiOrigin, type UpCommand, UpLogLevel } from "../cli.ts";
+import { SystemdUnit } from "./systemd.ts";
 
 /** An operating system process ID. */
 export const ProcessId = Schema.Int.check(Schema.isGreaterThan(0)).pipe(Schema.brand("ProcessId"));
@@ -16,21 +17,35 @@ export class InstanceLaunch extends Schema.Class<InstanceLaunch>("@usine/server/
   /** The CLI entry point, from `process.argv[1]`. */
   script: Schema.NonEmptyString,
   port: Port,
+  /** The origin of `--origin`, which a record omits without one. */
+  origin: Schema.OptionFromOptionalKey(UiOrigin).pipe(
+    Schema.withConstructorDefault(Effect.succeed(Option.none<UiOrigin>())),
+  ),
   /** Decodes as `Info` from a record that a `usine up` without `--log-level` wrote. */
   logLevel: UpLogLevel.pipe(Schema.withDecodingDefaultKey(Effect.succeed(DEFAULT_LOG_LEVEL))),
   allowVolatileInstance: Schema.Boolean,
 }) {}
 
-/** Returns how this process was started. Dies without `process.argv[1]`, which a CLI always has. */
-export const currentLaunch = (port: Port, logLevel: UpLogLevel, allowVolatileInstance: boolean) =>
-  Schema.decodeUnknownEffect(InstanceLaunch)({
-    node: process.execPath,
-    nodeOptions: process.execArgv,
-    script: process.argv[1],
-    port,
-    logLevel,
-    allowVolatileInstance,
-  }).pipe(Effect.orDie);
+/**
+ * Returns how this process was started with the settings of `command`. Dies without
+ * `process.argv[1]`, which a CLI always has.
+ */
+export const currentLaunch = ({ port, origin, logLevel, allowVolatileInstance }: UpCommand) =>
+  Schema.decodeUnknownEffect(Schema.NonEmptyString)(process.argv[1]).pipe(
+    Effect.map(
+      (script) =>
+        new InstanceLaunch({
+          node: process.execPath,
+          nodeOptions: process.execArgv,
+          script,
+          port,
+          origin,
+          logLevel,
+          allowVolatileInstance,
+        }),
+    ),
+    Effect.orDie,
+  );
 
 /**
  * The running `usine up` of an instance folder, as written to `.usine/instance.json`. A newer CLI
@@ -43,6 +58,13 @@ export class InstanceRecord extends Schema.Class<InstanceRecord>("@usine/server/
   version: Schema.NonEmptyString,
   startedAt: Schema.DateTimeUtcFromString,
   launch: InstanceLaunch,
+  /**
+   * The systemd service whose cgroup the process is in, which a record omits outside one. The CLI
+   * stops and starts the service with `systemctl` if systemd reports the process as its main one.
+   */
+  systemdUnit: Schema.OptionFromOptionalKey(SystemdUnit).pipe(
+    Schema.withConstructorDefault(Effect.succeed(Option.none<SystemdUnit>())),
+  ),
   /** When the process received its first `SIGINT` or `SIGTERM`. */
   stoppingSince: Schema.optionalKey(Schema.DateTimeUtcFromString),
 }) {}
@@ -106,6 +128,7 @@ export const markStoppingSync = (files: InstanceFiles, record: InstanceRecord): 
     version: record.version,
     startedAt: record.startedAt,
     launch: record.launch,
+    systemdUnit: record.systemdUnit,
     stoppingSince: DateTime.nowUnsafe(),
   });
   writeFileSync(staging, encodeRecord(stopping), { mode: 0o600 });

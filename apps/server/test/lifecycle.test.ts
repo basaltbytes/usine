@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -19,7 +20,7 @@ import { RunId } from "@usine/core/run";
 import { DateTime, Duration, Effect, Layer, Option, Schema } from "effect";
 import { FetchHttpClient, type HttpClient } from "effect/unstable/http";
 import { afterEach, assert, describe, it } from "vitest";
-import { LifecycleOptions, Port, SERVER_HOST, type UpLogLevel } from "../src/cli.ts";
+import { LifecycleOptions, Port, SERVER_HOST, UiOrigin, type UpLogLevel } from "../src/cli.ts";
 import { startDetached } from "../src/detach.ts";
 import { holdInstance } from "../src/instance/lock.ts";
 import { ListeningPortsError } from "../src/instance/ports.ts";
@@ -81,12 +82,17 @@ const options = (seconds: number, force = false) =>
 /** The fallback launch of a restart that must find the instance record. */
 const recordedOnly = Effect.die(new Error("usine restart used the fallback launch"));
 
-const fixtureLaunch = async (script = FIXTURE, logLevel: UpLogLevel = "Info") =>
+const fixtureLaunch = async (
+  script = FIXTURE,
+  logLevel: UpLogLevel = "Info",
+  origin = Option.none<UiOrigin>(),
+) =>
   new InstanceLaunch({
     node: process.execPath,
     nodeOptions: ["--experimental-strip-types", "--no-warnings"],
     script,
     port: await freePort(),
+    origin,
     logLevel,
     allowVolatileInstance: false,
   });
@@ -96,8 +102,9 @@ const startFixture = async (
   directory: InstanceDirectory,
   script = FIXTURE,
   logLevel: UpLogLevel = "Info",
+  origin = Option.none<UiOrigin>(),
 ) => {
-  const launch = await fixtureLaunch(script, logLevel);
+  const launch = await fixtureLaunch(script, logLevel, origin);
   const { pid } = await run(startDetached(directory, launch, Duration.seconds(30)));
   pids.add(pid);
   return { pid, launch };
@@ -107,15 +114,75 @@ const startFixture = async (
  * Runs the `usine` CLI in `directory` and returns its standard output, or rejects with its standard
  * error if it fails. Asynchronous, so this process reaps the instance processes it started.
  */
-const runCli = (directory: InstanceDirectory, args: ReadonlyArray<string>) =>
+const runCli = (
+  directory: InstanceDirectory,
+  args: ReadonlyArray<string>,
+  environment: NodeJS.ProcessEnv = process.env,
+) =>
   new Promise<string>((resolve, reject) => {
     execFile(
       process.execPath,
       ["--experimental-strip-types", "--no-warnings", CLI, ...args],
-      { cwd: directory, timeout: SCENARIO_TIMEOUT_MS },
+      { cwd: directory, timeout: SCENARIO_TIMEOUT_MS, env: environment },
       (error, stdout, stderr) => (error === null ? resolve(stdout) : reject(new Error(stderr))),
     );
   });
+
+const UNIT = "usine-test.service";
+
+/**
+ * Writes a `systemctl` that acts as systemd would for `UNIT` running the fixture in `directory`,
+ * and logs its arguments to `systemctl.log` there. `show` reports the PID in `.usine/instance.pid`
+ * as the main one, unless `systemctl-other-main` exists; `stop` sends it `SIGTERM`; and `start`
+ * starts the fixture with `launch`'s port in the background. With `systemctl-failing`, `start`
+ * starts nothing and `show` reports a service that waits to restart. With `systemctl-start-fails`,
+ * `start` also fails, as for a `Type=exec` service whose command can't run. With
+ * `systemctl-denied`, every verb but `show` fails as without the permission to manage the service.
+ * Returns the environment for the CLI.
+ */
+const fakeSystemctl = (directory: InstanceDirectory, launch: InstanceLaunch) => {
+  const bin = join(directory, "bin");
+  mkdirSync(bin);
+  const script = join(bin, "systemctl");
+  writeFileSync(
+    script,
+    `#!${process.execPath}
+const { appendFileSync, existsSync, openSync, readFileSync } = require("node:fs");
+const { spawn } = require("node:child_process");
+const { join } = require("node:path");
+const directory = ${JSON.stringify(directory)};
+const args = process.argv.slice(2);
+appendFileSync(join(directory, "systemctl.log"), args.join(" ") + "\\n");
+const flag = (name) => existsSync(join(directory, name));
+const pidFile = join(directory, ".usine", "instance.pid");
+const pid = () => (existsSync(pidFile) ? Number(readFileSync(pidFile, "utf8")) : 0);
+const verb = args[0];
+if (verb !== "show" && flag("systemctl-denied")) {
+  console.error("Failed to " + verb + " " + args.at(-1) + ": Access denied");
+  process.exit(4);
+}
+if (verb === "show" && args.includes("--property=MainPID")) {
+  console.log(flag("systemctl-other-main") ? 1 : pid());
+} else if (verb === "show") {
+  const failing = flag("systemctl-failing") || flag("systemctl-start-fails");
+  console.log(failing ? "ActiveState=activating\\nSubState=auto-restart" : "ActiveState=active\\nSubState=running");
+} else if (verb === "stop" && pid() !== 0) {
+  process.kill(pid(), "SIGTERM");
+} else if (verb === "start" && flag("systemctl-start-fails")) {
+  console.error("Job for " + args.at(-1) + " failed because the control process exited with error code.");
+  process.exit(1);
+} else if (verb === "start" && !flag("systemctl-failing")) {
+  const log = openSync(join(directory, ".usine", "usine.log"), "a");
+  spawn(${JSON.stringify(launch.node)}, ${JSON.stringify([...launch.nodeOptions, launch.script, "up", "--port", String(launch.port)])}, { cwd: directory, detached: true, stdio: ["ignore", log, log] }).unref();
+}
+`,
+  );
+  chmodSync(script, 0o755);
+  return { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}` };
+};
+
+const systemctlCalls = (directory: InstanceDirectory) =>
+  readFileSync(join(directory, "systemctl.log"), "utf8").trim().split("\n");
 
 const pid1OfAnotherUser =
   process.platform === "linux" && statSync("/proc/1").uid !== process.getuid?.();
@@ -150,10 +217,15 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
     assert.deepStrictEqual(state.stale, Option.none());
   });
 
-  it("restarts into a new process with the recorded launch, port, and log level", async () => {
+  it("restarts into a new process with the recorded launch, port, origin, and log level", async () => {
     const directory = instanceFolder();
     const files = instanceFiles(directory);
-    const first = await startFixture(directory, FIXTURE, "Debug");
+    const first = await startFixture(
+      directory,
+      FIXTURE,
+      "Debug",
+      Option.some(UiOrigin.make("https://usine-orchestrator.tail1234.ts.net")),
+    );
 
     await run(restart(directory, options(20), recordedOnly));
 
@@ -164,8 +236,9 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
     assert.isFalse(alive(first.pid));
     assert.strictEqual(state.record.launch.port, first.launch.port);
     assert.deepStrictEqual(state.record.launch.nodeOptions, first.launch.nodeOptions);
-    // Both starts passed --log-level to the fixture, which recorded it as usine up does.
+    // Both starts passed --log-level and --origin to the fixture, which recorded them as usine up does.
     assert.strictEqual(state.record.launch.logLevel, "Debug");
+    assert.deepStrictEqual(state.record.launch.origin, first.launch.origin);
     assert.strictEqual(readFileSync(files.pid, "utf8").trim(), String(state.record.pid));
     const log = readFileSync(files.log, "utf8");
     assert.strictEqual(log.match(/fixture listening/gu)?.length, 2, log);
@@ -415,5 +488,112 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
     assert.strictEqual(error.outcome, "exited");
     assert.deepStrictEqual(error.exit, Option.some("status 3"));
     assert.include(error.tail, "cannot start");
+  });
+  it("stops, restarts, and reports an instance that a systemd service runs with systemctl", async () => {
+    const directory = instanceFolder();
+    writeFileSync(join(directory, "fixture-unit"), UNIT);
+    const first = await startFixture(directory);
+    const environment = fakeSystemctl(directory, first.launch);
+
+    const restarted = await runCli(directory, ["restart", "--timeout", "20"], environment);
+    assert.match(
+      restarted,
+      new RegExp(`Stopping usine \\(pid ${first.pid}\\) with systemctl stop ${UNIT}`, "u"),
+    );
+    assert.match(restarted, new RegExp(`usine is running at .+ \\(pid \\d+\\) in ${UNIT}`, "u"));
+    const state = await run(probeInstance(directory));
+    assert(state._tag === "Running");
+    pids.add(state.record.pid);
+    assert.notStrictEqual(state.record.pid, first.pid);
+    assert.isFalse(alive(first.pid));
+    assert.deepStrictEqual(Option.getOrUndefined(state.record.systemdUnit), UNIT);
+
+    const report = await runCli(directory, ["status"], environment);
+    assert.include(report, `  service   ${UNIT}, managed with systemctl`);
+
+    await runCli(directory, ["stop", "--timeout", "20"], environment);
+    assert.isFalse(alive(state.record.pid));
+    const calls = systemctlCalls(directory);
+    assert.deepStrictEqual(
+      calls.filter((call) => !call.startsWith("show")),
+      [`stop --no-block ${UNIT}`, `start ${UNIT}`, `stop --no-block ${UNIT}`],
+    );
+    assert.include(calls, `show --property=MainPID --value ${UNIT}`);
+  });
+
+  it("signals an instance whose systemd service has another main process, without systemctl stop", async () => {
+    const directory = instanceFolder();
+    // As for a usine up that a script of another service started.
+    writeFileSync(join(directory, "fixture-unit"), UNIT);
+    writeFileSync(join(directory, "systemctl-other-main"), "");
+    const record = await startFixture(directory);
+    const environment = fakeSystemctl(directory, record.launch);
+
+    const output = await runCli(directory, ["stop", "--timeout", "20"], environment);
+
+    assert.match(output, new RegExp(`Stopping usine \\(pid ${record.pid}\\)\\.`, "u"));
+    assert.isFalse(alive(record.pid));
+    assert.deepStrictEqual(systemctlCalls(directory), [`show --property=MainPID --value ${UNIT}`]);
+  });
+
+  it("names the systemctl command that this user may not run, and leaves the instance running", async () => {
+    const directory = instanceFolder();
+    writeFileSync(join(directory, "fixture-unit"), UNIT);
+    writeFileSync(join(directory, "systemctl-denied"), "");
+    const record = await startFixture(directory);
+    const environment = fakeSystemctl(directory, record.launch);
+
+    const refused = await runCli(directory, ["stop"], environment).then(
+      () => "",
+      (error: Error) => error.message,
+    );
+
+    assert.include(refused, `systemctl stop --no-block ${UNIT} failed`);
+    assert.include(refused, "Access denied");
+    assert.isTrue(alive(record.pid));
+  });
+
+  it("stops a systemd service whose new process exits before it listens, so that it doesn't restart", async () => {
+    const directory = instanceFolder();
+    writeFileSync(join(directory, "fixture-unit"), UNIT);
+    const first = await startFixture(directory);
+    const environment = fakeSystemctl(directory, first.launch);
+    writeFileSync(join(directory, "systemctl-failing"), "");
+
+    const failed = await runCli(directory, ["restart", "--timeout", "20"], environment).then(
+      () => "",
+      (error: Error) => error.message,
+    );
+
+    assert.include(
+      failed,
+      `systemctl start ${UNIT} ran, but the service was activating (auto-restart)`,
+    );
+    assert.isFalse(alive(first.pid));
+    assert.deepStrictEqual(
+      systemctlCalls(directory).filter((call) => !call.startsWith("show")),
+      [`stop --no-block ${UNIT}`, `start ${UNIT}`, `stop --no-block ${UNIT}`],
+    );
+  });
+
+  it("cancels the restart of a systemd service whose systemctl start fails, and names that failure", async () => {
+    const directory = instanceFolder();
+    writeFileSync(join(directory, "fixture-unit"), UNIT);
+    const first = await startFixture(directory);
+    const environment = fakeSystemctl(directory, first.launch);
+    writeFileSync(join(directory, "systemctl-start-fails"), "");
+
+    const failed = await runCli(directory, ["restart", "--timeout", "20"], environment).then(
+      () => "",
+      (error: Error) => error.message,
+    );
+
+    assert.include(failed, `systemctl start ${UNIT} failed`);
+    assert.include(failed, "the control process exited with error code");
+    assert.isFalse(alive(first.pid));
+    assert.deepStrictEqual(
+      systemctlCalls(directory).filter((call) => !call.startsWith("show")),
+      [`stop --no-block ${UNIT}`, `start ${UNIT}`, `stop --no-block ${UNIT}`],
+    );
   });
 });

@@ -12,6 +12,7 @@ import {
 import type { InstanceRecord } from "./instance/record.ts";
 import { type ListedRun, listRuns } from "./instance/operator-api.ts";
 import { type InstanceState, probeInstance } from "./instance/state.ts";
+import { supervisingUnit } from "./instance/systemd.ts";
 import { resolveVersion } from "./registry.ts";
 
 /** What `usine status` prints, and whether a process holds the instance. */
@@ -39,6 +40,18 @@ const openRuns = (runs: ReadonlyArray<ListedRun>): string => {
     ? "none open"
     : counts.map(([state, count]) => `${count} ${state.toLowerCase()}`).join(", ");
 };
+
+/**
+ * Returns the service line for an instance whose systemd service has it as its main process, or
+ * `None` for an instance outside one.
+ */
+const serviceLine = (record: InstanceRecord) =>
+  supervisingUnit(record.pid, record.systemdUnit).pipe(
+    Effect.map(Option.map((unit) => field("service", `${unit}, managed with systemctl`))),
+    Effect.catchTag("SystemctlError", (error) =>
+      Effect.succeed(Option.some(field("service", `${error.unit}, unknown: ${error.reason}`))),
+    ),
+  );
 
 /** Returns the update line for an engine installed from a pin, or `None` for other engines. */
 const updateLine = Effect.fn("Cli.statusUpdate")(function* (
@@ -90,11 +103,13 @@ const runningLines = Effect.fn("Cli.statusRunning")(function* (
       : `usine is stopping in ${directory}. Its drain started at ${DateTime.formatIso(record.stoppingSince)} (${ago(record.stoppingSince, now)}).`,
     field("pid", String(record.pid)),
     field("address", `http://${SERVER_HOST}:${record.launch.port}`),
+    ...Option.toArray(Option.map(record.launch.origin, (origin) => field("origin", origin))),
     field(
       "engine",
       `${SERVER_PACKAGE} ${record.version}, ${installed ? "installed in the instance" : `from ${record.launch.script}`}`,
     ),
     field("started", `${DateTime.formatIso(record.startedAt)} (${ago(record.startedAt, now)})`),
+    ...Option.toArray(yield* serviceLine(record)),
     field("runs", runs),
   ];
   // The same entry point at another version means that the install changed after the start.

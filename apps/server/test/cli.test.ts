@@ -22,6 +22,7 @@ import {
 
 const noEnvironment = {
   port: Option.none<string>(),
+  origin: Option.none<string>(),
   logLevel: Option.none<string>(),
   allowVolatileInstance: Option.none<string>(),
 };
@@ -228,6 +229,50 @@ describe("usine CLI", () => {
     assert.match(flagError.message, /^--log-level must be trace, debug, info, warn, or error/);
     assert(environmentError instanceof CliUsageError);
     assert.match(environmentError.message, /^USINE_LOG_LEVEL/);
+  });
+
+  it("reads the UI origin from the flag, then the environment, and refuses a URL with a path or another scheme", async () => {
+    const origin = async (args: ReadonlyArray<string>, environment = Option.none<string>()) => {
+      const command = await Effect.runPromise(
+        parseCli(["up", ...args], { ...noEnvironment, origin: environment }),
+      );
+      assert(command._tag === "UpCommand");
+      return command.origin;
+    };
+    const serve = "https://usine-orchestrator.tail1234.ts.net";
+    assert.deepStrictEqual(await origin([]), Option.none());
+    assert.deepStrictEqual(await origin([], Option.some(serve)), Option.some(serve));
+    // As a browser writes it in the Origin header: no slash, no default port, and lower case.
+    assert.deepStrictEqual(
+      await origin(
+        ["--origin", "https://Usine-Orchestrator.tail1234.ts.net:443/"],
+        Option.some("https://other.tail1234.ts.net"),
+      ),
+      Option.some(serve),
+    );
+    assert.deepStrictEqual(
+      await origin(["--origin=http://100.64.0.20:8080"]),
+      Option.some("http://100.64.0.20:8080"),
+    );
+    for (const value of [
+      "usine-orchestrator.tail1234.ts.net",
+      `${serve}/ui`,
+      `${serve}/?tab=runs`,
+      "https://operator@usine-orchestrator.tail1234.ts.net",
+      "ftp://usine-orchestrator.tail1234.ts.net",
+      "file:///home/usine",
+    ]) {
+      const error = await Effect.runPromise(
+        parseCli(["up", "--origin", value], noEnvironment).pipe(Effect.flip),
+      );
+      assert(error instanceof CliUsageError, value);
+      assert.match(error.message, /^--origin must be the http or https URL of the UI/u);
+    }
+    const environmentError = await Effect.runPromise(
+      parseCli(["up"], { ...noEnvironment, origin: Option.some(`${serve}/ui`) }).pipe(Effect.flip),
+    );
+    assert(environmentError instanceof CliUsageError);
+    assert.match(environmentError.message, /^USINE_ORIGIN/u);
   });
 
   it("reads the version pinned in the installed server package", async () => {

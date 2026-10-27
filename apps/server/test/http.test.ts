@@ -1,5 +1,6 @@
 import { OperatorMessage, ParentTarget } from "@usine/core/attempt/channel";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NodeHttpPlatform, NodeHttpServer } from "@effect/platform-node";
@@ -96,7 +97,8 @@ import { HttpRouter } from "effect/unstable/http";
 import { HttpApiClient } from "effect/unstable/httpapi";
 import { afterAll, assert, describe, it } from "vitest";
 import { BackendUnavailableError, FactoryBackend, needsSetupBackendLayer } from "../src/backend.ts";
-import { apiRoutes, staticRoutes } from "../src/http.ts";
+import { Port, SERVER_HOST, UiOrigin } from "../src/cli.ts";
+import { apiRoutes, serverLayer, staticRoutes } from "../src/http.ts";
 
 const runId = RunId.make("run-1");
 const loopName = LoopName.make("review-issue");
@@ -376,9 +378,12 @@ const backend = needsSetupBackendLayer(
   observation,
   configuration,
 );
-const app = HttpRouter.toWebHandler(apiRoutes.pipe(HttpRouter.provideRequest(backend)), {
-  disableLogger: true,
-});
+const app = HttpRouter.toWebHandler(
+  apiRoutes(Option.none()).pipe(HttpRouter.provideRequest(backend)),
+  {
+    disableLogger: true,
+  },
+);
 
 afterAll(() => app.dispose());
 
@@ -522,6 +527,33 @@ describe("operator HTTP API", () => {
     );
     assert.strictEqual(malformed.status, 403);
     assert.strictEqual((await malformed.json()).error, "CrossSiteRequestError");
+
+    // With --origin, the UI's pages that tailscale serve publishes pass, at that origin only.
+    const proxied = HttpRouter.toWebHandler(
+      apiRoutes(Option.some(UiOrigin.make("https://usine-orchestrator.tail1234.ts.net"))).pipe(
+        HttpRouter.provideRequest(backend),
+      ),
+      { disableLogger: true },
+    );
+    try {
+      const approve = (origin: string) =>
+        proxied.handler(
+          new Request(`http://usine-orchestrator.tail1234.ts.net/api/runs/${runId}/approve`, {
+            method: "POST",
+            headers: { origin },
+          }),
+        );
+      assert.strictEqual((await approve("https://usine-orchestrator.tail1234.ts.net")).status, 503);
+      assert.strictEqual((await approve("http://127.0.0.1:7331")).status, 503);
+      assert.strictEqual((await approve("http://usine-orchestrator.tail1234.ts.net")).status, 403);
+      assert.strictEqual(
+        (await approve("https://usine-orchestrator.tail1234.ts.net:8443")).status,
+        403,
+      );
+      assert.strictEqual((await approve("https://other.tail1234.ts.net")).status, 403);
+    } finally {
+      await proxied.dispose();
+    }
   });
 
   it("maps typed engine errors onto operator-readable statuses", async () => {
@@ -594,7 +626,7 @@ describe("operator HTTP API", () => {
       runStatistics: (window) => Effect.succeed(runStatisticsOf(window)),
     });
     const rejectingApp = HttpRouter.toWebHandler(
-      apiRoutes.pipe(HttpRouter.provideRequest(rejecting)),
+      apiRoutes(Option.none()).pipe(HttpRouter.provideRequest(rejecting)),
       { disableLogger: true },
     );
     try {
@@ -780,9 +812,9 @@ describe("operator HTTP API", () => {
           return yield* Effect.flip(client.reload());
         }).pipe(
           Effect.provide(
-            HttpRouter.serve(apiRoutes.pipe(HttpRouter.provideRequest(rejecting))).pipe(
-              Layer.provideMerge(NodeHttpServer.layerTest),
-            ),
+            HttpRouter.serve(
+              apiRoutes(Option.none()).pipe(HttpRouter.provideRequest(rejecting)),
+            ).pipe(Layer.provideMerge(NodeHttpServer.layerTest)),
           ),
         ),
       );
@@ -878,9 +910,9 @@ describe("operator HTTP API", () => {
       statistics: (window) => Effect.succeed(statisticsOf(window)),
       runStatistics: (window) => Effect.succeed(runStatisticsOf(window)),
     });
-    const server = HttpRouter.serve(apiRoutes.pipe(HttpRouter.provideRequest(live))).pipe(
-      Layer.provideMerge(NodeHttpServer.layerTest),
-    );
+    const server = HttpRouter.serve(
+      apiRoutes(Option.none()).pipe(HttpRouter.provideRequest(live)),
+    ).pipe(Layer.provideMerge(NodeHttpServer.layerTest));
     await Effect.runPromise(
       Effect.gen(function* () {
         const { operator: client } = yield* HttpApiClient.make(OperatorApi);
@@ -1032,7 +1064,7 @@ describe("operator HTTP API", () => {
       writeFile(join(assets, "app.css"), ":root { color-scheme: dark; }"),
     ]);
     const web = HttpRouter.toWebHandler(
-      Layer.mergeAll(apiRoutes, staticRoutes(webRoot)).pipe(
+      Layer.mergeAll(apiRoutes(Option.none()), staticRoutes(webRoot)).pipe(
         HttpRouter.provideRequest(Layer.mergeAll(backend, NodeHttpPlatform.layer)),
       ),
       { disableLogger: true },
@@ -1080,4 +1112,43 @@ describe("operator HTTP API", () => {
       await rm(webRoot, { recursive: true });
     }
   });
+  // Linux routes all of 127.0.0.0/8 to the loopback interface; macOS has only 127.0.0.1.
+  it.skipIf(process.platform !== "linux")(
+    "listens on 127.0.0.1 only, also with an origin for a proxy",
+    async () => {
+      const port = await new Promise<Port>((resolve) => {
+        const probe = createServer();
+        probe.listen({ host: SERVER_HOST, port: 0 }, () => {
+          const { port: free } = Schema.decodeUnknownSync(Schema.Struct({ port: Port }))(
+            probe.address(),
+          );
+          probe.close(() => resolve(free));
+        });
+      });
+      const webRoot = await mkdtemp(join(tmpdir(), "usine-web-"));
+      const overview = (host: string) =>
+        Effect.tryPromise(() => fetch(`http://${host}:${port}/api/overview`)).pipe(
+          Effect.map((response) => response.status),
+          Effect.orElseSucceed(() => "unreachable"),
+        );
+      try {
+        const statuses = await Effect.runPromise(
+          Effect.gen(function* () {
+            yield* Layer.build(
+              serverLayer(
+                backend,
+                webRoot,
+                port,
+                Option.some(UiOrigin.make("https://usine-orchestrator.tail1234.ts.net")),
+              ),
+            );
+            return yield* Effect.all([overview("127.0.0.1"), overview("127.0.0.2")]);
+          }).pipe(Effect.scoped),
+        );
+        assert.deepStrictEqual(statuses, [200, "unreachable"]);
+      } finally {
+        await rm(webRoot, { recursive: true });
+      }
+    },
+  );
 });

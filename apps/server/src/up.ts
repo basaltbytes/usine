@@ -30,7 +30,8 @@ import {
 import { liveBackendLayer, needsSetupBackendLayer } from "./backend.ts";
 import {
   type Port,
-  type UpLogLevel,
+  type UiOrigin,
+  type UpCommand,
   VolatileInstanceDirectoryError,
   openBrowser,
   packageVersion,
@@ -44,6 +45,7 @@ import { serverLayer } from "./http.ts";
 import { instanceIdOf } from "./instance/id.ts";
 import { holdInstance } from "./instance/lock.ts";
 import { InstanceRecord, ProcessId, currentLaunch, instanceFiles } from "./instance/record.ts";
+import { currentSystemService } from "./instance/systemd.ts";
 import { reloadOnHangup } from "./reload-signal.ts";
 import { withGracefulShutdown } from "./shutdown.ts";
 import { warnIfSystemSleeps } from "./system-sleep.ts";
@@ -69,10 +71,13 @@ const serve = Effect.fnUntraced(function* (options: {
   readonly backend: ReturnType<typeof liveBackendLayer>;
   readonly webRoot: string;
   readonly port: Port;
+  readonly origin: Option.Option<UiOrigin>;
   readonly url: string;
   readonly openSetupPage: boolean;
 }) {
-  yield* Layer.build(serverLayer(options.backend, options.webRoot, options.port)).pipe(
+  yield* Layer.build(
+    serverLayer(options.backend, options.webRoot, options.port, options.origin),
+  ).pipe(
     Effect.mapError((error) => serverStartError(options.port, error)),
     Effect.catchTag("PortInUseError", ({ port }) => portInUse(port)),
   );
@@ -123,6 +128,7 @@ const start = Effect.fnUntraced(function* (
   instanceId: InstanceId,
   instances: CurrentInstance["Service"],
   port: Port,
+  origin: Option.Option<UiOrigin>,
 ) {
   yield* reloadOnHangup(instances);
   const credentials = yield* loadLocalCredentials(directory).pipe(
@@ -146,7 +152,7 @@ const start = Effect.fnUntraced(function* (
       Context.get(observationContext, OperatorObservation),
       Context.get(observationContext, OperatorConfiguration),
     );
-    return yield* serve({ backend, webRoot, port, url, openSetupPage: true });
+    return yield* serve({ backend, webRoot, port, origin, url, openSetupPage: true });
   }
 
   const shutdown = yield* Deferred.make<void>();
@@ -172,6 +178,7 @@ const start = Effect.fnUntraced(function* (
           ),
           webRoot,
           port,
+          origin,
           url,
           openSetupPage: false,
         }),
@@ -199,18 +206,20 @@ const start = Effect.fnUntraced(function* (
   );
 });
 
-export const up = (port: Port, logLevel: UpLogLevel, allowVolatileInstance: boolean) =>
+export const up = (command: UpCommand) =>
   Effect.scoped(
     Effect.gen(function* () {
+      const { port, origin } = command;
       const directory = InstanceDirectory.make(process.cwd());
-      yield* refuseVolatileInstance(directory, allowVolatileInstance).pipe(
+      yield* refuseVolatileInstance(directory, command.allowVolatileInstance).pipe(
         Effect.provide(NodeServices.layer),
       );
       const record = new InstanceRecord({
         pid: ProcessId.make(process.pid),
         version: yield* packageVersion().pipe(Effect.provide(NodeServices.layer)),
         startedAt: yield* DateTime.now,
-        launch: yield* currentLaunch(port, logLevel, allowVolatileInstance),
+        launch: yield* currentLaunch(command),
+        systemdUnit: yield* currentSystemService().pipe(Effect.provide(NodeServices.layer)),
       });
       // Acquired before any store opens and released after every store closes.
       yield* holdInstance(directory, record).pipe(Effect.provide(NodeServices.layer));
@@ -226,8 +235,8 @@ export const up = (port: Port, logLevel: UpLogLevel, allowVolatileInstance: bool
       const tracer = yield* Layer.build(tracingLayer(config.tracing)).pipe(
         Effect.provide(NodeServices.layer),
       );
-      return yield* start(directory, instanceId, instances, port).pipe(
+      return yield* start(directory, instanceId, instances, port, origin).pipe(
         Effect.provideContext(tracer),
       );
     }),
-  ).pipe(Effect.provideService(References.MinimumLogLevel, logLevel));
+  ).pipe(Effect.provideService(References.MinimumLogLevel, command.logLevel));

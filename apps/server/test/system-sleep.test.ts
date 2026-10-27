@@ -65,6 +65,9 @@ describe("system sleep check", () => {
   ])("warns when the Mac can sleep with runs open: sleep $sleep", async ({ sleep, warns }) => {
     const logged = await warnings(pmset(sleep));
     assert.lengthOf(logged, warns ? 1 : 0);
-    if (warns) assert.match(JSON.stringify(logged[0]), /caffeinate -s/u);
+    if (warns) {
+      assert.match(JSON.stringify(logged[0]), /caffeinate -s/u);
+      assert.match(JSON.stringify(logged[0]), /guides\/run-the-orchestrator-on-a-server\//u);
+    }
   });
 });

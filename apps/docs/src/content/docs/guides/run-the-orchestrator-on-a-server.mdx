@@ -1,0 +1,259 @@
+---
+title: Run the orchestrator on a server
+description: Run usine up on an always-on Hetzner Cloud server in the gateway's private network, with systemd, the web UI on your tailnet, and the steps to move an instance there from a laptop.
+sidebar:
+  order: 7
+---
+
+import { Steps } from "@astrojs/starlight/components";
+
+The orchestrator must run while runs are open. When a laptop sleeps, the orchestrator's SSH connections to the gateway and the workers close: a remote Claude Code child then resumes its session after the laptop wakes, and a Codex child fails. On macOS, `usine up` warns at startup if the Mac can sleep. Run the orchestrator on a small server instead. It uses about 110 MB of memory and needs no local worker.
+
+This guide creates a Hetzner Cloud server in the private network of the gateway that [SSH workers behind a gateway](/guides/add-a-worker/#ssh-workers-behind-a-gateway) set up, runs `usine up` there in a systemd service, and publishes the web UI on your [Tailscale](https://tailscale.com/) tailnet with `tailscale serve`. From the server, the gateway's `Host` alias and the workers' private addresses work as they do from a laptop on the tailnet.
+
+| Connection                                                                 | Path                                                                                                                                             |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| You to the orchestrator: SSH and the web UI                                | Over the tailnet: SSH to port 22, and the UI over HTTPS at the server's tailnet name. nftables refuses new connections from the private network. |
+| The orchestrator to the gateway: SSH and the admin API forward             | Over the private network, to the gateway's private address.                                                                                      |
+| The orchestrator to the workers                                            | SSH through the gateway, because workers accept SSH from the gateway only.                                                                       |
+| The orchestrator to GitHub, npm, and the model providers of the Pi parents | Over the server's public address. Its Hetzner firewall admits no inbound TCP.                                                                    |
+
+## Before you begin
+
+You need:
+
+- A gateway created by `infra/hetzner/gateway/gateway.sh`, and its network (`usine-gateway` by default). The gateway must be on your tailnet, with the `usine-gateway` `Host` entry on your computer ([Join the gateway to a tailnet](https://github.com/basaltbytes/usine/blob/main/infra/hetzner/gateway/README.md#join-the-gateway-to-a-tailnet)).
+- A usine checkout, and `hcloud` with an active context for the gateway's project.
+- An SSH key in the Hetzner project for root on the server, such as the `usine-worker` key of the gateway's setup, and the public key that you use to connect as `usine`.
+- MagicDNS and HTTPS certificates turned on for your tailnet, on the **DNS** page of the Tailscale admin console. `tailscale serve` needs both.
+
+## Allow your devices to reach the server
+
+The server joins the tailnet with the tag `tag:usine-orchestrator`. In your tailnet policy file, name who may apply the tag, and grant your own devices port 443 of the server for the UI and port 22 for SSH:
+
+```json title="Tailnet policy file"
+{
+  "tagOwners": {
+    "tag:usine-orchestrator": ["you@example.com"]
+  },
+  "grants": [
+    {
+      "src": ["you@example.com"],
+      "dst": ["tag:usine-orchestrator"],
+      "ip": ["tcp:443", "tcp:22"]
+    }
+  ]
+}
+```
+
+Merge these entries with the ones that the file has. `you@example.com` stands for your tailnet login. The grant admits only the devices that you log in with it, and no tagged device, such as another server. The UI has no login, so any device that a grant admits to port 443 of the server can use it. If the file still has the default rule that admits every device to every other one, replace it with grants for the connections that you use, such as SSH from your devices to the gateway.
+
+## Create the server
+
+<Steps>
+
+1. Create the server from the usine checkout. `SSH_KEY` names the project's keys for root, and the file has the public keys to authorize for `usine`:
+
+   ```sh title="usine checkout"
+   SSH_KEY=usine-worker ./infra/hetzner/gateway/gateway.sh orchestrator ~/.ssh/id_ed25519.pub
+   ```
+
+   The script creates the firewall `usine-orchestrator`, which admits only ICMP, and the server `usine-orchestrator`, labeled `usine=orchestrator`, in the gateway's network and location, and prints its private address, here `10.42.0.4`. `ORCHESTRATOR_TYPE` sets the server type (default `cpx12`), such as `cax11`, and `LOCATION` another location in the network's zone. If the type isn't available in the location, `hcloud server create` fails; check `hcloud server-type list`.
+
+2. Wait for cloud-init, through the gateway, with the project's key for root:
+
+   ```sh title="Your computer"
+   ssh -J usine-gateway -i ~/.ssh/usine_worker root@10.42.0.4 cloud-init status --wait
+   ```
+
+3. Log the server in to your tailnet, and publish the UI there. `orchestrator-tailnet-up` runs these commands as root over SSH, through the gateway:
+
+   - `tailscale up --netfilter-mode=off --accept-dns=false --advertise-tags=tag:usine-orchestrator`, as for the gateway, with the tag. It prints a login URL unless `TAILSCALE_AUTH_KEY` is set to an auth key with the tag. Log in as a user that the policy names in `tagOwners`.
+   - `tailscale serve --bg 7331`, which publishes `http://127.0.0.1:7331` over HTTPS at the server's tailnet name, also after a reboot.
+   - `systemctl enable --now nftables`. From then on, nftables refuses SSH through the gateway, so you connect to the server over the tailnet.
+
+   ```sh title="usine checkout"
+   GATEWAY_SSH=usine-gateway ./infra/hetzner/gateway/gateway.sh orchestrator-tailnet-up -i ~/.ssh/usine_worker
+   ```
+
+   It prints the server's tailnet address, here `100.64.0.20`, and the UI's URL, here `https://usine-orchestrator.tail1234.ts.net`. A tagged device's key doesn't expire, so the server stays on the tailnet. `ORCHESTRATOR_TAG` sets another tag.
+
+4. Add the server to your SSH configuration:
+
+   ```text title="~/.ssh/config on your computer"
+   Host usine-orchestrator
+     HostName 100.64.0.20
+     User usine
+   ```
+
+</Steps>
+
+cloud-init sets up the server from `infra/hetzner/orchestrator-cloud-init.yaml`:
+
+- The `usine` user, with your public keys, no password, and no sudo. It's in the `systemd-journal` group, to read the service's output. Root logs in only with the project's keys.
+- Node.js from NodeSource, at the major version of the attempt image, and `@usine/server` installed with `npm install --global` in `/home/usine/.local`, whose `bin` folder is on `usine`'s `PATH` in a login shell.
+- Tailscale from its apt repository, with the signing key that the gateway pins, and chrony, with the gateway as its preferred time source.
+- The nftables rules of `infra/hetzner/orchestrator-nftables.conf`. They accept new connections only to SSH from `tailscale0`, and forward nothing. cloud-init doesn't enable them, because they refuse SSH through the gateway, the only path to the server until `orchestrator-tailnet-up` logs it in to the tailnet.
+- The `usine.service` unit, which runs `/home/usine/.local/bin/usine up` as `usine` in the instance folder `/home/usine/factory`. It starts at boot once the folder has a `usine.yaml`.
+- A polkit rule that lets `usine` start, stop, and restart `usine.service`, which `usine stop`, `usine restart`, and `usine upgrade` do.
+
+## Set up the usine user's SSH access
+
+The orchestrator connects to the gateway and the workers as `usine`, with the entries of `/home/usine/.ssh/config`. The gateway's entry uses its private address; the workers jump through it. Copy the identity files that `usine.yaml` and these entries name, with mode `0600`:
+
+```text title="/home/usine/.ssh/config"
+Host usine-gateway
+  HostName 10.42.0.2
+  HostKeyAlias 203.0.113.30
+  User root
+  IdentityFile ~/.ssh/usine_worker
+
+Host worker-one
+  HostName 10.42.0.3
+  User usine
+  ProxyJump usine-gateway
+  IdentityFile ~/.ssh/usine_worker
+```
+
+usine's SSH connections run in batch mode, which refuses an unknown host key. Copy the lines for the gateway and the workers from your computer's `~/.ssh/known_hosts` to `/home/usine/.ssh/known_hosts`, so that `ssh` checks the keys that you already trust. Where the address differs from the one under which that file lists the host, set `HostKeyAlias` to the listed one: here the gateway's public address, as in the gateway's `Host` entry on your computer. Check each entry with `ssh usine-gateway true` and `ssh worker-one true` as `usine`.
+
+Provisioned workers behind the gateway need no entry: the executor jumps through `gateway.destination` to each server's private address and keeps the server's host key in `.usine/known-hosts/`.
+
+## Start the orchestrator
+
+<Steps>
+
+1. Create the instance folder `/home/usine/factory` as described in [Run a factory](/guides/#create-the-instance-folder), or move one from a laptop as described in [Move an instance from a laptop](#move-an-instance-from-a-laptop). Use SSH workers: the server has no harness for a local worker.
+
+2. Set `USINE_ORIGIN` in `.env` to the URL that `orchestrator-tailnet-up` printed, so that the operator API accepts the actions of the UI's pages there. Without it, the UI at that URL shows the runs, but refuses every action with `CrossSiteRequestError`:
+
+   ```sh title="/home/usine/factory"
+   echo USINE_ORIGIN=https://usine-orchestrator.tail1234.ts.net >> .env
+   chmod 600 .env
+   ```
+
+3. Start `usine up` once in the foreground, to see that it starts, then stop it with Ctrl+C:
+
+   ```sh title="/home/usine/factory"
+   usine up
+   ```
+
+4. Start the service, and follow its output:
+
+   ```sh title="/home/usine/factory"
+   systemctl start usine.service
+   journalctl -u usine.service -f
+   ```
+
+5. Open the UI at the URL of `USINE_ORIGIN`, here `https://usine-orchestrator.tail1234.ts.net`, from one of your devices.
+
+</Steps>
+
+The unit has no `EnvironmentFile=`: `usine up` reads `.env` itself, with the [environment file](/reference/configuration/cli/#environment-file) syntax. systemd parses `export`, `\n` in double quotes, and comments differently, and its values would take precedence over usine's.
+
+## Operate the service
+
+`usine status` adds the line `service   usine.service, managed with systemctl`. `usine stop`, `usine restart`, and `usine upgrade` stop the service with `systemctl stop --no-block` and start it with `systemctl start`, so that systemd keeps managing it ([Instances that systemd runs](/reference/configuration/cli/#instances-that-systemd-runs)). They refuse and drain as for any instance: `usine restart` refuses while a run has a running attempt, and `usine restart --force` stops without waiting, after which the new process reattaches the attempt.
+
+`systemctl restart usine.service` doesn't refuse. systemd sends `SIGTERM` to `usine up` alone, and `usine up` drains: it starts no new attempts and waits for the running ones to end, for at most `settings.max_attempt_minutes` if `usine.yaml` sets it. The command waits until the old process exits, then starts a new one. If the drain lasts more than an hour (`TimeoutStopSec=1h`), systemd sends `SIGKILL`: the attempts keep running on the workers, and the new process reattaches them, as after `usine restart --force`. To end a drain at once, run `usine stop --force`, which sends the second `SIGTERM`.
+
+systemd also starts the service at boot and restarts it 10 seconds after it fails. A drained `usine up` exits with status 130, which the unit counts as a clean stop.
+
+To upgrade usine, install the new version as `usine`, then restart:
+
+```sh title="/home/usine/factory"
+npm install --global @usine/server@0.4.0
+usine restart
+```
+
+`usine upgrade` moves an instance's `package.json` pin, and the service runs the global install, so `usine upgrade` refuses and says to update that install instead.
+
+## Keep the UI private
+
+The UI and the operator API have no login. On the server, they're reachable only from the devices that the tailnet policy admits, and from the server itself:
+
+- `usine up` listens on `127.0.0.1` only.
+- `tailscale serve` publishes the UI over HTTPS at the server's tailnet name, with a certificate for that name, to the devices that a grant admits to port 443 of the server ([Allow your devices to reach the server](#allow-your-devices-to-reach-the-server)). tailscaled answers that port itself, so nftables has no rule for it.
+- nftables accepts new connections only to SSH from `tailscale0`. The private network, where the workers run the attempts, can't open a connection to the server, and the Hetzner firewall admits no inbound TCP.
+- The operator API refuses browser requests from pages at origins other than the loopback names and `USINE_ORIGIN`, so other websites can't use it through your browser.
+
+To keep the UI off the tailnet, run `tailscale serve reset` as root on the server, and forward the port over SSH instead:
+
+```sh title="Your computer"
+ssh -N -L 7331:127.0.0.1:7331 usine-orchestrator
+```
+
+The UI is then at `http://127.0.0.1:7331` on your computer.
+
+## Move an instance from a laptop
+
+The runtime store and the durable storage move with the instance folder, so the server continues the laptop's runs. Only one orchestrator may run the instance: two would answer the same events twice.
+
+<Steps>
+
+1. On the laptop, run `usine status` in the instance folder and note the engine version. On the server, install that version or a later one, because the stores' migrations run forward only:
+
+   ```sh title="usine@usine-orchestrator"
+   npm install --global @usine/server@0.3.0
+   ```
+
+   If the laptop runs a checkout with changes that no release has, wait for that release.
+
+2. Stop the laptop's orchestrator, and keep it stopped. `usine stop` waits for running attempts to end. `usine stop --force` stops without waiting: the attempts keep running on the workers, and the server reattaches them.
+
+   ```sh title="Instance folder on the laptop"
+   usine stop
+   ```
+
+3. Copy the instance folder to the server, without its log, its backups, and the files of the stopped process. `--chmod=go-rwx` keeps every copied file and folder readable by `usine` only:
+
+   ```sh title="Instance folder on the laptop"
+   rsync -a --chmod=go-rwx --exclude node_modules/ --exclude .usine/usine.log --exclude .usine/backups/ \
+     --exclude .usine/instance.lock --exclude .usine/instance.pid --exclude .usine/instance.json \
+     ./ usine-orchestrator:factory/
+   ```
+
+   The copy has these files, with the instance folder's Git history:
+
+   | Path                                                            | Contents                                                                                                                                    |
+   | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+   | `usine.yaml`, `loops/`, `agents/`                               | The configuration.                                                                                                                          |
+   | `.env`                                                          | The variables that `usine up` reads, such as gateway admin tokens and `HCLOUD_TOKEN`.                                                       |
+   | `.usine/github-app.json`                                        | The GitHub App ID and private key, if you don't set them in `.env`.                                                                         |
+   | `.usine/runtime.sqlite`, `.usine/durable.sqlite`                | The runs, transcripts, and Pi parent tasks. After a clean stop, their `-wal` and `-shm` files can be absent.                                |
+   | `.usine/instance-id`                                            | The instance ID, which labels the attempt containers on SSH workers. Without it, usine no longer removes the containers that it left there. |
+   | `.usine/workers/`, `.usine/ssh-workers/`, `.usine/known-hosts/` | The workers' state, how to reach them, and the host keys of provisioned servers.                                                            |
+
+4. Copy the identity files of the gateway and the workers to `/home/usine/.ssh/`, with the `config` and `known_hosts` entries of [Set up the usine user's SSH access](#set-up-the-usine-users-ssh-access).
+
+5. Check that `.env` on the server sets every variable that the laptop's shell exported for `usine up`, such as the variable that a provisioned worker's `token_env` names, usually `HCLOUD_TOKEN`. The service gets no variable from a shell. Add `USINE_ORIGIN` as in [Start the orchestrator](#start-the-orchestrator).
+
+6. Remove the laptop's public address from the gateway's Hetzner firewall. The server reaches the gateway over the private network, which the Hetzner firewall doesn't filter, and you reach it over the tailnet:
+
+   ```sh title="usine checkout"
+   hcloud firewall delete-rule usine-gateway --direction in --protocol tcp --port 22 \
+     --source-ips 203.0.113.7/32 --description "SSH from the orchestrator"
+   ```
+
+   A worker without a gateway admits SSH from the orchestrator's public address only. Replace the laptop's address in its firewall, `usine-<worker>` or `provisioner.firewall`, with the server's, which `hcloud server ip usine-orchestrator` prints.
+
+7. Start the service on the server, and check the instance:
+
+   ```sh title="usine@usine-orchestrator"
+   cd ~/factory
+   systemctl start usine.service
+   usine status
+   ```
+
+   Startup recovery reconciles the checkouts on the workers and reattaches the running attempts before the UI answers. Follow it with `journalctl -u usine.service -f`.
+
+</Steps>
+
+The secrets stay in these files, readable only by `usine`. The setup creates `/home/usine/factory` with mode `0700`:
+
+| File                                                          | Secret                                                            | Mode                               |
+| ------------------------------------------------------------- | ----------------------------------------------------------------- | ---------------------------------- |
+| `/home/usine/factory/.env`                                    | Gateway admin tokens, `HCLOUD_TOKEN`, API keys                    | `0600`                             |
+| `/home/usine/factory/.usine/github-app.json`                  | The GitHub App's private key                                      | `0600`; usine refuses another mode |
+| `/home/usine/.ssh/usine_worker` and the other identity files  | The keys for the gateway and the workers                          | `0600`                             |
+| `/home/usine/factory/.usine/runtime.sqlite`, `durable.sqlite` | Transcripts, which can contain repository content and tool output | in the `0700` folder               |

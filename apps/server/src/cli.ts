@@ -20,6 +20,22 @@ export type Port = typeof Port.Type;
 
 const PortFromString = Schema.NumberFromString.pipe(Schema.decodeTo(Port));
 
+/**
+ * The origin of the UI's pages behind a proxy, such as the HTTPS URL at which `tailscale serve`
+ * publishes the UI: an `http` or `https` scheme, a host, and a port other than the scheme's
+ * default, as a browser writes it in the `Origin` header.
+ */
+export const UiOrigin = Schema.String.check(
+  Schema.makeFilter(
+    (origin: string) =>
+      URL.canParse(origin) &&
+      ["http:", "https:"].includes(new URL(origin).protocol) &&
+      new URL(origin).origin === origin,
+    { message: "Expected an http or https origin, such as https://orchestrator.example.ts.net" },
+  ),
+).pipe(Schema.brand("UiOrigin"));
+export type UiOrigin = typeof UiOrigin.Type;
+
 /** The minimum level of the lines `usine up` logs. */
 export const UpLogLevel = Schema.Literals(["Trace", "Debug", "Info", "Warn", "Error"]);
 export type UpLogLevel = typeof UpLogLevel.Type;
@@ -39,7 +55,7 @@ const LOG_LEVEL_NAMES = {
 export const DEFAULT_LIFECYCLE_TIMEOUT_SECONDS = 120;
 
 export const CLI_USAGE = `Usage:
-  usine up [--port <port>] [--log-level <level>] [--allow-volatile-instance] [--detach]
+  usine up [--port <port>] [--origin <url>] [--log-level <level>] [--allow-volatile-instance] [--detach]
   usine status
   usine stop [--timeout <seconds>] [--force]
   usine restart [--timeout <seconds>] [--force]
@@ -51,6 +67,7 @@ export const CLI_USAGE = `Usage:
 
 Options:
   -p, --port <port>            Listen on this port (default: 7331)
+  --origin <url>               Also accept the UI's pages at this origin, such as the URL of tailscale serve
   --log-level <level>          Log at this level and above: trace, debug, info, warn, or error (default: info)
   --allow-volatile-instance    Start even when the instance folder is in a temporary directory
   --detach                     Start in the background, with the output in .usine/usine.log
@@ -63,6 +80,7 @@ Options:
 
 Environment:
   USINE_PORT                     Listen on this port if --port is not set
+  USINE_ORIGIN                   Also accept the UI's pages at this origin if --origin is not set
   USINE_LOG_LEVEL                Log at this level if --log-level is not set
   USINE_ALLOW_VOLATILE_INSTANCE  Set to 1 for the same effect as --allow-volatile-instance
 
@@ -118,6 +136,8 @@ export class UpCommand extends Schema.TaggedClass<UpCommand>("@usine/server/UpCo
   "UpCommand",
   {
     port: Port,
+    /** The origin of the UI's pages besides the loopback ones, which the operator API accepts. */
+    origin: Schema.Option(UiOrigin),
     logLevel: UpLogLevel,
     allowVolatileInstance: Schema.Boolean,
     detach: Schema.Boolean,
@@ -176,6 +196,7 @@ export class BackupCommand extends Schema.TaggedClass<BackupCommand>("@usine/ser
 
 export interface CliEnvironment {
   readonly port: Option.Option<string>;
+  readonly origin: Option.Option<string>;
   readonly logLevel: Option.Option<string>;
   readonly allowVolatileInstance: Option.Option<string>;
 }
@@ -202,6 +223,26 @@ const decodePort = (
   Schema.decodeUnknownEffect(PortFromString)(value).pipe(
     Effect.mapError(() =>
       usageError(`${source} must be a whole number between 1 and 65535.\n\n${CLI_USAGE}`),
+    ),
+  );
+
+/** Returns the origin of a URL without a path, query, or fragment, else `value` itself. */
+const originOf = (value: string): string => {
+  if (!URL.canParse(value)) return value;
+  const url = new URL(value);
+  return url.href === `${url.origin}/` ? url.origin : value;
+};
+
+/** Decodes the URL of the UI's pages, such as `https://orchestrator.example.ts.net/`. */
+const decodeUiOrigin = (
+  source: "--origin" | "USINE_ORIGIN",
+  value: string,
+): Effect.Effect<UiOrigin, CliUsageError> =>
+  Schema.decodeUnknownEffect(UiOrigin)(originOf(value)).pipe(
+    Effect.mapError(() =>
+      usageError(
+        `${source} must be the http or https URL of the UI without a path, such as https://orchestrator.example.ts.net.\n\n${CLI_USAGE}`,
+      ),
     ),
   );
 
@@ -249,6 +290,7 @@ const upCommand = (
 ): Effect.Effect<UpCommand, CliUsageError> =>
   Effect.gen(function* () {
     let port: Option.Option<string> = Option.none();
+    let origin: Option.Option<string> = Option.none();
     let logLevel: Option.Option<string> = Option.none();
     let allowVolatileInstance = Option.exists(environment.allowVolatileInstance, (v) => v === "1");
     let detach = false;
@@ -261,6 +303,13 @@ const upCommand = (
         index += 1;
       } else if (arg?.startsWith("--port=")) {
         port = Option.some(arg.slice("--port=".length));
+      } else if (arg === "--origin") {
+        const value = args[index + 1];
+        if (value === undefined) return yield* usageError();
+        origin = Option.some(value);
+        index += 1;
+      } else if (arg?.startsWith("--origin=")) {
+        origin = Option.some(arg.slice("--origin=".length));
       } else if (arg === "--log-level") {
         const value = args[index + 1];
         if (value === undefined) return yield* usageError();
@@ -284,6 +333,14 @@ const upCommand = (
         }),
       onSome: (value) => decodePort("--port", value),
     });
+    const resolvedOrigin = yield* Option.match(origin, {
+      onNone: () =>
+        Option.match(environment.origin, {
+          onNone: () => Effect.succeedNone,
+          onSome: (value) => Effect.asSome(decodeUiOrigin("USINE_ORIGIN", value)),
+        }),
+      onSome: (value) => Effect.asSome(decodeUiOrigin("--origin", value)),
+    });
     const resolvedLogLevel = yield* Option.match(logLevel, {
       onNone: () =>
         Option.match(environment.logLevel, {
@@ -294,6 +351,7 @@ const upCommand = (
     });
     return new UpCommand({
       port: resolvedPort,
+      origin: resolvedOrigin,
       logLevel: resolvedLogLevel,
       allowVolatileInstance,
       detach,

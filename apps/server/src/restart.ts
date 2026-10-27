@@ -6,7 +6,7 @@ import {
   type LifecycleOptions,
   environmentUp,
 } from "./cli.ts";
-import { startDetached, startedMessage } from "./detach.ts";
+import { startAgain, startedMessage } from "./detach.ts";
 import { listRuns } from "./instance/operator-api.ts";
 import { listeningPorts } from "./instance/ports.ts";
 import {
@@ -16,6 +16,7 @@ import {
   currentLaunch,
 } from "./instance/record.ts";
 import { probeInstance } from "./instance/state.ts";
+import { type SystemdUnit, supervisingUnit } from "./instance/systemd.ts";
 import {
   InstanceNotRunningError,
   UnrecordedInstanceError,
@@ -29,11 +30,7 @@ import {
  * starts for an instance without a readable record.
  */
 export const fallbackLaunch = (environment: CliEnvironment) =>
-  environmentUp(environment).pipe(
-    Effect.flatMap(({ port, logLevel, allowVolatileInstance }) =>
-      currentLaunch(port, logLevel, allowVolatileInstance),
-    ),
-  );
+  environmentUp(environment).pipe(Effect.flatMap(currentLaunch));
 
 /**
  * Returns the port on which the process answers the operator API, or `None` if none of its ports
@@ -58,8 +55,8 @@ const operatorPort = Effect.fn("Cli.operatorPort")(function* (pid: ProcessId) {
 });
 
 /**
- * Returns the process that `usine restart` stops, its record if readable, the port on which the
- * checks ask it, and the next launch.
+ * Returns the process that `usine restart` stops, its record if readable, the systemd service that
+ * runs it, the port on which the checks ask it, and the next launch.
  */
 const restartTarget = Effect.fn("Cli.restartTarget")(function* (
   directory: InstanceDirectory,
@@ -79,6 +76,7 @@ const restartTarget = Effect.fn("Cli.restartTarget")(function* (
     return {
       pid: record.pid,
       record: Option.some(record),
+      unit: yield* supervisingUnit(record.pid, record.systemdUnit),
       port: Option.some(record.launch.port),
       launch: record.launch,
     };
@@ -115,22 +113,29 @@ const restartTarget = Effect.fn("Cli.restartTarget")(function* (
         `usine (pid ${pid}) runs without a readable .usine/instance.json and answers on port ${current}. usine restart checks it there, then starts usine up as usine up --detach would, on port ${launch.port}.`,
     }),
   );
-  return { pid, record: Option.none<InstanceRecord>(), port, launch };
+  return {
+    pid,
+    record: Option.none<InstanceRecord>(),
+    unit: Option.none<SystemdUnit>(),
+    port,
+    launch,
+  };
 });
 
 /**
  * Stops the `usine up` of the instance folder and starts it again in the background, with the
- * Node.js binary, entry point, port, and flags that it recorded. Without a readable record, as from
- * a usine version that writes only `.usine/instance.pid`, stops the process in that file and starts
- * `fallback`. The checks then ask the port on which that process answers, and pass if none does.
- * Fails with `ListeningPortsError`, before any signal, if the OS can't list that process's ports.
+ * Node.js binary, entry point, port, and flags that it recorded, or with `systemctl` if a systemd
+ * service runs it. Without a readable record, as from a usine version that writes only
+ * `.usine/instance.pid`, stops the process in that file and starts `fallback`. The checks then ask
+ * the port on which that process answers, and pass if none does. Fails with `ListeningPortsError`,
+ * before any signal, if the OS can't list that process's ports.
  */
 export const restart = Effect.fn("Cli.restart")(function* (
   directory: InstanceDirectory,
   options: LifecycleOptions,
   fallback: Effect.Effect<InstanceLaunch, CliUsageError>,
 ) {
-  const { pid, record, port, launch } = yield* restartTarget(directory, fallback);
+  const { pid, record, unit, port, launch } = yield* restartTarget(directory, fallback);
   if (Option.isSome(port)) {
     yield* refuseMissingEnvironment("restart", port.value);
     yield* refuseLiveAttempts("restart", port.value, options.force);
@@ -142,7 +147,7 @@ export const restart = Effect.fn("Cli.restart")(function* (
       },
     );
   }
-  yield* stopProcess("restart", pid, record, options);
-  const started = yield* startDetached(directory, launch, options.timeout);
+  yield* stopProcess("restart", pid, record, unit, options);
+  const started = yield* startAgain(directory, launch, unit, pid, options.timeout);
   yield* Console.log(startedMessage(started));
 });
