@@ -12,7 +12,7 @@ import { RunId } from "@usine/core/run";
 import { RunApproval } from "@usine/core/run/approval";
 
 import { DateTime, Effect, FileSystem, Layer, Option, Schema } from "effect";
-import { SqlClient } from "effect/unstable/sql";
+import { SqlClient } from "effect/sql";
 
 import { RunDatabase } from "../../src/database/database.ts";
 import { localSqliteLayer } from "../../src/database/local-sqlite.ts";

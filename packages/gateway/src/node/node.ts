@@ -1,10 +1,5 @@
 import { createServer } from "node:http";
-import {
-  NodeFileSystem,
-  NodeHttpClient,
-  NodeHttpServer,
-  NodeHttpServerRequest,
-} from "@effect/platform-node";
+import { NodeFileSystem, NodeHttpClient, NodeHttpServer } from "@effect/platform-node";
 import { ConfigProvider, Context, Effect, Layer, Stream } from "effect";
 import {
   HttpMiddleware,
@@ -13,7 +8,8 @@ import {
   HttpServer,
   HttpServerRequest,
   HttpServerResponse,
-} from "effect/unstable/http";
+} from "effect/http";
+import { NetAddress } from "effect/net";
 import { adminRoutes } from "../admin/server.ts";
 import { gatewayServices } from "../gateway.ts";
 import { GatewayProxy } from "../proxy/proxy.ts";
@@ -45,8 +41,10 @@ export class GatewayAddresses extends Context.Service<
   { readonly proxy: Listener; readonly egress: Listener; readonly admin: Listener }
 >()("@usine/gateway/node/GatewayAddresses") {}
 
-const boundTo = (address: HttpServer.Address, requested: Listener): Listener =>
-  address._tag === "TcpAddress" ? { host: address.hostname, port: address.port } : requested;
+const boundTo = (address: NetAddress.SocketAddress, requested: Listener): Listener =>
+  address._tag === "UnixPathAddress"
+    ? requested
+    : { host: NetAddress.formatHost(address), port: address.port };
 
 /** Returns an address this process can connect to for `listener`, which may be bound to all interfaces. */
 const reachable = (listener: Listener): Listener =>
@@ -63,19 +61,16 @@ const serveProxy = Effect.fn("GatewayNode.serveProxy")(function* (listener: List
       const request = yield* HttpServerRequest.HttpServerRequest;
       const response = yield* proxy.handle;
       if (response.body._tag !== "Stream") return response;
-      // effect 4.0.0-rc.111 ends a failed stream normally after sending headers. Destroying it first keeps a
-      // partial download or model response from looking complete to the Worker.
+      // The server destroys a response whose body fails after its headers, so the Worker sees a
+      // partial download or model response as incomplete.
       const body = response.body.stream.pipe(
         Stream.onError(() =>
-          Effect.gen(function* () {
-            yield* Effect.logError("The reverse proxy response body failed", {
-              host: request.headers.host,
-              method: request.method,
-              path: request.url.split("?")[0],
-              error: "UpstreamBodyFailure",
-            });
-            NodeHttpServerRequest.toServerResponse(request).destroy();
-          }).pipe(Effect.uninterruptible),
+          Effect.logError("The reverse proxy response body failed", {
+            host: request.headers.host,
+            method: request.method,
+            path: request.url.split("?")[0],
+            error: "UpstreamBodyFailure",
+          }),
         ),
       );
       return HttpServerResponse.setBody(
@@ -121,8 +116,7 @@ export const gatewayLayer = (listeners: GatewayListeners) =>
     Layer.provide(GatewayProxy.layer),
     Layer.provideMerge(gatewayServices),
     Layer.provide(Layer.mergeAll(NodeHttpClient.layerUndici, NodeFileSystem.layer)),
-    // effect 4.0.0-rc.111 reads header redaction settings after the request fiber may have cleared its
-    // context, so automatic HTTP spans are disabled. Named Gateway spans still record safe fields
+    // No automatic HTTP span records the incoming headers. Named Gateway spans record safe fields
     // without incoming credentials.
     Layer.provide(Layer.succeed(HttpMiddleware.TracerDisabledWhen)(() => true)),
   );

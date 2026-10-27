@@ -3,7 +3,7 @@ import { RepositoryName, safeSegment } from "@usine/core/repository";
 import type { WorkerName } from "@usine/core/worker";
 import type { AttemptRuntime } from "@usine/durable/attempt-runtime";
 import { Effect, Layer, Option } from "effect";
-import type { ChildProcessSpawner } from "effect/unstable/process";
+import type { ChildProcessSpawner } from "effect/process";
 import { CredentialUnavailableError, Executor } from "../executor.ts";
 import type { RemoteAccess, RemoteGrant, RemoteMachine } from "../remote/machine.ts";
 import { sharedUser } from "../remote/container.ts";

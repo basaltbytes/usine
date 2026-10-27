@@ -50,7 +50,7 @@ import {
   References,
   Schema,
 } from "effect";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { fileURLToPath } from "node:url";
 import { type HarnessProbe, layer as localExecutorLayer } from "@usine/executor/local";
 import { AttemptReport } from "@usine/durable/attempt-runtime";

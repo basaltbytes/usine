@@ -1,6 +1,6 @@
 import { RunId } from "@usine/core/run";
 import { Effect, Schema } from "effect";
-import { HttpClient, HttpClientResponse } from "effect/unstable/http";
+import { HttpClient, HttpClientResponse } from "effect/http";
 import { type Port, SERVER_HOST } from "../cli.ts";
 
 const OPERATOR_API_TIMEOUT = "5 seconds";

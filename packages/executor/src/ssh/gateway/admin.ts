@@ -9,8 +9,8 @@ import {
   type LlmProviderList,
 } from "@usine/gateway/admin";
 import { Data, DateTime, Effect, Option, type Redacted, Result, Schema } from "effect";
-import { HttpClient, HttpClientError, HttpClientRequest } from "effect/unstable/http";
-import { HttpApiClient } from "effect/unstable/httpapi";
+import { HttpClient, HttpClientError, HttpClientRequest } from "effect/http";
+import { HttpApiClient } from "effect/http-api";
 import type { SshWorkerGateway } from "../model.ts";
 import { type GatewayForward, GatewayForwardClosed, type OpenForward } from "./forward.ts";
 

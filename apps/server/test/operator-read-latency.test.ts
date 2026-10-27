@@ -37,7 +37,7 @@ import {
 import { GitHubItemKey } from "@usine/orchestrator/polling-triggers";
 import { WorkerStatus } from "@usine/orchestrator/worker-status";
 import { Clock, DateTime, Deferred, Effect, FileSystem, Layer, Option, Schema } from "effect";
-import { HttpClient, HttpRouter } from "effect/unstable/http";
+import { HttpClient, HttpRouter } from "effect/http";
 import { assert, describe, it } from "vitest";
 import { liveBackendLayer } from "../src/backend.ts";
 import { apiRoutes } from "../src/http.ts";

@@ -25,7 +25,7 @@ import {
   Result,
   Schema,
 } from "effect";
-import { type ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { type ChildProcess, ChildProcessSpawner } from "effect/process";
 import { platform, totalmem } from "node:os";
 import { allowlistedEnvironment, collectCommand, requireSuccess } from "../child-command.ts";
 import { durableSessionFor, type PostedCommentsHarvest } from "../durable-session.ts";

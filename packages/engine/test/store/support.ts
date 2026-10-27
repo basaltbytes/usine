@@ -13,7 +13,7 @@ import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { StepName } from "@usine/core/step";
 
 import { DateTime, Effect, FileSystem, Option } from "effect";
-import { SqlClient } from "effect/unstable/sql";
+import { SqlClient } from "effect/sql";
 
 import { localSqliteLayer } from "../../src/database/local-sqlite.ts";
 

@@ -1,7 +1,7 @@
 import { OperatorApi } from "@usine/orchestrator/operator/http";
 import { Effect } from "effect";
-import { FetchHttpClient, HttpClient } from "effect/unstable/http";
-import { HttpApiClient } from "effect/unstable/httpapi";
+import { FetchHttpClient, HttpClient } from "effect/http";
+import { HttpApiClient } from "effect/http-api";
 
 const makeClient = () => HttpApiClient.make(OperatorApi, { baseUrl: globalThis.location.origin });
 

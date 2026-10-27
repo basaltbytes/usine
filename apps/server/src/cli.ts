@@ -4,8 +4,8 @@ import { resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RunId } from "@usine/core/run";
 import { Array as Arr, Console, Duration, Effect, FileSystem, Option, Schema } from "effect";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
-import type { ServeError } from "effect/unstable/http/HttpServerError";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
+import type { ServeError } from "effect/http/HttpServerError";
 
 export const DEFAULT_PORT = 7_331;
 /** The address that the HTTP server listens on and the port check probes. */

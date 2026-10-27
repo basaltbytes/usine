@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { RepositoryName } from "@usine/core/repository";
 import { ItemNumber } from "@usine/core/item";
 import { DateTime, Effect, Layer, Redacted, Schema } from "effect";
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { GitHubApp } from "../src/github-app.ts";
 import { GitHubItemWriter, ItemLabelMutation } from "../src/item-writer.ts";
 import {

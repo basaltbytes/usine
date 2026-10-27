@@ -12,7 +12,7 @@ import {
   Scope,
   Stream,
 } from "effect";
-import { type ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { type ChildProcess, ChildProcessSpawner } from "effect/process";
 import type { AgentSessionId } from "@usine/core/agent/session";
 import { type ChildHost, childPidFile } from "../../child-host/child-host.ts";
 import { hostCommand } from "../../child-host/command.ts";

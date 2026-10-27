@@ -9,7 +9,7 @@ import { BlockList, connect, type Socket } from "node:net";
 import type { Duplex } from "node:stream";
 import type { WorkerName } from "@usine/core/worker";
 import { Data, Effect, Fiber, Match, Option, Predicate, Schema } from "effect";
-import { Headers } from "effect/unstable/http";
+import { Headers } from "effect/http";
 import { tokenFromAuthorization, CallerTokens } from "../caller/caller.ts";
 import { ClientHelloReader, comparableHost } from "../egress/client-hello.ts";
 import { type EgressPermitted, EgressRefused } from "../egress/egress.ts";

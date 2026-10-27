@@ -1,11 +1,12 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Effect, Encoding, Redacted, Result } from "effect";
+import { Effect, Redacted, Result } from "effect";
+import { Base64 } from "effect/encoding";
 import { generateHostKey } from "../../../src/ssh/provisioner/host-key.ts";
 
 const decoder = new TextDecoder();
 
 const base64 = (text: string): Uint8Array => {
-  const decoded = Encoding.decodeBase64(text);
+  const decoded = Base64.decode(text);
   assert(Result.isSuccess(decoded));
   return decoded.success;
 };

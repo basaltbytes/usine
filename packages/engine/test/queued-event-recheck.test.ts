@@ -3,7 +3,7 @@ import { SqliteClient } from "@effect/sql-sqlite-node";
 import { ItemKey, ItemNumber } from "@usine/core/item";
 import { RepositoryName } from "@usine/core/repository";
 import { Deferred, Effect, Layer, Option, Path, Ref, Schedule, Schema } from "effect";
-import { SqlClient } from "effect/unstable/sql";
+import { SqlClient } from "effect/sql";
 import { RunEngine } from "../src/engine/engine.ts";
 import {
   ItemContentHash,

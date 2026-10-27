@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { NodeServices } from "@effect/platform-node";
 import { InstanceDirectory } from "@usine/core/instance";
 import { DateTime, Effect, Layer, Schema } from "effect";
-import { FetchHttpClient } from "effect/unstable/http";
+import { FetchHttpClient } from "effect/http";
 import { afterEach, assert, describe, it } from "vitest";
 import { Port, SERVER_HOST } from "../src/cli.ts";
 import { holdInstance } from "../src/instance/lock.ts";

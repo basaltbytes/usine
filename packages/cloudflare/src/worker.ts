@@ -14,7 +14,7 @@ import {
   Redacted,
   Schema,
 } from "effect";
-import { HttpRouter } from "effect/unstable/http";
+import { HttpRouter } from "effect/http";
 import { type AccessToken, accessGranted } from "./access.ts";
 import { ProcessId, ProviderCredential, SandboxName, SandboxSummary } from "./api/api.ts";
 import { GITHUB_HOSTS } from "./api/harness.ts";

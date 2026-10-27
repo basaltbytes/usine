@@ -20,6 +20,7 @@ import type { RunId } from "@usine/core/run";
 import { ApprovalSource, RunApproval } from "@usine/core/run/approval";
 import { WorkerName } from "@usine/core/worker";
 import {
+  Context,
   Deferred,
   Effect,
   Fiber,
@@ -1320,7 +1321,7 @@ describe("store failures in a Run's fiber", () => {
         const failureSpans: Array<string | undefined> = [];
         const recovering = Logger.make(({ message, fiber }) => {
           if (/fiber stopped on an engine failure/u.test(JSON.stringify(message))) {
-            const span = fiber.currentSpan;
+            const span = Context.getOrUndefined(fiber.context, Tracer.ParentSpan);
             failureSpans.push(span?._tag === "Span" ? span.name : undefined);
             failures.left = 0;
           }

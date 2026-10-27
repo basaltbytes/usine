@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 import { DateTime, Effect, Layer, Option, Schema } from "effect";
-import { HttpRouter } from "effect/unstable/http";
+import { HttpRouter } from "effect/http";
 import { SandboxName, SandboxOwner, SandboxSummary } from "../src/api/api.ts";
 import {
   registryRoutes,

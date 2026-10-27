@@ -1,5 +1,5 @@
 import { Effect, Layer, Option, Sink, Stream } from "effect";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcessSpawner } from "effect/process";
 import { assert, describe, it } from "vitest";
 import { ProcessId } from "../../src/instance/record.ts";
 import {

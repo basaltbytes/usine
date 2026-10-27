@@ -1,5 +1,5 @@
 import { Array as Arr, Cause, Config, Effect, Fiber, Option, Stream } from "effect";
-import { ChildProcess, type ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcess, type ChildProcessSpawner } from "effect/process";
 import { ExecutorOperationError, type ExecutorOperation } from "./executor.ts";
 
 export interface CommandResult {
@@ -15,7 +15,7 @@ export const allowlistedEnvironment = (
   names: ReadonlyArray<string>,
 ): Effect.Effect<Record<string, string>> =>
   Effect.forEach(names, (name) =>
-    Effect.map(Config.option(Config.string(name)), (value) =>
+    Effect.map(Config.option(Config.String(name)), (value) =>
       Option.map(value, (found) => [name, found] as const),
     ),
   ).pipe(
