@@ -135,9 +135,10 @@ const UNIT = "usine-test.service";
  * and logs its arguments to `systemctl.log` there. `show` reports the PID in `.usine/instance.pid`
  * as the main one, unless `systemctl-other-main` exists; `stop` sends it `SIGTERM`; and `start`
  * starts the fixture with `launch`'s port in the background. With `systemctl-failing`, `start`
- * starts nothing and `show` reports a service that waits to restart. With `systemctl-denied`, every
- * verb but `show` fails as without the permission to manage the service. Returns the environment
- * for the CLI.
+ * starts nothing and `show` reports a service that waits to restart. With `systemctl-start-fails`,
+ * `start` also fails, as for a `Type=exec` service whose command can't run. With
+ * `systemctl-denied`, every verb but `show` fails as without the permission to manage the service.
+ * Returns the environment for the CLI.
  */
 const fakeSystemctl = (directory: InstanceDirectory, launch: InstanceLaunch) => {
   const bin = join(directory, "bin");
@@ -163,9 +164,13 @@ if (verb !== "show" && flag("systemctl-denied")) {
 if (verb === "show" && args.includes("--property=MainPID")) {
   console.log(flag("systemctl-other-main") ? 1 : pid());
 } else if (verb === "show") {
-  console.log(flag("systemctl-failing") ? "ActiveState=activating\\nSubState=auto-restart" : "ActiveState=active\\nSubState=running");
+  const failing = flag("systemctl-failing") || flag("systemctl-start-fails");
+  console.log(failing ? "ActiveState=activating\\nSubState=auto-restart" : "ActiveState=active\\nSubState=running");
 } else if (verb === "stop" && pid() !== 0) {
   process.kill(pid(), "SIGTERM");
+} else if (verb === "start" && flag("systemctl-start-fails")) {
+  console.error("Job for " + args.at(-1) + " failed because the control process exited with error code.");
+  process.exit(1);
 } else if (verb === "start" && !flag("systemctl-failing")) {
   const log = openSync(join(directory, ".usine", "usine.log"), "a");
   spawn(${JSON.stringify(launch.node)}, ${JSON.stringify([...launch.nodeOptions, launch.script, "up", "--port", String(launch.port)])}, { cwd: directory, detached: true, stdio: ["ignore", log, log] }).unref();
@@ -565,6 +570,27 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
       failed,
       `systemctl start ${UNIT} ran, but the service was activating (auto-restart)`,
     );
+    assert.isFalse(alive(first.pid));
+    assert.deepStrictEqual(
+      systemctlCalls(directory).filter((call) => !call.startsWith("show")),
+      [`stop --no-block ${UNIT}`, `start ${UNIT}`, `stop --no-block ${UNIT}`],
+    );
+  });
+
+  it("cancels the restart of a systemd service whose systemctl start fails, and names that failure", async () => {
+    const directory = instanceFolder();
+    writeFileSync(join(directory, "fixture-unit"), UNIT);
+    const first = await startFixture(directory);
+    const environment = fakeSystemctl(directory, first.launch);
+    writeFileSync(join(directory, "systemctl-start-fails"), "");
+
+    const failed = await runCli(directory, ["restart", "--timeout", "20"], environment).then(
+      () => "",
+      (error: Error) => error.message,
+    );
+
+    assert.include(failed, `systemctl start ${UNIT} failed`);
+    assert.include(failed, "the control process exited with error code");
     assert.isFalse(alive(first.pid));
     assert.deepStrictEqual(
       systemctlCalls(directory).filter((call) => !call.startsWith("show")),
