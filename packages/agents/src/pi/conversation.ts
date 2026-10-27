@@ -172,6 +172,10 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
     /** Waits until the session is not paused; harness hooks run it before each tool call or model request. */
     awaitUnpaused: Effect.suspend(() => (paused ? Deferred.await(resume) : Effect.void)),
     isPaused: Effect.sync(() => paused),
+    /** Whether the session finished a turn and waits under operator supervision. */
+    isIdle: Effect.sync(() => Option.isSome(idle)),
     isClosing: Effect.sync(() => closing),
+    /** The queued operator messages that the harness hasn't read, oldest first. */
+    unread: Effect.sync(() => queued.map(({ message }) => message)),
   };
 });

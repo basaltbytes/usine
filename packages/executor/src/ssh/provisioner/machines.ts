@@ -8,7 +8,7 @@ import type {
   MachineProvider,
   WorkerName,
 } from "@usine/core/worker";
-import { RemoteShell } from "@usine/agents/child-host";
+import { RemoteShell, SSH_FAILURE } from "@usine/agents/child-host";
 import {
   Array as Arr,
   Cache,
@@ -56,9 +56,6 @@ import {
   machineName,
   type MachineTags,
 } from "./model.ts";
-
-/** The exit code OpenSSH uses when it can't connect or authenticate. */
-const SSH_FAILURE = 255;
 
 /**
  * A script that waits for cloud-init to finish, if the machine has it, creates the Worker root
