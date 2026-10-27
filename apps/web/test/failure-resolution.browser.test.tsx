@@ -147,6 +147,7 @@ it("resolves a failure from Needs attention while retaining unrelated attention,
     context: { queryClient },
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
+  await router.load();
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
@@ -255,6 +256,7 @@ it("leaves a closed issue's failed run out of Needs attention and marks the issu
     context: { queryClient },
     history: createMemoryHistory({ initialEntries: [`/?run=${runId}`] }),
   });
+  await router.load();
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);

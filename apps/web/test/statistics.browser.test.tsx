@@ -67,6 +67,7 @@ const renderOverview = async (statistics: Windows, runStatistics: Windows) => {
     context: { queryClient },
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
+  await router.load();
   const client = queryClient;
   const mounted = root;
   flushSync(() =>

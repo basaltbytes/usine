@@ -134,6 +134,7 @@ beforeEach(async () => {
     context: { queryClient },
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
+  await router.load();
   flushSync(() =>
     root.render(
       <QueryClientProvider client={queryClient}>

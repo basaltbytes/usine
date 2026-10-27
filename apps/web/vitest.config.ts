@@ -52,6 +52,8 @@ export default mergeConfig(
             include: ["test/**/*.browser.test.tsx"],
             // Locator actions wait up to the test timeout; Chromium is slow on a busy machine.
             testTimeout: 30_000,
+            // Hooks that render a page load its route code, which is as slow.
+            hookTimeout: 30_000,
             browser: {
               enabled: true,
               headless: true,
