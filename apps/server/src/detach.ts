@@ -7,8 +7,11 @@ import { InstanceInUseError } from "./instance/lock.ts";
 import { type InstanceLaunch, ProcessId, currentLaunch, instanceFiles } from "./instance/record.ts";
 import { answers } from "./instance/operator-api.ts";
 import { probeInstance } from "./instance/state.ts";
+import { SystemdUnit, systemctl, unitState } from "./instance/systemd.ts";
 
 const READY_POLL_INTERVAL = "250 millis";
+/** Spaces the checks of a starting systemd service, each of which runs `systemctl show`. */
+const UNIT_POLL_INTERVAL = "500 millis";
 const LOG_TAIL_LINES = 20;
 const LOG_TAIL_BYTES = 64 * 1024;
 
@@ -85,6 +88,10 @@ export class StartedInstance extends Schema.Class<StartedInstance>("@usine/serve
   {
     pid: ProcessId,
     port: Port,
+    /** The systemd service that started the process, whose journal has its output. */
+    unit: Schema.Option(SystemdUnit).pipe(
+      Schema.withConstructorDefault(Effect.succeed(Option.none<SystemdUnit>())),
+    ),
   },
 ) {}
 
@@ -238,9 +245,110 @@ export const startDetached = Effect.fn("Cli.startDetached")(function* (
   return yield* error;
 });
 
-/** Returns the line that names a started instance's address, PID, and log. */
-export const startedMessage = ({ pid, port }: StartedInstance): string =>
-  `usine is running at http://${SERVER_HOST}:${port} (pid ${pid}), with its output in .usine/usine.log.`;
+/** Returns the line that names a started instance's address, PID, and output. */
+export const startedMessage = ({ pid, port, unit }: StartedInstance): string =>
+  Option.match(unit, {
+    onNone: () =>
+      `usine is running at http://${SERVER_HOST}:${port} (pid ${pid}), with its output in .usine/usine.log.`,
+    onSome: (service) =>
+      `usine is running at http://${SERVER_HOST}:${port} (pid ${pid}) in ${service}, with its output in the journal: journalctl -u ${service}.`,
+  });
+
+/**
+ * The systemd service that `systemctl start` started failed before its `usine up` answered, or its
+ * `usine up` didn't answer within the timeout.
+ */
+export class SystemdStartError extends Schema.TaggedError<SystemdStartError>(
+  "@usine/server/SystemdStartError",
+)("SystemdStartError", {
+  unit: SystemdUnit,
+  /** `failed` if the service stopped or waits to restart, `silent` if it runs but didn't answer. */
+  outcome: Schema.Literals(["failed", "silent"]),
+  /** The service's `ActiveState` and `SubState`, such as `activating (auto-restart)`. */
+  state: Schema.String,
+  timeout: Schema.Duration,
+}) {}
+
+/** The service states that end a start before `usine up` answers. */
+const ENDED_STATES: ReadonlySet<string> = new Set(["failed", "inactive", "deactivating"]);
+
+/**
+ * Starts the instance's systemd service with `systemctl start`, and waits until a process other
+ * than `previous` holds the instance and answers on its recorded port. Fails with
+ * `SystemdStartError` if the service stops or waits to restart first, and then stops it, or after
+ * `timeout`, when the service keeps running.
+ */
+export const startUnit = Effect.fn("Cli.startUnit")(function* (
+  directory: InstanceDirectory,
+  unit: SystemdUnit,
+  previous: ProcessId,
+  timeout: Duration.Duration,
+) {
+  yield* Effect.annotateCurrentSpan({ instanceDirectory: directory, unit });
+  yield* systemctl(unit, ["start"]);
+  yield* Effect.logInfo("Started the instance's systemd service", { unit });
+  let last = "unknown";
+  const listening = Effect.gen(function* () {
+    while (true) {
+      const state = yield* probeInstance(directory);
+      if (
+        state._tag === "Running" &&
+        state.record.pid !== previous &&
+        (yield* answers(state.record.launch.port))
+      ) {
+        return new StartedInstance({
+          pid: state.record.pid,
+          port: state.record.launch.port,
+          unit: Option.some(unit),
+        });
+      }
+      const { active, sub } = yield* unitState(unit);
+      last = `${active} (${sub})`;
+      if (ENDED_STATES.has(active) || sub === "auto-restart") {
+        yield* Effect.logWarning("The instance's systemd service ended before usine up answered", {
+          unit,
+          state: last,
+        });
+        // Cancels the restart, so that a start that fails, such as a failed migration, doesn't repeat.
+        if (sub === "auto-restart") yield* systemctl(unit, ["stop", "--no-block"]);
+        return yield* new SystemdStartError({ unit, outcome: "failed", state: last, timeout });
+      }
+      yield* Effect.sleep(UNIT_POLL_INTERVAL);
+    }
+  });
+  const started = yield* Effect.timeoutOption(listening, timeout);
+  if (Option.isSome(started)) {
+    yield* Effect.logInfo("The instance's systemd service is listening", {
+      unit,
+      pid: started.value.pid,
+      port: started.value.port,
+    });
+    return started.value;
+  }
+  yield* Effect.logWarning("The instance's systemd service didn't answer before the timeout", {
+    unit,
+    state: last,
+    timeoutSeconds: Duration.toSeconds(timeout),
+  });
+  return yield* new SystemdStartError({ unit, outcome: "silent", state: last, timeout });
+});
+
+/**
+ * Starts the instance again after `previous` stopped: with `systemctl start` if `unit` ran it, else
+ * in the background with `launch`.
+ */
+export const startAgain = Effect.fn("Cli.startAgain")(function* (
+  directory: InstanceDirectory,
+  launch: InstanceLaunch,
+  unit: Option.Option<SystemdUnit>,
+  previous: ProcessId,
+  timeout: Duration.Duration,
+) {
+  return yield* Option.match(unit, {
+    onNone: () => startDetached(directory, launch, timeout),
+    onSome: (service) => startUnit(directory, service, previous, timeout),
+  });
+});
 
 /** Starts `usine up` in the background in the instance folder, unless it runs already. */
 export const upDetached = Effect.fn("Cli.upDetached")(function* (

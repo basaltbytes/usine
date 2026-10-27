@@ -84,9 +84,22 @@ If the process exits first, the command prints how it exited and the last 20 lin
 | `version` | The `@usine/server` version of the process. |
 | `startedAt` | When the process took the instance lock, in ISO 8601 format. |
 | `launch` | How the process started: `node` (the Node.js binary), `nodeOptions`, `script` (the CLI entry point), `port`, `listen` (absent without `--listen`), `logLevel`, and `allowVolatileInstance`. `usine restart` starts the new process with these values, and at `info` if a version before `--log-level` wrote the record without `logLevel`. |
+| `systemdUnit` | The systemd system service whose cgroup the process is in, from `/proc/self/cgroup`, such as `usine.service`. Absent outside one. See [Instances that systemd runs](#instances-that-systemd-runs). |
 | `stoppingSince` | When the process received its first `SIGINT` or `SIGTERM`. Absent until then. |
 
 The record says which process holds the instance, but the instance lock says whether one does. If a process stops without removing its files, for example after `SIGKILL`, `usine status` reports them as stale, and the next `usine up` replaces them.
+
+### Instances that systemd runs
+
+If the record has a `systemdUnit`, `usine status`, `usine stop`, `usine restart`, and `usine upgrade` first run `systemctl show --property=MainPID --value <unit>`. If systemd reports the recorded process as the service's main process, they manage the service with `systemctl` instead of signals and background starts:
+
+- The first stop signal is `systemctl stop --no-block <unit>`, so that systemd doesn't restart the service. The drain, `--timeout`, and `--force` work as for any instance: the command waits for the process to exit, and `--force` sends the second `SIGTERM` and `SIGKILL` itself.
+- `usine restart` and `usine upgrade` start the service again with `systemctl start <unit>`, and wait until the new process answers. If the service fails or waits to restart before that, the command stops it with `systemctl stop --no-block`, so that a failing start doesn't repeat, and exits with status 1. If the process doesn't answer within `--timeout`, the command exits with status 1, and the service keeps starting.
+- `usine status` adds `service   <unit>, managed with systemctl`.
+
+If the service has another main process, for example because a script of another service started `usine up`, the commands signal the process as for any instance. If a `systemctl` command fails, for example because the user may not stop or start the service, `usine stop`, `usine restart`, and `usine upgrade` stop at that step, exit with status 1, and name the `systemctl` command; `usine status` shows the failure on its `service` line.
+
+The process that `systemctl start` starts gets the environment of the service, not of the shell that runs the command, and reads the [environment file](#environment-file) itself.
 
 ### Setup mode
 
@@ -162,7 +175,7 @@ The command exits with status 0 if a process holds the instance, and 3 if none d
 | `--timeout <seconds>`, `--timeout=<seconds>` | whole number above 0 | `120` | How long to wait for the process to exit. |
 | `--force` | none | off | Sends a second `SIGTERM`, which stops the orchestrator without waiting for running attempts, and `SIGKILL` if the process still runs after the timeout. The next `usine up` reattaches the attempts. |
 
-Sends `SIGTERM` to the orchestrator, which starts the [drain](#shutdown), and waits until the process exits. It names the runs whose attempts the drain waits for. If no `usine up` runs, it prints `usine is not running in <folder>.` and exits with status 0. It also stops an orchestrator of an earlier usine version, through `.usine/instance.pid`.
+Sends `SIGTERM` to the orchestrator, which starts the [drain](#shutdown), and waits until the process exits. For an orchestrator that a systemd service runs, it runs `systemctl stop --no-block` instead ([Instances that systemd runs](#instances-that-systemd-runs)). It names the runs whose attempts the drain waits for. If no `usine up` runs, it prints `usine is not running in <folder>.` and exits with status 0. It also stops an orchestrator of an earlier usine version, through `.usine/instance.pid`.
 
 If the process still runs after the timeout, the command exits with status 1, and the drain continues. Run `usine stop` again to keep waiting: the instance record shows the drain, so the command doesn't send the second signal. Run `usine stop --force` to stop without waiting.
 
@@ -172,7 +185,7 @@ With `--force`, a process that still runs after the timeout gets `SIGKILL`, and 
 
 Takes the same flags as `usine stop`. It applies `--timeout` to the stop, and to the start as the time without a new log line.
 
-Stops the orchestrator as `usine stop` does, then starts it as a [background start](#background-start) with the Node.js binary, Node.js options, entry point, port, and flags from the instance record. After a rebuild of a checkout, the entry point is the rebuilt one. The new process inherits the environment of the shell that runs `usine restart`, not the environment of the process that it replaces, and reads the [environment file](#environment-file) again. A variable in `.env` doesn't need to be set in that shell.
+Stops the orchestrator as `usine stop` does, then starts it as a [background start](#background-start) with the Node.js binary, Node.js options, entry point, port, and flags from the instance record, or with `systemctl start` for an orchestrator that a systemd service runs. After a rebuild of a checkout, the entry point is the rebuilt one. The new process inherits the environment of the shell that runs `usine restart`, not the environment of the process that it replaces, and reads the [environment file](#environment-file) again. A variable in `.env` doesn't need to be set in that shell.
 
 If the orchestrator has no instance record that this `usine` can read, for example because an earlier usine version started it, the command stops the process in `.usine/instance.pid`. It then starts `usine up` as `usine up --detach` without flags would: with the `usine` that you run, and the port, log level, and volatile flag that the shell or `.env` sets, else the defaults. Before it stops the process, it lists the TCP ports that the process listens on, from `/proc` on Linux and from `lsof` elsewhere, and runs the checks below on the port where the process answers the operator API. That port can differ from the new one. The checks pass if no port answers. The command prints the port that it checks, if any, and the new port.
 
@@ -200,9 +213,9 @@ Moves the `@usine/server` pin in the instance's `package.json` and restarts the 
 4. **Stop.** It stops the orchestrator as `usine stop` does.
 5. **Install.** It rewrites the version of each pin in `package.json` and keeps the rest of the file as it is. Then it runs `install` with the instance's package manager: the one in the `packageManager` field, else the one whose lockfile exists (pnpm, npm, Yarn, or Bun), else npm. If the install fails, it restores `package.json` and the lockfile, and the orchestrator stays stopped.
 6. **Commit.** It commits `package.json` and the lockfile, and no other file, as `Pin @usine/server to <version>`. If Git fails, it says so and continues.
-7. **Start.** If the orchestrator was running, it starts it as `usine restart` does, and the new version runs its forward-only migrations at startup.
+7. **Start.** If the orchestrator was running, it starts it as `usine restart` does, with `systemctl start` for a systemd service, and the new version runs its forward-only migrations at startup.
 
-If the new version exits before it listens, for example because a migration failed, the command prints the last lines of `.usine/usine.log` and the steps to roll back: revert the commit, install, restore the backup, and start the orchestrator.
+If the new version exits before it listens, for example because a migration failed, the command prints the last lines of `.usine/usine.log`, or the `journalctl` command for a systemd service, and the steps to roll back: revert the commit, install, restore the backup, and start the orchestrator.
 
 The command changes nothing in these cases:
 

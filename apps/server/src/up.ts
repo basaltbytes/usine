@@ -47,6 +47,7 @@ import { serverLayer } from "./http.ts";
 import { instanceIdOf } from "./instance/id.ts";
 import { holdInstance } from "./instance/lock.ts";
 import { InstanceRecord, ProcessId, currentLaunch, instanceFiles } from "./instance/record.ts";
+import { currentSystemService } from "./instance/systemd.ts";
 import { reloadOnHangup } from "./reload-signal.ts";
 import { withGracefulShutdown } from "./shutdown.ts";
 import { warnIfSystemSleeps } from "./system-sleep.ts";
@@ -220,6 +221,7 @@ export const up = (command: UpCommand) =>
         version: yield* packageVersion().pipe(Effect.provide(NodeServices.layer)),
         startedAt: yield* DateTime.now,
         launch: yield* currentLaunch(command),
+        systemdUnit: yield* currentSystemService().pipe(Effect.provide(NodeServices.layer)),
       });
       // Acquired before any store opens and released after every store closes.
       yield* holdInstance(directory, record).pipe(Effect.provide(NodeServices.layer));

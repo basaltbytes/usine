@@ -5,7 +5,8 @@
 // `fixture-drain` contains `never`, only a second signal ends its drain. If `fixture-close`
 // contains `never`, its runtime scope never closes, so only SIGKILL stops it. If `fixture-startup`
 // contains `<lines> <milliseconds>`, it logs that many lines at that interval before it listens, as
-// startup recovery does; if it contains `never`, it never listens.
+// startup recovery does; if it contains `never`, it never listens. If `fixture-unit` contains a
+// systemd service name, it records that a service by that name runs it.
 import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
@@ -14,6 +15,7 @@ import { Console, DateTime, Deferred, Duration, Effect, Option } from "effect";
 import { parseCli } from "../../src/cli.ts";
 import { holdInstance } from "../../src/instance/lock.ts";
 import { InstanceRecord, ProcessId, currentLaunch } from "../../src/instance/record.ts";
+import { SystemdUnit } from "../../src/instance/systemd.ts";
 import { withGracefulShutdown } from "../../src/shutdown.ts";
 
 const directory = process.cwd();
@@ -39,6 +41,10 @@ const startup = () => {
     { discard: true },
   );
 };
+const systemdUnit = () =>
+  existsSync(fixtureFile("fixture-unit"))
+    ? Option.some(SystemdUnit.make(readFileSync(fixtureFile("fixture-unit"), "utf8").trim()))
+    : Option.none();
 const workers = () =>
   existsSync(fixtureFile("fixture-gateway-env"))
     ? [
@@ -92,6 +98,7 @@ NodeRuntime.runMain(
         version: "0.0.0-fixture",
         startedAt: yield* DateTime.now,
         launch: yield* currentLaunch(command),
+        systemdUnit: systemdUnit(),
       });
       yield* holdInstance(directory, record);
       const requested = yield* Deferred.make();

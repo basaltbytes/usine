@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -113,15 +114,70 @@ const startFixture = async (
  * Runs the `usine` CLI in `directory` and returns its standard output, or rejects with its standard
  * error if it fails. Asynchronous, so this process reaps the instance processes it started.
  */
-const runCli = (directory: InstanceDirectory, args: ReadonlyArray<string>) =>
+const runCli = (
+  directory: InstanceDirectory,
+  args: ReadonlyArray<string>,
+  environment: NodeJS.ProcessEnv = process.env,
+) =>
   new Promise<string>((resolve, reject) => {
     execFile(
       process.execPath,
       ["--experimental-strip-types", "--no-warnings", CLI, ...args],
-      { cwd: directory, timeout: SCENARIO_TIMEOUT_MS },
+      { cwd: directory, timeout: SCENARIO_TIMEOUT_MS, env: environment },
       (error, stdout, stderr) => (error === null ? resolve(stdout) : reject(new Error(stderr))),
     );
   });
+
+const UNIT = "usine-test.service";
+
+/**
+ * Writes a `systemctl` that acts as systemd would for `UNIT` running the fixture in `directory`,
+ * and logs its arguments to `systemctl.log` there. `show` reports the PID in `.usine/instance.pid`
+ * as the main one, unless `systemctl-other-main` exists; `stop` sends it `SIGTERM`; and `start`
+ * starts the fixture with `launch`'s port in the background. With `systemctl-failing`, `start`
+ * starts nothing and `show` reports a service that waits to restart. With `systemctl-denied`, every
+ * verb but `show` fails as without the permission to manage the service. Returns the environment
+ * for the CLI.
+ */
+const fakeSystemctl = (directory: InstanceDirectory, launch: InstanceLaunch) => {
+  const bin = join(directory, "bin");
+  mkdirSync(bin);
+  const script = join(bin, "systemctl");
+  writeFileSync(
+    script,
+    `#!${process.execPath}
+const { appendFileSync, existsSync, openSync, readFileSync } = require("node:fs");
+const { spawn } = require("node:child_process");
+const { join } = require("node:path");
+const directory = ${JSON.stringify(directory)};
+const args = process.argv.slice(2);
+appendFileSync(join(directory, "systemctl.log"), args.join(" ") + "\\n");
+const flag = (name) => existsSync(join(directory, name));
+const pidFile = join(directory, ".usine", "instance.pid");
+const pid = () => (existsSync(pidFile) ? Number(readFileSync(pidFile, "utf8")) : 0);
+const verb = args[0];
+if (verb !== "show" && flag("systemctl-denied")) {
+  console.error("Failed to " + verb + " " + args.at(-1) + ": Access denied");
+  process.exit(4);
+}
+if (verb === "show" && args.includes("--property=MainPID")) {
+  console.log(flag("systemctl-other-main") ? 1 : pid());
+} else if (verb === "show") {
+  console.log(flag("systemctl-failing") ? "ActiveState=activating\\nSubState=auto-restart" : "ActiveState=active\\nSubState=running");
+} else if (verb === "stop" && pid() !== 0) {
+  process.kill(pid(), "SIGTERM");
+} else if (verb === "start" && !flag("systemctl-failing")) {
+  const log = openSync(join(directory, ".usine", "usine.log"), "a");
+  spawn(${JSON.stringify(launch.node)}, ${JSON.stringify([...launch.nodeOptions, launch.script, "up", "--port", String(launch.port)])}, { cwd: directory, detached: true, stdio: ["ignore", log, log] }).unref();
+}
+`,
+  );
+  chmodSync(script, 0o755);
+  return { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}` };
+};
+
+const systemctlCalls = (directory: InstanceDirectory) =>
+  readFileSync(join(directory, "systemctl.log"), "utf8").trim().split("\n");
 
 const pid1OfAnotherUser =
   process.platform === "linux" && statSync("/proc/1").uid !== process.getuid?.();
@@ -428,5 +484,91 @@ describe("instance lifecycle", { timeout: SCENARIO_TIMEOUT_MS }, () => {
     assert.strictEqual(error.outcome, "exited");
     assert.deepStrictEqual(error.exit, Option.some("status 3"));
     assert.include(error.tail, "cannot start");
+  });
+  it("stops, restarts, and reports an instance that a systemd service runs with systemctl", async () => {
+    const directory = instanceFolder();
+    writeFileSync(join(directory, "fixture-unit"), UNIT);
+    const first = await startFixture(directory);
+    const environment = fakeSystemctl(directory, first.launch);
+
+    const restarted = await runCli(directory, ["restart", "--timeout", "20"], environment);
+    assert.match(
+      restarted,
+      new RegExp(`Stopping usine \\(pid ${first.pid}\\) with systemctl stop ${UNIT}`, "u"),
+    );
+    assert.match(restarted, new RegExp(`usine is running at .+ \\(pid \\d+\\) in ${UNIT}`, "u"));
+    const state = await run(probeInstance(directory));
+    assert(state._tag === "Running");
+    pids.add(state.record.pid);
+    assert.notStrictEqual(state.record.pid, first.pid);
+    assert.isFalse(alive(first.pid));
+    assert.deepStrictEqual(Option.getOrUndefined(state.record.systemdUnit), UNIT);
+
+    const report = await runCli(directory, ["status"], environment);
+    assert.include(report, `  service   ${UNIT}, managed with systemctl`);
+
+    await runCli(directory, ["stop", "--timeout", "20"], environment);
+    assert.isFalse(alive(state.record.pid));
+    const calls = systemctlCalls(directory);
+    assert.deepStrictEqual(
+      calls.filter((call) => !call.startsWith("show")),
+      [`stop --no-block ${UNIT}`, `start ${UNIT}`, `stop --no-block ${UNIT}`],
+    );
+    assert.include(calls, `show --property=MainPID --value ${UNIT}`);
+  });
+
+  it("signals an instance whose systemd service has another main process, without systemctl stop", async () => {
+    const directory = instanceFolder();
+    // As for a usine up that a script of another service started.
+    writeFileSync(join(directory, "fixture-unit"), UNIT);
+    writeFileSync(join(directory, "systemctl-other-main"), "");
+    const record = await startFixture(directory);
+    const environment = fakeSystemctl(directory, record.launch);
+
+    const output = await runCli(directory, ["stop", "--timeout", "20"], environment);
+
+    assert.match(output, new RegExp(`Stopping usine \\(pid ${record.pid}\\)\\.`, "u"));
+    assert.isFalse(alive(record.pid));
+    assert.deepStrictEqual(systemctlCalls(directory), [`show --property=MainPID --value ${UNIT}`]);
+  });
+
+  it("names the systemctl command that this user may not run, and leaves the instance running", async () => {
+    const directory = instanceFolder();
+    writeFileSync(join(directory, "fixture-unit"), UNIT);
+    writeFileSync(join(directory, "systemctl-denied"), "");
+    const record = await startFixture(directory);
+    const environment = fakeSystemctl(directory, record.launch);
+
+    const refused = await runCli(directory, ["stop"], environment).then(
+      () => "",
+      (error: Error) => error.message,
+    );
+
+    assert.include(refused, `systemctl stop --no-block ${UNIT} failed`);
+    assert.include(refused, "Access denied");
+    assert.isTrue(alive(record.pid));
+  });
+
+  it("stops a systemd service whose new process exits before it listens, so that it doesn't restart", async () => {
+    const directory = instanceFolder();
+    writeFileSync(join(directory, "fixture-unit"), UNIT);
+    const first = await startFixture(directory);
+    const environment = fakeSystemctl(directory, first.launch);
+    writeFileSync(join(directory, "systemctl-failing"), "");
+
+    const failed = await runCli(directory, ["restart", "--timeout", "20"], environment).then(
+      () => "",
+      (error: Error) => error.message,
+    );
+
+    assert.include(
+      failed,
+      `systemctl start ${UNIT} ran, but the service was activating (auto-restart)`,
+    );
+    assert.isFalse(alive(first.pid));
+    assert.deepStrictEqual(
+      systemctlCalls(directory).filter((call) => !call.startsWith("show")),
+      [`stop --no-block ${UNIT}`, `start ${UNIT}`, `stop --no-block ${UNIT}`],
+    );
   });
 });
