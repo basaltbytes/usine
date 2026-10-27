@@ -36,12 +36,7 @@
       "ignoreDependencies": ["@usine/web"]
     },
     "apps/web": {
-      "entry": [
-        "src/index.ts",
-        "src/components/ui/*.tsx",
-        "src/components/ai-elements/*.tsx",
-        "src/hooks/*.ts"
-      ],
+      "entry": ["src/components/ui/*.tsx", "src/components/ai-elements/*.tsx", "src/hooks/*.ts"],
       "ignoreIssues": {
         "src/route-tree.gen.ts": ["types"]
       }

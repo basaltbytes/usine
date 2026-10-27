@@ -1,6 +1,6 @@
 import type { ComponentProps } from "react";
-import { TableCell } from "@/components/ui/table";
-import { cn } from "@/lib/utils";
+import { TableCell } from "~/components/ui/table";
+import { cn } from "~/lib/utils";
 
 /**
  * Renders a cell of the column that takes a table's remaining width. Its content never widens the

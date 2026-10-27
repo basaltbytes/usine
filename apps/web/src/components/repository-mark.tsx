@@ -1,6 +1,6 @@
 import { type RepositoryName, splitRepositoryName } from "@usine/core/repository";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { cn } from "@/lib/utils";
+import { Avatar, AvatarFallback, AvatarImage } from "~/components/ui/avatar";
+import { cn } from "~/lib/utils";
 
 /** Rendered width in pixels; the image is fetched at twice this for high-density screens. */
 const pixels = { inline: 16, title: 20 } as const;

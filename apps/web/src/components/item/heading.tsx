@@ -1,7 +1,7 @@
 import { Option } from "effect";
 import type { ComponentType, CSSProperties, ReactNode } from "react";
-import { cn } from "@/lib/utils";
-import { ItemMark, type ItemRef } from "./mark.tsx";
+import { cn } from "~/lib/utils";
+import { ItemMark, type ItemRef } from "~/components/item/mark";
 
 /** The props an `ItemHeading` passes to the element it renders. */
 interface HeadingElementProps {

@@ -8,9 +8,9 @@ import {
 } from "@phosphor-icons/react";
 import type { ComponentProps, ReactNode } from "react";
 
-import { Badge } from "@/components/ui/badge";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { cn } from "@/lib/utils";
+import { Badge } from "~/components/ui/badge";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "~/components/ui/collapsible";
+import { cn } from "~/lib/utils";
 
 type ToolStatus = "Running" | "Completed" | "Error" | "Stopped";
 

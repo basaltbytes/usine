@@ -1,7 +1,7 @@
 import type { ComponentProps } from "react";
 import ReactMarkdown, { type Components, type Options } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { cn } from "@/lib/utils";
+import { cn } from "~/lib/utils";
 
 type RemarkPlugins = NonNullable<Options["remarkPlugins"]>;
 

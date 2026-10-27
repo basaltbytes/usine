@@ -40,7 +40,11 @@ export default mergeConfig(
       projects: [
         {
           extends: true,
-          test: { name: "unit", exclude: [...configDefaults.exclude, "**/*.browser.test.tsx"] },
+          test: {
+            name: "unit",
+            include: ["src/**/*.test.{ts,tsx}"],
+            exclude: [...configDefaults.exclude, "**/*.browser.test.tsx"],
+          },
         },
         {
           extends: true,
@@ -49,7 +53,7 @@ export default mergeConfig(
           optimizeDeps: { force: true },
           test: {
             name: "browser",
-            include: ["test/**/*.browser.test.tsx"],
+            include: ["src/**/*.browser.test.tsx"],
             // Locator actions wait up to the test timeout; Chromium is slow on a busy machine.
             testTimeout: 30_000,
             // Hooks that render a page load its route code, which is as slow.

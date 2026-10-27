@@ -1,7 +1,7 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { AgentDetail } from "../../../configuration/agents.tsx";
-import { configurationQuery } from "../../../configuration/query.ts";
+import { AgentDetail } from "~/features/configuration/components/agents";
+import { configurationQuery } from "~/features/configuration/queries";
 
 const Agent = () => {
   const { agent } = Route.useParams();

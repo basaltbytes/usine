@@ -1,7 +1,7 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { configurationQuery } from "../../../configuration/query.ts";
-import { WorkersList } from "../../../configuration/workers.tsx";
+import { configurationQuery } from "~/features/configuration/queries";
+import { WorkersList } from "~/features/configuration/components/workers";
 
 const Workers = () => {
   const { data } = useSuspenseQuery(configurationQuery());

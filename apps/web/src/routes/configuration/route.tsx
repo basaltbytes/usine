@@ -3,8 +3,8 @@ import {
   ConfigurationPending,
   ConfigurationSection,
   ConfigurationUnavailable,
-} from "../../configuration/layout.tsx";
-import { configurationQuery } from "../../configuration/query.ts";
+} from "~/features/configuration/configuration.page";
+import { configurationQuery } from "~/features/configuration/queries";
 
 export const Route = createFileRoute("/configuration")({
   loader: ({ context }) => context.queryClient.ensureQueryData(configurationQuery()),

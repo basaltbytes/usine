@@ -1,7 +1,7 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import { RepositoryName } from "@usine/core/repository";
-import { ProjectNotFound } from "@/components/project-not-found";
-import { overviewQuery } from "../../../overview.ts";
+import { ProjectNotFound } from "~/components/project-not-found";
+import { overviewQuery } from "~/lib/overview";
 
 export const Route = createFileRoute("/projects/$owner/$name")({
   params: {

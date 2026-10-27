@@ -2,7 +2,7 @@
 import { CheckIcon, CopyIcon } from "@phosphor-icons/react";
 import { useEffect, useRef, useState, type ComponentProps } from "react";
 
-import { Button } from "@/components/ui/button";
+import { Button } from "~/components/ui/button";
 
 /** Copies the original content and reports clipboard denial beside the control. */
 export const CopyButton = ({

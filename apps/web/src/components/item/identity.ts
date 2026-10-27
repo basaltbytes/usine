@@ -1,8 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import type { BoardTaskView, FactoryOverview } from "@usine/orchestrator/operator";
 import { Array as EffectArray, Option } from "effect";
-import { overviewQuery } from "../../overview.ts";
-import type { ItemRef } from "./mark.tsx";
+import { overviewQuery } from "~/lib/overview";
+import type { ItemRef } from "~/components/item/mark";
 
 /** An item with its title, as Board cards and Task views list them. */
 export interface TitledItem extends ItemRef {

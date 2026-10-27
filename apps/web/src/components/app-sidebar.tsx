@@ -2,7 +2,7 @@ import { KanbanIcon, ListChecksIcon, SquaresFourIcon } from "@phosphor-icons/rea
 import { Link, useMatchRoute } from "@tanstack/react-router";
 import type { RepositoryName } from "@usine/core/repository";
 import type { ProjectView } from "@usine/orchestrator/operator";
-import { RepositoryMark } from "@/components/repository-mark";
+import { RepositoryMark } from "~/components/repository-mark";
 import {
   Sidebar,
   SidebarContent,
@@ -18,10 +18,10 @@ import {
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
-} from "@/components/ui/sidebar";
-import { cn } from "@/lib/utils";
-import { ConfigurationMenu } from "../configuration/layout.tsx";
-import { projectParams } from "../overview.ts";
+} from "~/components/ui/sidebar";
+import { cn } from "~/lib/utils";
+import { ConfigurationMenu } from "~/features/configuration/configuration.page";
+import { projectParams } from "~/lib/overview";
 
 /** `tasks` covers the Tasks list and Task pages; `project` covers other Project pages, such as a
  * Run page. */

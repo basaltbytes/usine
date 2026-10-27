@@ -1,6 +1,6 @@
 import { WarningCircleIcon } from "@phosphor-icons/react";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { cn } from "@/lib/utils";
+import { Alert, AlertDescription, AlertTitle } from "~/components/ui/alert";
+import { cn } from "~/lib/utils";
 
 export const ErrorAlert = ({
   title,

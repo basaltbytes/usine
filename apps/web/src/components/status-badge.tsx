@@ -1,4 +1,4 @@
-import { cn } from "@/lib/utils";
+import { cn } from "~/lib/utils";
 
 /** Returns the tone class for a Run, Attempt, Project, or Loop state (ADR 0015). An unpaused Loop
  * is `live`. Issue and pull request states use `ItemMark`. */

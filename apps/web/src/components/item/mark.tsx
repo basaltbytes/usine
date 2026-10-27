@@ -7,7 +7,7 @@ import {
   IssueOpenedIcon,
 } from "@primer/octicons-react";
 import type { LaneItemState } from "@usine/config/board";
-import { cn } from "@/lib/utils";
+import { cn } from "~/lib/utils";
 
 /** A GitHub issue or pull request; a `null` state is unknown. */
 export interface ItemRef {

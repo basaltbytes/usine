@@ -8,9 +8,9 @@ import {
   type CSSProperties,
 } from "react";
 
-import { cn } from "@/lib/utils";
+import { cn } from "~/lib/utils";
 
-import { CopyButton } from "./copy-button";
+import { CopyButton } from "~/components/ai-elements/copy-button";
 
 /** Languages represented by the command, file and patch tools. */
 export type CodeLanguage = "bash" | "text" | "diff" | "typescript" | "json";

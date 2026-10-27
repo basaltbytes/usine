@@ -1,5 +1,5 @@
 import type { LabelView } from "@usine/orchestrator/operator";
-import { Badge } from "@/components/ui/badge";
+import { Badge } from "~/components/ui/badge";
 
 const channel = (hex: string, offset: number): number =>
   parseInt(hex.slice(offset, offset + 2), 16);

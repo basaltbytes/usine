@@ -7,9 +7,9 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@/components/ui/empty";
-import { Spinner } from "@/components/ui/spinner";
-import { cn } from "@/lib/utils";
+} from "~/components/ui/empty";
+import { Spinner } from "~/components/ui/spinner";
+import { cn } from "~/lib/utils";
 
 /** Renders the loading, unreachable, or not-found screen in the viewport, or in the work panel below Needs you if `inPanel` is set. */
 export const BootScreen = ({

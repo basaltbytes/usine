@@ -1,5 +1,5 @@
-import { cn } from "@/lib/utils";
-import { ItemMark, type ItemRef } from "./mark.tsx";
+import { cn } from "~/lib/utils";
+import { ItemMark, type ItemRef } from "~/components/item/mark";
 
 /** Renders pull requests as item marks in the given order, or nothing if there are none. */
 export const PullRequestMarks = ({
