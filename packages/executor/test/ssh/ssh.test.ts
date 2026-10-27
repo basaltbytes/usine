@@ -262,6 +262,45 @@ describe("SSH Worker", () => {
     }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials, fails)));
   });
 
+  // A salvage command that timed out crashed the release, so the Run failed with a step executor
+  // defect instead of the Attempt's failure, and the machine kept the checkout (#602).
+  it.effect(
+    "retains a failed Attempt's checkout when a salvage command doesn't finish, and keeps the Attempt's failure",
+    () => {
+      const machine = fakeMachine();
+      const credentials = mintingProvider();
+      const inspecting = () =>
+        machine.state.calls.some(({ line }) => line.includes("'status' '--porcelain'"));
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        machine.state.salvage = "stalls";
+        const prepared = yield* executor.prepare(request);
+        const recorded: Array<AttemptSalvage> = [];
+        const launch = yield* prepared
+          .launch({
+            append: () => Effect.void,
+            comments: () => Effect.void,
+            transcript: Effect.succeed([]),
+            windows: aloneOnItem(),
+            salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
+          })
+          .pipe(Effect.forkChild);
+        while (!inspecting()) yield* Effect.yieldNow;
+        yield* TestClock.adjust("10 minutes");
+        const exit = yield* Fiber.await(launch);
+        assert(Exit.isFailure(exit));
+        assert.isFalse(Cause.hasDies(exit.cause), Cause.pretty(exit.cause));
+        const failure = Cause.findErrorOption(exit.cause);
+        assert(Option.isSome(failure) && failure.value._tag === "InfraFailure");
+        assert.strictEqual(failure.value.message, "The parent stopped");
+        const salvage = recorded[0];
+        assert(salvage?._tag === "Retained");
+        assert.strictEqual(salvage.path, WORKTREE);
+        assert.include(salvage.message, "didn't finish within 10 minutes");
+      }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials, fails)));
+    },
+  );
+
   it.effect(
     "gives a read Loop's Attempt a read token and a pre-push hook that explains a refused push, and pushes no salvage",
     () => {

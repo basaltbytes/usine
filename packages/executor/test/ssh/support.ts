@@ -155,7 +155,8 @@ interface FakeMachineState {
   cacheExists: boolean;
   /** Whether a clone fails with git's token in its stderr. */
   cloneEchoesToken: boolean;
-  salvage: "clean" | "dirty";
+  /** The checkout the salvage finds: clean, dirty, or one whose `git status` never answers. */
+  salvage: "clean" | "dirty" | "stalls";
   salvageCommitted: boolean;
   claudeLoggedIn: boolean;
   /** What `codex --version` prints on the machine. */
@@ -563,8 +564,10 @@ export const fakeMachine = () => {
       if (line.includes("'--absolute-git-dir'")) return oneShotHandle(`${GIT_DIRECTORY}\n`, 0);
       if (line.includes("'rev-parse'"))
         return oneShotHandle(`${state.salvageCommitted ? SALVAGE_COMMIT : COMMIT}\n`, 0);
-      if (line.includes("'status'"))
+      if (line.includes("'status'")) {
+        if (state.salvage === "stalls") return stalledHandle;
         return oneShotHandle(state.salvage === "clean" ? "" : " M src/index.ts\n", 0);
+      }
       if (line.includes("'diff' '--cached'"))
         return oneShotHandle(state.salvage === "clean" ? "" : "src/index.ts\0", 0);
       if (line.includes("'commit'")) state.salvageCommitted = true;

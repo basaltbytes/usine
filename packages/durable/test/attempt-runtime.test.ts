@@ -1622,4 +1622,56 @@ describe("durable AttemptRuntime", () => {
         }
       }).pipe(Effect.scoped),
   );
+
+  // The Claude children of #602 ended with "Claude output stream failed" until the parent used
+  // its budget; the parent's turn then ended without an answer.
+  it.live(
+    "fails the Attempt with InfraFailure when every child ends without a result and the parent's turn has no answer, then runs its retry",
+    () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        yield* Effect.gen(function* () {
+          const runtime = yield* AttemptRuntime;
+          const children = yield* StubChildren;
+          const request = attemptRequest("run/step/20", 2);
+          const recording = recordingSink();
+          const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
+          yield* (yield* children.next).crash("Claude output stream failed");
+          yield* (yield* children.next).crash("Claude output stream failed");
+          const failure = yield* Fiber.join(execution).pipe(Effect.flip);
+          assert(failure._tag === "InfraFailure");
+          assert.strictEqual(
+            failure.message,
+            "The Pi parent's turn ended without an answer: model_error",
+          );
+          assertAdmitted(request.spec.attemptId, recording.outbound());
+          assert.deepStrictEqual(
+            yield* runtime.finished(request.spec.attemptId),
+            Option.some(new ParentFailed({ failure })),
+          );
+
+          const retry = yield* Effect.forkChild(
+            runtime.execute(attemptRequest("run/step/21", 2), recordingSink().sink),
+          );
+          yield* (yield* children.next).reply("Child fixed the test.");
+          assert.strictEqual((yield* Fiber.join(retry)).message, "Fixed the flaky test.");
+        }).pipe(
+          Effect.provide(
+            layer({
+              database,
+              parent: [
+                delegate("Fix the flaky test"),
+                delegate("Fix the flaky test again"),
+                fauxAssistantMessage([], {
+                  stopReason: "error",
+                  errorMessage: "Gateway forward closed",
+                }),
+                delegate("Fix the flaky test"),
+                answer("Fixed the flaky test."),
+              ],
+            }),
+          ),
+        );
+      }).pipe(Effect.scoped),
+  );
 });

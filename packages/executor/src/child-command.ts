@@ -1,4 +1,4 @@
-import { Array as Arr, Config, Effect, Fiber, Option, Stream } from "effect";
+import { Array as Arr, Cause, Config, Effect, Fiber, Option, Stream } from "effect";
 import { ChildProcess, type ChildProcessSpawner } from "effect/unstable/process";
 import { ExecutorOperationError, type ExecutorOperation } from "./executor.ts";
 
@@ -60,7 +60,9 @@ export const collectCommand = (
       (cause) =>
         new ExecutorOperationError({
           operation,
-          message: `Can't run ${command}`,
+          message: Cause.isTimeoutError(cause)
+            ? `${command} didn't finish within ${COMMAND_TIMEOUT}`
+            : `Can't run ${command}`,
           cause,
         }),
     ),
