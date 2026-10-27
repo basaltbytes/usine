@@ -2,17 +2,8 @@ import { createServer, type Server } from "node:net";
 import { RepositoryName } from "@usine/core/repository";
 import { GatewayDomain, WorkerName } from "@usine/core/worker";
 import { AttachmentId } from "../src/attachment/attachment.ts";
-import {
-  DateTime,
-  Effect,
-  Encoding,
-  Layer,
-  Option,
-  Predicate,
-  Redacted,
-  Result,
-  Schema,
-} from "effect";
+import { DateTime, Effect, Layer, Option, Predicate, Redacted, Result, Schema } from "effect";
+import { Base64Url } from "effect/encoding";
 import { parseEgressAllowlist } from "../src/egress/egress.ts";
 import { GITHUB_ORIGINS, type GitHubOrigins } from "../src/github/github.ts";
 import type { LlmProviders } from "../src/llm/llm.ts";
@@ -55,9 +46,9 @@ export const NO_PROVIDERS: LlmProviders = { anthropic: Option.none(), openai: Op
 /** Returns an unsigned JWT with `claims`, which is all the Gateway reads of a ChatGPT token. */
 export const fakeJwt = (claims: Schema.Json) =>
   [
-    Encoding.encodeBase64Url(JSON.stringify({ alg: "none", typ: "JWT" })),
-    Encoding.encodeBase64Url(JSON.stringify(claims)),
-    Encoding.encodeBase64Url("signature"),
+    Base64Url.encode(JSON.stringify({ alg: "none", typ: "JWT" })),
+    Base64Url.encode(JSON.stringify(claims)),
+    Base64Url.encode("signature"),
   ].join(".");
 
 /** Returns an access token for the ChatGPT backend that expires at `expiresAt`, with `nonce` to tell tokens apart. */
@@ -71,7 +62,7 @@ const decodeNonce = Schema.decodeUnknownOption(
 /** Returns the `nonce` claim of a token from `chatGptAccessToken` or `fakeJwt`, or `none`. */
 export const nonceOf = (jwt: string): string =>
   Option.fromNullishOr(jwt.replace(/^Bearer /u, "").split(".")[1]).pipe(
-    Option.flatMap((payload) => Result.getSuccess(Encoding.decodeBase64UrlString(payload))),
+    Option.flatMap((payload) => Result.getSuccess(Base64Url.decodeString(payload))),
     Option.flatMap(decodeNonce),
     Option.match({ onNone: () => "none", onSome: ({ nonce }) => nonce }),
   );

@@ -1,6 +1,7 @@
 import { RepositoryName } from "@usine/core/repository";
-import { Encoding, Option, Redacted, Result, Schema } from "effect";
-import { Headers } from "effect/unstable/http";
+import { Option, Redacted, Result, Schema } from "effect";
+import { Base64 } from "effect/encoding";
+import { Headers } from "effect/http";
 import type { AttachmentCredential } from "../attachment/attachment.ts";
 import { UpstreamBase } from "../upstream.ts";
 
@@ -169,7 +170,7 @@ export const withGitHubCredential = (
         "authorization",
         protocol === "api"
           ? `Bearer ${token}`
-          : `Basic ${Encoding.encodeBase64(`x-access-token:${token}`)}`,
+          : `Basic ${Base64.encode(`x-access-token:${token}`)}`,
       );
     }
   }

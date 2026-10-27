@@ -34,7 +34,7 @@ import {
   Schema,
   Scope,
 } from "effect";
-import { FetchHttpClient } from "effect/unstable/http";
+import { FetchHttpClient } from "effect/http";
 import { gitHubCredentialLayer } from "../../src/credentials.ts";
 import { LabelReconciler } from "../../src/label-reconciler.ts";
 import { PollingTriggers } from "../../src/polling-triggers.ts";
@@ -274,15 +274,15 @@ describe("live agent loop", () => {
     () =>
       Effect.gen(function* () {
         const settings = yield* Effect.all({
-          botLogin: Config.string("USINE_GITHUB_INTEGRATION_BOT_LOGIN"),
-          childModel: Config.string("USINE_AGENT_INTEGRATION_CHILD_MODEL"),
-          credentialsDirectory: Config.string("USINE_GITHUB_INTEGRATION_INSTANCE_DIRECTORY"),
+          botLogin: Config.String("USINE_GITHUB_INTEGRATION_BOT_LOGIN"),
+          childModel: Config.String("USINE_AGENT_INTEGRATION_CHILD_MODEL"),
+          credentialsDirectory: Config.String("USINE_GITHUB_INTEGRATION_INSTANCE_DIRECTORY"),
           issueNumber: Config.schema(
             PositiveIntFromString,
             "USINE_GITHUB_INTEGRATION_ISSUE_NUMBER",
           ),
-          parentModel: Config.string("USINE_AGENT_INTEGRATION_PARENT_MODEL"),
-          repository: Config.string("USINE_GITHUB_INTEGRATION_REPO"),
+          parentModel: Config.String("USINE_AGENT_INTEGRATION_PARENT_MODEL"),
+          repository: Config.String("USINE_GITHUB_INTEGRATION_REPO"),
         });
         const repository = RepositoryName.make(settings.repository);
         const marker = `usine live agent contract ${globalThis.crypto.randomUUID()}`;

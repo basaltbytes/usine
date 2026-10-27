@@ -236,7 +236,7 @@ it("finishes an in-flight move in its original project after navigating to anoth
     ),
   );
   await expect.element(taskIn("Ready")).toBeVisible();
-  await expect.element(lane("Ready").getByRole("status")).toHaveTextContent("Saved on GitHub");
+  await expect.element(lane("Ready").getByRole("status")).toMatchTextContent("Saved on GitHub");
 });
 
 it("shows move progress even when the destination has no labels or Run details to display yet", async () => {
@@ -272,7 +272,7 @@ it("shows move progress even when the destination has no labels or Run details t
   await expect.element(lane("In progress")).not.toBeInTheDocument();
   await move(1, "Ready");
   await expectMovable(2, true);
-  await expect.element(lane("Ready").getByRole("status")).toHaveTextContent("Saved on GitHub");
+  await expect.element(lane("Ready").getByRole("status")).toMatchTextContent("Saved on GitHub");
 });
 
 it("keeps a saved destination when the project is reopened before GitHub is observed", async () => {
@@ -305,7 +305,7 @@ it("takes a keyboard drop on an empty lane before a lane with cards", async () =
   await expect.poll(() => lane("Ready").element().classList.contains("bg-muted/40")).toBe(true);
   await userEvent.keyboard(" ");
   await expect.element(taskIn("Ready")).toBeVisible();
-  await expect.element(lane("Ready").getByRole("status")).toHaveTextContent("Saved on GitHub");
+  await expect.element(lane("Ready").getByRole("status")).toMatchTextContent("Saved on GitHub");
   await expect.element(taskIn("Backlog")).not.toBeInTheDocument();
 });
 

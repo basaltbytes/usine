@@ -1,6 +1,6 @@
 # Child Processes & Scopes
 
-Verified against `effect@4.0.0-rc.111`. v4 has no `Command` module; the `@effect/platform` `Command` API is v3. Child processes are in `effect/unstable/process`. For fork variants, see [runtime-and-concurrency.md](runtime-and-concurrency.md#fork-family).
+Verified against `effect@4.0.6`. v4 has no `Command` module; the `@effect/platform` `Command` API is v3. Child processes are in `effect/process`. For fork variants, see [runtime-and-concurrency.md](runtime-and-concurrency.md#fork-family).
 
 ## Table of Contents
 
@@ -13,7 +13,7 @@ Verified against `effect@4.0.0-rc.111`. v4 has no `Command` module; the `@effect
 ## Spawning with ChildProcess
 
 ```typescript
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { Effect, Stream } from "effect"
 
 const runCommand = Effect.gen(function* () {
@@ -75,12 +75,12 @@ Use `Scope.make()` for external lifetime control:
 import { Effect, Scope, Exit } from "effect"
 
 const scope = yield* Scope.make()
-const handle = yield* spawnProcess(cmd).pipe(Scope.extend(scope))
+const handle = yield* spawnProcess(cmd).pipe(Scope.provide(scope))
 // later, to tear down:
 yield* Scope.close(scope, Exit.void)
 ```
 
-`Scope.extend` ties the resource to the scope and removes `Scope` from the effect's requirements.
+`Scope.provide` ties the resource to the scope and removes `Scope` from the effect's requirements.
 
 ### acquireRelease
 
@@ -100,7 +100,7 @@ const startBackground = (command: string) =>
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const handle = yield* spawner
       .spawn(ChildProcess.make("bash", ["-c", command], { detached: false, forceKillAfter: "10 seconds" }))
-      .pipe(Scope.extend(scope))
+      .pipe(Scope.provide(scope))
 
     // Fork ONLY the output collection, never the scoped acquisition
     yield* Effect.forkDetach(

@@ -1,6 +1,6 @@
 import { RepositoryName, splitRepositoryName } from "@usine/core/repository";
 import { Clock, Context, Effect, Layer, Option, Schema } from "effect";
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { GitHubApp } from "./github-app.ts";
 import { API_ROOT, authorized, invalidResponse, statusError, transportError } from "./http.ts";
 import type { GitHubAppError } from "./error.ts";

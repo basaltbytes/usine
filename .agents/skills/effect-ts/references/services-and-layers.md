@@ -45,7 +45,7 @@ Use `Layer.effect` for effectful implementations and `Layer.sync` for synchronou
 
 ```typescript
 import { Context, Effect, Layer, Schema } from "effect"
-import { HttpClient, HttpClientResponse } from "effect/unstable/http"
+import { HttpClient, HttpClientResponse } from "effect/http"
 
 const UserId = Schema.String.pipe(Schema.brand("UserId"))
 type UserId = typeof UserId.Type

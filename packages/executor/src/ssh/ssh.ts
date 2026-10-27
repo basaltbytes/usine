@@ -7,8 +7,8 @@ import { type RepositoryName, safeSegment } from "@usine/core/repository";
 import type { GatewayCredentialKind, WorkerName } from "@usine/core/worker";
 import type { AttemptRuntime } from "@usine/durable/attempt-runtime";
 import { Context, Effect, FileSystem, Layer, Option, type Path } from "effect";
-import type { HttpClient } from "effect/unstable/http";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import type { HttpClient } from "effect/http";
+import { ChildProcessSpawner } from "effect/process";
 import {
   type CredentialProvider,
   Executor,

@@ -6,7 +6,7 @@ import {
 } from "@usine/agents/child-host";
 import type { SshDestination } from "@usine/core/worker";
 import { Effect, Redacted, Stream } from "effect";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcessSpawner } from "effect/process";
 import {
   allowlistedEnvironment,
   collectCommand,

@@ -93,8 +93,8 @@ import {
   RestartRequiredError,
 } from "@usine/orchestrator/current-instance";
 import { Effect, Layer, Option, Schema } from "effect";
-import { HttpRouter } from "effect/unstable/http";
-import { HttpApiClient } from "effect/unstable/httpapi";
+import { HttpRouter } from "effect/http";
+import { HttpApiClient } from "effect/http-api";
 import { afterAll, assert, describe, it } from "vitest";
 import { BackendUnavailableError, FactoryBackend, needsSetupBackendLayer } from "../src/backend.ts";
 import { Port, SERVER_HOST, UiOrigin } from "../src/cli.ts";

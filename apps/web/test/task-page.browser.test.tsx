@@ -105,7 +105,7 @@ afterEach(() => {
 it("heads the page with the originating issue, its current pull request's state, lane, and labels", async () => {
   await mount(40);
   const heading = page.getByRole("heading", { level: 1 });
-  await expect.element(heading).toHaveTextContent("Rework the conversation reader");
+  await expect.element(heading).toMatchTextContent("Rework the conversation reader");
   const header = page.elementLocator(heading.element().closest("header") ?? document.body);
   await expect
     .element(heading.getByRole("link", { name: "Issue #40, open", exact: true }))
@@ -145,18 +145,18 @@ it("lists every Run newest first, each opening its Run page with why it ended", 
   await expect
     .element(rowOf("start-dev").getByRole("link", { name: "start-dev" }))
     .toHaveAttribute("href", `/projects/${taskRepository}/runs/run-dev`);
-  await expect.element(rowOf("start-dev")).toHaveTextContent("Agent failure");
+  await expect.element(rowOf("start-dev")).toMatchTextContent("Agent failure");
   await expect
     .element(rowOf("start-dev"))
-    .toHaveTextContent("The required check lint failed again");
+    .toMatchTextContent("The required check lint failed again");
   await expect
     .element(rowOf("start-dev").getByRole("link", { name: "Issue #40, open", exact: true }))
     .toBeInTheDocument();
-  await expect.element(rowOf("review-pr")).toHaveTextContent("Approved by PhilDL");
-  await expect.element(rowOf("review-pr")).toHaveTextContent("from GitHub");
-  await expect.element(rowOf("fix-ci", 1)).toHaveTextContent("Run again by PhilDL");
+  await expect.element(rowOf("review-pr")).toMatchTextContent("Approved by PhilDL");
+  await expect.element(rowOf("review-pr")).toMatchTextContent("from GitHub");
+  await expect.element(rowOf("fix-ci", 1)).toMatchTextContent("Run again by PhilDL");
   // Two Attempts of 30 minutes each.
-  await expect.element(rowOf("start-dev")).toHaveTextContent("1 h");
+  await expect.element(rowOf("start-dev")).toMatchTextContent("1 h");
   await expect
     .element(rowOf("plan").getByRole("link", { name: "Pull request #41, merged" }))
     .toHaveAttribute("href", `https://github.com/${taskRepository}/pull/41`);
@@ -208,7 +208,7 @@ it("lists the pull requests with their state and the comments the Runs posted", 
   const pullRequests = page.getByRole("region", { name: /^Pull requests/u });
   await expect
     .element(pullRequests.getByRole("row").nth(0))
-    .toHaveTextContent("Plan the reader rework");
+    .toMatchTextContent("Plan the reader rework");
   await expect
     .element(
       pullRequests
@@ -219,7 +219,7 @@ it("lists the pull requests with their state and the comments the Runs posted", 
     .toBeInTheDocument();
   await expect
     .element(pullRequests.getByRole("row").nth(1))
-    .toHaveTextContent("Conflicts with base");
+    .toMatchTextContent("Conflicts with base");
   await expect
     .element(
       pullRequests
@@ -231,7 +231,7 @@ it("lists the pull requests with their state and the comments the Runs posted", 
 
   const comments = page.getByRole("region", { name: /^Comments and reviews/u });
   const review = comments.getByRole("row").nth(0);
-  await expect.element(review).toHaveTextContent("Review");
+  await expect.element(review).toMatchTextContent("Review");
   await expect
     .element(review.getByRole("img", { name: "Pull request #41, merged", exact: true }))
     .toBeInTheDocument();

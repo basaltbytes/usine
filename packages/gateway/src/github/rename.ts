@@ -1,6 +1,6 @@
 import { canonicalRepositoryName, RepositoryName } from "@usine/core/repository";
 import { Effect, Option, Schema } from "effect";
-import { Headers, HttpClient, HttpClientRequest } from "effect/unstable/http";
+import { Headers, HttpClient, HttpClientRequest } from "effect/http";
 import type { Attachment } from "../attachment/attachment.ts";
 import { absoluteUrl, afterPrefix, type GitHubOrigins, withGitHubCredential } from "./github.ts";
 

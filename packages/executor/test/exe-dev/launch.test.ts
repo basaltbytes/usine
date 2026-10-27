@@ -607,10 +607,14 @@ describe("exe.dev launch", () => {
           "This attempt has no live session in this orchestrator",
         );
         const cancel = yield* executor.cancel(ATTEMPT_ID, "cancel").pipe(Effect.forkChild);
-        // A full interrupt grace passes; the cancel must not time out on a stop it didn't start.
-        yield* TestClock.adjust("2 seconds");
-        yield* Effect.sync(() => {
-          assert.isUndefined(cancel.pollUnsafe(), "the cancel must wait for the release");
+        yield* Effect.gen(function* () {
+          // The launch releases the Attempt when its own stop exceeds the interrupt grace.
+          yield* TestClock.adjust("1999 millis");
+          yield* Effect.sync(() => {
+            assert.isUndefined(cancel.pollUnsafe(), "the cancel must wait for the release");
+          });
+          // A full interrupt grace passes; the cancel must not time out on a stop it didn't start.
+          yield* TestClock.adjust("1 millis");
         }).pipe(Effect.ensuring(Deferred.succeed(taskStopped, undefined)));
         yield* Fiber.join(cancel);
         const failure = yield* Fiber.join(launch).pipe(Effect.flip);

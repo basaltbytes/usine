@@ -1,24 +1,14 @@
 import { NodeFileSystem } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
-import {
-  Context,
-  DateTime,
-  Effect,
-  Encoding,
-  Layer,
-  Logger,
-  Option,
-  Redacted,
-  Ref,
-  Stream,
-} from "effect";
+import { Context, DateTime, Effect, Layer, Logger, Option, Redacted, Ref, Stream } from "effect";
+import { Base64 } from "effect/encoding";
 import {
   Headers,
   HttpClient,
   HttpClientResponse,
   HttpServerRequest,
   HttpServerResponse,
-} from "effect/unstable/http";
+} from "effect/http";
 import {
   AnonymousCredential,
   Attachment,
@@ -209,7 +199,7 @@ describe("GatewayProxy", () => {
         );
         assert.deepStrictEqual(
           Headers.get(request.headers, "authorization"),
-          Option.some(`Basic ${Encoding.encodeBase64(`x-access-token:${INSTALLATION_TOKEN}`)}`),
+          Option.some(`Basic ${Base64.encode(`x-access-token:${INSTALLATION_TOKEN}`)}`),
         );
         assert.deepStrictEqual(
           Headers.get(request.headers, "git-protocol"),
@@ -550,7 +540,7 @@ describe("GatewayProxy", () => {
         assert(request !== undefined);
         assert.deepStrictEqual(
           Headers.get(request.headers, "authorization"),
-          Option.some(`Basic ${Encoding.encodeBase64(`x-access-token:${INSTALLATION_TOKEN}`)}`),
+          Option.some(`Basic ${Base64.encode(`x-access-token:${INSTALLATION_TOKEN}`)}`),
         );
         const served = lines.find((line) => line.includes("Served a GitHub release download"));
         assert(served !== undefined, lines.join("\n"));

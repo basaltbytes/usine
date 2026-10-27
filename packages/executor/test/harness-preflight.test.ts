@@ -6,8 +6,8 @@ import { HarnessReady } from "@usine/core/agent/capability";
 import { MachineId, WorkerName } from "@usine/core/worker";
 import { Deferred, Effect, Fiber, Option, Sink, Stream } from "effect";
 import { TestClock } from "effect/testing";
-import { ChildProcessSpawner } from "effect/unstable/process";
-import type { StandardCommand } from "effect/unstable/process/ChildProcess";
+import { ChildProcessSpawner } from "effect/process";
+import type { StandardCommand } from "effect/process/ChildProcess";
 import { claudeLoginLockLayer } from "../src/executor.ts";
 import {
   agentsHarnessProbe,

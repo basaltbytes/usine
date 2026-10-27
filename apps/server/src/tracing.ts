@@ -9,8 +9,8 @@ import {
   Schema,
   SchemaTransformation,
 } from "effect";
-import { FetchHttpClient, HttpClient } from "effect/unstable/http";
-import { OtlpSerialization, OtlpTracer } from "effect/unstable/observability";
+import { FetchHttpClient, HttpClient } from "effect/http";
+import { OtlpSerialization, OtlpTracer } from "effect/observability";
 import { type CliVersionError, packageVersion } from "./cli.ts";
 
 const RESOURCE_ATTRIBUTES = "OTEL_RESOURCE_ATTRIBUTES";
@@ -36,7 +36,7 @@ const ResourceAttributes = Schema.String.pipe(
 const resourceAttributes = Effect.fn("Tracing.resourceAttributes")(function* () {
   const refuse = (error: { readonly message: string }) =>
     new ResourceAttributesError({ variable: RESOURCE_ATTRIBUTES, message: error.message });
-  const value = yield* Config.option(Config.string(RESOURCE_ATTRIBUTES)).pipe(
+  const value = yield* Config.option(Config.String(RESOURCE_ATTRIBUTES)).pipe(
     Effect.mapError(refuse),
   );
   return yield* Option.match(value, {

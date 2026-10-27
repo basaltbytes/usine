@@ -20,7 +20,7 @@ For Node.js, use `@effect/platform-node@beta` instead.
 ## Minimal Example
 
 ```typescript
-import { Argument, Command, Flag } from "effect/unstable/cli"
+import { Argument, Command, Flag } from "effect/cli"
 import { BunServices, BunRuntime } from "@effect/platform-bun"
 import { Console, Effect } from "effect"
 
@@ -49,7 +49,7 @@ Built-in `--help` and `--version` work automatically. Every command should have 
 ### Arguments
 
 ```typescript
-import { Argument } from "effect/unstable/cli"
+import { Argument } from "effect/cli"
 
 Argument.string("file")                              // required text
 Argument.string("output").pipe(Argument.optional)    // optional
@@ -62,7 +62,7 @@ Argument.integer("id").pipe(Argument.withSchema(TaskId)) // schema-validated
 ### Flags
 
 ```typescript
-import { Flag } from "effect/unstable/cli"
+import { Flag } from "effect/cli"
 
 Flag.boolean("verbose").pipe(Flag.withAlias("v"))     // boolean
 Flag.string("output").pipe(Flag.withAlias("o"))       // text
@@ -192,7 +192,7 @@ class TaskRepo extends Context.Service<TaskRepo, {
 ### Commands
 
 ```typescript
-import { Argument, Command, Flag } from "effect/unstable/cli"
+import { Argument, Command, Flag } from "effect/cli"
 import { Console, Effect, Option } from "effect"
 
 const addCmd = Command.make("add", {

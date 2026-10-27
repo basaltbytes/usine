@@ -1,5 +1,5 @@
 import { Effect, Layer, Option, Schema } from "effect";
-import { HttpClient, HttpClientError, HttpClientResponse } from "effect/unstable/http";
+import { HttpClient, HttpClientError, HttpClientResponse } from "effect/http";
 
 /** The base URL of the fake Hetzner Cloud API. */
 export const HETZNER_TEST_API = "https://hetzner.test/v1";

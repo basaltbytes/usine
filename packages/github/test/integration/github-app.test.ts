@@ -3,7 +3,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { RepositoryName } from "@usine/core/repository";
 import { InstanceDirectory } from "@usine/core/instance";
 import { Config, Effect, Layer, Redacted, Schema } from "effect";
-import { FetchHttpClient } from "effect/unstable/http";
+import { FetchHttpClient } from "effect/http";
 import { GitHubApp } from "../../src/github-app.ts";
 import { localSecretsLayer } from "../../src/local-secrets.ts";
 
@@ -62,10 +62,10 @@ describe("operator-created GitHub App", () => {
   it.live("mints both token shapes and records the App bot identity", () =>
     Effect.gen(function* () {
       const settings = yield* Effect.all({
-        instanceDirectory: Config.string("USINE_GITHUB_INTEGRATION_INSTANCE_DIRECTORY"),
-        repository: Config.string("USINE_GITHUB_INTEGRATION_REPO"),
+        instanceDirectory: Config.String("USINE_GITHUB_INTEGRATION_INSTANCE_DIRECTORY"),
+        repository: Config.String("USINE_GITHUB_INTEGRATION_REPO"),
         issueNumber: Config.schema(PositiveIntFromString, "USINE_GITHUB_INTEGRATION_ISSUE_NUMBER"),
-        botLogin: Config.string("USINE_GITHUB_INTEGRATION_BOT_LOGIN"),
+        botLogin: Config.String("USINE_GITHUB_INTEGRATION_BOT_LOGIN"),
       });
       const root = InstanceDirectory.make(settings.instanceDirectory);
       const repository = RepositoryName.make(settings.repository);

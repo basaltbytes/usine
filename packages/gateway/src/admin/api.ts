@@ -8,7 +8,7 @@ import {
   HttpApiGroup,
   HttpApiMiddleware,
   HttpApiSecurity,
-} from "effect/unstable/httpapi";
+} from "effect/http-api";
 import {
   type Attachment,
   AttachmentAlreadyExpired,
@@ -112,8 +112,6 @@ export class AdminAuthorization extends HttpApiMiddleware.Service<AdminAuthoriza
   { error: HttpApiError.Unauthorized, security: { bearer: HttpApiSecurity.bearer } },
 ) {}
 
-const strict = { parseOptions: { onExcessProperty: "error" } } as const;
-
 /**
  * The admin API the executor uses to attach, renew, and detach a Worker VM's GitHub credential
  * for an Attempt, and to read the Gateway's LLM provider credential kinds (ADR 0013).
@@ -124,13 +122,13 @@ export const GatewayAdminApi = HttpApi.make("GatewayAdminApi").add(
   HttpApiGroup.make("attachments")
     .add(
       HttpApiEndpoint.post("attach", "/v1/attachments", {
-        payload: AttachRequest.annotate(strict),
+        payload: AttachRequest,
         success: Attached,
         error: AttachmentAlreadyExpired.annotate({ httpApiStatus: 422 }),
       }),
       HttpApiEndpoint.put("renew", "/v1/attachments/:id", {
         params: { id: AttachmentId },
-        payload: AttachRequest.annotate(strict),
+        payload: AttachRequest,
         success: Attached,
         error: [
           AttachmentAlreadyExpired.annotate({ httpApiStatus: 422 }),
@@ -143,6 +141,7 @@ export const GatewayAdminApi = HttpApi.make("GatewayAdminApi").add(
       }),
       HttpApiEndpoint.get("list", "/v1/attachments", { success: AttachmentList }),
     )
+    .annotate(HttpApi.PayloadParseOptions, { onExcessProperty: "error" })
     .middleware(AdminAuthorization),
   HttpApiGroup.make("llm")
     .add(HttpApiEndpoint.get("providers", "/v1/providers", { success: LlmProviderList }))

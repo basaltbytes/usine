@@ -5,7 +5,7 @@ import {
   HttpClientRequest,
   type HttpServerRequest,
   HttpServerResponse,
-} from "effect/unstable/http";
+} from "effect/http";
 
 /** Connection-level headers that are never forwarded (RFC 9110, section 7.6.1). */
 const HOP_BY_HOP = [

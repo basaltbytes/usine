@@ -1,5 +1,5 @@
 import { Effect, Layer, Redacted } from "effect";
-import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi";
+import { HttpApiBuilder, HttpApiError } from "effect/http-api";
 import { Attachment, type AttachmentId, newAttachmentId } from "../attachment/attachment.ts";
 import { Attachments } from "../attachment/store.ts";
 import { CallerClaims, CallerTokens } from "../caller/caller.ts";

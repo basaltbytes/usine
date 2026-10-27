@@ -1,3 +1,4 @@
+import { closedStruct } from "./closed-struct.ts";
 import { EventId } from "./event.ts";
 import { ItemKey } from "./item.ts";
 import { LoopName } from "./loop.ts";
@@ -26,17 +27,15 @@ export type CycleCount = typeof CycleCount.Type;
 
 /** The admitted and completed Runs of one Loop in the current cycle generation. */
 export class LoopCycleCount extends Schema.Class<LoopCycleCount>("LoopCycleCount")(
-  Schema.Struct({
+  closedStruct({
     loop: LoopName,
     admitted: CycleCount,
     completed: CycleCount,
-  })
-    .check(
-      Schema.makeFilter(({ admitted, completed }) => completed <= admitted, {
-        message: "Completed runs can't exceed admitted runs",
-      }),
-    )
-    .annotate({ parseOptions: { onExcessProperty: "error" } }),
+  }).check(
+    Schema.makeFilter(({ admitted, completed }) => completed <= admitted, {
+      message: "Completed runs can't exceed admitted runs",
+    }),
+  ),
 ) {}
 
 /** The ID of the Event and cycle generation that first exhausted an Item's budget. */
@@ -45,25 +44,23 @@ export type CycleBudgetAskId = typeof CycleBudgetAskId.Type;
 
 /** An Ask for the operator to reset an Item's cycle budget; no Runs open until the reset. */
 export class CycleBudgetAsk extends Schema.Class<CycleBudgetAsk>("CycleBudgetAsk")(
-  Schema.Struct({
+  closedStruct({
     id: CycleBudgetAskId,
     itemKey: ItemKey,
     repository: RepositoryName,
     loop: LoopName,
     limit: CycleLimit,
     counts: Schema.NonEmptyArray(LoopCycleCount),
-  })
-    .check(
-      Schema.makeFilter(
-        ({ loop, limit, counts }) =>
-          new Set(counts.map((count) => count.loop)).size === counts.length &&
-          counts.some((count) => count.loop === loop && count.admitted >= limit),
-        {
-          message: "Expected unique participating loops, including the exhausted loop at its limit",
-        },
-      ),
-    )
-    .annotate({ parseOptions: { onExcessProperty: "error" } }),
+  }).check(
+    Schema.makeFilter(
+      ({ loop, limit, counts }) =>
+        new Set(counts.map((count) => count.loop)).size === counts.length &&
+        counts.some((count) => count.loop === loop && count.admitted >= limit),
+      {
+        message: "Expected unique participating loops, including the exhausted loop at its limit",
+      },
+    ),
+  ),
 ) {
   /** The highest `completed` count across Loops; each Loop runs at most once per round. */
   get completedCycles(): CycleCount {

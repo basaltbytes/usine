@@ -3,7 +3,7 @@ import { ClaudeLoginLock } from "@usine/agents/runtime";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import { SshDestination, WorkerName } from "@usine/core/worker";
 import { Effect, Option, Ref, Schema } from "effect";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcessSpawner } from "effect/process";
 import {
   ExecutorOperationError,
   fullPreflight,

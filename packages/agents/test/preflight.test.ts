@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { HarnessReady, HarnessUnavailableError } from "@usine/core/agent/capability";
 import { Deferred, Effect, Fiber, Layer, Option, Schema, Sink, Stream } from "effect";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcessSpawner } from "effect/process";
 import { TestClock } from "effect/testing";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
