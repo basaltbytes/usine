@@ -303,7 +303,7 @@ export const conflictingSalvageMessage = ({ ref, commit }: SalvagePushed): strin
   `Not applied: the previous attempt's work on ${ref} at ${commit.slice(0, 7)} conflicts with the current revision. It is still on ${ref}`;
 
 export const outOfMemoryLine = ({ kills, memoryMib }: OutOfMemoryKills): string =>
-  `The kernel killed ${kills} ${kills === 1 ? "process" : "processes"} in the attempt container when it reached its ${memoryMib} MiB memory limit`;
+  `The kernel killed ${kills} ${kills === 1 ? "process" : "processes"} for memory across containers in this attempt. The last container with recorded kills had a ${memoryMib} MiB memory limit`;
 
 /** Returns a used-up cycle budget's rounds and Runs per Loop, for example `3 completed rounds. start-dev: 2 runs`. */
 export const cycleBudgetCounts = (ask: CycleBudgetNeed["ask"]): string =>
