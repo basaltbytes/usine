@@ -3,7 +3,16 @@
   "extends": ["//"],
   "tasks": {
     "test": {
-      "dependsOn": ["build"]
+      "dependsOn": ["build"],
+      "inputs": [
+        "$TURBO_EXTENDS$",
+        "$TURBO_ROOT$/infra/hetzner/orchestrator-cloud-init.yaml",
+        "$TURBO_ROOT$/infra/hetzner/orchestrator-nftables.conf",
+        "$TURBO_ROOT$/infra/hetzner/render-cloud-init.sh",
+        "$TURBO_ROOT$/infra/hetzner/gateway/gateway.sh",
+        "$TURBO_ROOT$/infra/hetzner/gateway/gateway-cloud-init.yaml",
+        "$TURBO_ROOT$/infra/worker-image/Dockerfile"
+      ]
     }
   }
 }

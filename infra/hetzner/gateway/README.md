@@ -4,7 +4,7 @@ These files create the gateway host of [#223](https://github.com/basaltbytes/usi
 
 | File | Contents |
 | --- | --- |
-| `gateway.sh` | Creates and deletes the network, gateway VM, and firewall with `hcloud`; logs the gateway in to a tailnet; installs `@usine/gateway` from npm or packed tarballs; renders a worker's cloud-init. |
+| `gateway.sh` | Creates and deletes the network, gateway VM, and firewall with `hcloud`; logs the gateway in to a tailnet; installs `@usine/gateway` from npm or packed tarballs; renders a worker's cloud-init; creates the orchestrator's server in the network and logs it in to the tailnet. |
 | `gateway-cloud-init.yaml` | The gateway VM: nftables, dnsmasq, chrony, bastion sshd settings, Tailscale, Node.js, and the `usine-gateway` service. |
 | `gateway-nftables.conf` | The gateway's firewall rules. |
 | `egress-allowlist` | The hosts that workers can reach through the forward proxy: package hosts and the harness login hosts. |
@@ -399,9 +399,25 @@ Rebuilding a worker from `worker-user-data` also adds the time server, but loses
 
 5. Check from the orchestrator with `ssh -J root@<gateway> usine@<worker> timedatectl`, which shows `System clock synchronized: yes` and `NTP service: active`. `timedatectl timesync-status` shows `Server: 10.42.0.2 (10.42.0.2)`.
 
+## Run the orchestrator in the gateway's network
+
+`gateway.sh orchestrator` creates a server for `usine up` itself in the gateway's network, from [`../orchestrator-cloud-init.yaml`](../orchestrator-cloud-init.yaml): Node.js from NodeSource, `@usine/server` installed with npm in the `usine` user's home, Tailscale, chrony with the gateway as its time source, the nftables rules of [`../orchestrator-nftables.conf`](../orchestrator-nftables.conf), and a `usine.service` systemd unit for the instance folder `/home/usine/factory`. The server has public addresses for its own connections and a Hetzner firewall that admits only ICMP; nftables accepts SSH and the web UI port from `tailscale0` and the private network only. From the server, `destination: usine-gateway` and the workers' private addresses work as from a laptop on the tailnet.
+
+```sh
+SSH_KEY=my-key ./gateway.sh orchestrator ~/.ssh/id_ed25519.pub     # the key that the usine user authorizes
+./gateway.sh orchestrator-tailnet-up -i ~/.ssh/usine_worker          # over SSH to root through the gateway
+```
+
+`SSH_KEY` names the project's keys for root, as for `create`. `ORCHESTRATOR_NAME` (default `usine-orchestrator`), `ORCHESTRATOR_TYPE` (default `cpx12`), `ORCHESTRATOR_LABEL`, `LOCATION`, and `IMAGE` set the server; `LOCATION` must be in the network's zone. `orchestrator-user-data` prints the rendered user data. `orchestrator-tailnet-up` runs `tailscale up` with the flags of `tailnet-up` and prints the tailnet address for `USINE_LISTEN`. [Run the orchestrator on a server](https://docs.usine.dev/guides/run-the-orchestrator-on-a-server/) covers the whole setup and the move of an instance from a laptop. Delete the orchestrator's server and its firewall before the gateway:
+
+```sh
+hcloud server delete usine-orchestrator
+hcloud firewall delete usine-orchestrator
+```
+
 ## Delete the gateway
 
-Delete the workers on the network first, then:
+Delete the workers and the orchestrator's server on the network first, then:
 
 ```sh
 ./gateway.sh delete

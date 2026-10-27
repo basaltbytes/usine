@@ -1,15 +1,17 @@
 #!/bin/sh
-# Prints cloud-init.yaml with "@AUTHORIZED_KEYS@" replaced by $1, a JSON list
-# of the public keys to authorize for the usine user, and @NODE_MAJOR@ by
-# NODE_MAJOR of ../worker-image/Dockerfile, the Node.js major version of the
-# attempt image. create-worker.sh, snapshot.sh, and
-# `gateway/gateway.sh worker-user-data` send the result as user data.
+# Prints cloud-init.yaml, or the file in $2, with "@AUTHORIZED_KEYS@" replaced
+# by $1, a JSON list of the public keys to authorize for the usine user, and
+# @NODE_MAJOR@ by NODE_MAJOR of ../worker-image/Dockerfile, the Node.js major
+# version of the attempt image. create-worker.sh, snapshot.sh, and
+# `gateway/gateway.sh worker-user-data` send the result as user data, and
+# `gateway/gateway.sh orchestrator-user-data` renders orchestrator-cloud-init.yaml.
 #
 #   ./render-cloud-init.sh '["ssh-ed25519 AAAA... orchestrator"]' > user-data.yaml
 set -eu
 
-[ "$#" -eq 1 ] || { echo "Usage: render-cloud-init.sh <JSON list of public keys>" >&2; exit 64; }
+[ "$#" -eq 1 ] || [ "$#" -eq 2 ] || { echo "Usage: render-cloud-init.sh <JSON list of public keys> [<cloud-init file>]" >&2; exit 64; }
 here=$(cd "$(dirname "$0")" && pwd)
+template=${2:-$here/cloud-init.yaml}
 dockerfile=$here/../worker-image/Dockerfile
 node_major=$(sed -n 's/^ARG NODE_MAJOR=//p' "$dockerfile")
 case "$node_major" in
@@ -22,4 +24,4 @@ AUTHORIZED_KEYS=$1 NODE_MAJOR=$node_major awk '
   /^[[:space:]]*#/ { print; next }
   (at = index($0, placeholder)) { $0 = substr($0, 1, at - 1) ENVIRON["AUTHORIZED_KEYS"] substr($0, at + length(placeholder)) }
   { gsub(/@NODE_MAJOR@/, ENVIRON["NODE_MAJOR"]); print }
-' "$here/cloud-init.yaml"
+' "$template"

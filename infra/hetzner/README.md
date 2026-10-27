@@ -7,6 +7,7 @@ An `ssh` worker is any Linux machine that the orchestrator reaches over SSH. The
 - `create-worker.sh` creates the server with that file, labels it `usine=worker`, and attaches a Hetzner firewall that allows SSH only from the orchestrator's address.
 - `snapshot.sh` builds the snapshot from which a [provisioned worker](#provisioned-workers) creates a server for each attempt.
 - `../worker-image/Dockerfile` is the image of each attempt's container. CI builds it and pushes it to `ghcr.io/basaltbytes/usine-worker`, tagged with its Claude Code and Codex versions.
+- `orchestrator-cloud-init.yaml` and `orchestrator-nftables.conf` build a server for the orchestrator itself, in the network of [`gateway/`](gateway/README.md#run-the-orchestrator-in-the-gateways-network). `gateway/gateway.sh orchestrator` creates it.
 
 ## Attempt containers
 
