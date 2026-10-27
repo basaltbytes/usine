@@ -14,9 +14,11 @@ import {
   Schema,
   Scope,
   Semaphore,
+  Sink,
   Stream,
 } from "effect";
 import { TestClock } from "effect/testing";
+import { ChildProcessSpawner } from "effect/unstable/process";
 import {
   Interrupt,
   type InterventionState,
@@ -28,7 +30,14 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type ChildHost, LocalProcess, RemoteShell } from "../../src/child-host/child-host.ts";
+import {
+  CHILD_STOP_SCRIPT,
+  type ChildHost,
+  LocalProcess,
+  RemoteShell,
+  SSH_FAILURE,
+  sshArguments,
+} from "../../src/child-host/child-host.ts";
 import {
   AgentResultError,
   ChildBackend,
@@ -55,8 +64,43 @@ const loginLock = Layer.effect(
   ),
 );
 
-/** The Claude backend, with a login lock that the test can also acquire. */
-const claudeChild = claudeChildLayer.pipe(Layer.provideMerge(loginLock));
+const encoder = new TextEncoder();
+
+/**
+ * Returns a process spawner for the backend's commands on Workers, which records each command line
+ * and answers it with `exitCode` and `stdout`.
+ */
+const workerCommands = (exitCode: number, stdout = "") => {
+  const commands: Array<ReadonlyArray<string>> = [];
+  const layer = Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(
+    ChildProcessSpawner.make((command) =>
+      Effect.gen(function* () {
+        if (command._tag !== "StandardCommand") return yield* Effect.die("unexpected pipeline");
+        commands.push([command.command, ...command.args]);
+        return ChildProcessSpawner.makeHandle({
+          pid: ChildProcessSpawner.ProcessId(123),
+          exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(exitCode)),
+          isRunning: Effect.succeed(false),
+          kill: () => Effect.void,
+          stdin: Sink.drain,
+          stdout: Stream.make(encoder.encode(stdout)),
+          stderr: Stream.empty,
+          all: Stream.empty,
+          getInputFd: () => Sink.drain,
+          getOutputFd: () => Stream.empty,
+          unref: Effect.succeed(Effect.void),
+        });
+      }),
+    ),
+  );
+  return { commands, layer };
+};
+
+/** The Claude backend, with a login lock that the test can also acquire, and `commands` on Workers. */
+const claudeChildWith = (commands: Layer.Layer<ChildProcessSpawner.ChildProcessSpawner>) =>
+  claudeChildLayer.pipe(Layer.provideMerge(loginLock), Layer.provide(commands));
+
+const claudeChild = claudeChildWith(workerCommands(0).layer);
 
 /** The event that shows Claude's first API request succeeded with a working login. */
 const rateLimitEvent = { type: "rate_limit_event", rate_limit_info: { status: "allowed" } };
@@ -183,6 +227,89 @@ const joinAdvancingClock = Effect.fn(function* <A, E>(fiber: Fiber.Fiber<A, E>) 
   while (fiber.pollUnsafe() === undefined) yield* TestClock.adjust("5 seconds");
   return yield* Fiber.join(fiber);
 });
+
+/** A remote host whose SSH client exits with `code` at once: `SSH_FAILURE` for a broken connection. */
+const exitingHost = (code: number) =>
+  new RemoteShell({
+    ssh: { command: process.execPath, args: ["-e", `process.exit(${code})`] },
+    sshEnvironment: {},
+    destination: "worker.exe.xyz",
+  });
+
+/**
+ * Returns a fake Claude SDK whose first launch starts a tool call and then fails, as the live SDK
+ * does, once its SSH client exits. Later launches finish the task; `resumed` records the session
+ * each one resumes, and `prompts` its first message.
+ */
+const droppedLaunch = () => {
+  const resumed: Array<string | undefined> = [];
+  const prompts: Array<string> = [];
+  let launches = 0;
+  const sdk = Layer.succeed(ClaudeSdk)({
+    open: (input, options) => {
+      launches += 1;
+      if (launches === 1) {
+        const spawn = options.spawnClaudeCodeProcess;
+        assert(spawn !== undefined);
+        const ssh = spawn({
+          command: "claude",
+          args: [],
+          cwd: "/workspace/repo",
+          env: {},
+          signal: new AbortController().signal,
+        });
+        const exited = new Promise((resolve) => ssh.once("exit", resolve));
+        return {
+          ...scripted([]),
+          async *[Symbol.asyncIterator]() {
+            yield { type: "system", subtype: "init", session_id: "claude-session-1" };
+            yield rateLimitEvent;
+            yield {
+              type: "assistant",
+              message: {
+                id: "message-1",
+                usage: { input_tokens: 100, output_tokens: 20 },
+                content: [{ type: "tool_use", id: "call-1", name: "Bash", input: {} }],
+              },
+            };
+            throw new Error(`Claude Code process exited with code ${String(await exited)}`);
+          },
+        };
+      }
+      resumed.push(options.resume);
+      return {
+        ...scripted([]),
+        async *[Symbol.asyncIterator]() {
+          const first = await input[Symbol.asyncIterator]().next();
+          if (first.done !== true) prompts.push(first.value.message.content);
+          yield { type: "system", subtype: "init", session_id: "claude-session-1" };
+          yield {
+            type: "assistant",
+            message: {
+              id: "message-2",
+              usage: { input_tokens: 50, output_tokens: 10 },
+              content: [{ type: "text", text: "Tests pass." }],
+            },
+          };
+          yield {
+            type: "result",
+            subtype: "success",
+            result: "Tests pass.",
+            modelUsage: {
+              "claude-sonnet-4-6": {
+                inputTokens: 50,
+                outputTokens: 10,
+                cacheCreationInputTokens: 0,
+                costUSD: 0.5,
+              },
+            },
+          };
+        },
+      };
+    },
+  });
+  return { resumed, prompts, sdk };
+};
 
 describe("Claude child backend", () => {
   it.effect("launches again after Claude loses its login refresh lock and keeps that session", () =>
@@ -818,6 +945,75 @@ describe("Claude child backend", () => {
         assert.strictEqual(spawned.env.HOME, undefined, "the SSH client inherits nothing");
       }).pipe(Effect.provide(claudeChild), Effect.provide(sdk)),
     );
+  });
+
+  it.effect("resumes a remote child's saved session after its SSH connection breaks", () => {
+    const { resumed, prompts, sdk } = droppedLaunch();
+    const worker = workerCommands(0, "/workspace/repo.child-1.pid stopped");
+    const host = exitingHost(SSH_FAILURE);
+    return Effect.gen(function* () {
+      const session = yield* (yield* ChildBackend).launch(request(undefined, undefined, host));
+      const [events, result] = yield* joinAdvancingClock(
+        yield* Effect.forkChild(Effect.all([Stream.runCollect(session.events), session.result])),
+      );
+      assert.strictEqual(result.message, "Tests pass.", "the same child returns the answer");
+      assert.deepStrictEqual(resumed, ["claude-session-1"]);
+      assert.match(prompts[0] ?? "", /^usine lost its connection to this session/u);
+      assert.deepStrictEqual(worker.commands, [
+        [
+          host.ssh.command,
+          ...sshArguments(host, {
+            command: "sh",
+            args: ["-c", CHILD_STOP_SCRIPT, "sh", "/workspace/repo.child-1.pid"],
+          }),
+        ],
+      ]);
+      assert.deepStrictEqual(
+        events.flatMap((event) =>
+          event._tag === "ToolFinished" ? [[event.callId, event.isError]] : [],
+        ),
+        [["call-1", true]],
+        "the call that the broken process ran is closed",
+      );
+      assert.lengthOf(
+        events.filter((event) => event._tag === "SessionStarted"),
+        1,
+      );
+      const usage = events.filter((event) => event._tag === "SessionTokensUpdated").at(-1);
+      assert(usage?._tag === "SessionTokensUpdated");
+      assert.strictEqual(usage.totalTokens, 180, "usage carries over from the broken launch");
+      assert.deepStrictEqual(usage.costUsd, Option.some(0.5));
+    }).pipe(Effect.provide(claudeChildWith(worker.layer)), Effect.provide(sdk), Effect.scoped);
+  });
+
+  it.effect("fails a remote child whose Claude process fails instead of resuming it", () => {
+    const { resumed, sdk } = droppedLaunch();
+    const worker = workerCommands(0);
+    return Effect.gen(function* () {
+      const session = yield* (yield* ChildBackend).launch(
+        request(undefined, undefined, exitingHost(1)),
+      );
+      const error = yield* Effect.flip(session.result);
+      assert(error instanceof SessionOperationError);
+      assert.strictEqual(error.message, "Claude output stream failed");
+      assert.deepStrictEqual(resumed, []);
+      assert.deepStrictEqual(worker.commands, []);
+    }).pipe(Effect.provide(claudeChildWith(worker.layer)), Effect.provide(sdk), Effect.scoped);
+  });
+
+  it.effect("fails a remote child once its Worker stays unreachable through every resume", () => {
+    const { resumed, sdk } = droppedLaunch();
+    const worker = workerCommands(SSH_FAILURE);
+    return Effect.gen(function* () {
+      const session = yield* (yield* ChildBackend).launch(
+        request(undefined, undefined, exitingHost(SSH_FAILURE)),
+      );
+      const error = yield* joinAdvancingClock(yield* Effect.forkChild(Effect.flip(session.result)));
+      assert(error instanceof SessionOperationError);
+      assert.strictEqual(error.message, "Claude output stream failed");
+      assert.lengthOf(worker.commands, 6, "one stop per resume try");
+      assert.deepStrictEqual(resumed, [], "no Claude process starts before the old one stops");
+    }).pipe(Effect.provide(claudeChildWith(worker.layer)), Effect.provide(sdk), Effect.scoped);
   });
 
   it.effect("rejects an unknown model through the typed channel before sending the prompt", () => {

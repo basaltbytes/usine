@@ -22,6 +22,7 @@ export type ClaudeQueryOptions = Pick<
   | "pathToClaudeCodeExecutable"
   | "permissionMode"
   | "persistSession"
+  | "resume"
   | "settingSources"
   | "spawnClaudeCodeProcess"
   | "thinking"

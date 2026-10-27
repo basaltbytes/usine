@@ -135,6 +135,7 @@ export const loginCheck = (message: Schema.Json, spentTokens: boolean): LoginChe
   return Schema.is(ClaudeLoginEvidence)(message) ? "loggedIn" : "waiting";
 };
 
+/** Returns the transcript events in `message`; `tools` names the open tool calls by ID. */
 export const sessionEventsFrom = (
   message: Schema.Json,
   session: ChildSession,
@@ -166,6 +167,7 @@ export const sessionEventsFrom = (
           isError: block.is_error === true,
         }),
       );
+      tools.delete(block.tool_use_id);
     }
   }
   return events;

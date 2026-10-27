@@ -1,19 +1,9 @@
 import type { Harness } from "@usine/core/agent/brain";
 import { HarnessUnavailableError, type HarnessCapability } from "@usine/core/agent/capability";
-import { Effect, Option, Stream } from "effect";
-import { ChildProcessSpawner } from "effect/unstable/process";
-import type { ChildHost } from "../child-host/child-host.ts";
-import { hostCommand } from "../child-host/command.ts";
+import { Effect, Option } from "effect";
+import { type ChildHost, SSH_FAILURE } from "../child-host/child-host.ts";
+import { hostOutput } from "../child-host/command.ts";
 import { SessionOperationError } from "../runtime.ts";
-
-/** The exit code OpenSSH returns if it cannot connect or run the remote command. */
-const SSH_FAILURE = 255;
-
-/** The trimmed stdout and exit code of a readiness command. */
-interface ProbeOutput {
-  readonly stdout: string;
-  readonly exitCode: number;
-}
 
 /** Returns the error for a readiness command that exited non-zero; the message includes the command but not its output. */
 export const probeFailed = (
@@ -42,34 +32,19 @@ export const probeOutput = Effect.fn("HarnessPreflight.command")(function* (
   args: ReadonlyArray<string>,
 ) {
   yield* Effect.annotateCurrentSpan({ harness, capability, host: host._tag });
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  return yield* Effect.scoped(
-    Effect.gen(function* () {
-      const handle = yield* spawner.spawn(
-        hostCommand(
-          host,
-          { environment, command, args },
-          { detached: false, forceKillAfter: "2 seconds" },
-        ),
-      );
-      const [stdout, , exitCode] = yield* Effect.all(
-        [
-          handle.stdout.pipe(Stream.decodeText(), Stream.mkString),
-          handle.stderr.pipe(Stream.runDrain),
-          handle.exitCode,
-        ],
-        { concurrency: "unbounded" },
-      );
-      if (host._tag === "RemoteShell" && exitCode === SSH_FAILURE)
-        return yield* new SessionOperationError({
-          operation: "launch",
-          sessionId: Option.none(),
-          message: `Can't reach ${host.destination} to run ${command}`,
-          cause: new Error(`${host.ssh.command} exited with code ${SSH_FAILURE}`),
-        });
-      return { stdout: stdout.trim(), exitCode } satisfies ProbeOutput;
-    }),
-  ).pipe(
+  return yield* hostOutput(host, { environment, command, args }).pipe(
+    Effect.flatMap((output) =>
+      host._tag === "RemoteShell" && output.exitCode === SSH_FAILURE
+        ? Effect.fail(
+            new SessionOperationError({
+              operation: "launch",
+              sessionId: Option.none(),
+              message: `Can't reach ${host.destination} to run ${command}`,
+              cause: new Error(`${host.ssh.command} exited with code ${SSH_FAILURE}`),
+            }),
+          )
+        : Effect.succeed(output),
+    ),
     Effect.timeout("30 seconds"),
     Effect.catchTags({
       PlatformError: () =>

@@ -113,6 +113,27 @@ export const childPidFile = (worktree: string, session: AgentSessionId): string 
   `${worktree}.child-${session.slice(session.lastIndexOf(":") + 1)}.pid`;
 
 /**
+ * The exit code of the OpenSSH client when it can't connect, loses the connection, or can't run the
+ * remote command. Any other code is the remote command's.
+ */
+export const SSH_FAILURE = 255;
+
+/**
+ * Stops the process in `$pidfile`: TERM, up to 5 seconds of waiting, then KILL. Prints
+ * `<pidfile> stopped`, `killed`, or `absent`, and removes the file.
+ */
+const STOP_PID_FILE = `
+  pid=$(cat "$pidfile" 2>/dev/null)
+  if [ -n "$pid" ] && kill -TERM "$pid" 2>/dev/null; then
+    n=0
+    while kill -0 "$pid" 2>/dev/null && [ "$n" -lt 10 ]; do sleep 0.5; n=$((n+1)); done
+    if kill -0 "$pid" 2>/dev/null; then kill -KILL "$pid" 2>/dev/null; echo "$pidfile killed"; else echo "$pidfile stopped"; fi
+  else
+    echo "$pidfile absent"
+  fi
+  rm -f "$pidfile"`;
+
+/**
  * A shell script that stops an Attempt's remaining remote children before its worktree is kept or
  * removed: for each `<worktree>.child-*.pid`, it sends TERM, waits, then sends KILL. Run it with
  * `sh -c` and the worktree as `$1`; it prints one outcome per PID file. An exited SSH client does
@@ -122,16 +143,13 @@ export const CHILD_KILL_SCRIPT = `
 found=0
 for pidfile in "$1".child-*.pid; do
   test -f "$pidfile" || continue
-  found=1
-  pid=$(cat "$pidfile" 2>/dev/null)
-  if [ -n "$pid" ] && kill -TERM "$pid" 2>/dev/null; then
-    n=0
-    while kill -0 "$pid" 2>/dev/null && [ "$n" -lt 10 ]; do sleep 0.5; n=$((n+1)); done
-    if kill -0 "$pid" 2>/dev/null; then kill -KILL "$pid" 2>/dev/null; echo "$pidfile killed"; else echo "$pidfile stopped"; fi
-  else
-    echo "$pidfile absent"
-  fi
-  rm -f "$pidfile"
+  found=1${STOP_PID_FILE}
 done
 test "$found" = 1 || echo no-children
 `.trim();
+
+/**
+ * A shell script that stops one remote child, whose PID file (`childPidFile`) is `$1`, in the way
+ * `CHILD_KILL_SCRIPT` stops each child. Run it with `sh -c`; it prints one outcome.
+ */
+export const CHILD_STOP_SCRIPT = `pidfile=$1${STOP_PID_FILE}`;
