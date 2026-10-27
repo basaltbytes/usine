@@ -129,7 +129,7 @@ HTTP.
 
 | Limit | Value | Source |
 | --- | --- | --- |
-| CPU per invocation | 5 minutes at most on Workers Paid, 30 s by default; 15 minutes per Cron Trigger or Queue consumer | [Limits](https://developers.cloudflare.com/workers/platform/limits/), [pricing](https://developers.cloudflare.com/workers/platform/pricing/) |
+| CPU per invocation | 30 s by default, up to 5 minutes with `limits.cpu_ms` on Workers Paid, for an HTTP request or a Queue consumer (see "Conflicts between vendor pages"). A Cron Trigger that runs every hour or less often gets 15 minutes; one that runs more often gets 30 s | [Limits](https://developers.cloudflare.com/workers/platform/limits/), [Queues limits](https://developers.cloudflare.com/queues/platform/limits/) |
 | Duration | No limit for an HTTP request while the client stays connected; `waitUntil()` runs at most 30 s after the response. 15 minutes for a Cron Trigger, a Queue consumer, or a Durable Object alarm | [Limits](https://developers.cloudflare.com/workers/platform/limits/) |
 | Memory | 128 MB per isolate, heap and WebAssembly included | [Limits](https://developers.cloudflare.com/workers/platform/limits/) |
 | Subrequests | 10,000 per request by default on Workers Paid, configurable up to 10 million | [Limits](https://developers.cloudflare.com/workers/platform/limits/) |
@@ -153,7 +153,7 @@ HTTP.
 | Limit | Value | Source |
 | --- | --- | --- |
 | Message | 128 KB | [Limits](https://developers.cloudflare.com/queues/platform/limits/) |
-| Consumer | 15 minutes of wall time, up to 5 minutes of CPU; batches of up to 100 messages | [Limits](https://developers.cloudflare.com/queues/platform/limits/) |
+| Consumer | 15 minutes of wall time per invocation; 30 s of CPU by default, up to 5 minutes with `limits.cpu_ms`; batches of up to 100 messages | [Limits](https://developers.cloudflare.com/queues/platform/limits/) |
 | Delivery delay | Up to 24 hours | [Limits](https://developers.cloudflare.com/queues/platform/limits/) |
 | Retention | 4 days by default, up to 14 days on Workers Paid | [Limits](https://developers.cloudflare.com/queues/platform/limits/) |
 
@@ -279,6 +279,13 @@ on 22 days, the duration line is $9.34.
 - **Workflows concurrency.** The limits table gives 50,000 concurrent instances on Workers Paid; the
   text below it still says 10,000
   ([limits](https://developers.cloudflare.com/workflows/reference/limits/)).
+- **Queue consumer CPU time.** Workers pricing gives a Queue consumer invocation, like a Cron
+  Trigger invocation, up to 15 minutes of CPU. The Queues limits page gives a consumer 30 s of CPU
+  by default, up to 5 minutes, and 15 minutes of wall time; the Workers limits page gives 15 minutes
+  of CPU only to a Cron Trigger that runs every hour or less often. This note uses the limits pages
+  ([pricing](https://developers.cloudflare.com/workers/platform/pricing/),
+  [Queues limits](https://developers.cloudflare.com/queues/platform/limits/),
+  [Workers limits](https://developers.cloudflare.com/workers/platform/limits/)).
 - **Inngest step duration on Connect workers.** The usage limits give 2 hours per step; the
   performance page says Connect has "no per-request duration limit on steps"
   ([usage limits](https://www.inngest.com/docs/usage-limits/inngest),
