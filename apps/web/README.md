@@ -231,6 +231,14 @@ Bookmarks expire after 30 days. Each browser origin keeps up to 20 runs, the 200
 
 Install the pinned Chromium once with `pnpm --filter @usine/web exec playwright install chromium`, then run `pnpm --filter @usine/web test`. Unit tests run in Node, and interaction tests in Chromium with the real MessageScroller, Base UI disclosures, sidebar, and layout. Board move tests replay stale refreshes, failures, concurrent card moves, and navigation during a request through the real HTTP client with controlled responses. CI installs Chromium and its OS dependencies first.
 
+To run the reader browser tests alone:
+
+```sh
+pnpm --filter @usine/web exec vitest run src/components/runs/transcript/conversation.browser.test.tsx
+```
+
+The checkpoint navigation test waits for startup scrolling to finish, then allows up to five seconds for navigation frames to position the selected row. It checks both offset bounds on the same measurement before adding new activity and checking that the reading position stays unchanged.
+
 If the machine has its own Chromium, such as a worker built by [`infra/hetzner/cloud-init.yaml`](../../infra/hetzner/cloud-init.yaml), set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to its path instead. `vitest.config.ts` passes it to Playwright as `executablePath`, and `turbo.json` lists it in the `test` task's `env`, so `pnpm test` from the repository root sees it.
 
 The tests use up to about 4.7 GiB of memory, roughly half in Vitest's process and most of the rest in Chromium. That's also the peak of `pnpm test` from the repository root, which runs one package's tests at a time. Give an attempt container that runs them at least 6 GiB (`memory_mib: 6144`), and run one such attempt at a time on a machine with 7.7 GiB, such as a Hetzner cx33 or cpx32. Two runs at once on that machine make it swap even when each container's limit allows them: browser tests time out, and the kernel kills processes for memory. The run page totals the processes the kernel killed for memory across an attempt's containers and separately gives the memory limit of the last container with recorded kills.

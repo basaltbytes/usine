@@ -789,21 +789,28 @@ it("resumes following when a wheel turn past a tool output's end reaches the lat
 it("scrolls the reader to a checkpoint chosen in the outline and stops following", async () => {
   mount(events, runId, undefined, [liveAttempt]);
   await expect.poll(atLatest).toBeLessThan(9);
+  await ownScrollEnded();
   const outline = page.getByRole("navigation", { name: "Run outline" });
   await expect
     .element(outline.getByRole("button", { name: "Attempt 1, running" }))
     .toHaveAttribute("aria-expanded", "true");
   await outline.getByRole("button", { name: "Parent, 45 messages" }).click();
   await outline.getByRole("button", { name: "Message 12", exact: true }).click();
-  // The reader keeps its top padding above the row it jumps to.
-  await expect.poll(() => offset(12)).toBeGreaterThanOrEqual(0);
-  await expect.poll(() => offset(12)).toBeLessThan(24);
-  const landed = offset(12);
+  // Navigation needs layout frames; allow a busy browser time to place the row below its padding.
+  const landed = await vi.waitFor(
+    () => {
+      const position = offset(12);
+      expect(position).toBeGreaterThanOrEqual(0);
+      expect(position).toBeLessThan(24);
+      return position;
+    },
+    { timeout: 5_000 },
+  );
   mount([...events, message(46)], runId, undefined, [liveAttempt]);
-  await expect.poll(() => Math.abs(offset(12) - landed)).toBeLessThan(2);
   await expect
     .element(page.getByRole("button", { name: "1 new update", exact: true }))
     .toBeVisible();
+  await expect.poll(() => Math.abs(offset(12) - landed)).toBeLessThan(2);
   window.dispatchEvent(new PageTransitionEvent("pagehide"));
   expect(bookmark()?.position).toMatchObject({ _tag: "Anchor", key: "event:12" });
 });
