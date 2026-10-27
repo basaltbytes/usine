@@ -737,7 +737,9 @@ export const runStatisticsFixture = (now: number, window: "7d" | "30d") => {
           }),
       ),
       approvalWait: durations(3 * scale, 14),
-      retryWait: null,
+      retryWait: durations(scale, 45),
+      resolutionWait: durations(scale, 15),
+      failureWait: durations(2 * scale, 30),
     }),
   });
 };
@@ -774,6 +776,8 @@ export const emptyRunStatisticsFixture = (now: number, window: StatisticsWindow)
       periods: [],
       approvalWait: null,
       retryWait: null,
+      resolutionWait: null,
+      failureWait: null,
     }),
   });
 };

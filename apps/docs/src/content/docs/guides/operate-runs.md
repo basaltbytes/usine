@@ -32,7 +32,7 @@ The line under the blocks names the tasks left out, such as `19 tasks before 19 
 Select **Details** for the run statistics, read only once you open it:
 
 - **Runs closed**, **Median run time**, **Median attempt time**, **Runs in one attempt**: run time is from a run's opening to its close; attempt time is from an attempt's start to its end.
-- **Runs closed per day**, stacked by outcome, and **Needs attention entries per day**, with the median wait for an approval and from a failure to your retry. **Mark resolved** records no time.
+- **Runs closed per day**, stacked by outcome, and **Needs attention entries per day**, with the median wait for an approval and from a failure to your first answer: **Retry**, **Edit and retry**, **Mark resolved**, or **Mark answered**. Separate figures show retry and resolution waits. A resolution followed by a retry counts once, as a resolution. Unanswered failures and resolutions recorded before this timing was available contribute no wait.
 - **Runs per loop**, **Runs per agent**, **Attempts per model**: outcomes, median time, tokens, and cost. A run has a price only if each of its sessions has one.
 - **Attempts per run**, **Queue wait** per worker, and **Worker utilization**: the share of the window that each worker's slots held attempts.
 

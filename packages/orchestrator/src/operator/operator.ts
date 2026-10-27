@@ -861,6 +861,15 @@ const makeOperator = Effect.gen(function* () {
     yield* Effect.logInfo("Operator approved Run", { runId });
   });
 
+  const resolveFailure = Effect.fn("Operator.resolveFailure")(function* (
+    instance: LoadedInstance,
+    runId: RunId,
+    attemptId: AttemptId,
+  ) {
+    yield* Effect.annotateCurrentSpan({ runId, attemptId });
+    yield* runs.resolveFailure(runId, attemptId, instance.config.operator);
+  });
+
   const retry = Effect.fn("Operator.retry")(function* (instance: LoadedInstance, runId: RunId) {
     yield* Effect.annotateCurrentSpan({ runId });
     yield* runs.retry(
@@ -1113,7 +1122,7 @@ const makeOperator = Effect.gen(function* () {
     githubChanges: githubChanges.read,
     pause,
     retry,
-    resolveFailure: runs.resolveFailure,
+    resolveFailure,
     editAndRetry,
     runAgain,
     intervene,
@@ -1143,6 +1152,7 @@ export class Operator extends Context.Service<
     ) => Effect.Effect<void, OperatorError>;
     /** Resolves attention for the displayed failed Attempt. Rejects stale requests. */
     readonly resolveFailure: (
+      instance: LoadedInstance,
       runId: RunId,
       attemptId: AttemptId,
     ) => Effect.Effect<void, OperatorError>;

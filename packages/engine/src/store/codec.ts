@@ -3,6 +3,7 @@ import { CycleGeneration, CycleLimit } from "@usine/core/cycle-budget";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import {
   Attempt,
+  FailureResolution,
   AttemptNumber,
   AttemptTask,
   AttemptId,
@@ -91,6 +92,7 @@ export const AttemptRow = Schema.Struct({
   endedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
   salvage: Schema.NullOr(AttemptSalvage),
   start: Schema.NullOr(AttemptStart),
+  failureResolution: Schema.NullOr(FailureResolution),
   reattachedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
   comments: Schema.NullOr(Schema.Array(Comment)),
   outOfMemory: Schema.NullOr(Schema.Array(ContainerOutOfMemoryKills)),
@@ -147,6 +149,7 @@ export const decodeOutOfMemory = Schema.decodeUnknownEffect(
     Schema.Struct({ outOfMemory: Schema.NullOr(Schema.Array(ContainerOutOfMemoryKills)) }),
   ),
 );
+export const encodeFailureResolution = Schema.encodeSync(FailureResolution);
 export const encodeAttemptStart = Schema.encodeSync(AttemptStart);
 export const decodeNextStarts = Schema.decodeUnknownEffect(
   Schema.Array(Schema.Struct({ nextStart: Schema.NullOr(OperatorRetryStart) })),
@@ -249,6 +252,7 @@ export const attemptFromRow = (row: AttemptRow): Attempt =>
     endedAt: Option.fromNullishOr(row.endedAt),
     salvage: Option.fromNullishOr(row.salvage),
     start: Option.fromNullishOr(row.start),
+    failureResolution: Option.fromNullishOr(row.failureResolution),
     reattachedAt: Option.fromNullishOr(row.reattachedAt),
     comments: row.comments ?? [],
     outOfMemory: Option.liftPredicate(

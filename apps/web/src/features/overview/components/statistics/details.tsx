@@ -20,6 +20,9 @@ import {
 import { runStatisticsQuery } from "~/features/overview/queries";
 import {
   countLabel,
+  medianFailureWait,
+  medianRetryWait,
+  medianResolutionWait,
   oneAttemptShare,
   outcomeTotal,
   percentLabel,
@@ -99,9 +102,11 @@ const RunDetails = ({ statistics }: RunDetailsProps) => {
           ) : (
             <div className="flex flex-col gap-3">
               <NeedsAttentionChart periods={attention.periods} bucket={statistics.bucket} />
-              <dl className="grid grid-cols-2 gap-x-8">
+              <dl className="grid grid-cols-2 gap-x-8 gap-y-4">
                 <Figure label="Median approval wait" value={median(attention.approvalWait)} />
-                <Figure label="Median failure to retry" value={median(attention.retryWait)} />
+                <Figure label={medianFailureWait} value={median(attention.failureWait)} />
+                <Figure label={medianRetryWait} value={median(attention.retryWait)} />
+                <Figure label={medianResolutionWait} value={median(attention.resolutionWait)} />
               </dl>
             </div>
           )}

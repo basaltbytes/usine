@@ -116,6 +116,7 @@ describe("Attempt migrations", () => {
         assert.strictEqual(snapshot.attempts[0]?.operatorIntervened, false);
         const attempt = snapshot.attempts[0];
         assert(attempt !== undefined);
+        assert.deepStrictEqual(attempt.failureResolution, Option.none());
         const transcript = yield* store.transcript(
           new TranscriptAllQuery({ attemptId: attempt.id }),
         );

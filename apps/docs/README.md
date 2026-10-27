@@ -12,7 +12,7 @@ pnpm --filter @usine/docs run deploy  # upload dist/ to docs.usine.dev
 
 Pages are Markdown or MDX files in `src/content/docs/`. The `guides/`, `architecture/`, and `reference/configuration/` folders are sidebar groups that list their pages automatically, ordered by each page's `sidebar.order`. Link to other pages by route, such as `/architecture/run-lifecycle/`. The build fails on a link to a page or heading that doesn't exist.
 
-The [Operate runs guide](src/content/docs/guides/operate-runs.md) documents saved agent definitions for Retry, current definitions for Edit and retry, and cancellation of open runs.
+The [Operate runs guide](src/content/docs/guides/operate-runs.md) documents saved agent definitions for Retry, current definitions for Edit and retry, cancellation of open runs, and failure-to-answer statistics for retries and resolutions.
 
 TypeDoc generates `reference/api/` on every `build`, `dev`, and `check`, from the declaration files of the public subpaths of each `@usine/*` package in this package's `devDependencies`. The folder isn't committed. Build those packages first with `pnpm build` from the repository root, or `pnpm turbo run build --filter=@usine/docs^...` before `dev`. The TypeDoc plugin in `typedoc/` makes one page per package and per subpath, and shortens some Effect types; `typedoc/plugin.mjs` lists its changes.
 

@@ -3,14 +3,21 @@ import { assert, describe, it } from "@effect/vitest";
 import { UsineConfig } from "@usine/config/factory";
 import { LoadedInstance } from "@usine/config/instance";
 import { Agent } from "@usine/core/agent";
+import { AgentFailure } from "@usine/core/attempt/failure";
+import { OperatorLogin } from "@usine/core/operator";
+import { WorkerName } from "@usine/core/worker";
 import { InstanceDirectory } from "@usine/core/instance";
 import * as RunState from "@usine/core/run/state";
-import { EnginePersistenceError } from "@usine/engine/engine";
-import { localSqliteLayer } from "@usine/engine/local-sqlite";
+import { EnginePersistenceError, RunEngine } from "@usine/engine/engine";
+import { localSqliteLayer, layer as localEngineLayer } from "@usine/engine/local-sqlite";
+import { StepExecutor } from "@usine/engine/step-executor";
 import { ProjectionRevision, RunReader } from "@usine/engine/run-reader";
 import { DateTime, Deferred, Effect, FileSystem, Layer, Option, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import { TestClock } from "effect/testing";
+import { OperatorStatistics } from "../../src/operator/statistics/statistics.ts";
+import { RunUsageReader } from "../../src/operator/usage.ts";
+import { alwaysHoldsLayer } from "../support/polling.ts";
 import { cacheStatistics } from "../../src/operator/statistics/cache.ts";
 import { submission } from "../local-worker/support.ts";
 
@@ -190,6 +197,75 @@ describe("Statistics cache", () => {
           Option.some(DateTime.makeUnsafe("2026-10-25T03:00:00.000Z")),
         );
         assert.strictEqual(reads, 11);
+      }).pipe(Effect.provide(services));
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("refreshes every cached run statistics window after a failure is resolved", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const directory = InstanceDirectory.make(
+        yield* fs.makeTempDirectoryScoped({ prefix: "usine-resolution-statistics-" }),
+      );
+      const worker = WorkerName.make("local");
+      const executor = Layer.succeed(StepExecutor)({
+        workers: Effect.succeed([worker]),
+        isLive: () => Effect.succeed(false),
+        outcome: () => Effect.succeed(Option.none()),
+        recover: () => Effect.void,
+        intervene: () => Effect.void,
+        interrupt: () => Effect.void,
+        occupy: () => Effect.succeed({ worker, release: Effect.void }),
+        sweep: Effect.void,
+        discard: () => Effect.void,
+        reserve: () => Effect.succeed({ worker, release: Effect.void }),
+        execute: () => Effect.fail(new AgentFailure({ message: "Needs operator input" })),
+      });
+      const engineLayer = localEngineLayer(directory).pipe(
+        Layer.provide(executor),
+        Layer.provide(alwaysHoldsLayer),
+      );
+      const services = OperatorStatistics.layer.pipe(
+        Layer.provide(RunUsageReader.layer),
+        Layer.provideMerge(engineLayer),
+      );
+      yield* TestClock.setTime(DateTime.toEpochMillis(DateTime.makeUnsafe("2026-10-25T00:00:00Z")));
+      yield* Effect.gen(function* () {
+        const engine = yield* RunEngine;
+        const statistics = yield* OperatorStatistics;
+        const claim = yield* engine.submit(submission(1));
+        assert(claim._tag === "Claimed");
+        const failed = yield* engine.inspect(claim.runId).pipe(
+          Effect.tap(() => Effect.yieldNow),
+          Effect.repeat({ until: ({ run }) => run.state._tag === "Failed" }),
+        );
+        const attempt = failed.attempts[0];
+        assert(attempt !== undefined);
+        yield* TestClock.adjust("15 minutes");
+        const windows = ["7d", "30d", "all"] as const;
+        for (const window of windows) {
+          const before = yield* statistics.runStatistics(instance, window);
+          assert.strictEqual(before.needsAttention.failureWait, null);
+          assert.strictEqual(yield* statistics.runStatistics(instance, window), before);
+        }
+        const operator = Option.some(OperatorLogin.make("Philippe"));
+        yield* engine.resolveFailure(claim.runId, attempt.id, operator);
+        for (const window of windows) {
+          const after = yield* statistics.runStatistics(instance, window);
+          assert.deepStrictEqual(
+            { ...after.needsAttention.failureWait },
+            {
+              count: 1,
+              medianMillis: 15 * 60_000,
+            },
+          );
+          assert.deepStrictEqual(
+            after.needsAttention.resolutionWait,
+            after.needsAttention.failureWait,
+          );
+          assert.strictEqual(after.needsAttention.retryWait, null);
+          assert.strictEqual(yield* statistics.runStatistics(instance, window), after);
+        }
       }).pipe(Effect.provide(services));
     }).pipe(Effect.provide(NodeServices.layer)),
   );

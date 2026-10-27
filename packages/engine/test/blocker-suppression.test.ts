@@ -86,7 +86,7 @@ describe("Attempts that end with a blocker", () => {
           assert.strictEqual((yield* engine.submit(posted))._tag, "Suppressed");
           const attempt = failed.attempts[0];
           assert(attempt !== undefined);
-          yield* engine.resolveFailure(blocked.runId, attempt.id);
+          yield* engine.resolveFailure(blocked.runId, attempt.id, Option.none());
           yield* waitFor(
             engine,
             yield* runIdFor(posted),

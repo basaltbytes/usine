@@ -269,6 +269,7 @@ const needsAttention = (
   const approvalWaits: Array<number> = [];
   const failures: Array<number> = [];
   const retryWaits: Array<number> = [];
+  const resolutionWaits: Array<number> = [];
   for (const summary of runs) {
     const opened = epoch(summary.run.openedAt);
     if (opened >= from) {
@@ -290,7 +291,13 @@ const needsAttention = (
       const next = ordered[index + 1];
       if (ended < from || automaticRestart(next)) return;
       failures.push(ended);
-      if (operatorRetry(next)) retryWaits.push(Math.max(0, epoch(next.startedAt) - ended));
+      if (Option.isSome(attempt.failureResolution)) {
+        resolutionWaits.push(
+          Math.max(0, epoch(attempt.failureResolution.value.resolvedAt) - ended),
+        );
+      } else if (operatorRetry(next)) {
+        retryWaits.push(Math.max(0, epoch(next.startedAt) - ended));
+      }
     });
   }
   const approvalCounts = perPeriod(bucket, starts, approvals);
@@ -308,6 +315,8 @@ const needsAttention = (
     ),
     approvalWait: durationSummary(approvalWaits),
     retryWait: durationSummary(retryWaits),
+    resolutionWait: durationSummary(resolutionWaits),
+    failureWait: durationSummary([...retryWaits, ...resolutionWaits]),
   });
 };
 

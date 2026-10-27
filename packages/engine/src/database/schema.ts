@@ -261,6 +261,7 @@ export const attempts = snakeCase.table(
     leftoversDiscardedAt: text(),
     /** The reason the Attempt started; `null` for older Attempts. */
     startJson: text({ mode: "json" }).$type<unknown>(),
+    failureResolutionJson: text({ mode: "json" }).$type<unknown>(),
     /** The last time an orchestrator restart reattached the Attempt, or `null`. */
     reattachedAt: text(),
     /** The comments and reviews posted by an unsuccessful Attempt, or `null` if none were recorded. */

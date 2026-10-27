@@ -118,7 +118,7 @@ describe("Attempts that end with an operator question", () => {
           assert.strictEqual((yield* engine.submit(posted))._tag, "Suppressed");
           const attempt = failed.attempts[0];
           assert(attempt !== undefined);
-          yield* engine.resolveFailure(asked.runId, attempt.id);
+          yield* engine.resolveFailure(asked.runId, attempt.id, Option.none());
           yield* waitFor(
             engine,
             yield* runIdFor(posted),

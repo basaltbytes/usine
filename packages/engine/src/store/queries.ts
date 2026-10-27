@@ -8,6 +8,7 @@ import {
   AttemptContext,
   AttemptNumber,
   type ContainerOutOfMemoryKills,
+  type FailureResolution,
   totalOutOfMemoryKills,
 } from "@usine/core/attempt";
 
@@ -74,6 +75,7 @@ import {
   decodeRunRows,
   encodeAgent,
   encodeAttemptStart,
+  encodeFailureResolution,
   encodeBrainSpec,
   encodeDateTime,
   encodeOutcome,
@@ -165,6 +167,7 @@ export const attemptSelection = {
   endedAt: attempts.endedAt,
   salvage: attempts.salvageJson,
   start: attempts.startJson,
+  failureResolution: attempts.failureResolutionJson,
   reattachedAt: attempts.reattachedAt,
   comments: attempts.commentsJson,
   outOfMemory: attempts.outOfMemoryJson,
@@ -456,8 +459,14 @@ export const queriesFor = (database: RunDatabaseClient) => {
   const resolveFailure = Effect.fn("RunStoreQueries.resolveFailure")(function* (
     runId: RunId,
     attemptId: AttemptId,
+    resolution: FailureResolution,
   ) {
     yield* Effect.annotateCurrentSpan({ runId, attemptId });
+    yield* database
+      .update(attempts)
+      .set({ failureResolutionJson: encodeFailureResolution(resolution) })
+      .where(eq(attempts.attemptId, attemptId))
+      .execute();
     yield* database
       .update(runs)
       .set({ resolvedFailureAttemptId: attemptId })

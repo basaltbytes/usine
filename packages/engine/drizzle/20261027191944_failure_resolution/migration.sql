@@ -1,0 +1,1 @@
+ALTER TABLE `usine_attempts` ADD `failure_resolution_json` text;

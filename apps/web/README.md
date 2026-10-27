@@ -37,6 +37,8 @@ The first screen, at `/`:
 
 A row about a run opens its run page. Empty blocks say what they would list, and loading blocks show skeleton rows. With no project registered, the overview points to `repos` in `usine.yaml` and offers **Reload configuration**.
 
+The Overview's run statistics show the median failure-to-answer time, with separate retry and resolution medians. The first recorded answer counts once, including when a resolved failure is later retried.
+
 ## Sidebar
 
 Lists the projects, each with **Board** and **Tasks** under it. The open page's row is highlighted; a project's own row opens its board.
