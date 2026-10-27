@@ -26,7 +26,7 @@ import {
   HttpClientResponse,
   HttpServerRequest,
   HttpServerResponse,
-} from "effect/unstable/http";
+} from "effect/http";
 import { AnonymousCredential, Attachment } from "../src/attachment/attachment.ts";
 import { Attachments } from "../src/attachment/store.ts";
 import { CallerClaims, CallerTokens } from "../src/caller/caller.ts";

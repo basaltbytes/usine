@@ -1,6 +1,6 @@
 # Runtime & Concurrency
 
-Fibers, calling Effect from promise-based callbacks, loop structure, locks, caches, and queues. Verified against `effect@4.0.0-rc.111`.
+Fibers, calling Effect from promise-based callbacks, loop structure, locks, caches, and queues. Verified against `effect@4.0.6`.
 
 ## Table of Contents
 
@@ -16,7 +16,7 @@ Fibers, calling Effect from promise-based callbacks, loop structure, locks, cach
 
 ## Fork Family
 
-rc.111 exports four fork variants. `Effect.fork` and `Effect.forkDaemon` do not exist; calling them fails at **runtime** ("... is not iterable"), not at the type level.
+4.0.6 exports four fork variants. `Effect.fork` and `Effect.forkDaemon` do not exist; calling them fails at **runtime** ("... is not iterable"), not at the type level.
 
 | API | Lifetime | Use |
 |-----|----------|-----|
@@ -52,7 +52,7 @@ When stdout is a machine channel, set `Effect.provideService(Logger.LogToStderr,
 
 ## Long-Running Loops
 
-**Per-item isolation.** `Effect.forEach` stops at the first failure, and its options are only `{ concurrency, discard }`; there is no `mode: "either"` in rc.111. One bad item must not stop the loop:
+**Per-item isolation.** `Effect.forEach` stops at the first failure, and its options are only `{ concurrency, discard }`; there is no `mode: "either"` in 4.0.6. One bad item must not stop the loop:
 
 ```typescript
 const results = yield* Effect.forEach(
@@ -141,4 +141,4 @@ A terminal-once adapter channel combines three pieces: a `Queue` for events, a `
 
 A synchronous library call inside a generator throws as a **defect**. Inside an `E = never` loop, that defect is not caught by `Effect.forever` and terminates the fiber with no log. Wrap such calls in `Effect.try` (piped to `Effect.result` for per-item isolation) when the throw should become a typed failure.
 
-Known rc.111 case: `Cron.prev` throws `Error("Unable to find cron date")` for about 23 hours on any DST spring-forward day, for crons whose local time falls in the skipped hour, and `Cron.next` returns a time inside that window, so a scheduler loop wakes up and immediately hits the throw. Run cron boundary math per schedule under `Effect.try`, convert it to a typed per-schedule failure, and keep the other schedules running.
+Known case, in 4.0.6 as in rc.111: `Cron.prev` throws `Error("Unable to find cron date")` for about 23 hours on any DST spring-forward day, for crons whose local time falls in the skipped hour, and `Cron.next` returns a time inside that window, so a scheduler loop wakes up and immediately hits the throw. Run cron boundary math per schedule under `Effect.try`, convert it to a typed per-schedule failure, and keep the other schedules running.

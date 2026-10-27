@@ -4,7 +4,7 @@ import { Console, DateTime, Duration, Effect, FileSystem, Option, Schema } from 
 import { backup } from "./backup.ts";
 import type { UpgradeCommand } from "./cli.ts";
 import { runCommand, runInTerminal } from "./command.ts";
-import { startDetached, startedMessage } from "./detach.ts";
+import { startAgain, startedMessage } from "./detach.ts";
 import {
   type InstanceManifest,
   PackageManager,
@@ -19,6 +19,7 @@ import {
 } from "./instance/manifest.ts";
 import { type InstanceRecord, instanceFiles } from "./instance/record.ts";
 import { probeInstance } from "./instance/state.ts";
+import { SystemdUnit, supervisingUnit } from "./instance/systemd.ts";
 import { dependenciesOf, resolveVersion } from "./registry.ts";
 import {
   UnrecordedInstanceError,
@@ -72,6 +73,8 @@ export class UpgradeFailedError extends Schema.TaggedError<UpgradeFailedError>(
   commit: Schema.Option(Schema.String),
   /** The last lines of `.usine/usine.log`, for a failed start. */
   tail: Schema.String,
+  /** The systemd service that runs the instance, whose journal has its output. */
+  unit: Schema.Option(SystemdUnit),
 }) {}
 
 const backupStamp = (now: DateTime.Utc): string =>
@@ -241,6 +244,9 @@ export const upgrade = Effect.fn("Cli.upgrade")(function* (
     yield* refuseMissingEnvironment("upgrade", running.value.launch.port);
     yield* refuseLiveAttempts("upgrade", running.value.launch.port, command.options.force);
   }
+  const unit = Option.isSome(running)
+    ? yield* supervisingUnit(running.value.pid, running.value.systemdUnit)
+    : Option.none<SystemdUnit>();
   yield* Effect.logInfo("Upgrading the engine pin of the instance", {
     from: previous,
     to: target,
@@ -272,7 +278,7 @@ export const upgrade = Effect.fn("Cli.upgrade")(function* (
   }
 
   if (Option.isSome(running)) {
-    yield* stopProcess("upgrade", running.value.pid, running, command.options);
+    yield* stopProcess("upgrade", running.value.pid, running, unit, command.options);
   }
 
   const failure = (
@@ -290,6 +296,7 @@ export const upgrade = Effect.fn("Cli.upgrade")(function* (
       backup: backupPath,
       commit,
       tail,
+      unit,
     });
   yield* fileSystem
     .writeFileString(manifest.value.path, bumped)
@@ -325,28 +332,42 @@ export const upgrade = Effect.fn("Cli.upgrade")(function* (
     );
     return;
   }
-  const started = yield* startDetached(
+  const started = yield* startAgain(
     directory,
     running.value.launch,
+    unit,
+    running.value.pid,
     command.options.timeout,
   ).pipe(
-    Effect.catchTag("DetachedStartError", (error) =>
-      Effect.fail(
-        error.outcome === "exited"
-          ? failure(
-              "start",
-              `it exited (${Option.getOrElse(error.exit, () => "unknown")}) before it listened`,
-              commit,
-              error.tail,
-            )
-          : failure(
-              "listen",
-              `it didn't answer on port ${error.port}, and wrote nothing to its log for ${Duration.format(error.timeout)}`,
-              commit,
-              error.tail,
-            ),
-      ),
-    ),
+    Effect.catchTags({
+      DetachedStartError: (error) =>
+        Effect.fail(
+          error.outcome === "exited"
+            ? failure(
+                "start",
+                `it exited (${Option.getOrElse(error.exit, () => "unknown")}) before it listened`,
+                commit,
+                error.tail,
+              )
+            : failure(
+                "listen",
+                `it didn't answer on port ${error.port}, and wrote nothing to its log for ${Duration.format(error.timeout)}`,
+                commit,
+                error.tail,
+              ),
+        ),
+      SystemdStartError: (error) =>
+        Effect.fail(
+          error.outcome === "failed"
+            ? failure("start", `${error.unit} was ${error.state} before it listened`, commit, "")
+            : failure(
+                "listen",
+                `it didn't answer within ${Duration.format(error.timeout)}`,
+                commit,
+                "",
+              ),
+        ),
+    }),
   );
   yield* Console.log(startedMessage(started));
 });

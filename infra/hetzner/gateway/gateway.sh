@@ -12,6 +12,8 @@
 #   pnpm --filter @usine/core --filter @usine/gateway pack                   # or a build: from the repository root, after pnpm build
 #   ./gateway.sh install -i ~/.ssh/usine_worker ./usine-core-0.3.0.tgz ./usine-gateway-0.0.0.tgz
 #   ./gateway.sh worker-user-data ~/.ssh/id_ed25519.pub > worker.mime        # cloud-init for a Worker behind it
+#   SSH_KEY=my-key ./gateway.sh orchestrator ~/.ssh/id_ed25519.pub            # the orchestrator's server in its network
+#   ./gateway.sh orchestrator-tailnet-up -i ~/.ssh/usine_worker               # log it in to the tailnet and publish its UI
 #   ./gateway.sh delete
 set -eu
 
@@ -26,6 +28,10 @@ SUBNET_CIDR=${SUBNET_CIDR:-10.42.0.0/24}
 GATEWAY_IP=${GATEWAY_IP:-10.42.0.2}
 DOMAIN=${DOMAIN:-gw.internal}
 LABEL=${LABEL:-usine=gateway}
+ORCHESTRATOR_NAME=${ORCHESTRATOR_NAME:-usine-orchestrator}
+ORCHESTRATOR_TYPE=${ORCHESTRATOR_TYPE:-cpx12}
+ORCHESTRATOR_LABEL=${ORCHESTRATOR_LABEL:-usine=orchestrator}
+ORCHESTRATOR_TAG=${ORCHESTRATOR_TAG:-tag:usine-orchestrator}
 
 encoded() {
   base64 | tr -d '\n'
@@ -34,13 +40,18 @@ encoded() {
 render() {
   gateway_rules=$(sed "s|^define network = .*|define network = $NETWORK_CIDR|" "$here/gateway-nftables.conf" | encoded)
   worker_rules=$(sed "s|^define gateway = .*|define gateway = $GATEWAY_IP|" "$here/worker-nftables.conf" | encoded)
+  orchestrator_rules=$(encoded < "$here/../orchestrator-nftables.conf")
   allowlist=$(encoded < "$here/egress-allowlist")
+  # The orchestrator installs Tailscale with the signing key that the gateway's file pins.
+  tailscale_key=$(sed -n '/BEGIN PGP PUBLIC KEY BLOCK/,/END PGP PUBLIC KEY BLOCK/s/^ *//p' "$here/gateway-cloud-init.yaml" | encoded)
   sed -e "s|@@DOMAIN@@|$DOMAIN|g" \
     -e "s|@@GATEWAY_IP@@|$GATEWAY_IP|g" \
     -e "s|@@NETWORK_CIDR@@|$NETWORK_CIDR|g" \
     -e "s|@@GATEWAY_NFTABLES_B64@@|$gateway_rules|" \
     -e "s|@@WORKER_NFTABLES_B64@@|$worker_rules|" \
+    -e "s|@@ORCHESTRATOR_NFTABLES_B64@@|$orchestrator_rules|" \
     -e "s|@@EGRESS_ALLOWLIST_B64@@|$allowlist|" \
+    -e "s|@@TAILSCALE_KEY_B64@@|$tailscale_key|" \
     "$1"
 }
 
@@ -104,21 +115,31 @@ with_identity() {
   if [ -n "$identity" ]; then "$tool" -i "$identity" -o IdentitiesOnly=yes "$@"; else "$tool" "$@"; fi
 }
 
-# Logs the gateway in to a tailnet with the auth key in $TAILSCALE_AUTH_KEY,
-# sent on standard input, or else with the login URL that tailscale up prints,
-# then prints the gateway's tailnet IPv4 address.
+# Logs a host in to a tailnet under the name $1, with the further tailscale up
+# flags in $2, and with the auth key in $TAILSCALE_AUTH_KEY, sent on standard
+# input, or else with the login URL that tailscale up prints. Sets address to
+# its tailnet IPv4 address. The other arguments are ssh's options and
+# destination.
+tailscale_up() {
+  hostname=$1
+  flags=$2
+  shift 2
+  up="tailscale up --hostname=$hostname --netfilter-mode=off --accept-dns=false$flags"
+  if [ -n "${TAILSCALE_AUTH_KEY:-}" ]; then
+    printf '%s' "$TAILSCALE_AUTH_KEY" | with_identity ssh "$@" "$up --auth-key=file:/dev/stdin"
+  else
+    with_identity ssh -t "$@" "$up"
+  fi
+  address=$(with_identity ssh "$@" tailscale ip -4)
+}
+
+# Logs the gateway in to a tailnet, then prints its tailnet IPv4 address.
 tailnet_up() {
   identity_option "$@"
   shift "$skipped"
   [ "$#" -eq 0 ] || { echo "tailnet-up takes no arguments other than -i <identity-file>" >&2; exit 2; }
   gateway_destination
-  up="tailscale up --hostname=$NAME --netfilter-mode=off --accept-dns=false"
-  if [ -n "${TAILSCALE_AUTH_KEY:-}" ]; then
-    printf '%s' "$TAILSCALE_AUTH_KEY" | with_identity ssh "$destination" "$up --auth-key=file:/dev/stdin"
-  else
-    with_identity ssh -t "$destination" "$up"
-  fi
-  address=$(with_identity ssh "$destination" tailscale ip -4)
+  tailscale_up "$NAME" "" "$destination"
   echo "Gateway $NAME is at $address on the tailnet."
 }
 
@@ -170,6 +191,71 @@ worker_user_data() {
   printf -- '--%s--\n' "$boundary"
 }
 
+# Prints the cloud-init of the orchestrator's server: ../orchestrator-cloud-init.yaml
+# with the keys of $1 authorized for the usine user, and this gateway's settings.
+orchestrator_user_data() {
+  [ -f "${1:-}" ] || { echo "Pass a file with the public keys to authorize for the usine user" >&2; exit 2; }
+  keys=$(jq -Rsc 'split("\n") | map(select(length > 0 and (startswith("#") | not)))' < "$1")
+  [ "$keys" != "[]" ] || { echo "No public key in $1" >&2; exit 2; }
+  "$here/../render-cloud-init.sh" "$keys" "$here/../orchestrator-cloud-init.yaml" | render /dev/stdin
+}
+
+# Prints the orchestrator's address in the gateway's network, its only network.
+orchestrator_address() {
+  hcloud server describe "$ORCHESTRATOR_NAME" -o json | jq -r '.private_net[0].ip'
+}
+
+# Creates the orchestrator's server in the gateway's network. It has public
+# addresses for its own connections, and a firewall that admits only ICMP: its
+# SSH and web UI are reachable over the tailnet, and its SSH over the private
+# network until orchestrator-tailnet-up enables nftables.
+orchestrator() {
+  : "${SSH_KEY:?Set SSH_KEY to the names or ids of SSH keys in the hcloud project, for root, separated by commas}"
+  [ "$#" -eq 1 ] || { echo "Pass a file with the public keys to authorize for the usine user" >&2; exit 2; }
+  work=$(mktemp -d)
+  trap 'rm -rf "$work"' EXIT
+  orchestrator_user_data "$1" > "$work/user-data.yaml"
+  echo '[{"direction": "in", "protocol": "icmp", "source_ips": ["0.0.0.0/0", "::/0"], "description": "ICMP"}]' > "$work/rules.json"
+  hcloud firewall create --name "$ORCHESTRATOR_NAME" --label "$ORCHESTRATOR_LABEL" --rules-file "$work/rules.json"
+  keys=$(printf '%s' "$SSH_KEY" | tr ',' '\n')
+  set --
+  while IFS= read -r key; do set -- "$@" --ssh-key "$key"; done <<KEYS
+$keys
+KEYS
+  hcloud server create --name "$ORCHESTRATOR_NAME" --type "$ORCHESTRATOR_TYPE" --image "$IMAGE" \
+    --location "$LOCATION" "$@" --network "$NAME" --firewall "$ORCHESTRATOR_NAME" \
+    --label "$ORCHESTRATOR_LABEL" --user-data-from-file "$work/user-data.yaml"
+  address=$(orchestrator_address)
+  echo "Orchestrator $ORCHESTRATOR_NAME is booting at $address on network $NAME."
+  echo "Wait for it with: ssh -J <gateway> root@$address cloud-init status --wait"
+  echo "Then log it in to your tailnet: $0 orchestrator-tailnet-up [-i <identity-file>]"
+}
+
+# Logs the orchestrator in to a tailnet with the tag $ORCHESTRATOR_TAG, over SSH
+# to root through the gateway, and publishes the web UI with tailscale serve.
+# Then enables nftables, which from then on refuses SSH from the private
+# network, and prints the server's tailnet address and the UI's URL.
+orchestrator_tailnet_up() {
+  identity_option "$@"
+  shift "$skipped"
+  [ "$#" -eq 0 ] || { echo "orchestrator-tailnet-up takes no arguments other than -i <identity-file>" >&2; exit 2; }
+  gateway_destination
+  if [ -n "$identity" ]; then
+    jump="ProxyCommand=ssh -i $identity -o IdentitiesOnly=yes -W %h:%p $destination"
+  else
+    jump="ProxyJump=$destination"
+  fi
+  root="root@$(orchestrator_address)"
+  tailscale_up "$ORCHESTRATOR_NAME" " --advertise-tags=$ORCHESTRATOR_TAG" -o "$jump" "$root"
+  # HTTPS at the server's tailnet name, proxied to usine up's default port on 127.0.0.1, also after a reboot.
+  with_identity ssh -t -o "$jump" "$root" tailscale serve --bg 7331
+  url=$(with_identity ssh -o "$jump" "$root" tailscale status --json | jq -r '"https://" + (.Self.DNSName | rtrimstr("."))')
+  with_identity ssh -o "$jump" "$root" systemctl enable --now nftables
+  echo "Orchestrator $ORCHESTRATOR_NAME is at $address on the tailnet, and serves the web UI at $url."
+  echo "nftables now refuses SSH from the private network: connect to the server over the tailnet."
+  echo "Add USINE_ORIGIN=$url to /home/usine/factory/.env, so that the UI's pages there can use the operator API."
+}
+
 delete() {
   if hcloud server describe "$NAME" > /dev/null 2>&1; then hcloud server delete "$NAME"; fi
   if hcloud firewall describe "$NAME" > /dev/null 2>&1; then hcloud firewall delete "$NAME"; fi
@@ -183,9 +269,12 @@ case "$command" in
   tailnet-up) tailnet_up "$@" ;;
   install) install_packages "$@" ;;
   worker-user-data) worker_user_data "${1:-}" ;;
+  orchestrator) orchestrator "$@" ;;
+  orchestrator-user-data) orchestrator_user_data "${1:-}" ;;
+  orchestrator-tailnet-up) orchestrator_tailnet_up "$@" ;;
   delete) delete ;;
   *)
-    echo "usage: $0 create | tailnet-up [-i <identity-file>] | install [-i <identity-file>] (@usine/gateway[@<version>] | <tarball>...) | worker-user-data <public-key-file> | delete" >&2
+    echo "usage: $0 create | tailnet-up [-i <identity-file>] | install [-i <identity-file>] (@usine/gateway[@<version>] | <tarball>...) | worker-user-data <public-key-file> | orchestrator <public-key-file> | orchestrator-user-data <public-key-file> | orchestrator-tailnet-up [-i <identity-file>] | delete" >&2
     exit 2
     ;;
 esac

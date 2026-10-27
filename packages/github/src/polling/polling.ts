@@ -12,7 +12,7 @@ import {
   Option,
   Schema,
 } from "effect";
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { GitHubApp } from "../github-app.ts";
 import { queryGraphql } from "../graphql.ts";
 import {

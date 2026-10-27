@@ -5,7 +5,7 @@ import type { BrainSpec } from "@usine/core/agent/brain";
 import type { HarnessReadiness } from "@usine/core/agent/capability";
 import type { MachineId, WorkerName } from "@usine/core/worker";
 import { Array as Arr, Effect, Option } from "effect";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcessSpawner } from "effect/process";
 import { logPreflightFailure, ExecutorOperationError, WorkerCapabilityError } from "./executor.ts";
 
 /**

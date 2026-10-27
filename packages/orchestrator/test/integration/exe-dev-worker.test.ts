@@ -16,7 +16,7 @@ import { GitHubIntegration, IntegrationName } from "@usine/executor/exe-dev";
 import { RunEngine, Submission } from "@usine/engine/engine";
 import { TranscriptAllQuery } from "@usine/engine/transcript";
 import { Config, DateTime, Effect, FileSystem, Layer, Option, Schema } from "effect";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { layer as exeDevLayer } from "../../src/exe-dev.ts";
 import { fixedConfigLayer } from "../support/current-instance.ts";
 import { testAppLayer } from "../support/github-app.ts";
@@ -68,10 +68,10 @@ describe("live exe.dev Worker", () => {
   it.live("runs one Attempt with its children on the VM and persists its transcript", () =>
     Effect.gen(function* () {
       const settings = yield* Effect.all({
-        worker: Config.string("USINE_EXE_DEV_INTEGRATION_WORKER"),
-        repository: Config.string("USINE_EXE_DEV_INTEGRATION_REPO"),
-        revision: Config.string("USINE_EXE_DEV_INTEGRATION_REVISION"),
-        integration: Config.string("USINE_EXE_DEV_INTEGRATION_GITHUB_INTEGRATION"),
+        worker: Config.String("USINE_EXE_DEV_INTEGRATION_WORKER"),
+        repository: Config.String("USINE_EXE_DEV_INTEGRATION_REPO"),
+        revision: Config.String("USINE_EXE_DEV_INTEGRATION_REVISION"),
+        integration: Config.String("USINE_EXE_DEV_INTEGRATION_GITHUB_INTEGRATION"),
       });
       const worker = WorkerName.make(settings.worker);
       const repository = RepositoryName.make(settings.repository);

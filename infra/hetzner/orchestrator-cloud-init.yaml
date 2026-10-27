@@ -1,0 +1,144 @@
+#cloud-config
+# The usine orchestrator on Debian: `usine up` as the usine user in the
+# usine.service systemd unit, from the instance folder /home/usine/factory, in
+# the gateway's private network, with SSH reachable only over the operator's
+# tailnet and the web UI published there by tailscale serve.
+# `gateway/gateway.sh orchestrator-user-data` renders this file:
+# render-cloud-init.sh replaces "@AUTHORIZED_KEYS@" with the public keys to
+# authorize for usine, as a list, and @NODE_MAJOR@ with NODE_MAJOR of
+# ../worker-image/Dockerfile; gateway.sh replaces the @@NAME@@ placeholders
+# with the gateway's settings. No secret is in this file: the instance folder
+# and its credentials are copied in over SSH, and
+# `gateway.sh orchestrator-tailnet-up` logs Tailscale in over SSH through the
+# gateway, publishes the UI, and then enables nftables, whose rules refuse that
+# path.
+
+ssh_pwauth: false
+# Hetzner authorizes the project's SSH keys for root, who administers the server.
+disable_root: false
+
+users:
+  - name: usine
+    shell: /bin/bash
+    lock_passwd: true
+    # Lets usine read the service's output with journalctl -u usine.
+    groups: [systemd-journal]
+    ssh_authorized_keys: "@AUTHORIZED_KEYS@"
+
+package_update: true
+package_upgrade: true
+packages:
+  - ca-certificates
+  - chrony
+  - curl
+  - dbus
+  - git
+  - nftables
+  - polkitd
+  - rsync
+
+write_files:
+  - path: /etc/ssh/sshd_config.d/10-usine-orchestrator.conf
+    permissions: "0644"
+    content: |
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PermitRootLogin prohibit-password
+      AllowUsers root usine
+      X11Forwarding no
+
+  - path: /etc/nftables.conf
+    permissions: "0644"
+    encoding: b64
+    content: "@@ORCHESTRATOR_NFTABLES_B64@@"
+
+  # chrony reads this file next to its own chrony.conf, which keeps the Debian pool as a time source.
+  - path: /etc/chrony/conf.d/usine-orchestrator.conf
+    permissions: "0644"
+    content: |
+      server @@GATEWAY_IP@@ iburst prefer
+
+  - path: /etc/sysctl.d/90-usine-orchestrator.conf
+    permissions: "0644"
+    content: |
+      net.ipv4.ip_forward = 0
+      net.ipv6.conf.all.forwarding = 0
+
+  # The gateway's copy of Tailscale's package repository signing key, fingerprint 2596 A99E AAB3 3821 893C 0A79 458C A832 957F 5868.
+  - path: /etc/apt/keyrings/tailscale.asc
+    permissions: "0644"
+    encoding: b64
+    content: "@@TAILSCALE_KEY_B64@@"
+
+  # KillMode=mixed sends SIGTERM to usine up alone, so that its drain keeps the SSH connections of running attempts. usine up exits with 130 after SIGTERM.
+  # usine reads .env in the instance folder itself, with dotenv's syntax; systemd's EnvironmentFile= would parse it differently, and its values would win.
+  - path: /etc/systemd/system/usine.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=usine orchestrator
+      Documentation=https://docs.usine.dev/guides/run-the-orchestrator-on-a-server/
+      Wants=network-online.target
+      After=network-online.target tailscaled.service
+      ConditionPathExists=/home/usine/factory/usine.yaml
+
+      [Service]
+      Type=exec
+      User=usine
+      Group=usine
+      WorkingDirectory=/home/usine/factory
+      ExecStart=/home/usine/.local/bin/usine up
+      KillMode=mixed
+      KillSignal=SIGTERM
+      TimeoutStopSec=1h
+      SuccessExitStatus=130
+      Restart=on-failure
+      RestartSec=10s
+      NoNewPrivileges=yes
+
+      [Install]
+      WantedBy=multi-user.target
+
+  # usine stop, restart, and upgrade run systemctl stop and start as usine.
+  - path: /etc/polkit-1/rules.d/50-usine.rules
+    permissions: "0644"
+    content: |
+      polkit.addRule(function (action, subject) {
+        if (
+          action.id === "org.freedesktop.systemd1.manage-units" &&
+          action.lookup("unit") === "usine.service" &&
+          subject.user === "usine" &&
+          ["start", "stop", "restart"].indexOf(action.lookup("verb")) >= 0
+        ) {
+          return polkit.Result.YES;
+        }
+      });
+
+  # One script with set -e, so a failed step marks cloud-init as failed instead of being skipped over.
+  - path: /usr/local/sbin/usine-orchestrator-setup
+    permissions: "0755"
+    content: |
+      #!/bin/sh
+      set -eu
+      codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
+      curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key -o /etc/apt/keyrings/nodesource.asc
+      chmod 0644 /etc/apt/keyrings/nodesource.asc
+      echo "deb [signed-by=/etc/apt/keyrings/nodesource.asc] https://deb.nodesource.com/node_@NODE_MAJOR@.x nodistro main" > /etc/apt/sources.list.d/nodesource.list
+      echo "deb [signed-by=/etc/apt/keyrings/tailscale.asc] https://pkgs.tailscale.com/stable/debian $codename main" > /etc/apt/sources.list.d/tailscale.list
+      apt-get update
+      DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs tailscale
+      # A global install in usine's home, which usine upgrades with npm install --global and no root.
+      install -d -o usine -g usine -m 0755 /home/usine/.local /home/usine/.local/bin /home/usine/.local/lib
+      printf 'prefix=/home/usine/.local\n' > /home/usine/.npmrc
+      chown usine:usine /home/usine/.npmrc
+      runuser -l usine -c 'npm install --global @usine/server'
+      install -d -o usine -g usine -m 0700 /home/usine/factory /home/usine/.ssh
+      sysctl --system > /dev/null
+      # nftables stays off until gateway.sh orchestrator-tailnet-up enables it, because its rules refuse SSH through the gateway, the only path to the server before it joins the tailnet.
+      systemctl restart chrony
+      systemctl reload ssh
+      systemctl daemon-reload
+      systemctl enable usine.service
+
+runcmd:
+  - [/usr/local/sbin/usine-orchestrator-setup]

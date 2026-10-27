@@ -119,7 +119,7 @@ it("reloads the configuration from any Configuration page and shows what changed
     );
     const reload = page.getByRole("button", { name: "Reload configuration" });
     await reload.click();
-    await expect.element(page.getByText("Configuration reloaded")).toBeVisible();
+    await expect.element(page.getByText(/^Configuration reloaded/u)).toBeVisible();
     await expect.element(page.getByText("Loops added: triage")).toBeVisible();
     await expect.element(page.getByRole("link", { name: "triage", exact: true })).toBeVisible();
 
@@ -129,7 +129,7 @@ it("reloads the configuration from any Configuration page and shows what changed
     await expect.element(page.getByText("Loops added: triage")).toBeVisible();
 
     await page.getByRole("button", { name: "Reload configuration" }).click();
-    await expect.element(page.getByText("Configuration not reloaded")).toBeVisible();
+    await expect.element(page.getByText(/^Configuration not reloaded/u)).toBeVisible();
     await expect
       .element(page.getByText("Could not load usine.yaml, the loops folder, or the agents folder."))
       .toBeVisible();
@@ -138,7 +138,7 @@ it("reloads the configuration from any Configuration page and shows what changed
       .toBeVisible();
 
     await page.getByRole("button", { name: "Dismiss the reload result" }).click();
-    await expect.element(page.getByText("Configuration not reloaded")).not.toBeInTheDocument();
+    await expect.element(page.getByText(/^Configuration not reloaded/u)).not.toBeInTheDocument();
 
     // A failed preflight links to the Worker whose check failed and to what the reload adds.
     const refusal = page.getByRole("alert").filter({ hasText: "Configuration not reloaded" });

@@ -41,7 +41,8 @@
     "@usine/tsconfig": "workspace:*",
     "@usine/web": "workspace:*",
     "typescript": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "yaml": "2.9.1"
   },
   "engines": {
     "node": ">=22"

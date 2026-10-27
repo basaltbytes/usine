@@ -1,5 +1,5 @@
 import { Clock, DateTime, Effect, Option, Schema } from "effect";
-import { type HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
+import { type HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { GitHubRateLimitError, type GitHubOperation } from "./error.ts";
 import {
   API_ROOT,

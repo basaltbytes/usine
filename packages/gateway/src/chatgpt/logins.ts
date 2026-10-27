@@ -13,7 +13,7 @@ import {
   Semaphore,
   SynchronizedRef,
 } from "effect";
-import { HttpClient, HttpClientRequest } from "effect/unstable/http";
+import { HttpClient, HttpClientRequest } from "effect/http";
 import type { ChatGptAccess, ChatGptLogin } from "../llm/llm.ts";
 import {
   type ChatGptAuthFileError,

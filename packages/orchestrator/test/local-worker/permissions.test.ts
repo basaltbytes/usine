@@ -23,7 +23,7 @@ import {
 } from "@usine/executor";
 import { layer as localExecutorLayer } from "@usine/executor/local";
 import { ConfigProvider, Effect, Exit, FileSystem, Layer, Option, Redacted } from "effect";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import {
   aloneOnItem,
   LIVE_TEST_TIMEOUT,

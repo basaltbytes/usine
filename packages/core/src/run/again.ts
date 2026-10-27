@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { closedStruct } from "../closed-struct.ts";
 import { OperatorLogin } from "../operator.ts";
 import { RunId } from "./run.ts";
 
@@ -7,8 +8,8 @@ import { RunId } from "./run.ts";
  * `requestedBy` is the operator login from `usine.yaml`, or `None` if none is configured.
  */
 export class RunAgain extends Schema.Class<RunAgain>("RunAgain")(
-  Schema.Struct({
+  closedStruct({
     from: RunId,
     requestedBy: Schema.OptionFromNullOr(OperatorLogin),
-  }).annotate({ parseOptions: { onExcessProperty: "error" } }),
+  }),
 ) {}

@@ -1,5 +1,5 @@
 import { Duration, Effect, Option, Schema } from "effect";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 const PMSET_TIMEOUT = Duration.seconds(5);
 
@@ -56,7 +56,7 @@ export const warnIfSystemSleeps = Effect.fn("Server.warnIfSystemSleeps")(functio
       preventedBy,
     });
   yield* Effect.logWarning(
-    "This Mac can sleep while runs are open. A sleep drops the SSH connections to workers and the gateway, and remote children must resume. Run `caffeinate -s` while runs are open, or turn off sleep on AC power with `sudo pmset -c sleep 0`",
+    "This Mac can sleep while runs are open. A sleep drops the SSH connections to workers and the gateway, and remote children must resume. Run `caffeinate -s` while runs are open, turn off sleep on AC power with `sudo pmset -c sleep 0`, or run the orchestrator on an always-on server: https://docs.usine.dev/guides/run-the-orchestrator-on-a-server/",
     { minutes, preventedBy },
   );
 });

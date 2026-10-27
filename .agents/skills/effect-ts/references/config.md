@@ -24,8 +24,8 @@ By default, `Config` reads from environment variables. Override with `ConfigProv
 import { Config, Effect } from "effect"
 
 const program = Effect.gen(function* () {
-  const apiKey = yield* Config.redacted("API_KEY")
-  const port = yield* Config.int("PORT")
+  const apiKey = yield* Config.Redacted("API_KEY")
+  const port = yield* Config.Int("PORT")
   console.log(`Starting on port ${port}`)
 })
 ```
@@ -60,11 +60,11 @@ class ApiConfig extends Context.Service<
   static readonly layer = Layer.effect(
     ApiConfig,
     Effect.gen(function* () {
-      const apiKey = yield* Config.redacted("API_KEY")
-      const baseUrl = yield* Config.string("API_BASE_URL").pipe(
+      const apiKey = yield* Config.Redacted("API_KEY")
+      const baseUrl = yield* Config.String("API_BASE_URL").pipe(
         Config.orElse(() => Config.succeed("https://api.example.com"))
       )
-      const timeout = yield* Config.int("API_TIMEOUT").pipe(
+      const timeout = yield* Config.Int("API_TIMEOUT").pipe(
         Config.orElse(() => Config.succeed(30000))
       )
       return { apiKey, baseUrl, timeout }
@@ -86,26 +86,26 @@ class ApiConfig extends Context.Service<
 - Config errors caught early at layer composition
 - Type-safe throughout your app
 
-For tests, just `Layer.succeed` with hardcoded values. No need for `ConfigProvider.fromMap`.
+For tests, just `Layer.succeed` with hardcoded values. No need for `ConfigProvider.fromUnknown`.
 
 ## Config Primitives
 
 ```typescript
-Config.string("MY_VAR")           // string
-Config.number("PORT")             // number
-Config.int("MAX_RETRIES")         // integer
-Config.boolean("DEBUG")           // boolean
-Config.redacted("API_KEY")        // hidden in logs
-Config.url("API_URL")             // URL
-Config.duration("TIMEOUT")        // Duration
-Config.array(Config.string(), "TAGS") // comma-separated array
+Config.String("MY_VAR")           // string
+Config.Number("PORT")             // number
+Config.Int("MAX_RETRIES")         // integer
+Config.Boolean("DEBUG")           // boolean
+Config.Redacted("API_KEY")        // hidden in logs
+Config.URL("API_URL")             // URL
+Config.Duration("TIMEOUT")        // Duration
+Config.Array(Schema.String, "TAGS") // comma-separated array
 ```
 
 ## Defaults and Fallbacks
 
 ```typescript
 // With orElse
-const port = yield* Config.int("PORT").pipe(
+const port = yield* Config.Int("PORT").pipe(
   Config.orElse(() => Config.succeed(3000))
 )
 
@@ -156,8 +156,6 @@ import { ConfigProvider, Layer } from "effect"
 // From object
 ConfigProvider.layer(ConfigProvider.fromUnknown({ API_KEY: "key", PORT: "3000" }))
 
-// From JSON
-ConfigProvider.layer(ConfigProvider.fromJson({ API_KEY: "key", PORT: 8080 }))
 
 // Prefixed env vars (reads APP_API_KEY, APP_PORT, etc.)
 ConfigProvider.layer(ConfigProvider.fromEnv().pipe(ConfigProvider.nested("APP")))
@@ -165,13 +163,13 @@ ConfigProvider.layer(ConfigProvider.fromEnv().pipe(ConfigProvider.nested("APP"))
 
 ## Redacted Secrets
 
-Always use `Config.redacted()` for sensitive values:
+Always use `Config.Redacted()` for sensitive values:
 
 ```typescript
 import { Config, Redacted } from "effect"
 
 const program = Effect.gen(function* () {
-  const apiKey = yield* Config.redacted("API_KEY")
+  const apiKey = yield* Config.Redacted("API_KEY")
 
   // Extract value when needed
   const headers = { Authorization: `Bearer ${Redacted.value(apiKey)}` }

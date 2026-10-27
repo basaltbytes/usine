@@ -43,9 +43,9 @@ import {
   Sink,
   Stream,
 } from "effect";
-import { HttpClient } from "effect/unstable/http";
-import { ChildProcessSpawner } from "effect/unstable/process";
-import type { StandardCommand } from "effect/unstable/process/ChildProcess";
+import { HttpClient } from "effect/http";
+import { ChildProcessSpawner } from "effect/process";
+import type { StandardCommand } from "effect/process/ChildProcess";
 import {
   CheckoutRequest,
   claudeLoginLockLayer,

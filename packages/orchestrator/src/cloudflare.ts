@@ -25,7 +25,7 @@ export const cloudflareWorkersOf = (config: UsineConfig): ReadonlyArray<Cloudfla
  */
 const cloudflareWorkerAddressOf = (worker: CloudflareWorker) => {
   const variable = (name: string) =>
-    Config.redacted(name).pipe(
+    Config.Redacted(name).pipe(
       Effect.mapError(
         (cause) =>
           new WorkerCapabilityError({

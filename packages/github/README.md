@@ -38,7 +38,7 @@ import { InstanceDirectory } from "@usine/core/instance"
 import { GitHubApp } from "@usine/github/github-app"
 import { localSecretsLayer } from "@usine/github/local-secrets"
 import { Layer } from "effect"
-import { FetchHttpClient } from "effect/unstable/http"
+import { FetchHttpClient } from "effect/http"
 
 const instance = InstanceDirectory.make("/path/to/instance")
 const platformLayer = Layer.merge(NodeFileSystem.layer, NodePath.layer)

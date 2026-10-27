@@ -1,7 +1,7 @@
 import { CloudflareImageName } from "@usine/core/worker";
 import { DateTime, Duration, Effect, Layer, Option, Schema, Semaphore } from "effect";
-import { HttpServer } from "effect/unstable/http";
-import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi";
+import { HttpServer } from "effect/http";
+import { HttpApi, HttpApiBuilder } from "effect/http-api";
 import {
   ContainerUnavailable,
   type CreateSandbox,

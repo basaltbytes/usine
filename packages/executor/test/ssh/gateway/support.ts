@@ -40,7 +40,7 @@ import {
   HttpServer,
   HttpServerRequest,
   HttpServerResponse,
-} from "effect/unstable/http";
+} from "effect/http";
 import type { StubParent, StubStorage } from "@usine/durable/testing";
 import type { SshExecutorOptions, SshWorkerAddress } from "../../../src/ssh/ssh.ts";
 import { ADDRESS, executorLayer, type fakeMachine, type mintingProvider } from "../support.ts";

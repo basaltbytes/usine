@@ -2,13 +2,16 @@ import { spawn } from "node:child_process";
 import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 import type { InstanceDirectory } from "@usine/core/instance";
 import { Console, Deferred, Duration, Effect, FileSystem, Option, Schedule, Schema } from "effect";
-import { DEFAULT_LIFECYCLE_TIMEOUT_SECONDS, Port, SERVER_HOST, type UpLogLevel } from "./cli.ts";
+import { DEFAULT_LIFECYCLE_TIMEOUT_SECONDS, Port, SERVER_HOST, type UpCommand } from "./cli.ts";
 import { InstanceInUseError } from "./instance/lock.ts";
 import { type InstanceLaunch, ProcessId, currentLaunch, instanceFiles } from "./instance/record.ts";
 import { answers } from "./instance/operator-api.ts";
 import { probeInstance } from "./instance/state.ts";
+import { type SystemctlError, SystemdUnit, systemctl, unitState } from "./instance/systemd.ts";
 
 const READY_POLL_INTERVAL = "250 millis";
+/** Spaces the checks of a starting systemd service, each of which runs `systemctl show`. */
+const UNIT_POLL_INTERVAL = "500 millis";
 const LOG_TAIL_LINES = 20;
 const LOG_TAIL_BYTES = 64 * 1024;
 
@@ -52,6 +55,7 @@ const launchArguments = (launch: InstanceLaunch): ReadonlyArray<string> => {
     "--log-level",
     launch.logLevel.toLowerCase(),
   ];
+  if (Option.isSome(launch.origin)) args.push("--origin", launch.origin.value);
   if (launch.allowVolatileInstance) args.push("--allow-volatile-instance");
   return args;
 };
@@ -84,6 +88,10 @@ export class StartedInstance extends Schema.Class<StartedInstance>("@usine/serve
   {
     pid: ProcessId,
     port: Port,
+    /** The systemd service that started the process, whose journal has its output. */
+    unit: Schema.Option(SystemdUnit).pipe(
+      Schema.withConstructorDefault(Effect.succeed(Option.none<SystemdUnit>())),
+    ),
   },
 ) {}
 
@@ -237,16 +245,155 @@ export const startDetached = Effect.fn("Cli.startDetached")(function* (
   return yield* error;
 });
 
-/** Returns the line that names a started instance's address, PID, and log. */
-export const startedMessage = ({ pid, port }: StartedInstance): string =>
-  `usine is running at http://${SERVER_HOST}:${port} (pid ${pid}), with its output in .usine/usine.log.`;
+/** Returns the line that names a started instance's address, PID, and output. */
+export const startedMessage = ({ pid, port, unit }: StartedInstance): string =>
+  Option.match(unit, {
+    onNone: () =>
+      `usine is running at http://${SERVER_HOST}:${port} (pid ${pid}), with its output in .usine/usine.log.`,
+    onSome: (service) =>
+      `usine is running at http://${SERVER_HOST}:${port} (pid ${pid}) in ${service}, with its output in the journal: journalctl -u ${service}.`,
+  });
+
+/**
+ * The systemd service that `systemctl start` started failed before its `usine up` answered, or its
+ * `usine up` didn't answer within the timeout.
+ */
+export class SystemdStartError extends Schema.TaggedError<SystemdStartError>(
+  "@usine/server/SystemdStartError",
+)("SystemdStartError", {
+  unit: SystemdUnit,
+  /** `failed` if the service stopped or waits to restart, `silent` if it runs but didn't answer. */
+  outcome: Schema.Literals(["failed", "silent"]),
+  /** The service's `ActiveState` and `SubState`, such as `activating (auto-restart)`. */
+  state: Schema.String,
+  timeout: Schema.Duration,
+}) {}
+
+/** The service states that end a start before `usine up` answers. */
+const ENDED_STATES: ReadonlySet<string> = new Set(["failed", "inactive", "deactivating"]);
+
+/**
+ * Stops `unit` if it waits to restart after `systemctl start` failed, as a `Type=exec` service with
+ * `Restart=on-failure` does when its command can't run, so that the failed start doesn't repeat.
+ * Logs a `systemctl` that fails here, and never fails itself.
+ */
+const cancelPendingRestart = Effect.fn("Cli.cancelPendingRestart")(
+  function* (unit: SystemdUnit, failure: SystemctlError) {
+    const state = yield* unitState(unit);
+    if (state.sub !== "auto-restart") {
+      yield* Effect.logWarning("systemctl start failed; the service doesn't wait to restart", {
+        unit,
+        state: `${state.active} (${state.sub})`,
+        reason: failure.reason,
+      });
+      return;
+    }
+    yield* Effect.logWarning(
+      "systemctl start failed and the service waits to restart; stopping it",
+      {
+        unit,
+        reason: failure.reason,
+      },
+    );
+    yield* systemctl(unit, ["stop", "--no-block"]);
+  },
+  Effect.catchTag("SystemctlError", (error) =>
+    Effect.logWarning(
+      "Could not check or cancel the restart of the service after systemctl start failed",
+      {
+        unit: error.unit,
+        command: error.command,
+        reason: error.reason,
+      },
+    ),
+  ),
+);
+
+/**
+ * Starts the instance's systemd service with `systemctl start`, and waits until a process other
+ * than `previous` holds the instance and answers on its recorded port. Fails with
+ * `SystemdStartError` if the service stops or waits to restart first, and then stops it, or after
+ * `timeout`, when the service keeps running. Fails with the `SystemctlError` of a
+ * `systemctl start` that fails, after it stops a service that waits to restart.
+ */
+export const startUnit = Effect.fn("Cli.startUnit")(function* (
+  directory: InstanceDirectory,
+  unit: SystemdUnit,
+  previous: ProcessId,
+  timeout: Duration.Duration,
+) {
+  yield* Effect.annotateCurrentSpan({ instanceDirectory: directory, unit });
+  yield* systemctl(unit, ["start"]).pipe(
+    Effect.tapError((failure) => cancelPendingRestart(unit, failure)),
+  );
+  yield* Effect.logInfo("Started the instance's systemd service", { unit });
+  let last = "unknown";
+  const listening = Effect.gen(function* () {
+    while (true) {
+      const state = yield* probeInstance(directory);
+      if (
+        state._tag === "Running" &&
+        state.record.pid !== previous &&
+        (yield* answers(state.record.launch.port))
+      ) {
+        return new StartedInstance({
+          pid: state.record.pid,
+          port: state.record.launch.port,
+          unit: Option.some(unit),
+        });
+      }
+      const { active, sub } = yield* unitState(unit);
+      last = `${active} (${sub})`;
+      if (ENDED_STATES.has(active) || sub === "auto-restart") {
+        yield* Effect.logWarning("The instance's systemd service ended before usine up answered", {
+          unit,
+          state: last,
+        });
+        // Cancels the restart, so that a start that fails, such as a failed migration, doesn't repeat.
+        if (sub === "auto-restart") yield* systemctl(unit, ["stop", "--no-block"]);
+        return yield* new SystemdStartError({ unit, outcome: "failed", state: last, timeout });
+      }
+      yield* Effect.sleep(UNIT_POLL_INTERVAL);
+    }
+  });
+  const started = yield* Effect.timeoutOption(listening, timeout);
+  if (Option.isSome(started)) {
+    yield* Effect.logInfo("The instance's systemd service is listening", {
+      unit,
+      pid: started.value.pid,
+      port: started.value.port,
+    });
+    return started.value;
+  }
+  yield* Effect.logWarning("The instance's systemd service didn't answer before the timeout", {
+    unit,
+    state: last,
+    timeoutSeconds: Duration.toSeconds(timeout),
+  });
+  return yield* new SystemdStartError({ unit, outcome: "silent", state: last, timeout });
+});
+
+/**
+ * Starts the instance again after `previous` stopped: with `systemctl start` if `unit` ran it, else
+ * in the background with `launch`.
+ */
+export const startAgain = Effect.fn("Cli.startAgain")(function* (
+  directory: InstanceDirectory,
+  launch: InstanceLaunch,
+  unit: Option.Option<SystemdUnit>,
+  previous: ProcessId,
+  timeout: Duration.Duration,
+) {
+  return yield* Option.match(unit, {
+    onNone: () => startDetached(directory, launch, timeout),
+    onSome: (service) => startUnit(directory, service, previous, timeout),
+  });
+});
 
 /** Starts `usine up` in the background in the instance folder, unless it runs already. */
 export const upDetached = Effect.fn("Cli.upDetached")(function* (
   directory: InstanceDirectory,
-  port: Port,
-  logLevel: UpLogLevel,
-  allowVolatileInstance: boolean,
+  command: UpCommand,
 ) {
   const state = yield* probeInstance(directory);
   if (state._tag !== "Stopped") {
@@ -255,7 +402,7 @@ export const upDetached = Effect.fn("Cli.upDetached")(function* (
       holder: state._tag === "Running" ? Option.some(state.record.pid) : state.pid,
     });
   }
-  const launch = yield* currentLaunch(port, logLevel, allowVolatileInstance);
+  const launch = yield* currentLaunch(command);
   const started = yield* startDetached(
     directory,
     launch,

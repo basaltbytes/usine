@@ -5,7 +5,7 @@ import * as SQLiteDrizzle from "drizzle-orm/effect-sqlite-node";
 import { migrate } from "drizzle-orm/effect-sqlite-node/migrator";
 import { sql } from "drizzle-orm";
 import { Effect, FileSystem, Layer, Option, Path, PlatformError, Schema } from "effect";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import type { SqlError } from "effect/sql/SqlError";
 import { CursorStore } from "../cursor/cursor.ts";
 import { ItemProjectionReader, ItemProjectionWriter } from "../item-projection/item-projection.ts";
 import {
@@ -32,13 +32,21 @@ const startupError = (operation: string, cause: unknown) =>
 const runtimeStorePath = (path: Path.Path, instanceDirectory: InstanceDirectory) =>
   path.join(instanceDirectory, ".usine", "runtime.sqlite");
 
+/** Returns `SqliteClient.layer`, failing with `onError` when the database can't be opened. */
+const openSqliteLayer = <E>(
+  config: SqliteClient.SqliteClientConfig,
+  onError: (cause: SqlError) => E,
+) => Layer.effectContext(Layer.build(SqliteClient.layer(config)).pipe(Effect.mapError(onError)));
+
 const sqliteClientLayer = (instanceDirectory: InstanceDirectory) =>
   Layer.unwrap(
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       yield* fileSystem.makeDirectory(path.join(instanceDirectory, ".usine"), { recursive: true });
-      return SqliteClient.layer({ filename: runtimeStorePath(path, instanceDirectory) });
+      return openSqliteLayer({ filename: runtimeStorePath(path, instanceDirectory) }, (cause) =>
+        startupError("open local database", cause),
+      );
     }).pipe(
       Effect.mapError((cause) => startupError("prepare local database directory", cause)),
       Effect.provide(NodeServices.layer),
@@ -129,15 +137,17 @@ const readableRuntimeStore = Effect.fn("LocalSqlite.readableRuntimeStore")(funct
     });
 });
 
-const readOnlySqliteLayer = (filename: string) =>
-  SqliteClient.layer({ filename, readonly: true, disableWAL: true });
+const readOnlySqliteLayer = <E>(filename: string, onError: (cause: SqlError) => E) =>
+  openSqliteLayer({ filename, readonly: true, disableWAL: true }, onError);
 
 const existingSqliteLayer = (instanceDirectory: InstanceDirectory) =>
   Layer.unwrap(
     Effect.gen(function* () {
       const filename = runtimeStorePath(yield* Path.Path, instanceDirectory);
       yield* readableRuntimeStore(filename);
-      return readOnlySqliteLayer(filename);
+      return readOnlySqliteLayer(filename, (cause) =>
+        startupError("open existing local database", cause),
+      );
     }).pipe(
       Effect.mapError((cause) => startupError("open existing local database", cause)),
       Effect.provide(NodeServices.layer),
@@ -194,17 +204,18 @@ export const backup = Effect.fn("LocalSqlite.backup")(
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const source = runtimeStorePath(path, instanceDirectory);
+    const failure =
+      (operation: RuntimeStoreBackupError["operation"]) =>
+      (cause: PlatformError.PlatformError | SqlError) =>
+        new RuntimeStoreBackupError({
+          operation,
+          source,
+          destination,
+          reason: failureReason(cause),
+          cause,
+        });
     const failed = (operation: RuntimeStoreBackupError["operation"]) =>
-      Effect.mapError(
-        (cause: PlatformError.PlatformError | SqlError) =>
-          new RuntimeStoreBackupError({
-            operation,
-            source,
-            destination,
-            reason: failureReason(cause),
-            cause,
-          }),
-      );
+      Effect.mapError(failure(operation));
     yield* readableRuntimeStore(source).pipe(failed("open"));
     const { totalPages } = yield* Effect.scoped(
       Effect.gen(function* () {
@@ -219,7 +230,7 @@ export const backup = Effect.fn("LocalSqlite.backup")(
         const metadata = yield* Effect.flatMap(SqliteClient.SqliteClient, (client) =>
           // Node's backup can't be canceled; wait before closing the database or deleting staging.
           client.backup(staged).pipe(failed("copy"), Effect.uninterruptible),
-        ).pipe(Effect.provide(readOnlySqliteLayer(source)));
+        ).pipe(Effect.provide(readOnlySqliteLayer(source, failure("open"))));
         // A hard link atomically creates the destination without overwriting it.
         yield* fileSystem.link(staged, destination).pipe(failed("publish"));
         return metadata;

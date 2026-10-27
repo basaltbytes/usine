@@ -41,8 +41,8 @@ import {
   Schema,
   Scope,
 } from "effect";
-import type { HttpClient } from "effect/unstable/http";
-import type { ChildProcessSpawner } from "effect/unstable/process";
+import type { HttpClient } from "effect/http";
+import type { ChildProcessSpawner } from "effect/process";
 import { fileURLToPath } from "node:url";
 import { childEnvironment, commitIdentity } from "../child-environment.ts";
 import { durableSessionFor, type PostedCommentsHarvest } from "../durable-session.ts";

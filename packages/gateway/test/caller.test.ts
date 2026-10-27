@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Effect, Encoding, Option, Redacted, Schema } from "effect";
-import { Headers } from "effect/unstable/http";
+import { Effect, Option, Redacted, Schema } from "effect";
+import { Base64, Base64Url } from "effect/encoding";
+import { Headers } from "effect/http";
 import {
   CallerClaims,
   CallerTokens,
@@ -64,7 +65,7 @@ describe("CallerTokens", () => {
               repository: OTHER_REPOSITORY,
             }),
           ]) {
-            const payload = Encoding.encodeBase64Url(
+            const payload = Base64Url.encode(
               Schema.encodeSync(Schema.fromJsonString(CallerClaims))(forged),
             );
             const error = yield* Effect.flip(callers.verify(secret(`ugw1.${payload}.${mac}`)));
@@ -111,7 +112,7 @@ describe("CallerTokens", () => {
           );
           assert.deepStrictEqual(
             yield* strip({
-              authorization: `Basic ${Encoding.encodeBase64(`x-access-token:${caller}`)}`,
+              authorization: `Basic ${Base64.encode(`x-access-token:${caller}`)}`,
               "x-api-key": caller,
             }),
             {},
@@ -134,7 +135,7 @@ describe("presentedToken", () => {
     assert.deepStrictEqual(read({ authorization: `token ${token}` }), Option.some(token));
     assert.deepStrictEqual(read({ authorization: `Bearer ${token}` }), Option.some(token));
     assert.deepStrictEqual(
-      read({ authorization: `Basic ${Encoding.encodeBase64(`x-access-token:${token}`)}` }),
+      read({ authorization: `Basic ${Base64.encode(`x-access-token:${token}`)}` }),
       Option.some(token),
     );
     assert.deepStrictEqual(read({ "x-api-key": token }), Option.some(token));

@@ -17,7 +17,7 @@ import type { AttemptRuntime } from "@usine/durable/attempt-runtime";
 import { claudeLoginLockLayer, CredentialProvider, WorkerCredential } from "@usine/executor";
 import type { HarnessProbe, LocalExecutorOptions } from "@usine/executor/local";
 import { DateTime, Effect, FileSystem, Layer, Option, Path, Redacted, Schema } from "effect";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { layer as localLayer } from "../../src/local.ts";
 import { stubAttemptRuntime, StubStorage } from "@usine/durable/testing";
 import { fixedConfigLayer } from "../support/current-instance.ts";

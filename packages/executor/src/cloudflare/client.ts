@@ -14,8 +14,8 @@ import {
 } from "@usine/cloudflare";
 import { WorkerName } from "@usine/core/worker";
 import { Effect, Option, Redacted, Schema } from "effect";
-import { HttpClient, HttpClientError, HttpClientRequest } from "effect/unstable/http";
-import { HttpApiClient } from "effect/unstable/httpapi";
+import { HttpClient, HttpClientError, HttpClientRequest } from "effect/http";
+import { HttpApiClient } from "effect/http-api";
 import type { CloudflareWorkerAddress } from "./model.ts";
 
 export const SandboxOperation = Schema.Literals([

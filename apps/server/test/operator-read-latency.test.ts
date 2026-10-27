@@ -37,7 +37,7 @@ import {
 import { GitHubItemKey } from "@usine/orchestrator/polling-triggers";
 import { WorkerStatus } from "@usine/orchestrator/worker-status";
 import { Clock, DateTime, Deferred, Effect, FileSystem, Layer, Option, Schema } from "effect";
-import { HttpClient, HttpRouter } from "effect/unstable/http";
+import { HttpClient, HttpRouter } from "effect/http";
 import { assert, describe, it } from "vitest";
 import { liveBackendLayer } from "../src/backend.ts";
 import { apiRoutes } from "../src/http.ts";
@@ -228,9 +228,12 @@ describe("operator read latency", () => {
           operator,
           configuration,
         );
-        const server = HttpRouter.serve(apiRoutes.pipe(HttpRouter.provideRequest(backend)), {
-          disableLogger: true,
-        }).pipe(Layer.provideMerge(NodeHttpServer.layerTest));
+        const server = HttpRouter.serve(
+          apiRoutes(Option.none()).pipe(HttpRouter.provideRequest(backend)),
+          {
+            disableLogger: true,
+          },
+        ).pipe(Layer.provideMerge(NodeHttpServer.layerTest));
 
         yield* Effect.gen(function* () {
           const client = yield* HttpClient.HttpClient;

@@ -13,7 +13,8 @@ import { LoopName, ApprovalRequirement, LoopPermissions } from "@usine/core/loop
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { StepName } from "@usine/core/step";
-import { Crypto, Effect, Encoding, Option, Schema } from "effect";
+import { Crypto, Effect, Option, Schema } from "effect";
+import { Hex } from "effect/encoding";
 
 /** A matched Event with its Loop, Item, and Run settings. */
 export class Submission extends Schema.Class<Submission>("@usine/engine/Submission")({
@@ -53,7 +54,7 @@ export const runIdFor = Effect.fn("Submission.runIdFor")(function* (submission: 
   const digest = yield* crypto
     .digest("SHA-256", new TextEncoder().encode(`${RUN_ID_NAMESPACE}-${submission.event.dedupKey}`))
     .pipe(Effect.orDie);
-  return RunId.make(Encoding.encodeHex(digest.subarray(0, 16)));
+  return RunId.make(Hex.encode(digest.subarray(0, 16)));
 });
 
 /**

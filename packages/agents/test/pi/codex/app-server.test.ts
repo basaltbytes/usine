@@ -18,7 +18,7 @@ import {
   Stream,
 } from "effect";
 import { TestClock } from "effect/testing";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcessSpawner } from "effect/process";
 import { type ChildHost, LocalProcess, RemoteShell } from "../../../src/child-host/child-host.ts";
 import { ChildRequest, SessionOperationError, WorkingDirectory } from "../../../src/runtime.ts";
 import {

@@ -316,7 +316,9 @@ it("shows a running card whose Loop swapped its lane label in the lane of its cu
 
 it("offers Retry beside the failure only on the card whose Run failed", async () => {
   const failed = page.elementLocator(cardOf(/^Pin GitHub Actions/u));
-  await expect.element(failed.getByText("The required check lint failed")).toBeVisible();
+  await expect
+    .element(failed.getByText("The required check lint failed on the pinned commit"))
+    .toBeVisible();
   await expect.element(failed.getByRole("button", { name: "Retry", exact: true })).toBeVisible();
   expect(page.getByRole("button", { name: "Retry", exact: true }).elements()).toHaveLength(1);
 });
@@ -389,7 +391,7 @@ const runAgainBody = (result: RunAgainResult) =>
 const runDroppedAgain = async () => {
   await commands.delayRunAgain();
   await actions(18).click();
-  await page.getByRole("menuitem", { name: "Run again" }).click();
+  await page.getByRole("menuitem", { name: /^Run again/u }).click();
 };
 
 it("runs a Task's canceled Run again from the card menu, says so on the card, and opens the new Run", async () => {
@@ -500,7 +502,7 @@ it("lists the current Run's applicable actions and moves the card through Move t
   await expect.element(lane("In progress").getByText(/^Retry salvage/u)).toBeVisible();
   await expect
     .element(lane("In progress").getByRole("status"))
-    .toHaveTextContent("Saved on GitHub");
+    .toMatchTextContent("Saved on GitHub");
   await expect.element(lane("Ready").getByText(/^Retry salvage/u)).not.toBeInTheDocument();
 });
 

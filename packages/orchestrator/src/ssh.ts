@@ -53,7 +53,7 @@ const secretFrom = (
   variable: string,
   message: string,
 ) =>
-  Config.redacted(variable).pipe(
+  Config.Redacted(variable).pipe(
     Effect.mapError(
       (cause) =>
         new WorkerCapabilityError({
@@ -134,7 +134,7 @@ const sshWorkerAddressOf = (worker: SshWorker, missing: MissingSecret) =>
     const gateway = yield* Effect.transposeOption(
       Option.map(worker.gateway, (settings) =>
         Effect.gen(function* () {
-          const adminToken = yield* Config.redacted(settings.adminTokenEnv);
+          const adminToken = yield* Config.Redacted(settings.adminTokenEnv);
           return {
             domain: settings.domain,
             destination: settings.destination,

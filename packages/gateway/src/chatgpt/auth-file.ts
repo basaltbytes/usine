@@ -1,14 +1,5 @@
-import {
-  DateTime,
-  Effect,
-  Encoding,
-  Exit,
-  FileSystem,
-  Option,
-  Redacted,
-  Result,
-  Schema,
-} from "effect";
+import { DateTime, Effect, Exit, FileSystem, Option, Redacted, Result, Schema } from "effect";
+import { Base64Url } from "effect/encoding";
 
 /**
  * The error when a ChatGPT login's `auth.json` can't be read or written, or isn't a Codex
@@ -66,7 +57,7 @@ const decodeJwtClaims = Schema.decodeUnknownOption(JwtClaims);
 /** Returns a JWT's claims without checking its signature, which only the issuer can. */
 const jwtClaims = (jwt: string) =>
   Option.fromNullishOr(jwt.split(".")[1]).pipe(
-    Option.flatMap((payload) => Result.getSuccess(Encoding.decodeBase64UrlString(payload))),
+    Option.flatMap((payload) => Result.getSuccess(Base64Url.decodeString(payload))),
     Option.flatMap(decodeJwtClaims),
   );
 

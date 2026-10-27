@@ -159,7 +159,7 @@ Use the `FromJson` schema (not the base schema) for both decode and encode when 
 | `Schema.Boolean` | `boolean` | |
 | `Schema.Date` | `Date` | Parses from ISO string |
 | `Schema.DateTimeUtc` | `DateTime.Utc` | Effect DateTime |
-| `Schema.UUID` | `string` | UUID format validation |
+| `Schema.String.check(Schema.isUUID())` | `string` | UUID format validation |
 | `Schema.NonEmptyString` | `string` | Min length 1 |
 | `Schema.NullOr(S)` | `T \| null` | Key stays REQUIRED — see below |
 | `Schema.optionalKey(S)` | `T` (key may be absent) | Absent-only optionality |

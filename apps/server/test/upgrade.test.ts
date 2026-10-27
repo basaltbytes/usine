@@ -16,7 +16,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { NodeServices } from "@effect/platform-node";
 import { InstanceDirectory } from "@usine/core/instance";
 import { Duration, Effect, Layer, Option, Schema } from "effect";
-import { FetchHttpClient, type HttpClient } from "effect/unstable/http";
+import { FetchHttpClient, type HttpClient } from "effect/http";
 import { afterEach, assert, beforeEach, describe, it } from "vitest";
 import { LifecycleOptions, Port, SERVER_HOST, UpgradeCommand } from "../src/cli.ts";
 import { CommandError, runCommand } from "../src/command.ts";

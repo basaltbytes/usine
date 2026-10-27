@@ -1,7 +1,7 @@
 import { ItemNumber } from "@usine/core/item";
 import { RepositoryName, splitRepositoryName } from "@usine/core/repository";
 import { Context, DateTime, Effect, Layer, Option, Schema } from "effect";
-import { HttpClient } from "effect/unstable/http";
+import { HttpClient } from "effect/http";
 import { GitHubItemNotFoundError, type GitHubAppError } from "./error.ts";
 import { GitHubApp } from "./github-app.ts";
 import { queryGraphql } from "./graphql.ts";

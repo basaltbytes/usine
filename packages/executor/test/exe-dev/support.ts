@@ -19,8 +19,8 @@ import { CheckoutRequest, claudeLoginLockLayer } from "../../src/executor.ts";
 import { layer as exeDevLayer } from "../../src/exe-dev/exe-dev.ts";
 import { GitHubIntegration, IntegrationName } from "../../src/exe-dev/model.ts";
 import { DateTime, Deferred, Effect, Layer, Option, Ref, Sink, Stream } from "effect";
-import { ChildProcessSpawner } from "effect/unstable/process";
-import type { StandardCommand } from "effect/unstable/process/ChildProcess";
+import { ChildProcessSpawner } from "effect/process";
+import type { StandardCommand } from "effect/process/ChildProcess";
 import { claudeVersionOutput } from "../claude-code.ts";
 
 export const ATTEMPT_ID = AttemptId.make("remote-run/execute/1");

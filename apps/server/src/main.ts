@@ -2,7 +2,7 @@
 import { NodeRuntime, NodeServices } from "@effect/platform-node";
 import { InstanceDirectory } from "@usine/core/instance";
 import { Config, ConfigProvider, Console, Effect, Layer, Match } from "effect";
-import { FetchHttpClient } from "effect/unstable/http";
+import { FetchHttpClient } from "effect/http";
 import { CLI_USAGE, type CliEnvironment, packageVersion, parseCli } from "./cli.ts";
 import { failureMessage } from "./failure-message.ts";
 import { instanceEnvironment } from "./instance/environment.ts";
@@ -21,9 +21,10 @@ const exitWith = (message: string) =>
   );
 
 const cliEnvironment: Config.Config<CliEnvironment> = Config.all({
-  port: Config.option(Config.string("USINE_PORT")),
-  logLevel: Config.option(Config.string("USINE_LOG_LEVEL")),
-  allowVolatileInstance: Config.option(Config.string("USINE_ALLOW_VOLATILE_INSTANCE")),
+  port: Config.option(Config.String("USINE_PORT")),
+  origin: Config.option(Config.String("USINE_ORIGIN")),
+  logLevel: Config.option(Config.String("USINE_LOG_LEVEL")),
+  allowVolatileInstance: Config.option(Config.String("USINE_ALLOW_VOLATILE_INSTANCE")),
 });
 
 // Untraced: a span around `usine up`, which never returns, would parent every span it exports.
@@ -44,15 +45,15 @@ const runCommand = Effect.fnUntraced(function* (directory: InstanceDirectory) {
         Effect.promise(() => import("./backup.ts")),
         ({ backup }) => backup(directory, output),
       ),
-    UpCommand: ({ port, logLevel, allowVolatileInstance, detach }) =>
-      detach
+    UpCommand: (command) =>
+      command.detach
         ? Effect.flatMap(
             Effect.promise(() => import("./detach.ts")),
-            ({ upDetached }) => upDetached(directory, port, logLevel, allowVolatileInstance),
+            ({ upDetached }) => upDetached(directory, command),
           )
         : Effect.flatMap(
             Effect.promise(() => import("./up.ts")),
-            ({ up }) => up(port, logLevel, allowVolatileInstance),
+            ({ up }) => up(command),
           ),
     StatusCommand: () =>
       Effect.flatMap(

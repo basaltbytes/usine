@@ -1,6 +1,7 @@
 import { canonicalRepositoryName, RepositoryName } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
-import { DateTime, Effect, Encoding, Schema } from "effect";
+import { DateTime, Effect, Schema } from "effect";
+import { Base64Url } from "effect/encoding";
 
 /**
  * The ID of an attachment, unchanged by renewals. A new attach for the same Worker and
@@ -13,7 +14,7 @@ export type AttachmentId = typeof AttachmentId.Type;
 
 /** Returns a new attachment ID of 128 random bits from the platform's cryptographic generator. */
 export const newAttachmentId = Effect.sync(() =>
-  AttachmentId.make(Encoding.encodeBase64Url(crypto.getRandomValues(new Uint8Array(16)))),
+  AttachmentId.make(Base64Url.encode(crypto.getRandomValues(new Uint8Array(16)))),
 );
 
 /** A GitHub App installation token added to the Worker's requests for the repository. */

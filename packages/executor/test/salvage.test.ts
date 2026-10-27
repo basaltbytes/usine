@@ -6,7 +6,7 @@ import { CommitSha } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
 import { Cause, Effect, Fiber, FileSystem, Option } from "effect";
 import { TestClock } from "effect/testing";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcessSpawner } from "effect/process";
 import { collectCommand, requireSuccess } from "../src/child-command.ts";
 import { ExecutorOperationError } from "../src/executor.ts";
 import { salvageWorktree } from "../src/salvage.ts";

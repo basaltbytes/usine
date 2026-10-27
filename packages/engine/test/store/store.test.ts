@@ -42,7 +42,7 @@ import { ContainerId, ContainerMemoryMib, WorkerName } from "@usine/core/worker"
 
 import { DateTime, Effect, FileSystem, Layer, Option, Result, Schema } from "effect";
 import { TestClock } from "effect/testing";
-import { SqlClient } from "effect/unstable/sql";
+import { SqlClient } from "effect/sql";
 
 import { localSqliteLayer } from "../../src/database/local-sqlite.ts";
 
@@ -809,6 +809,22 @@ describe("run store", () => {
         assert.deepStrictEqual(completed.step.result, Option.some(result));
       }),
     ),
+  );
+
+  it.live(
+    "fails with a persistence error, not a defect, when the runtime store can't be opened",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const directory = yield* fs.makeTempDirectoryScoped({ prefix: "usine-unopenable-store-" });
+        // SQLite can't open a directory as a database file.
+        yield* fs.makeDirectory(`${directory}/.usine/runtime.sqlite`, { recursive: true });
+        const failure = yield* Layer.build(
+          localSqliteLayer(InstanceDirectory.make(directory)),
+        ).pipe(Effect.scoped, Effect.flip);
+        assert.strictEqual(failure._tag, "EnginePersistenceError");
+        assert.strictEqual(failure.operation, "open local database");
+      }).pipe(Effect.provide(NodeServices.layer)),
   );
 
   it.live("an approved Run records its source once and is Queued until its attempt starts", () =>

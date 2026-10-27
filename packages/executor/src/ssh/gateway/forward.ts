@@ -2,7 +2,7 @@ import { createServer } from "node:net";
 import type { RemoteShell } from "@usine/agents/child-host";
 import { type GatewayAdminPort, SshDestination } from "@usine/core/worker";
 import { DateTime, Deferred, Effect, Fiber, Option, Ref, Result, Schema, Stream } from "effect";
-import { ChildProcess, type ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcess, type ChildProcessSpawner } from "effect/process";
 
 /** The line the SSH client prints through `LocalCommand` when its local port is listening. */
 const OPEN_LINE = "usine-gateway-forward-open";
