@@ -1,65 +1,55 @@
 ---
 name: react-app-structure
-description: File placement, naming, imports, props, data loading, and tests in a React app with TanStack file routes (apps/web). Use when adding a route, page, component, hook, helper, query, or UI string, when moving or splitting web files, when writing a web test, or when naming a route group, feature folder, or component folder.
+description: Where a file goes, what it exports, and how it loads data in apps/web. Use before creating, moving, or splitting a file under apps/web/src, writing a component, adding a query, or writing a web test.
 ---
 
 # React app structure
 
-`src/` has five top-level folders. Every file belongs to exactly one.
+`src/` has five top-level folders.
 
 | Folder | Holds |
 |---|---|
-| `routes/` | TanStack file routes. The framework owns this layout. |
-| `features/<feature>/` | Everything one feature owns: `components/`, `hooks/`, `utils/`, `lib/`, `queries.ts`, `strings.ts`, page files, and tests. |
-| `components/` | Reusable UI only. The root holds pieces any screen uses (`ui/` registry, marks, badges). `components/<feature>/` holds reusable pieces of one feature. |
+| `routes/` | TanStack file routes. |
+| `features/<feature>/` | Everything one feature owns. |
+| `components/` | Reusable UI. The root holds pieces any screen uses; `components/<feature>/` holds pieces of one feature that other features render. |
 | `hooks/` | App-wide hooks. |
 | `lib/` | App-wide helpers and clients. |
 
-Import direction: `routes/` imports `features/`, `features/` imports `components/`, `hooks/`, and `lib/`, and a feature never imports another feature's files. A lint rule enforces the direction.
+Imports flow one way: `routes/` to `features/`, and `features/` to `components/`, `hooks/`, and `lib/`. A feature imports only root folders.
+
+## Placement
+
+Name the file's feature first. With a feature, the file goes under `features/<feature>/`; rendered by other features too, under `components/<feature>/`. Without one, it goes in `components/`, `hooks/`, or `lib/`.
+
+A feature is named after its route group, and that one name is used everywhere: route `tasks/`, `features/tasks/`, `components/tasks/`. Inside a feature: `components/`, `hooks/`, `utils/`, `lib/`, `queries.ts`, `strings.ts`, page files, and tests.
 
 ## Routes
 
-- The route's component lives in the route file, defined above `Route`.
-- A page too large for its route file moves to `features/<feature>/<name>.page.tsx` (`features/tasks/list.page.tsx`), and the route file imports it. `.page.tsx` marks every page file; nothing else uses the suffix.
-- A route file holds the route, its loader, and its component. Queries, strings, and sub-components belong to the feature.
-- Search params are parsed once, by `validateSearch` on the route that owns them. Components read them with `Route.useSearch()`.
-
-## Features
-
-- One feature per route group, with the same word everywhere: route `tasks/`, folder `features/tasks/`, folder `components/tasks/`.
-- A feature folder holds `components/`, `hooks/`, `utils/`, `lib/`, `queries.ts`, `strings.ts`, page files, and tests. Create a subfolder once it has a file.
-- A piece that two features use is reusable. It moves to `components/`, `hooks/`, or `lib/` at the root.
+- A route file holds `Route`, its loader, and its component, defined above `Route`.
+- A page too large for its route file moves to `features/<feature>/<name>.page.tsx` and the route imports it. `.page.tsx` marks a page file and nothing else.
+- Search params are parsed once, by `validateSearch` on the route that owns them, and read with `Route.useSearch()`.
 
 ## Data
 
 - `features/<feature>/queries.ts` exports one `queryOptions` factory per query. The query key is written there and nowhere else.
-- The route's `loader` calls `context.queryClient.ensureQueryData(...)` with those options, so data is ready before the first render and links prefetch on hover.
-- Components read the same options with `useSuspenseQuery`. A component never builds a query key or calls `useQuery` with an inline key.
+- The route's `loader` calls `ensureQueryData` with those options; components read them with `useSuspenseQuery`.
 
 ## Strings
 
-- Text shown to the user lives in `features/<feature>/strings.ts` as named exports; a component imports the string it renders.
-- Strings shared by several features go in `lib/strings.ts`.
+Text shown to the user is a named export of `features/<feature>/strings.ts`, or `lib/strings.ts` when several features show it.
 
 ## Imports
 
-- Import app files through the `~/` alias (`~/components/ui/button`, `~/lib/api`). Relative paths are for files in the same folder.
-- `~/` is the only alias. `tsconfig.json` paths, the Vite alias, and the `aliases` block of `components.json` all spell it, so `shadcn add` emits it too.
-- Named exports only. The one default export is a route's `createFileRoute` result, which the generator requires as `Route`.
+- `~/` is the only alias, for every file outside the importer's folder. `components.json` spells it too, so `shadcn add` emits it.
+- Named exports only.
 
 ## Components
 
-- A component's props are a named type, `<Component>Props`, declared above the component: `DashboardProps` for `Dashboard`.
-- Declare it with `type`, never `interface`, and mark fields `readonly`.
-- A component file stays under 300 lines. Past that, the next sub-component moves to `components/<name>.tsx` in the same feature.
-- Vendored registry files under `components/ui/` and `components/ai-elements/` keep upstream's shape.
+- Props are a named type declared above the component: `type DashboardProps = { readonly ... }` for `Dashboard`.
+- A component file stays under 300 lines. Past that, the next sub-component moves to its own file under the feature's `components/`.
+- Vendored files under `components/ui/` and `components/ai-elements/` keep upstream's shape.
 
 ## Tests
 
-- A test sits beside the file it covers: `moves.ts` has `moves.test.ts`, and a component rendered in Chromium has `card.browser.test.tsx`.
-- `vitest.config.ts` picks tests up from `src/**` by those suffixes; no `test/` folder.
-- Pure modules (`utils/`, `lib/`, `queries.ts` selectors) get unit tests. Browser tests cover behaviour the DOM decides, such as drag, scroll, and focus.
-
-## Placement check
-
-Name the feature before you create a file. A file with no feature is app-wide and goes in `components/`, `hooks/`, or `lib/`. A file with a feature goes under `features/<feature>/`, or under `components/<feature>/` when other features render it.
+- A test sits beside the file it covers: `moves.test.ts` next to `moves.ts`, `card.browser.test.tsx` next to `card.tsx`.
+- Pure modules get unit tests. Browser tests cover what the DOM decides: drag, scroll, focus.
