@@ -96,6 +96,7 @@ const openAttempt: AttemptRecovery = {
   permissions: "write",
   succeeded: false,
   open: true,
+  rejected: Option.none(),
 };
 
 /**

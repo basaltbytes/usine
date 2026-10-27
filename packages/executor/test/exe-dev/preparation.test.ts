@@ -264,6 +264,7 @@ describe("exe.dev preparation", () => {
             permissions: "write",
             succeeded: false,
             open: false,
+            rejected: Option.none(),
           },
           {
             salvage: (salvage) =>
@@ -320,6 +321,7 @@ describe("exe.dev preparation", () => {
             permissions: "write",
             succeeded: true,
             open: false,
+            rejected: Option.none(),
           },
           {
             salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
@@ -356,6 +358,7 @@ describe("exe.dev preparation", () => {
             permissions: "write",
             succeeded,
             open: false,
+            rejected: Option.none(),
           },
           {
             salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
@@ -395,6 +398,7 @@ describe("exe.dev preparation", () => {
               permissions: "write",
               succeeded: index !== 2,
               open: false,
+              rejected: Option.none(),
             },
             {
               salvage: () => Effect.void,

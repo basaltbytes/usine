@@ -36,6 +36,7 @@ import {
   provisionWorktree,
   reattachWorktree,
   recoverWorktree,
+  recoveryFields,
   type WorkspaceOps,
 } from "../provision.ts";
 import {
@@ -430,7 +431,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       record: RecoverySink<E>,
       commitAuthor: Effect.Effect<BotAccount, A>,
     ) {
-      yield* Effect.annotateCurrentSpan({ ...attempt });
+      yield* Effect.annotateCurrentSpan(recoveryFields(attempt));
       yield* session.stopForRecovery(attempt);
       const located = yield* leftoversOf(attempt);
       if (Option.isNone(located)) {

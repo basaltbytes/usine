@@ -13,7 +13,13 @@ import {
   TextOutput,
 } from "@usine/core/agent/session";
 import { type Attempt, AttemptId, AttemptTask } from "@usine/core/attempt";
-import { SalvagePushed, SalvageRef, SalvageRetained } from "@usine/core/attempt/salvage";
+import {
+  SalvagePartlyPushed,
+  SalvagePushed,
+  SalvageRef,
+  SalvageRejected,
+  SalvageRetained,
+} from "@usine/core/attempt/salvage";
 import { CommitSha } from "@usine/core/repository";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
@@ -1232,23 +1238,65 @@ describe("cursor store", () => {
             "Retained",
           );
 
+          // A salvage that pushed the work without a file larger than GitHub accepts keeps the
+          // checkout of that file, and the retry resumes from the pushed part.
+          yield* store.finishAttempt(
+            fresh.execution.attempt,
+            Result.fail(new AgentFailure({ message: "Guard tripped a third time" })),
+          );
+          const partlyPushed = new SalvagePartlyPushed({
+            ref: SalvageRef.make("usine/salvage/salvaged-retry/3"),
+            commit: CommitSha.make("d".repeat(40)),
+            path: "/workers/local/attempts/salvaged-retry-3",
+            message:
+              "The checkout has files larger than GitHub's 100 MiB limit, which the salvage can't push: dataset.csv (100.0 MiB)",
+          });
+          yield* store.recordSalvage(fresh.execution.attempt.id, partlyPushed);
+          yield* store.retry(retriedRun);
+          const afterPartial = yield* store.beginAttempt(
+            retriedRun,
+            WorkerName.make("local"),
+            Option.none(),
+          );
+          assert(afterPartial._tag === "AttemptStarted");
+          assert.deepStrictEqual(
+            afterPartial.execution.resume,
+            Option.some(new SalvagePushed({ ref: partlyPushed.ref, commit: partlyPushed.commit })),
+          );
+          assert.deepStrictEqual(
+            (yield* store.snapshot(retriedRun)).attempts[2]?.salvage,
+            Option.some(partlyPushed),
+          );
+
           // A succeeded Attempt stays a candidate: a checkout its Worker could
           // not release at the time is removed at the next reconcile, not salvaged.
           yield* store.finishAttempt(
-            fresh.execution.attempt,
+            afterPartial.execution.attempt,
             Result.succeed(new StepResult({ message: "delivered", facts: [] })),
           );
+          // A recovery whose push GitHub refused records the rejection, and the next startup's
+          // recovery gets it, so it doesn't push the same commit again.
+          const rejected = new SalvageRejected({
+            path: "/workers/local/attempts/salvaged-retry",
+            commit: CommitSha.make("c".repeat(40)),
+            message: "remote: error: GH001: Large files detected.",
+          });
+          yield* store.recordSalvage(resumed.execution.attempt.id, rejected);
           const candidates = yield* store.salvageCandidates;
-          assert.strictEqual(candidates.length, 4);
+          assert.strictEqual(candidates.length, 5);
           assert.deepStrictEqual(
             Object.fromEntries(
-              candidates.map(({ attemptId, succeeded }) => [attemptId, succeeded]),
+              candidates.map(({ attemptId, succeeded, rejected }) => [
+                attemptId,
+                { succeeded, rejected },
+              ]),
             ),
             {
-              [first.execution.attempt.id]: false,
-              [started.execution.attempt.id]: false,
-              [resumed.execution.attempt.id]: false,
-              [fresh.execution.attempt.id]: true,
+              [first.execution.attempt.id]: { succeeded: false, rejected: Option.none() },
+              [started.execution.attempt.id]: { succeeded: false, rejected: Option.none() },
+              [resumed.execution.attempt.id]: { succeeded: false, rejected: Option.some(rejected) },
+              [fresh.execution.attempt.id]: { succeeded: false, rejected: Option.none() },
+              [afterPartial.execution.attempt.id]: { succeeded: true, rejected: Option.none() },
             },
           );
         }),

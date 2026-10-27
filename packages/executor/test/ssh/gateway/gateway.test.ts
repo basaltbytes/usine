@@ -606,6 +606,7 @@ describe("SSH Worker behind a Gateway", () => {
           permissions: "write",
           succeeded: false,
           open: false,
+          rejected: Option.none(),
         },
         {
           salvage: () => Effect.void,

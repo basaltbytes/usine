@@ -7,7 +7,7 @@ import { LoopName } from "@usine/core/loop";
 import { WorkerName } from "@usine/core/worker";
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
 import { completes, type StubParent, StubStorage } from "@usine/durable/testing";
-import { Cause, DateTime, Deferred, Effect, Exit, Fiber } from "effect";
+import { Cause, DateTime, Deferred, Effect, Exit, Fiber, Option } from "effect";
 import { TestClock } from "effect/testing";
 import { SSH_ENVIRONMENT_ALLOWLIST } from "../../src/remote/commands.ts";
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
@@ -326,6 +326,7 @@ describe("SSH Worker", () => {
           permissions: "read",
           succeeded: false,
           open: false,
+          rejected: Option.none(),
         },
         {
           salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
@@ -363,6 +364,7 @@ describe("SSH Worker", () => {
             permissions: "write",
             succeeded: false,
             open: false,
+            rejected: Option.none(),
           },
           {
             salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),

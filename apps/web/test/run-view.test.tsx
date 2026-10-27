@@ -14,7 +14,13 @@ import {
 } from "@usine/core/agent/session";
 import { AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
 import { SessionEvent, WorkerUnresponsive } from "@usine/core/attempt/channel";
-import { SalvagePushed, SalvageRef, SalvageRetained } from "@usine/core/attempt/salvage";
+import {
+  SalvagePartlyPushed,
+  SalvagePushed,
+  SalvageRef,
+  SalvageRejected,
+  SalvageRetained,
+} from "@usine/core/attempt/salvage";
 import {
   StartedAfterRestart,
   StartedByEditAndRetry,
@@ -608,6 +614,26 @@ describe("salvage line", () => {
     assert.notInclude(markup, "0123456789abcdef");
   });
 
+  it("names the pushed ref and the checkout that keeps the files the push left out", () => {
+    const markup = renderToStaticMarkup(
+      <SalvageLine
+        salvage={
+          new SalvagePartlyPushed({
+            ref: SalvageRef.make("usine/salvage/run/1"),
+            commit: CommitSha.make("0123456789abcdef0123456789abcdef01234567"),
+            path: "/workers/local/attempts/run_execute_1",
+            message:
+              "The checkout has files larger than GitHub's 100 MiB limit, which the salvage can't push: dataset.csv (100.0 MiB)",
+          })
+        }
+      />,
+    );
+    assert.include(markup, "usine/salvage/run/1");
+    assert.include(markup, "0123456");
+    assert.include(markup, "/workers/local/attempts/run_execute_1");
+    assert.include(markup, "dataset.csv (100.0 MiB)");
+  });
+
   it("shows where retained work lives, that startup retries it, and why the last try failed", () => {
     const markup = renderToStaticMarkup(
       <SalvageLine
@@ -623,6 +649,24 @@ describe("salvage line", () => {
     assert.include(markup, "/workers/local/attempts/run_execute_1");
     assert.include(markup, "retried at each startup");
     assert.include(markup, "remote: Repository not found.");
+  });
+
+  it("shows where rejected work lives, that startup doesn't retry it, and the remote's refusal", () => {
+    const markup = renderToStaticMarkup(
+      <SalvageLine
+        salvage={
+          new SalvageRejected({
+            path: "/workers/local/attempts/run_execute_1",
+            commit: CommitSha.make("0123456789abcdef0123456789abcdef01234567"),
+            message: "git exited with code 1: remote: error: GH001: Large files detected.",
+          })
+        }
+      />,
+    );
+    assert.include(markup, "/workers/local/attempts/run_execute_1");
+    assert.include(markup, "doesn&#x27;t retry it");
+    assert.notInclude(markup, "retried at each startup");
+    assert.include(markup, "GH001: Large files detected.");
   });
 
   it("says when no salvage branch exists", () => {

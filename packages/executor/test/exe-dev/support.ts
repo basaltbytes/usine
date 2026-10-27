@@ -280,6 +280,8 @@ export const fakeSsh = (sweepMode: SweepMode = "valid") => {
           if (state.salvage === "inspect-fails") return oneShotHandle("", 128, "inspection failed");
           return oneShotHandle(state.salvage === "clean" ? "" : " M src/index.ts\n", 0);
         }
+        if (line.includes("'diff' '--cached'"))
+          return oneShotHandle(state.salvage === "clean" ? "" : "src/index.ts\0", 0);
         if (line.includes("'add'") && state.salvage === "add-fails")
           return oneShotHandle("", 128, "index.lock exists");
         if (line.includes("'commit'")) {

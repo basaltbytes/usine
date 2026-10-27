@@ -269,6 +269,7 @@ const registerRelease = Effect.fn("Executor.registerRelease")(function* <E exten
                 worktree: layout.worktree,
                 baseCommit,
                 ref: request.salvageRef,
+                rejected: Option.none(),
                 git: (args) => ops.checkout.git("cleanup", args),
               })
           : Option.none<AttemptSalvage>();
@@ -294,7 +295,7 @@ const registerRelease = Effect.fn("Executor.registerRelease")(function* <E exten
         }
       }
       yield* Deferred.succeed(salvaged, salvage);
-      if (Option.exists(salvage, ({ _tag }) => _tag === "Retained")) {
+      if (Option.exists(salvage, ({ _tag }) => _tag !== "Pushed")) {
         yield* Effect.logWarning("Attempt worktree retained; salvage did not preserve all work", {
           attemptId: request.attemptId,
           worker: request.worker,
@@ -641,6 +642,13 @@ export const keptCheckoutRecovery = (request: CheckoutRequest): AttemptRecovery 
   permissions: request.permissions,
   succeeded: false,
   open: false,
+  rejected: Option.none(),
+});
+
+/** Returns the span and log fields of `attempt`, with whether its recorded salvage was rejected. */
+export const recoveryFields = (attempt: AttemptRecovery) => ({
+  ...attempt,
+  rejected: Option.isSome(attempt.rejected),
 });
 
 /**
@@ -657,14 +665,15 @@ export const recoverWorktree = Effect.fn("Executor.recoverWorktree")(function* <
   record: (salvage: AttemptSalvage) => Effect.Effect<void, RecordError>,
 ) {
   const { attempt, host, worktree } = options;
-  yield* Effect.annotateCurrentSpan({ ...attempt, host, worktree });
+  const fields = { ...recoveryFields(attempt), host, worktree };
+  yield* Effect.annotateCurrentSpan(fields);
   if (attempt.succeeded || attempt.permissions === "read") {
     yield* options.removeCheckout;
     yield* Effect.logInfo(
       attempt.succeeded
         ? "Released the checkout of a succeeded Attempt"
         : "Released the checkout of an Attempt whose Loop has read permissions, without salvage",
-      { ...attempt, host, worktree },
+      fields,
     );
     return;
   }
@@ -677,9 +686,9 @@ export const recoverWorktree = Effect.fn("Executor.recoverWorktree")(function* <
   });
   if (Option.isNone(salvage)) return;
   yield* record(salvage.value);
-  if (salvage.value._tag === "Retained") return;
+  if (salvage.value._tag !== "Pushed") return;
   yield* options.removeCheckout;
-  yield* Effect.logInfo("Reconciled and released Attempt salvage", { ...attempt, host, worktree });
+  yield* Effect.logInfo("Reconciled and released Attempt salvage", fields);
 });
 
 /**

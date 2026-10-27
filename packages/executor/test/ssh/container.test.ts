@@ -636,6 +636,7 @@ describe("SSH Worker with Docker", () => {
               permissions: "write",
               succeeded: false,
               open: false,
+              rejected: Option.none(),
             },
             {
               salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
@@ -684,6 +685,7 @@ describe("SSH Worker with Docker", () => {
               permissions: "write",
               succeeded: false,
               open: false,
+              rejected: Option.none(),
             },
             { salvage: () => Effect.void, comments: () => Effect.void, windows: aloneOnItem() },
             Effect.succeed(request.commitAuthor),

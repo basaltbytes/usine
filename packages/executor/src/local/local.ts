@@ -62,6 +62,7 @@ import {
   provisionWorktree,
   reattachWorktree,
   recoverWorktree,
+  recoveryFields,
   type WorkspaceOps,
 } from "../provision.ts";
 
@@ -257,7 +258,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       record: RecoverySink<E>,
       commitAuthor: Effect.Effect<BotAccount, A>,
     ) {
-      yield* Effect.annotateCurrentSpan({ ...attempt, host: "local" });
+      yield* Effect.annotateCurrentSpan({ ...recoveryFields(attempt), host: "local" });
       yield* session.stopForRecovery(attempt);
       const root = path.join(workersRoot, attempt.worker);
       const worktree = path.join(root, "attempts", safeSegment(attempt.attemptId));
