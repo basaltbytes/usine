@@ -19,7 +19,7 @@ import {
   WorkerKind,
 } from "@usine/core/worker";
 import { StepResult } from "@usine/core/step/result";
-import { Context, Effect, Option, type Result, Schema, Scope } from "effect";
+import { Context, Effect, Option, Predicate, Redacted, type Result, Schema, Scope } from "effect";
 
 export const ExecutorOperation = Schema.Literals([
   "preflight",
@@ -276,6 +276,16 @@ export interface PreparedAttempt {
   readonly launch: (io: AttemptChannel.Sink) => Effect.Effect<StepResult, AttemptFailure>;
 }
 
+/**
+ * A `Redacted` string, kept as the instance it was given, so wiping it wipes the token the
+ * provider issued. `Schema.Redacted` stores a copy instead.
+ */
+const IssuedToken = Schema.declare(
+  (input): input is Redacted.Redacted<string> =>
+    Redacted.isRedacted(input) && Predicate.isString(Redacted.value(input)),
+  { expected: "Redacted<string>" },
+);
+
 export class WorkerCredential extends Schema.Class<WorkerCredential>(
   "@usine/executor/WorkerCredential",
 )({
@@ -283,7 +293,7 @@ export class WorkerCredential extends Schema.Class<WorkerCredential>(
    * The token for git and gh, never written inside the checkout. Wiped when the Attempt's scope
    * closes; `Redacted.value` then throws.
    */
-  value: Schema.Redacted(Schema.String),
+  value: IssuedToken,
   /** A new credential is requested when five minutes or less remain. */
   expiresAt: Schema.DateTimeUtc,
 }) {}
