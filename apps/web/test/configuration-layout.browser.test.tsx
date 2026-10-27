@@ -115,7 +115,7 @@ it("gives a preflight check's description its own width, and the detail the rest
 it("folds a preflight check's time and message into its row on a narrow table, without scrolling sideways", async () => {
   for (const width of [390, 1280]) {
     await mount("/configuration/workers/local", width);
-    expect(headers(), `at ${width}px`).toEqual(["Check", "Result"]);
+    await expect.poll(headers, { message: `at ${width}px` }).toEqual(["Check", "Result"]);
     const [check, result] = cells("Claude Code");
     expect(check?.innerText).toContain("Claude Code needs a subscription login.");
     expect(result?.innerText).toContain(dayTimeLabel("2026-10-20T09:15:00.000Z"));
