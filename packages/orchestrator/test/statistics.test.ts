@@ -30,7 +30,7 @@ import { RunApproval } from "@usine/core/run/approval";
 import * as RunState from "@usine/core/run/state";
 import { Step, StepName } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
-import { RunSummary } from "@usine/engine/run-reader";
+import { ProjectionRevision, RunSummary } from "@usine/engine/run-reader";
 import { UsineConfig } from "@usine/config/factory";
 import { LoadedInstance } from "@usine/config/instance";
 import * as AttemptChannel from "@usine/core/attempt/channel";
@@ -843,6 +843,8 @@ describe("OperatorStatistics", () => {
       Effect.gen(function* () {
         const since: Array<Option.Option<DateTime.Utc>> = [];
         const closedRuns = [implemented, firstReview, onlyReview];
+        let itemReads = 0;
+        let historyReads = 0;
         const reader = Layer.succeed(RunReader)({
           inspect: () => Effect.die("unused"),
           evidence: () => Effect.die("unused"),
@@ -851,13 +853,14 @@ describe("OperatorStatistics", () => {
           closed: () => Effect.die("unused"),
           closedSince: (from) => Effect.sync(() => since.push(from)).pipe(Effect.as(closedRuns)),
           forItems: (keys) =>
-            Effect.succeed(
-              [implemented, firstReview, onlyReview].filter(({ itemKey }) =>
+            Effect.sync(() => {
+              historyReads += 1;
+              return [implemented, firstReview, onlyReview].filter(({ itemKey }) =>
                 keys.includes(itemKey),
-              ),
-            ),
+              );
+            }),
           events: () => Effect.die("unused"),
-          revision: () => Effect.die("unused"),
+          revision: () => Effect.succeed(Option.some(ProjectionRevision.make(0))),
           transcript: (query) =>
             Effect.succeed(
               query._tag === "TranscriptUsageQuery" && query.attemptId === "implemented/1"
@@ -871,20 +874,23 @@ describe("OperatorStatistics", () => {
           get: () => Effect.die("unused"),
           openIssues: () => Effect.die("unused"),
           list: () =>
-            Effect.succeed([
-              issue(1, [2]),
-              mergedPullRequest(2, "2026-10-22T08:00:00Z"),
-              // Merged before the window.
-              mergedPullRequest(9, "2026-10-10T08:00:00Z"),
-              new ItemProjection({
-                itemKey: gitHubItemKey(repository, 12),
-                repository,
-                source: ItemProjectionSource.make("pr"),
-                number: ItemNumber.make(12),
-                contentHash: ItemContentHash.make("malformed-12"),
-                payload: { number: 12 },
-              }),
-            ]),
+            Effect.sync(() => {
+              itemReads += 1;
+              return [
+                issue(1, [2]),
+                mergedPullRequest(2, "2026-10-22T08:00:00Z"),
+                // Merged before the window.
+                mergedPullRequest(9, "2026-10-10T08:00:00Z"),
+                new ItemProjection({
+                  itemKey: gitHubItemKey(repository, 12),
+                  repository,
+                  source: ItemProjectionSource.make("pr"),
+                  number: ItemNumber.make(12),
+                  contentHash: ItemContentHash.make("malformed-12"),
+                  payload: { number: 12 },
+                }),
+              ];
+            }),
         });
         const budgets = Layer.succeed(CycleBudgets)({
           ...emptyCycleBudgets,
@@ -894,7 +900,19 @@ describe("OperatorStatistics", () => {
         yield* TestClock.setTime(DateTime.toEpochMillis(now));
         const [tasksDone, runsClosed] = yield* OperatorStatistics.use(
           ({ statistics, runStatistics }) =>
-            Effect.all([statistics(instance, "7d"), runStatistics(instance, "7d")]),
+            Effect.gen(function* () {
+              const first = yield* Effect.all([
+                statistics(instance, "7d"),
+                runStatistics(instance, "7d"),
+              ]);
+              const repeated = yield* Effect.all([
+                statistics(instance, "7d"),
+                runStatistics(instance, "7d"),
+              ]);
+              assert.strictEqual(repeated[0], first[0]);
+              assert.strictEqual(repeated[1], first[1]);
+              return first;
+            }),
         ).pipe(
           Effect.provide(
             OperatorStatistics.layer.pipe(
@@ -913,6 +931,8 @@ describe("OperatorStatistics", () => {
           [tasksDone.firstTimeRight, tasksDone.operatorActions, tasksDone.unmetered],
           [1, 2, 1],
         );
+        assert.strictEqual(itemReads, 1);
+        assert.strictEqual(historyReads, 1);
         assert.deepStrictEqual(since, [Option.some(at("19T00:00"))]);
         assert.deepStrictEqual({ ...runsClosed.runs }, { succeeded: 3, failed: 0, canceled: 0 });
         assert.strictEqual(runsClosed.needsAttention.approvals, 3);
