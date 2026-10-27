@@ -33,9 +33,19 @@ const updatedAt = DateTime.makeUnsafe("2026-10-24T10:00:00Z");
 interface RemotePullRequest {
   readonly baseRefName: string;
   mergeable: string;
+  mergeStateStatus?: string;
+  statusCheckRollup?: PullRequestPayload["statusCheckRollup"];
 }
 
-const payload = (number: number, { baseRefName, mergeable }: RemotePullRequest) =>
+const payload = (
+  number: number,
+  {
+    baseRefName,
+    mergeable,
+    mergeStateStatus = "CLEAN",
+    statusCheckRollup = null,
+  }: RemotePullRequest,
+) =>
   Schema.decodeUnknownSync(PullRequestPayload)({
     number,
     title: "Track base branch heads",
@@ -56,8 +66,8 @@ const payload = (number: number, { baseRefName, mergeable }: RemotePullRequest) 
     changedFiles: 1,
     reviewDecision: null,
     mergeable,
-    mergeStateStatus: "UNKNOWN",
-    statusCheckRollup: null,
+    mergeStateStatus,
+    statusCheckRollup,
     labels: { totalCount: 0, nodes: [] },
     reviewRequests: { totalCount: 0, nodes: [] },
     reviews: { totalCount: 0, nodes: [] },
@@ -189,6 +199,115 @@ describe("open pull request refresh", () => {
           snapshots: [28],
         });
         pullRequest.mergeable = "CONFLICTING";
+        assert.deepStrictEqual((yield* poll).snapshots, [28]);
+        assert.deepStrictEqual((yield* poll).snapshots, []);
+      }).pipe(Effect.provide(testLayer(github, cursors)));
+    },
+  );
+
+  for (const [initial, settled] of [
+    ["PENDING", "SUCCESS"],
+    ["PENDING", "FAILURE"],
+    ["PENDING", "ERROR"],
+    ["EXPECTED", "SUCCESS"],
+  ] as const) {
+    it.effect(`refreshes a ${initial} check rollup on every poll until ${settled}`, () => {
+      const cursors = memoryCursorStore();
+      const pullRequest: RemotePullRequest = {
+        baseRefName: "main",
+        mergeable: "MERGEABLE",
+        mergeStateStatus: "BLOCKED",
+        statusCheckRollup: { state: initial },
+      };
+      const { github, poll } = fakeRepository(
+        new Map([[28, pullRequest]]),
+        baseBranches().baseRefHead,
+      );
+      return Effect.gen(function* () {
+        assert.deepStrictEqual((yield* poll).snapshots, [28]);
+        assert.deepStrictEqual((yield* poll).snapshots, [28]);
+        assert.deepStrictEqual(yield* poll, {
+          changes: 1,
+          baseRefReads: ["main if-none-match"],
+          snapshots: [28],
+        });
+        pullRequest.statusCheckRollup = { state: settled };
+        assert.deepStrictEqual((yield* poll).snapshots, [28]);
+        assert.deepStrictEqual((yield* poll).snapshots, []);
+      }).pipe(Effect.provide(testLayer(github, cursors)));
+    });
+  }
+
+  it.effect(
+    "refreshes an absent rollup on a blocked pull request until checks appear and settle",
+    () => {
+      const cursors = memoryCursorStore();
+      const pullRequest: RemotePullRequest = {
+        baseRefName: "main",
+        mergeable: "MERGEABLE",
+        mergeStateStatus: "BLOCKED",
+        statusCheckRollup: null,
+      };
+      const { github, poll } = fakeRepository(
+        new Map([[28, pullRequest]]),
+        baseBranches().baseRefHead,
+      );
+      return Effect.gen(function* () {
+        yield* poll;
+        yield* poll;
+        assert.deepStrictEqual((yield* poll).snapshots, [28]);
+        assert.deepStrictEqual((yield* poll).snapshots, [28]);
+        pullRequest.statusCheckRollup = { state: "PENDING" };
+        assert.deepStrictEqual((yield* poll).snapshots, [28]);
+        assert.deepStrictEqual((yield* poll).snapshots, [28]);
+        pullRequest.statusCheckRollup = { state: "SUCCESS" };
+        pullRequest.mergeStateStatus = "CLEAN";
+        assert.deepStrictEqual((yield* poll).snapshots, [28]);
+        assert.deepStrictEqual((yield* poll).snapshots, []);
+      }).pipe(Effect.provide(testLayer(github, cursors)));
+    },
+  );
+
+  it.effect(
+    "refreshes a cursor without check state once, then retries only unsettled checks",
+    () => {
+      const cursors = memoryCursorStore();
+      const pullRequest: RemotePullRequest = { baseRefName: "main", mergeable: "MERGEABLE" };
+      const { github, poll } = fakeRepository(
+        new Map([
+          [28, pullRequest],
+          [29, { baseRefName: "main", mergeable: "MERGEABLE" }],
+        ]),
+        baseBranches().baseRefHead,
+      );
+      const key = `github-poll:${repository}`;
+      const LegacyOpenPullRequests = Schema.Array(
+        Schema.Struct({
+          number: Schema.Number,
+          updatedAt: Schema.String,
+          baseRefName: Schema.String,
+          mergeable: Schema.String,
+        }),
+      );
+      return Effect.gen(function* () {
+        yield* poll;
+        yield* poll;
+        assert.deepStrictEqual((yield* poll).snapshots, []);
+        const { openPullRequests, ...rest } = Schema.decodeUnknownSync(Schema.JsonObject)(
+          cursors.stored.get(key),
+        );
+        cursors.stored.set(key, {
+          ...rest,
+          openPullRequests: Schema.decodeUnknownSync(LegacyOpenPullRequests)(openPullRequests),
+        });
+        pullRequest.statusCheckRollup = { state: "PENDING" };
+        assert.deepStrictEqual(yield* poll, {
+          changes: 1,
+          baseRefReads: ["main if-none-match"],
+          snapshots: [28, 29],
+        });
+        assert.deepStrictEqual((yield* poll).snapshots, [28]);
+        pullRequest.statusCheckRollup = { state: "SUCCESS" };
         assert.deepStrictEqual((yield* poll).snapshots, [28]);
         assert.deepStrictEqual((yield* poll).snapshots, []);
       }).pipe(Effect.provide(testLayer(github, cursors)));

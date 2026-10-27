@@ -4,7 +4,12 @@ import type { CycleBudgetUsedUpView, RunView, StalledItemView } from "@usine/orc
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { api } from "../api.ts";
-import { runActionLabel, runActionProgress, runAgainBlocked } from "../operator-copy.ts";
+import {
+  retryDescription,
+  runActionLabel,
+  runActionProgress,
+  runAgainBlocked,
+} from "../operator-copy.ts";
 import {
   type RunActionRequest,
   unchangedRunAgain,
@@ -27,12 +32,14 @@ const useRefreshDesk = () => {
 const ActionButton = ({
   appearance,
   label,
+  description,
   disabled,
   error,
   onClick,
 }: {
   readonly appearance: StallActionAppearance;
   readonly label: string;
+  readonly description?: string;
   readonly disabled: boolean;
   readonly error: string | null;
   readonly onClick: () => void;
@@ -47,6 +54,7 @@ const ActionButton = ({
       variant={appearance === "row" ? "ghost" : "outline"}
       size={appearance === "row" ? "default" : "xs"}
       className={appearance === "row" ? "text-muted-foreground" : undefined}
+      title={description}
       disabled={disabled}
       onClick={(event) => {
         event.stopPropagation();
@@ -86,6 +94,7 @@ const RunAction = ({
     <ActionButton
       appearance={appearance}
       label={action.isPending ? runActionProgress[request.action] : label}
+      {...(request.action === "retry" ? { description: retryDescription(run.agentBrain) } : {})}
       disabled={action.isPending}
       error={action.error?.message ?? null}
       onClick={() => action.mutate({ runId: run.id, request })}

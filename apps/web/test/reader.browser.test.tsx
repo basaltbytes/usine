@@ -91,6 +91,7 @@ const liveAttempt = new AttemptView({
 });
 const runView = (id: RunId, attempts: ReadonlyArray<AttemptView>) =>
   new RunView({
+    agentBrain: parent.brain,
     id,
     itemKey: ItemKey.make("item"),
     loop: LoopName.make("implement"),
@@ -133,6 +134,7 @@ const mount = (
           key={id}
           detail={
             new RunDetailView({
+              agentDefinitionChanged: false,
               run: runView(id, attempts),
               eventDedupKey: '["implement","basaltbytes/usine",7]',
               eventPayload: { tick: "scheduled" },

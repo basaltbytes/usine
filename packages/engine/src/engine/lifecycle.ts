@@ -176,6 +176,7 @@ export const beginAttempt = (
 
 type CancelDecision =
   | { readonly _tag: "AlreadyClosed" }
+  | { readonly _tag: "CancelRejected" }
   | {
       readonly _tag: "Canceled";
       readonly state: RunState.Canceled;
@@ -187,7 +188,8 @@ type CancelDecision =
 
 /** Returns the cancel decision for an open Run and its open Attempt, if any. */
 export const cancelRun = (current: RunProgress): CancelDecision => {
-  if (!RunState.isOpen(current.run.state)) return { _tag: "AlreadyClosed" };
+  if (current.run.state._tag === "Canceled") return { _tag: "AlreadyClosed" };
+  if (!RunState.isOpen(current.run.state)) return { _tag: "CancelRejected" };
   return {
     _tag: "Canceled",
     state: RunState.cancelByOperator(current.run.state),

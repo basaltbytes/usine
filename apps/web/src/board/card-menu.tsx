@@ -28,7 +28,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { elapsedLabel, openedTitle, runActionLabel } from "../operator-copy.ts";
+import { elapsedLabel, openedTitle, retryDescription, runActionLabel } from "../operator-copy.ts";
 import type { RunActions } from "../run-actions.ts";
 import type { CardRunAgain } from "./run-again.ts";
 
@@ -143,6 +143,7 @@ export const CardMenu = ({
           )}
           {run?.canRetry && (
             <DropdownMenuItem
+              title={retryDescription(run.agentBrain)}
               onClick={() => action.mutate({ runId: run.id, request: { action: "retry" } })}
             >
               {runActionLabel.retry}

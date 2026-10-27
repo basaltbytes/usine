@@ -637,6 +637,7 @@ it("renders a held child from session state when its activity is outside the loa
     salvage: null,
   });
   const run = new RunView({
+    agentBrain: brain,
     id: RunId.make("run-31"),
     itemKey: ItemKey.make("item"),
     loop: LoopName.make("implement"),

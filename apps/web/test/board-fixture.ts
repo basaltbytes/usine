@@ -103,6 +103,11 @@ const run = (
   attempts: ReadonlyArray<AttemptView>,
 ) =>
   new RunView({
+    agentBrain: new BrainSpec({
+      harness: "codex",
+      model: ModelId.make("test-model"),
+      effort: "high",
+    }),
     id: RunId.make(id),
     itemKey: item.itemKey,
     loop: LoopName.make(loop),

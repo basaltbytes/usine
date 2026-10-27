@@ -20,7 +20,7 @@ export type EditIntent = "retry" | "runAgain";
 const editCopy = {
   retry: {
     title: "Edit and retry",
-    note: "Later attempts use this task and agent until you edit them again.",
+    note: "Uses the selected agent's current definition, even if you keep the same name. Later attempts use this task and agent until you edit them again.",
     submit: "Save and retry",
   },
   runAgain: {

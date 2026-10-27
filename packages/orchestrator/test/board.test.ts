@@ -130,6 +130,11 @@ const mergedPullRequest = new ItemProjection({
 
 const runForBoard = (id: string, state: "Waiting" | "Running" | "Failed" | "Succeeded") =>
   new RunView({
+    agentBrain: new BrainSpec({
+      harness: "codex",
+      model: ModelId.make("test-model"),
+      effort: "high",
+    }),
     id: RunId.make(id),
     itemKey,
     loop: LoopName.make(`loop-${id}`),
