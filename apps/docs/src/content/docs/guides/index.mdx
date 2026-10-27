@@ -179,7 +179,7 @@ See [Operate runs](/guides/operate-runs/#stop-the-orchestrator) for the drain an
 
 ### Keep the machine awake
 
-The orchestrator must keep running while runs are open. A sleep closes its SSH connections to workers and to the gateway: after the machine wakes, a remote Claude Code child resumes its session, and a Codex child fails. On macOS, `usine up` warns at startup if the Mac can sleep. Keep it awake in one of these ways:
+The orchestrator must keep running while runs are open. A sleep closes its SSH connections to workers and to the gateway: after the machine wakes, a remote Claude Code child resumes its session, and a Codex child fails. On macOS, `usine up` warns at startup if the Mac can sleep. For a factory that runs unattended, [run the orchestrator on a server](/guides/run-the-orchestrator-on-a-server/) instead of a laptop. To keep a Mac awake:
 
 - Run `caffeinate -s` in another terminal while runs are open. It keeps a Mac on AC power awake until you stop it. To stop it with the orchestrator, run `caffeinate -s -w "$(cat .usine/instance.pid)"` from the instance folder.
 - Turn off system sleep on AC power with `sudo pmset -c sleep 0`.
@@ -188,7 +188,7 @@ Closing a laptop's lid also puts it to sleep, unless it runs in closed-display m
 
 ## Open the web UI
 
-The UI is at `http://127.0.0.1:7331`, or on the port you set. The server listens only on the loopback interface and has no login. It refuses browser requests from pages on non-loopback origins, so other websites can't use it through your browser. To use the UI from another computer, forward the port over SSH:
+The UI is at `http://127.0.0.1:7331`, or on the port you set. The server listens on the loopback interface, and on the address of [`--listen`](/reference/configuration/cli/#usine-up) if you set one, such as a server's tailnet address. It has no login. It refuses browser requests from pages at other origins, so other websites can't use it through your browser. To use the UI from another computer without `--listen`, forward the port over SSH:
 
 ```sh title="Your computer"
 ssh -N -L 7331:127.0.0.1:7331 orchestrator.example.com
@@ -247,5 +247,10 @@ The runtime store records every event, so that a loop doesn't act twice on the s
     title="Add a provisioned worker"
     description="Create a Hetzner Cloud server or a Boat sandbox for each attempt."
     href="/guides/add-a-provisioned-worker/"
+  />
+  <LinkCard
+    title="Run the orchestrator on a server"
+    description="Run usine up in a systemd service on a server in the gateway's network, with the UI on your tailnet."
+    href="/guides/run-the-orchestrator-on-a-server/"
   />
 </CardGrid>

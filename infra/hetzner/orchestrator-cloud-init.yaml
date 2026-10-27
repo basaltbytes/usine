@@ -33,6 +33,7 @@ packages:
   - git
   - nftables
   - polkitd
+  - rsync
 
 write_files:
   - path: /etc/ssh/sshd_config.d/10-usine-orchestrator.conf
