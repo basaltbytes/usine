@@ -55,7 +55,7 @@ const launchArguments = (launch: InstanceLaunch): ReadonlyArray<string> => {
     "--log-level",
     launch.logLevel.toLowerCase(),
   ];
-  if (Option.isSome(launch.listen)) args.push("--listen", launch.listen.value);
+  if (Option.isSome(launch.origin)) args.push("--origin", launch.origin.value);
   if (launch.allowVolatileInstance) args.push("--allow-volatile-instance");
   return args;
 };

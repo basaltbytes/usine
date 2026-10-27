@@ -13,13 +13,7 @@ import { Effect, Layer, Option, Schema, type Types } from "effect";
 import { Headers, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi";
 import { FactoryBackend, type BackendError } from "./backend.ts";
-import {
-  type ListenAddress,
-  type Port,
-  SERVER_HOST,
-  serverStartError,
-  urlHostname,
-} from "./cli.ts";
+import { type Port, SERVER_HOST, type UiOrigin } from "./cli.ts";
 
 const operatorFailure = (error: BackendError) => {
   const message = (() => {
@@ -81,37 +75,34 @@ const operatorFailure = (error: BackendError) => {
   return new OperatorHttpError({ error: error._tag, message });
 };
 
-const LOOPBACK_HOSTS = ["127.0.0.1", "localhost", "[::1]", "::1"];
-
-/** Returns the origin hostnames of the UI's pages: the loopback names, and the `--listen` address. */
-const pageHosts = (listen: Option.Option<ListenAddress>): ReadonlySet<string> =>
-  new Set([...LOOPBACK_HOSTS, ...Option.toArray(Option.flatMap(listen, urlHostname))]);
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
 
 /**
- * Whether the request has an `Origin` outside `pages`, which marks a cross-site request. Requests
- * without `Origin` (curl, same-origin GETs) are allowed.
+ * Whether the request has an `Origin` other than a loopback one and `page`, which marks a
+ * cross-site request. Requests without `Origin` (curl, same-origin GETs) are allowed.
  */
 const crossSiteOrigin = (
   request: HttpServerRequest.HttpServerRequest,
-  pages: ReadonlySet<string>,
+  page: Option.Option<UiOrigin>,
 ): boolean => {
   const origin = request.headers.origin;
   if (origin === undefined) return false;
   try {
-    return !pages.has(new URL(origin).hostname);
+    const url = new URL(origin);
+    return !LOOPBACK_HOSTS.has(url.hostname) && !Option.exists(page, (o) => o === url.origin);
   } catch {
     return true;
   }
 };
 
-const policy = (listen: Option.Option<ListenAddress>) => {
-  const pages = pageHosts(listen);
-  return Layer.succeed(OperatorHttpPolicy)((handler, { endpoint }) =>
+const policy = (page: Option.Option<UiOrigin>) =>
+  Layer.succeed(OperatorHttpPolicy)((handler, { endpoint }) =>
     Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest;
-      if (crossSiteOrigin(request, pages)) {
+      if (crossSiteOrigin(request, page)) {
         yield* Effect.logWarning("Cross-site request to the operator API was refused", {
           origin: request.headers.origin,
+          acceptedOrigin: Option.getOrUndefined(page),
           url: request.url,
         });
         return yield* new OperatorHttpError({
@@ -152,7 +143,6 @@ const policy = (listen: Option.Option<ListenAddress>) => {
       );
     }),
   );
-};
 
 const acknowledge = <E, R>(effect: Effect.Effect<void, E, R>) =>
   Effect.as(effect, { ok: true } as const);
@@ -261,13 +251,13 @@ const handlers = HttpApiBuilder.group(OperatorApi, "operator", (routes) =>
 );
 
 /**
- * Returns the operator API, which accepts browser requests from the UI's pages on the loopback
- * names and on `listen`.
+ * Returns the operator API, which accepts browser requests from the UI's pages at the loopback
+ * names and at `origin`.
  */
-export const apiRoutes = (listen: Option.Option<ListenAddress>) =>
+export const apiRoutes = (origin: Option.Option<UiOrigin>) =>
   HttpApiBuilder.layer(OperatorApi).pipe(
     Layer.provide(handlers),
-    Layer.provide(policy(listen)),
+    Layer.provide(policy(origin)),
     Layer.provide(NodeHttpServer.layerHttpServices),
   );
 
@@ -317,22 +307,19 @@ export const staticRoutes = (webRoot: string) => {
 };
 
 /**
- * Serves the operator API and the UI on `SERVER_HOST` and on `listen`, at `port`. Fails with
- * `PortInUseError` or `ServerStartError` for the first address it can't listen on.
+ * Serves the operator API and the UI on `SERVER_HOST` at `port`, for the UI's pages there and at
+ * `origin`.
  */
 export const serverLayer = (
   backend: Layer.Layer<FactoryBackend>,
   webRoot: string,
   port: Port,
-  listen: Option.Option<ListenAddress>,
+  origin: Option.Option<UiOrigin>,
 ) => {
-  const routes = Layer.mergeAll(apiRoutes(listen), staticRoutes(webRoot)).pipe(
+  const routes = Layer.mergeAll(apiRoutes(origin), staticRoutes(webRoot)).pipe(
     HttpRouter.provideRequest(backend),
   );
-  const serveOn = (host: string) =>
-    HttpRouter.serve(routes).pipe(
-      Layer.provide(NodeHttpServer.layer(createServer, { host, port })),
-      Layer.catch((error) => Layer.effectDiscard(Effect.fail(serverStartError(host, port, error)))),
-    );
-  return Layer.mergeAll(serveOn(SERVER_HOST), ...Option.toArray(Option.map(listen, serveOn)));
+  return HttpRouter.serve(routes).pipe(
+    Layer.provide(NodeHttpServer.layer(createServer, { host: SERVER_HOST, port })),
+  );
 };

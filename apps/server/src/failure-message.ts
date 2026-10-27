@@ -1,6 +1,6 @@
 import { Duration, type Effect, Match, Option, Schema } from "effect";
 import type { backup } from "./backup.ts";
-import { type CliUsageError, type CliVersionError, SERVER_HOST, hostPort } from "./cli.ts";
+import type { CliUsageError, CliVersionError } from "./cli.ts";
 import type { upDetached } from "./detach.ts";
 import type { exportRun } from "./export-run.ts";
 import type { instanceEnvironment } from "./instance/environment.ts";
@@ -189,10 +189,10 @@ export const failureMessage = (failure: CliFailure): string =>
       operation === "create"
         ? `usine up did not start: could not create ${path} (${clause(reason)}). Check that the folder is writable.`
         : `usine up did not start: could not read the instance ID in ${path} (${clause(reason)}). Restore the file, or delete it so that usine up creates a new ID. With a new ID, usine no longer removes the attempt containers that it left on SSH workers before; remove those with docker rm.`,
-    PortInUseError: ({ host, port, holder }) =>
-      `usine up stopped: port ${port} is already in use${host === SERVER_HOST ? "" : ` on ${host}`}${holderOf(holder)}. Stop that process, or run usine up --port <port> with another port.`,
-    ServerStartError: ({ host, port, cause }) =>
-      `usine up stopped: could not listen on ${hostPort(host, port)}${because(cause)}. ${host === SERVER_HOST ? "Run usine up --port <port> to use another port." : "Check that this machine has the address of --listen or USINE_LISTEN, or run usine up --port <port> to use another port."}`,
+    PortInUseError: ({ port, holder }) =>
+      `usine up stopped: port ${port} is already in use${holderOf(holder)}. Stop that process, or run usine up --port <port> with another port.`,
+    ServerStartError: ({ port, cause }) =>
+      `usine up stopped: could not listen on 127.0.0.1:${port}${because(cause)}. Run usine up --port <port> to use another port.`,
     ResourceAttributesError: ({ variable, message }) =>
       `usine up did not start: ${variable} is invalid: ${clause(message)}. Set it to comma-separated key=value pairs with percent-encoded keys and values, or unset it.`,
     FactoryConfigError: ({ file, stage, message }) =>

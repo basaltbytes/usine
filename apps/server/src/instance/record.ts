@@ -1,7 +1,7 @@
 import { renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DateTime, Effect, FileSystem, Option, Schema } from "effect";
-import { DEFAULT_LOG_LEVEL, ListenAddress, Port, type UpCommand, UpLogLevel } from "../cli.ts";
+import { DEFAULT_LOG_LEVEL, Port, UiOrigin, type UpCommand, UpLogLevel } from "../cli.ts";
 import { SystemdUnit } from "./systemd.ts";
 
 /** An operating system process ID. */
@@ -17,9 +17,9 @@ export class InstanceLaunch extends Schema.Class<InstanceLaunch>("@usine/server/
   /** The CLI entry point, from `process.argv[1]`. */
   script: Schema.NonEmptyString,
   port: Port,
-  /** The address of `--listen`, which a record omits without one. */
-  listen: Schema.OptionFromOptionalKey(ListenAddress).pipe(
-    Schema.withConstructorDefault(Effect.succeed(Option.none<ListenAddress>())),
+  /** The origin of `--origin`, which a record omits without one. */
+  origin: Schema.OptionFromOptionalKey(UiOrigin).pipe(
+    Schema.withConstructorDefault(Effect.succeed(Option.none<UiOrigin>())),
   ),
   /** Decodes as `Info` from a record that a `usine up` without `--log-level` wrote. */
   logLevel: UpLogLevel.pipe(Schema.withDecodingDefaultKey(Effect.succeed(DEFAULT_LOG_LEVEL))),
@@ -30,7 +30,7 @@ export class InstanceLaunch extends Schema.Class<InstanceLaunch>("@usine/server/
  * Returns how this process was started with the settings of `command`. Dies without
  * `process.argv[1]`, which a CLI always has.
  */
-export const currentLaunch = ({ port, listen, logLevel, allowVolatileInstance }: UpCommand) =>
+export const currentLaunch = ({ port, origin, logLevel, allowVolatileInstance }: UpCommand) =>
   Schema.decodeUnknownEffect(Schema.NonEmptyString)(process.argv[1]).pipe(
     Effect.map(
       (script) =>
@@ -39,7 +39,7 @@ export const currentLaunch = ({ port, listen, logLevel, allowVolatileInstance }:
           nodeOptions: process.execArgv,
           script,
           port,
-          listen,
+          origin,
           logLevel,
           allowVolatileInstance,
         }),

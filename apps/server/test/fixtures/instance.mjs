@@ -80,7 +80,7 @@ const listen = (port) =>
 
 const noEnvironment = {
   port: Option.none(),
-  listen: Option.none(),
+  origin: Option.none(),
   logLevel: Option.none(),
   allowVolatileInstance: Option.none(),
 };

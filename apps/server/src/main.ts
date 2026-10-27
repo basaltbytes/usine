@@ -22,7 +22,7 @@ const exitWith = (message: string) =>
 
 const cliEnvironment: Config.Config<CliEnvironment> = Config.all({
   port: Config.option(Config.string("USINE_PORT")),
-  listen: Config.option(Config.string("USINE_LISTEN")),
+  origin: Config.option(Config.string("USINE_ORIGIN")),
   logLevel: Config.option(Config.string("USINE_LOG_LEVEL")),
   allowVolatileInstance: Config.option(Config.string("USINE_ALLOW_VOLATILE_INSTANCE")),
 });

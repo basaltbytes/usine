@@ -97,7 +97,7 @@ import { HttpRouter } from "effect/unstable/http";
 import { HttpApiClient } from "effect/unstable/httpapi";
 import { afterAll, assert, describe, it } from "vitest";
 import { BackendUnavailableError, FactoryBackend, needsSetupBackendLayer } from "../src/backend.ts";
-import { ListenAddress, Port, SERVER_HOST } from "../src/cli.ts";
+import { Port, SERVER_HOST, UiOrigin } from "../src/cli.ts";
 import { apiRoutes, serverLayer, staticRoutes } from "../src/http.ts";
 
 const runId = RunId.make("run-1");
@@ -528,27 +528,31 @@ describe("operator HTTP API", () => {
     assert.strictEqual(malformed.status, 403);
     assert.strictEqual((await malformed.json()).error, "CrossSiteRequestError");
 
-    // With --listen, the UI's pages at that address pass, whichever way the address is written.
-    const listening = HttpRouter.toWebHandler(
-      apiRoutes(Option.some(ListenAddress.make("fd7a:115c:a1e0:0::1"))).pipe(
+    // With --origin, the UI's pages that tailscale serve publishes pass, at that origin only.
+    const proxied = HttpRouter.toWebHandler(
+      apiRoutes(Option.some(UiOrigin.make("https://usine-orchestrator.tail1234.ts.net"))).pipe(
         HttpRouter.provideRequest(backend),
       ),
       { disableLogger: true },
     );
     try {
       const approve = (origin: string) =>
-        listening.handler(
-          new Request(`http://localhost/api/runs/${runId}/approve`, {
+        proxied.handler(
+          new Request(`http://usine-orchestrator.tail1234.ts.net/api/runs/${runId}/approve`, {
             method: "POST",
             headers: { origin },
           }),
         );
-      assert.strictEqual((await approve("http://[fd7a:115c:a1e0::1]:7331")).status, 503);
+      assert.strictEqual((await approve("https://usine-orchestrator.tail1234.ts.net")).status, 503);
       assert.strictEqual((await approve("http://127.0.0.1:7331")).status, 503);
-      assert.strictEqual((await approve("http://[fd7a:115c:a1e0::2]:7331")).status, 403);
-      assert.strictEqual((await approve("http://100.64.0.20:7331")).status, 403);
+      assert.strictEqual((await approve("http://usine-orchestrator.tail1234.ts.net")).status, 403);
+      assert.strictEqual(
+        (await approve("https://usine-orchestrator.tail1234.ts.net:8443")).status,
+        403,
+      );
+      assert.strictEqual((await approve("https://other.tail1234.ts.net")).status, 403);
     } finally {
-      await listening.dispose();
+      await proxied.dispose();
     }
   });
 
@@ -1110,7 +1114,7 @@ describe("operator HTTP API", () => {
   });
   // Linux routes all of 127.0.0.0/8 to the loopback interface; macOS has only 127.0.0.1.
   it.skipIf(process.platform !== "linux")(
-    "listens on 127.0.0.1 and the --listen address, and on no other address",
+    "listens on 127.0.0.1 only, also with an origin for a proxy",
     async () => {
       const port = await new Promise<Port>((resolve) => {
         const probe = createServer();
@@ -1131,16 +1135,17 @@ describe("operator HTTP API", () => {
         const statuses = await Effect.runPromise(
           Effect.gen(function* () {
             yield* Layer.build(
-              serverLayer(backend, webRoot, port, Option.some(ListenAddress.make("127.0.0.2"))),
+              serverLayer(
+                backend,
+                webRoot,
+                port,
+                Option.some(UiOrigin.make("https://usine-orchestrator.tail1234.ts.net")),
+              ),
             );
-            return yield* Effect.all([
-              overview("127.0.0.1"),
-              overview("127.0.0.2"),
-              overview("127.0.0.3"),
-            ]);
+            return yield* Effect.all([overview("127.0.0.1"), overview("127.0.0.2")]);
           }).pipe(Effect.scoped),
         );
-        assert.deepStrictEqual(statuses, [200, 200, "unreachable"]);
+        assert.deepStrictEqual(statuses, [200, "unreachable"]);
       } finally {
         await rm(webRoot, { recursive: true });
       }
