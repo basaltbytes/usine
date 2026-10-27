@@ -1,7 +1,7 @@
 import { CHILD_KILL_SCRIPT, type RemoteShell } from "@usine/agents/child-host";
 import { ClaudeLoginLock } from "@usine/agents/runtime";
 import type { Harness } from "@usine/core/agent/brain";
-import { type AttemptId, OutOfMemoryKills } from "@usine/core/attempt";
+import { type AttemptId, ContainerOutOfMemoryKills } from "@usine/core/attempt";
 import { type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
 import type { AttemptRecovery, AttemptSalvage, RecoverySink } from "@usine/core/attempt/salvage";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
@@ -270,12 +270,19 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
             "No launch ran in the container, so its out-of-memory kills aren't read",
             { attemptId: attempt.attemptId, container: spec.name },
           );
-        const kills =
-          (yield* containers.outOfMemoryKills("cleanup", machine.shell, spec)) +
-          (yield* Ref.get(killedInits));
+        const { container, kills: counted } = yield* containers.outOfMemoryKills(
+          "cleanup",
+          machine.shell,
+          spec,
+        );
+        const kills = counted + (yield* Ref.get(killedInits));
         if (kills === 0) return;
         yield* record.value(
-          new OutOfMemoryKills({ kills, memoryMib: spec.settings.limits.memoryMib }),
+          new ContainerOutOfMemoryKills({
+            container,
+            kills,
+            memoryMib: spec.settings.limits.memoryMib,
+          }),
         );
       }).pipe(
         Effect.tapError((error) =>

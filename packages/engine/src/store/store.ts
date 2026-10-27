@@ -2,7 +2,7 @@ import {
   Attempt,
   AttemptId,
   type AttemptWindows,
-  type OutOfMemoryKills,
+  type ContainerOutOfMemoryKills,
 } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
@@ -561,16 +561,22 @@ const makeRunStore = Effect.gen(function* () {
 
   const recordOutOfMemory = Effect.fn("RunStore.recordOutOfMemory")(function* (
     attemptId: AttemptId,
-    kills: OutOfMemoryKills,
+    kills: ContainerOutOfMemoryKills,
   ) {
-    yield* Effect.annotateCurrentSpan({ attemptId, kills: kills.kills });
-    yield* database.transaction((transaction) =>
+    yield* Effect.annotateCurrentSpan({
+      attemptId,
+      container: kills.container,
+      kills: kills.kills,
+    });
+    const attempt = yield* database.transaction((transaction) =>
       queriesFor(transaction).recordOutOfMemory(attemptId, kills),
     );
     yield* Effect.logInfo("Recorded the processes the kernel killed in the Attempt's container", {
       attemptId,
+      container: kills.container,
       kills: kills.kills,
       memoryMib: kills.memoryMib,
+      attemptKills: attempt.kills,
     });
   }, persistence("record attempt out-of-memory kills"));
 
@@ -1072,10 +1078,14 @@ export class RunStore extends Context.Service<
       attemptId: AttemptId,
       comments: ReadonlyArray<Comment>,
     ) => Effect.Effect<void, RunStoreError>;
-    /** Records the processes that the kernel killed in the Attempt's container for memory. */
+    /**
+     * Records the processes that the kernel killed in one of the Attempt's containers for memory.
+     * The Attempt's `outOfMemory` adds up the kills of its containers; a second record of a
+     * container replaces its count.
+     */
     readonly recordOutOfMemory: (
       attemptId: AttemptId,
-      kills: OutOfMemoryKills,
+      kills: ContainerOutOfMemoryKills,
     ) => Effect.Effect<void, RunStoreError>;
     /**
      * Returns the Attempt's window and the overlapping windows of the same Agent's other Attempts

@@ -6,7 +6,8 @@ import {
   AttemptNumber,
   AttemptTask,
   AttemptId,
-  OutOfMemoryKills,
+  ContainerOutOfMemoryKills,
+  totalOutOfMemoryKills,
 } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptOutcome } from "@usine/core/attempt/outcome";
@@ -24,7 +25,7 @@ import { StepName, Step } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
 import * as RunState from "@usine/core/run/state";
 import { Comment, StepResult } from "@usine/core/step/result";
-import { Effect, Option, Schema } from "effect";
+import { Array as EffectArray, Effect, Option, Schema } from "effect";
 import { EnginePersistenceError, RunStoreError } from "../engine/error.ts";
 import { IgnoreReason, Submission } from "../engine/submission.ts";
 import { ProjectionRevision, RunEvent, RunSummary } from "../run-reader/model.ts";
@@ -92,7 +93,7 @@ export const AttemptRow = Schema.Struct({
   start: Schema.NullOr(AttemptStart),
   reattachedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
   comments: Schema.NullOr(Schema.Array(Comment)),
-  outOfMemory: Schema.NullOr(OutOfMemoryKills),
+  outOfMemory: Schema.NullOr(Schema.Array(ContainerOutOfMemoryKills)),
 });
 export type AttemptRow = typeof AttemptRow.Type;
 
@@ -140,7 +141,12 @@ export const encodeRunState = Schema.encodeSync(RunState.RunState);
 export const encodeOutcome = Schema.encodeSync(AttemptOutcome);
 export const encodeSalvage = Schema.encodeSync(AttemptSalvage);
 export const encodeComments = Schema.encodeSync(Schema.Array(Comment));
-export const encodeOutOfMemory = Schema.encodeSync(OutOfMemoryKills);
+export const encodeOutOfMemory = Schema.encodeSync(Schema.Array(ContainerOutOfMemoryKills));
+export const decodeOutOfMemory = Schema.decodeUnknownEffect(
+  Schema.Array(
+    Schema.Struct({ outOfMemory: Schema.NullOr(Schema.Array(ContainerOutOfMemoryKills)) }),
+  ),
+);
 export const encodeAttemptStart = Schema.encodeSync(AttemptStart);
 export const decodeNextStarts = Schema.decodeUnknownEffect(
   Schema.Array(Schema.Struct({ nextStart: Schema.NullOr(OperatorRetryStart) })),
@@ -245,7 +251,10 @@ export const attemptFromRow = (row: AttemptRow): Attempt =>
     start: Option.fromNullishOr(row.start),
     reattachedAt: Option.fromNullishOr(row.reattachedAt),
     comments: row.comments ?? [],
-    outOfMemory: Option.fromNullishOr(row.outOfMemory),
+    outOfMemory: Option.liftPredicate(
+      row.outOfMemory ?? [],
+      EffectArray.isReadonlyArrayNonEmpty,
+    ).pipe(Option.map(totalOutOfMemoryKills)),
   });
 
 export const runSummaryFromRow = (

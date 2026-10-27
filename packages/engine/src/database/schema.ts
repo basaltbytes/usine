@@ -265,7 +265,10 @@ export const attempts = snakeCase.table(
     reattachedAt: text(),
     /** The comments and reviews posted by an unsuccessful Attempt, or `null` if none were recorded. */
     commentsJson: text({ mode: "json" }).$type<unknown>(),
-    /** The processes the kernel killed in the Attempt's container for memory, or `null` if none. */
+    /**
+     * The processes the kernel killed for memory in each of the Attempt's containers that had
+     * kills, by container ID, or `null` if none.
+     */
     outOfMemoryJson: text({ mode: "json" }).$type<unknown>(),
   },
   (table) => [

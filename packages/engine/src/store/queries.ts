@@ -7,7 +7,8 @@ import {
   AttemptId,
   AttemptContext,
   AttemptNumber,
-  type OutOfMemoryKills,
+  type ContainerOutOfMemoryKills,
+  totalOutOfMemoryKills,
 } from "@usine/core/attempt";
 
 import { AttemptOutcome } from "@usine/core/attempt/outcome";
@@ -63,6 +64,7 @@ import {
   decodeAttemptRows,
   decodeDiscards,
   decodeNextStarts,
+  decodeOutOfMemory,
   decodeEventRoutes,
   decodeProjectionRevision,
   decodeReopenedEvents,
@@ -545,16 +547,35 @@ export const queriesFor = (database: RunDatabaseClient) => {
       .execute();
   });
 
+  /**
+   * Records the kills of one of the Attempt's containers, replacing an earlier record of the same
+   * container, and returns the kills of all its containers.
+   */
   const recordOutOfMemory = Effect.fn("RunStoreQueries.recordOutOfMemory")(function* (
     attemptId: AttemptId,
-    kills: OutOfMemoryKills,
+    kills: ContainerOutOfMemoryKills,
   ) {
-    yield* Effect.annotateCurrentSpan({ attemptId, kills: kills.kills });
-    yield* database
-      .update(attempts)
-      .set({ outOfMemoryJson: encodeOutOfMemory(kills) })
+    yield* Effect.annotateCurrentSpan({
+      attemptId,
+      container: kills.container,
+      kills: kills.kills,
+    });
+    const rows = yield* database
+      .select({ outOfMemory: attempts.outOfMemoryJson })
+      .from(attempts)
       .where(eq(attempts.attemptId, attemptId))
       .execute();
+    const recorded = (yield* decodeOutOfMemory(rows))[0]?.outOfMemory ?? [];
+    const containers = EffectArray.append(
+      recorded.filter(({ container }) => container !== kills.container),
+      kills,
+    );
+    yield* database
+      .update(attempts)
+      .set({ outOfMemoryJson: encodeOutOfMemory(containers) })
+      .where(eq(attempts.attemptId, attemptId))
+      .execute();
+    return totalOutOfMemoryKills(containers);
   });
 
   const closeAttempt = Effect.fn("RunStoreQueries.closeAttempt")(function* (
