@@ -1,4 +1,4 @@
-import type { RemoteShell } from "@usine/agents/child-host";
+import { type RemoteShell, SSH_FAILURE } from "@usine/agents/child-host";
 import { unsupportedCodexVersion } from "@usine/agents/preflight";
 import type { BrainSpec, Harness } from "@usine/core/agent/brain";
 import { HarnessReady, HarnessUnavailableError } from "@usine/core/agent/capability";
@@ -24,9 +24,6 @@ done
 
 /** Matches the Gateway's refusal header for a request without a caller token. */
 const REFUSED_WITHOUT_TOKEN = /^x-usine-gateway-refusal:\s*missing-caller-token\s*$/imu;
-
-/** The exit code OpenSSH uses when it can't connect to the machine or run the command. */
-const SSH_FAILURE = 255;
 
 const gatewayGap = (worker: WorkerName, message: string, cause: unknown) =>
   new WorkerCapabilityError({ worker, capability: "gateway", message, cause });

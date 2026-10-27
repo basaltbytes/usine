@@ -1,3 +1,4 @@
+import { SSH_FAILURE } from "@usine/agents/child-host";
 import type { Harness } from "@usine/core/agent/brain";
 import type { InstanceId } from "@usine/core/instance";
 import { safeSegment } from "@usine/core/repository";
@@ -55,8 +56,6 @@ const USER_IDS_SCRIPT = String.raw`
 image_uid=$("$1" run --rm --network none --entrypoint id "$2" -u) || exit 1
 printf '%s %s\n' "$(id -u)" "$image_uid"
 `.trim();
-
-const SSH_FAILURE = 255;
 
 /** What a preflight found about the containers of a Worker. */
 type ContainerCheck =
