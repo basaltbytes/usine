@@ -75,8 +75,8 @@ const lines = (text: string) => {
   return Math.round(element.getBoundingClientRect().height / lineHeight);
 };
 
-const fitsWithoutScrolling = () => {
-  const container = table().parentElement;
+const fitsWithoutScrolling = (element: Element = table()) => {
+  const container = element.parentElement;
   expect(container?.scrollWidth).toBeLessThanOrEqual(container?.clientWidth ?? 0);
   expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth + 1);
 };
@@ -122,4 +122,16 @@ it("folds a preflight check's time and message into its row on a narrow table, w
     expect(lines("Machine, Git, memory, gateway, and credentials")).toBeLessThanOrEqual(2);
     fitsWithoutScrolling();
   }
+});
+
+it("keeps a provisioned worker's Machines table within the main column beside the facts rail", async () => {
+  await mount("/configuration/workers/hz-pool", 1024);
+  const machines = page.getByRole("table").first().element();
+  expect(visible(machines.querySelectorAll("th")).map((cell) => cell.textContent)).toEqual([
+    "Machine",
+    "State",
+    "Age",
+    "For",
+  ]);
+  fitsWithoutScrolling(machines);
 });

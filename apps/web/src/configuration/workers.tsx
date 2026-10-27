@@ -506,7 +506,7 @@ const Machines = ({ worker }: { readonly worker: WorkerConfigurationView }) => {
                   >
                     {elapsedLabel(machine.since, now)}
                   </TableCell>
-                  <FillCell className="max-sm:hidden">
+                  <FillCell className="whitespace-normal max-sm:hidden">
                     <MachineFor machine={machine} />
                   </FillCell>
                 </TableRow>
