@@ -6,6 +6,7 @@ import { FetchHttpClient } from "effect/unstable/http";
 import { CLI_USAGE, type CliEnvironment, packageVersion, parseCli } from "./cli.ts";
 import { failureMessage } from "./failure-message.ts";
 import { instanceEnvironment } from "./instance/environment.ts";
+import { loggerLayer } from "./logger.ts";
 
 /** The exit status of `usine status` when no `usine up` runs, as for LSB init scripts. */
 const NOT_RUNNING_STATUS = 3;
@@ -93,7 +94,7 @@ const main = Effect.gen(function* () {
     Effect.provideService(ConfigProvider.ConfigProvider, environment),
   );
 }).pipe(
-  Effect.provide(Layer.merge(NodeServices.layer, FetchHttpClient.layer)),
+  Effect.provide(Layer.mergeAll(NodeServices.layer, FetchHttpClient.layer, loggerLayer)),
   // Only typed failures are caught: a defect still crashes with its full cause.
   Effect.catch((failure) => exitWith(failureMessage(failure))),
 );

@@ -44,6 +44,8 @@ For any other form, the parser prints the usage on standard error and exits with
 
 If a flag repeats, the last value wins.
 
+Each log line starts with its time as an ISO 8601 timestamp in UTC, such as `[2026-10-27T02:25:13.123Z] INFO`, whatever the machine's time zone.
+
 ### Startup
 
 `usine up` runs these steps in order and stops at the first failure ([`up`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/up.ts#L104)):
