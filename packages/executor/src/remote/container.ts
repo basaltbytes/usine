@@ -135,6 +135,21 @@ exec "$1" exec "$2" sh -c "$3" sh "$4"
 const STATE_FORMAT = "{{.State.Status}} {{.State.ExitCode}} {{.State.OOMKilled}}";
 
 /**
+ * A script that prints the `memory.events` of container `$2`'s cgroup if the container runs, or
+ * `oom_kill 1` if it stopped because the kernel killed its init for memory.
+ */
+const MEMORY_EVENTS_SCRIPT = String.raw`
+state=$("$1" container inspect --format '{{.State.Running}} {{.State.OOMKilled}}' "$2") || exit 1
+case "$state" in
+  "true "*) exec "$1" exec "$2" cat /sys/fs/cgroup/memory.events ;;
+  *" true") echo "oom_kill 1" ;;
+esac
+`.trim();
+
+/** The count of processes that the kernel killed for memory in a cgroup's `memory.events`. */
+const OOM_KILL_LINE = /^oom_kill (\d+)$/mu;
+
+/**
  * A script that lists the containers with both labels `$2` and `$3`, one `<name> <worker>` line
  * each. Prints nothing if the machine has no container CLI.
  */
@@ -380,7 +395,8 @@ export const containersFor = (commands: RemoteCommands) => {
 
   /**
    * Starts the container of `spec` again if it stopped, such as after an out-of-memory kill or a
-   * signal to its init. The scope that started it still removes it. Fails if it doesn't exist.
+   * signal to its init, and returns whether the kernel killed its init for memory. The scope that
+   * started it still removes it. Fails if it doesn't exist.
    */
   const ensureRunning = Effect.fn("RemoteExecutor.ensureContainerRunning")(function* (
     operation: ExecutorOperation,
@@ -399,7 +415,7 @@ export const containersFor = (commands: RemoteCommands) => {
       .split(" ");
     if (status === "running") {
       yield* Effect.logDebug("The container still runs", fields);
-      return;
+      return false;
     }
     yield* Effect.logWarning("The container stopped; starting it again", {
       ...fields,
@@ -408,6 +424,38 @@ export const containersFor = (commands: RemoteCommands) => {
       oomKilled,
     });
     yield* commands.run(operation, shell, CONTAINER_RUNTIME, ["start", spec.name]);
+    return oomKilled === "true";
+  });
+
+  /**
+   * Returns the number of processes that the kernel killed in the container of `spec` because the
+   * container reached its memory limit: the count of its cgroup while it runs, or 1 if it stopped
+   * because the kernel killed its init. A start creates a new cgroup, so the count restarts at 0.
+   */
+  const outOfMemoryKills = Effect.fn("RemoteExecutor.containerOutOfMemoryKills")(function* (
+    operation: ExecutorOperation,
+    shell: RemoteShell,
+    spec: ContainerSpec,
+  ) {
+    const fields = containerFields(shell, spec);
+    yield* Effect.annotateCurrentSpan(fields);
+    const events = yield* commands.run(operation, shell, "sh", [
+      "-c",
+      MEMORY_EVENTS_SCRIPT,
+      "sh",
+      CONTAINER_RUNTIME,
+      spec.name,
+    ]);
+    const kills = Number(OOM_KILL_LINE.exec(events)?.[1] ?? 0);
+    if (kills === 0)
+      yield* Effect.logDebug("The kernel killed no process in the container", fields);
+    else
+      yield* Effect.logWarning("The kernel killed processes in the container for memory", {
+        ...fields,
+        kills,
+        memoryMib: spec.settings.limits.memoryMib,
+      });
+    return kills;
   });
 
   /**
@@ -484,5 +532,5 @@ export const containersFor = (commands: RemoteCommands) => {
     });
   });
 
-  return { start, ensureRunning, stopChildren, sweep, remove, mark, marked };
+  return { start, ensureRunning, outOfMemoryKills, stopChildren, sweep, remove, mark, marked };
 };

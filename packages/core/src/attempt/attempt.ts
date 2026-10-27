@@ -4,7 +4,7 @@ import { BrainSpec, ModelId } from "../agent/brain.ts";
 import { RunId } from "../run/run.ts";
 import { Comment } from "../step/result.ts";
 import { StepName } from "../step/step.ts";
-import { WorkerName } from "../worker.ts";
+import { ContainerMemoryMib, WorkerName } from "../worker.ts";
 import { AttemptFailure, isAutoRetryableFailure } from "./failure.ts";
 import { AttemptOutcome } from "./outcome.ts";
 import { AttemptSalvage } from "./salvage.ts";
@@ -42,6 +42,15 @@ export class AttemptContext extends Schema.Class<AttemptContext>("AttemptContext
 }) {}
 
 /**
+ * The processes that the kernel killed in an Attempt's container because the container reached
+ * its memory limit, `memoryMib`.
+ */
+export class OutOfMemoryKills extends Schema.Class<OutOfMemoryKills>("OutOfMemoryKills")({
+  kills: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+  memoryMib: ContainerMemoryMib,
+}) {}
+
+/**
  * One try of a Step on a Worker.
  *
  * - `outcome`: `None` while the Attempt runs.
@@ -51,6 +60,8 @@ export class AttemptContext extends Schema.Class<AttemptContext>("AttemptContext
  * - `reattachedAt`: the last time an orchestrator restart reattached the Attempt.
  * - `comments`: the comments and reviews posted by an unsuccessful Attempt; a successful
  *   Attempt's are in the Step result.
+ * - `outOfMemory`: the processes the kernel killed in the Attempt's container for memory; `None`
+ *   if it killed none or the Attempt ran without a container.
  */
 export class Attempt extends Schema.Class<Attempt>("Attempt")({
   id: AttemptId,
@@ -74,6 +85,9 @@ export class Attempt extends Schema.Class<Attempt>("Attempt")({
     Schema.withConstructorDefault(Effect.succeed(Option.none())),
   ),
   comments: Schema.Array(Comment).pipe(Schema.withConstructorDefault(Effect.succeed([]))),
+  outOfMemory: Schema.Option(OutOfMemoryKills).pipe(
+    Schema.withConstructorDefault(Effect.succeed(Option.none<OutOfMemoryKills>())),
+  ),
 }) {}
 
 /**

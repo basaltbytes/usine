@@ -1,6 +1,6 @@
 import { BrainSpec } from "@usine/core/agent/brain";
 import { ChildSessionBudget, ChildSessionCount } from "@usine/core/agent/session";
-import { AttemptNumber, AttemptId, AttemptTask } from "@usine/core/attempt";
+import { AttemptNumber, AttemptId, AttemptTask, OutOfMemoryKills } from "@usine/core/attempt";
 import { AgentName } from "@usine/core/agent";
 import { RunawayCeiling } from "@usine/core/attempt/failure";
 import { AttemptSalvage } from "@usine/core/attempt/salvage";
@@ -148,6 +148,10 @@ export class AttemptView extends Schema.Class<AttemptView>("@usine/orchestrator/
   start: Schema.NullOr(AttemptStart).pipe(Schema.withConstructorDefault(Effect.succeed(null))),
   /** When an orchestrator restart last reattached the Attempt, or null if none did. */
   reattachedAt: Schema.NullOr(Schema.String).pipe(
+    Schema.withConstructorDefault(Effect.succeed(null)),
+  ),
+  /** The processes the kernel killed in the Attempt's container for memory, or null if none. */
+  outOfMemory: Schema.NullOr(OutOfMemoryKills).pipe(
     Schema.withConstructorDefault(Effect.succeed(null)),
   ),
 }) {}

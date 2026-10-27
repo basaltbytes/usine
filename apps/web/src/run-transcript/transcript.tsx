@@ -232,7 +232,7 @@ const Row = ({ row, speaker }: { readonly row: ChapterRow; readonly speaker: str
         }
       >
         <div data-transcript-id={Option.isSome(ending.position) ? ending.key : undefined}>
-          <Outcome end={ending.end} />
+          <Outcome end={ending.end} outOfMemory={ending.outOfMemory} />
         </div>
       </ReaderLine>
     ),

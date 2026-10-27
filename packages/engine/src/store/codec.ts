@@ -1,7 +1,13 @@
 import { Agent, AgentName } from "@usine/core/agent";
 import { CycleGeneration, CycleLimit } from "@usine/core/cycle-budget";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
-import { Attempt, AttemptNumber, AttemptTask, AttemptId } from "@usine/core/attempt";
+import {
+  Attempt,
+  AttemptNumber,
+  AttemptTask,
+  AttemptId,
+  OutOfMemoryKills,
+} from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptOutcome } from "@usine/core/attempt/outcome";
 import { AttemptSalvage } from "@usine/core/attempt/salvage";
@@ -86,6 +92,7 @@ export const AttemptRow = Schema.Struct({
   start: Schema.NullOr(AttemptStart),
   reattachedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
   comments: Schema.NullOr(Schema.Array(Comment)),
+  outOfMemory: Schema.NullOr(OutOfMemoryKills),
 });
 export type AttemptRow = typeof AttemptRow.Type;
 
@@ -133,6 +140,7 @@ export const encodeRunState = Schema.encodeSync(RunState.RunState);
 export const encodeOutcome = Schema.encodeSync(AttemptOutcome);
 export const encodeSalvage = Schema.encodeSync(AttemptSalvage);
 export const encodeComments = Schema.encodeSync(Schema.Array(Comment));
+export const encodeOutOfMemory = Schema.encodeSync(OutOfMemoryKills);
 export const encodeAttemptStart = Schema.encodeSync(AttemptStart);
 export const decodeNextStarts = Schema.decodeUnknownEffect(
   Schema.Array(Schema.Struct({ nextStart: Schema.NullOr(OperatorRetryStart) })),
@@ -237,6 +245,7 @@ export const attemptFromRow = (row: AttemptRow): Attempt =>
     start: Option.fromNullishOr(row.start),
     reattachedAt: Option.fromNullishOr(row.reattachedAt),
     comments: row.comments ?? [],
+    outOfMemory: Option.fromNullishOr(row.outOfMemory),
   });
 
 export const runSummaryFromRow = (

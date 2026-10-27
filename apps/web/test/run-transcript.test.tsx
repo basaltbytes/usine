@@ -17,8 +17,8 @@ import {
 } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentName } from "@usine/core/agent";
-import { AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
-import { WorkerName } from "@usine/core/worker";
+import { AttemptId, AttemptNumber, AttemptTask, OutOfMemoryKills } from "@usine/core/attempt";
+import { ContainerMemoryMib, WorkerName } from "@usine/core/worker";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
@@ -269,6 +269,19 @@ describe("run transcript", () => {
     assert.include(markup, "border-color:#fbca0466");
     assert.include(markup, "border-color:#0e8a1666");
     assert.include(markup, `href="${comment}"`);
+  });
+
+  it("says under an Attempt's outcome how many processes the kernel killed in its container, and at what memory limit", () => {
+    const ended = (outOfMemory: OutOfMemoryKills | null) =>
+      reader(
+        [event(1, "Running the test gate.")],
+        [new AttemptView({ ...liveAttempt, outcome: new CanceledAttemptView(), outOfMemory })],
+      ).replace(/<[^>]+>/gu, "");
+    assert.include(
+      ended(new OutOfMemoryKills({ kills: 2, memoryMib: ContainerMemoryMib.make(7168) })),
+      "Warning: The kernel killed 2 processes in the attempt container when it reached its 7168 MiB memory limit",
+    );
+    assert.notInclude(ended(null), "The kernel killed");
   });
 
   it("keeps a finished child's handoff when its launch is outside the loaded page", () => {

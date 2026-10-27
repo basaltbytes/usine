@@ -87,6 +87,7 @@ const sink = {
   append: () => Effect.void,
   salvage: () => Effect.void,
   comments: () => Effect.void,
+  outOfMemory: () => Effect.void,
   transcript: Effect.succeed([]),
   windows: aloneOnItem(),
 };

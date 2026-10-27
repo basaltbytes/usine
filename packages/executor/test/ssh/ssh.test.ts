@@ -85,6 +85,7 @@ const workingAttempts = (attemptIds: ReadonlyArray<AttemptId>) =>
           }),
         salvage: () => Effect.void,
         comments: () => Effect.void,
+        outOfMemory: () => Effect.void,
         transcript: Effect.succeed([]),
         windows: aloneOnItem(attemptId),
       }),
@@ -116,6 +117,7 @@ describe("SSH Worker", () => {
           append: () => Effect.void,
           salvage: () => Effect.void,
           comments: () => Effect.void,
+          outOfMemory: () => Effect.void,
           transcript: Effect.succeed([]),
           windows: aloneOnItem(),
         });
@@ -203,6 +205,7 @@ describe("SSH Worker", () => {
         append: () => Effect.void,
         salvage: () => Effect.void,
         comments: () => Effect.void,
+        outOfMemory: () => Effect.void,
         transcript: Effect.succeed([]),
         windows: aloneOnItem(),
       });
@@ -243,6 +246,7 @@ describe("SSH Worker", () => {
         .launch({
           append: () => Effect.void,
           comments: () => Effect.void,
+          outOfMemory: () => Effect.void,
           transcript: Effect.succeed([]),
           windows: aloneOnItem(),
           salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
@@ -283,6 +287,7 @@ describe("SSH Worker", () => {
           .launch({
             append: () => Effect.void,
             comments: () => Effect.void,
+            outOfMemory: () => Effect.void,
             transcript: Effect.succeed([]),
             windows: aloneOnItem(),
             salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
@@ -403,6 +408,7 @@ describe("SSH Worker", () => {
         append: () => Effect.void,
         salvage: () => Effect.void,
         comments: () => Effect.void,
+        outOfMemory: () => Effect.void,
         transcript: Effect.succeed([]),
         windows: aloneOnItem(),
       };
@@ -461,6 +467,7 @@ describe("SSH Worker", () => {
           }),
         salvage: () => Effect.void,
         comments: () => Effect.void,
+        outOfMemory: () => Effect.void,
         transcript: Effect.succeed([]),
         windows: aloneOnItem(),
       };

@@ -2,7 +2,13 @@ import { RepositoryName } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
 import type { Agent } from "@usine/core/agent";
 import type { ModelId } from "@usine/core/agent/brain";
-import { Attempt, AttemptId, AttemptContext, AttemptNumber } from "@usine/core/attempt";
+import {
+  Attempt,
+  AttemptId,
+  AttemptContext,
+  AttemptNumber,
+  type OutOfMemoryKills,
+} from "@usine/core/attempt";
 
 import { AttemptOutcome } from "@usine/core/attempt/outcome";
 import { AttemptSalvage, salvageRefFor } from "@usine/core/attempt/salvage";
@@ -70,6 +76,7 @@ import {
   encodeDateTime,
   encodeOutcome,
   encodeComments,
+  encodeOutOfMemory,
   encodeSalvage,
   encodePayload,
   encodeRunState,
@@ -158,6 +165,7 @@ export const attemptSelection = {
   start: attempts.startJson,
   reattachedAt: attempts.reattachedAt,
   comments: attempts.commentsJson,
+  outOfMemory: attempts.outOfMemoryJson,
 } as const;
 
 const storedStateTag = sql`json_extract(${runs.stateJson}, '$._tag')`;
@@ -533,6 +541,18 @@ export const queriesFor = (database: RunDatabaseClient) => {
     yield* database
       .update(attempts)
       .set({ commentsJson: encodeComments(comments) })
+      .where(eq(attempts.attemptId, attemptId))
+      .execute();
+  });
+
+  const recordOutOfMemory = Effect.fn("RunStoreQueries.recordOutOfMemory")(function* (
+    attemptId: AttemptId,
+    kills: OutOfMemoryKills,
+  ) {
+    yield* Effect.annotateCurrentSpan({ attemptId, kills: kills.kills });
+    yield* database
+      .update(attempts)
+      .set({ outOfMemoryJson: encodeOutOfMemory(kills) })
       .where(eq(attempts.attemptId, attemptId))
       .execute();
   });
@@ -983,6 +1003,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     setNextStart,
     recordSalvage,
     recordComments,
+    recordOutOfMemory,
     amend,
     markIntervened,
     approvalExists,

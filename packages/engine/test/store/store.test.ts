@@ -12,7 +12,7 @@ import {
   SessionIdle,
   TextOutput,
 } from "@usine/core/agent/session";
-import { type Attempt, AttemptId, AttemptTask } from "@usine/core/attempt";
+import { type Attempt, AttemptId, AttemptTask, OutOfMemoryKills } from "@usine/core/attempt";
 import {
   SalvagePartlyPushed,
   SalvagePushed,
@@ -32,7 +32,7 @@ import { RunId } from "@usine/core/run";
 import { ApprovalSource, RunApproval } from "@usine/core/run/approval";
 import { StepName } from "@usine/core/step";
 import { Comment, StepResult } from "@usine/core/step/result";
-import { WorkerName } from "@usine/core/worker";
+import { ContainerMemoryMib, WorkerName } from "@usine/core/worker";
 
 import { DateTime, Effect, FileSystem, Layer, Option, Result, Schema } from "effect";
 import { TestClock } from "effect/testing";
@@ -1332,6 +1332,36 @@ describe("cursor store", () => {
         assert(Option.isNone((yield* store.snapshot(runId)).step.result));
       }),
     ),
+  );
+
+  it.live(
+    "records the processes the kernel killed in an Attempt's container, on that Attempt",
+    () =>
+      withRunStore(
+        Effect.gen(function* () {
+          const store = yield* RunStore;
+          const runId = RunId.make("out-of-memory");
+          yield* store.recordAndClaim(lifecycleSubmission, runId);
+          const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+          assert(started._tag === "AttemptStarted");
+          const kills = new OutOfMemoryKills({
+            kills: 2,
+            memoryMib: ContainerMemoryMib.make(7168),
+          });
+          yield* store.recordOutOfMemory(started.execution.attempt.id, kills);
+          yield* store.finishAttempt(
+            started.execution.attempt,
+            Result.fail(new AgentFailure({ message: "The test gate was killed" })),
+          );
+          yield* store.retry(runId);
+          const retried = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+          assert(retried._tag === "AttemptStarted");
+
+          const attempts = (yield* store.snapshot(runId)).attempts;
+          assert.deepStrictEqual(attempts[0]?.outOfMemory, Option.some(kills));
+          assert.deepStrictEqual(attempts[1]?.outOfMemory, Option.none());
+        }),
+      ),
   );
 
   // Two Loops' Runs of one Agent on one Item sign their comments the same way (#429).

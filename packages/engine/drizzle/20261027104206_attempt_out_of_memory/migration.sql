@@ -1,0 +1,1 @@
+ALTER TABLE `usine_attempts` ADD `out_of_memory_json` text;

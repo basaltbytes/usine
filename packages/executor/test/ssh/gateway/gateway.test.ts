@@ -63,6 +63,7 @@ const sink = {
   append: () => Effect.void,
   salvage: () => Effect.void,
   comments: () => Effect.void,
+  outOfMemory: () => Effect.void,
   transcript: Effect.succeed([]),
   windows: aloneOnItem(),
 };
@@ -526,6 +527,7 @@ describe("SSH Worker behind a Gateway", () => {
         .launch({
           append: () => Effect.void,
           comments: () => Effect.void,
+          outOfMemory: () => Effect.void,
           transcript: Effect.succeed([]),
           windows: aloneOnItem(),
           salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),

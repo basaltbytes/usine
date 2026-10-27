@@ -1,5 +1,6 @@
 import { BrainSpec } from "@usine/core/agent/brain";
 import type { BillingPool } from "@usine/core/agent/session";
+import type { OutOfMemoryKills } from "@usine/core/attempt";
 import type { SalvagePushed } from "@usine/core/attempt/salvage";
 import type { AttemptStart } from "@usine/core/attempt/start";
 import { RepositoryName } from "@usine/core/repository";
@@ -300,6 +301,9 @@ export const queuedMessageLabel = (session: QueuedFor): string =>
 
 export const conflictingSalvageMessage = ({ ref, commit }: SalvagePushed): string =>
   `Not applied: the previous attempt's work on ${ref} at ${commit.slice(0, 7)} conflicts with the current revision. It is still on ${ref}`;
+
+export const outOfMemoryLine = ({ kills, memoryMib }: OutOfMemoryKills): string =>
+  `The kernel killed ${kills} ${kills === 1 ? "process" : "processes"} in the attempt container when it reached its ${memoryMib} MiB memory limit`;
 
 /** Returns a used-up cycle budget's rounds and Runs per Loop, for example `3 completed rounds. start-dev: 2 runs`. */
 export const cycleBudgetCounts = (ask: CycleBudgetNeed["ask"]): string =>

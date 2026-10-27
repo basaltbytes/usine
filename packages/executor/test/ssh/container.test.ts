@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { CHILD_KILL_SCRIPT, RemoteShell } from "@usine/agents/child-host";
 import { Agent } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
-import { AttemptId } from "@usine/core/attempt";
+import { AttemptId, type OutOfMemoryKills } from "@usine/core/attempt";
 import { type AttemptSalvage, SalvageRef } from "@usine/core/attempt/salvage";
 import { ContainerMemoryMib, WorkerName } from "@usine/core/worker";
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
@@ -43,6 +43,7 @@ const sink = {
   append: () => Effect.void,
   salvage: () => Effect.void,
   comments: () => Effect.void,
+  outOfMemory: () => Effect.void,
   transcript: Effect.succeed([]),
   windows: aloneOnItem(),
 };
@@ -89,6 +90,10 @@ const releaseSteps = (machine: ReturnType<typeof fakeMachine>) => {
     credentialGone: lines.indexOf(`exec 'rm' '-rf' '${CREDENTIALS}'`),
   };
 };
+
+/** Returns the index of the call that read the container's out-of-memory kills, or -1. */
+const killsRead = (machine: ReturnType<typeof fakeMachine>) =>
+  linesOf(machine).findIndex((line) => line.includes("memory.events"));
 
 /** Asserts that each named call index exists and comes after the one before it. */
 const assertInOrder = (steps: ReadonlyArray<readonly [string, number]>) =>
@@ -725,6 +730,38 @@ describe("SSH Worker with Docker", () => {
   );
 
   it.effect(
+    "records the processes the kernel killed in the Attempt's container for memory before it removes the container",
+    () => {
+      const machine = dockerMachine();
+      // The kernel kills the largest processes, such as a test runner, and the container runs on.
+      const exceedsMemory: StubParent = (context) =>
+        Effect.sync(() => {
+          const container = machine.state.containers.get(CONTAINER);
+          if (container !== undefined) container.oomKills = 2;
+        }).pipe(Effect.andThen(completes(context)));
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const prepared = yield* executor.prepare(request);
+        const kills: Array<OutOfMemoryKills> = [];
+        yield* prepared.launch({
+          ...sink,
+          outOfMemory: (killed) => Effect.sync(() => void kills.push(killed)),
+        });
+        assert.deepStrictEqual(
+          kills.map(({ kills, memoryMib }) => ({ kills, memoryMib })),
+          [{ kills: 2, memoryMib: 4096 }],
+        );
+        const { childrenStopped, containerGone } = releaseSteps(machine);
+        assertInOrder([
+          ["the children's stop", childrenStopped],
+          ["the kills' read", killsRead(machine)],
+          ["the container's removal", containerGone],
+        ]);
+      }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider(), exceedsMemory)));
+    },
+  );
+
+  it.effect(
     "salvages an Attempt whose container stopped, such as after an out-of-memory kill, in the container started again",
     () => {
       const machine = dockerMachine();
@@ -741,10 +778,20 @@ describe("SSH Worker with Docker", () => {
         machine.state.salvage = "dirty";
         const prepared = yield* executor.prepare(request);
         const recorded: Array<AttemptSalvage> = [];
+        const kills: Array<OutOfMemoryKills> = [];
         yield* prepared
-          .launch({ ...sink, salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)) })
+          .launch({
+            ...sink,
+            salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
+            outOfMemory: (killed) => Effect.sync(() => void kills.push(killed)),
+          })
           .pipe(Effect.flip);
         assert.strictEqual(recorded[0]?._tag, "Pushed");
+        assert.deepStrictEqual(
+          kills.map(({ kills, memoryMib }) => ({ kills, memoryMib })),
+          [{ kills: 1, memoryMib: 4096 }],
+          "the start for the salvage doesn't lose the killed init",
+        );
         const lines = linesOf(machine);
         const push = lines.findIndex((line) => line.includes("'push' '--force'"));
         assert.strictEqual(machine.state.calls[push]?.container, CONTAINER);

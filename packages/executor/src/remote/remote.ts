@@ -1,7 +1,7 @@
 import { CHILD_KILL_SCRIPT, type RemoteShell } from "@usine/agents/child-host";
 import { ClaudeLoginLock } from "@usine/agents/runtime";
 import type { Harness } from "@usine/core/agent/brain";
-import type { AttemptId } from "@usine/core/attempt";
+import { type AttemptId, OutOfMemoryKills } from "@usine/core/attempt";
 import { type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
 import type { AttemptRecovery, AttemptSalvage, RecoverySink } from "@usine/core/attempt/salvage";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
@@ -13,7 +13,7 @@ import {
   harvestPostedComments,
 } from "@usine/core/step/harvest";
 import { AttemptRuntime } from "@usine/durable/attempt-runtime";
-import { Deferred, Effect, Exit, Option, Schema, Scope, SynchronizedRef } from "effect";
+import { Deferred, Effect, Exit, Option, Ref, Schema, Scope, SynchronizedRef } from "effect";
 import { durableSessionFor, type PostedCommentsHarvest } from "../durable-session.ts";
 import {
   type AttemptWorkspace,
@@ -97,6 +97,11 @@ interface CheckoutHost {
    * Attempt's container again if it stopped while the Attempt ran.
    */
   readonly salvageShell: Effect.Effect<RemoteShell, ExecutorError>;
+  /**
+   * Sets where the processes that the kernel killed in the Attempt's container for memory are
+   * recorded before the container is removed. Without it, they're not read.
+   */
+  readonly recordOutOfMemory: (record: AttemptChannel.Sink["outOfMemory"]) => Effect.Effect<void>;
 }
 
 /**
@@ -244,18 +249,58 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
     ) {
       if (isolation._tag === "SharedUser") {
         const shell = Effect.succeed(access.shell);
-        const shared: CheckoutHost = { isolation, shell, salvageShell: shell };
+        const shared: CheckoutHost = {
+          isolation,
+          shell,
+          salvageShell: shell,
+          recordOutOfMemory: () => Effect.void,
+        };
         return shared;
       }
       const started = yield* SynchronizedRef.make(Option.none<RemoteShell>());
       const spec = containerSpec(machine, isolation.settings, attempt, worktree, access, harnesses);
       const marker = containerCheckoutMarker(machine.workerDirectory, attempt.attemptId);
+      const recorder = yield* Ref.make(Option.none<AttemptChannel.Sink["outOfMemory"]>());
+      // A start gives the container a new cgroup, whose count doesn't include the killed init.
+      const killedInits = yield* Ref.make(0);
+      const recordKills = Effect.gen(function* () {
+        const record = yield* Ref.get(recorder);
+        if (Option.isNone(record))
+          return yield* Effect.logDebug(
+            "No launch ran in the container, so its out-of-memory kills aren't read",
+            { attemptId: attempt.attemptId, container: spec.name },
+          );
+        const kills =
+          (yield* containers.outOfMemoryKills("cleanup", machine.shell, spec)) +
+          (yield* Ref.get(killedInits));
+        if (kills === 0) return;
+        yield* record.value(
+          new OutOfMemoryKills({ kills, memoryMib: spec.settings.limits.memoryMib }),
+        );
+      }).pipe(
+        Effect.tapError((error) =>
+          Effect.logWarning(
+            "Could not record the processes the kernel killed in the Attempt's container",
+            {
+              attemptId: attempt.attemptId,
+              worker: attempt.worker,
+              host: machine.shell.destination,
+              container: spec.name,
+              errorTag: error._tag,
+              message: String(error),
+            },
+          ),
+        ),
+        Effect.ignore,
+      );
       const shell = SynchronizedRef.modifyEffect(started, (current) =>
         Option.match(current, {
           onSome: (shell) => Effect.succeed([shell, current] as const),
           onNone: () =>
             containers.mark(operation, machine.shell, marker).pipe(
               Effect.andThen(containers.start(operation, machine.shell, spec)),
+              // Added after the start's removal, so it runs before it.
+              Effect.tap(() => Effect.addFinalizer(() => recordKills)),
               Scope.provide(scope),
               Effect.map((shell) => [shell, Option.some(shell)] as const),
             ),
@@ -263,9 +308,22 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       );
       // The kernel can kill the container for memory, or an Attempt can signal its init (#575).
       const salvageShell = yield* Effect.cached(
-        Effect.tap(shell, () => containers.ensureRunning("cleanup", machine.shell, spec)),
+        Effect.tap(shell, () =>
+          containers
+            .ensureRunning("cleanup", machine.shell, spec)
+            .pipe(
+              Effect.tap((oomKilled) =>
+                oomKilled ? Ref.update(killedInits, (n) => n + 1) : Effect.void,
+              ),
+            ),
+        ),
       );
-      const contained: CheckoutHost = { isolation, shell, salvageShell };
+      const contained: CheckoutHost = {
+        isolation,
+        shell,
+        salvageShell,
+        recordOutOfMemory: (record) => Ref.set(recorder, Option.some(record)),
+      };
       return contained;
     });
 
@@ -932,6 +990,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
                 machine,
                 prepared.spec.agent.brain.harness,
               );
+              yield* checkoutHost.recordOutOfMemory(io.outOfMemory);
               const shell = yield* checkoutHost.shell.pipe(
                 Effect.mapError(
                   (error) =>

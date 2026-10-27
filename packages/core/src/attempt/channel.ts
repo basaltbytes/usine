@@ -2,7 +2,7 @@ import { Effect, Option, Result, Schema } from "effect";
 import { Agent } from "../agent/agent.ts";
 import { Effort, ModelId } from "../agent/brain.ts";
 import { AgentSessionEvent, AgentSessionId, ChildSessionBudget } from "../agent/session.ts";
-import { AttemptId, AttemptTask, type AttemptWindows } from "./attempt.ts";
+import { AttemptId, AttemptTask, type AttemptWindows, type OutOfMemoryKills } from "./attempt.ts";
 import { RepositoryName, CommitSha, RepositoryRevision } from "../repository.ts";
 import { type Comment, StepResult } from "../step/result.ts";
 import { BotLogin, WorkerName } from "../worker.ts";
@@ -252,6 +252,8 @@ export interface Sink {
   readonly salvage: (salvage: AttemptSalvage) => Effect.Effect<void, AttemptFailure>;
   /** Records the comments and reviews an unsuccessful Attempt posted on the Run's Item. */
   readonly comments: (comments: ReadonlyArray<Comment>) => Effect.Effect<void, AttemptFailure>;
+  /** Records the processes that the kernel killed in the Attempt's container for memory. */
+  readonly outOfMemory: (kills: OutOfMemoryKills) => Effect.Effect<void, AttemptFailure>;
   /** Reads the Attempt windows; harvesting runs it after GitHub lists the Attempt's comments. */
   readonly windows: Effect.Effect<AttemptWindows, AttemptFailure>;
   /** Reads the envelopes recorded by `append`, in order; reattach uses them to restore counters. */

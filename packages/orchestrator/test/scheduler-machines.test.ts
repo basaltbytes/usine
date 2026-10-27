@@ -180,6 +180,7 @@ const sink = {
   append: () => Effect.void,
   salvage: () => Effect.void,
   comments: () => Effect.void,
+  outOfMemory: () => Effect.void,
   transcript: Effect.succeed([]),
   windows: Effect.die("no windows"),
   checkoutAcquired: Effect.void,

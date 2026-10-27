@@ -44,6 +44,7 @@ export const recording = () => {
   const sink: AttemptChannel.Sink = {
     salvage: () => Effect.void,
     comments: () => Effect.void,
+    outOfMemory: () => Effect.void,
     transcript: Effect.sync(() => transcript.map(([, envelope]) => envelope)),
     windows: aloneOnItem(),
     append: (direction, envelope) =>

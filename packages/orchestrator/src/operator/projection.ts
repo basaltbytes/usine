@@ -126,6 +126,7 @@ const attemptView = (
       onNone: () => null,
       onSome: DateTime.formatIso,
     }),
+    outOfMemory: Option.getOrNull(attempt.outOfMemory),
   });
 };
 

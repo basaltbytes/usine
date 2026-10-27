@@ -121,6 +121,8 @@ interface FakeContainer {
   readonly environment: string;
   /** Whether its init runs. A stopped container reads as one that the kernel killed for memory. */
   running: boolean;
+  /** The processes that the kernel killed for memory since it started, which `memory.events` counts. */
+  oomKills: number;
 }
 
 /** A fake SSH client that forwards a local port to a Gateway's admin API. */
@@ -370,6 +372,7 @@ export const fakeMachine = () => {
         labels,
         environment: input,
         running: true,
+        oomKills: 0,
       });
       return oneShotHandle("4f0c2d\n", 0);
     }
@@ -389,7 +392,20 @@ export const fakeMachine = () => {
       if (container === undefined)
         return oneShotHandle("", 1, `Error response from daemon: No such container: ${name}`);
       container.running = true;
+      container.oomKills = 0;
       return oneShotHandle(`${name}\n`, 0);
+    }
+    if (line.includes("memory.events")) {
+      // sh -c <script> sh docker <name>
+      const name = words.at(-1) ?? "";
+      const container = state.containers.get(name);
+      if (container === undefined) return oneShotHandle("", 1, `Error: No such container: ${name}`);
+      return oneShotHandle(
+        container.running
+          ? `low 0\nhigh 0\nmax 9\noom ${container.oomKills}\noom_kill ${container.oomKills}\noom_group_kill 0\n`
+          : "oom_kill 1\n",
+        0,
+      );
     }
     if (line.includes("container inspect")) {
       const container = state.containers.get(words[5] ?? "");

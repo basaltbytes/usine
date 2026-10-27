@@ -183,6 +183,7 @@ describe("local worker salvage", () => {
                       new InfraFailure({ message: "channel unavailable", cause: "outage" }),
                     ),
                   comments: () => Effect.void,
+                  outOfMemory: () => Effect.void,
                   transcript: Effect.succeed([]),
                   windows: aloneOnItem(failedRecordRequest.attemptId),
                   salvage: () =>
