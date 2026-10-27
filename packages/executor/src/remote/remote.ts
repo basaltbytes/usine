@@ -292,6 +292,13 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
           ),
         ),
         Effect.ignore,
+        Effect.withSpan(span("recordContainerOutOfMemoryKills"), {
+          attributes: {
+            attemptId: attempt.attemptId,
+            worker: attempt.worker,
+            container: spec.name,
+          },
+        }),
       );
       const shell = SynchronizedRef.modifyEffect(started, (current) =>
         Option.match(current, {

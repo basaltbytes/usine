@@ -37,7 +37,7 @@ An item-level `CycleBudgetAsk`, which can exist before another run opens, record
 
 ## Attempts
 
-Each attempt records its child `BrainSpec`, its effective Pi parent model, why it started (`start`, none for attempts from before usine recorded it), and when a restart last reattached it (`reattachedAt`). `RunSpec` is the immutable repo, payload, task, agent context, and child-session budget that the parent starts from.
+Each attempt records its child `BrainSpec`, its effective Pi parent model, why it started (`start`, none for attempts from before usine recorded it), when a restart last reattached it (`reattachedAt`), and how many processes the kernel killed in its container for memory, with the container's memory limit (`outOfMemory`, none if it killed none or the attempt ran without a container). `RunSpec` is the immutable repo, payload, task, agent context, and child-session budget that the parent starts from.
 
 Only infra failures retry automatically, up to a cap. Agent failures wait for the operator. Runaway guard failures, exhausted child-session budgets, and `DefectFailure` never retry automatically; `DefectFailure` records a defect caught at a boundary that needs a serializable outcome, with its original cause.
 
