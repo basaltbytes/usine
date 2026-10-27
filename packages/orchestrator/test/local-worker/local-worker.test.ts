@@ -479,6 +479,7 @@ describe("local worker", () => {
               append: () => Effect.void,
               salvage: () => Effect.void,
               comments: () => Effect.void,
+              outOfMemory: () => Effect.void,
               transcript: Effect.succeed([]),
               windows: aloneOnItem(AttemptId.make("cleanup-budget-run/execute/1")),
               checkoutAcquired: Effect.void,
@@ -700,6 +701,7 @@ describe("local worker", () => {
               append: () => Effect.void,
               salvage: () => Effect.void,
               comments: () => Effect.void,
+              outOfMemory: () => Effect.void,
               transcript: Effect.succeed([]),
               windows: aloneOnItem(AttemptId.make("unlaunched/run/2")),
             })
@@ -1009,6 +1011,7 @@ describe("local worker", () => {
                   append: () => Effect.void,
                   salvage: () => Effect.void,
                   comments: () => Effect.void,
+                  outOfMemory: () => Effect.void,
                   transcript: Effect.succeed([]),
                   windows: aloneOnItem(AttemptId.make(`bot-login-${kind}/execute/1`)),
                   checkoutAcquired: Effect.sync(() => {

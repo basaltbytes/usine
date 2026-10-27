@@ -1,10 +1,11 @@
+import type { OutOfMemoryKills } from "@usine/core/attempt";
 import type { AttemptSalvage } from "@usine/core/attempt/salvage";
 import type { FailureView } from "@usine/orchestrator/operator";
 import { Match, Option } from "effect";
 import { Markdown } from "@/components/markdown";
 import { StateMark } from "@/components/status-badge";
 import { cn } from "@/lib/utils";
-import { failureMessage, failureReason } from "../operator-copy.ts";
+import { failureMessage, failureReason, outOfMemoryLine } from "../operator-copy.ts";
 import type { AttemptEnd } from "./document/model.ts";
 
 const FailureNote = ({
@@ -60,7 +61,7 @@ export const SalvageLine = ({ salvage }: { readonly salvage: AttemptSalvage | nu
   </p>
 );
 
-export const Outcome = ({ end }: { readonly end: AttemptEnd }) =>
+const End = ({ end }: { readonly end: AttemptEnd }) =>
   Match.valueTags(end, {
     Failed: ({ failure, salvage }) => (
       <div className="space-y-2">
@@ -90,3 +91,26 @@ export const Outcome = ({ end }: { readonly end: AttemptEnd }) =>
       </div>
     ),
   });
+
+const OutOfMemoryLine = ({ kills }: { readonly kills: OutOfMemoryKills }) => (
+  <p className="text-xs text-warning wrap-anywhere">
+    <span className="sr-only">Warning: </span>
+    {outOfMemoryLine(kills)}
+  </p>
+);
+
+export const Outcome = ({
+  end,
+  outOfMemory,
+}: {
+  readonly end: AttemptEnd;
+  readonly outOfMemory: OutOfMemoryKills | null;
+}) =>
+  outOfMemory === null ? (
+    <End end={end} />
+  ) : (
+    <div className="space-y-2">
+      <End end={end} />
+      <OutOfMemoryLine kills={outOfMemory} />
+    </div>
+  );

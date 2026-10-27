@@ -42,6 +42,9 @@ const mount = async (path: string, width: number) => {
     context: { queryClient },
   });
   await router.load();
+  // A tree rendered at the previous width keeps its sidebar mode until the media query's change
+  // event arrives, which can be after the assertions on a busy machine.
+  flushSync(() => root.render(null));
   flushSync(() =>
     root.render(
       <QueryClientProvider client={queryClient}>

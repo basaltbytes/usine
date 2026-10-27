@@ -114,6 +114,8 @@ interface RemoteCall {
 
 /** A container on the fake machine. */
 interface FakeContainer {
+  /** The ID that its `docker run` printed. */
+  readonly id: string;
   /** The arguments of its `docker run`. */
   readonly args: ReadonlyArray<string>;
   readonly labels: ReadonlyMap<string, string>;
@@ -121,6 +123,8 @@ interface FakeContainer {
   readonly environment: string;
   /** Whether its init runs. A stopped container reads as one that the kernel killed for memory. */
   running: boolean;
+  /** The processes that the kernel killed for memory since it started, which `memory.events` counts. */
+  oomKills: number;
 }
 
 /** A fake SSH client that forwards a local port to a Gateway's admin API. */
@@ -191,6 +195,8 @@ interface FakeMachineState {
   imageUserId: string;
   /** The containers on the machine, by name. */
   readonly containers: Map<string, FakeContainer>;
+  /** The number of containers that `docker run` created, which gives each its ID. */
+  containersCreated: number;
   /** The files under the SSH user's home, such as harness logins. */
   readonly homeFiles: Set<string>;
   /** Whether the checkout's `.git` is a file, as in a linked worktree of the cached clone. */
@@ -202,6 +208,9 @@ interface FakeMachineState {
   /** Each write to `localFiles`, with the number of commands that ran before it. */
   readonly localWrites: Array<{ readonly path: string; readonly afterCalls: number }>;
 }
+
+/** Returns the ID of the `count`th container that the fake machine created, as Docker prints it. */
+export const fakeContainerId = (count: number): string => count.toString(16).padStart(64, "0");
 
 const oneShotHandle = (stdout: string, exitCode: number, stderr = "") => {
   const stdoutBytes = encoder.encode(stdout);
@@ -318,6 +327,7 @@ export const fakeMachine = () => {
     imageOnMachine: true,
     imageUserId: "1000",
     containers: new Map(),
+    containersCreated: 0,
     homeFiles: new Set([".claude/.credentials.json", ".claude.json"]),
     linkedCheckout: false,
     markers: new Set(),
@@ -366,13 +376,17 @@ export const fakeMachine = () => {
           return [[key, value.join("=")] as const];
         }),
       );
+      state.containersCreated += 1;
+      const id = fakeContainerId(state.containersCreated);
       state.containers.set(name, {
+        id,
         args: words.slice(1),
         labels,
         environment: input,
         running: true,
+        oomKills: 0,
       });
-      return oneShotHandle("4f0c2d\n", 0);
+      return oneShotHandle(`${id}\n`, 0);
     }
     if (line.startsWith("exec 'docker' 'rm' '--force' ")) {
       for (const name of words.slice(3)) state.containers.delete(name);
@@ -390,7 +404,21 @@ export const fakeMachine = () => {
       if (container === undefined)
         return oneShotHandle("", 1, `Error response from daemon: No such container: ${name}`);
       container.running = true;
+      container.oomKills = 0;
       return oneShotHandle(`${name}\n`, 0);
+    }
+    if (line.includes("memory.events")) {
+      // sh -c <script> sh docker <name>
+      const name = words.at(-1) ?? "";
+      const container = state.containers.get(name);
+      if (container === undefined) return oneShotHandle("", 1, `Error: No such container: ${name}`);
+      return oneShotHandle(
+        `container ${container.id}\n` +
+          (container.running
+            ? `low 0\nhigh 0\nmax 9\noom ${container.oomKills}\noom_kill ${container.oomKills}\noom_group_kill 0\n`
+            : "oom_kill 1\n"),
+        0,
+      );
     }
     if (line.includes("container inspect")) {
       const container = state.containers.get(words[5] ?? "");

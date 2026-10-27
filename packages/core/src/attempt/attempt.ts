@@ -1,10 +1,10 @@
-import { DateTime, Effect, Option, Schema } from "effect";
+import { Array as EffectArray, DateTime, Effect, Option, Schema } from "effect";
 import { Agent, AgentName } from "../agent/agent.ts";
 import { BrainSpec, ModelId } from "../agent/brain.ts";
 import { RunId } from "../run/run.ts";
 import { Comment } from "../step/result.ts";
 import { StepName } from "../step/step.ts";
-import { WorkerName } from "../worker.ts";
+import { ContainerId, ContainerMemoryMib, WorkerName } from "../worker.ts";
 import { AttemptFailure, isAutoRetryableFailure } from "./failure.ts";
 import { AttemptOutcome } from "./outcome.ts";
 import { AttemptSalvage } from "./salvage.ts";
@@ -41,6 +41,38 @@ export class AttemptContext extends Schema.Class<AttemptContext>("AttemptContext
   parentModel: Schema.OptionFromNullOr(ModelId),
 }) {}
 
+const Kills = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
+
+/**
+ * The processes that the kernel killed in an Attempt's containers because a container reached
+ * its memory limit, `memoryMib`: the limit of the last container that recorded kills.
+ */
+export class OutOfMemoryKills extends Schema.Class<OutOfMemoryKills>("OutOfMemoryKills")({
+  kills: Kills,
+  memoryMib: ContainerMemoryMib,
+}) {}
+
+/**
+ * The processes that the kernel killed in one of an Attempt's containers, `container`, because it
+ * reached its memory limit, `memoryMib`. A reattachment runs the Attempt in a new container.
+ */
+export class ContainerOutOfMemoryKills extends Schema.Class<ContainerOutOfMemoryKills>(
+  "ContainerOutOfMemoryKills",
+)({
+  container: ContainerId,
+  kills: Kills,
+  memoryMib: ContainerMemoryMib,
+}) {}
+
+/** Returns the kills in `containers` together, with the memory limit of the last one. */
+export const totalOutOfMemoryKills = (
+  containers: EffectArray.NonEmptyReadonlyArray<ContainerOutOfMemoryKills>,
+): OutOfMemoryKills =>
+  new OutOfMemoryKills({
+    kills: containers.reduce((total, { kills }) => total + kills, 0),
+    memoryMib: EffectArray.lastNonEmpty(containers).memoryMib,
+  });
+
 /**
  * One try of a Step on a Worker.
  *
@@ -51,6 +83,8 @@ export class AttemptContext extends Schema.Class<AttemptContext>("AttemptContext
  * - `reattachedAt`: the last time an orchestrator restart reattached the Attempt.
  * - `comments`: the comments and reviews posted by an unsuccessful Attempt; a successful
  *   Attempt's are in the Step result.
+ * - `outOfMemory`: the processes the kernel killed in the Attempt's containers for memory, in all
+ *   of them together; `None` if it killed none or the Attempt ran without a container.
  */
 export class Attempt extends Schema.Class<Attempt>("Attempt")({
   id: AttemptId,
@@ -74,6 +108,9 @@ export class Attempt extends Schema.Class<Attempt>("Attempt")({
     Schema.withConstructorDefault(Effect.succeed(Option.none())),
   ),
   comments: Schema.Array(Comment).pipe(Schema.withConstructorDefault(Effect.succeed([]))),
+  outOfMemory: Schema.Option(OutOfMemoryKills).pipe(
+    Schema.withConstructorDefault(Effect.succeed(Option.none<OutOfMemoryKills>())),
+  ),
 }) {}
 
 /**

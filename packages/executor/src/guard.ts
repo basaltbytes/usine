@@ -417,6 +417,7 @@ export const attemptGuard = (
       }),
       salvage: io.salvage,
       comments: io.comments,
+      outOfMemory: io.outOfMemory,
       windows: io.windows,
       transcript: io.transcript,
     };

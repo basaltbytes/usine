@@ -132,6 +132,17 @@ export const ContainerImage = Schema.String.check(
 ).pipe(Schema.brand("ContainerImage"));
 export type ContainerImage = typeof ContainerImage.Type;
 
+/**
+ * The ID that the container runtime gives a container when it creates it: 64 lowercase hex
+ * digits. A start of a stopped container keeps it.
+ */
+export const ContainerId = Schema.String.check(
+  Schema.isPattern(/^[0-9a-f]{64}$/u, {
+    message: "Expected a container ID of 64 lowercase hex digits",
+  }),
+).pipe(Schema.brand("ContainerId"));
+export type ContainerId = typeof ContainerId.Type;
+
 /** The CPUs a container may use, such as `1.5`. */
 export const ContainerCpus = Schema.Finite.check(Schema.isGreaterThan(0)).pipe(
   Schema.brand("ContainerCpus"),

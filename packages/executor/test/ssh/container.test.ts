@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { CHILD_KILL_SCRIPT, RemoteShell } from "@usine/agents/child-host";
 import { Agent } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
-import { AttemptId } from "@usine/core/attempt";
+import { AttemptId, type ContainerOutOfMemoryKills } from "@usine/core/attempt";
 import { type AttemptSalvage, SalvageRef } from "@usine/core/attempt/salvage";
 import { ContainerMemoryMib, WorkerName } from "@usine/core/worker";
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
@@ -20,6 +20,7 @@ import {
   CREDENTIALS,
   executorLayer,
   fails,
+  fakeContainerId,
   fakeMachine,
   INSTANCE,
   INSTANCE_ID,
@@ -43,6 +44,7 @@ const sink = {
   append: () => Effect.void,
   salvage: () => Effect.void,
   comments: () => Effect.void,
+  outOfMemory: () => Effect.void,
   transcript: Effect.succeed([]),
   windows: aloneOnItem(),
 };
@@ -89,6 +91,22 @@ const releaseSteps = (machine: ReturnType<typeof fakeMachine>) => {
     credentialGone: lines.indexOf(`exec 'rm' '-rf' '${CREDENTIALS}'`),
   };
 };
+
+/** Returns the index of the call that read the container's out-of-memory kills, or -1. */
+const killsRead = (machine: ReturnType<typeof fakeMachine>) =>
+  linesOf(machine).findIndex((line) => line.includes("memory.events"));
+
+/**
+ * Makes the kernel kill `kills` processes for memory in the Attempt's running container, and
+ * returns the container's ID.
+ */
+const killsInContainer = (machine: ReturnType<typeof fakeMachine>, kills: number) =>
+  Effect.sync(() => {
+    const container = machine.state.containers.get(CONTAINER);
+    assert(container !== undefined, "the Attempt's container runs");
+    container.oomKills = kills;
+    return container.id;
+  });
 
 /** Asserts that each named call index exists and comes after the one before it. */
 const assertInOrder = (steps: ReadonlyArray<readonly [string, number]>) =>
@@ -486,6 +504,7 @@ describe("SSH Worker with Docker", () => {
     () => {
       const machine = dockerMachine();
       const leftover = (worker: string, instance = INSTANCE, instanceId: string = INSTANCE_ID) => ({
+        id: fakeContainerId((machine.state.containersCreated += 1)),
         args: [],
         labels: new Map([
           ["dev.usine.instance", instance],
@@ -494,6 +513,7 @@ describe("SSH Worker with Docker", () => {
         ]),
         environment: "",
         running: true,
+        oomKills: 0,
       });
       machine.state.containers.set("usine-crashed", leftover(WORKER));
       machine.state.containers.set("usine-of-a-removed-worker", leftover("eu-gone"));
@@ -615,6 +635,62 @@ describe("SSH Worker with Docker", () => {
   );
 
   it.effect(
+    "records the processes the kernel killed in the container of a stopping process apart from those in the container that reattaches the Attempt",
+    () => {
+      const machine = dockerMachine();
+      const credentials = mintingProvider();
+      const storage = new StubStorage();
+      const kills: Array<ContainerOutOfMemoryKills> = [];
+      const recording = {
+        ...sink,
+        outOfMemory: (killed: ContainerOutOfMemoryKills) =>
+          Effect.sync(() => void kills.push(killed)),
+      };
+      const ran: Array<string> = [];
+      const killed = (count: number) =>
+        killsInContainer(machine, count).pipe(Effect.tap((id) => Effect.sync(() => ran.push(id))));
+      const started = Deferred.makeUnsafe<void>();
+      const stops: StubParent = () =>
+        killed(2).pipe(
+          Effect.andThen(Deferred.succeed(started, undefined)),
+          Effect.andThen(Effect.never),
+        );
+      const reattached: StubParent = (context) =>
+        killed(1).pipe(Effect.andThen(completes(context)));
+      return Effect.gen(function* () {
+        yield* Effect.gen(function* () {
+          const executor = yield* Executor;
+          const launch = yield* (yield* executor.prepare(request))
+            .launch(recording)
+            .pipe(Effect.forkChild);
+          yield* Deferred.await(started);
+          yield* Fiber.interrupt(launch);
+        }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials, stops, storage)));
+        yield* Effect.gen(function* () {
+          const executor = yield* Executor;
+          const prepared = yield* executor.prepare(
+            new CheckoutRequest({ ...request, reattach: true }),
+          );
+          yield* prepared.launch(recording);
+        }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials, reattached, storage)));
+
+        assert.strictEqual(
+          new Set(ran).size,
+          2,
+          "reattachment runs the Attempt in a new container",
+        );
+        assert.deepStrictEqual(
+          kills.map(({ container, kills }) => ({ container, kills })),
+          [
+            { container: ran[0], kills: 2 },
+            { container: ran[1], kills: 1 },
+          ],
+        );
+      });
+    },
+  );
+
+  it.effect(
     "salvages a crashed Attempt's checkout in a container, even if the Attempt made its .git a file",
     () => {
       const machine = dockerMachine();
@@ -725,6 +801,39 @@ describe("SSH Worker with Docker", () => {
   );
 
   it.effect(
+    "records the processes the kernel killed in the Attempt's container for memory before it removes the container",
+    () => {
+      const machine = dockerMachine();
+      let ran: string | undefined;
+      // The kernel kills the largest processes, such as a test runner, and the container runs on.
+      const exceedsMemory: StubParent = (context) =>
+        killsInContainer(machine, 2).pipe(
+          Effect.tap((id) => Effect.sync(() => void (ran = id))),
+          Effect.andThen(completes(context)),
+        );
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const prepared = yield* executor.prepare(request);
+        const kills: Array<ContainerOutOfMemoryKills> = [];
+        yield* prepared.launch({
+          ...sink,
+          outOfMemory: (killed) => Effect.sync(() => void kills.push(killed)),
+        });
+        assert.deepStrictEqual(
+          kills.map(({ container, kills, memoryMib }) => ({ container, kills, memoryMib })),
+          [{ container: ran, kills: 2, memoryMib: 4096 }],
+        );
+        const { childrenStopped, containerGone } = releaseSteps(machine);
+        assertInOrder([
+          ["the children's stop", childrenStopped],
+          ["the kills' read", killsRead(machine)],
+          ["the container's removal", containerGone],
+        ]);
+      }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider(), exceedsMemory)));
+    },
+  );
+
+  it.effect(
     "salvages an Attempt whose container stopped, such as after an out-of-memory kill, in the container started again",
     () => {
       const machine = dockerMachine();
@@ -741,10 +850,20 @@ describe("SSH Worker with Docker", () => {
         machine.state.salvage = "dirty";
         const prepared = yield* executor.prepare(request);
         const recorded: Array<AttemptSalvage> = [];
+        const kills: Array<ContainerOutOfMemoryKills> = [];
         yield* prepared
-          .launch({ ...sink, salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)) })
+          .launch({
+            ...sink,
+            salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
+            outOfMemory: (killed) => Effect.sync(() => void kills.push(killed)),
+          })
           .pipe(Effect.flip);
         assert.strictEqual(recorded[0]?._tag, "Pushed");
+        assert.deepStrictEqual(
+          kills.map(({ kills, memoryMib }) => ({ kills, memoryMib })),
+          [{ kills: 1, memoryMib: 4096 }],
+          "the start for the salvage doesn't lose the killed init",
+        );
         const lines = linesOf(machine);
         const push = lines.findIndex((line) => line.includes("'push' '--force'"));
         assert.strictEqual(machine.state.calls[push]?.container, CONTAINER);

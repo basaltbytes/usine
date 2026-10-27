@@ -1,4 +1,4 @@
-import type { AttemptId } from "@usine/core/attempt";
+import type { AttemptId, OutOfMemoryKills } from "@usine/core/attempt";
 import type { AttemptSalvage } from "@usine/core/attempt/salvage";
 import type { TranscriptSequence } from "@usine/engine/transcript";
 import type {
@@ -124,6 +124,7 @@ interface EndingRow {
   /** The session whose final message the ending replaces. */
   readonly speaker: Speaker | null;
   readonly end: AttemptEnd;
+  readonly outOfMemory: OutOfMemoryKills | null;
 }
 
 /** Labels an Agent removed from and added to the Run's Item together. */
@@ -478,6 +479,7 @@ const chapterRows = (
       ),
       speaker: replaced?.speaker ?? null,
       end,
+      outOfMemory: attempt?.outOfMemory ?? null,
     });
   }
   return rows;

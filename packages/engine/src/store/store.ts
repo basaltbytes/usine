@@ -1,4 +1,9 @@
-import { Attempt, AttemptId, type AttemptWindows } from "@usine/core/attempt";
+import {
+  Attempt,
+  AttemptId,
+  type AttemptWindows,
+  type ContainerOutOfMemoryKills,
+} from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
 import type { AttemptRecovery, AttemptSalvage } from "@usine/core/attempt/salvage";
@@ -554,6 +559,27 @@ const makeRunStore = Effect.gen(function* () {
     );
   }, persistence("record attempt comments"));
 
+  const recordOutOfMemory = Effect.fn("RunStore.recordOutOfMemory")(function* (
+    attemptId: AttemptId,
+    kills: ContainerOutOfMemoryKills,
+  ) {
+    yield* Effect.annotateCurrentSpan({
+      attemptId,
+      container: kills.container,
+      kills: kills.kills,
+    });
+    const attempt = yield* database.transaction((transaction) =>
+      queriesFor(transaction).recordOutOfMemory(attemptId, kills),
+    );
+    yield* Effect.logInfo("Recorded the processes the kernel killed in the Attempt's container", {
+      attemptId,
+      container: kills.container,
+      kills: kills.kills,
+      memoryMib: kills.memoryMib,
+      attemptKills: attempt.kills,
+    });
+  }, persistence("record attempt out-of-memory kills"));
+
   const attemptWindows = Effect.fn("RunStore.attemptWindows")(function* (attemptId: AttemptId) {
     yield* Effect.annotateCurrentSpan({ attemptId });
     const windows = yield* attemptWindowQueries(database).attemptWindows(attemptId);
@@ -956,6 +982,7 @@ const makeRunStore = Effect.gen(function* () {
       queries.salvageCandidate(attemptId).pipe(persistence("read a salvage candidate")),
     recordSalvage,
     recordComments,
+    recordOutOfMemory,
     attemptWindows,
     discardLeftovers,
     openAttempts,
@@ -1050,6 +1077,15 @@ export class RunStore extends Context.Service<
     readonly recordComments: (
       attemptId: AttemptId,
       comments: ReadonlyArray<Comment>,
+    ) => Effect.Effect<void, RunStoreError>;
+    /**
+     * Records the processes that the kernel killed in one of the Attempt's containers for memory.
+     * The Attempt's `outOfMemory` adds up the kills of its containers; a second record of a
+     * container replaces its count.
+     */
+    readonly recordOutOfMemory: (
+      attemptId: AttemptId,
+      kills: ContainerOutOfMemoryKills,
     ) => Effect.Effect<void, RunStoreError>;
     /**
      * Returns the Attempt's window and the overlapping windows of the same Agent's other Attempts

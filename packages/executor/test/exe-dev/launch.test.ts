@@ -441,6 +441,7 @@ describe("exe.dev launch", () => {
             Effect.sync(
               () => void recorded.push(comments.map(({ kind, url }) => kind + " " + url.href)),
             ),
+          outOfMemory: () => Effect.void,
           transcript: Effect.succeed([]),
           windows: aloneOnItem().pipe(
             Effect.map(({ own }) => new AttemptWindows({ own, overlapping: [...opened] })),
@@ -491,6 +492,7 @@ describe("exe.dev launch", () => {
           Effect.sync(
             () => void recorded.push(...comments.map(({ kind, url }) => `${kind} ${url.href}`)),
           ),
+        outOfMemory: () => Effect.void,
         transcript: Effect.succeed([]),
         windows: Effect.succeed(
           new AttemptWindows({

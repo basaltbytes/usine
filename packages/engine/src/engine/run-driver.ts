@@ -455,6 +455,8 @@ export class RunDriver extends Context.Service<
               store.recordSalvage(started.execution.attempt.id, salvage).pipe(asAttemptFailure),
             comments: (comments) =>
               store.recordComments(started.execution.attempt.id, comments).pipe(asAttemptFailure),
+            outOfMemory: (kills) =>
+              store.recordOutOfMemory(started.execution.attempt.id, kills).pipe(asAttemptFailure),
             windows: store
               .attemptWindows(started.execution.attempt.id)
               .pipe(retryingStore(runId, "read the attempt windows"), asAttemptFailure),

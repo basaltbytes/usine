@@ -12,7 +12,13 @@ import {
   SessionIdle,
   TextOutput,
 } from "@usine/core/agent/session";
-import { type Attempt, AttemptId, AttemptTask } from "@usine/core/attempt";
+import {
+  type Attempt,
+  AttemptId,
+  AttemptTask,
+  ContainerOutOfMemoryKills,
+  OutOfMemoryKills,
+} from "@usine/core/attempt";
 import {
   SalvagePartlyPushed,
   SalvagePushed,
@@ -32,7 +38,7 @@ import { RunId } from "@usine/core/run";
 import { ApprovalSource, RunApproval } from "@usine/core/run/approval";
 import { StepName } from "@usine/core/step";
 import { Comment, StepResult } from "@usine/core/step/result";
-import { WorkerName } from "@usine/core/worker";
+import { ContainerId, ContainerMemoryMib, WorkerName } from "@usine/core/worker";
 
 import { DateTime, Effect, FileSystem, Layer, Option, Result, Schema } from "effect";
 import { TestClock } from "effect/testing";
@@ -1348,6 +1354,57 @@ describe("cursor store", () => {
         assert(Option.isNone((yield* store.snapshot(runId)).step.result));
       }),
     ),
+  );
+
+  it.live(
+    "adds up the processes the kernel killed in each of an Attempt's containers, on that Attempt",
+    () =>
+      withRunStore(
+        Effect.gen(function* () {
+          const store = yield* RunStore;
+          const runId = RunId.make("out-of-memory");
+          yield* store.recordAndClaim(lifecycleSubmission, runId);
+          const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+          assert(started._tag === "AttemptStarted");
+          const attemptId = started.execution.attempt.id;
+          const killed = (container: string, kills: number, memoryMib: number) =>
+            store.recordOutOfMemory(
+              attemptId,
+              new ContainerOutOfMemoryKills({
+                container: ContainerId.make(container.repeat(64)),
+                kills,
+                memoryMib: ContainerMemoryMib.make(memoryMib),
+              }),
+            );
+          // A stopping orchestrator records the kills of the container it removes.
+          yield* killed("a", 2, 4096);
+          const reattached = yield* store.beginAttempt(
+            runId,
+            WorkerName.make("local"),
+            Option.some(attemptId),
+          );
+          assert(reattached._tag === "AttemptStarted");
+          // The reattached Attempt runs in a new container, whose kills are recorded once more.
+          yield* killed("b", 1, 7168);
+          yield* killed("b", 1, 7168);
+          yield* store.finishAttempt(
+            reattached.execution.attempt,
+            Result.fail(new AgentFailure({ message: "The test gate was killed" })),
+          );
+          yield* store.retry(runId);
+          const retried = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+          assert(retried._tag === "AttemptStarted");
+
+          const attempts = (yield* store.snapshot(runId)).attempts;
+          assert.deepStrictEqual(
+            attempts[0]?.outOfMemory,
+            Option.some(
+              new OutOfMemoryKills({ kills: 3, memoryMib: ContainerMemoryMib.make(7168) }),
+            ),
+          );
+          assert.deepStrictEqual(attempts[1]?.outOfMemory, Option.none());
+        }),
+      ),
   );
 
   // Two Loops' Runs of one Agent on one Item sign their comments the same way (#429).

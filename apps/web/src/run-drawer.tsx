@@ -115,7 +115,9 @@ export const RunSummary = ({ detail }: { readonly detail: RunDetailView }) => {
     case "Canceled":
       return Option.match(finalEnd(run), {
         onNone: () => <p className="text-muted-foreground">No attempt started</p>,
-        onSome: (end) => <Outcome end={end} />,
+        onSome: (end) => (
+          <Outcome end={end} outOfMemory={run.attempts.at(-1)?.outOfMemory ?? null} />
+        ),
       });
   }
 };

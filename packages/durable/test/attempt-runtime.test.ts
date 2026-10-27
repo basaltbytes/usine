@@ -410,6 +410,7 @@ describe("durable AttemptRuntime", () => {
             }),
           salvage: () => Effect.void,
           comments: () => Effect.void,
+          outOfMemory: () => Effect.void,
           transcript: Effect.die("The durable runtime never reads the Attempt transcript"),
           windows: Effect.die("The durable runtime never reads the Attempt windows"),
         };
@@ -1127,6 +1128,7 @@ describe("durable AttemptRuntime", () => {
               : Effect.void,
           salvage: () => Effect.void,
           comments: () => Effect.void,
+          outOfMemory: () => Effect.void,
           transcript: Effect.die("The durable runtime never reads the Attempt transcript"),
           windows: Effect.die("The durable runtime never reads the Attempt windows"),
         };

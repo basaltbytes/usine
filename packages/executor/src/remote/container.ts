@@ -1,10 +1,16 @@
 import { CHILD_KILL_SCRIPT, RemoteShell, type ShellContainer } from "@usine/agents/child-host";
 import type { Harness } from "@usine/core/agent/brain";
-import type { AttemptId } from "@usine/core/attempt";
+import { type AttemptId, ContainerOutOfMemoryKills } from "@usine/core/attempt";
+import type { Sink } from "@usine/core/attempt/channel";
 import type { InstanceId } from "@usine/core/instance";
 import { safeSegment } from "@usine/core/repository";
-import type { ContainerImage, ContainerLimits, WorkerName } from "@usine/core/worker";
-import { Effect, Option, Redacted } from "effect";
+import {
+  ContainerId,
+  type ContainerImage,
+  type ContainerLimits,
+  type WorkerName,
+} from "@usine/core/worker";
+import { Effect, Option, Redacted, Ref, Schema } from "effect";
 import { type ExecutorOperation, ExecutorOperationError } from "../executor.ts";
 import type { RemoteCommands } from "./commands.ts";
 
@@ -133,6 +139,28 @@ exec "$1" exec "$2" sh -c "$3" sh "$4"
 
 /** The `container inspect` format of a container's status, exit code, and out-of-memory kill. */
 const STATE_FORMAT = "{{.State.Status}} {{.State.ExitCode}} {{.State.OOMKilled}}";
+
+/**
+ * A script that prints `container <ID>` for container `$2`, then the `memory.events` of its
+ * cgroup if it runs, or `oom_kill 1` if it stopped because the kernel killed its init for memory.
+ */
+const MEMORY_EVENTS_SCRIPT = String.raw`
+state=$("$1" container inspect --format '{{.Id}} {{.State.Running}} {{.State.OOMKilled}}' "$2") || exit 1
+set -- "$1" "$2" $state
+echo "container $3"
+case "$4 $5" in
+  "true "*) exec "$1" exec "$2" cat /sys/fs/cgroup/memory.events ;;
+  *" true") echo "oom_kill 1" ;;
+esac
+`.trim();
+
+/** The container's ID in the output of `MEMORY_EVENTS_SCRIPT`. */
+const CONTAINER_LINE = /^container (\S*)$/mu;
+
+/** The count of processes that the kernel killed for memory in a cgroup's `memory.events`. */
+const OOM_KILL_LINE = /^oom_kill (\d+)$/mu;
+
+const decodeContainerId = Schema.decodeUnknownEffect(ContainerId);
 
 /**
  * A script that lists the containers with both labels `$2` and `$3`, one `<name> <worker>` line
@@ -380,7 +408,8 @@ export const containersFor = (commands: RemoteCommands) => {
 
   /**
    * Starts the container of `spec` again if it stopped, such as after an out-of-memory kill or a
-   * signal to its init. The scope that started it still removes it. Fails if it doesn't exist.
+   * signal to its init, and returns whether the kernel killed its init for memory. The scope that
+   * started it still removes it. Fails if it doesn't exist.
    */
   const ensureRunning = Effect.fn("RemoteExecutor.ensureContainerRunning")(function* (
     operation: ExecutorOperation,
@@ -399,7 +428,7 @@ export const containersFor = (commands: RemoteCommands) => {
       .split(" ");
     if (status === "running") {
       yield* Effect.logDebug("The container still runs", fields);
-      return;
+      return false;
     }
     yield* Effect.logWarning("The container stopped; starting it again", {
       ...fields,
@@ -408,6 +437,102 @@ export const containersFor = (commands: RemoteCommands) => {
       oomKilled,
     });
     yield* commands.run(operation, shell, CONTAINER_RUNTIME, ["start", spec.name]);
+    return oomKilled === "true";
+  });
+
+  /**
+   * Returns the ID of the container of `spec` and the number of processes that the kernel killed
+   * in it because it reached its memory limit: the count of its cgroup while it runs, or 1 if it
+   * stopped because the kernel killed its init. A start creates a new cgroup, so the count
+   * restarts at 0.
+   */
+  const outOfMemoryKills = Effect.fn("RemoteExecutor.containerOutOfMemoryKills")(function* (
+    operation: ExecutorOperation,
+    shell: RemoteShell,
+    spec: ContainerSpec,
+  ) {
+    const fields = containerFields(shell, spec);
+    yield* Effect.annotateCurrentSpan(fields);
+    const events = yield* commands.run(operation, shell, "sh", [
+      "-c",
+      MEMORY_EVENTS_SCRIPT,
+      "sh",
+      CONTAINER_RUNTIME,
+      spec.name,
+    ]);
+    const container = yield* decodeContainerId(CONTAINER_LINE.exec(events)?.[1]).pipe(
+      Effect.mapError(
+        (cause) =>
+          new ExecutorOperationError({
+            operation,
+            message: "The container runtime didn't print the container's ID",
+            cause,
+          }),
+      ),
+    );
+    const kills = Number(OOM_KILL_LINE.exec(events)?.[1] ?? 0);
+    if (kills === 0)
+      yield* Effect.logDebug("The kernel killed no process in the container", {
+        ...fields,
+        containerId: container,
+      });
+    else
+      yield* Effect.logWarning("The kernel killed processes in the container for memory", {
+        ...fields,
+        containerId: container,
+        kills,
+        memoryMib: spec.settings.limits.memoryMib,
+      });
+    return { container, kills };
+  });
+
+  /** Tracks kills across container restarts and records them before removal. */
+  const trackMemory = Effect.fn("RemoteExecutor.trackContainerMemory")(function* (
+    shell: RemoteShell,
+    spec: ContainerSpec,
+  ) {
+    const fields = containerFields(shell, spec);
+    yield* Effect.annotateCurrentSpan(fields);
+    const recorder = yield* Ref.make(Option.none<Sink["outOfMemory"]>());
+    // A start gives the container a new cgroup, whose count doesn't include the killed init.
+    const killedInits = yield* Ref.make(0);
+    const recordKills = Effect.fn("RemoteExecutor.recordContainerOutOfMemoryKills")(
+      function* () {
+        yield* Effect.annotateCurrentSpan(fields);
+        const record = yield* Ref.get(recorder);
+        if (Option.isNone(record))
+          return yield* Effect.logDebug(
+            "No launch ran in the container, so its out-of-memory kills aren't read",
+            fields,
+          );
+        const { container, kills: counted } = yield* outOfMemoryKills("cleanup", shell, spec);
+        const kills = counted + (yield* Ref.get(killedInits));
+        if (kills === 0) return;
+        yield* record.value(
+          new ContainerOutOfMemoryKills({
+            container,
+            kills,
+            memoryMib: spec.settings.limits.memoryMib,
+          }),
+        );
+      },
+      Effect.tapError((error) =>
+        Effect.logWarning(
+          "Could not record the processes the kernel killed in the Attempt's container",
+          { ...fields, errorTag: error._tag, message: String(error) },
+        ),
+      ),
+      Effect.ignore,
+    );
+    return {
+      recordKills,
+      recordTo: (record: Sink["outOfMemory"]) => Ref.set(recorder, Option.some(record)),
+      ensureRunning: ensureRunning("cleanup", shell, spec).pipe(
+        Effect.tap((oomKilled) =>
+          oomKilled ? Ref.update(killedInits, (n) => n + 1) : Effect.void,
+        ),
+      ),
+    };
   });
 
   /**
@@ -484,5 +609,5 @@ export const containersFor = (commands: RemoteCommands) => {
     });
   });
 
-  return { start, ensureRunning, stopChildren, sweep, remove, mark, marked };
+  return { start, trackMemory, stopChildren, sweep, remove, mark, marked };
 };

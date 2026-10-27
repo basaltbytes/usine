@@ -17,8 +17,15 @@ import {
 } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentName } from "@usine/core/agent";
-import { AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
-import { WorkerName } from "@usine/core/worker";
+import {
+  AttemptId,
+  AttemptNumber,
+  AttemptTask,
+  ContainerOutOfMemoryKills,
+  OutOfMemoryKills,
+  totalOutOfMemoryKills,
+} from "@usine/core/attempt";
+import { ContainerId, ContainerMemoryMib, WorkerName } from "@usine/core/worker";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
@@ -269,6 +276,35 @@ describe("run transcript", () => {
     assert.include(markup, "border-color:#fbca0466");
     assert.include(markup, "border-color:#0e8a1666");
     assert.include(markup, `href="${comment}"`);
+  });
+
+  it("separates an attempt's total out-of-memory kills from its last recorded container's limit", () => {
+    const ended = (outOfMemory: OutOfMemoryKills | null) =>
+      reader(
+        [event(1, "Running the test gate.")],
+        [new AttemptView({ ...liveAttempt, outcome: new CanceledAttemptView(), outOfMemory })],
+      ).replace(/<[^>]+>/gu, "");
+    const total = totalOutOfMemoryKills([
+      new ContainerOutOfMemoryKills({
+        container: ContainerId.make("a".repeat(64)),
+        kills: 2,
+        memoryMib: ContainerMemoryMib.make(4096),
+      }),
+      new ContainerOutOfMemoryKills({
+        container: ContainerId.make("b".repeat(64)),
+        kills: 1,
+        memoryMib: ContainerMemoryMib.make(7168),
+      }),
+    ]);
+    assert.include(
+      ended(total),
+      "Warning: The kernel killed 3 processes for memory across containers in this attempt. The last container with recorded kills had a 7168 MiB memory limit",
+    );
+    assert.include(
+      ended(new OutOfMemoryKills({ kills: 1, memoryMib: ContainerMemoryMib.make(4096) })),
+      "Warning: The kernel killed 1 process for memory across containers in this attempt. The last container with recorded kills had a 4096 MiB memory limit",
+    );
+    assert.notInclude(ended(null), "The kernel killed");
   });
 
   it("keeps a finished child's handoff when its launch is outside the loaded page", () => {
