@@ -9,6 +9,7 @@ import { useState } from "react";
 import { LabelBadge } from "@/components/label-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useScrollEdges } from "@/hooks/use-scroll-edges";
 import { cn } from "@/lib/utils";
 import { BoardCard, type LabelCatalog } from "./card.tsx";
 import { FlowArrow, type LaneFlow } from "./flow.tsx";
@@ -100,6 +101,7 @@ export const BoardColumn = ({
     (other) => other._tag === "WritableBoardLane" && other.id !== lane.id,
   );
   const count = lane.items.length;
+  const [listRef, edges] = useScrollEdges();
   if (foldable && folded) return <LaneRail lane={lane} open={() => setFolded(false)} />;
   return (
     <section
@@ -112,7 +114,7 @@ export const BoardColumn = ({
     >
       <header
         className={cn(
-          "sticky top-0 z-20 -mx-0.5 flex flex-col gap-1.5 px-1 pt-1 pb-1",
+          "z-20 -mx-0.5 flex shrink-0 flex-col gap-1.5 px-1 pt-1 pb-1",
           !targeted && "bg-background",
         )}
       >
@@ -140,7 +142,18 @@ export const BoardColumn = ({
           {lane.sources.length > 0 && <LaneSources sources={lane.sources} catalog={catalog} />}
         </div>
       </header>
-      <div className="flex min-h-40 flex-col gap-2">
+      {/* Scrolls on its own, so each lane scrolls independently; the faded edges show that more cards
+          are above or below. The negative margin keeps card rings and shadows inside the clip. */}
+      <div
+        ref={listRef}
+        aria-label={`${lane.name} cards`}
+        tabIndex={edges.above || edges.below ? 0 : undefined}
+        className={cn(
+          "-mx-1 flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-y-contain px-1 pb-1 outline-none focus-visible:ring-2 focus-visible:ring-ring/70",
+          edges.above && "mask-t-from-[calc(100%-2.5rem)]",
+          edges.below && "mask-b-from-[calc(100%-2.5rem)]",
+        )}
+      >
         <SortableContext
           items={lane.items.map(({ itemKey }) => itemKey)}
           strategy={verticalListSortingStrategy}

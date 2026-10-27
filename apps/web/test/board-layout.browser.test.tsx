@@ -2,8 +2,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
 import { LaneName } from "@usine/config/board";
 import { RepositoryName } from "@usine/core/repository";
+import { ItemKey, ItemNumber } from "@usine/core/item";
 import {
+  BoardItemLink,
   BoardLaneId,
+  BoardTaskView,
   BoardView,
   ProjectView,
   ReadOnlyBoardLaneView,
@@ -14,29 +17,60 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { page, userEvent } from "vitest/browser";
 import { routeTree } from "../src/route-tree.gen.ts";
+import { boardOverview } from "./board-fixture.ts";
 import "../src/index.css";
 
 const repository = RepositoryName.make("basaltbytes/usine");
-const project = new ProjectView({
-  repository,
-  status: "clear",
-  runs: [],
-  labels: [],
-  preflightFindings: [],
-  board: new BoardView({
-    failures: [],
-    lanes: ["Backlog", "Ready", "Developing", "Review", "Finishing", "Done"].map(
-      (name) =>
-        new ReadOnlyBoardLaneView({
-          id: BoardLaneId.make(name),
-          name: LaneName.make(name),
-          origin: "authored",
-          sources: [],
-          items: [],
-        }),
-    ),
-  }),
-});
+const projectWith = (backlog: ReadonlyArray<BoardTaskView>) =>
+  new ProjectView({
+    repository,
+    status: "clear",
+    runs: [],
+    labels: [],
+    preflightFindings: [],
+    board: new BoardView({
+      failures: [],
+      lanes: ["Backlog", "Ready", "Developing", "Review", "Finishing", "Done"].map(
+        (name) =>
+          new ReadOnlyBoardLaneView({
+            id: BoardLaneId.make(name),
+            name: LaneName.make(name),
+            origin: "authored",
+            sources: [],
+            items: name === "Backlog" ? backlog : [],
+          }),
+      ),
+    }),
+  });
+const project = projectWith([]);
+
+/** Returns `count` copies of a fixture card, each with its own Item. */
+const manyTasks = (count: number): ReadonlyArray<BoardTaskView> => {
+  const [template] = boardOverview().projects.flatMap(({ board }) =>
+    board.lanes.flatMap(({ items }) => items),
+  );
+  if (template === undefined) throw new Error("The board fixture has no cards");
+  return Array.from({ length: count }, (_, index) => {
+    const number = ItemNumber.make(1000 + index);
+    const itemKey = ItemKey.make(`${repository}:${number}`);
+    const item = new BoardItemLink({
+      itemKey,
+      kind: template.kind,
+      number,
+      title: `Task ${number}`,
+      url: template.url,
+      state: template.state,
+    });
+    return new BoardTaskView({
+      ...template,
+      ...item,
+      items: [item],
+      runs: [],
+      run: null,
+      pullRequest: null,
+    });
+  });
+};
 let host: HTMLDivElement;
 let root: Root;
 let queryClient: QueryClient;
@@ -123,4 +157,24 @@ it("scrolls every lane inside a narrow viewport without moving the page beneath 
   await userEvent.keyboard("{Escape}");
   await expect.element(page.getByRole("dialog", { name: "Sidebar" })).not.toBeInTheDocument();
   await visitBothEnds();
+});
+
+it("scrolls a long lane on its own and fades the edges that hide cards", async () => {
+  queryClient.setQueryData(
+    ["overview"],
+    new ReadyOverview({ projects: [projectWith(manyTasks(30))], loops: [], needsYou: [] }),
+  );
+  await mountBoard(1024);
+  const cards = page.getByLabelText("Backlog cards").element();
+  const otherLane = lane("Ready").getBoundingClientRect().top;
+  expect(cards.scrollHeight).toBeGreaterThan(cards.clientHeight);
+  // The lane fits in the board, so the board itself doesn't scroll vertically.
+  expect(board().scrollHeight).toBeLessThanOrEqual(board().clientHeight + 1);
+  await expect.poll(() => cards.className).toContain("mask-b-from");
+  expect(cards.className).not.toContain("mask-t-from");
+  cards.scrollTop = cards.scrollHeight;
+  await expect.poll(() => cards.className).toContain("mask-t-from");
+  expect(cards.className).not.toContain("mask-b-from");
+  expect(getComputedStyle(cards).maskImage).not.toBe("none");
+  expect(lane("Ready").getBoundingClientRect().top).toBe(otherLane);
 });
