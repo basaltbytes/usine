@@ -503,9 +503,9 @@ describe("the Node gateway", () => {
     }).pipe(Effect.scoped, Effect.provide(egressServices)),
   );
 
-  it.live(
-    "a client that sends everything through the forward proxy still reaches the gateway's own hosts",
-    () =>
+  it.live.each(["127.0.0.1", "::"])(
+    "forwards requests to the gateway's own hosts when the reverse proxy binds to %s",
+    (host) =>
       Effect.gen(function* () {
         const { egress } = yield* GatewayAddresses;
         assert.deepStrictEqual(yield* connect(egress, "llm.gw.test:80"), {
@@ -520,6 +520,13 @@ describe("the Node gateway", () => {
             reason: "missing-caller-token",
           },
         );
-      }).pipe(Effect.provide(gateway)),
+      }).pipe(
+        Effect.provide(
+          gatewayLayer({ proxy: { host, port: 0 }, egress: LOOPBACK, admin: LOOPBACK }).pipe(
+            Layer.provide(settingsLayer(NO_PROVIDERS)),
+            Layer.provideMerge(FetchHttpClient.layer),
+          ),
+        ),
+      ),
   );
 });
