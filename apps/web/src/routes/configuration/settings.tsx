@@ -1,7 +1,8 @@
 import { Upgrades } from "~/features/configuration/components/upgrades";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { configurationQuery, upgradeQuery } from "~/features/configuration/queries";
+import { upgradeQuery } from "~/features/configuration/queries";
+import { configurationQuery } from "~/lib/configuration/queries";
 import { SettingsPage } from "~/features/configuration/settings.page";
 
 const Settings = () => {

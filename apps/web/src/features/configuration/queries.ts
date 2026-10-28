@@ -1,14 +1,10 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { LoopName } from "@usine/core/loop";
 import { api } from "~/lib/api";
+import { configurationQuery } from "~/lib/configuration/queries";
+import { overviewQuery } from "~/lib/overview";
 
-const CONFIGURATION_REFRESH_MS = 5_000;
-
-export const configurationQuery = () => ({
-  queryKey: ["configuration"] as const,
-  queryFn: () => api((client) => client.configuration()),
-  refetchInterval: CONFIGURATION_REFRESH_MS,
-});
+const UPGRADE_REFRESH_MS = 5_000;
 
 export const usePauseLoop = () => {
   const queryClient = useQueryClient();
@@ -17,15 +13,16 @@ export const usePauseLoop = () => {
       api((client) => client[paused ? "unpause" : "pause"]({ params: { loop } })),
     onSuccess: () =>
       Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["configuration"] }),
-        queryClient.invalidateQueries({ queryKey: ["overview"] }),
+        queryClient.invalidateQueries({ queryKey: configurationQuery().queryKey }),
+        queryClient.invalidateQueries({ queryKey: overviewQuery().queryKey }),
       ]),
   });
 };
 
-export const upgradeQuery = () => ({
-  queryKey: ["upgrade"] as const,
-  queryFn: () => api((client) => client.upgradeStatus({})),
-  refetchInterval: CONFIGURATION_REFRESH_MS,
-  retry: 3,
-});
+export const upgradeQuery = () =>
+  queryOptions({
+    queryKey: ["upgrade"] as const,
+    queryFn: () => api((client) => client.upgradeStatus({})),
+    refetchInterval: UPGRADE_REFRESH_MS,
+    retry: 3,
+  });

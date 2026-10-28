@@ -1,6 +1,6 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { configurationQuery } from "~/features/configuration/queries";
+import { configurationQuery } from "~/lib/configuration/queries";
 import { WorkerDetail } from "~/features/configuration/components/workers/detail";
 
 const Worker = () => {

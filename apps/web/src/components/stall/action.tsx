@@ -1,6 +1,8 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { LoopName } from "@usine/core/loop";
 import type { CycleBudgetUsedUpView, RunView, StalledItemView } from "@usine/orchestrator/operator";
+import { overviewQuery } from "~/lib/overview";
+import { deskQuery } from "~/lib/desk/queries";
 import { Button } from "~/components/ui/button";
 import { cn } from "~/lib/utils";
 import { api } from "~/lib/api";
@@ -24,8 +26,8 @@ const useRefreshDesk = () => {
   const queryClient = useQueryClient();
   return () =>
     Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["overview"] }),
-      queryClient.invalidateQueries({ queryKey: ["desk"] }),
+      queryClient.invalidateQueries({ queryKey: overviewQuery().queryKey }),
+      queryClient.invalidateQueries({ queryKey: deskQuery().queryKey }),
     ]);
 };
 

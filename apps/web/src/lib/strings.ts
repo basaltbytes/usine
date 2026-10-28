@@ -92,3 +92,7 @@ export const windowLabel = (minutes: number): string =>
     : minutes % 60 === 0
       ? `${minutes / 60}-hour`
       : `${minutes}-minute`;
+
+export const loadingPage = "Loading…";
+export const pageUnavailable = "Could not load the page";
+export const tryAgain = "Try again";

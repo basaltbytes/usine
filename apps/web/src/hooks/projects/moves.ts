@@ -89,11 +89,11 @@ export const useBoardMoves = (project: ProjectView) => {
       updateMoves(repository, (moves) =>
         moves.map((move) => (move.itemKey === itemKey ? { ...move, phase: "syncing" } : move)),
       );
-      return queryClient.invalidateQueries({ queryKey: ["overview"] });
+      return queryClient.invalidateQueries({ queryKey: overviewQuery().queryKey });
     },
     onError: (_, { repository, itemKey }) => {
       updateMoves(repository, (moves) => moves.filter((move) => move.itemKey !== itemKey));
-      return queryClient.invalidateQueries({ queryKey: ["overview"] });
+      return queryClient.invalidateQueries({ queryKey: overviewQuery().queryKey });
     },
   });
 

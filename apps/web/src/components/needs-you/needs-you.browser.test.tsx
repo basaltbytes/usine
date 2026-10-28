@@ -22,6 +22,7 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { commands, page } from "vitest/browser";
+import { overviewQuery } from "~/lib/overview";
 import { routeTree } from "~/route-tree.gen";
 import "~/index.css";
 
@@ -185,10 +186,12 @@ it("holds the Run's approval in Needs attention while the drawer approves it, an
   await commands.answerApproval(200, '{"ok":true}');
   // Shorter than the 5 s overview refresh, which is still in flight.
   await expect.element(held, { timeout: 2_000 }).not.toBeInTheDocument();
-  expect(queryClient.getQueryState(["overview"])?.fetchStatus).toBe("fetching");
+  expect(queryClient.getQueryState(overviewQuery().queryKey)?.fetchStatus).toBe("fetching");
   await expect.element(entry("#12 Wait for the operator")).toBeInTheDocument();
   await expect
-    .poll(() => queryClient.getQueryState(["overview"])?.fetchStatus, { timeout: 10_000 })
+    .poll(() => queryClient.getQueryState(overviewQuery().queryKey)?.fetchStatus, {
+      timeout: 10_000,
+    })
     .toBe("idle");
   expect(await commands.lateOverviewRequests()).toBe(1);
   await expect.element(held).not.toBeInTheDocument();

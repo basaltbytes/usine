@@ -4,6 +4,7 @@ import { ChildTarget, ParentTarget } from "@usine/core/attempt/channel";
 import type { RunDetailView } from "@usine/orchestrator/operator";
 import { Option } from "effect";
 import { useCallback, useId, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { cn } from "~/lib/utils";
 import { SessionComposer } from "~/components/runs/intervention/session-composer";
 import { Conversation, type ReaderRequest } from "~/components/runs/transcript/conversation";
@@ -25,7 +26,7 @@ import { errorTally, type NavigableRow } from "~/lib/runs/transcript/navigation/
 import { type TranscriptHistory } from "~/components/runs/transcript/transcript";
 import { ReaderLine } from "~/components/runs/transcript/reader-line";
 import { EventDocument, TaskDocument } from "~/features/runs/components/documents";
-import { useRunGitHubChanges } from "~/features/runs/hooks/github-changes";
+import { runGitHubChangesQuery } from "~/features/runs/queries";
 import { eventPreview } from "~/lib/runs/item";
 import { Outline, type OutlineSelection } from "~/features/runs/components/outline/outline";
 
@@ -71,7 +72,7 @@ type RunWorkspaceProps = {
 export const RunWorkspace = ({ detail, history }: RunWorkspaceProps) => {
   const run = detail.run;
   const outlineId = useId();
-  const githubChanges = useRunGitHubChanges(run);
+  const githubChanges = useQuery(runGitHubChangesQuery(run));
   const document = useMemo(
     () =>
       withGitHubChanges(

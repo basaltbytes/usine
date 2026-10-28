@@ -4,6 +4,7 @@ import { LaneName } from "@usine/config/board";
 import { RepositoryName } from "@usine/core/repository";
 import { ItemKey, ItemNumber } from "@usine/core/item";
 import {
+  DeskView,
   BoardItemLink,
   BoardLaneId,
   BoardTaskView,
@@ -16,6 +17,8 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { page, userEvent } from "vitest/browser";
+import { overviewQuery } from "~/lib/overview";
+import { deskQuery } from "~/lib/desk/queries";
 import { routeTree } from "~/route-tree.gen";
 import { boardOverview } from "~/lib/projects/fixture";
 import "~/index.css";
@@ -81,7 +84,11 @@ beforeEach(() => {
   root = createRoot(host);
   queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
   queryClient.setQueryData(
-    ["overview"],
+    deskQuery().queryKey,
+    new DeskView({ running: [], notMoving: [], lastOutcomes: [], workers: [], polls: [] }),
+  );
+  queryClient.setQueryData(
+    overviewQuery().queryKey,
     new ReadyOverview({ projects: [project], loops: [], needsYou: [] }),
   );
 });
@@ -161,7 +168,7 @@ it("scrolls every lane inside a narrow viewport without moving the page beneath 
 
 it("scrolls a long lane on its own and fades the edges that hide cards", async () => {
   queryClient.setQueryData(
-    ["overview"],
+    overviewQuery().queryKey,
     new ReadyOverview({ projects: [projectWith(manyTasks(30))], loops: [], needsYou: [] }),
   );
   await mountBoard(1024);
