@@ -233,6 +233,12 @@ export class GatewayProxy extends Context.Service<
           );
         yield* confirmRename(client, settings.github, attachment, newName.value).pipe(
           Effect.andThen(attachments.learnNewName(attachment.id, newName.value)),
+          Effect.catchTag("AttachmentPersistenceError", ({ operation }) =>
+            Effect.logError("Could not persist the repository's new name", {
+              ...renamed,
+              operation,
+            }),
+          ),
           Effect.catchTag("RenameUnconfirmed", ({ reason, detail }) =>
             Effect.logWarning(
               "GitHub's API didn't confirm the new name of an attached repository",

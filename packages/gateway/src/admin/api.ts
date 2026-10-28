@@ -13,6 +13,7 @@ import {
   type Attachment,
   AttachmentAlreadyExpired,
   AttachmentConflict,
+  AttachmentPersistenceError,
   AttachmentCredential,
   AttachmentId,
 } from "../attachment/attachment.ts";
@@ -115,8 +116,7 @@ export class AdminAuthorization extends HttpApiMiddleware.Service<AdminAuthoriza
 /**
  * The admin API the executor uses to attach, renew, and detach a Worker VM's GitHub credential
  * for an Attempt, and to read the Gateway's LLM provider credential kinds (ADR 0013).
- * Attachments are in memory; after a Gateway restart, the executor's next renewal re-creates
- * each one under the same ID, so caller tokens stay valid.
+ * Renewal re-creates a missing attachment under the same ID, so caller tokens stay valid.
  */
 export const GatewayAdminApi = HttpApi.make("GatewayAdminApi").add(
   HttpApiGroup.make("attachments")
@@ -124,7 +124,10 @@ export const GatewayAdminApi = HttpApi.make("GatewayAdminApi").add(
       HttpApiEndpoint.post("attach", "/v1/attachments", {
         payload: AttachRequest,
         success: Attached,
-        error: AttachmentAlreadyExpired.annotate({ httpApiStatus: 422 }),
+        error: [
+          AttachmentAlreadyExpired.annotate({ httpApiStatus: 422 }),
+          AttachmentPersistenceError.annotate({ httpApiStatus: 503 }),
+        ],
       }),
       HttpApiEndpoint.put("renew", "/v1/attachments/:id", {
         params: { id: AttachmentId },
@@ -133,11 +136,13 @@ export const GatewayAdminApi = HttpApi.make("GatewayAdminApi").add(
         error: [
           AttachmentAlreadyExpired.annotate({ httpApiStatus: 422 }),
           AttachmentConflict.annotate({ httpApiStatus: 409 }),
+          AttachmentPersistenceError.annotate({ httpApiStatus: 503 }),
         ],
       }),
       HttpApiEndpoint.delete("detach", "/v1/attachments/:id", {
         params: { id: AttachmentId },
         success: Detached,
+        error: AttachmentPersistenceError.annotate({ httpApiStatus: 503 }),
       }),
       HttpApiEndpoint.get("list", "/v1/attachments", { success: AttachmentList }),
     )

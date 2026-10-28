@@ -97,3 +97,9 @@ export class AttachmentConflict extends Schema.TaggedError<AttachmentConflict>()
   "AttachmentConflict",
   { id: AttachmentId, worker: WorkerName, repository: RepositoryName },
 ) {}
+
+/** A snapshot could not be read or replaced. Diagnostics exclude credentials and file contents. */
+export class AttachmentPersistenceError extends Schema.TaggedError<AttachmentPersistenceError>()(
+  "AttachmentPersistenceError",
+  { operation: Schema.Literals(["read", "write"]), message: Schema.String },
+) {}
