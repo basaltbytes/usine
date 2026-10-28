@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer, Option, Schema } from "effect";
 import { RunDatabase } from "../database/database.ts";
 import { attentionAcknowledgements } from "../database/schema.ts";
@@ -23,6 +23,13 @@ export class AttentionAcknowledgements extends Context.Service<
       acknowledgement: AttentionAcknowledgement,
     ) => Effect.Effect<void, EnginePersistenceError>;
     readonly undo: (key: AttentionKey) => Effect.Effect<void, EnginePersistenceError>;
+    /**
+     * Deletes acknowledgements without a matching current ID and revision.
+     * Include dismissed entries in `current`; an empty list clears all acknowledgements.
+     */
+    readonly prune: (
+      current: ReadonlyArray<AttentionKey>,
+    ) => Effect.Effect<void, EnginePersistenceError>;
   }
 >()("@usine/engine/AttentionAcknowledgements") {
   static readonly layer = Layer.effect(
@@ -34,6 +41,33 @@ export class AttentionAcknowledgements extends Context.Service<
           const rows = yield* database.select().from(attentionAcknowledgements).execute();
           return yield* decodeRows(rows, { onExcessProperty: "error" });
         }, persistence("read attention acknowledgements")),
+        prune: Effect.fn("AttentionAcknowledgements.prune")(function* (
+          current: ReadonlyArray<AttentionKey>,
+        ) {
+          yield* Effect.annotateCurrentSpan({ currentEntries: current.length });
+          const removed = yield* database
+            .delete(attentionAcknowledgements)
+            .where(sql`not exists (
+              select 1 from json_each(${JSON.stringify(current)}) as current
+              where json_extract(current.value, '$.id') = ${attentionAcknowledgements.id}
+                and json_extract(current.value, '$.revision') = ${attentionAcknowledgements.revision}
+            )`)
+            .returning({ id: attentionAcknowledgements.id })
+            .execute();
+          if (removed.length === 0) {
+            yield* Effect.logDebug("Attention acknowledgements match current entries", {
+              currentEntries: current.length,
+            });
+            return;
+          }
+          const fields = {
+            currentEntries: current.length,
+            prunedEntries: removed.length,
+            needIds: removed.map(({ id }) => id),
+          };
+          yield* Effect.annotateCurrentSpan(fields);
+          yield* Effect.logInfo("Pruned obsolete attention acknowledgements", fields);
+        }, persistence("prune attention acknowledgements")),
         dismiss: Effect.fn("AttentionAcknowledgements.dismiss")(function* (
           acknowledgement: AttentionAcknowledgement,
         ) {

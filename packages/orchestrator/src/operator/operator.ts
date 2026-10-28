@@ -3,7 +3,7 @@ import {
   AttentionAcknowledgement,
   type AttentionKey,
 } from "@usine/engine/attention";
-import { partitionNeeds, taskNeedsAttention, projectAttention } from "./attention.ts";
+import { attentionKey, partitionNeeds, taskNeedsAttention, projectAttention } from "./attention.ts";
 import { transcriptEvent } from "./projection.ts";
 import { TranscriptSessionsQuery } from "@usine/engine/transcript";
 import { GitHubLabelName } from "@usine/config/label";
@@ -661,7 +661,12 @@ const makeOperatorObservation = Effect.gen(function* () {
         );
         return [projected, Option.some({ token: token.value, ...projected })] as const;
       }),
-    ).pipe(Effect.flatMap(({ overview, running }) => workerAttention(overview, running))),
+    ).pipe(
+      Effect.flatMap(({ overview, running }) => workerAttention(overview, running)),
+      Effect.tap(({ needsYou, dismissedNeeds }) =>
+        acknowledgements.prune([...needsYou, ...dismissedNeeds].map(attentionKey)),
+      ),
+    ),
   );
 
   /**

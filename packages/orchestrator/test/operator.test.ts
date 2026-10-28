@@ -628,6 +628,18 @@ const testLayer = (
   const dependencies = Layer.mergeAll(
     Layer.succeed(AttentionAcknowledgements)({
       list: () => Effect.sync(() => [...acknowledged]),
+      prune: (current) =>
+        Effect.gen(function* () {
+          const retained = acknowledged.filter((entry) =>
+            current.some(({ id, revision }) => entry.id === id && entry.revision === revision),
+          );
+          if (retained.length === acknowledged.length) return;
+          acknowledged.splice(0, acknowledged.length, ...retained);
+          yield* Ref.update(
+            projectionRevision,
+            Option.map((value) => ProjectionRevision.make(value + 1)),
+          );
+        }),
       dismiss: (acknowledgement) =>
         Effect.sync(() => {
           acknowledged.push(acknowledgement);
@@ -799,13 +811,21 @@ describe("Operator", () => {
               (entry) => entry.id === need.id,
             ),
           );
-          append(new AttemptChannel.WorkerResponsive({ worker: need.worker, lastAnsweredAt: now }));
+          append(
+            new AttemptChannel.WorkerResponsive({
+              worker: need.worker,
+              lastAnsweredAt: now,
+              recovered: false,
+            }),
+          );
           assert.deepStrictEqual(yield* workerNeeds, []);
           assert(
             !(yield* operator.overview(instance)).dismissedNeeds.some(
               (entry) => entry.id === need.id,
             ),
           );
+          append(silent(3));
+          assert.lengthOf(yield* workerNeeds, 1, "recovery prunes the previous dismissal");
           append(silent(3, DateTime.add(now, { minutes: 10 })));
           assert.lengthOf(yield* workerNeeds, 1);
           append(new AttemptChannel.WorkerResponsive({ worker: need.worker, lastAnsweredAt: now }));
@@ -871,7 +891,7 @@ describe("Operator", () => {
       }),
   );
 
-  it.effect("keeps failures dismissed when unrelated failures reorder or recover", () =>
+  it.effect("preserves current dismissals and prunes recovered entries and changed revisions", () =>
     Effect.gen(function* () {
       const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
       const moved = yield* Ref.make<ItemLabelMutation | null>(null);
@@ -976,7 +996,12 @@ describe("Operator", () => {
           Option.some(
             new ScheduleCycle({
               ...schedule,
-              failures: [new ScheduleTickFailure({ ...scheduleB, message: "Permission denied" })],
+              failures: [
+                new ScheduleTickFailure({
+                  ...scheduleB,
+                  scheduledAt: DateTime.add(now, { minutes: 1 }),
+                }),
+              ],
             }),
           ),
         );
@@ -988,6 +1013,20 @@ describe("Operator", () => {
           ).length,
           2,
         );
+        yield* Ref.set(latestPoll, Option.some(poll));
+        yield* Ref.set(latestSchedule, Option.some(schedule));
+        const recurring = yield* operator.overview(instance);
+        assert.deepStrictEqual(recurring.dismissedNeeds, []);
+        assert.deepStrictEqual(
+          recurring.needsYou.filter(
+            (need) => need._tag === "PollFailureNeed" || need._tag === "ScheduleFailureNeed",
+          ),
+          failures,
+        );
+        yield* operator.overview(instance);
+        const readsAfterPruning = yield* Ref.get(reads);
+        yield* operator.overview(instance);
+        assert.strictEqual(yield* Ref.get(reads), readsAfterPruning);
       }).pipe(
         Effect.provide(
           testLayer(

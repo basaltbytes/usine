@@ -40,6 +40,8 @@ usine config log
 usine config log agent developer
 ```
 
+Importing an unchanged export prints `No configuration changes.` and saves no revision. Adding or removing a worker records only that worker; unchanged loops and other entities keep their existing history.
+
 These commands work while `usine up` runs and while it is stopped. `edit` uses `$EDITOR` and refuses an edit if another revision was committed meanwhile. Entity kinds are `settings` (name `instance`), `worker`, `repository`, `label`, `loop`, and `agent`. Imports print the changed entities and save one revision, or report all validation problems without saving. A configuration with no differences saves no revision. Revisions apply live after worker preflight; restart-required changes remain stored until restart.
 
 ## Web UI
@@ -104,6 +106,8 @@ To clear a handled failure, select **Mark resolved** in the run drawer, opened f
 Failure resolution through `POST /api/runs/:runId/resolve-failure` records the current instance's operator login and resolution time. The next `GET /api/statistics/runs` reflects the resolution, including when the previous response was cached.
 
 Every Needs attention entry has **Dismiss**. The overview's collapsed **Dismissed** section lists acknowledged entries with **Undo**. Dismissals persist across refreshes and restarts, and a changed entry appears again. Attention counts and badges exclude dismissed entries. Dismissing an approval, failure, or cycle-budget ask leaves its state and actions available on the run and task pages and board cards. Dismiss and Undo also work while GitHub credentials need setup.
+
+Refreshing the overview removes dismissals for entries it no longer reports or whose content changed. If an entry disappears during a refresh and later returns, dismiss it again to hide it.
 
 ## Server upgrades
 

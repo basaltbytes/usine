@@ -1,6 +1,7 @@
 import { createServer } from "node:net";
 import { UpgradeView } from "@usine/orchestrator/operator/http";
 import { UsineConfig } from "@usine/config/factory";
+import { ConfigurationEntity } from "@usine/config/configuration";
 import { Schema } from "effect";
 import { spawn, spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -9,7 +10,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
-import { parse } from "yaml";
+import { parse, stringify } from "yaml";
 
 const cli = fileURLToPath(new URL("../dist/main.js", import.meta.url));
 const test = it.extend<{ directory: string }>({
@@ -44,6 +45,75 @@ const run = (directory: string, args: ReadonlyArray<string>, editor = "") =>
     timeout: 20_000,
     env: { ...process.env, EDITOR: editor },
   });
+
+test(
+  "round-trips all entity kinds and records only an added or removed worker",
+  { timeout: 60_000 },
+  async ({ directory }) => {
+    const source = join(directory, "usine.yaml");
+    await writeFile(source, `${await readFile(source, "utf8")}labels: [{ name: ready }]\n`);
+    const exported = join(directory, "exported");
+    const result = run(directory, ["export", exported]);
+    expect(result.status, result.stderr).toBe(0);
+    const database = new DatabaseSync(join(directory, ".usine/runtime.sqlite"));
+    try {
+      const stored = database
+        .prepare("SELECT value FROM usine_configuration_entities")
+        .all()
+        .map(
+          (row) =>
+            Schema.decodeUnknownSync(
+              Schema.Struct({
+                value: Schema.fromJsonString(Schema.toCodecJson(ConfigurationEntity)),
+              }),
+            )(row).value,
+        );
+      expect(new Set(stored.map(({ key }) => key.kind))).toEqual(
+        new Set(["settings", "worker", "repository", "label", "loop", "agent"]),
+      );
+      expect(stored.find(({ key }) => key.kind === "loop")?.value).toMatchObject({
+        maxCycles: 3,
+        permissions: "write",
+      });
+      const revisions = () =>
+        database.prepare("SELECT value FROM usine_configuration_revisions ORDER BY number").all();
+      const unchanged = run(directory, ["import", exported]);
+      expect(unchanged.status, unchanged.stderr).toBe(0);
+      expect(unchanged.stdout).toContain("No configuration changes.");
+      expect(revisions()).toHaveLength(1);
+
+      const yaml = join(exported, "usine.yaml");
+      const original = await readFile(yaml, "utf8");
+      const config = Schema.encodeSync(UsineConfig)(
+        Schema.decodeUnknownSync(UsineConfig)(parse(original)),
+      );
+      await writeFile(
+        yaml,
+        stringify({
+          ...config,
+          workers: [...(config.workers ?? []), { name: "extra", kind: "local" }],
+        }),
+      );
+      for (const action of ["Added", "Removed"]) {
+        const imported = run(directory, ["import", exported]);
+        expect(imported.status, imported.stderr).toBe(0);
+        expect(imported.stdout).toContain("1 change(s).");
+        expect(imported.stdout).toContain(`${action} worker extra`);
+        expect(imported.stdout).not.toContain("Changed");
+        await writeFile(yaml, original);
+      }
+      expect(revisions()).toHaveLength(3);
+      const history = run(directory, ["log", "loop", "implement"]);
+      expect(history.status, history.stderr).toBe(0);
+      expect(history.stdout).toContain("1\toperator\t");
+      expect(history.stdout).not.toMatch(/[23]\toperator\t/);
+      expect(run(directory, ["import", exported]).stdout).toContain("No configuration changes.");
+      expect(revisions()).toHaveLength(3);
+    } finally {
+      database.close();
+    }
+  },
+);
 
 test(
   "imports and exports worker preference changes with and without value edits",
