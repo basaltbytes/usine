@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 
 export const WorkerName = Schema.String.check(
   Schema.isPattern(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u, {
@@ -316,3 +316,31 @@ export const TailnetAddress = Schema.String.check(
   ),
 ).pipe(Schema.brand("TailnetAddress"));
 export type TailnetAddress = typeof TailnetAddress.Type;
+
+/** Positive whole seconds for provisioner waits and check intervals. */
+export const ProvisionerSeconds = Schema.Int.check(
+  Schema.isBetween({ minimum: 1, maximum: 2_147_483 }),
+).pipe(Schema.brand("ProvisionerSeconds"));
+export type ProvisionerSeconds = typeof ProvisionerSeconds.Type;
+
+const secondsWithDefault = (seconds: number) =>
+  ProvisionerSeconds.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(seconds)),
+    Schema.withConstructorDefault(Effect.succeed(ProvisionerSeconds.make(seconds))),
+  );
+
+/** Provisioner timings, in seconds. Creation failures double their delay up to the maximum. */
+export class ProvisionerTimings extends Schema.Class<ProvisionerTimings>("ProvisionerTimings")(
+  Schema.Struct({
+    sshWait: secondsWithDefault(600),
+    creationBackoffMin: secondsWithDefault(30),
+    creationBackoffMax: secondsWithDefault(600),
+    machineCheckInterval: secondsWithDefault(86_400),
+  }).check(
+    Schema.makeFilter(
+      (value) =>
+        value.creationBackoffMin <= value.creationBackoffMax ||
+        "Creation backoff minimum must not exceed its maximum",
+    ),
+  ),
+) {}

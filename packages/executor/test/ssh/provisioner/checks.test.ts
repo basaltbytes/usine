@@ -1,0 +1,63 @@
+import { assert, it } from "@effect/vitest";
+import { ContainerImage, ProvisionerSeconds, ProvisionerTimings } from "@usine/core/worker";
+import { Effect, Fiber, Option } from "effect";
+import { WorkerMachines } from "../../../src/executor.ts";
+import { fakeMachine, request, TEST_AGENT, WORKER } from "../support.ts";
+import { boatAddress, hetznerAddress, RUN, runtimeOf } from "./fixtures.ts";
+import { fakeProviders } from "./fake-providers.ts";
+import { hetznerSettings } from "./support.ts";
+
+it.live("uses the configured SSH wait and deletes the unreachable machine on timeout", () => {
+  const machine = fakeMachine();
+  machine.state.reachable = false;
+  const providers = fakeProviders();
+  providers.hetzner.startingReads = 0;
+  const address = {
+    ...hetznerAddress,
+    machine: {
+      _tag: "Provisioned" as const,
+      provisioner: hetznerSettings({
+        timings: new ProvisionerTimings({ sshWait: ProvisionerSeconds.make(2) }),
+      }),
+    },
+  };
+  return Effect.gen(function* () {
+    const machines = yield* WorkerMachines;
+    const creating = yield* Effect.forkChild(
+      machines.create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain]).pipe(Effect.flip),
+    );
+    yield* Effect.sleep("1 second");
+    assert.isUndefined(creating.pollUnsafe());
+    const failure = yield* Fiber.join(creating);
+    assert.strictEqual(failure._tag, "MachineUnavailableError");
+    assert.include(failure.message, "2s");
+    assert.strictEqual(providers.hetzner.servers.size, 0);
+  }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, address)));
+});
+
+it.live("reports the Boat SSH user's UID and image to rebuild on the first machine check", () => {
+  const machine = fakeMachine();
+  machine.state.localFiles.set("/keys/usine_boat.pub", "ssh-ed25519 AAAATest");
+  machine.state.docker = "running";
+  machine.state.hostUserId = "2345";
+  const providers = fakeProviders();
+  const image = ContainerImage.make("ghcr.io/example/attempt:boat");
+  const address = {
+    ...boatAddress,
+    container: { ...boatAddress.container, image: Option.some(image) },
+  };
+  return Effect.gen(function* () {
+    const machines = yield* WorkerMachines;
+    const failure = yield* machines
+      .create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain])
+      .pipe(Effect.flip);
+    assert.strictEqual(failure._tag, "WorkerCapabilityError");
+    assert.include(failure.message, image);
+    assert.include(failure.message, "--build-arg USINE_UID=2345");
+    assert.strictEqual(providers.boat.sandboxes.size, 0);
+    machine.state.imageUserId = "2345";
+    const fixed = yield* machines.create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain]);
+    assert.isTrue(Option.isSome(fixed.checked), "a failed check does not defer the next check");
+    yield* machines.release(fixed.hold);
+  }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, address)));
+});

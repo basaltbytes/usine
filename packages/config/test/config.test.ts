@@ -397,6 +397,36 @@ describe("ConfigParser", () => {
         labels: {},
         anthropicKey: null,
       });
+      expect({ ...provisioner.timings }).toEqual({
+        sshWait: 600,
+        creationBackoffMin: 30,
+        creationBackoffMax: 600,
+        machineCheckInterval: 86400,
+      });
+      const customized = yield* parse([
+        ...hetzner,
+        "      timings: { ssh_wait: 90, creation_backoff_min: 5, creation_backoff_max: 20, machine_check_interval: 3600 }",
+      ]);
+      const custom = customized.workers[0];
+      if (custom?.kind === "ssh" && Option.isSome(custom.provisioner)) {
+        expect({ ...custom.provisioner.value.timings }).toEqual({
+          sshWait: 90,
+          creationBackoffMin: 5,
+          creationBackoffMax: 20,
+          machineCheckInterval: 3600,
+        });
+      }
+      for (const timings of [
+        "{ ssh_wait: 0 }",
+        "{ machine_check_interval: -1 }",
+        "{ ssh_wait: 1.5 }",
+        "{ creation_backoff_min: 20, creation_backoff_max: 5 }",
+        "{ ssh_wait: 2147484 }",
+        "{ ssh_wiat: 20 }",
+      ]) {
+        const failure = yield* parse([...hetzner, `      timings: ${timings}`]).pipe(Effect.flip);
+        expect(failure._tag).toBe("ConfigFileError");
+      }
       const labeled = yield* parse([
         ...hetzner,
         "      ssh_user: worker",

@@ -78,8 +78,22 @@ else
   set -- --network "$NETWORK" --without-ipv4 --without-ipv6
 fi
 
+ssh-keygen -q -t ed25519 -N '' -C usine-snapshot -f "$work/host_key"
+{
+  printf 'Content-Type: multipart/mixed; boundary="usine-snapshot-user-data"\nMIME-Version: 1.0\n\n'
+  printf -- '--usine-snapshot-user-data\n'
+  if [ -z "$NETWORK" ]; then printf 'Content-Type: text/cloud-config; charset="utf-8"\n\n'; fi
+  cat "$work/user-data"
+  printf '\n--usine-snapshot-user-data\nContent-Type: text/cloud-config; charset="utf-8"\n\n'
+  printf '#cloud-config\nssh_deletekeys: true\nssh_genkeytypes: []\nssh_keys:\n  ed25519_private: |\n'
+  sed 's/^/    /' "$work/host_key"
+  printf '  ed25519_public: %s\n' "$(cat "$work/host_key.pub")"
+  printf -- '--usine-snapshot-user-data--\n'
+} > "$work/pinned-user-data"
+printf '%s %s\n' "$SERVER_NAME" "$(cat "$work/host_key.pub")" > "$work/known_hosts"
+
 hcloud server create --name "$SERVER_NAME" --type "$SERVER_TYPE" --image "$IMAGE" --location "$LOCATION" \
-  --ssh-key "$SSH_KEY" --label usine=snapshot-build --user-data-from-file "$work/user-data" "$@" > /dev/null
+  --ssh-key "$SSH_KEY" --label usine=snapshot-build --user-data-from-file "$work/pinned-user-data" "$@" > /dev/null
 if [ -z "$NETWORK" ]; then
   address=$(hcloud server ip "$SERVER_NAME")
 else
@@ -92,7 +106,7 @@ remote() {
   if [ -n "$NETWORK" ]; then set -- -J "$GATEWAY_SSH" "$@"; fi
   ssh -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
     -i "$identity" -o IdentitiesOnly=yes \
-    -o UserKnownHostsFile="$work/known_hosts" -o StrictHostKeyChecking=accept-new "$@"
+    -o UserKnownHostsFile="$work/known_hosts" -o HostKeyAlias="$SERVER_NAME" -o StrictHostKeyChecking=yes "$@"
 }
 
 wait_minutes=20
