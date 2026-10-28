@@ -45,10 +45,14 @@ export const configurationDiff = (
   const previous = new Map(before.map((entry) => [entry.key.key, entry]));
   const next = new Set(after.map(({ key }) => key.key));
   const previousOrder = new Map(
-    before.filter(({ key }) => next.has(key.key)).map(({ key }, index) => [key.key, index]),
+    before
+      .filter(({ key }) => key.kind === "worker" && next.has(key.key))
+      .map(({ key }, index) => [key.key, index]),
   );
   const nextOrder = new Map(
-    after.filter(({ key }) => previous.has(key.key)).map(({ key }, index) => [key.key, index]),
+    after
+      .filter(({ key }) => key.kind === "worker" && previous.has(key.key))
+      .map(({ key }, index) => [key.key, index]),
   );
   const removed = before
     .filter(({ key }) => !next.has(key.key))
@@ -56,10 +60,13 @@ export const configurationDiff = (
       ({ key, value }) =>
         new ConfigurationChange({ key, before: Option.some(value), after: Option.none() }),
     );
-  const changed = after.flatMap((entry, position) => {
+  let workerPosition = 0;
+  const changed = after.flatMap((entry) => {
+    const position = entry.key.kind === "worker" ? workerPosition++ : undefined;
     const old = previous.get(entry.key.key);
     const moved =
-      old === undefined || previousOrder.get(entry.key.key) !== nextOrder.get(entry.key.key);
+      position !== undefined &&
+      (old === undefined || previousOrder.get(entry.key.key) !== nextOrder.get(entry.key.key));
     if (!moved && Equal.equals(old?.value, entry.value)) return [];
     const change = {
       key: entry.key,

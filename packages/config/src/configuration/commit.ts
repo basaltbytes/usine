@@ -180,13 +180,19 @@ export const commit = (
       position === undefined ? [] : [{ key, position }],
     );
     const moved = new Set(moves.map(({ key }) => key.key));
-    const ordered = [...entities.values()].filter(({ key }) => !moved.has(key.key));
+    const workers = [...entities.values()].filter(({ key }) => key.kind === "worker");
+    const ordered = workers.filter(({ key }) => !moved.has(key.key));
     const positions = new Set<number>();
     for (const { key, position } of moves.sort((a, b) => a.position - b.position)) {
       const entity = entities.get(key.key);
-      if (entity === undefined || position >= entities.size || positions.has(position)) {
+      if (
+        key.kind !== "worker" ||
+        entity === undefined ||
+        position >= workers.length ||
+        positions.has(position)
+      ) {
         problems.push(
-          problem(key.key, "Position must be unique and within the resulting entity list"),
+          problem(key.key, "Position must be unique and within the resulting worker list"),
         );
         continue;
       }
@@ -194,7 +200,10 @@ export const commit = (
       ordered.splice(position, 0, entity);
     }
     if (Arr.isArrayNonEmpty(problems)) return yield* new ConfigurationInvalid({ problems });
-    const instance = yield* validateConfiguration(parser, ordered);
+    const instance = yield* validateConfiguration(parser, [
+      ...[...entities.values()].filter(({ key }) => key.kind !== "worker"),
+      ...ordered,
+    ]);
     const number = ConfigurationRevisionNumber.make(current.number + 1);
     return {
       configuration: new Configuration({ number, instance: Option.some(instance) }),
