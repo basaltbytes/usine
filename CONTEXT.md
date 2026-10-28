@@ -27,8 +27,16 @@ A repo that the registry declares and that loops run against.
 _Avoid_: target repo
 
 **Project**:
-The UI page for one managed repo, with its board, runs, and activity.
+A named group of managed repos with one board and the loops that run on them. Until [#633](https://github.com/basaltbytes/usine/issues/633) replaces the instance repo's files, each project is one managed repo from the registry.
 _Avoid_: repo (in the UI)
+
+**Member**:
+A GitHub login that can sign in to an instance. What it can see and do comes from its role bindings.
+_Avoid_: user, account
+
+**Role binding**:
+A grant of one role to a member, on the instance or on one project. Instance roles: admin. Project roles: viewer, operator, maintainer.
+_Avoid_: permission, ACL entry
 
 **Board**:
 The kanban view of a project's tasks, grouped into lanes. Dragging a card changes the labels of the task's current item on GitHub.

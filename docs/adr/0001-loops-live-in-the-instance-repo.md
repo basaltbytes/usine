@@ -2,6 +2,8 @@
 
 Unlike GitHub Actions files, every loop file is in the instance repo, with the registry and settings, read from the default branch only. Managed repos contain no usine files. A loop applies to every managed repo unless a selector (repo names or registry tags) limits it. Per-repo tailoring is another loop file with a selector, not an override layer.
 
+_Note, 2026-10-28 ([ADR 0031](./0031-authored-configuration-in-the-database.md), [#633](https://github.com/basaltbytes/usine/issues/633)):_ loops, agents, the registry, lane maps, and settings move from the instance repo to the database, which becomes their only source of truth, with a revision for each change. Managed repos still contain no usine files. A loop belongs to a project of one or more managed repos and runs on all of them unless its selector narrows it. Files are an import and export format only, so UI edits no longer commit to a default branch.
+
 ## Considered options
 
 - **Per-repo `.usine/loops/`**: loops are next to their code, but generic loops (review every PR, start work on ready issues) are copied into each repo, discovery reads N repos, and UI edits need commit access everywhere.

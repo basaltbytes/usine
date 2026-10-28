@@ -4,6 +4,8 @@ In the v1 web UI, every authored surface has a form as primary editor and a raw 
 
 The loop form is one flat form over the frontmatter: a stream dropdown, `if:` as validated CEL text with live check-phase errors and autocomplete over the stream's payload slice, registry-bound selector pickers, an approval toggle, the step name, and a roster agent dropdown. A Markdown prompt pane checks `{{ }}` likewise. The form previews what `if:` matches in polled state and renders the prompt for a sample match. UI-created loops start paused, and unpausing deliberately arms them; git-committed loops start armed. Lane maps get a visual manager over the repo's live labels. Agents get harness and effort dropdowns, and a free-text model field with non-blocking, harness-aware suggestions. `usine.yaml` gets an installation-bound add-repo picker; workers and settings are plain fields.
 
+_Note, 2026-10-28 ([ADR 0031](./0031-authored-configuration-in-the-database.md), [#633](https://github.com/basaltbytes/usine/issues/633)):_ forms first, the raw fallback, and preview before arming stay, but both editors save a revision in the database instead of committing to the default branch, and the raw editor edits an entity in the export format. A loop that any revision creates starts paused, since loops no longer come from git commits.
+
 ## Considered options
 
 - **Raw editor everywhere**: cheapest and fully general, but wastes the UI's one edge over a local editor: fields bound to live data the file can't show (repo labels, roster names, installation repos).
