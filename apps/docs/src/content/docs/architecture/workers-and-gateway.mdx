@@ -269,7 +269,7 @@ With `api_keys.anthropic` and no gateway credential for Anthropic, the attempt's
 - The gateway's admin API accepts the admin token, as for a long-lived worker, without the checks from the machine.
 - The harness credentials above.
 
-A refused token, a missing resource, or an unreachable API is a `provider` capability error. The report's `deferred` says that the harnesses are checked on the first machine each day. The executor runs the long-lived worker's machine preflight, with one attempt for the memory check, on the worker's first machine of each UTC day in each process, before the attempt starts. A failure there deletes the machine and fails the creation with the capability error.
+A refused token, a missing resource, or an unreachable API is a `provider` capability error. The report's `deferred` describes the configured machine check interval. The executor runs the long-lived worker's machine preflight, with one attempt for the memory check, on the worker's first machine in each process, then on the next machine created after `timings.machine_check_interval` seconds since the last successful check. These checks run before the attempt starts. A failure there deletes the machine and fails the creation with the capability error.
 
 ### Code shared by remote kinds
 
