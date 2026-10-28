@@ -16,6 +16,7 @@ import {
   SshWorkers,
 } from "@usine/executor/ssh";
 import { Config, ConfigProvider, Effect, Layer, Option } from "effect";
+import { workersChange } from "./current-instance/changes.ts";
 import { sshHttpClientLayer } from "./http-client.ts";
 import { type StepExecutorOptions, stepExecutorLayer } from "./scheduler/scheduler.ts";
 
@@ -233,14 +234,27 @@ export const sshStepExecutorLayer = (
       const machines = yield* SshWorkers;
       const provisioned = yield* Effect.serviceOption(WorkerMachines);
       const environment = yield* ConfigProvider.ConfigProvider;
-      const initialized = new Set(options.initializedWorkers ?? []);
+      const initialized = new Map(
+        config.workers
+          .filter(({ name }) => options.initializedWorkers?.includes(name))
+          .map((worker) => [worker.name, worker]),
+      );
       const add = Effect.fn("Orchestrator.addSshWorker")(function* (worker: ConfigWorker) {
         yield* Effect.annotateCurrentSpan({ worker: worker.name });
         if (worker.kind !== "ssh")
           return yield* Effect.die(
             new Error(`The SSH executor cannot run worker "${worker.name}" of kind ${worker.kind}`),
           );
-        if (initialized.has(worker.name)) {
+        const previous = initialized.get(worker.name);
+        if (previous !== undefined) {
+          const { restart } = workersChange([previous], [worker]);
+          if (restart.length > 0)
+            return yield* new WorkerCapabilityError({
+              worker: worker.name,
+              capability: "machine",
+              message: `Can't change the settings of SSH worker "${worker.name}" while its attempts run. Reload again after they end.`,
+              cause: restart,
+            });
           yield* Effect.logDebug("SSH worker credentials are already initialized", {
             worker: worker.name,
           });
@@ -252,7 +266,7 @@ export const sshStepExecutorLayer = (
             `The ${secret} for SSH worker "${worker.name}" is missing: ${variable} is not set in the orchestrator's environment. usine up reads only the variables that were set when it started. Set ${variable} and restart usine up, or set ${key} to a variable that usine up already has.`,
         ).pipe(Effect.provideService(ConfigProvider.ConfigProvider, environment));
         yield* machines.addWorker(address);
-        initialized.add(worker.name);
+        initialized.set(worker.name, worker);
       });
       return stepExecutorLayer(config, brains, {
         ...options,

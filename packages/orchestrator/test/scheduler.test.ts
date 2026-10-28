@@ -1347,7 +1347,7 @@ describe("SSH Workers on reload", () => {
   );
 
   it.live(
-    "keeps an SSH Worker with the executor when a reload adds it back while its Attempt runs",
+    "refuses changed settings when re-adding a draining SSH Worker, but accepts unchanged settings and more slots",
     () =>
       withWorkers(`${sshWorker("build-1", 1)}${sshWorker("build-2", 1)}`, (root) =>
         Effect.gen(function* () {
@@ -1362,12 +1362,32 @@ describe("SSH Workers on reload", () => {
 
           yield* writeInstanceFiles(root, [["usine.yaml", usineYaml(sshWorker("build-1", 1))]]);
           yield* instances.reload;
+          const running = yield* instances.get;
           yield* writeInstanceFiles(root, [
-            ["usine.yaml", usineYaml(`${sshWorker("build-1", 1)}${sshWorker("build-2", 1)}`)],
+            [
+              "usine.yaml",
+              usineYaml(
+                `${sshWorker("build-1", 1)}${sshWorker("build-2", 1, "usine@replacement-host")}`,
+              ),
+            ],
+          ]);
+          const failure = yield* instances.reload.pipe(Effect.flip);
+          assert(failure._tag === "ReloadPreflightError", failure._tag);
+          assert(failure.cause._tag === "WorkerCapabilityError", failure.cause._tag);
+          assert.strictEqual(failure.cause.capability, "machine");
+          assert.include(failure.cause.message, "while its attempts run");
+          assert.strictEqual(yield* instances.get, running);
+          assert.deepStrictEqual(yield* scheduler.workers, [build1, build2]);
+          assert.deepStrictEqual(events, [], "the retained host is not preflighted or removed");
+          yield* writeInstanceFiles(root, [
+            ["usine.yaml", usineYaml(`${sshWorker("build-1", 1)}${sshWorker("build-2", 2)}`)],
           ]);
           yield* instances.reload;
+          const next = yield* scheduler.reserve(runOf(3), submission(agent, 3), Option.none());
+          assert.strictEqual(next.worker, build2);
+          yield* next.release;
           yield* onSecond.release;
-          assert.deepStrictEqual(events, ["build-2 x1: gpt-5.6-sol"]);
+          assert.deepStrictEqual(events, ["build-2 x2: gpt-5.6-sol"]);
           assert.deepStrictEqual(yield* scheduler.workers, [build1, build2]);
         }).pipe(Effect.scoped),
       ),
