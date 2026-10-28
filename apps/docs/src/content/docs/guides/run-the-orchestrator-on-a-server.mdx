@@ -166,6 +166,8 @@ npm install --global @usine/server@0.4.0
 usine restart
 ```
 
+Every push to `main` that changes package code is also published as a prerelease under the `next` tag, with a version such as `0.4.1-next.312.g1a2b3c4`: the next patch version, the release workflow's run number, and the commit. To run the latest prerelease, install `@usine/server@next` instead. A later `npm install --global @usine/server@latest` returns to releases.
+
 `usine upgrade` moves an instance's `package.json` pin, and the service runs the global install, so `usine upgrade` refuses and says to update that install instead.
 
 ## Keep the UI private

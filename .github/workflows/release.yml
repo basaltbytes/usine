@@ -6,29 +6,53 @@ name: Release
 # published by hand from a logged-in machine, because npm only accepts a trusted
 # publisher on a package that already exists. Provenance attestations are
 # generated once the repository is public.
-
-# Runs when a changeset lands or the version PR merges, which changes package
-# manifests and changelogs. Other pushes to main have nothing to version.
+#
+# The release job runs when a changeset lands or the version PR merges, which
+# changes package manifests and changelogs. The next job publishes every push to
+# main that changes package code as a prerelease under the `next` dist-tag. Both
+# jobs are in this file because npm accepts one trusted publisher per package.
 on:
   push:
     branches: [main]
-    paths:
-      - ".changeset/**"
-      - "**/package.json"
-      - "**/CHANGELOG.md"
-      - ".github/workflows/release.yml"
   workflow_dispatch:
 
-concurrency: release-${{ github.ref }}
-
 permissions:
-  contents: write
-  pull-requests: write
-  id-token: write # OIDC exchange with the npm registry
+  contents: read
 
 jobs:
-  release:
+  changes:
     runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.paths.outputs.release }}
+      next: ${{ steps.paths.outputs.next }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: paths
+        env:
+          BEFORE: ${{ github.event.before }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" != push ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "next=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed=$(git diff --name-only "$BEFORE" "$GITHUB_SHA")
+          matches() { if printf '%s\n' "$changed" | grep -qE "$1"; then echo true; else echo false; fi; }
+          echo "release=$(matches '^\.changeset/|(^|/)package\.json$|(^|/)CHANGELOG\.md$|^\.github/workflows/release\.yml$')" >> "$GITHUB_OUTPUT"
+          echo "next=$(matches '^(packages|apps/server|apps/web)/|^(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml)$|^scripts/prerelease-versions\.mjs$|^\.github/workflows/release\.yml$')" >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: changes
+    if: needs.changes.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    concurrency: release-${{ github.ref }}
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write # OIDC exchange with the npm registry
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
@@ -50,3 +74,34 @@ jobs:
         with:
           version-script: pnpm changeset:version
           publish-script: pnpm changeset:publish
+
+  # Waits for the release job, so a release and a prerelease of the same commit never publish at once.
+  next:
+    needs: [changes, release]
+    if: ${{ !cancelled() && needs.changes.outputs.next == 'true' && needs.release.result != 'failure' }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: next-${{ github.ref }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      id-token: write # OIDC exchange with the npm registry
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          check-latest: true
+          cache: pnpm
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .turbo
+          key: turbo-${{ runner.os }}-release-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ runner.os }}-release-
+            turbo-${{ runner.os }}-
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm prerelease:version ${{ github.run_number }} ${{ github.sha }}
+      - run: pnpm build
+      - run: pnpm -r publish --tag next --no-git-checks
