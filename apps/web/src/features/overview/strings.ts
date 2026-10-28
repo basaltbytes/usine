@@ -5,7 +5,15 @@ import type {
   WorkerView,
 } from "@usine/orchestrator/operator";
 import { Match } from "effect";
+import type {
+  AttemptCountView,
+  OutcomeCountsView,
+  StatisticsBucket,
+  StatisticsWindow,
+  UntimedTasksView,
+} from "@usine/orchestrator/operator";
 import { agoLabel, clockLabel } from "~/lib/strings";
+import { durationLabel } from "~/lib/strings";
 
 export const warningLine = (warning: ConnectivityWarningView): string =>
   Match.valueTags(warning, {
@@ -55,15 +63,6 @@ export const deskCounts = (desk: DeskView): string | undefined => {
   ].filter((part) => part !== null);
   return parts.length === 0 ? undefined : parts.join(", ");
 };
-
-import type {
-  AttemptCountView,
-  OutcomeCountsView,
-  StatisticsBucket,
-  StatisticsWindow,
-  UntimedTasksView,
-} from "@usine/orchestrator/operator";
-import { durationLabel } from "~/lib/strings";
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -169,3 +168,5 @@ export const oneAttemptShare = (counts: ReadonlyArray<AttemptCountView>): string
 export const medianFailureWait = "Median failure to answer";
 export const medianRetryWait = "Median failure to retry";
 export const medianResolutionWait = "Median failure to resolution";
+
+export const overviewRefreshFailed = "Could not refresh the overview";

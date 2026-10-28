@@ -1,3 +1,4 @@
+import { RunId } from "@usine/core/run";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
 import { AgentName } from "@usine/core/agent";
@@ -9,6 +10,7 @@ import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { expect, it } from "vitest";
 import { commands, page } from "vitest/browser";
+import { runDetailKey } from "~/lib/runs/queries";
 import { routeTree } from "~/route-tree.gen";
 import "~/index.css";
 import { configurationJson } from "~/lib/configuration/fixture";
@@ -100,7 +102,9 @@ it("reloads the configuration from any Configuration page and shows what changed
   );
   await page.viewport(1280, 800);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  queryClient.setQueryData(["run", "failed-before-reload"], { agentDefinitionChanged: false });
+  queryClient.setQueryData(runDetailKey(RunId.make("failed-before-reload")), {
+    agentDefinitionChanged: false,
+  });
   const router = createRouter({
     routeTree,
     context: { queryClient },
@@ -122,7 +126,9 @@ it("reloads the configuration from any Configuration page and shows what changed
     await reload.click();
     await expect.element(page.getByText(/^Configuration reloaded/u)).toBeVisible();
     await expect.element(page.getByText("Loops added: triage")).toBeVisible();
-    expect(queryClient.getQueryState(["run", "failed-before-reload"])?.isInvalidated).toBe(true);
+    expect(
+      queryClient.getQueryState(runDetailKey(RunId.make("failed-before-reload")))?.isInvalidated,
+    ).toBe(true);
     await expect.element(page.getByRole("link", { name: "triage", exact: true })).toBeVisible();
 
     // The reload result stays visible after navigating to another Configuration page.

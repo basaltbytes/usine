@@ -15,6 +15,9 @@ import {
   type RunView,
 } from "@usine/orchestrator/operator";
 import { OperatorHttpError } from "@usine/orchestrator/operator/http";
+import { overviewQuery } from "~/lib/overview";
+import { deskQuery } from "~/lib/desk/queries";
+import { runDetailKey } from "~/lib/runs/queries";
 import { api } from "~/lib/api";
 
 /** An operator action on one Run; resolving a failure includes the failed Attempt. */
@@ -48,9 +51,9 @@ const useRefreshRun = () => {
   const queryClient = useQueryClient();
   return (runId: RunId) =>
     Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["overview"] }),
-      queryClient.invalidateQueries({ queryKey: ["desk"] }),
-      queryClient.invalidateQueries({ queryKey: ["run", runId] }),
+      queryClient.invalidateQueries({ queryKey: overviewQuery().queryKey }),
+      queryClient.invalidateQueries({ queryKey: deskQuery().queryKey }),
+      queryClient.invalidateQueries({ queryKey: runDetailKey(runId) }),
     ]);
 };
 
@@ -73,7 +76,7 @@ export const useRunAction = () => {
     onSuccess: (_, { runId }) => {
       // The overview refetch can take seconds; until then Needs you would still offer the action.
       // The refetch cancels overview requests in flight, so an older response cannot restore them.
-      queryClient.setQueryData<FactoryOverview>(["overview"], (overview) =>
+      queryClient.setQueryData<FactoryOverview>(overviewQuery().queryKey, (overview) =>
         overview === undefined ? overview : withoutRunNeeds(overview, runId),
       );
       return refresh(runId);

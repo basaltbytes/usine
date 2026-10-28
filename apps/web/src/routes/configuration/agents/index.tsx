@@ -1,7 +1,7 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { AgentsList } from "~/features/configuration/components/agents";
-import { configurationQuery } from "~/features/configuration/queries";
+import { configurationQuery } from "~/lib/configuration/queries";
 
 const Agents = () => {
   const { data } = useSuspenseQuery(configurationQuery());

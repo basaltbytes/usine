@@ -1,14 +1,8 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { LoopName } from "@usine/core/loop";
 import { api } from "~/lib/api";
-
-const CONFIGURATION_REFRESH_MS = 5_000;
-
-export const configurationQuery = () => ({
-  queryKey: ["configuration"] as const,
-  queryFn: () => api((client) => client.configuration()),
-  refetchInterval: CONFIGURATION_REFRESH_MS,
-});
+import { configurationQuery } from "~/lib/configuration/queries";
+import { overviewQuery } from "~/lib/overview";
 
 export const usePauseLoop = () => {
   const queryClient = useQueryClient();
@@ -17,8 +11,8 @@ export const usePauseLoop = () => {
       api((client) => client[paused ? "unpause" : "pause"]({ params: { loop } })),
     onSuccess: () =>
       Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["configuration"] }),
-        queryClient.invalidateQueries({ queryKey: ["overview"] }),
+        queryClient.invalidateQueries({ queryKey: configurationQuery().queryKey }),
+        queryClient.invalidateQueries({ queryKey: overviewQuery().queryKey }),
       ]),
   });
 };
