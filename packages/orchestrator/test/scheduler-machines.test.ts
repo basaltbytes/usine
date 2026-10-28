@@ -36,11 +36,28 @@ import { submission, testAgent } from "./local-worker/support.ts";
 const POOL = WorkerName.make("pool");
 const unused = () => Effect.die("unused");
 
-const config = Schema.decodeUnknownSync(UsineConfig)({
-  version: 1,
-  repos: [{ name: "acme/demo" }],
-  workers: [{ name: "pool", kind: "local", max_concurrent_attempts: 1 }],
-});
+const configWithTimings = (timings: Record<string, number>) =>
+  Schema.decodeUnknownSync(UsineConfig)({
+    version: 1,
+    repos: [{ name: "acme/demo" }],
+    workers: [
+      {
+        name: "pool",
+        kind: "ssh",
+        max_concurrent_attempts: 1,
+        root: "/srv/usine",
+        provisioner: {
+          provider: "hetzner",
+          token_env: "TOKEN",
+          server_type: "cx33",
+          location: "nbg1",
+          image: "image",
+          ssh_key: "key",
+          timings,
+        },
+      },
+    ],
+  });
 
 /**
  * A fake `WorkerMachines` that records each call, fails the creations in `failures`, and gives
@@ -55,9 +72,9 @@ const fakeMachines = () =>
     let next = 0;
     const machines = WorkerMachines.of({
       provisions: (worker) => Effect.succeed(worker === POOL),
-      create: (worker, runId) =>
+      create: (worker, runId, attemptId) =>
         Effect.gen(function* () {
-          calls.push(`create ${worker} ${runId}`);
+          calls.push(`create ${worker} ${runId} ${attemptId}`);
           const waiting = yield* Ref.get(gate);
           if (Option.isSome(waiting)) yield* Deferred.await(waiting.value);
           const failure = failures.shift();
@@ -71,8 +88,6 @@ const fakeMachines = () =>
             checked: Option.fromNullishOr(checks.shift()),
           });
         }).pipe(Effect.onInterrupt(() => Effect.sync(() => calls.push(`interrupted ${runId}`)))),
-      assign: (hold, attemptId) =>
-        Effect.sync(() => void calls.push(`assign ${hold} ${attemptId}`)),
       adopt: (worker, attemptId) =>
         Effect.sync(() => {
           calls.push(`adopt ${worker} ${attemptId}`);
@@ -100,7 +115,7 @@ let executorSweeps = 0;
 const discarded: Array<string> = [];
 
 const executor = Layer.succeed(Executor)({
-  kind: "local",
+  kind: "ssh",
   recover: unused,
   isLive: unused,
   outcome: unused,
@@ -124,7 +139,7 @@ const executor = Layer.succeed(Executor)({
   }),
 });
 
-const scheduler = (machines: WorkerMachines["Service"]) =>
+const scheduler = (machines: WorkerMachines["Service"], config = configWithTimings({})) =>
   Layer.build(
     stepExecutorLayer(config, [], {
       machines,
@@ -193,7 +208,7 @@ const settle = Effect.forEach(Array.from({ length: 20 }), () => Effect.yieldNow,
 
 describe("Worker scheduler on a provisioned Worker", () => {
   it.effect(
-    "creates the machine before the lease, gives it to the Attempt, deletes it with the lease, and passes on sweeps and discards",
+    "creates the machine with the persisted Attempt ID, deletes it with the lease, and passes on sweeps and discards",
     () =>
       Effect.gen(function* () {
         const fake = yield* fakeMachines();
@@ -211,17 +226,15 @@ describe("Worker scheduler on a provisioned Worker", () => {
         const run = RunId.make("run-1");
         const lease = yield* steps.reserve(run, submission(1), Option.none());
         assert.strictEqual(lease.worker, POOL);
-        assert.deepStrictEqual(fake.calls, [`create pool ${run}`]);
+        assert.deepStrictEqual(fake.calls, [], "a slot reservation creates no machine");
         assert.lengthOf(yield* status.machines, 1);
-        // The first machine's check gives the Worker page the limits its containers get.
-        const checked = (yield* status.preflights).find(({ worker }) => worker === POOL);
-        assert.deepStrictEqual(checked?.containerLimits, Option.some(limits));
-
         const attempt = AttemptId.make("run-1/execute/1");
         const failure = yield* steps.execute(executionOf(run, attempt), sink).pipe(Effect.flip);
         assert(failure instanceof InfraFailure, failure._tag);
-        assert.include(fake.calls, `assign hold-1 ${attempt}`);
+        assert.include(fake.calls, `create pool ${run} ${attempt}`);
         assert.include(prepared, attempt);
+        const checked = (yield* status.preflights).find(({ worker }) => worker === POOL);
+        assert.deepStrictEqual(checked?.containerLimits, Option.some(limits));
 
         yield* lease.release;
         assert.deepStrictEqual(fake.calls.at(-1), "release hold-1");
@@ -238,7 +251,7 @@ describe("Worker scheduler on a provisioned Worker", () => {
   );
 
   it.effect(
-    "keeps the Run waiting after a failed creation, pauses the Worker, and creates again when the pause ends",
+    "keeps the same Attempt after a failed creation and retries when the worker pause ends",
     () =>
       Effect.gen(function* () {
         const fake = yield* fakeMachines();
@@ -253,8 +266,11 @@ describe("Worker scheduler on a provisioned Worker", () => {
         const context = yield* scheduler(fake.machines);
         const steps = Context.get(context, StepExecutor);
         const status = Context.get(context, WorkerStatus);
+        const lease = yield* steps.reserve(RunId.make("run-1"), submission(1), Option.none());
         const waiting = yield* Effect.forkChild(
-          steps.reserve(RunId.make("run-1"), submission(1), Option.none()),
+          steps
+            .execute(executionOf(RunId.make("run-1"), AttemptId.make("run-1/execute/1")), sink)
+            .pipe(Effect.flip),
         );
         yield* settle;
         assert.isUndefined(waiting.pollUnsafe(), "the Run waits");
@@ -267,20 +283,17 @@ describe("Worker scheduler on a provisioned Worker", () => {
           DateTime.toEpochMillis(pause.retryAt) - DateTime.toEpochMillis(pause.failedAt),
           30_000,
         );
-        const queued = yield* status.queue;
-        assert.deepStrictEqual(
-          queued.map(({ runId }) => runId),
-          [RunId.make("run-1")],
-          "the Run keeps its place in the queue",
-        );
+        assert.lengthOf(yield* status.queue, 0, "the persisted Attempt has a slot");
+        const [slot] = yield* status.slots;
+        assert.strictEqual(slot?.leased, 1);
 
         yield* TestClock.adjust("29 seconds");
         yield* settle;
         assert.isUndefined(waiting.pollUnsafe(), "the Worker is still paused");
         yield* TestClock.adjust("1 second");
         yield* settle;
-        const lease = yield* Fiber.join(waiting);
-        assert.strictEqual(lease.worker, POOL);
+        yield* Fiber.join(waiting);
+        yield* lease.release;
         assert.lengthOf(
           fake.calls.filter((call) => call.startsWith("create")),
           2,
@@ -289,7 +302,50 @@ describe("Worker scheduler on a provisioned Worker", () => {
       }).pipe(Effect.scoped),
   );
 
-  it.effect("doubles the pause after each failure in a row", () =>
+  it.effect("resumes reservations after cancellation during creation backoff", () =>
+    Effect.gen(function* () {
+      const fake = yield* fakeMachines();
+      fake.failures.push(
+        new MachineUnavailableError({
+          worker: POOL,
+          provider: "hetzner",
+          reason: "capacity",
+          message: "This product is currently unavailable",
+        }),
+      );
+      const context = yield* scheduler(fake.machines);
+      const steps = Context.get(context, StepExecutor);
+      const status = Context.get(context, WorkerStatus);
+      const lease = yield* steps.reserve(RunId.make("run-1"), submission(1), Option.none());
+      const waiting = yield* Effect.forkChild(
+        steps.execute(executionOf(RunId.make("run-1"), AttemptId.make("run-1/execute/1")), sink),
+      );
+      yield* settle;
+      assert.isTrue((yield* status.provisioning)[0]?.blocked);
+      yield* Fiber.interrupt(waiting);
+      yield* lease.release;
+      assert.strictEqual((yield* status.slots)[0]?.leased, 0);
+      const next = yield* Effect.forkChild(
+        steps.reserve(RunId.make("run-2"), submission(2), Option.none()),
+      );
+      yield* TestClock.adjust("29 seconds");
+      yield* settle;
+      assert.isUndefined(next.pollUnsafe(), "new reservations wait for the pause to end");
+      yield* TestClock.adjust("1 second");
+      yield* settle;
+      assert.isFalse((yield* status.provisioning)[0]?.blocked);
+      const resumed = yield* Fiber.join(next);
+      assert.strictEqual(resumed.worker, POOL);
+      yield* steps
+        .execute(executionOf(RunId.make("run-2"), AttemptId.make("run-2/execute/1")), sink)
+        .pipe(Effect.flip);
+      assert.include(fake.calls, "create pool run-2 run-2/execute/1");
+      assert.lengthOf(yield* status.provisioning, 0);
+      yield* resumed.release;
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("uses the configured backoff minimum and caps repeated failures at its maximum", () =>
     Effect.gen(function* () {
       const fake = yield* fakeMachines();
       const quota = new MachineUnavailableError({
@@ -298,13 +354,19 @@ describe("Worker scheduler on a provisioned Worker", () => {
         reason: "quota",
         message: "project limit exceeded",
       });
-      fake.failures.push(quota, quota);
-      const context = yield* scheduler(fake.machines);
+      fake.failures.push(quota, quota, quota);
+      const context = yield* scheduler(
+        fake.machines,
+        configWithTimings({ creation_backoff_min: 2, creation_backoff_max: 3 }),
+      );
       const steps = Context.get(context, StepExecutor);
       const status = Context.get(context, WorkerStatus);
-      yield* Effect.forkChild(steps.reserve(RunId.make("run-1"), submission(1), Option.none()));
+      yield* steps.reserve(RunId.make("run-1"), submission(1), Option.none());
+      yield* Effect.forkChild(
+        steps.execute(executionOf(RunId.make("run-1"), AttemptId.make("run-1/execute/1")), sink),
+      );
       yield* settle;
-      yield* TestClock.adjust("30 seconds");
+      yield* TestClock.adjust("2 seconds");
       yield* settle;
       const [pause] = yield* status.provisioning;
       assert.strictEqual(pause?.failures, 2);
@@ -312,26 +374,42 @@ describe("Worker scheduler on a provisioned Worker", () => {
         pause === undefined
           ? 0
           : DateTime.toEpochMillis(pause.retryAt) - DateTime.toEpochMillis(pause.failedAt),
-        60_000,
+        3_000,
+      );
+      yield* TestClock.adjust("3 seconds");
+      yield* settle;
+      const [capped] = yield* status.provisioning;
+      assert.strictEqual(capped?.failures, 3);
+      assert.strictEqual(
+        capped === undefined
+          ? 0
+          : DateTime.toEpochMillis(capped.retryAt) - DateTime.toEpochMillis(capped.failedAt),
+        3000,
+      );
+      assert.deepStrictEqual(
+        fake.calls.filter((call) => call.startsWith("create")),
+        Array(3).fill("create pool run-1 run-1/execute/1"),
       );
     }).pipe(Effect.scoped),
   );
 
-  it.effect("stops the creation of a Run that stops waiting, and frees the slot", () =>
+  it.effect("stops machine creation when the Attempt is canceled, then releases its slot", () =>
     Effect.gen(function* () {
       const fake = yield* fakeMachines();
       const gate = yield* Deferred.make<void>();
       yield* Ref.set(fake.gate, Option.some(gate));
       const context = yield* scheduler(fake.machines);
       const steps = Context.get(context, StepExecutor);
+      const lease = yield* steps.reserve(RunId.make("run-1"), submission(1), Option.none());
       const waiting = yield* Effect.forkChild(
-        steps.reserve(RunId.make("run-1"), submission(1), Option.none()),
+        steps.execute(executionOf(RunId.make("run-1"), AttemptId.make("run-1/execute/1")), sink),
       );
       yield* settle;
-      assert.deepStrictEqual(fake.calls, ["create pool run-1"]);
+      assert.deepStrictEqual(fake.calls, ["create pool run-1 run-1/execute/1"]);
       yield* Fiber.interrupt(waiting);
       yield* settle;
       assert.include(fake.calls, "interrupted run-1");
+      yield* lease.release;
       yield* Ref.set(fake.gate, Option.none());
       const next = yield* steps.reserve(RunId.make("run-2"), submission(2), Option.none());
       assert.strictEqual(next.worker, POOL, "the slot is free again");

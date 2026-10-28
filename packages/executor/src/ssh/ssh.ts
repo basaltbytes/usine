@@ -242,7 +242,14 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
       interruptGrace: options.interruptGrace ?? "10 seconds",
     });
     return Context.make(Executor, executor).pipe(
-      Context.add(SshWorkers, SshWorkers.of({ addWorker, removeWorker: workers.removeWorker })),
+      Context.add(
+        SshWorkers,
+        SshWorkers.of({
+          addWorker,
+          removeWorker: (worker) =>
+            provisioned.retire(worker).pipe(Effect.andThen(workers.removeWorker(worker))),
+        }),
+      ),
       Context.add(WorkerMachines, provisioned.port),
     );
   });
