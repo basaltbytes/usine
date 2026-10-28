@@ -1,3 +1,4 @@
+import { keyedLockFor } from "./keyed-lock.ts";
 import type { ChildHost } from "@usine/agents/child-host";
 import type { AttemptId, StopReason } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
@@ -81,6 +82,10 @@ export interface DurableCheckout {
   readonly harvestComments: (
     windows: AttemptWindowsRead<AttemptFailure>,
   ) => Effect.Effect<ReadonlyArray<Comment>>;
+  /** Harvests a kept checkout with a fresh credential after its launch scope has closed. */
+  readonly harvestKeptComments: (
+    windows: AttemptWindowsRead<AttemptFailure>,
+  ) => Effect.Effect<ReadonlyArray<Comment>, ExecutorError>;
   /** Keeps the checkout on disk so a restart can reattach the parent or repeat an unrecorded harvest. */
   readonly keepForReattach: Effect.Effect<void>;
   /**
@@ -139,6 +144,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
 ) {
   const runtime = yield* AttemptRuntime;
   const attempts = new Map<AttemptId, ActiveAttempt>();
+  const cancellations = yield* keyedLockFor<AttemptId>();
   /**
    * The reconciliation of each checkout kept while its parent task isn't confirmed stopped, by
    * Attempt. The `cancel` that confirms the stop runs it.
@@ -261,7 +267,20 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
     yield* checkout.keepUntilStopped;
     unstopped.set(
       attemptId,
-      checkout.reconcileKept(io.salvage).pipe(
+      checkout.harvestKeptComments(io.windows).pipe(
+        Effect.flatMap((comments) => recordComments(attemptId, comments, io.comments)),
+        Effect.tapError((error) =>
+          Effect.logWarning(
+            "Could not acquire a credential to harvest the kept checkout's comments",
+            {
+              ...fields,
+              errorTag: error._tag,
+              message: error.message,
+            },
+          ),
+        ),
+        Effect.ignore,
+        Effect.andThen(checkout.reconcileKept(io.salvage)),
         Effect.tap(() =>
           Effect.logInfo(
             "Reconciled the checkout kept while the Attempt's parent task was not confirmed stopped",
@@ -685,22 +704,22 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
    * for example one awaiting reattachment. Fails if that task can't be confirmed stopped. Once it
    * is, reconciles the checkout that a launch kept while the stop was unconfirmed.
    */
-  const cancel = Effect.fn("DurableSession.cancel")(function* (
-    attemptId: AttemptId,
-    reason: StopReason,
-  ) {
-    yield* Effect.annotateCurrentSpan({ attemptId, reason });
-    yield* prepared.cancel(attemptId);
-    yield* stopTask(attemptId, stopReasons[reason]);
-    const kept = unstopped.get(attemptId);
-    if (kept === undefined) return;
-    unstopped.delete(attemptId);
-    yield* Effect.logInfo(
-      "The Attempt's parent task is confirmed stopped; reconciling the checkout kept while it was not",
-      { attemptId, reason },
-    );
-    yield* kept;
-  });
+  const cancel = Effect.fn("DurableSession.cancel")(
+    function* (attemptId: AttemptId, reason: StopReason) {
+      yield* Effect.annotateCurrentSpan({ attemptId, reason });
+      yield* prepared.cancel(attemptId);
+      yield* stopTask(attemptId, stopReasons[reason]);
+      const kept = unstopped.get(attemptId);
+      if (kept === undefined) return;
+      unstopped.delete(attemptId);
+      yield* Effect.logInfo(
+        "The Attempt's parent task is confirmed stopped; reconciling the checkout kept while it was not",
+        { attemptId, reason },
+      );
+      yield* kept;
+    },
+    (effect, attemptId) => effect.pipe(cancellations.withLock(attemptId)),
+  );
 
   /**
    * Returns whether the open Attempt's parent task is running or reported success without a

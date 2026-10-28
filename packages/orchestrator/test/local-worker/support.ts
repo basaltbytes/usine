@@ -18,7 +18,9 @@ import { claudeLoginLockLayer, CredentialProvider, WorkerCredential } from "@usi
 import type { HarnessProbe, LocalExecutorOptions } from "@usine/executor/local";
 import { DateTime, Effect, FileSystem, Layer, Option, Path, Redacted, Schema } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
-import { layer as localLayer } from "../../src/local.ts";
+import { layer as localExecutorLayer } from "@usine/executor/local";
+import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
+import { stepExecutorLayer } from "../../src/scheduler.ts";
 import { stubAttemptRuntime, StubStorage } from "@usine/durable/testing";
 import { fixedConfigLayer } from "../support/current-instance.ts";
 import { testAppLayer } from "../support/github-app.ts";
@@ -192,6 +194,7 @@ export const waitForSalvage = Effect.fn("test.waitForSalvage")(function* (
 /** Overrides for a test runtime: parent tasks, credentials, or executor settings. */
 export interface LocalRuntimeOptions {
   readonly attemptRuntime?: Layer.Layer<AttemptRuntime>;
+  readonly platform?: Layer.Layer<NodeServices.NodeServices>;
   readonly credentials?: Layer.Layer<CredentialProvider>;
   readonly executor?: Omit<LocalExecutorOptions, "instanceDirectory">;
 }
@@ -205,18 +208,26 @@ export const localRuntime = (
   remote: string,
   options: LocalRuntimeOptions = {},
 ) =>
-  localLayer(instance, config, [], {
-    repositoryUrl: () => remote,
-    interruptGrace: "100 millis",
-    harnessReadiness: harnessReady,
-    ...options.executor,
-  }).pipe(
+  localEngineLayer(instance).pipe(
+    Layer.provide(
+      stepExecutorLayer(config, []).pipe(
+        Layer.provide(
+          localExecutorLayer({
+            instanceDirectory: instance,
+            repositoryUrl: () => remote,
+            interruptGrace: "100 millis",
+            harnessReadiness: harnessReady,
+            ...options.executor,
+          }).pipe(Layer.provide(options.platform ?? NodeServices.layer)),
+        ),
+        Layer.provide(fixedConfigLayer(config)),
+        Layer.provide(testAppLayer),
+      ),
+    ),
     Layer.provide(options.credentials ?? credentialLayer),
     Layer.provide(options.attemptRuntime ?? stubAttemptRuntime(new StubStorage())),
     Layer.provide(claudeLoginLockLayer),
     Layer.provide(alwaysHoldsLayer),
-    Layer.provide(fixedConfigLayer(config)),
-    Layer.provide(testAppLayer),
   );
 
 export const withLocalEngine = <A, E, R>(

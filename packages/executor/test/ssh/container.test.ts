@@ -558,7 +558,9 @@ describe("SSH Worker with Docker", () => {
           .pipe(Effect.flip);
         assert.strictEqual(recorded[0]?._tag, "Pushed");
         const salvage = machine.state.calls.flatMap(({ line, container }, index) =>
-          line.includes(`'-C' '${WORKTREE}'`) ? [{ line, container, index }] : [],
+          line.includes(`'-C' '${WORKTREE}'`) && !line.includes("'update-ref'")
+            ? [{ line, container, index }]
+            : [],
         );
         for (const { line, container } of salvage)
           assert.strictEqual(container, CONTAINER, `${line} runs in the container`);

@@ -332,7 +332,7 @@ describe("cloudflare Worker", () => {
   );
 
   it.live(
-    "keeps the sandbox when a reattachment can't be prepared, so recovery salvages its checkout",
+    "keeps the sandbox when reattachment cannot be prepared, then removes its clean checkout after recovery",
     () =>
       Effect.gen(function* () {
         const worker = yield* fakeWorker;
@@ -379,11 +379,8 @@ describe("cloudflare Worker", () => {
           Effect.scoped,
           Effect.provide(executor(worker, mintingProvider(), completes, storage)),
         );
-        assert.deepStrictEqual(
-          salvages.map(({ _tag }) => _tag),
-          ["Pushed"],
-        );
-        assert.isTrue(
+        assert.isEmpty(salvages);
+        assert.isFalse(
           kept.commands.some(
             (line) => line.includes("'push'") && line.includes(request.salvageRef),
           ),

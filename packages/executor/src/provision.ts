@@ -18,6 +18,9 @@ import { failureMessage, salvageWorktree } from "./salvage.ts";
 
 const CACHE_DIRECTORY_SUFFIX = ".git";
 
+// Git keeps refs/worktree private to each linked worktree and removes them with it.
+const BASE_COMMIT_REF = "refs/worktree/usine-base";
+
 /** Returns the bare cache directory name for `repository` under `repos/`. */
 export const cacheDirectoryName = (repository: RepositoryName): string =>
   `${safeSegment(repository)}${CACHE_DIRECTORY_SUFFIX}`;
@@ -216,6 +219,7 @@ const cleanupFor =
  */
 const registerRelease = Effect.fn("Executor.registerRelease")(function* <E extends Error>(
   options: ReleaseOptions<E>,
+  confirmStop: Effect.Effect<void, E> = Effect.void,
 ) {
   const { layout, ops, request } = options;
   const checkedOut = yield* Ref.make(Option.none<CommitSha>());
@@ -244,6 +248,19 @@ const registerRelease = Effect.fn("Executor.registerRelease")(function* <E exten
             worker: request.worker,
             host: options.host,
             worktree: layout.worktree,
+          },
+        );
+        return;
+      }
+      const stopped = yield* confirmStop.pipe(Effect.result);
+      if (Result.isFailure(stopped)) {
+        yield* Deferred.succeed(salvaged, Option.none());
+        yield* Effect.logWarning(
+          "Checkout retained because its parent task is not confirmed stopped",
+          {
+            attemptId: request.attemptId,
+            worker: request.worker,
+            message: String(stopped.failure),
           },
         );
         return;
@@ -549,6 +566,13 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
   const salvage = yield* fetchSalvage(options, request.resume);
   const checkout = yield* checkOutWorktree(options, baseCommit, salvage);
   yield* Ref.set(release.checkedOut, Option.some(baseCommit));
+  yield* ops.checkout.git("prepare", [
+    "-C",
+    layout.worktree,
+    "update-ref",
+    BASE_COMMIT_REF,
+    baseCommit,
+  ]);
   const gitHooks = yield* installPrePushHook(options);
   const preparedAt = yield* DateTime.now;
   return {
@@ -583,6 +607,7 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
 export interface ReattachOptions<E> extends ReleaseOptions<E> {
   /** The RunSpec from the parent's durable request. */
   readonly spec: AttemptChannel.RunSpec;
+  readonly confirmStop: Effect.Effect<void, E>;
 }
 
 /**
@@ -600,8 +625,15 @@ export const reattachWorktree = Effect.fn("Executor.reattachWorktree")(function*
     host: options.host,
     repository: request.repository,
   });
-  const release = yield* registerRelease(options);
+  const release = yield* registerRelease(options, options.confirmStop);
   yield* Ref.set(release.checkedOut, Option.some(spec.baseCommit));
+  yield* options.ops.checkout.git("prepare", [
+    "-C",
+    layout.worktree,
+    "update-ref",
+    BASE_COMMIT_REF,
+    spec.baseCommit,
+  ]);
   const gitHooks = yield* installPrePushHook(options);
   return {
     workspace: new AttemptWorkspace({
@@ -653,7 +685,7 @@ export const recoveryFields = (attempt: AttemptRecovery) => ({
 
 /**
  * Reconciles a checkout left by an earlier process, or kept while its parent task's stop was
- * unconfirmed: salvages it without a known base, records the result, and removes the worktree
+ * unconfirmed: reads its saved base commit, salvages it, and removes the worktree
  * only after its work is pushed. Checkouts of succeeded Attempts and of `permissions: read` Loops
  * are removed without salvage.
  */
@@ -677,16 +709,32 @@ export const recoverWorktree = Effect.fn("Executor.recoverWorktree")(function* <
     );
     return;
   }
+  const baseCommit = yield* options
+    .git(["-C", worktree, "rev-parse", "--verify", BASE_COMMIT_REF])
+    .pipe(
+      Effect.flatMap((value) => decodeCommit(value.trim())),
+      Effect.tapError((error) =>
+        Effect.logWarning(
+          "Could not read the checkout's saved base commit; recovering without it",
+          {
+            ...fields,
+            message: String(error),
+          },
+        ),
+      ),
+      Effect.option,
+    );
   const salvage = yield* salvageWorktree({
     ...attempt,
     host,
     worktree,
-    baseCommit: Option.none(),
+    baseCommit,
     git: options.git,
   });
-  if (Option.isNone(salvage)) return;
-  yield* record(salvage.value);
-  if (salvage.value._tag !== "Pushed") return;
+  if (Option.isSome(salvage)) {
+    yield* record(salvage.value);
+    if (salvage.value._tag !== "Pushed") return;
+  }
   yield* options.removeCheckout;
   yield* Effect.logInfo("Reconciled and released Attempt salvage", fields);
 });
