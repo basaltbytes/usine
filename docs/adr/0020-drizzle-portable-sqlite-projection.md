@@ -40,3 +40,9 @@ The configuration store takes Effect's `SqlClient`, supplied by the application 
 The engine's `AttentionAcknowledgements` service stores operator dismissals in `usine_attention_acknowledgements`, keyed by entry ID and content revision, with operator login and time. This service uses `RunDatabase`, like `BoardMoves`. The existing run store owns lifecycle transitions, cycle budgets own asks, and cursors permit loss; none owns acknowledgements of configuration or polling findings. The separate capability covers all attention kinds without changing those contracts.
 
 The orchestrator defines each revision from the entry's schema-encoded content. Failed-run entry IDs include the attempt ID, so a later failure with identical text appears again. The overview partitions current entries into visible and dismissed lists. Project status and task badges derive from the visible list; run and ask state remain independent. Undo deletes the matching acknowledgement. Database triggers invalidate the overview cache on acknowledgement changes. Dismissal records for causes no longer reported remain in the store, but only current entries appear under Dismissed.
+
+## Amendment (2026-10-28, #646): acknowledgement pruning
+
+Overview refreshes prune acknowledgements whose ID and revision don't match any current entry, including dismissed entries. This replaces the retention rule in the #477 amendment: a cause that disappears during a refresh needs a new dismissal if it returns. Schedule tick times and worker attempt counts remain part of the revision, so each changed entry still requires attention.
+
+The engine deletes obsolete acknowledgements in one statement, passing current keys as one JSON parameter to SQLite's `json_each` to avoid parameter and expression-depth limits. Matching acknowledgements retain their operator and time. Existing deletion triggers invalidate projections only when rows change; repeating pruning against an unchanged list has no effect.

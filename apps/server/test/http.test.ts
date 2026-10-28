@@ -396,6 +396,7 @@ const backend = needsSetupBackendLayer(
   configuration,
   {
     list: () => Effect.succeed(dismissed),
+    prune: () => Effect.die("unused"),
     dismiss: (acknowledgement) =>
       Effect.sync(() => {
         dismissed.push(acknowledgement);

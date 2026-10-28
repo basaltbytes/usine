@@ -105,6 +105,8 @@ Failure resolution through `POST /api/runs/:runId/resolve-failure` records the c
 
 Every Needs attention entry has **Dismiss**. The overview's collapsed **Dismissed** section lists acknowledged entries with **Undo**. Dismissals persist across refreshes and restarts, and a changed entry appears again. Attention counts and badges exclude dismissed entries. Dismissing an approval, failure, or cycle-budget ask leaves its state and actions available on the run and task pages and board cards. Dismiss and Undo also work while GitHub credentials need setup.
 
+Refreshing the overview removes dismissals for entries it no longer reports or whose content changed. If an entry disappears during a refresh and later returns, dismiss it again to hide it.
+
 ## Server upgrades
 
 A global npm installation managed by systemd checks for upgrades every five minutes. Run `usine config edit settings instance` to configure `settings.upgrade_channel: latest` or `next` and `settings.upgrade_mode: off`, `propose`, or `automatic`. The defaults are `latest` and `propose`. Before offering an upgrade or draining attempts, the server checks that every `@usine/*` dependency, including transitive dependencies, resolves on the registry. If a package is unavailable, the server keeps admitting attempts and checks again in the next cycle.
