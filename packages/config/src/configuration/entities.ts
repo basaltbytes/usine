@@ -38,17 +38,28 @@ export const configurationEntities = (
   ];
 };
 
+const indexEntities = (entities: ReadonlyArray<ConfigurationEntity>) => {
+  let workerPosition = 0;
+  return new Map(
+    entities.map((entry) => [
+      entry.key.key,
+      { entry, position: entry.key.kind === "worker" ? workerPosition++ : undefined },
+    ]),
+  );
+};
+
 export const configurationDiff = (
   before: ReadonlyArray<ConfigurationEntity>,
   after: ReadonlyArray<ConfigurationEntity>,
 ): ReadonlyArray<ConfigurationChange> => {
-  const previous = new Map(before.map((entry, position) => [entry.key.key, { entry, position }]));
-  const next = new Map(after.map((entry, position) => [entry.key.key, { entry, position }]));
+  const previous = indexEntities(before);
+  const next = indexEntities(after);
   return [...new Set([...previous.keys(), ...next.keys()])].flatMap((key) => {
     const old = previous.get(key);
     const value = next.get(key);
     const identity = value ?? old;
-    const moved = value !== undefined && old?.position !== value.position;
+    const position = value?.position;
+    const moved = position !== undefined && old?.position !== position;
     if (identity === undefined || (!moved && Equal.equals(old?.entry.value, value?.entry.value)))
       return [];
     const change = {
@@ -56,6 +67,6 @@ export const configurationDiff = (
       before: Option.fromUndefinedOr(old?.entry.value),
       after: Option.fromUndefinedOr(value?.entry.value),
     };
-    return [new ConfigurationChange(moved ? { ...change, position: value.position } : change)];
+    return [new ConfigurationChange(moved ? { ...change, position } : change)];
   });
 };

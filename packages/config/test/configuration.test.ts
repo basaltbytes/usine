@@ -57,6 +57,7 @@ repos:
         sources: [{label: ready}]
 labels:
   - name: ready
+  - name: review
 workers:
   - name: local
     kind: local
@@ -94,6 +95,49 @@ const initialize = Effect.gen(function* () {
 });
 
 describe("configuration domain without layers", () => {
+  it.effect("omits unchanged entities when adding or removing an entity before them", () =>
+    Effect.gen(function* () {
+      const original = configurationEntities(yield* fixture);
+      const added = new ConfigurationEntity({
+        key: new ConfigurationEntityKey({
+          kind: "label",
+          identifier: ConfigurationEntityId.make("preferred"),
+        }),
+        value: { name: "preferred" },
+      });
+      const candidate = [added, ...original];
+      expect(configurationDiff(original, candidate)).toEqual([
+        new ConfigurationChange({
+          key: added.key,
+          before: Option.none(),
+          after: Option.some(added.value),
+        }),
+      ]);
+      expect(configurationDiff(candidate, original)).toEqual([
+        new ConfigurationChange({
+          key: added.key,
+          before: Option.some(added.value),
+          after: Option.none(),
+        }),
+      ]);
+    }),
+  );
+
+  it.effect("ignores unordered entity positions and records worker-relative positions", () =>
+    Effect.gen(function* () {
+      const original = configurationEntities(yield* fixture);
+      const workers = original.filter(({ key }) => key.kind === "worker");
+      const other = original.filter(({ key }) => key.kind !== "worker");
+      expect(configurationDiff(original, [...other.reverse(), ...workers])).toEqual([]);
+      const changes = configurationDiff(original, [...other, ...workers.reverse()]);
+      expect(changes.map(({ key, position }) => [key.key, position])).toEqual([
+        ["worker:local", 1],
+        ["worker:fallback", 0],
+      ]);
+      expect(changes.every(({ before, after }) => Equal.equals(before, after))).toBe(true);
+    }),
+  );
+
   it.effect("rejects a stale commit and collects invalid entities without changing the input", () =>
     Effect.gen(function* () {
       const changes = yield* initialChanges;
@@ -195,7 +239,12 @@ for (const [name, layer] of adapters)
             candidate,
           );
           expect(changes.length).toBeGreaterThan(0);
-          yield* store.commit({ expected: current.number, changes, ...metadata });
+          const revision = yield* store.commit({ expected: current.number, changes, ...metadata });
+          expect(revision.changes.every(({ key }) => key.kind === "worker")).toBe(true);
+          for (const entity of other)
+            expect(
+              (yield* store.list(Option.some(entity.key))).map(({ number }) => number),
+            ).toEqual([1]);
           const saved = yield* store.read;
           expect(Option.map(saved.instance, configurationEntities)).toEqual(Option.some(candidate));
           expect(configurationDiff(candidate, candidate)).toEqual([]);
@@ -230,15 +279,14 @@ for (const [name, layer] of adapters)
                 position: 1,
               }),
           ),
-          workers.map(
-            ({ key, value }) =>
-              new ConfigurationChange({
-                key,
-                before: Option.some(value),
-                after: Option.some(value),
-                position: entities.length,
-              }),
-          ),
+          ...workers.map(({ key, value }) => [
+            new ConfigurationChange({
+              key,
+              before: Option.some(value),
+              after: Option.some(value),
+              position: workers.length,
+            }),
+          ]),
           workers.map(
             ({ key, value }) =>
               new ConfigurationChange({
@@ -248,6 +296,16 @@ for (const [name, layer] of adapters)
                 position: 1,
               }),
           ),
+          ...entities
+            .filter(({ key }) => key.kind !== "worker")
+            .map(({ key, value }) => [
+              new ConfigurationChange({
+                key,
+                before: Option.some(value),
+                after: Option.some(value),
+                position: 0,
+              }),
+            ]),
         ]) {
           const failure = yield* store
             .commit({ expected: current.number, changes, ...metadata })
