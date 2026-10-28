@@ -5,7 +5,7 @@ import type { InstanceDirectory } from "@usine/core/instance";
 import { layer as exeDevExecutorLayer, type ExeDevExecutorOptions } from "@usine/executor/exe-dev";
 import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
 import { Layer } from "effect";
-import { stepExecutorLayer } from "./scheduler.ts";
+import { stepExecutorLayer } from "./scheduler/scheduler.ts";
 import { withSshWorkerDiscard } from "./ssh.ts";
 
 /**

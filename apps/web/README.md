@@ -16,6 +16,8 @@ Every entry has **Dismiss**. It leaves attention lists, counts, and badges immed
 
 Entries:
 
+- **<worker>: preflight failed**: the startup or retry error for a worker that takes no new attempts, with **Open worker**. The entry clears when preflight passes and scheduling resumes.
+
 - **Approval**: the loop and the task's name, with **Approve** and **Cancel run**. While any screen sends an action on the run, the buttons are disabled and name it, such as `Approving…`. The entry leaves when the action succeeds, before the overview refreshes. A refusal because the run changed state, for example after approval from the drawer, shows only in the drawer and run page; the entry leaves with the refresh.
 - **\<loop\>: blocked** or **Question from \<loop\>**, with the agent's blocker or question. **Mark resolved** (**Mark answered** for a question, in its drawer and run page) lets the run's loop act on the item's newest state.
 - **Failed run**. **Mark resolved**, in its drawer (from **Needs attention** or **Run history**) or run page, clears the warning and its project and board attention, across reloads and restarts, and keeps the outcome, attempt details, transcript, and retry controls. A later failed attempt raises it again.

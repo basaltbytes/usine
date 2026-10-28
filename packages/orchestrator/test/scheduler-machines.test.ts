@@ -27,7 +27,7 @@ import {
 } from "@usine/executor";
 import { Context, DateTime, Deferred, Effect, Fiber, Layer, Option, Ref, Schema } from "effect";
 import { TestClock } from "effect/testing";
-import { stepExecutorLayer } from "../src/scheduler.ts";
+import { stepExecutorLayer } from "../src/scheduler/scheduler.ts";
 import { WorkerStatus } from "../src/worker-status.ts";
 import { fixedConfigLayer } from "./support/current-instance.ts";
 import { testAppLayer } from "./support/github-app.ts";

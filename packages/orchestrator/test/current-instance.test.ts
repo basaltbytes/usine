@@ -7,7 +7,7 @@ import { LoopName } from "@usine/core/loop";
 import { Executor, WorkerCapabilityError, fullPreflight } from "@usine/executor";
 import { Effect, FileSystem, Layer, Logger, Path } from "effect";
 import { CurrentInstance } from "../src/current-instance/current-instance.ts";
-import { stepExecutorLayer } from "../src/scheduler.ts";
+import { stepExecutorLayer } from "../src/scheduler/scheduler.ts";
 import { testAppLayer } from "./support/github-app.ts";
 import { reloadableInstanceLayer, writeInstanceFiles } from "./support/instance-folder.ts";
 
