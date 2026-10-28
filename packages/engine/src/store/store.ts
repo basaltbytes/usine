@@ -626,7 +626,7 @@ const makeRunStore = Effect.gen(function* () {
         const current = yield* tx.snapshot(attempt.runId);
         const decision = decideFinishAttempt(current, attempt.id, result);
         yield* applyFinish(tx, attempt.runId, decision);
-        const stop = operatorStop(decision);
+        const stop = operatorStop(decision, result);
         if (Option.isSome(stop)) yield* suppressForOperator(tx, current, stop.value);
         return decision;
       }),

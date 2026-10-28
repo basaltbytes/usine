@@ -552,6 +552,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
           and(
             eq(attempts.attemptId, attemptId),
             sql`json_extract(${attempts.outcomeJson}, '$._tag') = 'Failed'`,
+            sql`json_extract(${attempts.outcomeJson}, '$.failure._tag') != 'GitHubPushFailure'`,
           ),
         )
         .execute();

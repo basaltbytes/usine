@@ -552,13 +552,16 @@ describe("SSH Worker with Docker", () => {
         const executor = yield* Executor;
         machine.state.salvage = "dirty";
         const prepared = yield* executor.prepare(request);
+        const preparedCalls = machine.state.calls.length;
         const recorded: Array<AttemptSalvage> = [];
         yield* prepared
           .launch({ ...sink, salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)) })
           .pipe(Effect.flip);
         assert.strictEqual(recorded[0]?._tag, "Pushed");
         const salvage = machine.state.calls.flatMap(({ line, container }, index) =>
-          line.includes(`'-C' '${WORKTREE}'`) ? [{ line, container, index }] : [],
+          index >= preparedCalls && line.includes(`'-C' '${WORKTREE}'`)
+            ? [{ line, container, index }]
+            : [],
         );
         for (const { line, container } of salvage)
           assert.strictEqual(container, CONTAINER, `${line} runs in the container`);

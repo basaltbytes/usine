@@ -314,7 +314,21 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       if (attempt.succeeded || attempt.permissions === "read") {
         const git = (args: ReadonlyArray<string>) => executeCommand("cleanup", "git", args);
         return yield* recoverWorktree(
-          { attempt, host: "local", worktree, git, removeCheckout: removeCheckout(git) },
+          {
+            attempt,
+            host: "local",
+            worktree,
+            git,
+            removeCheckout: removeCheckout(git),
+            readFile: (target) =>
+              fileSystem
+                .readFileString(target)
+                .pipe(
+                  Effect.mapError((cause) =>
+                    executorError("cleanup", "Can't read Git diagnostics", cause),
+                  ),
+                ),
+          },
           record,
         );
       }
@@ -335,6 +349,16 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
               host: "local",
               worktree,
               git: inCheckout,
+              readFile: (target) =>
+                fileSystem
+                  .exists(target)
+                  .pipe(
+                    Effect.flatMap((exists) =>
+                      exists
+                        ? fileSystem.readFileString(target).pipe(Effect.map(credential.scrub))
+                        : Effect.succeed(""),
+                    ),
+                  ),
               removeCheckout: removeCheckout(inCheckout),
             },
             record,
@@ -504,10 +528,29 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
           fileSystem.makeDirectory(path.dirname(worktree), { recursive: true }),
         ),
         promoteStaging: fileSystem.rename(`${cache}.cloning`, cache),
-        checkout: linkedWorktree(host, { cache, worktree }, (target, content) =>
-          fileSystem
-            .makeDirectory(path.dirname(target), { recursive: true })
-            .pipe(Effect.andThen(fileSystem.writeFileString(target, content, { mode: 0o755 }))),
+        checkout: linkedWorktree(
+          host,
+          { cache, worktree },
+          {
+            writeFile: (target, content, mode) =>
+              fileSystem
+                .makeDirectory(path.dirname(target), { recursive: true })
+                .pipe(
+                  Effect.andThen(
+                    fileSystem.writeFileString(target, content, { mode: Number.parseInt(mode, 8) }),
+                  ),
+                ),
+            readFile: (target) =>
+              fileSystem
+                .exists(target)
+                .pipe(
+                  Effect.flatMap((exists) =>
+                    exists
+                      ? fileSystem.readFileString(target).pipe(Effect.map(credential.scrub))
+                      : Effect.succeed(""),
+                  ),
+                ),
+          },
         ),
       };
       const acquire = Effect.gen(function* () {
@@ -555,6 +598,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         attemptEnvironment(prepared.workspace, credential),
         request.commitAuthor,
         prepared.gitHooks,
+        prepared.gitTrace,
       );
       return {
         workspace: prepared.workspace,

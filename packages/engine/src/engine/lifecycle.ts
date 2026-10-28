@@ -293,10 +293,14 @@ export interface Suppression {
 /** The kind of operator stop: a question or a blocker. */
 export type OperatorStop = "question" | "blocker";
 
-/** Returns the kind of operator stop that fails the Run in `decision`, or `None` (ADR 0017). */
-export const operatorStop = (decision: FinishDecision): Option.Option<OperatorStop> => {
+/** Preserves the original operator stop when a push failure replaces its displayed outcome (ADR 0017). */
+export const operatorStop = (
+  decision: FinishDecision,
+  result: Result.Result<StepResult, AttemptFailure>,
+): Option.Option<OperatorStop> => {
   if (decision._tag !== "RunFailed") return Option.none();
-  switch (decision.outcome.failure._tag) {
+  if (Result.isSuccess(result)) return Option.none();
+  switch (result.failure._tag) {
     case "QuestionFailure":
       return Option.some("question");
     case "BlockedFailure":
