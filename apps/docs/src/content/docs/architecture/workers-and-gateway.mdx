@@ -8,7 +8,7 @@ sidebar:
 import { FileTree, TabItem, Tabs } from "@astrojs/starlight/components";
 
 :::note
-This page describes commit [`7c0c3d3`](https://github.com/basaltbytes/usine/tree/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9) of basaltbytes/usine as it was on 2026-10-16, with later changes: the executor's own admin API forward ([#249][], 2026-10-19), refused GitHub tokens ([#431][], 2026-10-20), SSH workers that a reload adds or removes ([#387][], 2026-10-20), the recorded kind of the gateway's Anthropic credential ([#248][], 2026-10-22), SSH to the gateway over a tailnet ([#492][], 2026-10-24), the Claude Code 2.1.308 and Codex 0.159.2 pins in `cloud-init.yaml` ([#229][], 2026-10-24), release downloads and GitHub redirects through `git.<domain>` ([#237][], 2026-10-24), a renamed repository's new name ([#528][], 2026-10-25), a container per attempt on an SSH worker with Docker ([#548](https://github.com/basaltbytes/usine/issues/548), 2026-10-25), a machine per attempt on an SSH worker with a provisioner ([#550][], 2026-10-25), new names learned only from a rename that GitHub's API confirms ([#558][], 2026-10-26), container limits derived from the machine ([#588](https://github.com/basaltbytes/usine/issues/588), 2026-10-26), the instance ID label on attempt containers and one Node.js major version for the attempt image and the worker machine ([#589][], 2026-10-26), and the orchestrator's server in the gateway's network ([#609](https://github.com/basaltbytes/usine/issues/609), 2026-10-27).
+This page describes commit [`7c0c3d3`](https://github.com/basaltbytes/usine/tree/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9) of basaltbytes/usine as it was on 2026-10-16, with later changes: the executor's own admin API forward ([#249][], 2026-10-19), refused GitHub tokens ([#431][], 2026-10-20), SSH workers that a reload adds or removes ([#387][], 2026-10-20), the recorded kind of the gateway's Anthropic credential ([#248][], 2026-10-22), SSH to the gateway over a tailnet ([#492][], 2026-10-24), the Claude Code 2.1.308 and Codex 0.159.2 pins in `cloud-init.yaml` ([#229][], 2026-10-24), release downloads and GitHub redirects through `git.<domain>` ([#237][], 2026-10-24), a renamed repository's new name ([#528][], 2026-10-25), a container per attempt on an SSH worker with Docker ([#548](https://github.com/basaltbytes/usine/issues/548), 2026-10-25), a machine per attempt on an SSH worker with a provisioner ([#550][], 2026-10-25), new names learned only from a rename that GitHub's API confirms ([#558][], 2026-10-26), container limits derived from the machine ([#588](https://github.com/basaltbytes/usine/issues/588), 2026-10-26), the instance ID label on attempt containers and one Node.js major version for the attempt image and the worker machine ([#589][], 2026-10-26), and the orchestrator's server in the gateway's network ([#609](https://github.com/basaltbytes/usine/issues/609), 2026-10-27). The gateway-held Codex login, attempt home cleanup, and session resume sections reflect [#561](https://github.com/basaltbytes/usine/issues/561) (2026-10-28), building on commit [`80f2eb6`](https://github.com/basaltbytes/usine/commit/80f2eb6).
 :::
 
 A worker has an attempt's checkout and runs its children; the Pi parent runs in the orchestrator. [`infra/hetzner/README.md`](https://github.com/basaltbytes/usine/blob/main/infra/hetzner/README.md) and [`infra/hetzner/gateway/README.md`](https://github.com/basaltbytes/usine/blob/main/infra/hetzner/gateway/README.md) give the operating procedures.
@@ -122,21 +122,23 @@ A shell script writes the token from standard input, never a command line, to `<
 
 The children's environment has an exported part, on each command line and without secrets, and a sent part, passed with OpenSSH `SendEnv` and accepted by the worker's sshd with `AcceptEnv`, which keeps the caller token off command lines ([gateway/environment.ts:88][], [commands.ts:101][]). The clone URL is `http://git.<domain>/<owner>/<repo>.git` ([gateway/environment.ts:33][]).
 
-| Variable                                                 | Value                                                                | Part     |
-| -------------------------------------------------------- | -------------------------------------------------------------------- | -------- |
-| `GIT_CONFIG_COUNT`                                       | `3`                                                                  | exported |
-| `GIT_CONFIG_KEY_0`                                       | `http.http://git.<domain>/.extraHeader`                              | exported |
-| `GIT_CONFIG_VALUE_0`                                     | `x-usine-gateway-token: <caller token>`                              | sent     |
-| `GIT_CONFIG_KEY_1`, `GIT_CONFIG_KEY_2`                   | `url.http://git.<domain>/.insteadOf`                                 | exported |
-| `GIT_CONFIG_VALUE_1`, `GIT_CONFIG_VALUE_2`               | `https://github.com/`, `https://git.<domain>/`                       | exported |
-| `GH_HOST`                                                | `git.<domain>`                                                       | exported |
-| `GH_CONFIG_DIR`                                          | `<worker directory>/gh`                                              | exported |
-| `GH_PROMPT_DISABLED`                                     | `1`                                                                  | exported |
-| `HTTPS_PROXY`, `HTTP_PROXY`, `https_proxy`, `http_proxy` | `http://<domain>:3128`                                               | exported |
-| `NO_PROXY`, `no_proxy`                                   | `localhost,127.0.0.1,::1,<domain>`                                   | exported |
-| `GH_ENTERPRISE_TOKEN`, `GH_TOKEN`                        | the caller token                                                     | sent     |
-| `ANTHROPIC_BASE_URL`                                     | `http://llm.<domain>/anthropic`, with `anthropic` in `llm_providers` | exported |
-| `ANTHROPIC_AUTH_TOKEN`                                   | the caller token, with `anthropic` in `llm_providers`                | sent     |
+| Variable                                                 | Value                                                                     | Part     |
+| -------------------------------------------------------- | ------------------------------------------------------------------------- | -------- |
+| `GIT_CONFIG_COUNT`                                       | `3`                                                                       | exported |
+| `GIT_CONFIG_KEY_0`                                       | `http.http://git.<domain>/.extraHeader`                                   | exported |
+| `GIT_CONFIG_VALUE_0`                                     | `x-usine-gateway-token: <caller token>`                                   | sent     |
+| `GIT_CONFIG_KEY_1`, `GIT_CONFIG_KEY_2`                   | `url.http://git.<domain>/.insteadOf`                                      | exported |
+| `GIT_CONFIG_VALUE_1`, `GIT_CONFIG_VALUE_2`               | `https://github.com/`, `https://git.<domain>/`                            | exported |
+| `GH_HOST`                                                | `git.<domain>`                                                            | exported |
+| `GH_CONFIG_DIR`                                          | `<worker directory>/gh`                                                   | exported |
+| `GH_PROMPT_DISABLED`                                     | `1`                                                                       | exported |
+| `HTTPS_PROXY`, `HTTP_PROXY`, `https_proxy`, `http_proxy` | `http://<domain>:3128`                                                    | exported |
+| `NO_PROXY`, `no_proxy`                                   | `localhost,127.0.0.1,::1,<domain>`                                        | exported |
+| `GH_ENTERPRISE_TOKEN`, `GH_TOKEN`                        | the caller token                                                          | sent     |
+| `ANTHROPIC_BASE_URL`                                     | `http://llm.<domain>/anthropic`, with `anthropic` in `llm_providers`      | exported |
+| `ANTHROPIC_AUTH_TOKEN`                                   | the caller token, with `anthropic` in `llm_providers`                     | sent     |
+| `CODEX_HOME`                                             | `<root>/workers/<name>/codex/<attempt>`, with `openai` in `llm_providers` | exported |
+| `USINE_GATEWAY_TOKEN`                                    | the caller token, with `openai` in `llm_providers`                        | sent     |
 
 In an attempt's container, the exported part is the container's environment and each command line's, and the sent part goes into the container on `docker run`'s standard input (`--env-file /dev/stdin`). Children and checkout commands run with `docker exec` and send nothing over SSH. Only the fetch into the cached clone, as the SSH user, still sends the caller token with `SendEnv`. Each container sees only its own attempt's caller token ([#243](https://github.com/basaltbytes/usine/issues/243)).
 
@@ -305,14 +307,15 @@ Behind a gateway, the check for each brain depends on where its harness gets its
 ```mermaid
 flowchart TD
   harness{"brain's harness"} -->|"claude, with anthropic<br/>in llm_providers"| binary["claude --version only"]
-  harness -->|"claude without it,<br/>or codex"| login["login check, as on a<br/>Worker without a Gateway"]
+  harness -->|"codex, with openai<br/>in llm_providers"| codex["codex --version,<br/>supported version required"]
+  harness -->|"provider absent from<br/>llm_providers"| login["login check, as on a<br/>Worker without a Gateway"]
   login --> hosts["each login host responds<br/>through the forward proxy"]
   harness -->|pi| refused["refused: Pi children<br/>do not run remotely"]
 ```
 
 A provisioned worker has no machine at preflight, so it gets the checks of [Preflight of a provisioned worker](#preflight-of-a-provisioned-worker) instead, and the checks above run on its first machine each day.
 
-If the forward doesn't open, the error gives an `ssh` command that shows why. With the Anthropic key on the gateway, the executor records the credential kind that `GET /v1/providers` reports, `api-key` or `subscription` (never the credential, as of the last reload), with the worker, so usage counts its Claude Code children in the billed pool ([#248][], [gateway/preflight.ts:71][], [ADR 0013](https://github.com/basaltbytes/usine/blob/main/docs/adr/0013-cost-accounting-native-meters-guardrails.md)). No Anthropic credential fails the preflight; a gateway too old to answer keeps the Claude plan pool, with a warning once per worker.
+If the forward doesn't open, the error gives an `ssh` command that shows why. For each provider in `llm_providers`, the executor records the credential kind that `GET /v1/providers` reports, `api-key` or `subscription`, without reading the credential. Claude Code and Codex children use that recorded kind for their usage pool ([ADR 0013](https://github.com/basaltbytes/usine/blob/main/docs/adr/0013-cost-accounting-native-meters-guardrails.md)). A missing credential for a listed provider fails preflight. A gateway too old to report credentials keeps the Claude plan pool with a warning for Anthropic, but fails preflight for OpenAI because it can't serve Codex's gateway provider.
 
 Only exe.dev workers have long-lived GitHub credentials, their integrations, which preflight checks (`credentials` capability, [exe-dev/preflight.ts:123][]). Local and SSH attempts get tokens minted in `prepare`: a refusal, because the installation doesn't cover the repository, lacks a permission, or is suspended, fails the attempt once with GitHub's reason ([#431][]), and an unreachable GitHub or a rate limit is a retryable `InfraFailure`.
 
@@ -351,6 +354,7 @@ flowchart LR
     gh["gh"]
     socket["/run/usine-gateway/<br/>http.sock"]
     claude["Claude Code, with<br/>anthropic in llm_providers"]
+    codex["Codex, with<br/>openai in llm_providers"]
     tools["package managers,<br/>harness logins, apt"]
   end
   subgraph gateway["Gateway VM 10.42.0.2"]
@@ -361,11 +365,12 @@ flowchart LR
   gh --> socket
   socket -->|"systemd socket proxy"| reverse
   git -->|"git.gw.internal"| reverse
-  claude -->|"llm.gw.internal"| reverse
+  claude -->|"llm.gw.internal, caller token"| reverse
+  codex -->|"llm.gw.internal/openai/v1,<br/>caller token"| reverse
   tools -->|"HTTPS_PROXY, HTTP_PROXY,<br/>apt's proxy setting"| egress
   worker -.->|"name lookups"| dns
   reverse -->|"HTTPS, installation token"| github["github.com<br/>api.github.com<br/>uploads.github.com"]
-  reverse -->|"HTTPS, the Gateway's key"| llm["Anthropic, OpenAI"]
+  reverse -->|"HTTPS, the gateway's credential"| llm["Anthropic, OpenAI"]
   egress -->|"allowlisted hosts only"| hosts["package hosts,<br/>login hosts"]
 ```
 
@@ -621,23 +626,21 @@ No token goes through the orchestrator; each repository needs a persistent exe.d
 
 The orchestrator reads the gateway's admin token from the `admin_token_env` variable, at startup or at the reload that adds the worker. If it's unset, startup stops with a `gateway` capability error ([orchestrator/src/ssh.ts:27][]), and a reload is refused with a `ReloadPreflightError` of that kind. The variable must be in the environment that `usine up` starts with.
 
-## Harness logins on the worker
+## Harness logins
 
-The operator logs in Claude Code and Codex on the worker as `usine` with `claude auth login` and `codex login --device-auth`. Behind a gateway, logins use the forward proxy, whose allowlist has their hosts:
+With `openai` in a worker's `llm_providers`, the gateway stores the ChatGPT login in the Codex `auth.json` named by `USINE_GATEWAY_CHATGPT_AUTH_FILE`. It refreshes the access token before expiry and writes the rotated tokens back to that file. Use a separate login for the gateway: two copies that refresh the same token invalidate each other. The [gateway setup guide](/guides/add-a-worker/) describes the configuration. An OpenAI API key can occupy the same provider slot.
 
-```txt title="infra/hetzner/gateway/egress-allowlist"
-# Claude Code with a Claude subscription: the API, and the OAuth token
-# endpoint that claude auth login and token refreshes call.
-api.anthropic.com
-platform.claude.com
+Each attempt uses a caller token instead of the ChatGPT credential. The executor writes `<root>/workers/<name>/codex/<attempt>/config.toml`, sets `CODEX_HOME` to that directory, and configures a `model_provider` with `base_url = "http://llm.<domain>/openai/v1"`, `env_key = "USINE_GATEWAY_TOKEN"`, `wire_api = "responses"`, and `requires_openai_auth = false`. The file contains no token; the caller token reaches the attempt through SSH environment forwarding or the container's standard input. The gateway validates its attachment, replaces it with the ChatGPT access token and account ID, and forwards Responses requests to the ChatGPT backend. See [ADR 0027](https://github.com/basaltbytes/usine/blob/main/docs/adr/0027-gateway-credential-proxy.md), amendment of 2026-10-25.
 
-# Codex with a ChatGPT plan: the ChatGPT API, and the device-code login and
-# token refreshes.
-chatgpt.com
-auth.openai.com
-```
+With `anthropic` in `llm_providers`, Claude Code calls `llm.<domain>/anthropic` with the caller token, and the gateway substitutes its API key or subscription token. A harness whose provider isn't listed uses the login on a long-lived worker, through the forward proxy when configured. Those logins need their hosts in the proxy's allowlist. A provisioned machine has no saved login; see [Harness credentials](#harness-credentials).
 
-With `llm_providers: [anthropic]`, Claude Code children call `llm.<domain>/anthropic`, and the gateway sends its own key; its use of a Claude subscription token there is untested against Anthropic ([#234][]), and it has no ChatGPT login ([#235][]). [ADR 0027](https://github.com/basaltbytes/usine/blob/main/docs/adr/0027-gateway-credential-proxy.md), amendment of 2026-10-15, explains why logins stay on the worker. A machine of a provisioned worker has no login; see [Harness credentials](#harness-credentials).
+### Attempt Codex homes
+
+Codex saves sessions in the attempt's `CODEX_HOME`, which the attempt container mounts read-write. Cleanup removes the container before removing the home. After a crash, `Executor.sweep` removes homes on long-lived SSH workers only when no attempt in the process uses them and their checkouts are gone. A checkout retained for reattachment or unpreserved work keeps its home until a later sweep can remove it.
+
+**Discard leftovers** also removes the recorded attempts' Codex homes from a removed SSH worker, using its saved connection details. It leaves the checkouts. If the worker can't be reached, cleanup logs the failure and the operator must remove the homes. Provisioned machines delete their homes with the machine. Container mounts use the same directories on the host, so these rules cover attempts both with and without Docker.
+
+The run page hides **Resume details** for a Codex child with a recorded external credential, including the gateway's ChatGPT login: the operator's shell has neither the attempt's home setting nor its caller token. Codex children that used a local login keep the action, and a recorded custom home is included as `CODEX_HOME` in the command.
 
 ## cloud-init files
 
@@ -694,7 +697,7 @@ write_files:
   - path: /etc/ssh/sshd_config.d/40-usine-gateway.conf
     permissions: "0644"
     content: |
-      AcceptEnv GIT_CONFIG_VALUE_0 GH_ENTERPRISE_TOKEN GH_TOKEN ANTHROPIC_AUTH_TOKEN
+      AcceptEnv GIT_CONFIG_VALUE_0 GH_ENTERPRISE_TOKEN GH_TOKEN ANTHROPIC_AUTH_TOKEN USINE_GATEWAY_TOKEN
 ```
 
 These variables use the gateway's address and serve SSH sessions such as logins; attempt children get the executor's exported values, which use the domain: `http://<domain>:3128`. `gateway.sh` writes the gateway's address into the worker nftables file and the domain into the worker cloud-init, by default `10.42.0.2` and `gw.internal` ([gateway.sh:19][]):
