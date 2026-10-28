@@ -6,6 +6,8 @@ The instance repo needs **no remote**: `usine init` creates a local git repo, an
 
 The file/database boundary is **authored versus runtime**: authored content (loop bodies, agents, lane maps, settings) is committed files, and runtime toggles (pausing a loop) are database state, with runs and events.
 
+_Note, 2026-10-28 ([ADR 0031](./0031-authored-configuration-in-the-database.md), [#633](https://github.com/basaltbytes/usine/issues/633)):_ authored configuration moves to the database too, so the instance repo and its optional remote are no longer needed, and revisions in the database replace git history as the audit trail. ADR 0031 chooses the option that this ADR rejects below, "Config in the database, files as export", and records why.
+
 ## Considered options
 
 - **Everything commits** (pause as `paused: true` frontmatter): the file stays the whole truth, but a commit per toggle is ceremony for a switch, and noise in authored history.
