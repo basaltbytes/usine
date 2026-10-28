@@ -241,7 +241,7 @@ To run the reader browser tests alone:
 pnpm --filter @usine/web exec vitest run src/components/runs/transcript/conversation.browser.test.tsx
 ```
 
-`pnpm --filter @usine/web test` runs the task list browser tests in a separate process before the full suite, including in CI. To run the isolated check directly:
+To run the task list browser tests alone:
 
 ```sh
 pnpm --filter @usine/web exec vitest run src/features/tasks/list.page.browser.test.tsx
