@@ -12,7 +12,6 @@ import type {
 import { RemoteShell, SSH_FAILURE } from "@usine/agents/child-host";
 import {
   Array as Arr,
-  Cache,
   DateTime,
   Duration,
   Effect,
@@ -24,7 +23,6 @@ import {
   Ref,
   Result,
 } from "effect";
-import { homedir } from "node:os";
 import {
   type ExecutorError,
   ExecutorOperationError,
@@ -46,8 +44,7 @@ import {
   type PinnedHostKey,
   type SshWorkerEntry,
 } from "../workers.ts";
-import { BOAT_API, boatDriverFor } from "./boat.ts";
-import { HETZNER_API, hetznerDriverFor } from "./hetzner.ts";
+import { machineDriversFor } from "./drivers.ts";
 import {
   attemptTag,
   type ListedMachine,
@@ -183,10 +180,6 @@ const randomHex = (length: number) =>
     Effect.map((digits) => digits.map((digit) => digit.toString(16)).join("")),
   );
 
-/** Returns the absolute path of a key file given as absolute or `~/`. */
-const expandHome = (file: string): string =>
-  file.startsWith("~/") ? `${homedir()}/${file.slice(2)}` : file;
-
 const operationError =
   (operation: "prepare" | "cleanup") => (error: { readonly message: string }) =>
     new ExecutorOperationError({ operation, message: error.message, cause: error });
@@ -228,58 +221,8 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
   const knownHostsFile = (provider: MachineProvider, id: MachineId) =>
     path.join(knownHostsDirectory, `${provider}-${id}`);
 
-  const readPublicKey = Effect.fn("SshExecutor.readPublicKey")(function* (entry: SshWorkerEntry) {
-    const worker = entry.address.name;
-    const identity = Option.getOrUndefined(entry.address.identityFile);
-    const file = identity === undefined ? undefined : `${expandHome(identity)}.pub`;
-    const text =
-      file === undefined
-        ? Option.none<string>()
-        : yield* fs.readFileString(file).pipe(Effect.option);
-    const key = Option.filter(
-      Option.map(text, (content) => content.trim()),
-      (content) => content.length > 0,
-    );
-    if (Option.isSome(key)) return key.value;
-    return yield* new WorkerCapabilityError({
-      worker,
-      capability: "credentials",
-      message: `Provisioned worker "${worker}" needs the public key of identity_file at ${file ?? "<identity_file>.pub"}, which it adds to each Boat sandbox`,
-      cause: new Error(`no public key at ${file ?? "identity_file"}`),
-    });
-  });
-
-  const buildDriver = Effect.fn("SshExecutor.machineDriver")(function* (worker: WorkerName) {
-    const entry = yield* options.workerFor(worker);
-    const provisioner = provisionerOf(entry);
-    if (Option.isNone(provisioner))
-      return yield* new WorkerCapabilityError({
-        worker,
-        capability: "machine",
-        message: `SSH worker "${worker}" has a machine of its own and creates none`,
-        cause: new Error("long-lived SSH worker"),
-      });
-    const value = provisioner.value;
-    switch (value.provider) {
-      case "hetzner":
-        return yield* hetznerDriverFor(
-          worker,
-          value,
-          Option.isSome(entry.gateway),
-          settings.providerEndpoints?.hetzner ?? HETZNER_API,
-        );
-      case "boat":
-        return yield* boatDriverFor(
-          worker,
-          value,
-          yield* readPublicKey(entry),
-          settings.providerEndpoints?.boat ?? BOAT_API,
-        );
-    }
-  });
-  const drivers = yield* Cache.make({ capacity: Number.POSITIVE_INFINITY, lookup: buildDriver });
-  const driverFor = (worker: WorkerName): Effect.Effect<MachineDriver, ExecutorError> =>
-    Cache.get(drivers, worker);
+  const drivers = yield* machineDriversFor(options);
+  const driverFor = drivers.get;
 
   const register = (fields: Omit<Held, "hold">) =>
     Ref.getAndUpdate(nextHold, (count) => count + 1).pipe(
@@ -340,7 +283,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
   ) {
     const cached = (yield* Ref.get(earlierMachines)).get(worker);
     if (cached !== undefined) return cached;
-    const listed = yield* driver.list(instance, worker);
+    const listed = yield* driver.list(instance, Option.some(worker));
     yield* Ref.update(earlierMachines, (current) => new Map(current).set(worker, listed));
     yield* Effect.logInfo("Listed the machines of a provisioned Worker for its earlier Attempts", {
       worker,
@@ -538,6 +481,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     brains: ReadonlyArray<BrainSpec>,
   ) {
     const worker = machine.address.name;
+    yield* Effect.annotateCurrentSpan({ worker, host: machine.shell.destination });
     const now = DateTime.toEpochMillis(yield* DateTime.now);
     const last = (yield* Ref.get(checkedOn)).get(worker);
     const provisioner = machine.address.machine;
@@ -829,7 +773,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     const worker = entry.address.name;
     yield* Effect.annotateCurrentSpan({ worker });
     const driver = yield* driverFor(worker);
-    const listed = yield* driver.list(instance, worker);
+    const listed = yield* driver.list(instance, Option.some(worker));
     const current = [...(yield* Ref.get(held)).values()].filter(
       (machine) => machine.worker === worker,
     );
@@ -843,6 +787,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
           ),
       );
     let deleted = 0;
+    let failed = 0;
     for (const machine of listed) {
       const holder = holding(machine);
       if (holder !== undefined) {
@@ -850,20 +795,25 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
           if (Option.isNone(holder.id))
             yield* update(holder.hold, (found) => ({ ...found, id: Option.some(machine.id) }));
           yield* discard(holder.hold, "an earlier deletion failed");
+          if (Option.isSome(yield* entryOf(holder.hold))) failed += 1;
         }
         continue;
       }
       const removed = yield* destroy(driver, worker, machine.id).pipe(
         Effect.as(true),
         Effect.tapError((error) =>
-          Effect.logWarning(
-            "Could not delete a machine no Attempt holds; the next sweep tries again",
-            { worker, machine: machine.id, message: error.message },
-          ),
+          Effect.logWarning("Could not delete a machine no Attempt holds", {
+            worker,
+            machine: machine.id,
+            message: error.message,
+          }),
         ),
         Effect.orElseSucceed(() => false),
       );
-      if (!removed) continue;
+      if (!removed) {
+        failed += 1;
+        continue;
+      }
       deleted += 1;
       yield* Effect.logInfo("Deleted a machine that no Attempt holds", {
         worker,
@@ -883,13 +833,16 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
       listed: listed.length,
       deleted,
       held: current.length,
+      failed,
     });
+    return failed;
   });
 
   const sweep = Effect.fn("SshExecutor.sweepProvisionedMachines")(function* () {
     const provisioned = (yield* options.entries).filter((entry) =>
       Option.isSome(provisionerOf(entry)),
     );
+    yield* drivers.warnUnowned(provisioned);
     yield* Effect.forEach(
       provisioned,
       (entry) =>
@@ -904,6 +857,43 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
         ),
       { discard: true },
     );
+  });
+
+  const retire = Effect.fn("SshExecutor.sweepRemovedWorker")(function* (worker: WorkerName) {
+    yield* Effect.annotateCurrentSpan({ worker });
+    yield* Effect.gen(function* () {
+      const entry = yield* options.workerFor(worker);
+      if (Option.isNone(provisionerOf(entry))) return;
+      const failed = yield* sweepWorker(entry);
+      if (failed > 0)
+        return yield* Effect.logWarning(
+          "The removed Worker's final sweep could not delete all machines; delete them at the provider using the instance and worker labels",
+          { worker, instance, failed },
+        );
+      yield* Effect.logInfo(
+        "Swept the removed Worker's machines before discarding its provider token",
+        { worker },
+      );
+    }).pipe(
+      Effect.tapError((error) =>
+        Effect.logWarning(
+          "The removed Worker's final machine sweep failed; delete its machines at the provider using the instance and worker labels",
+          { worker, instance, message: error.message },
+        ),
+      ),
+      Effect.ignore,
+    );
+    yield* drivers.forget(worker);
+    yield* Ref.update(checkedOn, (current) => {
+      const next = new Map(current);
+      next.delete(worker);
+      return next;
+    });
+    yield* Ref.update(earlierMachines, (current) => {
+      const next = new Map(current);
+      next.delete(worker);
+      return next;
+    });
   });
 
   const machines = Ref.get(held).pipe(
@@ -1037,6 +1027,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
       sweep: sweep(),
       machines,
     }),
+    retire,
     attemptMachine,
     recoveryMachine,
     recovered,

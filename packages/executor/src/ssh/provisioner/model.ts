@@ -97,10 +97,10 @@ export interface MachineDriver {
   ) => Effect.Effect<MachineEndpoint, MachineUnavailableError>;
   /** Deletes the machine. A machine that is already gone counts as deleted. */
   readonly remove: (id: MachineId) => Effect.Effect<void, ProviderApiError>;
-  /** Lists the machines tagged with `instance` and `worker`. */
+  /** Lists machines tagged with `instance`, optionally limited to one Worker. */
   readonly list: (
     instance: string,
-    worker: WorkerName,
+    worker: Option.Option<WorkerName>,
   ) => Effect.Effect<ReadonlyArray<ListedMachine>, ProviderApiError>;
 }
 

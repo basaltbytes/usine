@@ -446,12 +446,18 @@ export const hetznerDriverFor = (
       );
     });
 
-    const list = Effect.fn("HetznerDriver.list")(function* (instance: string, listed: WorkerName) {
-      yield* Effect.annotateCurrentSpan({ worker: listed });
+    const list = Effect.fn("HetznerDriver.list")(function* (
+      instance: string,
+      listed: Option.Option<WorkerName>,
+    ) {
+      yield* Effect.annotateCurrentSpan({
+        instance,
+        worker: Option.getOrElse(listed, () => "all"),
+      });
       const pages = yield* listAll(
         "/servers",
         {
-          label_selector: `${LABELS.instance}=${tagValue(instance)},${LABELS.worker}=${tagValue(listed)}`,
+          label_selector: `${LABELS.instance}=${tagValue(instance)}${Option.match(listed, { onNone: () => "", onSome: (worker) => `,${LABELS.worker}=${tagValue(worker)}` })}`,
         },
         Servers,
         "list servers",

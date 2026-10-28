@@ -508,6 +508,8 @@ The parser refuses an `ssh` worker that:
 - Has a `gateway` and a Hetzner provisioner without `network`.
 - Has a `gateway` and a Boat provisioner, or a Boat provisioner without `identity_file`.
 
+Removing a worker keeps its provider token for one final machine sweep, then discards it. If deletion fails, the warning includes the instance and worker labels to use for manual cleanup. At startup, usine also warns about machines with its instance label whose worker is not configured. This discovery uses configured workers' tokens; if the removed worker used a separate provider account, restore its configuration to sweep that account.
+
 A reload refuses a changed `provisioner` with `RestartRequiredError`.
 
 Preflight creates no machine. It checks the provider token; for Hetzner, the server type in the location, the image, the SSH key, and the network; for Boat, the account's limits, which fail preflight if Boat doesn't offer the account the `size`. Hetzner documents no limits endpoint, so preflight reads none for it. It also checks the gateway's admin API, and that each harness of the roster has a credential that no machine has to keep: for Claude Code, `anthropic` in the gateway's `llm_providers` or `api_keys.anthropic`; for Codex, `openai` in `llm_providers` or `api_keys.openai`. Pi agents fail preflight on a provisioned worker. A Hetzner server type that is out of stock in the location logs a warning, and so does a Boat account that can't start sandboxes now or whose active-sandbox cap is below `max_concurrent_attempts`. The checks that need a machine run on the worker's first machine each day (UTC) and its first machine after `usine up`.

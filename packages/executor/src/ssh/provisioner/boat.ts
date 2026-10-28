@@ -338,9 +338,15 @@ export const boatDriverFor = (
         );
     });
 
-    const list = Effect.fn("BoatDriver.list")(function* (instance: string, listed: WorkerName) {
-      yield* Effect.annotateCurrentSpan({ worker: listed });
-      const prefix = `${NAME_PREFIX} ${tagValue(instance, 24)} ${tagValue(listed, 24)} `;
+    const list = Effect.fn("BoatDriver.list")(function* (
+      instance: string,
+      listed: Option.Option<WorkerName>,
+    ) {
+      yield* Effect.annotateCurrentSpan({
+        instance,
+        worker: Option.getOrElse(listed, () => "all"),
+      });
+      const prefix = `${NAME_PREFIX} ${tagValue(instance, 24)} ${Option.match(listed, { onNone: () => "", onSome: (worker) => `${tagValue(worker, 24)} ` })}`;
       const machines: Array<ListedMachine> = [];
       let cursor: string | null = null;
       do {
