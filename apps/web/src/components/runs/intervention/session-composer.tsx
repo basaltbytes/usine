@@ -10,6 +10,7 @@ import {
 import type { RunId } from "@usine/core/run";
 import { SessionIntervention } from "@usine/orchestrator/operator";
 import { useId, useState } from "react";
+import { runDetailKey } from "~/lib/runs/queries";
 import { api } from "~/lib/api";
 import { Button } from "~/components/ui/button";
 import { Textarea } from "~/components/ui/textarea";
@@ -47,7 +48,7 @@ export const SessionComposer = ({
     onSuccess: async (_result, action) => {
       if (action._tag === "OperatorMessage")
         setMessage((current) => (current === action.message ? "" : current));
-      await queryClient.invalidateQueries({ queryKey: ["run", runId] });
+      await queryClient.invalidateQueries({ queryKey: runDetailKey(runId) });
     },
   });
   const send = () => {

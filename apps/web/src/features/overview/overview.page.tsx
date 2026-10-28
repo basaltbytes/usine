@@ -1,4 +1,4 @@
-import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import type { NeedView, RepositoryPollView } from "@usine/orchestrator/operator";
 import { ErrorAlert } from "~/components/error-alert";
 import { Page, PageHeading } from "~/components/page";
@@ -7,11 +7,10 @@ import {
   ReloadOutcome,
   useReloadConfiguration,
 } from "~/components/configuration/reload";
-import { Skeleton } from "~/components/ui/skeleton";
 import { useNow } from "~/hooks/use-now";
 import { NeedEntry } from "~/components/needs-you/needs-you";
 import { overviewQuery } from "~/lib/overview";
-import { deskCounts, lastCheckedLabel } from "~/features/overview/strings";
+import { deskCounts, lastCheckedLabel, overviewRefreshFailed } from "~/features/overview/strings";
 import { LastOutcomes } from "~/features/overview/components/last-outcomes";
 import { NotMoving } from "~/features/overview/components/not-moving";
 import { deskQuery } from "~/lib/desk/queries";
@@ -63,68 +62,38 @@ export const DeskNeedsYou = ({ needs, polls, now }: DeskNeedsYouProps) => (
   </DeskSection>
 );
 
-type LoadingBlockProps = { readonly id: string; readonly title: string };
-
-const LoadingBlock = ({ id, title }: LoadingBlockProps) => (
-  <DeskSection id={id} title={title}>
-    <div aria-hidden="true" className="flex flex-col border-t">
-      {[0, 1, 2].map((row) => (
-        <div key={row} className="flex h-11 items-center border-b">
-          <Skeleton className="h-3 w-2/5" />
-        </div>
-      ))}
-    </div>
-  </DeskSection>
-);
-
 /**
  * Renders the Overview page at `/`, with Statistics first. Needs attention reads the overview
  * query, Statistics its own queries, and the other sections the desk query.
  */
 export const Desk = () => {
   const { data: overview } = useSuspenseQuery(overviewQuery());
-  const desk = useQuery(deskQuery());
+  const desk = useSuspenseQuery(deskQuery());
   const now = useNow(15_000);
   const readOnly = overview._tag === "NeedsSetup";
   return (
     <Page width="full">
       <div className="flex flex-col gap-9 pb-2">
-        <PageHeading
-          title="Overview"
-          counts={desk.data === undefined ? undefined : deskCounts(desk.data)}
-        />
+        <PageHeading title="Overview" counts={deskCounts(desk.data)} />
         {overview.projects.length === 0 && <NoProjects />}
         <Statistics />
-        <DeskNeedsYou needs={overview.needsYou} polls={desk.data?.polls ?? []} now={now} />
-        {desk.data === undefined ? (
-          desk.isError ? (
-            <ErrorAlert title="Could not load the overview" message={desk.error.message} />
-          ) : (
-            <>
-              <LoadingBlock id="desk-running" title="Running" />
-              <LoadingBlock id="desk-not-moving" title="Stalled" />
-              <LoadingBlock id="desk-outcomes" title="Recent runs" />
-            </>
-          )
-        ) : (
-          <>
-            <DeskSection id="desk-running" title="Running" count={desk.data.running.length}>
-              <RunningNow running={desk.data.running} workers={desk.data.workers} now={now} />
-            </DeskSection>
-            <DeskSection id="desk-not-moving" title="Stalled" count={desk.data.notMoving.length}>
-              <NotMoving
-                stalled={desk.data.notMoving}
-                now={now}
-                readOnly={readOnly}
-                polled={desk.data.polls.some(({ polledAt }) => polledAt !== null)}
-              />
-            </DeskSection>
-            <DeskSection id="desk-outcomes" title="Recent runs">
-              <LastOutcomes outcomes={desk.data.lastOutcomes} now={now} />
-            </DeskSection>
-            {desk.data.workers.length > 0 && <WorkersLine workers={desk.data.workers} now={now} />}
-          </>
-        )}
+        <DeskNeedsYou needs={overview.needsYou} polls={desk.data.polls} now={now} />
+        {desk.isError && <ErrorAlert title={overviewRefreshFailed} message={desk.error.message} />}
+        <DeskSection id="desk-running" title="Running" count={desk.data.running.length}>
+          <RunningNow running={desk.data.running} workers={desk.data.workers} now={now} />
+        </DeskSection>
+        <DeskSection id="desk-not-moving" title="Stalled" count={desk.data.notMoving.length}>
+          <NotMoving
+            stalled={desk.data.notMoving}
+            now={now}
+            readOnly={readOnly}
+            polled={desk.data.polls.some(({ polledAt }) => polledAt !== null)}
+          />
+        </DeskSection>
+        <DeskSection id="desk-outcomes" title="Recent runs">
+          <LastOutcomes outcomes={desk.data.lastOutcomes} now={now} />
+        </DeskSection>
+        {desk.data.workers.length > 0 && <WorkersLine workers={desk.data.workers} now={now} />}
       </div>
     </Page>
   );

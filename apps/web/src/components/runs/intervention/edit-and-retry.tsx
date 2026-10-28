@@ -4,6 +4,9 @@ import { AttemptTask } from "@usine/core/attempt";
 import type { RunId } from "@usine/core/run";
 import { EditAndRetry as Amendment, type RunView } from "@usine/orchestrator/operator";
 import { useId, useState } from "react";
+import { overviewQuery } from "~/lib/overview";
+import { agentsQuery } from "~/lib/configuration/queries";
+import { runDetailKey } from "~/lib/runs/queries";
 import { api } from "~/lib/api";
 import { runAgainBlocked } from "~/lib/runs/strings";
 import { useRunAgain } from "~/hooks/runs/actions";
@@ -41,8 +44,8 @@ const useRetryWith = (run: RunView, close: () => void) => {
       api((client) => client.editAndRetry({ params: { runId: run.id }, payload: amendment })),
     onSuccess: async () => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["run", run.id] }),
-        queryClient.invalidateQueries({ queryKey: ["overview"] }),
+        queryClient.invalidateQueries({ queryKey: runDetailKey(run.id) }),
+        queryClient.invalidateQueries({ queryKey: overviewQuery().queryKey }),
       ]);
       close();
     },
@@ -64,10 +67,7 @@ export const EditAndRetry = ({ run, intent, close, openRun, className }: EditAnd
   const [agent, setAgent] = useState<string>(run.agent);
   const id = useId();
   const copy = editCopy[intent];
-  const roster = useQuery({
-    queryKey: ["agents"],
-    queryFn: () => api((client) => client.agents()),
-  });
+  const roster = useQuery(agentsQuery());
   const retry = useRetryWith(run, close);
   const again = useRunAgain();
   const mutation = intent === "retry" ? retry : again;

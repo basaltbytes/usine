@@ -13,6 +13,8 @@ import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import type { FactoryOverview } from "@usine/orchestrator/operator";
 import { Schema } from "effect";
+import { Suspense, lazy, useState } from "react";
+import { runDetailQuery } from "~/lib/runs/queries";
 import { AppSidebar, type OperatorView, useOperatorView } from "~/components/app-sidebar";
 import { BootScreen } from "~/components/boot-screen";
 import { cardIdentity } from "~/components/item/identity";
@@ -33,7 +35,6 @@ import { ConfigurationCrumbs } from "~/components/configuration/navigation";
 import { NeedsYou } from "~/components/needs-you/needs-you";
 import { rejectionMessage } from "~/lib/api";
 import { needsYouByProject, overviewQuery, projectParams } from "~/lib/overview";
-import { Suspense, lazy, useState } from "react";
 
 // Loaded on first open; it includes the transcript, Markdown, and message components.
 const RunDrawer = lazy(() =>
@@ -215,7 +216,16 @@ const Shell = () => {
 
 export const Route = createRootRouteWithContext<RouterContext>()({
   validateSearch: RootSearch,
-  loader: ({ context }) => context.queryClient.ensureQueryData(overviewQuery()),
+  loaderDeps: ({ search }) => ({ run: search.run }),
+  loader: async ({ context: { queryClient }, deps: { run } }) => {
+    await Promise.all([
+      queryClient.ensureQueryData(overviewQuery()),
+      // A rejected drawer query is displayed inside the drawer.
+      Promise.allSettled(
+        run === undefined ? [] : [queryClient.ensureQueryData(runDetailQuery(queryClient, run))],
+      ),
+    ]);
+  },
   pendingComponent: () => <BootScreen title="usine" description="Loading…" />,
   errorComponent: Unreachable,
   component: Shell,

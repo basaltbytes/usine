@@ -5,6 +5,8 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { page, userEvent } from "vitest/browser";
+import { overviewQuery } from "~/lib/overview";
+import { deskQuery } from "~/lib/desk/queries";
 import { routeTree } from "~/route-tree.gen";
 import {
   boardOverview,
@@ -41,8 +43,8 @@ beforeEach(() => {
   queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
-  queryClient.setQueryData(["overview"], boardOverview());
-  queryClient.setQueryData(["desk"], desk(boardStalled()));
+  queryClient.setQueryData(overviewQuery().queryKey, boardOverview());
+  queryClient.setQueryData(deskQuery().queryKey, desk(boardStalled()));
 });
 
 afterEach(() => {
@@ -188,7 +190,7 @@ it("opens the tokens per pool, summed over the task's runs, from the tokens or t
 });
 
 it("marks the priced dollars with an asterisk while a run has no price yet, and says why", async () => {
-  queryClient.setQueryData(["overview"], boardOverviewUnpriced());
+  queryClient.setQueryData(overviewQuery().queryKey, boardOverviewUnpriced());
   await mount(list);
   await expect
     .element(
@@ -218,7 +220,7 @@ it("marks the priced dollars with an asterisk while a run has no price yet, and 
 });
 
 it("marks the elapsed time with an asterisk while an attempt has no recorded timing, and says why", async () => {
-  queryClient.setQueryData(["overview"], boardOverviewUntimed());
+  queryClient.setQueryData(overviewQuery().queryKey, boardOverviewUntimed());
   await mount(list);
   // The canceled task's 10 min are unknown, and every run is priced.
   await expect
@@ -240,7 +242,10 @@ it("marks the elapsed time with an asterisk while an attempt has no recorded tim
 });
 
 it("says Needs attention for a failure no stall explains, then the last run's outcome once it is resolved", async () => {
-  queryClient.setQueryData(["desk"], desk(boardStalled().filter(({ item }) => item.number !== 28)));
+  queryClient.setQueryData(
+    deskQuery().queryKey,
+    desk(boardStalled().filter(({ item }) => item.number !== 28)),
+  );
   await mount(list);
   await expect
     .element(page.getByText("3 in flight, 1 needs attention, 1 done", { exact: true }))
@@ -250,7 +255,7 @@ it("says Needs attention for a failure no stall explains, then the last run's ou
   // It ended 80m ago, so it comes before #18, whose run was canceled a day ago.
   await expect.element(pinned).toBe(table().getByRole("row").nth(4).element());
 
-  queryClient.setQueryData(["overview"], boardOverviewResolved());
+  queryClient.setQueryData(overviewQuery().queryKey, boardOverviewResolved());
   await expect.element(pinned.getByRole("cell").nth(1)).toMatchTextContent(/^Failed · 1h ago$/u);
   await expect.element(page.getByText("3 in flight, 1 done", { exact: true })).toBeVisible();
 });
@@ -258,7 +263,7 @@ it("says Needs attention for a failure no stall explains, then the last run's ou
 it("says No runs yet when no task has a run", async () => {
   const overview = boardOverview();
   queryClient.setQueryData(
-    ["overview"],
+    overviewQuery().queryKey,
     new ReadyOverview({
       ...overview,
       projects: overview.projects.map(
@@ -314,7 +319,7 @@ it("shows Board and Tasks under the project in the sidebar, the open page's row 
 });
 
 it("keeps every title on one line beside all the columns and wide figures, the long statuses wrapping instead", async () => {
-  queryClient.setQueryData(["overview"], boardOverviewDocumented());
+  queryClient.setQueryData(overviewQuery().queryKey, boardOverviewDocumented());
   await mount(list);
   expect(columns()).toHaveLength(7);
   const merged = rowOf(/@usine\/config/u);
@@ -337,7 +342,7 @@ it("keeps every title on one line beside all the columns and wide figures, the l
 });
 
 it("breaks a status word wider than the Status column inside it, beside the whole title", async () => {
-  queryClient.setQueryData(["overview"], boardOverviewDocumentedLongLoop());
+  queryClient.setQueryData(overviewQuery().queryKey, boardOverviewDocumentedLongLoop());
   await mount(list);
   expect(columns()).toHaveLength(7);
   const row = rowOf(/@usine\/core/u);

@@ -55,6 +55,9 @@ import {
 import { QueryClient } from "@tanstack/react-query";
 import { renderToStaticMarkup as renderMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
+import { LaneName } from "@usine/config/board";
+import { GitHubLabelName } from "@usine/config/label";
+import { runDetailKey, runDetailKeys } from "~/lib/runs/queries";
 import {
   mergeEarlierTranscript,
   mergeTranscript,
@@ -67,8 +70,6 @@ import { Transcript } from "~/components/runs/transcript/transcript";
 import { CurrentActivity } from "~/components/runs/transcript/activity";
 import { readerDocument } from "~/lib/runs/transcript/document/model";
 import { withGitHubChanges } from "~/lib/runs/transcript/document/github-changes";
-import { LaneName } from "@usine/config/board";
-import { GitHubLabelName } from "@usine/config/label";
 import { TranscriptDisclosureProvider } from "~/components/runs/transcript/grouping/disclosure";
 import { MessageScrollerProvider } from "~/components/ui/message-scroller";
 import { presentTool, type ToolSection } from "~/lib/runs/transcript/tool/presentation";
@@ -581,8 +582,8 @@ describe("run transcript", () => {
 
   it("advances manual earlier-page cursors through the TanStack cache until exhaustion", () => {
     const queryClient = new QueryClient();
-    const key = ["run", "run-31"] as const;
-    queryClient.setQueryDefaults(["run"], {
+    const key = runDetailKey(RunId.make("run-31"));
+    queryClient.setQueryDefaults(runDetailKeys, {
       structuralSharing: RUN_DETAIL_CACHE_STRUCTURAL_SHARING,
     });
     queryClient.setQueryData(key, {

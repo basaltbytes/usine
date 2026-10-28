@@ -1,3 +1,7 @@
+import { AgentSessionId, ParentSession, TextOutput } from "@usine/core/agent/session";
+import { SessionEvent } from "@usine/core/attempt/channel";
+import { TranscriptSequence } from "@usine/engine/transcript";
+import { DeskView, TranscriptEventView, TranscriptPageCursor } from "@usine/orchestrator/operator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
 import { AgentName } from "@usine/core/agent";
@@ -28,11 +32,21 @@ import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { expect, it } from "vitest";
 import { commands, page } from "vitest/browser";
+import { overviewQuery } from "~/lib/overview";
+import { deskQuery } from "~/lib/desk/queries";
+import { runDetailQuery } from "~/lib/runs/queries";
 import { routeTree } from "~/route-tree.gen";
 import "~/index.css";
 
 declare module "vitest/browser" {
   interface BrowserCommands {
+    loaderTranscriptResponses: (
+      bodies: Readonly<Record<"cold" | "tail" | "empty" | "earlier" | "oldest", string>>,
+    ) => Promise<void>;
+    releaseEarlierTranscript: () => Promise<void>;
+    loaderTranscriptRequests: () => Promise<
+      ReadonlyArray<{ after: string | null; before: string | null; attempt: string | null }>
+    >;
     failureResolutionResponses: (
       before: string,
       after: string,
@@ -209,9 +223,9 @@ it("resolves a failure from Needs attention while retaining unrelated attention,
     await expect
       .element(needs.getByRole("button", { name: "Cancel run", exact: true }))
       .toBeVisible();
-    expect(queryClient.getQueryData<ReadyOverview>(["overview"])?.projects[0]?.status).toBe(
-      "clear",
-    );
+    expect(
+      queryClient.getQueryData<ReadyOverview>(overviewQuery().queryKey)?.projects[0]?.status,
+    ).toBe("clear");
   } finally {
     flushSync(() => root.unmount());
     queryClient.clear();
@@ -297,6 +311,142 @@ it("leaves a closed issue's failed run out of Needs attention and marks the issu
     await expect
       .element(needs.getByRole("button", { name: /implement: agent failure/, includeHidden: true }))
       .not.toBeInTheDocument();
+  } finally {
+    flushSync(() => root.unmount());
+    queryClient.clear();
+    host.remove();
+  }
+});
+
+it("shares a direct-link drawer's transcript with the run page and merges earlier pages around a tail refetch", async () => {
+  const id = RunId.make("loader-run");
+  const viewed = new RunView({ ...run, id });
+  const parent = new ParentSession({
+    id: AgentSessionId.make("loader-parent"),
+    agent,
+    brain: run.agentBrain,
+  });
+  const message = (sequence: number) =>
+    new TranscriptEventView({
+      sequence: TranscriptSequence.make(sequence),
+      attemptId,
+      receivedAt: "2026-09-17T00:10:00Z",
+      direction: "outbound",
+      payload: new SessionEvent({
+        event: new TextOutput({ session: parent, text: `Transcript message ${sequence}` }),
+      }),
+    });
+  const detail = (sequences: ReadonlyArray<number>, before: number | null) =>
+    new RunDetailView({
+      run: viewed,
+      agentDefinitionChanged: false,
+      eventDedupKey: "event",
+      eventPayload: {},
+      transcript: sequences.map(message),
+      sessionState: [],
+      earlierTranscript:
+        before === null
+          ? []
+          : [new TranscriptPageCursor({ attemptId, before: TranscriptSequence.make(before) })],
+    });
+  const encode = (sequences: ReadonlyArray<number>, before: number | null) =>
+    JSON.stringify(Schema.encodeSync(RunDetailView)(detail(sequences, before)));
+  await commands.loaderTranscriptResponses({
+    cold: encode([3, 4], 3),
+    tail: encode([5], null),
+    empty: encode([], null),
+    earlier: encode([2], 2),
+    oldest: encode([1], null),
+  });
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+  });
+  queryClient.setQueryData(
+    overviewQuery().queryKey,
+    new ReadyOverview({
+      projects: [
+        new ProjectView({
+          repository,
+          status: "clear",
+          runs: [viewed],
+          board: new BoardView({ lanes: [], failures: [] }),
+          labels: [],
+          preflightFindings: [],
+        }),
+      ],
+      loops: [],
+      needsYou: [],
+    }),
+  );
+  queryClient.setQueryData(
+    deskQuery().queryKey,
+    new DeskView({ running: [], notMoving: [], lastOutcomes: [], workers: [], polls: [] }),
+  );
+  const options = runDetailQuery(queryClient, id);
+  const router = createRouter({
+    routeTree,
+    context: { queryClient },
+    history: createMemoryHistory({ initialEntries: [`/projects/${repository}?run=${id}`] }),
+  });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await router.load();
+    expect(queryClient.getQueryState(options.queryKey)?.error).toBeNull();
+    expect(
+      queryClient.getQueryData(options.queryKey)?.transcript.map(({ sequence }) => sequence),
+    ).toEqual([3, 4]);
+    flushSync(() =>
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>,
+      ),
+    );
+    const drawer = page.getByRole("dialog");
+    await expect.element(drawer.getByText("Agent failure", { exact: true })).toBeVisible();
+    await drawer.getByRole("link", { name: "Open run page", exact: true }).first().click();
+    await expect
+      .element(page.getByRole("button", { name: "Load earlier", exact: true }))
+      .toBeVisible();
+    expect(
+      (await commands.loaderTranscriptRequests()).filter(
+        ({ after, before }) => after === null && before === null,
+      ),
+    ).toHaveLength(1);
+    await page.getByRole("button", { name: "Load earlier", exact: true }).click();
+    await expect
+      .poll(async () =>
+        (await commands.loaderTranscriptRequests()).some(
+          ({ before, attempt }) => before === "3" && attempt === attemptId,
+        ),
+      )
+      .toBe(true);
+    await queryClient.invalidateQueries({ queryKey: options.queryKey });
+    await commands.releaseEarlierTranscript();
+    await expect
+      .poll(() => queryClient.getQueryData(options.queryKey)?.earlierTranscript[0]?.before)
+      .toBe(2);
+    await page.getByRole("button", { name: "Load earlier", exact: true }).click();
+    await expect
+      .element(page.getByRole("button", { name: "Load earlier", exact: true }))
+      .not.toBeInTheDocument();
+    expect(queryClient.getQueryState(options.queryKey)?.error).toBeNull();
+    expect(
+      queryClient.getQueryData(options.queryKey)?.transcript.map(({ sequence }) => sequence),
+    ).toEqual([1, 2, 3, 4, 5]);
+    expect(await commands.loaderTranscriptRequests()).toContainEqual({
+      after: null,
+      before: "2",
+      attempt: attemptId,
+    });
+    await expect
+      .element(page.getByText("Transcript message 1", { exact: true }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("Transcript message 5", { exact: true }))
+      .toBeInTheDocument();
   } finally {
     flushSync(() => root.unmount());
     queryClient.clear();

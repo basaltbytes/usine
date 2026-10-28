@@ -133,7 +133,7 @@ beforeEach(async () => {
   await page.viewport(1100, 800);
   await respond();
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  queryClient.setQueryData(["overview"], overview());
+  queryClient.setQueryData(overviewQuery().queryKey, overview());
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -159,7 +159,7 @@ it("keeps a saved move in its destination through stale refreshes, then follows 
   await move(1, "Ready");
   await expectMovable(2, true);
   await respond(overview(["Backlog", "Backlog"], " after refresh"));
-  await queryClient.refetchQueries({ queryKey: ["overview"] });
+  await queryClient.refetchQueries({ queryKey: overviewQuery().queryKey });
   await expect
     .element(page.getByRole("link", { name: "Task 2 after refresh", exact: true }))
     .toBeVisible();
@@ -169,19 +169,19 @@ it("keeps a saved move in its destination through stale refreshes, then follows 
   await expect.element(lane("Ready").getByText("Backlog", { exact: true })).not.toBeInTheDocument();
 
   await respond(overview(["Backlog", "Backlog"], " after label change", ["bug"]));
-  await queryClient.refetchQueries({ queryKey: ["overview"] });
+  await queryClient.refetchQueries({ queryKey: overviewQuery().queryKey });
   await expect
     .element(page.getByRole("link", { name: "Task 2 after label change", exact: true }))
     .toBeVisible();
   await expect.element(lane("Ready").getByText("bug", { exact: true })).toBeVisible();
 
   await respond(overview(["Ready", "Backlog"]));
-  await queryClient.refetchQueries({ queryKey: ["overview"] });
+  await queryClient.refetchQueries({ queryKey: overviewQuery().queryKey });
   await expectMovable(1, true);
   await expect.element(taskIn("Ready")).toBeVisible();
 
   await respond(overview(["In progress", "Backlog"]));
-  await queryClient.refetchQueries({ queryKey: ["overview"] });
+  await queryClient.refetchQueries({ queryKey: overviewQuery().queryKey });
   await expect.element(taskIn("In progress")).toBeVisible();
 });
 
@@ -191,8 +191,8 @@ it("keeps separate saved moves while another card can move, and accepts work tha
   await move(2, "Ready");
   await expect.poll(async () => (await lane("Ready").getByRole("status").all()).length).toBe(2);
   await expect.poll(() => queryClient.isMutating()).toBe(0);
-  await queryClient.refetchQueries({ queryKey: ["overview"] });
-  await expect.poll(() => queryClient.isFetching({ queryKey: ["overview"] })).toBe(0);
+  await queryClient.refetchQueries({ queryKey: overviewQuery().queryKey });
+  await expect.poll(() => queryClient.isFetching({ queryKey: overviewQuery().queryKey })).toBe(0);
   await expect.element(taskIn("Ready", 1)).toBeVisible();
   await expect.element(taskIn("Ready", 2)).toBeVisible();
 
@@ -211,7 +211,7 @@ it("finishes an in-flight move in its original project after navigating to anoth
     needsYou: [],
   });
   await respond(data);
-  await queryClient.refetchQueries({ queryKey: ["overview"] });
+  await queryClient.refetchQueries({ queryKey: overviewQuery().queryKey });
   await commands.delayBoardMove();
   await move(1, "Ready");
   await expectMovable(2, false);
@@ -270,7 +270,7 @@ it("shows move progress even when the destination has no labels or Run details t
     ),
   });
   await respond(singleDestination);
-  await queryClient.refetchQueries({ queryKey: ["overview"] });
+  await queryClient.refetchQueries({ queryKey: overviewQuery().queryKey });
   await expect.element(lane("In progress")).not.toBeInTheDocument();
   await move(1, "Ready");
   await expectMovable(2, true);
@@ -291,13 +291,13 @@ it("keeps a saved destination when the project is reopened before GitHub is obse
     ),
   );
   await expect.element(taskIn("Ready")).toBeVisible();
-  await queryClient.refetchQueries({ queryKey: ["overview"] });
+  await queryClient.refetchQueries({ queryKey: overviewQuery().queryKey });
   await expect.element(taskIn("Ready")).toBeVisible();
 });
 
 it("takes a keyboard drop on an empty lane before a lane with cards", async () => {
   await respond(overview(["Backlog", "In progress"]));
-  await queryClient.refetchQueries({ queryKey: ["overview"] });
+  await queryClient.refetchQueries({ queryKey: overviewQuery().queryKey });
   await expect.element(taskIn("In progress", 2)).toBeVisible();
   const card = taskIn("Backlog").element().closest("[data-slot=card]");
   if (!(card instanceof HTMLElement)) throw new Error("No card for Task 1");

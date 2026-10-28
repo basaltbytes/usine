@@ -101,7 +101,7 @@ beforeEach(async () => {
   await commands.boardResponses(JSON.stringify(Schema.encodeSync(FactoryOverview)(overview)), 200);
   opened = [];
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  queryClient.setQueryData(["overview"], overview);
+  queryClient.setQueryData(overviewQuery().queryKey, overview);
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -280,7 +280,7 @@ it("times a waiting Run from its opening and a failed one from its failure, with
 it("shows a card whose running Run's Loop removed its lane label in that lane, counted, with its Run line", async () => {
   overview = boardOverviewReviewing();
   await commands.boardResponses(JSON.stringify(Schema.encodeSync(FactoryOverview)(overview)), 200);
-  flushSync(() => queryClient.setQueryData(["overview"], overview));
+  flushSync(() => queryClient.setQueryData(overviewQuery().queryKey, overview));
   const review = lane("Review");
   await expect.element(review.getByRole("heading", { name: "Review 2" })).toBeVisible();
   const card = cardOf(/^Keep a running card/u);
@@ -303,7 +303,7 @@ it("shows a card whose running Run's Loop removed its lane label in that lane, c
 it("shows a running card whose Loop swapped its lane label in the lane of its current labels, with its Run line", async () => {
   overview = boardOverviewReviewing();
   await commands.boardResponses(JSON.stringify(Schema.encodeSync(FactoryOverview)(overview)), 200);
-  flushSync(() => queryClient.setQueryData(["overview"], overview));
+  flushSync(() => queryClient.setQueryData(overviewQuery().queryKey, overview));
   const inProgress = lane("In progress");
   await expect.element(inProgress.getByRole("heading", { name: "In progress 2" })).toBeVisible();
   const card = cardOf(/^Move a running card/u);

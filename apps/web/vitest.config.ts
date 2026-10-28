@@ -26,6 +26,13 @@ interface StatisticsRequests {
   readonly tasks: Array<string | null>;
   readonly runs: Array<string | null>;
 }
+interface TranscriptExchange {
+  readonly earlier: Promise<Route>;
+  readonly earlierBody: string;
+  readonly requests: Array<{ after: string | null; before: string | null; attempt: string | null }>;
+}
+const transcriptExchanges = new WeakMap<Page, TranscriptExchange>();
+const delayedStatistics = new WeakMap<Page, { window: string; releases: Array<() => void> }>();
 const statisticsWindows = new WeakMap<Page, StatisticsRequests>();
 // The overview response delay after approval, as on a busy instance (#463).
 const SLOW_OVERVIEW_MS = 5_000;
@@ -66,6 +73,55 @@ export default mergeConfig(
                 executablePath === undefined ? {} : { launchOptions: { executablePath } },
               ),
               commands: {
+                loaderTranscriptResponses: async (
+                  { page },
+                  bodies: Readonly<
+                    Record<"cold" | "tail" | "empty" | "earlier" | "oldest", string>
+                  >,
+                ) => {
+                  let receive: (route: Route) => void;
+                  const exchange: TranscriptExchange = {
+                    earlier: new Promise<Route>((resolve) => {
+                      receive = resolve;
+                    }),
+                    earlierBody: bodies.earlier,
+                    requests: [],
+                  };
+                  transcriptExchanges.set(page, exchange);
+                  await page.route("**/api/runs/loader-run/github-changes", (route) =>
+                    route.fulfill({ contentType: "application/json", body: '{"attempts":[]}' }),
+                  );
+                  await page.route("**/api/runs/loader-run?*", async (route) => {
+                    const url = new URL(route.request().url());
+                    const after = url.searchParams.get("after");
+                    const before = url.searchParams.get("before");
+                    exchange.requests.push({
+                      after,
+                      before,
+                      attempt: url.searchParams.get("attempt"),
+                    });
+                    if (before === "3") return receive(route);
+                    const body =
+                      before === "2" ? bodies.oldest : after === "4" ? bodies.tail : bodies.empty;
+                    await route.fulfill({ contentType: "application/json", body });
+                  });
+                  await page.route("**/api/runs/loader-run", (route) => {
+                    exchange.requests.push({ after: null, before: null, attempt: null });
+                    return route.fulfill({ contentType: "application/json", body: bodies.cold });
+                  });
+                },
+                releaseEarlierTranscript: async ({ page }) => {
+                  const exchange = transcriptExchanges.get(page);
+                  if (exchange === undefined)
+                    throw new Error("No earlier transcript request configured");
+                  const route = await exchange.earlier;
+                  await route.fulfill({
+                    contentType: "application/json",
+                    body: exchange.earlierBody,
+                  });
+                },
+                loaderTranscriptRequests: async ({ page }) =>
+                  transcriptExchanges.get(page)?.requests ?? [],
                 failureResolutionResponses: async (
                   { page },
                   before: string,
@@ -324,9 +380,13 @@ export default mergeConfig(
                       bodies: Readonly<Record<"7d" | "30d" | "all", string>>,
                       windows: Array<string | null>,
                     ) =>
-                    (route: Route) => {
+                    async (route: Route) => {
                       const window = new URL(route.request().url()).searchParams.get("window");
                       windows.push(window);
+                      const delayed = delayedStatistics.get(page);
+                      if (delayed !== undefined && delayed.window === window) {
+                        await new Promise<void>((resolve) => delayed.releases.push(resolve));
+                      }
                       return route.fulfill(
                         window === "7d" || window === "30d" || window === "all"
                           ? { contentType: "application/json", body: bodies[window] }
@@ -335,6 +395,14 @@ export default mergeConfig(
                     };
                   await page.route("**/api/statistics*", serve(statistics, requests.tasks));
                   await page.route("**/api/statistics/runs*", serve(runStatistics, requests.runs));
+                },
+                delayStatistics: async ({ page }, window: string) => {
+                  delayedStatistics.set(page, { window, releases: [] });
+                },
+                releaseStatistics: async ({ page }) => {
+                  const delayed = delayedStatistics.get(page);
+                  delayedStatistics.delete(page);
+                  for (const release of delayed?.releases ?? []) release();
                 },
                 statisticsRequests: async ({ page }) =>
                   statisticsWindows.get(page) ?? { tasks: [], runs: [] },
