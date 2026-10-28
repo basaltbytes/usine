@@ -5,6 +5,11 @@ import {
   ConfigurationStore,
   commit,
   type ConfigurationRevisionNumber,
+  type ConfigurationCommit,
+  type ConfigurationRevision,
+  type ConfigurationInvalid,
+  type ConfigurationStoreError,
+  type StaleRevision,
 } from "@usine/config/configuration";
 import type { LoadedInstance } from "@usine/config/instance";
 import { AgentName } from "@usine/core/agent";
@@ -14,6 +19,7 @@ import { ExecutorError } from "@usine/executor";
 import {
   Array as EffectArray,
   Context,
+  DateTime,
   Effect,
   Layer,
   Match,
@@ -120,14 +126,13 @@ export const reloadPreflightFailed = (
 export type InstanceReloadError = FactoryConfigError | RestartRequiredError | ReloadPreflightError;
 
 /**
- * Checks a reload from `running` to `loaded` without changing anything, and returns the effect that
- * applies `loaded`'s `workers` block. Fails on an unsupported `workers` change or a failed
- * preflight.
+ * Prepares a reload from `running` to `loaded` and returns the effect that applies its workers.
+ * The caller must apply it within the scope; failure releases prepared workers.
  */
 export type WorkerReload = (
   running: LoadedInstance,
   loaded: LoadedInstance,
-) => Effect.Effect<Effect.Effect<void>, RestartRequiredError | ReloadPreflightError>;
+) => Effect.Effect<Effect.Effect<void>, RestartRequiredError | ReloadPreflightError, Scope.Scope>;
 
 const rejectionLogFields = (error: InstanceReloadError) =>
   Match.valueTags(error, {
@@ -169,6 +174,13 @@ export class CurrentInstance extends Context.Service<
      * a rejected `workers` change.
      */
     readonly reload: Effect.Effect<InstanceReload, InstanceReloadError>;
+    /** Checks runtime compatibility before storing and applying a revision. */
+    readonly commit: (
+      request: ConfigurationCommit,
+    ) => Effect.Effect<
+      ConfigurationRevision,
+      InstanceReloadError | ConfigurationInvalid | ConfigurationStoreError | StaleRevision
+    >;
     /**
      * Routes each reload through `workers` until the scope closes. Without a registration, as in
      * setup mode, a reload rejects any `workers` change.
@@ -210,9 +222,7 @@ export class CurrentInstance extends Context.Service<
           return Effect.void;
         });
 
-        // Once the Workers have prepared the reload, it runs to completion, so their additions are
-        // applied.
-        const install = (snapshot: Configuration) =>
+        const prepare = (snapshot: Configuration) =>
           Effect.uninterruptibleMask((restore) =>
             Effect.gen(function* () {
               const running = yield* SubscriptionRef.get(current);
@@ -223,7 +233,6 @@ export class CurrentInstance extends Context.Service<
                   message: "The configuration store has not been initialized",
                 });
               const loaded = snapshot.instance.value;
-              yield* Ref.set(observed, snapshot);
               yield* Effect.annotateCurrentSpan({ revision: snapshot.number });
               const workers = yield* Ref.get(registered);
               const restart = restartChanges(running, loaded, Option.isSome(workers));
@@ -236,32 +245,35 @@ export class CurrentInstance extends Context.Service<
                   : beforeWorkersStart(running, loaded),
               );
               const changes = instanceReload(running, loaded);
-              yield* SubscriptionRef.set(current, loaded).pipe(Effect.andThen(applyWorkers));
-              yield* Effect.logInfo(
-                "Stored configuration applied; new runs use the new configuration",
-                {
-                  loopsAdded: changes.loops.added,
-                  loopsRemoved: changes.loops.removed,
-                  loopsChanged: changes.loops.changed,
-                  agentsAdded: changes.agents.added,
-                  agentsRemoved: changes.agents.removed,
-                  agentsChanged: changes.agents.changed,
-                  labelsAdded: changes.labels.added,
-                  labelsRemoved: changes.labels.removed,
-                  labelsChanged: changes.labels.changed,
-                  reposAdded: changes.repos.added,
-                  reposRemoved: changes.repos.removed,
-                  reposChanged: changes.repos.changed,
-                  workersAdded: changes.workers.added,
-                  workersRemoved: changes.workers.removed,
-                  workersChanged: changes.workers.changed,
-                  settingsChanged: changes.settingsChanged,
-                  operatorChanged: changes.operatorChanged,
-                  quarantinedLoops: changes.quarantinedLoops.map(({ file }) => file),
-                  invalidAgents: changes.invalidAgents.map(({ file }) => file),
-                },
-              );
-              return changes;
+              return Effect.gen(function* () {
+                yield* Ref.set(observed, snapshot);
+                yield* SubscriptionRef.set(current, loaded).pipe(Effect.andThen(applyWorkers));
+                yield* Effect.logInfo(
+                  "Stored configuration applied; new runs use the new configuration",
+                  {
+                    loopsAdded: changes.loops.added,
+                    loopsRemoved: changes.loops.removed,
+                    loopsChanged: changes.loops.changed,
+                    agentsAdded: changes.agents.added,
+                    agentsRemoved: changes.agents.removed,
+                    agentsChanged: changes.agents.changed,
+                    labelsAdded: changes.labels.added,
+                    labelsRemoved: changes.labels.removed,
+                    labelsChanged: changes.labels.changed,
+                    reposAdded: changes.repos.added,
+                    reposRemoved: changes.repos.removed,
+                    reposChanged: changes.repos.changed,
+                    workersAdded: changes.workers.added,
+                    workersRemoved: changes.workers.removed,
+                    workersChanged: changes.workers.changed,
+                    settingsChanged: changes.settingsChanged,
+                    operatorChanged: changes.operatorChanged,
+                    quarantinedLoops: changes.quarantinedLoops.map(({ file }) => file),
+                    invalidAgents: changes.invalidAgents.map(({ file }) => file),
+                  },
+                );
+                return changes;
+              });
             }),
           ).pipe(
             Effect.tapError((error) =>
@@ -272,6 +284,45 @@ export class CurrentInstance extends Context.Service<
             ),
             Effect.withSpan("CurrentInstance.install", { attributes: { directory } }),
           );
+
+        const install = (snapshot: Configuration) =>
+          Effect.uninterruptibleMask((restore) =>
+            Effect.gen(function* () {
+              yield* Ref.set(observed, snapshot);
+              const apply = yield* restore(prepare(snapshot));
+              return yield* apply;
+            }),
+          ).pipe(Effect.scoped);
+
+        const commitRevision = Effect.fn("CurrentInstance.commit")(
+          (request: ConfigurationCommit) =>
+            Effect.uninterruptibleMask((restore) =>
+              Effect.gen(function* () {
+                yield* Effect.annotateCurrentSpan({ expectedRevision: request.expected });
+                const snapshot = yield* store.read;
+                const candidate = yield* commit(
+                  parser,
+                  snapshot,
+                  request.expected,
+                  request.changes,
+                  {
+                    actor: request.actor,
+                    message: request.message,
+                    time: yield* DateTime.now,
+                  },
+                );
+                const apply = yield* restore(prepare(candidate.configuration));
+                const revision = yield* store.commit(request);
+                yield* apply;
+                return revision;
+              }),
+            ).pipe(Effect.scoped, reloading.withPermits(1)),
+          Effect.tapError((error) =>
+            Effect.logWarning("Configuration write refused", {
+              errorTag: error._tag,
+            }),
+          ),
+        );
 
         const reload = store.read.pipe(
           Effect.tapError((error) =>
@@ -331,6 +382,7 @@ export class CurrentInstance extends Context.Service<
           get: SubscriptionRef.get(current),
           changes: SubscriptionRef.changes(current),
           reload,
+          commit: commitRevision,
           registerWorkers,
         };
       }),

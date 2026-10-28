@@ -23,7 +23,7 @@ import { DateTime, Effect, FileSystem, Layer, Option, Result, Schema } from "eff
 import { CurrentInstance } from "../src/current-instance/current-instance.ts";
 import { idleTriggersLayer } from "../src/idle-triggers.ts";
 import { LabelPreflightFinding } from "../src/label-reconciler.ts";
-import { ConfigurationView, OperatorConfiguration } from "../src/operator/configuration.ts";
+import { ConfigurationView, OperatorConfiguration } from "../src/operator/configuration/view.ts";
 import { PollCycle, PollingTriggers } from "../src/polling-triggers.ts";
 import { recordPreflight, unchecked, WorkerStatus } from "../src/worker-status.ts";
 import { reloadableInstanceLayer, writeInstanceFiles } from "./support/instance-folder.ts";
@@ -225,6 +225,7 @@ const claudeLoggedOut = new WorkerCapabilityError({
 });
 
 const workers = Layer.succeed(WorkerStatus)({
+  unavailable: Effect.succeed([]),
   slots: Effect.succeed([
     { worker: local, capacity: 2, leased: 1 },
     { worker: WorkerName.make("retired"), capacity: 0, leased: 1 },

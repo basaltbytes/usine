@@ -40,9 +40,9 @@ import { RepositoryLabelProjectionReader } from "@usine/engine/repository-label-
 import { WorkerCapability } from "@usine/executor";
 import { Source } from "@usine/expression/expression-engine";
 import { Context, DateTime, Effect, Layer, Match, Option, Schema } from "effect";
-import { LabelPreflightFinding } from "../label-reconciler.ts";
-import { PollingTriggers } from "../polling-triggers.ts";
-import { type PreflightCheck, WorkerStatus } from "../worker-status.ts";
+import { LabelPreflightFinding } from "../../label-reconciler.ts";
+import { PollingTriggers } from "../../polling-triggers.ts";
+import { type PreflightCheck, WorkerStatus } from "../../worker-status.ts";
 import {
   MachineView,
   machineView,
@@ -50,7 +50,7 @@ import {
   ProvisioningPauseView,
   provisioningPauseView,
   provisionerView,
-} from "./machines.ts";
+} from "../machines.ts";
 
 /** A Loop's selector as written: the repositories and registry tags. */
 export class LoopSelectorView extends Schema.Class<LoopSelectorView>(

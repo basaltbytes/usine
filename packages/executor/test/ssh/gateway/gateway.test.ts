@@ -1122,10 +1122,11 @@ describe("SSH Worker behind a Gateway", () => {
     },
   );
 
-  it.effect(
-    "sweeps the Codex homes that a crash left, and keeps those of a held Attempt or a kept checkout",
-    () => {
+  it.effect.each(["absent", "running"] as const)(
+    "sweeps the Codex homes that a crash left, and keeps those of a held Attempt or a kept checkout (Docker %s)",
+    (docker) => {
       const machine = fakeMachine();
+      machine.state.docker = docker;
       const gateway = fakeGateway(machine, CHATGPT_PROVIDERS);
       const running = `${WORKER_ROOT}/codex/remote-run_execute_1`;
       const crashed = `${WORKER_ROOT}/codex/crashed-run_execute_1`;
@@ -1153,10 +1154,11 @@ describe("SSH Worker behind a Gateway", () => {
     },
   );
 
-  it.effect(
-    "removes the Codex homes of discarded Attempts after usine.yaml stops declaring the Worker",
-    () => {
+  it.effect.each(["absent", "running"] as const)(
+    "removes the Codex homes of discarded Attempts after usine.yaml stops declaring the Worker (Docker %s)",
+    (docker) => {
       const machine = fakeMachine();
+      machine.state.docker = docker;
       const gateway = fakeGateway(machine, CHATGPT_PROVIDERS);
       const crashed = `${WORKER_ROOT}/codex/crashed-run_execute_1`;
       const kept = `${WORKER_ROOT}/codex/kept-run_execute_1`;

@@ -11,6 +11,7 @@ import {
   StalledItemView,
   WorkerSlotsView,
   WorkerView,
+  WorkerPreflightNeed,
 } from "@usine/orchestrator/operator";
 import { Schema } from "effect";
 import { assert, describe, it } from "vitest";
@@ -66,6 +67,19 @@ describe("Desk", () => {
     assert.include(html, "Cycle budget exhausted");
     assert.include(html, "Reset cycle budget");
     assert.notInclude(html, "Nothing needs attention");
+  });
+
+  it("shows a failed worker's preflight message and links to that worker", () => {
+    const need = new WorkerPreflightNeed({
+      id: "worker-preflight:boat-pool",
+      worker: WorkerName.make("boat-pool"),
+      message: "Gateway check failed",
+    });
+    const html = render(<DeskNeedsYou needs={[need]} polls={desk.polls} now={now} />);
+    assert.include(text(html), "boat-pool: preflight failed");
+    assert.include(text(html), "Gateway check failed");
+    assert.include(text(html), "preflight retries automatically");
+    assert.include(html, "/configuration/workers/boat-pool");
   });
 
   it("says nothing is running and how many worker slots are free", () => {

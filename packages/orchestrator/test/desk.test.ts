@@ -413,6 +413,7 @@ const deskLayer = (
     ahead,
   });
   const slots = Layer.succeed(WorkerStatus)({
+    unavailable: Effect.succeed([]),
     slots: Effect.succeed([
       { worker: WorkerName.make("local"), capacity: 2, leased: 1 },
       { worker: WorkerName.make("spare"), capacity: 1, leased: 0 },

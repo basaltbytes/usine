@@ -21,7 +21,12 @@ import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
-import { SshDestination, SshPort, WorkerName } from "@usine/core/worker";
+import {
+  type GatewayCredentialKind,
+  SshDestination,
+  SshPort,
+  WorkerName,
+} from "@usine/core/worker";
 import { TranscriptSequence } from "@usine/engine/transcript";
 import {
   AgentFailureView,
@@ -863,11 +868,12 @@ const resumeCases: ReadonlyArray<{
   readonly harness: "claude" | "codex";
   readonly access: WorkerAccess | null;
   readonly facts: ReadonlyArray<string>;
-  readonly command: string;
+  readonly command: string | null;
+  readonly home?: string;
   /** The lines under the command, all of them. */
   readonly notes?: ReadonlyArray<string>;
   /** The child's model requests used the gateway's credential, with Codex in the attempt's own home. */
-  readonly gateway?: { readonly home: string };
+  readonly gateway?: { readonly home: string; readonly kind: GatewayCredentialKind };
 }> = [
   {
     worker: "local",
@@ -887,12 +893,9 @@ const resumeCases: ReadonlyArray<{
     worker: "usine-worker-1",
     harness: "codex",
     access: new SshWorkerAccess({ destination: usineWorker, port: null }),
-    gateway: { home: "/worker/codex/attempt-1" },
+    gateway: { home: "/worker/codex/attempt-1", kind: "subscription" },
     facts: ["Worktree /worker/Philippe's repo on usine-worker-1"],
-    command: String.raw`ssh -t usine-worker-1 'cd -- '\''/worker/Philippe'\''\'\'''\''s repo'\'' && CODEX_HOME='\''/worker/codex/attempt-1'\'' codex resume -- '\''native-session'\'''`,
-    notes: [
-      "The gateway credential isn't available from your shell. The worktree is removed at attempt cleanup",
-    ],
+    command: null,
   },
   {
     worker: "usine-worker-1",
@@ -923,30 +926,42 @@ const resumeCases: ReadonlyArray<{
     worker: "hz-pool",
     harness: "codex",
     access: Schema.decodeUnknownSync(WorkerAccess)({ _tag: "Provisioned", provider: "hetzner" }),
-    gateway: { home: "/worker/codex/attempt-1" },
+    gateway: { home: "/worker/codex/attempt-1", kind: "subscription" },
     facts: ["Worktree /worker/Philippe's repo on hz-pool"],
-    command: String.raw`cd -- '/worker/Philippe'\''s repo' && CODEX_HOME='/worker/codex/attempt-1' codex resume -- 'native-session'`,
-    notes: [
-      "Run it on the attempt's Hetzner machine, which is deleted with the attempt",
-      "The gateway credential or API key isn't available from your shell",
-    ],
+    command: null,
+  },
+  {
+    worker: "local",
+    harness: "codex",
+    access: new LocalWorkerAccess(),
+    home: "/worker/codex/local-login",
+    facts: ["Worktree /worker/Philippe's repo"],
+    command: String.raw`cd -- '/worker/Philippe'\''s repo' && CODEX_HOME='/worker/codex/local-login' codex resume -- 'native-session'`,
+  },
+  {
+    worker: "retired-worker",
+    harness: "codex",
+    access: null,
+    gateway: { home: "/worker/codex/attempt-1", kind: "api-key" },
+    facts: [],
+    command: null,
   },
 ];
 
 it.each(resumeCases)(
-  "gives a finished $harness child on $worker one copyable command for the operator's terminal",
-  async ({ worker, harness, access, facts, command, notes = [sameLogin], gateway }) => {
+  "offers resume for a finished $harness child on $worker only with an accessible credential",
+  async ({ worker, harness, access, facts, command, notes = [sameLogin], gateway, home }) => {
     const child = new ChildSession({
       id: AgentSessionId.make("saved-child"),
       parentId: parent.id,
       agent: AgentName.make("reviewer"),
       brain: new BrainSpec({ harness, model: ModelId.make("test-model"), effort: "high" }),
-      gatewayCredential: gateway === undefined ? Option.none() : Option.some("subscription"),
+      gatewayCredential: gateway === undefined ? Option.none() : Option.some(gateway.kind),
     });
     const saved = new HarnessSession({
       id: HarnessSessionId.make("native-session"),
       cwd: "/worker/Philippe's repo",
-      home: Option.fromNullishOr(gateway?.home),
+      home: Option.fromNullishOr(gateway?.home ?? home),
     });
     const copied: Array<string> = [];
     vi.spyOn(navigator.clipboard, "writeText").mockImplementation(async (text) => {
@@ -961,6 +976,22 @@ it.each(resumeCases)(
       undefined,
       [new AttemptView({ ...liveAttempt, worker: WorkerName.make(worker), workerAccess: access })],
     );
+    if (command === null) {
+      await expect
+        .element(
+          page
+            .getByRole("navigation", { name: "Run outline" })
+            .getByRole("button", { name: /^reviewer/ }),
+        )
+        .toBeVisible();
+      await expect
+        .element(page.getByRole("button", { name: "Resume details for reviewer" }))
+        .not.toBeInTheDocument();
+      await expect
+        .element(page.getByRole("button", { name: "Copy command" }))
+        .not.toBeInTheDocument();
+      return;
+    }
     await page.getByRole("button", { name: "Resume details for reviewer" }).click();
     await expect.element(page.getByText("Session native-session", { exact: true })).toBeVisible();
     for (const fact of facts) {

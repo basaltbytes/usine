@@ -56,6 +56,10 @@ export class Configuration extends Schema.Class<Configuration>("@usine/config/Co
     }),
   ),
 ) {
+  get actor(): Option.Option<OperatorLogin> {
+    return Option.flatMap(this.instance, ({ config }) => config.operator);
+  }
+
   static readonly empty = new Configuration({
     number: ConfigurationRevisionNumber.make(0),
     instance: Option.none(),
@@ -84,3 +88,7 @@ export class ConfigurationInvalid extends Schema.TaggedError<ConfigurationInvali
 export class ConfigurationStoreError extends Schema.TaggedError<ConfigurationStoreError>(
   "@usine/config/ConfigurationStoreError",
 )("ConfigurationStoreError", { operation: Schema.String, cause: Schema.Defect() }) {}
+
+export class ConfigurationRevertBlocked extends Schema.TaggedError<ConfigurationRevertBlocked>(
+  "@usine/config/ConfigurationRevertBlocked",
+)("ConfigurationRevertBlocked", { entities: Schema.NonEmptyArray(ConfigurationEntityKey) }) {}

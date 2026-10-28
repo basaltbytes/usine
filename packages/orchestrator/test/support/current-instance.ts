@@ -7,6 +7,7 @@ import { CurrentInstance } from "../../src/current-instance/current-instance.ts"
 export const fixedInstance = (instance: LoadedInstance): CurrentInstance["Service"] => ({
   get: Effect.succeed(instance),
   changes: Stream.concat(Stream.make(instance), Stream.never),
+  commit: () => Effect.die("this test never writes configuration"),
   reload: Effect.die("this test's instance is never reloaded"),
   registerWorkers: () => Effect.void,
 });

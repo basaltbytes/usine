@@ -20,7 +20,7 @@ import { DateTime, Effect, FileSystem, Layer, Option, Path, Redacted, Schema } f
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { layer as localExecutorLayer } from "@usine/executor/local";
 import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
-import { stepExecutorLayer } from "../../src/scheduler.ts";
+import { stepExecutorLayer } from "../../src/scheduler/scheduler.ts";
 import { stubAttemptRuntime, StubStorage } from "@usine/durable/testing";
 import { fixedConfigLayer } from "../support/current-instance.ts";
 import { testAppLayer } from "../support/github-app.ts";

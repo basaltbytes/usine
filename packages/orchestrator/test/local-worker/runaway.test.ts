@@ -15,7 +15,7 @@ import { layer as localExecutorLayer } from "@usine/executor/local";
 import { Deferred, Effect, Fiber, FileSystem, Layer, Option } from "effect";
 import { TestClock } from "effect/testing";
 import { layer as localLayer } from "../../src/local.ts";
-import { stepExecutorLayer } from "../../src/scheduler.ts";
+import { stepExecutorLayer } from "../../src/scheduler/scheduler.ts";
 import { type StubParent, stubAttemptRuntime, StubStorage } from "@usine/durable/testing";
 import { fixedConfigLayer } from "../support/current-instance.ts";
 import { testAppLayer } from "../support/github-app.ts";

@@ -130,7 +130,7 @@ import { OperatorStatistics } from "./statistics/statistics.ts";
 import type { RunStatisticsView, StatisticsView, StatisticsWindow } from "./statistics/view.ts";
 import { machineView } from "./machines.ts";
 import { WorkerStatus } from "../worker-status.ts";
-import { workerAttentionFor } from "./unresponsive.ts";
+import { workerAttentionFor } from "./worker-attention.ts";
 
 export type BoardMoveError =
   | BoardItemNotFoundError
@@ -221,7 +221,7 @@ const makeOperatorObservation = Effect.gen(function* () {
   const usageReader = yield* RunUsageReader;
   const stops = yield* UnconfirmedStops;
   const workerStatus = yield* WorkerStatus;
-  const workerAttention = workerAttentionFor(reader, acknowledgements);
+  const workerAttention = workerAttentionFor(reader, acknowledgements, workerStatus);
 
   const projectOverview = Effect.fn("Operator.projectOverview")(function* (
     instance: LoadedInstance,
@@ -670,7 +670,11 @@ const makeOperatorObservation = Effect.gen(function* () {
       }),
     ).pipe(
       Effect.flatMap(({ overview, running, reports }) =>
-        workerAttention(overview, running).pipe(
+        workerAttention(
+          overview,
+          running,
+          instance.config.workers.map(({ name }) => name),
+        ).pipe(
           Effect.tap(({ needsYou, dismissedNeeds }) =>
             reports.pollReported && reports.scheduleReported
               ? acknowledgements.prune([...needsYou, ...dismissedNeeds].map(attentionKey))
@@ -1387,6 +1391,7 @@ export {
   ConfigFileNeed,
   UnconfiguredWorkerNeed,
   UnresponsiveWorkerNeed,
+  WorkerPreflightNeed,
   UnconfirmedStopNeed,
   NeedView,
 } from "./need.ts";
@@ -1416,7 +1421,7 @@ export {
   SettingsView,
   ConfigurationView,
   OperatorConfiguration,
-} from "./configuration.ts";
+} from "./configuration/view.ts";
 export {
   WorkerSilentView,
   ProviderRetryingView,
@@ -1479,3 +1484,5 @@ export {
 } from "./transcript.ts";
 
 export { attentionKey, projectAttention } from "./attention.ts";
+
+export { ConfigurationEditor, type ConfigurationEditorError } from "./configuration/editor.ts";

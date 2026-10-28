@@ -35,27 +35,36 @@ export const loopReferenceFailure = (
   loop: LoopFile,
   references: ReferenceIndex,
 ): Option.Option<ConfigFileError> => {
-  const referenceError = (message: string): Option.Option<ConfigFileError> =>
-    Option.some(
-      new ConfigFileError({ file, stage: "reference", expression: Option.none(), message }),
-    );
-  const problems: Array<string> = [];
+  const problems: Array<{ readonly path: ReadonlyArray<string>; readonly message: string }> = [];
+  const failure = (): Option.Option<ConfigFileError> =>
+    problems.length === 0
+      ? Option.none()
+      : Option.some(
+          new ConfigFileError({
+            file,
+            stage: "reference",
+            expression: Option.none(),
+            message: problems.map(({ message }) => message).join("\n"),
+            details: problems,
+          }),
+        );
   if (!references.agentNames.has(loop.agent)) {
-    problems.push(
-      `Unknown agent "${loop.agent}": agents/${loop.agent}.md is missing or invalid. Fix the agent file, or set agent to an existing agent.`,
-    );
+    problems.push({
+      path: ["agent"],
+      message: `Unknown agent "${loop.agent}": agents/${loop.agent}.md is missing or invalid. Fix the agent file, or set agent to an existing agent.`,
+    });
   }
 
-  if (Option.isNone(loop.selector))
-    return problems.length === 0 ? Option.none() : referenceError(problems.join("\n"));
+  if (Option.isNone(loop.selector)) return failure();
   if (Option.isSome(loop.selector.value.repos)) {
     const missing = loop.selector.value.repos.value.filter(
       (name) => !references.repoNames.has(canonicalRepositoryName(name)),
     );
     if (missing.length > 0) {
-      problems.push(
-        `Unknown repositories in selector.repos: ${quoted(missing)}. Add them under repos in usine.yaml.`,
-      );
+      problems.push({
+        path: ["selector", "repos"],
+        message: `Unknown repositories in selector.repos: ${quoted(missing)}. Add them under repos in usine.yaml.`,
+      });
     }
   }
 
@@ -64,10 +73,11 @@ export const loopReferenceFailure = (
       (tag) => !references.registryTags.has(tag),
     );
     if (missing.length > 0) {
-      problems.push(
-        `Unknown tags in selector.tags: ${quoted(missing)}. Add them to a repository's tags in usine.yaml.`,
-      );
+      problems.push({
+        path: ["selector", "tags"],
+        message: `Unknown tags in selector.tags: ${quoted(missing)}. Add them to a repository's tags in usine.yaml.`,
+      });
     }
   }
-  return problems.length === 0 ? Option.none() : referenceError(problems.join("\n"));
+  return failure();
 };
