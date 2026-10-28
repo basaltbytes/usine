@@ -30,3 +30,7 @@ Both Drizzle packages are pinned at `1.0.0-rc.5-5935859`, the `rc5` npm tag's bu
 ## Amendment (2026-10-27, #494): Drizzle `1.0.0-rc.5` on Effect 4.0.x
 
 Both Drizzle packages are pinned at `1.0.0-rc.5`, the `rc` npm tag, whose peer range is `effect >=4.0.0`. The `1.0.0-rc.5-5935859` build imports `effect/unstable/sql/SqlError`, which Effect 4.0.x removed when SQL moved to `effect/sql`, so its transaction errors were typed `any`. `.execute()` stays.
+
+## Amendment (2026-10-28, #637): configuration migrations
+
+The configuration store takes Effect's `SqlClient`, supplied by the application on the runtime connection. Its Drizzle schema and generated migrations are in `@usine/config`, with the separate `usine_configuration_migrations` ledger. The package embeds generated migration SQL for deployments without a filesystem. Queries use `SqlClient` directly because the available Effect Drizzle SQLite adapters require concrete drivers. Configuration commits use one transaction with optimistic revision checks; this does not alter the engine's migration chain.
