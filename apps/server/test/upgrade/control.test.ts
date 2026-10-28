@@ -5,7 +5,7 @@ import {
   UpgradeRecord,
 } from "@usine/core/upgrade";
 import { UpgradeRequest } from "@usine/orchestrator/operator/http";
-import { Deferred, Effect, Option, Ref } from "effect";
+import { Deferred, Effect, Option, Ref, Schema } from "effect";
 import { expect, it } from "vitest";
 import { makeUpgrades, UpgradeError, type UpgradePlatform } from "../../src/upgrade/control.ts";
 
@@ -21,6 +21,7 @@ const fixture = Effect.gen(function* () {
     lookup: (channel) =>
       Ref.update(requests, (items) => [...items, channel]).pipe(Effect.as(target)),
     preflight: Effect.void,
+    checkDependencies: () => Effect.void,
     launch: (version) => Deferred.succeed(launched, version).pipe(Effect.asVoid),
     outcome: Ref.get(result),
   };
@@ -74,7 +75,7 @@ it("proposes without draining, and an immediate request bypasses the idle wait",
   );
 });
 
-it("does not check when off, downgrade automatically, or retry a rolled-back version", async () => {
+it("does not check when off, downgrade automatically, or retry a health-check rollback", async () => {
   await Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
@@ -99,6 +100,7 @@ it("does not check when off, downgrade automatically, or retry a rolled-back ver
               target,
               status: "rolled-back",
               reason: "API did not answer",
+              failureStage: "health-check",
             }),
           ),
         );
@@ -285,3 +287,96 @@ it("reports helper failure instead of waiting for a restart that will not happen
     ),
   );
 });
+
+it.each(["propose", "automatic"] as const)(
+  "waits for registry propagation in %s mode without closing admission",
+  async (mode) => {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const f = yield* fixture;
+          const ready = yield* Ref.make(false);
+          const drainStarted = yield* Ref.make(false);
+          const upgrades = yield* makeUpgrades({
+            running: previous,
+            settings: Effect.succeed({ upgradeChannel: "next", upgradeMode: mode }),
+            platform: Option.some({
+              ...f.platform,
+              checkDependencies: () =>
+                Ref.get(ready).pipe(
+                  Effect.flatMap((value) =>
+                    value
+                      ? Effect.void
+                      : Effect.fail(new UpgradeError({ message: "Package unavailable" })),
+                  ),
+                ),
+            }),
+            drain: Ref.set(drainStarted, true),
+          });
+          yield* upgrades.check().pipe(Effect.flip);
+          expect((yield* upgrades.status).available).toBeNull();
+          for (const timing of ["idle", "now"] as const) {
+            const error = yield* upgrades
+              .request(new UpgradeRequest({ timing, version: Option.some(target) }))
+              .pipe(Effect.flip);
+            expect(error.message).toBe("Package unavailable");
+            expect((yield* upgrades.status).phase).toBe("idle");
+          }
+          expect(yield* Ref.get(drainStarted)).toBe(false);
+          expect(yield* Deferred.isDone(f.launched)).toBe(false);
+          yield* Ref.set(ready, true);
+          yield* upgrades.check();
+          expect((yield* upgrades.status).available).toBe(target);
+          if (mode === "automatic") {
+            expect(yield* Deferred.await(f.launched)).toBe(target);
+            expect(yield* Ref.get(drainStarted)).toBe(true);
+          } else {
+            yield* Ref.set(ready, false);
+            yield* upgrades.check().pipe(Effect.flip);
+            expect((yield* upgrades.status).available).toBeNull();
+            expect(yield* Ref.get(drainStarted)).toBe(false);
+          }
+        }),
+      ),
+    );
+  },
+);
+
+it.each([
+  ["install", { status: "rolled-back", reason: "Install failed", failureStage: "install" }],
+  ["health-check", { status: "rolled-back", reason: "API failed", failureStage: "health-check" }],
+  ["legacy", { status: "rolled-back", reason: "Upgrade failed" }],
+  ["failed", { status: "failed", reason: "Rollback failed" }],
+  ["installing", { status: "installing" }],
+] as const)(
+  "decides automatic retry after restart for a persisted %s outcome",
+  async (outcome, persisted) => {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const f = yield* fixture;
+          const record = Schema.decodeUnknownSync(UpgradeRecord)(
+            { previous, target, ...persisted },
+            { onExcessProperty: "error" },
+          );
+          if (outcome === "legacy") {
+            expect(record.status === "rolled-back" && record.failureStage).toBe("unknown");
+          }
+          yield* Ref.set(f.result, Option.some(record));
+          const upgrades = yield* makeUpgrades({
+            running: previous,
+            settings: Effect.succeed({ upgradeChannel: "next", upgradeMode: "automatic" }),
+            platform: Option.some(f.platform),
+            drain: Effect.void,
+          });
+          yield* upgrades.check();
+          if (outcome === "install") {
+            expect(yield* Deferred.await(f.launched)).toBe(target);
+          } else {
+            expect(yield* Deferred.isDone(f.launched)).toBe(false);
+          }
+        }),
+      ),
+    );
+  },
+);

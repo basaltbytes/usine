@@ -11,6 +11,7 @@ export class UpgradeError extends Schema.TaggedError<UpgradeError>("@usine/serve
 
 export interface UpgradePlatform {
   readonly lookup: (channel: UpgradeChannel) => Effect.Effect<ReleaseVersion, UpgradeError>;
+  readonly checkDependencies: (target: ReleaseVersion) => Effect.Effect<void, UpgradeError>;
   readonly preflight: Effect.Effect<void, UpgradeError>;
   readonly launch: (target: ReleaseVersion) => Effect.Effect<void, UpgradeError>;
   readonly outcome: Effect.Effect<Option.Option<UpgradeRecord>, UpgradeError>;
@@ -138,6 +139,7 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
         message: "An upgrade was already requested. Restart the service if it failed.",
       });
     yield* platform.preflight.pipe(
+      Effect.andThen(platform.checkDependencies(target.value)),
       Effect.tapError((error) =>
         Effect.logWarning("Upgrade preflight failed before draining", {
           previous: options.running,
@@ -184,14 +186,16 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
       });
       return;
     }
+    yield* Ref.set(available, Option.none());
     const target = yield* options.platform.value.lookup(settings.upgradeChannel);
     yield* Effect.annotateCurrentSpan({
       previous: options.running,
       target,
       channel: settings.upgradeChannel,
     });
-    yield* Ref.set(checkError, Option.none());
     const newer = compareVersions(target, options.running) > 0;
+    if (newer) yield* options.platform.value.checkDependencies(target);
+    yield* Ref.set(checkError, Option.none());
     yield* Ref.set(
       available,
       newer
@@ -208,7 +212,10 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
     const blocked = Option.exists(
       result,
       (record) =>
-        record.status === "installing" || (record.target === target && record.status !== "good"),
+        record.status === "installing" ||
+        (record.target === target &&
+          (record.status === "failed" ||
+            (record.status === "rolled-back" && record.failureStage !== "install"))),
     );
     const currentSettings = yield* options.settings;
     if (
@@ -217,6 +224,11 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
       (yield* Ref.get(progress)).phase === "idle" &&
       !blocked
     ) {
+      yield* Effect.logInfo("Automatic server upgrade requested", {
+        previous: options.running,
+        target,
+        outcome: result,
+      });
       yield* request(new UpgradeRequest({ timing: "idle", version: Option.none() }));
     } else if (newer && blocked) {
       yield* Effect.logInfo("Automatic upgrade skipped after an unfinished or failed upgrade", {

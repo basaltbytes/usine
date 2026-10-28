@@ -98,6 +98,7 @@ it("keeps the rollback reason visible and explains a refused retry", async () =>
       target: ReleaseVersion.make("1.0.1-next.42.g1234567"),
       status: "rolled-back",
       reason: "The new API did not answer.",
+      failureStage: "health-check",
     }),
   });
   await commands.upgradeResponses(

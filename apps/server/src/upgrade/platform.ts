@@ -8,7 +8,7 @@ import { runCommand } from "../command.ts";
 import { realPathOrSelf, SERVER_PACKAGE } from "../instance/manifest.ts";
 import type { InstanceRecord } from "../instance/record.ts";
 import { SystemdUnit, supervisingUnit, systemctl, unitState } from "../instance/systemd.ts";
-import { resolveVersion } from "../registry.ts";
+import { dependenciesOf, resolveVersion } from "../registry.ts";
 import { UpgradeError, type UpgradePlatform } from "./control.ts";
 
 const failure = (error: { readonly message: string }) =>
@@ -36,6 +36,41 @@ export const systemUpgradePlatform = Effect.fn("Server.systemUpgradePlatform")(f
   const fs = yield* FileSystem.FileSystem;
   const folder = join(directory, ".usine", "upgrade");
   const resultPath = join(folder, "result.json");
+  const checkDependencies = Effect.fn("Server.checkUpgradeDependencies")(
+    function* (target: ReleaseVersion) {
+      yield* Effect.annotateCurrentSpan({ previous, target });
+      const pending: Array<readonly [string, string]> = [[SERVER_PACKAGE, target]];
+      const checked = new Set<string>();
+      for (const [name, spec] of pending) {
+        const key = `${name}@${spec}`;
+        if (checked.has(key)) continue;
+        checked.add(key);
+        const version = yield* resolveVersion(directory, name, spec);
+        const dependencies = yield* dependenciesOf(directory, name, version);
+        pending.push(
+          ...Object.entries(dependencies).filter(([name]) => name.startsWith("@usine/")),
+        );
+      }
+      yield* Effect.logInfo("Server upgrade dependencies are available", {
+        previous,
+        target,
+        packages: checked.size,
+      });
+    },
+    Effect.catchTag("PackageLookupError", (error) =>
+      Effect.logInfo("Server upgrade waits for registry packages", {
+        package: error.name,
+        spec: error.spec,
+        reason: error.reason,
+      }).pipe(
+        Effect.andThen(
+          new UpgradeError({
+            message: `Waiting for ${error.name}@${error.spec} on the registry: ${error.reason}`,
+          }),
+        ),
+      ),
+    ),
+  );
   const readOutcome = Effect.gen(function* () {
     if (!(yield* fs.exists(resultPath))) return Option.none<UpgradeRecord>();
     return Option.some(
@@ -111,6 +146,8 @@ export const systemUpgradePlatform = Effect.fn("Server.systemUpgradePlatform")(f
     });
   }, Effect.mapError(failure));
   return Option.some({
+    checkDependencies: (target) =>
+      checkDependencies(target).pipe(Effect.annotateLogs({ previous, target }), provideSpawner),
     preflight: preflight().pipe(provideSpawner),
     outcome: outcome.pipe(provideSpawner),
     launch: (target) => launch(target).pipe(provideSpawner),
