@@ -72,8 +72,8 @@
       "default": "./dist/schedule-triggers.js"
     },
     "./scheduler": {
-      "types": "./dist/scheduler.d.ts",
-      "default": "./dist/scheduler.js"
+      "types": "./dist/scheduler/scheduler.d.ts",
+      "default": "./dist/scheduler/scheduler.js"
     },
     "./ssh": {
       "types": "./dist/ssh.d.ts",

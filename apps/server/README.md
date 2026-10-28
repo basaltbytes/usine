@@ -12,6 +12,8 @@ It prints `http://127.0.0.1:7331` and stays attached to the terminal. Every comm
 
 One `usine up` runs per instance folder. It holds `.usine/instance.lock` from startup until every store closes, writes its pid to `.usine/instance.pid`, and writes its pid, port, version, start time, and command line to `.usine/instance.json`. It removes both files when it exits. It reads the instance ID from `.usine/instance-id`, and writes a new UUID there at its first start; the ID labels its attempt containers on SSH workers, so that another instance with the same GitHub App doesn't remove them. A second `usine up` there names the running process and exits nonzero before opening a store. A draining process keeps the folder until it exits.
 
+At startup, a failed worker preflight excludes that worker from scheduling while the other workers start and the API listens. **Needs attention** shows the worker and its preflight message. Checks retry after 1, 2, 5, and 10 minutes, then every 10 minutes; a passing check restores scheduling and clears the entry. A configuration revision that changes the worker's slot count checks it immediately. Live reload still refuses a revision whose preflight fails. Startup exits with an error if every worker fails preflight, or if a database, GitHub App, or listen-address error prevents startup.
+
 ## Manage the instance
 
 ```sh

@@ -14,11 +14,9 @@ import {
   CheckoutRequest,
   Executor,
   ExecutorError,
-  ExecutorOperationError,
   fullPreflight,
   type MachineHold,
   type MachineUnavailableError,
-  type PreflightReport,
   type WorkerCapabilityError,
   type WorkerMachines,
 } from "@usine/executor";
@@ -49,14 +47,14 @@ import {
   type RestartChange,
   type WorkersChange,
   workersChange,
-} from "./current-instance/changes.ts";
+} from "../current-instance/changes.ts";
 import {
   CurrentInstance,
   reloadPreflightFailed,
   restartRequired,
   type WorkerReload,
-} from "./current-instance/current-instance.ts";
-import { payloadLabels } from "./board/items.ts";
+} from "../current-instance/current-instance.ts";
+import { payloadLabels } from "../board/items.ts";
 import {
   type LeaseCandidate,
   aheadCount,
@@ -64,15 +62,10 @@ import {
   passedCount,
   type PipelinePosition,
   pipelinePosition,
-} from "./lease-order.ts";
-import {
-  type ProvisioningPause,
-  type QueuedRun,
-  recordPreflight,
-  unchecked,
-  type WorkerPreflight,
-  WorkerStatus,
-} from "./worker-status.ts";
+} from "../lease-order.ts";
+import { type ProvisioningPause, type QueuedRun, WorkerStatus } from "../worker-status.ts";
+
+import { preflightFor } from "./preflight.ts";
 
 export class UnsupportedWorkerError extends Schema.TaggedError<UnsupportedWorkerError>(
   "@usine/orchestrator/UnsupportedWorkerError",
@@ -220,18 +213,6 @@ const asAttemptFailure = (error: ExecutorError): AgentFailure | InfraFailure =>
       new InfraFailure({ message: `Executor ${operation} failed: ${message}`, cause: error }),
   });
 
-// The operation error has no Worker field, and reports must include the Worker.
-const namingWorker =
-  (worker: WorkerName) =>
-  (error: ExecutorError): ExecutorError =>
-    error._tag === "ExecutorOperationError"
-      ? new ExecutorOperationError({
-          operation: error.operation,
-          message: `worker "${worker}": ${error.message}`,
-          cause: error.cause,
-        })
-      : error;
-
 const validateWorkers = (
   kind: ConfigWorker["kind"],
   workers: ReadonlyArray<ConfigWorker>,
@@ -318,7 +299,18 @@ export const stepExecutorLayer = (
       const pool = yield* TxRef.make(slotPoolOf(workers, new Map()));
       const pending = yield* TxPriorityQueue.empty<Reservation>(leaseOrder);
       const nextOrder = yield* Ref.make(0);
-      const preflights = yield* Ref.make(new Map<WorkerName, WorkerPreflight>());
+      const preflight = yield* preflightFor(executor);
+      const availablePool = Effect.all([TxRef.get(pool), preflight.blocked]).pipe(
+        Effect.map(
+          ([current, blocked]): SlotPool =>
+            new Map(
+              [...current].map(([name, slots]) => [
+                name,
+                blocked.has(name) ? { ...slots, capacity: 0 } : slots,
+              ]),
+            ),
+        ),
+      );
       const executorWorkers = options.workers ?? anyWorker;
       // Every change to the executor's Workers takes this permit, so a removal never undoes an
       // addition.
@@ -332,46 +324,6 @@ export const stepExecutorLayer = (
       const creations = yield* FiberMap.make<number>();
       const provisions = (worker: WorkerName) =>
         machines === undefined ? Effect.succeed(false) : machines.provisions(worker);
-
-      const recordPreflightExit = Effect.fn("WorkerScheduler.recordPreflight")(function* (
-        worker: WorkerName,
-        roster: ReadonlyArray<BrainSpec>,
-        exit: Exit.Exit<PreflightReport, ExecutorError>,
-      ) {
-        const outcome: Option.Option<Result.Result<PreflightReport, ExecutorError>> =
-          Exit.isSuccess(exit)
-            ? Option.some(Result.succeed(exit.value))
-            : Option.map(Exit.findErrorOption(exit), (error) => Result.fail(error));
-        // An interrupted or defective preflight gives no information about the Worker.
-        if (Option.isNone(outcome)) return;
-        const checkedAt = yield* DateTime.now;
-        yield* Ref.update(preflights, (current) =>
-          new Map(current).set(
-            worker,
-            recordPreflight(
-              current.get(worker) ?? unchecked(worker),
-              roster,
-              checkedAt,
-              outcome.value,
-            ),
-          ),
-        );
-      });
-
-      /**
-       * Runs `before`, then the Worker's preflight, and records both outcomes as the Worker's
-       * preflight.
-       */
-      const preflightWorker = (
-        worker: ConfigWorker,
-        roster: ReadonlyArray<BrainSpec>,
-        before: Effect.Effect<void, ExecutorError> = Effect.void,
-      ) =>
-        before.pipe(
-          Effect.andThen(executor.preflight(worker.name, roster, worker.maxConcurrentAttempts)),
-          Effect.mapError(namingWorker(worker.name)),
-          Effect.onExit((exit) => recordPreflightExit(worker.name, roster, exit)),
-        );
 
       /**
        * Removes `worker` from the executor unless the scheduler has it or a reload is adding it.
@@ -417,11 +369,14 @@ export const stepExecutorLayer = (
       const applyWorkers = Effect.fn("WorkerScheduler.applyWorkers")(function* (
         change: WorkersChange,
         declared: ReadonlyArray<ConfigWorker>,
+        roster: ReadonlyArray<BrainSpec>,
+        checked: ReadonlySet<WorkerName>,
       ) {
         const before = yield* TxRef.modify(pool, (current) => [
           current,
           slotPoolOf(declared, current),
         ]);
+        yield* preflight.accept(declared, roster, checked);
         const running = (worker: WorkerName) => before.get(worker)?.leased ?? 0;
         yield* Effect.forEach(change.resized, ({ worker, from }) =>
           Effect.logInfo("Worker slots resized by a reload; running Attempts continue", {
@@ -454,65 +409,74 @@ export const stepExecutorLayer = (
         );
       });
 
-      const prepareReload: WorkerReload = Effect.fn("WorkerScheduler.prepareReload")(function* (
-        running: LoadedInstance,
-        loaded: LoadedInstance,
-      ) {
-        const change = workersChange(running.config.workers, loaded.config.workers);
-        const restart = [
-          ...change.restart,
-          ...EffectArray.getSomes(change.added.map(unservedChange)),
-        ];
-        if (EffectArray.isReadonlyArrayNonEmpty(restart)) {
-          return yield* restartRequired(restart);
-        }
-        const agents = agentsWithNewBrains(running, loaded);
-        const agentNames = agents.map(({ name }) => name);
-        const newBrains = EffectArray.dedupe(agents.map(({ agent }) => agent.brain));
-        const roster = EffectArray.dedupe(loaded.agents.map(({ agent }) => agent.brain));
-        const wholeRoster = new Set([
-          ...change.added.map(({ name }) => name),
-          ...change.resized.map(({ worker }) => worker.name),
-        ]);
-        const checks = loaded.config.workers.flatMap((worker) =>
-          wholeRoster.has(worker.name)
-            ? [{ worker, brains: roster }]
-            : newBrains.length > 0
-              ? [{ worker, brains: newBrains }]
-              : [],
-        );
-        yield* Effect.annotateCurrentSpan({ agents: agentNames, workers: [...wholeRoster] });
-        if (checks.length === 0) {
-          yield* Effect.logDebug(
-            "The reload adds no worker or brain and changes no slots, so it runs no worker preflight",
+      const prepareReload: WorkerReload = Effect.fn("WorkerScheduler.prepareReload")(
+        function* (running: LoadedInstance, loaded: LoadedInstance) {
+          const change = workersChange(running.config.workers, loaded.config.workers);
+          const restart = [
+            ...change.restart,
+            ...EffectArray.getSomes(change.added.map(unservedChange)),
+          ];
+          if (EffectArray.isReadonlyArrayNonEmpty(restart)) {
+            return yield* restartRequired(restart);
+          }
+          const agents = agentsWithNewBrains(running, loaded);
+          const agentNames = agents.map(({ name }) => name);
+          const newBrains = EffectArray.dedupe(agents.map(({ agent }) => agent.brain));
+          const roster = EffectArray.dedupe(loaded.agents.map(({ agent }) => agent.brain));
+          const wholeRoster = new Set([
+            ...change.added.map(({ name }) => name),
+            ...change.resized.map(({ worker }) => worker.name),
+          ]);
+          const blocked = yield* preflight.blocked;
+          const checks = loaded.config.workers.flatMap((worker) =>
+            wholeRoster.has(worker.name)
+              ? [{ worker, brains: roster }]
+              : newBrains.length > 0
+                ? [{ worker, brains: blocked.has(worker.name) ? roster : newBrains }]
+                : [],
           );
-          return applyWorkers(change, loaded.config.workers);
-        }
-        const added = new Set(change.added.map(({ name }) => name));
-        yield* membership.withPermit(
-          Ref.update(adding, (current) => new Set([...current, ...added])),
-        );
-        yield* Effect.logInfo("Preflighting the Workers, slots, and brains the reload adds", {
-          agents: agentNames,
-          brains: newBrains.map(brainLabel),
-          workers: [...wholeRoster],
-        });
-        // Add the Worker to the executor first, so its preflight can connect to its machine.
-        yield* Effect.forEach(
-          checks,
-          ({ worker, brains }) =>
-            added.has(worker.name)
-              ? preflightWorker(worker, brains, executorWorkers.add(worker))
-              : preflightWorker(worker, brains),
-          { concurrency: "unbounded", discard: true },
-        ).pipe(
-          Effect.mapError((cause) => reloadPreflightFailed(agentNames, [...wholeRoster], cause)),
-          Effect.onExit((exit) =>
-            Exit.isFailure(exit) ? settleAdded(added, [...added]) : Effect.void,
-          ),
-        );
-        return applyWorkers(change, loaded.config.workers);
-      });
+          const apply = preflight.exclusive.withPermit(
+            applyWorkers(
+              change,
+              loaded.config.workers,
+              roster,
+              new Set(checks.map(({ worker }) => worker.name)),
+            ),
+          );
+          yield* Effect.annotateCurrentSpan({ agents: agentNames, workers: [...wholeRoster] });
+          if (checks.length === 0) {
+            yield* Effect.logDebug(
+              "The reload adds no worker or brain and changes no slots, so it runs no worker preflight",
+            );
+            return apply;
+          }
+          const added = new Set(change.added.map(({ name }) => name));
+          yield* membership.withPermit(
+            Ref.update(adding, (current) => new Set([...current, ...added])),
+          );
+          yield* Effect.logInfo("Preflighting the Workers, slots, and brains the reload adds", {
+            agents: agentNames,
+            brains: newBrains.map(brainLabel),
+            workers: [...wholeRoster],
+          });
+          // Add the Worker to the executor first, so its preflight can connect to its machine.
+          yield* Effect.forEach(
+            checks,
+            ({ worker, brains }) =>
+              added.has(worker.name)
+                ? preflight.check(worker, brains, executorWorkers.add(worker))
+                : preflight.check(worker, brains),
+            { concurrency: "unbounded", discard: true },
+          ).pipe(
+            Effect.mapError((cause) => reloadPreflightFailed(agentNames, [...wholeRoster], cause)),
+            Effect.onExit((exit) =>
+              Exit.isFailure(exit) ? settleAdded(added, [...added]) : Effect.void,
+            ),
+          );
+          return apply;
+        },
+        (effect) => preflight.exclusive.withPermit(effect),
+      );
 
       yield* instances.registerWorkers(prepareReload);
       // A reload can change the roster after the caller read `brains` and before the registration.
@@ -521,10 +485,7 @@ export const stepExecutorLayer = (
         ...brains,
         ...agents.map(({ agent }) => agent.brain),
       ]);
-      yield* Effect.forEach(workers, (worker) => preflightWorker(worker, startupRoster), {
-        concurrency: "unbounded",
-        discard: true,
-      }).pipe(Effect.withSpan("WorkerScheduler.preflight"));
+      yield* preflight.exclusive.withPermit(preflight.start(workers, startupRoster));
 
       const releaseSlot = (worker: WorkerName) =>
         TxRef.modify(pool, (current) => releasedFrom(current, worker)).pipe(
@@ -601,10 +562,11 @@ export const stepExecutorLayer = (
       const nextAssignment = Effect.tx(
         Effect.gen(function* () {
           const current = yield* TxRef.get(pool);
+          const available = yield* availablePool;
           const pauses = yield* TxRef.get(paused);
           const waiting = yield* TxPriorityQueue.toArray(pending);
           const next = EffectArray.findFirst(waiting, (reservation) =>
-            Option.map(workerFor(current, pauses, reservation), (worker) => ({
+            Option.map(workerFor(available, pauses, reservation), (worker) => ({
               worker,
               reservation,
             })),
@@ -710,7 +672,7 @@ export const stepExecutorLayer = (
               const failure = created.failure;
               yield* releaseSlot(worker);
               if (failure._tag === "WorkerCapabilityError")
-                yield* recordPreflightExit(worker, roster, Exit.fail(failure));
+                yield* preflight.record(worker, roster, Exit.fail(failure));
               yield* pauseWorker(worker, failure);
               const requeued = yield* Ref.modify(reservation.state, (state) =>
                 state._tag === "Creating"
@@ -731,7 +693,7 @@ export const stepExecutorLayer = (
             );
             if (Option.isSome(grant.checked)) {
               const { brains, containerLimits } = grant.checked.value;
-              yield* recordPreflightExit(
+              yield* preflight.record(
                 worker,
                 brains,
                 Exit.succeed({ ...fullPreflight, containerLimits }),
@@ -910,7 +872,7 @@ export const stepExecutorLayer = (
           };
           const [queue, current] = yield* Effect.tx(
             TxPriorityQueue.offer(pending, reservation).pipe(
-              Effect.andThen(Effect.all([TxPriorityQueue.toArray(pending), TxRef.get(pool)])),
+              Effect.andThen(Effect.all([TxPriorityQueue.toArray(pending), availablePool])),
             ),
           );
           const fields = {
@@ -931,7 +893,7 @@ export const stepExecutorLayer = (
             );
           else
             yield* Effect.logWarning(
-              "Run waits for a slot on the Worker its reattached Attempt runs on, which usine.yaml does not declare; it waits until a reload declares that Worker again or the Run is canceled",
+              "Run waits for a slot on the Worker its reattached Attempt runs on, which is unavailable or no longer declared; it waits until preflight passes, a reload declares that Worker again, or the Run is canceled",
               { ...fields, worker: worker.value },
             );
           return yield* Deferred.await(deferred).pipe(
@@ -1086,15 +1048,16 @@ export const stepExecutorLayer = (
         executor.cancel(attemptId, reason).pipe(Effect.mapError(asAttemptFailure));
 
       const status = WorkerStatus.of({
-        slots: TxRef.get(pool).pipe(
+        slots: availablePool.pipe(
           Effect.map((current) =>
             [...current].map(([worker, { capacity, leased }]) => ({ worker, capacity, leased })),
           ),
         ),
-        queue: Effect.tx(Effect.all([TxPriorityQueue.toArray(pending), TxRef.get(pool)])).pipe(
+        queue: Effect.tx(Effect.all([TxPriorityQueue.toArray(pending), availablePool])).pipe(
           Effect.map(([queued, current]) => queuedRuns(queued, current)),
         ),
-        preflights: Ref.get(preflights).pipe(Effect.map((current) => [...current.values()])),
+        preflights: preflight.records,
+        unavailable: preflight.unavailable,
         machines: machines === undefined ? Effect.succeed([]) : machines.machines,
         provisioning: TxRef.get(paused).pipe(Effect.map((current) => [...current.values()])),
       });

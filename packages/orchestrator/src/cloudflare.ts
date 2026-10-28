@@ -13,7 +13,7 @@ import {
 import { layer as localEngineLayer, localSqliteLayer } from "@usine/engine/local-sqlite";
 import { Config, Effect, Layer } from "effect";
 import { externalHttpClientLayer } from "./http-client.ts";
-import { stepExecutorLayer } from "./scheduler.ts";
+import { stepExecutorLayer } from "./scheduler/scheduler.ts";
 import { withSshWorkerDiscard } from "./ssh.ts";
 
 /** Returns the Cloudflare Workers that `usine.yaml` declares, in declared order. */

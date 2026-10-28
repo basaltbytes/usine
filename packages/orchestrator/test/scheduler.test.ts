@@ -35,9 +35,10 @@ import {
   Redacted,
   Schema,
 } from "effect";
+import { TestClock } from "effect/testing";
 import { CurrentInstance } from "../src/current-instance/current-instance.ts";
 import { ReloadPreflightRefusal, reloadRefusal } from "../src/operator/http.ts";
-import { stepExecutorLayer } from "../src/scheduler.ts";
+import { stepExecutorLayer } from "../src/scheduler/scheduler.ts";
 import { sshStepExecutorLayer } from "../src/ssh.ts";
 import { WorkerStatus } from "../src/worker-status.ts";
 import { fixedConfigLayer } from "./support/current-instance.ts";
@@ -47,7 +48,7 @@ import { reloadableInstanceLayer, writeInstanceFiles } from "./support/instance-
 const unused = () => Effect.die("unused");
 
 describe("Worker scheduler startup", () => {
-  it.effect("names the Worker when its preflight fails on an operation", () =>
+  it.effect("fails startup with the worker message when every worker fails preflight", () =>
     Effect.gen(function* () {
       const executor = Layer.succeed(Executor)({
         kind: "local",
@@ -67,7 +68,14 @@ describe("Worker scheduler startup", () => {
         intervene: unused,
         sweep: Effect.void,
       });
-      const config = Schema.decodeUnknownSync(UsineConfig)({ version: 1, repos: [] });
+      const config = Schema.decodeUnknownSync(UsineConfig)({
+        version: 1,
+        repos: [],
+        workers: [
+          { name: "local", kind: "local" },
+          { name: "spare", kind: "local" },
+        ],
+      });
       const failure = yield* Layer.build(
         stepExecutorLayer(config, []).pipe(
           Layer.provide(executor),
@@ -79,6 +87,181 @@ describe("Worker scheduler startup", () => {
       assert.strictEqual(failure.operation, "preflight");
       assert.strictEqual(failure.message, 'worker "local": The harness probe timed out');
     }),
+  );
+
+  it.effect(
+    "schedules on a healthy worker while a failed worker waits, then recovers on its second preflight",
+    () =>
+      withWorkers(
+        localWorkers([
+          ["local", 1],
+          ["spare", 1],
+        ]),
+        () =>
+          Effect.gen(function* () {
+            const failing = ["local"];
+            const calls: Array<string> = [];
+            const context = yield* schedulerContext(calls, { failing });
+            const steps = Context.get(context, StepExecutor);
+            const status = Context.get(context, WorkerStatus);
+            const agent = yield* developer;
+            assert.deepStrictEqual(
+              (yield* status.slots).map(({ worker, capacity }) => [worker, capacity]),
+              [
+                ["local", 0],
+                ["spare", 1],
+              ],
+            );
+            const healthy = yield* steps.reserve(runOf(1), submission(agent, 1), Option.none());
+            assert.strictEqual(healthy.worker, "spare");
+            const waiting = yield* steps
+              .reserve(runOf(2), submission(agent, 2), Option.some(WorkerName.make("local")))
+              .pipe(Effect.forkChild);
+            failing.length = 0;
+            yield* TestClock.adjust("59 seconds");
+            assert.isUndefined(waiting.pollUnsafe());
+            assert.lengthOf(calls, 2);
+            yield* TestClock.adjust("1 second");
+            const recovered = yield* Fiber.join(waiting);
+            assert.strictEqual(recovered.worker, "local");
+            assert.lengthOf(calls, 3);
+            const checks = yield* status.preflights;
+            assert.strictEqual(
+              Option.getOrNull(
+                checks.find(({ worker }) => worker === "local")?.prerequisites ?? Option.none(),
+              )?._tag,
+              "Passed",
+            );
+            yield* recovered.release;
+            yield* healthy.release;
+          }).pipe(Effect.scoped),
+      ),
+  );
+
+  it.effect(
+    "keeps failed workers disabled across unrelated reloads and backs off until a changed worker passes",
+    () =>
+      withWorkers(
+        localWorkers([
+          ["local", 1],
+          ["spare", 1],
+        ]),
+        (root) =>
+          Effect.gen(function* () {
+            const failing = ["local"];
+            const calls: Array<string> = [];
+            const context = yield* schedulerContext(calls, { failing });
+            const status = Context.get(context, WorkerStatus);
+            const instances = yield* CurrentInstance;
+            yield* instances.reload;
+            assert.strictEqual(
+              (yield* status.slots).find(({ worker }) => worker === "local")?.capacity,
+              0,
+            );
+            for (const minutes of [1, 2, 5, 10, 10]) {
+              const before = calls.length;
+              yield* TestClock.adjust(`${minutes * 60 - 1} seconds`);
+              assert.lengthOf(calls, before);
+              yield* TestClock.adjust("1 second");
+              assert.lengthOf(calls, before + 1);
+            }
+            yield* writeInstanceFiles(root, [
+              [
+                "usine.yaml",
+                usineYaml(
+                  localWorkers([
+                    ["local", 2],
+                    ["spare", 1],
+                  ]),
+                ),
+              ],
+            ]);
+            const refused = yield* instances.reload.pipe(Effect.flip);
+            assert.strictEqual(refused._tag, "ReloadPreflightError");
+            assert.strictEqual(
+              (yield* status.slots).find(({ worker }) => worker === "local")?.capacity,
+              0,
+            );
+            failing.length = 0;
+            yield* instances.reload;
+            assert.strictEqual(
+              (yield* status.slots).find(({ worker }) => worker === "local")?.capacity,
+              2,
+            );
+            const recoveredCalls = calls.length;
+            yield* TestClock.adjust("10 minutes");
+            assert.lengthOf(calls, recoveredCalls);
+          }).pipe(Effect.scoped),
+      ),
+  );
+
+  it.effect(
+    "keeps a worker unavailable when its check passes but another worker refuses the revision",
+    () =>
+      withWorkers(
+        localWorkers([
+          ["local", 1],
+          ["spare", 1],
+        ]),
+        (root) =>
+          Effect.gen(function* () {
+            const failing = ["local"];
+            const context = yield* schedulerContext([], { failing });
+            const status = Context.get(context, WorkerStatus);
+            failing.splice(0, 1, "spare");
+            yield* writeInstanceFiles(root, [
+              [
+                "usine.yaml",
+                usineYaml(
+                  localWorkers([
+                    ["local", 2],
+                    ["spare", 2],
+                  ]),
+                ),
+              ],
+            ]);
+            const refused = yield* (yield* CurrentInstance).reload.pipe(Effect.flip);
+            assert.strictEqual(refused._tag, "ReloadPreflightError");
+            assert.deepStrictEqual(
+              (yield* status.unavailable).map(({ worker }) => worker),
+              ["local"],
+            );
+            assert.strictEqual(
+              (yield* status.slots).find(({ worker }) => worker === "local")?.capacity,
+              0,
+            );
+            yield* TestClock.adjust("1 minute");
+            assert.deepStrictEqual(yield* status.unavailable, []);
+            assert.strictEqual(
+              (yield* status.slots).find(({ worker }) => worker === "local")?.capacity,
+              1,
+            );
+          }).pipe(Effect.scoped),
+      ),
+  );
+
+  it.effect("stops preflight retries when a revision removes the failed worker", () =>
+    withWorkers(
+      localWorkers([
+        ["local", 1],
+        ["spare", 1],
+      ]),
+      (root) =>
+        Effect.gen(function* () {
+          const calls: Array<string> = [];
+          const context = yield* schedulerContext(calls, { failing: ["local"] });
+          yield* writeInstanceFiles(root, [
+            ["usine.yaml", usineYaml(localWorkers([["spare", 1]]))],
+          ]);
+          yield* (yield* CurrentInstance).reload;
+          yield* TestClock.adjust("20 minutes");
+          assert.lengthOf(calls, 2);
+          assert.deepStrictEqual(
+            (yield* Context.get(context, WorkerStatus).slots).map(({ worker }) => worker),
+            ["spare"],
+          );
+        }).pipe(Effect.scoped),
+    ),
   );
 });
 
@@ -403,7 +586,7 @@ describe("Worker scheduler reservations that name a Worker", () => {
         assert.deepStrictEqual(
           logged(
             lines,
-            "Run waits for a slot on the Worker its reattached Attempt runs on, which usine.yaml does not declare; it waits until a reload declares that Worker again or the Run is canceled",
+            "Run waits for a slot on the Worker its reattached Attempt runs on, which is unavailable or no longer declared; it waits until preflight passes, a reload declares that Worker again, or the Run is canceled",
           ),
           [
             {

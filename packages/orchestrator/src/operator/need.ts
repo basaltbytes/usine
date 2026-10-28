@@ -150,6 +150,15 @@ export class CycleBudgetNeed extends Schema.TaggedClass<CycleBudgetNeed>("CycleB
   },
 ) {}
 
+/** A worker excluded from scheduling after its startup preflight failed. */
+export class WorkerPreflightNeed extends Schema.TaggedClass<WorkerPreflightNeed>(
+  "@usine/orchestrator/WorkerPreflightNeed",
+)("WorkerPreflightNeed", {
+  id: Schema.String,
+  worker: WorkerName,
+  message: Schema.String,
+}) {}
+
 /** One reason the overview asks for operator attention. */
 export const NeedView = Schema.Union([
   CycleBudgetNeed,
@@ -163,5 +172,6 @@ export const NeedView = Schema.Union([
   UnconfiguredWorkerNeed,
   UnconfirmedStopNeed,
   UnresponsiveWorkerNeed,
+  WorkerPreflightNeed,
 ]);
 export type NeedView = typeof NeedView.Type;

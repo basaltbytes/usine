@@ -26,6 +26,7 @@ const repositoriesOf = (need: NeedView) =>
       failure._tag === "ScheduleTickFailure" ? [failure.repository] : [],
     ConfigFileNeed: () => [],
     UnconfiguredWorkerNeed: () => [],
+    WorkerPreflightNeed: () => [],
     UnresponsiveWorkerNeed: ({ attempts }) => attempts.map(({ repository }) => repository),
   });
 

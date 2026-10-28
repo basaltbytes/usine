@@ -130,7 +130,7 @@ import { OperatorStatistics } from "./statistics/statistics.ts";
 import type { RunStatisticsView, StatisticsView, StatisticsWindow } from "./statistics/view.ts";
 import { machineView } from "./machines.ts";
 import { WorkerStatus } from "../worker-status.ts";
-import { workerAttentionFor } from "./unresponsive.ts";
+import { workerAttentionFor } from "./worker-attention.ts";
 
 export type BoardMoveError =
   | BoardItemNotFoundError
@@ -221,7 +221,7 @@ const makeOperatorObservation = Effect.gen(function* () {
   const usageReader = yield* RunUsageReader;
   const stops = yield* UnconfirmedStops;
   const workerStatus = yield* WorkerStatus;
-  const workerAttention = workerAttentionFor(reader, acknowledgements);
+  const workerAttention = workerAttentionFor(reader, acknowledgements, workerStatus);
 
   const projectOverview = Effect.fn("Operator.projectOverview")(function* (
     instance: LoadedInstance,
@@ -662,7 +662,13 @@ const makeOperatorObservation = Effect.gen(function* () {
         return [projected, Option.some({ token: token.value, ...projected })] as const;
       }),
     ).pipe(
-      Effect.flatMap(({ overview, running }) => workerAttention(overview, running)),
+      Effect.flatMap(({ overview, running }) =>
+        workerAttention(
+          overview,
+          running,
+          instance.config.workers.map(({ name }) => name),
+        ),
+      ),
       Effect.tap(({ needsYou, dismissedNeeds }) =>
         acknowledgements.prune([...needsYou, ...dismissedNeeds].map(attentionKey)),
       ),
@@ -1377,6 +1383,7 @@ export {
   ConfigFileNeed,
   UnconfiguredWorkerNeed,
   UnresponsiveWorkerNeed,
+  WorkerPreflightNeed,
   UnconfirmedStopNeed,
   NeedView,
 } from "./need.ts";
