@@ -18,9 +18,13 @@ import { Array as Arr, Effect, Option, Schema } from "effect";
 const problemEntity = (file: string) => {
   const colon = file.indexOf(":");
   const slash = file.indexOf("/");
-  const kind = colon >= 0 ? file.slice(0, colon) : file.slice(0, slash).replace(/s$/u, "");
-  const identifier =
-    colon >= 0 ? file.slice(colon + 1) : file.slice(slash + 1).replace(/\.md$/u, "");
+  const separator = colon >= 0 && (slash < 0 || colon < slash) ? colon : slash;
+  const prefix = file.slice(0, separator);
+  const markdown = prefix === "agents" || prefix === "loops";
+  const kind = markdown ? prefix.slice(0, -1) : prefix;
+  const identifier = markdown
+    ? file.slice(separator + 1).replace(/\.md$/u, "")
+    : file.slice(separator + 1);
   return new ConfigurationEntityKey({
     kind: Option.getOrElse(
       Schema.decodeUnknownOption(ConfigurationEntityKind)(kind),

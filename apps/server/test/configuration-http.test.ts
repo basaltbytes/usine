@@ -383,6 +383,40 @@ it("refuses stale, invalid and incompatible writes without storing a revision", 
     }).pipe(Effect.scoped),
   ));
 
+it.each(["type:bug", "type:", "notes.md", "type/bug:"])(
+  "preserves label identifier %s in YAML and schema validation errors",
+  (identifier) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const { request, store } = yield* harness;
+        const path = `/entities/label/${encodeURIComponent(identifier)}`;
+        expect(yield* request("PUT", path, { expected: 1, text: "name: [" })).toMatchObject({
+          status: 422,
+          body: {
+            error: "ConfigurationInvalid",
+            problems: [{ entity: { kind: "label", identifier }, path: [] }],
+          },
+        });
+        expect(
+          yield* request("PUT", path, {
+            expected: 1,
+            value: { name: identifier, color: "wrong" },
+          }),
+        ).toMatchObject({
+          status: 422,
+          body: {
+            error: "ConfigurationInvalid",
+            problems: [{ entity: { kind: "label", identifier }, path: ["color"] }],
+          },
+        });
+        expect((yield* store.read).number).toBe(1);
+        expect(
+          (yield* request("PUT", path, { expected: 1, value: { name: identifier } })).status,
+        ).toBe(200);
+      }).pipe(Effect.scoped),
+    ),
+);
+
 it("reverts changes as a new revision and identifies entities changed by later revisions", () =>
   Effect.runPromise(
     Effect.gen(function* () {
