@@ -15,7 +15,7 @@ import {
   SshWorkers,
 } from "@usine/executor/ssh";
 import { Config, ConfigProvider, Effect, Layer, Option } from "effect";
-import { externalHttpClientLayer } from "./http-client.ts";
+import { sshHttpClientLayer } from "./http-client.ts";
 import { type StepExecutorOptions, stepExecutorLayer } from "./scheduler.ts";
 
 /** Returns where the SSH executor records how to reach each long-lived SSH Worker's machine. */
@@ -264,7 +264,7 @@ export const layer = (
 ) => {
   const executor = sshExecutorLayer(options).pipe(
     Layer.provide(NodeServices.layer),
-    Layer.provide(externalHttpClientLayer),
+    Layer.provide(sshHttpClientLayer),
   );
   const stepExecutor = withSshWorkerDiscard(instanceDirectory, (discard) =>
     sshStepExecutorLayer(config, brains, { discard }),

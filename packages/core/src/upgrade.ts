@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 
 export const UpgradeChannel = Schema.Literals(["latest", "next"]);
 export type UpgradeChannel = typeof UpgradeChannel.Type;
@@ -30,6 +30,9 @@ class RolledBack extends Schema.Class<RolledBack>("@usine/core/UpgradeRolledBack
   ...versions,
   status: Schema.Literal("rolled-back"),
   reason: Schema.NonEmptyString,
+  failureStage: Schema.Literals(["install", "health-check", "unknown"]).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed("unknown")),
+  ),
 }) {}
 class Failed extends Schema.Class<Failed>("@usine/core/UpgradeFailed")({
   ...versions,
