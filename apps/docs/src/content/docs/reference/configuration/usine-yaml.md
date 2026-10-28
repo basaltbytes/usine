@@ -391,6 +391,17 @@ Both providers take these keys:
 | `token_env` | string | required | Name of the orchestrator's environment variable that contains the provider's API token: a Hetzner Cloud API token with **Read & Write** permission for the project, or a Boat API key. The file never contains the token itself. |
 | `api_keys` | mapping | `{}` | LLM provider API keys for each attempt, as names of the orchestrator's environment variables. Each attempt's container gets `anthropic` as `ANTHROPIC_API_KEY` for Claude Code, and `openai` as `OPENAI_API_KEY` for Codex, unless the worker's gateway has the provider in `llm_providers`. |
 
+Both providers accept a `timings` mapping. Values are positive whole seconds, at most 2147483:
+
+| Key under `timings` | Default | Description |
+| --- | --- | --- |
+| `ssh_wait` | `600` | Maximum wait for the new machine's endpoint, SSH readiness, and gateway connection. |
+| `creation_backoff_min` | `30` | Delay after the first failed machine creation. Each consecutive failure doubles it. |
+| `creation_backoff_max` | `600` | Maximum creation delay. Must be at least `creation_backoff_min`. |
+| `machine_check_interval` | `86400` | Time between successful machine checks. The first machine after startup is always checked. |
+
+For example, `timings: { ssh_wait: 900, machine_check_interval: 3600 }` waits up to 15 minutes for SSH and checks the next machine created at least an hour after the previous successful check. A failed check does not reset the interval.
+
 `kind: ssh` keys with a `provisioner`:
 
 - `destination` and `port` are refused: the provider gives each machine's address and port.

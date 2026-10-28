@@ -207,12 +207,20 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
   const path = yield* Path.Path;
   const held = yield* Ref.make<ReadonlyMap<MachineHold, Held>>(new Map());
   const nextHold = yield* Ref.make(0);
-  const checkedOn = yield* Ref.make<ReadonlyMap<WorkerName, string>>(new Map());
+  const checkedOn = yield* Ref.make<ReadonlyMap<WorkerName, number>>(new Map());
   const earlierMachines = yield* Ref.make<ReadonlyMap<WorkerName, ReadonlyArray<ListedMachine>>>(
     new Map(),
   );
   const process = yield* randomHex(12);
-  const readyTimeout = Duration.fromInputUnsafe(settings.machineReadyTimeout ?? "10 minutes");
+  const readyTimeoutFor = (entry: SshWorkerEntry) =>
+    Duration.fromInputUnsafe(
+      settings.machineReadyTimeout ??
+        Duration.seconds(
+          entry.address.machine._tag === "Provisioned"
+            ? entry.address.machine.provisioner.timings.sshWait
+            : 600,
+        ),
+    );
   const interval = Effect.sleep(settings.machinePollInterval ?? "3 seconds");
   const knownHostsDirectory =
     settings.knownHostsDirectory === undefined
@@ -527,15 +535,28 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
    * Worker's preflight at `usine up` can't. Each machine runs one Attempt, so the container
    * limits it derives are for one Attempt; the Worker's machines get them until the next check.
    */
-  const checkDaily = Effect.fn("SshExecutor.checkMachineOfTheDay")(function* (
+  const checkMachine = Effect.fn("SshExecutor.checkMachine")(function* (
     machine: SshMachine,
     brains: ReadonlyArray<BrainSpec>,
   ) {
     const worker = machine.address.name;
-    const today = DateTime.formatIsoDateUtc(yield* DateTime.now);
-    if ((yield* Ref.get(checkedOn)).get(worker) === today) return Option.none<MachineCheck>();
+    const now = DateTime.toEpochMillis(yield* DateTime.now);
+    const last = (yield* Ref.get(checkedOn)).get(worker);
+    const provisioner = machine.address.machine;
+    if (provisioner._tag !== "Provisioned")
+      return yield* Effect.die(new Error("expected a provisioned machine"));
+    if (
+      last !== undefined &&
+      now - last < provisioner.provisioner.timings.machineCheckInterval * 1000
+    ) {
+      yield* Effect.logDebug("Machine check interval has not elapsed", {
+        worker,
+        lastCheckedAt: last,
+      });
+      return Option.none<MachineCheck>();
+    }
     yield* Effect.logInfo(
-      "Checking the first machine of the day on a provisioned Worker: Git, memory, the Gateway, Docker, the container limits, and the harnesses",
+      "Checking a provisioned Worker machine: Git, memory, the Gateway, Docker, the container limits, and the harnesses",
       { worker, host: machine.shell.destination, brains: brains.length },
     );
     const report = yield* options.verifyMachine(machine, brains, 1).pipe(
@@ -560,11 +581,15 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
           ),
       }),
     );
-    yield* Ref.update(checkedOn, (current) => new Map(current).set(worker, today));
+    yield* Ref.update(checkedOn, (current) => new Map(current).set(worker, now));
     return Option.some(new MachineCheck({ brains, containerLimits: report.containerLimits }));
   });
 
-  const timedOut = (worker: WorkerName, provider: MachineProvider) =>
+  const timedOut = (
+    worker: WorkerName,
+    provider: MachineProvider,
+    readyTimeout: Duration.Duration,
+  ) =>
     new MachineUnavailableError({
       worker,
       provider,
@@ -587,6 +612,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     const driver = yield* driverFor(worker).pipe(
       Effect.catchTags({ ExecutorOperationError: defect, CredentialUnavailableError: defect }),
     );
+    const readyTimeout = readyTimeoutFor(entry);
     const since = yield* DateTime.now;
     const tags: MachineTags = { instance, worker, run: runId, process, attempt: Option.none() };
     const { hold } = yield* register({
@@ -633,12 +659,12 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
       Effect.tap(tailnets.join),
       Effect.timeoutOrElse({
         duration: readyTimeout,
-        orElse: () => Effect.fail(timedOut(worker, driver.provider)),
+        orElse: () => Effect.fail(timedOut(worker, driver.provider, readyTimeout)),
       }),
     );
     const prepared = yield* ready.pipe(
       Effect.flatMap((machine) =>
-        checkDaily(machine, brains).pipe(Effect.map((checked) => ({ machine, checked }))),
+        checkMachine(machine, brains).pipe(Effect.map((checked) => ({ machine, checked }))),
       ),
       Effect.onExit((exit) =>
         Exit.isSuccess(exit) ? Effect.void : discard(hold, "the machine didn't become ready"),
@@ -713,10 +739,11 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
       Option.contains(tags.attempt, attemptTag(attemptId)),
     );
     if (listed === undefined) return false;
+    const readyTimeout = readyTimeoutFor(workerEntry);
     const machine = yield* machineOf(workerEntry, driver, listed.id, Option.none()).pipe(
       Effect.timeoutOrElse({
         duration: readyTimeout,
-        orElse: () => Effect.fail(timedOut(worker, driver.provider)),
+        orElse: () => Effect.fail(timedOut(worker, driver.provider, readyTimeout)),
       }),
     );
     yield* update(entry.hold, (current) => ({
@@ -1003,7 +1030,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
   /**
    * Verifies a provisioned Worker without a machine: the provider token, image, key, and limits,
    * the Gateway's admin API, and that every harness has a credential no machine has to keep.
-   * The machine checks run on the Worker's first machine each day.
+   * The machine checks run at the configured interval.
    */
   const verifyProvisioned = Effect.fn("SshExecutor.verifyProvisioned")(function* (
     entry: SshWorkerEntry,
@@ -1027,7 +1054,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     const gap = harnessCredentialGap(entry, brains);
     if (Option.isSome(gap)) return yield* gap.value;
     yield* Effect.logInfo(
-      "Provisioned SSH Worker preflight verified; its first machine each day checks the harnesses",
+      "Provisioned SSH Worker preflight verified; its next due machine check verifies the harnesses",
       {
         worker,
         provider: driver.provider,
@@ -1037,7 +1064,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     return {
       degraded: Option.none(),
       deferred: Option.some(
-        "Checked on the worker's first machine each day, since no machine exists before an attempt.",
+        `Checked on the first machine, then every ${provisioner.value.timings.machineCheckInterval} seconds when a machine is created.`,
       ),
       containerLimits: Option.none(),
     } satisfies PreflightReport;

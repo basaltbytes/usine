@@ -9,7 +9,7 @@ import type { ItemKey } from "@usine/core/item";
 import type { LoopName } from "@usine/core/loop";
 import { canonicalRepositoryName } from "@usine/core/repository";
 import type { RunId } from "@usine/core/run";
-import { BotLogin, WorkerName } from "@usine/core/worker";
+import { BotLogin, ProvisionerTimings, WorkerName } from "@usine/core/worker";
 import {
   CheckoutRequest,
   Executor,
@@ -175,13 +175,14 @@ const workerFor = (
     onSome: (worker) => (isFree(pool, worker) ? Option.some(worker) : Option.none()),
   });
 
-/** The first pause after a machine creation fails on a Worker. It doubles up to `MAX_PAUSE`. */
-const FIRST_PAUSE = Duration.seconds(30);
-const MAX_PAUSE = Duration.minutes(10);
-
-/** Returns the pause after the `failures`th consecutive failed machine creation. */
-const pauseAfter = (failures: number): Duration.Duration =>
-  Duration.min(Duration.times(FIRST_PAUSE, 2 ** Math.min(failures - 1, 10)), MAX_PAUSE);
+/** Returns the capped delay after consecutive machine creation failures. */
+const pauseAfter = (failures: number, timings: ProvisionerTimings): Duration.Duration =>
+  Duration.seconds(
+    Math.min(
+      timings.creationBackoffMin * 2 ** Math.min(failures - 1, 52),
+      timings.creationBackoffMax,
+    ),
+  );
 
 const withLeased = (pool: SlotPool, worker: WorkerName, change: number): SlotPool => {
   const slots = pool.get(worker);
@@ -622,11 +623,17 @@ export const stepExecutorLayer = (
         worker: WorkerName,
         failure: MachineUnavailableError | WorkerCapabilityError,
       ) {
+        const { config } = yield* instances.get;
+        const configured = config.workers.find(({ name }) => name === worker);
+        const timings =
+          configured?.kind === "ssh" && Option.isSome(configured.provisioner)
+            ? configured.provisioner.value.timings
+            : new ProvisionerTimings({});
         const failedAt = yield* DateTime.now;
         const pause = yield* Effect.tx(
           TxRef.modify(paused, (current) => {
             const failures = (current.get(worker)?.failures ?? 0) + 1;
-            const delay = pauseAfter(failures);
+            const delay = pauseAfter(failures, timings);
             const next: ProvisioningPause = {
               worker,
               reason: failure._tag === "MachineUnavailableError" ? failure.reason : "check",
