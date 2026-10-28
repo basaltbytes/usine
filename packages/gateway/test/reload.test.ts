@@ -89,6 +89,7 @@ const settingsLines = (
   domain = "gw.test",
 ) => [
   `USINE_GATEWAY_DOMAIN=${domain}`,
+  `STATE_DIRECTORY=${files.path("state")}`,
   `USINE_GATEWAY_PROXY_PORT=${ports.proxy}`,
   `USINE_GATEWAY_EGRESS_PORT=${ports.egress}`,
   `USINE_GATEWAY_ADMIN_PORT=${ports.admin}`,

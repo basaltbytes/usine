@@ -37,7 +37,7 @@ while [ "$#" -gt 1 ]; do
 done
 `.trim();
 
-/** The interval for re-storing a live Attempt's attachment, which bounds the outage after a Gateway restart. */
+/** The interval for restoring a live attempt's attachment if gateway state is lost. */
 const RESTORE_INTERVAL = "2 minutes";
 
 interface CurrentAttachment {
@@ -238,8 +238,7 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
       Effect.uninterruptible,
     );
 
-    // The Gateway stores attachments in memory. After a restart, re-creates the attachment with
-    // the same ID and the current token.
+    // Re-create missing state under the same ID and caller token, including on older gateways.
     const restore = Effect.fn("SshExecutor.restoreAttachment")(
       function* () {
         yield* Effect.annotateCurrentSpan(fields);
