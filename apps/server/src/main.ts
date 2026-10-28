@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import type { ConfigCommand } from "./configuration/command.ts";
 import { NodeRuntime, NodeServices } from "@effect/platform-node";
 import { InstanceDirectory } from "@usine/core/instance";
 import { Config, ConfigProvider, Console, Effect, Layer, Match } from "effect";
@@ -32,7 +33,16 @@ const runCommand = Effect.fnUntraced(function* (directory: InstanceDirectory) {
   // An environment and a parsed .env don't fail to load, so a ConfigError here is a defect.
   const environment = yield* Effect.orDie(cliEnvironment);
   const command = yield* parseCli(process.argv.slice(2), environment);
+  const configurationCommand = (config: ConfigCommand) =>
+    Effect.flatMap(
+      Effect.promise(() => import("./configuration/cli.ts")),
+      ({ configCommand }) => configCommand(directory, config),
+    );
   return yield* Match.valueTags(command, {
+    ConfigExportCommand: configurationCommand,
+    ConfigImportCommand: configurationCommand,
+    ConfigEditCommand: configurationCommand,
+    ConfigLogCommand: configurationCommand,
     HelpCommand: () => Console.log(CLI_USAGE),
     VersionCommand: () => Effect.flatMap(packageVersion(), Console.log),
     ExportRunCommand: ({ runId, output }) =>

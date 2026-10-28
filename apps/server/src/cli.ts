@@ -1,3 +1,4 @@
+import { ConfigCommand, parseConfigCommand } from "./configuration/command.ts";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { resolve, sep } from "node:path";
@@ -55,6 +56,10 @@ const LOG_LEVEL_NAMES = {
 export const DEFAULT_LIFECYCLE_TIMEOUT_SECONDS = 120;
 
 export const CLI_USAGE = `Usage:
+  usine config export <folder>
+  usine config import <folder> [--message <text>]
+  usine config edit <kind> <name>
+  usine config log [<kind> <name>]
   usine up [--port <port>] [--origin <url>] [--log-level <level>] [--allow-volatile-instance] [--detach]
   usine status
   usine stop [--timeout <seconds>] [--force]
@@ -202,6 +207,7 @@ export interface CliEnvironment {
 }
 
 export const CliCommand = Schema.Union([
+  ConfigCommand,
   HelpCommand,
   VersionCommand,
   UpCommand,
@@ -434,6 +440,7 @@ const upgradeCommand = (args: ReadonlyArray<string>) =>
   });
 
 const SUBCOMMANDS: ReadonlySet<string> = new Set([
+  "config",
   "up",
   "status",
   "stop",
@@ -459,6 +466,8 @@ export const parseCli = Effect.fn("Cli.parse")((
     return Effect.succeed(new VersionCommand());
   }
   switch (command) {
+    case "config":
+      return parseConfigCommand(rest).pipe(Effect.mapError(({ message }) => usageError(message)));
     case "backup":
       return backupCommand(rest);
     case "export-run":

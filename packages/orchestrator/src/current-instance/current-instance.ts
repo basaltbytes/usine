@@ -1,5 +1,11 @@
-import type { FactoryConfigError } from "@usine/config/file";
-import { InstanceFolder } from "@usine/config/instance-folder";
+import { ConfigParser } from "@usine/config/parser";
+import { FactoryConfigError, InstancePath } from "@usine/config/file";
+import {
+  Configuration,
+  ConfigurationStore,
+  commit,
+  type ConfigurationRevisionNumber,
+} from "@usine/config/configuration";
 import type { LoadedInstance } from "@usine/config/instance";
 import { AgentName } from "@usine/core/agent";
 import type { InstanceDirectory } from "@usine/core/instance";
@@ -16,7 +22,8 @@ import {
   Schema,
   type Scope,
   Semaphore,
-  type Stream,
+  Stream,
+  Schedule,
   SubscriptionRef,
 } from "effect";
 import {
@@ -146,7 +153,7 @@ const rejectionLogFields = (error: InstanceReloadError) =>
   });
 
 /**
- * The instance folder snapshot that the orchestrator runs, replaced by each reload. Consumers read
+ * The stored configuration snapshot that the orchestrator runs, replaced by each reload. Consumers read
  * it each time they act; a Run keeps the Agent, task, and parent model it opened with.
  */
 export class CurrentInstance extends Context.Service<
@@ -157,8 +164,8 @@ export class CurrentInstance extends Context.Service<
     /** The current snapshot, then each snapshot an accepted reload installs. */
     readonly changes: Stream.Stream<LoadedInstance>;
     /**
-     * Reloads the instance folder, one reload at a time, and returns what changed. Fails and keeps
-     * the running snapshot on an invalid `usine.yaml`, a changed `webhooks` or `tracing` block, or
+     * Re-reads the configuration store, one reload at a time, and returns what changed. Fails and keeps
+     * the running snapshot on an unreadable store, a changed `webhooks` or `tracing` block, or
      * a rejected `workers` change.
      */
     readonly reload: Effect.Effect<InstanceReload, InstanceReloadError>;
@@ -170,16 +177,21 @@ export class CurrentInstance extends Context.Service<
   }
 >()("@usine/orchestrator/CurrentInstance") {
   /**
-   * Starts from `initial`, the folder that `usine up` loaded at startup, and reloads `directory`.
+   * Starts from the imported or stored configuration and follows revisions after `after`.
    */
   static readonly layer = (
     directory: InstanceDirectory,
     initial: LoadedInstance,
-  ): Layer.Layer<CurrentInstance, never, InstanceFolder> =>
+    after: ConfigurationRevisionNumber,
+  ): Layer.Layer<CurrentInstance, never, ConfigurationStore | ConfigParser> =>
     Layer.effect(
       CurrentInstance,
       Effect.gen(function* () {
-        const folder = yield* InstanceFolder;
+        const store = yield* ConfigurationStore;
+        const parser = yield* ConfigParser;
+        const observed = yield* Ref.make(
+          new Configuration({ number: after, instance: Option.some(initial) }),
+        );
         const current = yield* SubscriptionRef.make(initial);
         const registered = yield* Ref.make(Option.none<WorkerReload>());
         const reloading = yield* Semaphore.make(1);
@@ -200,54 +212,114 @@ export class CurrentInstance extends Context.Service<
 
         // Once the Workers have prepared the reload, it runs to completion, so their additions are
         // applied.
-        const reload = Effect.uninterruptibleMask((restore) =>
-          Effect.gen(function* () {
-            const running = yield* SubscriptionRef.get(current);
-            const loaded = yield* restore(folder.load(directory));
-            const workers = yield* Ref.get(registered);
-            const restart = restartChanges(running, loaded, Option.isSome(workers));
-            if (EffectArray.isReadonlyArrayNonEmpty(restart)) {
-              return yield* restartRequired(restart);
-            }
-            const applyWorkers = yield* restore(
-              Option.isSome(workers)
-                ? workers.value(running, loaded)
-                : beforeWorkersStart(running, loaded),
-            );
-            const changes = instanceReload(running, loaded);
-            yield* SubscriptionRef.set(current, loaded).pipe(Effect.andThen(applyWorkers));
-            yield* Effect.logInfo("Instance folder reloaded; new Runs use the new configuration", {
-              loopsAdded: changes.loops.added,
-              loopsRemoved: changes.loops.removed,
-              loopsChanged: changes.loops.changed,
-              agentsAdded: changes.agents.added,
-              agentsRemoved: changes.agents.removed,
-              agentsChanged: changes.agents.changed,
-              labelsAdded: changes.labels.added,
-              labelsRemoved: changes.labels.removed,
-              labelsChanged: changes.labels.changed,
-              reposAdded: changes.repos.added,
-              reposRemoved: changes.repos.removed,
-              reposChanged: changes.repos.changed,
-              workersAdded: changes.workers.added,
-              workersRemoved: changes.workers.removed,
-              workersChanged: changes.workers.changed,
-              settingsChanged: changes.settingsChanged,
-              operatorChanged: changes.operatorChanged,
-              quarantinedLoops: changes.quarantinedLoops.map(({ file }) => file),
-              invalidAgents: changes.invalidAgents.map(({ file }) => file),
-            });
-            return changes;
-          }),
-        ).pipe(
-          Effect.tapError((error) =>
-            Effect.logWarning(
-              "Instance folder reload rejected; the running configuration is unchanged",
-              rejectionLogFields(error),
+        const install = (snapshot: Configuration) =>
+          Effect.uninterruptibleMask((restore) =>
+            Effect.gen(function* () {
+              const running = yield* SubscriptionRef.get(current);
+              if (Option.isNone(snapshot.instance))
+                return yield* new FactoryConfigError({
+                  file: InstancePath.make(".usine/runtime.sqlite"),
+                  stage: "read",
+                  message: "The configuration store has not been initialized",
+                });
+              const loaded = snapshot.instance.value;
+              yield* Ref.set(observed, snapshot);
+              yield* Effect.annotateCurrentSpan({ revision: snapshot.number });
+              const workers = yield* Ref.get(registered);
+              const restart = restartChanges(running, loaded, Option.isSome(workers));
+              if (EffectArray.isReadonlyArrayNonEmpty(restart)) {
+                return yield* restartRequired(restart);
+              }
+              const applyWorkers = yield* restore(
+                Option.isSome(workers)
+                  ? workers.value(running, loaded)
+                  : beforeWorkersStart(running, loaded),
+              );
+              const changes = instanceReload(running, loaded);
+              yield* SubscriptionRef.set(current, loaded).pipe(Effect.andThen(applyWorkers));
+              yield* Effect.logInfo(
+                "Stored configuration applied; new runs use the new configuration",
+                {
+                  loopsAdded: changes.loops.added,
+                  loopsRemoved: changes.loops.removed,
+                  loopsChanged: changes.loops.changed,
+                  agentsAdded: changes.agents.added,
+                  agentsRemoved: changes.agents.removed,
+                  agentsChanged: changes.agents.changed,
+                  labelsAdded: changes.labels.added,
+                  labelsRemoved: changes.labels.removed,
+                  labelsChanged: changes.labels.changed,
+                  reposAdded: changes.repos.added,
+                  reposRemoved: changes.repos.removed,
+                  reposChanged: changes.repos.changed,
+                  workersAdded: changes.workers.added,
+                  workersRemoved: changes.workers.removed,
+                  workersChanged: changes.workers.changed,
+                  settingsChanged: changes.settingsChanged,
+                  operatorChanged: changes.operatorChanged,
+                  quarantinedLoops: changes.quarantinedLoops.map(({ file }) => file),
+                  invalidAgents: changes.invalidAgents.map(({ file }) => file),
+                },
+              );
+              return changes;
+            }),
+          ).pipe(
+            Effect.tapError((error) =>
+              Effect.logWarning(
+                "Configuration revision could not be applied; the running configuration is unchanged",
+                rejectionLogFields(error),
+              ),
             ),
+            Effect.withSpan("CurrentInstance.install", { attributes: { directory } }),
+          );
+
+        const reload = store.read.pipe(
+          Effect.tapError((error) =>
+            Effect.logWarning("Could not re-read the configuration store", {
+              operation: error.operation,
+              cause: error.cause,
+            }),
           ),
+          Effect.mapError(
+            () =>
+              new FactoryConfigError({
+                file: InstancePath.make(".usine/runtime.sqlite"),
+                stage: "read",
+                message: "Could not read the configuration store",
+              }),
+          ),
+          Effect.flatMap(install),
           reloading.withPermits(1),
           Effect.withSpan("CurrentInstance.reload", { attributes: { directory } }),
+        );
+
+        yield* store.changes(after).pipe(
+          Stream.runForEach((revision) =>
+            Effect.gen(function* () {
+              const previous = yield* Ref.get(observed);
+              if (revision.number <= previous.number) return;
+              const next = yield* commit(
+                parser,
+                previous,
+                previous.number,
+                revision.changes,
+                revision,
+              );
+              yield* install(next.configuration).pipe(
+                Effect.catchTags({
+                  RestartRequiredError: () => Effect.void,
+                  ReloadPreflightError: () => Effect.void,
+                }),
+              );
+            }).pipe(reloading.withPermits(1)),
+          ),
+          Effect.tapError((error) =>
+            Effect.logWarning("Configuration revision stream failed; retrying", {
+              errorTag: error._tag,
+            }),
+          ),
+          Effect.retry(Schedule.spaced("1 second")),
+          Effect.forkScoped,
         );
 
         const registerWorkers = (workers: WorkerReload) =>

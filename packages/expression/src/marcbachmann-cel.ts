@@ -508,7 +508,7 @@ const unexpectedResult = (source: Source, expected: string) => () =>
 const isBooleanType = (resultType: string): boolean => resultType === "bool";
 const decodeScalar = Schema.decodeUnknownEffect(Scalar);
 
-const makeExpressionEngine = () => {
+export const makeExpressionEngine = () => {
   const runtimes = celRuntimes();
 
   const checkBoolean = Effect.fn("ExpressionEngine.checkBoolean")(

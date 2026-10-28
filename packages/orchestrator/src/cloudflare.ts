@@ -1,3 +1,5 @@
+import type { RunDatabase } from "@usine/engine/database";
+import type { EnginePersistenceError } from "@usine/engine/engine";
 import { NodeServices } from "@effect/platform-node";
 import type { CloudflareWorker, UsineConfig } from "@usine/config/factory";
 import type { BrainSpec } from "@usine/core/agent/brain";
@@ -8,7 +10,7 @@ import {
   type CloudflareWorkerAddress,
   layer as cloudflareExecutorLayer,
 } from "@usine/executor/cloudflare";
-import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
+import { layer as localEngineLayer, localSqliteLayer } from "@usine/engine/local-sqlite";
 import { Config, Effect, Layer } from "effect";
 import { externalHttpClientLayer } from "./http-client.ts";
 import { stepExecutorLayer } from "./scheduler.ts";
@@ -72,6 +74,7 @@ export const layer = (
   config: UsineConfig,
   brains: ReadonlyArray<BrainSpec>,
   options: CloudflareExecutorOptions,
+  database: Layer.Layer<RunDatabase, EnginePersistenceError> = localSqliteLayer(instanceDirectory),
 ) => {
   const { workers } = options;
   const executor = cloudflareExecutorLayer(options).pipe(
@@ -98,5 +101,5 @@ export const layer = (
       },
     }),
   ).pipe(Layer.provide(executor));
-  return localEngineLayer(instanceDirectory).pipe(Layer.provideMerge(stepExecutor));
+  return localEngineLayer(instanceDirectory, database).pipe(Layer.provideMerge(stepExecutor));
 };

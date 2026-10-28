@@ -2,7 +2,7 @@
 
 Typed CEL checking and evaluation for [usine](https://github.com/basaltbytes/usine). Describe types and root variables with `Environment`. `ExpressionEngine` then checks boolean trigger and scalar prompt expressions, and evaluates them over plain JSON.
 
-Import `ExpressionEngine`, `Source`, `Environment`, the environment descriptors, `Scalar`, and the typed errors from `@usine/expression/expression-engine`, which replaces `@usine/expression/model`. The CEL adapter layer is in `@usine/expression/marcbachmann-cel`.
+Import `ExpressionEngine`, `Source`, `Environment`, the environment descriptors, `Scalar`, and the typed errors from `@usine/expression/expression-engine`, which replaces `@usine/expression/model`. The CEL adapter layer is in `@usine/expression/marcbachmann-cel`. That subpath also exports `makeExpressionEngine()` for callers that supply the service explicitly without a layer.
 
 A `nullable` `ObjectField` can be `null`, and an absent key reads as `null`. Expressions compare it with `null` in either order, and paths below it stay type-checked. Unknown variables and paths fail checking, also inside macros such as `exists`.
 

@@ -7,7 +7,7 @@ sidebar:
 
 import { CardGrid, FileTree, LinkCard, Steps } from "@astrojs/starlight/components";
 
-A factory is one orchestrator process that you start with `usine up` from an instance folder. The folder contains your configuration, which you keep in git, and the runtime state in `.usine/`, which you keep out of git.
+A factory is one orchestrator process that you start with `usine up` from an instance folder. The folder contains bootstrap files and the database in `.usine/`, including configuration, its revision history, and runtime state. Keep `.usine/` and secrets out of git.
 
 ## Before you begin
 
@@ -40,6 +40,8 @@ The `@usine/server` package is on npm, but installing it with npm fails at this 
 To update usine, pull, run `pnpm install --frozen-lockfile` and `pnpm build` again, and run `usine restart` from the instance folder. The server reads the UI files on every request, so after a UI-only rebuild, reload the page.
 
 ## Create the instance folder
+
+The first start imports the files below into the database as revision 1. Later starts read only the stored configuration. Use [`usine config edit`, `import`, `export`, and `log`](/reference/configuration/cli/#configuration-revisions) to change configuration and inspect its history. `.env`, the GitHub App credentials, and the listen address remain in files or environment variables.
 
 <FileTree>
 
@@ -218,7 +220,7 @@ The runtime store records every event, so that a loop doesn't act twice on the s
 
 ## Change the configuration
 
-`usine up` doesn't watch its files. After you edit a loop, an agent, or `usine.yaml`, reload the configuration: select **Reload configuration** on any **Configuration** page, run `curl -s -X POST http://127.0.0.1:7331/api/instance/reload`, or run `kill -HUP $(cat .usine/instance.pid)` from the instance folder. Running attempts continue, and new work uses the new configuration. Some `workers` changes and the `webhooks` and `tracing` keys need a restart. See [Reload](/reference/configuration/cli/#reload).
+Configuration revisions apply live. Use `usine config edit agent developer` for an agent, or export a folder, edit it, and run `usine config import <folder>`. Running attempts continue, and new work uses the accepted revision. Some worker changes and the `webhooks` and `tracing` keys need a restart. **Reload configuration**, `POST /api/instance/reload`, and `SIGHUP` re-read the store. See [Configuration revisions](/reference/configuration/cli/#configuration-revisions).
 
 ## Next steps
 

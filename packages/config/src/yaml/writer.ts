@@ -1,7 +1,11 @@
 import { Effect, Schema } from "effect";
+import { stringify } from "yaml";
 import type { ConfigFileError, InstancePath } from "../file.ts";
 import { splitMarkdown } from "../frontmatter.ts";
 import { parseYamlDocument } from "./document.ts";
+
+/** Writes a complete YAML document in the folder export format. */
+export const writeYaml = (value: Schema.Json): string => stringify(value);
 
 /** A replacement of one value in a YAML file. */
 export class YamlEdit extends Schema.Class<YamlEdit>("@usine/config/YamlEdit")({
