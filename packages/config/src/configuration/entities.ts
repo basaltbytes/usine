@@ -42,20 +42,31 @@ export const configurationDiff = (
   before: ReadonlyArray<ConfigurationEntity>,
   after: ReadonlyArray<ConfigurationEntity>,
 ): ReadonlyArray<ConfigurationChange> => {
-  const previous = new Map(before.map((entry, position) => [entry.key.key, { entry, position }]));
-  const next = new Map(after.map((entry, position) => [entry.key.key, { entry, position }]));
-  return [...new Set([...previous.keys(), ...next.keys()])].flatMap((key) => {
-    const old = previous.get(key);
-    const value = next.get(key);
-    const identity = value ?? old;
-    const moved = value !== undefined && old?.position !== value.position;
-    if (identity === undefined || (!moved && Equal.equals(old?.entry.value, value?.entry.value)))
-      return [];
+  const previous = new Map(before.map((entry) => [entry.key.key, entry]));
+  const next = new Set(after.map(({ key }) => key.key));
+  const previousOrder = new Map(
+    before.filter(({ key }) => next.has(key.key)).map(({ key }, index) => [key.key, index]),
+  );
+  const nextOrder = new Map(
+    after.filter(({ key }) => previous.has(key.key)).map(({ key }, index) => [key.key, index]),
+  );
+  const removed = before
+    .filter(({ key }) => !next.has(key.key))
+    .map(
+      ({ key, value }) =>
+        new ConfigurationChange({ key, before: Option.some(value), after: Option.none() }),
+    );
+  const changed = after.flatMap((entry, position) => {
+    const old = previous.get(entry.key.key);
+    const moved =
+      old === undefined || previousOrder.get(entry.key.key) !== nextOrder.get(entry.key.key);
+    if (!moved && Equal.equals(old?.value, entry.value)) return [];
     const change = {
-      key: identity.entry.key,
-      before: Option.fromUndefinedOr(old?.entry.value),
-      after: Option.fromUndefinedOr(value?.entry.value),
+      key: entry.key,
+      before: Option.fromUndefinedOr(old?.value),
+      after: Option.some(entry.value),
     };
-    return [new ConfigurationChange(moved ? { ...change, position: value.position } : change)];
+    return [new ConfigurationChange(moved ? { ...change, position } : change)];
   });
+  return [...removed, ...changed];
 };
