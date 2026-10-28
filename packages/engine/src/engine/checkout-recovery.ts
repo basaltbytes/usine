@@ -134,7 +134,7 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
       return Option.none<SalvageCandidate>();
     }
     yield* Effect.logWarning(
-      "Could not confirm that the parent task of a closed Attempt stopped; its checkout and a slot of its Worker stay kept, and no Attempt starts on its Loop's Item, until a reconcile confirms the stop",
+      "Could not confirm that the parent task of a closed Attempt stopped; its checkout and a slot of its Worker stay kept, and no Attempt starts on its Item, until a reconcile confirms the stop",
       { ...fields, errorTag: stopped.failure._tag, message: stopped.failure.message },
     );
     yield* keep(attempt);
@@ -274,7 +274,7 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
           failure,
         )
       : Effect.logWarning(
-          "Could not confirm that the parent task of a closed Attempt stopped; its Worker's slot stays taken, and no Attempt starts on its Loop's Item, until a reconcile confirms the stop",
+          "Could not confirm that the parent task of a closed Attempt stopped; its Worker's slot stays taken, and no Attempt starts on its Item, until a reconcile confirms the stop",
           failure,
         );
     return yield* new ParentStopUnconfirmedError({

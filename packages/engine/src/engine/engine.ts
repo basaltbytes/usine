@@ -121,23 +121,34 @@ const makeRunEngine = Effect.gen(function* () {
     }
     yield* Effect.logInfo("Run canceled", {
       runId,
-      openAttempt: Option.getOrElse(outcome.openAttempt, () => "none"),
+      openAttempt: Option.match(outcome.openAttempt, {
+        onNone: () => "none",
+        onSome: ({ id }) => id,
+      }),
     });
     // The stop can end the Attempt's execution, and its fiber then frees the slot, so the slot
     // moves to the Attempt first.
     if (Option.isSome(outcome.openAttempt))
-      yield* driver.holdSlot(runId, outcome.openAttempt.value);
+      yield* driver.holdSlot({
+        attemptId: outcome.openAttempt.value.id,
+        worker: outcome.openAttempt.value.worker,
+        runId,
+        loop: outcome.loop,
+        itemKey: outcome.itemKey,
+        reason: "cancel",
+      });
     // Stop the Attempt before interrupting its fiber; otherwise its parent task stays live
     // waiting for a reattach.
     const handshake = Option.isSome(outcome.openAttempt)
-      ? yield* stepExecutor.interrupt(outcome.openAttempt.value, "cancel").pipe(Effect.result)
+      ? yield* stepExecutor.interrupt(outcome.openAttempt.value.id, "cancel").pipe(Effect.result)
       : Result.succeed(undefined);
     yield* driver.stop(runId);
     // The Attempt's slot, and a checkout that startup kept for a reattach, stay kept, and the
     // queued Event's Run starts no Attempt, until the parent task is confirmed stopped.
     if (Option.isSome(outcome.openAttempt))
       yield* driver.releaseKept({
-        attemptId: outcome.openAttempt.value,
+        attemptId: outcome.openAttempt.value.id,
+        worker: outcome.openAttempt.value.worker,
         runId,
         loop: outcome.loop,
         itemKey: outcome.itemKey,
@@ -146,7 +157,7 @@ const makeRunEngine = Effect.gen(function* () {
     yield* driver.continueWithNewest(runId);
     if (Option.isSome(outcome.openAttempt) && Result.isFailure(handshake)) {
       return yield* new AttemptCancellationError({
-        attemptId: outcome.openAttempt.value,
+        attemptId: outcome.openAttempt.value.id,
         cause: handshake.failure,
       });
     }

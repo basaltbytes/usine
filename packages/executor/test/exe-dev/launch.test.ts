@@ -625,10 +625,10 @@ describe("exe.dev launch", () => {
         assert.isFalse(yield* executor.isLive(ATTEMPT_ID));
         // The launch's own stop outlasted the interrupt grace, so the launch kept the checkout
         // and released its grant; the cancel that confirmed the stop reconciled the checkout with
-        // a second grant (#523).
+        // fresh grants for comments and salvage.
         assert.strictEqual(
           ssh.state.commands.filter(({ args }) => args.includes("detach")).length,
-          2,
+          3,
         );
       }).pipe(
         Effect.scoped,

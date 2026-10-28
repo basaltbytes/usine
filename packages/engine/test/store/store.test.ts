@@ -780,7 +780,13 @@ describe("run store", () => {
         assert.strictEqual(recovered.execution.attempt.number, 2);
         const outcome = yield* store.cancel(runId);
         assert(outcome._tag === "Canceled");
-        assert.deepStrictEqual(outcome.openAttempt, Option.some(recovered.execution.attempt.id));
+        assert.deepStrictEqual(
+          outcome.openAttempt,
+          Option.some({
+            id: recovered.execution.attempt.id,
+            worker: recovered.execution.attempt.worker,
+          }),
+        );
         const canceled = yield* store.snapshot(runId);
         yield* store.finishAttempt(
           recovered.execution.attempt,

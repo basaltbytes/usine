@@ -1,8 +1,13 @@
+import { NodeServices } from "@effect/platform-node";
+import { githubSignature } from "@usine/core/agent";
+import { Event } from "@usine/core/event";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
+import { fileURLToPath } from "node:url";
 import { assert, describe, it } from "@effect/vitest";
 import type { AttemptId } from "@usine/core/attempt";
 import { InfraFailure } from "@usine/core/attempt/failure";
 import type { SalvagePushed } from "@usine/core/attempt/salvage";
-import type { InstanceDirectory } from "@usine/core/instance";
+import { InstanceDirectory } from "@usine/core/instance";
 import { safeSegment } from "@usine/core/repository";
 import { AttemptRuntime } from "@usine/durable/attempt-runtime";
 import {
@@ -12,13 +17,16 @@ import {
   StubStorage,
   worksFor,
 } from "@usine/durable/testing";
-import { ReconcileInterval, UnconfirmedStops } from "@usine/engine/engine";
-import { Effect, FileSystem, Layer, Option, Path, Ref, Schedule } from "effect";
+import { ReconcileInterval, RunEngine, Submission, UnconfirmedStops } from "@usine/engine/engine";
+import { DateTime, Effect, FileSystem, Layer, Option, Path, Ref, Schedule } from "effect";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   LIVE_TEST_TIMEOUT,
+  localRuntime,
+  makeRemote,
   output,
+  run,
   submission,
   waitFor,
   waitForSalvage,
@@ -156,6 +164,175 @@ describe("local worker checkout after an unconfirmed stop", () => {
       }),
     LIVE_TEST_TIMEOUT,
   );
+
+  it.live(
+    "records a failed attempt's signed review when its kept checkout is reconciled",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+        const instance = InstanceDirectory.make(
+          yield* fs.makeTempDirectoryScoped({ prefix: "usine-kept-comments-" }),
+        );
+        const remote = yield* makeRemote(instance);
+        const unstoppable = yield* Ref.make(true);
+        const cancels = yield* Ref.make(0);
+        const first = yield* Ref.make(true);
+        const reviewUrl = "https://github.com/acme/demo/pull/71#pullrequestreview-81";
+        const parent: StubParent = (context) =>
+          Effect.gen(function* () {
+            if (!(yield* Ref.getAndSet(first, false))) return yield* completes(context);
+            yield* fs
+              .writeFileString(
+                join(context.request.cwd, ".test-review.json"),
+                JSON.stringify({
+                  id: 81,
+                  html_url: reviewUrl,
+                  body: `Review completed.\n\n${githubSignature(context.request.spec.agent.name)}`,
+                  user: { login: "usine-test[bot]" },
+                  state: "COMMENTED",
+                  submitted_at: DateTime.formatIso(yield* DateTime.now),
+                }),
+              )
+              .pipe(Effect.orDie);
+            return yield* new InfraFailure({
+              message: "Lost parent after posting",
+              cause: "offline",
+            });
+          });
+        const fixture = fileURLToPath(new URL("../fixtures/github.mjs", import.meta.url));
+        const github = ChildProcessSpawner.make((command) =>
+          command._tag === "StandardCommand" && command.command === "gh"
+            ? Ref.get(unstoppable).pipe(
+                Effect.flatMap((hidden) =>
+                  spawner.spawn(
+                    ChildProcess.make(
+                      process.execPath,
+                      [
+                        fixture,
+                        ...command.args,
+                        "--require-credentials",
+                        ...(hidden ? ["--hide-comments"] : []),
+                      ],
+                      command.options,
+                    ),
+                  ),
+                ),
+              )
+            : spawner.spawn(command),
+        );
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const selected = submission(4);
+          const accepted = yield* engine.submit(
+            new Submission({
+              ...selected,
+              event: new Event({
+                ...selected.event,
+                payload: { number: 71, url: "https://github.com/acme/demo/pull/71" },
+              }),
+            }),
+          );
+          assert(accepted._tag === "Claimed");
+          yield* retriedStops(cancels, 4);
+          const [failed] = (yield* engine.inspect(accepted.runId)).attempts;
+          assert(failed !== undefined);
+          assert.isEmpty(failed.comments);
+          yield* Ref.set(unstoppable, false);
+          const done = yield* waitFor(engine, accepted.runId, "Succeeded");
+          assert.deepStrictEqual(
+            done.attempts[0]?.comments.map(({ url }) => url.href),
+            [reviewUrl],
+          );
+        }).pipe(
+          Effect.provide(
+            localRuntime(instance, remote, {
+              attemptRuntime: unstoppableRuntime(parent, unstoppable, cancels),
+              platform: Layer.merge(
+                NodeServices.layer,
+                Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, github),
+              ),
+            }),
+          ),
+        );
+      }).pipe(
+        Effect.provide(NodeServices.layer),
+        Effect.provideService(ReconcileInterval, "50 millis"),
+      ),
+    LIVE_TEST_TIMEOUT,
+  );
+
+  for (const changes of ["clean", "committed"] as const) {
+    it.live(
+      `recovers a ${changes} kept checkout relative to its saved base commit`,
+      () =>
+        Effect.gen(function* () {
+          const unstoppable = yield* Ref.make(true);
+          const cancels = yield* Ref.make(0);
+          const first = yield* Ref.make(true);
+          const parent: StubParent = (context) =>
+            Effect.gen(function* () {
+              if (!(yield* Ref.getAndSet(first, false))) return yield* completes(context);
+              if (changes === "committed") {
+                yield* Effect.sync(() =>
+                  writeFileSync(join(context.request.cwd, "committed.md"), "saved work\n"),
+                );
+                yield* run("git", ["add", "committed.md"], context.request.cwd).pipe(
+                  Effect.provide(NodeServices.layer),
+                  Effect.orDie,
+                );
+                yield* run(
+                  "git",
+                  [
+                    "-c",
+                    "user.name=Test",
+                    "-c",
+                    "user.email=test@example.invalid",
+                    "commit",
+                    "-m",
+                    "Saved work",
+                  ],
+                  context.request.cwd,
+                ).pipe(Effect.provide(NodeServices.layer), Effect.orDie);
+              }
+              return yield* new InfraFailure({ message: "Lost parent", cause: "offline" });
+            });
+          yield* withLocalEngine(
+            { attemptRuntime: unstoppableRuntime(parent, unstoppable, cancels) },
+            ({ engine, instance, remote }) =>
+              Effect.gen(function* () {
+                const accepted = yield* engine.submit(submission(3));
+                assert(accepted._tag === "Claimed");
+                yield* retriedStops(cancels, 4);
+                const [attempt] = (yield* engine.inspect(accepted.runId)).attempts;
+                assert(attempt !== undefined);
+                const worktree = yield* checkoutOf(instance, attempt.id);
+                yield* Ref.set(unstoppable, false);
+                const done = yield* waitFor(engine, accepted.runId, "Succeeded");
+                const [failed] = done.attempts;
+                assert(failed !== undefined);
+                yield* removed(worktree);
+                if (changes === "clean") {
+                  assert.isTrue(Option.isNone(failed.salvage));
+                  assert.strictEqual(
+                    (yield* output("git", [
+                      "--git-dir",
+                      remote,
+                      "for-each-ref",
+                      "refs/heads/usine/salvage/",
+                    ])).trim(),
+                    "",
+                  );
+                } else {
+                  assert(Option.isSome(failed.salvage) && failed.salvage.value._tag === "Pushed");
+                  assert.include(yield* pushedFiles(remote, failed.salvage.value), "committed.md");
+                }
+              }),
+          ).pipe(Effect.provideService(ReconcileInterval, "50 millis"));
+        }),
+      LIVE_TEST_TIMEOUT,
+    );
+  }
 
   it.live(
     "keeps a canceled Attempt's checkout while its parent task can't be stopped, then salvages it",

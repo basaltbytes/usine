@@ -182,6 +182,7 @@ type CancelDecision =
       readonly state: RunState.Canceled;
       readonly attempt: Option.Option<{
         readonly id: AttemptId;
+        readonly worker: Attempt["worker"];
         readonly outcome: AttemptCanceled;
       }>;
     };
@@ -197,6 +198,7 @@ export const cancelRun = (current: RunProgress): CancelDecision => {
       current.run.state._tag === "Running"
         ? Option.map(openAttempt(current), (attempt) => ({
             id: attempt.id,
+            worker: attempt.worker,
             outcome: new AttemptCanceled(),
           }))
         : Option.none(),
