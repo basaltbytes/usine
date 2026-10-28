@@ -232,7 +232,7 @@ To recover a saved row, the run page loads up to 20 earlier pages. If the row is
 
 Bookmarks expire after 30 days. Each browser origin keeps up to 20 runs, the 200 most recent disclosure choices per run, and at most 512,000 characters of bookmark data: identities, preferences, a row-relative position, and the acknowledged transcript sequence, but no transcript text or tool payloads. If browser storage is disabled or full, the conversation still works, but can't restore a saved place. See [ADR 0025](../../docs/adr/0025-run-conversation-reader-bookmarks.md).
 
-## Conversation browser tests
+## Browser tests
 
 Install the pinned Chromium once with `pnpm --filter @usine/web exec playwright install chromium`, then run `pnpm --filter @usine/web test`. Unit tests run in Node, and interaction tests in Chromium with the real MessageScroller, Base UI disclosures, sidebar, and layout. Board move tests replay stale refreshes, failures, concurrent card moves, and navigation during a request through the real HTTP client with controlled responses. CI installs Chromium and its OS dependencies first.
 
@@ -241,6 +241,14 @@ To run the reader browser tests alone:
 ```sh
 pnpm --filter @usine/web exec vitest run src/components/runs/transcript/conversation.browser.test.tsx
 ```
+
+To run the task list browser tests alone:
+
+```sh
+pnpm --filter @usine/web exec vitest run src/features/tasks/list.page.browser.test.tsx
+```
+
+The task list tests serve a failed avatar response and wait for the repository's fallback letter before checking sidebar navigation. Sidebar links use role locators because the fallback changes the sidebar's text.
 
 The checkpoint navigation test waits for startup scrolling to finish, then allows up to five seconds for navigation frames to position the selected row. It checks both offset bounds on the same measurement before adding new activity and checking that the reading position stays unchanged.
 

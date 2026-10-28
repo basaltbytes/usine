@@ -4,7 +4,7 @@ import { BoardView, DeskView, ProjectView, ReadyOverview } from "@usine/orchestr
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
-import { page, userEvent } from "vitest/browser";
+import { commands, page, userEvent } from "vitest/browser";
 import { overviewQuery } from "~/lib/overview";
 import { deskQuery } from "~/lib/desk/queries";
 import { routeTree } from "~/route-tree.gen";
@@ -18,6 +18,12 @@ import {
   boardStalled,
 } from "~/lib/projects/fixture";
 import "~/index.css";
+
+declare module "vitest/browser" {
+  interface BrowserCommands {
+    taskListAvatarResponse: () => Promise<void>;
+  }
+}
 
 const list = "/projects/board-test/repo/tasks";
 
@@ -36,7 +42,8 @@ let root: Root;
 let queryClient: QueryClient;
 let router: ReturnType<typeof createRouter>;
 
-beforeEach(() => {
+beforeEach(async () => {
+  await commands.taskListAvatarResponse();
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -109,6 +116,7 @@ const crumbTexts = () =>
       for (const hidden of label.querySelectorAll("[aria-hidden=true]")) hidden.remove();
       return label.textContent;
     });
+// A generated locator for the sidebar includes avatar text, which changes when its fallback appears.
 const sidebarLink = (name: string) => page.getByRole("link", { name, exact: true }).first();
 
 it("lists only the tasks with runs, in flight first, with their status and last run time, runs, pull request, elapsed time, tokens, and estimated cost", async () => {
@@ -300,6 +308,9 @@ it("opens the task page from anywhere on a row, under its originating item", asy
 
 it("shows Board and Tasks under the project in the sidebar, the open page's row active", async () => {
   await mount(list);
+  await expect
+    .element(sidebarLink("board-test/repo").getByText("R", { exact: true }))
+    .toBeVisible();
   await expect.poll(crumbTexts).toEqual(["board-test/repo", "Tasks"]);
   await expect
     .element(crumbs().getByRole("link", { name: "board-test/repo" }))
