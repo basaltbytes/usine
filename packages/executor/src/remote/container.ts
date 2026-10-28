@@ -409,6 +409,8 @@ export const containersFor = (commands: RemoteCommands) => {
       String(spec.settings.limits.cpus),
       "--memory",
       `${spec.settings.limits.memoryMib}m`,
+      "--memory-swap",
+      `${spec.settings.limits.memoryMib}m`,
       "--pids-limit",
       String(spec.settings.limits.pids),
       "--env-file",

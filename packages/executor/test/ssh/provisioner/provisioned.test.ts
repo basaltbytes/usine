@@ -586,7 +586,10 @@ describe("Provisioned SSH Worker", () => {
         const run = machine.state.calls.find(({ line }) =>
           line.startsWith("exec 'docker' 'run' '--detach' '--name' 'usine-remote-run_execute_1'"),
         );
-        assert.include(run?.line, "'--cpus' '3.5' '--memory' '7168m' '--pids-limit' '60976'");
+        assert.include(
+          run?.line,
+          "'--cpus' '3.5' '--memory' '7168m' '--memory-swap' '7168m' '--pids-limit' '60976'",
+        );
       }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, derivingAddress)));
     },
   );
