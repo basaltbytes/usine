@@ -62,6 +62,8 @@ Each poll cycle closes the ask of an item that is closed, merged, or gone from G
 
 `Operator.runAgain(instance, runId, edit)` opens a new run for a succeeded or canceled run's item state, with the edit's task and roster agent and the loaded loop's step, approval, and cycle limit, as the `operator` login. It returns `Claimed` or `CycleBlocked` with the ask, and fails with `LoopNotFoundError` if the loop isn't loaded. API: `POST /api/runs/:runId/run-again` with `{ "task": "...", "agent": "..." }`. `RunView.canRunAgain` says when it applies; `RunView.runAgain` names the original run.
 
+Needs attention includes a `WorkerUnresponsiveNeed` after three consecutive unanswered probes, with the worker's last answer and its running attempts. The overview refreshes these notices even when its projection revision is unchanged. Recovery clears the entry; notices from before an attempt reattached are ignored. Dismissal applies to the current outage and attempt list, so a later outage or changed list appears again.
+
 `Operator.resolveFailure(instance, runId, attemptId)` clears attention for the current failed attempt, at `POST /api/runs/:runId/resolve-failure` with `{ "attemptId": "..." }`. The resolution records its time and the instance's configured operator login. The failure stays in history with retry available; Needs attention, project status, and board attention reflect it, and a later failure asks again. For a question (`QuestionFailureView`) or blocker (`BlockedFailureView`), it lifts the loop's suppression of the item and gives the newest queued event its turn.
 
 ## Operator HTTP
@@ -283,3 +285,5 @@ The Node runtime and worker compositions accept a supplied `RunDatabase` layer. 
 The overview returns visible entries in `needsYou` and matching acknowledged entries in `dismissedNeeds`. Project status and task and board attention badges use the visible list. A change to the entry's content makes it visible again; a later failed attempt has its own entry identity. Dismissal preserves approval gates, unresolved failures, and cycle-budget asks.
 
 For Boat workers behind a gateway, the SSH adapter resolves `provisioner.tailnet.client_id_env` and `client_secret_env` into redacted OAuth credentials. Missing variables produce a gateway capability error before an attempt starts.
+
+Reloading an SSH worker's slot count repeats preflight on both increases and decreases, so memory overcommit warnings use the new count. Container-setting changes require restarting `usine up`.

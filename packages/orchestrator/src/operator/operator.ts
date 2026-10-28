@@ -3,6 +3,7 @@ import {
   AttentionAcknowledgement,
   type AttentionKey,
 } from "@usine/engine/attention";
+import { workerAttention } from "./worker-attention.ts";
 import { partitionNeeds, taskNeedsAttention, projectAttention } from "./attention.ts";
 import { transcriptEvent } from "./projection.ts";
 import { TranscriptSessionsQuery } from "@usine/engine/transcript";
@@ -170,6 +171,7 @@ interface CachedOverview {
   readonly token: string;
   readonly overview: ReadyOverview;
   readonly usage: BoardUsage;
+  readonly running: ReadonlyArray<RunSummary>;
 }
 
 /**
@@ -384,7 +386,13 @@ const makeOperatorObservation = Effect.gen(function* () {
           paused: paused.has(loop.name),
         }),
     );
-    const needsYou: Array<NeedView> = [];
+    const repositories = new Set(instance.config.repos.map(({ name }) => name));
+    const running = snapshots.filter(
+      (summary) =>
+        repositories.has(summary.repository) &&
+        summary.attempts.some(({ outcome }) => Option.isNone(outcome)),
+    );
+    const needsYou: Array<NeedView> = yield* workerAttention(reader, running);
     for (const ask of cycleAsks) {
       const item = Schema.decodeUnknownOption(GitHubItemKey)(ask.itemKey);
       needsYou.push(
@@ -544,7 +552,32 @@ const makeOperatorObservation = Effect.gen(function* () {
       dismissedNeeds: dismissedNeeds.length,
       runsAtWork: usage.working.length,
     });
-    return { overview, usage } as const;
+    return { overview, usage, running } as const;
+  });
+
+  const refreshWorkerAttention = Effect.fn("Operator.refreshWorkerAttention")(function* (
+    cached: CachedOverview,
+  ) {
+    const workers = yield* workerAttention(reader, cached.running);
+    const previous = [...cached.overview.needsYou, ...cached.overview.dismissedNeeds];
+    if (
+      JSON.stringify(workers) ===
+      JSON.stringify(previous.filter((need) => need._tag === "WorkerUnresponsiveNeed"))
+    )
+      return cached;
+    const needs = [
+      ...previous.filter((need) => need._tag !== "WorkerUnresponsiveNeed"),
+      ...workers,
+    ];
+    const partition = partitionNeeds(needs, yield* acknowledgements.list());
+    return {
+      ...cached,
+      overview: new ReadyOverview({
+        ...cached.overview,
+        ...partition,
+        projects: projectAttention(cached.overview.projects, partition.needsYou),
+      }),
+    };
   });
 
   // Each session keeps its highest report, so a Run's usage changes only with more tokens or
@@ -641,7 +674,9 @@ const makeOperatorObservation = Effect.gen(function* () {
           yield* Effect.logDebug("Reusing unchanged operator overview", {
             revision,
           });
-          const current = yield* refreshWorkingUsage(cached.value);
+          const current = yield* refreshWorkingUsage(cached.value).pipe(
+            Effect.flatMap(refreshWorkerAttention),
+          );
           return [current.overview, Option.some(current)] as const;
         }
         const projected = yield* projectOverview(
@@ -1365,6 +1400,7 @@ export {
   ConfigFileNeed,
   UnconfiguredWorkerNeed,
   UnconfirmedStopNeed,
+  WorkerUnresponsiveNeed,
   NeedView,
 } from "./need.ts";
 export {

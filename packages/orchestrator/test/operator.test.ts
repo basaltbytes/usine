@@ -425,6 +425,15 @@ const testLayer = (
       Match.valueTags(query, {
         TranscriptAllQuery: () => transcript,
         TranscriptSessionsQuery: () => [],
+        TranscriptWorkerQuery: ({ attemptId: attempt }) =>
+          laterReports
+            .filter(
+              (entry) =>
+                entry.attemptId === attempt &&
+                (entry.envelope.payload._tag === "WorkerUnresponsive" ||
+                  entry.envelope.payload._tag === "WorkerResponsive"),
+            )
+            .slice(-1),
         TranscriptUsageQuery: ({ attemptId: attempt }) => {
           usageQueries.push(attempt);
           return [...usageReports, ...laterReports].filter((entry) => entry.attemptId === attempt);
@@ -466,7 +475,7 @@ const testLayer = (
       ),
     closed: () => Effect.succeed([]),
     closedSince: () => Effect.die("unused"),
-    forItems: () => Effect.succeed([runSnapshot]),
+    forItems: (keys) => Effect.succeed(keys.includes(runSnapshot.itemKey) ? [runSnapshot] : []),
     events: (runIds) =>
       Effect.succeed(
         runIds.includes(runSnapshot.run.id)
@@ -663,6 +672,77 @@ const testLayer = (
 };
 
 describe("Operator", () => {
+  it.effect(
+    "reports worker silence for a run without a board card, and clears it from the cache on recovery",
+    () =>
+      Effect.gen(function* () {
+        const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+        const moved = yield* Ref.make<ItemLabelMutation | null>(null);
+        const reads = yield* Ref.make(0);
+        const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+        const current = new RunSnapshot({
+          ...snapshot,
+          itemKey: ItemKey.make("schedule:maintenance"),
+          run: new Run({ ...snapshot.run, state: new RunState.Running() }),
+        });
+        const reports: Array<TranscriptEntry> = [];
+        const report = (sequence: number, payload: AttemptChannel.OutboundPayload) =>
+          new TranscriptEntry({
+            sequence: TranscriptSequence.make(sequence),
+            attemptId,
+            direction: "outbound",
+            envelope: new AttemptChannel.OutboundEnvelope({
+              version: AttemptChannel.PROTOCOL_VERSION,
+              attemptId,
+              sequence: AttemptChannel.Sequence.make(sequence),
+              sentAt: now,
+              payload,
+            }),
+            receivedAt: now,
+          });
+        reports.push(
+          report(
+            1,
+            new AttemptChannel.WorkerUnresponsive({
+              worker: WorkerName.make("local"),
+              lastAnsweredAt: now,
+              reason: "SSH timeout",
+              unansweredProbes: 3,
+            }),
+          ),
+        );
+        yield* Effect.gen(function* () {
+          const operator = yield* Operator;
+          const before = yield* operator.overview(instance);
+          assert(before.needsYou.some((need) => need._tag === "WorkerUnresponsiveNeed"));
+          assert(
+            !before.projects
+              .flatMap(({ board }) => board.lanes.flatMap(({ items }) => items))
+              .some(({ runs }) => runs.some(({ id }) => id === runId)),
+          );
+          reports.push(
+            report(
+              2,
+              new AttemptChannel.WorkerResponsive({
+                worker: WorkerName.make("local"),
+                lastAnsweredAt: now,
+              }),
+            ),
+          );
+          assert(
+            !(yield* operator.overview(instance)).needsYou.some(
+              (need) => need._tag === "WorkerUnresponsiveNeed",
+            ),
+          );
+          assert.strictEqual(yield* Ref.get(reads), 1);
+        }).pipe(
+          Effect.provide(
+            testLayer(approved, moved, reads, revision, current, undefined, undefined, [], reports),
+          ),
+        );
+      }),
+  );
+
   it.effect(
     "dismisses every projected entry across refreshes, keeps approval waiting, and restores badges with undo",
     () =>
@@ -1317,6 +1397,69 @@ describe("Operator", () => {
           assert.deepStrictEqual(usageQueries.slice(4), [retryAttemptId]);
           // Without a new report, the read returns the same overview.
           assert.strictEqual(yield* (yield* Operator).overview(declared), later);
+          const workerNotice = (sequence: number, payload: AttemptChannel.OutboundPayload) =>
+            new TranscriptEntry({
+              sequence: TranscriptSequence.make(sequence),
+              attemptId: retryAttemptId,
+              direction: "outbound",
+              envelope: new AttemptChannel.OutboundEnvelope({
+                version: AttemptChannel.PROTOCOL_VERSION,
+                attemptId: retryAttemptId,
+                sequence: AttemptChannel.Sequence.make(sequence),
+                sentAt: now,
+                payload,
+              }),
+              receivedAt: DateTime.add(now, { minutes: 10 }),
+            });
+          const silent = (unansweredProbes: number) =>
+            new AttemptChannel.WorkerUnresponsive({
+              worker: running.worker,
+              lastAnsweredAt: now,
+              reason: "SSH timeout",
+              unansweredProbes,
+            });
+          laterReports.push(
+            new TranscriptEntry({ ...workerNotice(2999, silent(3)), receivedAt: now }),
+          );
+          assert(
+            !(yield* (yield* Operator).overview(declared)).needsYou.some(
+              (need) => need._tag === "WorkerUnresponsiveNeed",
+            ),
+            "reattachment clears the earlier outage",
+          );
+          laterReports.push(workerNotice(3000, silent(1)));
+          assert(
+            !(yield* (yield* Operator).overview(declared)).needsYou.some(
+              (need) => need._tag === "WorkerUnresponsiveNeed",
+            ),
+          );
+          laterReports.push(workerNotice(3001, silent(3)));
+          const attention = yield* (yield* Operator).overview(declared);
+          const need = attention.needsYou.find((need) => need._tag === "WorkerUnresponsiveNeed");
+          assert(need?._tag === "WorkerUnresponsiveNeed");
+          assert.strictEqual(need.worker, running.worker);
+          assert.strictEqual(need.lastAnsweredAt, DateTime.formatIso(now));
+          assert.deepStrictEqual(
+            need.attempts.map(({ attemptId }) => attemptId),
+            [retryAttemptId],
+          );
+          assert.strictEqual(yield* (yield* Operator).overview(declared), attention);
+          laterReports.push(
+            workerNotice(
+              3002,
+              new AttemptChannel.WorkerResponsive({ worker: running.worker, lastAnsweredAt: now }),
+            ),
+          );
+          assert(
+            !(yield* (yield* Operator).overview(declared)).needsYou.some(
+              (need) => need._tag === "WorkerUnresponsiveNeed",
+            ),
+          );
+          assert.strictEqual(
+            yield* Ref.get(reads),
+            1,
+            "worker notices refresh even with an unchanged projection revision",
+          );
         }).pipe(
           Effect.provide(
             testLayer(

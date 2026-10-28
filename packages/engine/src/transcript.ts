@@ -72,6 +72,11 @@ export class TranscriptUsageQuery extends Schema.TaggedClass<TranscriptUsageQuer
   "@usine/engine/TranscriptUsageQuery",
 )("TranscriptUsageQuery", { attemptId: AttemptId }) {}
 
+/** A query for the latest worker connectivity notice, regardless of later session output. */
+export class TranscriptWorkerQuery extends Schema.TaggedClass<TranscriptWorkerQuery>(
+  "@usine/engine/TranscriptWorkerQuery",
+)("TranscriptWorkerQuery", { attemptId: AttemptId }) {}
+
 /** A query for up to `limit` rows after `after`, in append order. */
 export class TranscriptTailQuery extends Schema.TaggedClass<TranscriptTailQuery>(
   "@usine/engine/TranscriptTailQuery",
@@ -96,6 +101,7 @@ export const TranscriptQuery = Schema.Union([
   TranscriptAllQuery,
   TranscriptSessionsQuery,
   TranscriptUsageQuery,
+  TranscriptWorkerQuery,
   TranscriptTailQuery,
   TranscriptPageQuery,
 ]);

@@ -16,8 +16,12 @@ export const needsYouByProject = (
 ): ReadonlyMap<RepositoryName, number> => {
   const counts = new Map<RepositoryName, number>();
   for (const need of needs) {
-    const repository = needCopy(need).repository;
-    if (repository !== null) counts.set(repository, (counts.get(repository) ?? 0) + 1);
+    const repositories =
+      need._tag === "WorkerUnresponsiveNeed"
+        ? [...new Set(need.attempts.map(({ repository }) => repository))]
+        : [needCopy(need).repository];
+    for (const repository of repositories)
+      if (repository !== null) counts.set(repository, (counts.get(repository) ?? 0) + 1);
   }
   return counts;
 };

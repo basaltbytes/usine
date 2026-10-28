@@ -18,7 +18,7 @@ import { AttemptTask, AttemptId } from "../src/attempt/attempt.ts";
 import * as AttemptChannel from "../src/attempt/channel.ts";
 import { AgentFailure, ChildSessionBudgetFailure } from "../src/attempt/failure.ts";
 import { RepositoryName, CommitSha, RepositoryRevision } from "../src/repository.ts";
-import { BotLogin } from "../src/worker.ts";
+import { BotLogin, WorkerName } from "../src/worker.ts";
 import { Comment, Commit, PullRequest, StepResult } from "../src/step/result.ts";
 
 const agent = new Agent({
@@ -53,6 +53,37 @@ const spec = new AttemptChannel.RunSpec({
 });
 
 describe("attempt channel", () => {
+  it("reads stored worker notices from before probe counts and rejects invalid counts", () => {
+    const stored = {
+      _tag: "WorkerUnresponsive",
+      worker: "one",
+      lastAnsweredAt: "2026-10-28T12:00:00Z",
+      reason: "SSH timeout",
+    };
+    assert.strictEqual(
+      Schema.decodeUnknownSync(AttemptChannel.WorkerUnresponsive)(stored).unansweredProbes,
+      1,
+    );
+    assert.throws(() =>
+      Schema.decodeUnknownSync(AttemptChannel.WorkerUnresponsive)({
+        ...stored,
+        unansweredProbes: 0,
+      }),
+    );
+    const notice = new AttemptChannel.WorkerUnresponsive({
+      worker: WorkerName.make("one"),
+      lastAnsweredAt: DateTime.makeUnsafe(stored.lastAnsweredAt),
+      reason: stored.reason,
+      unansweredProbes: 3,
+    });
+    assert.deepStrictEqual(
+      Schema.decodeUnknownSync(AttemptChannel.WorkerUnresponsive)(
+        Schema.encodeSync(AttemptChannel.WorkerUnresponsive)(notice),
+      ),
+      notice,
+    );
+  });
+
   it("round-trips a final envelope through JSON", () => {
     const envelope = new AttemptChannel.OutboundEnvelope({
       version: AttemptChannel.PROTOCOL_VERSION,

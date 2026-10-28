@@ -23,6 +23,7 @@ The default adapter stores the event ledger and run records in `<instance>/.usin
 - `evidence(runId)`: the run snapshot and all its transcript entries, in append order and unpaged, from one transaction, consistent while attempts complete or append.
 - `attemptsByWorker()`: per worker, the attempts that startup still visits, and how many are open.
 - `revision()`: lets callers reuse an unchanged projection.
+- `transcript(new TranscriptWorkerQuery({ attemptId }))`: returns the latest worker connectivity notice, even after later session output. Transcript appends do not change the projection revision; refresh this query while attempts run.
 
 ## Runtime rules
 

@@ -885,6 +885,14 @@ describe("Worker scheduler on reload", () => {
         const resized = yield* instances.reload;
         assert.deepStrictEqual(resized.workers.changed, [WorkerName.make("build-1")]);
         assert.deepStrictEqual(preflighted, ["build-1 x3: gpt-5.6-sol"]);
+        preflighted.length = 0;
+        yield* writeInstanceFiles(root, [["usine.yaml", usineYaml(sshWorker("build-1", 2))]]);
+        yield* instances.reload;
+        assert.deepStrictEqual(
+          preflighted,
+          ["build-1 x2: gpt-5.6-sol"],
+          "fewer SSH slots can still overcommit container memory",
+        );
         assert.deepStrictEqual(yield* scheduler.workers, [WorkerName.make("build-1")]);
       }).pipe(Effect.scoped),
     ),

@@ -1,6 +1,8 @@
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
+import { AttemptId, AttemptNumber } from "@usine/core/attempt";
+import { WorkerName } from "@usine/core/worker";
 import { AgentName } from "@usine/core/agent";
 import { ItemKey, ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
@@ -8,6 +10,7 @@ import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import {
   ApprovalNeed,
+  WorkerUnresponsiveNeed,
   BoardItemLink,
   BoardView,
   FactoryOverview,
@@ -87,6 +90,21 @@ const approvalOf = (id: RunId, number: number, title: string) =>
   });
 const approval = approvalOf(runId, 367, "Keep Needs attention current");
 const unrelated = approvalOf(RunId.make("other-run"), 12, "Wait for the operator");
+const worker = new WorkerUnresponsiveNeed({
+  id: "worker-unresponsive:worker-1",
+  worker: WorkerName.make("worker-1"),
+  lastAnsweredAt: "2026-10-28T14:35:00Z",
+  attempts: [
+    {
+      attemptId: AttemptId.make("attempt-1"),
+      attemptNumber: AttemptNumber.make(1),
+      runId,
+      repository,
+      loop,
+    },
+  ],
+});
+
 // The Project has no Runs, so the overview polls at its idle interval and the slow stub only
 // receives the requests a test sends.
 const overview = (needsYou: ReadonlyArray<NeedView>) =>
@@ -128,8 +146,8 @@ let root: Root;
 let queryClient: QueryClient;
 beforeEach(async () => {
   await commands.approvalResponses(
-    overview([approval, unrelated]),
-    overview([unrelated]),
+    overview([approval, unrelated, worker]),
+    overview([unrelated, worker]),
     detail(waiting),
     detail(running),
   );
@@ -227,4 +245,15 @@ it("explains in the drawer an approve refused because the Run was approved elsew
       timeout: 10_000,
     })
     .toBeVisible();
+});
+
+it("shows an unresponsive worker's last answer and opens its affected attempt", async () => {
+  const warning = entry("worker-1: not responding");
+  await expect
+    .element(warning.getByText("Last answered 2026-10-28T14:35:00Z", { exact: false }))
+    .toBeVisible();
+  await warning
+    .getByRole("button", { name: "approval/project · start-dev: attempt 1", includeHidden: true })
+    .click();
+  await expect.element(page.getByRole("dialog")).toBeVisible();
 });

@@ -36,13 +36,67 @@ import {
   TranscriptSequence,
   TranscriptTailQuery,
   TranscriptUsageQuery,
+  TranscriptWorkerQuery,
 } from "../../src/transcript.ts";
 import { InstanceDirectory } from "@usine/core/instance";
 
 import { RunStore } from "../../src/store/store.ts";
 
-import { lifecycleSubmission, testAgent } from "./support.ts";
+import { lifecycleSubmission, testAgent, withRunStore } from "./support.ts";
 describe("Attempt transcripts", () => {
+  it.live(
+    "reads the latest worker notice beyond session output and replaces silence on recovery",
+    () =>
+      withRunStore(
+        Effect.gen(function* () {
+          const store = yield* RunStore;
+          const runId = RunId.make("silent-worker-run");
+          yield* store.recordAndClaim(lifecycleSubmission, runId);
+          const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+          assert(started._tag === "AttemptStarted");
+          const attemptId = started.execution.attempt.id;
+          const at = DateTime.makeUnsafe("2026-10-28T12:00:00Z");
+          const silent = new AttemptChannel.WorkerUnresponsive({
+            worker: WorkerName.make("local"),
+            lastAnsweredAt: at,
+            reason: "SSH timeout",
+            unansweredProbes: 3,
+          });
+          const append = (sequence: number, payload: AttemptChannel.OutboundPayload) =>
+            store.appendTranscript(
+              "outbound",
+              new AttemptChannel.OutboundEnvelope({
+                version: AttemptChannel.PROTOCOL_VERSION,
+                attemptId,
+                sequence: AttemptChannel.Sequence.make(sequence),
+                sentAt: at,
+                payload,
+              }),
+            );
+          yield* append(1, silent);
+          for (let sequence = 2; sequence <= 105; sequence++)
+            yield* append(
+              sequence,
+              new AttemptChannel.Started({ parentModel: ModelId.make("test") }),
+            );
+          const query = new TranscriptWorkerQuery({ attemptId });
+          assert.deepStrictEqual(
+            (yield* store.transcript(query)).map(({ envelope }) => envelope.payload),
+            [silent],
+          );
+          const recovered = new AttemptChannel.WorkerResponsive({
+            worker: silent.worker,
+            lastAnsweredAt: at,
+          });
+          yield* append(106, recovered);
+          assert.deepStrictEqual(
+            (yield* store.transcript(query)).map(({ envelope }) => envelope.payload),
+            [recovered],
+          );
+        }),
+      ),
+  );
+
   it.live("writes the effective parent model back onto the Attempt", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

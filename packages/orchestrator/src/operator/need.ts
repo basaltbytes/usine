@@ -1,5 +1,5 @@
 import { ConfigFileError } from "@usine/config/file";
-import { AttemptNumber } from "@usine/core/attempt";
+import { AttemptId, AttemptNumber } from "@usine/core/attempt";
 import { LoopName } from "@usine/core/loop";
 import { CycleBudgetAsk } from "@usine/core/cycle-budget";
 import { RepositoryName } from "@usine/core/repository";
@@ -122,6 +122,24 @@ export class UnconfirmedStopNeed extends Schema.TaggedClass<UnconfirmedStopNeed>
   worker: WorkerName,
 }) {}
 
+/** A worker with running attempts after repeated unanswered probes. */
+export class WorkerUnresponsiveNeed extends Schema.TaggedClass<WorkerUnresponsiveNeed>(
+  "@usine/orchestrator/WorkerUnresponsiveNeed",
+)("WorkerUnresponsiveNeed", {
+  id: Schema.String,
+  worker: WorkerName,
+  lastAnsweredAt: Schema.String,
+  attempts: Schema.NonEmptyArray(
+    Schema.Struct({
+      attemptId: AttemptId,
+      attemptNumber: AttemptNumber,
+      runId: RunId,
+      repository: RepositoryName,
+      loop: LoopName,
+    }),
+  ),
+}) {}
+
 /** An Item that stopped opening Runs until the operator resets its cycle budget. */
 export class CycleBudgetNeed extends Schema.TaggedClass<CycleBudgetNeed>("CycleBudgetNeed")(
   "CycleBudgetNeed",
@@ -145,5 +163,6 @@ export const NeedView = Schema.Union([
   ConfigFileNeed,
   UnconfiguredWorkerNeed,
   UnconfirmedStopNeed,
+  WorkerUnresponsiveNeed,
 ]);
 export type NeedView = typeof NeedView.Type;

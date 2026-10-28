@@ -473,7 +473,9 @@ export const stepExecutorLayer = (
         const wholeRoster = new Set([
           ...change.added.map(({ name }) => name),
           ...change.resized
-            .filter(({ worker, from }) => worker.maxConcurrentAttempts > from)
+            .filter(
+              ({ worker, from }) => worker.kind === "ssh" || worker.maxConcurrentAttempts > from,
+            )
             .map(({ worker }) => worker.name),
         ]);
         const checks = loaded.config.workers.flatMap((worker) =>
@@ -486,7 +488,7 @@ export const stepExecutorLayer = (
         yield* Effect.annotateCurrentSpan({ agents: agentNames, workers: [...wholeRoster] });
         if (checks.length === 0) {
           yield* Effect.logDebug(
-            "The reload adds no Worker, slot, or brain, so it runs no Worker preflight",
+            "The reload has no Worker or brain changes that require preflight",
           );
           return applyWorkers(change, loaded.config.workers);
         }
@@ -494,7 +496,7 @@ export const stepExecutorLayer = (
         yield* membership.withPermit(
           Ref.update(adding, (current) => new Set([...current, ...added])),
         );
-        yield* Effect.logInfo("Preflighting the Workers, slots, and brains the reload adds", {
+        yield* Effect.logInfo("Preflighting Worker changes and new brains", {
           agents: agentNames,
           brains: newBrains.map(brainLabel),
           workers: [...wholeRoster],

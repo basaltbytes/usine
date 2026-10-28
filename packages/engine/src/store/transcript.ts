@@ -96,6 +96,11 @@ export const transcriptQueries = (database: RunDatabaseClient) => {
           database.select({ sequence: highest.sequence }).from(highest),
         );
       },
+      TranscriptWorkerQuery: ({ attemptId }) =>
+        and(
+          eq(attemptTranscripts.attemptId, attemptId),
+          sql`json_extract(${attemptTranscripts.envelope}, '$.payload._tag') IN ('WorkerUnresponsive', 'WorkerResponsive')`,
+        ),
       TranscriptAllQuery: ({ attemptId }) => eq(attemptTranscripts.attemptId, attemptId),
       TranscriptTailQuery: ({ attemptId, after }) =>
         and(eq(attemptTranscripts.attemptId, attemptId), gt(attemptTranscripts.sequence, after)),
@@ -123,6 +128,8 @@ export const transcriptQueries = (database: RunDatabaseClient) => {
     const rows = yield* Match.valueTags(query, {
       TranscriptSessionsQuery: () => selection.orderBy(asc(attemptTranscripts.sequence)).execute(),
       TranscriptUsageQuery: () => selection.orderBy(asc(attemptTranscripts.sequence)).execute(),
+      TranscriptWorkerQuery: () =>
+        selection.orderBy(desc(attemptTranscripts.sequence)).limit(1).execute(),
       TranscriptAllQuery: () => selection.orderBy(asc(attemptTranscripts.sequence)).execute(),
       TranscriptTailQuery: ({ limit }) =>
         selection.orderBy(asc(attemptTranscripts.sequence)).limit(limit).execute(),

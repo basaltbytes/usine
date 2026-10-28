@@ -15,7 +15,7 @@ import { Button } from "~/components/ui/button";
 import { itemIdentity, useOverview } from "~/components/item/identity";
 import { cn } from "~/lib/utils";
 import { useOpenRun } from "~/hooks/use-open-run";
-import { needCopy } from "~/lib/needs-you/strings";
+import { needCopy, workerAttemptLabel } from "~/lib/needs-you/strings";
 import { runActionLabel, runActionProgress } from "~/lib/runs/strings";
 import { isRunOperationRejected, usePendingRunAction, useRunAction } from "~/hooks/runs/actions";
 import { CycleBudgetAsk } from "~/components/needs-you/cycle-budget-ask";
@@ -110,6 +110,24 @@ export const NeedEntry = ({ need, compact }: NeedEntryProps) => {
       return <ApprovalAsk need={need} compact={compact} dismiss={dismiss} />;
     case "CycleBudgetNeed":
       return <CycleBudgetAsk need={need} compact={compact} dismiss={dismiss} />;
+    case "WorkerUnresponsiveNeed":
+      return (
+        <NeedItem
+          copy={needCopy(need)}
+          compact={compact}
+          dismiss={dismiss}
+          fullDetail
+          actions={need.attempts.map((attempt) => (
+            <Button
+              key={attempt.attemptId}
+              variant="outline"
+              onClick={() => openRun(attempt.runId)}
+            >
+              {workerAttemptLabel(attempt)}
+            </Button>
+          ))}
+        />
+      );
     case "UnconfiguredWorkerNeed":
       return <UnconfiguredWorkerAsk need={need} compact={compact} dismiss={dismiss} />;
     default: {

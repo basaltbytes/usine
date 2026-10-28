@@ -26,6 +26,7 @@ const repositoryOf = (need: NeedView) =>
       failure._tag === "ScheduleTickFailure" ? failure.repository : null,
     ConfigFileNeed: () => null,
     UnconfiguredWorkerNeed: () => null,
+    WorkerUnresponsiveNeed: () => null,
   });
 
 export const taskNeedsAttention = (
@@ -33,6 +34,8 @@ export const taskNeedsAttention = (
   needs: ReadonlyArray<NeedView>,
 ): boolean =>
   needs.some((need) => {
+    if (need._tag === "WorkerUnresponsiveNeed")
+      return task.runs.some(({ id }) => need.attempts.some(({ runId }) => runId === id));
     if ("runId" in need) return task.runs.some(({ id }) => id === need.runId);
     if (need._tag === "CycleBudgetNeed")
       return task.items.some(({ itemKey }) => itemKey === need.ask.itemKey);
@@ -46,7 +49,13 @@ export const projectAttention = (
   projects: ReadonlyArray<ProjectView>,
   needsYou: ReadonlyArray<NeedView>,
 ): ReadonlyArray<ProjectView> => {
-  const repositories = new Set(needsYou.map(repositoryOf));
+  const repositories = new Set(
+    needsYou.flatMap((need) =>
+      need._tag === "WorkerUnresponsiveNeed"
+        ? need.attempts.map(({ repository }) => repository)
+        : [repositoryOf(need)],
+    ),
+  );
   return projects.map(
     (project) =>
       new ProjectView({

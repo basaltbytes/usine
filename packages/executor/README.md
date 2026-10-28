@@ -45,13 +45,15 @@ Startup reconciliation lists each worker's `attempts/` once per executor instanc
 
 This replaces the 0.x `Executor.launch(prepared, io)` and `Executor.cleanup(prepared)`; the engine's `StepExecutor` contract is unchanged.
 
+Remote worker probes report the first unanswered probe and an update after three consecutive failures, then report recovery. A newly watched attempt on a silent machine receives its current failure count. The notices do not stop attempts.
+
 ## Worker preflight
 
 Call `executor.preflight(worker, brains, maxConcurrentAttempts)` with the roster's `BrainSpec` values and the worker's `max_concurrent_attempts` before scheduling. It returns a `PreflightReport`, whose `degraded` gives the reason when the worker runs attempts without a capability that keeps them apart, such as an SSH worker without Docker, and whose `containerLimits` gives the CPU, memory, and process limits of each attempt container on an SSH worker with Docker; `fullPreflight` is the report without either.
 
 Every adapter compares the machine's memory with `maxConcurrentAttempts`. The local adapter reads `/proc/meminfo` on Linux and physical memory on macOS, where swap grows on demand; exe.dev and SSH read `/proc/meminfo` over SSH. Under 1.5 GiB per concurrent attempt, or no swap with more than one, is a `memory` `WorkerCapabilityError`; under 3 GiB logs a warning ([#270](https://github.com/basaltbytes/usine/issues/270)).
 
-SSH preflight also warns when the concurrent containers' combined memory limits exceed `MemTotal` minus a 1 GiB host reserve, including when every container limit is configured. The warning includes the worker, slot count, limits, and available memory. Startup and reloads that add a worker or increase its slots run this check; changing container settings requires a restart. Containers set `--memory-swap` equal to `--memory`, so they cannot use host swap.
+SSH preflight also warns when the concurrent containers' combined memory limits exceed `MemTotal` minus a 1 GiB host reserve, including when every container limit is configured. The warning includes the worker, slot count, limits, and available memory. Startup and reloads that add a worker or change its slot count run this check; changing container settings requires a restart. Containers set `--memory-swap` equal to `--memory`, so they cannot use host swap.
 
 Every adapter runs the `@usine/agents/preflight` checks where children run: local on this machine (override with `LocalExecutorOptions.harnessReadiness`), exe.dev and SSH over SSH (`SshExecutorOptions.harnessReadiness`). Codex needs CLI 0.153.4 or 0.159.0 through 0.159.3 and a ChatGPT login, Claude its CLI and subscription login, and Pi children API keys for their models. Pi children run tools in the orchestrator, so exe.dev and SSH workers report Pi brains unavailable.
 
