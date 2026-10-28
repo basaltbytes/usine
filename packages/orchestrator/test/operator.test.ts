@@ -891,7 +891,7 @@ describe("Operator", () => {
       }),
   );
 
-  it.effect("preserves current dismissals and prunes recovered entries and changed revisions", () =>
+  it.effect("defers pruning until startup reports arrive, then removes obsolete dismissals", () =>
     Effect.gen(function* () {
       const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
       const moved = yield* Ref.make<ItemLabelMutation | null>(null);
@@ -934,7 +934,14 @@ describe("Operator", () => {
         submissions: [],
         revokedRuns: 0,
         failures: [pollA, pollB],
-        preflightFindings: [],
+        preflightFindings: [
+          new LabelPreflightFinding({
+            repository,
+            label: GitHubLabelName.make("ready-for-review"),
+            errorTag: "GitHubApiError",
+            message: "GitHub returned HTTP status 500",
+          }),
+        ],
         nextPollAt: Option.none(),
       });
       const schedule = new ScheduleCycle({
@@ -952,17 +959,40 @@ describe("Operator", () => {
         const operator = yield* Operator;
         const before = yield* operator.overview(instance);
         const failures = before.needsYou.filter(
-          (need) => need._tag === "PollFailureNeed" || need._tag === "ScheduleFailureNeed",
+          (need) =>
+            need._tag === "PollFailureNeed" ||
+            need._tag === "ScheduleFailureNeed" ||
+            need._tag === "PreflightFindingNeed",
         );
-        assert.strictEqual(failures.length, 6);
-        assert.strictEqual(new Set(failures.map(({ id }) => id)).size, 6);
+        assert.strictEqual(failures.length, 7);
+        assert.strictEqual(new Set(failures.map(({ id }) => id)).size, 7);
         const dismissed = failures.filter((need) =>
           need._tag === "PollFailureNeed"
             ? need.failure.message === pollB.message
-            : need.failure._tag !== "ScheduleTickFailure" ||
+            : need._tag === "PreflightFindingNeed" ||
+              need.failure._tag !== "ScheduleTickFailure" ||
               need.failure.repository === scheduleB.repository,
         );
         for (const need of dismissed) yield* operator.dismissNeed(instance, attentionKey(need));
+        for (const [pollReport, scheduleReport] of [
+          [Option.none<PollCycle>(), Option.none<ScheduleCycle>()],
+          [Option.some(poll), Option.none<ScheduleCycle>()],
+          [Option.none<PollCycle>(), Option.some(schedule)],
+          [Option.some(poll), Option.some(schedule)],
+        ] as const) {
+          yield* Ref.set(latestPoll, pollReport);
+          yield* Ref.set(latestSchedule, scheduleReport);
+          for (let refresh = 0; refresh < 2; refresh++) {
+            const starting = yield* operator.overview(instance);
+            const expected = dismissed.filter((need) =>
+              need._tag === "ScheduleFailureNeed"
+                ? Option.isSome(scheduleReport)
+                : Option.isSome(pollReport),
+            );
+            assert.deepStrictEqual(new Set(starting.dismissedNeeds), new Set(expected));
+            assert(!starting.needsYou.some((need) => dismissed.some(({ id }) => id === need.id)));
+          }
+        }
         for (const [pollFailures, scheduleFailures] of [
           [
             [pollB, pollA],
@@ -988,6 +1018,7 @@ describe("Operator", () => {
             new PollCycle({
               ...poll,
               failures: [new RepositoryPollFailure({ ...pollB, message: "Expression changed" })],
+              preflightFindings: [],
             }),
           ),
         );
@@ -1009,7 +1040,10 @@ describe("Operator", () => {
         assert.deepStrictEqual(changed.dismissedNeeds, []);
         assert.strictEqual(
           changed.needsYou.filter(
-            (need) => need._tag === "PollFailureNeed" || need._tag === "ScheduleFailureNeed",
+            (need) =>
+              need._tag === "PollFailureNeed" ||
+              need._tag === "ScheduleFailureNeed" ||
+              need._tag === "PreflightFindingNeed",
           ).length,
           2,
         );
@@ -1019,7 +1053,10 @@ describe("Operator", () => {
         assert.deepStrictEqual(recurring.dismissedNeeds, []);
         assert.deepStrictEqual(
           recurring.needsYou.filter(
-            (need) => need._tag === "PollFailureNeed" || need._tag === "ScheduleFailureNeed",
+            (need) =>
+              need._tag === "PollFailureNeed" ||
+              need._tag === "ScheduleFailureNeed" ||
+              need._tag === "PreflightFindingNeed",
           ),
           failures,
         );
@@ -1027,6 +1064,23 @@ describe("Operator", () => {
         const readsAfterPruning = yield* Ref.get(reads);
         yield* operator.overview(instance);
         assert.strictEqual(yield* Ref.get(reads), readsAfterPruning);
+
+        for (const need of failures) yield* operator.dismissNeed(instance, attentionKey(need));
+        yield* Ref.set(latestPoll, Option.none());
+        yield* Ref.set(latestSchedule, Option.none());
+        yield* operator.overview(instance);
+        yield* Ref.set(
+          latestPoll,
+          Option.some(new PollCycle({ ...poll, failures: [], preflightFindings: [] })),
+        );
+        yield* Ref.set(
+          latestSchedule,
+          Option.some(new ScheduleCycle({ ...schedule, failures: [] })),
+        );
+        yield* operator.overview(instance);
+        yield* Ref.set(latestPoll, Option.some(poll));
+        yield* Ref.set(latestSchedule, Option.some(schedule));
+        assert.deepStrictEqual((yield* operator.overview(instance)).dismissedNeeds, []);
       }).pipe(
         Effect.provide(
           testLayer(

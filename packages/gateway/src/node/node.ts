@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { NodeFileSystem, NodeHttpClient, NodeHttpServer } from "@effect/platform-node";
-import { ConfigProvider, Context, Effect, Layer, Stream } from "effect";
+import { Config, ConfigProvider, Context, Effect, Layer, Stream } from "effect";
 import {
   HttpMiddleware,
   HttpBody,
@@ -11,7 +11,11 @@ import {
 } from "effect/http";
 import { NetAddress } from "effect/net";
 import { adminRoutes } from "../admin/server.ts";
-import { gatewayServices } from "../gateway.ts";
+import { gatewayServicesWithAttachments } from "../gateway.ts";
+import { Attachments } from "../attachment/store.ts";
+import type { AttachmentPersistenceError } from "../attachment/attachment.ts";
+import { fileAttachmentsLayer } from "./attachments.ts";
+import { trackConnections } from "./connections.ts";
 import { GatewayProxy } from "../proxy/proxy.ts";
 import { GatewaySettings } from "../settings.ts";
 import { serveEgressProxy } from "./egress-proxy.ts";
@@ -55,7 +59,12 @@ const reachable = (listener: Listener): Listener =>
 const serveProxy = Effect.fn("GatewayNode.serveProxy")(function* (listener: Listener) {
   const proxy = yield* GatewayProxy;
   // A git push or a long model response can exceed Node's default request timeout.
-  const server = yield* NodeHttpServer.make(() => createServer({ requestTimeout: 0 }), listener);
+  const http = createServer({ requestTimeout: 0 });
+  const closeConnections = trackConnections(http);
+  const server = yield* NodeHttpServer.make(() => http, {
+    ...listener,
+    disablePreemptiveShutdown: true,
+  });
   yield* server.serve(
     Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest;
@@ -79,19 +88,26 @@ const serveProxy = Effect.fn("GatewayNode.serveProxy")(function* (listener: List
       );
     }),
   );
+  yield* Effect.addFinalizer(closeConnections);
   const bound = boundTo(server.address, listener);
   yield* Effect.logInfo("The gateway proxy is listening", bound);
   return bound;
 });
 
 const serveAdmin = Effect.fn("GatewayNode.serveAdmin")(function* (listener: Listener) {
-  const server = yield* NodeHttpServer.make(() => createServer(), listener);
+  const http = createServer();
+  const closeConnections = trackConnections(http);
+  const server = yield* NodeHttpServer.make(() => http, {
+    ...listener,
+    disablePreemptiveShutdown: true,
+  });
   yield* Layer.build(
     HttpRouter.serve(adminRoutes, { disableListenLog: true }).pipe(
       Layer.provide(Layer.succeed(HttpServer.HttpServer)(server)),
       Layer.provide(NodeHttpServer.layerHttpServices),
     ),
   );
+  yield* Effect.addFinalizer(closeConnections);
   const bound = boundTo(server.address, listener);
   yield* Effect.logInfo("The gateway admin API is listening", bound);
   return bound;
@@ -103,7 +119,14 @@ const serveAdmin = Effect.fn("GatewayNode.serveAdmin")(function* (listener: List
  * requests use undici, which doesn't change `content-encoding`, so compressed bodies pass
  * through unchanged. ChatGPT logins read and write their auth files with Node's file system.
  */
-export const gatewayLayer = (listeners: GatewayListeners) =>
+export const gatewayLayer = (
+  listeners: GatewayListeners,
+  attachments: Layer.Layer<
+    Attachments,
+    AttachmentPersistenceError,
+    GatewaySettings
+  > = Attachments.layer,
+) =>
   Layer.effect(
     GatewayAddresses,
     Effect.gen(function* () {
@@ -114,7 +137,7 @@ export const gatewayLayer = (listeners: GatewayListeners) =>
     }),
   ).pipe(
     Layer.provide(GatewayProxy.layer),
-    Layer.provideMerge(gatewayServices),
+    Layer.provideMerge(gatewayServicesWithAttachments(attachments)),
     Layer.provide(Layer.mergeAll(NodeHttpClient.layerUndici, NodeFileSystem.layer)),
     // No automatic HTTP span records the incoming headers. Named Gateway spans record safe fields
     // without incoming credentials.
@@ -129,10 +152,15 @@ export const gatewayLayer = (listeners: GatewayListeners) =>
 export const gatewayFromEnvironment = Layer.unwrap(
   Effect.gen(function* () {
     const base = yield* ConfigProvider.ConfigProvider;
-    const started = yield* readStartupSettings(yield* readSettingsSource(base));
+    const source = yield* readSettingsSource(base);
+    const started = yield* readStartupSettings(source);
+    const directory = yield* Config.String("STATE_DIRECTORY")
+      .pipe(Config.withDefault("/var/lib/usine-gateway"))
+      .parse(source.provider);
+    const attachments = fileAttachmentsLayer(directory);
     return reloadOnHangup.pipe(
       Layer.provideMerge(gatewayReloadLayer(started, base)),
-      Layer.provideMerge(gatewayLayer(started.listeners)),
+      Layer.provideMerge(gatewayLayer(started.listeners, attachments)),
       Layer.provide(Layer.succeed(GatewaySettings)(started.settings)),
     );
   }),

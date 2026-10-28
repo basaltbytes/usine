@@ -4,6 +4,7 @@ import { ChildSessionBudget } from "@usine/core/agent/session";
 import { OperatorLogin } from "@usine/core/operator";
 import { RepositoryName } from "@usine/core/repository";
 import {
+  ProvisionerTimings,
   BoatSize,
   BoatSnapshotName,
   TailnetAddress,
@@ -156,6 +157,16 @@ const ProviderApiKeysFromYaml = ProviderApiKeys.pipe(
   Schema.withDecodingDefaultKey(Effect.succeed({})),
 );
 
+const ProvisionerTimingsFromYaml = ProvisionerTimings.pipe(
+  Schema.encodeKeys({
+    sshWait: "ssh_wait",
+    creationBackoffMin: "creation_backoff_min",
+    creationBackoffMax: "creation_backoff_max",
+    machineCheckInterval: "machine_check_interval",
+  }),
+  Schema.withDecodingDefaultKey(Effect.succeed({})),
+);
+
 /**
  * Creates one Hetzner Cloud server per Attempt from a snapshot, and deletes it after the
  * Attempt (#550).
@@ -188,6 +199,7 @@ export class HetznerProvisioner extends Schema.Class<HetznerProvisioner>(
   sshUser: SshUser.pipe(Schema.withDecodingDefaultKey(Effect.succeed("usine"))),
   labels: HetznerLabels.pipe(Schema.withDecodingDefaultKey(Effect.succeed({}))),
   apiKeys: ProviderApiKeysFromYaml,
+  timings: ProvisionerTimingsFromYaml,
 }) {}
 
 /** The gateway address and OAuth client variables for a Boat sandbox's tailnet join. */
@@ -214,6 +226,7 @@ export class BoatProvisioner extends Schema.Class<BoatProvisioner>("@usine/confi
       ),
     ),
     apiKeys: ProviderApiKeysFromYaml,
+    timings: ProvisionerTimingsFromYaml,
   },
 ) {}
 

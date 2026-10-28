@@ -89,3 +89,5 @@ Boat workers accept a gateway with `provisioner.snapshot` and `provisioner.tailn
 `Configuration.actor` returns the configured operator login for revision attribution. Schema errors include structured `details` with field paths and messages. Configuration validation associates problems in workers, repositories, and labels with their entity keys.
 
 `revertConfiguration(parser, target, history, current)` computes reverse changes from the revision log, restoring workers relative to surviving workers in the current snapshot. It preserves unrelated changes and returns `ConfigurationRevertBlocked` with the entity keys changed by later revisions. Commit the returned changes with the expected current revision to prevent a concurrent write from being overwritten.
+
+Both SSH provisioners accept `timings` with `ssh_wait`, `creation_backoff_min`, `creation_backoff_max`, and `machine_check_interval`, in positive whole seconds. Parsing defaults them to 600, 30, 600, and 86400 and rejects reversed backoff bounds.

@@ -109,7 +109,7 @@ Failure resolution through `POST /api/runs/:runId/resolve-failure` records the c
 
 Every Needs attention entry has **Dismiss**. The overview's collapsed **Dismissed** section lists acknowledged entries with **Undo**. Dismissals persist across refreshes and restarts, and a changed entry appears again. Attention counts and badges exclude dismissed entries. Dismissing an approval, failure, or cycle-budget ask leaves its state and actions available on the run and task pages and board cards. Dismiss and Undo also work while GitHub credentials need setup.
 
-Refreshing the overview removes dismissals for entries it no longer reports or whose content changed. If an entry disappears during a refresh and later returns, dismiss it again to hide it.
+After the first poll cycle and schedule check finish, refreshing the overview removes dismissals for entries it no longer reports or whose content changed. Until both sources report, including while GitHub credentials need setup, the overview retains dismissals so that startup does not clear them. If an entry disappears during a refresh and later returns, dismiss it again to hide it.
 
 ## Server upgrades
 

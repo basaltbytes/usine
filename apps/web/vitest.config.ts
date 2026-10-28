@@ -73,6 +73,12 @@ export default mergeConfig(
                 executablePath === undefined ? {} : { launchOptions: { executablePath } },
               ),
               commands: {
+                taskListAvatarResponse: async ({ page }) => {
+                  await page.unroute("https://github.com/board-test.png?*");
+                  await page.route("https://github.com/board-test.png?*", (route) =>
+                    route.fulfill({ status: 404, body: "" }),
+                  );
+                },
                 attentionResponses: async ({ page }, before: string, after: string) => {
                   let dismissed = false;
                   await page.route("**/api/overview", (route) =>

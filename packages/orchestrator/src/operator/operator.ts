@@ -591,6 +591,10 @@ const makeOperatorObservation = Effect.gen(function* () {
           [reader.revision(), polling.latest, schedules.latest, stops.list] as const,
           { concurrency: "unbounded" },
         );
+        const reports = {
+          pollReported: Option.isSome(latestPoll),
+          scheduleReported: Option.isSome(latestSchedule),
+        };
         const pollFailures = Option.match(latestPoll, {
           onNone: () => [],
           onSome: ({ failures }) => failures,
@@ -639,7 +643,7 @@ const makeOperatorObservation = Effect.gen(function* () {
             revision,
             unconfirmedStops,
           );
-          return [projected, Option.none<CachedOverview>()] as const;
+          return [{ ...projected, reports }, Option.none<CachedOverview>()] as const;
         }
         if (Option.isSome(cached) && cached.value.token === token.value) {
           yield* Effect.logDebug("Reusing unchanged operator overview", {
@@ -647,7 +651,7 @@ const makeOperatorObservation = Effect.gen(function* () {
           });
           const current = yield* refreshWorkingUsage(cached.value);
           return [
-            { overview: current.overview, running: current.running },
+            { overview: current.overview, running: current.running, reports },
             Option.some(current),
           ] as const;
         }
@@ -659,12 +663,20 @@ const makeOperatorObservation = Effect.gen(function* () {
           revision,
           unconfirmedStops,
         );
-        return [projected, Option.some({ token: token.value, ...projected })] as const;
+        return [
+          { ...projected, reports },
+          Option.some({ token: token.value, ...projected }),
+        ] as const;
       }),
     ).pipe(
-      Effect.flatMap(({ overview, running }) => workerAttention(overview, running)),
-      Effect.tap(({ needsYou, dismissedNeeds }) =>
-        acknowledgements.prune([...needsYou, ...dismissedNeeds].map(attentionKey)),
+      Effect.flatMap(({ overview, running, reports }) =>
+        workerAttention(overview, running).pipe(
+          Effect.tap(({ needsYou, dismissedNeeds }) =>
+            reports.pollReported && reports.scheduleReported
+              ? acknowledgements.prune([...needsYou, ...dismissedNeeds].map(attentionKey))
+              : Effect.logDebug("Deferred attention pruning until trigger sources report", reports),
+          ),
+        ),
       ),
     ),
   );

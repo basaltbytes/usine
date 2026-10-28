@@ -33,7 +33,7 @@ A machine created for one attempt keeps no harness login: a login saved in a sna
 | Codex       | `openai` in the gateway's `llm_providers`, with a ChatGPT login or an API key on the gateway. Or `provisioner.api_keys.openai`, which each attempt's container gets as `OPENAI_API_KEY`. If both are set, the gateway's applies.                                                                      |
 | Pi          | Not available. Pi children run only on local workers.                                                                                                                                                                                                                                                 |
 
-A Boat worker can't have a gateway, so its Claude Code and Codex agents need `api_keys`. With an OpenAI key, each attempt gets its own `CODEX_HOME` with a `config.toml` that points Codex at `api.openai.com` with the key from `OPENAI_API_KEY`, so Codex needs no login. Behind a gateway that doesn't hold the provider's credential, the machine reaches the provider through the gateway's forward proxy, and the first machine's checks fail if the egress allowlist doesn't have `api.anthropic.com` or `api.openai.com`; `api.openai.com` isn't in the default allowlist.
+A Boat worker can use [gateway subscriptions over Tailscale](#gateway-subscriptions-over-tailscale), or supply its Claude Code and Codex agents with `api_keys`. With an OpenAI key, each attempt gets its own `CODEX_HOME` with a `config.toml` that points Codex at `api.openai.com` with the key from `OPENAI_API_KEY`, so Codex needs no login. Behind a gateway that doesn't hold the provider's credential, the machine reaches the provider through the gateway's forward proxy, and the first machine's checks fail if the egress allowlist doesn't have `api.anthropic.com` or `api.openai.com`; `api.openai.com` isn't in the default allowlist.
 
 The run page counts children that use an API key under API keys, and those that use a subscription on the gateway under the Claude or ChatGPT plan.
 
@@ -277,20 +277,20 @@ Check the policy from an attempt node: port 80 at the gateway should answer, whi
 
 ## Machine lifecycle
 
-1. When a slot is free on the worker, the scheduler takes the next waiting run in [queue order](/reference/configuration/loop-files/#priority) and creates its machine. The run stays `Pending` or `Queued` until the machine answers over SSH, for up to 10 minutes.
-2. The executor waits for cloud-init, creates `root`, and waits for Docker. The first machine of the day also gets the [machine checks](#machine-checks).
-3. The attempt starts on the machine and runs as on a long-lived SSH worker. Hetzner servers get the attempt's label.
+1. When a slot is free, the scheduler takes the next waiting run in [queue order](/reference/configuration/loop-files/#priority). The engine persists its attempt, then creates the machine with that attempt in its initial labels. The attempt waits for SSH for up to `provisioner.timings.ssh_wait` seconds (600 by default).
+2. The executor waits for cloud-init, creates `root`, and waits for Docker. The first machine after the configured check interval also gets the [machine checks](#machine-checks).
+3. The attempt starts on the machine and runs as on a long-lived SSH worker. Both providers retain the attempt label until deletion.
 4. After the attempt releases its checkout, the release of its slot deletes the machine. If usine can't confirm that the attempt's parent task stopped, the slot and the machine stay until a reconcile confirms the stop.
 5. After a restart, recovery finds each attempt's machine by its tags. After recovery, and at each reconcile every 3 minutes, usine deletes the machines of the instance that no attempt or creation of the running process holds. It keeps a machine whose recovery failed, for the next process.
 
-A failed creation isn't an attempt failure. The slot is freed, the run keeps its place in the queue, and the worker creates no machine for 30 seconds, then for twice as long after each further failure, up to 10 minutes; a creation that succeeds resets the pause. The **Workers** page and the log show the reason and the time of the next try:
+A failed creation retries within the same attempt, keeping its slot. The worker pauses further creation for `provisioner.timings.creation_backoff_min` seconds (30 by default), doubling after each consecutive failure up to `creation_backoff_max` (600 by default). Success resets the pause. Other workers continue, and canceling the attempt interrupts creation and frees its slot. The **Workers** page and the log show the reason and the time of the next try:
 
-| Reason                     | Hetzner Cloud                                                                    | Boat                              |
-| -------------------------- | -------------------------------------------------------------------------------- | --------------------------------- |
-| No machine of the type now | `resource_unavailable`, or a plan shown as currently unavailable                 | 503: no machine of the size ready |
-| Account limit              | `resource_limit_exceeded`                                                        | 402 or 429                        |
-| Refused or failed request  | an API error                                                                     | an API error, or no host key      |
-| No answer                  | the API doesn't respond, or the server doesn't answer over SSH within 10 minutes | the same                          |
+| Reason                     | Hetzner Cloud                                                                                 | Boat                              |
+| -------------------------- | --------------------------------------------------------------------------------------------- | --------------------------------- |
+| No machine of the type now | `resource_unavailable`, or a plan shown as currently unavailable                              | 503: no machine of the size ready |
+| Account limit              | `resource_limit_exceeded`                                                                     | 402 or 429                        |
+| Refused or failed request  | an API error                                                                                  | an API error, or no host key      |
+| No answer                  | the API doesn't respond, or the server doesn't answer over SSH within the configured SSH wait | the same                          |
 
 ### Host keys
 
@@ -303,11 +303,11 @@ The executor writes each key to `.usine/known-hosts/<provider>-<id>` in the inst
 
 ### Machine checks
 
-Preflight at `usine up` has no machine, so the checks that need one run on the worker's first machine each day (UTC), and on its first machine after `usine up`: Git, the memory for one attempt, the gateway from the machine, Docker and the attempt image, the container limits, and each harness. A failure shows as a preflight failure does, the machine is deleted, and the worker pauses its creations as for a failed creation. The **Workers** page says that the harnesses are checked on the first machine each day.
+Preflight at `usine up` has no machine, so the checks that need one run on its first machine after `usine up` and on the next machine created after `provisioner.timings.machine_check_interval` seconds since the last successful check (86400 by default): Git, the memory for one attempt, the gateway from the machine, Docker and the attempt image, the container limits, and each harness. A failure shows as a preflight failure does, the machine is deleted, and the worker pauses its creations as for a failed creation. The **Workers** page shows the configured interval. A UID mismatch fails this check with the image name and the `--build-arg USINE_UID=<SSH user UID>` needed to rebuild it.
 
-The machine's attempt containers share a `usine-pnpm-store` Docker volume, initialized even when the machine skips the daily preflight. The volume is deleted with the machine after the attempt, so it does not cache packages across attempts. See [Shared pnpm store](/guides/add-a-worker/#shared-pnpm-store) for ownership and disk reclamation.
+The machine's attempt containers share a `usine-pnpm-store` Docker volume, initialized even when the machine skips the periodic preflight. The volume is deleted with the machine after the attempt, so it does not cache packages across attempts. See [Shared pnpm store](/guides/add-a-worker/#shared-pnpm-store) for ownership and disk reclamation.
 
-Each machine runs one attempt, so the check derives each container limit that [`workers[].container`](/reference/configuration/usine-yaml/#workerscontainer) leaves out for one attempt: the machine's total, less a reserve for its own processes. The worker's machines keep those limits until the next day's first machine, and the **Workers** page shows them.
+Each machine runs one attempt, so the check derives each container limit that [`workers[].container`](/reference/configuration/usine-yaml/#workerscontainer) leaves out for one attempt: the machine's total, less a reserve for its own processes. The worker's machines keep those limits until the next successful machine check, and the **Workers** page shows them.
 
 ### Machines in the web UI
 

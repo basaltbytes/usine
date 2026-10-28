@@ -1,9 +1,10 @@
 import { canonicalRepositoryName, type RepositoryName } from "@usine/core/repository";
-import { Context, Data, DateTime, Effect, Layer, Match, Ref } from "effect";
+import { Context, Data, DateTime, Effect, Layer, Match, SynchronizedRef } from "effect";
 import {
   type Attachment,
   AttachmentAlreadyExpired,
   AttachmentConflict,
+  AttachmentPersistenceError,
   type AttachmentId,
   type AttachmentLookup,
   ExpiredAttachment,
@@ -23,6 +24,14 @@ interface Entry {
   readonly newNames: ReadonlyArray<RepositoryName>;
 }
 
+/** Loads and atomically replaces the attachment snapshot. */
+export interface AttachmentPersistence {
+  readonly load: Effect.Effect<ReadonlyArray<LiveAttachment>, AttachmentPersistenceError>;
+  readonly save: (
+    entries: ReadonlyArray<LiveAttachment>,
+  ) => Effect.Effect<void, AttachmentPersistenceError>;
+}
+
 /** What `learnNewName` did: added the name to the attachment, or kept its names, and why. */
 type Learning = Data.TaggedEnum<{
   Learned: { readonly attachment: Attachment };
@@ -31,8 +40,7 @@ type Learning = Data.TaggedEnum<{
 const Learning = Data.taggedEnum<Learning>();
 
 /**
- * The in-memory attachment store, keyed by attachment ID. A Gateway restart clears it; the
- * executor re-attaches with the same IDs when it renews or restarts.
+ * The attachment store, keyed by attachment ID. Mutations persist before becoming visible.
  */
 export class Attachments extends Context.Service<
   Attachments,
@@ -43,9 +51,12 @@ export class Attachments extends Context.Service<
      */
     readonly attach: (
       attachment: Attachment,
-    ) => Effect.Effect<void, AttachmentAlreadyExpired | AttachmentConflict>;
+    ) => Effect.Effect<
+      void,
+      AttachmentAlreadyExpired | AttachmentConflict | AttachmentPersistenceError
+    >;
     /** Removes the attachment. Returns `false` if it didn't exist. */
-    readonly detach: (id: AttachmentId) => Effect.Effect<boolean>;
+    readonly detach: (id: AttachmentId) => Effect.Effect<boolean, AttachmentPersistenceError>;
     /** Returns the active attachments, earliest expiry first. */
     readonly list: () => Effect.Effect<ReadonlyArray<Attachment>>;
     /** Returns whether the attachment is active, expired, or missing. */
@@ -55,151 +66,190 @@ export class Attachments extends Context.Service<
      * request for it, so the attachment serves paths that name it until detach or expiry. Does
      * nothing if the attachment isn't live or already serves `name`.
      */
-    readonly learnNewName: (id: AttachmentId, name: RepositoryName) => Effect.Effect<void>;
+    readonly learnNewName: (
+      id: AttachmentId,
+      name: RepositoryName,
+    ) => Effect.Effect<void, AttachmentPersistenceError>;
     /** Removes expired attachments and returns the number removed. */
-    readonly sweep: () => Effect.Effect<number>;
+    readonly sweep: () => Effect.Effect<number, AttachmentPersistenceError>;
   }
 >()("@usine/gateway/Attachments") {
-  /** An empty store that removes expired attachments every minute while the layer is in scope. */
-  static readonly layer = Layer.effect(
-    Attachments,
-    Effect.gen(function* () {
-      const entries = yield* Ref.make<ReadonlyMap<AttachmentId, Entry>>(new Map());
-
-      const attach = Effect.fn("Attachments.attach")(function* (attachment: Attachment) {
-        const { id, worker, repository, expiresAt } = attachment;
-        yield* Effect.annotateCurrentSpan({ attachment: id, worker, repository });
-        const now = yield* DateTime.now;
-        if (!attachment.isLiveAt(now))
-          return yield* new AttachmentAlreadyExpired({ worker, repository, expiresAt });
-        const outcome = yield* Ref.modify(entries, (current) => {
-          const previous = current.get(id);
-          if (previous !== undefined && !samePair(previous.attachment, attachment))
-            return ["conflict" as const, current];
-          return [
-            previous === undefined ? ("attached" as const) : ("renewed" as const),
-            new Map(current).set(id, { attachment, newNames: previous?.newNames ?? [] }),
-          ];
-        });
-        if (outcome === "conflict")
-          return yield* new AttachmentConflict({ id, worker, repository });
-        yield* Effect.logInfo(
-          outcome === "attached" ? "Attached a GitHub credential" : "Renewed a GitHub credential",
-          {
-            attachment: id,
-            worker,
-            repository,
-            credential: attachment.credential._tag,
-            expiresAt: DateTime.formatIso(expiresAt),
-          },
+  /** Restores live attachments and persists mutations before acknowledging them. */
+  static readonly layerWithPersistence = (persistence: AttachmentPersistence) =>
+    Layer.effect(
+      Attachments,
+      Effect.gen(function* () {
+        const loaded = yield* persistence.load;
+        const startedAt = yield* DateTime.now;
+        const live = loaded.filter(({ attachment }) => attachment.isLiveAt(startedAt));
+        yield* persistence.save(live);
+        const entries = yield* SynchronizedRef.make<ReadonlyMap<AttachmentId, Entry>>(
+          new Map(live.map((entry) => [entry.attachment.id, entry])),
         );
-      });
-
-      const detach = Effect.fn("Attachments.detach")(function* (id: AttachmentId) {
-        yield* Effect.annotateCurrentSpan({ attachment: id });
-        const removed = yield* Ref.modify(entries, (current) => {
-          const entry = current.get(id);
-          if (entry === undefined) return [entry, current];
-          const next = new Map(current);
-          next.delete(id);
-          return [entry.attachment, next];
+        yield* Effect.logInfo("Loaded gateway attachments", {
+          restored: live.length,
+          expired: loaded.length - live.length,
         });
-        if (removed === undefined) {
-          yield* Effect.logInfo("Nothing to detach", { attachment: id });
-          return false;
-        }
-        yield* Effect.logInfo("Detached a GitHub credential", {
-          attachment: id,
-          worker: removed.worker,
-          repository: removed.repository,
-        });
-        return true;
-      });
+        const modify = <A>(
+          change: (
+            current: ReadonlyMap<AttachmentId, Entry>,
+          ) => readonly [A, ReadonlyMap<AttachmentId, Entry>],
+        ) =>
+          SynchronizedRef.modifyEffect(entries, (current) => {
+            const [result, next] = change(current);
+            return (
+              next === current
+                ? Effect.void
+                : persistence.save([...next.values()].map((entry) => new LiveAttachment(entry)))
+            ).pipe(Effect.as([result, next] as const));
+          }).pipe(Effect.uninterruptible);
 
-      const list = Effect.fn("Attachments.list")(function* () {
-        const now = yield* DateTime.now;
-        const current = yield* Ref.get(entries);
-        return [...current.values()]
-          .map(({ attachment }) => attachment)
-          .filter((attachment) => attachment.isLiveAt(now))
-          .sort(
-            (left, right) =>
-              DateTime.toEpochMillis(left.expiresAt) - DateTime.toEpochMillis(right.expiresAt),
-          );
-      });
-
-      const find = Effect.fn("Attachments.find")(function* (id: AttachmentId) {
-        const now = yield* DateTime.now;
-        const entry = (yield* Ref.get(entries)).get(id);
-        if (entry === undefined) return new MissingAttachment();
-        return entry.attachment.isLiveAt(now)
-          ? new LiveAttachment(entry)
-          : new ExpiredAttachment({ expiredAt: entry.attachment.expiresAt });
-      });
-
-      const learnNewName = Effect.fn("Attachments.learnNewName")(function* (
-        id: AttachmentId,
-        name: RepositoryName,
-      ) {
-        yield* Effect.annotateCurrentSpan({ attachment: id, newName: name });
-        const now = yield* DateTime.now;
-        const learning = yield* Ref.modify(
-          entries,
-          (current): [Learning, ReadonlyMap<AttachmentId, Entry>] => {
-            const entry = current.get(id);
-            if (entry === undefined || !entry.attachment.isLiveAt(now))
-              return [Learning.Kept({ reason: "not-live" }), current];
-            if (new LiveAttachment(entry).serves(name))
-              return [Learning.Kept({ reason: "already-served" }), current];
+        const attach = Effect.fn("Attachments.attach")(function* (attachment: Attachment) {
+          const { id, worker, repository, expiresAt } = attachment;
+          yield* Effect.annotateCurrentSpan({ attachment: id, worker, repository });
+          const now = yield* DateTime.now;
+          if (!attachment.isLiveAt(now))
+            return yield* new AttachmentAlreadyExpired({ worker, repository, expiresAt });
+          const outcome = yield* modify((current) => {
+            const previous = current.get(id);
+            if (previous !== undefined && !samePair(previous.attachment, attachment))
+              return ["conflict" as const, current];
             return [
-              Learning.Learned({ attachment: entry.attachment }),
-              new Map(current).set(id, { ...entry, newNames: [...entry.newNames, name] }),
+              previous === undefined ? ("attached" as const) : ("renewed" as const),
+              new Map(current).set(id, { attachment, newNames: previous?.newNames ?? [] }),
             ];
-          },
-        );
-        yield* Match.valueTags(learning, {
-          Learned: ({ attachment }) =>
-            Effect.logInfo("Learned the new name of an attached repository", {
-              attachment: id,
-              worker: attachment.worker,
-              repository: attachment.repository,
-              newName: name,
-            }),
-          Kept: ({ reason }) =>
-            Effect.logDebug("Kept the names an attachment serves", {
-              attachment: id,
-              newName: name,
-              reason,
-            }),
-        });
-      });
-
-      const sweep = Effect.fn("Attachments.sweep")(function* () {
-        const now = yield* DateTime.now;
-        const expired = yield* Ref.modify(entries, (current) => {
-          const gone = [...current.values()]
-            .map(({ attachment }) => attachment)
-            .filter((attachment) => !attachment.isLiveAt(now));
-          if (gone.length === 0) return [gone, current];
-          const next = new Map(current);
-          for (const { id } of gone) next.delete(id);
-          return [gone, next];
-        });
-        for (const { id, worker, repository, expiresAt } of expired)
-          yield* Effect.logInfo("Forgot an expired GitHub credential", {
-            attachment: id,
-            worker,
-            repository,
-            expiredAt: DateTime.formatIso(expiresAt),
           });
-        return expired.length;
-      });
+          if (outcome === "conflict")
+            return yield* new AttachmentConflict({ id, worker, repository });
+          yield* Effect.logInfo(
+            outcome === "attached" ? "Attached a GitHub credential" : "Renewed a GitHub credential",
+            {
+              attachment: id,
+              worker,
+              repository,
+              credential: attachment.credential._tag,
+              expiresAt: DateTime.formatIso(expiresAt),
+            },
+          );
+        });
 
-      yield* Effect.forever(Effect.sleep(SWEEP_INTERVAL).pipe(Effect.andThen(sweep()))).pipe(
-        Effect.forkScoped,
-      );
+        const detach = Effect.fn("Attachments.detach")(function* (id: AttachmentId) {
+          yield* Effect.annotateCurrentSpan({ attachment: id });
+          const removed = yield* modify((current) => {
+            const entry = current.get(id);
+            if (entry === undefined) return [entry, current];
+            const next = new Map(current);
+            next.delete(id);
+            return [entry.attachment, next];
+          });
+          if (removed === undefined) {
+            yield* Effect.logInfo("Nothing to detach", { attachment: id });
+            return false;
+          }
+          yield* Effect.logInfo("Detached a GitHub credential", {
+            attachment: id,
+            worker: removed.worker,
+            repository: removed.repository,
+          });
+          return true;
+        });
 
-      return { attach, detach, list, find, learnNewName, sweep };
-    }),
-  );
+        const list = Effect.fn("Attachments.list")(function* () {
+          const now = yield* DateTime.now;
+          const current = yield* SynchronizedRef.get(entries);
+          return [...current.values()]
+            .map(({ attachment }) => attachment)
+            .filter((attachment) => attachment.isLiveAt(now))
+            .sort(
+              (left, right) =>
+                DateTime.toEpochMillis(left.expiresAt) - DateTime.toEpochMillis(right.expiresAt),
+            );
+        });
+
+        const find = Effect.fn("Attachments.find")(function* (id: AttachmentId) {
+          const now = yield* DateTime.now;
+          const entry = (yield* SynchronizedRef.get(entries)).get(id);
+          if (entry === undefined) return new MissingAttachment();
+          return entry.attachment.isLiveAt(now)
+            ? new LiveAttachment(entry)
+            : new ExpiredAttachment({ expiredAt: entry.attachment.expiresAt });
+        });
+
+        const learnNewName = Effect.fn("Attachments.learnNewName")(function* (
+          id: AttachmentId,
+          name: RepositoryName,
+        ) {
+          yield* Effect.annotateCurrentSpan({ attachment: id, newName: name });
+          const now = yield* DateTime.now;
+          const learning = yield* modify(
+            (current): [Learning, ReadonlyMap<AttachmentId, Entry>] => {
+              const entry = current.get(id);
+              if (entry === undefined || !entry.attachment.isLiveAt(now))
+                return [Learning.Kept({ reason: "not-live" }), current];
+              if (new LiveAttachment(entry).serves(name))
+                return [Learning.Kept({ reason: "already-served" }), current];
+              return [
+                Learning.Learned({ attachment: entry.attachment }),
+                new Map(current).set(id, { ...entry, newNames: [...entry.newNames, name] }),
+              ];
+            },
+          );
+          yield* Match.valueTags(learning, {
+            Learned: ({ attachment }) =>
+              Effect.logInfo("Learned the new name of an attached repository", {
+                attachment: id,
+                worker: attachment.worker,
+                repository: attachment.repository,
+                newName: name,
+              }),
+            Kept: ({ reason }) =>
+              Effect.logDebug("Kept the names an attachment serves", {
+                attachment: id,
+                newName: name,
+                reason,
+              }),
+          });
+        });
+
+        const sweep = Effect.fn("Attachments.sweep")(function* () {
+          const now = yield* DateTime.now;
+          const expired = yield* modify((current) => {
+            const gone = [...current.values()]
+              .map(({ attachment }) => attachment)
+              .filter((attachment) => !attachment.isLiveAt(now));
+            if (gone.length === 0) return [gone, current];
+            const next = new Map(current);
+            for (const { id } of gone) next.delete(id);
+            return [gone, next];
+          });
+          for (const { id, worker, repository, expiresAt } of expired)
+            yield* Effect.logInfo("Forgot an expired GitHub credential", {
+              attachment: id,
+              worker,
+              repository,
+              expiredAt: DateTime.formatIso(expiresAt),
+            });
+          return expired.length;
+        });
+
+        yield* Effect.forever(
+          Effect.sleep(SWEEP_INTERVAL).pipe(
+            Effect.andThen(sweep()),
+            Effect.catchTag("AttachmentPersistenceError", (error) =>
+              Effect.logError("Could not persist expired attachment removal; will retry", {
+                operation: error.operation,
+              }),
+            ),
+          ),
+        ).pipe(Effect.forkScoped);
+
+        return { attach, detach, list, find, learnNewName, sweep };
+      }),
+    );
+
+  /** An empty in-memory store that removes expired attachments every minute. */
+  static readonly layer = Attachments.layerWithPersistence({
+    load: Effect.succeed([]),
+    save: () => Effect.void,
+  });
 }
