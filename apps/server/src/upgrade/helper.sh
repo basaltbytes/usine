@@ -5,6 +5,9 @@ record() {
   if [ "$1" = installing ] || [ "$1" = good ]; then
     printf '{"previous":"%s","target":"%s","status":"%s"}\n' \
       "$previous" "$target" "$1" > "$folder/result.tmp"
+  elif [ "$1" = rolled-back ]; then
+    printf '{"previous":"%s","target":"%s","status":"%s","reason":"%s","failureStage":"%s"}\n' \
+      "$previous" "$target" "$1" "$2" "$failure_stage" > "$folder/result.tmp"
   else
     printf '{"previous":"%s","target":"%s","status":"%s","reason":"%s"}\n' \
       "$previous" "$target" "$1" "$2" > "$folder/result.tmp"
@@ -51,7 +54,25 @@ healthy() {
 }
 
 install_version() {
-  timeout 5m npm install --global --prefix "$prefix" "@usine/server@$1"
+  local version=$1 attempt output exit_code
+  for ((attempt=1; attempt<=3; attempt++)); do
+    printf 'upgrade install version=%s attempt=%s\n' "$version" "$attempt"
+    if timeout 5m npm install --global --prefix "$prefix" "@usine/server@$version" > "$folder/install.log" 2>&1; then
+      cat "$folder/install.log"
+      return 0
+    else
+      exit_code=$?
+    fi
+    output=$(< "$folder/install.log")
+    printf '%s\n' "$output"
+    if [ "$exit_code" -eq 124 ] || [ "$attempt" -eq 3 ] || \
+      [[ ! "$output" =~ npm[[:space:]]+(ERR!|error)[[:space:]]+code[[:space:]]+(ETARGET|E404)($|[[:space:]]) ]]; then
+      printf 'upgrade install failed version=%s attempt=%s exit_code=%s\n' "$version" "$attempt" "$exit_code"
+      return 1
+    fi
+    printf 'upgrade install retry version=%s attempt=%s delay_seconds=60\n' "$version" "$attempt"
+    sleep 60
+  done
 }
 
 # The lock is outside node_modules and survives replacement of the package.
@@ -63,14 +84,16 @@ if ! stop_server; then
   exit 1
 fi
 reason='The package could not be installed.'
+failure_stage=install
 if install_version "$target"; then
   reason='The new server did not answer the operator API within three minutes.'
+  failure_stage=health-check
   if timeout 30s systemctl start "$unit" && healthy "$target"; then
     record good ''
     exit 0
   fi
 fi
-printf 'upgrade rollback previous=%s target=%s reason=%s\n' "$previous" "$target" "$reason"
+printf 'upgrade rollback previous=%s target=%s failure_stage=%s reason=%s\n' "$previous" "$target" "$failure_stage" "$reason"
 if stop_server && install_version "$previous" && timeout 30s systemctl start "$unit" && healthy "$previous"; then
   record rolled-back "$reason"
 else

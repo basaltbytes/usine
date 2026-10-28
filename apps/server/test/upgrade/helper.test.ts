@@ -9,7 +9,16 @@ import { assert, expect, it } from "vitest";
 const helper = readFileSync(new URL("../../src/upgrade/helper.sh", import.meta.url), "utf8");
 
 const run = (
-  scenario: "good" | "bad-api" | "bad-install" | "bad-rollback" | "bad-stop",
+  scenario:
+    | "good"
+    | "bad-api"
+    | "bad-install"
+    | "bad-rollback"
+    | "bad-stop"
+    | "transient-target"
+    | "transient-404"
+    | "missing-target"
+    | "missing-404",
   shutdown: "normal" | "exit-term" | "exit-kill" | "stuck" = "normal",
 ) => {
   const folder = mkdtempSync(join(tmpdir(), "usine-upgrade-helper-"));
@@ -19,11 +28,27 @@ const run = (
     chmodSync(path, 0o700);
   };
   try {
-    command("sleep", "exit 0");
+    command("sleep", 'echo "sleep $*" >> "$folder/commands"');
     command(
       "npm",
       `echo "$*" >> "$folder/commands"
-if [ "$scenario" = bad-install ] && [ "$5" = @usine/server@2.0.0 ]; then exit 1; fi
+if [ "$5" = @usine/server@2.0.0 ]; then
+  count=0
+  if [ -f "$folder/installs" ]; then count=$(cat "$folder/installs"); fi
+  count=$((count + 1))
+  echo "$count" > "$folder/installs"
+  case "$scenario" in
+    bad-install) echo 'npm error code EACCES' >&2; exit 1;;
+    transient-target|transient-404|missing-target|missing-404)
+      if [ "$count" -lt 3 ] || [[ "$scenario" = missing-* ]]; then
+        case "$scenario" in
+          *target) echo 'npm error code ETARGET' >&2;;
+          *404) echo 'npm ERR! code E404' >&2;;
+        esac
+        exit 1
+      fi;;
+  esac
+fi
 if [ "$scenario" = bad-rollback ] && [ "$5" = @usine/server@1.0.0 ]; then exit 1; fi
 echo "$5" > "$folder/installed"`,
     );
@@ -100,6 +125,11 @@ it.each(["bad-api", "bad-install"] as const)(
     expect(result.failed).toBe(false);
     assert(result.record.status === "rolled-back");
     expect(result.record.reason).not.toBe("");
+    expect(result.record.failureStage).toBe(
+      scenario === "bad-install" ? "install" : "health-check",
+    );
+    expect(result.commands.match(/@usine\/server@2\.0\.0/gu)).toHaveLength(1);
+    expect(result.commands).not.toContain("sleep 60");
     expect(result.commands).toContain("@usine/server@1.0.0");
   },
 );
@@ -136,3 +166,28 @@ it("does not install after failed signals when the unit remains deactivating", (
   expect(result.record.status).toBe("failed");
   expect(result.commands).not.toContain("install");
 });
+
+it.each(["transient-target", "transient-404"] as const)(
+  "installs after delayed registry propagation for %s without rollback",
+  (scenario) => {
+    const result = run(scenario);
+    expect(result.failed).toBe(false);
+    expect(result.record.status).toBe("good");
+    expect(result.commands.match(/@usine\/server@2\.0\.0/gu)).toHaveLength(3);
+    expect(result.commands.match(/sleep 60/gu)).toHaveLength(2);
+    expect(result.commands).not.toContain("@usine/server@1.0.0");
+  },
+);
+
+it.each(["missing-target", "missing-404"] as const)(
+  "rolls back with an install failure after exhausting registry retries for %s",
+  (scenario) => {
+    const result = run(scenario);
+    expect(result.failed).toBe(false);
+    assert(result.record.status === "rolled-back");
+    expect(result.record.failureStage).toBe("install");
+    expect(result.commands.match(/@usine\/server@2\.0\.0/gu)).toHaveLength(3);
+    expect(result.commands.match(/sleep 60/gu)).toHaveLength(2);
+    expect(result.commands).toContain("@usine/server@1.0.0");
+  },
+);

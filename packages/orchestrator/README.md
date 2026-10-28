@@ -272,7 +272,7 @@ pnpm --filter @usine/orchestrator test:integration:agent
 
 Cleanup removes its kick and result comments.
 
-The operator HTTP contract includes `GET /api/upgrade`, `POST /api/upgrade`, and `GET /api/version`. The upgrade view reports the channel, running and available versions, progress, and rollback outcome. A request selects `idle` or `now`, with an optional exact version. The server supplies the systemd implementation; the contract remains platform-free.
+The operator HTTP contract includes `GET /api/upgrade`, `POST /api/upgrade`, and `GET /api/version`. The upgrade view reports the channel, running and available versions, progress, and rollback outcome, including its `failureStage` (`install`, `health-check`, or `unknown`). A request selects `idle` or `now`, with an optional exact version. The server supplies the systemd implementation; the contract remains platform-free.
 
 The Node runtime and worker compositions accept a supplied `RunDatabase` layer. The server shares it with the configuration store, and stored agent revisions pass the same worker preflight as explicit reloads. A restart-required revision remains in the store while the running snapshot stays unchanged; restart applies it.
 
