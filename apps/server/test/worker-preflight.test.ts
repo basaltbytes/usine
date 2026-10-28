@@ -117,6 +117,7 @@ it("serves the API and runs on a healthy worker, then restores a failed worker a
       get: Effect.succeed(instance),
       changes: Stream.make(instance),
       reload: Effect.die("unused"),
+      commit: () => Effect.die("unused"),
       registerWorkers: () => Effect.void,
     });
     const app = Layer.mock(GitHubApp)({
