@@ -120,7 +120,7 @@ interface Held {
   readonly provider: MachineProvider;
   /**
    * `creating` until the machine answers over SSH, `located` while it serves an Attempt,
-   * `unlocated` for an adopted Attempt whose machine the provider couldn't be asked about yet,
+   * `unlocated` when the machine must be looked up with the current worker configuration,
    * and `deleting` until its deletion succeeds.
    */
   readonly state: "creating" | "located" | "unlocated" | "deleting";
@@ -916,8 +916,15 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     );
     yield* drivers.forget(worker);
     const remaining = yield* Ref.modify(held, (current) => {
-      const next = new Map([...current].filter(([, entry]) => entry.worker !== worker));
-      return [current.size - next.size, next] as const;
+      const next = new Map(current);
+      let remaining = 0;
+      for (const [hold, entry] of current) {
+        if (entry.worker !== worker) continue;
+        remaining += 1;
+        if (entry.state === "deleting") next.delete(hold);
+        else next.set(hold, { ...entry, state: "unlocated", machine: Option.none() });
+      }
+      return [remaining, next] as const;
     });
     if (remaining > 0)
       yield* Effect.logWarning(

@@ -302,6 +302,49 @@ describe("Worker scheduler on a provisioned Worker", () => {
       }).pipe(Effect.scoped),
   );
 
+  it.effect("resumes reservations after cancellation during creation backoff", () =>
+    Effect.gen(function* () {
+      const fake = yield* fakeMachines();
+      fake.failures.push(
+        new MachineUnavailableError({
+          worker: POOL,
+          provider: "hetzner",
+          reason: "capacity",
+          message: "This product is currently unavailable",
+        }),
+      );
+      const context = yield* scheduler(fake.machines);
+      const steps = Context.get(context, StepExecutor);
+      const status = Context.get(context, WorkerStatus);
+      const lease = yield* steps.reserve(RunId.make("run-1"), submission(1), Option.none());
+      const waiting = yield* Effect.forkChild(
+        steps.execute(executionOf(RunId.make("run-1"), AttemptId.make("run-1/execute/1")), sink),
+      );
+      yield* settle;
+      assert.isTrue((yield* status.provisioning)[0]?.blocked);
+      yield* Fiber.interrupt(waiting);
+      yield* lease.release;
+      assert.strictEqual((yield* status.slots)[0]?.leased, 0);
+      const next = yield* Effect.forkChild(
+        steps.reserve(RunId.make("run-2"), submission(2), Option.none()),
+      );
+      yield* TestClock.adjust("29 seconds");
+      yield* settle;
+      assert.isUndefined(next.pollUnsafe(), "new reservations wait for the pause to end");
+      yield* TestClock.adjust("1 second");
+      yield* settle;
+      assert.isFalse((yield* status.provisioning)[0]?.blocked);
+      const resumed = yield* Fiber.join(next);
+      assert.strictEqual(resumed.worker, POOL);
+      yield* steps
+        .execute(executionOf(RunId.make("run-2"), AttemptId.make("run-2/execute/1")), sink)
+        .pipe(Effect.flip);
+      assert.include(fake.calls, "create pool run-2 run-2/execute/1");
+      assert.lengthOf(yield* status.provisioning, 0);
+      yield* resumed.release;
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("uses the configured backoff minimum and caps repeated failures at its maximum", () =>
     Effect.gen(function* () {
       const fake = yield* fakeMachines();

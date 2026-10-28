@@ -309,6 +309,7 @@ export const stepExecutorLayer = (
 > =>
   Layer.effectContext(
     Effect.gen(function* () {
+      const schedulerScope = yield* Effect.scope;
       const executor = yield* Executor;
       const instances = yield* CurrentInstance;
       const app = yield* GitHubApp;
@@ -669,9 +670,9 @@ export const stepExecutorLayer = (
               failures: pause.failures,
             }),
           ),
-          Effect.forkScoped,
+          Effect.forkIn(schedulerScope),
         );
-      });
+      }, Effect.uninterruptible);
 
       const dispatch = Effect.forever(
         Effect.gen(function* () {

@@ -39,7 +39,7 @@ import {
 } from "../../../src/executor.ts";
 import type { SshWorkerAddress } from "../../../src/ssh/model.ts";
 import { attemptTag } from "../../../src/ssh/provisioner/model.ts";
-import { layer as sshLayer } from "../../../src/ssh/ssh.ts";
+import { layer as sshLayer, SshWorkers } from "../../../src/ssh/ssh.ts";
 import {
   capturedLogs,
   fakeMachine,
@@ -434,6 +434,19 @@ describe("Provisioned SSH Worker", () => {
           assert.strictEqual(providers.hetzner.servers.size, 1, "the machine keeps the checkout");
           yield* machines.sweep;
           assert.strictEqual(providers.hetzner.servers.size, 1);
+          const workers = yield* SshWorkers;
+          yield* workers.removeWorker(WORKER);
+          yield* workers.addWorker(hetznerAddress);
+          yield* machines.sweep;
+          assert.strictEqual(
+            providers.hetzner.servers.size,
+            1,
+            "restoring the worker preserves a previously located machine's checkout",
+          );
+          const restored = yield* machines.adopt(WORKER, request.attemptId);
+          assert.isTrue(Option.isSome(restored));
+          if (Option.isSome(restored)) yield* machines.release(restored.value);
+          assert.strictEqual(providers.hetzner.servers.size, 1);
         }).pipe(
           Effect.scoped,
           Effect.provide(
@@ -732,7 +745,7 @@ describe("Provisioned SSH Worker", () => {
   });
 
   it.live(
-    "doesn't connect to an earlier process's machine whose host key it has no record of, and keeps the machine",
+    "keeps a machine with no recorded host key through worker removal and restoration",
     () => {
       const machine = fakeMachine();
       const providers = fakeProviders();
@@ -777,6 +790,17 @@ describe("Provisioned SSH Worker", () => {
           "nothing connected to the machine",
         );
         assert.isTrue(providers.hetzner.servers.has(22), "the machine and its checkout stay");
+        const machines = yield* WorkerMachines;
+        const workers = yield* SshWorkers;
+        yield* machines.sweep;
+        yield* workers.removeWorker(WORKER);
+        assert.isTrue(providers.hetzner.servers.has(22), "removal preserves the checkout");
+        yield* workers.addWorker(hetznerAddress);
+        yield* machines.sweep;
+        assert.isTrue(
+          providers.hetzner.servers.has(22),
+          "restoring the worker preserves the unrecovered checkout",
+        );
       }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, hetznerAddress)));
     },
   );
