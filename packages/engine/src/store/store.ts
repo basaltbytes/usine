@@ -108,7 +108,7 @@ export type CancelOutcome =
   | { readonly _tag: "AlreadyClosed" }
   | {
       readonly _tag: "Canceled";
-      readonly openAttempt: Option.Option<AttemptId>;
+      readonly openAttempt: Option.Option<Pick<Attempt, "id" | "worker">>;
       readonly loop: LoopName;
       readonly itemKey: ItemKey;
     };
@@ -883,7 +883,7 @@ const makeRunStore = Effect.gen(function* () {
         yield* tx.updateState(runId, decision.state, canceledAt);
         const canceled: CancelOutcome = {
           _tag: "Canceled",
-          openAttempt: Option.map(decision.attempt, ({ id }) => id),
+          openAttempt: Option.map(decision.attempt, ({ id, worker }) => ({ id, worker })),
           loop: current.run.loop,
           itemKey: current.itemKey,
         };

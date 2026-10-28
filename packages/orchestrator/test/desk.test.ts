@@ -553,7 +553,7 @@ describe("Operator desk", () => {
               new UnconfirmedStop({
                 attemptId: AttemptId.make("canceled-4-attempt"),
                 runId: RunId.make("canceled-4"),
-                loop: startDev.name,
+                loop: LoopName.make("another-loop"),
                 itemKey: itemKey(4),
                 worker: WorkerName.make("local"),
                 reason: "cancel",

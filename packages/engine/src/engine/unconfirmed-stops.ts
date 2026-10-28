@@ -6,8 +6,8 @@ import { WorkerName } from "@usine/core/worker";
 import { Context, Effect, Layer, Schema } from "effect";
 
 /**
- * A closed Attempt whose parent task isn't confirmed stopped. It keeps a slot of `worker`, and no
- * Run of `loop` on `itemKey` starts an Attempt, until a reconcile confirms the stop (#475, #523).
+ * An attempt whose parent task stop is pending or unconfirmed. No loop starts a new attempt on
+ * `itemKey` until the stop succeeds. A failed stop also reserves a slot of `worker`.
  * `reason` is why the engine stops the parent task, which each retry passes to the executor.
  */
 export class UnconfirmedStop extends Schema.Class<UnconfirmedStop>("@usine/engine/UnconfirmedStop")(
@@ -21,11 +21,11 @@ export class UnconfirmedStop extends Schema.Class<UnconfirmedStop>("@usine/engin
   },
 ) {}
 
-/** The service that lists the closed Attempts whose parent task stop each reconcile retries. */
+/** Lists pending parent stops and failed stops that reconciliation retries. */
 export class UnconfirmedStops extends Context.Service<
   UnconfirmedStops,
   {
-    /** Returns the Attempts in the order their stop first failed. */
+    /** Returns attempts in the order their stop was first requested. */
     readonly list: Effect.Effect<ReadonlyArray<UnconfirmedStop>>;
   }
 >()("@usine/engine/UnconfirmedStops") {

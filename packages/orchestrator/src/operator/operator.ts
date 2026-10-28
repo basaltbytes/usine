@@ -682,7 +682,7 @@ const makeOperatorObservation = Effect.gen(function* () {
   );
 
   /**
-   * Returns the unconfirmed stop on the Loop and Item of the open Run of `snapshot`, which keeps
+   * Returns the unconfirmed stop on the Item of the open Run of `snapshot`, which keeps
    * the Run from starting an Attempt, or null.
    */
   const blockingStop = Effect.fn("Operator.blockingStop")(function* (
@@ -690,9 +690,7 @@ const makeOperatorObservation = Effect.gen(function* () {
     unconfirmedStops: ReadonlyArray<UnconfirmedStop>,
   ) {
     if (!RunState.isOpen(snapshot.run.state)) return null;
-    const stop = unconfirmedStops.find(
-      ({ loop, itemKey }) => loop === snapshot.run.loop && itemKey === snapshot.itemKey,
-    );
+    const stop = unconfirmedStops.find(({ itemKey }) => itemKey === snapshot.itemKey);
     if (stop === undefined) return null;
     const fields = {
       runId: snapshot.run.id,
