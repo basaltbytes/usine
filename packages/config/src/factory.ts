@@ -5,6 +5,8 @@ import { OperatorLogin } from "@usine/core/operator";
 import { RepositoryName } from "@usine/core/repository";
 import {
   BoatSize,
+  BoatSnapshotName,
+  TailnetAddress,
   CloudflareImageName,
   CloudflareInstanceType,
   CloudflareLlmProvider,
@@ -188,22 +190,29 @@ export class HetznerProvisioner extends Schema.Class<HetznerProvisioner>(
   apiKeys: ProviderApiKeysFromYaml,
 }) {}
 
-/**
- * Creates one Boat sandbox per Attempt and deletes it after the Attempt (#550). Boat has no
- * network rules, so a Boat Worker has no Gateway, and each Attempt's GitHub token is on its
- * machine (ADR 0026). Boat documents no region choice; its machines are in Germany, Finland, and
- * France.
- *
- * - `tokenEnv`: the orchestrator environment variable with a Boat API key.
- * - `size`: each sandbox's Boat machine type.
- * - `apiKeys`: provider API keys for each Attempt. A harness without one can't authenticate,
- *   because a subscription login needs a Gateway.
- */
+/** The gateway address and OAuth client variables for a Boat sandbox's tailnet join. */
+export class BoatTailnet extends Schema.Class<BoatTailnet>("@usine/config/BoatTailnet")({
+  gatewayAddress: TailnetAddress,
+  clientIdEnv: EnvironmentVariableName,
+  clientSecretEnv: EnvironmentVariableName,
+}) {}
+
+/** Creates one credential-free Boat sandbox per attempt. */
 export class BoatProvisioner extends Schema.Class<BoatProvisioner>("@usine/config/BoatProvisioner")(
   {
     provider: Schema.Literal("boat"),
     tokenEnv: EnvironmentVariableName,
     size: BoatSize.pipe(Schema.withDecodingDefaultKey(Effect.succeed("default"))),
+    snapshot: Schema.OptionFromOptionalKey(BoatSnapshotName),
+    tailnet: Schema.OptionFromOptionalKey(
+      BoatTailnet.pipe(
+        Schema.encodeKeys({
+          gatewayAddress: "gateway_address",
+          clientIdEnv: "client_id_env",
+          clientSecretEnv: "client_secret_env",
+        }),
+      ),
+    ),
     apiKeys: ProviderApiKeysFromYaml,
   },
 ) {}
@@ -273,8 +282,13 @@ const sshMachineConflict = (worker: SshWorker): string | undefined => {
         ? `SSH worker "${worker.name}" has a gateway, so its provisioner needs the gateway's private network in network`
         : undefined;
     case "boat":
-      if (Option.isSome(worker.gateway))
-        return `SSH worker "${worker.name}" has a Boat provisioner and a gateway; Boat has no network rules, so no gateway can be its machines' only way out. Remove gateway.`;
+      if (
+        Option.isSome(worker.gateway) &&
+        (Option.isNone(provisioner.tailnet) || Option.isNone(provisioner.snapshot))
+      )
+        return `SSH worker "${worker.name}" needs provisioner.tailnet and provisioner.snapshot to use a Boat gateway`;
+      if (Option.isSome(provisioner.tailnet) && Option.isNone(worker.gateway))
+        return `SSH worker "${worker.name}" sets provisioner.tailnet without a gateway`;
       return Option.isNone(worker.identityFile)
         ? `SSH worker "${worker.name}" has a Boat provisioner and needs identity_file, whose .pub file usine adds to each sandbox`
         : undefined;

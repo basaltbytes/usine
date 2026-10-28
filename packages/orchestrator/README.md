@@ -281,3 +281,5 @@ The Node runtime and worker compositions accept a supplied `RunDatabase` layer. 
 `Operator.dismissNeed(instance, key)` and `Operator.undoDismissNeed(key)` record or remove an acknowledgement for the entry ID and revision returned by `attentionKey(need)`. The HTTP endpoints are `POST /api/attention/dismiss` and `POST /api/attention/undo`, each with `{ "id": "...", "revision": "..." }`.
 
 The overview returns visible entries in `needsYou` and matching acknowledged entries in `dismissedNeeds`. Project status and task and board attention badges use the visible list. A change to the entry's content makes it visible again; a later failed attempt has its own entry identity. Dismissal preserves approval gates, unresolved failures, and cycle-budget asks.
+
+For Boat workers behind a gateway, the SSH adapter resolves `provisioner.tailnet.client_id_env` and `client_secret_env` into redacted OAuth credentials. Missing variables produce a gateway capability error before an attempt starts.

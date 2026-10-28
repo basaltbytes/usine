@@ -400,7 +400,7 @@ Both providers take these keys:
 
 `usine up` reads the variables named by `token_env` and `api_keys` when it starts, and a reload reads them for the worker that it adds.
 
-With `api_keys.openai`, the executor writes a Codex `model_provider` to each attempt's `CODEX_HOME`, which sends the Responses API to `api.openai.com` with the key from `OPENAI_API_KEY`, so Codex needs no login. Behind a gateway, a harness with an API key reaches its provider through the forward proxy, so the gateway's egress allowlist must have `api.anthropic.com` or `api.openai.com`.
+With `api_keys.openai`, the executor writes a Codex `model_provider` to each attempt's `CODEX_HOME`, which sends the Responses API to `api.openai.com` with the key from `OPENAI_API_KEY`, so Codex needs no login. Behind a gateway on a private network, a harness with an API key reaches its provider through the forward proxy, so the gateway's egress allowlist must have `api.anthropic.com` or `api.openai.com`.
 
 The executor connects to each machine only with a host key that it knows beforehand, with `StrictHostKeyChecking=yes`. It writes the key to a file for that machine under `.usine/known-hosts/` in the instance folder before the first connection, and the file stays across restarts until the machine is deleted. For a Hetzner server, the executor generates the key and passes it in the server's cloud-init user data. For a Boat sandbox, it uses the key that Boat's API returns, and a sandbox without one fails its creation.
 
@@ -460,8 +460,20 @@ Creates a Boat sandbox for each attempt, with none of the account's secrets, no 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
 | `size` | `small`, `default`, `large`, `xlarge` | `default` | The Boat machine type. `default` has 4 vCPU and 8 GB. `xlarge` needs a Boat plan of $100 per month or more. |
+| `snapshot` | string | none | Saved snapshot name. Required with a gateway. Preflight requires status `ready`. Rebuild it when the attempt image changes. |
+| `tailnet` | mapping | none | Required with a gateway; refused without one. Its fields are listed below. |
 
-A Boat worker can't have a `gateway`, because Boat has no network rules, so no gateway can be its machines' only way out. Each attempt's installation token is written to its machine, as on an SSH worker without a gateway, Claude Code needs `api_keys.anthropic`, and Codex needs `api_keys.openai`. Boat documents no region choice, and its machines are in Germany, Finland, and France, so a `region` key is refused like any unknown key. Boat has no labels, so each sandbox's name carries the same tags: `usine <instance> <worker> <run> <process> <attempt>`.
+`tailnet` accepts these keys:
+
+| Key | Type | Description |
+| --- | --- | --- |
+| `gateway_address` | string | Gateway IPv4 address in Tailscale's `100.64.0.0/10` range. |
+| `client_id_env` | string | Environment variable containing the Tailscale OAuth client ID. |
+| `client_secret_env` | string | Environment variable containing its secret. The client needs `auth_keys` write access for `tag:usine-attempt`. |
+
+The OAuth variables are read from the instance's `.env` at startup. The [provisioned-worker guide](/guides/add-a-provisioned-worker/#gateway-subscriptions-over-tailscale) covers the policy, snapshot builder, gateway listener, and cleanup. Boat workers use direct internet access for package downloads; the tailnet grants only the gateway's port 80.
+
+A Boat worker can use a `gateway` over Tailscale when `snapshot` and `tailnet` are set. Without a gateway, each attempt's installation token is written to its machine, as on an SSH worker without a gateway, Claude Code needs `api_keys.anthropic`, and Codex needs `api_keys.openai`. Boat documents no region choice, and its machines are in Germany, Finland, and France, so a `region` key is refused like any unknown key. Each sandbox's name records the recovery tags: `usine <instance> <worker> <run> <process> <attempt>`.
 
 ```yaml title="usine.yaml"
 workers:

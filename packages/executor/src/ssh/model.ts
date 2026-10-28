@@ -2,6 +2,8 @@ import type { SshCommand } from "@usine/agents/child-host";
 import type { InstanceId } from "@usine/core/instance";
 import type {
   BoatSize,
+  BoatSnapshotName,
+  TailnetAddress,
   ContainerCpus,
   ContainerImage,
   ContainerMemoryMib,
@@ -23,7 +25,7 @@ import type {
   WorkerName,
   WorkerRoot,
 } from "@usine/core/worker";
-import type { Duration, Effect, Option, Redacted, Ref } from "effect";
+import { Option, type Duration, type Effect, type Redacted, type Ref } from "effect";
 import type { HarnessProbe } from "../harness-preflight.ts";
 import type { RemoteMachine } from "../remote/machine.ts";
 import type { GatewayAdmin } from "./gateway/admin.ts";
@@ -85,12 +87,21 @@ export interface HetznerProvisioner {
   readonly apiKeys: ProviderApiKeys;
 }
 
+/** Credentials for creating single-use auth keys tagged tag:usine-attempt. */
+export interface BoatTailnet {
+  readonly gatewayAddress: TailnetAddress;
+  readonly clientId: Redacted.Redacted<string>;
+  readonly clientSecret: Redacted.Redacted<string>;
+}
+
 /** Creates each Attempt's machine as a Boat sandbox. */
 export interface BoatProvisioner {
   readonly provider: "boat";
   /** The Boat API key. */
   readonly token: Redacted.Redacted<string>;
   readonly size: BoatSize;
+  readonly snapshot: Option.Option<BoatSnapshotName>;
+  readonly tailnet: Option.Option<BoatTailnet>;
   readonly apiKeys: ProviderApiKeys;
 }
 
@@ -162,7 +173,7 @@ export interface SshExecutorOptions {
 }
 
 export interface MachineGateway {
-  readonly settings: SshWorkerGateway;
+  readonly settings: SshWorkerGateway & { readonly egress: "proxy" | "direct" };
   readonly forward: GatewayForward;
   readonly admin: GatewayAdmin;
   /**
@@ -185,3 +196,9 @@ export interface SshMachine extends RemoteMachine {
   readonly address: SshWorkerAddress;
   readonly gateway: Option.Option<MachineGateway>;
 }
+
+/** Returns a Boat worker's tailnet settings, if configured. */
+export const boatTailnetOf = (address: SshWorkerAddress): Option.Option<BoatTailnet> =>
+  address.machine._tag === "Provisioned" && address.machine.provisioner.provider === "boat"
+    ? address.machine.provisioner.tailnet
+    : Option.none();

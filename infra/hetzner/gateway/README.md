@@ -129,7 +129,7 @@ The Hetzner firewall admits SSH from `ORCHESTRATOR_CIDR` only, so the orchestrat
    TAILSCALE_AUTH_KEY=tskey-auth-... ./gateway.sh tailnet-up -i ~/.ssh/usine_worker
    ```
 
-   `tailnet-up` passes `--netfilter-mode=off`, because the `flush ruleset` in `gateway-nftables.conf` would delete Tailscale's rules at every nftables reload, and `--accept-dns=false`, so the gateway keeps Hetzner's resolvers. nftables accepts SSH on every interface, `tailscale0` included, and the gateway's other services only from the private network. It refuses connections from the gateway into the tailnet, and the tailnet's access rules decide which devices can reach the gateway on port 22.
+   `tailnet-up` passes `--netfilter-mode=off`, because the `flush ruleset` in `gateway-nftables.conf` would delete Tailscale's rules at every nftables reload, and `--accept-dns=false`, so the gateway keeps Hetzner's resolvers. nftables accepts SSH on every interface, `tailscale0` included, and port 80 on `tailscale0`; DNS, NTP, and the forward proxy accept only the private network. It refuses connections from the gateway into the tailnet, and the tailnet's access rules decide which devices can reach the gateway on port 22.
 
 2. Keep the gateway's node key from expiring, which by default happens after 180 days and takes the gateway off the tailnet. In the Tailscale admin console, disable key expiry for the gateway's machine, or log in with a tagged auth key: tagged devices have key expiry disabled by default.
 
@@ -422,3 +422,7 @@ Delete the workers and the orchestrator's server on the network first, then:
 ```sh
 ./gateway.sh delete
 ```
+
+## Boat workers over Tailscale
+
+The reverse proxy binds to `0.0.0.0`, with nftables accepting port 80 on the private network and `tailscale0`. Keep the public firewall closed to port 80, and restrict `tag:usine-attempt` to the gateway's TCP port 80 in the tailnet policy. The admin API stays on loopback; the forward proxy stays on the private address. Existing gateways must update `USINE_GATEWAY_PROXY_HOST` and the nftables rules before restarting the service. The [provisioned-worker guide](https://docs.usine.dev/guides/add-a-provisioned-worker/#gateway-subscriptions-over-tailscale) describes OAuth, snapshots, and policy grants.

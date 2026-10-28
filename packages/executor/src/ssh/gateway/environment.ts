@@ -64,6 +64,7 @@ const codexGatewayConfig = (domain: GatewayDomain): string =>
   ].join("\n");
 
 export interface GatewayEnvironmentOptions {
+  readonly egress?: "proxy" | "direct";
   readonly domain: GatewayDomain;
   readonly llmProviders: ReadonlyArray<GatewayLlmProvider>;
   /** The machine directory that contains the `ghGatewayConfig` files. */
@@ -106,7 +107,7 @@ export interface GatewayEnvironment {
  * such as a preflight's harness probes.
  */
 export const gatewayExportedEnvironment = (
-  settings: Pick<GatewayEnvironmentOptions, "domain" | "llmProviders">,
+  settings: Pick<GatewayEnvironmentOptions, "domain" | "llmProviders" | "egress">,
   ghConfigDirectory: string,
 ): Readonly<Record<string, string>> => {
   const { CODEX_HOME: _, ...exported } = gatewayEnvironment({
@@ -139,7 +140,7 @@ export const gatewayExportedEnvironment = (
 export const gatewayEnvironment = (options: GatewayEnvironmentOptions): GatewayEnvironment => {
   const { domain, callerToken } = options;
   const gitBase = `http://git.${domain}/`;
-  const proxy = forwardProxyUrl(domain);
+  const proxy = options.egress === "direct" ? "" : forwardProxyUrl(domain);
   const direct = `localhost,127.0.0.1,::1,${domain}`;
   const exported = {
     GIT_CONFIG_COUNT: "3",

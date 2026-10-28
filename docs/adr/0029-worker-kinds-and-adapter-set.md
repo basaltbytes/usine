@@ -44,3 +44,7 @@ _Note, 2026-10-25 ([#550](https://github.com/basaltbytes/usine/issues/550)):_ th
 ## Amendment (2026-10-25, #548): the harness logins are mounted read-write
 
 A container mounts the SSH user's Claude Code and Codex login files read-write, not read-only. The harnesses rewrite those files when they refresh an OAuth token, and with the operator's subscriptions a refresh that can't be saved may leave every later attempt with a revoked login. Read-write mounts of the same files keep the sharing that attempts had as one user, and the Claude login lock still serializes Claude starts on the worker ([ADR 0011](./0011-github-app-identity-scoped-worker-tokens.md), amended 2026-10-25).
+
+## Amendment (2026-10-28, #647): Boat gateway credentials
+
+Boat workers can use the gateway over a Tailscale tailnet as described in ADR 0027's amendment for #647. Their GitHub and harness credentials stay on the gateway. The consequence above about a token on each Boat machine applies only to workers without a gateway; Boat's direct internet access remains unchanged.

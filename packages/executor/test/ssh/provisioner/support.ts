@@ -31,6 +31,8 @@ export const boatSettings = (overrides: Partial<BoatProvisioner> = {}): BoatProv
   provider: "boat",
   token: Redacted.make("boat_key_for_tests"),
   size: "default",
+  snapshot: Option.none(),
+  tailnet: Option.none(),
   apiKeys: { anthropic: Option.some(Redacted.make("sk-ant-api-for-tests")), openai: Option.none() },
   ...overrides,
 });

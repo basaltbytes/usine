@@ -1,3 +1,4 @@
+import { boatTailnetOf } from "./model.ts";
 import { SSH_FAILURE } from "@usine/agents/child-host";
 import type { Harness } from "@usine/core/agent/brain";
 import type { InstanceId } from "@usine/core/instance";
@@ -221,7 +222,20 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
     const image = imageFor(machine);
     yield* Effect.annotateCurrentSpan({ worker, image, slots });
     const limits = yield* limitsFor(machine, slots);
-    const settings: ContainerSettings = { image, limits: limits.limits, instance, instanceId };
+    const hosts = Option.match(Option.all([boatTailnetOf(machine.address), machine.gateway]), {
+      onNone: () => ({}),
+      onSome: ([tailnet, gateway]) => ({
+        [`git.${gateway.settings.domain}`]: tailnet.gatewayAddress,
+        [`llm.${gateway.settings.domain}`]: tailnet.gatewayAddress,
+      }),
+    });
+    const settings: ContainerSettings = {
+      image,
+      limits: limits.limits,
+      instance,
+      instanceId,
+      hosts,
+    };
     yield* record(worker, { _tag: "Container", settings });
     yield* Effect.logInfo("SSH Worker runs each Attempt in its own container", {
       worker,
