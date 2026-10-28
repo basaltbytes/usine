@@ -101,7 +101,8 @@ const creationReason = (failure: ProviderFailure): MachineUnavailableReason => {
     code === "limit_reached" ||
     code === "member_limit_reached" ||
     code === "trial_compute_limit_reached" ||
-    code === "trial_machine_class_not_allowed"
+    code === "trial_machine_class_not_allowed" ||
+    code === "machine_class_plan_required"
   )
     return "quota";
   if (failure.status === 401 || failure.status === 403 || failure.status === 400) return "refused";
