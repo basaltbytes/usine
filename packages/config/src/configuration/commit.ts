@@ -7,7 +7,7 @@ import { loopReferenceFailure, referenceIndex } from "../instance/references.ts"
 import { LoopFile, loopPath } from "../loop.ts";
 import { type ConfigParser, formatAgent, formatLoop } from "../parser.ts";
 import { writeYaml } from "../yaml/writer.ts";
-import { AgentJson, LoopJson, configurationEntities } from "./entities.ts";
+import { AgentJson, LoopJson, configurationDiff, configurationEntities } from "./entities.ts";
 import {
   Configuration,
   ConfigurationChange,
@@ -150,12 +150,11 @@ export const commit = (
   Effect.gen(function* () {
     if (current.number !== expected)
       return yield* new StaleRevision({ expected, actual: current.number });
-    const entities = new Map(
-      Option.match(current.instance, {
-        onNone: () => [],
-        onSome: configurationEntities,
-      }).map((entry) => [entry.key.key, entry]),
-    );
+    const before = Option.match(current.instance, {
+      onNone: () => [],
+      onSome: configurationEntities,
+    });
+    const entities = new Map(before.map((entry) => [entry.key.key, entry]));
     const seen = new Set<string>();
     const problems: Array<ConfigFileError> = [];
     for (const change of changes) {
@@ -181,6 +180,10 @@ export const commit = (
     const number = ConfigurationRevisionNumber.make(current.number + 1);
     return {
       configuration: new Configuration({ number, instance: Option.some(instance) }),
-      revision: new ConfigurationRevision({ ...metadata, number, changes }),
+      revision: new ConfigurationRevision({
+        ...metadata,
+        number,
+        changes: configurationDiff(before, configurationEntities(instance)),
+      }),
     };
   });

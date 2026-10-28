@@ -120,6 +120,22 @@ describe("configuration domain without layers", () => {
       if (failure._tag === "ConfigurationInvalid")
         expect(failure.problems.length).toBeGreaterThanOrEqual(2);
       expect(first.configuration.number).toBe(1);
+      const worker = changes.find(({ key }) => key.kind === "worker");
+      if (worker === undefined) return yield* Effect.die("fixture has no worker");
+      const normalized = yield* commit(
+        parser,
+        first.configuration,
+        first.configuration.number,
+        [
+          new ConfigurationChange({
+            ...worker,
+            before: worker.after,
+            after: Option.some({ name: "local", kind: "local" }),
+          }),
+        ],
+        metadata,
+      );
+      expect(normalized.revision.changes).toEqual([]);
     }),
   );
 });
