@@ -49,7 +49,12 @@ import {
 } from "@usine/core/agent/session";
 import { StartedByEvent, StartedByInfraRetry } from "@usine/core/attempt/start";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { BlockedFailure, DefectFailure, InfraFailure } from "@usine/core/attempt/failure";
+import {
+  BlockedFailure,
+  DefectFailure,
+  GitHubPushFailure,
+  InfraFailure,
+} from "@usine/core/attempt/failure";
 import { AttemptCanceled, AttemptFailed } from "@usine/core/attempt/outcome";
 import * as RunState from "@usine/core/run/state";
 import {
@@ -1060,7 +1065,12 @@ describe("Operator", () => {
         ...original,
         outcome: Option.some(
           new AttemptFailed({
-            failure: new InfraFailure({ message: "Worker unavailable", cause: "disconnected" }),
+            failure: new GitHubPushFailure({
+              repository,
+              ref: "refs/heads/usine/salvage/run/1",
+              message:
+                "GitHub refused the push to basaltbytes/usine at refs/heads/usine/salvage/run/1 (HTTP 403). The token is a single-repository installation token. Permission denied to usine-test[bot].",
+            }),
           }),
         ),
       });
@@ -1105,6 +1115,11 @@ describe("Operator", () => {
           assert.strictEqual(detail.run.state, "Failed");
           const failureNeed = overview.needsYou.find((need) => need._tag === "RunFailureNeed");
           if (failureNeed !== undefined) {
+            assert(failureNeed.failure._tag === "GitHubPushFailure");
+            const outcome = detail.run.attempts.at(-1)?.outcome;
+            assert(outcome?._tag === "Failed");
+            assert.deepStrictEqual(outcome.failure, failureNeed.failure);
+            assert.include(failureNeed.failure.message, "single-repository installation token");
             if (dismissedFailure !== undefined)
               assert.deepStrictEqual(partitionNeeds([failureNeed], [dismissedFailure]).needsYou, [
                 failureNeed,

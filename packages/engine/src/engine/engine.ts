@@ -186,6 +186,7 @@ const makeRunEngine = Effect.gen(function* () {
               ChildSessionBudgetFailure: () => "The attempt reached its child-session budget",
               QuestionFailure: () => "The attempt ended with a question for the operator",
               BlockedFailure: ({ message }) => message,
+              GitHubPushFailure: ({ message }) => message,
               InfraFailure: ({ message }) => message,
               DefectFailure: ({ message }) => message,
               AgentFailure: ({ message }) => message,

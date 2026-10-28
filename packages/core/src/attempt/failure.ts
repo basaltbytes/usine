@@ -1,5 +1,15 @@
 import { Schema } from "effect";
 import { ChildSessionBudget, ChildSessionCount } from "../agent/session.ts";
+import { RepositoryName } from "../repository.ts";
+
+/** A push refused with HTTP 403 for the attempt's single-repository installation token. */
+export class GitHubPushFailure extends Schema.TaggedError<GitHubPushFailure>(
+  "AttemptFailure/GitHubPushFailure",
+)("GitHubPushFailure", {
+  repository: RepositoryName,
+  ref: Schema.NonEmptyString,
+  message: Schema.String,
+}) {}
 
 /**
  * An infrastructure failure outside the agent, such as an unreachable Worker or failed checkout.
@@ -67,6 +77,7 @@ export class ChildSessionBudgetFailure extends Schema.TaggedError<ChildSessionBu
 }) {}
 
 export const AttemptFailure = Schema.Union([
+  GitHubPushFailure,
   InfraFailure,
   DefectFailure,
   AgentFailure,

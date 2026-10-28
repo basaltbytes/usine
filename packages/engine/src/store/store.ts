@@ -538,7 +538,12 @@ const makeRunStore = Effect.gen(function* () {
       Match.valueTags(salvage, {
         Pushed: ({ ref, commit }) => ({ attemptId, ref, commit }),
         PartlyPushed: ({ ref, commit, path }) => ({ attemptId, ref, commit, path }),
-        Retained: ({ path, commit }) => ({ attemptId, path, commit }),
+        Retained: ({ path, commit, pushFailure }) => ({
+          attemptId,
+          path,
+          commit,
+          pushFailure: Option.map(pushFailure, ({ message }) => message),
+        }),
         Rejected: ({ path, commit }) => ({ attemptId, path, commit }),
       }),
     );

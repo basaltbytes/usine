@@ -10,6 +10,7 @@ import {
   windowsOverlap,
 } from "../src/attempt/attempt.ts";
 import {
+  GitHubPushFailure,
   AgentFailure,
   ChildSessionBudgetFailure,
   DefectFailure,
@@ -17,6 +18,8 @@ import {
   isAutoRetryableFailure,
   RunawayFailure,
 } from "../src/attempt/failure.ts";
+import { SalvageRetained } from "../src/attempt/salvage.ts";
+import { RepositoryName } from "../src/repository.ts";
 import { Event, DedupKey, EventId } from "../src/event.ts";
 
 const infra = new InfraFailure({ message: "worker unreachable", cause: new Error("ECONNREFUSED") });
@@ -109,5 +112,30 @@ describe("Attempt windows", () => {
     expect(windowsOverlap(ended, window("fix/1", "2026-10-21T12:00:00.700Z", null))).toBe(true);
     expect(windowsOverlap(window("fix/1", "2026-10-21T12:00:00.700Z", null), ended)).toBe(true);
     expect(windowsOverlap(ended, window("fix/1", "2026-10-21T12:00:01.000Z", null))).toBe(false);
+  });
+});
+
+describe("retained push refusal", () => {
+  it("reads older retained salvage and preserves a non-retryable push failure through JSON", () => {
+    const legacy = {
+      _tag: "Retained",
+      path: "/checkout",
+      commit: null,
+      message: "push failed",
+    } as const;
+    expect(Option.isNone(Schema.decodeUnknownSync(SalvageRetained)(legacy).pushFailure)).toBe(true);
+    const failure = new GitHubPushFailure({
+      repository: RepositoryName.make("acme/demo"),
+      ref: "refs/heads/usine/salvage/run/1",
+      message: "GitHub refused the push (HTTP 403)",
+    });
+    expect(isAutoRetryableFailure(failure)).toBe(false);
+    const retained = new SalvageRetained({
+      ...legacy,
+      commit: Option.none(),
+      pushFailure: Option.some(failure),
+    });
+    const json = Schema.fromJsonString(SalvageRetained);
+    expect(Schema.decodeUnknownSync(json)(Schema.encodeSync(json)(retained))).toEqual(retained);
   });
 });
