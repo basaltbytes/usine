@@ -113,7 +113,7 @@ import {
 } from "../src/schedule-triggers.ts";
 import { workerAttentionFor } from "../src/operator/unresponsive.ts";
 import { failureView, runDuration, runView } from "../src/operator/projection.ts";
-import { WorkerStatus } from "../src/worker-status.ts";
+import { type ProvisioningPause, WorkerStatus } from "../src/worker-status.ts";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { noCycleBudgets } from "./support/polling.ts";
 
@@ -416,6 +416,7 @@ const testLayer = (
   recordedMoves: Array<BoardMoveRecord> = [],
   unconfirmedStops: Effect.Effect<ReadonlyArray<UnconfirmedStop>> = Effect.succeed([]),
   triggerCycles: {
+    readonly provisioning?: Effect.Effect<ReadonlyArray<ProvisioningPause>>;
     readonly poll?: PollingTriggers["Service"]["latest"];
     readonly schedule?: ScheduleTriggers["Service"]["latest"];
   } = {},
@@ -678,7 +679,13 @@ const testLayer = (
     polling,
     schedules,
     MarcbachmannCelLayer,
-    WorkerStatus.idle,
+    Layer.succeed(WorkerStatus)({
+      slots: Effect.succeed([]),
+      queue: Effect.succeed([]),
+      preflights: Effect.succeed([]),
+      machines: Effect.succeed([]),
+      provisioning: triggerCycles.provisioning ?? Effect.succeed([]),
+    }),
     Layer.succeed(UnconfirmedStops)({ list: unconfirmedStops }),
   );
   return Operator.layer.pipe(Layer.provide(dependencies));
@@ -1957,6 +1964,93 @@ describe("Operator", () => {
         }).pipe(
           Effect.provide(
             testLayer(approved, movedLabels, overviewReads, projectionRevision, queued),
+          ),
+        );
+      }),
+  );
+
+  it.effect(
+    "refreshes quota attention and waiting reasons without a ledger change, and clears them after recovery",
+    () =>
+      Effect.gen(function* () {
+        const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+        const movedLabels = yield* Ref.make<ItemLabelMutation | null>(null);
+        const overviewReads = yield* Ref.make(0);
+        const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+        const pauses = yield* Ref.make<ReadonlyArray<ProvisioningPause>>([]);
+        const queued = new RunSnapshot({
+          ...snapshot,
+          attempts: [],
+          run: new Run({ ...snapshot.run, state: new RunState.Queued() }),
+        });
+        const pause: ProvisioningPause = {
+          worker: WorkerName.make("local"),
+          reason: "quota",
+          message: "shared core limit exceeded",
+          quota: Option.some({ provider: "hetzner", message: "shared core limit exceeded" }),
+          failures: 1,
+          failedAt: now,
+          retryAt: DateTime.addDuration(now, "30 seconds"),
+          blocked: true,
+        };
+        yield* Effect.gen(function* () {
+          const operator = yield* Operator;
+          yield* operator.overview(instance);
+          yield* Ref.set(pauses, [pause]);
+          const overview = yield* operator.overview(instance);
+          assert(overview._tag === "Ready");
+          const need = overview.needsYou.find((need) => need._tag === "WorkerQuotaNeed");
+          assert(need?._tag === "WorkerQuotaNeed");
+          assert.strictEqual(need.quota.message, pause.message);
+          assert.deepStrictEqual(need.runs, [{ runId, repository }]);
+          const card = overview.projects
+            .flatMap(({ board }) => board.lanes.flatMap(({ items }) => items))
+            .find(({ runs }) => runs.some(({ id }) => id === runId));
+          assert(card !== undefined);
+          assert.isTrue(card.needsYou);
+          assert.strictEqual(
+            card.runs.find(({ id }) => id === runId)?.provisioning[0]?.message,
+            pause.message,
+          );
+          assert.strictEqual(
+            (yield* operator.detail(instance, runId)).run.provisioning[0]?.message,
+            pause.message,
+          );
+          yield* operator.dismissNeed(instance, attentionKey(need));
+          const dismissed = yield* operator.overview(instance);
+          assert(dismissed._tag === "Ready");
+          assert.isFalse(dismissed.needsYou.some((need) => need._tag === "WorkerQuotaNeed"));
+          assert.strictEqual((yield* operator.detail(instance, runId)).run.provisioning.length, 1);
+          yield* Ref.set(pauses, []);
+          const recovered = yield* operator.overview(instance);
+          assert(recovered._tag === "Ready");
+          assert.isFalse(
+            [...recovered.needsYou, ...recovered.dismissedNeeds].some(
+              (need) => need._tag === "WorkerQuotaNeed",
+            ),
+          );
+          assert.lengthOf(recovered.projects[0]?.runs[0]?.provisioning ?? [], 0);
+          assert.lengthOf((yield* operator.detail(instance, runId)).run.provisioning, 0);
+        }).pipe(
+          Effect.provide(
+            testLayer(
+              approved,
+              movedLabels,
+              overviewReads,
+              revision,
+              queued,
+              noCycleBudgets,
+              {
+                retry: () => Effect.void,
+                intervene: () => Effect.void,
+                runAgain: () => Effect.die("unused"),
+              },
+              [],
+              [],
+              [],
+              Effect.succeed([]),
+              { provisioning: Ref.get(pauses) },
+            ),
           ),
         );
       }),

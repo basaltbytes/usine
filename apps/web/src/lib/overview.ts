@@ -17,9 +17,11 @@ export const needsYouByProject = (
   const counts = new Map<RepositoryName, number>();
   for (const need of needs) {
     const repositories =
-      need._tag === "UnresponsiveWorkerNeed"
-        ? need.attempts.map(({ repository }) => repository)
-        : [needCopy(need).repository];
+      need._tag === "WorkerQuotaNeed"
+        ? need.runs.map(({ repository }) => repository)
+        : need._tag === "UnresponsiveWorkerNeed"
+          ? need.attempts.map(({ repository }) => repository)
+          : [needCopy(need).repository];
     for (const repository of new Set(repositories))
       if (repository !== null) counts.set(repository, (counts.get(repository) ?? 0) + 1);
   }

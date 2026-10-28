@@ -1,3 +1,7 @@
+import { RunSummary } from "@usine/engine/run-reader";
+import { workerQuotas } from "../src/operator/machines.ts";
+import { workerQuotaNeeds } from "../src/operator/attention.ts";
+import { runView, workerAccesses } from "../src/operator/projection.ts";
 import { assert, describe, it } from "@effect/vitest";
 import { UsineConfig } from "@usine/config/factory";
 import { Attempt, AttemptId, AttemptNumber } from "@usine/core/attempt";
@@ -261,6 +265,11 @@ describe("Worker scheduler on a provisioned Worker", () => {
         const [pause] = yield* status.provisioning;
         assert(pause !== undefined, "the Worker is paused");
         assert.strictEqual(pause.reason, "capacity");
+        assert.lengthOf(
+          workerQuotas(yield* status.provisioning),
+          0,
+          "temporary capacity failures need no quota action",
+        );
         assert.isTrue(pause.blocked);
         assert.strictEqual(pause.failures, 1);
         assert.strictEqual(
@@ -287,6 +296,110 @@ describe("Worker scheduler on a provisioned Worker", () => {
         );
         assert.lengthOf(yield* status.provisioning, 0, "a success ends the pause");
       }).pipe(Effect.scoped),
+  );
+
+  it.effect(
+    "reports quota attention and a queued run's refusal until creation succeeds, including through a transient retry",
+    () =>
+      Effect.gen(function* () {
+        const fake = yield* fakeMachines();
+        fake.failures.push(
+          new MachineUnavailableError({
+            worker: POOL,
+            provider: "hetzner",
+            reason: "quota",
+            message: "shared core limit exceeded",
+          }),
+          new MachineUnavailableError({
+            worker: POOL,
+            provider: "hetzner",
+            reason: "unreachable",
+            message: "request timed out",
+          }),
+        );
+        const context = yield* scheduler(fake.machines);
+        const steps = Context.get(context, StepExecutor);
+        const status = Context.get(context, WorkerStatus);
+        const selected = submission(1);
+        const runId = RunId.make("quota-run");
+        const summary = new RunSummary({
+          itemKey: selected.itemKey,
+          run: new Run({
+            id: runId,
+            eventId: selected.event.id,
+            loop: selected.loop,
+            state: new RunState.Queued(),
+            openedAt: selected.event.receivedAt,
+          }),
+          step: new Step({ runId, name: selected.step, result: Option.none() }),
+          attempts: [],
+          resolvedFailureAttemptId: Option.none(),
+          closedAt: Option.none(),
+          approval: Option.none(),
+          runAgain: Option.none(),
+          repository: selected.repository,
+          task: selected.task,
+          agent: selected.agent,
+        });
+        const view = Effect.gen(function* () {
+          const quotas = workerQuotas(yield* status.provisioning);
+          const run = runView(summary, new Set(), workerAccesses(config.workers), quotas);
+          return { run, needs: workerQuotaNeeds(quotas, [run]) };
+        });
+        const waiting = yield* Effect.forkChild(steps.reserve(runId, selected, Option.none()));
+        yield* settle;
+        const first = yield* view;
+        assert.lengthOf(first.needs, 1);
+        assert.strictEqual(first.needs[0]?.quota.worker, POOL);
+        assert.strictEqual(first.run.provisioning[0]?.message, "shared core limit exceeded");
+        assert.include(first.needs[0]?.quota.recovery ?? "", "server_type");
+        assert.deepStrictEqual(
+          first.needs[0]?.runs.map(({ runId }) => runId),
+          [runId],
+        );
+        yield* TestClock.adjust("30 seconds");
+        yield* settle;
+        assert.deepStrictEqual(
+          yield* view,
+          first,
+          "a temporary failure doesn't clear the quota refusal",
+        );
+        yield* TestClock.adjust("60 seconds");
+        yield* settle;
+        const lease = yield* Fiber.join(waiting);
+        const recovered = yield* view;
+        assert.lengthOf(recovered.needs, 0);
+        assert.lengthOf(recovered.run.provisioning, 0);
+        yield* lease.release;
+      }).pipe(Effect.scoped),
+  );
+
+  it.effect("keeps timeouts and server failures out of quota attention", () =>
+    Effect.gen(function* () {
+      const fake = yield* fakeMachines();
+      const context = yield* scheduler(fake.machines);
+      const steps = Context.get(context, StepExecutor);
+      const status = Context.get(context, WorkerStatus);
+      for (const reason of ["unreachable", "provider", "timeout"] as const) {
+        fake.failures.push(
+          new MachineUnavailableError({
+            worker: POOL,
+            provider: "hetzner",
+            reason,
+            message: "Temporary creation failure",
+          }),
+        );
+        const waiting = yield* Effect.forkChild(
+          steps.reserve(RunId.make(reason), submission(1), Option.none()),
+        );
+        yield* settle;
+        assert.lengthOf(workerQuotaNeeds(workerQuotas(yield* status.provisioning), []), 0);
+        yield* TestClock.adjust("30 seconds");
+        yield* settle;
+        const lease = yield* Fiber.join(waiting);
+        yield* lease.release;
+      }
+    }).pipe(Effect.scoped),
   );
 
   it.effect("doubles the pause after each failure in a row", () =>

@@ -62,11 +62,12 @@ export const stopWaitLine = (
  * returns `stopWaitLine`; while `machine` is being created for a queued Run, says so.
  */
 export const runStateLine = (
-  run: Pick<RunView, "id" | "state" | "attempts">,
+  run: Pick<RunView, "id" | "state" | "attempts" | "provisioning">,
   unconfirmedStop: UnconfirmedStopView | null = null,
   machine: MachineView | null = null,
 ): string => {
   if (unconfirmedStop !== null) return stopWaitLine(run.id, unconfirmedStop);
+  if (run.state === "Queued" && run.provisioning.length > 0) return provisioningWaitLine(run);
   if (run.state === "Queued" && machine?.state === "creating")
     return `Queued, creating a ${providerLabel[machine.provider]} machine`;
   const attempts = run.attempts.length;
@@ -158,3 +159,6 @@ export const transcriptAttemptLabel = (attempt: Chapter["attempt"]): string =>
     onNone: () => "Attempt",
     onSome: ({ number }) => `Attempt ${number}`,
   });
+
+export const provisioningWaitLine = (run: Pick<RunView, "provisioning">): string =>
+  run.provisioning.map(({ worker, message }) => `Waiting for ${worker}: ${message}`).join("; ");

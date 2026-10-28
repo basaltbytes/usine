@@ -112,6 +112,8 @@ export const NeedEntry = ({ need, compact }: NeedEntryProps) => {
       return <CycleBudgetAsk need={need} compact={compact} dismiss={dismiss} />;
     case "UnconfiguredWorkerNeed":
       return <UnconfiguredWorkerAsk need={need} compact={compact} dismiss={dismiss} />;
+    case "WorkerQuotaNeed":
+      return <NeedItem copy={needCopy(need)} compact={compact} fullDetail dismiss={dismiss} />;
     case "UnresponsiveWorkerNeed":
       return (
         <NeedItem

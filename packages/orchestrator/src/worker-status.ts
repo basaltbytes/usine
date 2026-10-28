@@ -3,7 +3,7 @@ import { HarnessUnavailableError } from "@usine/core/agent/capability";
 import type { ItemKey } from "@usine/core/item";
 import type { LoopName } from "@usine/core/loop";
 import type { RunId } from "@usine/core/run";
-import type { ContainerLimits, WorkerName } from "@usine/core/worker";
+import type { ContainerLimits, MachineProvider, WorkerName } from "@usine/core/worker";
 import type {
   ExecutorError,
   MachineStatus,
@@ -97,6 +97,8 @@ export type PreflightCheck =
  * would serve keep waiting.
  */
 export interface ProvisioningPause {
+  /** The last quota refusal, retained until a machine is created successfully. */
+  readonly quota: Option.Option<{ readonly provider: MachineProvider; readonly message: string }>;
   readonly worker: WorkerName;
   /** Why the creation failed, or `check` if the first machine of the day failed its preflight. */
   readonly reason: MachineUnavailableReason | "check";

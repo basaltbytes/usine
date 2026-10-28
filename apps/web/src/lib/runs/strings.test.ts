@@ -3,7 +3,7 @@ import { SalvagePushed, SalvageRef } from "@usine/core/attempt/salvage";
 import { CommitSha } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { WorkerName } from "@usine/core/worker";
-import { UnconfirmedStopView } from "@usine/orchestrator/operator";
+import { WorkerQuotaView, UnconfirmedStopView } from "@usine/orchestrator/operator";
 import { assert, describe, it } from "vitest";
 import { conflictingSalvageMessage, runStateLine } from "~/lib/runs/strings";
 
@@ -28,7 +28,12 @@ describe("run state while a parent task isn't confirmed stopped", () => {
       attemptNumber: AttemptNumber.make(1),
       worker: WorkerName.make("local"),
     });
-  const run = { id: RunId.make("retrying"), state: "Running", attempts: [] } as const;
+  const run = {
+    id: RunId.make("retrying"),
+    state: "Running",
+    provisioning: [],
+    attempts: [],
+  } as const;
 
   it("names the run's own attempt and the worker it still ends on", () => {
     assert.strictEqual(
@@ -47,4 +52,22 @@ describe("run state while a parent task isn't confirmed stopped", () => {
   it("keeps the state without an unconfirmed stop", () => {
     assert.strictEqual(runStateLine(run), "Running, attempt 1");
   });
+});
+
+it("names the worker and provider refusal while a queued run waits for quota", () => {
+  const quota = new WorkerQuotaView({
+    worker: WorkerName.make("hetzner-pool"),
+    provider: "hetzner",
+    message: "shared core limit exceeded",
+    recovery: "Request a limit increase",
+  });
+  assert.strictEqual(
+    runStateLine({
+      id: RunId.make("queued"),
+      state: "Queued",
+      attempts: [],
+      provisioning: [quota],
+    }),
+    "Waiting for hetzner-pool: shared core limit exceeded",
+  );
 });

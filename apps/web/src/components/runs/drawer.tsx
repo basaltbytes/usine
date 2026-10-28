@@ -19,7 +19,7 @@ import {
 import { useNow } from "~/hooks/use-now";
 import { clockLabel, timestampLabel } from "~/lib/strings";
 import { machineCreationLine } from "~/lib/workers/strings";
-import { queuedMessageLabel } from "~/lib/runs/strings";
+import { queuedMessageLabel, provisioningWaitLine } from "~/lib/runs/strings";
 import { overviewQuery, projectParams } from "~/lib/overview";
 import { RunHeader } from "~/components/runs/header";
 import { ContextualActions } from "~/components/runs/intervention/contextual-actions";
@@ -110,6 +110,8 @@ export const RunSummary = ({ detail }: RunSummaryProps) => {
     case "Waiting":
       return <p className="text-muted-foreground">Waiting for approval</p>;
     case "Queued":
+      if (run.provisioning.length > 0)
+        return <p className="text-needs-you">{provisioningWaitLine(run)}</p>;
       return detail.machine?.state === "creating" ? (
         <MachineCreation machine={detail.machine} />
       ) : (

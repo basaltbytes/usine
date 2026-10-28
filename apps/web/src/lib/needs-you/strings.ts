@@ -21,6 +21,12 @@ export const cycleBudgetCounts = (ask: CycleBudgetNeed["ask"]): string =>
 
 export const needCopy = (need: NeedView): NeedCopy =>
   Match.valueTags(need, {
+    WorkerQuotaNeed: ({ quota }) => ({
+      title: `${quota.worker}: provider quota reached`,
+      detail: `${quota.message}. ${quota.recovery} Machine creation retries automatically.`,
+      repository: null,
+      runId: null,
+    }),
     CycleBudgetNeed: ({ ask, itemLabel }) => ({
       title: "Cycle budget exhausted",
       detail: `${itemLabel}: ${cycleBudgetCounts(ask)}`,

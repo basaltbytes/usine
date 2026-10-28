@@ -622,12 +622,18 @@ export const stepExecutorLayer = (
         worker: WorkerName,
         failure: MachineUnavailableError | WorkerCapabilityError,
       ) {
+        yield* Effect.annotateCurrentSpan({ worker });
         const failedAt = yield* DateTime.now;
         const pause = yield* Effect.tx(
           TxRef.modify(paused, (current) => {
-            const failures = (current.get(worker)?.failures ?? 0) + 1;
+            const previous = current.get(worker);
+            const failures = (previous?.failures ?? 0) + 1;
             const delay = pauseAfter(failures);
             const next: ProvisioningPause = {
+              quota:
+                failure._tag === "MachineUnavailableError" && failure.reason === "quota"
+                  ? Option.some({ provider: failure.provider, message: failure.message })
+                  : (previous?.quota ?? Option.none()),
               worker,
               reason: failure._tag === "MachineUnavailableError" ? failure.reason : "check",
               message: failure.message,
@@ -721,14 +727,24 @@ export const stepExecutorLayer = (
               return;
             }
             const grant = created.success;
-            yield* Effect.tx(
-              TxRef.update(paused, (current) => {
-                if (!current.has(worker)) return current;
+            const previousPause = yield* Effect.tx(
+              TxRef.modify(paused, (current) => {
+                const previous = current.get(worker);
                 const next = new Map(current);
                 next.delete(worker);
-                return next;
+                return [previous, next] as const;
               }),
             );
+            if (previousPause !== undefined)
+              yield* Effect.logInfo(
+                "Machine creation succeeded; cleared the worker's provisioning failure",
+                {
+                  ...fields,
+                  provider: grant.provider,
+                  failures: previousPause.failures,
+                  quotaCleared: Option.isSome(previousPause.quota),
+                },
+              );
             if (Option.isSome(grant.checked)) {
               const { brains, containerLimits } = grant.checked.value;
               yield* recordPreflightExit(

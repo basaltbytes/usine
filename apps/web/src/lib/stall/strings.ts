@@ -2,7 +2,7 @@ import type { RunView, StalledItemView } from "@usine/orchestrator/operator";
 import { Match } from "effect";
 import { agoLabel } from "~/lib/strings";
 import { machineCreationLine } from "~/lib/workers/strings";
-import { failureReason, stopWaitLine } from "~/lib/runs/strings";
+import { failureReason, stopWaitLine, provisioningWaitLine } from "~/lib/runs/strings";
 import { runActivityAt } from "~/lib/tasks/model";
 
 const isQuestion = (run: RunView): boolean => {
@@ -30,13 +30,15 @@ export const stallSentence = ({ loop, reason }: StalledItemView, now: number): s
       `${run.state === "Succeeded" ? "Succeeded" : "Canceled"} ${agoLabel(runActivityAt(run), now)}, unchanged since`,
     LoopPaused: () => `${loop} paused`,
     WaitingForStop: ({ run, stop }) => stopWaitLine(run.id, stop),
-    QueuedForWorker: ({ ahead, creating }) =>
-      creating !== null
-        ? machineCreationLine(creating, now)
-        : ahead === null
-          ? "Waiting for a free worker slot"
-          : ahead === 0
-            ? "Waiting for a free worker slot, next in queue"
-            : `Waiting for a free worker slot, behind ${ahead} ${ahead === 1 ? "run" : "runs"}`,
+    QueuedForWorker: ({ run, ahead, creating }) =>
+      run.provisioning.length > 0
+        ? provisioningWaitLine(run)
+        : creating !== null
+          ? machineCreationLine(creating, now)
+          : ahead === null
+            ? "Waiting for a free worker slot"
+            : ahead === 0
+              ? "Waiting for a free worker slot, next in queue"
+              : `Waiting for a free worker slot, behind ${ahead} ${ahead === 1 ? "run" : "runs"}`,
     AwaitingPoll: () => "Waiting for the next poll",
   });

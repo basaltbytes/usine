@@ -9,6 +9,7 @@ import { Schema } from "effect";
 import { LabelPreflightFinding } from "../label-reconciler.ts";
 import { RepositoryPollFailure } from "../polling-triggers.ts";
 import { ScheduleFailure } from "../schedule-triggers.ts";
+import { WorkerQuotaView } from "./machines.ts";
 import { FailureView } from "./attempt.ts";
 import { BoardItemLink, BoardProjectionError } from "./board.ts";
 
@@ -150,8 +151,17 @@ export class CycleBudgetNeed extends Schema.TaggedClass<CycleBudgetNeed>("CycleB
   },
 ) {}
 
+export class WorkerQuotaNeed extends Schema.TaggedClass<WorkerQuotaNeed>(
+  "@usine/orchestrator/WorkerQuotaNeed",
+)("WorkerQuotaNeed", {
+  id: Schema.String,
+  quota: WorkerQuotaView,
+  runs: Schema.Array(Schema.Struct({ runId: RunId, repository: RepositoryName })),
+}) {}
+
 /** One reason the overview asks for operator attention. */
 export const NeedView = Schema.Union([
+  WorkerQuotaNeed,
   CycleBudgetNeed,
   ApprovalNeed,
   BoardProjectionNeed,

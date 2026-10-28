@@ -1,3 +1,4 @@
+import { RunLine } from "./run-line";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget, ChildSessionCount } from "@usine/core/agent/session";
 import { AttemptNumber, AttemptId, AttemptTask } from "@usine/core/attempt";
@@ -34,6 +35,7 @@ import {
   ReadOnlyBoardLaneView,
   RunFailureNeed,
   RunView,
+  WorkerQuotaView,
   SucceededAttemptView,
   WritableBoardLaneView,
   LocalWorkerAccess,
@@ -710,4 +712,23 @@ describe("Board card Run line", () => {
     const unrecorded = new AttemptView({ ...failed, endedAt: null });
     assert.strictEqual(runLineSince(new RunView({ ...run, attempts: [unrecorded] })), null);
   });
+});
+
+it("shows a queued run's worker and quota refusal on its board card", () => {
+  const run = new RunView({
+    ...runOnItem("Succeeded", []),
+    state: "Queued",
+    closedAt: null,
+    canCancel: true,
+    provisioning: [
+      new WorkerQuotaView({
+        worker: WorkerName.make("hetzner-pool"),
+        provider: "hetzner",
+        message: "shared core limit exceeded",
+        recovery: "Request a limit increase",
+      }),
+    ],
+  });
+  const markup = renderToStaticMarkup(<RunLine run={run} />);
+  assert.include(markup, "Waiting for hetzner-pool: shared core limit exceeded");
 });

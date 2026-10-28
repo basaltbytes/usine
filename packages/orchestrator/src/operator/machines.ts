@@ -31,6 +31,36 @@ export class MachineView extends Schema.Class<MachineView>("@usine/orchestrator/
   since: Schema.String,
 }) {}
 
+export class WorkerQuotaView extends Schema.Class<WorkerQuotaView>(
+  "@usine/orchestrator/WorkerQuotaView",
+)({
+  worker: WorkerName,
+  provider: MachineProvider,
+  message: Schema.NonEmptyString,
+  recovery: Schema.NonEmptyString,
+}) {}
+
+export const workerQuotas = (
+  pauses: ReadonlyArray<ProvisioningPause>,
+): ReadonlyArray<WorkerQuotaView> =>
+  pauses.flatMap(({ worker, quota }) =>
+    Option.toArray(
+      Option.map(
+        quota,
+        ({ provider, message }) =>
+          new WorkerQuotaView({
+            worker,
+            provider,
+            message,
+            recovery:
+              provider === "hetzner"
+                ? "Request a limit increase in the Hetzner console, choose a smaller server_type, or delete unused servers to free capacity."
+                : "Raise the plan or usage limit in the Boat console, add funds for more time, choose a smaller size, or stop unused sandboxes to free capacity.",
+          }),
+      ),
+    ),
+  );
+
 /** A provisioned Worker whose last machine creation failed, and when it tries again. */
 export class ProvisioningPauseView extends Schema.Class<ProvisioningPauseView>(
   "@usine/orchestrator/ProvisioningPauseView",

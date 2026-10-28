@@ -4,6 +4,8 @@ import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { WorkerName } from "@usine/core/worker";
 import {
+  WorkerQuotaNeed,
+  WorkerQuotaView,
   BlockedFailureView,
   ConfigFileNeed,
   QuestionFailureView,
@@ -162,4 +164,26 @@ it("counts a worker alert once for each affected project", () => {
     ],
   );
   assert.include(needCopy(need).detail, "3 attempts are still running");
+});
+
+it("shows the provider refusal and recovery steps and counts affected projects once", () => {
+  const repository = RepositoryName.make("basaltbytes/usine");
+  const need = new WorkerQuotaNeed({
+    id: "worker-quota:pool",
+    quota: new WorkerQuotaView({
+      worker: WorkerName.make("pool"),
+      provider: "hetzner",
+      message: "shared core limit exceeded",
+      recovery: "Choose a smaller server_type",
+    }),
+    runs: [
+      { runId: RunId.make("one"), repository },
+      { runId: RunId.make("two"), repository },
+    ],
+  });
+  const copy = needCopy(need);
+  assert.include(copy.title, "pool");
+  assert.include(copy.detail, "shared core limit exceeded");
+  assert.include(copy.detail, "Choose a smaller server_type");
+  assert.strictEqual(needsYouByProject([need]).get(repository), 1);
 });

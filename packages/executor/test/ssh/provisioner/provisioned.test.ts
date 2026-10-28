@@ -609,6 +609,7 @@ describe("Provisioned SSH Worker", () => {
         const quota = yield* machines.create(WORKER, RUN, [TEST_AGENT.brain]).pipe(Effect.flip);
         assert(quota._tag === "MachineUnavailableError");
         assert.strictEqual(quota.reason, "quota");
+        assert.include(quota.message, "project limit exceeded");
         assert.lengthOf(yield* machines.machines, 0);
 
         providers.hetzner.createFails = undefined;

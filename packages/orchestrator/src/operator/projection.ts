@@ -40,6 +40,7 @@ import {
   TranscriptPageCursor,
   TranscriptEventView,
 } from "./transcript.ts";
+import type { WorkerQuotaView } from "./machines.ts";
 import { ApprovalView, RunDurationView, RunView } from "./run.ts";
 
 /** The number of newest rows loaded per Attempt when a drawer opens. */
@@ -211,6 +212,7 @@ export const runView = (
   snapshot: RunSummary,
   pausedLoops: ReadonlySet<LoopName>,
   workers: WorkerAccesses,
+  quotas: ReadonlyArray<WorkerQuotaView> = [],
 ): RunView => {
   const actions = RunState.operatorActions(snapshot.run.state);
   const result = Option.getOrNull(snapshot.step.result);
@@ -226,6 +228,11 @@ export const runView = (
     agentBrain: snapshot.agent.brain,
     state: snapshot.run.state._tag,
     loopPaused: pausedLoops.has(snapshot.run.loop),
+    provisioning:
+      snapshot.run.state._tag === "Queued" &&
+      !snapshot.attempts.some((attempt) => Option.isNone(attempt.outcome))
+        ? quotas.filter(({ worker }) => workers.has(worker))
+        : [],
     openedAt: DateTime.formatIso(snapshot.run.openedAt),
     closedAt: Option.match(snapshot.closedAt, { onNone: () => null, onSome: DateTime.formatIso }),
     task: snapshot.task,

@@ -93,8 +93,17 @@ const nameOf = (tags: MachineTags): string =>
 /** Returns the reason a creation failure is retried, by Boat's documented statuses. */
 const creationReason = (failure: ProviderFailure): MachineUnavailableReason => {
   if (failure._tag === "ProviderUnanswered") return "unreachable";
-  if (failure.status === 503) return "capacity";
-  if (failure.status === 402 || failure.status === 429) return "quota";
+  if (failure.status >= 500) return failure.status === 503 ? "capacity" : "provider";
+  const code = Option.getOrElse(failure.code, () => "");
+  if (code === "rate_limited" || code === "IP_RATE_LIMIT_EXCEEDED") return "provider";
+  if (
+    failure.status === 402 ||
+    code === "limit_reached" ||
+    code === "member_limit_reached" ||
+    code === "trial_compute_limit_reached" ||
+    code === "trial_machine_class_not_allowed"
+  )
+    return "quota";
   if (failure.status === 401 || failure.status === 403 || failure.status === 400) return "refused";
   return "provider";
 };

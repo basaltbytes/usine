@@ -14,7 +14,7 @@ import * as RunState from "@usine/core/run/state";
 import { WorkerName } from "@usine/core/worker";
 import { Effect, Schema } from "effect";
 import { AttemptView } from "./attempt.ts";
-import { MachineView } from "./machines.ts";
+import { MachineView, WorkerQuotaView } from "./machines.ts";
 import { TranscriptEventView, TranscriptPageCursor } from "./transcript.ts";
 import { RunUsageView } from "./usage.ts";
 
@@ -70,6 +70,10 @@ export class RunView extends Schema.Class<RunView>("@usine/orchestrator/RunView"
   agentBrain: BrainSpec,
   state: RunStateTag,
   loopPaused: Schema.Boolean,
+  /** Provider quota refusals affecting the workers available for the next attempt. */
+  provisioning: Schema.Array(WorkerQuotaView).pipe(
+    Schema.withConstructorDefault(Effect.succeed([])),
+  ),
   openedAt: Schema.String,
   /**
    * When the Run last succeeded, failed, or was canceled, even before any Attempt. Null while open;

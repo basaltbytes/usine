@@ -1,7 +1,9 @@
 import { AttentionKey, AttentionRevision } from "@usine/engine/attention";
 import { Match, Schema } from "effect";
 import { BoardTaskView, BoardView, ReadOnlyBoardLaneView, WritableBoardLaneView } from "./board.ts";
-import { NeedView } from "./need.ts";
+import { WorkerQuotaNeed, NeedView } from "./need.ts";
+import type { WorkerQuotaView } from "./machines.ts";
+import type { RunView } from "./run.ts";
 import { ProjectView } from "./overview.ts";
 
 const encodeNeed = Schema.encodeSync(NeedView);
@@ -15,6 +17,7 @@ export const attentionKey = (need: NeedView): AttentionKey =>
 
 const repositoriesOf = (need: NeedView) =>
   Match.valueTags(need, {
+    WorkerQuotaNeed: ({ runs }) => runs.map(({ repository }) => repository),
     ApprovalNeed: ({ repository }) => [repository],
     RunFailureNeed: ({ repository }) => [repository],
     UnconfirmedStopNeed: ({ repository }) => [repository],
@@ -34,6 +37,8 @@ export const taskNeedsAttention = (
   needs: ReadonlyArray<NeedView>,
 ): boolean =>
   needs.some((need) => {
+    if (need._tag === "WorkerQuotaNeed")
+      return need.runs.some(({ runId }) => task.runs.some(({ id }) => id === runId));
     if (need._tag === "UnresponsiveWorkerNeed")
       return need.attempts.some(({ runId }) => task.runs.some(({ id }) => id === runId));
     if ("runId" in need) return task.runs.some(({ id }) => id === need.runId);
@@ -90,3 +95,18 @@ export const partitionNeeds = (
   }
   return { needsYou, dismissedNeeds };
 };
+
+export const workerQuotaNeeds = (
+  quotas: ReadonlyArray<WorkerQuotaView>,
+  runs: ReadonlyArray<RunView>,
+): ReadonlyArray<WorkerQuotaNeed> =>
+  quotas.map(
+    (quota) =>
+      new WorkerQuotaNeed({
+        id: `worker-quota:${quota.worker}`,
+        quota,
+        runs: runs
+          .filter((run) => run.provisioning.some(({ worker }) => worker === quota.worker))
+          .map(({ id: runId, repository }) => ({ runId, repository })),
+      }),
+  );

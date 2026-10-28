@@ -3,7 +3,13 @@ import {
   AttentionAcknowledgement,
   type AttentionKey,
 } from "@usine/engine/attention";
-import { attentionKey, partitionNeeds, taskNeedsAttention, projectAttention } from "./attention.ts";
+import {
+  workerQuotaNeeds,
+  attentionKey,
+  partitionNeeds,
+  taskNeedsAttention,
+  projectAttention,
+} from "./attention.ts";
 import { transcriptEvent } from "./projection.ts";
 import { TranscriptSessionsQuery } from "@usine/engine/transcript";
 import { GitHubLabelName } from "@usine/config/label";
@@ -128,7 +134,7 @@ import { TaskReader, type TaskReadError, TaskView } from "./task.ts";
 import { type DeskView, OperatorDesk } from "./desk.ts";
 import { OperatorStatistics } from "./statistics/statistics.ts";
 import type { RunStatisticsView, StatisticsView, StatisticsWindow } from "./statistics/view.ts";
-import { machineView } from "./machines.ts";
+import { machineView, workerQuotas, type WorkerQuotaView } from "./machines.ts";
 import { WorkerStatus } from "../worker-status.ts";
 import { workerAttentionFor } from "./unresponsive.ts";
 
@@ -230,6 +236,7 @@ const makeOperatorObservation = Effect.gen(function* () {
     scheduleFailures: ReadonlyArray<ScheduleFailure>,
     revision: Option.Option<ProjectionRevision>,
     unconfirmedStops: ReadonlyArray<UnconfirmedStop>,
+    quotas: ReadonlyArray<WorkerQuotaView>,
   ) {
     const [snapshots, states, cycleAsks, workerAttempts] = yield* Effect.all(
       [
@@ -242,7 +249,7 @@ const makeOperatorObservation = Effect.gen(function* () {
     );
     const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
     const access = workerAccesses(instance.config.workers);
-    const views = snapshots.map((snapshot) => runView(snapshot, paused, access));
+    const views = snapshots.map((snapshot) => runView(snapshot, paused, access, quotas));
     const runsByRepository = new Map<string, Array<(typeof views)[number]>>();
     for (const view of views) {
       const projectRuns = runsByRepository.get(view.repository) ?? [];
@@ -277,7 +284,7 @@ const makeOperatorObservation = Effect.gen(function* () {
           }
           const merged = new Map((runsByRepository.get(name) ?? []).map((run) => [run.id, run]));
           for (const saved of history) {
-            const view = runView(saved, paused, access);
+            const view = runView(saved, paused, access, quotas);
             merged.set(view.id, view);
           }
           const projectRuns = [...merged.values()].sort(
@@ -388,7 +395,7 @@ const makeOperatorObservation = Effect.gen(function* () {
           paused: paused.has(loop.name),
         }),
     );
-    const needsYou: Array<NeedView> = [];
+    const needsYou: Array<NeedView> = [...workerQuotaNeeds(quotas, views)];
     for (const ask of cycleAsks) {
       const item = Schema.decodeUnknownOption(GitHubItemKey)(ask.itemKey);
       needsYou.push(
@@ -587,9 +594,19 @@ const makeOperatorObservation = Effect.gen(function* () {
   const overview = Effect.fn("Operator.overview")((instance: LoadedInstance) =>
     SynchronizedRef.modifyEffect(cache, (cached) =>
       Effect.gen(function* () {
-        const [revision, latestPoll, latestSchedule, unconfirmedStops] = yield* Effect.all(
-          [reader.revision(), polling.latest, schedules.latest, stops.list] as const,
-          { concurrency: "unbounded" },
+        const [revision, latestPoll, latestSchedule, unconfirmedStops, provisioning] =
+          yield* Effect.all(
+            [
+              reader.revision(),
+              polling.latest,
+              schedules.latest,
+              stops.list,
+              workerStatus.provisioning,
+            ] as const,
+            { concurrency: "unbounded" },
+          );
+        const quotas = workerQuotas(provisioning).filter(({ worker }) =>
+          instance.config.workers.some(({ name }) => name === worker),
         );
         const pollFailures = Option.match(latestPoll, {
           onNone: () => [],
@@ -625,6 +642,7 @@ const makeOperatorObservation = Effect.gen(function* () {
             preflightFindings,
             scheduleFailures,
             unconfirmedStops.map(({ attemptId }) => attemptId),
+            quotas,
           ]),
         );
         if (Option.isNone(token)) {
@@ -638,6 +656,7 @@ const makeOperatorObservation = Effect.gen(function* () {
             scheduleFailures,
             revision,
             unconfirmedStops,
+            quotas,
           );
           return [projected, Option.none<CachedOverview>()] as const;
         }
@@ -658,6 +677,7 @@ const makeOperatorObservation = Effect.gen(function* () {
           scheduleFailures,
           revision,
           unconfirmedStops,
+          quotas,
         );
         return [projected, Option.some({ token: token.value, ...projected })] as const;
       }),
@@ -713,8 +733,14 @@ const makeOperatorObservation = Effect.gen(function* () {
     request: TranscriptRequest = new ColdTranscriptRequest(),
   ) {
     yield* Effect.annotateCurrentSpan({ runId });
-    const [snapshot, states, unconfirmedStops, inFlight] = yield* Effect.all(
-      [reader.inspect(runId), controls.states, stops.list, workerStatus.machines] as const,
+    const [snapshot, states, unconfirmedStops, inFlight, provisioning] = yield* Effect.all(
+      [
+        reader.inspect(runId),
+        controls.states,
+        stops.list,
+        workerStatus.machines,
+        workerStatus.provisioning,
+      ] as const,
       { concurrency: "unbounded" },
     );
     const openAttempt = snapshot.attempts.find((attempt) => Option.isNone(attempt.outcome));
@@ -748,7 +774,12 @@ const makeOperatorObservation = Effect.gen(function* () {
       );
     const currentAgent = instance.agents.find(({ name }) => name === snapshot.agent.name);
     return new RunDetailView({
-      run: runView(snapshot, paused, workerAccesses(instance.config.workers)),
+      run: runView(
+        snapshot,
+        paused,
+        workerAccesses(instance.config.workers),
+        workerQuotas(provisioning),
+      ),
       agentDefinitionChanged:
         currentAgent !== undefined && !sameAgent(snapshot.agent, currentAgent.agent),
       eventDedupKey: snapshot.event.dedupKey,
@@ -1367,6 +1398,7 @@ export {
   type TaskReadError,
 } from "./task.ts";
 export {
+  WorkerQuotaNeed,
   ApprovalNeed,
   CycleBudgetNeed,
   RunFailureNeed,
@@ -1469,3 +1501,5 @@ export {
 } from "./transcript.ts";
 
 export { attentionKey, projectAttention } from "./attention.ts";
+
+export { WorkerQuotaView } from "./machines.ts";
