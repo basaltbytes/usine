@@ -18,14 +18,18 @@ stop_server() {
   sleep 1
   # A second signal uses the same recovery path as usine restart --force.
   main_pid=$(systemctl show --property=MainPID --value "$unit") || return 1
-  if [ "$main_pid" -gt 0 ]; then kill -TERM "$main_pid" || return 1; fi
+  if [ "$main_pid" -gt 0 ] && ! kill -TERM "$main_pid"; then
+    printf 'upgrade shutdown unit=%s pid=%s signal=TERM failed; checking unit state\n' "$unit" "$main_pid"
+  fi
   for ((i=0; i<60; i++)); do
     state=$(systemctl show --property=ActiveState --value "$unit") || return 1
     if [ "$state" = inactive ] || [ "$state" = failed ]; then return 0; fi
     sleep 1
   done
   main_pid=$(systemctl show --property=MainPID --value "$unit") || return 1
-  if [ "$main_pid" -gt 0 ]; then kill -KILL "$main_pid" || return 1; fi
+  if [ "$main_pid" -gt 0 ] && ! kill -KILL "$main_pid"; then
+    printf 'upgrade shutdown unit=%s pid=%s signal=KILL failed; checking unit state\n' "$unit" "$main_pid"
+  fi
   for ((i=0; i<5; i++)); do
     state=$(systemctl show --property=ActiveState --value "$unit") || return 1
     if [ "$state" = inactive ] || [ "$state" = failed ]; then return 0; fi

@@ -205,9 +205,10 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
       (record) =>
         record.status === "installing" || (record.target === target && record.status !== "good"),
     );
+    const currentSettings = yield* options.settings;
     if (
       newer &&
-      settings.upgradeMode === "automatic" &&
+      currentSettings.upgradeMode === "automatic" &&
       (yield* Ref.get(progress)).phase === "idle" &&
       !blocked
     ) {
@@ -217,6 +218,12 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
         previous: options.running,
         target,
         outcome: result,
+      });
+    } else if (newer && currentSettings.upgradeMode !== "automatic") {
+      yield* Effect.logInfo("Automatic upgrade skipped for the current mode", {
+        previous: options.running,
+        target,
+        mode: currentSettings.upgradeMode,
       });
     }
   });

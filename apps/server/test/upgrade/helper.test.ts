@@ -8,7 +8,10 @@ import { assert, expect, it } from "vitest";
 
 const helper = readFileSync(new URL("../../src/upgrade/helper.sh", import.meta.url), "utf8");
 
-const run = (scenario: "good" | "bad-api" | "bad-install" | "bad-rollback" | "bad-stop") => {
+const run = (
+  scenario: "good" | "bad-api" | "bad-install" | "bad-rollback" | "bad-stop",
+  shutdown: "normal" | "exit-term" | "exit-kill" | "stuck" = "normal",
+) => {
   const folder = mkdtempSync(join(tmpdir(), "usine-upgrade-helper-"));
   const command = (name: string, body: string) => {
     const path = join(folder, name);
@@ -28,8 +31,23 @@ echo "$5" > "$folder/installed"`,
       "systemctl",
       `echo "$*" >> "$folder/commands"
 if [ "$1" = stop ] && [ "$scenario" = bad-stop ]; then exit 1; fi
-if [ "$2" = --property=MainPID ]; then echo 0; fi
-if [ "$1" = stop ]; then echo inactive > "$folder/state"; fi
+if [ "$1" = stop ]; then
+  echo inactive > "$folder/state"
+  rm -f "$folder/pid-read"
+  if [ "$shutdown" != normal ]; then echo deactivating > "$folder/state"; fi
+fi
+if [ "$2" = --property=MainPID ]; then
+  if [ "$shutdown" = normal ] || { [ "$shutdown" = exit-kill ] && [ ! -f "$folder/pid-read" ]; }; then
+    echo 0
+  else
+    bash -c 'exit 0' &
+    exited_pid=$!
+    wait "$exited_pid"
+    echo "$exited_pid"
+    if [ "$shutdown" != stuck ]; then echo inactive > "$folder/state"; fi
+  fi
+  touch "$folder/pid-read"
+fi
 if [ "$1" = start ]; then echo active > "$folder/state"; fi
 if [ "$2" = --property=ActiveState ]; then cat "$folder/state"; fi`,
     );
@@ -47,7 +65,7 @@ printf '"%s"' "\${installed#@usine/server@}"`,
     let failed = false;
     try {
       execFileSync("bash", [script], {
-        env: { ...process.env, PATH: `${folder}:${process.env.PATH}`, folder, scenario },
+        env: { ...process.env, PATH: `${folder}:${process.env.PATH}`, folder, scenario, shutdown },
         stdio: "pipe",
       });
     } catch {
@@ -96,5 +114,25 @@ it("records a failed rollback and leaves the previous version in the recovery re
 it("does not replace packages when systemd cannot stop the server", () => {
   const result = run("bad-stop");
   expect(result.failed).toBe(true);
+  expect(result.commands).not.toContain("install");
+});
+
+it.each(["exit-term", "exit-kill"] as const)(
+  "finishes upgrades and rollback when the server disappears before %s",
+  (shutdown) => {
+    const upgraded = run("good", shutdown);
+    expect(upgraded.failed).toBe(false);
+    expect(upgraded.record.status).toBe("good");
+    const recovered = run("bad-api", shutdown);
+    expect(recovered.failed).toBe(false);
+    expect(recovered.record.status).toBe("rolled-back");
+    expect(recovered.commands).toContain("@usine/server@1.0.0");
+  },
+);
+
+it("does not install after failed signals when the unit remains deactivating", () => {
+  const result = run("good", "stuck");
+  expect(result.failed).toBe(true);
+  expect(result.record.status).toBe("failed");
   expect(result.commands).not.toContain("install");
 });

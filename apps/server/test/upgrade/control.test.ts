@@ -1,4 +1,9 @@
-import { ReleaseVersion, type UpgradeChannel, UpgradeRecord } from "@usine/core/upgrade";
+import {
+  ReleaseVersion,
+  type UpgradeChannel,
+  type UpgradeMode,
+  UpgradeRecord,
+} from "@usine/core/upgrade";
 import { UpgradeRequest } from "@usine/orchestrator/operator/http";
 import { Deferred, Effect, Option, Ref } from "effect";
 import { expect, it } from "vitest";
@@ -186,6 +191,40 @@ it("rejects an automatic candidate when the channel changes during its lookup", 
     ),
   );
 });
+
+it.each(["off", "propose"] as const)(
+  "does not drain or install when automatic mode changes to %s during lookup",
+  async (mode) => {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const f = yield* fixture;
+          const currentMode = yield* Ref.make<UpgradeMode>("automatic");
+          const drainStarted = yield* Ref.make(false);
+          const upgrades = yield* makeUpgrades({
+            running: previous,
+            settings: Ref.get(currentMode).pipe(
+              Effect.map((upgradeMode) => ({ upgradeChannel: "next" as const, upgradeMode })),
+            ),
+            platform: Option.some({
+              ...f.platform,
+              lookup: () => Ref.set(currentMode, mode).pipe(Effect.as(target)),
+            }),
+            drain: Ref.set(drainStarted, true),
+          });
+          yield* upgrades.check();
+          yield* Effect.yieldNow;
+          const status = yield* upgrades.status;
+          expect(status.mode).toBe(mode);
+          expect(status.phase).toBe("idle");
+          expect(status.available).toBe(mode === "off" ? null : target);
+          expect(yield* Ref.get(drainStarted)).toBe(false);
+          expect(yield* Deferred.isDone(f.launched)).toBe(false);
+        }),
+      ),
+    );
+  },
+);
 
 it("refuses a missing helper before closing admission", async () => {
   await Effect.runPromise(
