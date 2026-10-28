@@ -220,10 +220,7 @@ export const hetznerDriverFor = (
       [LABELS.worker]: tagValue(tags.worker),
       [LABELS.run]: tagValue(tags.run),
       [LABELS.process]: tagValue(tags.process),
-      ...Option.match(tags.attempt, {
-        onNone: () => ({}),
-        onSome: (attempt) => ({ [LABELS.attempt]: attemptTag(attempt) }),
-      }),
+      [LABELS.attempt]: attemptTag(tags.attempt),
     });
 
     const verify = Effect.fn("HetznerDriver.verify")(
@@ -437,13 +434,6 @@ export const hetznerDriverFor = (
         ),
     );
 
-    const tag = Effect.fn("HetznerDriver.tag")(function* (id: MachineId, tags: MachineTags) {
-      yield* Effect.annotateCurrentSpan({ worker, machine: id });
-      yield* api
-        .send("PUT", `/servers/${id}`, { body: { labels: labelsOf(tags) } })
-        .pipe(Effect.mapError(apiError("label the server")));
-    });
-
     const remove = Effect.fn("HetznerDriver.remove")(function* (id: MachineId) {
       yield* Effect.annotateCurrentSpan({ worker, machine: id });
       yield* api.send("DELETE", `/servers/${id}`).pipe(
@@ -456,12 +446,18 @@ export const hetznerDriverFor = (
       );
     });
 
-    const list = Effect.fn("HetznerDriver.list")(function* (instance: string, listed: WorkerName) {
-      yield* Effect.annotateCurrentSpan({ worker: listed });
+    const list = Effect.fn("HetznerDriver.list")(function* (
+      instance: string,
+      listed: Option.Option<WorkerName>,
+    ) {
+      yield* Effect.annotateCurrentSpan({
+        instance,
+        worker: Option.getOrElse(listed, () => "all"),
+      });
       const pages = yield* listAll(
         "/servers",
         {
-          label_selector: `${LABELS.instance}=${tagValue(instance)},${LABELS.worker}=${tagValue(listed)}`,
+          label_selector: `${LABELS.instance}=${tagValue(instance)}${Option.match(listed, { onNone: () => "", onSome: (worker) => `,${LABELS.worker}=${tagValue(worker)}` })}`,
         },
         Servers,
         "list servers",
@@ -485,7 +481,6 @@ export const hetznerDriverFor = (
       verify,
       create,
       endpoint,
-      tag,
       remove,
       list,
     } satisfies MachineDriver;

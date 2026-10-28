@@ -251,9 +251,9 @@ describe("Workers page", () => {
       "API token Read from HCLOUD_TOKEN",
       "Anthropic key Not set",
       "Provider, gateway, and credentials",
-      "Harness checks run on the first machine of each day.",
+      "configured interval since the last successful check",
       "Deferred",
-      "Checked on the worker's first machine each day",
+      "Checked on the first machine, then every 86400 seconds when a machine is created.",
     ]) {
       assert.include(page, fact);
     }
