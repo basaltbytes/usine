@@ -26,6 +26,7 @@ import {
   configurationEntities,
   Configuration,
   ConfigurationChange,
+  ConfigurationEntity,
   ConfigurationEntityId,
   ConfigurationEntityKey,
   ConfigurationRevisionNumber,
@@ -58,6 +59,8 @@ labels:
   - name: ready
 workers:
   - name: local
+    kind: local
+  - name: fallback
     kind: local
 settings:
   poll_interval: 30
@@ -153,6 +156,54 @@ const adapters = [
 
 for (const [name, layer] of adapters)
   describe(`${name} configuration store contract`, () => {
+    it.effect("preserves worker order through imports, value changes, and revision replay", () =>
+      Effect.gen(function* () {
+        const store = yield* ConfigurationStore;
+        yield* initialize;
+        const original = configurationEntities(yield* fixture);
+        const workers = original.filter(({ key }) => key.kind === "worker");
+        const other = original.filter(({ key }) => key.kind !== "worker");
+        const [settings, ...rest] = other;
+        if (settings === undefined) return yield* Effect.die("fixture has no settings");
+        const reordered = [settings, ...workers.toReversed(), ...rest];
+        for (const candidate of [
+          reordered,
+          original.map((entity) =>
+            entity.key.kind === "worker"
+              ? new ConfigurationEntity({
+                  ...entity,
+                  value: {
+                    ...Schema.decodeUnknownSync(Schema.JsonObject)(entity.value),
+                    max_concurrent_attempts: 2,
+                  },
+                })
+              : entity,
+          ),
+        ]) {
+          const current = yield* store.read;
+          const changes = configurationDiff(
+            Option.match(current.instance, { onNone: () => [], onSome: configurationEntities }),
+            candidate,
+          );
+          expect(changes.length).toBeGreaterThan(0);
+          yield* store.commit({ expected: current.number, changes, ...metadata });
+          const saved = yield* store.read;
+          expect(Option.map(saved.instance, configurationEntities)).toEqual(Option.some(candidate));
+          expect(configurationDiff(candidate, candidate)).toEqual([]);
+        }
+        let replayed = Configuration.empty;
+        for (const revision of yield* store.changes(zero).pipe(Stream.take(3), Stream.runCollect)) {
+          replayed = (yield* commit(parser, replayed, replayed.number, revision.changes, revision))
+            .configuration;
+          if (revision.number === 2)
+            expect(
+              Option.map(replayed.instance, ({ config }) => config.workers.map(({ name }) => name)),
+            ).toEqual(Option.some(["fallback", "local"]));
+        }
+        expect(replayed).toEqual(yield* store.read);
+      }).pipe(Effect.provide(layer)),
+    );
+
     it.effect(
       "commits atomically, records before and after, filters history, and replays revisions",
       () =>

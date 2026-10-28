@@ -42,6 +42,8 @@ export class ConfigurationChange extends Schema.Class<ConfigurationChange>(
   key: ConfigurationEntityKey,
   before: Schema.Option(Schema.Json),
   after: Schema.Option(Schema.Json),
+  /** Zero-based position in the resulting entity list; omitted for value-only edits. */
+  position: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
 }) {}
 
 export class Configuration extends Schema.Class<Configuration>("@usine/config/Configuration")(

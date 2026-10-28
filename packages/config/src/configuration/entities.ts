@@ -42,18 +42,21 @@ export const configurationDiff = (
   before: ReadonlyArray<ConfigurationEntity>,
   after: ReadonlyArray<ConfigurationEntity>,
 ): ReadonlyArray<ConfigurationChange> => {
-  const previous = new Map(before.map((entry) => [entry.key.key, entry]));
-  const next = new Map(after.map((entry) => [entry.key.key, entry]));
+  const previous = new Map(before.map((entry, position) => [entry.key.key, { entry, position }]));
+  const next = new Map(after.map((entry, position) => [entry.key.key, { entry, position }]));
   return [...new Set([...previous.keys(), ...next.keys()])].flatMap((key) => {
     const old = previous.get(key);
     const value = next.get(key);
     const identity = value ?? old;
-    if (identity === undefined || Equal.equals(old?.value, value?.value)) return [];
+    const moved = value !== undefined && old?.position !== value.position;
+    if (identity === undefined || (!moved && Equal.equals(old?.entry.value, value?.entry.value)))
+      return [];
     return [
       new ConfigurationChange({
-        key: identity.key,
-        before: Option.fromUndefinedOr(old?.value),
-        after: Option.fromUndefinedOr(value?.value),
+        key: identity.entry.key,
+        before: Option.fromUndefinedOr(old?.entry.value),
+        after: Option.fromUndefinedOr(value?.entry.value),
+        ...(moved ? { position: value.position } : {}),
       }),
     ];
   });

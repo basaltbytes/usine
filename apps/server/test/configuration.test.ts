@@ -1,4 +1,5 @@
 import { createServer } from "node:net";
+import { UsineConfig } from "@usine/config/factory";
 import { Schema } from "effect";
 import { spawn, spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -7,6 +8,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
+import { parse } from "yaml";
 
 const cli = fileURLToPath(new URL("../dist/main.js", import.meta.url));
 const test = it.extend<{ directory: string }>({
@@ -41,6 +43,50 @@ const run = (directory: string, args: ReadonlyArray<string>, editor = "") =>
     timeout: 20_000,
     env: { ...process.env, EDITOR: editor },
   });
+
+test(
+  "imports and exports worker preference changes with and without value edits",
+  { timeout: 60_000 },
+  async ({ directory }) => {
+    const source = join(directory, "usine.yaml");
+    const settings = await readFile(source, "utf8");
+    const writeWorkers = (names: ReadonlyArray<string>, capacity: number) =>
+      writeFile(
+        source,
+        `${settings}workers:\n${names.map((name) => `  - name: ${name}\n    kind: local\n    max_concurrent_attempts: ${capacity}\n`).join("")}`,
+      );
+    await writeWorkers(["preferred", "fallback"], 1);
+    const initial = run(directory, ["log"]);
+    expect(initial.status, initial.stderr).toBe(0);
+    const exported = join(directory, "exported");
+    for (const { names, capacity, revision } of [
+      { names: ["fallback", "preferred"], capacity: 1, revision: 2 },
+      { names: ["preferred", "fallback"], capacity: 2, revision: 3 },
+    ]) {
+      await writeWorkers(names, capacity);
+      const imported = run(directory, ["import", directory]);
+      expect(imported.status, imported.stderr).toBe(0);
+      expect(imported.stdout).toContain(`Revision ${revision}:`);
+      expect(run(directory, ["log", "worker", "preferred"]).stdout).toContain(
+        `${revision}\toperator\t`,
+      );
+      const result = run(directory, ["export", exported]);
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain(`Exported revision ${revision}`);
+      const config = Schema.decodeUnknownSync(UsineConfig)(
+        parse(await readFile(join(exported, "usine.yaml"), "utf8")),
+      );
+      expect(config.workers.map(({ name }) => name)).toEqual(names);
+      expect(config.workers.map(({ maxConcurrentAttempts }) => maxConcurrentAttempts)).toEqual([
+        capacity,
+        capacity,
+      ]);
+      const unchanged = run(directory, ["import", exported]);
+      expect(unchanged.status, unchanged.stderr).toBe(0);
+      expect(unchanged.stdout).toContain("No configuration changes");
+    }
+  },
+);
 
 test(
   "imports once, exports the configuration and edits an agent, and refuses invalid imports and stale edits",
