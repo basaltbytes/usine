@@ -1,5 +1,6 @@
+import { DismissNeed } from "./dismiss";
 import type { ApprovalNeed, NeedView } from "@usine/orchestrator/operator";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,6 +24,7 @@ import { UnconfiguredWorkerAsk } from "~/components/needs-you/unconfigured-worke
 
 type ApprovalAskProps = {
   readonly need: ApprovalNeed;
+  readonly dismiss: ReactNode;
   readonly compact: boolean;
 };
 
@@ -30,7 +32,7 @@ type ApprovalAskProps = {
  * Disables the buttons while any screen sends an action on the Run. If the server rejects the action
  * because the Run changed state, shows no error.
  */
-const ApprovalAsk = ({ need, compact }: ApprovalAskProps) => {
+const ApprovalAsk = ({ need, compact, dismiss }: ApprovalAskProps) => {
   const openRun = useOpenRun();
   const action = useRunAction();
   const [confirmingCancel, setConfirmingCancel] = useState(false);
@@ -44,6 +46,7 @@ const ApprovalAsk = ({ need, compact }: ApprovalAskProps) => {
         copy={origin === undefined ? copy : { ...copy, detail: origin.title }}
         item={origin}
         compact={compact}
+        dismiss={dismiss}
         open={() => openRun(need.runId)}
         error={
           action.error === null || isRunOperationRejected(action.error)
@@ -101,19 +104,21 @@ type NeedEntryProps = {
 
 export const NeedEntry = ({ need, compact }: NeedEntryProps) => {
   const openRun = useOpenRun();
+  const dismiss = <DismissNeed need={need} action="dismissNeed" />;
   switch (need._tag) {
     case "ApprovalNeed":
-      return <ApprovalAsk need={need} compact={compact} />;
+      return <ApprovalAsk need={need} compact={compact} dismiss={dismiss} />;
     case "CycleBudgetNeed":
-      return <CycleBudgetAsk need={need} compact={compact} />;
+      return <CycleBudgetAsk need={need} compact={compact} dismiss={dismiss} />;
     case "UnconfiguredWorkerNeed":
-      return <UnconfiguredWorkerAsk need={need} compact={compact} />;
+      return <UnconfiguredWorkerAsk need={need} compact={compact} dismiss={dismiss} />;
     default: {
       const copy = needCopy(need);
       const runId = copy.runId;
       return (
         <NeedItem
           copy={copy}
+          dismiss={dismiss}
           compact={compact}
           open={runId === null ? undefined : () => openRun(runId)}
         />

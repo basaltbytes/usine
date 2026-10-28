@@ -1,3 +1,5 @@
+import { AttentionAcknowledgements, type AttentionAcknowledgement } from "@usine/engine/attention";
+import { attentionKey, partitionNeeds } from "../src/operator/attention.ts";
 import { CycleGeneration } from "@usine/core/cycle-budget";
 import { assert, describe, it } from "@effect/vitest";
 import {
@@ -407,6 +409,7 @@ const testLayer = (
   recordedMoves: Array<BoardMoveRecord> = [],
   unconfirmedStops: Effect.Effect<ReadonlyArray<UnconfirmedStop>> = Effect.succeed([]),
 ) => {
+  const acknowledged: Array<AttentionAcknowledgement> = [];
   const readTranscript = (query: TranscriptQuery) =>
     Effect.succeed(
       Match.valueTags(query, {
@@ -599,6 +602,34 @@ const testLayer = (
     onItem: () => Effect.die("unused"),
   });
   const dependencies = Layer.mergeAll(
+    Layer.succeed(AttentionAcknowledgements)({
+      list: () => Effect.sync(() => [...acknowledged]),
+      dismiss: (acknowledgement) =>
+        Effect.sync(() => {
+          acknowledged.push(acknowledgement);
+        }).pipe(
+          Effect.andThen(
+            Ref.update(
+              projectionRevision,
+              Option.map((value) => ProjectionRevision.make(value + 1)),
+            ),
+          ),
+        ),
+      undo: (key) =>
+        Effect.sync(() => {
+          const index = acknowledged.findIndex(
+            (entry) => entry.id === key.id && entry.revision === key.revision,
+          );
+          if (index >= 0) acknowledged.splice(index, 1);
+        }).pipe(
+          Effect.andThen(
+            Ref.update(
+              projectionRevision,
+              Option.map((value) => ProjectionRevision.make(value + 1)),
+            ),
+          ),
+        ),
+    }),
     budgets,
     runs,
     reader,
@@ -618,6 +649,49 @@ const testLayer = (
 };
 
 describe("Operator", () => {
+  it.effect(
+    "dismisses every projected entry across refreshes, keeps approval waiting, and restores badges with undo",
+    () =>
+      Effect.gen(function* () {
+        const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+        const moved = yield* Ref.make<ItemLabelMutation | null>(null);
+        const reads = yield* Ref.make(0);
+        const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+        yield* Effect.gen(function* () {
+          const operator = yield* Operator;
+          const before = yield* operator.overview(instance);
+          for (const need of before.needsYou)
+            yield* operator.dismissNeed(instance, attentionKey(need));
+          const dismissed = yield* operator.overview(instance);
+          assert.deepStrictEqual(dismissed.needsYou, []);
+          assert.deepStrictEqual(dismissed.dismissedNeeds, before.needsYou);
+          assert(
+            dismissed.projects.every(
+              ({ status, board }) =>
+                status !== "needs-you" &&
+                board.lanes.every(({ items }) => items.every(({ needsYou }) => !needsYou)),
+            ),
+          );
+          assert.deepStrictEqual((yield* operator.overview(instance)).needsYou, []);
+          const detail = yield* operator.detail(instance, runId);
+          assert.strictEqual(detail.run.state, "Waiting");
+          assert.strictEqual(detail.run.canApprove, true);
+          assert.deepStrictEqual(yield* Ref.get(approved), []);
+          const approval = before.needsYou.find((need) => need._tag === "ApprovalNeed");
+          assert(approval !== undefined);
+          yield* operator.undoDismissNeed(attentionKey(approval));
+          const restored = yield* operator.overview(instance);
+          assert.deepStrictEqual(restored.needsYou, [approval]);
+          assert.strictEqual(restored.projects[0]?.status, "needs-you");
+          assert(
+            restored.projects[0]?.board.lanes.some(({ items }) =>
+              items.some((task) => task.needsYou),
+            ),
+          );
+        }).pipe(Effect.provide(testLayer(approved, moved, reads, revision)));
+      }),
+  );
+
   it.effect("clears only resolved failure attention and renews it for a later failed Attempt", () =>
     Effect.gen(function* () {
       const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
@@ -639,6 +713,7 @@ describe("Operator", () => {
         id: AttemptId.make("later-failure"),
         number: AttemptNumber.make(2),
       });
+      let dismissedFailure: ReturnType<typeof attentionKey> | undefined;
       for (const [attempts, resolved, needsAttention] of [
         [[failed], Option.none<AttemptId>(), true],
         [[failed], Option.some(failed.id), false],
@@ -672,6 +747,21 @@ describe("Operator", () => {
           assert.strictEqual(detail.run.canResolveFailure, needsAttention);
           assert.strictEqual(detail.run.canRetry, true);
           assert.strictEqual(detail.run.state, "Failed");
+          const failureNeed = overview.needsYou.find((need) => need._tag === "RunFailureNeed");
+          if (failureNeed !== undefined) {
+            if (dismissedFailure !== undefined)
+              assert.deepStrictEqual(partitionNeeds([failureNeed], [dismissedFailure]).needsYou, [
+                failureNeed,
+              ]);
+            yield* operator.dismissNeed(instance, attentionKey(failureNeed));
+            dismissedFailure = attentionKey(failureNeed);
+            const dismissed = yield* operator.overview(instance);
+            assert(!dismissed.needsYou.some((need) => need._tag === "RunFailureNeed"));
+            assert.strictEqual(
+              (yield* operator.detail(instance, runId)).run.canResolveFailure,
+              true,
+            );
+          }
         }).pipe(Effect.provide(testLayer(approved, moved, reads, revision, current)));
       }
     }),
@@ -1424,6 +1514,34 @@ describe("Operator", () => {
             lane.items.some((card) => card.itemKey === itemKey && card.needsYou),
           ),
         );
+        yield* operator.dismissNeed(instance, attentionKey(need));
+        const dismissed = yield* operator.overview(instance);
+        assert(!dismissed.needsYou.some((entry) => entry.id === need.id));
+        assert(dismissed.dismissedNeeds.some((entry) => entry.id === need.id));
+        assert.deepStrictEqual(yield* Ref.get(asks), [ask]);
+        assert.deepStrictEqual(yield* Ref.get(answered), []);
+        const nextRound = new CycleBudgetAsk({
+          ...ask,
+          counts: [
+            new LoopCycleCount({
+              loop: loopName,
+              admitted: CycleCount.make(4),
+              completed: CycleCount.make(3),
+            }),
+          ],
+        });
+        yield* Ref.set(asks, [nextRound]);
+        yield* Ref.update(
+          revision,
+          Option.map((value) => ProjectionRevision.make(value + 1)),
+        );
+        const changed = yield* operator.overview(instance);
+        const changedNeed = changed.needsYou.find((entry) => entry.id === need.id);
+        assert(changedNeed !== undefined);
+        assert(!changed.dismissedNeeds.some((entry) => entry.id === need.id));
+        yield* operator.dismissNeed(instance, attentionKey(changedNeed));
+        yield* operator.undoDismissNeed(attentionKey(changedNeed));
+        assert((yield* operator.overview(instance)).needsYou.some((entry) => entry.id === need.id));
         yield* operator.resetCycleBudget(ask.id);
         const answers = yield* Ref.get(answered);
         assert.strictEqual(answers[0]?.id, ask.id);

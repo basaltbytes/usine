@@ -1,3 +1,4 @@
+import { AttentionAcknowledgements } from "@usine/engine/attention";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NodeServices } from "@effect/platform-node";
@@ -151,6 +152,7 @@ const start = Effect.fnUntraced(function* (
       error._tag,
       Context.get(observationContext, OperatorObservation),
       Context.get(observationContext, OperatorConfiguration),
+      Context.get(observationContext, AttentionAcknowledgements),
     );
     return yield* serve({ backend, webRoot, port, origin, url, openSetupPage: true });
   }

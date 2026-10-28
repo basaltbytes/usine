@@ -88,3 +88,5 @@ Run `usine stop`, press Ctrl+C, or send `SIGTERM` once to stop polling and drain
 To clear a handled failure, select **Mark resolved** in the run drawer, opened from Needs attention or run history. Resolution survives restarts and keeps the failed outcome, transcript, and retry. A later failed attempt asks for attention again. After a question the button reads **Mark answered**; after a question or blocker, the loop then acts on the item's newest state.
 
 Failure resolution through `POST /api/runs/:runId/resolve-failure` records the current instance's operator login and resolution time. The next `GET /api/statistics/runs` reflects the resolution, including when the previous response was cached.
+
+Every Needs attention entry has **Dismiss**. The overview's collapsed **Dismissed** section lists acknowledged entries with **Undo**. Dismissals persist across refreshes and restarts, and a changed entry appears again. Attention counts and badges exclude dismissed entries. Dismissing an approval, failure, or cycle-budget ask leaves its state and actions available on the run and task pages and board cards. Dismiss and Undo also work while GitHub credentials need setup.

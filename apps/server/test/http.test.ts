@@ -1,3 +1,8 @@
+import {
+  AttentionKey,
+  AttentionRevision,
+  type AttentionAcknowledgement,
+} from "@usine/engine/attention";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { OperatorMessage, ParentTarget } from "@usine/core/attempt/channel";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
@@ -93,7 +98,7 @@ import {
   ReloadPreflightError,
   RestartRequiredError,
 } from "@usine/orchestrator/current-instance";
-import { Effect, Layer, Option, Schema } from "effect";
+import { DateTime, Effect, Layer, Option, Schema } from "effect";
 import { HttpRouter } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
 import { afterAll, assert, describe, it } from "vitest";
@@ -381,11 +386,26 @@ const reloaded = new InstanceReload({
   ],
   invalidAgents: [],
 });
+const dismissed: Array<AttentionAcknowledgement> = [];
 const backend = needsSetupBackendLayer(
   { get: Effect.succeed(instance), reload: Effect.succeed(reloaded) },
   "SecretsFileError",
   observation,
   configuration,
+  {
+    list: () => Effect.succeed(dismissed),
+    dismiss: (acknowledgement) =>
+      Effect.sync(() => {
+        dismissed.push(acknowledgement);
+      }),
+    undo: (key) =>
+      Effect.sync(() => {
+        const index = dismissed.findIndex(
+          (entry) => entry.id === key.id && entry.revision === key.revision,
+        );
+        if (index >= 0) dismissed.splice(index, 1);
+      }),
+  },
 );
 const app = HttpRouter.toWebHandler(
   apiRoutes(Option.none()).pipe(HttpRouter.provideRequest(backend)),
@@ -397,6 +417,32 @@ const app = HttpRouter.toWebHandler(
 afterAll(() => app.dispose());
 
 describe("operator HTTP API", () => {
+  it("records dismissals and undo during setup without accepting client-supplied operator identity", async () => {
+    const payload = { id: "config-file:loop", revision: "invalid agent" };
+    const send = (path: string, body: Schema.Json) =>
+      app.handler(
+        new Request(`http://localhost/api/attention/${path}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+      );
+    const invalid = await send("dismiss", { ...payload, dismissedBy: "someone-else" });
+    assert.strictEqual(invalid.status, 400);
+    assert.strictEqual(dismissed.length, 0);
+    const response = await send("dismiss", payload);
+    assert.strictEqual(response.status, 200);
+    const saved = dismissed[0];
+    assert(saved !== undefined);
+    assert.strictEqual(saved.id, payload.id);
+    assert.strictEqual(saved.revision, payload.revision);
+    assert.deepStrictEqual(saved.dismissedBy, instance.config.operator);
+    assert(DateTime.toEpochMillis(saved.dismissedAt) > 0);
+    const undo = await send("undo", payload);
+    assert.strictEqual(undo.status, 200);
+    assert.strictEqual(dismissed.length, 0);
+  });
+
   it("preserves durable observation in needs-setup mode while intervention remains unavailable", async () => {
     const response = await app.handler(new Request("http://localhost/api/overview"));
     assert.strictEqual(response.status, 200);
@@ -608,6 +654,8 @@ describe("operator HTTP API", () => {
         Effect.fail(
           new RunOperationRejectedError({ runId: id, operation: "approve", state: "Running" }),
         ),
+      dismissNeed: () => Effect.void,
+      undoDismissNeed: () => Effect.void,
       resetCycleBudget: () => Effect.void,
       retry: (id: RunId) =>
         Effect.fail(
@@ -907,6 +955,8 @@ describe("operator HTTP API", () => {
           : Effect.fail(
               new RunOperationRejectedError({ runId: id, operation: "approve", state: "Running" }),
             ),
+      dismissNeed: (key) => record(`dismiss:${key.id}:${key.revision}`),
+      undoDismissNeed: (key) => record(`undo:${key.id}:${key.revision}`),
       resetCycleBudget: (id) =>
         id === "current-ask"
           ? record(`reset:${id}`)
@@ -978,6 +1028,17 @@ describe("operator HTTP API", () => {
           }),
           task,
         );
+        for (const action of ["dismissNeed", "undoDismissNeed"] as const) {
+          assert.deepStrictEqual(
+            yield* client[action]({
+              payload: new AttentionKey({
+                id: "finding",
+                revision: AttentionRevision.make("revision"),
+              }),
+            }),
+            { ok: true },
+          );
+        }
         assert.deepStrictEqual(
           yield* client.resetCycleBudget({
             payload: { askId: CycleBudgetAskId.make("current-ask") },
@@ -1024,6 +1085,8 @@ describe("operator HTTP API", () => {
           '2 attempts are still running on worker "local". Discard its leftovers after they end.',
         );
         assert.deepStrictEqual(interventions, [
+          "dismiss:finding:revision",
+          "undo:finding:revision",
           "reset:current-ask",
           `resolve:${runId}:attempt/1`,
           `approve:${runId}`,

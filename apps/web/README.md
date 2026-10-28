@@ -12,6 +12,8 @@ A mark is the item's GitHub icon and number in GitHub's state colour: an issue i
 
 Peach-tinted entries in two columns at the top of every screen except the overview, where they're the first block; absent when empty. Each entry has a title, project, detail line, and actions; an entry about a run opens its drawer. On the run page, entries take one line each, with the full detail in a tooltip. The sidebar shows the total beside **Overview** and a count per project.
 
+Every entry has **Dismiss**. It leaves attention lists, counts, and badges immediately after the acknowledgement saves. The overview's **Dismissed** section is collapsed by default and offers **Undo** for each acknowledged entry. A changed finding, count, or failed attempt appears again. Run drawers, run pages, and board cards retain the underlying states and actions: dismissal does not approve a run, resolve a failure, or reset a cycle budget.
+
 Entries:
 
 - **Approval**: the loop and the task's name, with **Approve** and **Cancel run**. While any screen sends an action on the run, the buttons are disabled and name it, such as `Approving…`. The entry leaves when the action succeeds, before the overview refreshes. A refusal because the run changed state, for example after approval from the drawer, shows only in the drawer and run page; the entry leaves with the refresh.

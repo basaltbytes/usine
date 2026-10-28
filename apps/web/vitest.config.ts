@@ -66,6 +66,19 @@ export default mergeConfig(
                 executablePath === undefined ? {} : { launchOptions: { executablePath } },
               ),
               commands: {
+                attentionResponses: async ({ page }, before: string, after: string) => {
+                  let dismissed = false;
+                  await page.route("**/api/overview", (route) =>
+                    route.fulfill({
+                      contentType: "application/json",
+                      body: dismissed ? after : before,
+                    }),
+                  );
+                  await page.route("**/api/attention/*", (route) => {
+                    dismissed = route.request().url().endsWith("/dismiss");
+                    return route.fulfill({ contentType: "application/json", body: '{"ok":true}' });
+                  });
+                },
                 failureResolutionResponses: async (
                   { page },
                   before: string,
