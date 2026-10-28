@@ -131,7 +131,7 @@ describe("configuration domain without layers", () => {
         first.configuration.number,
         [
           new ConfigurationChange({
-            ...worker,
+            key: worker.key,
             before: worker.after,
             after: Option.some({ name: "local", kind: "local" }),
           }),
@@ -165,7 +165,14 @@ for (const [name, layer] of adapters)
         const other = original.filter(({ key }) => key.kind !== "worker");
         const [settings, ...rest] = other;
         if (settings === undefined) return yield* Effect.die("fixture has no settings");
-        const reordered = [settings, ...workers.toReversed(), ...rest];
+        const reordered = [settings, ...[...workers].reverse(), ...rest];
+        const added = new ConfigurationEntity({
+          key: new ConfigurationEntityKey({
+            kind: "worker",
+            identifier: ConfigurationEntityId.make("new-preferred"),
+          }),
+          value: { name: "new-preferred", kind: "local", max_concurrent_attempts: 1 },
+        });
         for (const candidate of [
           reordered,
           original.map((entity) =>
@@ -179,6 +186,8 @@ for (const [name, layer] of adapters)
                 })
               : entity,
           ),
+          [settings, added, ...[...workers].reverse(), ...rest],
+          original,
         ]) {
           const current = yield* store.read;
           const changes = configurationDiff(
@@ -192,7 +201,7 @@ for (const [name, layer] of adapters)
           expect(configurationDiff(candidate, candidate)).toEqual([]);
         }
         let replayed = Configuration.empty;
-        for (const revision of yield* store.changes(zero).pipe(Stream.take(3), Stream.runCollect)) {
+        for (const revision of yield* store.changes(zero).pipe(Stream.take(5), Stream.runCollect)) {
           replayed = (yield* commit(parser, replayed, replayed.number, revision.changes, revision))
             .configuration;
           if (revision.number === 2)
@@ -201,6 +210,52 @@ for (const [name, layer] of adapters)
             ).toEqual(Option.some(["fallback", "local"]));
         }
         expect(replayed).toEqual(yield* store.read);
+      }).pipe(Effect.provide(layer)),
+    );
+
+    it.effect("rejects invalid ordering without writing a revision", () =>
+      Effect.gen(function* () {
+        const store = yield* ConfigurationStore;
+        yield* initialize;
+        const current = yield* store.read;
+        const entities = configurationEntities(yield* fixture);
+        const workers = entities.filter(({ key }) => key.kind === "worker");
+        for (const changes of [
+          workers.map(
+            ({ key, value }) =>
+              new ConfigurationChange({
+                key,
+                before: Option.some(value),
+                after: Option.some(value),
+                position: 1,
+              }),
+          ),
+          workers.map(
+            ({ key, value }) =>
+              new ConfigurationChange({
+                key,
+                before: Option.some(value),
+                after: Option.some(value),
+                position: entities.length,
+              }),
+          ),
+          workers.map(
+            ({ key, value }) =>
+              new ConfigurationChange({
+                key,
+                before: Option.some(value),
+                after: Option.none(),
+                position: 1,
+              }),
+          ),
+        ]) {
+          const failure = yield* store
+            .commit({ expected: current.number, changes, ...metadata })
+            .pipe(Effect.flip);
+          expect(failure._tag).toBe("ConfigurationInvalid");
+          expect(yield* store.read).toEqual(current);
+          expect(yield* store.list(Option.none())).toHaveLength(1);
+        }
       }).pipe(Effect.provide(layer)),
     );
 

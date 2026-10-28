@@ -51,13 +51,11 @@ export const configurationDiff = (
     const moved = value !== undefined && old?.position !== value.position;
     if (identity === undefined || (!moved && Equal.equals(old?.entry.value, value?.entry.value)))
       return [];
-    return [
-      new ConfigurationChange({
-        key: identity.entry.key,
-        before: Option.fromUndefinedOr(old?.entry.value),
-        after: Option.fromUndefinedOr(value?.entry.value),
-        ...(moved ? { position: value.position } : {}),
-      }),
-    ];
+    const change = {
+      key: identity.entry.key,
+      before: Option.fromUndefinedOr(old?.entry.value),
+      after: Option.fromUndefinedOr(value?.entry.value),
+    };
+    return [new ConfigurationChange(moved ? { ...change, position: value.position } : change)];
   });
 };
