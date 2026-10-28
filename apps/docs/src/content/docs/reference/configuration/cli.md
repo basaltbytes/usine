@@ -12,7 +12,7 @@ usine up [--port <port>] [--origin <url>] [--log-level <level>] [--allow-volatil
 usine status
 usine stop [--timeout <seconds>] [--force]
 usine restart [--timeout <seconds>] [--force]
-usine upgrade [<version>] [--check] [--timeout <seconds>] [--force]
+usine upgrade [<version> | --channel <latest|next>] [--check] [--timeout <seconds>] [--force]
 usine backup <path>
 usine export-run <runId> [--output <path>]
 usine --help
@@ -200,8 +200,13 @@ The command changes nothing and exits with status 1 in these cases:
 
 ## `usine upgrade [<version>]`
 
+For a global npm installation managed by systemd, this command requests an upgrade from `settings.upgrade_channel`. It waits for running attempts by default; `--force` selects immediate restart and reattachment. The separate upgrade helper restores the previous package version if installation or the new API fails. The command exits after acceptance; follow Settings or the helper journal for the outcome. Install the helper as described in the [server guide](/guides/run-the-orchestrator-on-a-server/#upgrade-the-server).
+
+For an installation pinned in the instance folder, the following pin upgrade behavior applies.
+
 | Flag | Value | Default | Description |
 | --- | --- | --- | --- |
+| `--channel` | `latest` or `next` | configured channel for systemd | Selects an npm dist-tag. |
 | `<version>` | a version, range, or dist-tag | `latest` | The `@usine/server` version to pin. |
 | `--check` | none | off | Prints the running, pinned, and available versions, and changes nothing. |
 | `--timeout <seconds>`, `--force` | | | As for `usine restart`. |
@@ -220,7 +225,7 @@ If the new version exits before it listens, for example because a migration fail
 
 The command changes nothing in these cases:
 
-- The orchestrator runs from outside the instance's `node_modules`, such as a checkout or a global install. The command exits with status 1 and says how to update that engine. `--check` still prints the versions.
+- The orchestrator runs from outside the instance's `node_modules`, except for a global npm installation managed by systemd. The command exits with status 1 and says how to update that engine. `--check` still prints the versions.
 - `package.json` is missing, or doesn't pin `@usine/server` to a registry version, for example because it links a local folder. The command exits with status 1.
 - The pin already has the version. If the orchestrator runs another version, the command suggests `usine restart`.
 - Without `<version>`, the `latest` version is older than the pin.

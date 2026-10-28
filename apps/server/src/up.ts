@@ -1,3 +1,5 @@
+import { ServerUpgrades } from "./upgrade/control.ts";
+import { systemUpgradePlatform } from "./upgrade/platform.ts";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NodeServices } from "@effect/platform-node";
@@ -74,13 +76,21 @@ const serve = Effect.fnUntraced(function* (options: {
   readonly origin: Option.Option<UiOrigin>;
   readonly url: string;
   readonly openSetupPage: boolean;
+  readonly upgrades: ServerUpgrades["Service"];
 }) {
   yield* Layer.build(
-    serverLayer(options.backend, options.webRoot, options.port, options.origin),
+    serverLayer(
+      options.backend,
+      options.webRoot,
+      options.port,
+      options.origin,
+      Layer.succeed(ServerUpgrades, options.upgrades),
+    ),
   ).pipe(
     Effect.mapError((error) => serverStartError(options.port, error)),
     Effect.catchTag("PortInUseError", ({ port }) => portInUse(port)),
   );
+  yield* options.upgrades.polling.pipe(Effect.forkScoped);
   yield* Console.log(
     options.openSetupPage
       ? `usine is running in setup mode at ${options.url}`
@@ -129,6 +139,7 @@ const start = Effect.fnUntraced(function* (
   instances: CurrentInstance["Service"],
   port: Port,
   origin: Option.Option<UiOrigin>,
+  record: InstanceRecord,
 ) {
   yield* reloadOnHangup(instances);
   const credentials = yield* loadLocalCredentials(directory).pipe(
@@ -152,7 +163,23 @@ const start = Effect.fnUntraced(function* (
       Context.get(observationContext, OperatorObservation),
       Context.get(observationContext, OperatorConfiguration),
     );
-    return yield* serve({ backend, webRoot, port, origin, url, openSetupPage: true });
+    const upgradeContext = yield* Layer.build(
+      ServerUpgrades.layer({
+        running: record.version,
+        settings: Effect.map(instances.get, ({ config }) => config.settings),
+        platform: Option.none(),
+        drain: Effect.void,
+      }),
+    );
+    return yield* serve({
+      backend,
+      webRoot,
+      port,
+      origin,
+      url,
+      openSetupPage: true,
+      upgrades: Context.get(upgradeContext, ServerUpgrades),
+    });
   }
 
   const shutdown = yield* Deferred.make<void>();
@@ -167,6 +194,17 @@ const start = Effect.fnUntraced(function* (
     const operator = Context.get(context, Operator);
     const orchestrator = Context.get(context, Orchestrator);
     const engine = Context.get(context, RunEngine);
+    const upgradeContext = yield* Layer.build(
+      ServerUpgrades.layer({
+        running: record.version,
+        settings: Effect.map(instances.get, ({ config }) => config.settings),
+        platform: yield* systemUpgradePlatform(directory, record).pipe(
+          Effect.provide(NodeServices.layer),
+        ),
+        drain: engine.drain(),
+      }),
+    );
+    const upgrades = Context.get(upgradeContext, ServerUpgrades);
     return {
       drain: engine.drain(),
       running: Effect.raceFirst(
@@ -181,6 +219,7 @@ const start = Effect.fnUntraced(function* (
           origin,
           url,
           openSetupPage: false,
+          upgrades,
         }),
         orchestrator.run.pipe(
           Effect.tapCause((cause) =>
@@ -235,7 +274,7 @@ export const up = (command: UpCommand) =>
       const tracer = yield* Layer.build(tracingLayer(config.tracing)).pipe(
         Effect.provide(NodeServices.layer),
       );
-      return yield* start(directory, instanceId, instances, port, origin).pipe(
+      return yield* start(directory, instanceId, instances, port, origin, record).pipe(
         Effect.provideContext(tracer),
       );
     }),

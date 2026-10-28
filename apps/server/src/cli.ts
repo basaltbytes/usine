@@ -1,3 +1,4 @@
+import { UpgradeChannel } from "@usine/core/upgrade";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { resolve, sep } from "node:path";
@@ -59,7 +60,7 @@ export const CLI_USAGE = `Usage:
   usine status
   usine stop [--timeout <seconds>] [--force]
   usine restart [--timeout <seconds>] [--force]
-  usine upgrade [<version>] [--check] [--timeout <seconds>] [--force]
+  usine upgrade [<version> | --channel <latest|next>] [--check] [--timeout <seconds>] [--force]
   usine backup <path>
   usine export-run <runId> [--output <path>]
   usine --help
@@ -390,6 +391,11 @@ const lifecycleArguments = (
         index += 1;
       } else if (arg.startsWith("--timeout=")) {
         timeout = Option.some(arg.slice("--timeout=".length));
+      } else if (arg === "--channel" && allowCheck) {
+        const channel = Schema.decodeUnknownOption(UpgradeChannel)(args[index + 1]);
+        if (Option.isNone(channel)) return yield* usageError();
+        operands.push(channel.value);
+        index += 1;
       } else if (arg === "--force") {
         force = true;
       } else if (arg === "--check" && allowCheck) {

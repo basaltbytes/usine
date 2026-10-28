@@ -1,3 +1,5 @@
+import { UpgradeRequest, UpgradeView } from "./upgrade.ts";
+export { UpgradeRequest, UpgradeView } from "./upgrade.ts";
 import { FileStage, InstancePath } from "@usine/config/file";
 import { AttemptId } from "@usine/core/attempt";
 import { AgentName } from "@usine/core/agent";
@@ -29,6 +31,7 @@ import { DeskView } from "./desk.ts";
 import { RunStatisticsView, StatisticsView, StatisticsWindow } from "./statistics/view.ts";
 
 const errorStatuses = {
+  UpgradeError: 409,
   SchemaError: 400,
   InvalidRequestError: 400,
   CrossSiteRequestError: 403,
@@ -272,6 +275,12 @@ const statisticsQuery = Schema.Struct({
 export const OperatorApi = HttpApi.make("OperatorApi").add(
   HttpApiGroup.make("operator")
     .add(
+      HttpApiEndpoint.get("upgradeStatus", "/api/upgrade", { success: UpgradeView }),
+      HttpApiEndpoint.get("serverVersion", "/api/version", { success: Schema.String }),
+      HttpApiEndpoint.post("requestUpgrade", "/api/upgrade", {
+        payload: UpgradeRequest,
+        success: acknowledged,
+      }),
       HttpApiEndpoint.get("overview", "/api/overview", { success: FactoryOverview }),
       HttpApiEndpoint.get("agents", "/api/agents", { success: Schema.Array(AgentName) }),
       HttpApiEndpoint.post("editAndRetry", "/api/runs/:runId/edit-and-retry", {

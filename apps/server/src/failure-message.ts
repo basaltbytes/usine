@@ -8,7 +8,7 @@ import type { restart } from "./restart.ts";
 import type { status } from "./status.ts";
 import type { LifecycleCommandName, stop } from "./stop.ts";
 import type { up } from "./up.ts";
-import type { UpgradeFailedError, upgrade } from "./upgrade.ts";
+import type { UpgradeFailedError, upgrade } from "./upgrade/upgrade.ts";
 
 /** The expected failures of CLI commands. Defects aren't included and still crash. */
 export type CliFailure =
@@ -164,6 +164,7 @@ const stillRuns = (failure: UpgradeFailedError): string =>
  */
 export const failureMessage = (failure: CliFailure): string =>
   Match.valueTags(failure, {
+    UpgradeError: ({ message }) => message,
     CliUsageError: ({ message }) => message,
     CliVersionError: ({ cause }) =>
       `Could not read the installed @usine/server version${because(cause)}. Reinstall @usine/server.`,

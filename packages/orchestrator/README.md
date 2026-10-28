@@ -271,3 +271,5 @@ pnpm --filter @usine/orchestrator test:integration:agent
 ```
 
 Cleanup removes its kick and result comments.
+
+The operator HTTP contract includes `GET /api/upgrade`, `POST /api/upgrade`, and `GET /api/version`. The upgrade view reports the channel, running and available versions, progress, and rollback outcome. A request selects `idle` or `now`, with an optional exact version. The server supplies the systemd implementation; the contract remains platform-free.

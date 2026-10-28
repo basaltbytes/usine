@@ -135,12 +135,16 @@ const groups = (
   ],
 ];
 
-type SettingsPageProps = { readonly configuration: ConfigurationView };
+type SettingsPageProps = {
+  readonly configuration: ConfigurationView;
+  readonly children?: ReactNode;
+};
 
 /** Renders the `settings`, `operator`, and `tracing` keys of `usine.yaml` and the webhooks mode, with defaults applied. */
-export const SettingsPage = ({ configuration }: SettingsPageProps) => (
+export const SettingsPage = ({ configuration, children }: SettingsPageProps) => (
   <ConfigurationPage title="Settings">
     <div className="flex max-w-4xl flex-col gap-8 pt-2">
+      {children}
       {groups(configuration.settings).map(([group, settings]) => (
         <section key={group} className="flex flex-col gap-3">
           <h2 className="text-md font-semibold">{group}</h2>

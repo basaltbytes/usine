@@ -18,17 +18,17 @@ import { InstanceDirectory } from "@usine/core/instance";
 import { Duration, Effect, Layer, Option, Schema } from "effect";
 import { FetchHttpClient, type HttpClient } from "effect/http";
 import { afterEach, assert, beforeEach, describe, it } from "vitest";
-import { LifecycleOptions, Port, SERVER_HOST, UpgradeCommand } from "../src/cli.ts";
-import { CommandError, runCommand } from "../src/command.ts";
-import { startDetached } from "../src/detach.ts";
-import { InstanceLaunch } from "../src/instance/record.ts";
-import { probeInstance } from "../src/instance/state.ts";
-import { PackageLookupError, resolveVersion } from "../src/registry.ts";
-import { stop } from "../src/stop.ts";
-import { upgrade } from "../src/upgrade.ts";
+import { LifecycleOptions, Port, SERVER_HOST, UpgradeCommand } from "../../src/cli.ts";
+import { CommandError, runCommand } from "../../src/command.ts";
+import { startDetached } from "../../src/detach.ts";
+import { InstanceLaunch } from "../../src/instance/record.ts";
+import { probeInstance } from "../../src/instance/state.ts";
+import { PackageLookupError, resolveVersion } from "../../src/registry.ts";
+import { stop } from "../../src/stop.ts";
+import { upgrade } from "../../src/upgrade/upgrade.ts";
 
 const SCENARIO_TIMEOUT_MS = 60_000;
-const FIXTURE = fileURLToPath(new URL("./fixtures/instance.mjs", import.meta.url));
+const FIXTURE = fileURLToPath(new URL("../fixtures/instance.mjs", import.meta.url));
 
 // Answers `npm view` with version 2.0.0 and no dependencies, except for 9.9.9, which it doesn't
 // have. Records `npm install`.

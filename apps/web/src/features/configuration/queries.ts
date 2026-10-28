@@ -22,3 +22,10 @@ export const usePauseLoop = () => {
       ]),
   });
 };
+
+export const upgradeQuery = () => ({
+  queryKey: ["upgrade"] as const,
+  queryFn: () => api((client) => client.upgradeStatus({})),
+  refetchInterval: CONFIGURATION_REFRESH_MS,
+  retry: 3,
+});

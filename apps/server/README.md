@@ -88,3 +88,11 @@ Run `usine stop`, press Ctrl+C, or send `SIGTERM` once to stop polling and drain
 To clear a handled failure, select **Mark resolved** in the run drawer, opened from Needs attention or run history. Resolution survives restarts and keeps the failed outcome, transcript, and retry. A later failed attempt asks for attention again. After a question the button reads **Mark answered**; after a question or blocker, the loop then acts on the item's newest state.
 
 Failure resolution through `POST /api/runs/:runId/resolve-failure` records the current instance's operator login and resolution time. The next `GET /api/statistics/runs` reflects the resolution, including when the previous response was cached.
+
+## Server upgrades
+
+A global npm installation managed by systemd checks for upgrades every five minutes. Configure `settings.upgrade_channel: latest` or `next` and `settings.upgrade_mode: off`, `propose`, or `automatic` in `usine.yaml`. The defaults are `latest` and `propose`.
+
+In **Configuration → Settings**, select **Upgrade when idle** to stop admitting attempts and wait for active attempts to finish, or **Upgrade now** to restart and reattach running attempts. `usine upgrade [<version> | --channel <latest|next>]` requests the same operation; `--force` selects immediate restart, and `--check` only reports versions. The CLI prints when the request is accepted; Settings and the helper journal report its outcome.
+
+Install the helper service and polkit rule in the [server guide](https://docs.usine.dev/guides/run-the-orchestrator-on-a-server/) before using app upgrades. The independent helper installs into the same npm prefix and restores the previous version if installation or the new operator API fails. Its result is in `.usine/upgrade/result.json`; inspect `journalctl -u usine-upgrade.service` for progress. A rolled-back version is not retried automatically. Rollback restores packages; maintain database backups for releases with incompatible storage changes.

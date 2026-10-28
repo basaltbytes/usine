@@ -111,6 +111,9 @@ describe("usine CLI", () => {
     assert(upgrade._tag === "UpgradeCommand");
     assert.deepStrictEqual(upgrade.version, Option.some("0.4.0"));
     assert.isTrue(upgrade.check);
+    const next = await parse(["upgrade", "--channel", "next"]);
+    assert(next._tag === "UpgradeCommand");
+    assert.deepStrictEqual(next.version, Option.some("next"));
     assert.strictEqual(Duration.toSeconds(upgrade.options.timeout), 5);
     assert(latest._tag === "UpgradeCommand");
     assert.deepStrictEqual(latest.version, Option.none());

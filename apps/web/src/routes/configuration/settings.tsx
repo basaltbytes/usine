@@ -1,11 +1,19 @@
+import { Upgrades } from "~/features/configuration/components/upgrades";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { configurationQuery } from "~/features/configuration/queries";
+import { configurationQuery, upgradeQuery } from "~/features/configuration/queries";
 import { SettingsPage } from "~/features/configuration/settings.page";
 
 const Settings = () => {
   const { data } = useSuspenseQuery(configurationQuery());
-  return <SettingsPage configuration={data} />;
+  return (
+    <SettingsPage configuration={data}>
+      <Upgrades />
+    </SettingsPage>
+  );
 };
 
-export const Route = createFileRoute("/configuration/settings")({ component: Settings });
+export const Route = createFileRoute("/configuration/settings")({
+  loader: ({ context }) => context.queryClient.ensureQueryData(upgradeQuery()),
+  component: Settings,
+});

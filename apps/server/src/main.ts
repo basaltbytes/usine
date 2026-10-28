@@ -82,7 +82,7 @@ const runCommand = Effect.fnUntraced(function* (directory: InstanceDirectory) {
       ),
     UpgradeCommand: (upgradeCommand) =>
       Effect.flatMap(
-        Effect.promise(() => import("./upgrade.ts")),
+        Effect.promise(() => import("./upgrade/upgrade.ts")),
         ({ upgrade }) => upgrade(directory, upgradeCommand),
       ),
   });
