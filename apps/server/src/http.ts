@@ -1,9 +1,10 @@
+import { fromConfiguration, fromConfigurationRevision } from "./configuration/http.ts";
 import { type UpgradeError, ServerUpgrades } from "./upgrade/control.ts";
 import { createServer } from "node:http";
 import { extname, resolve, sep } from "node:path";
 import { NodeHttpServer } from "@effect/platform-node";
 import { RepositoryName } from "@usine/core/repository";
-import { BoardMove } from "@usine/orchestrator/operator";
+import { type ConfigurationEditor, BoardMove } from "@usine/orchestrator/operator";
 import {
   OperatorApi,
   OperatorHttpError,
@@ -273,6 +274,24 @@ const handlers = HttpApiBuilder.group(OperatorApi, "operator", (routes) =>
         return yield* fromBackend((backend) => backend.task(repository, params.item));
       }),
     )
+    .handle("configurationRevisions", ({ query }) =>
+      fromConfiguration((editor) => editor.list(query)),
+    )
+    .handle("configurationRevision", ({ params }) =>
+      fromConfigurationRevision((editor) => editor.revision(params.number)),
+    )
+    .handle("configurationEntity", ({ params }) =>
+      fromConfiguration((editor) => editor.entity(params)),
+    )
+    .handle("replaceConfigurationEntity", ({ params, payload }) =>
+      fromConfigurationRevision((editor) => editor.replace(params, payload)),
+    )
+    .handle("deleteConfigurationEntity", ({ params, payload }) =>
+      fromConfigurationRevision((editor) => editor.remove(params, payload)),
+    )
+    .handle("revertConfigurationRevision", ({ params, payload }) =>
+      fromConfigurationRevision((editor) => editor.revert(params.number, payload)),
+    )
     .handle("configuration", () => fromBackend((backend) => backend.configuration))
     .handle("desk", () => fromBackend((backend) => backend.desk))
     .handle("statistics", ({ query }) => fromBackend((backend) => backend.statistics(query.window)))
@@ -346,10 +365,10 @@ export const serverLayer = (
   webRoot: string,
   port: Port,
   origin: Option.Option<UiOrigin>,
-  upgrades: Layer.Layer<ServerUpgrades> | Layer.Layer<never> = Layer.empty,
+  services: Layer.Layer<ServerUpgrades | ConfigurationEditor> | Layer.Layer<never> = Layer.empty,
 ) => {
   const routes = Layer.mergeAll(apiRoutes(origin), staticRoutes(webRoot)).pipe(
-    HttpRouter.provideRequest(Layer.merge(backend, upgrades)),
+    HttpRouter.provideRequest(Layer.merge(backend, services)),
   );
   return HttpRouter.serve(routes).pipe(
     Layer.provide(NodeHttpServer.layer(createServer, { host: SERVER_HOST, port })),

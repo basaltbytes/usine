@@ -51,8 +51,11 @@ export {
   ConfigurationInvalid,
   ConfigurationRevision,
   ConfigurationRevisionNumber,
+  ConfigurationRevertBlocked,
   ConfigurationStoreError,
   StaleRevision,
 } from "./model.ts";
 export { commit, validateConfiguration } from "./commit.ts";
 export { configurationDiff, configurationEntities } from "./entities.ts";
+
+export { revertConfiguration } from "./revert.ts";

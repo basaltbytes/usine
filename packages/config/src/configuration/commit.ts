@@ -74,7 +74,36 @@ export const validateConfiguration = (
         }),
       )
       .pipe(Effect.result);
-    if (Result.isFailure(config)) problems.push(config.failure);
+    if (Result.isFailure(config)) {
+      const error = config.failure;
+      if (error.details === undefined) problems.push(error);
+      else
+        for (const detail of error.details) {
+          const [group, index, ...path] = detail.path;
+          const kind =
+            group === "workers"
+              ? "worker"
+              : group === "repos"
+                ? "repository"
+                : group === "labels"
+                  ? "label"
+                  : "settings";
+          const entity =
+            kind === "settings"
+              ? settings
+              : entities
+                  .filter(({ key }) => key.kind === kind)
+                  .find((_, position) => position === index);
+          problems.push(
+            new ConfigFileError({
+              ...error,
+              file: InstancePath.make(entity?.key.key ?? "settings:instance"),
+              message: detail.message,
+              details: [{ ...detail, path: kind === "settings" ? detail.path : path }],
+            }),
+          );
+        }
+    }
 
     const agents: Array<AgentFile> = [];
     const loops: Array<LoopFile> = [];
@@ -96,7 +125,7 @@ export const validateConfiguration = (
               errors: "all",
               onExcessProperty: "error",
             }).pipe(
-              Effect.mapError((e) => problem(file, e.message)),
+              Effect.mapError((e) => ConfigFileError.fromSchema(file, e)),
               Effect.flatMap((value) => parser.parseAgentFile(file, formatAgent(value))),
               Effect.tap((value) => Effect.sync(() => agents.push(value))),
               Effect.asVoid,
@@ -105,7 +134,7 @@ export const validateConfiguration = (
               errors: "all",
               onExcessProperty: "error",
             }).pipe(
-              Effect.mapError((e) => problem(file, e.message)),
+              Effect.mapError((e) => ConfigFileError.fromSchema(file, e)),
               Effect.flatMap((value) => parser.parseLoopFile(file, formatLoop(value))),
               Effect.tap((value) => Effect.sync(() => loops.push(value))),
               Effect.asVoid,

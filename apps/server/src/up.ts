@@ -13,7 +13,12 @@ import { RunEngine, RunEngineShutdown } from "@usine/engine/engine";
 import { GitHubCredentials } from "@usine/github/github-app";
 import { loadLocalCredentials } from "@usine/github/local-secrets";
 import { CurrentInstance } from "@usine/orchestrator/current-instance";
-import { Operator, OperatorConfiguration, OperatorObservation } from "@usine/orchestrator/operator";
+import {
+  ConfigurationEditor,
+  Operator,
+  OperatorConfiguration,
+  OperatorObservation,
+} from "@usine/orchestrator/operator";
 import { Orchestrator } from "@usine/orchestrator/orchestrator";
 import { operatorObservationLayer, runtimeLayer } from "@usine/orchestrator/runtime";
 import {
@@ -64,6 +69,7 @@ const serve = Effect.fnUntraced(function* (options: {
   readonly url: string;
   readonly openSetupPage: boolean;
   readonly upgrades: ServerUpgrades["Service"];
+  readonly configurationEditor: ConfigurationEditor["Service"];
 }) {
   yield* Layer.build(
     serverLayer(
@@ -71,7 +77,10 @@ const serve = Effect.fnUntraced(function* (options: {
       options.webRoot,
       options.port,
       options.origin,
-      Layer.succeed(ServerUpgrades, options.upgrades),
+      Layer.merge(
+        Layer.succeed(ServerUpgrades, options.upgrades),
+        Layer.succeed(ConfigurationEditor, options.configurationEditor),
+      ),
     ),
   ).pipe(
     Effect.mapError((error) => serverStartError(options.port, error)),
@@ -128,6 +137,7 @@ const start = Effect.fnUntraced(function* (
   origin: Option.Option<UiOrigin>,
   record: InstanceRecord,
   database: Layer.Layer<RunDatabase, EnginePersistenceError>,
+  configurationEditor: ConfigurationEditor["Service"],
 ) {
   yield* reloadOnHangup(instances);
   const credentials = yield* loadLocalCredentials(directory).pipe(
@@ -162,6 +172,7 @@ const start = Effect.fnUntraced(function* (
     );
     return yield* serve({
       backend,
+      configurationEditor,
       webRoot,
       port,
       origin,
@@ -203,6 +214,7 @@ const start = Effect.fnUntraced(function* (
             operator,
             Context.get(context, OperatorConfiguration),
           ),
+          configurationEditor,
           webRoot,
           port,
           origin,
@@ -271,13 +283,27 @@ export const up = (command: UpCommand) =>
         ),
       );
       const instances = Context.get(current, CurrentInstance);
+      const editorContext = yield* Layer.build(
+        ConfigurationEditor.layer.pipe(
+          Layer.provide(Layer.succeed(CurrentInstance, instances)),
+          Layer.provide(Layer.succeedContext(configurationContext)),
+        ),
+      );
+      const configurationEditor = Context.get(editorContext, ConfigurationEditor);
       const { config } = yield* instances.get;
       // Built before the runtime, so the exporter flushes the runtime's last spans when it closes.
       const tracer = yield* Layer.build(tracingLayer(config.tracing)).pipe(
         Effect.provide(NodeServices.layer),
       );
-      return yield* start(directory, instanceId, instances, port, origin, record, database).pipe(
-        Effect.provideContext(tracer),
-      );
+      return yield* start(
+        directory,
+        instanceId,
+        instances,
+        port,
+        origin,
+        record,
+        database,
+        configurationEditor,
+      ).pipe(Effect.provideContext(tracer));
     }),
   ).pipe(Effect.provideService(References.MinimumLogLevel, command.logLevel));

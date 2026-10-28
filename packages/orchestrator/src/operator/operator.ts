@@ -1423,7 +1423,7 @@ export {
   SettingsView,
   ConfigurationView,
   OperatorConfiguration,
-} from "./configuration.ts";
+} from "./configuration/view.ts";
 export {
   WorkerSilentView,
   ProviderRetryingView,
@@ -1486,3 +1486,5 @@ export {
 } from "./transcript.ts";
 
 export { attentionKey, projectAttention } from "./attention.ts";
+
+export { ConfigurationEditor, type ConfigurationEditorError } from "./configuration/editor.ts";

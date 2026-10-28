@@ -104,12 +104,7 @@ interface Interpolation {
 }
 
 const schemaError = (file: InstancePath, error: Schema.SchemaError): ConfigFileError =>
-  new ConfigFileError({
-    file,
-    stage: "schema",
-    expression: Option.none(),
-    message: formatIssue(error.issue),
-  });
+  ConfigFileError.fromSchema(file, error);
 
 const decodeJson = Schema.decodeUnknownEffect(Schema.Json);
 
@@ -132,12 +127,17 @@ const parseYaml = (
     );
   });
 
-const expressionError = (file: InstancePath, error: ExpressionError): ConfigFileError =>
+const expressionError = (
+  file: InstancePath,
+  error: ExpressionError,
+  path: ReadonlyArray<string>,
+): ConfigFileError =>
   new ConfigFileError({
     file,
     stage: "expression",
     expression: Option.some(error.source),
     message: error.message,
+    details: [{ path, message: error.message }],
   });
 
 const markdownName = (file: InstancePath): Effect.Effect<string, ConfigFileError> => {
@@ -211,7 +211,7 @@ const render = (
     const expressions = yield* interpolations(file, loop.body);
     const rendered = yield* Effect.forEach(expressions, (expression) =>
       engine.evaluateScalar(expression.source, environment, context).pipe(
-        Effect.mapError((error) => expressionError(file, error)),
+        Effect.mapError((error) => expressionError(file, error, ["body"])),
         Effect.map((value) => ({ expression, value })),
       ),
     );
@@ -279,7 +279,7 @@ const makeParseLoopFile = (engine: ExpressionEngine["Service"]) =>
         const environment: Environment = environmentFor(frontmatter.trigger.on);
         const failures: Array<ConfigFileError> = [];
         const condition = yield* engine.checkBoolean(frontmatter.trigger.if, environment).pipe(
-          Effect.mapError((error) => expressionError(file, error)),
+          Effect.mapError((error) => expressionError(file, error, ["trigger", "if"])),
           Effect.result,
         );
         if (Result.isFailure(condition)) failures.push(condition.failure);
@@ -288,7 +288,7 @@ const makeParseLoopFile = (engine: ExpressionEngine["Service"]) =>
         else {
           const checked = yield* Effect.forEach(promptExpressions.success, ({ source }) =>
             engine.checkScalar(source, environment).pipe(
-              Effect.mapError((error) => expressionError(file, error)),
+              Effect.mapError((error) => expressionError(file, error, ["body"])),
               Effect.result,
             ),
           );
@@ -300,6 +300,9 @@ const makeParseLoopFile = (engine: ExpressionEngine["Service"]) =>
             stage: "expression",
             expression: failures[0].expression,
             message: failures.map(({ message }) => message).join("\n"),
+            details: failures.flatMap(
+              (failure) => failure.details ?? [{ path: ["body"], message: failure.message }],
+            ),
           });
         return new LoopFile({
           name,

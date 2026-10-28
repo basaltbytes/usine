@@ -23,7 +23,7 @@ import { CurrentInstance } from "./current-instance/current-instance.ts";
 import { externalHttpClientLayer } from "./http-client.ts";
 import { idleTriggersLayer } from "./idle-triggers.ts";
 import { LabelReconciler } from "./label-reconciler.ts";
-import { OperatorConfiguration } from "./operator/configuration.ts";
+import { OperatorConfiguration } from "./operator/configuration/view.ts";
 import { Operator, OperatorObservation } from "./operator/operator.ts";
 import { Orchestrator } from "./orchestrator.ts";
 import { PollingTriggers } from "./polling-triggers.ts";

@@ -246,7 +246,7 @@ export interface ExecutorWorkers {
   readonly add: (worker: ConfigWorker) => Effect.Effect<void, ExecutorError>;
   /**
    * Removes `worker` once no Attempt runs on it: a Worker removed by a reload, or one added by a
-   * reload whose preflight failed.
+   * reload whose preparation or persistence failed.
    */
   readonly remove: (worker: WorkerName) => Effect.Effect<void>;
 }
@@ -448,8 +448,14 @@ export const stepExecutorLayer = (
             return apply;
           }
           const added = new Set(change.added.map(({ name }) => name));
-          yield* membership.withPermit(
-            Ref.update(adding, (current) => new Set([...current, ...added])),
+          yield* Effect.acquireRelease(
+            membership.withPermit(Ref.update(adding, (current) => new Set([...current, ...added]))),
+            (_, exit) =>
+              Exit.isFailure(exit)
+                ? Effect.logInfo("Releasing workers prepared for a failed configuration change", {
+                    workers: [...added],
+                  }).pipe(Effect.andThen(settleAdded(added, [...added])))
+                : Effect.void,
           );
           yield* Effect.logInfo("Preflighting the Workers, slots, and brains the reload adds", {
             agents: agentNames,
@@ -462,9 +468,6 @@ export const stepExecutorLayer = (
             discard: true,
           }).pipe(
             Effect.mapError((cause) => reloadPreflightFailed(agentNames, [...wholeRoster], cause)),
-            Effect.onExit((exit) =>
-              Exit.isFailure(exit) ? settleAdded(added, [...added]) : Effect.void,
-            ),
           );
           return apply;
         },
