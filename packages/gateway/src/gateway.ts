@@ -10,6 +10,7 @@ export {
   Attachment,
   AttachmentAlreadyExpired,
   AttachmentConflict,
+  AttachmentPersistenceError,
   AttachmentCredential,
   AttachmentId,
   type AttachmentLookup,
@@ -18,7 +19,7 @@ export {
   LiveAttachment,
   MissingAttachment,
 } from "./attachment/attachment.ts";
-export { Attachments } from "./attachment/store.ts";
+export { Attachments, type AttachmentPersistence } from "./attachment/store.ts";
 export {
   CallerClaims,
   CallerToken,
@@ -75,9 +76,8 @@ export { UpstreamBase } from "./upstream.ts";
  * forward proxy, admin API, and reload. The logins need a `FileSystem` for their auth files and
  * an `HttpClient` for refreshes.
  */
-export const gatewayServices = Layer.mergeAll(
-  Attachments.layer,
-  CallerTokens.layer,
-  SettingsInForce.layer,
-  ChatGptLogins.layer,
-);
+export const gatewayServicesWithAttachments = <E, R>(attachments: Layer.Layer<Attachments, E, R>) =>
+  Layer.mergeAll(attachments, CallerTokens.layer, SettingsInForce.layer, ChatGptLogins.layer);
+
+/** Shared gateway services with an in-memory attachment store. */
+export const gatewayServices = gatewayServicesWithAttachments(Attachments.layer);

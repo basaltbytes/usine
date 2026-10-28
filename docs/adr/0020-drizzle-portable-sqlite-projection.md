@@ -46,3 +46,7 @@ The orchestrator defines each revision from the entry's schema-encoded content. 
 Overview refreshes prune acknowledgements whose ID and revision don't match any current entry, including dismissed entries. This replaces the retention rule in the #477 amendment: a cause that disappears during a refresh needs a new dismissal if it returns. Schedule tick times and worker attempt counts remain part of the revision, so each changed entry still requires attention.
 
 The engine deletes obsolete acknowledgements in one statement, passing current keys as one JSON parameter to SQLite's `json_each` to avoid parameter and expression-depth limits. Matching acknowledgements retain their operator and time. Existing deletion triggers invalidate projections only when rows change; repeating pruning against an unchanged list has no effect.
+
+## Amendment (2026-10-28, #666): startup retention
+
+Overview refreshes defer acknowledgement pruning until both polling and schedule triggers have reported a cycle since startup. The pruning decision uses the same reports as the overview projection, including when the projection comes from the cache. An unreported source does not establish that its previous findings have recovered. Setup mode retains acknowledgements while the trigger services are idle. Once both sources report, the #646 pruning rule applies, including when their completed reports contain no failures.
