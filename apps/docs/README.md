@@ -23,3 +23,5 @@ TypeDoc generates `reference/api/` on every `build`, `dev`, and `check`, from th
 A fenced `mermaid` code block renders as a diagram in the browser and follows the light or dark theme.
 
 `wrangler.jsonc` makes the Worker serve `dist/` as static assets on the `docs.usine.dev` custom domain, with no Worker script. The `Deploy docs` workflow (`.github/workflows/deploy-docs.yml`) builds and deploys on every push to `main`, with the `CLOUDFLARE_API_TOKEN` repository secret. To deploy by hand, run `pnpm turbo run build --filter=@usine/docs` first, because `deploy` uploads `dist/` as it is, after `npx wrangler login` to the Basaltbytes account.
+
+The worker reference documents provisioner timing settings in seconds, machine checks, and cleanup when a worker is removed. The execution architecture describes attempt persistence before machine creation.

@@ -1,3 +1,4 @@
+import { AttemptId } from "@usine/core/attempt";
 import { remoteCommandsFor } from "../../../src/remote/commands.ts";
 import { assert, describe, it } from "@effect/vitest";
 import { RemoteShell } from "@usine/agents/child-host";
@@ -189,7 +190,7 @@ describe("Boat tailnet", () => {
         worker: WORKER,
         run: RunId.make("earlier-run"),
         process: "earlier-process",
-        attempt: Option.none(),
+        attempt: AttemptId.make("earlier-run/execute/1"),
       });
       assert.strictEqual(boat.boat.sandboxes.size, 1);
       yield* (yield* WorkerMachines).sweep;
@@ -289,7 +290,9 @@ describe("Boat tailnet", () => {
       return Effect.gen(function* () {
         const machines = yield* WorkerMachines;
         const failure = yield* machines
-          .create(WORKER, RunId.make("remote-run"), [TEST_AGENT.brain])
+          .create(WORKER, RunId.make("remote-run"), AttemptId.make("remote-run/execute/1"), [
+            TEST_AGENT.brain,
+          ])
           .pipe(Effect.flip);
         assert.include(failure.message, "could not join");
         assert.notInclude(JSON.stringify(failure), "tskey-auth-test");
@@ -364,8 +367,13 @@ describe("Boat tailnet", () => {
             const executor = yield* Executor;
             const machines = yield* WorkerMachines;
             yield* executor.preflight(WORKER, [agent.brain], 1);
-            const grant = yield* machines.create(WORKER, RunId.make("remote-run"), [agent.brain]);
-            yield* machines.assign(grant.hold, attempt.attemptId);
+            const grant = yield* machines.create(
+              WORKER,
+              RunId.make("remote-run"),
+              attempt.attemptId,
+              [agent.brain],
+            );
+
             yield* Effect.gen(function* () {
               yield* (yield* executor.prepare(attempt)).launch(sink);
             }).pipe(Effect.scoped);

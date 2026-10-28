@@ -11,7 +11,12 @@ import {
 } from "~/features/configuration/components/section";
 import { SlotCells } from "~/features/configuration/components/workers/slots";
 import { WorkerFacts } from "~/features/configuration/components/workers/facts";
-import { harnessLabel, plural, workerKindLabel } from "~/features/configuration/strings";
+import {
+  harnessLabel,
+  plural,
+  provisionedHarnessCheckDescription,
+  workerKindLabel,
+} from "~/features/configuration/strings";
 
 const slotsLabel = ({ capacity, leased }: WorkerSlotsView): string =>
   `${leased} of ${plural(capacity, "slot")} in use`;
@@ -80,9 +85,7 @@ export const WorkerDetail = ({ name, configuration }: WorkerDetailProps) => {
           aside="At startup, and when a reload adds workers, slots, or an agent with a new harness, model, or effort"
         >
           {worker.provisioner !== null && (
-            <p className="text-muted-foreground">
-              Harness checks run on the first machine of each day.
-            </p>
+            <p className="text-muted-foreground">{provisionedHarnessCheckDescription}</p>
           )}
           {checks.length === 0 ? (
             <p className="text-muted-foreground">No preflight since usine up started.</p>

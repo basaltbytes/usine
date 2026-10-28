@@ -120,19 +120,17 @@ it("folds what each machine is for under its ID on a phone, without scrolling si
   expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth + 1);
 });
 
-it("shows harness checks as deferred to the first machine of each day", async () => {
+it("shows deferred harness checks with the configured interval", async () => {
   await mount("/configuration/workers/hz-pool");
   await expect
-    .element(
-      page.getByText("Harness checks run on the first machine of each day.", { exact: true }),
-    )
+    .element(page.getByText(/configured interval since the last successful check/u))
     .toBeVisible();
   const claude = row(/Claude Code/u);
   await expect.element(claude.getByText("Deferred", { exact: true })).toBeVisible();
   await expect
     .element(
       claude.getByRole("cell", {
-        name: "Checked on the worker's first machine each day, since no machine exists before an attempt.",
+        name: "Checked on the first machine, then every 86400 seconds when a machine is created.",
         exact: false,
       }),
     )

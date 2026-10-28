@@ -50,6 +50,7 @@ interface FakeSandbox {
 
 interface HetznerState {
   readonly servers: Map<number, FakeServer>;
+  createAnswerFails: boolean;
   nextId: number;
   nextIp: number;
   /** The bearer token the API accepts. */
@@ -148,6 +149,7 @@ export const fakeProviders = () => {
   const calls: Array<ProviderCall & { readonly provider: "hetzner" | "boat" }> = [];
   const hetzner: HetznerState = {
     servers: new Map<number, FakeServer>(),
+    createAnswerFails: false,
     nextId: 52_341_896,
     nextIp: 5,
     /** The bearer token the API accepts. */
@@ -277,6 +279,11 @@ export const fakeProviders = () => {
         startingReads: hetzner.startingReads,
       };
       hetzner.servers.set(id, server);
+      if (hetzner.createAnswerFails)
+        return [
+          500,
+          hetznerError({ status: 500, code: "server_error", message: "creation response lost" }),
+        ];
       return [
         201,
         {

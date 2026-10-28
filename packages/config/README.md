@@ -85,3 +85,5 @@ Historical revisions that record positions in the combined entity list require c
 Entity values use schema encoding with parser defaults applied. Exporting and importing unchanged configuration produces an empty diff. Diffs compare the relative order of retained entities, so adding or removing a worker does not mark later entities as changed. Reordering workers records their changed preference order.
 
 Boat workers accept a gateway with `provisioner.snapshot` and `provisioner.tailnet`. The tailnet settings contain the gateway address and OAuth environment-variable names; parsing rejects a gateway without both settings. See the [provisioned-worker guide](https://docs.usine.dev/guides/add-a-provisioned-worker/#gateway-subscriptions-over-tailscale).
+
+Both SSH provisioners accept `timings` with `ssh_wait`, `creation_backoff_min`, `creation_backoff_max`, and `machine_check_interval`, in positive whole seconds. Parsing defaults them to 600, 30, 600, and 86400 and rejects reversed backoff bounds.

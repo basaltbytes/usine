@@ -20,7 +20,7 @@ export interface MachineTags {
   readonly worker: WorkerName;
   readonly run: RunId;
   readonly process: string;
-  readonly attempt: Option.Option<AttemptId>;
+  readonly attempt: AttemptId;
 }
 
 /** The tags of a machine as its provider lists them, each encoded by `tagValue`. */
@@ -28,7 +28,7 @@ interface ListedTags {
   readonly worker: string;
   readonly run: string;
   readonly process: string;
-  /** `None` until the machine is assigned to an Attempt. */
+  /** `None` for an orphan created by an older release. */
   readonly attempt: Option.Option<string>;
 }
 
@@ -95,14 +95,12 @@ export interface MachineDriver {
     id: MachineId,
     interval: Effect.Effect<void>,
   ) => Effect.Effect<MachineEndpoint, MachineUnavailableError>;
-  /** Replaces the machine's tags, for example to add its Attempt. */
-  readonly tag: (id: MachineId, tags: MachineTags) => Effect.Effect<void, ProviderApiError>;
   /** Deletes the machine. A machine that is already gone counts as deleted. */
   readonly remove: (id: MachineId) => Effect.Effect<void, ProviderApiError>;
-  /** Lists the machines tagged with `instance` and `worker`. */
+  /** Lists machines tagged with `instance`, optionally limited to one Worker. */
   readonly list: (
     instance: string,
-    worker: WorkerName,
+    worker: Option.Option<WorkerName>,
   ) => Effect.Effect<ReadonlyArray<ListedMachine>, ProviderApiError>;
 }
 
