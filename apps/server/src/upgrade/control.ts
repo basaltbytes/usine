@@ -1,5 +1,5 @@
 import type { Settings } from "@usine/config/factory";
-import { ReleaseVersion, type UpgradeChannel, type UpgradeRecord } from "@usine/core/upgrade";
+import { ReleaseVersion, UpgradeChannel, type UpgradeRecord } from "@usine/core/upgrade";
 import { UpgradeRequest, UpgradeView } from "@usine/orchestrator/operator/http";
 import { Context, Effect, Layer, Option, Ref, Schema } from "effect";
 import { compareVersions } from "../instance/manifest.ts";
@@ -40,9 +40,23 @@ type Progress =
   | { readonly phase: "waiting" | "installing"; readonly target: ReleaseVersion }
   | { readonly phase: "failed"; readonly message: string };
 
+class UpgradeCandidate extends Schema.Class<UpgradeCandidate>("@usine/server/UpgradeCandidate")({
+  channel: UpgradeChannel,
+  version: ReleaseVersion,
+}) {}
+
 export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options: UpgradeOptions) {
   const scope = yield* Effect.scope;
-  const available = yield* Ref.make(Option.none<ReleaseVersion>());
+  const available = yield* Ref.make(Option.none<UpgradeCandidate>());
+  const availableFor = (channel: UpgradeChannel) =>
+    Ref.get(available).pipe(
+      Effect.map((candidate) =>
+        candidate.pipe(
+          Option.filter((checked) => checked.channel === channel),
+          Option.map((checked) => checked.version),
+        ),
+      ),
+    );
   const progress = yield* Ref.make<Progress>({ phase: "idle" });
   const checkError = yield* Ref.make(Option.none<string>());
   const outcome = Option.match(options.platform, {
@@ -70,7 +84,9 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
       mode: settings.upgradeMode,
       supported: Option.isSome(options.platform),
       available:
-        settings.upgradeMode === "off" ? null : Option.getOrNull(yield* Ref.get(available)),
+        settings.upgradeMode === "off"
+          ? null
+          : Option.getOrNull(yield* availableFor(settings.upgradeChannel)),
       phase: Option.exists(result, (record) => record.status === "installing")
         ? "installing"
         : state.phase,
@@ -87,10 +103,17 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
       });
     }
     const platform = options.platform.value;
-    const latest = yield* Ref.get(available);
+    const settings = yield* options.settings;
+    const latest = yield* availableFor(settings.upgradeChannel);
     const target = Option.orElse(input.version, () => latest);
-    if (Option.isNone(target))
+    if (Option.isNone(target)) {
+      yield* Effect.logInfo("Server upgrade request rejected without a current channel candidate", {
+        previous: options.running,
+        channel: settings.upgradeChannel,
+        timing: input.timing,
+      });
       return yield* new UpgradeError({ message: "No newer version is available." });
+    }
     yield* Effect.annotateCurrentSpan({
       previous: options.running,
       target: target.value,
@@ -164,7 +187,12 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
     });
     yield* Ref.set(checkError, Option.none());
     const newer = compareVersions(target, options.running) > 0;
-    yield* Ref.set(available, newer ? Option.some(target) : Option.none());
+    yield* Ref.set(
+      available,
+      newer
+        ? Option.some(new UpgradeCandidate({ channel: settings.upgradeChannel, version: target }))
+        : Option.none(),
+    );
     yield* Effect.logInfo("Server upgrade check completed", {
       previous: options.running,
       target,
@@ -183,7 +211,7 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
       (yield* Ref.get(progress)).phase === "idle" &&
       !blocked
     ) {
-      yield* request(new UpgradeRequest({ timing: "idle", version: Option.some(target) }));
+      yield* request(new UpgradeRequest({ timing: "idle", version: Option.none() }));
     } else if (newer && blocked) {
       yield* Effect.logInfo("Automatic upgrade skipped after an unfinished or failed upgrade", {
         previous: options.running,

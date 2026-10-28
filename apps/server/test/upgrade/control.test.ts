@@ -1,4 +1,4 @@
-import { ReleaseVersion, UpgradeRecord } from "@usine/core/upgrade";
+import { ReleaseVersion, type UpgradeChannel, UpgradeRecord } from "@usine/core/upgrade";
 import { UpgradeRequest } from "@usine/orchestrator/operator/http";
 import { Deferred, Effect, Option, Ref } from "effect";
 import { expect, it } from "vitest";
@@ -109,6 +109,79 @@ it("does not check when off, downgrade automatically, or retry a rolled-back ver
         });
         yield* current.check();
         expect((yield* current.status).available).toBeNull();
+      }),
+    ),
+  );
+});
+
+it.each(["idle", "now"] as const)(
+  "rejects a cached candidate from the previous channel for %s upgrades",
+  async (timing) => {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const f = yield* fixture;
+          const channel = yield* Ref.make<UpgradeChannel>("next");
+          const stable = ReleaseVersion.make("1.0.1");
+          const upgrades = yield* makeUpgrades({
+            running: previous,
+            settings: Ref.get(channel).pipe(
+              Effect.map((upgradeChannel) => ({ upgradeChannel, upgradeMode: "propose" as const })),
+            ),
+            platform: Option.some({
+              ...f.platform,
+              lookup: (selected) => Effect.succeed(selected === "next" ? target : stable),
+            }),
+            drain: Deferred.await(f.drained),
+          });
+          yield* upgrades.check();
+          expect((yield* upgrades.status).available).toBe(target);
+          yield* Ref.set(channel, "latest");
+          const error = yield* upgrades
+            .request(new UpgradeRequest({ timing, version: Option.none() }))
+            .pipe(Effect.flip);
+          expect(error).toBeInstanceOf(UpgradeError);
+          expect(yield* Deferred.isDone(f.launched)).toBe(false);
+          const status = yield* upgrades.status;
+          expect(status.channel).toBe("latest");
+          expect(status.available).toBeNull();
+          expect(status.phase).toBe("idle");
+
+          yield* upgrades.check();
+          expect((yield* upgrades.status).available).toBe(stable);
+          yield* upgrades.request(new UpgradeRequest({ timing, version: Option.none() }));
+          yield* Deferred.succeed(f.drained, undefined);
+          expect(yield* Deferred.await(f.launched)).toBe(stable);
+        }),
+      ),
+    );
+  },
+);
+
+it("rejects an automatic candidate when the channel changes during its lookup", async () => {
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const f = yield* fixture;
+        const channel = yield* Ref.make<UpgradeChannel>("next");
+        const upgrades = yield* makeUpgrades({
+          running: previous,
+          settings: Ref.get(channel).pipe(
+            Effect.map((upgradeChannel) => ({ upgradeChannel, upgradeMode: "automatic" as const })),
+          ),
+          platform: Option.some({
+            ...f.platform,
+            lookup: () => Ref.set(channel, "latest").pipe(Effect.as(target)),
+          }),
+          drain: Effect.void,
+        });
+        const error = yield* upgrades.check().pipe(Effect.flip);
+        expect(error).toBeInstanceOf(UpgradeError);
+        const status = yield* upgrades.status;
+        expect(status.channel).toBe("latest");
+        expect(status.available).toBeNull();
+        expect(status.phase).toBe("idle");
+        expect(yield* Deferred.isDone(f.launched)).toBe(false);
       }),
     ),
   );
