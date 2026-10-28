@@ -134,7 +134,7 @@ import { TaskReader, type TaskReadError, TaskView } from "./task.ts";
 import { type DeskView, OperatorDesk } from "./desk.ts";
 import { OperatorStatistics } from "./statistics/statistics.ts";
 import type { RunStatisticsView, StatisticsView, StatisticsWindow } from "./statistics/view.ts";
-import { machineView, workerQuotas, type WorkerQuotaView } from "./machines.ts";
+import { machineView, runsWithMachines, workerQuotas, type WorkerQuotaView } from "./machines.ts";
 import { WorkerStatus } from "../worker-status.ts";
 import { workerAttentionFor } from "./unresponsive.ts";
 
@@ -237,6 +237,7 @@ const makeOperatorObservation = Effect.gen(function* () {
     revision: Option.Option<ProjectionRevision>,
     unconfirmedStops: ReadonlyArray<UnconfirmedStop>,
     quotas: ReadonlyArray<WorkerQuotaView>,
+    assigned: ReadonlySet<RunId>,
   ) {
     const [snapshots, states, cycleAsks, workerAttempts] = yield* Effect.all(
       [
@@ -249,7 +250,7 @@ const makeOperatorObservation = Effect.gen(function* () {
     );
     const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
     const access = workerAccesses(instance.config.workers);
-    const views = snapshots.map((snapshot) => runView(snapshot, paused, access, quotas));
+    const views = snapshots.map((snapshot) => runView(snapshot, paused, access, quotas, assigned));
     const runsByRepository = new Map<string, Array<(typeof views)[number]>>();
     for (const view of views) {
       const projectRuns = runsByRepository.get(view.repository) ?? [];
@@ -284,7 +285,7 @@ const makeOperatorObservation = Effect.gen(function* () {
           }
           const merged = new Map((runsByRepository.get(name) ?? []).map((run) => [run.id, run]));
           for (const saved of history) {
-            const view = runView(saved, paused, access, quotas);
+            const view = runView(saved, paused, access, quotas, assigned);
             merged.set(view.id, view);
           }
           const projectRuns = [...merged.values()].sort(
@@ -594,7 +595,7 @@ const makeOperatorObservation = Effect.gen(function* () {
   const overview = Effect.fn("Operator.overview")((instance: LoadedInstance) =>
     SynchronizedRef.modifyEffect(cache, (cached) =>
       Effect.gen(function* () {
-        const [revision, latestPoll, latestSchedule, unconfirmedStops, provisioning] =
+        const [revision, latestPoll, latestSchedule, unconfirmedStops, provisioning, inFlight] =
           yield* Effect.all(
             [
               reader.revision(),
@@ -602,9 +603,11 @@ const makeOperatorObservation = Effect.gen(function* () {
               schedules.latest,
               stops.list,
               workerStatus.provisioning,
+              workerStatus.machines,
             ] as const,
             { concurrency: "unbounded" },
           );
+        const assigned = runsWithMachines(inFlight);
         const quotas = workerQuotas(provisioning).filter(({ worker }) =>
           instance.config.workers.some(({ name }) => name === worker),
         );
@@ -643,6 +646,7 @@ const makeOperatorObservation = Effect.gen(function* () {
             scheduleFailures,
             unconfirmedStops.map(({ attemptId }) => attemptId),
             quotas,
+            [...assigned].sort(),
           ]),
         );
         if (Option.isNone(token)) {
@@ -657,6 +661,7 @@ const makeOperatorObservation = Effect.gen(function* () {
             revision,
             unconfirmedStops,
             quotas,
+            assigned,
           );
           return [projected, Option.none<CachedOverview>()] as const;
         }
@@ -678,6 +683,7 @@ const makeOperatorObservation = Effect.gen(function* () {
           revision,
           unconfirmedStops,
           quotas,
+          assigned,
         );
         return [projected, Option.some({ token: token.value, ...projected })] as const;
       }),
@@ -779,6 +785,7 @@ const makeOperatorObservation = Effect.gen(function* () {
         paused,
         workerAccesses(instance.config.workers),
         workerQuotas(provisioning),
+        runsWithMachines(inFlight),
       ),
       agentDefinitionChanged:
         currentAgent !== undefined && !sameAgent(snapshot.agent, currentAgent.agent),

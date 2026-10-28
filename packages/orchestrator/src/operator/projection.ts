@@ -3,6 +3,7 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptFailure } from "@usine/core/attempt/failure";
 import { AttemptOutcome } from "@usine/core/attempt/outcome";
 import { LoopName } from "@usine/core/loop";
+import type { RunId } from "@usine/core/run";
 import * as RunState from "@usine/core/run/state";
 import { PullRequest } from "@usine/core/step/result";
 import { SshDestination, type WorkerName } from "@usine/core/worker";
@@ -213,6 +214,7 @@ export const runView = (
   pausedLoops: ReadonlySet<LoopName>,
   workers: WorkerAccesses,
   quotas: ReadonlyArray<WorkerQuotaView> = [],
+  assigned: ReadonlySet<RunId> = new Set(),
 ): RunView => {
   const actions = RunState.operatorActions(snapshot.run.state);
   const result = Option.getOrNull(snapshot.step.result);
@@ -230,6 +232,7 @@ export const runView = (
     loopPaused: pausedLoops.has(snapshot.run.loop),
     provisioning:
       snapshot.run.state._tag === "Queued" &&
+      !assigned.has(snapshot.run.id) &&
       !snapshot.attempts.some((attempt) => Option.isNone(attempt.outcome))
         ? quotas.filter(({ worker }) => workers.has(worker))
         : [],

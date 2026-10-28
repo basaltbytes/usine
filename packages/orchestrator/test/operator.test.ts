@@ -85,6 +85,7 @@ import {
 import { GitHubItemHistory } from "@usine/github/item-history";
 import { GitHubItemWriter, type ItemLabelMutation } from "@usine/github/item-writer";
 import { Source } from "@usine/expression/expression-engine";
+import { MachineStatus } from "@usine/executor";
 import { DateTime, Effect, Layer, Match, Option, Ref, Schema } from "effect";
 import { LabelPreflightFinding } from "../src/label-reconciler.ts";
 import { BoardLaneId, BoardMove } from "../src/operator/board.ts";
@@ -417,6 +418,7 @@ const testLayer = (
   unconfirmedStops: Effect.Effect<ReadonlyArray<UnconfirmedStop>> = Effect.succeed([]),
   triggerCycles: {
     readonly provisioning?: Effect.Effect<ReadonlyArray<ProvisioningPause>>;
+    readonly machines?: WorkerStatus["Service"]["machines"];
     readonly poll?: PollingTriggers["Service"]["latest"];
     readonly schedule?: ScheduleTriggers["Service"]["latest"];
   } = {},
@@ -683,7 +685,7 @@ const testLayer = (
       slots: Effect.succeed([]),
       queue: Effect.succeed([]),
       preflights: Effect.succeed([]),
-      machines: Effect.succeed([]),
+      machines: triggerCycles.machines ?? Effect.succeed([]),
       provisioning: triggerCycles.provisioning ?? Effect.succeed([]),
     }),
     Layer.succeed(UnconfirmedStops)({ list: unconfirmedStops }),
@@ -1970,7 +1972,7 @@ describe("Operator", () => {
   );
 
   it.effect(
-    "refreshes quota attention and waiting reasons without a ledger change, and clears them after recovery",
+    "refreshes quota waiting reasons when another worker creates a machine and retains the worker alert until recovery",
     () =>
       Effect.gen(function* () {
         const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
@@ -1978,13 +1980,35 @@ describe("Operator", () => {
         const overviewReads = yield* Ref.make(0);
         const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
         const pauses = yield* Ref.make<ReadonlyArray<ProvisioningPause>>([]);
+        const machines = yield* Ref.make<ReadonlyArray<MachineStatus>>([]);
+        const workers = Schema.decodeUnknownSync(UsineConfig)({
+          version: 1,
+          repos: [{ name: repository }],
+          workers: ["worker-a", "worker-b"].map((name) => ({
+            name,
+            kind: "ssh",
+            root: "/work",
+            provisioner: {
+              provider: "hetzner",
+              token_env: "HETZNER_TOKEN",
+              server_type: "cpx32",
+              location: "fsn1",
+              image: "ubuntu-24.04",
+              ssh_key: "usine",
+            },
+          })),
+        }).workers;
+        const quotaInstance = new LoadedInstance({
+          ...instance,
+          config: new UsineConfig({ ...config, workers }),
+        });
         const queued = new RunSnapshot({
           ...snapshot,
           attempts: [],
           run: new Run({ ...snapshot.run, state: new RunState.Queued() }),
         });
         const pause: ProvisioningPause = {
-          worker: WorkerName.make("local"),
+          worker: WorkerName.make("worker-a"),
           reason: "quota",
           message: "shared core limit exceeded",
           quota: Option.some({ provider: "hetzner", message: "shared core limit exceeded" }),
@@ -1995,9 +2019,9 @@ describe("Operator", () => {
         };
         yield* Effect.gen(function* () {
           const operator = yield* Operator;
-          yield* operator.overview(instance);
+          yield* operator.overview(quotaInstance);
           yield* Ref.set(pauses, [pause]);
-          const overview = yield* operator.overview(instance);
+          const overview = yield* operator.overview(quotaInstance);
           assert(overview._tag === "Ready");
           const need = overview.needsYou.find((need) => need._tag === "WorkerQuotaNeed");
           assert(need?._tag === "WorkerQuotaNeed");
@@ -2013,16 +2037,61 @@ describe("Operator", () => {
             pause.message,
           );
           assert.strictEqual(
-            (yield* operator.detail(instance, runId)).run.provisioning[0]?.message,
+            (yield* operator.detail(quotaInstance, runId)).run.provisioning[0]?.message,
             pause.message,
           );
-          yield* operator.dismissNeed(instance, attentionKey(need));
-          const dismissed = yield* operator.overview(instance);
+          const machine = new MachineStatus({
+            worker: WorkerName.make("worker-b"),
+            provider: "hetzner",
+            state: "creating",
+            id: Option.none(),
+            runId: Option.some(runId),
+            attemptId: Option.none(),
+            since: now,
+          });
+          for (const state of ["creating", "ready"] as const) {
+            yield* Ref.set(machines, [new MachineStatus({ ...machine, state })]);
+            const accepted = yield* operator.overview(quotaInstance);
+            assert(accepted._tag === "Ready");
+            const alert = accepted.needsYou.find((entry) => entry._tag === "WorkerQuotaNeed");
+            assert(alert?._tag === "WorkerQuotaNeed");
+            assert.strictEqual(alert.quota.worker, pause.worker);
+            assert.deepStrictEqual(alert.runs, []);
+            assert.deepStrictEqual(accepted.projects[0]?.runs[0]?.provisioning, []);
+            const acceptedCard = accepted.projects
+              .flatMap(({ board }) => board.lanes.flatMap(({ items }) => items))
+              .find(({ runs }) => runs.some(({ id }) => id === runId));
+            assert(acceptedCard !== undefined);
+            assert.isFalse(acceptedCard.needsYou);
+            assert.deepStrictEqual(acceptedCard.runs[0]?.provisioning, []);
+            const detail = yield* operator.detail(quotaInstance, runId);
+            assert.deepStrictEqual(detail.run.provisioning, []);
+            assert.strictEqual(detail.machine?.worker, machine.worker);
+            assert.strictEqual(detail.machine?.state, state);
+            const desk = yield* operator.desk(quotaInstance);
+            const stalled = desk.notMoving.find(({ item }) => item.itemKey === itemKey);
+            assert(stalled?.reason._tag === "QueuedForWorker");
+            assert.deepStrictEqual(stalled.reason.run.provisioning, []);
+            if (state === "creating")
+              assert.strictEqual(stalled.reason.creating?.worker, machine.worker);
+          }
+          yield* Ref.set(machines, [new MachineStatus({ ...machine, state: "deleting" })]);
+          const waiting = yield* operator.overview(quotaInstance);
+          assert(waiting._tag === "Ready");
+          const waitingNeed = waiting.needsYou.find((entry) => entry._tag === "WorkerQuotaNeed");
+          assert(waitingNeed?._tag === "WorkerQuotaNeed");
+          assert.deepStrictEqual(waitingNeed.runs, [{ runId, repository }]);
+          assert.lengthOf((yield* operator.detail(quotaInstance, runId)).run.provisioning, 1);
+          yield* operator.dismissNeed(quotaInstance, attentionKey(need));
+          const dismissed = yield* operator.overview(quotaInstance);
           assert(dismissed._tag === "Ready");
           assert.isFalse(dismissed.needsYou.some((need) => need._tag === "WorkerQuotaNeed"));
-          assert.strictEqual((yield* operator.detail(instance, runId)).run.provisioning.length, 1);
+          assert.strictEqual(
+            (yield* operator.detail(quotaInstance, runId)).run.provisioning.length,
+            1,
+          );
           yield* Ref.set(pauses, []);
-          const recovered = yield* operator.overview(instance);
+          const recovered = yield* operator.overview(quotaInstance);
           assert(recovered._tag === "Ready");
           assert.isFalse(
             [...recovered.needsYou, ...recovered.dismissedNeeds].some(
@@ -2030,7 +2099,7 @@ describe("Operator", () => {
             ),
           );
           assert.lengthOf(recovered.projects[0]?.runs[0]?.provisioning ?? [], 0);
-          assert.lengthOf((yield* operator.detail(instance, runId)).run.provisioning, 0);
+          assert.lengthOf((yield* operator.detail(quotaInstance, runId)).run.provisioning, 0);
         }).pipe(
           Effect.provide(
             testLayer(
@@ -2049,7 +2118,7 @@ describe("Operator", () => {
               [],
               [],
               Effect.succeed([]),
-              { provisioning: Ref.get(pauses) },
+              { provisioning: Ref.get(pauses), machines: Ref.get(machines) },
             ),
           ),
         );

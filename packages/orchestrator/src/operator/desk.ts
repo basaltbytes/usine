@@ -28,6 +28,7 @@ import {
   ProvisioningPauseView,
   provisioningPauseView,
   workerQuotas,
+  runsWithMachines,
 } from "./machines.ts";
 import { AttemptView } from "./attempt.ts";
 import { BoardItemLink } from "./board.ts";
@@ -498,6 +499,7 @@ const makeDesk = Effect.gen(function* () {
       { concurrency: "unbounded" },
     );
     const quotas = workerQuotas(pauses);
+    const assigned = runsWithMachines(inFlight);
     const machineViews = inFlight.map(machineView);
     const creating = new Map(
       machineViews.flatMap((machine) =>
@@ -540,7 +542,7 @@ const makeDesk = Effect.gen(function* () {
     const runs = new Map(
       [...summaries, ...history].map((summary) => [
         summary.run.id,
-        runView(summary, paused, access, quotas),
+        runView(summary, paused, access, quotas, assigned),
       ]),
     );
     const newestFirst = [...runs.values()].sort(

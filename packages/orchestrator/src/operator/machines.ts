@@ -40,6 +40,14 @@ export class WorkerQuotaView extends Schema.Class<WorkerQuotaView>(
   recovery: Schema.NonEmptyString,
 }) {}
 
+/** Runs with a machine being created or ready for an attempt. */
+export const runsWithMachines = (machines: ReadonlyArray<MachineStatus>): ReadonlySet<RunId> =>
+  new Set(
+    machines.flatMap((machine) =>
+      machine.state === "deleting" ? [] : Option.toArray(machine.runId),
+    ),
+  );
+
 export const workerQuotas = (
   pauses: ReadonlyArray<ProvisioningPause>,
 ): ReadonlyArray<WorkerQuotaView> =>
