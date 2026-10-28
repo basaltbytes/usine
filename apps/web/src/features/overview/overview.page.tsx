@@ -1,3 +1,4 @@
+import { DismissedNeeds } from "~/features/overview/components/dismissed-needs";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import type { NeedView, RepositoryPollView } from "@usine/orchestrator/operator";
 import { ErrorAlert } from "~/components/error-alert";
@@ -38,11 +39,12 @@ const NoProjects = () => {
 
 type DeskNeedsYouProps = {
   readonly needs: ReadonlyArray<NeedView>;
+  readonly dismissedNeeds?: ReadonlyArray<NeedView>;
   readonly polls: ReadonlyArray<RepositoryPollView>;
   readonly now: number;
 };
 
-export const DeskNeedsYou = ({ needs, polls, now }: DeskNeedsYouProps) => (
+export const DeskNeedsYou = ({ needs, dismissedNeeds = [], polls, now }: DeskNeedsYouProps) => (
   <DeskSection
     id="desk-needs-you"
     title="Needs attention"
@@ -59,6 +61,7 @@ export const DeskNeedsYou = ({ needs, polls, now }: DeskNeedsYouProps) => (
         ))}
       </ul>
     )}
+    <DismissedNeeds needs={dismissedNeeds} />
   </DeskSection>
 );
 
@@ -77,7 +80,12 @@ export const Desk = () => {
         <PageHeading title="Overview" counts={deskCounts(desk.data)} />
         {overview.projects.length === 0 && <NoProjects />}
         <Statistics />
-        <DeskNeedsYou needs={overview.needsYou} polls={desk.data.polls} now={now} />
+        <DeskNeedsYou
+          dismissedNeeds={overview.dismissedNeeds}
+          needs={overview.needsYou}
+          polls={desk.data.polls}
+          now={now}
+        />
         {desk.isError && <ErrorAlert title={overviewRefreshFailed} message={desk.error.message} />}
         <DeskSection id="desk-running" title="Running" count={desk.data.running.length}>
           <RunningNow running={desk.data.running} workers={desk.data.workers} now={now} />

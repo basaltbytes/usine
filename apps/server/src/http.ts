@@ -175,6 +175,12 @@ const handlers = HttpApiBuilder.group(OperatorApi, "operator", (routes) =>
     .handle("intervene", ({ params, payload }) =>
       fromBackend((backend) => backend.intervene(params.runId, payload)).pipe(acknowledge),
     )
+    .handle("dismissNeed", ({ payload }) =>
+      fromBackend((backend) => backend.dismissNeed(payload)).pipe(acknowledge),
+    )
+    .handle("undoDismissNeed", ({ payload }) =>
+      fromBackend((backend) => backend.undoDismissNeed(payload)).pipe(acknowledge),
+    )
     .handle("resetCycleBudget", ({ payload }) =>
       fromBackend((backend) => backend.resetCycleBudget(payload.askId)).pipe(acknowledge),
     )

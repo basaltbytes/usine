@@ -1,3 +1,4 @@
+import { AttentionRevision } from "../attention/model.ts";
 import { ModelId } from "@usine/core/agent/brain";
 import { AgentName } from "@usine/core/agent";
 import { AttemptNumber, AttemptTask, AttemptId } from "@usine/core/attempt";
@@ -458,4 +459,15 @@ export const projectionRevision = snakeCase.table(
     revision: integer({ mode: "number" }).notNull().default(0),
   },
   (table) => [check("usine_projection_revision_singleton", sql`${table.singleton} = 1`)],
+);
+
+export const attentionAcknowledgements = snakeCase.table(
+  "usine_attention_acknowledgements",
+  {
+    id: text().notNull(),
+    revision: text().$type<AttentionRevision>().notNull(),
+    dismissedBy: text().$type<OperatorLogin>(),
+    dismissedAt: text().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.id, table.revision] })],
 );

@@ -168,3 +168,7 @@ The Drizzle schema defines usine's tables. After changing it, generate and revie
 ```sh
 pnpm --filter @usine/engine db:generate --name <migration_name>
 ```
+
+## Attention acknowledgements
+
+`AttentionAcknowledgements` from `@usine/engine/attention` records a dismissal by entry ID and content revision, with the configured operator login and time. Repeating the same dismissal preserves the first record. Undo deletes only that revision. The local runtime store persists these records and invalidates operator projections when they change. Run state, failure resolution, and cycle budgets stay unchanged.

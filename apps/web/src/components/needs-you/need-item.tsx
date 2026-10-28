@@ -10,6 +10,7 @@ type NeedItemProps = {
   readonly item?: ItemRef | undefined;
   readonly open?: (() => void) | undefined;
   readonly actions?: ReactNode;
+  readonly dismiss?: ReactNode;
   /** The error message of the last failed action on this entry. */
   readonly error?: string | null;
   readonly fullDetail?: boolean;
@@ -24,6 +25,7 @@ export const NeedItem = ({
   item,
   open,
   actions,
+  dismiss,
   error,
   fullDetail = false,
   compact = false,
@@ -106,9 +108,10 @@ export const NeedItem = ({
           <p className="text-xs text-destructive wrap-anywhere">{error}</p>
         )}
       </div>
-      {actions !== undefined ? (
+      {actions !== undefined || dismiss !== undefined ? (
         <div className="relative z-10 ml-auto flex shrink-0 flex-wrap items-center justify-end gap-1.5">
           {actions}
+          {dismiss}
         </div>
       ) : (
         open !== undefined && (

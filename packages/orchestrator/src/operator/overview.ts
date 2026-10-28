@@ -1,7 +1,7 @@
 import { AgentName } from "@usine/core/agent";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { LabelPreflightFinding } from "../label-reconciler.ts";
 import { RunView } from "./run.ts";
 import { BoardView, LabelView } from "./board.ts";
@@ -38,6 +38,7 @@ export class ReadyOverview extends Schema.TaggedClass<ReadyOverview>(
   projects: Schema.Array(ProjectView),
   loops: Schema.Array(LoopView),
   needsYou: Schema.Array(NeedView),
+  dismissedNeeds: Schema.Array(NeedView).pipe(Schema.withConstructorDefault(Effect.succeed([]))),
 }) {}
 
 /** The overview during setup, with the error that prevents normal operation. */
@@ -48,6 +49,7 @@ export class NeedsSetupOverview extends Schema.TaggedClass<NeedsSetupOverview>(
   projects: Schema.Array(ProjectView),
   loops: Schema.Array(LoopView),
   needsYou: Schema.Array(NeedView),
+  dismissedNeeds: Schema.Array(NeedView).pipe(Schema.withConstructorDefault(Effect.succeed([]))),
 }) {}
 
 /** The operator overview, depending on whether factory setup is complete. */
