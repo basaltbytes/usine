@@ -38,35 +38,42 @@ export const configurationEntities = (
   ];
 };
 
-const indexEntities = (entities: ReadonlyArray<ConfigurationEntity>) => {
-  let workerPosition = 0;
-  return new Map(
-    entities.map((entry) => [
-      entry.key.key,
-      { entry, position: entry.key.kind === "worker" ? workerPosition++ : undefined },
-    ]),
-  );
-};
-
 export const configurationDiff = (
   before: ReadonlyArray<ConfigurationEntity>,
   after: ReadonlyArray<ConfigurationEntity>,
 ): ReadonlyArray<ConfigurationChange> => {
-  const previous = indexEntities(before);
-  const next = indexEntities(after);
-  return [...new Set([...previous.keys(), ...next.keys()])].flatMap((key) => {
-    const old = previous.get(key);
-    const value = next.get(key);
-    const identity = value ?? old;
-    const position = value?.position;
-    const moved = position !== undefined && old?.position !== position;
-    if (identity === undefined || (!moved && Equal.equals(old?.entry.value, value?.entry.value)))
-      return [];
+  const previous = new Map(before.map((entry) => [entry.key.key, entry]));
+  const next = new Set(after.map(({ key }) => key.key));
+  const previousOrder = new Map(
+    before
+      .filter(({ key }) => key.kind === "worker" && next.has(key.key))
+      .map(({ key }, index) => [key.key, index]),
+  );
+  const nextOrder = new Map(
+    after
+      .filter(({ key }) => key.kind === "worker" && previous.has(key.key))
+      .map(({ key }, index) => [key.key, index]),
+  );
+  const removed = before
+    .filter(({ key }) => !next.has(key.key))
+    .map(
+      ({ key, value }) =>
+        new ConfigurationChange({ key, before: Option.some(value), after: Option.none() }),
+    );
+  let workerPosition = 0;
+  const changed = after.flatMap((entry) => {
+    const position = entry.key.kind === "worker" ? workerPosition++ : undefined;
+    const old = previous.get(entry.key.key);
+    const moved =
+      position !== undefined &&
+      (old === undefined || previousOrder.get(entry.key.key) !== nextOrder.get(entry.key.key));
+    if (!moved && Equal.equals(old?.value, entry.value)) return [];
     const change = {
-      key: identity.entry.key,
-      before: Option.fromUndefinedOr(old?.entry.value),
-      after: Option.fromUndefinedOr(value?.entry.value),
+      key: entry.key,
+      before: Option.fromUndefinedOr(old?.value),
+      after: Option.some(entry.value),
     };
     return [new ConfigurationChange(moved ? { ...change, position } : change)];
   });
+  return [...removed, ...changed];
 };
