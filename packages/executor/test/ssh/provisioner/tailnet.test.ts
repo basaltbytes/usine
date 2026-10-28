@@ -74,9 +74,10 @@ const fakeTailnet = () => {
             url.hostname === tailnet.gatewayAddress
               ? new Response("", {
                   status: 401,
-                  headers: state.gatewayAnswers
-                    ? { "x-usine-gateway-refusal": "missing-caller-token" }
-                    : {},
+                  headers:
+                    state.gatewayAnswers && request.headers.host === "git.gw.test"
+                      ? { "x-usine-gateway-refusal": "missing-caller-token" }
+                      : {},
                 })
               : url.pathname.endsWith("/oauth/token")
                 ? Response.json({ access_token: "test-access-token" })
@@ -252,6 +253,7 @@ describe("Boat tailnet", () => {
         const error = yield* client.withKey(() => Effect.void).pipe(Effect.flip);
         assert.include(error.message, "HTTP 403");
         assert.notInclude(JSON.stringify(error), "test-client-secret");
+        yield* client.verifyGateway(GatewayDomain.make("gw.test"));
         api.state.gatewayAnswers = false;
         assert.include(
           (yield* client.verifyGateway(GatewayDomain.make("gw.test")).pipe(Effect.flip)).message,
