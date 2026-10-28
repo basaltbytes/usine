@@ -77,15 +77,17 @@ it("dismisses an approval, keeps it in a collapsed section after refresh, and re
     );
     await page.getByRole("button", { name: "Dismiss", exact: true }).click();
     await expect.element(page.getByText("Nothing needs attention")).toBeVisible();
-    await expect.element(page.getByText("Dismissed (1)")).toBeVisible();
+    const disclosure = page.getByRole("button", { name: "Dismissed (1)" });
+    await expect.element(disclosure).toHaveAttribute("aria-expanded", "false");
     await expect
-      .element(page.getByRole("button", { name: "Undo", includeHidden: true }))
-      .not.toBeVisible();
+      .element(page.getByRole("button", { name: "Undo", exact: true }))
+      .not.toBeInTheDocument();
     await queries.invalidateQueries({ queryKey: overviewQuery().queryKey });
     expect(queries.getQueryData<FactoryOverview>(overviewQuery().queryKey)?.needsYou).toHaveLength(
       0,
     );
-    await page.getByText("Dismissed (1)").click();
+    await disclosure.click();
+    await expect.element(disclosure).toHaveAttribute("aria-expanded", "true");
     await page.getByRole("button", { name: "Undo", exact: true }).click();
     await expect.element(page.getByRole("button", { name: "Dismiss", exact: true })).toBeVisible();
     await expect.element(page.getByRole("button", { name: "Approve", exact: true })).toBeEnabled();
