@@ -14,6 +14,7 @@ export const revertConfiguration = (
   parser: ConfigParser["Service"],
   target: ConfigurationRevision,
   history: ReadonlyArray<ConfigurationRevision>,
+  current: Configuration,
 ) =>
   Effect.gen(function* () {
     const later = new Set(
@@ -32,15 +33,33 @@ export const revertConfiguration = (
       previous = (yield* commit(parser, previous, previous.number, entry.changes, entry))
         .configuration;
     }
-    const entities = Option.match(previous.instance, {
-      onNone: () => [],
-      onSome: configurationEntities,
-    });
-    const positions = new Map(
-      entities
-        .filter(({ key }) => key.kind === "worker")
-        .map(({ key }, position) => [key.key, position]),
-    );
+    const workerKeys = (snapshot: Configuration) =>
+      Option.match(snapshot.instance, {
+        onNone: () => [],
+        onSome: (instance) =>
+          configurationEntities(instance)
+            .filter(({ key }) => key.kind === "worker")
+            .map(({ key }) => key.key),
+      });
+    const historical = workerKeys(previous);
+    const changed = new Set(target.changes.map(({ key }) => key.key));
+    const ordered = workerKeys(current).filter((key) => !changed.has(key));
+    for (const [index, key] of historical.entries()) {
+      if (!changed.has(key)) continue;
+      const next = historical.slice(index + 1).find((candidate) => ordered.includes(candidate));
+      const preceding = historical
+        .slice(0, index)
+        .reverse()
+        .find((candidate) => ordered.includes(candidate));
+      const position =
+        next !== undefined
+          ? ordered.indexOf(next)
+          : preceding !== undefined
+            ? ordered.indexOf(preceding) + 1
+            : ordered.length;
+      ordered.splice(position, 0, key);
+    }
+    const positions = new Map(ordered.map((key, position) => [key, position]));
     return target.changes.map((change) => {
       const position = positions.get(change.key.key);
       const reversed = { key: change.key, before: change.after, after: change.before };

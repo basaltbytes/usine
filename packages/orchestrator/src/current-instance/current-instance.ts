@@ -126,14 +126,13 @@ export const reloadPreflightFailed = (
 export type InstanceReloadError = FactoryConfigError | RestartRequiredError | ReloadPreflightError;
 
 /**
- * Checks a reload from `running` to `loaded` without changing anything, and returns the effect that
- * applies `loaded`'s `workers` block. Fails on an unsupported `workers` change or a failed
- * preflight.
+ * Prepares a reload from `running` to `loaded` and returns the effect that applies its workers.
+ * The caller must apply it within the scope; failure releases prepared workers.
  */
 export type WorkerReload = (
   running: LoadedInstance,
   loaded: LoadedInstance,
-) => Effect.Effect<Effect.Effect<void>, RestartRequiredError | ReloadPreflightError>;
+) => Effect.Effect<Effect.Effect<void>, RestartRequiredError | ReloadPreflightError, Scope.Scope>;
 
 const rejectionLogFields = (error: InstanceReloadError) =>
   Match.valueTags(error, {
@@ -293,7 +292,7 @@ export class CurrentInstance extends Context.Service<
               const apply = yield* restore(prepare(snapshot));
               return yield* apply;
             }),
-          );
+          ).pipe(Effect.scoped);
 
         const commitRevision = Effect.fn("CurrentInstance.commit")(
           (request: ConfigurationCommit) =>
@@ -317,7 +316,7 @@ export class CurrentInstance extends Context.Service<
                 yield* apply;
                 return revision;
               }),
-            ).pipe(reloading.withPermits(1)),
+            ).pipe(Effect.scoped, reloading.withPermits(1)),
           Effect.tapError((error) =>
             Effect.logWarning("Configuration write refused", {
               errorTag: error._tag,

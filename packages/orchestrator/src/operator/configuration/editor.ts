@@ -215,7 +215,7 @@ export class ConfigurationEditor extends Context.Service<
           const snapshot = yield* snapshotFor(input.expected);
           const target = yield* revision(number);
           const history = yield* store.list(Option.none());
-          const changes = yield* revertConfiguration(parser, target, history).pipe(
+          const changes = yield* revertConfiguration(parser, target, history, snapshot).pipe(
             Effect.tapError((error) =>
               Effect.logInfo("Configuration revert refused", {
                 revision: number,

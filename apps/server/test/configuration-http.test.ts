@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import {
   ConfigurationStore,
+  ConfigurationStoreError,
   ConfigurationRevisionNumber,
   configurationDiff,
   configurationEntities,
@@ -52,9 +53,23 @@ const harness = Effect.gen(function* () {
     Layer.provide(controlLayer),
     Layer.provideMerge(parserLayer),
   );
-  const services = yield* Layer.build(storeLayer);
-  const parser = Context.get(services, ConfigParser);
-  const store = Context.get(services, ConfigurationStore);
+  const base = yield* Layer.build(storeLayer);
+  const parser = Context.get(base, ConfigParser);
+  const underlyingStore = Context.get(base, ConfigurationStore);
+  const failNextCommit = yield* Ref.make(Option.none<ConfigurationStoreError>());
+  const store = ConfigurationStore.of({
+    ...underlyingStore,
+    commit: (request) =>
+      Ref.getAndSet(failNextCommit, Option.none()).pipe(
+        Effect.flatMap(
+          Option.match({
+            onNone: () => underlyingStore.commit(request),
+            onSome: Effect.fail,
+          }),
+        ),
+      ),
+  });
+  const services = Context.add(base, ConfigurationStore, store);
   const initial = new LoadedInstance({
     config: yield* parser.parseUsineYaml(
       InstancePath.make("usine.yaml"),
@@ -78,11 +93,25 @@ const harness = Effect.gen(function* () {
     ),
   );
   const current = Context.get(currentContext, CurrentInstance);
+  const preflightAction = yield* Ref.make<Effect.Effect<void>>(Effect.void);
+  const workers = new Map(initial.config.workers.map((worker) => [worker.name, worker]));
   const currentLayer = Layer.succeed(CurrentInstance, current);
   const scheduler = yield* Layer.build(
     stepExecutorLayer(
       initial.config,
       initial.agents.map(({ agent }) => agent.brain),
+      {
+        workers: {
+          add: (worker) =>
+            Effect.sync(() => {
+              workers.set(worker.name, worker);
+            }),
+          remove: (worker) =>
+            Effect.sync(() => {
+              workers.delete(worker);
+            }),
+        },
+      },
     ).pipe(
       Layer.provide(currentLayer),
       Layer.provide(
@@ -96,16 +125,21 @@ const harness = Effect.gen(function* () {
           intervene: unused,
           sweep: Effect.void,
           preflight: (worker) =>
-            worker === "broken"
-              ? Effect.fail(
-                  new WorkerCapabilityError({
-                    worker,
-                    capability: "memory",
-                    message: "Insufficient memory",
-                    cause: "private observation",
-                  }),
-                )
-              : Effect.succeed(fullPreflight),
+            Ref.getAndSet(preflightAction, Effect.void).pipe(
+              Effect.flatten,
+              Effect.andThen(
+                worker === "broken"
+                  ? Effect.fail(
+                      new WorkerCapabilityError({
+                        worker,
+                        capability: "memory",
+                        message: "Insufficient memory",
+                        cause: "private observation",
+                      }),
+                    )
+                  : Effect.succeed(fullPreflight),
+              ),
+            ),
         }),
       ),
       Layer.provide(
@@ -184,7 +218,16 @@ const harness = Effect.gen(function* () {
       const value: unknown = await response.json();
       return { status: response.status, body: value };
     });
-  return { request, store, current, controls, status: Context.get(scheduler, WorkerStatus) };
+  return {
+    request,
+    store,
+    current,
+    controls,
+    preflightAction,
+    failNextCommit,
+    workers,
+    status: Context.get(scheduler, WorkerStatus),
+  };
 });
 
 it("creates, reads, replaces and deletes entities with paginated and filtered revision history", () =>
@@ -480,5 +523,142 @@ it("restores worker order when reverting a move or deletion", () =>
       );
       expect((yield* request("POST", "/revisions/5/revert", { expected: 5 })).status).toBe(200);
       expect((yield* status.slots).map(({ worker }) => worker)).toEqual(["extra", "local"]);
+    }).pipe(Effect.scoped),
+  ));
+
+it.each(["stale", "storage"] as const)(
+  "releases prepared workers after a %s commit failure",
+  (failure) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const { request, store, current, status, preflightAction, failNextCommit, workers } =
+          yield* harness;
+        const expected = failure === "stale" ? 2 : 1;
+        yield* Ref.set(
+          preflightAction,
+          failure === "stale"
+            ? store
+                .commit({
+                  expected: ConfigurationRevisionNumber.make(1),
+                  actor: Option.none(),
+                  message: Option.some("Concurrent CLI edit"),
+                  changes: [],
+                })
+                .pipe(Effect.orDie, Effect.asVoid)
+            : Ref.set(
+                failNextCommit,
+                Option.some(
+                  new ConfigurationStoreError({
+                    operation: "commit",
+                    cause: "storage unavailable",
+                  }),
+                ),
+              ),
+        );
+        expect(
+          yield* request("PUT", "/entities/worker/extra", {
+            expected: 1,
+            value: { name: "extra", kind: "local" },
+          }),
+        ).toMatchObject(
+          failure === "stale"
+            ? { status: 409, body: { error: "StaleRevision", current: 2 } }
+            : { status: 500, body: { error: "ConfigurationStoreError" } },
+        );
+        expect([...workers.keys()]).toEqual(["local"]);
+        expect((yield* status.slots).map(({ worker }) => worker)).toEqual(["local"]);
+        expect((yield* current.get).config.workers.map(({ name }) => name)).toEqual(["local"]);
+        expect((yield* store.read).number).toBe(expected);
+        expect(yield* request("GET", "/entities/worker/extra")).toMatchObject({ status: 404 });
+        expect(
+          (yield* request("PUT", "/entities/worker/extra", {
+            expected,
+            value: { name: "extra", kind: "local", max_concurrent_attempts: 3 },
+          })).status,
+        ).toBe(200);
+        expect(workers.get(WorkerName.make("extra"))?.maxConcurrentAttempts).toBe(3);
+        expect(yield* status.slots).toContainEqual(
+          expect.objectContaining({ worker: "extra", capacity: 3 }),
+        );
+        expect(
+          (yield* request("DELETE", "/entities/worker/extra", { expected: expected + 1 })).status,
+        ).toBe(200);
+        expect([...workers.keys()]).toEqual(["local"]);
+      }).pipe(Effect.scoped),
+    ),
+);
+
+it.each([
+  { removed: "c", laterRemoved: "local", expected: ["b", "c"] },
+  { removed: "b", laterRemoved: "local", expected: ["b", "c"] },
+  { removed: "b", laterRemoved: "c", expected: ["local", "b"] },
+])(
+  "restores $removed relative to surviving workers after deleting $laterRemoved",
+  ({ removed, laterRemoved, expected }) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const { request, status } = yield* harness;
+        for (const [index, name] of ["b", "c"].entries()) {
+          expect(
+            (yield* request("PUT", `/entities/worker/${name}`, {
+              expected: index + 1,
+              value: { name, kind: "local" },
+            })).status,
+          ).toBe(200);
+        }
+        expect(
+          (yield* request("DELETE", `/entities/worker/${removed}`, { expected: 3 })).status,
+        ).toBe(200);
+        expect(
+          (yield* request("DELETE", `/entities/worker/${laterRemoved}`, { expected: 4 })).status,
+        ).toBe(200);
+        expect(yield* request("POST", "/revisions/4/revert", { expected: 5 })).toMatchObject({
+          status: 200,
+          body: { number: 6 },
+        });
+        expect((yield* status.slots).map(({ worker }) => worker)).toEqual(expected);
+        expect((yield* request("GET", `/entities/worker/${laterRemoved}`)).status).toBe(404);
+      }).pipe(Effect.scoped),
+    ),
+);
+
+it("restores several deleted workers while preserving later additions and deletions", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const { request, store, status } = yield* harness;
+      for (const [index, name] of ["b", "c", "d"].entries()) {
+        expect(
+          (yield* request("PUT", `/entities/worker/${name}`, {
+            expected: index + 1,
+            value: { name, kind: "local" },
+          })).status,
+        ).toBe(200);
+      }
+      const snapshot = yield* store.read;
+      if (Option.isNone(snapshot.instance))
+        return yield* Effect.die("Missing initial configuration");
+      const before = configurationEntities(snapshot.instance.value);
+      yield* store.commit({
+        expected: snapshot.number,
+        actor: snapshot.actor,
+        message: Option.none(),
+        changes: configurationDiff(
+          before,
+          before.filter(({ key }) => key.key !== "worker:b" && key.key !== "worker:c"),
+        ),
+      });
+      expect((yield* request("DELETE", "/entities/worker/local", { expected: 5 })).status).toBe(
+        200,
+      );
+      expect(
+        (yield* request("PUT", "/entities/worker/extra", {
+          expected: 6,
+          value: { name: "extra", kind: "local" },
+          position: 0,
+        })).status,
+      ).toBe(200);
+      expect((yield* request("POST", "/revisions/5/revert", { expected: 7 })).status).toBe(200);
+      expect((yield* status.slots).map(({ worker }) => worker)).toEqual(["extra", "b", "c", "d"]);
+      expect((yield* request("GET", "/entities/worker/local")).status).toBe(404);
     }).pipe(Effect.scoped),
   ));
