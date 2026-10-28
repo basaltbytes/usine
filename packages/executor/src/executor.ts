@@ -452,6 +452,7 @@ export class WorkerMachines extends Context.Service<
      * Creates a machine on `worker` for the persisted `attemptId`, labeled with the instance,
      * Worker, Run, and Attempt, and waits until it answers over SSH. The first machine after the configured
      * check interval also gets the preflight checks of `brains`, whose failure is a `WorkerCapabilityError`.
+     * Call only before preparing the Attempt. A retry first deletes machines from its earlier failed creation.
      * On failure or interruption, deletes the machine.
      */
     readonly create: (

@@ -107,6 +107,11 @@ it.live("reports a failed final deletion and still removes the worker configurat
     yield* workers.removeWorker(WORKER);
     assert.isFalse(yield* machines.provisions(WORKER));
     assert.strictEqual(providers.hetzner.servers.size, 1);
+    assert.lengthOf(
+      yield* machines.machines,
+      0,
+      "removed worker records do not retain its credentials",
+    );
     assert.isTrue(
       logs.lines.some(
         (line) =>
@@ -118,4 +123,28 @@ it.live("reports a failed final deletion and still removes the worker configurat
     Effect.provide(runtimeOf(machine, providers, hetznerAddress)),
     Effect.provide(logs.layer),
   );
+});
+
+it.live("removes an ambiguously created machine before retrying the same Attempt", () => {
+  const machine = fakeMachine();
+  const providers = fakeProviders();
+  return Effect.gen(function* () {
+    const machines = yield* WorkerMachines;
+    providers.hetzner.createAnswerFails = true;
+    yield* machines.create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain]).pipe(Effect.flip);
+    assert.strictEqual(providers.hetzner.servers.size, 1);
+    providers.hetzner.createAnswerFails = false;
+    providers.hetzner.deleteFails = { status: 500, code: "server_error", message: "down" };
+    yield* machines.create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain]).pipe(Effect.flip);
+    assert.strictEqual(
+      providers.hetzner.servers.size,
+      1,
+      "failed cleanup creates no second machine",
+    );
+    providers.hetzner.deleteFails = undefined;
+    const grant = yield* machines.create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain]);
+    assert.deepStrictEqual([...providers.hetzner.servers.keys()], [Number(grant.id)]);
+    yield* machines.release(grant.hold);
+    assert.strictEqual(providers.hetzner.servers.size, 0);
+  }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, hetznerAddress)));
 });

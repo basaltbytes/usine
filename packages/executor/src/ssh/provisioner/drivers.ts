@@ -20,6 +20,7 @@ export const machineDriversFor = Effect.fn("SshExecutor.machineDriversFor")(func
   const { settings, instance } = options;
   const readPublicKey = Effect.fn("SshExecutor.readPublicKey")(function* (entry: SshWorkerEntry) {
     const worker = entry.address.name;
+    yield* Effect.annotateCurrentSpan({ worker });
     const identity = Option.getOrUndefined(entry.address.identityFile);
     const file = identity === undefined ? undefined : `${expandHome(identity)}.pub`;
     const text =

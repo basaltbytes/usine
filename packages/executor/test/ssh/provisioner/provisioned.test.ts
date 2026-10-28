@@ -623,6 +623,7 @@ describe("Provisioned SSH Worker", () => {
       return Effect.gen(function* () {
         const machines = yield* WorkerMachines;
         earlier(11, attemptTag(request.attemptId));
+        earlier(15, attemptTag(request.attemptId));
         earlier(12, "hdeadbeefdeadbeef");
         earlier(13, undefined);
         providers.hetzner.servers.set(14, {
@@ -636,7 +637,9 @@ describe("Provisioned SSH Worker", () => {
         // Startup recovery occupies the slot of the Attempt that still runs on server 11.
         const adopted = yield* machines.adopt(WORKER, request.attemptId);
         assert.isTrue(Option.isSome(adopted));
-        const ours = yield* machines.create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain]);
+        const ours = yield* machines.create(WORKER, RUN, AttemptId.make("other-run/execute/1"), [
+          TEST_AGENT.brain,
+        ]);
         yield* machines.sweep;
         assert.deepStrictEqual(
           [...providers.hetzner.servers.keys()].sort(),

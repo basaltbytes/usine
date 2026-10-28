@@ -1,5 +1,10 @@
 import { RunId } from "@usine/core/run";
-import { SshIdentityFile, WorkerRoot } from "@usine/core/worker";
+import {
+  ProvisionerTimings,
+  ProvisionerSeconds,
+  SshIdentityFile,
+  WorkerRoot,
+} from "@usine/core/worker";
 import {
   completes,
   type StubParent,
@@ -37,6 +42,7 @@ export const hetznerAddress: SshWorkerAddress = {
     _tag: "Provisioned",
     provisioner: hetznerSettings({
       network: Option.none(),
+      timings: new ProvisionerTimings({ sshWait: ProvisionerSeconds.make(1) }),
       apiKeys: { anthropic: Option.some(Redacted.make(KEY)), openai: Option.none() },
     }),
   },
@@ -47,7 +53,12 @@ export const boatAddress: SshWorkerAddress = {
   port: Option.none(),
   root: WorkerRoot.make("/home/user/.usine"),
   identityFile: Option.some(SshIdentityFile.make("/keys/usine_boat")),
-  machine: { _tag: "Provisioned", provisioner: boatSettings() },
+  machine: {
+    _tag: "Provisioned",
+    provisioner: boatSettings({
+      timings: new ProvisionerTimings({ sshWait: ProvisionerSeconds.make(1) }),
+    }),
+  },
 };
 
 export const sink = {
@@ -72,7 +83,6 @@ export const runtimeOf = (
     interruptGrace: "2 seconds",
     providerEndpoints: { hetzner: HETZNER_TEST_API, boat: BOAT_TEST_API },
     machinePollInterval: "1 millis",
-    machineReadyTimeout: "1 second",
   }).pipe(
     Layer.provide(machine.layer),
     Layer.provide(mintingProvider().layer),

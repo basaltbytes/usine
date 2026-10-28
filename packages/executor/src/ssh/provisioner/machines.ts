@@ -472,7 +472,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
   });
 
   /**
-   * Runs the machine preflight on the first machine of `worker` each day, which a provisioned
+   * Runs the machine preflight when its interval elapses, which a provisioned
    * Worker's preflight at `usine up` can't. Each machine runs one Attempt, so the container
    * limits it derives are for one Attempt; the Worker's machines get them until the next check.
    */
@@ -523,7 +523,8 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
           ),
       }),
     );
-    yield* Ref.update(checkedOn, (current) => new Map(current).set(worker, now));
+    const checkedAt = DateTime.toEpochMillis(yield* DateTime.now);
+    yield* Ref.update(checkedOn, (current) => new Map(current).set(worker, checkedAt));
     return Option.some(new MachineCheck({ brains, containerLimits: report.containerLimits }));
   });
 
@@ -555,6 +556,33 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     const driver = yield* driverFor(worker).pipe(
       Effect.catchTags({ ExecutorOperationError: defect, CredentialUnavailableError: defect }),
     );
+    yield* Effect.gen(function* () {
+      const earlier = yield* driver.list(instance, Option.some(worker));
+      for (const machine of earlier.filter(({ tags }) =>
+        Option.contains(tags.attempt, attemptTag(attemptId)),
+      )) {
+        yield* destroy(driver, worker, machine.id);
+        const previous = [...(yield* Ref.get(held)).values()].filter((entry) =>
+          Option.contains(entry.id, machine.id),
+        );
+        yield* Effect.forEach(previous, ({ hold }) => unregister(hold), { discard: true });
+        yield* Effect.logInfo("Deleted a machine from an earlier failed creation before retrying", {
+          worker,
+          attemptId,
+          machine: machine.id,
+        });
+      }
+    }).pipe(
+      Effect.mapError(
+        (error) =>
+          new MachineUnavailableError({
+            worker,
+            provider: driver.provider,
+            reason: "provider",
+            message: `Could not clean up the attempt's earlier machine creation: ${error.message}`,
+          }),
+      ),
+    );
     const readyTimeout = readyTimeoutFor(entry);
     const since = yield* DateTime.now;
     const tags: MachineTags = { instance, worker, run: runId, process, attempt: attemptId };
@@ -573,6 +601,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     yield* Effect.logInfo("Creating a machine for the persisted Attempt", {
       worker,
       runId,
+      attemptId,
       provider: driver.provider,
     });
     const created = yield* driver
@@ -620,6 +649,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     yield* Effect.logInfo("The machine for the Attempt is ready", {
       worker,
       runId,
+      attemptId,
       provider: driver.provider,
       machine: id,
       host: prepared.machine.shell.destination,
@@ -782,9 +812,10 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
       current.find(
         (entry) =>
           Option.contains(entry.id, machine.id) ||
-          Option.exists(entry.attemptId, (attemptId) =>
-            Option.contains(machine.tags.attempt, attemptTag(attemptId)),
-          ),
+          (Option.isNone(entry.id) &&
+            Option.exists(entry.attemptId, (attemptId) =>
+              Option.contains(machine.tags.attempt, attemptTag(attemptId)),
+            )),
       );
     let deleted = 0;
     let failed = 0;
@@ -884,6 +915,15 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
       Effect.ignore,
     );
     yield* drivers.forget(worker);
+    const remaining = yield* Ref.modify(held, (current) => {
+      const next = new Map([...current].filter(([, entry]) => entry.worker !== worker));
+      return [current.size - next.size, next] as const;
+    });
+    if (remaining > 0)
+      yield* Effect.logWarning(
+        "Removed Worker still has machines with retained checkouts or failed deletions; restore its configuration to recover them or delete them at the provider",
+        { worker, instance, remaining },
+      );
     yield* Ref.update(checkedOn, (current) => {
       const next = new Map(current);
       next.delete(worker);

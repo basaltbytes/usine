@@ -326,7 +326,6 @@ export const stepExecutorLayer = (
       const paused = yield* TxRef.make<ReadonlyMap<WorkerName, ProvisioningPause>>(new Map());
       // The machine of each Run's lease, which `execute` gives to the Run's Attempt.
       const runMachines = yield* Ref.make<ReadonlyMap<RunId, LeaseMachine>>(new Map());
-      // The machine creation of each reservation, by its order.
       const provisions = (worker: WorkerName) =>
         machines === undefined ? Effect.succeed(false) : machines.provisions(worker);
 
@@ -625,6 +624,7 @@ export const stepExecutorLayer = (
           configured?.kind === "ssh" && Option.isSome(configured.provisioner)
             ? configured.provisioner.value.timings
             : new ProvisionerTimings({});
+        yield* Effect.annotateCurrentSpan({ worker });
         const failedAt = yield* DateTime.now;
         const pause = yield* Effect.tx(
           TxRef.modify(paused, (current) => {
@@ -859,6 +859,7 @@ export const stepExecutorLayer = (
         if (machines === undefined || !(yield* provisions(worker))) return;
         const attemptId = execution.attempt.id;
         const fields = { runId: execution.run.id, attemptId, worker };
+        yield* Effect.annotateCurrentSpan(fields);
         const machine = (yield* Ref.get(runMachines)).get(execution.run.id);
         if (execution.reattach) {
           const adopted = yield* machines.adopt(worker, attemptId);
