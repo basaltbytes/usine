@@ -5,6 +5,8 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { page } from "vitest/browser";
+import { overviewQuery } from "~/lib/overview";
+import { configurationQuery } from "~/lib/configuration/queries";
 import { dayTimeLabel } from "~/lib/strings";
 import { routeTree } from "~/route-tree.gen";
 import { configurationFixture } from "~/lib/configuration/fixture";
@@ -22,10 +24,10 @@ beforeEach(() => {
     defaultOptions: { queries: { staleTime: Infinity, retry: false } },
   });
   queryClient.setQueryData(
-    ["overview"],
+    overviewQuery().queryKey,
     new ReadyOverview({ projects: [], loops: [], needsYou: [] }),
   );
-  queryClient.setQueryData(["configuration"], configurationFixture());
+  queryClient.setQueryData(configurationQuery().queryKey, configurationFixture());
 });
 
 afterEach(() => {

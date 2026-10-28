@@ -1,6 +1,6 @@
-import type { Query } from "@tanstack/react-query";
+import { queryOptions } from "@tanstack/react-query";
 import { RepositoryName, splitRepositoryName } from "@usine/core/repository";
-import type { FactoryOverview, NeedView } from "@usine/orchestrator/operator";
+import type { NeedView } from "@usine/orchestrator/operator";
 import { api } from "~/lib/api";
 import { needCopy } from "~/lib/needs-you/strings";
 
@@ -26,17 +26,16 @@ const ACTIVE_OVERVIEW_REFRESH_MS = 2_000;
 const IDLE_OVERVIEW_REFRESH_MS = 15_000;
 
 /** Returns the overview query, which every route uses; the root loader prefetches it. */
-export const overviewQuery = () => ({
-  queryKey: ["overview"] as const,
-  queryFn: () => api((client) => client.overview()),
-  refetchInterval: (
-    query: Query<FactoryOverview, Error, FactoryOverview, readonly ["overview"]>,
-  ) => {
-    const overview = query.state.data;
-    if (overview?._tag === "NeedsSetup") return false;
-    const hasOpenRun = overview?.projects.some((project) =>
-      project.runs.some(({ canCancel }) => canCancel),
-    );
-    return hasOpenRun === true ? ACTIVE_OVERVIEW_REFRESH_MS : IDLE_OVERVIEW_REFRESH_MS;
-  },
-});
+export const overviewQuery = () =>
+  queryOptions({
+    queryKey: ["overview"] as const,
+    queryFn: () => api((client) => client.overview()),
+    refetchInterval: (query) => {
+      const overview = query.state.data;
+      if (overview?._tag === "NeedsSetup") return false;
+      const hasOpenRun = overview?.projects.some((project) =>
+        project.runs.some(({ canCancel }) => canCancel),
+      );
+      return hasOpenRun === true ? ACTIVE_OVERVIEW_REFRESH_MS : IDLE_OVERVIEW_REFRESH_MS;
+    },
+  });

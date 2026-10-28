@@ -4,7 +4,7 @@ import {
   ConfigurationSection,
   ConfigurationUnavailable,
 } from "~/features/configuration/configuration.page";
-import { configurationQuery } from "~/features/configuration/queries";
+import { configurationQuery } from "~/lib/configuration/queries";
 
 export const Route = createFileRoute("/configuration")({
   loader: ({ context }) => context.queryClient.ensureQueryData(configurationQuery()),

@@ -3,6 +3,7 @@ import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/rea
 import {
   DeskView,
   FactoryOverview,
+  NeedsSetupOverview,
   RunStatisticsView,
   StatisticsView,
 } from "@usine/orchestrator/operator";
@@ -11,6 +12,7 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, it } from "vitest";
 import { commands, page } from "vitest/browser";
+import { statisticsQuery } from "~/features/overview/queries";
 import { routeTree } from "~/route-tree.gen";
 import {
   deskFixture,
@@ -32,6 +34,8 @@ declare module "vitest/browser" {
       statistics: Windows,
       runStatistics: Windows,
     ) => Promise<void>;
+    delayStatistics: (window: string) => Promise<void>;
+    releaseStatistics: () => Promise<void>;
     statisticsRequests: () => Promise<{
       readonly tasks: ReadonlyArray<string | null>;
       readonly runs: ReadonlyArray<string | null>;
@@ -51,9 +55,13 @@ let host: HTMLDivElement | undefined;
 let queryClient: QueryClient | undefined;
 
 /** Renders the Overview with the desk fixtures and the task and run statistics of each window. */
-const renderOverview = async (statistics: Windows, runStatistics: Windows) => {
+const renderOverview = async (
+  statistics: Windows,
+  runStatistics: Windows,
+  state: FactoryOverview = overview,
+) => {
   await commands.statisticsResponses(
-    JSON.stringify(Schema.encodeSync(FactoryOverview)(overview)),
+    JSON.stringify(Schema.encodeSync(FactoryOverview)(state)),
     JSON.stringify(Schema.encodeSync(DeskView)(desk)),
     statistics,
     runStatistics,
@@ -79,7 +87,8 @@ const renderOverview = async (statistics: Windows, runStatistics: Windows) => {
   );
 };
 
-afterEach(() => {
+afterEach(async () => {
+  await commands.releaseStatistics();
   const mounted = root;
   if (mounted !== undefined) flushSync(() => mounted.unmount());
   queryClient?.clear();
@@ -174,7 +183,15 @@ it("leads the Overview with the tasks done and reads the run statistics only beh
     .element(statistics.getByRole("meter", { name: "local slot use" }))
     .toHaveAttribute("aria-valuenow", "38");
 
+  await commands.delayStatistics("7d");
   await statistics.getByRole("button", { name: "7 days" }).click();
+  await expect.poll(async () => (await commands.statisticsRequests()).runs).toContain("7d");
+  await expect.element(statistics.getByText("12 tasks", { exact: true })).toBeVisible();
+  await expect
+    .element(statistics.getByRole("definition").filter({ hasText: /^36$/u }))
+    .toBeVisible();
+  expect(statistics.element().querySelectorAll('[aria-busy="true"]')).toHaveLength(2);
+  await commands.releaseStatistics();
   await expect.element(statistics.getByText("4 tasks", { exact: true })).toBeVisible();
   expect(statistics.getByText("median price", { exact: true }).elements()).toHaveLength(0);
   await expect
@@ -216,4 +233,36 @@ it("says what is missing when the window has no task done", async () => {
   await expect
     .element(statistics.getByText("No closed runs yet", { exact: true }).first())
     .toBeVisible();
+});
+
+it("keeps setup mode usable when statistics fail and recovers on refetch", async () => {
+  const state = new NeedsSetupOverview({
+    errorTag: "GitHubAppNotConfigured",
+    projects: [],
+    loops: [],
+    needsYou: [],
+  });
+  const unavailable = { "7d": "{}", "30d": "{}", all: "{}" };
+  await renderOverview(unavailable, runFixtures, state);
+  await expect.element(page.getByText("GitHub App not set up", { exact: true })).toBeVisible();
+  await expect.element(page.getByText("No projects registered", { exact: true })).toBeVisible();
+  await expect
+    .element(statistics.getByText("Could not load the statistics", { exact: true }))
+    .toBeVisible();
+  await expect.element(page.getByRole("heading", { name: "Recent runs" })).toBeVisible();
+  await commands.statisticsResponses(
+    JSON.stringify(Schema.encodeSync(FactoryOverview)(state)),
+    JSON.stringify(Schema.encodeSync(DeskView)(desk)),
+    {
+      "7d": encode(statisticsFixture(now, "7d")),
+      "30d": encode(statisticsFixture(now, "30d")),
+      all: encode(weeklyStatisticsFixture(now)),
+    },
+    runFixtures,
+  );
+  await queryClient?.invalidateQueries({ queryKey: statisticsQuery("30d").queryKey });
+  await expect.element(statistics.getByText("12 tasks", { exact: true })).toBeVisible();
+  await expect
+    .element(statistics.getByText("Could not load the statistics", { exact: true }))
+    .not.toBeInTheDocument();
 });

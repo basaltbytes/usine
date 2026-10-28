@@ -1,13 +1,15 @@
+import { ItemNumber } from "@usine/core/item";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { RouterProvider, useRouterState } from "@tanstack/react-router";
+import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
 import { FactoryOverview, TaskView } from "@usine/orchestrator/operator";
 import { Schema } from "effect";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { page, userEvent } from "vitest/browser";
-import { TaskPage } from "~/features/tasks/task.page";
-import { memoryRouter } from "~/lib/testing/memory-router";
+import { taskQuery } from "~/features/tasks/queries";
+import { routeTree } from "~/route-tree.gen";
+import { overviewQuery } from "~/lib/overview";
 import { fullTask, quietTask, taskOverview, taskRepository } from "~/lib/tasks/fixture";
 import "~/index.css";
 
@@ -19,9 +21,12 @@ interface Sent {
 let host: HTMLDivElement;
 let root: Root;
 let queryClient: QueryClient;
-let router: ReturnType<typeof memoryRouter>;
+let router: ReturnType<typeof createRouter<typeof routeTree>>;
 let sent: Array<Sent>;
 let tasks: Map<string, TaskView>;
+let taskUnavailable: boolean;
+let taskDelay: Promise<void> | undefined;
+let taskRequests: Array<string>;
 
 const json = (body: string, status = 200) =>
   new Response(body, { status, headers: { "content-type": "application/json" } });
@@ -38,6 +43,13 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   if (url.pathname === "/api/agents") return json('["developer","reviewer"]');
   const number = /\/tasks\/(\d+)$/u.exec(url.pathname)?.[1];
   if (number !== undefined) {
+    taskRequests.push(number);
+    await taskDelay;
+    if (taskUnavailable)
+      return json(
+        JSON.stringify({ error: "BackendUnavailableError", message: "GitHub is unavailable" }),
+        503,
+      );
     const task = tasks.get(number);
     return task === undefined
       ? json(
@@ -53,15 +65,18 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   return json('{"ok":true}');
 };
 
-const AtAddress = () => {
-  const number = useRouterState({ select: ({ location }) => location.pathname.split("/").at(-1) });
-  return <TaskPage key={number} repository={taskRepository} number={number ?? ""} />;
-};
-
 const mount = async (number: number | string, width = 1280) => {
   await page.viewport(width, 900);
-  router = memoryRouter(AtAddress, `/projects/${taskRepository}/tasks/${number}`);
-  await router.load();
+  router = createRouter({
+    routeTree,
+    history: createMemoryHistory({
+      initialEntries: [`/projects/${taskRepository}/tasks/${number}`],
+    }),
+    context: { queryClient },
+    defaultPendingMs: 0,
+    defaultPendingMinMs: 0,
+  });
+  const loaded = router.load();
   flushSync(() =>
     root.render(
       <QueryClientProvider client={queryClient}>
@@ -69,6 +84,7 @@ const mount = async (number: number | string, width = 1280) => {
       </QueryClientProvider>,
     ),
   );
+  await loaded;
 };
 
 const runsTable = () => page.getByRole("region", { name: /^Runs/u });
@@ -85,12 +101,15 @@ const menuItems = async () => {
 
 beforeEach(() => {
   sent = [];
+  taskUnavailable = false;
+  taskDelay = undefined;
+  taskRequests = [];
   tasks = new Map([
     ["40", fullTask()],
     ["12", quietTask()],
   ]);
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  queryClient.setQueryData(["overview"], taskOverview());
+  queryClient.setQueryData(overviewQuery().queryKey, taskOverview());
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -275,4 +294,52 @@ it("moves to the originating Item's address, and explains an Item off the Board"
   flushSync(() => root.render(null));
   await mount(9999);
   await expect.element(page.getByText("Task not found")).toBeVisible();
+});
+
+it("shows pending navigation, then renders the loader's task without a second request", async () => {
+  let release = () => {};
+  taskDelay = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const mounted = mount(40);
+  try {
+    await expect.element(page.getByText("Loading…", { exact: true })).toBeVisible();
+    release();
+    await mounted;
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toMatchTextContent("Rework the conversation reader");
+    expect(taskRequests).toEqual(["40"]);
+  } finally {
+    release();
+    await mounted;
+  }
+});
+
+it("retries a failed direct link and retains the task during a failed refresh", async () => {
+  taskUnavailable = true;
+  await mount(40);
+  await expect.element(page.getByText("GitHub is unavailable", { exact: true })).toBeVisible();
+  taskUnavailable = false;
+  await page.getByRole("button", { name: "Try again", exact: true }).click();
+  await expect
+    .element(page.getByRole("heading", { level: 1 }))
+    .toMatchTextContent("Rework the conversation reader");
+  taskUnavailable = true;
+  await queryClient.invalidateQueries({
+    queryKey: taskQuery(taskRepository, ItemNumber.make(40)).queryKey,
+  });
+  await expect.element(page.getByText("Could not refresh the task")).toBeVisible();
+  await expect
+    .element(page.getByRole("heading", { level: 1 }))
+    .toMatchTextContent("Rework the conversation reader");
+  taskUnavailable = false;
+  await queryClient.invalidateQueries({ queryKey: overviewQuery().queryKey });
+  await expect.element(page.getByText("Could not refresh the task")).not.toBeInTheDocument();
+});
+
+it("rejects an invalid task number before requesting it", async () => {
+  await mount("not-a-number");
+  await expect.element(page.getByText("Task not found", { exact: true })).toBeVisible();
+  expect(taskRequests).toEqual([]);
 });

@@ -1,5 +1,5 @@
 import { ArrowsOutSimpleIcon } from "@phosphor-icons/react";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import type { RunId } from "@usine/core/run";
 import type { MachineView, RunDetailView } from "@usine/orchestrator/operator";
@@ -34,7 +34,7 @@ import { readerDocument, type AttemptEnd } from "~/lib/runs/transcript/document/
 import { previewText } from "~/lib/runs/transcript/document/text";
 import { projectTranscript } from "~/lib/runs/transcript/model";
 import { Outcome } from "~/components/runs/transcript/outcome";
-import { useRunDetail } from "~/hooks/runs/transcript";
+import { runDetailQuery } from "~/lib/runs/queries";
 
 type LiveSummaryProps = { readonly detail: RunDetailView };
 
@@ -138,7 +138,8 @@ type RunDrawerProps = {
 
 export const RunDrawer = ({ runId, open, close }: RunDrawerProps) => {
   const { data: overview } = useSuspenseQuery(overviewQuery());
-  const detail = useRunDetail(runId, open);
+  const queryClient = useQueryClient();
+  const detail = useQuery({ ...runDetailQuery(queryClient, runId), enabled: open });
   const [editing, setEditing] = useState<EditIntent | null>(null);
   const openRun = useOpenRun();
   const run = detail.data?.run;

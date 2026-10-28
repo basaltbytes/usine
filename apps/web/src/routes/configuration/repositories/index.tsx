@@ -1,6 +1,6 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { configurationQuery } from "~/features/configuration/queries";
+import { configurationQuery } from "~/lib/configuration/queries";
 import { RepositoriesList } from "~/features/configuration/components/repositories/list";
 
 const Repositories = () => {

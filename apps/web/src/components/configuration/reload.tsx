@@ -1,6 +1,9 @@
 import { ArrowClockwiseIcon, CheckCircleIcon } from "@phosphor-icons/react";
 import { type UseMutationResult, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { InstanceReload } from "@usine/orchestrator/current-instance";
+import { overviewQuery } from "~/lib/overview";
+import { agentsQuery, configurationQuery } from "~/lib/configuration/queries";
+import { runDetailKeys } from "~/lib/runs/queries";
 import { ErrorAlert } from "~/components/error-alert";
 import { Alert, AlertDescription, AlertTitle } from "~/components/ui/alert";
 import { Button } from "~/components/ui/button";
@@ -16,11 +19,11 @@ export const useReloadConfiguration = (): ConfigurationReload => {
     mutationFn: () => api((client) => client.reload()),
     onSuccess: () =>
       Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["overview"] }),
-        queryClient.invalidateQueries({ queryKey: ["agents"] }),
-        queryClient.invalidateQueries({ queryKey: ["run"] }),
+        queryClient.invalidateQueries({ queryKey: overviewQuery().queryKey }),
+        queryClient.invalidateQueries({ queryKey: agentsQuery().queryKey }),
+        queryClient.invalidateQueries({ queryKey: runDetailKeys }),
       ]),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ["configuration"] }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: configurationQuery().queryKey }),
   });
 };
 

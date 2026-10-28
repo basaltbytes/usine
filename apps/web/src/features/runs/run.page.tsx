@@ -1,7 +1,8 @@
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import type { RunId } from "@usine/core/run";
 import { useState } from "react";
+import { runDetailQuery } from "~/lib/runs/queries";
 import { ErrorAlert } from "~/components/error-alert";
 import { overviewQuery, projectParams } from "~/lib/overview";
 import { ContextualActions } from "~/components/runs/intervention/contextual-actions";
@@ -10,7 +11,7 @@ import {
   type EditIntent,
   editApplies,
 } from "~/components/runs/intervention/edit-and-retry";
-import { useEarlierTranscript, useRunDetail } from "~/hooks/runs/transcript";
+import { useEarlierTranscript } from "~/hooks/runs/transcript";
 import { RunHeader } from "~/components/runs/header";
 import { RunWorkspace } from "~/features/runs/components/workspace";
 
@@ -18,14 +19,13 @@ type RunPageProps = { readonly runId: RunId };
 
 export const RunPage = ({ runId }: RunPageProps) => {
   const { data: overview } = useSuspenseQuery(overviewQuery());
-  const detail = useRunDetail(runId, true);
+  const queryClient = useQueryClient();
+  const detail = useSuspenseQuery(runDetailQuery(queryClient, runId));
   const earlier = useEarlierTranscript(runId);
   const [editing, setEditing] = useState<EditIntent | null>(null);
   const navigate = useNavigate();
   if (detail.isError)
     return <ErrorAlert className="m-4 max-w-3xl md:m-5" message={detail.error.message} />;
-  if (detail.data === undefined)
-    return <p className="px-4 py-5 text-muted-foreground md:px-5">Loading run…</p>;
   const run = detail.data.run;
   const openRun = (opened: RunId) => {
     setEditing(null);
