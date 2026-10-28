@@ -18,7 +18,8 @@
     "knip": "knip",
     "changeset": "changeset",
     "changeset:version": "changeset version && pnpm install --lockfile-only",
-    "changeset:publish": "pnpm build && pnpm -r publish --no-git-checks && changeset git-tag"
+    "changeset:publish": "pnpm build && pnpm -r publish --no-git-checks && changeset git-tag",
+    "prerelease:version": "node scripts/prerelease-versions.mjs"
   },
   "devDependencies": {
     "@changesets/cli": "catalog:",
