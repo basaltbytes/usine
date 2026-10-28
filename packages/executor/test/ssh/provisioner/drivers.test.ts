@@ -27,7 +27,7 @@ const tags: MachineTags = {
   worker: WORKER,
   run: RUN,
   process: "a1b2c3d4e5f6",
-  attempt: Option.none(),
+  attempt: ATTEMPT,
 };
 
 const noWait = Effect.void;
@@ -59,6 +59,7 @@ describe("Hetzner Cloud driver", () => {
             "usine-worker": "hetzner-pool",
             "usine-run": RUN,
             "usine-process": "a1b2c3d4e5f6",
+            "usine-attempt": attemptTag(ATTEMPT),
           },
           start_after_create: true,
         });
@@ -81,7 +82,6 @@ describe("Hetzner Cloud driver", () => {
         assert.isTrue(Option.isNone(endpoint.hostKey));
         assert.isTrue(Option.isNone(endpoint.port));
 
-        yield* driver.tag(id, { ...tags, attempt: Option.some(ATTEMPT) });
         const [listed] = yield* driver.list("github-app-4242", WORKER);
         assert.strictEqual(listed?.id, id);
         assert.deepStrictEqual(listed?.tags.attempt, Option.some(attemptTag(ATTEMPT)));
@@ -241,7 +241,7 @@ describe("Boat driver", () => {
         const created = providers.boat.sandboxes.get(id);
         assert.deepStrictEqual(created?.body, {
           type: "default",
-          name: `usine github-app-4242 hetzner-pool ${RUN} a1b2c3d4e5f6 -`,
+          name: `usine github-app-4242 hetzner-pool ${RUN} a1b2c3d4e5f6 ${attemptTag(ATTEMPT)}`,
           ttlSeconds: null,
           noEnv: true,
           snapshots: false,
@@ -256,7 +256,6 @@ describe("Boat driver", () => {
         const key = providers.calls.find(({ path }) => path === `/sandboxes/${id}/sshkey`);
         assert.deepStrictEqual(key?.body, { key: "ssh-ed25519 AAAAOperatorKey usine" });
 
-        yield* driver.tag(id, { ...tags, attempt: Option.some(ATTEMPT) });
         assert.strictEqual(
           providers.boat.sandboxes.get(id)?.name,
           `usine github-app-4242 hetzner-pool ${RUN} a1b2c3d4e5f6 ${attemptTag(ATTEMPT)}`,
@@ -308,7 +307,7 @@ describe("Boat driver", () => {
         [ours],
       );
       assert.strictEqual(listed[0]?.tags.run, RUN);
-      assert.isTrue(Option.isNone(listed[0]?.tags.attempt ?? Option.some("")));
+      assert.deepStrictEqual(listed[0]?.tags.attempt, Option.some(attemptTag(ATTEMPT)));
     }).pipe(Effect.provide(providers.layer));
   });
 

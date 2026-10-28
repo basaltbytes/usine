@@ -50,7 +50,6 @@ import { BOAT_API, boatDriverFor } from "./boat.ts";
 import { HETZNER_API, hetznerDriverFor } from "./hetzner.ts";
 import {
   attemptTag,
-  tagValue,
   type ListedMachine,
   type MachineDriver,
   type MachineEndpoint,
@@ -133,7 +132,6 @@ interface Held {
   readonly runId: Option.Option<RunId>;
   readonly attemptId: Option.Option<AttemptId>;
   readonly machine: Option.Option<SshMachine>;
-  readonly tags: Option.Option<MachineTags>;
   /**
    * `lease` while the scheduler's lease holds it, `recovery` while startup recovery reconciles
    * its checkout, and `retained` while it keeps a checkout that no Attempt in this process will
@@ -600,9 +598,10 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
   const create = Effect.fn("SshExecutor.createMachine")(function* (
     worker: WorkerName,
     runId: RunId,
+    attemptId: AttemptId,
     brains: ReadonlyArray<BrainSpec>,
   ) {
-    yield* Effect.annotateCurrentSpan({ worker, runId });
+    yield* Effect.annotateCurrentSpan({ worker, runId, attemptId });
     const defect = <E>(error: E) => Effect.die(error);
     const entry = yield* options
       .workerFor(worker)
@@ -614,7 +613,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     );
     const readyTimeout = readyTimeoutFor(entry);
     const since = yield* DateTime.now;
-    const tags: MachineTags = { instance, worker, run: runId, process, attempt: Option.none() };
+    const tags: MachineTags = { instance, worker, run: runId, process, attempt: attemptId };
     const { hold } = yield* register({
       worker,
       provider: driver.provider,
@@ -622,13 +621,12 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
       since,
       id: Option.none(),
       runId: Option.some(runId),
-      attemptId: Option.none(),
+      attemptId: Option.some(attemptId),
       machine: Option.none(),
-      tags: Option.some(tags),
       holder: "lease",
       checkout: false,
     });
-    yield* Effect.logInfo("Creating a machine for the Run's next Attempt", {
+    yield* Effect.logInfo("Creating a machine for the persisted Attempt", {
       worker,
       runId,
       provider: driver.provider,
@@ -675,7 +673,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
       state: "located",
       machine: Option.some(prepared.machine),
     }));
-    yield* Effect.logInfo("The machine for the Run's next Attempt is ready", {
+    yield* Effect.logInfo("The machine for the Attempt is ready", {
       worker,
       runId,
       provider: driver.provider,
@@ -690,38 +688,6 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
       worker,
       provider: driver.provider,
       checked: prepared.checked,
-    });
-  });
-
-  const assign = Effect.fn("SshExecutor.assignMachine")(function* (
-    hold: MachineHold,
-    attemptId: AttemptId,
-  ) {
-    yield* Effect.annotateCurrentSpan({ hold, attemptId });
-    const entry = yield* entryOf(hold);
-    const holding = Option.flatMap(entry, (found) =>
-      Option.flatMap(found.id, (id) => Option.map(found.tags, (tags) => ({ found, id, tags }))),
-    );
-    if (Option.isNone(holding))
-      return yield* new ExecutorOperationError({
-        operation: "prepare",
-        message: "The attempt's machine is no longer held",
-        cause: new Error(`no machine for hold ${hold}`),
-      });
-    const { found, id } = holding.value;
-    const tags = { ...holding.value.tags, attempt: Option.some(attemptId) };
-    const driver = yield* driverFor(found.worker).pipe(Effect.mapError(operationError("prepare")));
-    yield* driver.tag(id, tags).pipe(Effect.mapError(operationError("prepare")));
-    yield* update(hold, (current) => ({
-      ...current,
-      attemptId: Option.some(attemptId),
-      tags: Option.some(tags),
-    }));
-    yield* Effect.logInfo("The machine is the Attempt's", {
-      worker: found.worker,
-      machine: id,
-      attemptId,
-      runId: Option.getOrElse(found.runId, () => "none"),
     });
   });
 
@@ -784,7 +750,6 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
           runId: Option.none(),
           attemptId: Option.some(attemptId),
           machine: Option.none(),
-          tags: Option.none(),
           holder,
           checkout: false,
         });
@@ -869,16 +834,6 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
       (machine) => machine.worker === worker,
     );
     const listedIds = new Set(listed.map(({ id }) => id));
-    const creatingRuns = new Set(
-      current.flatMap((entry) =>
-        entry.state === "creating" && Option.isNone(entry.id)
-          ? Option.match(entry.runId, {
-              onNone: () => [],
-              onSome: (runId) => [tagValue(runId), tagValue(runId, 32)],
-            })
-          : [],
-      ),
-    );
     const holding = (machine: ListedMachine) =>
       current.find(
         (entry) =>
@@ -898,9 +853,6 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
         }
         continue;
       }
-      // A machine of this process that no entry holds yet is still being created, unless its
-      // creation ended without the provider's answer.
-      if (machine.tags.process === process && creatingRuns.has(machine.tags.run)) continue;
       const removed = yield* destroy(driver, worker, machine.id).pipe(
         Effect.as(true),
         Effect.tapError((error) =>
@@ -1080,7 +1032,6 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     port: WorkerMachines.of({
       provisions,
       create,
-      assign,
       adopt,
       release,
       sweep: sweep(),

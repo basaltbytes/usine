@@ -449,21 +449,17 @@ export class WorkerMachines extends Context.Service<
     /** Returns whether `worker` creates a machine for each Attempt. */
     readonly provisions: (worker: WorkerName) => Effect.Effect<boolean>;
     /**
-     * Creates a machine on `worker` for the next Attempt of `runId`, labeled with the instance,
-     * Worker, and Run, and waits until it answers over SSH. The first machine on the Worker each
-     * day also gets the preflight checks of `brains`, whose failure is a `WorkerCapabilityError`.
+     * Creates a machine on `worker` for the persisted `attemptId`, labeled with the instance,
+     * Worker, Run, and Attempt, and waits until it answers over SSH. The first machine after the configured
+     * check interval also gets the preflight checks of `brains`, whose failure is a `WorkerCapabilityError`.
      * On failure or interruption, deletes the machine.
      */
     readonly create: (
       worker: WorkerName,
       runId: RunId,
+      attemptId: AttemptId,
       brains: ReadonlyArray<BrainSpec>,
     ) => Effect.Effect<MachineGrant, MachineUnavailableError | WorkerCapabilityError>;
-    /** Gives the held machine to the Attempt, so that `Executor.prepare` uses it and a restart finds it. */
-    readonly assign: (
-      hold: MachineHold,
-      attemptId: AttemptId,
-    ) => Effect.Effect<void, ExecutorOperationError>;
     /**
      * Holds the machine of `attemptId`, an Attempt from before a restart on `worker`, until
      * `release`. Returns `None` if `worker` isn't provisioned or the provider no longer lists the

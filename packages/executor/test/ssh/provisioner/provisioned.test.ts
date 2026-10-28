@@ -6,13 +6,12 @@ import { AttemptId } from "@usine/core/attempt";
 import type { AttemptRecovery } from "@usine/core/attempt/salvage";
 import { RunId } from "@usine/core/run";
 import {
+  ProvisionerTimings,
   ContainerCpus,
   ContainerLimits,
   ContainerMemoryMib,
   ContainerPids,
   type GatewayLlmProvider,
-  SshIdentityFile,
-  WorkerRoot,
 } from "@usine/core/worker";
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
 import {
@@ -29,6 +28,7 @@ import {
   OpenAiProvider,
   UpstreamBase,
 } from "@usine/gateway";
+import { TestClock } from "effect/testing";
 import { Deferred, Effect, Fiber, Layer, Option, Redacted, Schema } from "effect";
 import {
   CheckoutRequest,
@@ -41,8 +41,6 @@ import type { SshWorkerAddress } from "../../../src/ssh/model.ts";
 import { attemptTag } from "../../../src/ssh/provisioner/model.ts";
 import { layer as sshLayer } from "../../../src/ssh/ssh.ts";
 import {
-  ADDRESS,
-  aloneOnItem,
   capturedLogs,
   fakeMachine,
   INSTANCE,
@@ -53,68 +51,11 @@ import {
   TEST_AGENT,
   WORKER,
 } from "../support.ts";
-import { boatSettings, hetznerSettings } from "./support.ts";
+import { hetznerSettings } from "./support.ts";
 import { fakeGateway, gatewayAddress } from "../gateway/support.ts";
-import { BOAT_TEST_API, fakeProviders, HETZNER_TEST_API } from "./fake-providers.ts";
+import { fakeProviders, HETZNER_TEST_API } from "./fake-providers.ts";
 
-const ROOT = WorkerRoot.make("/home/usine/.usine");
-const RUN = RunId.make("remote-run");
-const KEY = "sk-ant-api-for-provisioned-tests";
-
-/** A provisioned Hetzner Worker without a Gateway, whose Attempts get an Anthropic API key. */
-const hetznerAddress: SshWorkerAddress = {
-  ...ADDRESS,
-  port: Option.none(),
-  root: ROOT,
-  machine: {
-    _tag: "Provisioned",
-    provisioner: hetznerSettings({
-      network: Option.none(),
-      apiKeys: { anthropic: Option.some(Redacted.make(KEY)), openai: Option.none() },
-    }),
-  },
-};
-
-const boatAddress: SshWorkerAddress = {
-  ...ADDRESS,
-  port: Option.none(),
-  root: WorkerRoot.make("/home/user/.usine"),
-  identityFile: Option.some(SshIdentityFile.make("/keys/usine_boat")),
-  machine: { _tag: "Provisioned", provisioner: boatSettings() },
-};
-
-const sink = {
-  append: () => Effect.void,
-  salvage: () => Effect.void,
-  comments: () => Effect.void,
-  outOfMemory: () => Effect.void,
-  transcript: Effect.succeed([]),
-  windows: aloneOnItem(),
-};
-
-const runtimeOf = (
-  machine: ReturnType<typeof fakeMachine>,
-  providers: ReturnType<typeof fakeProviders>,
-  address: SshWorkerAddress,
-  options: { readonly parent?: StubParent; readonly storage?: StubStorage } = {},
-) =>
-  sshLayer({
-    workers: [address],
-    instance: INSTANCE,
-    instanceId: INSTANCE_ID,
-    interruptGrace: "2 seconds",
-    providerEndpoints: { hetzner: HETZNER_TEST_API, boat: BOAT_TEST_API },
-    machinePollInterval: "1 millis",
-    machineReadyTimeout: "1 second",
-  }).pipe(
-    Layer.provide(machine.layer),
-    Layer.provide(mintingProvider().layer),
-    Layer.provide(
-      stubAttemptRuntime(options.storage ?? new StubStorage(), options.parent ?? completes),
-    ),
-    Layer.provide(claudeLoginLockLayer),
-    Layer.provide(providers.layer),
-  );
+import { ROOT, RUN, KEY, hetznerAddress, boatAddress, sink, runtimeOf } from "./fixtures.ts";
 
 const codexAgent = new Agent({
   name: AgentName.make("reviewer"),
@@ -236,7 +177,7 @@ describe("Provisioned SSH Worker behind a Gateway", () => {
         const machines = yield* WorkerMachines;
         const report = yield* executor.preflight(WORKER, [TEST_AGENT.brain], 2);
         assert.isTrue(Option.isSome(report.deferred));
-        const grant = yield* machines.create(WORKER, RUN, [TEST_AGENT.brain]);
+        const grant = yield* machines.create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain]);
         const created = providers.calls.find(
           ({ method, path }) => method === "POST" && path === "/servers",
         );
@@ -244,7 +185,7 @@ describe("Provisioned SSH Worker behind a Gateway", () => {
           networks: [7],
           public_net: { enable_ipv4: false, enable_ipv6: false },
         });
-        yield* machines.assign(grant.hold, request.attemptId);
+
         const prepared = yield* executor.prepare(request);
         yield* prepared.launch(sink);
         assert(given !== undefined && given.host instanceof RemoteShell);
@@ -280,7 +221,7 @@ describe("Provisioned SSH Worker behind a Gateway", () => {
         const machines = yield* WorkerMachines;
         const report = yield* executor.preflight(WORKER, [codexAgent.brain], 1);
         assert.isTrue(Option.isSome(report.deferred));
-        const grant = yield* machines.create(WORKER, RUN, [codexAgent.brain]);
+        const grant = yield* machines.create(WORKER, RUN, request.attemptId, [codexAgent.brain]);
         const lines = machine.state.calls.map(({ line }) => line);
         assert.include(lines, "exec 'codex' '--version'");
         assert.isFalse(
@@ -288,7 +229,6 @@ describe("Provisioned SSH Worker behind a Gateway", () => {
           "no login host is checked",
         );
 
-        yield* machines.assign(grant.hold, codexRequest.attemptId);
         yield* (yield* executor.prepare(codexRequest)).launch(sink);
         assert(given !== undefined && given.host instanceof RemoteShell);
         assert.strictEqual(given.environment.CODEX_HOME, CODEX_HOME);
@@ -342,7 +282,9 @@ describe("Provisioned SSH Worker behind a Gateway", () => {
           const executor = yield* Executor;
           const machines = yield* WorkerMachines;
           yield* executor.preflight(WORKER, [codexAgent.brain], 1);
-          return yield* machines.create(WORKER, RUN, [codexAgent.brain]).pipe(Effect.flip);
+          return yield* machines
+            .create(WORKER, RUN, request.attemptId, [codexAgent.brain])
+            .pipe(Effect.flip);
         }).pipe(
           Effect.scoped,
           Effect.provide(
@@ -381,13 +323,13 @@ describe("Provisioned SSH Worker", () => {
         const machines = yield* WorkerMachines;
         assert.isTrue(yield* machines.provisions(WORKER));
 
-        const grant = yield* machines.create(WORKER, RUN, [TEST_AGENT.brain]);
+        const grant = yield* machines.create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain]);
         const [server] = providers.hetzner.servers.values();
         assert(server !== undefined, "a server exists");
         assert.strictEqual(String(server.id), grant.id);
         assert.strictEqual(server.labels["usine-run"], RUN);
         assert.strictEqual(server.labels["usine-instance"], INSTANCE);
-        assert.isUndefined(server.labels["usine-attempt"]);
+        assert.strictEqual(server.labels["usine-attempt"], attemptTag(request.attemptId));
         // The first machine of the day gets the machine preflight with the roster.
         assert.deepStrictEqual(
           grant.checked,
@@ -401,7 +343,6 @@ describe("Provisioned SSH Worker", () => {
           [["ready", grant.id]],
         );
 
-        yield* machines.assign(grant.hold, request.attemptId);
         assert.strictEqual(server.labels["usine-attempt"], attemptTag(request.attemptId));
         const prepared = yield* executor.prepare(request);
         assert.strictEqual(
@@ -454,8 +395,8 @@ describe("Provisioned SSH Worker", () => {
     return Effect.gen(function* () {
       const executor = yield* Executor;
       const machines = yield* WorkerMachines;
-      const grant = yield* machines.create(WORKER, RUN, [TEST_AGENT.brain]);
-      yield* machines.assign(grant.hold, request.attemptId);
+      yield* machines.create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain]);
+
       const prepared = yield* executor.prepare(request);
       yield* prepared.launch(sink);
       const run = machine.state.calls.find(
@@ -481,8 +422,8 @@ describe("Provisioned SSH Worker", () => {
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
           const machines = yield* WorkerMachines;
-          const grant = yield* machines.create(WORKER, RUN, [TEST_AGENT.brain]);
-          yield* machines.assign(grant.hold, request.attemptId);
+          const grant = yield* machines.create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain]);
+
           const launch = yield* (yield* executor.prepare(request))
             .launch(sink)
             .pipe(Effect.forkChild);
@@ -528,15 +469,22 @@ describe("Provisioned SSH Worker", () => {
     },
   );
 
-  it.live(
-    "checks only the first machine of the day, whose derived container limits the day's machines keep",
+  it.effect(
+    "reuses checked container limits until the configured machine check interval elapses",
     () => {
       const machine = fakeMachine();
       machine.state.docker = "running";
       machine.state.memoryGib = 8;
       const providers = fakeProviders();
+      providers.hetzner.startingReads = 0;
       const derivingAddress: SshWorkerAddress = {
         ...hetznerAddress,
+        machine: {
+          _tag: "Provisioned",
+          provisioner: hetznerSettings({
+            timings: Schema.decodeUnknownSync(ProvisionerTimings)({ machineCheckInterval: 60 }),
+          }),
+        },
         container: {
           image: Option.none(),
           cpus: Option.none(),
@@ -547,7 +495,9 @@ describe("Provisioned SSH Worker", () => {
       return Effect.gen(function* () {
         const executor = yield* Executor;
         const machines = yield* WorkerMachines;
-        const first = yield* machines.create(WORKER, RUN, [TEST_AGENT.brain]);
+        const first = yield* machines.create(WORKER, RUN, AttemptId.make("first/execute/1"), [
+          TEST_AGENT.brain,
+        ]);
         const count = (matches: (line: string) => boolean) =>
           machine.state.calls.filter(({ line }) => matches(line)).length;
         const memoryChecks = () => count((line) => line === "exec 'cat' '/proc/meminfo'");
@@ -572,14 +522,17 @@ describe("Provisioned SSH Worker", () => {
           ),
         );
 
+        yield* TestClock.adjust("59 seconds");
         machine.state.cpus = 8;
-        const second = yield* machines.create(WORKER, RunId.make("other-run"), [TEST_AGENT.brain]);
+        const second = yield* machines.create(WORKER, RunId.make("other-run"), request.attemptId, [
+          TEST_AGENT.brain,
+        ]);
         assert.isTrue(Option.isNone(second.checked));
         assert.strictEqual(memoryChecks(), 1);
         assert.strictEqual(resourceReads(), 1);
         assert.strictEqual(storePreparations(), 1);
         assert.strictEqual(providers.hetzner.servers.size, 2);
-        yield* machines.assign(second.hold, request.attemptId);
+
         const prepared = yield* executor.prepare(request);
         yield* prepared.launch(sink);
         assert.strictEqual(storePreparations(), 2);
@@ -590,6 +543,12 @@ describe("Provisioned SSH Worker", () => {
           run?.line,
           "'--cpus' '3.5' '--memory' '7168m' '--memory-swap' '7168m' '--pids-limit' '60976'",
         );
+        yield* TestClock.adjust("1 second");
+        const third = yield* machines.create(WORKER, RUN, AttemptId.make("third/execute/1"), [
+          TEST_AGENT.brain,
+        ]);
+        assert.isTrue(Option.isSome(third.checked));
+        assert.strictEqual(memoryChecks(), 2);
       }).pipe(Effect.scoped, Effect.provide(runtimeOf(machine, providers, derivingAddress)));
     },
   );
@@ -606,14 +565,18 @@ describe("Provisioned SSH Worker", () => {
           code: "resource_limit_exceeded",
           message: "project limit exceeded",
         };
-        const quota = yield* machines.create(WORKER, RUN, [TEST_AGENT.brain]).pipe(Effect.flip);
+        const quota = yield* machines
+          .create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain])
+          .pipe(Effect.flip);
         assert(quota._tag === "MachineUnavailableError");
         assert.strictEqual(quota.reason, "quota");
         assert.lengthOf(yield* machines.machines, 0);
 
         providers.hetzner.createFails = undefined;
         machine.state.reachable = false;
-        const silent = yield* machines.create(WORKER, RUN, [TEST_AGENT.brain]).pipe(Effect.flip);
+        const silent = yield* machines
+          .create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain])
+          .pipe(Effect.flip);
         assert(silent._tag === "MachineUnavailableError");
         assert.strictEqual(silent.reason, "timeout");
         assert.strictEqual(providers.hetzner.servers.size, 0, "the silent machine was deleted");
@@ -621,7 +584,9 @@ describe("Provisioned SSH Worker", () => {
 
         machine.state.reachable = true;
         machine.state.memoryGib = 1;
-        const unchecked = yield* machines.create(WORKER, RUN, [TEST_AGENT.brain]).pipe(Effect.flip);
+        const unchecked = yield* machines
+          .create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain])
+          .pipe(Effect.flip);
         assert(unchecked._tag === "WorkerCapabilityError");
         assert.strictEqual(unchecked.capability, "memory");
         assert.strictEqual(providers.hetzner.servers.size, 0);
@@ -671,7 +636,7 @@ describe("Provisioned SSH Worker", () => {
         // Startup recovery occupies the slot of the Attempt that still runs on server 11.
         const adopted = yield* machines.adopt(WORKER, request.attemptId);
         assert.isTrue(Option.isSome(adopted));
-        const ours = yield* machines.create(WORKER, RUN, [TEST_AGENT.brain]);
+        const ours = yield* machines.create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain]);
         yield* machines.sweep;
         assert.deepStrictEqual(
           [...providers.hetzner.servers.keys()].sort(),
@@ -691,8 +656,8 @@ describe("Provisioned SSH Worker", () => {
       const providers = fakeProviders();
       return Effect.gen(function* () {
         const machines = yield* WorkerMachines;
-        const grant = yield* machines.create(WORKER, RUN, [TEST_AGENT.brain]);
-        yield* machines.assign(grant.hold, request.attemptId);
+        const grant = yield* machines.create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain]);
+
         // A kept checkout's slot isn't released, so a sweep leaves its machine.
         yield* machines.sweep;
         assert.strictEqual(providers.hetzner.servers.size, 1);
@@ -880,13 +845,12 @@ describe("Provisioned SSH Worker", () => {
         const machines = yield* WorkerMachines;
         const report = yield* executor.preflight(WORKER, [codexAgent.brain], 1);
         assert.isTrue(Option.isSome(report.deferred));
-        const grant = yield* machines.create(WORKER, RUN, [codexAgent.brain]);
+        const grant = yield* machines.create(WORKER, RUN, request.attemptId, [codexAgent.brain]);
         assert.include(
           machine.state.calls.map(({ line }) => line),
           "exec 'codex' '--version'",
         );
 
-        yield* machines.assign(grant.hold, codexRequest.attemptId);
         yield* (yield* executor.prepare(codexRequest)).launch(sink);
         assert(given !== undefined && given.host instanceof RemoteShell);
         assert.strictEqual(given.environment.CODEX_HOME, CODEX_HOME);
@@ -942,7 +906,7 @@ describe("Provisioned SSH Worker", () => {
         const executor = yield* Executor;
         const machines = yield* WorkerMachines;
         yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
-        const grant = yield* machines.create(WORKER, RUN, [TEST_AGENT.brain]);
+        const grant = yield* machines.create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain]);
         const known = machine.state.localFiles.get(`${LOCAL_TEMPORARY_DIRECTORY}/boat-${grant.id}`);
         assert.strictEqual(known, `usine-boat-${grant.id} ${providers.boat.hostKey ?? ""}\n`);
         const key = providers.calls.find(({ path }) => path.endsWith("/sshkey"));
@@ -970,7 +934,9 @@ describe("Provisioned SSH Worker", () => {
       providers.boat.hostKey = undefined;
       return Effect.gen(function* () {
         const machines = yield* WorkerMachines;
-        const refused = yield* machines.create(WORKER, RUN, [TEST_AGENT.brain]).pipe(Effect.flip);
+        const refused = yield* machines
+          .create(WORKER, RUN, request.attemptId, [TEST_AGENT.brain])
+          .pipe(Effect.flip);
         assert(refused._tag === "MachineUnavailableError");
         assert.strictEqual(refused.reason, "provider");
         assert.include(refused.message, "doesn't trust the host key of a first connection");
