@@ -29,7 +29,11 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
-key=$(cat /proc/sys/kernel/random/uuid)
+if command -v uuidgen >/dev/null 2>&1; then
+  key=$(uuidgen)
+else
+  key=$(cat /proc/sys/kernel/random/uuid)
+fi
 api POST /sandboxes -H "Idempotency-Key: $key" --data \
   "$(jq -nc --arg name "usine-snapshot-$name" '{name:$name,noEnv:true,snapshots:true,monitoring:false,ttlSeconds:3600}')" > "$work/created.json"
 sandbox=$(jq -er '.sandbox.id' "$work/created.json")
