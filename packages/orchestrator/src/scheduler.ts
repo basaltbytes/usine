@@ -472,9 +472,7 @@ export const stepExecutorLayer = (
         const roster = EffectArray.dedupe(loaded.agents.map(({ agent }) => agent.brain));
         const wholeRoster = new Set([
           ...change.added.map(({ name }) => name),
-          ...change.resized
-            .filter(({ worker, from }) => worker.maxConcurrentAttempts > from)
-            .map(({ worker }) => worker.name),
+          ...change.resized.map(({ worker }) => worker.name),
         ]);
         const checks = loaded.config.workers.flatMap((worker) =>
           wholeRoster.has(worker.name)
@@ -486,7 +484,7 @@ export const stepExecutorLayer = (
         yield* Effect.annotateCurrentSpan({ agents: agentNames, workers: [...wholeRoster] });
         if (checks.length === 0) {
           yield* Effect.logDebug(
-            "The reload adds no Worker, slot, or brain, so it runs no Worker preflight",
+            "The reload adds no worker or brain and changes no slots, so it runs no worker preflight",
           );
           return applyWorkers(change, loaded.config.workers);
         }

@@ -103,6 +103,7 @@ import {
 import { LoopView, ProjectView, ReadyOverview } from "./overview.ts";
 import {
   RunDetailView,
+  type RunView,
   EditAndRetry,
   LoopNotFoundError,
   SessionIntervention,
@@ -129,6 +130,7 @@ import { OperatorStatistics } from "./statistics/statistics.ts";
 import type { RunStatisticsView, StatisticsView, StatisticsWindow } from "./statistics/view.ts";
 import { machineView } from "./machines.ts";
 import { WorkerStatus } from "../worker-status.ts";
+import { workerAttentionFor } from "./unresponsive.ts";
 
 export type BoardMoveError =
   | BoardItemNotFoundError
@@ -170,6 +172,7 @@ interface CachedOverview {
   readonly token: string;
   readonly overview: ReadyOverview;
   readonly usage: BoardUsage;
+  readonly running: ReadonlyArray<RunView>;
 }
 
 /**
@@ -218,6 +221,7 @@ const makeOperatorObservation = Effect.gen(function* () {
   const usageReader = yield* RunUsageReader;
   const stops = yield* UnconfirmedStops;
   const workerStatus = yield* WorkerStatus;
+  const workerAttention = workerAttentionFor(reader, acknowledgements);
 
   const projectOverview = Effect.fn("Operator.projectOverview")(function* (
     instance: LoadedInstance,
@@ -544,7 +548,7 @@ const makeOperatorObservation = Effect.gen(function* () {
       dismissedNeeds: dismissedNeeds.length,
       runsAtWork: usage.working.length,
     });
-    return { overview, usage } as const;
+    return { overview, usage, running: views.filter((run) => run.state === "Running") } as const;
   });
 
   // Each session keeps its highest report, so a Run's usage changes only with more tokens or
@@ -627,7 +631,7 @@ const makeOperatorObservation = Effect.gen(function* () {
           yield* Effect.logWarning(
             "Projection revision singleton is missing; the overview cache is bypassed",
           );
-          const { overview: projected } = yield* projectOverview(
+          const projected = yield* projectOverview(
             instance,
             pollFailures,
             preflightFindings,
@@ -642,7 +646,10 @@ const makeOperatorObservation = Effect.gen(function* () {
             revision,
           });
           const current = yield* refreshWorkingUsage(cached.value);
-          return [current.overview, Option.some(current)] as const;
+          return [
+            { overview: current.overview, running: current.running },
+            Option.some(current),
+          ] as const;
         }
         const projected = yield* projectOverview(
           instance,
@@ -652,9 +659,9 @@ const makeOperatorObservation = Effect.gen(function* () {
           revision,
           unconfirmedStops,
         );
-        return [projected.overview, Option.some({ token: token.value, ...projected })] as const;
+        return [projected, Option.some({ token: token.value, ...projected })] as const;
       }),
-    ),
+    ).pipe(Effect.flatMap(({ overview, running }) => workerAttention(overview, running))),
   );
 
   /**
@@ -1364,6 +1371,7 @@ export {
   ScheduleFailureNeed,
   ConfigFileNeed,
   UnconfiguredWorkerNeed,
+  UnresponsiveWorkerNeed,
   UnconfirmedStopNeed,
   NeedView,
 } from "./need.ts";

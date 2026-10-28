@@ -36,6 +36,7 @@ import {
   TranscriptSequence,
   TranscriptTailQuery,
   TranscriptUsageQuery,
+  TranscriptWorkerQuery,
 } from "../../src/transcript.ts";
 import { InstanceDirectory } from "@usine/core/instance";
 
@@ -43,6 +44,71 @@ import { RunStore } from "../../src/store/store.ts";
 
 import { lifecycleSubmission, testAgent } from "./support.ts";
 describe("Attempt transcripts", () => {
+  it.live(
+    "keeps the latest worker notice beyond transcript pages and replaces it on recovery",
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const directory = InstanceDirectory.make(
+          yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-worker-notice-" }),
+        );
+        yield* Effect.gen(function* () {
+          const store = yield* RunStore;
+          const runId = RunId.make("worker-notice-run");
+          yield* store.recordAndClaim(lifecycleSubmission, runId);
+          const started = yield* store.beginAttempt(
+            runId,
+            WorkerName.make("remote"),
+            Option.none(),
+          );
+          assert(started._tag === "AttemptStarted");
+          const attemptId = started.execution.attempt.id;
+          const at = DateTime.makeUnsafe("2026-10-28T00:00:00Z");
+          let sequence = 0;
+          const append = (payload: AttemptChannel.OutboundPayload) =>
+            store.appendTranscript(
+              "outbound",
+              new AttemptChannel.OutboundEnvelope({
+                version: AttemptChannel.PROTOCOL_VERSION,
+                attemptId,
+                sequence: AttemptChannel.Sequence.make(++sequence),
+                sentAt: at,
+                payload,
+              }),
+            );
+          const query = new TranscriptWorkerQuery({ attemptId });
+          assert.deepStrictEqual(yield* store.transcript(query), []);
+          const silent = new AttemptChannel.WorkerUnresponsive({
+            worker: WorkerName.make("remote"),
+            lastAnsweredAt: at,
+            reason: "SSH timed out",
+            unansweredProbes: 3,
+          });
+          yield* append(silent);
+          for (let i = 0; i < 205; i++)
+            yield* append(new AttemptChannel.Started({ parentModel: ModelId.make("test-model") }));
+          assert.deepStrictEqual(
+            (yield* store.transcript(query)).map(({ envelope }) => envelope.payload),
+            [silent],
+          );
+          const recovered = new AttemptChannel.WorkerResponsive({
+            worker: silent.worker,
+            lastAnsweredAt: at,
+          });
+          yield* append(recovered);
+          assert.deepStrictEqual(
+            (yield* store.transcript(query)).map(({ envelope }) => envelope.payload),
+            [recovered],
+          );
+          yield* append(silent);
+          assert.deepStrictEqual(
+            (yield* store.transcript(query)).map(({ envelope }) => envelope.payload),
+            [silent],
+          );
+        }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
+      }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   it.live("writes the effective parent model back onto the Attempt", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

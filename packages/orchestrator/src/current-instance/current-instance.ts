@@ -60,7 +60,7 @@ export const restartRequired = (
   });
 
 /**
- * A reload adds Workers, slots, or brains that failed Worker preflight, so the running instance is
+ * A reload adds workers or brains, or changes slots, that failed worker preflight, so the running instance is
  * kept.
  */
 export class ReloadPreflightError extends Schema.TaggedError<ReloadPreflightError>(
@@ -72,7 +72,7 @@ export class ReloadPreflightError extends Schema.TaggedError<ReloadPreflightErro
    */
   agents: Schema.Array(AgentName),
   /**
-   * The Workers added or given more slots by the reload, which preflight checked with every
+   * The workers added or resized by the reload, which preflight checked with every
    * rostered brain.
    */
   workers: Schema.Array(WorkerName),

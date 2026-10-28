@@ -66,3 +66,5 @@ Envelopes include `PROTOCOL_VERSION` (7), which the transcript store uses to rea
 `@usine/core/upgrade` defines release versions, upgrade channels and modes, request timing, and the durable helper outcome shared by configuration and operator surfaces.
 
 `@usine/core/worker` also exports `BoatSnapshotName` and `TailnetAddress`, which validate saved snapshot names and Tailscale IPv4 addresses.
+
+`WorkerUnresponsive.unansweredProbes` records consecutive unanswered probes; older notices decode to 1. `WORKER_UNRESPONSIVE_PROBES` is the shared attention threshold of 3. The executor reports at that threshold so consumers can distinguish persistent outages from the first missed probe.

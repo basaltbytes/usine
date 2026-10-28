@@ -111,7 +111,8 @@ import {
   ScheduleTickFailure,
   ScheduleTriggers,
 } from "../src/schedule-triggers.ts";
-import { failureView, runDuration } from "../src/operator/projection.ts";
+import { workerAttentionFor } from "../src/operator/unresponsive.ts";
+import { failureView, runDuration, runView } from "../src/operator/projection.ts";
 import { WorkerStatus } from "../src/worker-status.ts";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { noCycleBudgets } from "./support/polling.ts";
@@ -425,6 +426,15 @@ const testLayer = (
       Match.valueTags(query, {
         TranscriptAllQuery: () => transcript,
         TranscriptSessionsQuery: () => [],
+        TranscriptWorkerQuery: ({ attemptId: attempt }) =>
+          [...transcript, ...laterReports]
+            .filter(
+              (entry) =>
+                entry.attemptId === attempt &&
+                (entry.envelope.payload._tag === "WorkerUnresponsive" ||
+                  entry.envelope.payload._tag === "WorkerResponsive"),
+            )
+            .slice(-1),
         TranscriptUsageQuery: ({ attemptId: attempt }) => {
           usageQueries.push(attempt);
           return [...usageReports, ...laterReports].filter((entry) => entry.attemptId === attempt);
@@ -663,6 +673,161 @@ const testLayer = (
 };
 
 describe("Operator", () => {
+  it.effect("groups running attempts on one silent worker and removes ended attempts", () =>
+    Effect.gen(function* () {
+      const original = snapshot.attempts[0];
+      assert(original !== undefined);
+      const running = ["one", "two"].map((id) => {
+        const runId = RunId.make(id);
+        return runView(
+          new RunSnapshot({
+            ...snapshot,
+            run: new Run({ ...snapshot.run, id: runId, state: new RunState.Running() }),
+            attempts: [new Attempt({ ...original, runId, id: AttemptId.make(id) })],
+          }),
+          new Set(),
+          new Map(),
+        );
+      });
+      const refresh = workerAttentionFor(
+        {
+          transcript: ({ attemptId }) =>
+            Effect.succeed([
+              new TranscriptEntry({
+                sequence: TranscriptSequence.make(1),
+                attemptId,
+                direction: "outbound",
+                receivedAt: now,
+                envelope: new AttemptChannel.OutboundEnvelope({
+                  version: AttemptChannel.PROTOCOL_VERSION,
+                  attemptId,
+                  sequence: AttemptChannel.Sequence.make(1),
+                  sentAt: now,
+                  payload: new AttemptChannel.WorkerUnresponsive({
+                    worker: original.worker,
+                    lastAnsweredAt: now,
+                    reason: "SSH timed out",
+                    unansweredProbes: 3,
+                  }),
+                }),
+              }),
+            ]),
+        },
+        { list: () => Effect.succeed([]) },
+      );
+      const overview = new ReadyOverview({ projects: [], loops: [], needsYou: [] });
+      const grouped = (yield* refresh(overview, running)).needsYou;
+      assert.lengthOf(grouped, 1);
+      const need = grouped[0];
+      assert(need?._tag === "UnresponsiveWorkerNeed");
+      assert.deepStrictEqual(
+        need.attempts.map(({ runId }) => runId),
+        ["one", "two"],
+      );
+      const remaining = (yield* refresh(overview, running.slice(1))).needsYou[0];
+      assert(remaining?._tag === "UnresponsiveWorkerNeed");
+      assert.deepStrictEqual(
+        remaining.attempts.map(({ runId }) => runId),
+        ["two"],
+      );
+      assert.deepStrictEqual((yield* refresh(overview, [])).needsYou, []);
+    }),
+  );
+
+  it.effect(
+    "refreshes worker attention on a cached overview, clears recovery, and resurfaces a later outage",
+    () =>
+      Effect.gen(function* () {
+        const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+        const moved = yield* Ref.make<ItemLabelMutation | null>(null);
+        const reads = yield* Ref.make(0);
+        const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+        const notices: Array<TranscriptEntry> = [];
+        const current = new RunSnapshot({
+          ...snapshot,
+          run: new Run({ ...snapshot.run, state: new RunState.Running() }),
+        });
+        const append = (payload: AttemptChannel.OutboundPayload) =>
+          notices.push(
+            new TranscriptEntry({
+              sequence: TranscriptSequence.make(3000 + notices.length),
+              attemptId,
+              direction: "outbound",
+              receivedAt: now,
+              envelope: new AttemptChannel.OutboundEnvelope({
+                version: AttemptChannel.PROTOCOL_VERSION,
+                attemptId,
+                sequence: AttemptChannel.Sequence.make(3000 + notices.length),
+                sentAt: now,
+                payload,
+              }),
+            }),
+          );
+        const silent = (unansweredProbes: number, lastAnsweredAt = now) =>
+          new AttemptChannel.WorkerUnresponsive({
+            worker: WorkerName.make("local"),
+            lastAnsweredAt,
+            reason: "SSH timed out",
+            unansweredProbes,
+          });
+        yield* Effect.gen(function* () {
+          const operator = yield* Operator;
+          const workerNeeds = Effect.map(operator.overview(instance), (view) =>
+            view.needsYou.filter((need) => need._tag === "UnresponsiveWorkerNeed"),
+          );
+          append(silent(1));
+          assert.deepStrictEqual(yield* workerNeeds, []);
+          append(silent(3));
+          const needs = yield* workerNeeds;
+          assert.lengthOf(needs, 1);
+          const need = needs[0];
+          assert(need !== undefined);
+          assert.strictEqual(need.lastAnsweredAt, DateTime.formatIso(now));
+          assert.deepStrictEqual(
+            need.attempts.map(({ runId, attemptId }) => [runId, attemptId]),
+            [[current.run.id, attemptId]],
+          );
+          assert.strictEqual(
+            yield* Ref.get(reads),
+            1,
+            "worker notices do not need a board revision",
+          );
+          yield* operator.dismissNeed(instance, attentionKey(need));
+          assert.deepStrictEqual(yield* workerNeeds, []);
+          assert(
+            (yield* operator.overview(instance)).dismissedNeeds.some(
+              (entry) => entry.id === need.id,
+            ),
+          );
+          append(new AttemptChannel.WorkerResponsive({ worker: need.worker, lastAnsweredAt: now }));
+          assert.deepStrictEqual(yield* workerNeeds, []);
+          assert(
+            !(yield* operator.overview(instance)).dismissedNeeds.some(
+              (entry) => entry.id === need.id,
+            ),
+          );
+          append(silent(3, DateTime.add(now, { minutes: 10 })));
+          assert.lengthOf(yield* workerNeeds, 1);
+          append(new AttemptChannel.WorkerResponsive({ worker: need.worker, lastAnsweredAt: now }));
+          assert.deepStrictEqual(yield* workerNeeds, []);
+        }).pipe(
+          Effect.provide(
+            testLayer(
+              approved,
+              moved,
+              reads,
+              revision,
+              current,
+              noCycleBudgets,
+              undefined,
+              [],
+              notices,
+            ),
+          ),
+        );
+      }),
+  );
+
   it.effect(
     "dismisses every projected entry across refreshes, keeps approval waiting, and restores badges with undo",
     () =>

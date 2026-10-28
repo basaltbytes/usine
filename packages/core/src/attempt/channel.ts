@@ -181,6 +181,9 @@ export class InterventionRejected extends Schema.TaggedClass<InterventionRejecte
   message: Schema.NonEmptyString,
 }) {}
 
+/** Consecutive unanswered probes before the operator needs a worker alert. */
+export const WORKER_UNRESPONSIVE_PROBES = 3;
+
 /**
  * A probe of the Worker that didn't run a command over a new SSH connection within its timeout.
  * The Attempt isn't stopped or failed (ADR 0013).
@@ -193,6 +196,10 @@ export class WorkerUnresponsive extends Schema.TaggedClass<WorkerUnresponsive>(
   lastAnsweredAt: Schema.DateTimeUtcFromString,
   /** The probe error, such as the SSH client's error or the exceeded timeout. */
   reason: Schema.NonEmptyString,
+  unansweredProbes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(1)),
+    Schema.withConstructorDefault(Effect.succeed(1)),
+  ),
 }) {}
 
 /** A successful probe after `WorkerUnresponsive`. */

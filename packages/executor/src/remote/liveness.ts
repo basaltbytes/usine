@@ -4,6 +4,7 @@ import {
   type WorkerNotice,
   WorkerResponsive,
   WorkerUnresponsive,
+  WORKER_UNRESPONSIVE_PROBES,
 } from "@usine/core/attempt/channel";
 import type { WorkerName } from "@usine/core/worker";
 import { DateTime, Effect, Fiber, Match, Option, Ref, type Scope, Semaphore } from "effect";
@@ -73,11 +74,12 @@ const observe = (
           : Option.none(),
     };
   const told = liveness._tag === "Silent" ? liveness.told : new Set<AttemptId>();
+  const unanswered = liveness._tag === "Silent" ? liveness.unanswered + 1 : 1;
   return {
     liveness: {
       _tag: "Silent",
       lastAnsweredAt: liveness.lastAnsweredAt,
-      unanswered: liveness._tag === "Silent" ? liveness.unanswered + 1 : 1,
+      unanswered,
       reason: probe.reason,
       told: new Set(watching),
     },
@@ -86,8 +88,11 @@ const observe = (
         worker,
         lastAnsweredAt: liveness.lastAnsweredAt,
         reason: probe.reason,
+        unansweredProbes: unanswered,
       }),
-      watching.filter((attemptId) => !told.has(attemptId)),
+      watching.filter(
+        (attemptId) => unanswered === WORKER_UNRESPONSIVE_PROBES || !told.has(attemptId),
+      ),
     ),
   };
 };
@@ -106,6 +111,7 @@ const joinSilent = (worker: WorkerName, liveness: Liveness, attemptId: AttemptId
             worker,
             lastAnsweredAt: liveness.lastAnsweredAt,
             reason: liveness.reason,
+            unansweredProbes: liveness.unanswered,
           }),
           [attemptId],
         ),

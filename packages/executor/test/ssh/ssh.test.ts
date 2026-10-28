@@ -539,6 +539,7 @@ describe("SSH Worker", () => {
           const silent = notices()[0];
           assert(silent?._tag === "WorkerUnresponsive");
           assert.strictEqual(silent.worker, WORKER);
+          assert.strictEqual(silent.unansweredProbes, 1);
           assert.strictEqual(DateTime.formatIso(silent.lastAnsweredAt), launchedAt);
           assert.strictEqual(silent.reason, "No answer within 45 seconds");
 
@@ -546,10 +547,19 @@ describe("SSH Worker", () => {
           yield* TestClock.adjust("45 seconds");
           assert.lengthOf(notices(), 1, "a Worker that stays silent is reported once");
 
+          yield* TestClock.adjust("1 minute");
+          yield* TestClock.adjust("45 seconds");
+          const persistent = notices()[1];
+          assert(persistent?._tag === "WorkerUnresponsive");
+          assert.strictEqual(persistent.unansweredProbes, 3);
+          yield* TestClock.adjust("1 minute");
+          yield* TestClock.adjust("45 seconds");
+          assert.lengthOf(notices(), 2, "the attention threshold is reported once");
+
           machine.state.stalled = false;
           yield* TestClock.adjust("1 minute");
-          assert.lengthOf(notices(), 2);
-          const answering = notices()[1];
+          assert.lengthOf(notices(), 3);
+          const answering = notices()[2];
           assert(answering?._tag === "WorkerResponsive");
           assert.strictEqual(DateTime.formatIso(answering.lastAnsweredAt), launchedAt);
 
@@ -562,11 +572,11 @@ describe("SSH Worker", () => {
         }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials, parent)));
 
         const warnings = logs.lines.filter((line) => line.includes("The Worker"));
-        assert.lengthOf(warnings, 3);
+        assert.lengthOf(warnings, 5);
         assert.include(warnings[0], "The Worker stopped answering");
         assert.include(warnings[0], `"lastAnsweredAt":"`);
         assert.include(warnings[1], "The Worker still does not answer");
-        assert.include(warnings[2], "The Worker answers again");
+        assert.include(warnings[4], "The Worker answers again");
       }).pipe(Effect.provide(logs.layer));
     },
   );

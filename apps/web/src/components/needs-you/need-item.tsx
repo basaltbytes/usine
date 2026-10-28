@@ -109,7 +109,7 @@ export const NeedItem = ({
         )}
       </div>
       {actions !== undefined || dismiss !== undefined ? (
-        <div className="relative z-10 ml-auto flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+        <div className="relative z-10 ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-1.5">
           {actions}
           {dismiss}
         </div>
