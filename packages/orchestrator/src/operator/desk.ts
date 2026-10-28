@@ -12,7 +12,11 @@ import { ItemProjectionReader } from "@usine/engine/item-projection";
 import { LoopControl } from "@usine/engine/loop-control";
 import { type RunStoreError, UnconfirmedStops } from "@usine/engine/engine";
 import { type LoopSighting, RunReader, type RunSummary } from "@usine/engine/run-reader";
-import { type TranscriptEntry, TranscriptPageQuery } from "@usine/engine/transcript";
+import {
+  type TranscriptEntry,
+  TranscriptPageQuery,
+  TranscriptWorkerQuery,
+} from "@usine/engine/transcript";
 import { Context, DateTime, Effect, Layer, Match, Option, Order, Result, Schema } from "effect";
 import { projectedItem } from "../board/items.ts";
 import { LoopMatches } from "../loop-matches.ts";
@@ -447,14 +451,20 @@ const makeDesk = Effect.gen(function* () {
     attempt: AttemptView,
   ) {
     yield* Effect.annotateCurrentSpan({ attemptId: attempt.id });
-    const entries = yield* reader.transcript(
-      new TranscriptPageQuery({
-        attemptId: attempt.id,
-        before: Option.none(),
-        limit: RECENT_TRANSCRIPT_ROWS,
-      }),
+    const [entries, worker] = yield* Effect.all(
+      [
+        reader.transcript(
+          new TranscriptPageQuery({
+            attemptId: attempt.id,
+            before: Option.none(),
+            limit: RECENT_TRANSCRIPT_ROWS,
+          }),
+        ),
+        reader.transcript(new TranscriptWorkerQuery({ attemptId: attempt.id })),
+      ],
+      { concurrency: "unbounded" },
     );
-    return attemptActivity(entries);
+    return attemptActivity([...entries, ...worker]);
   });
 
   const desk = Effect.fn("Operator.desk")(function* (instance: LoadedInstance) {

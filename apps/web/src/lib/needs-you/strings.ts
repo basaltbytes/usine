@@ -1,6 +1,10 @@
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
-import type { CycleBudgetNeed, NeedView } from "@usine/orchestrator/operator";
+import type {
+  CycleBudgetNeed,
+  NeedView,
+  UnresponsiveWorkerNeed,
+} from "@usine/orchestrator/operator";
 import { Match } from "effect";
 import { failureMessage, failureReason } from "~/lib/runs/strings";
 
@@ -83,6 +87,12 @@ export const needCopy = (need: NeedView): NeedCopy =>
       repository: null,
       runId: null,
     }),
+    UnresponsiveWorkerNeed: ({ worker, lastAnsweredAt, attempts }) => ({
+      title: `${worker}: worker not responding`,
+      detail: `Last answered ${lastAnsweredAt}. ${attempts.length} ${attempts.length === 1 ? "attempt is" : "attempts are"} still running. Check the worker or open an affected run.`,
+      repository: null,
+      runId: null,
+    }),
     UnconfirmedStopNeed: ({ loop, repository, runId, attemptNumber, worker }) => ({
       title: `${loop}: parent task not stopped`,
       detail: `Attempt ${attemptNumber} still ending on ${worker}, using one slot. No new attempt on this item until it stops. Stop retried every few minutes`,
@@ -97,3 +107,10 @@ export const attentionActionProgress = {
   undoDismissNeed: "Undoing…",
 } as const;
 export const dismissedAttentionTitle = "Dismissed";
+
+export const workerAttemptLabel = ({
+  repository,
+  loop,
+  attemptNumber,
+}: UnresponsiveWorkerNeed["attempts"][number]) =>
+  `${repository} · ${loop} · attempt ${attemptNumber}`;

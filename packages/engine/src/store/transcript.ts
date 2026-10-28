@@ -48,6 +48,12 @@ export const transcriptQueries = (database: RunDatabaseClient) => {
     });
 
     const cursor = Match.valueTags(query, {
+      TranscriptWorkerQuery: ({ attemptId }) =>
+        and(
+          eq(attemptTranscripts.attemptId, attemptId),
+          eq(attemptTranscripts.direction, "outbound"),
+          sql`json_extract(${attemptTranscripts.envelope}, '$.payload._tag') IN ('WorkerUnresponsive', 'WorkerResponsive')`,
+        ),
       TranscriptSessionsQuery: ({ attemptId }) =>
         inArray(
           attemptTranscripts.sequence,
@@ -121,6 +127,8 @@ export const transcriptQueries = (database: RunDatabaseClient) => {
       .where(cursor);
     // A page query reads the newest rows backwards, then sorts them into append order.
     const rows = yield* Match.valueTags(query, {
+      TranscriptWorkerQuery: () =>
+        selection.orderBy(desc(attemptTranscripts.sequence)).limit(1).execute(),
       TranscriptSessionsQuery: () => selection.orderBy(asc(attemptTranscripts.sequence)).execute(),
       TranscriptUsageQuery: () => selection.orderBy(asc(attemptTranscripts.sequence)).execute(),
       TranscriptAllQuery: () => selection.orderBy(asc(attemptTranscripts.sequence)).execute(),

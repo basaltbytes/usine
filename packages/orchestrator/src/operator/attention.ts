@@ -13,19 +13,20 @@ export const attentionKey = (need: NeedView): AttentionKey =>
     revision: AttentionRevision.make(JSON.stringify(encodeNeed(need))),
   });
 
-const repositoryOf = (need: NeedView) =>
+const repositoriesOf = (need: NeedView) =>
   Match.valueTags(need, {
-    ApprovalNeed: ({ repository }) => repository,
-    RunFailureNeed: ({ repository }) => repository,
-    UnconfirmedStopNeed: ({ repository }) => repository,
-    CycleBudgetNeed: ({ ask }) => ask.repository,
-    BoardProjectionNeed: ({ failure }) => failure.repository,
-    PollFailureNeed: ({ failure }) => failure.repository,
-    PreflightFindingNeed: ({ finding }) => finding.repository,
+    ApprovalNeed: ({ repository }) => [repository],
+    RunFailureNeed: ({ repository }) => [repository],
+    UnconfirmedStopNeed: ({ repository }) => [repository],
+    CycleBudgetNeed: ({ ask }) => [ask.repository],
+    BoardProjectionNeed: ({ failure }) => [failure.repository],
+    PollFailureNeed: ({ failure }) => [failure.repository],
+    PreflightFindingNeed: ({ finding }) => [finding.repository],
     ScheduleFailureNeed: ({ failure }) =>
-      failure._tag === "ScheduleTickFailure" ? failure.repository : null,
-    ConfigFileNeed: () => null,
-    UnconfiguredWorkerNeed: () => null,
+      failure._tag === "ScheduleTickFailure" ? [failure.repository] : [],
+    ConfigFileNeed: () => [],
+    UnconfiguredWorkerNeed: () => [],
+    UnresponsiveWorkerNeed: ({ attempts }) => attempts.map(({ repository }) => repository),
   });
 
 export const taskNeedsAttention = (
@@ -33,6 +34,8 @@ export const taskNeedsAttention = (
   needs: ReadonlyArray<NeedView>,
 ): boolean =>
   needs.some((need) => {
+    if (need._tag === "UnresponsiveWorkerNeed")
+      return need.attempts.some(({ runId }) => task.runs.some(({ id }) => id === runId));
     if ("runId" in need) return task.runs.some(({ id }) => id === need.runId);
     if (need._tag === "CycleBudgetNeed")
       return task.items.some(({ itemKey }) => itemKey === need.ask.itemKey);
@@ -46,7 +49,7 @@ export const projectAttention = (
   projects: ReadonlyArray<ProjectView>,
   needsYou: ReadonlyArray<NeedView>,
 ): ReadonlyArray<ProjectView> => {
-  const repositories = new Set(needsYou.map(repositoryOf));
+  const repositories = new Set(needsYou.flatMap(repositoriesOf));
   return projects.map(
     (project) =>
       new ProjectView({

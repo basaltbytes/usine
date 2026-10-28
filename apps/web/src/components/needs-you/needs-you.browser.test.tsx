@@ -1,6 +1,8 @@
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
+import { AttemptId, AttemptNumber } from "@usine/core/attempt";
+import { WorkerName } from "@usine/core/worker";
 import { AgentName } from "@usine/core/agent";
 import { ItemKey, ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
@@ -8,6 +10,7 @@ import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import {
   ApprovalNeed,
+  UnresponsiveWorkerNeed,
   BoardItemLink,
   BoardView,
   FactoryOverview,
@@ -227,4 +230,41 @@ it("explains in the drawer an approve refused because the Run was approved elsew
       timeout: 10_000,
     })
     .toBeVisible();
+});
+
+it("shows a silent worker's last answer and opens an affected run", async () => {
+  const need = new UnresponsiveWorkerNeed({
+    id: "worker:remote",
+    worker: WorkerName.make("remote"),
+    lastAnsweredAt: "2026-10-28T14:35:00.000Z",
+    attempts: [runId, RunId.make("other-run")].map((id, index) => ({
+      runId: id,
+      attemptId: AttemptId.make(`attempt-${index}`),
+      attemptNumber: AttemptNumber.make(index + 1),
+      repository,
+      loop,
+    })),
+  });
+  await commands.approvalResponses(
+    overview([need]),
+    overview([need]),
+    detail(running),
+    detail(running),
+  );
+  await queryClient.invalidateQueries({ queryKey: overviewQuery().queryKey });
+  const held = entry("remote: worker not responding");
+  await expect.element(held.getByText(/Last answered 2026-10-28T14:35:00.000Z/)).toBeVisible();
+  await expect
+    .element(held.getByRole("button", { name: "approval/project · start-dev · attempt 2" }))
+    .toBeVisible();
+  for (const { width, height } of [
+    { width: 1280, height: 800 },
+    { width: 390, height: 844 },
+  ]) {
+    await page.viewport(width, height);
+    await expect.element(held).toBeVisible();
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+  }
+  await held.getByRole("button", { name: "approval/project · start-dev · attempt 1" }).click();
+  await expect.element(page.getByRole("dialog")).toBeVisible();
 });

@@ -45,7 +45,8 @@ export const resourcesFromOutput = (output: string): Option.Option<MachineResour
 };
 
 /** What the Attempt containers leave to the machine's own processes, such as sshd, Docker, and the cached clones' fetches. */
-const HOST_RESERVE = { cpus: 0.5, memoryMib: 1024, tasks: 1024 } as const;
+export const HOST_MEMORY_RESERVE_MIB = 1024;
+const HOST_RESERVE = { cpus: 0.5, memoryMib: HOST_MEMORY_RESERVE_MIB, tasks: 1024 } as const;
 
 /** The smallest limits that `usine.yaml` and Docker accept. */
 const SMALLEST = { cpus: 0.01, memoryMib: 256, pids: 64 } as const;

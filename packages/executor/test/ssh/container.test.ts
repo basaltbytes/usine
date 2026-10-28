@@ -165,6 +165,7 @@ describe("SSH Worker with Docker", () => {
         assert.deepStrictEqual(running, [CONTAINER]);
         const { words, input } = runOf(machine, CONTAINER);
         assert.strictEqual(optionOf(words, "--network"), "host");
+        assert.strictEqual(optionOf(words, "--memory-swap"), optionOf(words, "--memory"));
         assert.deepStrictEqual(
           [optionOf(words, "--cpus"), optionOf(words, "--memory"), optionOf(words, "--pids-limit")],
           ["2", "4096m", "4096"],
@@ -223,6 +224,49 @@ describe("SSH Worker with Docker", () => {
       }).pipe(
         Effect.scoped,
         Effect.provide(runtime(machine, mintingProvider(), parent)),
+        Effect.provide(logs.layer),
+      );
+    },
+  );
+
+  it.effect.each([
+    { slots: 3, memoryMib: 7168, warns: true },
+    { slots: 2, memoryMib: 3584, warns: false },
+    { slots: 1, memoryMib: 7169, warns: true },
+  ])(
+    "checks fully configured container memory against the host reserve: $slots × $memoryMib",
+    ({ slots, memoryMib, warns }) => {
+      const machine = dockerMachine();
+      machine.state.memoryGib = 8;
+      const logs = capturedLogs();
+      const address: SshWorkerAddress = {
+        ...ADDRESS,
+        container: {
+          ...ADDRESS.container,
+          memoryMib: Option.some(ContainerMemoryMib.make(memoryMib)),
+        },
+      };
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        yield* executor.preflight(WORKER, [], slots);
+        const warnings = logs.lines.filter((line) =>
+          line.includes("Concurrent container memory exceeds"),
+        );
+        assert.lengthOf(warnings, warns ? 1 : 0);
+        for (const warning of warnings)
+          assert.deepInclude(JSON.parse(warning)[1], {
+            worker: WORKER,
+            maxConcurrentAttempts: slots,
+            memoryMib,
+            allocatedMemoryMib: slots * memoryMib,
+            availableMemoryMib: 7168,
+            hostReserveMib: 1024,
+          });
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          executorLayer(machine, mintingProvider(), address).pipe(Layer.provide(noGateway)),
+        ),
         Effect.provide(logs.layer),
       );
     },

@@ -1,4 +1,4 @@
-import { AttemptNumber } from "@usine/core/attempt";
+import { AttemptId, AttemptNumber } from "@usine/core/attempt";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
@@ -9,10 +9,12 @@ import {
   QuestionFailureView,
   RunFailureNeed,
   UnconfiguredWorkerNeed,
+  UnresponsiveWorkerNeed,
   UnconfirmedStopNeed,
 } from "@usine/orchestrator/operator";
 import { Schema } from "effect";
 import { assert, describe, it } from "vitest";
+import { needsYouByProject } from "~/lib/overview";
 import { needCopy } from "~/lib/needs-you/strings";
 
 describe("operator question copy in Needs attention", () => {
@@ -132,4 +134,32 @@ describe("unconfirmed stop copy in Needs attention", () => {
       runId: RunId.make("canceled"),
     });
   });
+});
+
+it("counts a worker alert once for each affected project", () => {
+  const repositories = [
+    RepositoryName.make("test/one"),
+    RepositoryName.make("test/one"),
+    RepositoryName.make("test/two"),
+  ];
+  const need = new UnresponsiveWorkerNeed({
+    id: "worker:remote",
+    worker: WorkerName.make("remote"),
+    lastAnsweredAt: "2026-10-28T14:35:00Z",
+    attempts: repositories.map((repository, index) => ({
+      repository,
+      runId: RunId.make(`run-${index}`),
+      loop: LoopName.make("implement"),
+      attemptId: AttemptId.make(`attempt-${index}`),
+      attemptNumber: AttemptNumber.make(1),
+    })),
+  });
+  assert.deepStrictEqual(
+    [...needsYouByProject([need])],
+    [
+      ["test/one", 1],
+      ["test/two", 1],
+    ],
+  );
+  assert.include(needCopy(need).detail, "3 attempts are still running");
 });

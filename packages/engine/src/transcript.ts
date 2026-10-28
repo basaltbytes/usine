@@ -67,6 +67,11 @@ export class TranscriptSessionsQuery extends Schema.TaggedClass<TranscriptSessio
   "@usine/engine/TranscriptSessionsQuery",
 )("TranscriptSessionsQuery", { attemptId: AttemptId }) {}
 
+/** The latest worker notice, including recovery, regardless of later session activity. */
+export class TranscriptWorkerQuery extends Schema.TaggedClass<TranscriptWorkerQuery>(
+  "@usine/engine/TranscriptWorkerQuery",
+)("TranscriptWorkerQuery", { attemptId: AttemptId }) {}
+
 /** A query for each session's highest `SessionTokensUpdated` report, which is its cumulative usage. */
 export class TranscriptUsageQuery extends Schema.TaggedClass<TranscriptUsageQuery>(
   "@usine/engine/TranscriptUsageQuery",
@@ -95,6 +100,7 @@ export class TranscriptPageQuery extends Schema.TaggedClass<TranscriptPageQuery>
 export const TranscriptQuery = Schema.Union([
   TranscriptAllQuery,
   TranscriptSessionsQuery,
+  TranscriptWorkerQuery,
   TranscriptUsageQuery,
   TranscriptTailQuery,
   TranscriptPageQuery,

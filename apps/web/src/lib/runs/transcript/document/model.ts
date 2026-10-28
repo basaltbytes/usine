@@ -288,7 +288,8 @@ const noteText = (notice: TranscriptNotice): string =>
 const workerNotice = (origin: TranscriptNotice["origin"]): ConnectivityNote | null => {
   if (origin._tag !== "Envelope") return null;
   if (origin.payload._tag === "WorkerUnresponsive") return { _tag: "WorkerSilent" };
-  if (origin.payload._tag === "WorkerResponsive") return { _tag: "WorkerAnswers" };
+  if (origin.payload._tag === "WorkerResponsive" && origin.payload.recovered)
+    return { _tag: "WorkerAnswers" };
   return null;
 };
 

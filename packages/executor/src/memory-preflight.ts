@@ -133,4 +133,5 @@ export const verifyLinuxMemory = Effect.fn("Executor.verifyLinuxMemory")(functio
       new Error(output.slice(0, 200)),
     );
   yield* verifyWorkerMemory(worker, maxConcurrentAttempts, memory.value);
+  return memory.value;
 });

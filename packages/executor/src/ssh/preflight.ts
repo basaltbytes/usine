@@ -16,7 +16,7 @@ import type { RemoteCommands } from "../remote/commands.ts";
 import type { SshContainers } from "./container.ts";
 import { gatewayExportedEnvironment } from "./gateway/environment.ts";
 import { verifyGateway } from "./gateway/preflight.ts";
-import { limitFields } from "./limits.ts";
+import { HOST_MEMORY_RESERVE_MIB, limitFields } from "./limits.ts";
 import type { SshMachine } from "./model.ts";
 import type { SshWorkerEntry } from "./workers.ts";
 
@@ -101,7 +101,7 @@ export const sshMachinePreflightFor = (
         `Worker "${worker}" returned an unrecognized Git version`,
         new Error(gitVersion),
       );
-    yield* verifyLinuxMemory(
+    const memory = yield* verifyLinuxMemory(
       worker,
       maxConcurrentAttempts,
       commands.run("preflight", machine.shell, "cat", ["/proc/meminfo"]),
@@ -110,6 +110,33 @@ export const sshMachinePreflightFor = (
     if (Option.isSome(machine.gateway))
       yield* verifyGateway(commands, worker, machine, machine.gateway.value);
     const containerCheck = yield* containers.verify(machine, maxConcurrentAttempts);
+    if (containerCheck._tag === "Container") {
+      const memoryMib = containerCheck.limits.limits.memoryMib;
+      const hostMemoryMib = Math.floor(memory.totalBytes / 1024 ** 2);
+      const allocatedMemoryMib = maxConcurrentAttempts * memoryMib;
+      const availableMemoryMib = Math.max(0, hostMemoryMib - HOST_MEMORY_RESERVE_MIB);
+      if (allocatedMemoryMib > availableMemoryMib)
+        yield* Effect.logWarning(
+          "Concurrent container memory exceeds the host memory available after its reserve. Reduce max_concurrent_attempts or container.memory_mib.",
+          {
+            worker,
+            host,
+            maxConcurrentAttempts,
+            memoryMib,
+            allocatedMemoryMib,
+            hostMemoryMib,
+            availableMemoryMib,
+            hostReserveMib: HOST_MEMORY_RESERVE_MIB,
+          },
+        );
+      else
+        yield* Effect.logInfo("Concurrent container memory fits the host", {
+          worker,
+          maxConcurrentAttempts,
+          allocatedMemoryMib,
+          availableMemoryMib,
+        });
+    }
     const harnesses = Arr.dedupe(brains.map(({ harness }) => harness));
     const probe = (shell: RemoteShell) =>
       verifyHarnessReadiness(

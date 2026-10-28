@@ -181,6 +181,9 @@ export class InterventionRejected extends Schema.TaggedClass<InterventionRejecte
   message: Schema.NonEmptyString,
 }) {}
 
+/** Consecutive unanswered probes before the operator needs a worker alert. */
+export const WORKER_UNRESPONSIVE_PROBES = 3;
+
 /**
  * A probe of the Worker that didn't run a command over a new SSH connection within its timeout.
  * The Attempt isn't stopped or failed (ADR 0013).
@@ -193,15 +196,24 @@ export class WorkerUnresponsive extends Schema.TaggedClass<WorkerUnresponsive>(
   lastAnsweredAt: Schema.DateTimeUtcFromString,
   /** The probe error, such as the SSH client's error or the exceeded timeout. */
   reason: Schema.NonEmptyString,
+  unansweredProbes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(1)),
+    Schema.withConstructorDefault(Effect.succeed(1)),
+  ),
 }) {}
 
-/** A successful probe after `WorkerUnresponsive`. */
+/** The first successful probe for an attempt's watch, or a successful probe after `WorkerUnresponsive`. */
 export class WorkerResponsive extends Schema.TaggedClass<WorkerResponsive>(
   "AttemptChannel/WorkerResponsive",
 )("WorkerResponsive", {
   worker: WorkerName,
-  /** The value from the preceding `WorkerUnresponsive`. */
+  /** The value from the preceding `WorkerUnresponsive`, or the first confirmed answer after joining a watch. */
   lastAnsweredAt: Schema.DateTimeUtcFromString,
+  /** Whether this watch observed an unanswered probe before this answer. Older notices represent recovery. */
+  recovered: Schema.Boolean.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(true)),
+    Schema.withConstructorDefault(Effect.succeed(true)),
+  ),
 }) {}
 
 export const WorkerNotice = Schema.Union([WorkerUnresponsive, WorkerResponsive]);
