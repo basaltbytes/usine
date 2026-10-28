@@ -226,6 +226,8 @@ Factory-wide values ([`Settings`](https://github.com/basaltbytes/usine/blob/7c0c
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
+| `upgrade_channel` | `latest` or `next` | `latest` | npm channel checked every five minutes for a global server managed by systemd. |
+| `upgrade_mode` | `off`, `propose`, or `automatic` | `propose` | Disable checks, offer upgrades in Settings, or upgrade after admitted attempts finish. |
 | `poll_interval` | integer ≥ 1 | `60` | Seconds between the starts of two GitHub poll cycles. A GitHub rate limit can push the next cycle later. |
 | `max_children` | integer ≥ 1 | `4` | The child-session budget: the number of child sessions that one attempt can start over its lifetime, sequential and concurrent together. The next start fails the attempt. |
 | `max_attempt_minutes` | integer ≥ 1 | none | Wall-clock limit per attempt, in minutes. Time while a child has an operator hold doesn't count. Also the drain deadline when `usine up` stops. |

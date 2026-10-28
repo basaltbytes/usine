@@ -1,3 +1,4 @@
+import { runInNewContext } from "node:vm";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -172,9 +173,31 @@ describe("the orchestrator's Hetzner server", () => {
     assert.deepStrictEqual(settings("SuccessExitStatus"), [String(interruptedStatus())]);
     // usine reads .env with dotenv's syntax, and systemd's values would win over it.
     assert.deepStrictEqual(settings("EnvironmentFile"), []);
-    assert.include(
-      fileOf(userData, "/etc/polkit-1/rules.d/50-usine.rules"),
-      'action.lookup("unit") === "usine.service"',
-    );
+    type Rule = (
+      action: { readonly id: string; readonly lookup: (key: string) => string },
+      subject: { readonly user: string },
+    ) => string | undefined;
+    const rules: Array<Rule> = [];
+    runInNewContext(fileOf(userData, "/etc/polkit-1/rules.d/50-usine.rules"), {
+      polkit: { addRule: (rule: Rule) => rules.push(rule), Result: { YES: "yes" } },
+    });
+    const allowed = (unit: string, verb: string, user: string) =>
+      rules[0]?.(
+        {
+          id: "org.freedesktop.systemd1.manage-units",
+          lookup: (key) => (key === "unit" ? unit : verb),
+        },
+        { user },
+      );
+    for (const service of ["usine.service", "usine-upgrade.service"]) {
+      assert.strictEqual(allowed(service, "start", "usine"), "yes");
+      assert.strictEqual(allowed(service, "stop", "usine"), "yes");
+      assert.isUndefined(allowed(service, "start", "other"));
+    }
+    assert.isUndefined(allowed("ssh.service", "stop", "usine"));
+    assert.isUndefined(allowed("usine-upgrade.service", "set-property", "usine"));
+    const helper = fileOf(userData, "/etc/systemd/system/usine-upgrade.service");
+    assert.include(helper, "ExecStart=/bin/bash /home/usine/factory/.usine/upgrade/run.sh");
+    assert.include(helper, "User=usine");
   });
 });

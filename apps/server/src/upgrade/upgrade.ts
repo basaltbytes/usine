@@ -1,10 +1,11 @@
+import { requestSystemUpgrade } from "./client.ts";
 import { join, sep } from "node:path";
 import type { InstanceDirectory } from "@usine/core/instance";
 import { Console, DateTime, Duration, Effect, FileSystem, Option, Schema } from "effect";
-import { backup } from "./backup.ts";
-import type { UpgradeCommand } from "./cli.ts";
-import { runCommand, runInTerminal } from "./command.ts";
-import { startAgain, startedMessage } from "./detach.ts";
+import { backup } from "../backup.ts";
+import type { UpgradeCommand } from "../cli.ts";
+import { runCommand, runInTerminal } from "../command.ts";
+import { startAgain, startedMessage } from "../detach.ts";
 import {
   type InstanceManifest,
   PackageManager,
@@ -16,17 +17,17 @@ import {
   readManifest,
   realPathOrSelf,
   serverPin,
-} from "./instance/manifest.ts";
-import { type InstanceRecord, instanceFiles } from "./instance/record.ts";
-import { probeInstance } from "./instance/state.ts";
-import { SystemdUnit, supervisingUnit } from "./instance/systemd.ts";
-import { dependenciesOf, resolveVersion } from "./registry.ts";
+} from "../instance/manifest.ts";
+import { type InstanceRecord, instanceFiles } from "../instance/record.ts";
+import { probeInstance } from "../instance/state.ts";
+import { SystemdUnit, supervisingUnit } from "../instance/systemd.ts";
+import { dependenciesOf, resolveVersion } from "../registry.ts";
 import {
   UnrecordedInstanceError,
   refuseLiveAttempts,
   refuseMissingEnvironment,
   stopProcess,
-} from "./stop.ts";
+} from "../stop.ts";
 
 const GIT_TIMEOUT = "30 seconds";
 
@@ -157,6 +158,13 @@ export const upgrade = Effect.fn("Cli.upgrade")(function* (
   if (Option.isSome(running)) {
     const script = running.value.launch.script;
     if (!installedInInstance(yield* realPathOrSelf(directory), yield* realPathOrSelf(script))) {
+      const unit = yield* supervisingUnit(running.value.pid, running.value.systemdUnit);
+      if (
+        Option.isSome(unit) &&
+        (yield* realPathOrSelf(script)).endsWith("/lib/node_modules/@usine/server/dist/main.js")
+      ) {
+        return yield* requestSystemUpgrade(directory, running.value, command);
+      }
       if (!command.check) {
         return yield* new EngineOutsideInstanceError({
           script,

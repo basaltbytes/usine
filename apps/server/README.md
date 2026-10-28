@@ -104,3 +104,11 @@ To clear a handled failure, select **Mark resolved** in the run drawer, opened f
 Failure resolution through `POST /api/runs/:runId/resolve-failure` records the current instance's operator login and resolution time. The next `GET /api/statistics/runs` reflects the resolution, including when the previous response was cached.
 
 Every Needs attention entry has **Dismiss**. The overview's collapsed **Dismissed** section lists acknowledged entries with **Undo**. Dismissals persist across refreshes and restarts, and a changed entry appears again. Attention counts and badges exclude dismissed entries. Dismissing an approval, failure, or cycle-budget ask leaves its state and actions available on the run and task pages and board cards. Dismiss and Undo also work while GitHub credentials need setup.
+
+## Server upgrades
+
+A global npm installation managed by systemd checks for upgrades every five minutes. Run `usine config edit settings instance` to configure `settings.upgrade_channel: latest` or `next` and `settings.upgrade_mode: off`, `propose`, or `automatic`. The defaults are `latest` and `propose`.
+
+In **Configuration → Settings**, select **Upgrade when idle** to stop admitting attempts and wait for active attempts to finish, or **Upgrade now** to restart and reattach running attempts. `usine upgrade [<version> | --channel <latest|next>]` requests the same operation; `--force` selects immediate restart, and `--check` only reports versions. The CLI prints when the request is accepted; Settings and the helper journal report its outcome.
+
+Install the helper service and polkit rule in the [server guide](https://docs.usine.dev/guides/run-the-orchestrator-on-a-server/) before using app upgrades. The independent helper installs into the same npm prefix and restores the previous version if installation or the new operator API fails. Its result is in `.usine/upgrade/result.json`; inspect `journalctl -u usine-upgrade.service` for progress. A rolled-back version is not retried automatically. Rollback restores packages; maintain database backups for releases with incompatible storage changes.

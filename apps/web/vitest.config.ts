@@ -187,6 +187,33 @@ export default mergeConfig(
                     }),
                   );
                 },
+                upgradeResponses: async (
+                  { page },
+                  initial: string,
+                  after: string,
+                  timing: string,
+                  rejection: string,
+                ) => {
+                  let current = initial;
+                  await page.unroute("**/api/upgrade");
+                  await page.route("**/api/upgrade", (route) => {
+                    if (route.request().method() === "GET")
+                      return route.fulfill({ contentType: "application/json", body: current });
+                    const accepted =
+                      route.request().postDataJSON().timing === timing && rejection === "";
+                    if (accepted) current = after;
+                    return route.fulfill({
+                      status: accepted ? 200 : 409,
+                      contentType: "application/json",
+                      body: accepted
+                        ? '{"ok":true}'
+                        : JSON.stringify({
+                            error: "UpgradeError",
+                            message: rejection || "Unexpected upgrade timing",
+                          }),
+                    });
+                  });
+                },
                 reloadResponses: async (
                   { page },
                   before: string,

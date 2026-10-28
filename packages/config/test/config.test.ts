@@ -34,6 +34,8 @@ describe("ConfigParser", () => {
         "version: 1\nrepos: []\nsettings: {}\n",
       );
 
+      expect(config.settings.upgradeChannel).toBe("latest");
+      expect(config.settings.upgradeMode).toBe("propose");
       expect(config.settings.pollInterval).toBe(60);
       expect(config.settings.maxChildren).toBe(4);
       expect(config.workers).toHaveLength(1);
@@ -50,6 +52,8 @@ describe("ConfigParser", () => {
           "repos: []",
           "settings:",
           "  poll_interval: 30",
+          "  upgrade_channel: next",
+          "  upgrade_mode: automatic",
           "  max_children: 2",
           "workers:",
           "  - name: remote",
@@ -59,6 +63,15 @@ describe("ConfigParser", () => {
           "    max_concurrent_attempts: 2",
         ].join("\n"),
       );
+      expect(configuredWorker.settings.upgradeChannel).toBe("next");
+      expect(configuredWorker.settings.upgradeMode).toBe("automatic");
+      const badChannel = yield* parser
+        .parseUsineYaml(
+          InstancePath.make("usine.yaml"),
+          "version: 1\nrepos: []\nsettings:\n  upgrade_channel: nightly\n",
+        )
+        .pipe(Effect.flip);
+      expect(badChannel.stage).toBe("schema");
       expect(configuredWorker.settings.pollInterval).toBe(30);
       expect(configuredWorker.settings.maxChildren).toBe(2);
       expect(configuredWorker.workers[0]?.maxConcurrentAttempts).toBe(1);

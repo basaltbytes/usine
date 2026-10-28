@@ -159,16 +159,59 @@ The unit has no `EnvironmentFile=`: `usine up` reads `.env` itself, with the [en
 
 systemd also starts the service at boot and restarts it 10 seconds after it fails. A drained `usine up` exits with status 130, which the unit counts as a clean stop.
 
-To upgrade usine, install the new version as `usine`, then restart:
+## Upgrade the server
 
-```sh title="/home/usine/factory"
-npm install --global @usine/server@0.4.0
-usine restart
+Run `usine config edit settings instance` from `/home/usine/factory` to select the npm channel and upgrade mode:
+
+```yaml
+settings:
+  upgrade_channel: next
+  upgrade_mode: automatic
 ```
 
-Every push to `main` that changes package code is also published as a prerelease under the `next` tag, with a version such as `0.4.1-next.312.g1a2b3c4`: the next patch version, the release workflow's run number, and the commit. To run the latest prerelease, install `@usine/server@next` instead. A later `npm install --global @usine/server@latest` returns to releases.
+The defaults are `latest` and `propose`. Saving the edit commits a configuration revision that the running server applies automatically. The server checks every five minutes. Automatic mode stops admitting attempts, waits for running attempts to finish, and upgrades. With `propose`, **Configuration → Settings** shows the available version and a link to its changes. Select **Upgrade when idle** to wait or **Upgrade now** to restart immediately and reattach running attempts. `off` disables checks.
 
-`usine upgrade` moves an instance's `package.json` pin, and the service runs the global install, so `usine upgrade` refuses and says to update that install instead.
+From `/home/usine/factory`, `usine upgrade` requests an idle upgrade from the configured channel. Use `usine upgrade --channel next` or an exact version to select another release, `--force` to restart immediately, and `--check` to report versions without changing anything. The command reports acceptance; Settings and `journalctl -u usine-upgrade.service -f` report progress and the outcome.
+
+The helper runs separately from the server. It records the previous version, installs the target into the same npm prefix, and restarts the service. If installation fails or the new operator API does not answer within three minutes, it reinstalls the previous version and restarts it. Settings displays the rollback and its reason. Automatic mode does not retry that version. Package rollback does not restore databases; keep [database backups](/reference/configuration/cli/#usine-backup-path) for incompatible storage migrations.
+
+### Existing servers
+
+New cloud-init installations include the helper. On an existing server, install this unit as root at `/etc/systemd/system/usine-upgrade.service`:
+
+```ini
+[Unit]
+Description=usine package upgrade and rollback
+After=network-online.target
+
+[Service]
+Type=exec
+User=usine
+Group=usine
+WorkingDirectory=/home/usine/factory
+ExecStart=/bin/bash /home/usine/factory/.usine/upgrade/run.sh
+TimeoutStartSec=infinity
+NoNewPrivileges=yes
+```
+
+Replace `/etc/polkit-1/rules.d/50-usine.rules` with:
+
+```js
+polkit.addRule(function (action, subject) {
+  if (
+    action.id === "org.freedesktop.systemd1.manage-units" &&
+    ["usine.service", "usine-upgrade.service"].indexOf(action.lookup("unit")) >= 0 &&
+    subject.user === "usine" &&
+    ["start", "stop", "restart"].indexOf(action.lookup("verb")) >= 0
+  ) {
+    return polkit.Result.YES;
+  }
+});
+```
+
+Run `systemctl daemon-reload`. The helper also requires `bash`, `curl`, `flock`, `timeout`, and `npm`, which the server image provides. For a differently named service, name the helper `<service-name>-upgrade.service` and adjust its working directory, script path, user, and polkit rule.
+
+Install the first version with app upgrade support manually using `npm install --global @usine/server@latest`, then `usine restart`. Later upgrades use the app or automatic mode.
 
 ## Keep the UI private
 

@@ -66,6 +66,8 @@ Subpaths: `/factory` (settings and registry), `/board` (lanes), `/label`, `/loop
 
 The 0.x APIs can change between minor releases.
 
+For a global server installation managed by systemd, `settings.upgrade_channel` selects `latest` (default) or `next`. `settings.upgrade_mode` selects `off`, `propose` (default), or `automatic`. Committed configuration revisions apply both settings; automatic mode waits for admitted attempts to finish before upgrading.
+
 ## Configuration revisions
 
 `ConfigurationStore` from `/configuration` reads the current `Configuration`, lists revisions (optionally by entity), reads one revision, commits changes with an expected revision number, and streams revisions after a supplied number. A `ConfigurationRevision` records the actor, time, optional message, and before and after values for settings, workers, repositories (including lanes), labels, loops, and agents. The actor is optional for instances without an `operator` value.

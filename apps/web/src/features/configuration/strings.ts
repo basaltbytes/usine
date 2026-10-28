@@ -174,3 +174,25 @@ export const reloadRefusalLead = (error: OperatorHttpError["error"] | undefined)
       return null;
   }
 };
+
+export const upgradesTitle = "Server upgrades";
+export const upgradeWhenIdle = "Upgrade when idle";
+export const upgradeNow = "Upgrade now";
+export const upgradeChanges = "View changes";
+export const upgradeIdleHelp =
+  "Wait for running attempts to finish. No new attempt starts while waiting.";
+export const upgradeNowHelp = "Restart now. Running attempts reattach after the server restarts.";
+export const upgradeUnsupported =
+  "App upgrades require a global npm install managed by systemd. Use usine status and usine upgrade for this instance.";
+export const upgradeCurrent = "No newer version is available.";
+export const upgradeOff = "Upgrade checks are off.";
+export const upgradeWaiting = "Waiting for running attempts to finish. No new attempts will start.";
+export const upgradeInstalling =
+  "Installing and restarting. This page reconnects when the server answers.";
+export const upgradeRolledBack = (previous: string, target: string, reason: string) =>
+  `Upgrade to ${target} failed. Restored ${previous}. ${reason}`;
+
+export const upgradeRunningLabel = "Running version";
+export const upgradeChannelLabel = "Channel";
+export const upgradeModeLabel = "Mode";
+export const upgradeAvailable = (version: string) => `Version ${version} is available.`;

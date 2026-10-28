@@ -1,3 +1,5 @@
+import { UpgradeView } from "@usine/orchestrator/operator/http";
+import { ServerUpgrades } from "../src/upgrade/control.ts";
 import {
   AttentionKey,
   AttentionRevision,
@@ -417,6 +419,70 @@ const app = HttpRouter.toWebHandler(
 afterAll(() => app.dispose());
 
 describe("operator HTTP API", () => {
+  it("reports the running release and validates upgrade requests before accepting them", async () => {
+    const requested: Array<string> = [];
+    const upgradeBackend = Layer.succeed(ServerUpgrades, {
+      polling: Effect.never,
+      status: Effect.succeed(
+        new UpgradeView({
+          running: "1.0.0",
+          channel: "next",
+          mode: "propose",
+          supported: true,
+          available: null,
+          phase: "idle",
+          message: null,
+          outcome: null,
+        }),
+      ),
+      request: (input) =>
+        Effect.sync(() => {
+          requested.push(input.timing);
+        }),
+    });
+    const upgradeApp = HttpRouter.toWebHandler(
+      apiRoutes(Option.none()).pipe(
+        HttpRouter.provideRequest(Layer.merge(backend, upgradeBackend)),
+      ),
+      { disableLogger: true },
+    );
+    try {
+      const version = await upgradeApp.handler(new Request("http://localhost/api/version"));
+      assert.strictEqual(await version.json(), "1.0.0");
+      const status = await upgradeApp.handler(new Request("http://localhost/api/upgrade"));
+      assert.strictEqual(
+        Schema.decodeUnknownSync(UpgradeView)(await status.json()).channel,
+        "next",
+      );
+      const invalid = await upgradeApp.handler(
+        new Request("http://localhost/api/upgrade", {
+          method: "POST",
+          body: JSON.stringify({ timing: "tomorrow" }),
+        }),
+      );
+      assert.strictEqual(invalid.status, 400);
+      const invalidVersion = await upgradeApp.handler(
+        new Request("http://localhost/api/upgrade", {
+          method: "POST",
+          body: JSON.stringify({ timing: "now", version: "1.0.0-01" }),
+        }),
+      );
+      assert.strictEqual(invalidVersion.status, 400);
+
+      assert.deepStrictEqual(requested, []);
+      const accepted = await upgradeApp.handler(
+        new Request("http://localhost/api/upgrade", {
+          method: "POST",
+          body: JSON.stringify({ timing: "idle" }),
+        }),
+      );
+      assert.strictEqual(accepted.status, 200);
+      assert.deepStrictEqual(requested, ["idle"]);
+    } finally {
+      await upgradeApp.dispose();
+    }
+  });
+
   it("records dismissals and undo during setup without accepting client-supplied operator identity", async () => {
     const payload = { id: "config-file:loop", revision: "invalid agent" };
     const send = (path: string, body: Schema.Json) =>
@@ -562,6 +628,14 @@ describe("operator HTTP API", () => {
     );
     assert.strictEqual(crossSite.status, 403);
     assert.strictEqual((await crossSite.json()).error, "CrossSiteRequestError");
+    const upgrade = await app.handler(
+      new Request("http://localhost/api/upgrade", {
+        method: "POST",
+        headers: { origin: "https://evil.example" },
+        body: JSON.stringify({ timing: "now" }),
+      }),
+    );
+    assert.strictEqual(upgrade.status, 403);
 
     // A loopback origin (the Vite dev server) passes the guard; the needs-setup 503 shows the
     // handler ran.

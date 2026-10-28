@@ -1,3 +1,4 @@
+import { type UpgradeError, ServerUpgrades } from "./upgrade/control.ts";
 import { createServer } from "node:http";
 import { extname, resolve, sep } from "node:path";
 import { NodeHttpServer } from "@effect/platform-node";
@@ -162,8 +163,32 @@ const projectRepository = (params: { readonly owner: string; readonly repository
     ),
   );
 
+const fromUpgrades = <A>(
+  use: (upgrades: ServerUpgrades["Service"]) => Effect.Effect<A, UpgradeError>,
+) =>
+  Effect.gen(function* () {
+    const upgrades = yield* Effect.serviceOption(ServerUpgrades);
+    if (Option.isNone(upgrades))
+      return yield* new OperatorHttpError({
+        error: "UpgradeError",
+        message: "Upgrades are unavailable until the factory is running.",
+      });
+    return yield* use(upgrades.value).pipe(
+      Effect.mapError(
+        (error) => new OperatorHttpError({ error: "UpgradeError", message: error.message }),
+      ),
+    );
+  });
+
 const handlers = HttpApiBuilder.group(OperatorApi, "operator", (routes) =>
   routes
+    .handle("upgradeStatus", () => fromUpgrades((upgrades) => upgrades.status))
+    .handle("serverVersion", () =>
+      fromUpgrades((upgrades) => upgrades.status.pipe(Effect.map((status) => status.running))),
+    )
+    .handle("requestUpgrade", ({ payload }) =>
+      fromUpgrades((upgrades) => upgrades.request(payload)).pipe(acknowledge),
+    )
     .handle("overview", () => fromBackend((backend) => backend.overview))
     .handle("agents", () => fromBackend((backend) => backend.agents))
     .handle("editAndRetry", ({ params, payload }) =>
@@ -321,9 +346,10 @@ export const serverLayer = (
   webRoot: string,
   port: Port,
   origin: Option.Option<UiOrigin>,
+  upgrades: Layer.Layer<ServerUpgrades> | Layer.Layer<never> = Layer.empty,
 ) => {
   const routes = Layer.mergeAll(apiRoutes(origin), staticRoutes(webRoot)).pipe(
-    HttpRouter.provideRequest(backend),
+    HttpRouter.provideRequest(Layer.merge(backend, upgrades)),
   );
   return HttpRouter.serve(routes).pipe(
     Layer.provide(NodeHttpServer.layer(createServer, { host: SERVER_HOST, port })),

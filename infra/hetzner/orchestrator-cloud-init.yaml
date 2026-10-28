@@ -99,14 +99,31 @@ write_files:
       [Install]
       WantedBy=multi-user.target
 
-  # usine stop, restart, and upgrade run systemctl stop and start as usine.
+  - path: /etc/systemd/system/usine-upgrade.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=usine package upgrade and rollback
+      After=network-online.target
+
+      [Service]
+      Type=exec
+      User=usine
+      Group=usine
+      WorkingDirectory=/home/usine/factory
+      ExecStart=/bin/bash /home/usine/factory/.usine/upgrade/run.sh
+      TimeoutStartSec=infinity
+      NoNewPrivileges=yes
+
+  # The helper runs outside usine.service so stopping the server doesn't stop rollback.
+
   - path: /etc/polkit-1/rules.d/50-usine.rules
     permissions: "0644"
     content: |
       polkit.addRule(function (action, subject) {
         if (
           action.id === "org.freedesktop.systemd1.manage-units" &&
-          action.lookup("unit") === "usine.service" &&
+          ["usine.service", "usine-upgrade.service"].indexOf(action.lookup("unit")) >= 0 &&
           subject.user === "usine" &&
           ["start", "stop", "restart"].indexOf(action.lookup("verb")) >= 0
         ) {

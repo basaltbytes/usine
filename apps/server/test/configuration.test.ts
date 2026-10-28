@@ -1,4 +1,5 @@
 import { createServer } from "node:net";
+import { UpgradeView } from "@usine/orchestrator/operator/http";
 import { UsineConfig } from "@usine/config/factory";
 import { Schema } from "effect";
 import { spawn, spawnSync } from "node:child_process";
@@ -208,6 +209,28 @@ test(
         )
         .toBe("codex");
       expect(run(directory, ["log"]).stdout).toContain("Imported from the instance folder");
+      const upgrades = async () =>
+        Schema.decodeUnknownSync(UpgradeView)(await (await fetch(`${origin}/api/upgrade`)).json());
+      expect(await upgrades()).toMatchObject({ channel: "latest", mode: "propose" });
+      const settingsEditor = join(directory, "settings-editor.mjs");
+      await writeFile(
+        settingsEditor,
+        `import { readFileSync, writeFileSync } from "node:fs";
+const file = process.argv[2];
+writeFileSync(file, readFileSync(file, "utf8").replace("upgrade_channel: latest", "upgrade_channel: next").replace("upgrade_mode: propose", "upgrade_mode: automatic"));
+`,
+      );
+      const settingsEdit = run(
+        directory,
+        ["edit", "settings", "instance"],
+        `${process.execPath} ${settingsEditor}`,
+      );
+      expect(settingsEdit.status, settingsEdit.stderr).toBe(0);
+      await expect.poll(upgrades, { timeout: 10_000 }).toMatchObject({
+        channel: "next",
+        mode: "automatic",
+      });
+
       const editor = join(directory, "live-editor.mjs");
       await writeFile(
         editor,
