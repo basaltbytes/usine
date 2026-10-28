@@ -19,7 +19,7 @@ A recorded change to the instance configuration, with a number, actor, time, opt
 _Avoid_: config commit, version
 
 **Registry**:
-The list of managed repos in the instance repo, with optional tags.
+The list of managed repos in the instance configuration, with optional tags.
 _Avoid_: repo list, inventory
 
 **Managed repo**:
