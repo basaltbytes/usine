@@ -491,28 +491,33 @@ describe("SSH Worker behind a Gateway", () => {
     }).pipe(Effect.scoped, Effect.provide(gatewayRuntime(machine, credentials, gateway)));
   });
 
-  it.effect("gives a restarted Gateway the Attempt's attachment back within two minutes", () => {
-    const machine = fakeMachine();
-    const credentials = mintingProvider();
-    const gateway = fakeGateway(machine);
-    return Effect.gen(function* () {
-      const executor = yield* Executor;
-      yield* executor.prepare(request);
-      const [attached] = yield* attachmentsInForce;
-      assert(attached !== undefined);
-      // A restart empties the Gateway's store.
-      const store = yield* Attachments;
-      yield* store.detach(attached.id);
-      assert.deepStrictEqual(yield* attachmentsInForce, []);
-      yield* advance(gateway, 2);
-      const [restored] = yield* attachmentsInForce;
-      assert.strictEqual(
-        restored?.id,
-        attached.id,
-        "the same attachment, so the caller token holds",
-      );
-    }).pipe(Effect.scoped, Effect.provide(gatewayRuntime(machine, credentials, gateway)));
-  });
+  it.effect(
+    "restores a missing gateway attachment within two minutes with the original caller token",
+    () => {
+      const machine = fakeMachine();
+      const credentials = mintingProvider();
+      const gateway = fakeGateway(machine);
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        yield* executor.prepare(request);
+        const [attached] = yield* attachmentsInForce;
+        assert(attached !== undefined);
+        // Simulate lost state or a restart of an older gateway.
+        const store = yield* Attachments;
+        yield* store.detach(attached.id);
+        assert.deepStrictEqual(yield* attachmentsInForce, []);
+        yield* advance(gateway, 2);
+        const [restored] = yield* attachmentsInForce;
+        assert.strictEqual(
+          restored?.id,
+          attached.id,
+          "the same attachment, so the caller token holds",
+        );
+        assert(restored !== undefined);
+        assert.deepStrictEqual(restored.credential, attached.credential);
+      }).pipe(Effect.scoped, Effect.provide(gatewayRuntime(machine, credentials, gateway)));
+    },
+  );
 
   it.effect("pushes a failed Attempt's salvage through the Gateway before detaching", () => {
     const machine = fakeMachine();

@@ -16,6 +16,7 @@ import { type EgressPermitted, EgressRefused } from "../egress/egress.ts";
 import { endToEndHeaders } from "../proxy/forward.ts";
 import { REFUSAL_HEADER } from "../proxy/proxy.ts";
 import { GatewaySettings, gatewayHosts, SettingsInForce } from "../settings.ts";
+import { trackConnections } from "./connections.ts";
 import type { Listener } from "./environment.ts";
 
 /**
@@ -629,6 +630,7 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
   });
 
   const server = createServer({ requestTimeout: 0 });
+  const closeConnections = trackConnections(server);
   const run = (effect: Effect.Effect<void>) =>
     Fiber.runIn(Effect.runForkWith(context)(effect), scope);
   server.on("connect", (request: IncomingMessage, client: Duplex, head: Buffer) => {
@@ -658,10 +660,13 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
       server.listen(listener.port, listener.host, () => resume(Effect.void));
     }),
     () =>
-      Effect.callback<void>((resume) => {
-        server.close(() => resume(Effect.void));
-        server.closeAllConnections();
-      }),
+      closeConnections().pipe(
+        Effect.andThen(
+          Effect.callback<void>((resume) => {
+            server.close(() => resume(Effect.void));
+          }),
+        ),
+      ),
   );
   const address = server.address();
   const bound =
