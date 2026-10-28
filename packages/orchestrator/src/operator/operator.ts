@@ -459,10 +459,10 @@ const makeOperatorObservation = Effect.gen(function* () {
         );
       }
     }
-    pollFailures.forEach((failure, index) => {
+    pollFailures.forEach((failure) => {
       needsYou.push(
         new PollFailureNeed({
-          id: `poll-failure:${failure.repository}:${failure.errorTag}:${index}`,
+          id: `poll-failure:${JSON.stringify([failure.repository, failure.errorTag, failure.message])}`,
           failure,
         }),
       );
@@ -475,10 +475,14 @@ const makeOperatorObservation = Effect.gen(function* () {
         }),
       );
     });
-    scheduleFailures.forEach((failure, index) => {
+    scheduleFailures.forEach((failure) => {
       needsYou.push(
         new ScheduleFailureNeed({
-          id: `schedule-failure:${failure.loop}:${failure._tag}:${index}`,
+          id: `schedule-failure:${JSON.stringify([
+            failure.loop,
+            failure._tag,
+            failure._tag === "ScheduleTickFailure" ? failure.repository : null,
+          ])}`,
           failure,
         }),
       );

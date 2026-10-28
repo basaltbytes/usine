@@ -104,7 +104,13 @@ import {
   UnconfirmedStopView,
 } from "../src/operator/run.ts";
 import { PollCycle, PollingTriggers, RepositoryPollFailure } from "../src/polling-triggers.ts";
-import { ScheduleCycle, ScheduleTriggers } from "../src/schedule-triggers.ts";
+import {
+  ScheduleAgentFailure,
+  ScheduleCronFailure,
+  ScheduleCycle,
+  ScheduleTickFailure,
+  ScheduleTriggers,
+} from "../src/schedule-triggers.ts";
 import { failureView, runDuration } from "../src/operator/projection.ts";
 import { WorkerStatus } from "../src/worker-status.ts";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
@@ -408,6 +414,10 @@ const testLayer = (
   /** Receives each Board move the operator records, in order. */
   recordedMoves: Array<BoardMoveRecord> = [],
   unconfirmedStops: Effect.Effect<ReadonlyArray<UnconfirmedStop>> = Effect.succeed([]),
+  triggerCycles: {
+    readonly poll?: PollingTriggers["Service"]["latest"];
+    readonly schedule?: ScheduleTriggers["Service"]["latest"];
+  } = {},
 ) => {
   const acknowledged: Array<AttentionAcknowledgement> = [];
   const readTranscript = (query: TranscriptQuery) =>
@@ -550,49 +560,53 @@ const testLayer = (
       ),
     poll: () => Effect.die("unused"),
     run: () => Effect.never,
-    latest: Effect.succeed(
-      Option.some(
-        new PollCycle({
-          repositories: 1,
-          changedItems: 0,
-          submissions: [],
-          revokedRuns: 0,
-          failures: [
-            new RepositoryPollFailure({
-              repository,
-              errorTag: "GitHubApiError",
-              message: "GitHub was unavailable",
-            }),
-          ],
-          preflightFindings: [
-            new LabelPreflightFinding({
-              repository,
-              label: GitHubLabelName.make("ready-for-review"),
-              errorTag: "GitHubApiError",
-              message: "GitHub returned HTTP status 500",
-            }),
-          ],
-          nextPollAt: Option.none(),
-        }),
+    latest:
+      triggerCycles.poll ??
+      Effect.succeed(
+        Option.some(
+          new PollCycle({
+            repositories: 1,
+            changedItems: 0,
+            submissions: [],
+            revokedRuns: 0,
+            failures: [
+              new RepositoryPollFailure({
+                repository,
+                errorTag: "GitHubApiError",
+                message: "GitHub was unavailable",
+              }),
+            ],
+            preflightFindings: [
+              new LabelPreflightFinding({
+                repository,
+                label: GitHubLabelName.make("ready-for-review"),
+                errorTag: "GitHubApiError",
+                message: "GitHub returned HTTP status 500",
+              }),
+            ],
+            nextPollAt: Option.none(),
+          }),
+        ),
       ),
-    ),
   });
   const schedules = Layer.succeed(ScheduleTriggers)({
     tick: () => Effect.die("unused"),
     run: () => Effect.never,
-    latest: Effect.succeed(
-      Option.some(
-        new ScheduleCycle({
-          loops: 0,
-          fanout: 0,
-          submissions: [],
-          skipped: 0,
-          alreadyFired: 0,
-          failures: [],
-          nextTickAt: Option.none(),
-        }),
+    latest:
+      triggerCycles.schedule ??
+      Effect.succeed(
+        Option.some(
+          new ScheduleCycle({
+            loops: 0,
+            fanout: 0,
+            submissions: [],
+            skipped: 0,
+            alreadyFired: 0,
+            failures: [],
+            nextTickAt: Option.none(),
+          }),
+        ),
       ),
-    ),
   });
   const history = Layer.succeed(GitHubItemHistory)({
     appChanges: () => Effect.die("unused"),
@@ -690,6 +704,144 @@ describe("Operator", () => {
           );
         }).pipe(Effect.provide(testLayer(approved, moved, reads, revision)));
       }),
+  );
+
+  it.effect("keeps failures dismissed when unrelated failures reorder or recover", () =>
+    Effect.gen(function* () {
+      const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+      const moved = yield* Ref.make<ItemLabelMutation | null>(null);
+      const reads = yield* Ref.make(0);
+      const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+      const pollA = new RepositoryPollFailure({
+        repository,
+        errorTag: "ExpressionEvaluationError",
+        message: "Loop review-issue failed on issue #31",
+      });
+      const pollB = new RepositoryPollFailure({
+        ...pollA,
+        message: "Loop review-issue failed on issue #32",
+      });
+      const scheduleA = new ScheduleTickFailure({
+        loop: loopName,
+        repository,
+        scheduledAt: now,
+        errorTag: "GitHubApiError",
+        message: "GitHub was unavailable",
+      });
+      const scheduleB = new ScheduleTickFailure({
+        ...scheduleA,
+        repository: RepositoryName.make("test/other"),
+      });
+      const agentFailure = new ScheduleAgentFailure({
+        loop: LoopName.make("missing-agent"),
+        agent: agentFile.name,
+        message: "Agent is unavailable",
+      });
+      const cronFailure = new ScheduleCronFailure({
+        loop: LoopName.make("invalid-cron"),
+        cron: "0 2 * * *",
+        tz: "Europe/Paris",
+        message: "Could not compute cron boundaries",
+      });
+      const poll = new PollCycle({
+        repositories: 1,
+        changedItems: 0,
+        submissions: [],
+        revokedRuns: 0,
+        failures: [pollA, pollB],
+        preflightFindings: [],
+        nextPollAt: Option.none(),
+      });
+      const schedule = new ScheduleCycle({
+        loops: 3,
+        fanout: 2,
+        submissions: [],
+        skipped: 0,
+        alreadyFired: 0,
+        failures: [scheduleA, scheduleB, agentFailure, cronFailure],
+        nextTickAt: Option.none(),
+      });
+      const latestPoll = yield* Ref.make(Option.some(poll));
+      const latestSchedule = yield* Ref.make(Option.some(schedule));
+      yield* Effect.gen(function* () {
+        const operator = yield* Operator;
+        const before = yield* operator.overview(instance);
+        const failures = before.needsYou.filter(
+          (need) => need._tag === "PollFailureNeed" || need._tag === "ScheduleFailureNeed",
+        );
+        assert.strictEqual(failures.length, 6);
+        assert.strictEqual(new Set(failures.map(({ id }) => id)).size, 6);
+        const dismissed = failures.filter((need) =>
+          need._tag === "PollFailureNeed"
+            ? need.failure.message === pollB.message
+            : need.failure._tag !== "ScheduleTickFailure" ||
+              need.failure.repository === scheduleB.repository,
+        );
+        for (const need of dismissed) yield* operator.dismissNeed(instance, attentionKey(need));
+        for (const [pollFailures, scheduleFailures] of [
+          [
+            [pollB, pollA],
+            [cronFailure, agentFailure, scheduleB, scheduleA],
+          ],
+          [[pollB], [scheduleB, agentFailure, cronFailure]],
+        ] as const) {
+          yield* Ref.set(
+            latestPoll,
+            Option.some(new PollCycle({ ...poll, failures: pollFailures })),
+          );
+          yield* Ref.set(
+            latestSchedule,
+            Option.some(new ScheduleCycle({ ...schedule, failures: scheduleFailures })),
+          );
+          const refreshed = yield* operator.overview(instance);
+          assert.deepStrictEqual(new Set(refreshed.dismissedNeeds), new Set(dismissed));
+          assert(!refreshed.needsYou.some((need) => dismissed.some(({ id }) => id === need.id)));
+        }
+        yield* Ref.set(
+          latestPoll,
+          Option.some(
+            new PollCycle({
+              ...poll,
+              failures: [new RepositoryPollFailure({ ...pollB, message: "Expression changed" })],
+            }),
+          ),
+        );
+        yield* Ref.set(
+          latestSchedule,
+          Option.some(
+            new ScheduleCycle({
+              ...schedule,
+              failures: [new ScheduleTickFailure({ ...scheduleB, message: "Permission denied" })],
+            }),
+          ),
+        );
+        const changed = yield* operator.overview(instance);
+        assert.deepStrictEqual(changed.dismissedNeeds, []);
+        assert.strictEqual(
+          changed.needsYou.filter(
+            (need) => need._tag === "PollFailureNeed" || need._tag === "ScheduleFailureNeed",
+          ).length,
+          2,
+        );
+      }).pipe(
+        Effect.provide(
+          testLayer(
+            approved,
+            moved,
+            reads,
+            revision,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            { poll: Ref.get(latestPoll), schedule: Ref.get(latestSchedule) },
+          ),
+        ),
+      );
+    }),
   );
 
   it.effect("clears only resolved failure attention and renews it for a later failed Attempt", () =>
