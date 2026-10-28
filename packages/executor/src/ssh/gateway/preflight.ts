@@ -446,7 +446,7 @@ export const gatewayHarnessProbe = (
     yield* Effect.annotateCurrentSpan({ worker, host, domain, harness });
     const readiness = yield* probe(brain);
     if (readiness._tag === "HarnessUnavailableError") return readiness;
-    yield* loginHostsReachable(harness);
+    if (gateway.settings.egress === "proxy") yield* loginHostsReachable(harness);
     return readiness;
   });
 

@@ -283,6 +283,7 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
     ).pipe(Effect.forkScoped);
     const { exported, sent } = gatewayEnvironment({
       domain: settings.domain,
+      egress: settings.egress,
       llmProviders: settings.llmProviders,
       ...directories,
       callerToken,

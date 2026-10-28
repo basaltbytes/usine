@@ -30,6 +30,13 @@ const Sandbox = Schema.Struct({
   createdAt: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
 
+const SavedSnapshot = Schema.Struct({
+  snapshot: Schema.Struct({
+    name: Schema.String,
+    status: Schema.Literals(["saving", "ready", "failed"]),
+  }),
+});
+
 const OneSandbox = Schema.Struct({ sandbox: Sandbox });
 
 const SandboxList = Schema.Struct({
@@ -116,7 +123,7 @@ const destinationOf = (
  * Returns the Boat driver for `worker`'s sandboxes (#550). Each sandbox is created with none of
  * the account's secrets (`noEnv`), no snapshots, which Boat can store outside the EU, no command
  * monitoring, and no automatic stop, and the executor deletes it. Its name carries the instance,
- * Worker, Run, creating process, and Attempt, because Boat has no labels. `publicKey` is the
+ * Worker, Run, creating process, and Attempt, for recovery by earlier releases. `publicKey` is the
  * OpenSSH public key each sandbox authorizes.
  */
 export const boatDriverFor = (
@@ -146,6 +153,16 @@ export const boatDriverFor = (
       function* (_worker: WorkerName, maxConcurrentAttempts: number) {
         yield* Effect.annotateCurrentSpan({ worker, maxConcurrentAttempts });
         yield* api.send("GET", "/me");
+        if (Option.isSome(settings.snapshot)) {
+          const { snapshot } = yield* api
+            .send("GET", `/saved-snapshots/${settings.snapshot.value}`)
+            .pipe(Effect.flatMap(api.decode(SavedSnapshot, "read the saved snapshot")));
+          if (snapshot.status !== "ready")
+            return yield* providerGap(
+              `Boat snapshot "${settings.snapshot.value}" is ${snapshot.status}; wait for it to be ready or rebuild it.`,
+              new Error(`snapshot ${snapshot.status}`),
+            );
+        }
         const limits = yield* api
           .send("GET", "/limits")
           .pipe(Effect.flatMap(api.decode(Limits, "read the limits")));
@@ -207,11 +224,16 @@ export const boatDriverFor = (
     );
 
     const create = Effect.fn("BoatDriver.create")(
-      function* (_name: string, tags: MachineTags) {
+      function* (name: string, tags: MachineTags) {
         yield* Effect.annotateCurrentSpan({ worker, run: tags.run });
         const response = yield* api.send("POST", "/sandboxes", {
+          headers: { "Idempotency-Key": name },
           body: {
             type: settings.size,
+            ...Option.match(settings.snapshot, {
+              onNone: () => ({}),
+              onSome: (from) => ({ from }),
+            }),
             name: nameOf(tags),
             ttlSeconds: null,
             noEnv: true,

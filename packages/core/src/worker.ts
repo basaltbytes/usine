@@ -296,3 +296,23 @@ export type SshUser = typeof SshUser.Type;
  */
 export const BoatSize = Schema.Literals(["small", "default", "large", "xlarge"]);
 export type BoatSize = typeof BoatSize.Type;
+
+/** A Boat saved snapshot name, excluding names reserved by its API. */
+export const BoatSnapshotName = Schema.String.check(
+  Schema.isPattern(/^[a-z0-9][a-z0-9-]{0,62}$/u),
+  Schema.makeFilter(
+    (name: string) =>
+      !["latest", "tree", "pull", "rm", "save", "current", "self", "new"].includes(name),
+    { message: "Expected a non-reserved Boat snapshot name" },
+  ),
+).pipe(Schema.brand("BoatSnapshotName"));
+export type BoatSnapshotName = typeof BoatSnapshotName.Type;
+
+/** A Tailscale IPv4 address in 100.64.0.0/10. */
+export const TailnetAddress = Schema.String.check(
+  Schema.isPattern(
+    /^100\.(?:6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$/u,
+    { message: "Expected a Tailscale IPv4 address in 100.64.0.0/10" },
+  ),
+).pipe(Schema.brand("TailnetAddress"));
+export type TailnetAddress = typeof TailnetAddress.Type;

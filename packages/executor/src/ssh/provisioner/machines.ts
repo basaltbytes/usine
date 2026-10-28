@@ -1,3 +1,4 @@
+import { boatTailnetsFor } from "./tailnet/bootstrap.ts";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import { HarnessUnavailableError } from "@usine/core/agent/capability";
 import type { AttemptId } from "@usine/core/attempt";
@@ -81,14 +82,10 @@ fi
  */
 const harnessCredentialGap = (
   entry: SshWorkerEntry,
-  provisioner: SshProvisioner,
   brains: ReadonlyArray<BrainSpec>,
 ): Option.Option<WorkerCapabilityError> => {
   const worker = entry.address.name;
-  const noGateway =
-    provisioner.provider === "boat"
-      ? "A subscription login needs a gateway, which a Boat worker can't have."
-      : "A subscription login needs a gateway, which this worker doesn't have.";
+  const noGateway = "A subscription login needs a gateway, which this worker doesn't have.";
   const missing = (label: string, provider: GatewayLlmProvider, login: string) => {
     const head = `${label} on provisioned worker "${worker}" has no credential, because a machine created for one attempt keeps no login.`;
     return Option.isSome(entry.gateway)
@@ -205,6 +202,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
   options: ProvisionedMachinesOptions,
 ) {
   const { instance, commands, settings } = options;
+  const tailnets = yield* boatTailnetsFor(commands);
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const held = yield* Ref.make<ReadonlyMap<MachineHold, Held>>(new Map());
@@ -407,6 +405,7 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
         fields,
       );
     }
+    if (Option.isSome(found.machine)) yield* tailnets.leave(found.machine.value);
     const deleted = yield* destroy(driver.value, found.worker, id.value).pipe(
       Effect.as(true),
       Effect.tapError((error) =>
@@ -628,6 +627,10 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
           ),
         ),
       ),
+      Effect.tap((machine) =>
+        update(hold, (current) => ({ ...current, machine: Option.some(machine) })),
+      ),
+      Effect.tap(tailnets.join),
       Effect.timeoutOrElse({
         duration: readyTimeout,
         orElse: () => Effect.fail(timedOut(worker, driver.provider)),
@@ -1020,7 +1023,8 @@ export const provisionedMachinesFor = Effect.fn("SshExecutor.provisionedMachines
     );
     if (Option.isSome(entry.gateway))
       yield* options.verifyGatewayAdmin(worker, entry.gateway.value);
-    const gap = harnessCredentialGap(entry, provisioner.value, brains);
+    yield* tailnets.verify(entry.address);
+    const gap = harnessCredentialGap(entry, brains);
     if (Option.isSome(gap)) return yield* gap.value;
     yield* Effect.logInfo(
       "Provisioned SSH Worker preflight verified; its first machine each day checks the harnesses",

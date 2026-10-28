@@ -441,6 +441,24 @@ describe("ConfigParser", () => {
           ),
       ).toEqual(Option.some("large"));
 
+      const tailnet = [
+        "      snapshot: usine-attempt",
+        "      tailnet:",
+        "        gateway_address: 100.64.0.2",
+        "        client_id_env: TAILSCALE_CLIENT_ID",
+        "        client_secret_env: TAILSCALE_CLIENT_SECRET",
+      ];
+      const configured = (yield* parse([...boat, ...tailnet, ...gateway])).workers[0];
+      expect(configured?.kind === "ssh" && Option.isSome(configured.gateway)).toBe(true);
+      for (const invalid of [
+        [...boat, ...tailnet],
+        [...boat, ...tailnet.filter((line) => !line.includes("snapshot:")), ...gateway],
+        [...boat, ...tailnet.map((line) => line.replace("100.64.0.2", "203.0.113.2")), ...gateway],
+        [...boat, "      snapshot: latest"],
+        [...boat, "      snapshot: Bad_Name"],
+      ])
+        expect(Result.isFailure(yield* parse(invalid).pipe(Effect.result))).toBe(true);
+
       for (const [workers, message] of [
         [
           [...hetzner, "    destination: usine@203.0.113.7"],
@@ -451,7 +469,7 @@ describe("ConfigParser", () => {
           hetzner.filter((line) => !line.includes("network:")),
           "needs the gateway's private network",
         ],
-        [[...boat, ...gateway], "Boat has no network rules"],
+        [[...boat, ...gateway], "needs provisioner.tailnet and provisioner.snapshot"],
         [boat.filter((line) => !line.includes("identity_file")), "needs identity_file"],
         [[...hetzner, "      labels: { usine-attempt: x }"], "usine sets itself"],
         [[...hetzner, "      labels: { team: has space }"], "Hetzner label value"],

@@ -64,3 +64,5 @@ The optional `SessionStarted.harnessSession` (`HarnessSession`) records the harn
 Envelopes include `PROTOCOL_VERSION` (7), which the transcript store uses to read older envelopes. Version 7 added the previous attempt's pushed salvage to `RunSpec` (`resume`); version 6 added harness session metadata.
 
 `@usine/core/upgrade` defines release versions, upgrade channels and modes, request timing, and the durable helper outcome shared by configuration and operator surfaces.
+
+`@usine/core/worker` also exports `BoatSnapshotName` and `TailnetAddress`, which validate saved snapshot names and Tailscale IPv4 addresses.

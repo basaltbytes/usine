@@ -197,7 +197,7 @@ Each attempt gets a Boat sandbox: a VM with Boat's Ubuntu 24.04 image, which has
    ```
 
    - `size` is `small`, `default` (4 vCPU, 8 GB), `large`, or `xlarge`, which needs a Boat plan of $100 per month or more.
-   - `identity_file` is required. A `gateway` and a `region` are refused: Boat has no network rules, and it documents no region choice.
+   - `identity_file` is required. A `region` is refused because Boat documents no region choice. For subscription logins, use the gateway setup below.
 
 4. Add the Anthropic API key to `.env` the same way, and start the orchestrator, which reads both keys from `.env`:
 
@@ -212,9 +212,68 @@ Each attempt gets a Boat sandbox: a VM with Boat's Ubuntu 24.04 image, which has
 
 On a Boat worker:
 
-- A sandbox can reach any host. The installation token is in a file on the machine, readable by the attempt, which an agent can use from anywhere until the token expires, within the hour ([ADR 0026](https://github.com/basaltbytes/usine/blob/main/docs/adr/0026-eu-ssh-worker.md)). The API keys are in the attempt container's environment, where an agent can read them and spend them.
+- Without a gateway, a sandbox can reach any host. The installation token is in a file on the machine, readable by the attempt, which an agent can use from anywhere until the token expires, within the hour ([ADR 0026](https://github.com/basaltbytes/usine/blob/main/docs/adr/0026-eu-ssh-worker.md)). The API keys are in the attempt container's environment, where an agent can read them and spend them.
 - usine creates each sandbox with none of the account's secrets (`noEnv`), so it can't act on your account or other sandboxes. It turns off snapshots, because Boat can store snapshot copies outside the EU and no attempt resumes a sandbox. It also turns off command monitoring and the automatic stop, since usine deletes the sandbox. A creation succeeds only if a machine of the size is ready (`failFast`); otherwise Boat creates and bills nothing.
-- Boat has no labels, so the sandbox name carries usine's tags: `usine <instance> <worker> <run> <process> <attempt>`.
+- The sandbox name records usine's recovery tags: `usine <instance> <worker> <run> <process> <attempt>`.
+
+### Gateway subscriptions over Tailscale
+
+Use a gateway to keep the GitHub installation token, Claude subscription token, and ChatGPT login off Boat sandboxes. The sandbox gets only its attempt's caller token. Boat retains direct internet access; this setup does not enforce an egress allowlist.
+
+1. Configure the gateway's [provider credentials](/guides/add-a-worker/#ssh-workers-behind-a-gateway), including both providers in `llm_providers` when both harnesses run. Join the gateway and orchestrator to your tailnet. Record the gateway's IPv4 address with `tailscale ip -4`.
+2. Set `USINE_GATEWAY_PROXY_HOST=0.0.0.0` in the gateway's environment file and restart `usine-gateway`. Apply the updated `infra/hetzner/gateway/gateway-nftables.conf`: it accepts TCP port 80 on `tailscale0`. Keep the admin API on loopback and the forward proxy on the private address. The public firewall must continue to refuse port 80.
+3. Create a Tailscale OAuth client with `auth_keys` write access and permission to create keys tagged `tag:usine-attempt`. Add its ID and secret to the instance's `.env` as `TAILSCALE_CLIENT_ID` and `TAILSCALE_CLIENT_SECRET`. The executor creates a preauthorized, ephemeral, single-use key for each sandbox, with a ten-minute expiry, and revokes it after joining. These OAuth credentials stay on the orchestrator.
+4. Adapt your tailnet policy to grant attempt nodes only the gateway's TCP port 80. For example, use the following grant with a gateway tagged `tag:usine-gateway`:
+
+   ```json
+   { "src": ["tag:usine-attempt"], "dst": ["tag:usine-gateway"], "ip": ["tcp:80"] }
+   ```
+
+   Configure tag ownership for your OAuth client. Remove broader grants or legacy ACLs that also match attempt nodes: grants are additive. No other user or tag should have access to `tag:usine-attempt`; if the orchestrator needs tailnet SSH, grant only its tag TCP port 22. Normal Boat SSH uses the endpoint Boat returns and needs no inbound tailnet grant. Keep your policy file in your own tailnet administration.
+
+5. Build a saved snapshot from this repository. Set `BOAT_API_KEY` in the shell, then run:
+
+   ```sh
+   infra/boat/build-snapshot.sh usine-attempt \
+     ghcr.io/basaltbytes/usine-worker:claude-2.1.308-codex-0.159.2 \
+     ~/.ssh/usine_boat
+   ```
+
+   The script requires `curl`, `jq`, OpenSSH, and a paid Boat plan; the free trial refuses saved snapshots. It creates a source sandbox with `noEnv: true`, installs Tailscale, pulls the image, and creates a stopped container so Boat retains the image. It stops Tailscale and removes its state before saving, so each sandbox creates its own node identity. It waits for the saved snapshot to become `ready`, then deletes the source sandbox. Rebuild the snapshot whenever the attempt image changes. Saved snapshot copies can be stored outside the EU, so keep credentials and repository checkouts out of the source sandbox.
+
+6. Configure the worker and import the configuration:
+
+   ```yaml title="usine.yaml"
+   workers:
+     - name: boat-pool
+       kind: ssh
+       root: /home/user/.usine
+       identity_file: ~/.ssh/usine_boat
+       gateway:
+         domain: gw.internal
+         destination: usine-gateway
+         admin_token_env: USINE_GATEWAY_ADMIN_TOKEN
+         llm_providers: [anthropic, openai]
+       provisioner:
+         provider: boat
+         token_env: BOAT_API_KEY
+         snapshot: usine-attempt
+         tailnet:
+           gateway_address: 100.64.0.2
+           client_id_env: TAILSCALE_CLIENT_ID
+           client_secret_env: TAILSCALE_CLIENT_SECRET
+   ```
+
+   ```sh
+   usine config import
+   usine restart
+   ```
+
+Preflight checks the saved snapshot's readiness, creates and revokes an auth key to check the OAuth client's tag permissions, and checks the gateway at its tailnet address. After SSH answers, the executor joins the sandbox with `--accept-dns=false` and `--accept-routes=false`. It configures `git.<domain>` and `llm.<domain>` on the host and in attempt containers, plus gh's HTTP socket. Package downloads use Boat's direct internet connection; port 3128 stays closed on the tailnet.
+
+Cleanup detaches the caller token, logs the sandbox out of Tailscale, and deletes the sandbox. After an orchestrator crash, reconciliation deletes orphan sandboxes; Tailscale removes offline ephemeral nodes automatically, including when logout could not run. A live sandbox remains on the tailnet until cleanup or reconciliation, so restore the orchestrator or delete orphan sandboxes after an outage.
+
+Check the policy from an attempt node: port 80 at the gateway should answer, while ports 22, 3128, and 7070 should not. Children appear under the Claude or ChatGPT plan on the run page when the gateway reports a subscription credential. Without a gateway, continue to provide `api_keys` as shown above.
 
 ## Machine lifecycle
 

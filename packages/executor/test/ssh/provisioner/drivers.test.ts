@@ -1,3 +1,4 @@
+import { BoatSnapshotName } from "@usine/core/worker";
 import { assert, describe, it } from "@effect/vitest";
 import { AttemptId } from "@usine/core/attempt";
 import { RunId } from "@usine/core/run";
@@ -332,6 +333,36 @@ describe("Boat driver", () => {
       assert.strictEqual((yield* driver.create("x", tags).pipe(Effect.flip)).reason, "quota");
     }).pipe(Effect.provide(providers.layer));
   });
+
+  it.effect(
+    "creates from a ready snapshot without account credentials and refuses missing or unfinished snapshots",
+    () => {
+      const providers = fakeProviders();
+      return Effect.gen(function* () {
+        const driver = yield* boatDriverFor(
+          WORKER,
+          boatSettings({ snapshot: Option.some(BoatSnapshotName.make("usine-attempt")) }),
+          "ssh-ed25519 AAAA",
+          BOAT_TEST_API,
+        );
+        yield* driver.verify(WORKER, 1);
+        const { id } = yield* driver.create("unique-create", tags);
+        assert.strictEqual(providers.boat.sandboxes.get(id)?.body?.from, "usine-attempt");
+        assert.strictEqual(providers.boat.sandboxes.get(id)?.body?.noEnv, true);
+        assert.strictEqual(
+          providers.calls.find((call) => call.method === "POST" && call.path === "/sandboxes")
+            ?.headers["idempotency-key"],
+          "unique-create",
+        );
+        for (const state of ["saving", "failed"]) {
+          providers.boat.snapshots.set("usine-attempt", state);
+          assert.include((yield* driver.verify(WORKER, 1).pipe(Effect.flip)).message, state);
+        }
+        providers.boat.snapshots.clear();
+        assert.include((yield* driver.verify(WORKER, 1).pipe(Effect.flip)).message, "404");
+      }).pipe(Effect.provide(providers.layer));
+    },
+  );
 
   it.effect("checks the API key and the account's limits and machine sizes", () => {
     const providers = fakeProviders();

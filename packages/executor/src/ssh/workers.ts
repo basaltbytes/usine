@@ -1,3 +1,4 @@
+import { boatTailnetOf } from "./model.ts";
 import type { SshCommand } from "@usine/agents/child-host";
 import { safeSegment } from "@usine/core/repository";
 import type { MachineId, MachineProvider, WorkerName } from "@usine/core/worker";
@@ -116,7 +117,7 @@ const provisionedSshCommandFor = (
     "StrictHostKeyChecking=yes",
     ...Option.match(entry.gateway, {
       onNone: () => [],
-      onSome: ({ settings }) => ["-J", settings.destination],
+      onSome: ({ settings }) => (settings.egress === "direct" ? [] : ["-J", settings.destination]),
     }),
     ...Option.match(endpoint.port, { onNone: () => [], onSome: (port) => ["-p", String(port)] }),
     ...Option.match(entry.address.identityFile, {
@@ -186,7 +187,10 @@ export const sshMachinesFor = Effect.fnUntraced(function* (
     const warnedOfUnreportedCredential = yield* Ref.make(false);
     return {
       gateway: {
-        settings,
+        settings: {
+          ...settings,
+          egress: Option.isSome(boatTailnetOf(address)) ? "direct" : "proxy",
+        },
         forward,
         admin,
         credentials,

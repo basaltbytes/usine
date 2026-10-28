@@ -198,7 +198,13 @@ export const remoteCommandsFor = Effect.gen(function* () {
       extendEnv: false,
       stdin: Stream.make(encoder.encode(Redacted.value(input))),
     });
-    return yield* requireSuccess(operation, shell.destination, shell.ssh.command, sshArgs, result);
+    const secret = Redacted.value(input);
+    const scrub = (text: string) => (secret === "" ? text : text.replaceAll(secret, "[REDACTED]"));
+    return yield* requireSuccess(operation, shell.destination, shell.ssh.command, sshArgs, {
+      ...result,
+      stdout: scrub(result.stdout),
+      stderr: scrub(result.stderr),
+    });
   });
 
   return { shellFor, local, inspect, run, runWithInput } satisfies RemoteCommands;

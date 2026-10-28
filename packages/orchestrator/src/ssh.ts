@@ -121,7 +121,31 @@ const sshWorkerMachineOf = (worker: SshWorker, missing: MissingSecret) =>
       case "boat":
         return {
           _tag: "Provisioned",
-          provisioner: { provider: "boat", token, size: settings.size, apiKeys },
+          provisioner: {
+            provider: "boat",
+            token,
+            size: settings.size,
+            apiKeys,
+            snapshot: settings.snapshot,
+            tailnet: yield* Effect.transposeOption(
+              Option.map(settings.tailnet, (tailnet) =>
+                Effect.gen(function* () {
+                  const read = (variable: string, field: string) =>
+                    secretFrom(
+                      worker,
+                      "gateway",
+                      variable,
+                      missing("Tailscale OAuth client", variable, `provisioner.tailnet.${field}`),
+                    );
+                  return {
+                    gatewayAddress: tailnet.gatewayAddress,
+                    clientId: yield* read(tailnet.clientIdEnv, "client_id_env"),
+                    clientSecret: yield* read(tailnet.clientSecretEnv, "client_secret_env"),
+                  };
+                }),
+              ),
+            ),
+          },
         } satisfies SshWorkerMachine;
     }
   });

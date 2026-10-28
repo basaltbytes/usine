@@ -168,6 +168,7 @@ interface FakeMachineState {
   readonly droppedSentVariables: Set<string>;
   /** Whether `git.<domain>` resolves and responds from the machine. */
   gatewayReachable: boolean;
+  tailscaleJoin: "ready" | "refused";
   /** Whether the Gateway's forward proxy responds to the machine. */
   forwardProxyReachable: boolean;
   /** Hosts that the forward proxy refuses to tunnel to. */
@@ -319,6 +320,7 @@ export const fakeMachine = () => {
     acceptsSentVariables: true,
     droppedSentVariables: new Set(),
     gatewayReachable: true,
+    tailscaleJoin: "ready",
     forwardProxyReachable: true,
     refusedHosts: new Set(),
     files: new Map(),
@@ -481,6 +483,8 @@ export const fakeMachine = () => {
       );
     const docker = respondToDocker(line, input);
     if (docker !== undefined) return docker;
+    if (line.includes("'tailscale' 'up'") && state.tailscaleJoin === "refused")
+      return oneShotHandle("", 1, `auth key refused: ${input}`);
     if (line === "exec 'true'") return oneShotHandle("", 0);
     if (line.includes("printenv")) {
       const received = state.acceptsSentVariables

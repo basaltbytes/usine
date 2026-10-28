@@ -91,6 +91,7 @@ interface BoatLimits {
 }
 
 interface BoatState {
+  readonly snapshots: Map<string, string>;
   readonly sandboxes: Map<string, FakeSandbox>;
   nextId: number;
   token: string;
@@ -178,6 +179,7 @@ export const fakeProviders = () => {
     deleteFails: undefined,
   };
   const boat: BoatState = {
+    snapshots: new Map([["usine-attempt", "ready"]]),
     sandboxes: new Map<string, FakeSandbox>(),
     nextId: 0,
     token: "boat_key_for_tests",
@@ -348,6 +350,13 @@ export const fakeProviders = () => {
     if (call.headers.authorization !== `Bearer ${boat.token}`)
       return [401, boatError({ status: 401, code: "unauthorized", message: "Unauthorized" })];
     const segments = call.path.split("/").filter((segment) => segment !== "");
+    if (call.method === "GET" && call.path.startsWith("/saved-snapshots/")) {
+      const name = call.path.slice("/saved-snapshots/".length);
+      const status = boat.snapshots.get(name);
+      return status === undefined
+        ? [404, { code: "snapshot_not_found" }]
+        : [200, { snapshot: { name, status } }];
+    }
     if (call.method === "GET" && call.path === "/me")
       return [200, { ok: true, type: "user.info", user: { login: "operator" } }];
     if (call.method === "GET" && call.path === "/limits")

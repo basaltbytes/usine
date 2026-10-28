@@ -55,6 +55,7 @@ const SEED_DIRECTORY = "/usr/local/share/usine/seed";
 
 /** The image and limits of each Attempt container on a Worker. */
 export interface ContainerSettings {
+  readonly hosts: Readonly<Record<string, string>>;
   readonly image: ContainerImage;
   readonly limits: ContainerLimits;
   /** The value of the instance label, which the instances that share a GitHub App share too. */
@@ -400,6 +401,10 @@ export const containersFor = (commands: RemoteCommands) => {
       ...lifetime.labels.flatMap((label) => ["--label", label]),
       "--network",
       "host",
+      ...Object.entries(spec.settings.hosts).flatMap(([host, address]) => [
+        "--add-host",
+        `${host}:${address}`,
+      ]),
       "--cpus",
       String(spec.settings.limits.cpus),
       "--memory",

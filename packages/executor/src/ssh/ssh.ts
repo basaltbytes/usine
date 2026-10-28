@@ -272,6 +272,7 @@ export const layer = (
 
 export type {
   BoatProvisioner,
+  BoatTailnet,
   HetznerProvisioner,
   ProviderApiKeys,
   SshExecutorOptions,
