@@ -28,6 +28,7 @@ interface PreflightConfiguration {
 
 export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* (
   executor: Pick<Executor["Service"], "preflight">,
+  initialize: (worker: Worker) => Effect.Effect<void, ExecutorError>,
 ) {
   const configuration = yield* Ref.make<PreflightConfiguration>({ workers: [], roster: [] });
   const records = yield* Ref.make(new Map<WorkerName, WorkerPreflight>());
@@ -59,10 +60,9 @@ export const preflightFor = Effect.fn("WorkerScheduler.preflightFor")(function* 
   const check = Effect.fn("WorkerScheduler.checkPreflight")(function* (
     worker: Worker,
     roster: ReadonlyArray<BrainSpec>,
-    before: Effect.Effect<void, ExecutorError> = Effect.void,
   ) {
     yield* Effect.annotateCurrentSpan({ worker: worker.name });
-    return yield* before.pipe(
+    return yield* initialize(worker).pipe(
       Effect.andThen(executor.preflight(worker.name, roster, worker.maxConcurrentAttempts)),
       Effect.mapError((error) =>
         error._tag === "ExecutorOperationError"

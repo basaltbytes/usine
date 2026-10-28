@@ -3,6 +3,7 @@ import type { EnginePersistenceError } from "@usine/engine/engine";
 import { NodeServices } from "@effect/platform-node";
 import type { SshWorker, UsineConfig, Worker as ConfigWorker } from "@usine/config/factory";
 import type { BrainSpec } from "@usine/core/agent/brain";
+import type { WorkerName } from "@usine/core/worker";
 import type { InstanceDirectory } from "@usine/core/instance";
 import { layer as localEngineLayer, localSqliteLayer } from "@usine/engine/local-sqlite";
 import { WorkerCapabilityError, WorkerMachines } from "@usine/executor";
@@ -222,29 +223,46 @@ export const sshWorkerAddressesOf = Effect.fn("Orchestrator.sshWorkerAddressesOf
 export const sshStepExecutorLayer = (
   config: UsineConfig,
   brains: ReadonlyArray<BrainSpec>,
-  options: Pick<StepExecutorOptions, "discard"> = {},
+  options: Pick<StepExecutorOptions, "discard"> & {
+    /** Workers already registered by the supplied executor layer. */
+    readonly initializedWorkers?: ReadonlyArray<WorkerName>;
+  } = {},
 ) =>
   Layer.unwrap(
     Effect.gen(function* () {
       const machines = yield* SshWorkers;
       const provisioned = yield* Effect.serviceOption(WorkerMachines);
       const environment = yield* ConfigProvider.ConfigProvider;
+      const initialized = new Set(options.initializedWorkers ?? []);
       const add = Effect.fn("Orchestrator.addSshWorker")(function* (worker: ConfigWorker) {
         yield* Effect.annotateCurrentSpan({ worker: worker.name });
         if (worker.kind !== "ssh")
           return yield* Effect.die(
             new Error(`The SSH executor cannot run worker "${worker.name}" of kind ${worker.kind}`),
           );
+        if (initialized.has(worker.name)) {
+          yield* Effect.logDebug("SSH worker credentials are already initialized", {
+            worker: worker.name,
+          });
+          return;
+        }
         const address = yield* sshWorkerAddressOf(
           worker,
           (secret, variable, key) =>
             `The ${secret} for SSH worker "${worker.name}" is missing: ${variable} is not set in the orchestrator's environment. usine up reads only the variables that were set when it started. Set ${variable} and restart usine up, or set ${key} to a variable that usine up already has.`,
         ).pipe(Effect.provideService(ConfigProvider.ConfigProvider, environment));
         yield* machines.addWorker(address);
+        initialized.add(worker.name);
       });
       return stepExecutorLayer(config, brains, {
         ...options,
-        workers: { add, remove: machines.removeWorker },
+        workers: {
+          add,
+          remove: (worker) =>
+            machines
+              .removeWorker(worker)
+              .pipe(Effect.tap(() => Effect.sync(() => initialized.delete(worker)))),
+        },
         ...Option.match(provisioned, { onNone: () => ({}), onSome: (machines) => ({ machines }) }),
       });
     }),
@@ -267,7 +285,10 @@ export const layer = (
     Layer.provide(sshHttpClientLayer),
   );
   const stepExecutor = withSshWorkerDiscard(instanceDirectory, (discard) =>
-    sshStepExecutorLayer(config, brains, { discard }),
+    sshStepExecutorLayer(config, brains, {
+      discard,
+      initializedWorkers: options.workers.map(({ name }) => name),
+    }),
   ).pipe(Layer.provide(executor));
   return localEngineLayer(instanceDirectory, database).pipe(Layer.provideMerge(stepExecutor));
 };

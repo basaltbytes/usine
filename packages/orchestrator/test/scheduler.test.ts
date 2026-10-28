@@ -1235,7 +1235,7 @@ describe("SSH Workers on reload", () => {
           const report = yield* instances.reload;
           assert.deepStrictEqual(report.workers.added, [build2]);
           assert.deepStrictEqual(events, ["add build-2", "build-2 x1: gpt-5.6-sol"]);
-          const [address] = added;
+          const address = added.find(({ name }) => name === build2);
           assert(address !== undefined && Option.isSome(address.gateway));
           assert.strictEqual(address.gateway.value.destination, "usine-gateway");
           assert.strictEqual(
@@ -1367,7 +1367,7 @@ describe("SSH Workers on reload", () => {
           ]);
           yield* instances.reload;
           yield* onSecond.release;
-          assert.deepStrictEqual(events, ["add build-2", "build-2 x1: gpt-5.6-sol"]);
+          assert.deepStrictEqual(events, ["build-2 x1: gpt-5.6-sol"]);
           assert.deepStrictEqual(yield* scheduler.workers, [build1, build2]);
         }).pipe(Effect.scoped),
       ),

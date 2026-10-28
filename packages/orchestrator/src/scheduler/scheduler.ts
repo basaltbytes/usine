@@ -242,8 +242,8 @@ const botAccountFailure = (error: GitHubAppError) => {
  */
 export interface ExecutorWorkers {
   /**
-   * Adds `worker` to the executor before its preflight. On failure, the reload fails with
-   * `ReloadPreflightError`.
+   * Adds `worker` to the executor before each preflight. Repeated additions are idempotent.
+   * A failure disables the worker at startup or refuses a reload.
    */
   readonly add: (worker: ConfigWorker) => Effect.Effect<void, ExecutorError>;
   /**
@@ -255,8 +255,8 @@ export interface ExecutorWorkers {
 
 export interface StepExecutorOptions {
   /**
-   * The executor's Worker set, which the scheduler updates on each reload. If omitted, the executor
-   * runs any Worker of its kind by name, like the local executor.
+   * The executor's worker set, initialized during preflight and updated on each reload. If omitted,
+   * the executor runs any worker of its kind by name, like the local executor.
    */
   readonly workers?: ExecutorWorkers;
   /**
@@ -299,7 +299,8 @@ export const stepExecutorLayer = (
       const pool = yield* TxRef.make(slotPoolOf(workers, new Map()));
       const pending = yield* TxPriorityQueue.empty<Reservation>(leaseOrder);
       const nextOrder = yield* Ref.make(0);
-      const preflight = yield* preflightFor(executor);
+      const executorWorkers = options.workers ?? anyWorker;
+      const preflight = yield* preflightFor(executor, executorWorkers.add);
       const availablePool = Effect.all([TxRef.get(pool), preflight.blocked]).pipe(
         Effect.map(
           ([current, blocked]): SlotPool =>
@@ -311,7 +312,6 @@ export const stepExecutorLayer = (
             ),
         ),
       );
-      const executorWorkers = options.workers ?? anyWorker;
       // Every change to the executor's Workers takes this permit, so a removal never undoes an
       // addition.
       const membership = yield* Semaphore.make(1);
@@ -460,14 +460,10 @@ export const stepExecutorLayer = (
             workers: [...wholeRoster],
           });
           // Add the Worker to the executor first, so its preflight can connect to its machine.
-          yield* Effect.forEach(
-            checks,
-            ({ worker, brains }) =>
-              added.has(worker.name)
-                ? preflight.check(worker, brains, executorWorkers.add(worker))
-                : preflight.check(worker, brains),
-            { concurrency: "unbounded", discard: true },
-          ).pipe(
+          yield* Effect.forEach(checks, ({ worker, brains }) => preflight.check(worker, brains), {
+            concurrency: "unbounded",
+            discard: true,
+          }).pipe(
             Effect.mapError((cause) => reloadPreflightFailed(agentNames, [...wholeRoster], cause)),
             Effect.onExit((exit) =>
               Exit.isFailure(exit) ? settleAdded(added, [...added]) : Effect.void,

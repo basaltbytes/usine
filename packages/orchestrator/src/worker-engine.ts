@@ -6,18 +6,9 @@ import type { BrainSpec } from "@usine/core/agent/brain";
 import type { InstanceDirectory, InstanceId } from "@usine/core/instance";
 import { GitHubCredentials } from "@usine/github/github-app";
 import { Effect, Layer, Option } from "effect";
-import {
-  cloudflareWorkerAddressesOf,
-  cloudflareWorkersOf,
-  layer as cloudflareLayer,
-} from "./cloudflare.ts";
+import { cloudflareWorkersOf, layer as cloudflareLayer } from "./cloudflare.ts";
 import { layer as localLayer } from "./local.ts";
-import {
-  layer as sshLayer,
-  sshWorkerAddressesOf,
-  sshWorkerRecordsDirectory,
-  sshWorkersOf,
-} from "./ssh.ts";
+import { layer as sshLayer, sshWorkerRecordsDirectory, sshWorkersOf } from "./ssh.ts";
 
 /**
  * Provides the engine for the Workers in `config`: the SSH executor if every Worker is `ssh`, the
@@ -37,7 +28,6 @@ export const workerEngineLayer = (
       const ssh = sshWorkersOf(config);
       const workers = config.workers.map(({ name }) => name).join(",");
       if (ssh.length === config.workers.length) {
-        const addresses = yield* sshWorkerAddressesOf(config);
         // The GitHub App is the instance's identity (ADR 0011).
         const { appId } = yield* GitHubCredentials;
         const instance = `github-app-${String(appId)}`;
@@ -45,12 +35,12 @@ export const workerEngineLayer = (
           workers,
           instance,
           instanceId,
-          behindGateway: addresses
+          behindGateway: ssh
             .filter(({ gateway }) => Option.isSome(gateway))
             .map(({ name }) => name)
             .join(","),
-          provisioned: addresses
-            .filter(({ machine }) => machine._tag === "Provisioned")
+          provisioned: ssh
+            .filter(({ provisioner }) => Option.isSome(provisioner))
             .map(({ name }) => name)
             .join(","),
         });
@@ -59,7 +49,7 @@ export const workerEngineLayer = (
           config,
           brains,
           {
-            workers: addresses,
+            workers: [],
             instance,
             instanceId,
             knownHostsDirectory: `${instanceDirectory}/.usine/known-hosts`,
@@ -69,20 +59,21 @@ export const workerEngineLayer = (
         );
       }
       if (cloudflareWorkersOf(config).length === config.workers.length) {
-        const addresses = yield* cloudflareWorkerAddressesOf(config);
         // The GitHub App is the instance's identity (ADR 0011).
         const { appId } = yield* GitHubCredentials;
         const instance = `github-app-${String(appId)}`;
         yield* Effect.logInfo("Running Attempts in Cloudflare sandboxes", {
           workers,
           instance,
-          workerUrls: addresses.map(({ workerUrl }) => workerUrl.origin).join(","),
+          workerUrls: cloudflareWorkersOf(config)
+            .map(({ workerUrl }) => workerUrl.origin)
+            .join(","),
         });
         return cloudflareLayer(
           instanceDirectory,
           config,
           brains,
-          { workers: addresses, instance },
+          { workers: [], instance },
           database,
         );
       }

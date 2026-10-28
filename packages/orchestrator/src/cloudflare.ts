@@ -1,17 +1,19 @@
 import type { RunDatabase } from "@usine/engine/database";
 import type { EnginePersistenceError } from "@usine/engine/engine";
 import { NodeServices } from "@effect/platform-node";
-import type { CloudflareWorker, UsineConfig } from "@usine/config/factory";
+import type { CloudflareWorker, UsineConfig, Worker as ConfigWorker } from "@usine/config/factory";
 import type { BrainSpec } from "@usine/core/agent/brain";
+import type { WorkerName } from "@usine/core/worker";
 import type { InstanceDirectory } from "@usine/core/instance";
 import { ExecutorOperationError, WorkerCapabilityError } from "@usine/executor";
 import {
+  CloudflareWorkers,
   type CloudflareExecutorOptions,
   type CloudflareWorkerAddress,
   layer as cloudflareExecutorLayer,
 } from "@usine/executor/cloudflare";
 import { layer as localEngineLayer, localSqliteLayer } from "@usine/engine/local-sqlite";
-import { Config, Effect, Layer } from "effect";
+import { Config, ConfigProvider, Effect, Layer } from "effect";
 import { externalHttpClientLayer } from "./http-client.ts";
 import { stepExecutorLayer } from "./scheduler/scheduler.ts";
 import { withSshWorkerDiscard } from "./ssh.ts";
@@ -76,30 +78,46 @@ export const layer = (
   options: CloudflareExecutorOptions,
   database: Layer.Layer<RunDatabase, EnginePersistenceError> = localSqliteLayer(instanceDirectory),
 ) => {
-  const { workers } = options;
   const executor = cloudflareExecutorLayer(options).pipe(
     Layer.provide(NodeServices.layer),
     Layer.provide(externalHttpClientLayer),
   );
-  const started = new Set(workers.map(({ name }) => name));
+  const started = new Set(config.workers.map(({ name }) => name));
   // Discarding leftovers still removes the Codex homes on an SSH Worker that `usine.yaml` dropped.
   const stepExecutor = withSshWorkerDiscard(instanceDirectory, (discard) =>
-    stepExecutorLayer(config, brains, {
-      discard,
-      workers: {
-        add: (worker) =>
-          started.has(worker.name)
-            ? Effect.void
-            : Effect.fail(
-                new ExecutorOperationError({
-                  operation: "preflight",
-                  message: `A reload can't add cloudflare worker "${worker.name}", whose secrets usine up reads when it starts. Restart usine up to add it.`,
-                  cause: new Error(worker.name),
-                }),
-              ),
-        remove: () => Effect.void,
-      },
-    }),
+    Layer.unwrap(
+      Effect.gen(function* () {
+        const workers = yield* CloudflareWorkers;
+        const environment = yield* ConfigProvider.ConfigProvider;
+        const initialized = new Set<WorkerName>(options.workers.map(({ name }) => name));
+        const add = Effect.fn("Orchestrator.addCloudflareWorker")(function* (worker: ConfigWorker) {
+          yield* Effect.annotateCurrentSpan({ worker: worker.name });
+          if (!started.has(worker.name))
+            return yield* new ExecutorOperationError({
+              operation: "preflight",
+              message: `A reload can't add cloudflare worker "${worker.name}", whose secrets usine up reads when it starts. Restart usine up to add it.`,
+              cause: new Error(worker.name),
+            });
+          if (worker.kind !== "cloudflare")
+            return yield* Effect.die(new Error(`Unexpected worker kind ${worker.kind}`));
+          if (initialized.has(worker.name)) {
+            yield* Effect.logDebug("Cloudflare worker credentials are already initialized", {
+              worker: worker.name,
+            });
+            return;
+          }
+          const address = yield* cloudflareWorkerAddressOf(worker).pipe(
+            Effect.provideService(ConfigProvider.ConfigProvider, environment),
+          );
+          yield* workers.addWorker(address);
+          initialized.add(worker.name);
+        });
+        return stepExecutorLayer(config, brains, {
+          discard,
+          workers: { add, remove: () => Effect.void },
+        });
+      }),
+    ),
   ).pipe(Layer.provide(executor));
   return localEngineLayer(instanceDirectory, database).pipe(Layer.provideMerge(stepExecutor));
 };
