@@ -73,10 +73,13 @@ export const systemUpgradePlatform = Effect.fn("Server.systemUpgradePlatform")(f
     }
     yield* runCommand(
       "bash",
-      ["-c", "command -v npm curl timeout flock >/dev/null"],
+      [
+        "-c",
+        'for executable in npm curl timeout flock; do command -v "$executable" >/dev/null || { printf "Missing required executable: %s\\n" "$executable" >&2; exit 1; }; done',
+      ],
       directory,
       "10 seconds",
-    ).pipe(Effect.mapError(failure));
+    ).pipe(Effect.mapError(({ reason }) => new UpgradeError({ message: reason })));
   });
   const launch = Effect.fn("Server.launchUpgradeHelper")(function* (target: ReleaseVersion) {
     yield* Effect.annotateCurrentSpan({ previous, target, unit: service, prefix });
