@@ -202,12 +202,12 @@ export class WorkerUnresponsive extends Schema.TaggedClass<WorkerUnresponsive>(
   ),
 }) {}
 
-/** A successful probe after `WorkerUnresponsive`. */
+/** The first successful probe for an attempt's watch, or a successful probe after `WorkerUnresponsive`. */
 export class WorkerResponsive extends Schema.TaggedClass<WorkerResponsive>(
   "AttemptChannel/WorkerResponsive",
 )("WorkerResponsive", {
   worker: WorkerName,
-  /** The value from the preceding `WorkerUnresponsive`. */
+  /** The value from the preceding `WorkerUnresponsive`, or the first confirmed answer after joining a watch. */
   lastAnsweredAt: Schema.DateTimeUtcFromString,
 }) {}
 

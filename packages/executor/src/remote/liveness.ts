@@ -21,7 +21,11 @@ type Probe =
   | { readonly _tag: "Unanswered"; readonly reason: string };
 
 type Liveness =
-  | { readonly _tag: "Answering"; readonly lastAnsweredAt: DateTime.Utc }
+  | {
+      readonly _tag: "Answering";
+      readonly lastAnsweredAt: DateTime.Utc;
+      readonly confirmed: ReadonlySet<AttemptId>;
+    }
   | {
       readonly _tag: "Silent";
       readonly lastAnsweredAt: DateTime.Utc;
@@ -52,8 +56,8 @@ const reportTo = (
 /**
  * Returns the next liveness after a probe at `now`, with the notice for the `watching` Attempts.
  * On the first unanswered probe, every Attempt not yet notified gets a "stopped responding"
- * notice. When the Worker responds again, only notified Attempts get a "responding again"
- * notice.
+ * notice. A successful probe reports recovery to notified attempts, or confirms the first
+ * answer for each attempt so a persisted outage clears after reattachment.
  */
 const observe = (
   worker: WorkerName,
@@ -64,14 +68,18 @@ const observe = (
 ): Observation => {
   if (probe._tag === "Answered")
     return {
-      liveness: { _tag: "Answering", lastAnsweredAt: now },
-      report:
-        liveness._tag === "Silent"
-          ? reportTo(
-              new WorkerResponsive({ worker, lastAnsweredAt: liveness.lastAnsweredAt }),
-              watching.filter((attemptId) => liveness.told.has(attemptId)),
-            )
-          : Option.none(),
+      liveness: { _tag: "Answering", lastAnsweredAt: now, confirmed: new Set(watching) },
+      report: reportTo(
+        new WorkerResponsive({
+          worker,
+          lastAnsweredAt: liveness._tag === "Silent" ? liveness.lastAnsweredAt : now,
+        }),
+        watching.filter((attemptId) =>
+          liveness._tag === "Silent"
+            ? liveness.told.has(attemptId)
+            : !liveness.confirmed.has(attemptId),
+        ),
+      ),
     };
   const told = liveness._tag === "Silent" ? liveness.told : new Set<AttemptId>();
   const unanswered = liveness._tag === "Silent" ? liveness.unanswered + 1 : 1;
@@ -217,7 +225,9 @@ const watchWorker = (
                   ...fields,
                   unansweredProbes: previous.unanswered,
                 })
-              : Effect.logDebug("The Worker answered its liveness probe", fields),
+              : Option.isSome(next.report)
+                ? Effect.logInfo("Confirmed the worker's first answer for watched attempts", fields)
+                : Effect.logDebug("The Worker answered its liveness probe", fields),
           Unanswered: ({ reason }) =>
             Effect.logWarning(
               previous._tag === "Silent"
@@ -304,6 +314,7 @@ export const workerWatchesFor = (
           const liveness = yield* Ref.make<Liveness>({
             _tag: "Answering",
             lastAnsweredAt: yield* DateTime.now,
+            confirmed: new Set(),
           });
           const watchers = new Map<AttemptId, WorkerWatcher>([[watch.attemptId, watch]]);
           const fiber = yield* watchWorker(

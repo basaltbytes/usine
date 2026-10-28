@@ -439,13 +439,18 @@ describe("SSH Worker", () => {
   );
 
   it.effect(
-    "reattaches after a restart with a fresh credential, removing the earlier one first",
+    "reattaches after a restart with a fresh credential and clears the persisted worker outage",
     () => {
       const machine = fakeMachine();
       const credentials = mintingProvider();
       const storage = new StubStorage();
+      const notices: Array<AttemptChannel.WorkerNotice> = [];
       const sink = {
-        append: () => Effect.void,
+        append: (_direction: AttemptChannel.Direction, envelope: AttemptChannel.Envelope) =>
+          Effect.sync(() => {
+            if (envelope._tag === "OutboundEnvelope" && isWorkerNotice(envelope.payload))
+              notices.push(envelope.payload);
+          }),
         salvage: () => Effect.void,
         comments: () => Effect.void,
         outOfMemory: () => Effect.void,
@@ -462,8 +467,21 @@ describe("SSH Worker", () => {
             .launch(sink)
             .pipe(Effect.forkChild);
           yield* Deferred.await(started);
+          machine.state.stalled = true;
+          for (let probe = 0; probe < 3; probe++) {
+            yield* TestClock.adjust("1 minute");
+            yield* TestClock.adjust("45 seconds");
+          }
+          const silent = notices.at(-1);
+          assert(silent?._tag === "WorkerUnresponsive");
+          assert.strictEqual(silent.unansweredProbes, 3);
+          machine.state.stalled = false;
           yield* Fiber.interrupt(launch);
-        }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials, working, storage)));
+        }).pipe(
+          Effect.ensuring(Effect.sync(() => (machine.state.stalled = false))),
+          Effect.scoped,
+          Effect.provide(runtime(machine, credentials, working, storage)),
+        );
         assert.strictEqual(
           machine.state.credentials.size,
           0,
@@ -472,6 +490,7 @@ describe("SSH Worker", () => {
         // A process that crashed instead would have left its token behind.
         machine.state.credentials.set(CREDENTIALS, credentials.minted[0] ?? "");
 
+        const { parent, signalsOf } = yield* workingAttempts([request.attemptId]);
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
           assert.isTrue(yield* executor.isLive(request.attemptId));
@@ -486,8 +505,17 @@ describe("SSH Worker", () => {
             !lines.some((line) => line.includes("'clone'") || line.includes("'worktree' 'add'")),
           );
           assert.strictEqual(machine.state.credentials.get(CREDENTIALS), `${TOKEN_PREFIX}2`);
-          yield* prepared.launch(sink);
-        }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials, completes, storage)));
+          const launch = yield* prepared.launch(sink).pipe(Effect.forkChild);
+          yield* Deferred.await(signalsOf(request.attemptId).working);
+          assert.strictEqual(notices.at(-1)?._tag, "WorkerUnresponsive");
+          yield* TestClock.adjust("1 minute");
+          assert.strictEqual(notices.at(-1)?._tag, "WorkerResponsive");
+          const recoveredCount = notices.length;
+          yield* TestClock.adjust("2 minutes");
+          assert.lengthOf(notices, recoveredCount, "healthy probes do not repeat the notice");
+          yield* Deferred.succeed(signalsOf(request.attemptId).done, undefined);
+          yield* Fiber.join(launch);
+        }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials, parent, storage)));
         assert.strictEqual(machine.state.credentials.size, 0);
       });
     },
@@ -597,6 +625,8 @@ describe("SSH Worker", () => {
             .launch(sinkFor(request.attemptId))
             .pipe(Effect.forkChild);
           yield* Deferred.await(signalsOf(request.attemptId).working);
+          yield* TestClock.adjust("1 minute");
+          assert.strictEqual(noticesOf(request.attemptId)[0]?._tag, "WorkerResponsive");
           const other = yield* (yield* executor.prepare(second))
             .launch(sinkFor(second.attemptId))
             .pipe(Effect.forkChild);
@@ -606,7 +636,11 @@ describe("SSH Worker", () => {
           yield* TestClock.adjust("1 minute");
           assert.strictEqual(probes(), before + 1, "one probe for both Attempts");
           for (const attemptId of attempts)
-            assert.lengthOf(noticesOf(attemptId), 0, "nothing while the Worker answers");
+            assert.deepStrictEqual(
+              noticesOf(attemptId).map(({ _tag }) => _tag),
+              ["WorkerResponsive"],
+              "each attempt gets one confirmed answer, including a late join",
+            );
 
           machine.state.stalled = true;
           yield* TestClock.adjust("1 minute");
@@ -614,14 +648,14 @@ describe("SSH Worker", () => {
           assert.strictEqual(probes(), before + 2);
           for (const attemptId of attempts) {
             const notices = noticesOf(attemptId);
-            assert.lengthOf(notices, 1, `${attemptId} is told the Worker stopped answering`);
-            assert.strictEqual(notices[0]?._tag, "WorkerUnresponsive");
+            assert.lengthOf(notices, 2, `${attemptId} is told the Worker stopped answering`);
+            assert.strictEqual(notices[1]?._tag, "WorkerUnresponsive");
           }
 
           machine.state.stalled = false;
           yield* TestClock.adjust("1 minute");
           for (const attemptId of attempts)
-            assert.strictEqual(noticesOf(attemptId)[1]?._tag, "WorkerResponsive");
+            assert.strictEqual(noticesOf(attemptId)[2]?._tag, "WorkerResponsive");
 
           yield* Deferred.succeed(signalsOf(request.attemptId).done, undefined);
           yield* Fiber.join(first);
