@@ -4,15 +4,16 @@ import { RemoteShell, sshArguments } from "@usine/agents/child-host";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { Agent } from "@usine/core/agent";
 import type { AttemptSalvage } from "@usine/core/attempt/salvage";
+import { InfraFailure } from "@usine/core/attempt/failure";
 import { CloudflareImageName, WorkerName } from "@usine/core/worker";
-import type { AttemptRequest } from "@usine/durable/attempt-runtime";
+import { AttemptRuntime, type AttemptRequest } from "@usine/durable/attempt-runtime";
 import {
   completes,
   type StubParent,
   StubStorage,
   stubAttemptRuntime,
 } from "@usine/durable/testing";
-import { Deferred, Effect, Exit, Fiber, Layer, Option, Redacted, Stream } from "effect";
+import { Deferred, Effect, Exit, Fiber, Layer, Option, Redacted, Ref, Stream } from "effect";
 import { FetchHttpClient } from "effect/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { fileURLToPath } from "node:url";
@@ -98,6 +99,7 @@ const executor = (
   storage: StubStorage = new StubStorage(),
   providers: ReadonlyArray<CloudflareProviderKey> = [ANTHROPIC],
   accessClientSecret = ACCESS_CLIENT_SECRET,
+  runtime = stubAttemptRuntime(storage, parent),
 ) =>
   cloudflareLayer({
     workers: [
@@ -117,7 +119,7 @@ const executor = (
     drainPollInterval: "100 millis",
   }).pipe(
     Layer.provide(credentials.layer),
-    Layer.provide(stubAttemptRuntime(storage, parent)),
+    Layer.provide(runtime),
     Layer.provide(claudeLoginLockLayer),
     Layer.provide(FetchHttpClient.layer),
     Layer.provide(NodeServices.layer),
@@ -330,6 +332,91 @@ describe("cloudflare Worker", () => {
         assert.isFalse(worker.state.sandboxes.has(SANDBOX));
       }).pipe(Effect.scoped),
   );
+
+  for (const permissions of ["read", "write"] as const) {
+    it.live(
+      `keeps a ${permissions} sandbox when its prepared reattachment cannot stop the parent`,
+      () =>
+        Effect.gen(function* () {
+          const worker = yield* fakeWorker;
+          const storage = new StubStorage();
+          const credentials = mintingProvider();
+          const checkout = new CheckoutRequest({ ...request, permissions });
+          const working = yield* Deferred.make<void>();
+          const blocks: StubParent = () =>
+            Deferred.succeed(working, undefined).pipe(Effect.andThen(Effect.never));
+          yield* Effect.gen(function* () {
+            const cloudflare = yield* Executor;
+            const prepared = yield* cloudflare.prepare(checkout);
+            const running = yield* Effect.forkChild(prepared.launch(sink));
+            yield* Deferred.await(working);
+            yield* Fiber.interrupt(running);
+          }).pipe(Effect.scoped, Effect.provide(executor(worker, credentials, blocks, storage)));
+
+          const refusing = yield* Ref.make(true);
+          const runtime = Layer.effect(
+            AttemptRuntime,
+            Effect.gen(function* () {
+              const original = yield* AttemptRuntime;
+              return AttemptRuntime.of({
+                ...original,
+                cancel: (id) =>
+                  Effect.gen(function* () {
+                    if (yield* Ref.get(refusing))
+                      return yield* new InfraFailure({ message: "Stop refused", cause: "offline" });
+                    yield* original.cancel(id);
+                  }),
+              });
+            }),
+          ).pipe(Layer.provide(stubAttemptRuntime(storage)));
+          const restarted = executor(
+            worker,
+            credentials,
+            completes,
+            storage,
+            [ANTHROPIC],
+            ACCESS_CLIENT_SECRET,
+            runtime,
+          );
+          yield* Executor.pipe(
+            Effect.flatMap((cloudflare) =>
+              cloudflare.prepare(new CheckoutRequest({ ...checkout, reattach: true })),
+            ),
+            Effect.scoped,
+            Effect.provide(restarted),
+          );
+
+          const kept = worker.state.sandboxes.get(SANDBOX);
+          assert(kept !== undefined, "a failed parent stop must preserve the sandbox");
+          assert.isTrue(kept.held);
+          assert.isTrue(kept.paths.has(WORKTREE));
+          assert.deepStrictEqual(kept.github, [
+            null,
+            `${TOKEN_PREFIX}1`,
+            null,
+            `${TOKEN_PREFIX}2`,
+            null,
+          ]);
+          assert.deepStrictEqual(kept.providers, [0, 1, 0, 1, 0]);
+          assert.notInclude(worker.state.requests, `DELETE /v1/sandboxes/${SANDBOX}`);
+          assert.isFalse(kept.commands.some((line) => line.includes("'push'")));
+
+          yield* Ref.set(refusing, false);
+          yield* Executor.pipe(
+            Effect.flatMap((cloudflare) =>
+              cloudflare.recover(
+                keptCheckoutRecovery(checkout),
+                sink,
+                Effect.succeed(COMMIT_AUTHOR),
+              ),
+            ),
+            Effect.scoped,
+            Effect.provide(restarted),
+          );
+          assert.isFalse(worker.state.sandboxes.has(SANDBOX));
+        }).pipe(Effect.scoped),
+    );
+  }
 
   it.live(
     "keeps the sandbox when reattachment cannot be prepared, then removes its clean checkout after recovery",

@@ -1061,7 +1061,9 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
               layout: { worktree: layout.worktree },
               ops,
               spec,
-              confirmStop: session.stopForRecovery(keptCheckoutRecovery(request)),
+              confirmStop: session
+                .stopForRecovery(keptCheckoutRecovery(request))
+                .pipe(Effect.tapError(() => Ref.set(keep, true))),
             }),
         });
         const releaseWorkspace = Effect.fn("CloudflareExecutor.releaseWorkspace")(
