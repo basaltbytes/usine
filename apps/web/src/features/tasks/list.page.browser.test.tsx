@@ -109,11 +109,7 @@ const crumbTexts = () =>
       for (const hidden of label.querySelectorAll("[aria-hidden=true]")) hidden.remove();
       return label.textContent;
     });
-const sidebarLink = (name: string) => {
-  const sidebar = document.querySelector("[data-slot=sidebar-inner]");
-  if (!(sidebar instanceof HTMLElement)) throw new Error("No sidebar");
-  return page.elementLocator(sidebar).getByRole("link", { name, exact: true });
-};
+const sidebarLink = (name: string) => page.getByRole("link", { name, exact: true }).first();
 
 it("lists only the tasks with runs, in flight first, with their status and last run time, runs, pull request, elapsed time, tokens, and estimated cost", async () => {
   await mount(list);

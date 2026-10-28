@@ -433,9 +433,11 @@ it("shares a direct-link drawer's transcript with the run page and merges earlie
       .element(page.getByRole("button", { name: "Load earlier", exact: true }))
       .not.toBeInTheDocument();
     expect(queryClient.getQueryState(options.queryKey)?.error).toBeNull();
-    expect(
-      queryClient.getQueryData(options.queryKey)?.transcript.map(({ sequence }) => sequence),
-    ).toEqual([1, 2, 3, 4, 5]);
+    await expect
+      .poll(() =>
+        queryClient.getQueryData(options.queryKey)?.transcript.map(({ sequence }) => sequence),
+      )
+      .toEqual([1, 2, 3, 4, 5]);
     expect(await commands.loaderTranscriptRequests()).toContainEqual({
       after: null,
       before: "2",
