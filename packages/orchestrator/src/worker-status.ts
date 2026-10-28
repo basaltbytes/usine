@@ -27,7 +27,7 @@ import type { PipelinePosition } from "./lease-order.ts";
 /** A Worker's current slot usage in the scheduler. */
 export interface WorkerSlots {
   readonly worker: WorkerName;
-  /** The maximum concurrent Attempts, or zero after a reload removed the Worker. */
+  /** The maximum concurrent Attempts, or zero while preflight has failed or after a reload removed the Worker. */
   readonly capacity: number;
   /** The number of Attempts with a slot, which can exceed `capacity` after a reload lowered it. */
   readonly leased: number;
@@ -222,6 +222,12 @@ export const unchecked = (worker: WorkerName): WorkerPreflight => ({
   containerLimits: Option.none(),
 });
 
+/** A worker excluded from scheduling until its startup preflight passes. */
+export interface WorkerPreflightFailure {
+  readonly worker: WorkerName;
+  readonly message: string;
+}
+
 /**
  * The scheduler's current slot usage, queued Runs, last preflight of each Worker, and the
  * provisioned Workers' machines and pauses.
@@ -241,6 +247,8 @@ export class WorkerStatus extends Context.Service<
      * preflight.
      */
     readonly preflights: Effect.Effect<ReadonlyArray<WorkerPreflight>>;
+    /** Startup failures that still prevent scheduling, including the latest retry message. */
+    readonly unavailable: Effect.Effect<ReadonlyArray<WorkerPreflightFailure>>;
     /** The machines of the provisioned Workers in flight, oldest first. */
     readonly machines: Effect.Effect<ReadonlyArray<MachineStatus>>;
     /** The provisioned Workers whose last machine creation failed. */
@@ -252,6 +260,7 @@ export class WorkerStatus extends Context.Service<
     slots: Effect.succeed([]),
     queue: Effect.succeed([]),
     preflights: Effect.succeed([]),
+    unavailable: Effect.succeed([]),
     machines: Effect.succeed([]),
     provisioning: Effect.succeed([]),
   });

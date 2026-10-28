@@ -16,6 +16,8 @@ Every entry has **Dismiss**. It leaves attention lists, counts, and badges immed
 
 Entries:
 
+- **<worker>: preflight failed**: the startup or retry error for a worker that takes no new attempts, with **Open worker**. The entry clears when preflight passes and scheduling resumes.
+
 - **Approval**: the loop and the task's name, with **Approve** and **Cancel run**. While any screen sends an action on the run, the buttons are disabled and name it, such as `Approving…`. The entry leaves when the action succeeds, before the overview refreshes. A refusal because the run changed state, for example after approval from the drawer, shows only in the drawer and run page; the entry leaves with the refresh.
 - **\<loop\>: blocked** or **Question from \<loop\>**, with the agent's blocker or question. **Mark resolved** (**Mark answered** for a question, in its drawer and run page) lets the run's loop act on the item's newest state.
 - **Failed run**. **Mark resolved**, in its drawer (from **Needs attention** or **Run history**) or run page, clears the warning and its project and board attention, across reloads and restarts, and keeps the outcome, attempt details, transcript, and retry controls. A later failed attempt raises it again.
@@ -178,7 +180,9 @@ Under the outline, a red count with previous and next controls steps through loa
 - For an SSH worker, it runs that over `ssh -t` to the worker's `destination`, with `-p` if `usine.yaml` sets `port`, quoted again for the remote shell; the worktree line names the worker.
 - For a provisioned worker, which has no `destination`, it uses the local form to run on the attempt's machine and says that the machine is deleted with the attempt; the worktree line names the worker.
 - For a worker that `usine.yaml` no longer declares, it uses the local form and says so.
-- For a Codex child that saved its session in the attempt's own Codex home, as behind a gateway with `openai` in `llm_providers`, it sets `CODEX_HOME` to that directory before `codex resume`.
+- For a Codex child using a local login with a recorded custom home, it sets `CODEX_HOME` to that directory before `codex resume`.
+
+**Resume details** is hidden for Codex children with a recorded external credential, including the gateway's ChatGPT login, because the operator's shell lacks that credential. This uses the child's recorded credential kind, even if the worker configuration has changed.
 
 **Copy command** copies the wrapped command as one line. Resuming needs the attempt's harness login and its worktree, which attempt cleanup removes. For a child whose model requests used the gateway's credential, the line under the command reads `The gateway credential isn't available from your shell` instead of naming the login. On a provisioned worker, where such a child used the gateway's credential or the provisioner's API key, a second line under the machine note reads `The gateway credential or API key isn't available from your shell`. Older transcripts and Pi children say no harness session was saved.
 

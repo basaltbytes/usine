@@ -225,6 +225,7 @@ const claudeLoggedOut = new WorkerCapabilityError({
 });
 
 const workers = Layer.succeed(WorkerStatus)({
+  unavailable: Effect.succeed([]),
   slots: Effect.succeed([
     { worker: local, capacity: 2, leased: 1 },
     { worker: WorkerName.make("retired"), capacity: 0, leased: 1 },

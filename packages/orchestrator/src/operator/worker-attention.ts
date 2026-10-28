@@ -5,17 +5,20 @@ import type { RunReader } from "@usine/engine/run-reader";
 import { TranscriptWorkerQuery } from "@usine/engine/transcript";
 import { DateTime, Effect } from "effect";
 import { partitionNeeds, projectAttention } from "./attention.ts";
-import { UnresponsiveWorkerNeed } from "./need.ts";
+import { type NeedView, UnresponsiveWorkerNeed, WorkerPreflightNeed } from "./need.ts";
 import { ReadyOverview } from "./overview.ts";
+import type { WorkerStatus } from "../worker-status.ts";
 import type { RunView } from "./run.ts";
 
 export const workerAttentionFor = (
   reader: Pick<RunReader["Service"], "transcript">,
   acknowledgements: Pick<AttentionAcknowledgements["Service"], "list">,
+  status: Pick<WorkerStatus["Service"], "unavailable">,
 ) =>
   Effect.fn("Operator.workerAttention")(function* (
     overview: ReadyOverview,
     running: ReadonlyArray<RunView>,
+    declared: ReadonlyArray<WorkerName>,
   ) {
     const silent = yield* Effect.forEach(
       running.flatMap((run) =>
@@ -70,16 +73,19 @@ export const workerAttentionFor = (
       workers: [...workers.keys()],
       affectedAttempts: silent.flat().length,
     });
-    if (workers.size === 0) return overview;
-    const { needsYou, dismissedNeeds } = partitionNeeds(
-      [...workers.values()],
-      yield* acknowledgements.list(),
-    );
+    const needs: Array<NeedView> = [...workers.values()];
+    for (const { worker, message } of yield* status.unavailable) {
+      if (!declared.includes(worker)) continue;
+      needs.push(new WorkerPreflightNeed({ id: `worker-preflight:${worker}`, worker, message }));
+    }
+    if (needs.length === 0) return overview;
+    const { needsYou, dismissedNeeds } = partitionNeeds(needs, yield* acknowledgements.list());
     const visible = [...overview.needsYou, ...needsYou];
-    yield* Effect.logDebug("Refreshed unresponsive worker attention", {
+    yield* Effect.logDebug("Refreshed worker attention", {
       workers: [...workers.keys()],
       attempts: silent.flat().length,
       dismissed: dismissedNeeds.length,
+      preflightFailures: needs.filter((need) => need._tag === "WorkerPreflightNeed").length,
     });
     return new ReadyOverview({
       ...overview,

@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router";
 import { DismissNeed } from "./dismiss";
 import type { ApprovalNeed, NeedView } from "@usine/orchestrator/operator";
 import { type ReactNode, useState } from "react";
@@ -15,7 +16,7 @@ import { Button } from "~/components/ui/button";
 import { itemIdentity, useOverview } from "~/components/item/identity";
 import { cn } from "~/lib/utils";
 import { useOpenRun } from "~/hooks/use-open-run";
-import { needCopy, workerAttemptLabel } from "~/lib/needs-you/strings";
+import { needCopy, workerAttemptLabel, openWorkerLabel } from "~/lib/needs-you/strings";
 import { runActionLabel, runActionProgress } from "~/lib/runs/strings";
 import { isRunOperationRejected, usePendingRunAction, useRunAction } from "~/hooks/runs/actions";
 import { CycleBudgetAsk } from "~/components/needs-you/cycle-budget-ask";
@@ -110,6 +111,23 @@ export const NeedEntry = ({ need, compact }: NeedEntryProps) => {
       return <ApprovalAsk need={need} compact={compact} dismiss={dismiss} />;
     case "CycleBudgetNeed":
       return <CycleBudgetAsk need={need} compact={compact} dismiss={dismiss} />;
+    case "WorkerPreflightNeed":
+      return (
+        <NeedItem
+          copy={needCopy(need)}
+          compact={compact}
+          fullDetail
+          dismiss={dismiss}
+          actions={
+            <Button
+              variant="ghost"
+              render={<Link to="/configuration/workers/$worker" params={{ worker: need.worker }} />}
+            >
+              {openWorkerLabel}
+            </Button>
+          }
+        />
+      );
     case "UnconfiguredWorkerNeed":
       return <UnconfiguredWorkerAsk need={need} compact={compact} dismiss={dismiss} />;
     case "UnresponsiveWorkerNeed":

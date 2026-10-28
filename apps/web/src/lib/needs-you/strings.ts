@@ -78,6 +78,12 @@ export const needCopy = (need: NeedView): NeedCopy =>
       repository: null,
       runId: null,
     }),
+    WorkerPreflightNeed: ({ worker, message }) => ({
+      title: `${worker}: preflight failed`,
+      detail: `${message} This worker takes no new attempts while preflight retries automatically.`,
+      repository: null,
+      runId: null,
+    }),
     UnconfiguredWorkerNeed: ({ worker, attempts, running }) => ({
       title: "Worker not configured",
       detail:
@@ -114,3 +120,5 @@ export const workerAttemptLabel = ({
   attemptNumber,
 }: UnresponsiveWorkerNeed["attempts"][number]) =>
   `${repository} · ${loop} · attempt ${attemptNumber}`;
+
+export const openWorkerLabel = "Open worker";

@@ -111,7 +111,7 @@ import {
   ScheduleTickFailure,
   ScheduleTriggers,
 } from "../src/schedule-triggers.ts";
-import { workerAttentionFor } from "../src/operator/unresponsive.ts";
+import { workerAttentionFor } from "../src/operator/worker-attention.ts";
 import { failureView, runDuration, runView } from "../src/operator/projection.ts";
 import { WorkerStatus } from "../src/worker-status.ts";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
@@ -726,9 +726,10 @@ describe("Operator", () => {
             ]),
         },
         { list: () => Effect.succeed([]) },
+        { unavailable: Effect.succeed([]) },
       );
       const overview = new ReadyOverview({ projects: [], loops: [], needsYou: [] });
-      const grouped = (yield* refresh(overview, running)).needsYou;
+      const grouped = (yield* refresh(overview, running, [])).needsYou;
       assert.lengthOf(grouped, 1);
       const need = grouped[0];
       assert(need?._tag === "UnresponsiveWorkerNeed");
@@ -736,13 +737,13 @@ describe("Operator", () => {
         need.attempts.map(({ runId }) => runId),
         ["one", "two"],
       );
-      const remaining = (yield* refresh(overview, running.slice(1))).needsYou[0];
+      const remaining = (yield* refresh(overview, running.slice(1), [])).needsYou[0];
       assert(remaining?._tag === "UnresponsiveWorkerNeed");
       assert.deepStrictEqual(
         remaining.attempts.map(({ runId }) => runId),
         ["two"],
       );
-      assert.deepStrictEqual((yield* refresh(overview, [])).needsYou, []);
+      assert.deepStrictEqual((yield* refresh(overview, [], [])).needsYou, []);
     }),
   );
 
