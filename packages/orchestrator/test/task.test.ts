@@ -408,7 +408,12 @@ const observation = (
     latest: Effect.succeed(Option.none()),
   });
   return OperatorObservation.layer.pipe(
-    Layer.provide(Layer.mock(AttentionAcknowledgements)({ list: () => Effect.succeed([]) })),
+    Layer.provide(
+      Layer.mock(AttentionAcknowledgements)({
+        list: () => Effect.succeed([]),
+        prune: () => Effect.void,
+      }),
+    ),
     Layer.provide(
       Layer.mergeAll(
         noCycleBudgets,

@@ -282,4 +282,6 @@ The Node runtime and worker compositions accept a supplied `RunDatabase` layer. 
 
 The overview returns visible entries in `needsYou` and matching acknowledged entries in `dismissedNeeds`. Project status and task and board attention badges use the visible list. A change to the entry's content makes it visible again; a later failed attempt has its own entry identity. Dismissal preserves approval gates, unresolved failures, and cycle-budget asks.
 
+On refresh, the overview prunes acknowledgements for entries it no longer reports or whose content revision changed. It retains acknowledgements for current dismissed entries. If an entry disappears during a refresh and later returns with the same content, it needs a new dismissal. Each failed schedule tick and each change to an unconfigured worker's attempt counts still produces a new revision.
+
 For Boat workers behind a gateway, the SSH adapter resolves `provisioner.tailnet.client_id_env` and `client_secret_env` into redacted OAuth credentials. Missing variables produce a gateway capability error before an attempt starts.

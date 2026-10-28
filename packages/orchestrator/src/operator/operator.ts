@@ -3,7 +3,7 @@ import {
   AttentionAcknowledgement,
   type AttentionKey,
 } from "@usine/engine/attention";
-import { partitionNeeds, taskNeedsAttention, projectAttention } from "./attention.ts";
+import { attentionKey, partitionNeeds, taskNeedsAttention, projectAttention } from "./attention.ts";
 import { transcriptEvent } from "./projection.ts";
 import { TranscriptSessionsQuery } from "@usine/engine/transcript";
 import { GitHubLabelName } from "@usine/config/label";
@@ -529,6 +529,7 @@ const makeOperatorObservation = Effect.gen(function* () {
         }),
       );
     }
+    yield* acknowledgements.prune(needsYou.map(attentionKey));
     const saved = yield* acknowledgements.list();
     const { needsYou: visible, dismissedNeeds } = partitionNeeds(needsYou, saved);
     const overview = new ReadyOverview({
