@@ -1,3 +1,8 @@
+import {
+  AttentionAcknowledgement,
+  type AttentionAcknowledgements,
+  type AttentionKey,
+} from "@usine/engine/attention";
 import { LoopName } from "@usine/core/loop";
 import { CycleBudgetAskId } from "@usine/core/cycle-budget";
 import { AttemptId } from "@usine/core/attempt";
@@ -32,7 +37,7 @@ import {
 } from "@usine/orchestrator/operator";
 import type { ItemNumber } from "@usine/core/item";
 import type { RepositoryName } from "@usine/core/repository";
-import { Context, Effect, Layer, Schema } from "effect";
+import { Context, DateTime, Effect, Layer, Schema } from "effect";
 
 export class BackendUnavailableError extends Schema.TaggedError<BackendUnavailableError>(
   "@usine/server/BackendUnavailableError",
@@ -52,6 +57,8 @@ export class FactoryBackend extends Context.Service<
     ) => Effect.Effect<RunDetailView, BackendError>;
     readonly githubChanges: (runId: RunId) => Effect.Effect<RunGitHubChangesView, BackendError>;
     readonly approve: (runId: RunId) => Effect.Effect<void, BackendError>;
+    readonly dismissNeed: (key: AttentionKey) => Effect.Effect<void, BackendError>;
+    readonly undoDismissNeed: (key: AttentionKey) => Effect.Effect<void, BackendError>;
     readonly resetCycleBudget: (askId: CycleBudgetAskId) => Effect.Effect<void, BackendError>;
     readonly resolveFailure: (
       runId: RunId,
@@ -106,6 +113,9 @@ export const liveBackendLayer = (
     githubChanges: operator.githubChanges,
     approve: (runId) =>
       Effect.flatMap(instances.get, (instance) => operator.approve(instance, runId)),
+    dismissNeed: (key) =>
+      Effect.flatMap(instances.get, (instance) => operator.dismissNeed(instance, key)),
+    undoDismissNeed: operator.undoDismissNeed,
     resetCycleBudget: operator.resetCycleBudget,
     retry: (runId) => Effect.flatMap(instances.get, (instance) => operator.retry(instance, runId)),
     resolveFailure: (runId, attemptId) =>
@@ -138,22 +148,23 @@ export const liveBackendLayer = (
   });
 
 /**
- * Provides the setup-mode backend, where only the overview, configuration, and reload work. Other
- * operations fail with `BackendUnavailableError`.
+ * Provides observation, configuration, reload, and attention acknowledgements during setup. Run
+ * actions fail with `BackendUnavailableError`.
  */
 export const needsSetupBackendLayer = (
   instances: BackendInstance,
   errorTag: string,
   observation: OperatorObservation["Service"],
   configuration: OperatorConfiguration["Service"],
+  acknowledgements: AttentionAcknowledgements["Service"],
 ): Layer.Layer<FactoryBackend> => {
   const unavailable = new BackendUnavailableError({
     message: "The GitHub App is not set up. Set it up to use operator actions.",
   });
   const overview = Effect.flatMap(instances.get, observation.overview).pipe(
     Effect.map(
-      ({ projects, loops, needsYou }) =>
-        new NeedsSetupOverview({ errorTag, projects, loops, needsYou }),
+      ({ projects, loops, needsYou, dismissedNeeds }) =>
+        new NeedsSetupOverview({ errorTag, projects, loops, needsYou, dismissedNeeds }),
     ),
   );
   const fail = () => Effect.fail(unavailable);
@@ -164,6 +175,18 @@ export const needsSetupBackendLayer = (
     githubChanges: fail,
     approve: fail,
     resetCycleBudget: fail,
+    dismissNeed: Effect.fn("FactoryBackend.dismissNeed")(function* (key) {
+      yield* Effect.annotateCurrentSpan({ needId: key.id });
+      const instance = yield* instances.get;
+      yield* acknowledgements.dismiss(
+        new AttentionAcknowledgement({
+          ...key,
+          dismissedBy: instance.config.operator,
+          dismissedAt: yield* DateTime.now,
+        }),
+      );
+    }),
+    undoDismissNeed: acknowledgements.undo,
     retry: fail,
     resolveFailure: fail,
     agents: rosterOf(instances),

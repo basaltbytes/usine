@@ -1,5 +1,6 @@
 import { ServerUpgrades } from "./upgrade/control.ts";
 import { systemUpgradePlatform } from "./upgrade/platform.ts";
+import { AttentionAcknowledgements } from "@usine/engine/attention";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NodeServices } from "@effect/platform-node";
@@ -162,6 +163,7 @@ const start = Effect.fnUntraced(function* (
       error._tag,
       Context.get(observationContext, OperatorObservation),
       Context.get(observationContext, OperatorConfiguration),
+      Context.get(observationContext, AttentionAcknowledgements),
     );
     const upgradeContext = yield* Layer.build(
       ServerUpgrades.layer({

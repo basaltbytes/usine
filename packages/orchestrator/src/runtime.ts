@@ -1,3 +1,4 @@
+import { AttentionAcknowledgements } from "@usine/engine/attention";
 import { BrainSpec } from "@usine/core/agent/brain";
 import { NodeServices } from "@effect/platform-node";
 import { ConfigParser } from "@usine/config/parser";
@@ -27,11 +28,15 @@ import { workerEngineLayer } from "./worker-engine.ts";
 import { WorkerStatus } from "./worker-status.ts";
 
 /**
- * Provides the read-only operator surface (observation, desk, and configuration) for when trigger
- * credentials aren't available yet. No Worker runs Attempts.
+ * Provides observation, configuration, and attention acknowledgements while trigger credentials
+ * are unavailable. No worker runs attempts.
  */
 export const operatorObservationLayer = (instanceDirectory: InstanceDirectory) =>
-  Layer.mergeAll(OperatorObservation.layer, OperatorConfiguration.layer).pipe(
+  Layer.mergeAll(
+    OperatorObservation.layer,
+    OperatorConfiguration.layer,
+    Layer.effect(AttentionAcknowledgements, AttentionAcknowledgements),
+  ).pipe(
     Layer.provide(
       Layer.mergeAll(
         localObservationLayer(instanceDirectory),

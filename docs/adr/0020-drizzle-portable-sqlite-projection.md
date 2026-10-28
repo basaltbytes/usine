@@ -30,3 +30,9 @@ Both Drizzle packages are pinned at `1.0.0-rc.5-5935859`, the `rc5` npm tag's bu
 ## Amendment (2026-10-27, #494): Drizzle `1.0.0-rc.5` on Effect 4.0.x
 
 Both Drizzle packages are pinned at `1.0.0-rc.5`, the `rc` npm tag, whose peer range is `effect >=4.0.0`. The `1.0.0-rc.5-5935859` build imports `effect/unstable/sql/SqlError`, which Effect 4.0.x removed when SQL moved to `effect/sql`, so its transaction errors were typed `any`. `.execute()` stays.
+
+## Amendment (2026-10-28, #477): attention acknowledgements
+
+The engine's `AttentionAcknowledgements` service stores operator dismissals in `usine_attention_acknowledgements`, keyed by entry ID and content revision, with operator login and time. This service uses `RunDatabase`, like `BoardMoves`. The existing run store owns lifecycle transitions, cycle budgets own asks, and cursors permit loss; none owns acknowledgements of configuration or polling findings. The separate capability covers all attention kinds without changing those contracts.
+
+The orchestrator defines each revision from the entry's schema-encoded content. Failed-run entry IDs include the attempt ID, so a later failure with identical text appears again. The overview partitions current entries into visible and dismissed lists. Project status and task badges derive from the visible list; run and ask state remain independent. Undo deletes the matching acknowledgement. Database triggers invalidate the overview cache on acknowledgement changes. Dismissal records for causes no longer reported remain in the store, but only current entries appear under Dismissed.

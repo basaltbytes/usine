@@ -1,3 +1,4 @@
+import { AttentionAcknowledgements } from "../attention/attention.ts";
 import { Event } from "@usine/core/event";
 import { AttemptId } from "@usine/core/attempt";
 import { Intervention } from "@usine/core/attempt/channel";
@@ -375,6 +376,7 @@ export class RunEngine extends Context.Service<
 export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
   database: Layer.Layer<RunDatabase, DatabaseError, DatabaseRequirements>,
 ): Layer.Layer<
+  | AttentionAcknowledgements
   | BoardMoves
   | CursorStore
   | CycleBudgets
@@ -408,6 +410,7 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
   ).pipe(Layer.provide(driver));
   return Layer.mergeAll(
     runEngine,
+    AttentionAcknowledgements.layer.pipe(Layer.provide(database)),
     BoardMoves.layer.pipe(Layer.provide(database)),
     CycleBudgets.layer.pipe(Layer.provide(database)),
     RunReader.layer.pipe(Layer.provide(database)),

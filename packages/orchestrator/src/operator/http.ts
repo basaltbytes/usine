@@ -1,5 +1,6 @@
 import { UpgradeRequest, UpgradeView } from "./upgrade.ts";
 export { UpgradeRequest, UpgradeView } from "./upgrade.ts";
+import { AttentionKey } from "@usine/engine/attention";
 import { FileStage, InstancePath } from "@usine/config/file";
 import { AttemptId } from "@usine/core/attempt";
 import { AgentName } from "@usine/core/agent";
@@ -282,6 +283,14 @@ export const OperatorApi = HttpApi.make("OperatorApi").add(
         success: acknowledged,
       }),
       HttpApiEndpoint.get("overview", "/api/overview", { success: FactoryOverview }),
+      HttpApiEndpoint.post("dismissNeed", "/api/attention/dismiss", {
+        payload: AttentionKey,
+        success: acknowledged,
+      }),
+      HttpApiEndpoint.post("undoDismissNeed", "/api/attention/undo", {
+        payload: AttentionKey,
+        success: acknowledged,
+      }),
       HttpApiEndpoint.get("agents", "/api/agents", { success: Schema.Array(AgentName) }),
       HttpApiEndpoint.post("editAndRetry", "/api/runs/:runId/edit-and-retry", {
         params: runParams,

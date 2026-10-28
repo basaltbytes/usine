@@ -67,6 +67,10 @@
     "./cursor": {
       "types": "./dist/cursor/cursor.d.ts",
       "default": "./dist/cursor/cursor.js"
+    },
+    "./attention": {
+      "types": "./dist/attention/attention.d.ts",
+      "default": "./dist/attention/attention.js"
     }
   },
   "publishConfig": {
