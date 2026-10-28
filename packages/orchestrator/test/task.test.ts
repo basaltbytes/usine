@@ -1,3 +1,4 @@
+import { AttentionAcknowledgements } from "@usine/engine/attention";
 import { assert, describe, it } from "@effect/vitest";
 import { UsineConfig } from "@usine/config/factory";
 import { LoadedInstance } from "@usine/config/instance";
@@ -367,7 +368,7 @@ const observation = (
   const reader = Layer.succeed(RunReader)({
     inspect: () => Effect.die("unused"),
     evidence: () => Effect.die("unused"),
-    list: () => Effect.die("A Task reads every Run of its Items, not the overview's window"),
+    list: () => Effect.succeed([]),
     closed: () => Effect.die("unused"),
     closedSince: () => Effect.die("unused"),
     forItems: (keys) =>
@@ -376,7 +377,7 @@ const observation = (
       ),
     events: (runIds) => Effect.succeed(runEvents.filter(({ runId }) => runIds.includes(runId))),
     revision: () => Effect.succeed(Option.none()),
-    transcript: () => Effect.die("unused"),
+    transcript: () => Effect.succeed([]),
     attemptsByWorker: () => Effect.succeed([]),
     sightings: () => Effect.die("A Task reads no Loop sightings"),
   });
@@ -387,7 +388,8 @@ const observation = (
     states: Effect.succeed([]),
   });
   const itemReader = Layer.succeed(ItemProjectionReader)({
-    get: () => Effect.die("the Task read reads no single Item"),
+    get: (key) =>
+      Effect.succeed(Option.fromNullishOr(items.find(({ itemKey }) => itemKey === key))),
     list: () => Effect.succeed(items),
     openIssues: () => Effect.die("the Task read does not check open issues"),
   });
@@ -406,6 +408,7 @@ const observation = (
     latest: Effect.succeed(Option.none()),
   });
   return OperatorObservation.layer.pipe(
+    Layer.provide(Layer.mock(AttentionAcknowledgements)({ list: () => Effect.succeed([]) })),
     Layer.provide(
       Layer.mergeAll(
         noCycleBudgets,

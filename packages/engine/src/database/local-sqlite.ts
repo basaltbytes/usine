@@ -1,3 +1,4 @@
+import { AttentionAcknowledgements } from "../attention/attention.ts";
 import { NodeServices } from "@effect/platform-node";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { fileURLToPath } from "node:url";
@@ -85,6 +86,7 @@ export const layer = (
   instanceDirectory: InstanceDirectory,
   database: Layer.Layer<RunDatabase, EnginePersistenceError> = localSqliteLayer(instanceDirectory),
 ): Layer.Layer<
+  | AttentionAcknowledgements
   | BoardMoves
   | CursorStore
   | CycleBudgets
@@ -105,6 +107,7 @@ export const observationLayer = (
   instanceDirectory: InstanceDirectory,
   database: Layer.Layer<RunDatabase, EnginePersistenceError> = localSqliteLayer(instanceDirectory),
 ): Layer.Layer<
+  | AttentionAcknowledgements
   | CycleBudgets
   | ItemProjectionReader
   | LoopControl
@@ -114,6 +117,7 @@ export const observationLayer = (
   RunEngineError
 > => {
   return Layer.mergeAll(
+    AttentionAcknowledgements.layer,
     CycleBudgets.layer,
     ItemProjectionReader.layer,
     LoopControl.layer,

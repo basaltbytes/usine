@@ -273,3 +273,9 @@ pnpm --filter @usine/orchestrator test:integration:agent
 Cleanup removes its kick and result comments.
 
 The Node runtime and worker compositions accept a supplied `RunDatabase` layer. The server shares it with the configuration store, and stored agent revisions pass the same worker preflight as explicit reloads. A restart-required revision remains in the store while the running snapshot stays unchanged; restart applies it.
+
+## Dismiss attention entries
+
+`Operator.dismissNeed(instance, key)` and `Operator.undoDismissNeed(key)` record or remove an acknowledgement for the entry ID and revision returned by `attentionKey(need)`. The HTTP endpoints are `POST /api/attention/dismiss` and `POST /api/attention/undo`, each with `{ "id": "...", "revision": "..." }`.
+
+The overview returns visible entries in `needsYou` and matching acknowledged entries in `dismissedNeeds`. Project status and task and board attention badges use the visible list. A change to the entry's content makes it visible again; a later failed attempt has its own entry identity. Dismissal preserves approval gates, unresolved failures, and cycle-budget asks.

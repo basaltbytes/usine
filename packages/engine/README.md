@@ -172,3 +172,7 @@ pnpm --filter @usine/engine db:generate --name <migration_name>
 ## Shared runtime connection
 
 `localSqliteLayer(directory)` provides `RunDatabase` and the matching `SqlClient`. The `layer` and `observationLayer` functions in `/local-sqlite` accept that database layer as their second argument. Applications can build the connection once and pass its context to the engine and the configuration store; each package maintains its own migration ledger in the runtime file.
+
+## Attention acknowledgements
+
+`AttentionAcknowledgements` from `@usine/engine/attention` records a dismissal by entry ID and content revision, with the configured operator login and time. Repeating the same dismissal preserves the first record. Undo deletes only that revision. The local runtime store persists these records and invalidates operator projections when they change. Run state, failure resolution, and cycle budgets stay unchanged.

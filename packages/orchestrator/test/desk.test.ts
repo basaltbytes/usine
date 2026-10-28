@@ -1,3 +1,4 @@
+import { AttentionAcknowledgements } from "@usine/engine/attention";
 import { assert, describe, it } from "@effect/vitest";
 import { AgentFile } from "@usine/config/agent";
 import { UsineConfig } from "@usine/config/factory";
@@ -450,6 +451,7 @@ const deskLayer = (
     ]),
   });
   return OperatorObservation.layer.pipe(
+    Layer.provide(Layer.mock(AttentionAcknowledgements)({ list: () => Effect.succeed([]) })),
     Layer.provide(
       Layer.mergeAll(
         reader,

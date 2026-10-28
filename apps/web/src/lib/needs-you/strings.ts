@@ -90,3 +90,10 @@ export const needCopy = (need: NeedView): NeedCopy =>
       runId,
     }),
   });
+
+export const attentionActionLabel = { dismissNeed: "Dismiss", undoDismissNeed: "Undo" } as const;
+export const attentionActionProgress = {
+  dismissNeed: "Dismissing…",
+  undoDismissNeed: "Undoing…",
+} as const;
+export const dismissedAttentionTitle = "Dismissed";

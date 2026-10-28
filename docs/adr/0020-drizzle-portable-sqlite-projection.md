@@ -34,3 +34,9 @@ Both Drizzle packages are pinned at `1.0.0-rc.5`, the `rc` npm tag, whose peer r
 ## Amendment (2026-10-28, #637): configuration migrations
 
 The configuration store takes Effect's `SqlClient`, supplied by the application on the runtime connection. Its Drizzle schema and generated migrations are in `@usine/config`, with the separate `usine_configuration_migrations` ledger. The package embeds generated migration SQL for deployments without a filesystem. Queries use `SqlClient` directly because the available Effect Drizzle SQLite adapters require concrete drivers. Configuration commits use one transaction with optimistic revision checks; this does not alter the engine's migration chain.
+
+## Amendment (2026-10-28, #477): attention acknowledgements
+
+The engine's `AttentionAcknowledgements` service stores operator dismissals in `usine_attention_acknowledgements`, keyed by entry ID and content revision, with operator login and time. This service uses `RunDatabase`, like `BoardMoves`. The existing run store owns lifecycle transitions, cycle budgets own asks, and cursors permit loss; none owns acknowledgements of configuration or polling findings. The separate capability covers all attention kinds without changing those contracts.
+
+The orchestrator defines each revision from the entry's schema-encoded content. Failed-run entry IDs include the attempt ID, so a later failure with identical text appears again. The overview partitions current entries into visible and dismissed lists. Project status and task badges derive from the visible list; run and ask state remain independent. Undo deletes the matching acknowledgement. Database triggers invalidate the overview cache on acknowledgement changes. Dismissal records for causes no longer reported remain in the store, but only current entries appear under Dismissed.

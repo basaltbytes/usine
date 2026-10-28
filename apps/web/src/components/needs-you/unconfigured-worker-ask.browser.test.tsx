@@ -63,7 +63,10 @@ it("says how many attempts still run on a removed worker and offers no discard u
       ),
     )
     .toBeVisible();
-  expect(needs().getByRole("button").elements()).toEqual([]);
+  await expect
+    .element(needs().getByRole("button", { name: "Discard leftovers", exact: true }))
+    .not.toBeInTheDocument();
+  await expect.element(needs().getByRole("button", { name: "Dismiss", exact: true })).toBeEnabled();
 });
 
 it("offers Discard leftovers once no attempt runs on the worker, and shows why a discard is refused", async () => {

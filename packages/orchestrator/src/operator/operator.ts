@@ -1,3 +1,9 @@
+import {
+  AttentionAcknowledgements,
+  AttentionAcknowledgement,
+  type AttentionKey,
+} from "@usine/engine/attention";
+import { partitionNeeds, taskNeedsAttention, projectAttention } from "./attention.ts";
 import { transcriptEvent } from "./projection.ts";
 import { TranscriptSessionsQuery } from "@usine/engine/transcript";
 import { GitHubLabelName } from "@usine/config/label";
@@ -53,7 +59,7 @@ import {
   Schema,
   SynchronizedRef,
 } from "effect";
-import { runNeedsAttention, settledItemState } from "../board/items.ts";
+import { settledItemState } from "../board/items.ts";
 import { labelMutationForBoardMove, projectBoard } from "../board/projection.ts";
 import type { LabelPreflightFinding } from "../label-reconciler.ts";
 import { LoopMatches } from "../loop-matches.ts";
@@ -94,7 +100,7 @@ import {
   type TranscriptAttemptNotFoundError,
   type TranscriptRequest,
 } from "./transcript.ts";
-import { LoopView, ProjectView, ReadyOverview, type ProjectStatus } from "./overview.ts";
+import { LoopView, ProjectView, ReadyOverview } from "./overview.ts";
 import {
   RunDetailView,
   EditAndRetry,
@@ -117,7 +123,7 @@ import {
   type RunGitHubChangesError,
   type RunGitHubChangesView,
 } from "./github-changes.ts";
-import { TaskReader, type TaskReadError, type TaskView } from "./task.ts";
+import { TaskReader, type TaskReadError, TaskView } from "./task.ts";
 import { type DeskView, OperatorDesk } from "./desk.ts";
 import { OperatorStatistics } from "./statistics/statistics.ts";
 import type { RunStatisticsView, StatisticsView, StatisticsWindow } from "./statistics/view.ts";
@@ -199,6 +205,7 @@ const withRunUsage = (
   });
 
 const makeOperatorObservation = Effect.gen(function* () {
+  const acknowledgements = yield* AttentionAcknowledgements;
   const budgets = yield* CycleBudgets;
   const reader = yield* RunReader;
   const controls = yield* LoopControl;
@@ -348,18 +355,9 @@ const makeOperatorObservation = Effect.gen(function* () {
       ),
     );
     const projects = projected.map(({ name, projectFindings, projectRuns, board, catalog }) => {
-      const status: ProjectStatus =
-        cycleAsks.some((ask) => ask.repository === name) ||
-        board.failures.length > 0 ||
-        projectFindings.length > 0 ||
-        projectRuns.some((run) => runNeedsAttention(run, settledItems.has(run.itemKey)))
-          ? "needs-you"
-          : projectRuns.some((run) => run.canCancel)
-            ? "active"
-            : "clear";
       return new ProjectView({
         repository: name,
-        status,
+        status: "clear",
         runs: projectRuns,
         board,
         labels: catalog.map(
@@ -442,7 +440,7 @@ const makeOperatorObservation = Effect.gen(function* () {
         }
         needsYou.push(
           new RunFailureNeed({
-            id: `run-failure:${run.id}`,
+            id: `run-failure:${run.id}:${attempt.id}`,
             repository: run.repository,
             runId: run.id,
             loop: run.loop,
@@ -461,10 +459,10 @@ const makeOperatorObservation = Effect.gen(function* () {
         );
       }
     }
-    pollFailures.forEach((failure, index) => {
+    pollFailures.forEach((failure) => {
       needsYou.push(
         new PollFailureNeed({
-          id: `poll-failure:${failure.repository}:${failure.errorTag}:${index}`,
+          id: `poll-failure:${JSON.stringify([failure.repository, failure.errorTag, failure.message])}`,
           failure,
         }),
       );
@@ -477,10 +475,14 @@ const makeOperatorObservation = Effect.gen(function* () {
         }),
       );
     });
-    scheduleFailures.forEach((failure, index) => {
+    scheduleFailures.forEach((failure) => {
       needsYou.push(
         new ScheduleFailureNeed({
-          id: `schedule-failure:${failure.loop}:${failure._tag}:${index}`,
+          id: `schedule-failure:${JSON.stringify([
+            failure.loop,
+            failure._tag,
+            failure._tag === "ScheduleTickFailure" ? failure.repository : null,
+          ])}`,
           failure,
         }),
       );
@@ -527,11 +529,19 @@ const makeOperatorObservation = Effect.gen(function* () {
         }),
       );
     }
-    const overview = new ReadyOverview({ projects, loops, needsYou });
+    const saved = yield* acknowledgements.list();
+    const { needsYou: visible, dismissedNeeds } = partitionNeeds(needsYou, saved);
+    const overview = new ReadyOverview({
+      projects: projectAttention(projects, visible),
+      loops,
+      needsYou: visible,
+      dismissedNeeds,
+    });
     yield* Effect.logDebug("Refreshed operator overview", {
       revision,
       runs: views.length,
-      needsYou: needsYou.length,
+      needsYou: visible.length,
+      dismissedNeeds: dismissedNeeds.length,
       runsAtWork: usage.working.length,
     });
     return { overview, usage } as const;
@@ -747,7 +757,19 @@ const makeOperatorObservation = Effect.gen(function* () {
   const { desk } = yield* OperatorDesk;
   const { statistics, runStatistics } = yield* OperatorStatistics;
 
-  return { detail, overview, task: tasks.read, desk, statistics, runStatistics } as const;
+  const task = Effect.fn("Operator.task")(function* (
+    instance: LoadedInstance,
+    repository: RepositoryName,
+    item: ItemNumber,
+  ) {
+    yield* Effect.annotateCurrentSpan({ repository, item });
+    const [view, current] = yield* Effect.all(
+      [tasks.read(instance, repository, item), overview(instance)],
+      { concurrency: "unbounded" },
+    );
+    return new TaskView({ ...view, needsYou: taskNeedsAttention(view, current.needsYou) });
+  });
+  return { detail, overview, task, desk, statistics, runStatistics } as const;
 });
 
 /** The read-only operator surface, which needs no trigger execution. */
@@ -820,6 +842,7 @@ export class OperatorObservation extends Context.Service<
 }
 
 const makeOperator = Effect.gen(function* () {
+  const acknowledgements = yield* AttentionAcknowledgements;
   const budgets = yield* CycleBudgets;
   const observation = yield* OperatorObservation;
   const runs = yield* RunEngine;
@@ -831,6 +854,24 @@ const makeOperator = Effect.gen(function* () {
   const boardMoves = yield* BoardMoves;
   const polling = yield* PollingTriggers;
   const githubChanges = yield* RunGitHubChanges;
+
+  const dismissNeed = Effect.fn("Operator.dismissNeed")(function* (
+    instance: LoadedInstance,
+    key: AttentionKey,
+  ) {
+    yield* Effect.annotateCurrentSpan({ needId: key.id });
+    yield* acknowledgements.dismiss(
+      new AttentionAcknowledgement({
+        ...key,
+        dismissedBy: instance.config.operator,
+        dismissedAt: yield* DateTime.now,
+      }),
+    );
+  });
+  const undoDismissNeed = Effect.fn("Operator.undoDismissNeed")(function* (key: AttentionKey) {
+    yield* Effect.annotateCurrentSpan({ needId: key.id });
+    yield* acknowledgements.undo(key);
+  });
 
   const approve = Effect.fn("Operator.approve")(function* (instance: LoadedInstance, runId: RunId) {
     yield* Effect.annotateCurrentSpan({ runId });
@@ -1128,6 +1169,8 @@ const makeOperator = Effect.gen(function* () {
     intervene,
     unpause,
     resetCycleBudget,
+    dismissNeed,
+    undoDismissNeed,
   } as const;
 });
 
@@ -1137,10 +1180,14 @@ const makeOperator = Effect.gen(function* () {
 export class Operator extends Context.Service<
   Operator,
   OperatorObservation["Service"] & {
-    /**
-     * Answers the Item's current cycle-budget Ask. Polling refreshes its state before more Runs
-     * open.
-     */
+    /** Acknowledges only the displayed revision, preserving the run or ask state. */
+    readonly dismissNeed: (
+      instance: LoadedInstance,
+      key: AttentionKey,
+    ) => Effect.Effect<void, OperatorError>;
+    /** Removes the acknowledgement of this revision. */
+    readonly undoDismissNeed: (key: AttentionKey) => Effect.Effect<void, OperatorError>;
+    /** Answers the current cycle-budget ask and requests fresh polling. */
     readonly resetCycleBudget: (askId: CycleBudgetAskId) => Effect.Effect<void, OperatorError>;
     /**
      * Records the operator's approval of a waiting Run, attributed to the operator login in
@@ -1407,3 +1454,5 @@ export {
   TranscriptRequest,
   TranscriptAttemptNotFoundError,
 } from "./transcript.ts";
+
+export { attentionKey, projectAttention } from "./attention.ts";

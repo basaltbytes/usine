@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { CycleBudgetNeed } from "@usine/orchestrator/operator";
 import { Option } from "effect";
@@ -11,10 +12,11 @@ import { NeedItem } from "~/components/needs-you/need-item";
 type CycleBudgetAskProps = {
   readonly need: CycleBudgetNeed;
   readonly compact: boolean;
+  readonly dismiss?: ReactNode;
 };
 
 /** Renders the cycle budget Ask of an Item; resetting the budget does not create a Run. */
-export const CycleBudgetAsk = ({ need, compact }: CycleBudgetAskProps) => {
+export const CycleBudgetAsk = ({ need, compact, dismiss }: CycleBudgetAskProps) => {
   const queries = useQueryClient();
   const reset = useMutation({
     mutationFn: () => api((client) => client.resetCycleBudget({ payload: { askId: need.ask.id } })),
@@ -32,6 +34,7 @@ export const CycleBudgetAsk = ({ need, compact }: CycleBudgetAskProps) => {
       })}
       item={Option.getOrUndefined(item)}
       compact={compact}
+      dismiss={dismiss}
       error={reset.isError ? reset.error.message : null}
       actions={
         <>
