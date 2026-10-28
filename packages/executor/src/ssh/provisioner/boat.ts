@@ -87,7 +87,7 @@ const nameOf = (tags: MachineTags): string =>
     tagValue(tags.worker, 24),
     tagValue(tags.run, 32),
     tagValue(tags.process, 12),
-    Option.match(tags.attempt, { onNone: () => "-", onSome: attemptTag }),
+    attemptTag(tags.attempt),
   ].join(" ");
 
 /** Returns the reason a creation failure is retried, by Boat's documented statuses. */
@@ -324,13 +324,6 @@ export const boatDriverFor = (
         ),
     );
 
-    const tag = Effect.fn("BoatDriver.tag")(function* (id: MachineId, tags: MachineTags) {
-      yield* Effect.annotateCurrentSpan({ worker, machine: id });
-      yield* api
-        .send("PATCH", `/sandboxes/${id}`, { body: { name: nameOf(tags) } })
-        .pipe(Effect.mapError(apiError("rename the sandbox")));
-    });
-
     const remove = Effect.fn("BoatDriver.remove")(function* (id: MachineId) {
       yield* Effect.annotateCurrentSpan({ worker, machine: id });
       yield* api
@@ -345,9 +338,15 @@ export const boatDriverFor = (
         );
     });
 
-    const list = Effect.fn("BoatDriver.list")(function* (instance: string, listed: WorkerName) {
-      yield* Effect.annotateCurrentSpan({ worker: listed });
-      const prefix = `${NAME_PREFIX} ${tagValue(instance, 24)} ${tagValue(listed, 24)} `;
+    const list = Effect.fn("BoatDriver.list")(function* (
+      instance: string,
+      listed: Option.Option<WorkerName>,
+    ) {
+      yield* Effect.annotateCurrentSpan({
+        instance,
+        worker: Option.getOrElse(listed, () => "all"),
+      });
+      const prefix = `${NAME_PREFIX} ${tagValue(instance, 24)} ${Option.match(listed, { onNone: () => "", onSome: (worker) => `${tagValue(worker, 24)} ` })}`;
       const machines: Array<ListedMachine> = [];
       let cursor: string | null = null;
       do {
@@ -387,7 +386,6 @@ export const boatDriverFor = (
       verify,
       create,
       endpoint,
-      tag,
       remove,
       list,
     } satisfies MachineDriver;

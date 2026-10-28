@@ -1,5 +1,5 @@
 import { createServer } from "node:net";
-import { UpgradeView } from "@usine/orchestrator/operator/http";
+import { ConfigurationEntityView, UpgradeView } from "@usine/orchestrator/operator/http";
 import { UsineConfig } from "@usine/config/factory";
 import { ConfigurationEntity } from "@usine/config/configuration";
 import { Schema } from "effect";
@@ -320,11 +320,66 @@ writeFileSync(file, readFileSync(file, "utf8").replace("harness: codex", "harnes
       });
       expect(reloaded.status, await reloaded.text()).toBe(200);
       expect(await harness()).toBe("claude");
+      const entity = Schema.decodeUnknownSync(ConfigurationEntityView)(
+        await (await fetch(`${origin}/api/configuration/entities/agent/developer`)).json(),
+      );
+      const saved = await fetch(`${origin}/api/configuration/entities/agent/developer`, {
+        method: "PUT",
+        headers: { Origin: origin },
+        body: JSON.stringify({
+          expected: entity.number,
+          text: entity.text.replace("harness: claude", "harness: codex"),
+        }),
+      });
+      expect(saved.status, await saved.text()).toBe(200);
+      expect(await harness()).toBe("codex");
     } finally {
       child.kill("SIGTERM");
       const kill = setTimeout(() => child.kill("SIGKILL"), 5000);
       await exited;
       clearTimeout(kill);
+    }
+  },
+);
+
+test(
+  "pauses imported loops atomically and preserves the migration's pause state",
+  { timeout: 30_000 },
+  async ({ directory }) => {
+    expect(run(directory, ["log"]).status).toBe(0);
+    const database = new DatabaseSync(join(directory, ".usine/runtime.sqlite"));
+    try {
+      expect(database.prepare("SELECT * FROM usine_loop_runtime").all()).toEqual([]);
+      const loop = await readFile(join(directory, "loops/implement.md"), "utf8");
+      await writeFile(join(directory, "loops/review.md"), loop);
+      database.exec(
+        "CREATE TRIGGER refuse_loop_pause BEFORE INSERT ON usine_loop_runtime BEGIN SELECT RAISE(ABORT, 'pause unavailable'); END",
+      );
+      const refused = run(directory, ["import", directory]);
+      expect(refused.status).toBe(1);
+      expect(
+        database.prepare("SELECT count(*) AS count FROM usine_configuration_revisions").get()
+          ?.count,
+      ).toBe(1);
+      expect(
+        database
+          .prepare("SELECT * FROM usine_configuration_entities WHERE key = 'loop:review'")
+          .all(),
+      ).toEqual([]);
+      database.exec("DROP TRIGGER refuse_loop_pause");
+      const imported = run(directory, ["import", directory]);
+      expect(imported.status, imported.stderr).toBe(0);
+      expect(database.prepare("SELECT * FROM usine_loop_runtime").all()).toEqual([
+        { loop_name: "review", paused: 1 },
+      ]);
+      database.prepare("UPDATE usine_loop_runtime SET paused = 0 WHERE loop_name = 'review'").run();
+      expect(run(directory, ["import", directory]).status).toBe(0);
+      expect(
+        database.prepare("SELECT paused FROM usine_loop_runtime WHERE loop_name = 'review'").get()
+          ?.paused,
+      ).toBe(0);
+    } finally {
+      database.close();
     }
   },
 );

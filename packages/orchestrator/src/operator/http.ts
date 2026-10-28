@@ -1,3 +1,24 @@
+import {
+  ConfigurationRevisionNumber,
+  ConfigurationEntityId,
+  ConfigurationEntityKey,
+} from "@usine/config/configuration";
+import {
+  ConfigurationEntityView,
+  ConfigurationReplacement,
+  ConfigurationRevisionPage,
+  ConfigurationRevisionView,
+  ConfigurationWrite,
+  ConfigurationRevisionQuery,
+  ConfigurationEntityRequest,
+} from "./configuration/model.ts";
+export {
+  ConfigurationEntityView,
+  ConfigurationReplacement,
+  ConfigurationRevisionPage,
+  ConfigurationRevisionView,
+  ConfigurationWrite,
+} from "./configuration/model.ts";
 import { UpgradeRequest, UpgradeView } from "./upgrade.ts";
 export { UpgradeRequest, UpgradeView } from "./upgrade.ts";
 import { AttentionKey } from "@usine/engine/attention";
@@ -27,12 +48,14 @@ import { FactoryOverview } from "./overview.ts";
 import { RunDetailView, EditAndRetry, SessionIntervention } from "./run.ts";
 import { RunGitHubChangesView } from "./github-changes.ts";
 import { TaskView } from "./task.ts";
-import { ConfigurationView } from "./configuration.ts";
+import { ConfigurationView } from "./configuration/view.ts";
 import { DeskView } from "./desk.ts";
 import { RunStatisticsView, StatisticsView, StatisticsWindow } from "./statistics/view.ts";
 
 const errorStatuses = {
   UpgradeError: 409,
+  ConfigurationNotFound: 404,
+  ConfigurationStoreError: 500,
   SchemaError: 400,
   InvalidRequestError: 400,
   CrossSiteRequestError: 403,
@@ -199,6 +222,59 @@ export const reloadRefusal = (error: InstanceReloadError, message: string): Relo
     FactoryConfigError: ({ _tag, file, stage }) =>
       new FactoryConfigRefusal({ error: _tag, message, file, stage }),
   });
+
+export class StaleRevisionRefusal extends Schema.Error<StaleRevisionRefusal>(
+  "StaleRevisionRefusal",
+)(
+  {
+    error: Schema.Literal("StaleRevision"),
+    message: Schema.String,
+    expected: ConfigurationRevisionNumber,
+    current: ConfigurationRevisionNumber,
+  },
+  { httpApiStatus: 409 },
+) {}
+
+export class ConfigurationInvalidRefusal extends Schema.Error<ConfigurationInvalidRefusal>(
+  "ConfigurationInvalidRefusal",
+)(
+  {
+    error: Schema.Literal("ConfigurationInvalid"),
+    message: Schema.String,
+    problems: Schema.NonEmptyArray(
+      Schema.Struct({
+        entity: ConfigurationEntityKey,
+        path: Schema.Array(Schema.Union([Schema.String, Schema.Number])),
+        message: Schema.String,
+      }),
+    ),
+  },
+  { httpApiStatus: 422 },
+) {}
+
+export class ConfigurationRevertRefusal extends Schema.Error<ConfigurationRevertRefusal>(
+  "ConfigurationRevertRefusal",
+)(
+  {
+    error: Schema.Literal("ConfigurationRevertBlocked"),
+    message: Schema.String,
+    entities: Schema.NonEmptyArray(ConfigurationEntityKey),
+  },
+  { httpApiStatus: 409 },
+) {}
+
+const configurationWriteErrors = [
+  StaleRevisionRefusal,
+  ConfigurationInvalidRefusal,
+  ConfigurationRevertRefusal,
+  RestartRequiredRefusal,
+  ReloadPreflightRefusal,
+  FactoryConfigRefusal,
+];
+const revisionParams = {
+  number: Schema.FiniteFromString.pipe(Schema.decodeTo(ConfigurationRevisionNumber)),
+};
+const entityParams = ConfigurationEntityRequest.fields;
 
 const absent = Schema.optionalKey(Schema.Never);
 // Use the first occurrence of a repeated query key, as `URLSearchParams.get` did.
@@ -372,6 +448,67 @@ export const OperatorApi = HttpApi.make("OperatorApi").add(
         },
         success: TaskView,
       }),
+    )
+    .add(
+      HttpApiEndpoint.get("configurationRevisions", "/api/configuration/revisions", {
+        query: Schema.Struct({
+          kind: Schema.optionalKey(queryValue),
+          identifier: Schema.optionalKey(queryValue.pipe(Schema.decodeTo(ConfigurationEntityId))),
+          before: Schema.optionalKey(
+            queryValue.pipe(
+              Schema.decodeTo(Schema.FiniteFromString),
+              Schema.decodeTo(ConfigurationRevisionNumber),
+            ),
+          ),
+          limit: queryValue.pipe(
+            Schema.decodeTo(Schema.FiniteFromString),
+            Schema.decodeTo(ConfigurationRevisionQuery.fields.limit),
+            Schema.withDecodingDefaultKey(Effect.succeed("50")),
+          ),
+        }),
+        success: ConfigurationRevisionPage,
+        error: configurationWriteErrors,
+      }),
+      HttpApiEndpoint.get("configurationRevision", "/api/configuration/revisions/:number", {
+        params: revisionParams,
+        success: ConfigurationRevisionView,
+        error: configurationWriteErrors,
+      }),
+      HttpApiEndpoint.get("configurationEntity", "/api/configuration/entities/:kind/:identifier", {
+        params: entityParams,
+        success: ConfigurationEntityView,
+        error: configurationWriteErrors,
+      }),
+      HttpApiEndpoint.put(
+        "replaceConfigurationEntity",
+        "/api/configuration/entities/:kind/:identifier",
+        {
+          params: entityParams,
+          payload: ConfigurationReplacement,
+          success: ConfigurationRevisionView,
+          error: configurationWriteErrors,
+        },
+      ),
+      HttpApiEndpoint.delete(
+        "deleteConfigurationEntity",
+        "/api/configuration/entities/:kind/:identifier",
+        {
+          params: entityParams,
+          payload: ConfigurationWrite,
+          success: ConfigurationRevisionView,
+          error: configurationWriteErrors,
+        },
+      ),
+      HttpApiEndpoint.post(
+        "revertConfigurationRevision",
+        "/api/configuration/revisions/:number/revert",
+        {
+          params: revisionParams,
+          payload: ConfigurationWrite,
+          success: ConfigurationRevisionView,
+          error: configurationWriteErrors,
+        },
+      ),
     )
     .add(HttpApiEndpoint.get("configuration", "/api/configuration", { success: ConfigurationView }))
     .add(HttpApiEndpoint.get("desk", "/api/desk", { success: DeskView }))

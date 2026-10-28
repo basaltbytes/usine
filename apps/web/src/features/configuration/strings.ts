@@ -25,6 +25,9 @@ export const workerKindLabel = {
   cloudflare: "Cloudflare",
 } satisfies Record<WorkerKind, string>;
 
+export const provisionedHarnessCheckDescription =
+  "Harness checks run on the first machine, then on the next machine created after the configured interval since the last successful check.";
+
 export const approvalLabel = {
   none: "Not required",
   required: "Required",

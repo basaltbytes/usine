@@ -48,8 +48,7 @@ const deferredHarness = (harness: string, checkedAt: string) => ({
   check: {
     _tag: "Deferred",
     checkedAt,
-    message:
-      "Checked on the worker's first machine each day, since no machine exists before an attempt.",
+    message: "Checked on the first machine, then every 86400 seconds when a machine is created.",
   },
 });
 

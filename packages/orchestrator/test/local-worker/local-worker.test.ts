@@ -30,7 +30,7 @@ import { GitHubApp, InstallationDiscoveryError } from "@usine/github/github-app"
 import { InstanceDirectory } from "@usine/core/instance";
 import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
 import { StepExecution, StepExecutor } from "@usine/engine/step-executor";
-import { stepExecutorLayer } from "../../src/scheduler.ts";
+import { stepExecutorLayer } from "../../src/scheduler/scheduler.ts";
 import { TestClock } from "effect/testing";
 import { RunEngine, Submission } from "@usine/engine/engine";
 import { TranscriptAllQuery, TranscriptTailQuery } from "@usine/engine/transcript";

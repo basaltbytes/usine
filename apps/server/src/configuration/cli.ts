@@ -40,7 +40,7 @@ export const runConfigCommand = Effect.fn("Cli.config")(
           expected,
           changes,
           message,
-          actor: instance.config.operator,
+          actor: (yield* store.read).actor,
         });
         yield* Console.log(`Revision ${revision.number}: ${changes.length} change(s).`);
         yield* Effect.forEach(

@@ -332,7 +332,7 @@ Without Docker, the worker runs its attempts as the SSH user, as before containe
 | `memory_mib` | `MemTotal` in `/proc/meminfo` | 1024 MiB | (total − 1024) ÷ `max_concurrent_attempts`, rounded down to a MiB |
 | `pids` | the lower of `/proc/sys/kernel/threads-max` and `/proc/sys/kernel/pid_max` | 1024 | (total − 1024) ÷ `max_concurrent_attempts`, rounded down |
 
-A machine with 4 CPUs and 8 GiB of memory gives each container 3.5 CPUs and 7168 MiB with `max_concurrent_attempts: 1`, and 1.16 CPUs and 2389 MiB with `max_concurrent_attempts: 3`. No derived limit goes below 0.01 CPU, 256 MiB, or 64 processes. A provisioned worker's machines each run one attempt, so its first machine each day gets the limits for one attempt, and the worker's machines keep them until the next day's first machine.
+A machine with 4 CPUs and 8 GiB of memory gives each container 3.5 CPUs and 7168 MiB with `max_concurrent_attempts: 1`, and 1.16 CPUs and 2389 MiB with `max_concurrent_attempts: 3`. No derived limit goes below 0.01 CPU, 256 MiB, or 64 processes. A provisioned worker's machines each run one attempt, so its first checked machine gets the limits for one attempt, and the worker's machines keep them until the next successful machine check.
 
 Preflight logs the limits with the worker's preflight line, `SSH Worker preflight verified`: `cpus`, `memoryMib`, `pids`, `derivedLimits` (the ones it derived), `slots`, and the machine's `machineCpus`, `machineMemoryMib`, and `machineTasks`. The **Workers** page shows the limits that the last preflight applied and which ones it derived. A value in the file always wins over a derived one. A reload that raises `max_concurrent_attempts` runs preflight, which derives the limits again for new containers; one that lowers it runs no preflight, so new containers keep the smaller limits until the next preflight.
 
@@ -390,6 +390,17 @@ Both providers take these keys:
 | `provider` | `hetzner`, `boat` | required | Selects the provider and the other keys that it accepts. |
 | `token_env` | string | required | Name of the orchestrator's environment variable that contains the provider's API token: a Hetzner Cloud API token with **Read & Write** permission for the project, or a Boat API key. The file never contains the token itself. |
 | `api_keys` | mapping | `{}` | LLM provider API keys for each attempt, as names of the orchestrator's environment variables. Each attempt's container gets `anthropic` as `ANTHROPIC_API_KEY` for Claude Code, and `openai` as `OPENAI_API_KEY` for Codex, unless the worker's gateway has the provider in `llm_providers`. |
+
+Both providers accept a `timings` mapping. Values are positive whole seconds, at most 2147483:
+
+| Key under `timings` | Default | Description |
+| --- | --- | --- |
+| `ssh_wait` | `600` | Maximum wait for the new machine's endpoint, SSH readiness, and gateway connection. |
+| `creation_backoff_min` | `30` | Delay after the first failed machine creation. Each consecutive failure doubles it. |
+| `creation_backoff_max` | `600` | Maximum creation delay. Must be at least `creation_backoff_min`. |
+| `machine_check_interval` | `86400` | Time between successful machine checks. The first machine after startup is always checked. |
+
+For example, `timings: { ssh_wait: 900, machine_check_interval: 3600 }` waits up to 15 minutes for SSH and checks the next machine created at least an hour after the previous successful check. A failed check does not reset the interval.
 
 `kind: ssh` keys with a `provisioner`:
 
@@ -497,9 +508,11 @@ The parser refuses an `ssh` worker that:
 - Has a `gateway` and a Hetzner provisioner without `network`.
 - Has a `gateway` and a Boat provisioner, or a Boat provisioner without `identity_file`.
 
+Removing a worker keeps its provider token for one final machine sweep, then discards it. If deletion fails, the warning includes the instance and worker labels to use for manual cleanup. At startup, usine also warns about machines with its instance label whose worker is not configured. This discovery uses configured workers' tokens; if the removed worker used a separate provider account, restore its configuration to sweep that account.
+
 A reload refuses a changed `provisioner` with `RestartRequiredError`.
 
-Preflight creates no machine. It checks the provider token; for Hetzner, the server type in the location, the image, the SSH key, and the network; for Boat, the account's limits, which fail preflight if Boat doesn't offer the account the `size`. Hetzner documents no limits endpoint, so preflight reads none for it. It also checks the gateway's admin API, and that each harness of the roster has a credential that no machine has to keep: for Claude Code, `anthropic` in the gateway's `llm_providers` or `api_keys.anthropic`; for Codex, `openai` in `llm_providers` or `api_keys.openai`. Pi agents fail preflight on a provisioned worker. A Hetzner server type that is out of stock in the location logs a warning, and so does a Boat account that can't start sandboxes now or whose active-sandbox cap is below `max_concurrent_attempts`. The checks that need a machine run on the worker's first machine each day (UTC) and its first machine after `usine up`.
+Preflight creates no machine. It checks the provider token; for Hetzner, the server type in the location, the image, the SSH key, and the network; for Boat, the account's limits, which fail preflight if Boat doesn't offer the account the `size`. Hetzner documents no limits endpoint, so preflight reads none for it. It also checks the gateway's admin API, and that each harness of the roster has a credential that no machine has to keep: for Claude Code, `anthropic` in the gateway's `llm_providers` or `api_keys.anthropic`; for Codex, `openai` in `llm_providers` or `api_keys.openai`. Pi agents fail preflight on a provisioned worker. A Hetzner server type that is out of stock in the location logs a warning, and so does a Boat account that can't start sandboxes now or whose active-sandbox cap is below `max_concurrent_attempts`. The checks that need a machine run on the worker's first machine after `usine up` and after the configured machine check interval.
 
 ### `kind: cloudflare`
 

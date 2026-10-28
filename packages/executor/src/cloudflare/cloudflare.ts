@@ -1,5 +1,5 @@
 import { checkoutFiles } from "../checkout-files.ts";
-import { RemoteShell, type SshCommand } from "@usine/agents/child-host";
+import type { RemoteShell, SshCommand } from "@usine/agents/child-host";
 import { supportedCodexVersions } from "@usine/agents/preflight";
 import { ClaudeLoginLock } from "@usine/agents/runtime";
 import {
@@ -9,7 +9,6 @@ import {
   SandboxCredentials,
   type SandboxName,
   sandboxName,
-  SandboxOwner,
 } from "@usine/cloudflare";
 import { harnessEnvironment, SANDBOX_HOME } from "@usine/cloudflare/harness";
 import type { BrainSpec, Harness } from "@usine/core/agent/brain";
@@ -31,6 +30,7 @@ import { AttemptRuntime } from "@usine/durable/attempt-runtime";
 import {
   Array as Arr,
   Cache,
+  Context,
   DateTime,
   Deferred,
   Effect,
@@ -72,9 +72,10 @@ import {
 } from "../provision.ts";
 import { type RemoteCommands, remoteCommandsFor } from "../remote/commands.ts";
 import { renewableCredential } from "../renewable-credential.ts";
-import { type SandboxClient, type SandboxRequestError, sandboxClientFor } from "./client.ts";
+import type { SandboxRequestError } from "./client.ts";
+import { CloudflareWorkers, cloudflareWorkersFor, type CloudflareWorker } from "./workers.ts";
 import type { CloudflareExecutorOptions, CloudflareWorkerAddress } from "./model.ts";
-import { SHELL_ENVIRONMENT, SHELL_FAILURE } from "./shell/environment.ts";
+import { SHELL_FAILURE } from "./shell/environment.ts";
 
 /** The sandbox directory with the cached clone under `repos` and the checkout under `attempts`. */
 const WORKSPACE = `${SANDBOX_HOME}/workspace`;
@@ -99,16 +100,6 @@ const PROVIDER_LABELS = {
   anthropic: "Claude Code needs an Anthropic API key",
   openai: "Codex needs an OpenAI API key",
 } as const satisfies Record<CloudflareLlmProvider, string>;
-
-interface CloudflareWorker {
-  readonly address: CloudflareWorkerAddress;
-  /** This instance's owner of the Worker's sandboxes. */
-  readonly owner: SandboxOwner;
-  readonly client: SandboxClient;
-  readonly providers: ReadonlyArray<CloudflareLlmProvider>;
-  /** Returns the shell that runs commands in the sandbox `name`, through the sandbox shell. */
-  readonly shellFor: (name: SandboxName) => RemoteShell;
-}
 
 /** The sandbox paths of one Attempt's checkout. */
 const layoutFor = (repository: RepositoryName, attemptId: AttemptId) => {
@@ -235,45 +226,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
     const shell = options.shell ?? DEFAULT_SHELL;
     const drainPollInterval = options.drainPollInterval ?? "30 seconds";
 
-    const workers = new Map<WorkerName, CloudflareWorker>();
-    for (const address of options.workers) {
-      if (workers.has(address.name))
-        return yield* Effect.die(
-          new Error(`CloudflareExecutorOptions.workers names "${address.name}" twice`),
-        );
-      const owner = yield* Option.match(
-        Schema.decodeUnknownOption(SandboxOwner)(`${options.instance}.${address.name}`),
-        {
-          onNone: () =>
-            Effect.die(
-              new Error(
-                `CloudflareExecutorOptions.instance "${options.instance}" isn't in kebab case`,
-              ),
-            ),
-          onSome: Effect.succeed,
-        },
-      );
-      const client = yield* sandboxClientFor(address, owner);
-      const sshEnvironment = {
-        ...Object.fromEntries(
-          ["HOME", "PATH", "TMPDIR"].flatMap((name) =>
-            Option.toArray(
-              Option.map(Option.fromNullishOr(process.env[name]), (value) => [name, value]),
-            ),
-          ),
-        ),
-        [SHELL_ENVIRONMENT.workerUrl]: address.workerUrl.origin,
-        [SHELL_ENVIRONMENT.accessClientId]: Redacted.value(address.accessClientId),
-        [SHELL_ENVIRONMENT.accessClientSecret]: Redacted.value(address.accessClientSecret),
-      };
-      workers.set(address.name, {
-        address,
-        owner,
-        client,
-        providers: Arr.dedupe(address.providers.map(({ provider }) => provider)),
-        shellFor: (name) => new RemoteShell({ ssh: shell, sshEnvironment, destination: name }),
-      });
-    }
+    const { workerFor, membership } = yield* cloudflareWorkersFor(options, shell);
 
     const lastIssued = yield* Ref.make(DateTime.makeUnsafe(0));
     /**
@@ -296,19 +249,6 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
         Effect.sync(() => active.add(name)),
         () => Effect.sync(() => active.delete(name)),
       );
-
-    const workerFor = (operation: ExecutorOperation, name: WorkerName) =>
-      Option.match(Option.fromNullishOr(workers.get(name)), {
-        onNone: () =>
-          Effect.fail(
-            new ExecutorOperationError({
-              operation,
-              message: `No cloudflare worker named "${name}" is configured`,
-              cause: new Error(name),
-            }),
-          ),
-        onSome: Effect.succeed,
-      });
 
     /** Returns the variables that point git, gh, and the harnesses at the sandbox's outbound handlers. */
     const sandboxEnvironment = (worker: CloudflareWorker) => harnessEnvironment(worker.providers);
@@ -1194,17 +1134,20 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
       };
     }, session.prepare);
 
-    return Executor.of({
-      kind: "cloudflare",
-      recover,
-      cancel: session.cancel,
-      intervene: session.intervene,
-      isLive: session.isLive,
-      outcome: session.outcome,
-      preflight,
-      prepare,
-      sweep: Effect.void,
-    });
+    return Context.make(
+      Executor,
+      Executor.of({
+        kind: "cloudflare",
+        recover,
+        cancel: session.cancel,
+        intervene: session.intervene,
+        isLive: session.isLive,
+        outcome: session.outcome,
+        preflight,
+        prepare,
+        sweep: Effect.void,
+      }),
+    ).pipe(Context.add(CloudflareWorkers, membership));
   });
 
 /**
@@ -1217,17 +1160,19 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
 export const layer = (
   options: CloudflareExecutorOptions,
 ): Layer.Layer<
-  Executor,
+  Executor | CloudflareWorkers,
   never,
   | AttemptRuntime
   | ClaudeLoginLock
   | ChildProcessSpawner.ChildProcessSpawner
   | CredentialProvider
   | HttpClient.HttpClient
-> => Layer.effect(Executor, makeCloudflareExecutor(options));
+> => Layer.effectContext(makeCloudflareExecutor(options));
 
 export type {
   CloudflareExecutorOptions,
   CloudflareProviderKey,
   CloudflareWorkerAddress,
 } from "./model.ts";
+
+export { CloudflareWorkers } from "./workers.ts";

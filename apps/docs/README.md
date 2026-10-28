@@ -12,6 +12,8 @@ pnpm --filter @usine/docs run deploy  # upload dist/ to docs.usine.dev
 
 Pages are Markdown or MDX files in `src/content/docs/`. The `guides/`, `architecture/`, and `reference/configuration/` folders are sidebar groups that list their pages automatically, ordered by each page's `sidebar.order`. Link to other pages by route, such as `/architecture/run-lifecycle/`. The build fails on a link to a page or heading that doesn't exist.
 
+The [workers and gateway architecture page](src/content/docs/architecture/workers-and-gateway.mdx) describes gateway-held harness logins, caller tokens, and cleanup of attempt Codex homes.
+
 The [Operate runs guide](src/content/docs/guides/operate-runs.md) documents saved agent definitions for Retry, current definitions for Edit and retry, cancellation of open runs, and failure-to-answer statistics for retries and resolutions.
 
 The [server guide](src/content/docs/guides/run-the-orchestrator-on-a-server.mdx) documents npm channel upgrades, idle and immediate restarts, the independent rollback helper, and setup for existing systemd installations. The CLI and `usine.yaml` reference pages describe the corresponding command and settings.
@@ -21,3 +23,5 @@ TypeDoc generates `reference/api/` on every `build`, `dev`, and `check`, from th
 A fenced `mermaid` code block renders as a diagram in the browser and follows the light or dark theme.
 
 `wrangler.jsonc` makes the Worker serve `dist/` as static assets on the `docs.usine.dev` custom domain, with no Worker script. The `Deploy docs` workflow (`.github/workflows/deploy-docs.yml`) builds and deploys on every push to `main`, with the `CLOUDFLARE_API_TOKEN` repository secret. To deploy by hand, run `pnpm turbo run build --filter=@usine/docs` first, because `deploy` uploads `dist/` as it is, after `npx wrangler login` to the Basaltbytes account.
+
+The worker reference documents provisioner timing settings in seconds, machine checks, and cleanup when a worker is removed. The execution architecture describes attempt persistence before machine creation.

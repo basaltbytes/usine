@@ -197,6 +197,7 @@ describe("TriggerCondition", () => {
           changes: SubscriptionRef.changes(current),
           reload: Effect.die("the test swaps the instance itself"),
           registerWorkers: () => Effect.void,
+          commit: () => Effect.die("the test swaps the instance itself"),
         });
         const submission = submissionFor(scheduleLoop.name, '["github","basaltbytes/usine"]');
         yield* Effect.gen(function* () {
