@@ -114,6 +114,10 @@
     "./agent/capability": {
       "types": "./dist/agent/capability.d.ts",
       "default": "./dist/agent/capability.js"
+    },
+    "./upgrade": {
+      "types": "./dist/upgrade.d.ts",
+      "default": "./dist/upgrade.js"
     }
   },
   "publishConfig": {

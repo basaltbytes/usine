@@ -1,3 +1,4 @@
+import { UpgradeChannel, UpgradeMode } from "@usine/core/upgrade";
 import { Effort, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget } from "@usine/core/agent/session";
 import { OperatorLogin } from "@usine/core/operator";
@@ -345,6 +346,8 @@ export const Worker = Schema.Union([LocalWorker, ExeDevWorker, SshWorker, Cloudf
 export type Worker = typeof Worker.Type;
 
 export class Settings extends Schema.Class<Settings>("@usine/config/Settings")({
+  upgradeChannel: UpgradeChannel.pipe(Schema.withDecodingDefaultKey(Effect.succeed("latest"))),
+  upgradeMode: UpgradeMode.pipe(Schema.withDecodingDefaultKey(Effect.succeed("propose"))),
   /** The interval between GitHub polling cycles, in seconds. */
   pollInterval: PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(60))),
   /** The maximum number of child sessions per Attempt, counting sequential spawns. */
@@ -395,6 +398,8 @@ export class Tracing extends Schema.Class<Tracing>("@usine/config/Tracing")({
 
 const SettingsFromYaml = Settings.pipe(
   Schema.encodeKeys({
+    upgradeChannel: "upgrade_channel",
+    upgradeMode: "upgrade_mode",
     pollInterval: "poll_interval",
     maxChildren: "max_children",
     maxAttemptMinutes: "max_attempt_minutes",

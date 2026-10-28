@@ -62,3 +62,5 @@ Outbound `SessionEvent` envelopes keep parent and first-level child session iden
 The optional `SessionStarted.harnessSession` (`HarnessSession`) records the harness's `HarnessSessionId` and the worker `cwd`, apart from usine's session identity. Its optional `home` is the directory the harness saved the session in when the attempt set one, Codex's `CODEX_HOME`. Older transcripts decode `harnessSession`, and a `HarnessSession` without `home`, to `Option.none()`.
 
 Envelopes include `PROTOCOL_VERSION` (7), which the transcript store uses to read older envelopes. Version 7 added the previous attempt's pushed salvage to `RunSpec` (`resume`); version 6 added harness session metadata.
+
+`@usine/core/upgrade` defines release versions, upgrade channels and modes, request timing, and the durable helper outcome shared by configuration and operator surfaces.

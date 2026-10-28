@@ -65,3 +65,5 @@ Subpaths: `/factory` (settings and registry), `/board` (lanes), `/label`, `/loop
 `InstanceFolder` (`/instance-folder`) and `ConfigParser` (`/parser`) are Effect services. `InstanceFolder.layer` needs `FileSystem.FileSystem` and `Path.Path`; `ConfigParser.layer` needs `ExpressionEngine` from `@usine/expression/expression-engine`.
 
 The 0.x APIs can change between minor releases.
+
+For a global server installation managed by systemd, `settings.upgrade_channel` selects `latest` (default) or `next`. `settings.upgrade_mode` selects `off`, `propose` (default), or `automatic`. Reloading the instance applies both settings; automatic mode waits for admitted attempts to finish before upgrading.
