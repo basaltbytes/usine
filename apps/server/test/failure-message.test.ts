@@ -1,4 +1,6 @@
-import { FactoryConfigError, InstancePath } from "@usine/config/file";
+import { ConfigurationInvalid } from "@usine/config/configuration";
+import { Option } from "effect";
+import { ConfigFileError, InstancePath } from "@usine/config/file";
 import { WorkerName } from "@usine/core/worker";
 import { DurableHarnessError } from "@usine/durable/harness";
 import { EnginePersistenceError } from "@usine/engine/engine";
@@ -9,27 +11,37 @@ import { failureMessage } from "../src/failure-message.ts";
 describe("CLI failure messages", () => {
   it("names the file, stage, and key of an invalid usine.yaml", () => {
     const message = failureMessage(
-      new FactoryConfigError({
-        file: InstancePath.make("usine.yaml"),
-        stage: "schema",
-        message: 'Expected a full GitHub repo name (owner/name)\n  at ["repos"][0]["name"]',
+      new ConfigurationInvalid({
+        problems: [
+          new ConfigFileError({
+            expression: Option.none(),
+            file: InstancePath.make("usine.yaml"),
+            stage: "schema",
+            message: 'Expected a full GitHub repo name (owner/name)\n  at ["repos"][0]["name"]',
+          }),
+        ],
       }),
     );
-    assert.include(message, "usine.yaml is invalid (schema)");
+    assert.include(message, "usine.yaml (schema)");
     assert.include(message, '["repos"][0]["name"]');
     assert.notInclude(message, "FactoryConfigError");
   });
 
   it("names a folder the instance load could not read", () => {
     const message = failureMessage(
-      new FactoryConfigError({
-        file: InstancePath.make("loops"),
-        stage: "read",
-        message: "ENOENT: no such file or directory",
+      new ConfigurationInvalid({
+        problems: [
+          new ConfigFileError({
+            expression: Option.none(),
+            file: InstancePath.make("loops"),
+            stage: "read",
+            message: "ENOENT: no such file or directory",
+          }),
+        ],
       }),
     );
-    assert.include(message, "could not read loops (ENOENT: no such file or directory)");
-    assert.include(message, "instance folder");
+    assert.include(message, "loops (read): ENOENT: no such file or directory");
+    assert.include(message, "no revision was written");
   });
 
   it("names the Worker, the failed check, and the cause of a preflight refusal", () => {

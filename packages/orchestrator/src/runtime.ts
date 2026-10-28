@@ -1,9 +1,14 @@
+import type { RunDatabase } from "@usine/engine/database";
+import type { EnginePersistenceError } from "@usine/engine/engine";
 import { BrainSpec } from "@usine/core/agent/brain";
 import { NodeServices } from "@effect/platform-node";
 import { ConfigParser } from "@usine/config/parser";
 import type { InstanceDirectory, InstanceId } from "@usine/core/instance";
 import { layer as durableAttemptRuntimeLayer } from "@usine/durable/live";
-import { observationLayer as localObservationLayer } from "@usine/engine/local-sqlite";
+import {
+  observationLayer as localObservationLayer,
+  localSqliteLayer,
+} from "@usine/engine/local-sqlite";
 import { claudeLoginLockLayer } from "@usine/executor";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { GitHubApp } from "@usine/github/github-app";
@@ -30,11 +35,14 @@ import { WorkerStatus } from "./worker-status.ts";
  * Provides the read-only operator surface (observation, desk, and configuration) for when trigger
  * credentials aren't available yet. No Worker runs Attempts.
  */
-export const operatorObservationLayer = (instanceDirectory: InstanceDirectory) =>
+export const operatorObservationLayer = (
+  instanceDirectory: InstanceDirectory,
+  database: Layer.Layer<RunDatabase, EnginePersistenceError> = localSqliteLayer(instanceDirectory),
+) =>
   Layer.mergeAll(OperatorObservation.layer, OperatorConfiguration.layer).pipe(
     Layer.provide(
       Layer.mergeAll(
-        localObservationLayer(instanceDirectory),
+        localObservationLayer(instanceDirectory, database),
         idleTriggersLayer,
         MarcbachmannCelLayer,
         WorkerStatus.idle,
@@ -46,7 +54,11 @@ export const operatorObservationLayer = (instanceDirectory: InstanceDirectory) =
  * Provides the full Node composition for one factory: trigger streams, the durable engine, Worker
  * execution, and the operator surface. Requires the GitHub credentials and `CurrentInstance`.
  */
-export const runtimeLayer = (instanceDirectory: InstanceDirectory, instanceId: InstanceId) => {
+export const runtimeLayer = (
+  instanceDirectory: InstanceDirectory,
+  instanceId: InstanceId,
+  database: Layer.Layer<RunDatabase, EnginePersistenceError> = localSqliteLayer(instanceDirectory),
+) => {
   const app = GitHubApp.layer.pipe(
     Layer.provide(externalHttpClientLayer),
     Layer.provide(NodeServices.layer),
@@ -77,6 +89,7 @@ export const runtimeLayer = (instanceDirectory: InstanceDirectory, instanceId: I
         startup.agents.map(
           ({ harness, model, effort }) => new BrainSpec({ harness, model, effort }),
         ),
+        database,
       );
     }),
   ).pipe(

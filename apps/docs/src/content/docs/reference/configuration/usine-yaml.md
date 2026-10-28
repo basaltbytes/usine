@@ -5,7 +5,7 @@ sidebar:
   order: 1
 ---
 
-`usine.yaml` is at the top of the instance folder, next to `loops/` and `agents/`. It contains the registry of managed repositories, labels, board lanes, settings, workers, and span export.
+`usine.yaml` is the import and export format at the top of the instance folder, next to `loops/` and `agents/`. The first start imports these files once; later starts read the configuration store. Use [`usine config edit` or `usine config import`](/reference/configuration/cli/#configuration-revisions) to save changes. It contains the registry of managed repositories, labels, board lanes, settings, workers, and span export.
 
 The orchestrator reads it at startup and at each [reload](/reference/configuration/cli/#reload). A reload applies `labels`, `repos`, `settings`, and `operator` to new work, and resizes, adds, or removes [workers](#workers). Changes to `webhooks` and `tracing`, and some `workers` changes, need a restart.
 
@@ -14,7 +14,7 @@ The parser is strict:
 - Keys are snake_case in the file. The parser renames them to camelCase domain fields ([`Schema.encodeKeys`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/factory.ts#L182)), so `poll_interval` in the file is `pollInterval` in code.
 - An unknown key at any level is an error ([`onExcessProperty: "error"`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/parser.ts#L186)).
 - Duplicate keys and YAML parser warnings are errors ([`parseYamlDocument`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/yaml/document.ts#L18)).
-- An invalid `usine.yaml` stops the instance from loading: `usine up` prints one line with the file, the failed stage, the reason, and the path of the invalid key, and exits with status 1. An invalid loop or agent file affects only that file ([Validation and quarantine](/reference/configuration/loop-files/#validation-and-quarantine)).
+- An invalid configuration file rejects the complete import. The command lists schema, CEL, and reference problems and saves no revision.
 
 The schema is [`UsineConfig`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/factory.ts#L209) in `packages/config/src/factory.ts`.
 
@@ -129,7 +129,7 @@ flowchart LR
   lanes -. "label" .-> labels
 ```
 
-A solid arrow is a reference that must resolve: usine quarantines a loop whose agent, selected repository, or selected tag doesn't exist. A dotted arrow only logs a warning if the label isn't declared ([`configWarnings`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/parser.ts#L256)).
+A solid arrow is a reference that must resolve: an import fails if a loop's agent, selected repository, or selected tag doesn't exist. A dotted arrow only logs a warning if the label isn't declared ([`configWarnings`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/parser.ts#L256)).
 
 ## Top-level keys
 

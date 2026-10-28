@@ -1,8 +1,10 @@
+import type { RunDatabase } from "@usine/engine/database";
+import type { EnginePersistenceError } from "@usine/engine/engine";
 import { NodeServices } from "@effect/platform-node";
 import type { SshWorker, UsineConfig, Worker as ConfigWorker } from "@usine/config/factory";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import type { InstanceDirectory } from "@usine/core/instance";
-import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
+import { layer as localEngineLayer, localSqliteLayer } from "@usine/engine/local-sqlite";
 import { WorkerCapabilityError, WorkerMachines } from "@usine/executor";
 import {
   layer as sshExecutorLayer,
@@ -234,6 +236,7 @@ export const layer = (
   config: UsineConfig,
   brains: ReadonlyArray<BrainSpec>,
   options: SshExecutorOptions,
+  database: Layer.Layer<RunDatabase, EnginePersistenceError> = localSqliteLayer(instanceDirectory),
 ) => {
   const executor = sshExecutorLayer(options).pipe(
     Layer.provide(NodeServices.layer),
@@ -242,5 +245,5 @@ export const layer = (
   const stepExecutor = withSshWorkerDiscard(instanceDirectory, (discard) =>
     sshStepExecutorLayer(config, brains, { discard }),
   ).pipe(Layer.provide(executor));
-  return localEngineLayer(instanceDirectory).pipe(Layer.provideMerge(stepExecutor));
+  return localEngineLayer(instanceDirectory, database).pipe(Layer.provideMerge(stepExecutor));
 };

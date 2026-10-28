@@ -28,6 +28,18 @@ const noEnvironment = {
 };
 
 describe("usine CLI", () => {
+  it.each([
+    ["config"],
+    ["config", "export", ""],
+    ["config", "import", ""],
+    ["config", "import", "folder", "--message"],
+    ["config", "edit", "unknown", "name"],
+    ["config", "log", "agent"],
+  ])("rejects malformed configuration operands: %j", async (...args) => {
+    const failure = await Effect.runPromise(parseCli(args, noEnvironment).pipe(Effect.flip));
+    assert.instanceOf(failure, CliUsageError);
+  });
+
   it("parses backup independently of server settings and provides help", async () => {
     const command = await Effect.runPromise(
       parseCli(["backup", "evidence.sqlite"], {

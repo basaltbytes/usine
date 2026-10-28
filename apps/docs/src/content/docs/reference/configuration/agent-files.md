@@ -5,9 +5,9 @@ sidebar:
   order: 3
 ---
 
-An agent is one Markdown file in `agents/`. The file name without `.md` is the agent name, which loops use in their `agent` field. The frontmatter is the brain spec: the harness, model, and reasoning effort of the child sessions, and optional settings for the attempt's Pi parent. The body is the persona, the standing instructions for every session of the agent.
+An agent exports as one Markdown file in `agents/`. The file name without `.md` is the agent name, which loops use in their `agent` field. The frontmatter is the brain spec: the harness, model, and reasoning effort of the child sessions, and optional settings for the attempt's Pi parent. The body is the persona, the standing instructions for every session of the agent.
 
-The orchestrator reads every `.md` file directly in `agents/`, in name order, at startup and at each [reload](/reference/configuration/cli/#reload). The folder must exist, even if it's empty. A run keeps the agent that it opened with, so an edited agent applies to new runs.
+The first start imports the `agents/` folder, which must exist even if it is empty. Later starts and reloads read the configuration store. Use [`usine config edit agent <name>` or `usine config import <folder>`](/reference/configuration/cli/#configuration-revisions) to save changes. A run keeps the agent that it opened with, so an edited agent applies to new runs.
 
 The schema is [`AgentFrontmatter`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/parser.ts#L44) in `packages/config/src/parser.ts`, which produces an [`AgentFile`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/agent.ts#L7).
 
@@ -75,7 +75,7 @@ Loops can rely on the signature, as the `act-on-findings` example in [More examp
 
 ## Roster
 
-Every valid agent file is in the roster. usine leaves out an invalid file, and quarantines every loop that references it with `Unknown agent "<name>": agents/<name>.md is missing or invalid. Fix the agent file, or set agent to an existing agent.` At startup and at each reload, it logs each invalid file with its stage and message, and lists it in **Needs attention** as **Agent file not loaded**.
+Every agent in a committed configuration is in the roster. An invalid agent file rejects the complete import, including loops that reference the invalid agent. The command lists the file, stage, and message; fix the files and import again. No revision is saved for an invalid import.
 
 | Stage | Checks |
 | --- | --- |

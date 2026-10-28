@@ -83,6 +83,7 @@ export const localSqliteLayer = (instanceDirectory: InstanceDirectory) => {
 /** Returns the local runtime layer on `.usine/runtime.sqlite`. */
 export const layer = (
   instanceDirectory: InstanceDirectory,
+  database: Layer.Layer<RunDatabase, EnginePersistenceError> = localSqliteLayer(instanceDirectory),
 ): Layer.Layer<
   | BoardMoves
   | CursorStore
@@ -97,11 +98,12 @@ export const layer = (
   | UnconfirmedStops,
   RunEngineError,
   StepExecutor | TriggerCondition
-> => layerWithDatabase(localSqliteLayer(instanceDirectory)).pipe(Layer.provide(NodeServices.layer));
+> => layerWithDatabase(database).pipe(Layer.provide(NodeServices.layer));
 
 /** Returns the observation layer, which initializes the local database but never recovers Runs or starts Attempts. */
 export const observationLayer = (
   instanceDirectory: InstanceDirectory,
+  database: Layer.Layer<RunDatabase, EnginePersistenceError> = localSqliteLayer(instanceDirectory),
 ): Layer.Layer<
   | CycleBudgets
   | ItemProjectionReader
@@ -111,7 +113,6 @@ export const observationLayer = (
   | UnconfirmedStops,
   RunEngineError
 > => {
-  const database = localSqliteLayer(instanceDirectory);
   return Layer.mergeAll(
     CycleBudgets.layer,
     ItemProjectionReader.layer,

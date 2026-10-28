@@ -1,3 +1,4 @@
+import type { configCommand } from "./configuration/cli.ts";
 import { Duration, type Effect, Match, Option, Schema } from "effect";
 import type { backup } from "./backup.ts";
 import type { CliUsageError, CliVersionError } from "./cli.ts";
@@ -12,6 +13,7 @@ import type { UpgradeFailedError, upgrade } from "./upgrade.ts";
 
 /** The expected failures of CLI commands. Defects aren't included and still crash. */
 export type CliFailure =
+  | Effect.Error<ReturnType<typeof configCommand>>
   | CliUsageError
   | CliVersionError
   | Effect.Error<ReturnType<typeof instanceEnvironment>>
@@ -195,10 +197,13 @@ export const failureMessage = (failure: CliFailure): string =>
       `usine up stopped: could not listen on 127.0.0.1:${port}${because(cause)}. Run usine up --port <port> to use another port.`,
     ResourceAttributesError: ({ variable, message }) =>
       `usine up did not start: ${variable} is invalid: ${clause(message)}. Set it to comma-separated key=value pairs with percent-encoded keys and values, or unset it.`,
-    FactoryConfigError: ({ file, stage, message }) =>
-      stage === "read"
-        ? `usine up did not start: could not read ${file} (${clause(message)}). Run usine up from the instance folder, which contains usine.yaml, agents/, and loops/.`
-        : `usine up did not start: ${file} is invalid (${stage}): ${clause(message)}. Fix the file and run usine up again.`,
+    ConfigCommandError: ({ message }) => message,
+    ConfigurationInvalid: ({ problems }) =>
+      `Configuration is invalid; no revision was written.\n${problems.map(({ file, stage, message }) => `${file} (${stage}): ${message}`).join("\n")}`,
+    ConfigurationStoreError: ({ operation, cause }) =>
+      `Configuration store error: could not ${operation}${because(cause)}.`,
+    StaleRevision: ({ expected, actual }) =>
+      `Configuration changed from revision ${expected} to ${actual}. No revision was written. Export or edit the current configuration and try again.`,
     UnsupportedWorkerError: ({ worker, kind }) =>
       `usine up did not start: worker "${worker}" has kind ${kind}, which differs from the other workers in usine.yaml. usine up runs all workers with one executor. Give every worker under workers the same kind.`,
     WorkerCapabilityError: ({ worker, capability, message, cause }) =>

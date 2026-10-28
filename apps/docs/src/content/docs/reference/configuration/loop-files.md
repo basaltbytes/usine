@@ -5,9 +5,9 @@ sidebar:
   order: 2
 ---
 
-A loop is one Markdown file in `loops/`. The file name without `.md` is the loop's name and identity: renaming the file removes the old loop and creates a new one, and deleting it removes the loop. The YAML frontmatter declares the trigger, the selector, and the agent. The body is the prompt template for the agent's task. usine has no built-in loops.
+A loop exports as one Markdown file in `loops/`. The file name without `.md` is the loop's name and identity: importing a renamed file removes the old loop and creates a new one, and importing a folder without it removes the loop. The YAML frontmatter declares the trigger, the selector, and the agent. The body is the prompt template for the agent's task. usine has no built-in loops.
 
-The orchestrator reads every `.md` file directly in `loops/`, in name order, at startup and at each [reload](/reference/configuration/cli/#reload). It ignores other files. If `loops/` or `agents/` is missing, the instance doesn't load.
+The first start imports every `.md` file directly in `loops/` and `agents/`, in name order. Both folders must exist for that import. Later starts and reloads read the configuration store. Use [`usine config edit loop <name>` or `usine config import <folder>`](/reference/configuration/cli/#configuration-revisions) to save changes.
 
 The schema is [`LoopFrontmatter`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/parser.ts#L31) in `packages/config/src/parser.ts`, which produces a [`LoopFile`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/loop.ts#L25).
 
@@ -261,7 +261,7 @@ The task doesn't need to repeat payload fields or these rules. Interpolate value
 
 ## Validation and quarantine
 
-usine validates each loop file separately. A file that fails a check is quarantined: the loop opens no runs, and the other loops still load ([`InstanceFolder.load`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/instance-folder.ts#L93)). The checks run in this order, and the first failure sets the stage:
+Configuration imports validate every loop file and reject the complete import if any file is invalid. No revision is saved, and the running configuration stays unchanged. Diagnostics name the file and validation stage:
 
 | Stage | Checks | Example message |
 | --- | --- | --- |
@@ -273,9 +273,9 @@ usine validates each loop file separately. A file that fails a check is quaranti
 | `expression` | `if` type-checks as a boolean, and each interpolation is closed and type-checks as a scalar. | `No such key: nmae` |
 | `reference` | The agent is in the roster, and the selected repositories and tags exist in `usine.yaml`. | `Unknown tags in selector.tags: "mobile". Add them to a repository's tags in usine.yaml.` |
 
-At startup and at each reload, usine logs each quarantined loop as a warning, `Loop quarantined; it opens no Runs until its file is fixed`, with its file, stage, and message, and lists it in **Needs attention** as **Loop file not loaded**. Fix the file and [reload](/reference/configuration/cli/#reload).
+Fix each reported file and import the folder again. Invalid loops never enter the configuration store.
 
-Two checks only log a warning: a label name in `if` ([label declarations](/reference/configuration/expressions/#label-declarations)) or in a [lane](/reference/configuration/usine-yaml/#reposlanes) that `usine.yaml` doesn't declare.
+Two checks add a non-blocking diagnostic: a label name in `if` ([label declarations](/reference/configuration/expressions/#label-declarations)) or in a [lane](/reference/configuration/usine-yaml/#reposlanes) that `usine.yaml` doesn't declare.
 
 ## More examples
 

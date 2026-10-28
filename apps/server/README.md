@@ -28,9 +28,23 @@ usine upgrade       # back up, move the @usine/server pin, install, commit, and 
 
 Without GitHub App credentials, it logs the typed error, leaves both trigger streams idle, and opens the setup screen in the default browser. The browser command times out after two seconds; a failed opener only logs a warning. Runs, transcripts, and loop pause state stay readable, and the instance folder can be reloaded, but interventions are unavailable. Supply `USINE_GITHUB_APP_ID` and `USINE_GITHUB_PRIVATE_KEY`, or `app_id` and `private_key` in a mode-0600 `.usine/github-app.json`. Credentials are read only at startup, so restart `usine up` after adding them, as the setup screen says.
 
+## Configuration commands
+
+The first start imports `usine.yaml`, `agents/`, and `loops/` as revision 1, with the operator as actor and the message `Imported from the instance folder`. Invalid files prevent the import. Later starts read configuration only from `.usine/runtime.sqlite`. Keep `.env`, `.usine/github-app.json`, and the listen address in files or environment variables.
+
+```sh
+usine config export ./configuration
+usine config import ./configuration --message "Update worker slots"
+usine config edit agent developer
+usine config log
+usine config log agent developer
+```
+
+These commands work while `usine up` runs and while it is stopped. `edit` uses `$EDITOR` and refuses an edit if another revision was committed meanwhile. Entity kinds are `settings` (name `instance`), `worker`, `repository`, `label`, `loop`, and `agent`. Imports print the changed entities and save one revision, or report all validation problems without saving. A configuration with no differences saves no revision. Revisions apply live after worker preflight; restart-required changes remain stored until restart.
+
 ## Web UI
 
-Each project opens as a board of authored or proposed lanes; proposed lanes are read-only. To enable moves, define `repos[].lanes` in `usine.yaml` and reload (see the [lane example](../../packages/config/README.md)). Moving an item to an authored label-backed lane swaps only the labels in that map and keeps other labels; polling then evaluates label-driven loops. Cards show the latest run and open its drawer. Retry controls describe the saved harness and model. The drawer flags a changed agent definition, and **Edit and retry** uses the current loaded definition even with the same task and agent name. `POST /api/runs/:id/cancel` returns 409 for failed and succeeded runs and preserves their outcomes; repeating it on a canceled run succeeds.
+Each project opens as a board of authored or proposed lanes; proposed lanes are read-only. To enable moves, edit the repository with `usine config edit repository <owner/name>` (see the [lane example](../../packages/config/README.md)). Moving an item to an authored label-backed lane swaps only the labels in that map and keeps other labels; polling then evaluates label-driven loops. Cards show the latest run and open its drawer. Retry controls describe the saved harness and model. The drawer flags a changed agent definition, and **Edit and retry** uses the current loaded definition even with the same task and agent name. `POST /api/runs/:id/cancel` returns 409 for failed and succeeded runs and preserves their outcomes; repeating it on a canceled run succeeds.
 
 The UI can approve, retry, or cancel a run, pause or unpause a loop, page back through older transcript rows, and tail parent and first-level child activity.
 
@@ -44,9 +58,9 @@ After `pnpm build`, reload the page to use the new web bundle; no restart is nee
 
 ## Reload the configuration
 
-**Reload configuration** on any Configuration page, `POST /api/instance/reload`, and `SIGHUP` reload `usine.yaml`, `agents/`, and `loops/` without stopping the process. `SIGHUP` no longer ends the process; stop it with Ctrl+C or `SIGTERM`. The [CLI reference](https://docs.usine.dev/reference/configuration/cli/) describes what a reload applies. A refused reload keeps the running configuration and returns:
+**Reload configuration** on any Configuration page, `POST /api/instance/reload`, and `SIGHUP` re-read the configuration store without stopping the process. Revisions also apply automatically. `SIGHUP` no longer ends the process; stop it with Ctrl+C or `SIGTERM`. The [CLI reference](https://docs.usine.dev/reference/configuration/cli/) describes what a reload applies. A refused reload keeps the running configuration and returns:
 
-- 422 `FactoryConfigError` for an invalid `usine.yaml`;
+- 422 `FactoryConfigError` if the configuration store cannot be read;
 - 409 `RestartRequiredError`, naming the field, for a changed `webhooks` block or a `workers` change that needs a restart (a worker's kind or settings, or a rename);
 - 409 `ReloadPreflightError` if a worker, slot count, or agent brain that the reload adds fails preflight, or a new SSH worker's gateway admin token variable is unset.
 
@@ -62,7 +76,7 @@ usine backup /path/to/runtime-backup.sqlite
 
 Both copies include committed WAL data and are owner-only. The command opens each source read-only, copies the durable storage first, needs no GitHub credentials, and never overwrites a file. Use a new name in an existing writable directory on a file system with hard links. If the runtime copy fails, the durable copy is removed. Without durable storage (no attempt has run yet), it writes only the runtime copy and says so. Errors give the path and cause.
 
-Keep backups outside the instance folder, and back up the instance files and credentials separately. To restore, stop the orchestrator and restore both files of one backup:
+Keep backups outside the instance folder. The runtime backup includes authored configuration and revisions; back up credentials and bootstrap files separately. To restore, stop the orchestrator and restore both files of one backup:
 
 1. Move `.usine/runtime.sqlite` and `.usine/durable.sqlite` aside, with their `-wal` and `-shm` files.
 2. Copy the runtime backup to `.usine/runtime.sqlite` and the `.durable` backup to `.usine/durable.sqlite`.
