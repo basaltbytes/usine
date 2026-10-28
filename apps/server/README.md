@@ -40,6 +40,8 @@ usine config log
 usine config log agent developer
 ```
 
+Importing an unchanged export prints `No configuration changes.` and saves no revision. Adding or removing a worker records only that worker; unchanged loops and other entities keep their existing history.
+
 These commands work while `usine up` runs and while it is stopped. `edit` uses `$EDITOR` and refuses an edit if another revision was committed meanwhile. Entity kinds are `settings` (name `instance`), `worker`, `repository`, `label`, `loop`, and `agent`. Imports print the changed entities and save one revision, or report all validation problems without saving. A configuration with no differences saves no revision. Revisions apply live after worker preflight; restart-required changes remain stored until restart.
 
 ## Web UI

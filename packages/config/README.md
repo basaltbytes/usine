@@ -78,4 +78,6 @@ For a global server installation managed by systemd, `settings.upgrade_channel` 
 
 `ConfigurationFolder` from `/folder-codec` imports a folder strictly and exports the current format. It rejects invalid configuration as a whole, including invalid loop and agent files. `InstanceFolder.load` remains the permissive inspection API for callers that need quarantine diagnostics. Export writes complete YAML and Markdown files; it does not preserve YAML comments and removes stale Markdown entity files in the destination. It does not export secrets or loop pause state.
 
+Entity values use schema encoding with parser defaults applied. Exporting and importing unchanged configuration produces an empty diff. Diffs compare the relative order of retained entities, so adding or removing a worker does not mark later entities as changed. Reordering workers records their changed preference order.
+
 Boat workers accept a gateway with `provisioner.snapshot` and `provisioner.tailnet`. The tailnet settings contain the gateway address and OAuth environment-variable names; parsing rejects a gateway without both settings. See the [provisioned-worker guide](https://docs.usine.dev/guides/add-a-provisioned-worker/#gateway-subscriptions-over-tailscale).

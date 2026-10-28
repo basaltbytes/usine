@@ -32,7 +32,11 @@ import {
   ConfigurationRevisionNumber,
   ConfigurationStore,
 } from "../src/configuration/store.ts";
-import { ConfigurationFolder } from "../src/configuration/folder.ts";
+import {
+  ConfigurationFolder,
+  formatConfigurationEntity,
+  parseConfigurationEntity,
+} from "../src/configuration/folder.ts";
 import { memoryConfigurationLayer } from "../src/configuration/memory.ts";
 import { sqliteConfigurationLayer } from "../src/configuration/sqlite/store.ts";
 
@@ -72,7 +76,19 @@ settings:
   );
   const loop = yield* parser.parseLoopFile(
     InstancePath.make("loops/implement.md"),
-    "---\ntrigger:\n  on: issue\n  if: item.number > 0\nagent: developer\nselector:\n  tags: [app]\n---\nImplement #{{ item.number }}.\n",
+    `---
+trigger:
+  on: issue
+  if: >-
+    item.number > 0 &&
+    item.title != "This title makes the expression long enough for the YAML writer to fold it"
+agent: developer
+selector:
+  repos: [acme/project]
+  tags: [app]
+---
+Implement #{{ item.number }}.
+`,
   );
   return new LoadedInstance({
     config,
@@ -156,6 +172,54 @@ const adapters = [
 
 for (const [name, layer] of adapters)
   describe(`${name} configuration store contract`, () => {
+    it.effect("stores defaults and round-trips every entity kind without changes", () =>
+      Effect.gen(function* () {
+        const store = yield* ConfigurationStore;
+        const folder = yield* ConfigurationFolder;
+        const fs = yield* FileSystem.FileSystem;
+        const root = InstanceDirectory.make(yield* fs.makeTempDirectoryScoped());
+        const canonical = configurationEntities(yield* fixture);
+        const changes = (yield* initialChanges).map((change) =>
+          change.key.kind === "loop"
+            ? new ConfigurationChange({
+                ...change,
+                after: Option.map(change.after, (value) => {
+                  const {
+                    maxCycles: _cycles,
+                    permissions: _permissions,
+                    ...fields
+                  } = Schema.decodeUnknownSync(Schema.JsonObject)(value);
+                  return fields;
+                }),
+              })
+            : change,
+        );
+        const revision = yield* store.commit({ expected: zero, changes, ...metadata });
+        expect(revision.changes).toEqual(configurationDiff([], canonical));
+        const { instance } = yield* store.read;
+        if (Option.isNone(instance)) return yield* Effect.die("configuration is uninitialized");
+        yield* folder.export(root, instance.value);
+        const imported = configurationEntities(yield* folder.load(root));
+        expect(new Set(imported.map(({ key }) => key.kind))).toEqual(
+          new Set(["settings", "worker", "repository", "label", "loop", "agent"]),
+        );
+        expect(configurationDiff(canonical, imported)).toEqual([]);
+        for (const entity of imported) {
+          const edited = yield* parseConfigurationEntity(
+            parser,
+            entity.key,
+            yield* formatConfigurationEntity(entity),
+          );
+          expect(configurationDiff([entity], [edited])).toEqual([]);
+        }
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(layer),
+        Effect.provide(ConfigurationFolder.layer.pipe(Layer.provide(parserLayer))),
+        Effect.provide(NodeServices.layer),
+      ),
+    );
+
     it.effect("preserves worker order through imports, value changes, and revision replay", () =>
       Effect.gen(function* () {
         const store = yield* ConfigurationStore;
@@ -174,6 +238,8 @@ for (const [name, layer] of adapters)
           value: { name: "new-preferred", kind: "local", max_concurrent_attempts: 1 },
         });
         for (const candidate of [
+          [settings, ...workers, added, ...rest],
+          original,
           reordered,
           original.map((entity) =>
             entity.key.kind === "worker"
@@ -195,16 +261,18 @@ for (const [name, layer] of adapters)
             candidate,
           );
           expect(changes.length).toBeGreaterThan(0);
+          if (current.number <= 2)
+            expect(changes.map(({ key }) => key.key)).toEqual([added.key.key]);
           yield* store.commit({ expected: current.number, changes, ...metadata });
           const saved = yield* store.read;
           expect(Option.map(saved.instance, configurationEntities)).toEqual(Option.some(candidate));
           expect(configurationDiff(candidate, candidate)).toEqual([]);
         }
         let replayed = Configuration.empty;
-        for (const revision of yield* store.changes(zero).pipe(Stream.take(5), Stream.runCollect)) {
+        for (const revision of yield* store.changes(zero).pipe(Stream.take(7), Stream.runCollect)) {
           replayed = (yield* commit(parser, replayed, replayed.number, revision.changes, revision))
             .configuration;
-          if (revision.number === 2)
+          if (revision.number === 4)
             expect(
               Option.map(replayed.instance, ({ config }) => config.workers.map(({ name }) => name)),
             ).toEqual(Option.some(["fallback", "local"]));
