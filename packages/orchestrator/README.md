@@ -287,3 +287,22 @@ On refresh, the overview prunes acknowledgements for entries it no longer report
 For Boat workers behind a gateway, the SSH adapter resolves `provisioner.tailnet.client_id_env` and `client_secret_env` into redacted OAuth credentials. Missing variables produce a gateway capability error before an attempt starts.
 
 Needs attention includes `UnresponsiveWorkerNeed` after three consecutive unanswered worker probes. Each entry lists the affected running attempts and the last answer time. Worker notices refresh even when the board projection is cached, and remain visible beyond the recent transcript page. Recovery or completion removes the affected attempt; a later outage or changed attempt list resurfaces a dismissed entry. Worker preflight runs for every slot-count change on reload, including reductions.
+
+## Configuration revisions API
+
+`ConfigurationEditor` reads revision history and saves entity changes through `CurrentInstance.commit`. The runtime checks restart requirements and worker preflight before committing, then applies the accepted snapshot before the request returns. A refused API write saves no revision. The actor comes from the stored configuration's `operator` value.
+
+| Method | Path | Result |
+| --- | --- | --- |
+| GET | `/api/configuration/revisions` | Newest revision summaries, with optional `kind`, `identifier`, `before`, and `limit` query parameters. |
+| GET | `/api/configuration/revisions/:number` | A revision with each entity's before and after values. |
+| GET | `/api/configuration/entities/:kind/:identifier` | The current JSON `value`, export-format `text`, and revision `number`. |
+| PUT | `/api/configuration/entities/:kind/:identifier` | Creates or replaces an entity from `value` or `text`. |
+| DELETE | `/api/configuration/entities/:kind/:identifier` | Deletes an entity. |
+| POST | `/api/configuration/revisions/:number/revert` | Creates a revision that restores the earlier values and worker positions. |
+
+Writes require `expected`, the current revision number, and accept an optional `message`. PUT requires exactly one of `value` and `text`; workers also accept a zero-based `position`. Encode identifiers as URL path segments, including the slash in repository names. For example, `owner/repo` becomes `owner%2Frepo`.
+
+Revision lists default to 50 entries and accept limits from 1 to 100. Pass a response's `nextBefore` as `before` for the next page; `null` means there are no more entries. Before and after values use `null` for an absent entity. Actors and messages are nullable; times are ISO timestamps.
+
+Stale writes return 409 with `expected` and `current`. Invalid configuration returns 422 with a `problems` array containing the entity key, field path when available, and message. Unknown entities, kinds, and revision numbers return 404. A revert returns 409 with the conflicting entity keys if a later revision changed them. Restart and preflight refusals use the reload endpoint's error responses.

@@ -85,3 +85,7 @@ Historical revisions that record positions in the combined entity list require c
 Entity values use schema encoding with parser defaults applied. Exporting and importing unchanged configuration produces an empty diff. Diffs compare the relative order of retained entities, so adding or removing a worker does not mark later entities as changed. Reordering workers records their changed preference order.
 
 Boat workers accept a gateway with `provisioner.snapshot` and `provisioner.tailnet`. The tailnet settings contain the gateway address and OAuth environment-variable names; parsing rejects a gateway without both settings. See the [provisioned-worker guide](https://docs.usine.dev/guides/add-a-provisioned-worker/#gateway-subscriptions-over-tailscale).
+
+`Configuration.actor` returns the configured operator login for revision attribution. Schema errors include structured `details` with field paths and messages. Configuration validation associates problems in workers, repositories, and labels with their entity keys.
+
+`revertConfiguration(parser, target, history)` computes reverse changes from the revision log, including prior worker positions. It returns `ConfigurationRevertBlocked` with the entity keys changed by later revisions. Commit the returned changes with the expected current revision to prevent a concurrent write from being overwritten.

@@ -30,7 +30,7 @@ import {
 } from "./machines.ts";
 import { AttemptView } from "./attempt.ts";
 import { BoardItemLink } from "./board.ts";
-import { checkView, PreflightCheckView, WorkerSlotsView } from "./configuration.ts";
+import { checkView, PreflightCheckView, WorkerSlotsView } from "./configuration/view.ts";
 import { runView, workerAccesses } from "./projection.ts";
 import { RunView, UnconfirmedStopView } from "./run.ts";
 
