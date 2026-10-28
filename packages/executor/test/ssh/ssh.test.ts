@@ -509,7 +509,9 @@ describe("SSH Worker", () => {
           yield* Deferred.await(signalsOf(request.attemptId).working);
           assert.strictEqual(notices.at(-1)?._tag, "WorkerUnresponsive");
           yield* TestClock.adjust("1 minute");
-          assert.strictEqual(notices.at(-1)?._tag, "WorkerResponsive");
+          const confirmation = notices.at(-1);
+          assert(confirmation?._tag === "WorkerResponsive");
+          assert.isFalse(confirmation.recovered);
           const recoveredCount = notices.length;
           yield* TestClock.adjust("2 minutes");
           assert.lengthOf(notices, recoveredCount, "healthy probes do not repeat the notice");
@@ -589,6 +591,7 @@ describe("SSH Worker", () => {
           assert.lengthOf(notices(), 3);
           const answering = notices()[2];
           assert(answering?._tag === "WorkerResponsive");
+          assert.isTrue(answering.recovered);
           assert.strictEqual(DateTime.formatIso(answering.lastAnsweredAt), launchedAt);
 
           yield* Deferred.succeed(done, undefined);
@@ -635,12 +638,16 @@ describe("SSH Worker", () => {
           const before = probes();
           yield* TestClock.adjust("1 minute");
           assert.strictEqual(probes(), before + 1, "one probe for both Attempts");
-          for (const attemptId of attempts)
+          for (const attemptId of attempts) {
             assert.deepStrictEqual(
               noticesOf(attemptId).map(({ _tag }) => _tag),
               ["WorkerResponsive"],
               "each attempt gets one confirmed answer, including a late join",
             );
+            const confirmation = noticesOf(attemptId)[0];
+            assert(confirmation?._tag === "WorkerResponsive");
+            assert.isFalse(confirmation.recovered);
+          }
 
           machine.state.stalled = true;
           yield* TestClock.adjust("1 minute");
@@ -654,8 +661,11 @@ describe("SSH Worker", () => {
 
           machine.state.stalled = false;
           yield* TestClock.adjust("1 minute");
-          for (const attemptId of attempts)
-            assert.strictEqual(noticesOf(attemptId)[2]?._tag, "WorkerResponsive");
+          for (const attemptId of attempts) {
+            const recovery = noticesOf(attemptId)[2];
+            assert(recovery?._tag === "WorkerResponsive");
+            assert.isTrue(recovery.recovered);
+          }
 
           yield* Deferred.succeed(signalsOf(request.attemptId).done, undefined);
           yield* Fiber.join(first);

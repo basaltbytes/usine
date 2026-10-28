@@ -7,3 +7,5 @@
 ---
 
 Show workers with three consecutive unanswered probes in Needs attention, with the last answer time and links to affected runs. Keep worker status visible beyond recent transcript pages, clear recovered workers even after an orchestrator restart, and recheck memory on slot reductions during reload.
+
+Distinguish a worker's first confirmed answer from outage recovery in the transcript and its checkpoints.

@@ -53,6 +53,22 @@ const spec = new AttemptChannel.RunSpec({
 });
 
 describe("attempt channel", () => {
+  it("preserves legacy worker recoveries and round-trips initial confirmations", () => {
+    const notice = {
+      _tag: "WorkerResponsive",
+      worker: "remote",
+      lastAnsweredAt: "2026-10-28T00:00:00Z",
+    };
+    const decode = Schema.decodeUnknownSync(AttemptChannel.WorkerResponsive);
+    assert.isTrue(decode(notice).recovered);
+    const initial = decode({ ...notice, recovered: false });
+    assert.isFalse(initial.recovered);
+    const json = Schema.fromJsonString(AttemptChannel.WorkerResponsive);
+    assert.deepStrictEqual(
+      Schema.decodeUnknownSync(json)(Schema.encodeSync(json)(initial)),
+      initial,
+    );
+  });
   it("reads legacy worker notices as one failed probe and rejects invalid probe counts", () => {
     const notice = {
       _tag: "WorkerUnresponsive",

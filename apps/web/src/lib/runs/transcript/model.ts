@@ -375,12 +375,14 @@ export const projectTranscript = (
             format: "plain",
             tone: "warning",
           }),
-          WorkerResponsive: ({ worker, lastAnsweredAt }): NoticeContent => ({
+          WorkerResponsive: ({ worker, lastAnsweredAt, recovered }): NoticeContent => ({
             kind: "status",
-            label: `${worker} answering again`,
-            detail: `Silent for ${durationLabel(
-              Date.parse(record.receivedAt) - DateTime.toEpochMillis(lastAnsweredAt),
-            )}`,
+            label: recovered ? `${worker} answering again` : `${worker} answering`,
+            detail: recovered
+              ? `Silent for ${durationLabel(
+                  Date.parse(record.receivedAt) - DateTime.toEpochMillis(lastAnsweredAt),
+                )}`
+              : "",
             format: "plain",
             tone: "plain",
           }),

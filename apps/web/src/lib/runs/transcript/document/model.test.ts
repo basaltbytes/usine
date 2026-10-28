@@ -610,6 +610,54 @@ describe("connectivity", () => {
   const notes = (rows: ReadonlyArray<ChapterRow>) =>
     rows.flatMap((row) => (row._tag === "Note" ? [`${row.tone}: ${row.text}`] : []));
 
+  it("shows a healthy worker's first answer without an outage or recovery checkpoint", () => {
+    const chapter = document(
+      [
+        said(3, "Running the gate."),
+        record(
+          60,
+          new AttemptChannel.WorkerResponsive({
+            worker,
+            lastAnsweredAt: DateTime.makeUnsafe(at(60)),
+            recovered: false,
+          }),
+        ),
+      ],
+      [attempt(null)],
+    ).chapters[0];
+    assert(chapter !== undefined);
+    assert.deepStrictEqual(notes(chapter.rows), ["plain: usine-worker-1 answering"]);
+    assert.deepStrictEqual(chapter.connectivity, []);
+    assert.deepStrictEqual(
+      chapterCheckpoints(chapter).map(({ key }) => key),
+      ["event:3"],
+    );
+  });
+
+  it("clears a persisted outage on the first answer after reattachment without inventing its duration", () => {
+    const chapter = document(
+      [
+        ...events.filter(({ payload }) => payload._tag === "WorkerUnresponsive"),
+        record(
+          60,
+          new AttemptChannel.WorkerResponsive({
+            worker,
+            lastAnsweredAt: DateTime.makeUnsafe(at(60)),
+            recovered: false,
+          }),
+        ),
+      ],
+      [attempt(null)],
+    ).chapters[0];
+    assert(chapter !== undefined);
+    assert.deepStrictEqual(chapter.connectivity, []);
+    assert.strictEqual(notes(chapter.rows).at(-1), "plain: usine-worker-1 answering");
+    assert.deepStrictEqual(
+      chapterCheckpoints(chapter).map(({ key }) => key),
+      ["event:6"],
+    );
+  });
+
   it("shows a silent Worker and a child's provider retries as warnings, each retry streak on one line", () => {
     const chapter = document(events, [attempt(null)]).chapters[0];
     assert(chapter !== undefined);
@@ -650,6 +698,7 @@ describe("connectivity", () => {
       "plain: Provider reachable again after 3 retries",
       "plain: usine-worker-1 answering again. Silent for 6s",
     ]);
+    assert(chapterCheckpoints(chapter).some(({ key }) => key === "event:10"));
     const failure = new InfraFailureView({ message: "Worker disconnected" });
     const ended = document(
       [...events, record(9, new FailedTranscriptView({ failure }))],

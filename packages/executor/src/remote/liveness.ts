@@ -73,6 +73,7 @@ const observe = (
         new WorkerResponsive({
           worker,
           lastAnsweredAt: liveness._tag === "Silent" ? liveness.lastAnsweredAt : now,
+          recovered: liveness._tag === "Silent",
         }),
         watching.filter((attemptId) =>
           liveness._tag === "Silent"

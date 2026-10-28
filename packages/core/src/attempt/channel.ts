@@ -209,6 +209,11 @@ export class WorkerResponsive extends Schema.TaggedClass<WorkerResponsive>(
   worker: WorkerName,
   /** The value from the preceding `WorkerUnresponsive`, or the first confirmed answer after joining a watch. */
   lastAnsweredAt: Schema.DateTimeUtcFromString,
+  /** Whether this watch observed an unanswered probe before this answer. Older notices represent recovery. */
+  recovered: Schema.Boolean.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(true)),
+    Schema.withConstructorDefault(Effect.succeed(true)),
+  ),
 }) {}
 
 export const WorkerNotice = Schema.Union([WorkerUnresponsive, WorkerResponsive]);
