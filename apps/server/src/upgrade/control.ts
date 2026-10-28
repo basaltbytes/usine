@@ -63,8 +63,13 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
     onNone: () => Effect.succeed(Option.none<UpgradeRecord>()),
     onSome: (platform) => platform.outcome,
   });
-  const status = Effect.gen(function* () {
+  const status = Effect.fn("Server.upgradeStatus")(function* () {
     const settings = yield* options.settings;
+    yield* Effect.annotateCurrentSpan({
+      running: options.running,
+      channel: settings.upgradeChannel,
+      mode: settings.upgradeMode,
+    });
     const current = yield* Ref.get(progress);
     const result = yield* outcome;
     const state =
@@ -240,5 +245,5 @@ export const makeUpgrades = Effect.fn("Server.makeUpgrades")(function* (options:
     Effect.andThen(Effect.sleep("5 minutes")),
     Effect.forever,
   );
-  return { status, request, check, polling };
+  return { status: status(), request, check, polling };
 });

@@ -147,7 +147,7 @@ describe("CurrentInstance", () => {
     ),
   );
 
-  it.live("keeps the running instance when usine.yaml no longer loads", () =>
+  it.live("keeps the running instance when the configuration store cannot be read", () =>
     withFolder((root) =>
       Effect.gen(function* () {
         const instances = yield* CurrentInstance;
@@ -162,11 +162,8 @@ describe("CurrentInstance", () => {
           Effect.withLogger(warningsIn(warnings)),
         );
         assert(failure._tag === "FactoryConfigError", failure._tag);
-        assert.strictEqual(failure.file, "usine.yaml");
-        assert.include(
-          warnings,
-          "Instance folder reload rejected; the running configuration is unchanged",
-        );
+        assert.strictEqual(failure.file, ".usine/runtime.sqlite");
+        assert.include(warnings, "Could not re-read the configuration store");
         assert.strictEqual(yield* instances.get, running);
       }),
     ),
@@ -209,31 +206,6 @@ describe("CurrentInstance", () => {
         assert.include(failure.message, "the webhooks block changed; the tracing block changed");
         assert.strictEqual(yield* instances.get, running);
       }).pipe(Effect.scoped),
-    ),
-  );
-
-  it.live("leaves out a Loop that no longer loads and reports it as quarantined", () =>
-    withFolder((root) =>
-      Effect.gen(function* () {
-        const instances = yield* CurrentInstance;
-        const warnings: Array<unknown> = [];
-        yield* writeInstanceFiles(root, [["loops/start-dev.md", loopFile("ghost")]]);
-        const report = yield* instances.reload.pipe(Effect.withLogger(warningsIn(warnings)));
-        assert.deepStrictEqual(report.loops.removed, [LoopName.make("start-dev")]);
-        assert.deepStrictEqual(
-          report.quarantinedLoops.map(({ file, error }) => [file, error.message]),
-          [
-            [
-              "loops/start-dev.md",
-              'Unknown agent "ghost": agents/ghost.md is missing or invalid. Fix the agent file, or set agent to an existing agent.',
-            ],
-          ],
-        );
-        assert.include(warnings, "Loop quarantined; it opens no Runs until its file is fixed");
-        const current = yield* instances.get;
-        assert.deepStrictEqual(current.loops, []);
-        assert.strictEqual(current.quarantinedLoops[0]?.file, "loops/start-dev.md");
-      }),
     ),
   );
 

@@ -1,6 +1,6 @@
 # @usine/config
 
-Reads and edits the files of a [usine](https://github.com/basaltbytes/usine) instance folder. The [`usine.yaml`](https://docs.usine.dev/reference/configuration/usine-yaml/), [loop file](https://docs.usine.dev/reference/configuration/loop-files/), and [agent file](https://docs.usine.dev/reference/configuration/agent-files/) references describe every key.
+Stores versioned configuration and imports and exports the files of a [usine](https://github.com/basaltbytes/usine) instance folder. The [`usine.yaml`](https://docs.usine.dev/reference/configuration/usine-yaml/), [loop file](https://docs.usine.dev/reference/configuration/loop-files/), and [agent file](https://docs.usine.dev/reference/configuration/agent-files/) references describe every key.
 
 - `usine.yaml`: schema version, factory-wide GitHub labels, the managed-repo registry, settings, workers, webhook mode, and operator login.
 - `loops/*.md`: strict YAML frontmatter and a Markdown prompt. The parser type-checks the trigger and every `{{ CEL expression }}` against the trigger's payload.
@@ -66,4 +66,14 @@ Subpaths: `/factory` (settings and registry), `/board` (lanes), `/label`, `/loop
 
 The 0.x APIs can change between minor releases.
 
-For a global server installation managed by systemd, `settings.upgrade_channel` selects `latest` (default) or `next`. `settings.upgrade_mode` selects `off`, `propose` (default), or `automatic`. Reloading the instance applies both settings; automatic mode waits for admitted attempts to finish before upgrading.
+For a global server installation managed by systemd, `settings.upgrade_channel` selects `latest` (default) or `next`. `settings.upgrade_mode` selects `off`, `propose` (default), or `automatic`. Committed configuration revisions apply both settings; automatic mode waits for admitted attempts to finish before upgrading.
+
+## Configuration revisions
+
+`ConfigurationStore` from `/configuration` reads the current `Configuration`, lists revisions (optionally by entity), reads one revision, commits changes with an expected revision number, and streams revisions after a supplied number. A `ConfigurationRevision` records the actor, time, optional message, and before and after values for settings, workers, repositories (including lanes), labels, loops, and agents. The actor is optional for instances without an `operator` value.
+
+`commit(parser, current, expected, changes, metadata)` performs deterministic validation without filesystem, database, or clock services. Supply the parser explicitly with `makeConfigParser(makeExpressionEngine())`, and supply the actor and time. It returns the new configuration and revision or `StaleRevision` or `ConfigurationInvalid`. Validation uses the file schemas, CEL checks, and reference checks. `ConfigurationInvalid.problems` contains the errors collected across the candidate.
+
+`memoryConfigurationLayer` from `/memory` uses a `Ref`. `sqliteConfigurationLayer` from `/sqlite` requires `SqlClient` and `ConfigParser`; the application supplies the connection. SQLite commits update the revision log and entity rows in one transaction. The Drizzle schema and migrations are in this package, with their own `usine_configuration_migrations` ledger. Run `pnpm db:generate` after changing the schema; the command embeds the generated SQL so the adapter needs no filesystem or Node driver. Revision streams poll the durable log every 500 ms while idle, including commits from other processes.
+
+`ConfigurationFolder` from `/folder-codec` imports a folder strictly and exports the current format. It rejects invalid configuration as a whole, including invalid loop and agent files. `InstanceFolder.load` remains the permissive inspection API for callers that need quarantine diagnostics. Export writes complete YAML and Markdown files; it does not preserve YAML comments and removes stale Markdown entity files in the destination. It does not export secrets or loop pause state.

@@ -1,9 +1,11 @@
+import type { RunDatabase } from "@usine/engine/database";
+import type { EnginePersistenceError } from "@usine/engine/engine";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import { NodeServices } from "@effect/platform-node";
 import type { UsineConfig } from "@usine/config/factory";
 import type { InstanceDirectory } from "@usine/core/instance";
 import { layer as localExecutorLayer, type LocalExecutorOptions } from "@usine/executor/local";
-import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
+import { layer as localEngineLayer, localSqliteLayer } from "@usine/engine/local-sqlite";
 import { Layer } from "effect";
 import { stepExecutorLayer } from "./scheduler.ts";
 import { withSshWorkerDiscard } from "./ssh.ts";
@@ -17,6 +19,7 @@ export const layer = (
   config: UsineConfig,
   brains: ReadonlyArray<BrainSpec>,
   options: Omit<LocalExecutorOptions, "instanceDirectory">,
+  database: Layer.Layer<RunDatabase, EnginePersistenceError> = localSqliteLayer(instanceDirectory),
 ) => {
   const executor = localExecutorLayer({ ...options, instanceDirectory }).pipe(
     Layer.provide(NodeServices.layer),
@@ -25,5 +28,5 @@ export const layer = (
   const stepExecutor = withSshWorkerDiscard(instanceDirectory, (discard) =>
     stepExecutorLayer(config, brains, { discard }),
   ).pipe(Layer.provide(executor));
-  return localEngineLayer(instanceDirectory).pipe(Layer.provideMerge(stepExecutor));
+  return localEngineLayer(instanceDirectory, database).pipe(Layer.provideMerge(stepExecutor));
 };

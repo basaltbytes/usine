@@ -1,6 +1,6 @@
 # @usine/orchestrator
 
-Connects loaded loop files to GitHub polling, the durable run engine, and the configured workers for [usine](https://github.com/basaltbytes/usine). [Operator surfaces](https://docs.usine.dev/architecture/operator-surfaces/) and [Run lifecycle](https://docs.usine.dev/architecture/run-lifecycle/) describe the behavior in depth.
+Connects stored loop definitions to GitHub polling, the durable run engine, and the configured workers for [usine](https://github.com/basaltbytes/usine). [Operator surfaces](https://docs.usine.dev/architecture/operator-surfaces/) and [Run lifecycle](https://docs.usine.dev/architecture/run-lifecycle/) describe the behavior in depth.
 
 The platform-free entry points are `PollingTriggers` (`/polling-triggers`), `ScheduleTriggers` (`/schedule-triggers`), `Orchestrator` (`/orchestrator`), and `Operator` with its request and response types (`/operator`). `Orchestrator.run` runs both trigger streams over the factory's `CurrentInstance`.
 
@@ -126,9 +126,9 @@ The event key covers the loop, canonical repo, and scheduled time. An in-memory 
 
 ## Instance reload
 
-`CurrentInstance` (`/current-instance`) is the running instance snapshot. `CurrentInstance.layer(directory, initial)` starts from the one `usine up` loaded, and needs `InstanceFolder` (`@usine/config/instance-folder`). Polling, schedules, queued-event re-checks, App project discovery, attempt settings, and the operator backend read `get` when they act.
+`CurrentInstance` (`/current-instance`) is the running instance snapshot. `CurrentInstance.layer(directory, initial, revisionNumber)` starts from the stored configuration and needs `ConfigurationStore` and `ConfigParser`. Polling, schedules, queued-event re-checks, App project discovery, attempt settings, and the operator backend read `get` when they act.
 
-`reload` loads the folder again with the same per-file quarantine and replaces the snapshot. It returns an `InstanceReload` that names the loops, agents, labels, repos, and workers added, removed, or changed, and the files left out. An invalid `usine.yaml` fails with `FactoryConfigError`, and a changed `webhooks` block with `RestartRequiredError`, whose `fields` and message name the change; both keep the running snapshot. `changes` streams the snapshot, then each one an accepted reload installs.
+The layer follows committed revisions. `reload` re-reads the store and replaces the running snapshot. It returns an `InstanceReload` that names the loops, agents, labels, repos, and workers added, removed, or changed, and the files left out. An unreadable configuration store fails with `FactoryConfigError`, and a changed `webhooks` block with `RestartRequiredError`, whose `fields` and message name the change; both keep the running snapshot. `changes` streams the snapshot, then each one an accepted reload installs.
 
 `registerWorkers(workers)` passes each later reload to the workers first. They refuse a `workers` change they can't apply (`RestartRequiredError`), preflight added workers, slots, and brains, refuse a failed preflight (`ReloadPreflightError`), and apply the new `workers` block after the snapshot is replaced. `stepExecutorLayer` registers itself; until then, as in setup mode, a reload refuses any `workers` change and preflights nothing. A run keeps the agent, task, and parent model it opened with.
 
@@ -273,6 +273,8 @@ pnpm --filter @usine/orchestrator test:integration:agent
 Cleanup removes its kick and result comments.
 
 The operator HTTP contract includes `GET /api/upgrade`, `POST /api/upgrade`, and `GET /api/version`. The upgrade view reports the channel, running and available versions, progress, and rollback outcome. A request selects `idle` or `now`, with an optional exact version. The server supplies the systemd implementation; the contract remains platform-free.
+
+The Node runtime and worker compositions accept a supplied `RunDatabase` layer. The server shares it with the configuration store, and stored agent revisions pass the same worker preflight as explicit reloads. A restart-required revision remains in the store while the running snapshot stays unchanged; restart applies it.
 
 ## Dismiss attention entries
 

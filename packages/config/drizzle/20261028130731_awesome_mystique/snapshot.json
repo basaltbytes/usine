@@ -1,0 +1,81 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "id": "c9743f6e-49dd-4de8-96bc-79894ad4f51b",
+  "prevIds": ["00000000-0000-0000-0000-000000000000"],
+  "ddl": [
+    {
+      "name": "usine_configuration_entities",
+      "entityType": "tables"
+    },
+    {
+      "name": "usine_configuration_revisions",
+      "entityType": "tables"
+    },
+    {
+      "table": "usine_configuration_entities",
+      "name": "key",
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "usine_configuration_entities",
+      "name": "position",
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "usine_configuration_entities",
+      "name": "value",
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "usine_configuration_revisions",
+      "name": "number",
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "usine_configuration_revisions",
+      "name": "value",
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "usine_configuration_entities",
+      "name": "usine_configuration_entities_pk",
+      "columns": ["key"],
+      "nameExplicit": false,
+      "entityType": "pks"
+    },
+    {
+      "table": "usine_configuration_revisions",
+      "name": "usine_configuration_revisions_pk",
+      "columns": ["number"],
+      "nameExplicit": false,
+      "entityType": "pks"
+    }
+  ],
+  "renames": []
+}

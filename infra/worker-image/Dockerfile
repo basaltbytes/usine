@@ -19,7 +19,7 @@ ARG USINE_UID=1000
 RUN set -eu; \
     apt-get update; \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      build-essential bubblewrap ca-certificates chromium curl git gnupg jq tini; \
+      build-essential bubblewrap ca-certificates chromium curl git gnupg iproute2 jq lsof procps tini; \
     install -d -m 0755 /etc/apt/keyrings; \
     curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
       -o /etc/apt/keyrings/githubcli-archive-keyring.gpg; \

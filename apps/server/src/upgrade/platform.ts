@@ -62,7 +62,8 @@ export const systemUpgradePlatform = Effect.fn("Server.systemUpgradePlatform")(f
     }
     return result;
   });
-  const preflight = Effect.gen(function* () {
+  const preflight = Effect.fn("Server.upgradePreflight")(function* () {
+    yield* Effect.annotateCurrentSpan({ previous, unit: service, helperUnit, prefix });
     const loaded = yield* systemctl(helperUnit, ["show", "--property=LoadState", "--value"]).pipe(
       Effect.mapError(failure),
     );
@@ -110,7 +111,7 @@ export const systemUpgradePlatform = Effect.fn("Server.systemUpgradePlatform")(f
     });
   }, Effect.mapError(failure));
   return Option.some({
-    preflight: preflight.pipe(provideSpawner),
+    preflight: preflight().pipe(provideSpawner),
     outcome: outcome.pipe(provideSpawner),
     launch: (target) => launch(target).pipe(provideSpawner),
     lookup: (channel) =>

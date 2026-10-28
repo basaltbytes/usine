@@ -1,14 +1,15 @@
 import { ServerUpgrades } from "./upgrade/control.ts";
 import { systemUpgradePlatform } from "./upgrade/platform.ts";
+import { localSqliteLayer } from "@usine/engine/local-sqlite";
+import type { RunDatabase } from "@usine/engine/database";
+import type { EnginePersistenceError } from "@usine/engine/engine";
+import { configurationLayer, initializeConfiguration } from "./configuration/runtime.ts";
 import { AttentionAcknowledgements } from "@usine/engine/attention";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NodeServices } from "@effect/platform-node";
-import { InstanceFolder } from "@usine/config/instance-folder";
-import { ConfigParser } from "@usine/config/parser";
 import { InstanceDirectory, type InstanceId } from "@usine/core/instance";
 import { RunEngine, RunEngineShutdown } from "@usine/engine/engine";
-import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { GitHubCredentials } from "@usine/github/github-app";
 import { loadLocalCredentials } from "@usine/github/local-secrets";
 import { CurrentInstance } from "@usine/orchestrator/current-instance";
@@ -53,21 +54,6 @@ import { reloadOnHangup } from "./reload-signal.ts";
 import { withGracefulShutdown } from "./shutdown.ts";
 import { warnIfSystemSleeps } from "./system-sleep.ts";
 import { tracingLayer } from "./tracing.ts";
-
-const instanceFolderLayer = InstanceFolder.layer.pipe(
-  Layer.provide(ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer))),
-  Layer.provide(NodeServices.layer),
-);
-
-/** Loads the instance folder and keeps it reloadable. Fails if `usine.yaml` is invalid. */
-const loadInstance = Effect.fn("Server.loadInstance")(function* (directory: InstanceDirectory) {
-  const context = yield* Layer.build(instanceFolderLayer);
-  const initial = yield* Context.get(context, InstanceFolder).load(directory);
-  const current = yield* Layer.build(
-    CurrentInstance.layer(directory, initial).pipe(Layer.provide(Layer.succeedContext(context))),
-  );
-  return Context.get(current, CurrentInstance);
-});
 
 // Untraced: a span around a server that never returns would parent every request span.
 const serve = Effect.fnUntraced(function* (options: {
@@ -141,6 +127,7 @@ const start = Effect.fnUntraced(function* (
   port: Port,
   origin: Option.Option<UiOrigin>,
   record: InstanceRecord,
+  database: Layer.Layer<RunDatabase, EnginePersistenceError>,
 ) {
   yield* reloadOnHangup(instances);
   const credentials = yield* loadLocalCredentials(directory).pipe(
@@ -157,7 +144,7 @@ const start = Effect.fnUntraced(function* (
       message: error.message,
       instanceDirectory: directory,
     });
-    const observationContext = yield* Layer.build(operatorObservationLayer(directory));
+    const observationContext = yield* Layer.build(operatorObservationLayer(directory, database));
     const backend = needsSetupBackendLayer(
       instances,
       error._tag,
@@ -186,7 +173,7 @@ const start = Effect.fnUntraced(function* (
 
   const shutdown = yield* Deferred.make<void>();
   const startup = Effect.gen(function* () {
-    const runtime = runtimeLayer(directory, instanceId).pipe(
+    const runtime = runtimeLayer(directory, instanceId, database).pipe(
       Layer.provide(Layer.succeed(GitHubCredentials, credentials.success)),
       Layer.provide(Layer.succeed(CurrentInstance, instances)),
     );
@@ -270,13 +257,26 @@ export const up = (command: UpCommand) =>
       yield* refuseTakenPort(port).pipe(Effect.provide(NodeServices.layer));
       if (process.platform === "darwin")
         yield* warnIfSystemSleeps().pipe(Effect.provide(NodeServices.layer));
-      const instances = yield* loadInstance(directory);
+      const databaseContext = yield* Layer.build(localSqliteLayer(directory));
+      const database = Layer.succeedContext(databaseContext);
+      const configurationContext = yield* Layer.build(
+        configurationLayer.pipe(Layer.provide(database)),
+      );
+      const initial = yield* initializeConfiguration(directory).pipe(
+        Effect.provideContext(configurationContext),
+      );
+      const current = yield* Layer.build(
+        CurrentInstance.layer(directory, initial.instance, initial.number).pipe(
+          Layer.provide(Layer.succeedContext(configurationContext)),
+        ),
+      );
+      const instances = Context.get(current, CurrentInstance);
       const { config } = yield* instances.get;
       // Built before the runtime, so the exporter flushes the runtime's last spans when it closes.
       const tracer = yield* Layer.build(tracingLayer(config.tracing)).pipe(
         Effect.provide(NodeServices.layer),
       );
-      return yield* start(directory, instanceId, instances, port, origin, record).pipe(
+      return yield* start(directory, instanceId, instances, port, origin, record, database).pipe(
         Effect.provideContext(tracer),
       );
     }),

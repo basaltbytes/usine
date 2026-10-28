@@ -161,7 +161,7 @@ systemd also starts the service at boot and restarts it 10 seconds after it fail
 
 ## Upgrade the server
 
-In `usine.yaml`, select the npm channel and upgrade mode:
+Run `usine config edit settings instance` from `/home/usine/factory` to select the npm channel and upgrade mode:
 
 ```yaml
 settings:
@@ -169,7 +169,7 @@ settings:
   upgrade_mode: automatic
 ```
 
-The defaults are `latest` and `propose`. Reload the configuration after changing them. The server checks every five minutes. Automatic mode stops admitting attempts, waits for running attempts to finish, and upgrades. With `propose`, **Configuration → Settings** shows the available version and a link to its changes. Select **Upgrade when idle** to wait or **Upgrade now** to restart immediately and reattach running attempts. `off` disables checks.
+The defaults are `latest` and `propose`. Saving the edit commits a configuration revision that the running server applies automatically. The server checks every five minutes. Automatic mode stops admitting attempts, waits for running attempts to finish, and upgrades. With `propose`, **Configuration → Settings** shows the available version and a link to its changes. Select **Upgrade when idle** to wait or **Upgrade now** to restart immediately and reattach running attempts. `off` disables checks.
 
 From `/home/usine/factory`, `usine upgrade` requests an idle upgrade from the configured channel. Use `usine upgrade --channel next` or an exact version to select another release, `--force` to restart immediately, and `--check` to report versions without changing anything. The command reports acceptance; Settings and `journalctl -u usine-upgrade.service -f` report progress and the outcome.
 

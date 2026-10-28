@@ -1,21 +1,25 @@
 # Usine
 
-usine runs coding agents against GitHub issues and pull requests, using loops that the operator defines in files.
+usine runs coding agents against GitHub issues and pull requests, using loops that the operator defines.
 
 ## Language
 
 In UI copy and documentation, write glossary terms as lowercase common nouns. Capitalize them only in headings and code identifiers. For UI copy, follow the Voice section of `apps/web/DESIGN.md`.
 
 **Loop**:
-A file in the instance repo that defines a trigger and the agent run to start for each matched item. The filename is the loop name.
+A named definition of a trigger and the agent run to start for each matched item.
 _Avoid_: workflow, schedule, task, cron
 
 **Instance repo**:
-The git repo that contains the loops, agents, registry, and settings of an instance.
+The git repo that contains an instance’s bootstrap files and configuration import and export files.
 _Avoid_: config repo, factory repo
 
+**Revision**:
+A recorded change to the instance configuration, with a number, actor, time, optional message, and each entity’s value before and after the change.
+_Avoid_: config commit, version
+
 **Registry**:
-The list of managed repos in the instance repo, with optional tags.
+The list of managed repos in the instance configuration, with optional tags.
 _Avoid_: repo list, inventory
 
 **Managed repo**:
@@ -185,7 +189,7 @@ The token that an attempt's children send to the gateway instead of a credential
 _Avoid_: API key, placeholder
 
 **Agent**:
-A file in the instance repo that defines standing instructions and a brain spec (harness, model, reasoning effort). The filename is the agent name.
+A named definition of standing instructions and a brain spec (harness, model, reasoning effort).
 _Avoid_: profile, bot, teammate, persona
 
 **Harness**:

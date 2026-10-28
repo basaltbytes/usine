@@ -5,7 +5,7 @@ sidebar:
   order: 5
 ---
 
-The `@usine/server` package provides the `usine` binary ([`main.ts`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/main.ts#L47)). Run every command from the instance folder, the folder that contains `usine.yaml`. Each command first reads the [environment file](#environment-file), `.env`, in that folder.
+The `@usine/server` package provides the `usine` binary ([`main.ts`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/main.ts#L47)). Run every command from the instance folder, the folder that contains `.usine/runtime.sqlite` and the bootstrap files. Each command first reads the [environment file](#environment-file), `.env`, in that folder.
 
 ```sh title="Usage"
 usine up [--port <port>] [--origin <url>] [--log-level <level>] [--allow-volatile-instance] [--detach]
@@ -15,6 +15,10 @@ usine restart [--timeout <seconds>] [--force]
 usine upgrade [<version> | --channel <latest|next>] [--check] [--timeout <seconds>] [--force]
 usine backup <path>
 usine export-run <runId> [--output <path>]
+usine config export <folder>
+usine config import <folder> [--message <text>]
+usine config edit <kind> <name>
+usine config log [<kind> <name>]
 usine --help
 usine --version
 ```
@@ -54,7 +58,7 @@ Each log line starts with its time as an ISO 8601 timestamp in UTC, such as `[20
 1. **Volatile path check.** usine refuses an instance folder under `os.tmpdir()`, `$TMPDIR`, `/tmp`, `/private/tmp`, or `/var/folders`, by the given path or its real path, because the runtime store is the only copy of every run and transcript. With `--allow-volatile-instance`, usine logs a warning and continues.
 2. **Instance lock.** usine holds an exclusive SQLite transaction on `.usine/instance.lock`, writes its process ID to `.usine/instance.pid`, and writes the [instance record](#instance-record) to `.usine/instance.json` ([`holdInstance`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/instance-lock.ts#L44)). A second `usine up` in the folder exits and prints that ID. The lock ends with the process, however it exits. usine removes both files when it exits, unless the OS kills it, for example with `SIGKILL`. usine then reads the instance ID from `.usine/instance-id`, or writes a new UUID there at the first start. The ID labels the instance's attempt containers on SSH workers, so that another instance folder with the same GitHub App doesn't remove them ([`instanceIdOf`](https://github.com/basaltbytes/usine/blob/main/apps/server/src/instance/id.ts)). If the file doesn't contain a UUID, usine exits.
 3. **Port check.** usine refuses a port that another process listens on, and prints that process if `lsof` finds it.
-4. **Instance load.** usine reads `usine.yaml`, `agents/`, and `loops/`, and exits with status 1 if `usine.yaml` is invalid or a folder is missing. Invalid loop and agent files don't stop startup ([Validation and quarantine](/reference/configuration/loop-files/#validation-and-quarantine)).
+4. **Configuration load.** usine reads the runtime configuration store. If the configuration tables are empty, it imports `usine.yaml`, `agents/`, and `loops/` as revision 1, attributed to the instance's `operator`, with the message `Imported from the instance folder`. Any schema, CEL, or reference problem refuses the import. Later starts ignore those configuration files. Loop pause state is unchanged.
 5. **GitHub App credentials.** usine reads `USINE_GITHUB_APP_ID` and `USINE_GITHUB_PRIVATE_KEY`, and fills a missing one from `.usine/github-app.json` ([`loadLocalCredentials`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/github/src/local-secrets.ts#L69)). If both variables are set, usine doesn't read the file. It accepts PKCS#1 keys (`BEGIN RSA PRIVATE KEY`, as GitHub downloads them) and PKCS#8 keys.
 6. **Runtime.** usine opens the stores, reads each gateway's admin token, runs preflight on every worker, starts polling and schedules, and reattaches the attempts that an earlier process left running. It prints `usine is running at http://127.0.0.1:<port>`.
 
@@ -118,9 +122,9 @@ The secrets file is JSON with two keys, and must be a regular file with mode `06
 
 ### Reload
 
-`usine up` doesn't watch its files. To load changes without a restart, send `SIGHUP`, select **Reload configuration** on any **Configuration** page, or send `POST /api/instance/reload`; the page and the response list what changed. usine reloads `usine.yaml`, `agents/`, and `loops/` as at startup, and lists invalid loop and agent files in **Needs attention** and on the **Loops** and **Agents** pages.
+Committed revisions apply automatically. To re-read the store explicitly, send `SIGHUP`, select **Reload configuration** on any **Configuration** page, or send `POST /api/instance/reload`; the page and response list what changed. None of these actions imports edited files. Use `usine config import` to commit file changes.
 
-New runs, the next poll and schedule tick, and the next attempt use the new configuration. An open run keeps the agent, task, and parent model that it opened with, including on retries, and so does an event that waits behind a running run. An accepted reload starts the next poll immediately, or when a wait that GitHub requested ends, if that is later. If the set of loops that apply to a repository changes (a loop is added or removed, or its `on` or `if:` changes), that poll reads the repository's items from the start. It logs `Instance folder reloaded; new Runs use the new configuration` with the changes, or `Instance folder reload rejected; the running configuration is unchanged` with the reason, and keeps running.
+New runs, the next poll and schedule tick, and the next attempt use the new configuration. An open run keeps the agent, task, and parent model that it opened with, including on retries, and so does an event that waits behind a running run. An accepted reload starts the next poll immediately, or when a wait that GitHub requested ends, if that is later. If the set of loops that apply to a repository changes (a loop is added or removed, or its `on` or `if:` changes), that poll reads the repository's items from the start. It logs `Stored configuration applied; new runs use the new configuration` with the changes, or `Configuration revision could not be applied; the running configuration is unchanged` with the reason, and keeps running.
 
 A reload applies a worker's new `max_concurrent_attempts`, a new `local` or `ssh` worker, and a removed worker without stopping running attempts ([`workers`](/reference/configuration/usine-yaml/#workers)).
 
@@ -337,3 +341,34 @@ The domain, the listeners, the admin token, and the caller key change only with 
 | `USINE_GATEWAY_PROXY_HOST`, `USINE_GATEWAY_PROXY_PORT` | `127.0.0.1`, `80` | Listener of the reverse proxy that workers call for GitHub and LLM providers. |
 | `USINE_GATEWAY_EGRESS_HOST`, `USINE_GATEWAY_EGRESS_PORT` | `127.0.0.1`, `3128` | Listener of the forward proxy. |
 | `USINE_GATEWAY_ADMIN_HOST`, `USINE_GATEWAY_ADMIN_PORT` | `127.0.0.1`, `7070` | Listener of the admin API. `admin_port` in `usine.yaml` is the same port. The executor forwards a local port to it over SSH. |
+
+## Configuration revisions
+
+Configuration commands work on running and stopped instances. They use `.usine/runtime.sqlite` directly and attribute each revision to the stored `operator` value. An instance without `operator` records no actor and shows `(operator not configured)` in the log. Secrets remain in `.env` or `.usine/github-app.json`; the listen address remains in command flags or environment variables.
+
+### `usine config export <folder>`
+
+Writes `usine.yaml`, `agents/*.md`, and `loops/*.md` in the current folder format. Existing configuration files in the destination are replaced, and stale Markdown files in `agents/` and `loops/` are removed. Export does not preserve YAML comments. It does not export secrets, pause state, or revision history; use `usine backup` to preserve the database.
+
+### `usine config import <folder> [--message <text>]`
+
+Validates the complete folder, computes differences from the stored configuration, and commits one revision. The command prints each added, changed, or removed entity. An unchanged import prints `No configuration changes.` Invalid imports list the problems and save nothing. A concurrent revision causes a stale-revision error; export the current configuration and reapply the changes.
+
+### `usine config edit <kind> <name>`
+
+Opens one exported entity in `$EDITOR`, including editor arguments. Saving and closing the editor commits one revision. A nonzero editor exit, invalid content, or a revision committed by another process while the editor was open saves nothing.
+
+| Kind | Name | Editor format |
+| --- | --- | --- |
+| `settings` | `instance` | YAML with settings, operator, webhooks, and tracing |
+| `worker` | Worker name | One YAML worker record |
+| `repository` | `owner/name` | One YAML repository record, including lanes |
+| `label` | Label name | One YAML label record |
+| `loop` | Loop name | Markdown with frontmatter |
+| `agent` | Agent name | Markdown with frontmatter |
+
+For example, `usine config edit agent developer` changes the agent used by new attempts after worker preflight. Running attempts retain their definitions. Changes that need a restart are committed but leave the running configuration unchanged until restart.
+
+### `usine config log [<kind> <name>]`
+
+Lists revision number, actor, UTC time, and message in ascending order. Supply a kind and name to list only revisions that changed that entity, for example `usine config log agent developer`.

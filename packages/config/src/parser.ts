@@ -7,7 +7,18 @@ import {
   type ExpressionError,
   Source,
 } from "@usine/expression/expression-engine";
-import { Context, Effect, Layer, Option, Schema, SchemaGetter, SchemaIssue, Struct } from "effect";
+import {
+  Array as Arr,
+  Context,
+  Effect,
+  Layer,
+  Option,
+  Result,
+  Schema,
+  SchemaGetter,
+  SchemaIssue,
+  Struct,
+} from "effect";
 import { splitMarkdown } from "./frontmatter.ts";
 import { AgentFile } from "./agent.ts";
 import { canonicalLabelName, GitHubLabelName } from "./label.ts";
@@ -25,6 +36,7 @@ import { ValidSelector } from "./selector.ts";
 import { Effort, Harness, ModelId } from "@usine/core/agent/brain";
 import { environmentFor } from "./payload-slices.ts";
 import { parseYamlDocument } from "./yaml/document.ts";
+import { writeYaml } from "./yaml/writer.ts";
 
 const formatIssue = SchemaIssue.makeFormatterDefault();
 
@@ -78,6 +90,12 @@ class AgentFrontmatter extends Schema.Class<AgentFrontmatter>("@usine/config/Age
 const AuthoredAgentFrontmatter = AgentFrontmatter.pipe(
   Schema.encodeKeys({ parentModel: "parent_model", parentEffort: "parent_effort" }),
 );
+
+export const formatAgent = (agent: AgentFile): string =>
+  `---\n${writeYaml(Schema.encodeSync(AuthoredAgentFrontmatter)(new AgentFrontmatter(agent)))}---\n${agent.persona}`;
+
+export const formatLoop = (loop: LoopFile): string =>
+  `---\n${writeYaml(Schema.encodeSync(AuthoredLoopFrontmatter)(new LoopFrontmatter(loop)))}---\n${loop.body}`;
 
 interface Interpolation {
   readonly source: Source;
@@ -214,6 +232,7 @@ const parseUsineYaml = Effect.fn("ConfigParser.parseUsineYaml")(
       const yaml = yield* parseYaml(file, source);
       return yield* Schema.decodeUnknownEffect(UsineConfig)(yaml, {
         onExcessProperty: "error",
+        errors: "all",
       }).pipe(Effect.mapError((error) => schemaError(file, error)));
     }),
 );
@@ -226,6 +245,7 @@ const parseAgentFile = Effect.fn("ConfigParser.parseAgentFile")(
       const yaml = yield* parseYaml(file, markdown.yaml);
       const frontmatter = yield* Schema.decodeUnknownEffect(AuthoredAgentFrontmatter)(yaml, {
         onExcessProperty: "error",
+        errors: "all",
       }).pipe(Effect.mapError((error) => schemaError(file, error)));
       const persona = yield* Schema.decodeUnknownEffect(AgentPersona)(markdown.body).pipe(
         Effect.mapError((error) => schemaError(file, error)),
@@ -251,23 +271,36 @@ const makeParseLoopFile = (engine: ExpressionEngine["Service"]) =>
         const yaml = yield* parseYaml(file, markdown.yaml);
         const frontmatter = yield* Schema.decodeUnknownEffect(AuthoredLoopFrontmatter)(yaml, {
           onExcessProperty: "error",
+          errors: "all",
         }).pipe(Effect.mapError((error) => schemaError(file, error)));
         const body = yield* Schema.decodeUnknownEffect(PromptTemplate)(markdown.body).pipe(
           Effect.mapError((error) => schemaError(file, error)),
         );
         const environment: Environment = environmentFor(frontmatter.trigger.on);
-        yield* engine
-          .checkBoolean(frontmatter.trigger.if, environment)
-          .pipe(Effect.mapError((error) => expressionError(file, error)));
-        const promptExpressions = yield* interpolations(file, body);
-        yield* Effect.forEach(
-          promptExpressions,
-          ({ source: expression }) =>
-            engine
-              .checkScalar(expression, environment)
-              .pipe(Effect.mapError((error) => expressionError(file, error))),
-          { discard: true },
+        const failures: Array<ConfigFileError> = [];
+        const condition = yield* engine.checkBoolean(frontmatter.trigger.if, environment).pipe(
+          Effect.mapError((error) => expressionError(file, error)),
+          Effect.result,
         );
+        if (Result.isFailure(condition)) failures.push(condition.failure);
+        const promptExpressions = yield* interpolations(file, body).pipe(Effect.result);
+        if (Result.isFailure(promptExpressions)) failures.push(promptExpressions.failure);
+        else {
+          const checked = yield* Effect.forEach(promptExpressions.success, ({ source }) =>
+            engine.checkScalar(source, environment).pipe(
+              Effect.mapError((error) => expressionError(file, error)),
+              Effect.result,
+            ),
+          );
+          for (const result of checked) if (Result.isFailure(result)) failures.push(result.failure);
+        }
+        if (Arr.isArrayNonEmpty(failures))
+          return yield* new ConfigFileError({
+            file,
+            stage: "expression",
+            expression: failures[0].expression,
+            message: failures.map(({ message }) => message).join("\n"),
+          });
         return new LoopFile({
           name,
           trigger: frontmatter.trigger,
@@ -354,15 +387,18 @@ export class ConfigParser extends Context.Service<
     ConfigParser,
     Effect.gen(function* () {
       const engine = yield* ExpressionEngine;
-      return {
-        configWarnings: makeConfigWarnings(engine),
-        parseUsineYaml,
-        parseAgentFile,
-        parseLoopFile: makeParseLoopFile(engine),
-        renderPrompt: Effect.fn("ConfigParser.renderPrompt")(
-          (loop: LoopFile, context: Schema.JsonObject) => render(engine, loop, context),
-        ),
-      };
+      return makeConfigParser(engine);
     }),
   );
 }
+
+/** Builds the parser from an explicit expression engine without a layer. */
+export const makeConfigParser = (engine: ExpressionEngine["Service"]): ConfigParser["Service"] => ({
+  configWarnings: makeConfigWarnings(engine),
+  parseUsineYaml,
+  parseAgentFile,
+  parseLoopFile: makeParseLoopFile(engine),
+  renderPrompt: Effect.fn("ConfigParser.renderPrompt")(
+    (loop: LoopFile, context: Schema.JsonObject) => render(engine, loop, context),
+  ),
+});

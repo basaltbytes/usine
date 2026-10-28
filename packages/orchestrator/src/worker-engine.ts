@@ -1,3 +1,6 @@
+import type { RunDatabase } from "@usine/engine/database";
+import type { EnginePersistenceError } from "@usine/engine/engine";
+import { localSqliteLayer } from "@usine/engine/local-sqlite";
 import type { UsineConfig } from "@usine/config/factory";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import type { InstanceDirectory, InstanceId } from "@usine/core/instance";
@@ -27,6 +30,7 @@ export const workerEngineLayer = (
   instanceId: InstanceId,
   config: UsineConfig,
   brains: ReadonlyArray<BrainSpec>,
+  database: Layer.Layer<RunDatabase, EnginePersistenceError> = localSqliteLayer(instanceDirectory),
 ) =>
   Layer.unwrap(
     Effect.gen(function* () {
@@ -50,13 +54,19 @@ export const workerEngineLayer = (
             .map(({ name }) => name)
             .join(","),
         });
-        return sshLayer(instanceDirectory, config, brains, {
-          workers: addresses,
-          instance,
-          instanceId,
-          knownHostsDirectory: `${instanceDirectory}/.usine/known-hosts`,
-          workerRecordsDirectory: sshWorkerRecordsDirectory(instanceDirectory),
-        });
+        return sshLayer(
+          instanceDirectory,
+          config,
+          brains,
+          {
+            workers: addresses,
+            instance,
+            instanceId,
+            knownHostsDirectory: `${instanceDirectory}/.usine/known-hosts`,
+            workerRecordsDirectory: sshWorkerRecordsDirectory(instanceDirectory),
+          },
+          database,
+        );
       }
       if (cloudflareWorkersOf(config).length === config.workers.length) {
         const addresses = yield* cloudflareWorkerAddressesOf(config);
@@ -68,9 +78,15 @@ export const workerEngineLayer = (
           instance,
           workerUrls: addresses.map(({ workerUrl }) => workerUrl.origin).join(","),
         });
-        return cloudflareLayer(instanceDirectory, config, brains, { workers: addresses, instance });
+        return cloudflareLayer(
+          instanceDirectory,
+          config,
+          brains,
+          { workers: addresses, instance },
+          database,
+        );
       }
       yield* Effect.logInfo("Running Attempts with the local executor", { workers });
-      return localLayer(instanceDirectory, config, brains, {});
+      return localLayer(instanceDirectory, config, brains, {}, database);
     }),
   );

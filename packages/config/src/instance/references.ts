@@ -39,19 +39,21 @@ export const loopReferenceFailure = (
     Option.some(
       new ConfigFileError({ file, stage: "reference", expression: Option.none(), message }),
     );
+  const problems: Array<string> = [];
   if (!references.agentNames.has(loop.agent)) {
-    return referenceError(
+    problems.push(
       `Unknown agent "${loop.agent}": agents/${loop.agent}.md is missing or invalid. Fix the agent file, or set agent to an existing agent.`,
     );
   }
 
-  if (Option.isNone(loop.selector)) return Option.none();
+  if (Option.isNone(loop.selector))
+    return problems.length === 0 ? Option.none() : referenceError(problems.join("\n"));
   if (Option.isSome(loop.selector.value.repos)) {
     const missing = loop.selector.value.repos.value.filter(
       (name) => !references.repoNames.has(canonicalRepositoryName(name)),
     );
     if (missing.length > 0) {
-      return referenceError(
+      problems.push(
         `Unknown repositories in selector.repos: ${quoted(missing)}. Add them under repos in usine.yaml.`,
       );
     }
@@ -62,10 +64,10 @@ export const loopReferenceFailure = (
       (tag) => !references.registryTags.has(tag),
     );
     if (missing.length > 0) {
-      return referenceError(
+      problems.push(
         `Unknown tags in selector.tags: ${quoted(missing)}. Add them to a repository's tags in usine.yaml.`,
       );
     }
   }
-  return Option.none();
+  return problems.length === 0 ? Option.none() : referenceError(problems.join("\n"));
 };
