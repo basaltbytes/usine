@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router";
 import type { RepositoryName } from "@usine/core/repository";
 import { BootScreen } from "~/components/boot-screen";
 import { Button } from "~/components/ui/button";
+import { backToBoard, taskNotFound, taskNotFoundDescription } from "~/features/tasks/strings";
 import { projectParams } from "~/lib/overview";
 
 type TaskNotFoundProps = {
@@ -11,8 +12,8 @@ type TaskNotFoundProps = {
 
 export const TaskNotFound = ({ repository, number }: TaskNotFoundProps) => (
   <BootScreen
-    title="Task not found"
-    description={`#${number} is not among the newest items on the ${repository} board`}
+    title={taskNotFound}
+    description={taskNotFoundDescription(repository, number)}
     tone="error"
     inPanel
   >
@@ -21,7 +22,7 @@ export const TaskNotFound = ({ repository, number }: TaskNotFoundProps) => (
       nativeButton={false}
       render={<Link to="/projects/$owner/$name" params={projectParams(repository)} />}
     >
-      Back to the board
+      {backToBoard}
     </Button>
   </BootScreen>
 );
