@@ -24,6 +24,8 @@ Parent reasoning effort is configured, not inherited: `settings.parent_effort` i
 
 The subagents extension is now a pi-durable extension (`@usine/durable`), and the Pi parent runs in the orchestrator, not a worker run host. Each attempt is a `usine.attempt` task with its parent conversation, and the `subagent` tool is the parent's only tool. pi-durable commits the conversation, each tool call's intent, and its output so far before showing anything, so an orchestrator restart resumes the attempt instead of failing it.
 
+The parent's system prompt remains the `usine` section alone because its only tool is `subagent`, children read the worktree's `AGENTS.md` themselves, and three weeks of internal use ran with this prompt (#185).
+
 Unchanged: the parent's model, effort, and pool resolution, the child-session budget, `[usine:blocked]` reports, and the three child backends. A child is a vendor process the parent can't replay, so the tool isn't replay-safe. After a restart, its call ends as interrupted with the committed output, and the parent model decides whether to delegate again. Resuming the vendor session by recorded id comes later.
 
 Every child and its commands get exactly the attempt's environment, because the orchestrator's own contains the App private key ([ADR 0011](./0011-github-app-identity-scoped-worker-tokens.md)). It's never stored, so after a restart new children wait for the executor. Interrupting the parent aborts its current turn and children, rather than blocking its next tool call. The parent is then on hold until operator guidance or a release ([ADR 0018](./0018-takeover-and-edit-and-retry.md)).
