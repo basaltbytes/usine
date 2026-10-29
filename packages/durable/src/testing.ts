@@ -13,7 +13,7 @@ import {
   AgentBlockedError,
   AgentQuestionError,
   type AgentReport,
-  AgentResultError,
+  harnessFailure,
   type AgentSessionError,
   ChildBackend,
   type ChildRequest,
@@ -191,8 +191,7 @@ const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: Chil
     report(new AgentBlockedError({ sessionId: Option.some(session.id), message }));
   const ask = (question: string) =>
     report(new AgentQuestionError({ sessionId: Option.some(session.id), message: question }));
-  const fail = (message: string) =>
-    report(new AgentResultError({ sessionId: Option.some(session.id), message }));
+  const fail = (message: string) => report(harnessFailure(Option.some(session.id), message));
   const crash = (message: string) =>
     Effect.gen(function* () {
       const error = new SessionOperationError({

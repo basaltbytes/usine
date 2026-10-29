@@ -9,7 +9,7 @@ import type {
   RunView,
   UnconfirmedStopView,
 } from "@usine/orchestrator/operator";
-import { Match, Option } from "effect";
+import { DateTime, Match, Option } from "effect";
 import type { RunActionRequest } from "~/hooks/runs/actions";
 import type { Chapter } from "~/lib/runs/transcript/document/model";
 import type { QueuedFor } from "~/lib/runs/transcript/model";
@@ -41,6 +41,7 @@ export const attemptStartLabel = (start: AttemptStart): string =>
         onSome: (login) => `Edited and retried by ${login}`,
       }),
     InfraRetry: () => "Retried after an infrastructure failure",
+    ProviderRetry: () => "Retried after a provider capacity refusal",
     AfterRestart: () => "Started again after a restart",
   });
 
@@ -62,13 +63,17 @@ export const stopWaitLine = (
  * returns `stopWaitLine`; while `machine` is being created for a queued Run, says so.
  */
 export const runStateLine = (
-  run: Pick<RunView, "id" | "state" | "attempts">,
+  run: Pick<RunView, "id" | "state" | "attempts" | "providerRetry">,
   unconfirmedStop: UnconfirmedStopView | null = null,
   machine: MachineView | null = null,
 ): string => {
   if (unconfirmedStop !== null) return stopWaitLine(run.id, unconfirmedStop);
   if (run.state === "Queued" && machine?.state === "creating")
     return `Queued, creating a ${providerLabel[machine.provider]} machine`;
+  if (run.providerRetry !== null) {
+    const { message, nextAttempt, retryAt } = run.providerRetry;
+    return `Provider at capacity: ${message} Next try: attempt ${nextAttempt} at ${timestampLabel(DateTime.formatIso(retryAt))}.`;
+  }
   const attempts = run.attempts.length;
   const after =
     attempts === 0 ? "" : ` after ${attempts} ${attempts === 1 ? "attempt" : "attempts"}`;
@@ -94,6 +99,7 @@ export const failureReason = (failure: FailureView): string =>
   Match.valueTags(failure, {
     GitHubPushFailure: () => "GitHub refused push",
     InfraFailure: () => "Infrastructure failure",
+    ProviderCapacityFailure: () => "Provider at capacity",
     DefectFailure: () => "Executor defect",
     AgentFailure: () => "Agent failure",
     BlockedFailure: () => "Agent blocked",
@@ -122,6 +128,7 @@ export const failureMessage = (failure: FailureView): string =>
   Match.valueTags(failure, {
     GitHubPushFailure: ({ message }) => message,
     InfraFailure: ({ message }) => message,
+    ProviderCapacityFailure: ({ message }) => message,
     DefectFailure: ({ message }) => message,
     AgentFailure: ({ message }) => message,
     BlockedFailure: ({ message }) => message,

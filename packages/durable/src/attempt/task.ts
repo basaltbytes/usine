@@ -18,7 +18,12 @@ import {
   UserEntry,
 } from "@earendil-works/pi-durable";
 import { assemblePrompt } from "@usine/agents/prompt";
-import { reportedOutcome, toAttemptFailure } from "@usine/agents/runtime";
+import {
+  AgentCapacityError,
+  harnessFailure,
+  reportedOutcome,
+  toAttemptFailure,
+} from "@usine/agents/runtime";
 import { ModelId } from "@usine/core/agent/brain";
 import type { AttemptId } from "@usine/core/attempt";
 import type { RunSpec } from "@usine/core/attempt/channel";
@@ -28,6 +33,7 @@ import {
   BlockedFailure,
   ChildSessionBudgetFailure,
   InfraFailure,
+  ProviderCapacityFailure,
   QuestionFailure,
 } from "@usine/core/attempt/failure";
 import {
@@ -36,7 +42,7 @@ import {
   SessionIdle,
   SessionResumed,
 } from "@usine/core/agent/session";
-import { Effect, Option, Result } from "effect";
+import { Effect, Option, Result, Schema } from "effect";
 import { durableError } from "../harness.ts";
 import {
   type AttemptRecord,
@@ -89,6 +95,7 @@ const childReportFailure = ({
   kind,
 }: NonNullable<AttemptRecord["childBlocker"]>): AttemptFailure => {
   if (kind === "question") return new QuestionFailure({ question: message });
+  if (kind === "capacity") return new ProviderCapacityFailure({ message });
   if (kind === "failed") return new AgentFailure({ message });
   return new BlockedFailure({ message });
 };
@@ -418,11 +425,23 @@ export const attemptTask = (
     }
     const reason = settled.status === "unanswered" ? settled.reason : settled.status;
     yield* Effect.logError("Pi parent turn ended without an answer", { turn, reason });
+    const refusal =
+      settled.status === "unanswered" &&
+      settled.reason === "model_error" &&
+      Schema.is(Schema.String)(settled.detail)
+        ? Option.some(harnessFailure(Option.none(), settled.detail)).pipe(
+            Option.filter((error) => error instanceof AgentCapacityError),
+          )
+        : Option.none<AgentCapacityError>();
     yield* commit(runtime, context, "record the unanswered turn", () =>
       failedOutcome(
-        new InfraFailure({
-          message: `The Pi parent's turn ended without an answer: ${reason}`,
-          cause: settled.status === "unanswered" ? (settled.detail ?? reason) : reason,
+        Option.match(refusal, {
+          onSome: toAttemptFailure,
+          onNone: () =>
+            new InfraFailure({
+              message: `The Pi parent's turn ended without an answer: ${reason}`,
+              cause: settled.status === "unanswered" ? (settled.detail ?? reason) : reason,
+            }),
         }),
       ),
     );

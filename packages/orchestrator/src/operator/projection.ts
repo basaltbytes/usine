@@ -1,3 +1,4 @@
+import { pendingProviderRetry } from "@usine/core/attempt";
 import type { Worker as ConfigWorker } from "@usine/config/factory";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptFailure } from "@usine/core/attempt/failure";
@@ -24,6 +25,7 @@ import {
   FailedAttemptView,
   type FailureView,
   InfraFailureView,
+  ProviderCapacityFailureView,
   GitHubPushFailureView,
   LocalWorkerAccess,
   QuestionFailureView,
@@ -52,6 +54,7 @@ export const failureView = (failure: AttemptFailure): FailureView =>
   Match.valueTags(failure, {
     GitHubPushFailure: ({ message }) => new GitHubPushFailureView({ message }),
     InfraFailure: ({ message }) => new InfraFailureView({ message }),
+    ProviderCapacityFailure: ({ message }) => new ProviderCapacityFailureView({ message }),
     DefectFailure: ({ message }) => new DefectFailureView({ message }),
     AgentFailure: ({ message }) => new AgentFailureView({ message }),
     BlockedFailure: ({ message }) => new BlockedFailureView({ message }),
@@ -227,6 +230,7 @@ export const runView = (
     agent: snapshot.agent.name,
     agentBrain: snapshot.agent.brain,
     state: snapshot.run.state._tag,
+    providerRetry: Option.getOrNull(pendingProviderRetry(snapshot.run.state, snapshot.attempts)),
     loopPaused: pausedLoops.has(snapshot.run.loop),
     openedAt: DateTime.formatIso(snapshot.run.openedAt),
     closedAt: Option.match(snapshot.closedAt, { onNone: () => null, onSome: DateTime.formatIso }),

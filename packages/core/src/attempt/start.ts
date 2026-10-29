@@ -26,6 +26,11 @@ export class StartedByInfraRetry extends Schema.TaggedClass<StartedByInfraRetry>
   "AttemptStart/InfraRetry",
 )("InfraRetry", {}) {}
 
+/** An automatic retry after a provider capacity refusal and its backoff. */
+export class StartedByProviderRetry extends Schema.TaggedClass<StartedByProviderRetry>(
+  "AttemptStart/ProviderRetry",
+)("ProviderRetry", {}) {}
+
 /** A start after an orchestrator restart interrupted the previous Attempt without a reattach. */
 export class StartedAfterRestart extends Schema.TaggedClass<StartedAfterRestart>(
   "AttemptStart/AfterRestart",
@@ -40,6 +45,7 @@ export const AttemptStart = Schema.Union([
   StartedByRetry,
   StartedByEditAndRetry,
   StartedByInfraRetry,
+  StartedByProviderRetry,
   StartedAfterRestart,
 ]);
 export type AttemptStart = typeof AttemptStart.Type;

@@ -19,6 +19,7 @@ import { WorkerName } from "@usine/core/worker";
 import { Effect, Fiber, Layer, Logger, Option, Queue, Stream } from "effect";
 import {
   AgentResultError,
+  AgentCapacityError,
   ChildRequest,
   PiChildBackend,
   PoolUnavailableError,
@@ -621,6 +622,44 @@ describe("Pi child backend", () => {
         const error = yield* Effect.flip(backend.launch(childRequest));
         assert(error instanceof SessionOperationError);
         assert.strictEqual(error.operation, "launch");
+      }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(sdk)),
+    );
+  });
+
+  it.effect("fails a Pi child with capacity when its provider retries are exhausted", () => {
+    const listeners: Array<(event: PiSessionEvent) => void> = [];
+    const message = "HTTP 529: overloaded_error";
+    const session: PiSession = {
+      abort: () => Promise.resolve(),
+      dispose: () => undefined,
+      messages: [],
+      prompt: () => {
+        for (const listener of listeners)
+          listener({ type: "auto_retry_end", success: false, attempt: 3, finalError: message });
+        return Promise.resolve();
+      },
+      steer: () => Promise.resolve(),
+      subscribe: (listener) => {
+        listeners.push(listener);
+        return () => undefined;
+      },
+    };
+    const sdk = Layer.succeed(PiSdk)({
+      start: () =>
+        Promise.resolve({
+          _tag: "Started",
+          model: childRequest.session.brain.model,
+          pool: "apiKeys",
+          session,
+          tools: childTools,
+        }),
+    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const running = yield* (yield* PiChildBackend).launch(childRequest);
+        const error = yield* running.result.pipe(Effect.flip);
+        assert(error instanceof AgentCapacityError);
+        assert.strictEqual(error.message, message);
       }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(sdk)),
     );
   });

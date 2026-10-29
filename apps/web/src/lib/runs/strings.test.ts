@@ -1,9 +1,10 @@
-import { AttemptNumber } from "@usine/core/attempt";
+import { AttemptNumber, ProviderRetry } from "@usine/core/attempt";
 import { SalvagePushed, SalvageRef } from "@usine/core/attempt/salvage";
 import { CommitSha } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { WorkerName } from "@usine/core/worker";
 import { UnconfirmedStopView } from "@usine/orchestrator/operator";
+import { DateTime } from "effect";
 import { assert, describe, it } from "vitest";
 import { conflictingSalvageMessage, runStateLine } from "~/lib/runs/strings";
 
@@ -28,7 +29,12 @@ describe("run state while a parent task isn't confirmed stopped", () => {
       attemptNumber: AttemptNumber.make(1),
       worker: WorkerName.make("local"),
     });
-  const run = { id: RunId.make("retrying"), state: "Running", attempts: [] } as const;
+  const run = {
+    id: RunId.make("retrying"),
+    state: "Running",
+    attempts: [],
+    providerRetry: null,
+  } as const;
 
   it("names the run's own attempt and the worker it still ends on", () => {
     assert.strictEqual(
@@ -47,4 +53,20 @@ describe("run state while a parent task isn't confirmed stopped", () => {
   it("keeps the state without an unconfirmed stop", () => {
     assert.strictEqual(runStateLine(run), "Running, attempt 1");
   });
+});
+
+it("shows the provider refusal and the scheduled attempt in the run header", () => {
+  const message = "Selected model is at capacity. Please try a different model.";
+  const line = runStateLine({
+    id: RunId.make("capacity"),
+    state: "Running",
+    attempts: [],
+    providerRetry: new ProviderRetry({
+      message,
+      nextAttempt: AttemptNumber.make(2),
+      retryAt: DateTime.makeUnsafe(new Date(2026, 9, 29, 2, 4)),
+    }),
+  });
+  assert.include(line, message);
+  assert.include(line, "attempt 2 at 2026-10-29 02:04");
 });

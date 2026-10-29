@@ -14,7 +14,13 @@ import {
 } from "@usine/core/agent/session";
 import { Cause, Deferred, Effect, Option, Queue, Ref, Schema } from "effect";
 import { addUsage, piMessageUsage, type SessionUsage } from "./usage.ts";
-import { type AgentSessionError, reportedOutcome, SessionResult } from "../runtime.ts";
+import {
+  type AgentSessionError,
+  AgentCapacityError,
+  harnessFailure,
+  reportedOutcome,
+  SessionResult,
+} from "../runtime.ts";
 import type { PiMessage, PiSession, PiSessionEvent } from "./sdk.ts";
 
 export interface SessionChannelOptions {
@@ -261,6 +267,10 @@ export const subscribePiSession = (
           );
           offer(new ProviderRecovered({ session, retries: ProviderRetries.make(retries) }));
           return;
+        }
+        if (!event.success && event.finalError) {
+          const failure = harnessFailure(Option.some(session.id), event.finalError);
+          if (failure instanceof AgentCapacityError) log(channel.fail(failure));
         }
         log(
           Effect.logInfo("Pi session stopped retrying its provider", {

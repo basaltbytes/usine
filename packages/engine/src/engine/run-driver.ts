@@ -1,4 +1,4 @@
-import type { Attempt, AttemptId } from "@usine/core/attempt";
+import { type Attempt, type AttemptId, pendingProviderRetry } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { type AttemptFailure, DefectFailure, InfraFailure } from "@usine/core/attempt/failure";
 import type { RunId } from "@usine/core/run";
@@ -436,7 +436,7 @@ export class RunDriver extends Context.Service<
           const finished = yield* store
             .finishAttempt(open.value.attempt, open.value.result)
             .pipe(retryingStore(runId, "finish the attempt"));
-          if (finished._tag !== "RetryAttempt") return finished._tag;
+          return finished._tag;
         }
         const started = yield* store
           .beginAttempt(
@@ -527,6 +527,28 @@ export class RunDriver extends Context.Service<
         return finished._tag;
       });
 
+      const awaitProviderRetry = Effect.fn("RunDriver.awaitProviderRetry")(function* (
+        runId: RunId,
+      ) {
+        yield* Effect.annotateCurrentSpan({ runId });
+        const snapshot = yield* store
+          .snapshot(runId)
+          .pipe(retryingStore(runId, "read the retry delay"));
+        const retry = pendingProviderRetry(snapshot.run.state, snapshot.attempts);
+        if (Option.isNone(retry)) return;
+        const { retryAt, nextAttempt, message } = retry.value;
+        const delayMillis =
+          DateTime.toEpochMillis(retryAt) - DateTime.toEpochMillis(yield* DateTime.now);
+        yield* Effect.logInfo("Run waits before retrying provider capacity", {
+          runId,
+          nextAttempt,
+          message,
+          retryAt: DateTime.formatIso(retryAt),
+          delayMillis: Math.max(0, delayMillis),
+        });
+        if (delayMillis > 0) yield* Effect.sleep(delayMillis);
+      });
+
       // `launch` traces it as the root span of the Run's own trace.
       const drive = Effect.fnUntraced(function* (runId: RunId) {
         const submission = yield* store
@@ -549,6 +571,7 @@ export class RunDriver extends Context.Service<
 
         let outcome: FinishDecision["_tag"] | "WaitingForStop";
         do {
+          yield* awaitProviderRetry(runId);
           // A reattached Attempt uses a slot on the Worker it started on (#177).
           const open = yield* openAttempt(runId);
           if (Option.isSome(open) && open.value._tag !== "Live") {

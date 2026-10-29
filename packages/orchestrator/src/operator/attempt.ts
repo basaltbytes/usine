@@ -18,6 +18,11 @@ export class InfraFailureView extends Schema.TaggedClass<InfraFailureView>(
   "@usine/orchestrator/InfraFailureView",
 )("InfraFailure", { message: Schema.String }) {}
 
+/** A temporary model provider capacity refusal. */
+export class ProviderCapacityFailureView extends Schema.TaggedClass<ProviderCapacityFailureView>(
+  "@usine/orchestrator/ProviderCapacityFailureView",
+)("ProviderCapacityFailure", { message: Schema.String }) {}
+
 /** A captured programmer defect that needs operator intervention, without the original cause. */
 export class DefectFailureView extends Schema.TaggedClass<DefectFailureView>(
   "@usine/orchestrator/DefectFailureView",
@@ -61,6 +66,7 @@ export class ChildSessionBudgetFailureView extends Schema.TaggedClass<ChildSessi
 export const FailureView = Schema.Union([
   GitHubPushFailureView,
   InfraFailureView,
+  ProviderCapacityFailureView,
   DefectFailureView,
   AgentFailureView,
   BlockedFailureView,

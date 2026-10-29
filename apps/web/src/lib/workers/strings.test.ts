@@ -10,7 +10,12 @@ describe("machine copy for provisioned workers", () => {
   const now = Date.parse(local(25, 19, 40));
 
   it("says a queued run's machine is being created, with the provider", () => {
-    const queued = { id: RunId.make("queued"), state: "Queued", attempts: [] } as const;
+    const queued = {
+      id: RunId.make("queued"),
+      state: "Queued",
+      attempts: [],
+      providerRetry: null,
+    } as const;
     assert.strictEqual(
       runStateLine(queued, null, machineFixture({ provider: "boat" })),
       "Queued, creating a Boat machine",

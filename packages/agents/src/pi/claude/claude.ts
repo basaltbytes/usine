@@ -33,7 +33,8 @@ import {
 } from "effect";
 import { ChildProcessSpawner } from "effect/process";
 import {
-  AgentResultError,
+  type AgentCapacityError,
+  type AgentResultError,
   ClaudeChildBackend,
   ClaudeLoginLock,
   ChildBackend,
@@ -59,6 +60,9 @@ import {
   ClaudeCompletionHeader,
   ClaudeResultMessage,
   decodeApiRetry,
+  apiRetryFailure,
+  assistantFailure,
+  resultFailure,
   decodeClaudeInit,
   decodeCompletionUpdate,
   isAssistantMessage,
@@ -587,11 +591,18 @@ const makeClaudeChild = Effect.gen(function* () {
         );
       });
 
+      let providerFailure = Option.none<AgentCapacityError | AgentResultError>();
+
       /** Applies one message from Claude to the session. */
       const handle = (message: Schema.Json) =>
         Effect.gen(function* () {
           const retry = decodeApiRetry(message);
-          if (Option.isSome(retry)) return yield* reportRetry(retry.value);
+          if (Option.isSome(retry)) {
+            providerFailure = apiRetryFailure(request.session.id, retry.value);
+            return yield* reportRetry(retry.value);
+          }
+          if (isAssistantMessage(message))
+            providerFailure = assistantFailure(request.session.id, message, providerFailure);
           if (retrying && isAssistantMessage(message)) yield* reportRecovery();
           if (Schema.is(ClaudeCompletionHeader)(message)) {
             const update = yield* decodeCompletionUpdate(message).pipe(
@@ -665,15 +676,10 @@ const makeClaudeChild = Effect.gen(function* () {
           retries = 0;
           retrying = false;
           if (message.subtype !== "success" || message.result === undefined) {
-            const detail = message.errors?.join("; ") ?? "Claude returned an unsuccessful result";
-            yield* channel.fail(
-              new AgentResultError({
-                sessionId: Option.some(request.session.id),
-                message: detail,
-              }),
-            );
+            yield* channel.fail(resultFailure(request.session.id, message, providerFailure));
             return;
           }
+          providerFailure = Option.none();
           const stillQueued = message.queued_turn_count;
           // Claude has read every queued message except those still queued as separate turns.
           if (stillQueued !== undefined)

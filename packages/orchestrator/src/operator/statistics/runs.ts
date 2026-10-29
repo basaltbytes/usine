@@ -248,7 +248,10 @@ const firstAttempt = (summary: RunSummary): Attempt | undefined =>
 
 const automaticRestart = (attempt: Attempt | undefined): boolean =>
   attempt !== undefined &&
-  Option.exists(attempt.start, ({ _tag }) => _tag === "InfraRetry" || _tag === "AfterRestart");
+  Option.exists(
+    attempt.start,
+    ({ _tag }) => _tag === "InfraRetry" || _tag === "ProviderRetry" || _tag === "AfterRestart",
+  );
 
 /** Whether the operator started the Attempt by retrying the failed Run, with or without an edit. */
 export const operatorRetry = (attempt: Attempt | undefined): attempt is Attempt =>

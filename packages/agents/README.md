@@ -96,7 +96,7 @@ Should egress use HTTP CONNECT or a SOCKS proxy? Both fit the gateway.
 
 A child's report returns to the parent's `subagent` call as text opening with its marker, to return verbatim. The parent keeps the first: a later ordinary answer fails with it, and the paraphrase stays in the transcript. Successful siblings don't clear it. Held children can take guidance and replace their answer before release. A marker without details still fails.
 
-Model ids stay opaque until the harness checks its registry. Harness failures use `AgentResultError`. `toAttemptFailure` maps only `SessionOperationError` (SDK, process, and protocol failures) to a retryable infrastructure failure; `ChildSessionBudgetExceededError` becomes a non-retryable `ChildSessionBudgetFailure`.
+Model ids stay opaque until the harness checks its registry. Task failures use `AgentResultError`. `toAttemptFailure` maps `SessionOperationError` (SDK, process, and protocol failures) to a retryable infrastructure failure; `ChildSessionBudgetExceededError` becomes a non-retryable `ChildSessionBudgetFailure`.
 
 ## GitHub identity and reviews
 
@@ -125,3 +125,7 @@ USINE_PI_INTEGRATION_MODEL=anthropic/claude-sonnet-4-6 pnpm --filter @usine/agen
 ```
 
 The protocol conformance baseline is 0.159.2. Codex 0.159.0, 0.159.1, and 0.159.3 have the same protocol crates. Codex 0.153.4 passed the real steering and interruption contracts, including Astra, and its generated types have the same shape as 0.159.2's for every field the adapter uses. Other CLI builds need verification first.
+
+Provider capacity refusals use `AgentCapacityError`, which maps to `ProviderCapacityFailure`. Codex's `serverOverloaded` code and Claude's `overloaded` code take precedence over error text. HTTP 529 and HTTP 503 with a retry hint also qualify. When a harness exposes only text, `harnessFailure` recognizes “Selected model is at capacity”, `overloaded_error`, HTTP 529, and 503 with a retry hint. Other task failures remain `AgentResultError`.
+
+`reportText` relays capacity refusals with `[usine:provider-capacity]`; `reportedOutcome` restores their classification. Pi children report capacity when their provider retries end unsuccessfully.

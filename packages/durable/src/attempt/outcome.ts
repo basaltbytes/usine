@@ -33,6 +33,7 @@ const failureMessage = (failure: AttemptFailure): string =>
   Match.valueTags(failure, {
     GitHubPushFailure: ({ message }) => message,
     InfraFailure: ({ message }) => message,
+    ProviderCapacityFailure: ({ message }) => message,
     DefectFailure: ({ message }) => message,
     AgentFailure: ({ message }) => message,
     BlockedFailure: ({ message }) => message,
