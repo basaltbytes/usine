@@ -13,10 +13,10 @@
     "deploy": "wrangler deploy"
   },
   "dependencies": {
-    "@astrojs/starlight": "0.42.6",
+    "@astrojs/starlight": "0.42.7",
     "@mermaid-js/layout-elk": "1.0.1",
-    "astro": "7.4.1",
-    "astro-mermaid": "2.1.0",
+    "astro": "7.4.2",
+    "astro-mermaid": "2.2.0",
     "lucode-starlight": "1.0.0",
     "mermaid": "12.2.0",
     "starlight-links-validator": "0.27.0",
@@ -25,7 +25,7 @@
     "typedoc-plugin-markdown": "4.14.1"
   },
   "devDependencies": {
-    "@astrojs/check": "0.9.11",
+    "@astrojs/check": "0.9.12",
     "@usine/agents": "workspace:*",
     "@usine/cloudflare": "workspace:*",
     "@usine/config": "workspace:*",
@@ -37,8 +37,8 @@
     "@usine/gateway": "workspace:*",
     "@usine/github": "workspace:*",
     "@usine/orchestrator": "workspace:*",
-    "typescript": "6.0.3",
-    "wrangler": "4.151.2"
+    "typescript": "7.0.2",
+    "wrangler": "4.153.0"
   },
   "engines": {
     "node": ">=22.22.0"
