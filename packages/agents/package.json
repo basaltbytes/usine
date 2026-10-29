@@ -68,7 +68,7 @@
     "test:integration:pi": "vitest run test/integration/pi.test.ts"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "0.3.308",
+    "@anthropic-ai/claude-agent-sdk": "0.3.310",
     "@earendil-works/chord": "1.4.0",
     "@earendil-works/pi-agent-core": "1.4.0",
     "@earendil-works/pi-ai": "1.4.0",
@@ -82,7 +82,7 @@
   "devDependencies": {
     "@effect/platform-node": "catalog:",
     "@effect/vitest": "catalog:",
-    "@pwrdrvr/codex-app-server-protocol": "0.159.2",
+    "@pwrdrvr/codex-app-server-protocol": "0.164.0",
     "@usine/tsconfig": "workspace:*",
     "effect": "catalog:",
     "typescript": "catalog:",
