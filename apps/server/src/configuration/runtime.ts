@@ -6,6 +6,7 @@ import {
   configurationEntities,
 } from "@usine/config/configuration";
 import { ConfigurationFolder } from "@usine/config/folder-codec";
+import { migrateProjects } from "@usine/config/project";
 import { ConfigParser } from "@usine/config/parser";
 import { sqliteConfigurationLayer } from "@usine/config/sqlite";
 import type { InstanceDirectory } from "@usine/core/instance";
@@ -69,6 +70,40 @@ export const initializeConfiguration = Effect.fn("Server.initializeConfiguration
   yield* Effect.annotateCurrentSpan({ directory });
   const store = yield* ConfigurationStore;
   const current = yield* store.read;
+  if (Option.isSome(current.instance) && current.instance.value.config.version === 1) {
+    const migrated = yield* Effect.fromResult(migrateProjects(current.instance.value)).pipe(
+      Effect.tapError(({ problems }) =>
+        Effect.forEach(
+          problems,
+          (problem) =>
+            Effect.logError("Project migration would drop an authored loop", {
+              revision: current.number,
+              file: problem.file,
+              message: problem.message,
+            }),
+          { discard: true },
+        ),
+      ),
+    );
+    yield* store
+      .commit({
+        expected: current.number,
+        actor: current.actor,
+        message: Option.some("Migrated repositories and loops to projects"),
+        changes: configurationDiff(
+          configurationEntities(current.instance.value),
+          configurationEntities(migrated),
+        ),
+      })
+      .pipe(
+        Effect.catchTag("StaleRevision", () =>
+          Effect.logInfo("Another process migrated projects first"),
+        ),
+      );
+    const saved = yield* store.read;
+    if (Option.isSome(saved.instance))
+      return { instance: saved.instance.value, number: saved.number };
+  }
   if (Option.isSome(current.instance)) {
     yield* Effect.logInfo("Loaded stored configuration", { revision: current.number });
     return { instance: current.instance.value, number: current.number };

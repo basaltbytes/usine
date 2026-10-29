@@ -1559,19 +1559,26 @@ describe("PollingTriggers", () => {
     }).pipe(Effect.provide(layer));
   });
 
-  it.live("submits items from concurrent repositories through one engine", () =>
+  it.live("runs one project loop on items from both repositories through one engine", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const directory = InstanceDirectory.make(
         yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-polling-multi-" }),
       );
       const multiConfig = Schema.decodeUnknownSync(UsineConfig)({
-        version: 1,
+        version: 2,
+        projects: [
+          {
+            id: "workspace",
+            name: "Workspace",
+            repositories: ["basaltbytes/one", "basaltbytes/two"],
+          },
+        ],
         repos: [{ name: "basaltbytes/one" }, { name: "basaltbytes/two" }],
         settings: { poll_interval: 60 },
       });
       const loop = new LoopFile({
-        name: LoopName.make("watch-open"),
+        name: LoopName.make("workspace/watch-open"),
         trigger: new IssueTrigger({ on: "issue", if: Source.make('item.state == "OPEN"') }),
         selector: Option.none(),
         approval: "required",

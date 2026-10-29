@@ -57,7 +57,7 @@ export const TaskList = ({ project, stalled }: TaskListProps) => {
                   <TaskListRow
                     key={row.task.itemKey}
                     row={row}
-                    repository={project.repository}
+                    repository={row.task.repository}
                     now={now}
                   />
                 ))}

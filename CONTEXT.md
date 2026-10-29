@@ -7,7 +7,7 @@ usine runs coding agents against GitHub issues and pull requests, using loops th
 In UI copy and documentation, write glossary terms as lowercase common nouns. Capitalize them only in headings and code identifiers. For UI copy, follow the Voice section of `apps/web/DESIGN.md`.
 
 **Loop**:
-A named definition of a trigger and the agent run to start for each matched item.
+A named definition within a project of a trigger and the agent run to start for each matched item.
 _Avoid_: workflow, schedule, task, cron
 
 **Instance repo**:
@@ -27,7 +27,7 @@ A repo that the registry declares and that loops run against.
 _Avoid_: target repo
 
 **Project**:
-A named group of managed repos with one board and the loops that run on them. Until [#633](https://github.com/basaltbytes/usine/issues/633) replaces the instance repo's files, each project is one managed repo from the registry.
+A named group of managed repos with one board and the loops that run on them.
 _Avoid_: repo (in the UI)
 
 **Member**:
@@ -58,7 +58,7 @@ A board column that maps to one or more GitHub labels or item states.
 _Avoid_: column, status, stage
 
 **Selector**:
-A repo name or tag that limits the managed repos a loop applies to. A loop without a selector applies to all managed repos.
+A repo name or tag that limits which repositories in a project a loop applies to. A loop without a selector applies to every repository in its project.
 _Avoid_: filter
 
 **Trigger**:

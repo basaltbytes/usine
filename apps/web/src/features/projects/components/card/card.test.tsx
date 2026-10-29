@@ -118,6 +118,7 @@ const runOnItem = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<Attemp
 const itemWithRun = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<AttemptView>) => {
   const run = runOnItem(state, attempts);
   return new BoardTaskView({
+    repository,
     itemKey,
     kind: "issue",
     number: ItemNumber.make(33),

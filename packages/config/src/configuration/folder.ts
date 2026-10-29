@@ -18,6 +18,7 @@ import { loopReferenceFailure, referenceIndex } from "../instance/references.ts"
 import { LoopFile, loopPath } from "../loop.ts";
 import { ConfigParser, formatAgent, formatLoop } from "../parser.ts";
 import { writeYaml } from "../yaml/writer.ts";
+import { migrateProjects } from "../project/operations.ts";
 import { configurationWarnings } from "./commit.ts";
 import { ConfigurationInvalid, ConfigurationStoreError } from "./model.ts";
 
@@ -56,8 +57,15 @@ export class ConfigurationFolder extends Context.Service<
         fs
           .readFileString(path.join(root, file))
           .pipe(Effect.mapError((error) => fileError(file, error.message)));
-      const files = (root: InstanceDirectory, directory: string) =>
+      const files = (root: InstanceDirectory, directory: string, missing: "empty" | "error") =>
         fs.readDirectory(path.join(root, directory)).pipe(
+          Effect.catchIf(
+            (error) => missing === "empty" && error.reason._tag === "NotFound",
+            () =>
+              Effect.logDebug("Configuration folder has no loop files", { directory }).pipe(
+                Effect.as([]),
+              ),
+          ),
           Effect.map((names) => names.filter((name) => name.endsWith(".md")).sort()),
           Effect.mapError((error) => fileError(directory, error.message)),
         );
@@ -75,10 +83,11 @@ export class ConfigurationFolder extends Context.Service<
             if (Result.isFailure(config)) problems.push(config.failure);
             const load = <A>(
               directory: string,
+              missing: "empty" | "error",
               parse: (file: InstancePath, source: string) => Effect.Effect<A, ConfigFileError>,
             ) =>
               Effect.gen(function* () {
-                const names = yield* files(root, directory).pipe(Effect.result);
+                const names = yield* files(root, directory, missing).pipe(Effect.result);
                 if (Result.isFailure(names)) {
                   problems.push(names.failure);
                   return [];
@@ -101,8 +110,13 @@ export class ConfigurationFolder extends Context.Service<
                 }
                 return values;
               });
-            const agents = yield* load<AgentFile>("agents", parser.parseAgentFile);
-            const loops = yield* load<LoopFile>("loops", parser.parseLoopFile);
+            const agents = yield* load<AgentFile>("agents", "error", parser.parseAgentFile);
+            const loops =
+              Result.isSuccess(config) && config.success.version === 2
+                ? (yield* Effect.forEach(config.success.projects, (project) =>
+                    load<LoopFile>(`projects/${project.id}/loops`, "empty", parser.parseLoopFile),
+                  )).flat()
+                : yield* load<LoopFile>("loops", "error", parser.parseLoopFile);
             if (Result.isSuccess(config)) {
               const references = referenceIndex(config.success, agents);
               for (const loop of loops) {
@@ -113,27 +127,44 @@ export class ConfigurationFolder extends Context.Service<
             if (Arr.isArrayNonEmpty(problems)) return yield* new ConfigurationInvalid({ problems });
             if (Result.isFailure(config))
               return yield* new ConfigurationInvalid({ problems: [config.failure] });
-            return new LoadedInstance({
-              config: config.success,
-              agents,
-              loops,
-              warnings: yield* configurationWarnings(parser, config.success, loops),
-              invalidAgents: [],
-              quarantinedLoops: [],
-            });
+            return yield* Effect.fromResult(
+              migrateProjects(
+                new LoadedInstance({
+                  config: config.success,
+                  agents,
+                  loops,
+                  warnings: yield* configurationWarnings(parser, config.success, loops),
+                  invalidAgents: [],
+                  quarantinedLoops: [],
+                }),
+              ),
+            );
           },
           Effect.tapError(({ problems }) =>
-            Effect.logWarning("Configuration folder rejected", { problems: problems.length }),
+            Effect.forEach(
+              problems,
+              (problem) =>
+                Effect.logWarning("Configuration folder rejected", {
+                  file: problem.file,
+                  message: problem.message,
+                }),
+              { discard: true },
+            ),
           ),
         ),
         export: Effect.fn("ConfigurationFolder.export")(
           function* (root, instance) {
             yield* Effect.annotateCurrentSpan({ directory: root });
             yield* fs.makeDirectory(root, { recursive: true });
-            yield* fs.writeFileString(
-              path.join(root, "usine.yaml"),
-              writeYaml(Schema.encodeSync(UsineConfig)(instance.config)),
-            );
+            const encoded = Schema.encodeSync(UsineConfig)(instance.config);
+            const exported =
+              instance.config.version === 1
+                ? encoded
+                : {
+                    ...encoded,
+                    repos: encoded.repos.map(({ lanes: _lanes, ...repository }) => repository),
+                  };
+            yield* fs.writeFileString(path.join(root, "usine.yaml"), writeYaml(exported));
             const write = (
               directory: string,
               documents: ReadonlyArray<readonly [string, string]>,
@@ -156,10 +187,22 @@ export class ConfigurationFolder extends Context.Service<
               "agents",
               instance.agents.map((agent) => [agent.name, formatAgent(agent)]),
             );
-            yield* write(
-              "loops",
-              instance.loops.map((loop) => [loop.name, formatLoop(loop)]),
-            );
+            if (instance.config.version === 1) {
+              yield* write(
+                "loops",
+                instance.loops.map((loop) => [loop.name, formatLoop(loop)]),
+              );
+            } else {
+              yield* write("loops", []);
+              for (const project of instance.config.projects) {
+                yield* write(
+                  `projects/${project.id}/loops`,
+                  instance.loops
+                    .filter((loop) => loop.name.startsWith(`${project.id}/`))
+                    .map((loop) => [loop.name.slice(project.id.length + 1), formatLoop(loop)]),
+                );
+              }
+            }
             yield* Effect.logInfo("Configuration exported", { directory: root });
           },
           Effect.mapError(

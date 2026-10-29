@@ -130,6 +130,7 @@ export const taskCards = (
     const runs = history.map(({ run }) => run).reverse();
     const view = new BoardTaskView({
       ...itemLink(current),
+      repository,
       title: origin.item.title,
       labels: current.labels,
       items: ordered.map(({ item }) => itemLink(item)),

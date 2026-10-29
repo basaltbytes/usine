@@ -1,3 +1,6 @@
+import { ProjectView } from "../src/operator/overview.ts";
+import { groupProjectViews } from "../src/operator/projects.ts";
+import { boardRepositories } from "@usine/config/project";
 import { assert, describe, it } from "@effect/vitest";
 import { GitHubLabelName } from "@usine/config/label";
 import { LabelLaneSource, LaneName } from "@usine/config/board";
@@ -569,6 +572,7 @@ describe("Board projection", () => {
 
   it("derives an authored lane mutation without trusting truncated card labels", () => {
     const card = new BoardTaskView({
+      repository,
       itemKey,
       kind: "issue",
       number: CoreItemNumber.make(33),
@@ -821,3 +825,55 @@ describe("Task usage", () => {
     assert.strictEqual(usage.cost, null);
   });
 });
+
+it.effect("matches a project's label lane by name in both repositories", () =>
+  Effect.gen(function* () {
+    const config = Schema.decodeUnknownSync(UsineConfig)({
+      version: 2,
+      repos: [{ name: repository }, { name: "basaltbytes/second" }],
+      projects: [
+        {
+          id: "workspace",
+          name: "Workspace",
+          repositories: [repository, "basaltbytes/second"],
+          lanes: [{ name: "Ready", sources: [{ label: ready }] }],
+        },
+      ],
+    });
+    const views: Array<ProjectView> = [];
+    for (const managed of boardRepositories(config)) {
+      const projection = new ItemProjection({
+        ...item,
+        repository: managed.name,
+        itemKey: ItemKey.make(JSON.stringify(["github", managed.name, item.number])),
+      });
+      const board = yield* projectBoard(managed, [], [projection], []);
+      assert.strictEqual(board.lanes[0]?.name, "Ready");
+      assert.strictEqual(board.lanes[0]?.items[0]?.itemKey, projection.itemKey);
+      views.push(
+        new ProjectView({
+          repository: managed.name,
+          status: "clear",
+          runs: [],
+          board,
+          labels: [],
+          preflightFindings: [],
+        }),
+      );
+    }
+    const projects = groupProjectViews(config, views);
+    assert.strictEqual(projects.length, 1);
+    assert.strictEqual(projects[0]?.id, "workspace");
+    assert.deepStrictEqual(projects[0]?.repositories, [
+      repository,
+      RepositoryName.make("basaltbytes/second"),
+    ]);
+    assert.deepStrictEqual(
+      projects[0]?.board.lanes[0]?.items.map(({ repository, number }) => ({ repository, number })),
+      [
+        { repository, number: item.number },
+        { repository: "basaltbytes/second", number: item.number },
+      ],
+    );
+  }),
+);

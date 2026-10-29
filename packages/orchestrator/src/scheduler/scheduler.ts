@@ -1,3 +1,4 @@
+import { boardRepositories } from "@usine/config/project";
 import type { UsineConfig, Worker as ConfigWorker } from "@usine/config/factory";
 import type { LoadedInstance } from "@usine/config/instance";
 import { resolveParentEffort } from "@usine/core/agent";
@@ -716,7 +717,7 @@ export const stepExecutorLayer = (
         const loop = loops.find(({ name }) => name === submission.loop);
         const priority = Option.flatMap(Option.fromNullishOr(loop), ({ priority }) => priority);
         const lanes =
-          config.repos.find(
+          boardRepositories(config).find(
             ({ name }) =>
               canonicalRepositoryName(name) === canonicalRepositoryName(submission.repository),
           )?.lanes ?? [];

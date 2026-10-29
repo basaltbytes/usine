@@ -1,3 +1,4 @@
+import { repositoryEditorEntity, repositoryEditorChanges } from "./repositories.ts";
 import { configurationLoopOperations } from "./loops/operations.ts";
 import {
   type LoopDraft,
@@ -16,6 +17,8 @@ import {
   revertConfiguration,
   type ConfigurationRevertBlocked,
   configurationEntities,
+  resolveConfigurationEntityKey,
+  qualifyLoopValue,
   type ConfigurationInvalid,
   type ConfigurationRevision,
   type ConfigurationRevisionNumber,
@@ -128,6 +131,16 @@ export class ConfigurationEditor extends Context.Service<
           actor: snapshot.actor,
           message: Option.fromUndefinedOr(input.message),
         });
+      const resolveKey = (snapshot: Configuration, key: ConfigurationEntityKey) =>
+        Option.match(resolveConfigurationEntityKey(entitiesOf(snapshot), key), {
+          onSome: Effect.succeed,
+          onNone: () =>
+            Effect.fail(
+              new ConfigurationNotFound({
+                message: `Loop ${key.identifier} is ambiguous. Use project/loop.`,
+              }),
+            ),
+        });
       const findEntity = (snapshot: Configuration, key: ConfigurationEntityKey) => {
         const found = entitiesOf(snapshot).find((entity) => entity.key.key === key.key);
         return found === undefined
@@ -152,6 +165,13 @@ export class ConfigurationEditor extends Context.Service<
                   }),
               ),
             );
+          const identifier =
+            query.kind === "loop" && query.identifier !== undefined
+              ? (yield* resolveKey(
+                  yield* store.read,
+                  yield* entityKey({ kind: "loop", identifier: query.identifier }),
+                )).identifier
+              : query.identifier;
           const history = yield* store.list(Option.none());
           const filtered = history
             .filter(
@@ -161,7 +181,7 @@ export class ConfigurationEditor extends Context.Service<
                   changes.some(
                     ({ key }) =>
                       (query.kind === undefined || key.kind === query.kind) &&
-                      (query.identifier === undefined || key.identifier === query.identifier),
+                      (identifier === undefined || key.identifier === identifier),
                   )),
             )
             .sort((a, b) => b.number - a.number);
@@ -180,10 +200,10 @@ export class ConfigurationEditor extends Context.Service<
           });
         }),
         entity: Effect.fn("ConfigurationEditor.entity")(function* (request) {
-          const key = yield* entityKey(request);
-          yield* Effect.annotateCurrentSpan({ entity: key.key });
           const snapshot = yield* store.read;
-          const entity = yield* findEntity(snapshot, key);
+          const key = yield* resolveKey(snapshot, yield* entityKey(request));
+          yield* Effect.annotateCurrentSpan({ entity: key.key });
+          const entity = repositoryEditorEntity(snapshot, yield* findEntity(snapshot, key));
           return new ConfigurationEntityView({
             ...entity,
             text: yield* formatConfigurationEntity(entity),
@@ -191,13 +211,14 @@ export class ConfigurationEditor extends Context.Service<
           });
         }),
         replace: Effect.fn("ConfigurationEditor.replace")(function* (request, input) {
-          const key = yield* entityKey(request);
-          yield* Effect.annotateCurrentSpan({ entity: key.key, expectedRevision: input.expected });
           const snapshot = yield* snapshotFor(input.expected);
-          const entity =
+          const key = yield* resolveKey(snapshot, yield* entityKey(request));
+          yield* Effect.annotateCurrentSpan({ entity: key.key, expectedRevision: input.expected });
+          const parsed =
             input.text !== undefined
               ? yield* parseConfigurationEntity(parser, key, input.text)
-              : new ConfigurationEntity({ key, value: input.value });
+              : new ConfigurationEntity({ key, value: qualifyLoopValue(key, input.value) });
+          const { entity, changes } = yield* repositoryEditorChanges(snapshot, parsed);
           const before = entitiesOf(snapshot).find((entry) => entry.key.key === key.key);
           const change = {
             key,
@@ -205,15 +226,16 @@ export class ConfigurationEditor extends Context.Service<
             after: Option.some(entity.value),
           };
           return yield* save(snapshot, input, [
+            ...changes,
             new ConfigurationChange(
               input.position === undefined ? change : { ...change, position: input.position },
             ),
           ]);
         }),
         remove: Effect.fn("ConfigurationEditor.remove")(function* (request, input) {
-          const key = yield* entityKey(request);
-          yield* Effect.annotateCurrentSpan({ entity: key.key, expectedRevision: input.expected });
           const snapshot = yield* snapshotFor(input.expected);
+          const key = yield* resolveKey(snapshot, yield* entityKey(request));
+          yield* Effect.annotateCurrentSpan({ entity: key.key, expectedRevision: input.expected });
           const entity = yield* findEntity(snapshot, key);
           return yield* save(snapshot, input, [
             new ConfigurationChange({

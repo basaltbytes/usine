@@ -44,6 +44,7 @@ export class BoardPullRequestView extends Schema.Class<BoardPullRequestView>(
 export class BoardTaskView extends Schema.Class<BoardTaskView>("@usine/orchestrator/BoardTaskView")(
   {
     ...BoardItemLink.fields,
+    repository: RepositoryName,
     labels: Schema.Array(GitHubLabelName),
     items: Schema.Array(BoardItemLink).check(Schema.isNonEmpty()),
     /**

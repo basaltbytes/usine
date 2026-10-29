@@ -1,3 +1,5 @@
+import { groupProjectViews } from "./projects.ts";
+import { boardRepositories } from "@usine/config/project";
 import {
   AttentionAcknowledgements,
   AttentionAcknowledgement,
@@ -250,7 +252,7 @@ const makeOperatorObservation = Effect.gen(function* () {
       runsByRepository.set(view.repository, projectRuns);
     }
     const projected = yield* Effect.forEach(
-      instance.config.repos,
+      boardRepositories(instance.config),
       (repository) =>
         Effect.gen(function* () {
           const { name } = repository;
@@ -358,23 +360,26 @@ const makeOperatorObservation = Effect.gen(function* () {
         ),
       ),
     );
-    const projects = projected.map(({ name, projectFindings, projectRuns, board, catalog }) => {
-      return new ProjectView({
-        repository: name,
-        status: "clear",
-        runs: projectRuns,
-        board,
-        labels: catalog.map(
-          ({ name: label, color, description }) =>
-            new LabelView({
-              name: GitHubLabelName.make(label),
-              color: Option.getOrNull(color),
-              description: Option.getOrNull(description),
-            }),
-        ),
-        preflightFindings: projectFindings,
-      });
-    });
+    const projects = groupProjectViews(
+      instance.config,
+      projected.map(({ name, projectFindings, projectRuns, board, catalog }) => {
+        return new ProjectView({
+          repository: name,
+          status: "clear",
+          runs: projectRuns,
+          board,
+          labels: catalog.map(
+            ({ name: label, color, description }) =>
+              new LabelView({
+                name: GitHubLabelName.make(label),
+                color: Option.getOrNull(color),
+                description: Option.getOrNull(description),
+              }),
+          ),
+          preflightFindings: projectFindings,
+        });
+      }),
+    );
     const usage: BoardUsage = {
       runs: new Map(projected.flatMap(({ runUsage }) => [...runUsage])),
       working: projected.flatMap(({ working }) => working),
@@ -612,7 +617,8 @@ const makeOperatorObservation = Effect.gen(function* () {
         const token = Option.map(revision, (value) =>
           JSON.stringify([
             value,
-            instance.config.repos.map(({ name, tags, lanes }) => [name, tags, lanes]),
+            instance.config.repos,
+            instance.config.projects,
             [...workerAccesses(instance.config.workers)],
             instance.loops.map(({ name, agent, trigger, selector }) => [
               name,
@@ -1073,7 +1079,9 @@ const makeOperator = Effect.gen(function* () {
         item: move.item,
         lane: move.toLane,
       });
-      const repository = instance.config.repos.find(({ name }) => name === move.repository);
+      const repository = boardRepositories(instance.config).find(
+        ({ name }) => canonicalRepositoryName(name) === canonicalRepositoryName(move.repository),
+      );
       if (repository === undefined) {
         return yield* new BoardProjectNotFound({ repository: move.repository });
       }

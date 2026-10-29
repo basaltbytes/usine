@@ -3,14 +3,14 @@ import { createFileRoute } from "@tanstack/react-router";
 import { RouteError, RoutePending } from "~/components/route-status";
 import { ProjectNotFound } from "~/components/project-not-found";
 import { deskQuery } from "~/lib/desk/queries";
-import { overviewQuery } from "~/lib/overview";
+import { overviewQuery, projectForRepository } from "~/lib/overview";
 import { TaskList } from "~/features/tasks/list.page";
 
 const TasksRoute = () => {
   const { repository } = Route.useParams();
   const { data } = useSuspenseQuery(overviewQuery());
   const desk = useSuspenseQuery(deskQuery());
-  const project = data.projects.find((candidate) => candidate.repository === repository);
+  const project = projectForRepository(data.projects, repository);
   // A refetch after the loader ran can remove the project.
   if (project === undefined) return <ProjectNotFound />;
   return <TaskList project={project} stalled={desk.data.notMoving} />;

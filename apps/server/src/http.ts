@@ -1,3 +1,5 @@
+import { type ProjectId } from "@usine/core/project";
+import { LoopName } from "@usine/core/loop";
 import { HARNESSES, EFFORTS } from "@usine/core/agent/brain";
 import { GitHubApp } from "@usine/github/github-app";
 import { GitHubPolling } from "@usine/github/polling";
@@ -72,6 +74,21 @@ const operatorFailure = (error: BackendError) => {
   })();
   return new OperatorHttpError({ error: error._tag, message });
 };
+
+const requireProjectRepository = (project: ProjectId, repository: RepositoryName) =>
+  fromBackend((backend) => backend.configuration).pipe(
+    Effect.flatMap((configuration) => {
+      const member = configuration.projects.find(({ id }) => id === project);
+      return member?.includes(repository) === true
+        ? Effect.void
+        : Effect.fail(
+            new OperatorHttpError({
+              error: "BoardProjectNotFoundError",
+              message: `Repository ${repository} does not belong to project ${project}.`,
+            }),
+          );
+    }),
+  );
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
 
@@ -187,6 +204,52 @@ const handlers = HttpApiBuilder.group(OperatorApi, "operator", (routes) =>
       fromUpgrades((upgrades) => upgrades.request(payload)).pipe(acknowledge),
     )
     .handle("overview", () => fromBackend((backend) => backend.overview))
+    .handle("project", ({ params }) =>
+      fromBackend((backend) => backend.overview).pipe(
+        Effect.flatMap((overview) => {
+          const project = overview.projects.find(({ id }) => id === params.project);
+          return project === undefined
+            ? Effect.fail(
+                new OperatorHttpError({
+                  error: "BoardProjectNotFoundError",
+                  message: `Project ${params.project} was not found.`,
+                }),
+              )
+            : Effect.succeed(project);
+        }),
+      ),
+    )
+    .handle("projectTask", ({ params, query }) =>
+      requireProjectRepository(params.project, query.repository).pipe(
+        Effect.andThen(fromBackend((backend) => backend.task(query.repository, params.item))),
+      ),
+    )
+    .handle("moveProjectItem", ({ params, payload }) =>
+      requireProjectRepository(params.project, payload.repository).pipe(
+        Effect.andThen(
+          fromBackend((backend) =>
+            backend.moveBoardItem(
+              new BoardMove({
+                repository: payload.repository,
+                item: params.item,
+                toLane: payload.toLane,
+              }),
+            ),
+          ),
+        ),
+        acknowledge,
+      ),
+    )
+    .handle("pauseProjectLoop", ({ params }) =>
+      fromBackend((backend) =>
+        backend.pause(LoopName.make(`${params.project}/${params.loop}`)),
+      ).pipe(acknowledge),
+    )
+    .handle("unpauseProjectLoop", ({ params }) =>
+      fromBackend((backend) =>
+        backend.unpause(LoopName.make(`${params.project}/${params.loop}`)),
+      ).pipe(acknowledge),
+    )
     .handle("agents", () => fromBackend((backend) => backend.agents))
     .handle("editAndRetry", ({ params, payload }) =>
       fromBackend((backend) => backend.editAndRetry(params.runId, payload)).pipe(acknowledge),

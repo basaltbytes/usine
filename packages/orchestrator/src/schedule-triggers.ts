@@ -6,7 +6,7 @@ import type { ManagedRepo } from "@usine/config/factory";
 import type { ScheduleTrigger } from "@usine/config/trigger";
 import { ConfigParser } from "@usine/config/parser";
 import { environmentFor, repositoryContext } from "@usine/config/payload-slices";
-import { matchesSelector } from "@usine/config/selector";
+import { matchesLoop } from "@usine/config/project";
 import { AttemptTask } from "@usine/core/attempt";
 import { AgentName } from "@usine/core/agent";
 import { DedupKey } from "@usine/core/event";
@@ -143,7 +143,7 @@ const watchedSchedules = (instance: LoadedInstance): ReadonlyArray<WatchedSchedu
       {
         loop,
         repositories: instance.config.repos.filter((repository) =>
-          matchesSelector(loop.selector, repository),
+          matchesLoop(instance.config, loop, repository),
         ),
         trigger,
       },

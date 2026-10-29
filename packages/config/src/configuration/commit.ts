@@ -71,6 +71,7 @@ export const validateConfiguration = (
           workers: values("worker"),
           repos: values("repository"),
           labels: values("label"),
+          projects: values("project"),
         }),
       )
       .pipe(Effect.result);
@@ -81,13 +82,15 @@ export const validateConfiguration = (
         for (const detail of error.details) {
           const [group, index, ...path] = detail.path;
           const kind =
-            group === "workers"
-              ? "worker"
-              : group === "repos"
-                ? "repository"
-                : group === "labels"
-                  ? "label"
-                  : "settings";
+            group === "projects"
+              ? "project"
+              : group === "workers"
+                ? "worker"
+                : group === "repos"
+                  ? "repository"
+                  : group === "labels"
+                    ? "label"
+                    : "settings";
           const entity =
             kind === "settings"
               ? settings
@@ -105,11 +108,16 @@ export const validateConfiguration = (
         }
     }
 
+    for (const entry of entities.filter(({ key }) => key.kind === "project")) {
+      const value = Schema.decodeUnknownResult(Schema.Struct({ id: Schema.String }))(entry.value);
+      if (Result.isSuccess(value) && value.success.id !== entry.key.identifier)
+        problems.push(problem(entry.key.key, "Project identifier does not match its id"));
+    }
     const agents: Array<AgentFile> = [];
     const loops: Array<LoopFile> = [];
     for (const entry of entities) {
       const { kind, identifier } = entry.key;
-      if (kind !== "settings" && kind !== "loop") {
+      if (kind !== "settings" && kind !== "loop" && kind !== "project") {
         const named = Schema.decodeUnknownResult(Schema.Struct({ name: Schema.NonEmptyString }))(
           entry.value,
         );
@@ -150,6 +158,18 @@ export const validateConfiguration = (
     if (Arr.isArrayNonEmpty(problems)) return yield* new ConfigurationInvalid({ problems });
     if (Result.isFailure(config))
       return yield* new ConfigurationInvalid({ problems: [config.failure] });
+    if (config.success.version === 2) {
+      for (const loop of loops) {
+        if (!config.success.projects.some(({ id }) => loop.name.startsWith(`${id}/`)))
+          problems.push(
+            problem(
+              `loop:${loop.name}`,
+              "Expected a loop identifier in an existing project: project/loop",
+            ),
+          );
+      }
+    }
+    if (Arr.isArrayNonEmpty(problems)) return yield* new ConfigurationInvalid({ problems });
     return new LoadedInstance({
       config: config.success,
       agents,
@@ -231,6 +251,19 @@ export const commit = (
       ...[...entities.values()].filter(({ key }) => key.kind !== "worker"),
       ...ordered,
     ]);
+    if (
+      Option.isSome(current.instance) &&
+      current.instance.value.config.version === 2 &&
+      instance.config.version === 1
+    )
+      return yield* new ConfigurationInvalid({
+        problems: [
+          problem(
+            "settings:instance",
+            "Project configuration cannot revert to version 1; import legacy files to convert them",
+          ),
+        ],
+      });
     const number = ConfigurationRevisionNumber.make(current.number + 1);
     return {
       configuration: new Configuration({ number, instance: Option.some(instance) }),

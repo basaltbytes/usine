@@ -1,3 +1,4 @@
+import { boardRepositories } from "@usine/config/project";
 import { LaneName } from "@usine/config/board";
 import type { LoadedInstance } from "@usine/config/instance";
 import { GitHubLabelName } from "@usine/config/label";
@@ -141,7 +142,7 @@ const makeTaskReader = Effect.gen(function* () {
     number: ItemNumber,
   ) {
     yield* Effect.annotateCurrentSpan({ repository, item: number });
-    const managed = instance.config.repos.find(
+    const managed = boardRepositories(instance.config).find(
       ({ name }) => canonicalRepositoryName(name) === canonicalRepositoryName(repository),
     );
     if (managed === undefined) {

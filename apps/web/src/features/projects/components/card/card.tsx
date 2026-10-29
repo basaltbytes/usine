@@ -1,6 +1,5 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import type { RepositoryName } from "@usine/core/repository";
 import type { RunId } from "@usine/core/run";
 import type { BoardLaneView, BoardTaskView, StalledItemView } from "@usine/orchestrator/operator";
 import { Card } from "~/components/ui/card";
@@ -31,7 +30,6 @@ type BoardCardProps = {
   readonly item: BoardTaskView;
   readonly lane: BoardLaneView;
   readonly catalog: LabelCatalog;
-  readonly repository: RepositoryName;
   readonly draggable: boolean;
   readonly phase: BoardMoveProgress["phase"] | undefined;
   readonly moves: CardMoves;
@@ -52,7 +50,6 @@ export const BoardCard = ({
   stall,
   readOnly,
   openRun,
-  repository,
 }: BoardCardProps) => {
   const action = useRunAction();
   const again = useCardRunAgain(item.itemKey, openRun);
@@ -89,7 +86,7 @@ export const BoardCard = ({
           item={item}
           lane={lane}
           catalog={catalog}
-          repository={repository}
+
           stall={stall}
           readOnly={readOnly}
           action={action}

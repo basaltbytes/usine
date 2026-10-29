@@ -37,6 +37,10 @@ export const entityReferences = (
           .find(({ name }) => name === identifier)
           ?.repositories.map((name) => `project ${name}`) ?? []
       );
+    case "project":
+      return configuration.loops
+        .filter(({ name }) => name.startsWith(`${identifier}/`))
+        .map(({ name }) => `loop ${name}`);
     case "repository":
       return configuration.loops
         .filter(({ repositories }) => repositories.some((name) => name === identifier))
@@ -64,6 +68,8 @@ export const entityTemplate = (
       return `---\ntrigger:\n  on: issue\n  if: item.state == "OPEN" && item.labels.nodes.exists(label, label.name == "ready-for-agent")\nagent: ${JSON.stringify(agent)}\n---\n\nComplete issue #{{ item.number }}: {{ item.title }}.\n`;
     case "worker":
       return `name: ${JSON.stringify(identifier)}\nkind: local\nmax_concurrent_attempts: 1\n`;
+    case "project":
+      return `id: ${JSON.stringify(identifier)}\nname: ${JSON.stringify(identifier)}\nrepositories: []\nlanes: []\n`;
     case "repository":
       return `name: ${JSON.stringify(identifier)}\n`;
     case "label":

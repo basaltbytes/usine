@@ -288,6 +288,7 @@ export const quietTask = () =>
 const card = (task: TaskView) => {
   const current = task.items.find(({ itemKey }) => itemKey === task.current) ?? task.items[0];
   return new BoardTaskView({
+    repository: task.repository,
     itemKey: current.itemKey,
     kind: current.kind,
     number: current.number,

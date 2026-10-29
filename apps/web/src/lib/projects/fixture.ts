@@ -200,6 +200,7 @@ const task = (
       !members.some(({ itemKey, state }) => itemKey === run.itemKey && isSettledItemState(state)));
   const preferred = [...runs].reverse().find(needsYou) ?? runs.at(-1);
   return new BoardTaskView({
+    repository: boardRepository,
     ...current,
     title: members[0].title,
     state,

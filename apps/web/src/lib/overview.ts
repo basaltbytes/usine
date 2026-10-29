@@ -1,6 +1,10 @@
 import { queryOptions } from "@tanstack/react-query";
-import { RepositoryName, splitRepositoryName } from "@usine/core/repository";
-import type { NeedView } from "@usine/orchestrator/operator";
+import {
+  RepositoryName,
+  canonicalRepositoryName,
+  splitRepositoryName,
+} from "@usine/core/repository";
+import type { NeedView, ProjectView } from "@usine/orchestrator/operator";
 import { api } from "~/lib/api";
 import { needCopy } from "~/lib/needs-you/strings";
 
@@ -9,6 +13,16 @@ export const projectParams = (repository: RepositoryName) => ({
   ...splitRepositoryName(repository),
   repository,
 });
+
+export const projectForRepository = (
+  projects: ReadonlyArray<ProjectView>,
+  repository: RepositoryName,
+): ProjectView | undefined =>
+  projects.find((project) =>
+    [project.repository, ...project.repositories].some(
+      (member) => canonicalRepositoryName(member) === canonicalRepositoryName(repository),
+    ),
+  );
 
 /** Returns the count of Needs you entries per Project; entries without a Project are omitted. */
 export const needsYouByProject = (

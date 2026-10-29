@@ -74,3 +74,7 @@ Envelopes include `PROTOCOL_VERSION` (7), which the transcript store uses to rea
 `ProvisionerTimings` in `/worker` validates provisioner waits and check intervals in seconds, including ordered creation backoff bounds. Defaults are 600 seconds for SSH, 30 to 600 seconds for backoff, and 86400 seconds between machine checks.
 
 `ProviderCapacityFailure` records a temporary model provider refusal. It permits an automatic retry under the same attempt cap as `InfraFailure`. `pendingProviderRetry` derives the next attempt number, provider message, and earliest start from a running run's last failed attempt: two minutes after attempt 1 and five after attempt 2. `StartedByProviderRetry` distinguishes these starts from infrastructure retries.
+
+## Project identities
+
+`ProjectId` from `@usine/core/project` is a lowercase slug of letters, digits, and separating hyphens. Project-owned loops use `project/loop` as their `LoopName`; repository identities remain independent of project membership.

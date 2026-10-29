@@ -5,9 +5,9 @@ sidebar:
   order: 1
 ---
 
-`usine.yaml` is the import and export format at the top of the instance folder, next to `loops/` and `agents/`. The first start imports these files once; later starts read the configuration store. Use [`usine config edit` or `usine config import`](/reference/configuration/cli/#configuration-revisions) to save changes. It contains the registry of managed repositories, labels, board lanes, settings, workers, and span export.
+`usine.yaml` is the import and export format at the top of the instance folder, next to `projects/` and `agents/`. The first start imports these files once; later starts read the configuration store. Use [`usine config edit` or `usine config import`](/reference/configuration/cli/#configuration-revisions) to save changes. It contains the registry of managed repositories, labels, board lanes, settings, workers, and span export.
 
-The orchestrator reads it at startup and at each [reload](/reference/configuration/cli/#reload). A reload applies `labels`, `repos`, `settings`, and `operator` to new work, and resizes, adds, or removes [workers](#workers). Changes to `webhooks` and `tracing`, and some `workers` changes, need a restart.
+Accepted configuration revisions apply `labels`, `repos`, `projects`, `settings`, and `operator` to new work, and resize, add, or remove [workers](#workers). Changes to `webhooks` and `tracing`, and some `workers` changes, need a restart.
 
 The parser is strict:
 
@@ -21,8 +21,8 @@ The schema is [`UsineConfig`](https://github.com/basaltbytes/usine/blob/7c0c3d36
 ## Complete example
 
 ```yaml title="usine.yaml"
-# Schema version of this file. Required; 1 is the only accepted value.
-version: 1
+# Schema version for project configuration.
+version: 2
 
 # GitHub login recorded on operator interventions (steer, interrupt, messages).
 operator: octocat
@@ -42,6 +42,13 @@ labels:
 repos:
   - name: acme/widgets
     tags: [web]
+  - name: acme/gadgets
+    tags: [web, mobile]
+
+projects:
+  - id: products
+    name: Products
+    repositories: [acme/widgets, acme/gadgets]
     lanes:
       - name: Ready
         sources: [{ label: ready-for-agent }]
@@ -59,9 +66,6 @@ repos:
         sources: [{ state: pr-open }]
       - name: Done
         sources: [{ state: pr-merged }, { state: pr-closed }, { state: issue-closed }]
-  - name: acme/gadgets
-    tags: [web, mobile]
-
 settings:
   poll_interval: 60 # seconds between poll cycles
   max_children: 4 # child sessions per attempt
@@ -105,23 +109,23 @@ tracing:
 The smallest valid file sets `version` and `repos`, which can be empty:
 
 ```yaml title="usine.yaml"
-version: 1
+version: 2
 repos:
   - name: acme/widgets
 ```
 
 ## References between instance files
 
-A loop file references an agent file and selects repositories from the registry. usine checks label names in lanes and loop conditions against the declared labels.
+A loop exports to `projects/<project>/loops/<loop>.md` and references an agent in `agents/`. Its identity is `<project>/<loop>`; API and CLI operations also accept a short loop name when it is unique. A selector narrows the loop to repositories within its project. A project with no loops can omit its loops folder. usine checks label names in lanes and loop conditions against the declared labels.
 
 ```mermaid
 flowchart LR
-  loop["loops/name.md"]
+  loop["projects/project/loops/name.md"]
   agent["agents/name.md"]
   subgraph config["usine.yaml"]
     repos["repos[].name and repos[].tags"]
     labels["labels[].name"]
-    lanes["repos[].lanes[].sources[].label"]
+    lanes["projects[].lanes[].sources[].label"]
   end
   loop -- "agent" --> agent
   loop -- "selector.repos, selector.tags" --> repos
@@ -135,10 +139,11 @@ A solid arrow is a reference that must resolve: an import fails if a loop's agen
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
-| `version` | `1` | required | Schema version. Any other value is an error. |
+| `version` | `2` | required | Project configuration format. Legacy version 1 imports convert to version 2. |
 | `operator` | GitHub login | none | The login recorded as the author of operator interventions and approvals given in the web UI. |
 | `labels` | list of [labels](#labels) | `[]` | Labels created in every managed repository. |
 | `repos` | list of [repositories](#repos) | required | The registry. An empty list is valid. |
+| `projects` | list of [projects](#projects) | `[]` | Project membership and board lanes. |
 | `settings` | [settings](#settings) | `{}` | Polling, attempt limits, and parent defaults. |
 | `workers` | list of [workers](#workers) | one local worker named `local` | Where attempts run. Must not be empty if present. |
 | `webhooks` | [webhooks](#webhooks) | `{ mode: off }` | Parsed and validated. The orchestrator doesn't read it at this commit. |
@@ -177,17 +182,31 @@ Each entry is one managed repository ([`ManagedRepo`](https://github.com/basaltb
 | --- | --- | --- | --- |
 | `name` | string | required | Full `owner/name` of the GitHub repository. Letters, digits, `_`, `.`, and `-` on each side of the slash. |
 | `tags` | list of strings | `[]` | Tags that loop selectors match. Each tag is non-blank. Tags are unique within a repository. |
-| `lanes` | list of [lanes](#reposlanes) | `[]` | The board columns for this repository. |
 
-The GitHub App installation must include every repository in the list. A loop applies to every repository unless its [selector](/reference/configuration/loop-files/#selector) limits it.
+The GitHub App installation must include every repository in the list. A repository can belong to at most one project. A registered repository without a project has no board and no loop execution. Version 2 rejects lanes on repository records; configure them on the project.
 
-### `repos[].lanes`
+## `projects`
+
+Each project groups one or more registered repositories under one lane map. Repository names match case-insensitively, and their order is preserved.
+
+| Key | Type | Default | Description |
+| --- | --- | --- | --- |
+| `id` | slug | required | Unique lowercase letters, digits, and hyphens, starting and ending with a letter or digit. |
+| `name` | string | required | Non-blank display name. |
+| `repositories` | list of `owner/name` | required | Non-empty list of unique registry names. Each repository belongs to at most one project. |
+| `lanes` | list of [lanes](#projectslanes) | `[]` | Shared board lanes for all repositories in the project. |
+
+Each loop runs on its project's repositories unless its [selector](/reference/configuration/loop-files/#selector) narrows them. A label lane matches the same label name in every repository; usine creates missing lane labels in each repository.
+
+Legacy version 1 imports convert each registered repository to a project and copy each loop into every project it selects. Startup migrates a stored version 1 configuration and its runtime references in one revision. If a loop selects no registered repository, migration reports the loop and selector and saves no revision. Register a matching repository or remove that loop before migrating.
+
+### `projects[].lanes`
 
 Each lane is one board column ([`Lane`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/board.ts#L43)).
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
-| `name` | string | required | Non-blank. Unique within the repository. |
+| `name` | string | required | Non-blank. Unique within the project. |
 | `sources` | list of sources | required | At least one. Each source is a mapping with exactly one key, `label` or `state`. |
 
 | Source | Valid values | Description |
@@ -195,7 +214,7 @@ Each lane is one board column ([`Lane`](https://github.com/basaltbytes/usine/blo
 | `label` | a GitHub label name | Places items that have this label, in any case, in the lane. A board move into the lane adds the label. |
 | `state` | `issue-open`, `issue-closed`, `pr-open`, `pr-closed`, `pr-merged` | Places items in this GitHub state in the lane. A board move can't change a state. |
 
-A source can appear in only one lane of a repository, ignoring case for labels. The board places each task as follows ([`laneFor`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/board/projection.ts#L78)):
+A source can appear in only one lane of a project, ignoring case for labels. The board places each task as follows ([`laneFor`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/board/projection.ts#L78)):
 
 1. A task whose current item is a merged or closed pull request, or a closed issue, goes to the first lane with a matching `state` source. An item that GitHub no longer has, as found by polling, counts as closed.
 2. A task whose newest open run is `Running` goes to the first lane, in file order, with a `label` source that matches one of the item's labels. If none matches, it goes to the first lane with a `label` source that matches a label the item had when that run's trigger matched, so a loop that removes its trigger label and sets no other lane label leaves the card in that lane until the run ends. If neither matches, rule 3 applies.
@@ -206,13 +225,15 @@ A lane with a `label` source accepts board moves, which add its labels and remov
 
 Without `lanes`, the board shows one read-only lane per repository label, sorted by name ([`effectiveLanes`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/board/projection.ts#L50)).
 
-Lane order also ranks runs that wait for a worker slot: a run whose item had the label of a later lane when its trigger matched goes first ([queue order](/reference/configuration/loop-files/#priority)). The proposed lanes of a repository without `lanes` don't rank runs.
+Lane order also ranks runs that wait for a worker slot: a run whose item had the label of a later lane when its trigger matched goes first ([queue order](/reference/configuration/loop-files/#priority)). The proposed lanes of a project without `lanes` don't rank runs.
 
 An undeclared `label` source still loads, and usine logs `Board Lane references an undeclared GitHub label`.
 
 ```yaml title="usine.yaml"
-repos:
-  - name: acme/widgets
+projects:
+  - id: products
+    name: Products
+    repositories: [acme/widgets]
     lanes:
       - name: Ready
         sources: [{ label: ready-for-agent }]
@@ -251,7 +272,7 @@ Every kind takes these keys:
 | `kind` | `local`, `ssh`, `cloudflare`, `exe.dev` | required | Selects the worker adapter and the other keys that it accepts. |
 | `max_concurrent_attempts` | integer ≥ 1 | `1` | The number of attempts that the worker runs at the same time. See the memory check below. For a [provisioned worker](#workersprovisioner), it also caps the machines in flight, including those being created. |
 
-A run takes a slot of the first worker in this list with a free slot ([`stepExecutorLayer`](https://github.com/basaltbytes/usine/blob/main/packages/orchestrator/src/scheduler.ts)). Waiting runs take free slots in [queue order](/reference/configuration/loop-files/#priority): runs in later [lanes](#reposlanes) first, then in the order that their events arrived. At startup, a failed preflight on any worker stops `usine up`.
+A run takes a slot of the first worker in this list with a free slot ([`stepExecutorLayer`](https://github.com/basaltbytes/usine/blob/main/packages/orchestrator/src/scheduler.ts)). Waiting runs take free slots in [queue order](/reference/configuration/loop-files/#priority): runs in later [lanes](#projectslanes) first, then in the order that their events arrived. At startup, a failed preflight on any worker stops `usine up`.
 
 A [reload](/reference/configuration/cli/#reload) applies these `workers` changes without stopping running attempts:
 

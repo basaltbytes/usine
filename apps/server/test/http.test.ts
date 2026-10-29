@@ -1,3 +1,5 @@
+import { ProjectId } from "@usine/core/project";
+import { Project } from "@usine/config/project";
 import { UpgradeView } from "@usine/orchestrator/operator/http";
 import { ServerUpgrades } from "../src/upgrade/control.ts";
 import {
@@ -181,6 +183,9 @@ const detail = new RunDetailView({
 const overview = new ReadyOverview({
   projects: [
     new ProjectView({
+      id: ProjectId.make("workspace"),
+      name: "Workspace",
+      repositories: [repositoryName],
       repository: repositoryName,
       status: "needs-you",
       runs: [run],
@@ -314,6 +319,13 @@ const observation: OperatorObservation["Service"] = {
   task: () => Effect.succeed(task),
 };
 const configurationView = new ConfigurationView({
+  projects: [
+    new Project({
+      id: ProjectId.make("workspace"),
+      name: "Workspace",
+      repositories: [repositoryName],
+    }),
+  ],
   labels: [],
   loops: [],
   quarantinedLoops: [],
@@ -974,6 +986,25 @@ describe("operator HTTP API", () => {
           }),
           task,
         );
+        assert.deepStrictEqual(
+          yield* client.project({ params: { project: ProjectId.make("workspace") } }),
+          overview.projects[0],
+        );
+        assert.deepStrictEqual(
+          yield* client.projectTask({
+            params: { project: ProjectId.make("workspace"), item: ItemNumber.make(31) },
+            query: { repository: repositoryName },
+          }),
+          task,
+        );
+        const unrelatedProject = yield* client
+          .projectTask({
+            params: { project: ProjectId.make("workspace"), item: ItemNumber.make(31) },
+            query: { repository: RepositoryName.make("other/repository") },
+          })
+          .pipe(Effect.flip);
+        assert.instanceOf(unrelatedProject, OperatorHttpError);
+        assert.strictEqual(unrelatedProject.error, "BoardProjectNotFoundError");
         for (const action of ["dismissNeed", "undoDismissNeed"] as const) {
           assert.deepStrictEqual(
             yield* client[action]({

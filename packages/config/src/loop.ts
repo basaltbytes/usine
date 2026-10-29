@@ -8,8 +8,8 @@ import { nonBlankString } from "./checks.ts";
 import { ValidSelector } from "./selector.ts";
 import { Trigger } from "./trigger.ts";
 
-const KebabCase = Schema.isPattern(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u, {
-  message: "Expected a kebab-case file name",
+const KebabCase = Schema.isPattern(/^(?:[a-z0-9]+(?:-[a-z0-9]+)*\/)?[a-z0-9]+(?:-[a-z0-9]+)*$/u, {
+  message: "Expected a loop name or project/loop identifier",
 });
 
 const LoopFileName = LoopName.check(KebabCase);
@@ -63,4 +63,9 @@ export class QuarantinedLoop extends Schema.Class<QuarantinedLoop>("@usine/confi
   },
 ) {}
 
-export const loopPath = (name: LoopName): InstancePath => InstancePath.make(`loops/${name}.md`);
+export const loopPath = (name: LoopName): InstancePath => {
+  const [project, loop] = name.split("/");
+  return InstancePath.make(
+    loop === undefined ? `loops/${name}.md` : `projects/${project}/loops/${loop}.md`,
+  );
+};

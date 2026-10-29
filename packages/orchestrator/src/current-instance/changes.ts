@@ -4,6 +4,7 @@ import type { LoadedInstance } from "@usine/config/instance";
 import { canonicalLabelName, GitHubLabelName } from "@usine/config/label";
 import { QuarantinedLoop } from "@usine/config/loop";
 import { AgentName } from "@usine/core/agent";
+import { ProjectId } from "@usine/core/project";
 import { LoopName } from "@usine/core/loop";
 import { canonicalRepositoryName, RepositoryName } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
@@ -46,6 +47,7 @@ export class InstanceReload extends Schema.Class<InstanceReload>(
   agents: nameChanges(AgentName),
   labels: nameChanges(GitHubLabelName),
   repos: nameChanges(RepositoryName),
+  projects: nameChanges(ProjectId),
   workers: nameChanges(WorkerName),
   settingsChanged: Schema.Boolean,
   operatorChanged: Schema.Boolean,
@@ -99,6 +101,12 @@ export const instanceReload = (running: LoadedInstance, loaded: LoadedInstance):
       loaded.config.labels,
       ({ name }) => name,
       ({ name }) => canonicalLabelName(name),
+    ),
+    projects: changesBy(
+      running.config.projects,
+      loaded.config.projects,
+      ({ id }) => id,
+      ({ id }) => id,
     ),
     repos: changesBy(
       running.config.repos,

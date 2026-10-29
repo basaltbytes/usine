@@ -53,7 +53,7 @@ export class InstanceFolder extends Context.Service<
       const markdownFiles = Effect.fn("InstanceFolder.markdownFiles")(
         (
           root: InstanceDirectory,
-          directory: "agents" | "loops",
+          directory: string,
         ): Effect.Effect<ReadonlyArray<string>, FactoryConfigError> =>
           fileSystem.readDirectory(path.join(root, directory)).pipe(
             Effect.map((files) => files.filter((file) => file.endsWith(".md")).sort()),
@@ -70,7 +70,7 @@ export class InstanceFolder extends Context.Service<
 
       const loadMarkdownFiles = <A>(
         root: InstanceDirectory,
-        directory: "agents" | "loops",
+        directory: string,
         parseFile: (file: InstancePath, source: string) => Effect.Effect<A, ConfigFileError>,
       ): Effect.Effect<ReadonlyArray<ParsedFile<A>>, FactoryConfigError> =>
         Effect.gen(function* () {
@@ -103,7 +103,16 @@ export class InstanceFolder extends Context.Service<
               const parsed = yield* Effect.all(
                 {
                   agents: loadMarkdownFiles(root, "agents", parser.parseAgentFile),
-                  loops: loadMarkdownFiles(root, "loops", parser.parseLoopFile),
+                  loops:
+                    config.version === 1
+                      ? loadMarkdownFiles(root, "loops", parser.parseLoopFile)
+                      : Effect.forEach(config.projects, (project) =>
+                          loadMarkdownFiles(
+                            root,
+                            `projects/${project.id}/loops`,
+                            parser.parseLoopFile,
+                          ),
+                        ).pipe(Effect.map((groups) => groups.flat())),
                 },
                 { concurrency: 2 },
               );

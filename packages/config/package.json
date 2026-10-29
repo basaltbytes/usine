@@ -83,6 +83,10 @@
     "./folder-codec": {
       "types": "./dist/configuration/folder.d.ts",
       "default": "./dist/configuration/folder.js"
+    },
+    "./project": {
+      "types": "./dist/project/operations.d.ts",
+      "default": "./dist/project/operations.js"
     }
   },
   "publishConfig": {

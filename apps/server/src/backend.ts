@@ -1,3 +1,4 @@
+import { resolveLoopName } from "@usine/config/project";
 import {
   AttentionAcknowledgement,
   type AttentionAcknowledgements,
@@ -23,6 +24,7 @@ import {
   type Operator,
   type OperatorConfiguration,
   type OperatorError,
+  LoopNotFoundError,
   type OperatorObservation,
   type EditAndRetry,
   type SessionIntervention,
@@ -33,7 +35,7 @@ import {
 } from "@usine/orchestrator/operator";
 import type { ItemNumber } from "@usine/core/item";
 import type { RepositoryName } from "@usine/core/repository";
-import { Context, DateTime, Effect, Layer, Schema } from "effect";
+import { Context, DateTime, Effect, Layer, Option, Schema } from "effect";
 
 export class BackendUnavailableError extends Schema.TaggedError<BackendUnavailableError>(
   "@usine/server/BackendUnavailableError",
@@ -95,6 +97,21 @@ type BackendInstance = Pick<CurrentInstance["Service"], "get">;
 const rosterOf = (instances: BackendInstance) =>
   Effect.map(instances.get, ({ agents }) => agents.map(({ name }) => name));
 
+const loopOf = Effect.fn("FactoryBackend.resolveLoop")(function* (
+  instances: BackendInstance,
+  loop: LoopName,
+) {
+  yield* Effect.annotateCurrentSpan({ loop });
+  const instance = yield* instances.get;
+  const name = resolveLoopName(instance.loops, loop);
+  if (Option.isNone(name))
+    return yield* new LoopNotFoundError({
+      loop,
+      message: "Loop is missing or ambiguous. Use project/loop.",
+    });
+  return name.value;
+});
+
 /** Provides the backend of a running factory, which reads the current instance on each request. */
 export const liveBackendLayer = (
   instances: BackendInstance,
@@ -128,8 +145,9 @@ export const liveBackendLayer = (
     discardLeftovers: operator.discardLeftovers,
     moveBoardItem: (move) =>
       Effect.flatMap(instances.get, (instance) => operator.moveBoardItem(instance, move)),
-    pause: (loop) => operator.pause(loop).pipe(Effect.asVoid),
-    unpause: (loop) => operator.unpause(loop).pipe(Effect.asVoid),
+    pause: (loop) => loopOf(instances, loop).pipe(Effect.flatMap(operator.pause), Effect.asVoid),
+    unpause: (loop) =>
+      loopOf(instances, loop).pipe(Effect.flatMap(operator.unpause), Effect.asVoid),
 
     task: (repository, item) =>
       Effect.flatMap(instances.get, (instance) => operator.task(instance, repository, item)),

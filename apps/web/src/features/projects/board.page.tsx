@@ -147,7 +147,6 @@ export const ProjectBoard = ({ project, loops, stalled, disabled, openRun }: Pro
                   stallOf={stallOf}
                   openRun={openRun}
                   onMove={moveItem}
-                  repository={project.repository}
                 />
               ))}
             </div>
@@ -160,7 +159,6 @@ export const ProjectBoard = ({ project, loops, stalled, disabled, openRun }: Pro
               item={active.item}
               lane={active.lane}
               catalog={catalog}
-              repository={project.repository}
               stall={stallOf(active.item)}
             />
           )}

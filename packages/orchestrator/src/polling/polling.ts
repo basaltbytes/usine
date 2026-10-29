@@ -2,7 +2,7 @@ import type { DeclaredLabel } from "@usine/config/label";
 import type { LoadedInstance } from "@usine/config/instance";
 import type { ManagedRepo } from "@usine/config/factory";
 import { ConfigParser } from "@usine/config/parser";
-import { matchesSelector } from "@usine/config/selector";
+import { labelsForRepository, matchesLoop } from "@usine/config/project";
 import { canonicalRepositoryName, type RepositoryName } from "@usine/core/repository";
 import { CursorKey, CursorStore } from "@usine/engine/cursor";
 import { CycleBudgets } from "@usine/engine/cycle-budget";
@@ -122,11 +122,12 @@ const watchedRepositories = (
 ): ReadonlyArray<WatchedRepository> =>
   instance.config.repos.map((repository) => {
     const loops = resolved.filter(
-      ({ loop }) => loop.trigger.on !== "schedule" && matchesSelector(loop.selector, repository),
+      ({ loop }) =>
+        loop.trigger.on !== "schedule" && matchesLoop(instance.config, loop, repository),
     );
     return {
       repository,
-      declaredLabels: instance.config.labels,
+      declaredLabels: labelsForRepository(instance.config, repository.name),
       loops,
       watches: loops.map(watchKey).sort(),
     };

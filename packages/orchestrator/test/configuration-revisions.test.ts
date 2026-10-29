@@ -29,13 +29,16 @@ it.live(
         yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped(),
       );
       yield* writeInstanceFiles(root, [
-        ["usine.yaml", "version: 1\noperator: operator\nrepos: []\n"],
+        [
+          "usine.yaml",
+          "version: 2\noperator: operator\nrepos: [{ name: acme/project }]\nprojects: [{ id: acme-project, name: Project, repositories: [acme/project] }]\n",
+        ],
         [
           "agents/developer.md",
           "---\nharness: codex\nmodel: gpt-6.1-sol\neffort: high\n---\nImplement the issue.\n",
         ],
         [
-          "loops/implement.md",
+          "projects/acme-project/loops/implement.md",
           "---\ntrigger: { on: issue, if: 'true' }\nagent: developer\n---\nImplement.\n",
         ],
       ]);

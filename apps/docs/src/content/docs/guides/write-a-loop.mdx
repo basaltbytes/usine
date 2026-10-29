@@ -7,13 +7,13 @@ sidebar:
 
 import { Steps } from "@astrojs/starlight/components";
 
-Create a loop in **Configuration > Loops > New**, or import a Markdown file from `loops/`. The export-format frontmatter sets which issues or pull requests start work, on which repositories, whether you approve each run, and which agent does the work. Its body is the agent's task. The name is in kebab-case. [Loop files](/reference/configuration/loop-files/) lists every key, and [Expressions](/reference/configuration/expressions/) lists every field that an expression can read.
+Create a loop in **Configuration > Loops > New**, or import a Markdown file from `projects/<project>/loops/`. The export-format frontmatter sets which issues or pull requests start work, on which repositories, whether you approve each run, and which agent does the work. Its body is the agent's task. The name is in kebab-case. [Loop files](/reference/configuration/loop-files/) lists every key, and [Expressions](/reference/configuration/expressions/) lists every field that an expression can read.
 
 ## Create a minimal loop
 
-Choose **New**, enter a name, and edit the template below. Save the loop, then select **Resume** after reviewing it; new loops start paused.
+Choose **New**, enter a `project/loop` name, and edit the template below. A short name also works when the configuration has one project. Save the loop, then select **Resume** after reviewing it; new loops start paused.
 
-```markdown title="loops/start-dev.md"
+```markdown title="projects/widgets/loops/start-dev.md"
 ---
 trigger:
   on: issue
@@ -56,13 +56,13 @@ If an expression reads a field that the payload doesn't have, or `if:` isn't a b
 
 ## Limit the repositories
 
-```yaml title="loops/start-dev.md"
+```yaml title="projects/widgets/loops/start-dev.md"
 selector:
   repos: [acme/widgets]
   tags: [backend]
 ```
 
-Without a `selector`, a loop applies to every repository in `usine.yaml`. With both keys, a repository must be listed and have one of the tags ([`selector`](/reference/configuration/loop-files/#selector)).
+Without a `selector`, a loop applies to every repository in its project. A selector only narrows that membership. With both keys, a repository must be listed and have one of the tags ([`selector`](/reference/configuration/loop-files/#selector)).
 
 ## Require approval
 
@@ -100,7 +100,7 @@ Remove the trigger label first because the agent's comments and commits change t
 
 2. Write the first loop's task so that it changes the labels. This is `start-dev` from the factory that runs usine on its own repository. It also requires approval and skips issues that an open pull request already closes:
 
-   ```markdown title="loops/start-dev.md"
+   ```markdown title="projects/widgets/loops/start-dev.md"
    ---
    trigger:
      on: issue
@@ -124,7 +124,7 @@ Remove the trigger label first because the agent's comments and commits change t
 
 3. Write the loop for the next label. `review-pr` ends by adding `agent-review-findings` or `review-passed`, the trigger labels of the next loops:
 
-   ```markdown title="loops/review-pr.md"
+   ```markdown title="projects/widgets/loops/review-pr.md"
    ---
    trigger:
      on: pr
@@ -144,11 +144,16 @@ Remove the trigger label first because the agent's comments and commits change t
    Post the review on GitHub. If you find any actionable issue, explain it with file and line references and add `agent-review-findings`. If there are none, make sure `agent-review-findings` is absent and add `review-passed`. Do not edit the branch or merge the pull request.
    ```
 
-4. Map the labels to [board lanes](/reference/configuration/usine-yaml/#reposlanes), so that dragging a card into a lane sets its label and starts a loop:
+4. Map the labels to [board lanes](/reference/configuration/usine-yaml/#projectslanes), so that dragging a card into a lane sets its label and starts a loop:
 
    ```yaml title="usine.yaml"
+   version: 2
    repos:
      - name: acme/widgets
+   projects:
+     - id: widgets
+       name: Widgets
+       repositories: [acme/widgets]
        lanes:
          - name: Ready
            sources: [{ label: ready-for-agent }]
@@ -178,7 +183,7 @@ flowchart LR
 
 ## Write a schedule loop
 
-```markdown title="loops/weekly-dependencies.md"
+```markdown title="projects/widgets/loops/weekly-dependencies.md"
 ---
 trigger:
   on: schedule
@@ -198,7 +203,7 @@ Quote the `cron` value, because YAML reads a leading `*` as an alias. The loop f
 
 ## Pause a loop
 
-On the **Loops** page under **Configuration**, select **Pause** on a loop, and **Resume** to undo it. The page lists every loop file, with the ones that failed to load first, and shows each one as usine parsed it, with its prompt expressions outlined, or the error that prevents it from loading. `POST /api/loops/<name>/pause` and `POST /api/loops/<name>/unpause` do the same.
+On the **Loops** page under **Configuration**, select **Pause** on a loop, and **Resume** to undo it. The page lists every loop file, with the ones that failed to load first, and shows each one as usine parsed it, with its prompt expressions outlined, or the error that prevents it from loading. `POST /api/loops/<project>/<loop>/pause` and `POST /api/loops/<project>/<loop>/unpause` do the same.
 
 A paused loop opens no new runs, and its open runs continue. usine stores the flag in the runtime store, never in the loop file, so it persists across restarts. When you unpause an `issue` or `pr` loop, the next poll reads the repository's items from the start, so the loop sees what changed while it was paused. To remove a loop, open its detail page, select **Delete**, and confirm.
 
