@@ -7,7 +7,6 @@ import {
 } from "@usine/config/configuration";
 import { ConfigurationFolder } from "@usine/config/folder-codec";
 import { migrateProjects } from "@usine/config/project";
-import { RepositoryProject, migrateProjectLoops } from "@usine/engine/database";
 import { ConfigParser } from "@usine/config/parser";
 import { sqliteConfigurationLayer } from "@usine/config/sqlite";
 import type { InstanceDirectory } from "@usine/core/instance";
@@ -31,34 +30,7 @@ const transactionalStore = Layer.effect(
     return ConfigurationStore.of({
       ...store,
       commit: Effect.fn("Server.commitConfigurationTransaction")((request) =>
-        Effect.gen(function* () {
-          const before = yield* store.read;
-          const revision = yield* store.commit(request);
-          const after = yield* store.read;
-          if (
-            Option.isSome(after.instance) &&
-            after.instance.value.config.version === 2 &&
-            (Option.isNone(before.instance) || before.instance.value.config.version === 1)
-          ) {
-            yield* migrateProjectLoops(
-              after.instance.value.config.projects.flatMap((project) =>
-                project.repositories.map(
-                  (repository) => new RepositoryProject({ repository, project: project.id }),
-                ),
-              ),
-            ).pipe(
-              Effect.provideService(SqlClient.SqlClient, sql),
-              Effect.mapError(
-                (cause) =>
-                  new ConfigurationStoreError({
-                    operation: "migrate runtime project identities",
-                    cause,
-                  }),
-              ),
-            );
-          }
-          return revision;
-        }).pipe(
+        store.commit(request).pipe(
           sql.withTransaction,
           Effect.provideService(SqlClient.BeginTransaction, "BEGIN IMMEDIATE"),
           Effect.catchTag("SqlError", (cause) =>

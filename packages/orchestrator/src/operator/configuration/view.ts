@@ -31,7 +31,7 @@ import { RegistryTag, type ManagedRepo, type Worker } from "@usine/config/factor
 import { ConfigFileError, InstancePath } from "@usine/config/file";
 import type { LoadedInstance } from "@usine/config/instance";
 import { DeclaredLabel, canonicalLabelName, GitHubLabelName } from "@usine/config/label";
-import { LoopPriority, PromptTemplate } from "@usine/config/loop";
+import { LoopPriority, PromptTemplate, loopPath } from "@usine/config/loop";
 import { boardRepositories, Project, matchesLoop } from "@usine/config/project";
 import { Cron, TimeZone, Stream } from "@usine/config/trigger";
 import type { EnginePersistenceError } from "@usine/engine/engine";
@@ -71,9 +71,9 @@ export class LoopFileView extends Schema.Class<LoopFileView>("@usine/orchestrato
   /** A schedule trigger's cron and time zone, or null for the other streams. */
   cron: Schema.NullOr(Cron),
   timeZone: Schema.NullOr(TimeZone),
-  /** Null if the file has no selector, so the Loop applies to every registered repository. */
+  /** Null when omitted; the loop then applies to every repository in its project. */
   selector: Schema.NullOr(LoopSelectorView),
-  /** The registered repositories the selector selects, in `usine.yaml` order. */
+  /** Project repositories that match the selector, in registry order. */
   repositories: Schema.Array(RepositoryName),
   approval: ApprovalRequirement,
   maxCycles: CycleLimit,
@@ -515,7 +515,7 @@ const makeOperatorConfiguration = Effect.gen(function* () {
       (loop) =>
         new LoopFileView({
           name: loop.name,
-          file: InstancePath.make(`loops/${loop.name}.md`),
+          file: loopPath(loop.name),
           stream: loop.trigger.on,
           condition: loop.trigger.if,
           cron: loop.trigger.on === "schedule" ? loop.trigger.cron : null,

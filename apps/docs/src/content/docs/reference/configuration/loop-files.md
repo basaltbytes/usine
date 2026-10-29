@@ -5,15 +5,15 @@ sidebar:
   order: 2
 ---
 
-A loop exports as one Markdown file in `loops/`. The file name without `.md` is the loop's name and identity: importing a renamed file removes the old loop and creates a new one, and importing a folder without it removes the loop. The YAML frontmatter declares the trigger, the selector, and the agent. The body is the prompt template for the agent's task. usine has no built-in loops.
+A loop exports as one Markdown file in `projects/<project>/loops/`. Its identity is `<project>/<loop>`, with the loop name taken from the file name without `.md`: importing a renamed file removes the old loop and creates a new one, and importing a folder without it removes the loop. The YAML frontmatter declares the trigger, the selector, and the agent. The body is the prompt template for the agent's task. usine has no built-in loops.
 
-The first start imports every `.md` file directly in `loops/` and `agents/`, in name order. Both folders must exist for that import. Later starts and reloads read the configuration store. Use [`usine config edit loop <name>` or `usine config import <folder>`](/reference/configuration/cli/#configuration-revisions) to save changes.
+The first start imports `.md` files from each project's loops folder and from `agents/`, in name order. The agents folder must exist; a project without loops can omit its loops folder. Legacy version 1 imports accept `loops/` and convert loops to project identities. Later starts and reloads read the configuration store. Use [`usine config edit loop <name>` or `usine config import <folder>`](/reference/configuration/cli/#configuration-revisions) to save changes.
 
 The schema is [`LoopFrontmatter`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/parser.ts#L31) in `packages/config/src/parser.ts`, which produces a [`LoopFile`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/loop.ts#L25).
 
 ## Example
 
-```markdown title="loops/start-dev.md"
+```markdown title="projects/widgets/loops/start-dev.md"
 ---
 trigger:
   on: issue
@@ -48,7 +48,7 @@ Keys are snake_case. Unknown keys at any level and duplicate keys are errors.
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
 | `trigger` | [trigger](#trigger) | required | The loop's stream and the condition that selects items. |
-| `selector` | [selector](#selector) | every managed repository | The repositories that the loop applies to. |
+| `selector` | [selector](#selector) | every repository in the project | The repositories that the loop applies to. |
 | `approval` | `none`, `required` | `none` | Whether each new run waits for the operator's approval. |
 | `step` | string | `run` | The name of the run's single step. |
 | `agent` | string | required | The agent that does the loop's runs: the name of a file in `agents/`, without `.md`. |
@@ -101,7 +101,7 @@ Each field accepts `*`, lists (`1,15`), ranges (`1-5`), and steps (`*/15`). If b
 
 In a daylight-saving gap, usine can't compute the cron boundaries, so the schedule logs an error and retries at its next wake. In the hour that repeats when clocks go back, the loop fires at both UTC instants.
 
-```markdown title="loops/weekly-triage.md"
+```markdown title="projects/widgets/loops/weekly-triage.md"
 ---
 trigger:
   on: schedule
@@ -120,7 +120,7 @@ This Run belongs to the Tick scheduled for {{ item.tick.scheduledAtLocal }}.
 
 ### `selector`
 
-Limits the loop to some managed repositories ([`Selector`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/selector.ts#L6)). Without it, the loop applies to every repository in `usine.yaml`.
+Limits the loop to some managed repositories ([`Selector`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/selector.ts#L6)). Without it, the loop applies to every repository in its project. A selector cannot add repositories outside the project.
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -129,7 +129,7 @@ Limits the loop to some managed repositories ([`Selector`](https://github.com/ba
 
 A selector must set `repos`, `tags`, or both, each a non-empty list without duplicates. With both, a repository must be in `repos` and have one of the `tags` ([`matchesSelector`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/selector.ts#L23)).
 
-```yaml title="loops/review-pr.md"
+```yaml title="projects/widgets/loops/review-pr.md"
 selector:
   repos: [acme/widgets, acme/gadgets]
   tags: [web]
@@ -155,7 +155,7 @@ When a loop reaches its limit, its next matching event opens an ask instead of a
 
 **Reset cycle budget** starts a new budget and polls the repository again from the start ([`CycleBudget.admit`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/engine/src/cycle-budget/queries.ts#L84)). Only active loops that match the item then can open work. A paused loop stays paused.
 
-```yaml title="loops/act-on-findings.md"
+```yaml title="projects/widgets/loops/act-on-findings.md"
 max_cycles: 5
 ```
 
@@ -177,7 +177,7 @@ An exe.dev worker uses exe.dev's GitHub integration, which grants the access of 
 - [SSH workers](/guides/add-a-worker/#ssh-workers) have none of your credentials, and a worker behind a gateway has no GitHub token on disk.
 - On an SSH worker, an attempt can read the token or caller token of another attempt that runs on the same machine at the same time ([#231](https://github.com/basaltbytes/usine/issues/231), [#243](https://github.com/basaltbytes/usine/issues/243)), including a `write` attempt.
 
-```yaml title="loops/review-pr.md"
+```yaml title="projects/widgets/loops/review-pr.md"
 permissions: read
 ```
 
@@ -187,16 +187,21 @@ When every worker slot is taken, runs wait in a queue. A free slot goes to the f
 
 1. A run that reattaches an attempt still running on the worker with the free slot.
 2. A run of a loop that sets `priority`, higher first.
-3. A run with a lane position, later lane first. The position is the first lane, in the repository's [`lanes`](/reference/configuration/usine-yaml/#projectslanes) order, with a `label` source that matches a label the item had when the run's trigger matched. While the run runs, the board shows its card in that lane unless the item's current labels match a lane.
-4. Any other run, such as a schedule run or a run in a repository without `lanes`.
+3. A run with a lane position, later lane first. The position is the first lane, in the project's [`lanes`](/reference/configuration/usine-yaml/#projectslanes) order, with a `label` source that matches a label the item had when the run's trigger matched. While the run runs, the board shows its card in that lane unless the item's current labels match a lane.
+4. Any other run, such as a schedule run or a run in a project without `lanes`.
 
 Runs at the same position keep the order in which their events arrived.
 
 With lanes ordered as the pipeline runs, later stages go first without any `priority`. In this `usine.yaml`, a `review-pr` run on a pull request labeled `ready-for-review` goes before every `start-dev` run on an issue labeled `ready-for-agent`, even one whose event arrived earlier:
 
 ```yaml title="usine.yaml"
+version: 2
 repos:
   - name: acme/widgets
+projects:
+  - id: widgets
+    name: Widgets
+    repositories: [acme/widgets]
     lanes:
       - name: Ready
         sources: [{ label: ready-for-agent }]
@@ -208,7 +213,7 @@ repos:
 
 Set `priority` for a loop that lane order doesn't rank, or ranks wrong. A loop with `priority` goes before every lane, so to order loops by hand, set `priority` on each of them.
 
-```yaml title="loops/rebase-pr.md"
+```yaml title="projects/widgets/loops/rebase-pr.md"
 priority: 1
 ```
 
@@ -229,7 +234,7 @@ Everything after the closing `---` line is the prompt template, and it must not 
 
 Values render as text: integers as decimal digits, booleans as `true` or `false`, and doubles in JavaScript number form ([`render`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/parser.ts#L155)). To insert a list, reduce it to a string:
 
-```markdown title="loops/start-dev.md"
+```markdown title="projects/widgets/loops/start-dev.md"
 Labels on this issue: {{ item.labels.nodes.map(label, label.name).join(", ") }}
 ```
 
@@ -237,7 +242,7 @@ Labels on this issue: {{ item.labels.nodes.map(label, label.name).join(", ") }}
 
 An interpolation that type-checks can still fail at render time, for example on a [null field](/reference/configuration/expressions/#fields-that-can-be-null). Test the object with `!= null`, or use [optional selection](/reference/configuration/expressions/#optional-values) with an `orValue` fallback. Both lines render `none` on an issue without a milestone:
 
-```markdown title="loops/plan-milestone.md"
+```markdown title="projects/widgets/loops/plan-milestone.md"
 Milestone: {{ item.milestone != null ? item.milestone.title : "none" }}
 Milestone: {{ item.?milestone.?title.orValue("none") }}
 ```
@@ -281,7 +286,7 @@ Two checks add a non-blocking diagnostic: a label name in `if` ([label declarati
 
 A pull request loop that reviews the head commit:
 
-```markdown title="loops/review-pr.md"
+```markdown title="projects/widgets/loops/review-pr.md"
 ---
 trigger:
   on: pr
@@ -310,7 +315,7 @@ Post the review on GitHub. If you find any actionable issue, explain it with fil
 
 A pull request loop that fixes the findings of a review. Its trigger doesn't count reviews: `max_cycles` limits the review and fix rounds on each pull request. When a loop has used its limit, usine opens an ask instead of another run. See [Write review and fix loops](/guides/review-fix-loops/):
 
-```markdown title="loops/act-on-findings.md"
+```markdown title="projects/widgets/loops/act-on-findings.md"
 ---
 trigger:
   on: pr

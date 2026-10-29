@@ -11,6 +11,7 @@ import {
   attentionAcknowledgements,
 } from "./schema.ts";
 import { ProjectId } from "@usine/core/project";
+import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { Effect, Option, Predicate, Schema } from "effect";
 import { SqlClient } from "effect/sql";
@@ -19,6 +20,8 @@ import { EnginePersistenceError } from "../engine/error.ts";
 export class RepositoryProject extends Schema.Class<RepositoryProject>("RepositoryProject")({
   repository: RepositoryName,
   project: ProjectId,
+  /** Qualified identities of the project's authored loops. */
+  loops: Schema.Array(LoopName),
 }) {}
 
 const Json = Schema.fromJsonString(Schema.Json);
@@ -54,15 +57,17 @@ export const migrateProjectLoops = Effect.fn("RunDatabase.migrateProjectLoops")(
     yield* Effect.annotateCurrentSpan({
       repositories: projects.map(({ repository }) => repository),
     });
-    for (const { repository, project } of projects) {
+    for (const { repository, project, loops } of projects) {
       // Item identities keep their repository, including schedule items without a number.
       yield* sql`UPDATE ${sql(getTableName(loopItems))} SET loop_name = ${project} || '/' || loop_name
         WHERE instr(loop_name, '/') = 0 AND (item_key IN
           (SELECT item_key FROM ${sql(getTableName(triggerEvents))} WHERE lower(repository) = lower(${repository}))
           OR CASE WHEN json_valid(item_key) THEN lower(json_extract(item_key, '$[1]')) = lower(${repository}) ELSE 0 END)`;
-      yield* sql`UPDATE ${sql(getTableName(events))} SET dedup_key = json_set(dedup_key, '$[0]', ${project} || '/' || json_extract(dedup_key, '$[0]'))
-        WHERE event_id IN (SELECT event_id FROM ${sql(getTableName(triggerEvents))} WHERE lower(repository) = lower(${repository})
-          AND instr(loop_name, '/') = 0 AND json_valid(dedup_key) AND json_extract(dedup_key, '$[0]') = loop_name)`;
+      yield* sql`UPDATE ${sql(getTableName(events))} AS event SET dedup_key = json_set(event.dedup_key, '$[0]', ${project} || '/' || json_extract(event.dedup_key, '$[0]'))
+        WHERE json_valid(event.dedup_key) AND EXISTS (
+          SELECT 1 FROM ${sql(getTableName(triggerEvents))} AS trigger
+          WHERE trigger.event_id = event.event_id AND lower(trigger.repository) = lower(${repository})
+            AND instr(trigger.loop_name, '/') = 0 AND json_extract(event.dedup_key, '$[0]') = trigger.loop_name)`;
       yield* sql`UPDATE ${sql(getTableName(cycleReservations))} SET loop = ${project} || '/' || loop
         WHERE instr(loop, '/') = 0 AND item_key IN
           (SELECT item_key FROM ${sql(getTableName(itemCycleBudgets))} WHERE lower(repository) = lower(${repository}))`;
@@ -70,9 +75,15 @@ export const migrateProjectLoops = Effect.fn("RunDatabase.migrateProjectLoops")(
         WHERE lower(repository) = lower(${repository}) AND instr(loop_name, '/') = 0`;
       yield* sql`UPDATE ${sql(getTableName(runs))} SET loop_name = ${project} || '/' || loop_name
         WHERE lower(repository) = lower(${repository}) AND instr(loop_name, '/') = 0`;
-      yield* sql`INSERT INTO ${sql(getTableName(loopRuntime))} (loop_name, paused)
-        SELECT ${project} || '/' || loop_name, paused FROM ${sql(getTableName(loopRuntime))} WHERE instr(loop_name, '/') = 0
-        ON CONFLICT(loop_name) DO UPDATE SET paused = excluded.paused`;
+      if (loops.length > 0) {
+        yield* sql`INSERT INTO ${sql(getTableName(loopRuntime))} (loop_name, paused)
+          SELECT ${project} || '/' || loop_name, paused FROM ${sql(getTableName(loopRuntime))}
+          WHERE instr(loop_name, '/') = 0 AND ${sql.in(
+            "loop_name",
+            loops.map((loop) => loop.slice(project.length + 1)),
+          )}
+          ON CONFLICT(loop_name) DO UPDATE SET paused = excluded.paused`;
+      }
       const asks =
         yield* sql`SELECT item_key AS key, ask_json AS value FROM ${sql(getTableName(itemCycleBudgets))}
         WHERE lower(repository) = lower(${repository}) AND ask_json IS NOT NULL`;

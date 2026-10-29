@@ -25,6 +25,10 @@ it.effect(
             new RepositoryProject({
               repository: RepositoryName.make(`acme/${name}`),
               project: ProjectId.make(`acme-${name}`),
+              loops: [
+                LoopName.make(`acme-${name}/implement`),
+                ...(name === "one" ? [LoopName.make("acme-one/review")] : []),
+              ],
             }),
         );
         const submissions: Array<Submission> = [];
@@ -65,7 +69,7 @@ it.effect(
           };
           yield* sql`INSERT INTO usine_attention_acknowledgements (id, revision, dismissed_at) VALUES (${need.id}, ${JSON.stringify(need)}, '2026-10-29T00:00:00Z')`;
         }
-        yield* sql`INSERT INTO usine_loop_runtime (loop_name, paused) VALUES ('implement', 1)`;
+        yield* sql`INSERT INTO usine_loop_runtime (loop_name, paused) VALUES ('implement', 1), ('review', 1)`;
         yield* migrateProjectLoops(projects).pipe(sql.withTransaction);
         yield* migrateProjectLoops(projects).pipe(sql.withTransaction);
         for (const submission of submissions) {
@@ -99,6 +103,7 @@ it.effect(
           yield* sql`SELECT loop_name, paused FROM usine_loop_runtime ORDER BY loop_name`,
         ).toEqual([
           { loop_name: "acme-one/implement", paused: 1 },
+          { loop_name: "acme-one/review", paused: 1 },
           { loop_name: "acme-two/implement", paused: 1 },
         ]);
         expect(

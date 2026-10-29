@@ -1,4 +1,6 @@
 import { ItemProjectionReader, ItemProjection } from "@usine/engine/item-projection";
+import { NodeServices } from "@effect/platform-node";
+import { localSqliteLayer } from "@usine/engine/local-sqlite";
 
 import { GitHubPolling } from "@usine/github/polling";
 
@@ -26,7 +28,7 @@ import { ConfigurationEditor, OperatorConfiguration } from "@usine/orchestrator/
 import { idleTriggersLayer } from "@usine/orchestrator/idle-triggers";
 import { stepExecutorLayer } from "@usine/orchestrator/scheduler";
 import { WorkerStatus } from "@usine/orchestrator/worker-status";
-import { Context, Effect, Layer, Option, Ref, Schema } from "effect";
+import { Context, Effect, FileSystem, Layer, Option, Ref, Schema } from "effect";
 import { HttpRouter } from "effect/http";
 import { FactoryBackend } from "../../src/backend.ts";
 import { apiRoutes } from "../../src/http.ts";
@@ -56,10 +58,17 @@ export const harness = (
       unpause: (loop) => setPause(loop, false),
     });
     const controlLayer = Layer.succeed(LoopControl, controls);
+    const directory = yield* FileSystem.FileSystem.pipe(
+      Effect.flatMap((fs) => fs.makeTempDirectoryScoped({ prefix: "usine-configuration-http-" })),
+      Effect.map(InstanceDirectory.make),
+      Effect.provide(NodeServices.layer),
+    );
     const storeLayer = configurationLoopControlLayer.pipe(
       Layer.provide(memoryConfigurationLayer),
       Layer.provide(controlLayer),
       Layer.provideMerge(parserLayer),
+      Layer.provide(localSqliteLayer(directory)),
+      Layer.provide(NodeServices.layer),
     );
     const base = yield* Layer.build(storeLayer);
     const parser = Context.get(base, ConfigParser);
