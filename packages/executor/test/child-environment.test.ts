@@ -19,12 +19,9 @@ describe("childEnvironment", () => {
       },
       author,
       Option.some("/attempt/.git/usine-hooks"),
-      "/attempt/.git/usine-git-trace.jsonl",
     );
     const email = "323694641+usine-phildl[bot]@users.noreply.github.com";
     assert.deepStrictEqual(environment, {
-      GIT_TRACE2_EVENT: "/attempt/.git/usine-git-trace.jsonl",
-      GIT_EXEC_PATH: "/attempt/.git/usine-git-trace.jsonl.helpers",
       GIT_AUTHOR_NAME: "usine-phildl[bot]",
       GIT_AUTHOR_EMAIL: email,
       GIT_COMMITTER_NAME: "usine-phildl[bot]",

@@ -1,4 +1,4 @@
-import { type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
+import type { AttemptFailure } from "@usine/core/attempt/failure";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import {
   type AttemptRecovery,
@@ -14,7 +14,6 @@ import {
   type CheckoutRequest,
 } from "./executor.ts";
 import { PRE_PUSH_HOOKS_DIRECTORY, prePushHook } from "./pre-push-hook.ts";
-import { PUSH_TRACE_FILE, readPushRefusal } from "./push-refusal.ts";
 import { failureMessage, salvageWorktree } from "./salvage.ts";
 
 const CACHE_DIRECTORY_SUFFIX = ".git";
@@ -63,16 +62,8 @@ export interface CheckoutOps<E> {
     operation: "prepare" | "cleanup",
     args: ReadonlyArray<string>,
   ) => Effect.Effect<string, E>;
-  /** Writes `content` to `path` inside the checkout, creating its directory with the given file mode. */
-  readonly writeFile: (
-    path: string,
-    content: string,
-    mode: "600" | "755",
-  ) => Effect.Effect<void, E>;
-  /** Reads a file with credential scrubbing; returns an empty string if it is absent. */
-  readonly readFile: (path: string) => Effect.Effect<string, E>;
-  /** Installs HTTP helpers that preserve scrubbed server diagnostics by Git trace session. */
-  readonly installGitDiagnostics: (trace: string) => Effect.Effect<void, E>;
+  /** Writes `content` to `path` inside the checkout, creating its directory, and makes it executable. */
+  readonly writeExecutable: (path: string, content: string) => Effect.Effect<void, E>;
   /** Removes the checkout when the Attempt releases it, running each step through `cleanup`. */
   readonly remove: (cleanup: CleanupStep<E>) => Effect.Effect<void>;
 }
@@ -99,7 +90,7 @@ export interface WorkspaceOps<E> {
 export const linkedWorktree = <E>(
   ops: Pick<WorkspaceOps<E>, "cacheExists" | "git" | "removePath">,
   layout: Pick<WorkspaceLayout, "cache" | "worktree">,
-  files: Pick<CheckoutOps<E>, "writeFile" | "readFile" | "installGitDiagnostics">,
+  writeExecutable: (path: string, content: string) => Effect.Effect<void, E>,
 ): CheckoutOps<E> => ({
   add: (commit) =>
     Effect.asVoid(
@@ -124,7 +115,7 @@ export const linkedWorktree = <E>(
     ]),
   ),
   git: ops.git,
-  ...files,
+  writeExecutable,
   remove: (cleanup) =>
     Effect.gen(function* () {
       const cacheExists = yield* ops.cacheExists.pipe(
@@ -188,8 +179,6 @@ export interface ProvisionedWorktree {
    * `permissions: read` Loop. If `None`, the repository's own hooks apply.
    */
   readonly gitHooks: Option.Option<string>;
-  /** Private Git Trace2 event file shared by the parent and its children. */
-  readonly gitTrace: string;
 }
 
 interface ReleaseOptions<E> {
@@ -277,32 +266,8 @@ const registerRelease = Effect.fn("Executor.registerRelease")(function* <E exten
         return;
       }
       const baseCommit = yield* Ref.get(checkedOut);
-      const refused = Option.isSome(baseCommit)
-        ? yield* readPushRefusal({
-            attemptId: request.attemptId,
-            repository: request.repository,
-            worktree: layout.worktree,
-            git: (args) => ops.checkout.git("cleanup", args),
-            readFile: ops.checkout.readFile,
-          }).pipe(Effect.result)
-        : Result.succeed(Option.none());
-      if (Result.isFailure(refused)) {
-        yield* Deferred.fail(
-          salvaged,
-          new InfraFailure({
-            message: "Can't read the attempt's Git push diagnostics",
-            cause: refused.failure,
-          }),
-        );
-        yield* Effect.logError("Could not inspect agent pushes; checkout retained", {
-          attemptId: request.attemptId,
-          message: failureMessage(refused.failure),
-        });
-        return;
-      }
-      const salvage = Option.isSome(refused.success)
-        ? Option.some<AttemptSalvage>(refused.success.value)
-        : Option.isSome(baseCommit) && !Exit.isSuccess(exit)
+      const salvage =
+        Option.isSome(baseCommit) && !Exit.isSuccess(exit)
           ? request.permissions === "read"
             ? yield* Effect.logInfo(
                 "The Attempt's Loop has read permissions, so its checkout is removed without salvage",
@@ -409,7 +374,7 @@ const installPrePushHook = Effect.fn("Executor.installPrePushHook")(function* <E
     "--absolute-git-dir",
   ])).trim();
   const hooks = `${gitDirectory}/${PRE_PUSH_HOOKS_DIRECTORY}`;
-  yield* ops.checkout.writeFile(`${hooks}/pre-push`, prePushHook(request.loop), "755");
+  yield* ops.checkout.writeExecutable(`${hooks}/pre-push`, prePushHook(request.loop));
   yield* Effect.logInfo(
     "The Attempt's Loop has read permissions; its checkout's pre-push hook explains a refused push",
     { ...fields, hooks },
@@ -610,15 +575,6 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
     baseCommit,
   ]);
   const gitHooks = yield* installPrePushHook(options);
-  const gitDirectory = (yield* ops.checkout.git("prepare", [
-    "-C",
-    layout.worktree,
-    "rev-parse",
-    "--absolute-git-dir",
-  ])).trim();
-  const gitTrace = `${gitDirectory}/${PUSH_TRACE_FILE}`;
-  yield* ops.checkout.writeFile(gitTrace, "", "600");
-  yield* ops.checkout.installGitDiagnostics(gitTrace);
   const preparedAt = yield* DateTime.now;
   return {
     workspace: new AttemptWorkspace({
@@ -646,7 +602,6 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
     keepForReattach: release.keepForReattach,
     keepUntilStopped: release.keepUntilStopped,
     gitHooks,
-    gitTrace,
   } satisfies ProvisionedWorktree;
 });
 
@@ -664,7 +619,7 @@ export interface ReattachOptions<E> extends ReleaseOptions<E> {
 export const reattachWorktree = Effect.fn("Executor.reattachWorktree")(function* <E extends Error>(
   options: ReattachOptions<E>,
 ) {
-  const { layout, request, spec, ops } = options;
+  const { layout, request, spec } = options;
   yield* Effect.annotateCurrentSpan({
     attemptId: request.attemptId,
     worker: request.worker,
@@ -681,14 +636,6 @@ export const reattachWorktree = Effect.fn("Executor.reattachWorktree")(function*
     spec.baseCommit,
   ]);
   const gitHooks = yield* installPrePushHook(options);
-  const gitDirectory = (yield* ops.checkout.git("prepare", [
-    "-C",
-    layout.worktree,
-    "rev-parse",
-    "--absolute-git-dir",
-  ])).trim();
-  const gitTrace = `${gitDirectory}/${PUSH_TRACE_FILE}`;
-  yield* ops.checkout.installGitDiagnostics(gitTrace);
   return {
     workspace: new AttemptWorkspace({
       worker: request.worker,
@@ -700,7 +647,6 @@ export const reattachWorktree = Effect.fn("Executor.reattachWorktree")(function*
     keepForReattach: release.keepForReattach,
     keepUntilStopped: release.keepUntilStopped,
     gitHooks,
-    gitTrace,
   } satisfies ProvisionedWorktree;
 });
 
@@ -715,8 +661,6 @@ export interface RecoveryOptions<E> {
   readonly git: (args: ReadonlyArray<string>) => Effect.Effect<string, E>;
   /** Removes the checkout and its registration in the cached clone. */
   readonly removeCheckout: Effect.Effect<void, E>;
-  /** Reads a file with credential scrubbing; returns an empty string if it is absent. */
-  readonly readFile: (path: string) => Effect.Effect<string, E>;
 }
 
 /**
@@ -765,23 +709,6 @@ export const recoverWorktree = Effect.fn("Executor.recoverWorktree")(function* <
       fields,
     );
     return;
-  }
-  const refused = yield* readPushRefusal({
-    attemptId: attempt.attemptId,
-    repository: attempt.repository,
-    worktree,
-    git: options.git,
-    readFile: options.readFile,
-  });
-  if (Option.isSome(refused)) {
-    yield* record(refused.value);
-    if (attempt.open) {
-      yield* Effect.logInfo(
-        "Retaining the checkout until the recovered push failure closes the attempt",
-        fields,
-      );
-      return;
-    }
   }
   const baseCommit = yield* options
     .git(["-C", worktree, "rev-parse", "--verify", BASE_COMMIT_REF])

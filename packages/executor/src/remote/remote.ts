@@ -1,4 +1,3 @@
-import { checkoutFiles } from "../checkout-files.ts";
 import { CHILD_KILL_SCRIPT, type RemoteShell } from "@usine/agents/child-host";
 import { ClaudeLoginLock } from "@usine/agents/runtime";
 import type { Harness } from "@usine/core/agent/brain";
@@ -56,6 +55,14 @@ const isExecutorError = Schema.is(ExecutorError);
 
 const executorError = (message: string, cause: unknown): ExecutorOperationError =>
   new ExecutorOperationError({ operation: "prepare", message, cause });
+
+/** A script that writes `$2` to the file `$1`, creating its directory, and makes it executable. */
+const WRITE_EXECUTABLE_SCRIPT = String.raw`
+set -e
+mkdir -p "$(dirname "$1")"
+printf '%s' "$2" > "$1"
+chmod 755 "$1"
+`.trim();
 
 /**
  * A script that creates the checkout `$1` as its own repository at commit `$4`: objects come from
@@ -363,10 +370,9 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       const reconcile = (
         git: (args: ReadonlyArray<string>) => Effect.Effect<string, ExecutorError>,
         removeCheckout: Effect.Effect<void, ExecutorError>,
-        readFile: (target: string) => Effect.Effect<string, ExecutorError>,
       ) =>
         recoverWorktree(
-          { attempt, host: machine.shell.destination, worktree, git, removeCheckout, readFile },
+          { attempt, host: machine.shell.destination, worktree, git, removeCheckout },
           record,
         );
       const removeCheckout = (
@@ -391,9 +397,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         yield* stopChildren("cleanup", machine, worktree, attempt.attemptId, isolation);
         const git = (args: ReadonlyArray<string>) =>
           commands.run("cleanup", machine.shell, "git", args);
-        yield* reconcile(git, removeCheckout(git), (target) =>
-          commands.run("cleanup", machine.shell, "cat", [target]),
-        );
+        yield* reconcile(git, removeCheckout(git));
         if (isolation._tag === "Container")
           yield* containers.remove(machine.shell, attemptContainerName(attempt.attemptId));
         return;
@@ -421,17 +425,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
             [],
           );
           const git = accessGit("cleanup", access, author, checkout.shell);
-          yield* reconcile(
-            git,
-            removeCheckout(git),
-            checkoutFiles((operation, command, args) =>
-              checkout.shell.pipe(
-                Effect.flatMap((shell) =>
-                  commands.run(operation, shell, command, args, { scrub: access.scrub }),
-                ),
-              ),
-            ).readFile,
-          );
+          yield* reconcile(git, removeCheckout(git));
         }),
       );
     });
@@ -637,7 +631,10 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
           ]),
         ),
         git: (operation, args) => inContainer(operation, "git", args),
-        ...checkoutFiles(inContainer),
+        writeExecutable: (target, content) =>
+          Effect.asVoid(
+            inContainer("prepare", "sh", ["-c", WRITE_EXECUTABLE_SCRIPT, "sh", target, content]),
+          ),
         remove: (cleanup) =>
           cleanup(
             "worktree-directory",
@@ -700,11 +697,15 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
               )
             : linkedCheckout(
                 request.attemptId,
-                linkedWorktree(
-                  host,
-                  layout,
-                  checkoutFiles((operation, command, args) =>
-                    commands.run(operation, machine.shell, command, args, { scrub: access.scrub }),
+                linkedWorktree(host, layout, (target, content) =>
+                  Effect.asVoid(
+                    commands.run("prepare", machine.shell, "sh", [
+                      "-c",
+                      WRITE_EXECUTABLE_SCRIPT,
+                      "sh",
+                      target,
+                      content,
+                    ]),
                   ),
                 ),
               ),
@@ -966,7 +967,6 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
                   access.environment,
                   request.commitAuthor,
                   provisioned.gitHooks,
-                  provisioned.gitTrace,
                 ),
                 gatewayCredential,
                 harvest: (windows) => harvest(prepared, access, shell, windows),

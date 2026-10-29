@@ -1,4 +1,3 @@
-import { checkoutFiles } from "../checkout-files.ts";
 import type { RemoteShell, SshCommand } from "@usine/agents/child-host";
 import { supportedCodexVersions } from "@usine/agents/preflight";
 import { ClaudeLoginLock } from "@usine/agents/runtime";
@@ -88,6 +87,14 @@ const DEFAULT_SHELL: SshCommand = {
   command: process.execPath,
   args: [fileURLToPath(new URL("shell/shell.js", import.meta.url))],
 };
+
+/** A script that writes `$2` to the file `$1`, creating its directory, and makes it executable. */
+const WRITE_EXECUTABLE_SCRIPT = String.raw`
+set -e
+mkdir -p "$(dirname "$1")"
+printf '%s' "$2" > "$1"
+chmod 755 "$1"
+`.trim();
 
 /** The provider whose API key each harness needs in a sandbox, which holds no harness login. */
 const HARNESS_PROVIDERS = {
@@ -535,7 +542,6 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
         Ref.set(retained, salvage._tag !== "Pushed").pipe(Effect.andThen(record(salvage)));
       const reconcile = (
         git: (args: ReadonlyArray<string>) => Effect.Effect<string, ExecutorError>,
-        readFile: (target: string) => Effect.Effect<string, ExecutorError>,
       ) =>
         recoverWorktree(
           {
@@ -543,7 +549,6 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
             host: name,
             worktree: layout.worktree,
             git,
-            readFile,
             removeCheckout: Effect.asVoid(
               git(["--git-dir", layout.cache, "worktree", "remove", "--force", layout.worktree]),
             ),
@@ -552,10 +557,7 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
         );
       if (attempt.succeeded || attempt.permissions === "read") {
         yield* stopCommands("cleanup", worker, name);
-        yield* reconcile(
-          sandboxGit("cleanup", worker, name, Option.none(), Option.none()),
-          (target) => commands.run("cleanup", worker.shellFor(name), "cat", [target]),
-        );
+        yield* reconcile(sandboxGit("cleanup", worker, name, Option.none(), Option.none()));
         return false;
       }
       const author = yield* commitAuthor;
@@ -572,11 +574,6 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
           yield* stopCommands("cleanup", worker, name);
           yield* reconcile(
             sandboxGit("cleanup", worker, name, Option.some(access), Option.some(author)),
-            checkoutFiles((operation, command, args) =>
-              commands.run(operation, worker.shellFor(name), command, args, {
-                scrub: access.scrub,
-              }),
-            ).readFile,
           );
         }),
       );
@@ -976,11 +973,15 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
           promoteStaging: Effect.asVoid(
             commands.run("prepare", shell, "mv", [layout.staging, layout.cache]),
           ),
-          checkout: linkedWorktree(
-            host,
-            layout,
-            checkoutFiles((operation, command, args) =>
-              commands.run(operation, shell, command, args, { scrub: access.scrub }),
+          checkout: linkedWorktree(host, layout, (target, content) =>
+            Effect.asVoid(
+              commands.run("prepare", shell, "sh", [
+                "-c",
+                WRITE_EXECUTABLE_SCRIPT,
+                "sh",
+                target,
+                content,
+              ]),
             ),
           ),
         };
@@ -1080,7 +1081,6 @@ const makeCloudflareExecutor = (options: CloudflareExecutorOptions) =>
             sandboxEnvironment(worker),
             request.commitAuthor,
             provisioned.gitHooks,
-            provisioned.gitTrace,
           ),
           gatewayCredential: Effect.succeed(
             gatewayCredential(worker, prepared.spec.agent.brain.harness),

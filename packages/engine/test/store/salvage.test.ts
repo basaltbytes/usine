@@ -9,7 +9,6 @@ import { SalvagePushed, SalvageRef, SalvageRetained } from "@usine/core/attempt/
 import { Event, EventId, DedupKey } from "@usine/core/event";
 import { Submission } from "../../src/engine/submission.ts";
 import { CommitSha } from "@usine/core/repository";
-import { StepResult } from "@usine/core/step/result";
 import { RunId } from "@usine/core/run";
 import { WorkerName } from "@usine/core/worker";
 import { Effect, Option, Result } from "effect";
@@ -31,7 +30,7 @@ const retained = new SalvageRetained({
   pushFailure: Option.some(failure),
 });
 
-it.live.each(["completion", "restart", "closed", "reported-success"] as const)(
+it.live.each(["completion", "restart", "closed"] as const)(
   "keeps a push refusal as the attempt failure during %s, including after salvage recovers",
   (phase) =>
     withRunStore(
@@ -47,14 +46,10 @@ it.live.each(["completion", "restart", "closed", "reported-success"] as const)(
             Result.fail(new AgentFailure({ message: "Agent stopped" })),
           );
         yield* store.recordSalvage(attempt.id, retained);
-        if (phase === "completion" || phase === "reported-success") {
+        if (phase === "completion") {
           const decision = yield* store.finishAttempt(
             attempt,
-            phase === "reported-success"
-              ? Result.succeed(
-                  new StepResult({ message: "Parent finished before restart", facts: [] }),
-                )
-              : Result.fail(new AgentFailure({ message: "Agent stopped" })),
+            Result.fail(new AgentFailure({ message: "Agent stopped" })),
           );
           assert.strictEqual(decision._tag, "RunFailed");
         } else if (phase === "restart") {

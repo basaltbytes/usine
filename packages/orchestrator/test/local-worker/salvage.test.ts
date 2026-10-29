@@ -12,8 +12,7 @@ import { WorkerName } from "@usine/core/worker";
 import { RunEngine } from "@usine/engine/engine";
 import { claudeLoginLockLayer, CheckoutRequest, Executor } from "@usine/executor";
 import { layer as localExecutorLayer } from "@usine/executor/local";
-import { ChildProcess, ChildProcessSpawner } from "effect/process";
-import { Cause, Effect, Exit, FileSystem, Layer, Option, Path, Stream } from "effect";
+import { Cause, Effect, Exit, FileSystem, Layer, Option, Path } from "effect";
 import { stubAttemptRuntime, StubStorage, worksFor } from "@usine/durable/testing";
 import {
   aloneOnItem,
@@ -57,7 +56,7 @@ describe("local worker salvage", () => {
             createServer((request, response) => {
               requests.push(request.url);
               response.writeHead(403, { "content-type": "text/plain" });
-              response.end(githubMessage);
+              response.end(`${githubMessage} ${TOKEN}`);
             }),
           { host: "127.0.0.1", port: 0 },
         );
@@ -88,6 +87,7 @@ describe("local worker salvage", () => {
             assert.strictEqual(failure.repository, "acme/demo");
             assert.strictEqual(failure.ref, `refs/heads/usine/salvage/${accepted.runId}/1`);
             assert.include(failure.message, githubMessage);
+            assert.notInclude(failure.message, TOKEN);
             assert.include(failure.message, failure.repository);
             assert.include(failure.message, failure.ref);
             assert.include(failure.message, "single-repository installation token");
@@ -105,120 +105,6 @@ describe("local worker salvage", () => {
             assert.strictEqual(outcome.failure.message, failure.message);
           }),
         );
-        assert.include(requests, "/acme/demo.git/info/refs?service=git-receive-pack");
-      }).pipe(Effect.provide(NodeServices.layer)),
-    LIVE_TEST_TIMEOUT,
-  );
-
-  it.live.each([
-    ["push", "origin", "HEAD:refs/heads/feature"],
-    ["push", "-u", "origin", "HEAD"],
-    ["push", "--repo=origin"],
-    ["-c", "alias.publish=push", "publish", "origin", "HEAD:refs/heads/feature"],
-    ["push"],
-  ])(
-    "fails a reported success after an agent push 403 (%j), preserving the ref through recovery",
-    (push) =>
-      Effect.gen(function* () {
-        const requests: Array<string | undefined> = [];
-        const githubMessage = "Permission to acme/demo.git denied to usine-test[bot].";
-        const server = yield* NodeHttpServer.make(
-          () =>
-            createServer((request, response) => {
-              requests.push(request.url);
-              response.writeHead(403, { "content-type": "text/plain" });
-              response.end(`${githubMessage} ghs_expiredInstallationToken`);
-            }),
-          { host: "127.0.0.1", port: 0 },
-        );
-        assert(server.address._tag !== "UnixPathAddress");
-        const pushUrl = `http://127.0.0.1:${server.address.port}/acme/demo.git`;
-        const fs = yield* FileSystem.FileSystem;
-        const root = yield* fs.makeTempDirectoryScoped({ prefix: "usine-agent-push-" });
-        const instance = InstanceDirectory.make(root);
-        const remote = yield* makeRemote(root);
-        const parent = stubAttemptRuntime(new StubStorage(), ({ request }) =>
-          Effect.gen(function* () {
-            const fs = yield* FileSystem.FileSystem;
-            yield* fs.writeFileString(`${request.cwd}/progress.txt`, "keep this work\n");
-            yield* run("git", ["remote", "set-url", "--push", "origin", pushUrl], request.cwd);
-            const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-            const git = (args: ReadonlyArray<string>) =>
-              spawner.exitCode(
-                ChildProcess.make("git", args, { cwd: request.cwd, env: request.environment }),
-              );
-            assert.strictEqual(Number(yield* git(["add", "progress.txt"])), 0);
-            assert.strictEqual(Number(yield* git(["commit", "-m", "Keep progress"])), 0);
-            assert.strictEqual(Number(yield* git(["switch", "-c", "feature"])), 0);
-            assert.strictEqual(
-              Number(
-                yield* git(["config", "push.default", push.length === 1 ? "upstream" : "current"]),
-              ),
-              0,
-            );
-            if (push.length === 1) {
-              yield* git(["config", "branch.feature.remote", "origin"]);
-              yield* git(["config", "branch.feature.merge", "refs/heads/main"]);
-            }
-            const pushed = yield* spawner.spawn(
-              ChildProcess.make("git", push, { cwd: request.cwd, env: request.environment }),
-            );
-            const diagnostic = yield* pushed.stderr.pipe(Stream.decodeText(), Stream.mkString);
-            assert.notStrictEqual(Number(yield* pushed.exitCode), 0);
-            assert.include(diagnostic, "The requested URL returned error: 403");
-            assert.include(diagnostic, githubMessage);
-            yield* run("git", ["remote", "set-url", "--push", "origin", remote], request.cwd);
-            if (push.includes("HEAD")) yield* git(["switch", "-c", "later-branch"]);
-            return "The push was refused by GitHub.";
-          }).pipe(Effect.scoped, Effect.provide(NodeServices.layer), Effect.orDie),
-        );
-        const runtime = () => localRuntime(instance, remote, { attemptRuntime: parent });
-        const saved = yield* Effect.gen(function* () {
-          const engine = yield* RunEngine;
-          const accepted = yield* engine.submit(submission(1));
-          assert(accepted._tag === "Claimed");
-          const snapshot = yield* waitFor(engine, accepted.runId, "Failed");
-          assert.lengthOf(snapshot.attempts, 1);
-          const attempt = snapshot.attempts[0];
-          assert(attempt !== undefined && Option.isSome(attempt.outcome));
-          assert(attempt.outcome.value._tag === "Failed");
-          const failure = attempt.outcome.value.failure;
-          assert(failure._tag === "GitHubPushFailure");
-          assert.strictEqual(failure.repository, "acme/demo");
-          assert.strictEqual(
-            failure.ref,
-            push.length === 1 ? "refs/heads/main" : "refs/heads/feature",
-          );
-          assert.include(failure.message, "The requested URL returned error: 403");
-          assert.include(failure.message, githubMessage);
-          assert.notInclude(failure.message, "ghs_expiredInstallationToken");
-          assert.include(failure.message, "[REDACTED]");
-          assert.include(failure.message, failure.repository);
-          assert.include(failure.message, failure.ref);
-          assert.include(failure.message, "single-repository installation token");
-          assert(Option.isSome(attempt.salvage) && attempt.salvage.value._tag === "Retained");
-          assert.deepStrictEqual(attempt.salvage.value.pushFailure, Option.some(failure));
-          const fs = yield* FileSystem.FileSystem;
-          assert.strictEqual(
-            yield* fs.readFileString(`${attempt.salvage.value.path}/progress.txt`),
-            "keep this work\n",
-          );
-          const view = runView(snapshot, new Set(), new Map());
-          assert.isTrue(view.canResolveFailure);
-          const outcome = view.attempts[0]?.outcome;
-          assert(outcome?._tag === "Failed" && outcome.failure._tag === "GitHubPushFailure");
-          assert.strictEqual(outcome.failure.message, failure.message);
-          return { runId: accepted.runId, failure, worktree: attempt.salvage.value.path };
-        }).pipe(Effect.provide(runtime()));
-        yield* Effect.gen(function* () {
-          const engine = yield* RunEngine;
-          const recovered = (yield* engine.inspect(saved.runId)).attempts[0];
-          assert(recovered !== undefined && Option.isSome(recovered.outcome));
-          assert(recovered.outcome.value._tag === "Failed");
-          assert.deepStrictEqual(recovered.outcome.value.failure, saved.failure);
-          assert(Option.isSome(recovered.salvage) && recovered.salvage.value._tag === "Pushed");
-          assert.isFalse(yield* fs.exists(saved.worktree));
-        }).pipe(Effect.provide(runtime()));
         assert.include(requests, "/acme/demo.git/info/refs?service=git-receive-pack");
       }).pipe(Effect.provide(NodeServices.layer)),
     LIVE_TEST_TIMEOUT,

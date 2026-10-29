@@ -1,5 +1,5 @@
 import type { AttemptId } from "@usine/core/attempt";
-import { githubPushFailure } from "./push-refusal.ts";
+import { GitHubPushFailure } from "@usine/core/attempt/failure";
 import {
   type AttemptSalvage,
   type SalvageRef,
@@ -258,8 +258,12 @@ export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <
     const message = pushFailure.value;
     if (/\bThe requested URL returned error: 403\b/u.test(message)) {
       const ref = `refs/heads/${options.ref}`;
-      const failure = githubPushFailure(options.repository, ref, message);
-      yield* Effect.logError("GitHub refused the attempt's push; retaining its checkout", {
+      const failure = new GitHubPushFailure({
+        repository: options.repository,
+        ref,
+        message: `GitHub refused the push to ${options.repository} at ${ref} (HTTP 403). The token is a single-repository installation token. GitHub's message: ${message}`,
+      });
+      yield* Effect.logError("GitHub refused the salvage push; retaining its checkout", {
         ...fields,
         ref,
         commit,

@@ -17,20 +17,10 @@ export const commitIdentity = (author: BotAccount) =>
 
 /**
  * Returns the environment for an Attempt's parent and children on every Worker kind:
- * `environment`, with the commit identity, Git trace file, and optional hooks directory.
+ * `environment`, with `commitIdentity(author)`, and with `gitHooks` as `core.hooksPath` if set.
  */
 export const childEnvironment = (
   environment: Readonly<Record<string, string>>,
   author: BotAccount,
   gitHooks: Option.Option<string>,
-  gitTrace: string,
-): Record<string, string> =>
-  withGitHooks(
-    {
-      ...environment,
-      ...commitIdentity(author),
-      GIT_TRACE2_EVENT: gitTrace,
-      GIT_EXEC_PATH: `${gitTrace}.helpers`,
-    },
-    gitHooks,
-  );
+): Record<string, string> => withGitHooks({ ...environment, ...commitIdentity(author) }, gitHooks);
