@@ -11,7 +11,7 @@
     "build": "turbo run build",
     "check": "turbo run check",
     "check:packed-install": "node scripts/check-packed-install.mjs",
-    "test": "node --test scripts/release/*.test.mjs && turbo run test --concurrency=1",
+    "test": "node --test scripts/release/*.test.mjs infra/hetzner/gateway/test/*.test.mjs && turbo run test --concurrency=1",
     "lint": "oxlint",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
@@ -24,11 +24,13 @@
   "devDependencies": {
     "@changesets/cli": "catalog:",
     "@effect/language-service": "catalog:",
+    "effect": "catalog:",
     "knip": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "turbo": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "yaml": "2.9.1"
   },
   "engines": {
     "node": ">=22"

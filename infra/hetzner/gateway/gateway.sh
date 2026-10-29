@@ -1,6 +1,6 @@
 #!/bin/sh
 # Creates and deletes the usine gateway at Hetzner Cloud: a private network,
-# the gateway VM, and its firewall, all labeled $LABEL. install and tailnet-up
+# the gateway VM, and its firewall, all labeled $LABEL. apply, install, and tailnet-up
 # connect to the SSH destination in $GATEWAY_SSH, such as a Host alias in
 # ~/.ssh/config, or by default to root at the gateway's public address.
 #
@@ -9,6 +9,7 @@
 #   TAILSCALE_AUTH_KEY=tskey-auth-... ./gateway.sh tailnet-up                # or with an auth key
 #   GATEWAY_SSH=usine-gateway ./gateway.sh install @usine/gateway            # the release on npm, through a Host alias
 #   ./gateway.sh install -i ~/.ssh/usine_worker @usine/gateway               # or through the public address
+#   ./gateway.sh apply -i ~/.ssh/usine_worker --dry-run                     # preview host configuration changes
 #   pnpm --filter @usine/core --filter @usine/gateway pack                   # or a build: from the repository root, after pnpm build
 #   ./gateway.sh install -i ~/.ssh/usine_worker ./usine-core-0.3.0.tgz ./usine-gateway-0.0.0.tgz
 #   ./gateway.sh worker-user-data ~/.ssh/id_ed25519.pub > worker.mime        # cloud-init for a Worker behind it
@@ -174,6 +175,19 @@ install_packages() {
   with_identity ssh "$destination" "/usr/local/sbin/usine-gateway-install$remote"
 }
 
+apply() {
+  identity_option "$@"
+  shift "$skipped"
+  mode=apply
+  if [ "${1:-}" = --dry-run ]; then mode=dry-run; shift; fi
+  [ "$#" -eq 0 ] || { echo "apply takes [-i <identity-file>] [--dry-run]" >&2; exit 2; }
+  gateway_destination
+  work=$(mktemp -d)
+  trap 'rm -rf "$work"' EXIT
+  render "$here/gateway-cloud-init.yaml" > "$work/user-data.yaml"
+  node "$here/apply.mjs" "$work/user-data.yaml" "$mode" "$destination" "$identity" "$0"
+}
+
 # Prints a MIME multipart cloud-init for a Worker behind the gateway: the
 # Worker file of ../cloud-init.yaml with the keys of $1 authorized for the
 # usine user, then worker-cloud-init.yaml, whose lists cloud-init appends to
@@ -268,13 +282,14 @@ case "$command" in
   create) create ;;
   tailnet-up) tailnet_up "$@" ;;
   install) install_packages "$@" ;;
+  apply) apply "$@" ;;
   worker-user-data) worker_user_data "${1:-}" ;;
   orchestrator) orchestrator "$@" ;;
   orchestrator-user-data) orchestrator_user_data "${1:-}" ;;
   orchestrator-tailnet-up) orchestrator_tailnet_up "$@" ;;
   delete) delete ;;
   *)
-    echo "usage: $0 create | tailnet-up [-i <identity-file>] | install [-i <identity-file>] (@usine/gateway[@<version>] | <tarball>...) | worker-user-data <public-key-file> | orchestrator <public-key-file> | orchestrator-user-data <public-key-file> | orchestrator-tailnet-up [-i <identity-file>] | delete" >&2
+    echo "usage: $0 create | apply [-i <identity-file>] [--dry-run] | tailnet-up [-i <identity-file>] | install [-i <identity-file>] (@usine/gateway[@<version>] | <tarball>...) | worker-user-data <public-key-file> | orchestrator <public-key-file> | orchestrator-user-data <public-key-file> | orchestrator-tailnet-up [-i <identity-file>] | delete" >&2
     exit 2
     ;;
 esac

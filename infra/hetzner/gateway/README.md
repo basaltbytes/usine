@@ -82,7 +82,7 @@ ssh root@<gateway> cloud-init status --wait
 ./gateway.sh install -i ~/.ssh/usine_worker @usine/gateway
 ```
 
-`install` and `tailnet-up` connect to root at the public address that `hcloud server ip` gives. `GATEWAY_SSH` sets another SSH destination, such as the gateway's `Host` alias once it uses the tailnet:
+`apply`, `install`, and `tailnet-up` connect to root at the public address that `hcloud server ip` gives. `GATEWAY_SSH` sets another SSH destination, such as the gateway's `Host` alias once it uses the tailnet:
 
 ```sh
 GATEWAY_SSH=usine-gateway ./gateway.sh install @usine/gateway
@@ -103,7 +103,7 @@ pnpm --filter @usine/core --filter @usine/gateway pack
 
 Run `install` again to upgrade. Each `install` builds a new tree, moves it to `/opt/usine-gateway`, and keeps the one before in `/opt/usine-gateway.previous`.
 
-Gateways created before the new-tree install keep their packages and fail with `ERESOLVE` when a release needs another `effect`. Copy the `usine-gateway-install` script from `gateway-cloud-init.yaml` to `/usr/local/sbin/usine-gateway-install` on the gateway, as root, then run `install` again.
+Gateways created before the new-tree install keep their packages and fail with `ERESOLVE` when a release needs another `effect`. Run `gateway.sh apply` to update `/usr/local/sbin/usine-gateway-install`, then run `install` again.
 
 At first boot, the VM writes its admin token and caller key to `/etc/usine-gateway/secrets.env`, readable by root and the `usine-gateway` group. The service reads `settings.env` and `secrets.env`, listed in its unit's `USINE_GATEWAY_ENVIRONMENT_FILES`, at startup and each reload. To give the gateway the operator's subscription logins, see [Give the gateway the subscription logins](#give-the-gateway-the-subscription-logins). To use API keys instead, add them to `secrets.env` and reload:
 
@@ -113,7 +113,33 @@ ssh root@<gateway> 'echo ANTHROPIC_API_KEY=sk-ant-... >> /etc/usine-gateway/secr
 
 `NAME`, `LOCATION`, `SERVER_TYPE`, `IMAGE`, `NETWORK_CIDR`, `SUBNET_CIDR`, `GATEWAY_IP`, `DOMAIN`, and `LABEL` override the defaults at the top of `gateway.sh`. Logs are one JSON object per line: `journalctl -u usine-gateway -o cat`.
 
-On an existing gateway whose `/etc/dnsmasq.d/usine-gateway.conf` lacks a `local=/<domain>/` line, add it and run `systemctl restart dnsmasq`; without it, Codex on a worker can't resolve the forward proxy ([#260](https://github.com/basaltbytes/usine/issues/260)).
+## Apply host configuration
+
+In a repository checkout, run `pnpm install --frozen-lockfile` first. Apply needs Node.js 22 or later, SSH, and `diff` locally. Use the same `DOMAIN`, `GATEWAY_IP`, and `NETWORK_CIDR` values as when you created the gateway; the defaults remain at the top of `gateway.sh`.
+
+```sh
+GATEWAY_SSH=usine-gateway ./gateway.sh apply -i ~/.ssh/usine_worker --dry-run
+GATEWAY_SSH=usine-gateway ./gateway.sh apply -i ~/.ssh/usine_worker
+```
+
+Both commands require root through the SSH destination. If the SSH user isn't root, apply stops and prints a command using a root destination. `--dry-run` compares the rendered `write_files` entries in `gateway-cloud-init.yaml` with the gateway, prints content diffs and ownership or mode changes, and writes nothing remotely. Without `--dry-run`, apply prints the same preview, copies only changed files with their YAML permissions and owner (default `root:root`), and activates the changes:
+
+| Changed file | Activation |
+| --- | --- |
+| `/etc/nftables.conf` | `nft -f /etc/nftables.conf` |
+| dnsmasq configuration or defaults | Restart dnsmasq. |
+| `settings.env` | Restart `usine-gateway`. |
+| `usine-gateway.service` | `systemctl daemon-reload`, then restart `usine-gateway`. |
+| chrony, SSH, or sysctl configuration | Restart chrony, validate and reload SSH, or load the changed sysctl file. |
+| `/usr/local/sbin` scripts or the Tailscale signing key | Copy the file; no service reload. |
+
+Apply collects all diffs before writing and runs each required reload once. An unchanged gateway needs no writes or reloads. It never reads or overwrites `/etc/usine-gateway/egress-allowlist`, `/etc/usine-gateway/secrets.env`, or files in `/var/lib/usine-gateway`, including the ChatGPT auth state. The allowlist is copied only at creation; maintain it on the gateway and run `systemctl reload usine-gateway` after editing it.
+
+Before the first apply, move any local settings added to `settings.env`, including `USINE_GATEWAY_CHATGPT_AUTH_FILE`, into `secrets.env`. Apply replaces `settings.env` with the template; the service reads `secrets.env` last, so local overrides belong there. Keep its existing owner and mode.
+
+Apply updates files only. It doesn't install packages, rerun cloud-init or `usine-gateway-setup`, or upgrade the gateway package; use `install` for package upgrades. If an older gateway lacks a required system package such as chrony, install it as root before applying its configuration. Apply stops on a failed read, copy, or reload and exits nonzero. Files already copied remain changed. Resolve the error, rerun apply for any remaining files, then run the printed reload commands as root even if the next diff is empty.
+
+Run the SSH-stub tests from the repository root with `node --test infra/hetzner/gateway/test/*.test.mjs`; `pnpm test` also runs them.
 
 ## Join the gateway to a tailnet
 
@@ -211,7 +237,7 @@ For ChatGPT, log in to Codex with an empty `CODEX_HOME`, so the gateway gets a l
 export CODEX_HOME=$(mktemp -d)
 codex login
 scp "$CODEX_HOME/auth.json" root@<gateway>:/var/lib/usine-gateway/codex-auth.json
-ssh root@<gateway> 'chown usine-gateway:usine-gateway /var/lib/usine-gateway/codex-auth.json && chmod 0600 /var/lib/usine-gateway/codex-auth.json && echo USINE_GATEWAY_CHATGPT_AUTH_FILE=/var/lib/usine-gateway/codex-auth.json >> /etc/usine-gateway/settings.env && systemctl reload usine-gateway'
+ssh root@<gateway> 'chown usine-gateway:usine-gateway /var/lib/usine-gateway/codex-auth.json && chmod 0600 /var/lib/usine-gateway/codex-auth.json && echo USINE_GATEWAY_CHATGPT_AUTH_FILE=/var/lib/usine-gateway/codex-auth.json >> /etc/usine-gateway/secrets.env && systemctl reload usine-gateway'
 rm -rf "$CODEX_HOME" && unset CODEX_HOME
 ```
 
@@ -260,13 +286,13 @@ hcloud server create --name worker-one --type cx33 --image debian-13 --location 
 
 The output is a MIME multipart cloud-init: `../cloud-init.yaml`'s worker file, then `worker-cloud-init.yaml`, whose lists (packages, files, commands) are appended per its `Merge-Type` header. The second file points the resolver, apt, `/etc/environment`, and Docker at the gateway, so the first file's setup installs the toolchain through the forward proxy: Debian packages and Docker from `deb.debian.org` and `mirror.hetzner.com`, gh from `cli.github.com`, Node.js from `deb.nodesource.com`, and pnpm and the harnesses from `registry.npmjs.org`. Docker pulls the attempt image from `ghcr.io` and `pkg-containers.githubusercontent.com`, which `egress-allowlist` lists.
 
-On a worker created before these files installed Docker, add as root `/etc/systemd/system/docker.service.d/http-proxy.conf` and `/etc/docker/daemon.json` with the contents of `worker-cloud-init.yaml`, then install Docker as [`../README.md`](../README.md#add-docker-to-an-existing-worker) describes. On the gateway, add the two `ghcr.io` hosts to `/etc/usine-gateway/egress-allowlist` and run `systemctl reload usine-gateway`.
+For a worker created before these files installed Docker, [replace the worker](../README.md#update-host-configuration) using the current cloud-init files. On the gateway, add the two `ghcr.io` hosts to `/etc/usine-gateway/egress-allowlist` and run `systemctl reload usine-gateway`.
 
 Projects use Debian's Chromium through `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` (see [`../README.md`](../README.md)), and `egress-allowlist` omits Playwright's download: on x64 Linux, Playwright 1.61 fetches from `cdn.playwright.dev`, which redirects to `storage.googleapis.com`, every Google Cloud Storage bucket's endpoint, so allowing it would let a worker upload a checkout to any bucket it has a signed URL for.
 
 A worker needs 8 GB: the lint and knip gates reserve a 6 GiB virtual buffer, which a 4 GB machine refuses, and two attempts at once thrash it ([#270](https://github.com/basaltbytes/usine/issues/270)). cloud-init sets `vm.overcommit_memory=1` and a 2 GB swap file, and installs bubblewrap for Codex's sandbox ([#269](https://github.com/basaltbytes/usine/issues/269)). Create the gateway first. A `cx33` worker takes about four minutes; follow with `ssh -J root@<gateway> usine@<worker> cloud-init status --wait`. `hcloud server describe worker-one` shows its private address.
 
-The worker's sshd accepts `GIT_CONFIG_VALUE_0`, `GH_ENTERPRISE_TOKEN`, `GH_TOKEN`, `ANTHROPIC_AUTH_TOKEN`, and `USINE_GATEWAY_TOKEN` (`AcceptEnv`), which carry the caller token over SSH, out of command lines; if sshd drops them, preflight fails and names them. On existing workers, add the missing names to the `AcceptEnv` line of `/etc/ssh/sshd_config.d/40-usine-gateway.conf` and reload sshd: `GH_TOKEN` for gh, which needs both token variables because `GH_TOKEN` serves absolute GitHub pagination links and explicit github.com URLs, and `USINE_GATEWAY_TOKEN` for Codex on the gateway's OpenAI credential.
+The worker's sshd accepts `GIT_CONFIG_VALUE_0`, `GH_ENTERPRISE_TOKEN`, `GH_TOKEN`, `ANTHROPIC_AUTH_TOKEN`, and `USINE_GATEWAY_TOKEN` (`AcceptEnv`), which carry the caller token over SSH, out of command lines; if sshd drops them, preflight fails and names them. If an existing worker lacks these names in `AcceptEnv`, [replace the worker](../README.md#update-host-configuration) with the current cloud-init files. gh needs both token variables because `GH_TOKEN` serves absolute GitHub pagination links and explicit github.com URLs; Codex uses `USINE_GATEWAY_TOKEN` for the gateway's OpenAI credential.
 
 ## Log in to the harnesses on the worker
 
@@ -337,69 +363,9 @@ The servers have no harness login. For each harness, give the gateway the provid
 
 ## Add the time server to an existing gateway and worker
 
-Gateways and workers created before chrony was added need these steps for a worker time source ([#254](https://github.com/basaltbytes/usine/issues/254)). Infra changes don't reach running machines ([#264](https://github.com/basaltbytes/usine/issues/264)), so run them by hand. They use the default `NETWORK_CIDR` and `GATEWAY_IP`, `10.42.0.0/16` and `10.42.0.2`. Do the gateway first; the worker's timesyncd needs its chrony.
+On a gateway created before chrony was added, install it as root with `apt-get update && apt-get install -y chrony`, then run `gateway.sh apply`. Apply writes chrony's settings and the nftables rules, restarts chrony, and loads the firewall rules. Check `chronyc sources` for a source marked `^*`.
 
-On the gateway, as root (`ssh root@<gateway>`):
-
-1. Write chrony's settings: Hetzner's time servers, and the private network as clients.
-
-   ```sh
-   mkdir -p /etc/chrony/conf.d
-   printf 'server ntp1.hetzner.de iburst\nserver ntp2.hetzner.com iburst\nserver ntp3.hetzner.net iburst\nallow 10.42.0.0/16\n' > /etc/chrony/conf.d/usine-gateway.conf
-   ```
-
-2. Install chrony. It removes systemd-timesyncd and starts with the file above.
-
-   ```sh
-   apt-get update && apt-get install -y chrony
-   ```
-
-3. Accept NTP from the private network, then load the rules.
-
-   ```sh
-   sed -i 's/udp dport 53 accept/udp dport { 53, 123 } accept/' /etc/nftables.conf
-   nft -f /etc/nftables.conf
-   ```
-
-4. Check. Within a minute, `chronyc sources` marks one source with `^*`, and `timedatectl` shows:
-
-   ```
-   System clock synchronized: yes
-   NTP service: active
-   ```
-
-Rebuilding a worker from `worker-user-data` also adds the time server, but loses its harness logins. On a running worker, `usine` has no sudo and root can't log in over SSH, so run the steps as root through `su` in an SSH session as `usine`:
-
-1. Give root a password with `hcloud server reset-password <worker>`, which prints it, then connect through the gateway and switch to root:
-
-   ```sh
-   ssh -t <worker> 'su -'
-   ```
-
-   `<worker>` is the worker's `Host` entry in the orchestrator user's SSH configuration, which jumps through the gateway (see [Add the worker to `usine.yaml`](#add-the-worker-to-usineyaml)). If SSH fails, log in as root with that password on the server's Hetzner Cloud Console.
-
-2. Point timesyncd at the gateway.
-
-   ```sh
-   mkdir -p /etc/systemd/timesyncd.conf.d
-   printf '[Time]\nNTP=\nNTP=10.42.0.2\n' > /etc/systemd/timesyncd.conf.d/usine-gateway.conf
-   ```
-
-3. Allow NTP to the gateway, then load the rules.
-
-   ```sh
-   sed -i 's/udp dport 53 accept/udp dport { 53, 123 } accept/' /etc/nftables.conf
-   nft -f /etc/nftables.conf
-   ```
-
-4. Restart timesyncd, and lock root's password again.
-
-   ```sh
-   systemctl restart systemd-timesyncd
-   passwd -l root
-   ```
-
-5. Check from the orchestrator with `ssh -J root@<gateway> usine@<worker> timedatectl`, which shows `System clock synchronized: yes` and `NTP service: active`. `timedatectl timesync-status` shows `Server: 10.42.0.2 (10.42.0.2)`.
+[Replace the worker](../README.md#update-host-configuration), or rebuild its snapshot, with the current cloud-init files. They configure timesyncd to use the gateway and allow NTP through the worker's firewall. Gateway-held subscription logins survive replacement. Check `timedatectl` on the new worker for `System clock synchronized: yes` and `NTP service: active`.
 
 ## Run the orchestrator in the gateway's network
 
