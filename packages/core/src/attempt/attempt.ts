@@ -3,6 +3,7 @@ import { Agent, AgentName } from "../agent/agent.ts";
 import { BrainSpec, ModelId } from "../agent/brain.ts";
 import { closedStruct } from "../closed-struct.ts";
 import { OperatorLogin } from "../operator.ts";
+import type { RunState } from "../run/state.ts";
 import { RunId } from "../run/run.ts";
 import { Comment } from "../step/result.ts";
 import { StepName } from "../step/step.ts";
@@ -22,6 +23,9 @@ export const AttemptNumber = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).
   Schema.brand("AttemptNumber"),
 );
 export type AttemptNumber = typeof AttemptNumber.Type;
+
+/** The total attempt cap for automatic retries, including the first try. */
+export const MAX_AUTO_ATTEMPTS = AttemptNumber.make(3);
 
 /** The task text for the agent: the interpolated loop prompt or the operator's edit-and-retry text. */
 export const AttemptTask = Schema.String.check(
@@ -190,3 +194,40 @@ export const shouldAutoRetry = (options: {
   readonly number: AttemptNumber;
   readonly maxAutoAttempts: AttemptNumber;
 }): boolean => isAutoRetryableFailure(options.failure) && options.number < options.maxAutoAttempts;
+
+/** The next attempt after a provider capacity refusal, with its earliest start time. */
+export class ProviderRetry extends Schema.Class<ProviderRetry>("ProviderRetry")(
+  closedStruct({
+    nextAttempt: AttemptNumber.check(Schema.isGreaterThanOrEqualTo(2)),
+    retryAt: Schema.DateTimeUtcFromString,
+    message: Schema.NonEmptyString,
+  }),
+) {}
+
+/** Returns a pending capacity retry from persisted state, including after an orchestrator restart. */
+export const pendingProviderRetry = (
+  state: RunState,
+  attempts: ReadonlyArray<Attempt>,
+): Option.Option<ProviderRetry> => {
+  if (state._tag !== "Running") return Option.none();
+  const last = attempts.at(-1);
+  if (
+    last === undefined ||
+    last.number >= MAX_AUTO_ATTEMPTS ||
+    Option.isNone(last.outcome) ||
+    Option.isNone(last.endedAt)
+  )
+    return Option.none();
+  const outcome = last.outcome.value;
+  if (outcome._tag !== "Failed" || outcome.failure._tag !== "ProviderCapacityFailure")
+    return Option.none();
+  return Option.some(
+    new ProviderRetry({
+      nextAttempt: AttemptNumber.make(last.number + 1),
+      retryAt: DateTime.add(last.endedAt.value, {
+        minutes: last.number === 1 ? 2 : 5,
+      }),
+      message: outcome.failure.message,
+    }),
+  );
+};

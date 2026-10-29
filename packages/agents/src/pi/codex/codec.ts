@@ -7,12 +7,18 @@ import {
   type ThreadStartParams,
   type ToolItem,
   type TurnInterruptParams,
+  type TurnCompleted,
   type TurnStartParams,
   type TurnSteerParams,
   type UserMessageItem,
   UserTextInput,
 } from "../../protocol/codex.ts";
-import { SessionOperationError } from "../../runtime.ts";
+import {
+  AgentCapacityError,
+  AgentResultError,
+  harnessFailure,
+  SessionOperationError,
+} from "../../runtime.ts";
 import { type CodexClient, operationError } from "./app-server.ts";
 
 type CodexRequestPayload =
@@ -97,3 +103,34 @@ export const rateLimitWindow = (window: typeof RateLimitWindow.Type): CoreRateLi
     windowDurationMinutes: Option.fromNullishOr(window.windowDurationMins),
     resetsAt: Option.fromNullishOr(window.resetsAt).pipe(Option.map(DateTime.fromEpochSeconds)),
   });
+
+const decodeHttpStatus = Schema.decodeUnknownOption(
+  Schema.Struct({ httpStatusCode: Schema.NullOr(Schema.Number) }),
+);
+
+/** Classifies the final turn error, preferring Codex's error code to message matching. */
+export const turnFailure = (
+  sessionId: AgentSessionId,
+  error: (typeof TurnCompleted.Type)["turn"]["error"],
+  message: string,
+): AgentResultError | AgentCapacityError => {
+  const code = error?.codexErrorInfo;
+  if (code === undefined || code === null || code === "other")
+    return harnessFailure(Option.some(sessionId), message);
+  const capacity = Schema.is(Schema.String)(code)
+    ? code === "serverOverloaded"
+    : Object.values(code).some((detail) =>
+        Option.exists(
+          decodeHttpStatus(detail),
+          ({ httpStatusCode }) =>
+            httpStatusCode === 529 ||
+            (httpStatusCode === 503 &&
+              /\bretry(?:[- ]after)?\b|\btry again\b/iu.test(
+                message + " " + (error?.additionalDetails ?? ""),
+              )),
+        ),
+      );
+  return capacity
+    ? new AgentCapacityError({ sessionId: Option.some(sessionId), message })
+    : new AgentResultError({ sessionId: Option.some(sessionId), message });
+};

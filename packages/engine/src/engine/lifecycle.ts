@@ -1,4 +1,11 @@
-import { Attempt, AttemptId, AttemptNumber, shouldAutoRetry } from "@usine/core/attempt";
+import {
+  Attempt,
+  AttemptId,
+  AttemptNumber,
+  MAX_AUTO_ATTEMPTS,
+  pendingProviderRetry,
+  shouldAutoRetry,
+} from "@usine/core/attempt";
 import { AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
 import { AttemptCanceled, AttemptFailed, AttemptSucceeded } from "@usine/core/attempt/outcome";
 import { type AttemptSalvage, SalvagePushed } from "@usine/core/attempt/salvage";
@@ -8,6 +15,7 @@ import {
   StartedAfterRestart,
   StartedByEvent,
   StartedByInfraRetry,
+  StartedByProviderRetry,
 } from "@usine/core/attempt/start";
 import { EventId } from "@usine/core/event";
 import { Run, RunId } from "@usine/core/run";
@@ -15,8 +23,6 @@ import * as RunState from "@usine/core/run/state";
 import { StepResult } from "@usine/core/step/result";
 import { Array as EffectArray, Match, Option, Result } from "effect";
 import type { IgnoreReason } from "./submission.ts";
-
-const MAX_AUTO_ATTEMPTS = AttemptNumber.make(3);
 
 /** A Run and its Attempts, ordered by Attempt number. */
 interface RunProgress {
@@ -82,8 +88,8 @@ const failRunningAttempt = (
 };
 
 /**
- * Returns the changes for the executor result of `attemptId`. An infrastructure failure is
- * retried up to 3 Attempts in total; a late or repeated result returns `Unchanged`.
+ * Returns the changes for the executor result of `attemptId`. Infrastructure and capacity failures
+ * allow up to 3 Attempts in total; a late or repeated result returns `Unchanged`.
  */
 export const finishAttempt = (
   current: RunProgress,
@@ -180,9 +186,12 @@ export const beginAttempt = (
   }
   const start: AttemptStart = Option.isSome(interrupted)
     ? new StartedAfterRestart()
-    : Option.getOrElse(requested, (): AttemptStart =>
-        current.attempts.length === 0 ? new StartedByEvent() : new StartedByInfraRetry(),
-      );
+    : Option.getOrElse(requested, (): AttemptStart => {
+        if (current.attempts.length === 0) return new StartedByEvent();
+        return Option.isSome(pendingProviderRetry(state, current.attempts))
+          ? new StartedByProviderRetry()
+          : new StartedByInfraRetry();
+      });
   return {
     _tag: "StartAttempt",
     state: state._tag === "Running" ? state : RunState.start(state),

@@ -45,7 +45,7 @@ export type AttemptRecord = {
   childBlocker: {
     sessionId: string;
     message: string;
-    kind?: "blocked" | "question" | "failed";
+    kind?: "blocked" | "question" | "failed" | "capacity";
   } | null;
   childBudgetExceeded: { attempted: number; max: number } | null;
   /** The next outbound and inbound sequence numbers. */

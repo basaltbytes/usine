@@ -40,6 +40,7 @@ import {
 } from "../../src/child-host/child-host.ts";
 import {
   AgentResultError,
+  AgentCapacityError,
   ChildBackend,
   ChildRequest,
   ClaudeLoginLock,
@@ -1061,29 +1062,104 @@ describe("Claude child backend", () => {
     );
   });
 
-  it.effect("fails the session as agent work when Claude reports an unsuccessful result", () => {
-    const sdk = Layer.succeed(ClaudeSdk)({
-      open: () =>
-        scripted([
-          { type: "system", subtype: "session_state_changed", state: "running" },
-          {
-            type: "system",
-            subtype: "background_tasks_changed",
-            tasks: [{ task_id: "gate", task_type: "local_bash", description: "Run gate" }],
-          },
-          { type: "result", subtype: "error_max_turns", errors: ["ran out of turns"] },
-        ]),
-    });
-    return Effect.scoped(
-      Effect.gen(function* () {
-        const backend = yield* ChildBackend;
-        const session = yield* backend.launch(request());
-        const error = yield* Effect.flip(session.result);
-        assert(error instanceof AgentResultError);
-        assert.strictEqual(error.message, "ran out of turns");
-      }).pipe(Effect.provide(claudeChild), Effect.provide(sdk)),
-    );
-  });
+  it.effect.each([
+    { messages: [], detail: "ran out of turns", capacity: false },
+    { messages: [], detail: '529 {"error":{"type":"overloaded_error"}}', capacity: true },
+    {
+      messages: [
+        {
+          type: "assistant",
+          error: "overloaded",
+          message: { content: [{ type: "text", text: "Busy provider" }] },
+        },
+      ],
+      detail: "API failed",
+      capacity: true,
+    },
+    {
+      messages: [
+        {
+          type: "system",
+          subtype: "api_retry",
+          attempt: 3,
+          max_retries: 3,
+          retry_delay_ms: 1000,
+          error_status: 529,
+          error: "server_error",
+        },
+      ],
+      detail: "API failed",
+      capacity: true,
+    },
+    {
+      messages: [
+        {
+          type: "system",
+          subtype: "api_retry",
+          attempt: 3,
+          max_retries: 3,
+          retry_delay_ms: 1000,
+          error_status: 503,
+          error: "server_error",
+        },
+      ],
+      detail: "API failed",
+      capacity: true,
+    },
+    {
+      messages: [
+        {
+          type: "assistant",
+          error: "authentication_failed",
+          message: { content: [{ type: "text", text: "Selected model is at capacity" }] },
+        },
+      ],
+      detail: "Selected model is at capacity",
+      capacity: false,
+    },
+    {
+      messages: [
+        {
+          type: "system",
+          subtype: "api_retry",
+          attempt: 3,
+          max_retries: 3,
+          retry_delay_ms: 1000,
+          error_status: 529,
+          error: "server_error",
+        },
+        { type: "assistant", message: { content: [{ type: "text", text: "Recovered" }] } },
+      ],
+      detail: "ran out of turns",
+      capacity: false,
+    },
+  ])(
+    "classifies Claude's terminal refusal: $detail / capacity=$capacity",
+    ({ messages, detail, capacity }) => {
+      const sdk = Layer.succeed(ClaudeSdk)({
+        open: () =>
+          scripted([
+            { type: "system", subtype: "session_state_changed", state: "running" },
+            {
+              type: "system",
+              subtype: "background_tasks_changed",
+              tasks: [{ task_id: "gate", task_type: "local_bash", description: "Run gate" }],
+            },
+            ...messages,
+            { type: "result", subtype: "error_during_execution", errors: [detail] },
+          ]),
+      });
+      return Effect.scoped(
+        Effect.gen(function* () {
+          const backend = yield* ChildBackend;
+          const session = yield* backend.launch(request());
+          const error = yield* Effect.flip(session.result);
+          assert.strictEqual(error instanceof AgentCapacityError, capacity);
+          if (!capacity) assert(error instanceof AgentResultError);
+        }).pipe(Effect.provide(claudeChild), Effect.provide(sdk)),
+      );
+    },
+  );
 
   it.effect("fails the session as infrastructure when the output closes without a result", () => {
     const sdk = Layer.succeed(ClaudeSdk)({

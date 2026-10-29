@@ -13,7 +13,7 @@ export class GitHubPushFailure extends Schema.TaggedError<GitHubPushFailure>(
 
 /**
  * An infrastructure failure outside the agent, such as an unreachable Worker or failed checkout.
- * It's the only failure the engine retries automatically, up to the attempt cap.
+ * The engine retries it automatically, up to the attempt cap.
  */
 export class InfraFailure extends Schema.TaggedError<InfraFailure>("AttemptFailure/InfraFailure")(
   "InfraFailure",
@@ -27,6 +27,11 @@ export class InfraFailure extends Schema.TaggedError<InfraFailure>("AttemptFailu
 export class DefectFailure extends Schema.TaggedError<DefectFailure>(
   "AttemptFailure/DefectFailure",
 )("DefectFailure", { message: Schema.String, cause: Schema.Defect() }) {}
+
+/** A temporary refusal because the model provider has no capacity. */
+export class ProviderCapacityFailure extends Schema.TaggedError<ProviderCapacityFailure>(
+  "AttemptFailure/ProviderCapacityFailure",
+)("ProviderCapacityFailure", { message: Schema.NonEmptyString }) {}
 
 /** A task failure reported by the agent; not retried automatically. */
 export class AgentFailure extends Schema.TaggedError<AgentFailure>("AttemptFailure/AgentFailure")(
@@ -79,6 +84,7 @@ export class ChildSessionBudgetFailure extends Schema.TaggedError<ChildSessionBu
 export const AttemptFailure = Schema.Union([
   GitHubPushFailure,
   InfraFailure,
+  ProviderCapacityFailure,
   DefectFailure,
   AgentFailure,
   BlockedFailure,
@@ -88,5 +94,7 @@ export const AttemptFailure = Schema.Union([
 ]);
 export type AttemptFailure = typeof AttemptFailure.Type;
 
-/** Returns whether the failure is an `InfraFailure`; `shouldAutoRetry` also applies the attempt cap. */
-export const isAutoRetryableFailure = Schema.is(InfraFailure);
+/** Returns whether infrastructure or provider capacity permits an automatic retry; the attempt cap also applies. */
+export const isAutoRetryableFailure = Schema.is(
+  Schema.Union([InfraFailure, ProviderCapacityFailure]),
+);

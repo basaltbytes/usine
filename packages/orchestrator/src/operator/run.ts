@@ -2,7 +2,7 @@ import { SettledItemState } from "@usine/config/board";
 import { AgentName } from "@usine/core/agent";
 import { BrainSpec } from "@usine/core/agent/brain";
 import { TokenCount } from "@usine/core/agent/session";
-import { AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
+import { AttemptId, AttemptNumber, AttemptTask, ProviderRetry } from "@usine/core/attempt";
 import { OperatorAction, SessionTarget } from "@usine/core/attempt/channel";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
@@ -69,6 +69,10 @@ export class RunView extends Schema.Class<RunView>("@usine/orchestrator/RunView"
   /** The saved agent definition's brain, including any edit-and-retry amendment. */
   agentBrain: BrainSpec,
   state: RunStateTag,
+  providerRetry: Schema.NullOr(ProviderRetry).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(null)),
+    Schema.withConstructorDefault(Effect.succeed(null)),
+  ),
   loopPaused: Schema.Boolean,
   openedAt: Schema.String,
   /**

@@ -2,11 +2,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assert, describe, it } from "@effect/vitest";
-import { fauxAssistantMessage } from "@earendil-works/pi-ai/providers/faux";
+import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
 import {
   createAgentSession,
   type CreateAgentSessionOptions,
   type ExtensionToolContext,
+  ModelRuntime,
   SessionManager,
   SettingsManager,
   type ToolDefinition,
@@ -19,6 +20,7 @@ import { WorkerName } from "@usine/core/worker";
 import { Effect, Fiber, Layer, Logger, Option, Queue, Stream } from "effect";
 import {
   AgentResultError,
+  AgentCapacityError,
   ChildRequest,
   PiChildBackend,
   PoolUnavailableError,
@@ -624,4 +626,99 @@ describe("Pi child backend", () => {
       }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(sdk)),
     );
   });
+
+  for (const scenario of [
+    {
+      name: "classifies a terminal overload when SDK retries are disabled",
+      message: "HTTP 529: overloaded_error",
+      retry: { enabled: false },
+      responses: 1,
+      outcome: "capacity",
+    },
+    {
+      name: "classifies HTTP 529 when the SDK does not recognize it as retryable",
+      message: "HTTP 529",
+      retry: {},
+      responses: 1,
+      outcome: "capacity",
+    },
+    {
+      name: "classifies capacity after SDK retries are exhausted",
+      message: "HTTP 529: overloaded_error",
+      retry: { enabled: true, maxRetries: 1, baseDelayMs: 1 },
+      responses: 2,
+      outcome: "capacity",
+    },
+    {
+      name: "finishes successfully when an SDK retry recovers from an overload",
+      message: "HTTP 529: overloaded_error",
+      retry: { enabled: true, maxRetries: 1, baseDelayMs: 1 },
+      responses: 1,
+      outcome: "success",
+    },
+  ]) {
+    it.live(scenario.name, () =>
+      Effect.gen(function* () {
+        const directory = mkdtempSync(join(tmpdir(), "usine-pi-capacity-"));
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => rmSync(directory, { force: true, recursive: true })),
+        );
+        const faux = fauxProvider();
+        faux.setResponses([
+          ...Array.from({ length: scenario.responses }, () =>
+            fauxAssistantMessage([], { stopReason: "error", errorMessage: scenario.message }),
+          ),
+          fauxAssistantMessage("Recovered"),
+        ]);
+        const modelRuntime = yield* Effect.promise(() =>
+          ModelRuntime.create({
+            authPath: join(directory, "auth.json"),
+            modelsPath: null,
+            refreshOnCreate: false,
+          }),
+        );
+        modelRuntime.registerNativeProvider(faux.provider);
+        const { session } = yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            createAgentSession({
+              agentDir: directory,
+              cwd: directory,
+              model: faux.getModel(),
+              modelRuntime,
+              tools: [],
+              sessionManager: SessionManager.inMemory(directory),
+              settingsManager: SettingsManager.inMemory({ retry: scenario.retry }),
+            }),
+          ),
+          ({ session }) => Effect.sync(() => session.dispose()),
+        );
+        const sdk = Layer.succeed(PiSdk)({
+          start: () =>
+            Promise.resolve({
+              _tag: "Started",
+              model: ModelId.make(`${faux.provider.id}/${faux.getModel().id}`),
+              pool: "apiKeys",
+              session,
+              tools: [],
+            }),
+        });
+        yield* Effect.gen(function* () {
+          const running = yield* (yield* PiChildBackend).launch(childRequest);
+          if (scenario.outcome === "capacity") {
+            const error = yield* Effect.flip(running.result);
+            assert(error instanceof AgentCapacityError);
+            assert.strictEqual(error.message, scenario.message);
+            assert.deepStrictEqual(error.sessionId, Option.some(childRequest.session.id));
+          } else {
+            const result = yield* running.result;
+            assert.strictEqual(result.message, "Recovered");
+          }
+          assert.strictEqual(
+            faux.state.callCount,
+            scenario.responses + (scenario.outcome === "success" ? 1 : 0),
+          );
+        }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(sdk));
+      }).pipe(Effect.scoped),
+    );
+  }
 });

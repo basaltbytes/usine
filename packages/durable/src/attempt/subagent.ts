@@ -245,7 +245,7 @@ export const subagentTool = (services: ExtensionServices) => {
     const forwarding = yield* child.events.pipe(
       Stream.runForEach(forward),
       Effect.catchTag(
-        ["AgentResultError", "AgentBlockedError", "AgentQuestionError"],
+        ["AgentResultError", "AgentCapacityError", "AgentBlockedError", "AgentQuestionError"],
         () => Effect.void,
       ),
       Effect.forkScoped,
@@ -253,8 +253,9 @@ export const subagentTool = (services: ExtensionServices) => {
     const outcome = yield* untilAborted(
       child.result.pipe(
         Effect.map(Result.succeed),
-        Effect.catchTag(["AgentResultError", "AgentBlockedError", "AgentQuestionError"], (report) =>
-          Effect.succeed(Result.fail(report)),
+        Effect.catchTag(
+          ["AgentResultError", "AgentCapacityError", "AgentBlockedError", "AgentQuestionError"],
+          (report) => Effect.succeed(Result.fail(report)),
         ),
       ),
       context,
@@ -275,6 +276,7 @@ export const subagentTool = (services: ExtensionServices) => {
         Effect.gen(function* () {
           const kind = Match.valueTags(report, {
             AgentResultError: () => "failed" as const,
+            AgentCapacityError: () => "capacity" as const,
             AgentBlockedError: () => "blocked" as const,
             AgentQuestionError: () => "question" as const,
           });

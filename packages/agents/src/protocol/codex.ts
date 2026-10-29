@@ -138,6 +138,9 @@ export const TurnCompleted = Schema.Struct({
       Schema.Struct({
         message: Schema.String,
         additionalDetails: Schema.NullOr(Schema.String),
+        codexErrorInfo: Schema.optionalKey(
+          Schema.NullOr(Schema.Union([Schema.String, Schema.Record(Schema.String, Schema.Json)])),
+        ),
       }),
     ),
   }),

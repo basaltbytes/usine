@@ -16,6 +16,7 @@ import {
   BlockedFailure,
   ChildSessionBudgetFailure,
   InfraFailure,
+  ProviderCapacityFailure,
   QuestionFailure,
 } from "@usine/core/attempt/failure";
 import { Context, Effect, Match, Option, Schema, Scope, Stream } from "effect";
@@ -97,9 +98,20 @@ export const QUESTION_MARKER = "[usine:question]";
 /**
  * The reserved prefix of a report that relays a harness failure, such as a child's failed Codex
  * turn, to the parent. The session fails with `AgentResultError`, which ends the Attempt with
- * `AgentFailure`.
+ * `AgentFailure`. Capacity refusals use `CAPACITY_MARKER`.
  */
 export const FAILED_MARKER = "[usine:failed]";
+
+/** The reserved report prefix for a temporary provider capacity refusal. */
+export const CAPACITY_MARKER = "[usine:provider-capacity]";
+
+/** A harness refusal because its model provider has no capacity. */
+export class AgentCapacityError extends Schema.TaggedError<AgentCapacityError>(
+  "@usine/agents/AgentCapacityError",
+)("AgentCapacityError", {
+  sessionId: Schema.OptionFromNullOr(AgentSessionId),
+  message: Schema.NonEmptyString,
+}) {}
 
 /** An error for a session that finished and reported that the work failed. */
 export class AgentResultError extends Schema.TaggedError<AgentResultError>(
@@ -108,6 +120,21 @@ export class AgentResultError extends Schema.TaggedError<AgentResultError>(
   sessionId: Schema.OptionFromNullOr(AgentSessionId),
   message: Schema.NonEmptyString,
 }) {}
+
+/** Recognizes capacity refusals when a harness supplies only an error message. */
+const isCapacityMessage = (message: string): boolean =>
+  /\bselected model is at capacity\b|\boverloaded_error\b/iu.test(message) ||
+  /(?:^|\b(?:HTTP|(?:status|error)(?: code)?)[: ]+)529\b/iu.test(message) ||
+  (/\b503\b/u.test(message) && /\bretry(?:[- ]after)?\b|\btry again\b/iu.test(message));
+
+/** Classifies a harness failure when it exposes only a message. */
+export const harnessFailure = (
+  sessionId: Option.Option<AgentSessionId>,
+  message: string,
+): AgentResultError | AgentCapacityError =>
+  isCapacityMessage(message)
+    ? new AgentCapacityError({ sessionId, message })
+    : new AgentResultError({ sessionId, message });
 
 /** An error for a session that finished with the blocker marker; `message` is the blocker text. */
 export class AgentBlockedError extends Schema.TaggedError<AgentBlockedError>(
@@ -154,6 +181,7 @@ export const AgentSessionError = Schema.Union([
   PoolUnavailableError,
   UnsupportedEffortError,
   AgentResultError,
+  AgentCapacityError,
   AgentBlockedError,
   AgentQuestionError,
   ChildSessionBudgetExceededError,
@@ -165,18 +193,30 @@ export type AgentSessionError = typeof AgentSessionError.Type;
  * A report that a session ends with: a blocker or question marked in its final answer, or a failure
  * reported by its harness. A child relays each report to the parent with the same marker.
  */
-export type AgentReport = AgentResultError | AgentBlockedError | AgentQuestionError;
+export type AgentReport =
+  | AgentResultError
+  | AgentCapacityError
+  | AgentBlockedError
+  | AgentQuestionError;
 
 /**
- * Returns the report of a final answer that starts with `[usine:blocked]`, `[usine:question]`, or
- * `[usine:failed]`; the details can follow on the same line or the next. Returns `None` if the answer
- * does not start with a marker.
+ * Returns the report of a final answer that starts with a reserved report marker. Details can
+ * follow on the same line or the next. Returns `None` if the answer has no marker.
  */
 export const reportedOutcome = (
   sessionId: Option.Option<AgentSessionId>,
   answer: string,
 ): Option.Option<AgentReport> => {
   const trimmed = answer.trim();
+  if (trimmed.startsWith(CAPACITY_MARKER)) {
+    return Option.some(
+      new AgentCapacityError({
+        sessionId,
+        message:
+          trimmed.slice(CAPACITY_MARKER.length).trim() || "The model provider is at capacity.",
+      }),
+    );
+  }
   if (trimmed.startsWith(QUESTION_MARKER)) {
     return Option.some(
       new AgentQuestionError({
@@ -213,6 +253,7 @@ export const reportedOutcome = (
 export const reportText = (report: AgentReport): string => {
   const marker = Match.valueTags(report, {
     AgentResultError: () => FAILED_MARKER,
+    AgentCapacityError: () => CAPACITY_MARKER,
     AgentBlockedError: () => BLOCKED_MARKER,
     AgentQuestionError: () => QUESTION_MARKER,
   });
@@ -221,7 +262,8 @@ export const reportText = (report: AgentReport): string => {
 
 /**
  * Maps a session error to an Attempt failure: SDK and process failures are retryable infrastructure
- * failures; roster errors and Agent-reported failures wait for the operator (ADR 0002).
+ * failures; capacity refusals use a delayed retry. Roster errors and other Agent-reported
+ * failures wait for the operator (ADR 0002).
  */
 export const toAttemptFailure = (error: AgentSessionError): AttemptFailure =>
   Match.valueTags(error, {
@@ -231,6 +273,7 @@ export const toAttemptFailure = (error: AgentSessionError): AttemptFailure =>
     PoolUnavailableError: ({ message }) => new AgentFailure({ message }),
     UnsupportedEffortError: ({ message }) => new AgentFailure({ message }),
     AgentResultError: ({ message }) => new AgentFailure({ message }),
+    AgentCapacityError: ({ message }) => new ProviderCapacityFailure({ message }),
     AgentBlockedError: ({ message }) => new BlockedFailure({ message }),
     AgentQuestionError: ({ message }) => new QuestionFailure({ question: message }),
     ChildSessionBudgetExceededError: ({ attemptedChildren, maxChildren }) =>
