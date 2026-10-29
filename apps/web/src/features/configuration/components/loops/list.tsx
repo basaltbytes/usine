@@ -16,13 +16,10 @@ type LoopsListProps = {
 
 /** `pause` is `null` if operator actions are unavailable. */
 export const LoopsList = ({ configuration, pause }: LoopsListProps) => (
-  <ConfigurationPage title="Loops" counts={loopCounts(configuration)}>
+  <ConfigurationPage title="Loops" createKind="loop" counts={loopCounts(configuration)}>
     {pause?.isError === true && <ErrorAlert message={pause.error.message} />}
     {configuration.loops.length === 0 && configuration.quarantinedLoops.length === 0 ? (
-      <Missing title="No loops">
-        Add a Markdown file under <code>loops/</code> in the instance folder, then reload the
-        configuration.
-      </Missing>
+      <Missing title="No loops">Choose New to add a loop. New loops start paused.</Missing>
     ) : (
       <div className="-mx-2">
         <Table>

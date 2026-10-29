@@ -3,11 +3,8 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import type { NeedView, RepositoryPollView } from "@usine/orchestrator/operator";
 import { ErrorAlert } from "~/components/error-alert";
 import { Page, PageHeading } from "~/components/page";
-import {
-  ReloadConfigurationButton,
-  ReloadOutcome,
-  useReloadConfiguration,
-} from "~/components/configuration/reload";
+import { Link } from "@tanstack/react-router";
+import { Button } from "~/components/ui/button";
 import { useNow } from "~/hooks/use-now";
 import { NeedEntry } from "~/components/needs-you/needs-you";
 import { overviewQuery } from "~/lib/overview";
@@ -21,18 +18,15 @@ import { Statistics } from "~/features/overview/components/statistics/statistics
 import { WorkersLine } from "~/features/overview/components/workers-line";
 
 const NoProjects = () => {
-  const reload = useReloadConfiguration();
   return (
     <section className="flex flex-col items-start gap-3">
       <div className="flex max-w-prose flex-col gap-1">
         <h2 className="text-md font-medium">No projects registered</h2>
-        <p className="text-muted-foreground">
-          Add each repository under <code>repos</code> in <code>usine.yaml</code>, then reload the
-          configuration.
-        </p>
+        <p className="text-muted-foreground">Register a repository in Configuration.</p>
       </div>
-      <ReloadConfigurationButton reload={reload} />
-      <ReloadOutcome reload={reload} />
+      <Button variant="outline" render={<Link to="/configuration/repositories" />}>
+        Open repositories
+      </Button>
     </section>
   );
 };

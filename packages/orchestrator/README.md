@@ -308,3 +308,5 @@ Writes require `expected`, the current revision number, and accept an optional `
 Revision lists default to 50 entries and accept limits from 1 to 100. Pass a response's `nextBefore` as `before` for the next page; `null` means there are no more entries. Before and after values use `null` for an absent entity. Actors and messages are nullable; times are ISO timestamps.
 
 Stale writes return 409 with `expected` and `current`. Invalid configuration returns 422 with a `problems` array containing the entity key, field path when available, and message. Unknown entities, kinds, and revision numbers return 404. A revert returns 409 with the conflicting entity keys if a later revision changed them. Restart and preflight refusals use the reload endpoint's error responses.
+
+The configuration view includes all declared labels, including declarations with no managed repository. The web UI uses the revision and entity endpoints for editing and history. The obsolete `POST /api/instance/reload` endpoint is removed; committed revisions apply live.

@@ -9,11 +9,7 @@ import { AttemptId } from "@usine/core/attempt";
 import { RunId } from "@usine/core/run";
 import { AgentName } from "@usine/core/agent";
 import type { RunAgainResult } from "@usine/engine/engine";
-import type {
-  CurrentInstance,
-  InstanceReload,
-  InstanceReloadError,
-} from "@usine/orchestrator/current-instance";
+import type { CurrentInstance } from "@usine/orchestrator/current-instance";
 import type { WorkerName } from "@usine/core/worker";
 import {
   type BoardMove,
@@ -45,7 +41,7 @@ export class BackendUnavailableError extends Schema.TaggedError<BackendUnavailab
   message: Schema.String,
 }) {}
 
-export type BackendError = OperatorError | BackendUnavailableError | InstanceReloadError;
+export type BackendError = OperatorError | BackendUnavailableError;
 
 export class FactoryBackend extends Context.Service<
   FactoryBackend,
@@ -80,7 +76,6 @@ export class FactoryBackend extends Context.Service<
     readonly moveBoardItem: (move: BoardMove) => Effect.Effect<void, BackendError>;
     readonly pause: (loop: LoopName) => Effect.Effect<void, BackendError>;
     readonly unpause: (loop: LoopName) => Effect.Effect<void, BackendError>;
-    readonly reload: Effect.Effect<InstanceReload, BackendError>;
 
     readonly task: (
       repository: RepositoryName,
@@ -95,7 +90,7 @@ export class FactoryBackend extends Context.Service<
   }
 >()("@usine/server/FactoryBackend") {}
 
-type BackendInstance = Pick<CurrentInstance["Service"], "get" | "reload">;
+type BackendInstance = Pick<CurrentInstance["Service"], "get">;
 
 const rosterOf = (instances: BackendInstance) =>
   Effect.map(instances.get, ({ agents }) => agents.map(({ name }) => name));
@@ -135,7 +130,6 @@ export const liveBackendLayer = (
       Effect.flatMap(instances.get, (instance) => operator.moveBoardItem(instance, move)),
     pause: (loop) => operator.pause(loop).pipe(Effect.asVoid),
     unpause: (loop) => operator.unpause(loop).pipe(Effect.asVoid),
-    reload: instances.reload,
 
     task: (repository, item) =>
       Effect.flatMap(instances.get, (instance) => operator.task(instance, repository, item)),
@@ -148,7 +142,7 @@ export const liveBackendLayer = (
   });
 
 /**
- * Provides observation, configuration, reload, and attention acknowledgements during setup. Run
+ * Provides observation, configuration, and attention acknowledgements during setup. Run
  * actions fail with `BackendUnavailableError`.
  */
 export const needsSetupBackendLayer = (
@@ -198,7 +192,6 @@ export const needsSetupBackendLayer = (
     moveBoardItem: fail,
     pause: fail,
     unpause: fail,
-    reload: instances.reload,
 
     task: (repository, item) =>
       Effect.flatMap(instances.get, (instance) => observation.task(instance, repository, item)),

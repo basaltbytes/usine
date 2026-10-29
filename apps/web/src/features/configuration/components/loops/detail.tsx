@@ -1,3 +1,4 @@
+import { entityKey } from "~/features/configuration/lib/entities";
 import { Link } from "@tanstack/react-router";
 import type { ConfigurationView } from "@usine/orchestrator/operator";
 import { FileError } from "~/features/configuration/components/file-error";
@@ -19,12 +20,17 @@ export const LoopDetail = ({ name, configuration, pause }: LoopDetailProps) => {
   const quarantined = configuration.quarantinedLoops.find((candidate) => candidate.name === name);
   if (quarantined !== undefined)
     return (
-      <ConfigurationPage title={quarantined.name} marks={<NotLoaded />} file={quarantined.file}>
+      <ConfigurationPage
+        entity={entityKey("loop", name)}
+        title={quarantined.name}
+        marks={<NotLoaded />}
+        file={quarantined.file}
+      >
         <FileError error={quarantined.error} consequence="No runs until the file loads." />
       </ConfigurationPage>
     );
   return (
-    <ConfigurationPage title={name}>
+    <ConfigurationPage entity={entityKey("loop", name)} title={name}>
       <Missing title="Loop not found">
         The configuration has no file <code>loops/{name}.md</code>.{" "}
         <Link to="/configuration/loops" className="text-primary hover:underline">

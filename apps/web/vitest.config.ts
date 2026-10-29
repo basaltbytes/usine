@@ -1,3 +1,8 @@
+import {
+  configurationEditorResponses,
+  configurationEditorScreenshot,
+  configurationEditorRequests,
+} from "./src/features/configuration/components/editor/browser-fixture.ts";
 import { playwright } from "@vitest/browser-playwright";
 import { configDefaults, defineConfig, mergeConfig } from "vitest/config";
 import type { Page, Route } from "playwright";
@@ -73,6 +78,9 @@ export default mergeConfig(
                 executablePath === undefined ? {} : { launchOptions: { executablePath } },
               ),
               commands: {
+                configurationEditorResponses,
+                configurationEditorRequests,
+                configurationEditorScreenshot,
                 taskListAvatarResponse: async ({ page }) => {
                   await page.unroute("https://github.com/board-test.png?*");
                   await page.route("https://github.com/board-test.png?*", (route) =>
@@ -218,39 +226,6 @@ export default mergeConfig(
                             message: rejection || "Unexpected upgrade timing",
                           }),
                     });
-                  });
-                },
-                reloadResponses: async (
-                  { page },
-                  before: string,
-                  after: string,
-                  report: string,
-                  rejections: ReadonlyArray<{ readonly status: number; readonly body: string }>,
-                  configurationBefore: string,
-                  configurationAfter: string,
-                ) => {
-                  let reloads = 0;
-                  await page.unroute("**/api/overview");
-                  await page.route("**/api/overview", (route) =>
-                    route.fulfill({
-                      contentType: "application/json",
-                      body: reloads === 0 ? before : after,
-                    }),
-                  );
-                  await page.route("**/api/configuration", (route) =>
-                    route.fulfill({
-                      contentType: "application/json",
-                      body: reloads === 0 ? configurationBefore : configurationAfter,
-                    }),
-                  );
-                  await page.route("**/api/instance/reload", (route) => {
-                    reloads += 1;
-                    const rejection = rejections[Math.min(reloads - 2, rejections.length - 1)];
-                    return route.fulfill(
-                      reloads === 1 || rejection === undefined
-                        ? { contentType: "application/json", body: report }
-                        : { contentType: "application/json", ...rejection },
-                    );
                   });
                 },
                 interventionResponses: async ({ page }, status: 200 | 503) => {

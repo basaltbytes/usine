@@ -10,13 +10,11 @@ type RepositoriesListProps = {
 export const RepositoriesList = ({ configuration }: RepositoriesListProps) => (
   <ConfigurationPage
     title="Repositories"
+    createKind="repository"
     counts={`${configuration.repositories.length} ${configuration.repositories.length === 1 ? "repository" : "repositories"}`}
   >
     {configuration.repositories.length === 0 ? (
-      <Missing title="No repositories registered">
-        Add each repository under <code>repos</code> in <code>usine.yaml</code>, then reload the
-        configuration.
-      </Missing>
+      <Missing title="No repositories registered">Choose New to register a repository.</Missing>
     ) : (
       <div className="@container -mx-2">
         <Table>

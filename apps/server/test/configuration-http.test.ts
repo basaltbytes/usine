@@ -195,7 +195,6 @@ const harness = Effect.gen(function* () {
     moveBoardItem: unused,
     pause: unused,
     unpause: unused,
-    reload: current.reload,
     task: unused,
     desk: Effect.die("unused"),
     statistics: unused,

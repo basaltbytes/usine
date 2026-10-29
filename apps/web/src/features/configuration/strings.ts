@@ -7,7 +7,6 @@ import type {
   PreflightCheckView,
   WorkerConfigurationView,
 } from "@usine/orchestrator/operator";
-import type { OperatorHttpError } from "@usine/orchestrator/operator/http";
 
 export const plural = (count: number, noun: string): string =>
   `${count} ${noun}${count === 1 ? "" : "s"}`;
@@ -40,7 +39,7 @@ export const permissionsLabel = {
 
 type Capability = Exclude<Extract<PreflightCheckView, { _tag: "Failed" }>["capability"], null>;
 
-export const capabilityLabel = {
+const capabilityLabel = {
   machine: "machine",
   toolchain: "toolchain",
   memory: "memory",
@@ -164,20 +163,6 @@ export const loopCounts = (configuration: ConfigurationView): string => {
   ].join(", ");
 };
 
-/** Returns the text shown before a reload error message, or `null` for other errors. */
-export const reloadRefusalLead = (error: OperatorHttpError["error"] | undefined): string | null => {
-  switch (error) {
-    case "FactoryConfigError":
-      return "Could not load usine.yaml, the loops folder, or the agents folder.";
-    case "RestartRequiredError":
-      return "These changes require a restart of usine up.";
-    case "ReloadPreflightError":
-      return "A worker failed preflight for the added configuration.";
-    default:
-      return null;
-  }
-};
-
 export const upgradesTitle = "Server upgrades";
 export const upgradeWhenIdle = "Upgrade when idle";
 export const upgradeNow = "Upgrade now";
@@ -199,3 +184,46 @@ export const upgradeRunningLabel = "Running version";
 export const upgradeChannelLabel = "Channel";
 export const upgradeModeLabel = "Mode";
 export const upgradeAvailable = (version: string) => `Version ${version} is available.`;
+
+export const editorCopy = {
+  noLabels: "No labels",
+  addLabel: "Choose New to declare a label.",
+  localOperator: "Local operator",
+  edit: "Edit",
+  save: "Save",
+  saving: "Saving…",
+  cancel: "Cancel",
+  delete: "Delete",
+  confirmDelete: "Confirm delete",
+  new: "New",
+  history: "History",
+  revert: "Revert",
+  confirmRevert: "Confirm revert",
+  message: "Message (optional)",
+  name: "Name",
+  source: "Configuration text",
+  draft: "Unsaved draft",
+  reload: "Reload text",
+  deletedConflict:
+    "This entity was deleted. Reload text to start a new version; your draft remains available below.",
+  conflict:
+    "The configuration changed since this editor opened. Review the newer revision before saving. Reloading keeps your unsaved draft below for copying.",
+  paused: "New loops start paused. Review the loop before resuming it.",
+  emptyHistory: "No revisions",
+  more: "Older revisions",
+  loading: "Loading…",
+  noDiff: "No text changes",
+  saved: "Saved",
+  deleted: "Deleted",
+  reverted: "Revision reverted",
+  deleteWarning: (name: string) => `Delete ${name}?`,
+  references: (names: readonly string[]) =>
+    names.length === 0
+      ? "No loops or projects reference this entity."
+      : `Referenced by: ${names.join(", ")}.`,
+  revertWarning:
+    "Revert restores every entity in this revision. Later changes can prevent a revert.",
+  alreadyExists: "This name already exists. Open the entity to edit it.",
+  create: (kind: string) => `New ${kind}`,
+  revision: (number: number) => `Revision ${number}`,
+};

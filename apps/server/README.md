@@ -12,7 +12,7 @@ It prints `http://127.0.0.1:7331` and stays attached to the terminal. Every comm
 
 One `usine up` runs per instance folder. It holds `.usine/instance.lock` from startup until every store closes, writes its pid to `.usine/instance.pid`, and writes its pid, port, version, start time, and command line to `.usine/instance.json`. It removes both files when it exits. It reads the instance ID from `.usine/instance-id`, and writes a new UUID there at its first start; the ID labels its attempt containers on SSH workers, so that another instance with the same GitHub App doesn't remove them. A second `usine up` there names the running process and exits nonzero before opening a store. A draining process keeps the folder until it exits.
 
-At startup, a failed worker preflight excludes that worker from scheduling while the other workers start and the API listens. **Needs attention** shows the worker and its preflight message. Checks retry after 1, 2, 5, and 10 minutes, then every 10 minutes; a passing check restores scheduling and clears the entry. A configuration revision that changes the worker's slot count checks it immediately. Live reload still refuses a revision whose preflight fails. Startup exits with an error if every worker fails preflight, or if a database, GitHub App, or listen-address error prevents startup.
+At startup, a failed worker preflight excludes that worker from scheduling while the other workers start and the API listens. **Needs attention** shows the worker and its preflight message. Checks retry after 1, 2, 5, and 10 minutes, then every 10 minutes; a passing check restores scheduling and clears the entry. A configuration revision that changes the worker's slot count checks it immediately. Configuration writes still refuse a revision whose preflight fails. Startup exits with an error if every worker fails preflight, or if a database, GitHub App, or listen-address error prevents startup.
 
 ## Manage the instance
 
@@ -28,7 +28,7 @@ usine upgrade       # back up, move the @usine/server pin, install, commit, and 
 
 `usine up` records the systemd service whose cgroup it runs in, such as `usine.service`. If systemd reports the process as that service's main process, `stop`, `restart`, and `upgrade` stop it with `systemctl stop --no-block` and start it with `systemctl start`, so that systemd keeps managing it, and `status` names the service. A start whose service fails or waits to restart is stopped, so that it doesn't repeat.
 
-Without GitHub App credentials, it logs the typed error, leaves both trigger streams idle, and opens the setup screen in the default browser. The browser command times out after two seconds; a failed opener only logs a warning. Runs, transcripts, and loop pause state stay readable, and the instance folder can be reloaded, but interventions are unavailable. Supply `USINE_GITHUB_APP_ID` and `USINE_GITHUB_PRIVATE_KEY`, or `app_id` and `private_key` in a mode-0600 `.usine/github-app.json`. Credentials are read only at startup, so restart `usine up` after adding them, as the setup screen says.
+Without GitHub App credentials, it logs the typed error, leaves both trigger streams idle, and opens the setup screen in the default browser. The browser command times out after two seconds; a failed opener only logs a warning. Runs, transcripts, and loop pause state stay readable, and stored configuration can be edited, but interventions are unavailable. Supply `USINE_GITHUB_APP_ID` and `USINE_GITHUB_PRIVATE_KEY`, or `app_id` and `private_key` in a mode-0600 `.usine/github-app.json`. Credentials are read only at startup, so restart `usine up` after adding them, as the setup screen says.
 
 ## Configuration commands
 
@@ -62,15 +62,11 @@ Direct browser requests for UI routes serve the app shell, so refreshing or shar
 
 After `pnpm build`, reload the page to use the new web bundle; no restart is needed.
 
-## Reload the configuration
+## Change the configuration
 
-**Reload configuration** on any Configuration page, `POST /api/instance/reload`, and `SIGHUP` re-read the configuration store without stopping the process. Revisions also apply automatically. `SIGHUP` no longer ends the process; stop it with Ctrl+C or `SIGTERM`. The [CLI reference](https://docs.usine.dev/reference/configuration/cli/) describes what a reload applies. A refused reload keeps the running configuration and returns:
+The web UI edits stored entities in their export format, validates each save, and shows revision history and diffs. Concurrent writes return a conflict; the editor retains the draft while the operator reviews the newer text. Create, delete, and revert actions use the same API as other configuration writes. New loops start paused.
 
-- 422 `FactoryConfigError` if the configuration store cannot be read;
-- 409 `RestartRequiredError`, naming the field, for a changed `webhooks` block or a `workers` change that needs a restart (a worker's kind or settings, or a rename);
-- 409 `ReloadPreflightError` if a worker, slot count, or agent brain that the reload adds fails preflight, or a new SSH worker's gateway admin token variable is unset.
-
-An accepted reload's response names the loops, agents, labels, repos, and workers it added, removed, or changed. Until a removed worker's last attempt ends, Needs attention counts its running attempts, and `POST /api/workers/:worker/discard-leftovers` returns 409 `LeftoversDiscardRejectedError` with that count. GitHub credentials, the `workers` changes above, and the `webhooks` block apply only at startup.
+The reload HTTP endpoint has been removed. Revisions apply automatically; `SIGHUP` remains available to explicitly re-read the store without stopping the process. A configuration write that requires a restart or fails worker preflight stores nothing and returns the reason. GitHub credentials are read only at startup.
 
 ## Back up and export
 

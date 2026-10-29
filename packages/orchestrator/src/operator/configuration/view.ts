@@ -30,7 +30,7 @@ import { LaneItemState, LaneName } from "@usine/config/board";
 import { RegistryTag, type ManagedRepo, type Worker } from "@usine/config/factory";
 import { ConfigFileError, InstancePath } from "@usine/config/file";
 import type { LoadedInstance } from "@usine/config/instance";
-import { canonicalLabelName, GitHubLabelName } from "@usine/config/label";
+import { DeclaredLabel, canonicalLabelName, GitHubLabelName } from "@usine/config/label";
 import { LoopPriority, PromptTemplate } from "@usine/config/loop";
 import { matchesSelector } from "@usine/config/selector";
 import { Cron, TimeZone } from "@usine/config/trigger";
@@ -341,6 +341,7 @@ export class SettingsView extends Schema.Class<SettingsView>("@usine/orchestrato
 export class ConfigurationView extends Schema.Class<ConfigurationView>(
   "@usine/orchestrator/ConfigurationView",
 )({
+  labels: Schema.Array(DeclaredLabel),
   loops: Schema.Array(LoopFileView),
   quarantinedLoops: Schema.Array(QuarantinedLoopView),
   agents: Schema.Array(AgentFileView),
@@ -588,6 +589,7 @@ const makeOperatorConfiguration = Effect.gen(function* () {
     });
     const { settings, webhooks, tracing } = config;
     const configuration = new ConfigurationView({
+      labels: instance.config.labels,
       loops,
       quarantinedLoops: instance.quarantinedLoops.map(
         ({ file, error }) => new QuarantinedLoopView({ name: fileStem(file), file, error }),

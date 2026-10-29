@@ -12,11 +12,9 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NodeHttpPlatform, NodeHttpServer } from "@effect/platform-node";
-import { FactoryConfigError, ConfigFileError, InstancePath } from "@usine/config/file";
 import { LoadedInstance } from "@usine/config/instance";
 import { GitHubLabelName } from "@usine/config/label";
 import { LaneName } from "@usine/config/board";
-import { QuarantinedLoop } from "@usine/config/loop";
 import { UsineConfig } from "@usine/config/factory";
 import { AgentName } from "@usine/core/agent";
 import { AttemptId, AttemptTask } from "@usine/core/attempt";
@@ -30,7 +28,6 @@ import { RunId } from "@usine/core/run";
 import { RunAgain } from "@usine/core/run/again";
 import { ApprovalSource } from "@usine/core/run/approval";
 import { WorkerName } from "@usine/core/worker";
-import { WorkerCapabilityError } from "@usine/executor";
 import {
   Claimed,
   LeftoversDiscardRejectedError,
@@ -89,17 +86,7 @@ import {
   type StatisticsWindow,
   WorkerConfigurationView,
 } from "@usine/orchestrator/operator";
-import {
-  OperatorApi,
-  OperatorHttpError,
-  ReloadPreflightRefusal,
-} from "@usine/orchestrator/operator/http";
-import {
-  InstanceReload,
-  type InstanceReloadError,
-  ReloadPreflightError,
-  RestartRequiredError,
-} from "@usine/orchestrator/current-instance";
+import { OperatorApi, OperatorHttpError } from "@usine/orchestrator/operator/http";
 import { DateTime, Effect, Layer, Option, Schema } from "effect";
 import { HttpRouter } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
@@ -327,6 +314,7 @@ const observation: OperatorObservation["Service"] = {
   task: () => Effect.succeed(task),
 };
 const configurationView = new ConfigurationView({
+  labels: [],
   loops: [],
   quarantinedLoops: [],
   agents: [],
@@ -365,32 +353,9 @@ const configurationView = new ConfigurationView({
 const configuration: OperatorConfiguration["Service"] = {
   view: () => Effect.succeed(configurationView),
 };
-const noChanges = { added: [], removed: [], changed: [] };
-const reloaded = new InstanceReload({
-  loops: { added: [LoopName.make("triage")], removed: [], changed: [loopName] },
-  agents: { added: [], removed: [], changed: [agentName] },
-  labels: noChanges,
-  repos: noChanges,
-  workers: noChanges,
-  settingsChanged: true,
-  operatorChanged: false,
-  quarantinedLoops: [
-    new QuarantinedLoop({
-      file: InstancePath.make("loops/ghost.md"),
-      error: new ConfigFileError({
-        file: InstancePath.make("loops/ghost.md"),
-        stage: "reference",
-        expression: Option.none(),
-        message:
-          'Unknown agent "ghost": agents/ghost.md is missing or invalid. Fix the agent file, or set agent to an existing agent.',
-      }),
-    }),
-  ],
-  invalidAgents: [],
-});
 const dismissed: Array<AttentionAcknowledgement> = [];
 const backend = needsSetupBackendLayer(
-  { get: Effect.succeed(instance), reload: Effect.succeed(reloaded) },
+  { get: Effect.succeed(instance) },
   "SecretsFileError",
   observation,
   configuration,
@@ -592,12 +557,10 @@ describe("operator HTTP API", () => {
       configurationView,
     );
 
-    // Setup mode can still pick up edits to the instance folder.
-    const reload = await app.handler(
+    const removedReload = await app.handler(
       new Request("http://localhost/api/instance/reload", { method: "POST" }),
     );
-    assert.strictEqual(reload.status, 200);
-    assert.deepStrictEqual(Schema.decodeUnknownSync(InstanceReload)(await reload.json()), reloaded);
+    assert.strictEqual(removedReload.status, 404);
 
     const invalidCursor = await app.handler(
       new Request(`http://localhost/api/runs/${runId}?after=0`),
@@ -688,11 +651,6 @@ describe("operator HTTP API", () => {
 
   it("maps typed engine errors onto operator-readable statuses", async () => {
     let moved: BoardMove | undefined;
-    let reloadFailure: InstanceReloadError = new FactoryConfigError({
-      file: InstancePath.make("usine.yaml"),
-      stage: "yaml",
-      message: "Unexpected flow-map-end token.",
-    });
     const rejecting = Layer.succeed(FactoryBackend)({
       resolveFailure: () => Effect.void,
       agents: Effect.succeed([]),
@@ -753,7 +711,6 @@ describe("operator HTTP API", () => {
           : Effect.sync(() => void (moved = move)),
       pause: () => Effect.void,
       unpause: () => Effect.void,
-      reload: Effect.suspend(() => Effect.fail(reloadFailure)),
       task: (repository, item) => Effect.fail(new BoardItemNotFoundError({ repository, item })),
       configuration: Effect.succeed(configurationView),
       desk: Effect.succeed(desk),
@@ -890,85 +847,6 @@ describe("operator HTTP API", () => {
       );
       assert.strictEqual(simplePost.status, 200);
       assert.strictEqual(moved?.toLane, "authored:Done");
-
-      const invalidConfig = await rejectingApp.handler(
-        new Request("http://localhost/api/instance/reload", { method: "POST" }),
-      );
-      assert.strictEqual(invalidConfig.status, 422);
-      assert.deepStrictEqual(await invalidConfig.json(), {
-        error: "FactoryConfigError",
-        message:
-          "usine.yaml is invalid (yaml): Unexpected flow-map-end token. The running configuration is unchanged.",
-        file: "usine.yaml",
-        stage: "yaml",
-      });
-      const restartMessage =
-        'These usine.yaml changes require a restart: worker "local" changed kind from local to ssh. The running configuration is unchanged. Restart usine up to apply them.';
-      reloadFailure = new RestartRequiredError({
-        blocks: ["workers"],
-        fields: ["workers.local.kind"],
-        message: restartMessage,
-      });
-      const restart = await rejectingApp.handler(
-        new Request("http://localhost/api/instance/reload", { method: "POST" }),
-      );
-      assert.strictEqual(restart.status, 409);
-      assert.deepStrictEqual(await restart.json(), {
-        error: "RestartRequiredError",
-        message: restartMessage,
-        blocks: ["workers"],
-        fields: ["workers.local.kind"],
-      });
-      const preflightMessage =
-        'Worker preflight failed for agent "reviewer". Worker "local": Claude Code is not logged in. The running configuration is unchanged. Fix the worker, usine.yaml, or the agent file, then reload again.';
-      reloadFailure = new ReloadPreflightError({
-        agents: [AgentName.make("reviewer")],
-        workers: [],
-        message: preflightMessage,
-        cause: new WorkerCapabilityError({
-          worker: WorkerName.make("local"),
-          capability: "harness-login",
-          message: "Claude Code is not logged in.",
-          cause: "logged out",
-        }),
-      });
-      const preflight = await rejectingApp.handler(
-        new Request("http://localhost/api/instance/reload", { method: "POST" }),
-      );
-      assert.strictEqual(preflight.status, 409);
-      // The check's observation ("logged out") is not sent to the client.
-      assert.deepStrictEqual(await preflight.json(), {
-        error: "ReloadPreflightError",
-        message: preflightMessage,
-        agents: ["reviewer"],
-        workers: [],
-        cause: {
-          _tag: "WorkerCapabilityError",
-          worker: "local",
-          capability: "harness-login",
-          message: "Claude Code is not logged in.",
-        },
-      });
-
-      const preflightRefusal = await Effect.runPromise(
-        Effect.gen(function* () {
-          const { operator: client } = yield* HttpApiClient.make(OperatorApi);
-          return yield* Effect.flip(client.reload());
-        }).pipe(
-          Effect.provide(
-            HttpRouter.serve(
-              apiRoutes(Option.none()).pipe(HttpRouter.provideRequest(rejecting)),
-            ).pipe(Layer.provideMerge(NodeHttpServer.layerTest)),
-          ),
-        ),
-      );
-      assert.instanceOf(preflightRefusal, ReloadPreflightRefusal);
-      assert.deepStrictEqual(preflightRefusal.cause, {
-        _tag: "WorkerCapabilityError",
-        worker: WorkerName.make("local"),
-        capability: "harness-login",
-        message: "Claude Code is not logged in.",
-      });
     } finally {
       await rejectingApp.dispose();
     }
@@ -1046,7 +924,6 @@ describe("operator HTTP API", () => {
           : Effect.fail(new BackendUnavailableError({ message: "Setup is required." })),
       unpause: (loop) => record(`unpause:${loop}`),
       moveBoardItem: (move) => record(`move:${move.repository}#${move.item}:${move.toLane}`),
-      reload: Effect.succeed(reloaded),
       task: (repository, item) =>
         repository === repositoryName && item === 31
           ? Effect.succeed(task)
@@ -1064,7 +941,6 @@ describe("operator HTTP API", () => {
         const { operator: client } = yield* HttpApiClient.make(OperatorApi);
         assert.deepStrictEqual(yield* client.overview(), overview);
         assert.deepStrictEqual(yield* client.agents(), [agentName]);
-        assert.deepStrictEqual(yield* client.reload(), reloaded);
         assert.deepStrictEqual(yield* client.configuration(), configurationView);
         const edit = new EditAndRetry({
           task: AttemptTask.make("Fix the reviewed behavior"),

@@ -1,3 +1,4 @@
+import { entityKey } from "~/features/configuration/lib/entities";
 import { WarningIcon } from "@phosphor-icons/react";
 import type {
   ConfigurationView,
@@ -43,6 +44,7 @@ export const LoadedLoop = ({ loop, configuration, pause }: LoadedLoopProps) => {
   const expressions = interpolations(loop.prompt).length;
   return (
     <ConfigurationPage
+      entity={entityKey("loop", loop.name)}
       title={loop.name}
       marks={<LoopState paused={loop.paused} />}
       file={loop.file}

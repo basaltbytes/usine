@@ -15,6 +15,8 @@ A provisioned worker is an `ssh` worker that creates a machine at a cloud provid
 | Hetzner Cloud without a gateway | a server from your snapshot with a public IPv4 address                  | any host         | a token file, mode 600, removed after the attempt   |
 | Boat                            | a Boat sandbox in Germany, Finland, or France, with Boat's Ubuntu image | any host         | a token file, mode 600, removed after the attempt   |
 
+Use **Configuration > Workers > New** to create a worker, or **Edit** on a worker page to change it. Paste one worker object into the raw editor, without the surrounding `workers:` list shown in import examples. A refused save displays the validation, restart, or preflight reason.
+
 ## Prerequisites
 
 - Every worker in `usine.yaml` has `kind: ssh`.
@@ -25,7 +27,7 @@ A provisioned worker is an `ssh` worker that creates a machine at a cloud provid
 
 ## Harness credentials
 
-A machine created for one attempt keeps no harness login: a login saved in a snapshot contains one refresh token, and the first machine that refreshes it invalidates it for the others. So at `usine up`, and at the reload that adds the worker, preflight refuses a provisioned worker if a harness that its agents use has no credential outside the machine.
+A machine created for one attempt keeps no harness login: a login saved in a snapshot contains one refresh token, and the first machine that refreshes it invalidates it for the others. So at `usine up`, and when a revision adds the worker, preflight refuses a provisioned worker if a harness that its agents use has no credential outside the machine.
 
 | Harness     | Credential                                                                                                                                                                                                                                                                                            |
 | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -151,7 +153,7 @@ provisioner:
 
 ### Update the snapshot
 
-Build a new snapshot when a usine release changes the attempt image or `infra/hetzner/cloud-init.yaml`. Its description names the new harness versions, so change `image` in `usine.yaml` and restart `usine up`; a reload refuses a changed `provisioner` with `RestartRequiredError`. A new snapshot with the same description, from `DESCRIPTION`, needs no restart, because each server is created from the newest one. Delete the old snapshots, which Hetzner bills by size:
+Build a new snapshot when a usine release changes the attempt image or `infra/hetzner/cloud-init.yaml`. Its description names the new harness versions, so export the configuration, change `image`, stop the instance, import it, and restart `usine up`; a live edit refuses a changed `provisioner` with `RestartRequiredError`. A new snapshot with the same description, from `DESCRIPTION`, needs no restart, because each server is created from the newest one. Delete the old snapshots, which Hetzner bills by size:
 
 ```sh title="Orchestrator machine"
 hcloud image list --type snapshot --selector usine=snapshot

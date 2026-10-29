@@ -14,7 +14,6 @@ import { LoopsList } from "~/features/configuration/components/loops/list";
 import { LoopDetail } from "~/features/configuration/components/loops/detail";
 import { interpolations } from "~/features/configuration/components/prompt";
 import { usePauseLoop } from "~/features/configuration/queries";
-import { SectionReloadProvider } from "~/features/configuration/components/reload";
 import { RepositoriesList } from "~/features/configuration/components/repositories/list";
 import { RepositoryDetail } from "~/features/configuration/components/repositories/detail";
 import { SettingsPage } from "~/features/configuration/settings.page";
@@ -32,7 +31,7 @@ const render = async (page: () => ReactNode): Promise<string> => {
   const queryClient = new QueryClient();
   const router = createRouter({
     routeTree: createRootRoute({
-      component: () => <SectionReloadProvider>{page()}</SectionReloadProvider>,
+      component: page,
     }),
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
@@ -82,7 +81,7 @@ describe("Loops page", () => {
     assert.include(markup, 'href="/configuration/loops/start-dev"');
     assert.include(page, "Paused");
     assert.include(page, "Resume");
-    assert.include(page, "Reload configuration");
+    assert.notInclude(page, "Reload configuration");
   });
 
   it("offers no Pause or Resume while operator actions are unavailable", async () => {
@@ -93,7 +92,7 @@ describe("Loops page", () => {
       [...markup.matchAll(/<button[^>]*>(.*?)<\/button>/gu)].map(([, label]) =>
         text(label ?? "").trim(),
       ),
-      ["Reload configuration"],
+      ["New"],
     );
   });
 
@@ -102,7 +101,7 @@ describe("Loops page", () => {
       await render(() => <LoopsList configuration={emptyConfiguration()} pause={null} />),
     );
     assert.include(page, "No loops");
-    assert.include(page, "loops/");
+    assert.include(page, "Choose New to add a loop");
   });
 
   it("shows a Loop's trigger and selector verbatim, its facts, and its prompt with marked expressions", async () => {
@@ -195,7 +194,7 @@ describe("Agents page", () => {
     const page = text(markup);
     assert.include(markup, "<li>Keep changes small.</li>");
     assert.include(page, "openai-codex/gpt-5.6-terra From settings.parent_model");
-    assert.include(page, "medium Set in this file");
+    assert.include(page, "medium Set on this agent");
     assert.include(markup, 'href="/configuration/loops/start-dev"');
   });
 
