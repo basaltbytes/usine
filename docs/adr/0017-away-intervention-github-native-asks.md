@@ -1,5 +1,7 @@
 # Away intervention: GitHub-native asks answered by reaction or reply; questions park the attempt
 
+**Superseded on 2026-10-29** ([#36](https://github.com/basaltbytes/usine/issues/36)). Operators reach the authenticated web UI and API from a phone ([ADR 0030](./0030-operator-api-authentication-and-access-control.md)), the UI lists needs in a notification tray ([#697](https://github.com/basaltbytes/usine/issues/697)), and a native app can add push notifications. Bot @mention comments would also post on public repositories for every blocked run. The notifier and the asks were never built; only the `github-ask` approval channel in `@usine/core` and the approvals table exists, and the member attribution of #632 replaces it.
+
 The single operator must unblock runs from a phone with **no inbound path** to the orchestrator, so the notification must include the action, and both go through GitHub. When a run blocks (approval wait, agent-failed attempt, runaway trip, agent question), the engine posts an **ask**: an @mention comment by the App bot on the run's item. The bot's separate identity ([ADR 0011](./0011-github-app-identity-scoped-worker-tokens.md)) triggers the operator's GitHub notifications, which the mobile app pushes. Two kinds:
 
 - A **yes/no ask** has a fixed minimal summary (loop, agent, what's needed, typed error class name), never error detail, transcript excerpts, or costs, since managed repos can be public. A reaction answers it: 👍 approves, retries, or restarts; 👎 cancels the run.

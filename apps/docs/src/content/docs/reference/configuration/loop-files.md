@@ -301,6 +301,10 @@ Review pull request #{{ item.number }} at commit {{ item.headRefOid }} with the 
 
 Before reading the diff, fetch `refs/pull/{{ item.number }}/head`, verify that it resolves to {{ item.headRefOid }}, and check out that commit. Remove `ready-for-review` from the pull request before starting the review.
 
+Before posting any review or changing outcome labels, verify that the PR still has the expected head; if it changed, restore `ready-for-review` and stop.
+
+Query the live `mergeable` before reading the diff and again before posting a clean review; wait briefly and retry `UNKNOWN`. If it is `CONFLICTING`, submit a COMMENT finding at the expected head requesting a merge from the base branch and CI on the resulting head. Add `agent-review-findings`, remove `review-passed` and `ready-for-review`, and stop without reviewing the diff. Review a resolved PR only after CI passes on the expected head.
+
 Post the review on GitHub. If you find any actionable issue, explain it with file and line references and add `agent-review-findings` to the pull request. If there are no actionable findings, post a short review result, make sure `agent-review-findings` is absent, and add `review-passed`. Do not edit the branch or merge the pull request.
 ```
 
@@ -324,7 +328,11 @@ Address the review findings on pull request #{{ item.number }}. Do not merge the
 
 Fetch `refs/pull/{{ item.number }}/head`, verify that it resolves to {{ item.headRefOid }}, and check out the pull request branch `{{ item.headRefName }}` before editing.
 
-Read every review comment signed `usine agent: reviewer`. Fix each finding in the branch, run the required checks, commit the changes, and push them to `{{ item.headRefName }}`. Reply to each finding with what changed or why it was left as is. Then add `ready-for-review` and remove `agent-review-findings` and `review-passed`, so the new commit gets another review.
+Read every review comment signed `usine agent: reviewer` and fix each finding in the branch. Before pushing, query the live `headRefOid`, `baseRefName`, and `mergeable`. Wait briefly and retry `UNKNOWN`; reconcile any unexpected remote head change before publishing. For `CONFLICTING`, fetch the base branch and merge `origin/<baseRefName>` into the PR branch, preserving the intent of both sides within the issue and findings. If resolution needs an operator decision, post the exact conflict, question, and options on the PR, leave outcome labels unchanged, and return `[usine:question]` on the first line.
+
+Run the required checks on the resolved tree, commit the changes, and push them to `{{ item.headRefName }}`. Wait for CI on the pushed head in the foreground. If no checks appear, query mergeability again and repeat the merge, checks, push, and CI watch for a new conflict. An empty checks list alone is not a blocker; for a mergeable PR, inspect workflow triggers and run status instead of dispatching a workflow to bypass a conflict.
+
+After CI passes, verify that the PR still has the checked head. Reply to each finding with what changed or why it was left as is. Then add `ready-for-review` and remove `agent-review-findings` and `review-passed`, so the new commit gets another review.
 
 If you can't complete the fix, leave `agent-review-findings` on the pull request and comment with the blocker.
 ```
