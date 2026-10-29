@@ -51,12 +51,12 @@ export type AttemptRecord = {
   /** The next outbound and inbound sequence numbers. */
   nextOutbound: number;
   nextInbound: number;
-  /**
-   * The newest parent entry whose session events were all relayed, and the parent's last relayed
-   * token count.
-   */
+  /** Reserved envelopes as JSON, awaiting delivery. Absent means empty on older records. */
+  pendingOutbound?: string[];
+  /** The newest parent entry and token count reserved in the outbox or already relayed. */
   relayedEntry: number;
   relayedTokens: number;
+  /** True only after the terminal envelope was appended and the outbox cleared. */
   terminalRelayed: boolean;
   /** The caller confirmed cancellation and stopped relaying. Absent means false on older records. */
   settled?: boolean;
@@ -92,6 +92,7 @@ export const AttemptRecordDoc = defineDocFamily<AttemptRecord, null>({
     childBlocker: null,
     childBudgetExceeded: null,
     nextOutbound: 1,
+    pendingOutbound: [],
     nextInbound: 1,
     relayedEntry: 0,
     relayedTokens: 0,
