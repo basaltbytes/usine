@@ -55,6 +55,8 @@ const nullableEnvironment = new Environment({
         new ObjectField({ name: "milestone", type: typeReference("Milestone"), nullable: true }),
         new ObjectField({ name: "reviewers", type: typeReference("list<Reviewer>") }),
         new ObjectField({ name: "annotations", type: typeReference("map<string,string>") }),
+        new ObjectField({ name: "reviewersByRole", type: typeReference("map<string,Reviewer>") }),
+        new ObjectField({ name: "counts", type: typeReference("map<string,int>") }),
       ],
     }),
   ],
@@ -75,6 +77,38 @@ const withValues = {
 };
 
 describe("ExpressionEngine", () => {
+  it.effect("evaluates typed JSON map values with nullable fields and integer arithmetic", () =>
+    Effect.gen(function* () {
+      const engine = yield* ExpressionEngine;
+      const context = {
+        item: {
+          reviewersByRole: Object.fromEntries([
+            ["__proto__", {}],
+            ["owner", { login: "octocat" }],
+          ]),
+          counts: { reviews: 2 },
+        },
+      };
+      expect(
+        yield* engine.evaluateBoolean(
+          source(
+            'item.reviewersByRole["__proto__"].login == null && ' +
+              'item.reviewersByRole["owner"].login == "octocat" && item.counts["reviews"] + 1 == 3',
+          ),
+          nullableEnvironment,
+          context,
+        ),
+      ).toBe(true);
+      const typo = yield* Effect.flip(
+        engine.checkBoolean(
+          source('item.reviewersByRole["owner"].logni == "octocat"'),
+          nullableEnvironment,
+        ),
+      );
+      expect(typo.code).toBe("type_error");
+    }).pipe(Effect.provide(MarcbachmannCelLayer)),
+  );
+
   it.effect("compares nullable fields with null and evaluates reads of them on null", () =>
     Effect.gen(function* () {
       const engine = yield* ExpressionEngine;
