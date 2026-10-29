@@ -1,3 +1,4 @@
+import { configurationLayer } from "./support/configuration.ts";
 import { createHash } from "node:crypto";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
@@ -278,7 +279,11 @@ const withFactory = <A, E>(
       }),
     );
     const polling = PollingTriggers.layer.pipe(Layer.provideMerge(dependencies));
-    return yield* test.pipe(Effect.provide(Operator.layer.pipe(Layer.provideMerge(polling))));
+    return yield* test.pipe(
+      Effect.provide(
+        Operator.layer.pipe(Layer.provide(configurationLayer), Layer.provideMerge(polling)),
+      ),
+    );
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
 
 /** Waits until every Run of the instance is closed and returns them. */

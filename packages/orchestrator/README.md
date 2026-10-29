@@ -18,6 +18,10 @@ Approval needs include the item's number, title, and GitHub link even when the i
 
 `Operator.statistics(instance, window)` and `Operator.runStatistics(instance, window)` cache their computed views in memory for up to five minutes, separately for `7d`, `30d`, and `all`. Concurrent requests for the same view and window share a computation. Each request checks the store's projection revision: run closure, retry, failure resolution, and close-time changes invalidate cached views, as do item and budget changes. Reloading the instance also invalidates them. If the revision record is missing, requests bypass the cache. Debug logs report cache hits and misses with the window.
 
+`Operator.layer` and `OperatorObservation.layer` require `ConfigurationStore` to read worker slot history. Worker utilization divides occupied attempt time by slot-time capacity over the selected window. It reads each worker’s configuration revisions and integrates each slot count over its duration. Revision 1’s count applies before the first revision; workers added later have no capacity before their creation, and removal gaps contribute none. The view’s `slots` field reports the current count. An instance without stored revisions uses its declared slot count.
+
+First time right counts merged tasks where no loop succeeded twice on the same item. Every loop counts, including loops that rebase pull requests.
+
 `GET /api/statistics/runs` includes `needsAttention.failureWait`, the median time from failure to the first recorded operator answer. `retryWait` and `resolutionWait` report those answers separately. A resolution followed by a retry counts once, as a resolution. Unanswered failures and older resolutions without timestamps contribute no wait.
 
 ### Overview and board

@@ -46,6 +46,8 @@ The first screen, at `/`:
 
 A row about a run opens its run page. Empty blocks say what they would list, and loading blocks show skeleton rows. With no project registered, the overview links to **Configuration > Repositories**.
 
+Statistics Details defines first time right as no loop succeeding twice on the same item, including rebase loops. Worker utilization uses configuration revisions to account for slot changes over the window; revision 1 supplies the count before recorded history. The slot count beside each meter is the current count.
+
 The Overview's run statistics show the median failure-to-answer time, with separate retry and resolution medians. The first recorded answer counts once, including when a resolved failure is later retried.
 
 ## Sidebar

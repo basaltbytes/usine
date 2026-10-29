@@ -220,8 +220,8 @@ export class AttemptCountView extends Schema.Class<AttemptCountView>(
 )({ attempts: PositiveCount, runs: Count }) {}
 
 /**
- * The time a declared Worker's slots held Attempts in the window, as a share of `slots` times the
- * window's length.
+ * Attempt time as a share of the worker's slot-time capacity over the window. Configuration
+ * revisions determine capacity; `slots` is the current slot count.
  */
 export class WorkerUtilizationView extends Schema.Class<WorkerUtilizationView>(
   "@usine/orchestrator/WorkerUtilizationView",

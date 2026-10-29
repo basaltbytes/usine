@@ -1,3 +1,4 @@
+import { configurationLayer } from "./support/configuration.ts";
 import { assert, describe, it } from "@effect/vitest";
 import { Agent, AgentName, AgentPersona } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
@@ -378,9 +379,14 @@ const runs = [
   waiting,
 ];
 const workers = [
-  { name: WorkerName.make("w1"), slots: 2 },
-  { name: WorkerName.make("w2"), slots: 1 },
-  { name: WorkerName.make("idle"), slots: 1 },
+  {
+    name: WorkerName.make("w1"),
+    slots: 2,
+    initialSlots: 1,
+    changes: [{ at: at("22T00:00"), slots: 2 }],
+  },
+  { name: WorkerName.make("w2"), slots: 1, initialSlots: 1, changes: [] },
+  { name: WorkerName.make("idle"), slots: 1, initialSlots: 1, changes: [] },
 ];
 const week = runStatisticsView({ window: "7d", now, runs, usage, workers });
 
@@ -647,8 +653,9 @@ describe("Run statistics", () => {
         [3, 1],
       ],
     );
-    // w1's two slots held ended Attempts for 127 minutes and the running Attempt for 29.
+    // w1 grew from one slot to two after three days; its attempts occupied 156 minutes.
     const windowMillis = (6 * 24 + 12) * HOUR;
+    const resizedCapacityMillis = 3 * 24 * HOUR + 2 * (3 * 24 + 12) * HOUR;
     assert.deepStrictEqual(
       week.utilization.map(({ worker, slots, occupiedMillis, share }) => [
         worker,
@@ -657,7 +664,7 @@ describe("Run statistics", () => {
         share,
       ]),
       [
-        ["w1", 2, 127 * MINUTE + 29 * MINUTE, (156 * MINUTE) / (2 * windowMillis)],
+        ["w1", 2, 127 * MINUTE + 29 * MINUTE, (156 * MINUTE) / resizedCapacityMillis],
         [
           "w2",
           1,
@@ -960,6 +967,7 @@ describe("OperatorStatistics", () => {
         ).pipe(
           Effect.provide(
             OperatorStatistics.layer.pipe(
+              Layer.provide(configurationLayer),
               Layer.provide(RunUsageReader.layer),
               Layer.provide(Layer.mergeAll(reader, items, budgets)),
             ),
