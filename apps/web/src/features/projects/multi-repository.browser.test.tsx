@@ -182,6 +182,25 @@ it("filters the project task list by repository without changing the project", a
   expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(390);
 });
 
+it("clears a repository filter whose URL casing differs from project membership", async () => {
+  const router = await mount("/projects/product/tasks?repository=board-test%2Fapi", 390);
+  const filter = page.getByRole("combobox", { name: "Repository", exact: true });
+  const apiTask = page.getByRole("link", { name: /API task/u });
+  const otherTask = page.getByRole("link", { name: /Redesign the Board columns and cards/u });
+  await expect.element(filter).toHaveValue("Board-Test/API");
+  await expect.element(apiTask).toBeVisible();
+  await expect.element(otherTask).not.toBeInTheDocument();
+
+  await filter.selectOptions("");
+
+  await expect.element(filter).toHaveValue("");
+  await expect.poll(() => router.state.location.search.repository).toBeUndefined();
+  expect(router.state.location.searchStr).not.toContain("repository=");
+  expect(router.state.location.pathname).toBe("/projects/product/tasks");
+  await expect.element(apiTask).toBeVisible();
+  await expect.element(otherTask).toBeVisible();
+});
+
 it("redirects a legacy repository named tasks instead of treating its owner as a project", async () => {
   client.setQueryData(
     overviewQuery().queryKey,

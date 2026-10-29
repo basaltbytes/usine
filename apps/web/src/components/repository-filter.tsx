@@ -1,4 +1,4 @@
-import type { RepositoryName } from "@usine/core/repository";
+import { canonicalRepositoryName, type RepositoryName } from "@usine/core/repository";
 import { Label } from "~/components/ui/label";
 import { NativeSelect } from "~/components/ui/native-select";
 import { repositoryFilterLabel, allRepositoriesLabel } from "~/lib/strings";
@@ -14,7 +14,13 @@ export const RepositoryFilter = ({ repositories, value, onChange }: RepositoryFi
     {repositoryFilterLabel}
     <NativeSelect
       className="w-full min-w-0 sm:w-auto"
-      value={value ?? ""}
+      value={
+        repositories.find(
+          (repository) =>
+            value !== undefined &&
+            canonicalRepositoryName(repository) === canonicalRepositoryName(value),
+        ) ?? ""
+      }
       onChange={(event) =>
         onChange(repositories.find((repository) => repository === event.target.value))
       }
