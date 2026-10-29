@@ -300,6 +300,9 @@ Needs attention includes `UnresponsiveWorkerNeed` after three consecutive unansw
 
 | Method | Path | Result |
 | --- | --- | --- |
+| GET | `/api/configuration/capabilities` | Supported harnesses and efforts. |
+| GET | `/api/configuration/repositories` | Repository names accessible to the GitHub App installation. |
+| GET | `/api/configuration/labels/:repository` | Live repository labels with names, colors, and descriptions. |
 | GET | `/api/configuration/revisions` | Newest revision summaries, with optional `kind`, `identifier`, `before`, and `limit` query parameters. |
 | GET | `/api/configuration/revisions/:number` | A revision with each entity's before and after values. |
 | GET | `/api/configuration/entities/:kind/:identifier` | The current JSON `value`, export-format `text`, and revision `number`. |

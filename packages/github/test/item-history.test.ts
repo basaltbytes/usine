@@ -23,6 +23,7 @@ const appLayer = Layer.succeed(GitHubApp)({
         appSlug: AppSlug.make("usine-phildl"),
       }),
     ),
+  repositories: () => Effect.die("unused installation repositories"),
   installationToken: () =>
     Effect.succeed(
       new InstallationToken({

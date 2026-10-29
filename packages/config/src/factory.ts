@@ -436,7 +436,7 @@ const SettingsFromYaml = Settings.pipe(
   }),
 );
 
-const WorkerFromYaml = Schema.Union([
+export const WorkerFromYaml = Schema.Union([
   LocalWorker.pipe(Schema.encodeKeys({ maxConcurrentAttempts: "max_concurrent_attempts" })),
   ExeDevWorker.pipe(Schema.encodeKeys({ maxConcurrentAttempts: "max_concurrent_attempts" })),
   SshWorker.pipe(

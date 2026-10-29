@@ -21,6 +21,12 @@ import { writeYaml } from "../yaml/writer.ts";
 import { configurationWarnings } from "./commit.ts";
 import { ConfigurationInvalid, ConfigurationStoreError } from "./model.ts";
 
+export {
+  ConfigurationFormKind,
+  parseConfigurationForm,
+  validateConfigurationForm,
+} from "./forms.ts";
+
 export { formatConfigurationEntity, parseConfigurationEntity } from "./format.ts";
 
 export class ConfigurationFolder extends Context.Service<

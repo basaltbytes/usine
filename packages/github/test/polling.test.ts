@@ -37,6 +37,7 @@ const appLayer = Layer.succeed(GitHubApp)({
         appSlug: AppSlug.make("usine-basaltbytes"),
       }),
     ),
+  repositories: () => Effect.die("unused installation repositories"),
   installationToken: () => Effect.succeed(token),
   botAccount: () => Effect.die("not used by polling tests"),
   projectAccess: () => Effect.die("not used by polling tests"),

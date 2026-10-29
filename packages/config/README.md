@@ -91,3 +91,5 @@ Boat workers accept a gateway with `provisioner.snapshot` and `provisioner.tailn
 `revertConfiguration(parser, target, history, current)` computes reverse changes from the revision log, restoring workers relative to surviving workers in the current snapshot. It preserves unrelated changes and returns `ConfigurationRevertBlocked` with the entity keys changed by later revisions. Commit the returned changes with the expected current revision to prevent a concurrent write from being overwritten.
 
 Both SSH provisioners accept `timings` with `ssh_wait`, `creation_backoff_min`, `creation_backoff_max`, and `machine_check_interval`, in positive whole seconds. Parsing defaults them to 600, 30, 600, and 86400 and rejects reversed backoff bounds.
+
+`parseConfigurationForm(key, text)` and `validateConfigurationForm(key, value)` from `/folder-codec` support agent, worker, repository, and settings forms. They use the entity schemas and return `ConfigFileError` with field paths. Agent drafts use the JSON codec of `AgentFile`; other drafts use the export-format keys. `WorkerFromYaml` from `/factory` exposes the worker schema with snake_case keys and cross-field checks.

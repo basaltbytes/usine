@@ -97,3 +97,5 @@ pnpm --filter @usine/github test:integration
 ```
 
 It mints both token kinds, posts an issue comment with the repo token, checks the author against `<app>[bot]`, and deletes the comment at cleanup. `@usine/orchestrator` has a separate live polling test that creates and applies a repo label.
+
+`GitHubApp.repositories()` lists the repository names accessible to the GitHub App installation, following every page. Configuration pickers can compare these names with the registry before offering a repository to add.

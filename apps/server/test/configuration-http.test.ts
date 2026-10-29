@@ -1,3 +1,5 @@
+import { RepositoryName } from "@usine/core/repository";
+import { GitHubPolling, RepositoryLabelCatalog } from "@usine/github/polling";
 import { expect, it } from "vitest";
 import {
   ConfigurationStore,
@@ -17,7 +19,7 @@ import { LoopControl, LoopRuntimeState } from "@usine/engine/loop-control";
 import { RepositoryLabelProjectionReader } from "@usine/engine/repository-label-projection";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { Executor, fullPreflight, WorkerCapabilityError } from "@usine/executor";
-import { GitHubApp } from "@usine/github/github-app";
+import { GitHubApp, InvalidGitHubResponseError } from "@usine/github/github-app";
 import { CurrentInstance } from "@usine/orchestrator/current-instance";
 import { ConfigurationEditor, OperatorConfiguration } from "@usine/orchestrator/operator";
 import { idleTriggersLayer } from "@usine/orchestrator/idle-triggers";
@@ -34,205 +36,211 @@ const unused = () => Effect.die("unused test service operation");
 const agentText = "---\nharness: codex\nmodel: gpt-6.1-sol\neffort: high\n---\nImplement.\n";
 const loopText = "---\ntrigger: { on: issue, if: 'true' }\nagent: developer\n---\nImplement.\n";
 
-const harness = Effect.gen(function* () {
-  const states = yield* Ref.make(new Map<LoopName, LoopRuntimeState>());
-  const setPause = (loop: LoopName, paused: boolean) =>
-    Ref.modify(states, (previous) => {
-      const state = new LoopRuntimeState({ loop, paused });
-      return [state, new Map(previous).set(loop, state)];
+const harness = (
+  catalog: Layer.Layer<GitHubApp | GitHubPolling> | Layer.Layer<never> = Layer.empty,
+) =>
+  Effect.gen(function* () {
+    const states = yield* Ref.make(new Map<LoopName, LoopRuntimeState>());
+    const setPause = (loop: LoopName, paused: boolean) =>
+      Ref.modify(states, (previous) => {
+        const state = new LoopRuntimeState({ loop, paused });
+        return [state, new Map(previous).set(loop, state)];
+      });
+    const controls = LoopControl.of({
+      isPaused: (loop) => Ref.get(states).pipe(Effect.map((all) => all.get(loop)?.paused ?? false)),
+      states: Ref.get(states).pipe(Effect.map((all) => [...all.values()])),
+      pause: (loop) => setPause(loop, true),
+      unpause: (loop) => setPause(loop, false),
     });
-  const controls = LoopControl.of({
-    isPaused: (loop) => Ref.get(states).pipe(Effect.map((all) => all.get(loop)?.paused ?? false)),
-    states: Ref.get(states).pipe(Effect.map((all) => [...all.values()])),
-    pause: (loop) => setPause(loop, true),
-    unpause: (loop) => setPause(loop, false),
-  });
-  const controlLayer = Layer.succeed(LoopControl, controls);
-  const storeLayer = configurationLoopControlLayer.pipe(
-    Layer.provide(memoryConfigurationLayer),
-    Layer.provide(controlLayer),
-    Layer.provideMerge(parserLayer),
-  );
-  const base = yield* Layer.build(storeLayer);
-  const parser = Context.get(base, ConfigParser);
-  const underlyingStore = Context.get(base, ConfigurationStore);
-  const failNextCommit = yield* Ref.make(Option.none<ConfigurationStoreError>());
-  const store = ConfigurationStore.of({
-    ...underlyingStore,
-    commit: (request) =>
-      Ref.getAndSet(failNextCommit, Option.none()).pipe(
-        Effect.flatMap(
-          Option.match({
-            onNone: () => underlyingStore.commit(request),
-            onSome: Effect.fail,
+    const controlLayer = Layer.succeed(LoopControl, controls);
+    const storeLayer = configurationLoopControlLayer.pipe(
+      Layer.provide(memoryConfigurationLayer),
+      Layer.provide(controlLayer),
+      Layer.provideMerge(parserLayer),
+    );
+    const base = yield* Layer.build(storeLayer);
+    const parser = Context.get(base, ConfigParser);
+    const underlyingStore = Context.get(base, ConfigurationStore);
+    const failNextCommit = yield* Ref.make(Option.none<ConfigurationStoreError>());
+    const store = ConfigurationStore.of({
+      ...underlyingStore,
+      commit: (request) =>
+        Ref.getAndSet(failNextCommit, Option.none()).pipe(
+          Effect.flatMap(
+            Option.match({
+              onNone: () => underlyingStore.commit(request),
+              onSome: Effect.fail,
+            }),
+          ),
+        ),
+    });
+    const services = Context.add(base, ConfigurationStore, store);
+    const initial = new LoadedInstance({
+      config: yield* parser.parseUsineYaml(
+        InstancePath.make("usine.yaml"),
+        "version: 1\noperator: operator\nrepos: []\n",
+      ),
+      agents: [yield* parser.parseAgentFile(InstancePath.make("agents/developer.md"), agentText)],
+      loops: [yield* parser.parseLoopFile(InstancePath.make("loops/implement.md"), loopText)],
+      invalidAgents: [],
+      quarantinedLoops: [],
+      warnings: [],
+    });
+    const first = yield* store.commit({
+      expected: ConfigurationRevisionNumber.make(0),
+      actor: initial.config.operator,
+      message: Option.some("Initial import"),
+      changes: configurationDiff([], configurationEntities(initial)),
+    });
+    const currentContext = yield* Layer.build(
+      CurrentInstance.layer(InstanceDirectory.make("/instance"), initial, first.number).pipe(
+        Layer.provide(Layer.succeedContext(services)),
+      ),
+    );
+    const current = Context.get(currentContext, CurrentInstance);
+    const preflightAction = yield* Ref.make<Effect.Effect<void>>(Effect.void);
+    const workers = new Map(initial.config.workers.map((worker) => [worker.name, worker]));
+    const currentLayer = Layer.succeed(CurrentInstance, current);
+    const scheduler = yield* Layer.build(
+      stepExecutorLayer(
+        initial.config,
+        initial.agents.map(({ agent }) => agent.brain),
+        {
+          workers: {
+            add: (worker) =>
+              Effect.sync(() => {
+                workers.set(worker.name, worker);
+              }),
+            remove: (worker) =>
+              Effect.sync(() => {
+                workers.delete(worker);
+              }),
+          },
+        },
+      ).pipe(
+        Layer.provide(currentLayer),
+        Layer.provide(
+          Layer.succeed(Executor, {
+            kind: "local",
+            recover: unused,
+            isLive: unused,
+            outcome: unused,
+            prepare: unused,
+            cancel: unused,
+            intervene: unused,
+            sweep: Effect.void,
+            preflight: (worker) =>
+              Ref.getAndSet(preflightAction, Effect.void).pipe(
+                Effect.flatten,
+                Effect.andThen(
+                  worker === "broken"
+                    ? Effect.fail(
+                        new WorkerCapabilityError({
+                          worker,
+                          capability: "memory",
+                          message: "Insufficient memory",
+                          cause: "private observation",
+                        }),
+                      )
+                    : Effect.succeed(fullPreflight),
+                ),
+              ),
+          }),
+        ),
+        Layer.provide(
+          Layer.succeed(GitHubApp, {
+            installation: unused,
+            botAccount: () =>
+              Effect.succeed(
+                new BotAccount({ login: BotLogin.make("test[bot]"), id: BotUserId.make(1) }),
+              ),
+            repositories: () => Effect.die("unused installation repositories"),
+            installationToken: unused,
+            projectAccess: unused,
+            workerToken: unused,
           }),
         ),
       ),
-  });
-  const services = Context.add(base, ConfigurationStore, store);
-  const initial = new LoadedInstance({
-    config: yield* parser.parseUsineYaml(
-      InstancePath.make("usine.yaml"),
-      "version: 1\noperator: operator\nrepos: []\n",
-    ),
-    agents: [yield* parser.parseAgentFile(InstancePath.make("agents/developer.md"), agentText)],
-    loops: [yield* parser.parseLoopFile(InstancePath.make("loops/implement.md"), loopText)],
-    invalidAgents: [],
-    quarantinedLoops: [],
-    warnings: [],
-  });
-  const first = yield* store.commit({
-    expected: ConfigurationRevisionNumber.make(0),
-    actor: initial.config.operator,
-    message: Option.some("Initial import"),
-    changes: configurationDiff([], configurationEntities(initial)),
-  });
-  const currentContext = yield* Layer.build(
-    CurrentInstance.layer(InstanceDirectory.make("/instance"), initial, first.number).pipe(
-      Layer.provide(Layer.succeedContext(services)),
-    ),
-  );
-  const current = Context.get(currentContext, CurrentInstance);
-  const preflightAction = yield* Ref.make<Effect.Effect<void>>(Effect.void);
-  const workers = new Map(initial.config.workers.map((worker) => [worker.name, worker]));
-  const currentLayer = Layer.succeed(CurrentInstance, current);
-  const scheduler = yield* Layer.build(
-    stepExecutorLayer(
-      initial.config,
-      initial.agents.map(({ agent }) => agent.brain),
-      {
-        workers: {
-          add: (worker) =>
-            Effect.sync(() => {
-              workers.set(worker.name, worker);
-            }),
-          remove: (worker) =>
-            Effect.sync(() => {
-              workers.delete(worker);
-            }),
-        },
-      },
-    ).pipe(
-      Layer.provide(currentLayer),
-      Layer.provide(
-        Layer.succeed(Executor, {
-          kind: "local",
-          recover: unused,
-          isLive: unused,
-          outcome: unused,
-          prepare: unused,
-          cancel: unused,
-          intervene: unused,
-          sweep: Effect.void,
-          preflight: (worker) =>
-            Ref.getAndSet(preflightAction, Effect.void).pipe(
-              Effect.flatten,
-              Effect.andThen(
-                worker === "broken"
-                  ? Effect.fail(
-                      new WorkerCapabilityError({
-                        worker,
-                        capability: "memory",
-                        message: "Insufficient memory",
-                        cause: "private observation",
-                      }),
-                    )
-                  : Effect.succeed(fullPreflight),
-              ),
-            ),
-        }),
+    );
+    const editorContext = yield* Layer.build(
+      ConfigurationEditor.layer.pipe(
+        Layer.provide(currentLayer),
+        Layer.provide(Layer.succeedContext(services)),
       ),
-      Layer.provide(
-        Layer.succeed(GitHubApp, {
-          installation: unused,
-          botAccount: () =>
-            Effect.succeed(
-              new BotAccount({ login: BotLogin.make("test[bot]"), id: BotUserId.make(1) }),
-            ),
-          installationToken: unused,
-          projectAccess: unused,
-          workerToken: unused,
-        }),
+    );
+    const viewContext = yield* Layer.build(
+      OperatorConfiguration.layer.pipe(
+        Layer.provide(controlLayer),
+        Layer.provide(idleTriggersLayer),
+        Layer.provide(Layer.succeedContext(scheduler)),
+        Layer.provide(
+          Layer.succeed(RepositoryLabelProjectionReader, {
+            get: () => Effect.succeed(Option.none()),
+          }),
+        ),
       ),
-    ),
-  );
-  const editorContext = yield* Layer.build(
-    ConfigurationEditor.layer.pipe(
-      Layer.provide(currentLayer),
-      Layer.provide(Layer.succeedContext(services)),
-    ),
-  );
-  const viewContext = yield* Layer.build(
-    OperatorConfiguration.layer.pipe(
-      Layer.provide(controlLayer),
-      Layer.provide(idleTriggersLayer),
-      Layer.provide(Layer.succeedContext(scheduler)),
-      Layer.provide(
-        Layer.succeed(RepositoryLabelProjectionReader, {
-          get: () => Effect.succeed(Option.none()),
-        }),
-      ),
-    ),
-  );
-  const views = Context.get(viewContext, OperatorConfiguration);
-  const backend = Layer.succeed(FactoryBackend, {
-    configuration: current.get.pipe(Effect.flatMap(views.view)),
-    overview: Effect.die("unused"),
-    detail: unused,
-    githubChanges: unused,
-    approve: unused,
-    dismissNeed: unused,
-    undoDismissNeed: unused,
-    resetCycleBudget: unused,
-    resolveFailure: unused,
-    retry: unused,
-    agents: Effect.die("unused"),
-    editAndRetry: unused,
-    runAgain: unused,
-    intervene: unused,
-    cancel: unused,
-    discardLeftovers: unused,
-    moveBoardItem: unused,
-    pause: unused,
-    unpause: unused,
-    task: unused,
-    desk: Effect.die("unused"),
-    statistics: unused,
-    runStatistics: unused,
-  });
-  const app = HttpRouter.toWebHandler(
-    apiRoutes(Option.none()).pipe(
-      HttpRouter.provideRequest(Layer.merge(backend, Layer.succeedContext(editorContext))),
-    ),
-    { disableLogger: true },
-  );
-  yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
-  const request = (method: string, path: string, body?: Schema.Json) =>
-    Effect.promise(async () => {
-      const options: RequestInit = { method };
-      if (body !== undefined) options.body = JSON.stringify(body);
-      const response = await app.handler(
-        new Request(`http://localhost/api/configuration${path}`, options),
-      );
-      const value: unknown = await response.json();
-      return { status: response.status, body: value };
+    );
+    const views = Context.get(viewContext, OperatorConfiguration);
+    const backend = Layer.succeed(FactoryBackend, {
+      configuration: current.get.pipe(Effect.flatMap(views.view)),
+      overview: Effect.die("unused"),
+      detail: unused,
+      githubChanges: unused,
+      approve: unused,
+      dismissNeed: unused,
+      undoDismissNeed: unused,
+      resetCycleBudget: unused,
+      resolveFailure: unused,
+      retry: unused,
+      agents: Effect.die("unused"),
+      editAndRetry: unused,
+      runAgain: unused,
+      intervene: unused,
+      cancel: unused,
+      discardLeftovers: unused,
+      moveBoardItem: unused,
+      pause: unused,
+      unpause: unused,
+      task: unused,
+      desk: Effect.die("unused"),
+      statistics: unused,
+      runStatistics: unused,
     });
-  return {
-    request,
-    store,
-    current,
-    controls,
-    preflightAction,
-    failNextCommit,
-    workers,
-    status: Context.get(scheduler, WorkerStatus),
-  };
-});
+    const app = HttpRouter.toWebHandler(
+      apiRoutes(Option.none()).pipe(
+        HttpRouter.provideRequest(
+          Layer.mergeAll(backend, Layer.succeedContext(editorContext), catalog),
+        ),
+      ),
+      { disableLogger: true },
+    );
+    yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
+    const request = (method: string, path: string, body?: Schema.Json) =>
+      Effect.promise(async () => {
+        const options: RequestInit = { method };
+        if (body !== undefined) options.body = JSON.stringify(body);
+        const response = await app.handler(
+          new Request(`http://localhost/api/configuration${path}`, options),
+        );
+        const value: unknown = await response.json();
+        return { status: response.status, body: value };
+      });
+    return {
+      request,
+      store,
+      current,
+      controls,
+      preflightAction,
+      failNextCommit,
+      workers,
+      status: Context.get(scheduler, WorkerStatus),
+    };
+  });
 
 it("creates, reads, replaces and deletes entities with paginated and filtered revision history", () =>
   Effect.runPromise(
     Effect.gen(function* () {
-      const { request } = yield* harness;
+      const { request } = yield* harness();
       expect(yield* request("GET", "/entities/agent/developer")).toMatchObject({
         status: 200,
         body: { number: 1, value: { name: "developer", harness: "codex" }, text: agentText },
@@ -312,7 +320,7 @@ it("creates, reads, replaces and deletes entities with paginated and filtered re
 it("refuses stale, invalid and incompatible writes without storing a revision", () =>
   Effect.runPromise(
     Effect.gen(function* () {
-      const { request, store } = yield* harness;
+      const { request, store } = yield* harness();
       expect(
         yield* request("PUT", "/entities/label/ready", { expected: 0, value: { name: "ready" } }),
       ).toMatchObject({ status: 409, body: { error: "StaleRevision", expected: 0, current: 1 } });
@@ -387,7 +395,7 @@ it.each(["type:bug", "type:", "notes.md", "type/bug:"])(
   (identifier) =>
     Effect.runPromise(
       Effect.gen(function* () {
-        const { request, store } = yield* harness;
+        const { request, store } = yield* harness();
         const path = `/entities/label/${encodeURIComponent(identifier)}`;
         expect(yield* request("PUT", path, { expected: 1, text: "name: [" })).toMatchObject({
           status: 422,
@@ -419,7 +427,7 @@ it.each(["type:bug", "type:", "notes.md", "type/bug:"])(
 it("reverts changes as a new revision and identifies entities changed by later revisions", () =>
   Effect.runPromise(
     Effect.gen(function* () {
-      const { request } = yield* harness;
+      const { request } = yield* harness();
       expect(
         (yield* request("PUT", "/entities/label/ready", { expected: 1, value: { name: "ready" } }))
           .status,
@@ -459,7 +467,7 @@ it("reverts changes as a new revision and identifies entities changed by later r
 it("applies API changes to the configuration view and running scheduler, and pauses created loops", () =>
   Effect.runPromise(
     Effect.gen(function* () {
-      const { request, controls, status } = yield* harness;
+      const { request, controls, status } = yield* harness();
       expect(yield* controls.isPaused(LoopName.make("implement"))).toBe(false);
       expect(
         (yield* request("PUT", "/entities/worker/local", {
@@ -502,7 +510,7 @@ it("applies API changes to the configuration view and running scheduler, and pau
 it("preserves encoded identifiers and accepts only one of two writes to the same revision", () =>
   Effect.runPromise(
     Effect.gen(function* () {
-      const { request, store } = yield* harness;
+      const { request, store } = yield* harness();
       const results = yield* Effect.all(
         [
           request("PUT", "/entities/repository/owner%2Frepo", {
@@ -533,7 +541,7 @@ it("preserves encoded identifiers and accepts only one of two writes to the same
 it("restores worker order when reverting a move or deletion", () =>
   Effect.runPromise(
     Effect.gen(function* () {
-      const { request, status } = yield* harness;
+      const { request, status } = yield* harness();
       expect(
         (yield* request("PUT", "/entities/worker/extra", {
           expected: 1,
@@ -565,7 +573,7 @@ it.each(["stale", "storage"] as const)(
     Effect.runPromise(
       Effect.gen(function* () {
         const { request, store, current, status, preflightAction, failNextCommit, workers } =
-          yield* harness;
+          yield* harness();
         const expected = failure === "stale" ? 2 : 1;
         yield* Ref.set(
           preflightAction,
@@ -630,7 +638,7 @@ it.each([
   ({ removed, laterRemoved, expected }) =>
     Effect.runPromise(
       Effect.gen(function* () {
-        const { request, status } = yield* harness;
+        const { request, status } = yield* harness();
         for (const [index, name] of ["b", "c"].entries()) {
           expect(
             (yield* request("PUT", `/entities/worker/${name}`, {
@@ -658,7 +666,7 @@ it.each([
 it("restores several deleted workers while preserving later additions and deletions", () =>
   Effect.runPromise(
     Effect.gen(function* () {
-      const { request, store, status } = yield* harness;
+      const { request, store, status } = yield* harness();
       for (const [index, name] of ["b", "c", "d"].entries()) {
         expect(
           (yield* request("PUT", `/entities/worker/${name}`, {
@@ -693,5 +701,63 @@ it("restores several deleted workers while preserving later additions and deleti
       expect((yield* request("POST", "/revisions/5/revert", { expected: 7 })).status).toBe(200);
       expect((yield* status.slots).map(({ worker }) => worker)).toEqual(["extra", "b", "c", "d"]);
       expect((yield* request("GET", "/entities/worker/local")).status).toBe(404);
+    }).pipe(Effect.scoped),
+  ));
+
+it("serves installation repositories, live labels and supported harnesses, and reports unavailable choices", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const repository = RepositoryName.make("acme/repo");
+      const github = Layer.succeed(GitHubApp)({
+        installation: unused,
+        installationToken: unused,
+        botAccount: unused,
+        projectAccess: unused,
+        workerToken: unused,
+        repositories: () => Effect.succeed([repository]),
+      });
+      const polling = Layer.succeed(GitHubPolling)({
+        changes: unused,
+        baseRefHead: unused,
+        snapshot: unused,
+        missingIssues: unused,
+        labels: (name) =>
+          name === repository
+            ? Effect.succeed(
+                Schema.decodeUnknownSync(RepositoryLabelCatalog)({
+                  entityTag: null,
+                  labels: [{ name: "ready", color: "00ff00", description: "Ready" }],
+                }),
+              )
+            : Effect.fail(
+                new InvalidGitHubResponseError({
+                  operation: "list-repository-labels",
+                  message: "Unavailable",
+                  detail: "Test response failure",
+                }),
+              ),
+      });
+      const { request } = yield* harness(Layer.merge(github, polling));
+      expect(yield* request("GET", "/repositories")).toEqual({ status: 200, body: ["acme/repo"] });
+      expect(yield* request("GET", "/labels/acme%2Frepo")).toEqual({
+        status: 200,
+        body: [{ name: "ready", color: "00ff00", description: "Ready" }],
+      });
+      expect(yield* request("GET", "/capabilities")).toMatchObject({
+        status: 200,
+        body: {
+          harnesses: expect.arrayContaining(["codex"]),
+          efforts: expect.arrayContaining(["high"]),
+        },
+      });
+      expect(yield* request("GET", "/labels/acme%2Funavailable")).toMatchObject({
+        status: 503,
+        body: { error: "BackendUnavailableError" },
+      });
+      const setup = yield* harness();
+      expect(yield* setup.request("GET", "/repositories")).toMatchObject({
+        status: 503,
+        body: { error: "BackendUnavailableError" },
+      });
     }).pipe(Effect.scoped),
   ));
