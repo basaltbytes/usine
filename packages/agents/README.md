@@ -128,4 +128,4 @@ The protocol conformance baseline is 0.159.2. Codex 0.159.0, 0.159.1, and 0.159.
 
 Provider capacity refusals use `AgentCapacityError`, which maps to `ProviderCapacityFailure`. Codex's `serverOverloaded` code and Claude's `overloaded` code take precedence over error text. HTTP 529 and HTTP 503 with a retry hint also qualify. When a harness exposes only text, `harnessFailure` recognizes “Selected model is at capacity”, `overloaded_error`, HTTP 529, and 503 with a retry hint. Other task failures remain `AgentResultError`.
 
-`reportText` relays capacity refusals with `[usine:provider-capacity]`; `reportedOutcome` restores their classification. Pi children report capacity when their provider retries end unsuccessfully.
+`reportText` relays capacity refusals with `[usine:provider-capacity]`; `reportedOutcome` restores their classification. Pi children classify the final assistant error when a turn settles, including when SDK retries are disabled or the SDK does not retry that error. A successful SDK retry completes normally.
