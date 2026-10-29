@@ -58,6 +58,8 @@ export type AttemptRecord = {
   relayedEntry: number;
   relayedTokens: number;
   terminalRelayed: boolean;
+  /** The caller confirmed cancellation and stopped relaying. Absent means false on older records. */
+  settled?: boolean;
   /** The harvested `StepResult` as JSON, absent until the executor records it. */
   result?: string;
   /**
@@ -94,6 +96,7 @@ export const AttemptRecordDoc = defineDocFamily<AttemptRecord, null>({
     relayedEntry: 0,
     relayedTokens: 0,
     terminalRelayed: false,
+    settled: false,
   }),
 });
 

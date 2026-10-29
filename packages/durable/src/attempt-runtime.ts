@@ -108,7 +108,7 @@ export class AttemptRuntime extends Context.Service<
     ) => Effect.Effect<AttemptReport, AttemptFailure>;
     /**
      * Whether the Attempt is open in durable storage: true until `execute` relays the terminal
-     * envelope, and false for a canceled task.
+     * envelope, and false for a canceled or settled task.
      */
     readonly isLive: (attemptId: AttemptId) => Effect.Effect<boolean, AttemptFailure>;
     /**
@@ -155,6 +155,11 @@ export class AttemptRuntime extends Context.Service<
     readonly attached: (attemptId: AttemptId) => Effect.Effect<void>;
     /** Aborts the children, then the parent conversation, and ends the pending `execute` call. */
     readonly cancel: (attemptId: AttemptId) => Effect.Effect<void, AttemptFailure>;
+    /**
+     * Marks an attempt as no longer live after its caller confirms cancellation and stops
+     * relaying it. Preserves the task's outcome and terminal delivery state. Idempotent.
+     */
+    readonly settle: (attemptId: AttemptId) => Effect.Effect<void, AttemptFailure>;
     /**
      * Appends a Worker notice to the transcript. If the parent hasn't started, keeps only the
      * latest notice (and a preceding `WorkerUnresponsive`) until `Started`.
