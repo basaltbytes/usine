@@ -1,3 +1,4 @@
+import { ConfigurationStore } from "@usine/config/configuration";
 import { NodeHttpServer, NodeServices } from "@effect/platform-node";
 import { AgentFile } from "@usine/config/agent";
 import { UsineConfig } from "@usine/config/factory";
@@ -207,6 +208,7 @@ describe("operator read latency", () => {
         ),
       );
       const observation = OperatorObservation.layer.pipe(
+        Layer.provide(Layer.mock(ConfigurationStore)({})),
         Layer.provide(Layer.mergeAll(idleTriggersLayer, MarcbachmannCelLayer, WorkerStatus.idle)),
         Layer.provideMerge(engine),
       );

@@ -1,5 +1,4 @@
 import type { LoadedInstance } from "@usine/config/instance";
-import type { RunStoreError } from "@usine/engine/engine";
 import type { ProjectionRevision, RunReader } from "@usine/engine/run-reader";
 import { Clock, Effect, Option, SynchronizedRef } from "effect";
 import type { StatisticsWindow } from "./view.ts";
@@ -13,12 +12,9 @@ interface CachedView<View> {
   readonly view: View;
 }
 
-export const cacheStatistics = <View>(
+export const cacheStatistics = <View, Error>(
   revision: RunReader["Service"]["revision"],
-  compute: (
-    instance: LoadedInstance,
-    window: StatisticsWindow,
-  ) => Effect.Effect<View, RunStoreError>,
+  compute: (instance: LoadedInstance, window: StatisticsWindow) => Effect.Effect<View, Error>,
 ) => {
   const windows = new Map<
     StatisticsWindow,

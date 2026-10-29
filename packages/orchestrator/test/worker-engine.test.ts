@@ -1,3 +1,4 @@
+import { configurationLayer } from "./support/configuration.ts";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { UsineConfig } from "@usine/config/factory";
@@ -159,6 +160,7 @@ const productionObservation = (
     Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: environment }))),
   );
   return OperatorObservation.layer.pipe(
+    Layer.provide(configurationLayer),
     Layer.provide(Layer.merge(idleTriggersLayer, MarcbachmannCelLayer)),
     Layer.provideMerge(engine),
     Layer.provideMerge(fixedConfigLayer(config)),

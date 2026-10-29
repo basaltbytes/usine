@@ -107,7 +107,7 @@ const loopsByFirstRun = (runs: ReadonlyArray<RunSummary>): ReadonlyArray<LoopNam
 
 /**
  * Whether no Loop succeeded twice on one of the task's Items. A second successful Run of a Loop is
- * a second round (ADR 0022), such as a review after findings; a rebase runs its Loop once.
+ * a second round (ADR 0022), including a loop that rebases a pull request.
  */
 const firstTimeRight = (runs: ReadonlyArray<RunSummary>): boolean =>
   Object.values(

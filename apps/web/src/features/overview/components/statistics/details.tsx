@@ -20,6 +20,8 @@ import {
 import { runStatisticsQuery } from "~/features/overview/queries";
 import {
   countLabel,
+  firstTimeRightDetails,
+  workerUtilizationDetails,
   medianFailureWait,
   medianRetryWait,
   medianResolutionWait,
@@ -65,6 +67,7 @@ const RunDetails = ({ statistics }: RunDetailsProps) => {
   const attention = statistics.needsAttention;
   return (
     <div className="flex flex-col gap-7">
+      <p className="text-sm text-muted-foreground">{firstTimeRightDetails}</p>
       <dl className="grid grid-cols-2 gap-x-8 gap-y-4 sm:grid-cols-4">
         <Figure
           label="Runs closed"
@@ -136,6 +139,7 @@ const RunDetails = ({ statistics }: RunDetailsProps) => {
           )}
         </StatisticsBlock>
         <StatisticsBlock title="Worker utilization">
+          <p className="text-xs text-muted-foreground">{workerUtilizationDetails}</p>
           {statistics.utilization.length === 0 ? (
             <Empty>No workers in usine.yaml</Empty>
           ) : (

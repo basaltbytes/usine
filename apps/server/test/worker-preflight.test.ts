@@ -1,3 +1,4 @@
+import { ConfigurationStore } from "@usine/config/configuration";
 import { NodeHttpServer, NodeServices } from "@effect/platform-node";
 import { UsineConfig } from "@usine/config/factory";
 import { LoadedInstance } from "@usine/config/instance";
@@ -137,6 +138,7 @@ it("serves the API and runs on a healthy worker, then restores a failed worker a
       Layer.provide(Layer.succeed(TriggerCondition)({ recheck: () => Effect.succeed("matches") })),
     );
     const observation = OperatorObservation.layer.pipe(
+      Layer.provide(Layer.mock(ConfigurationStore)({})),
       Layer.provide(Layer.merge(idleTriggersLayer, MarcbachmannCelLayer)),
       Layer.provideMerge(engine),
     );

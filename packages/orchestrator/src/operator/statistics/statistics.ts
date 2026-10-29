@@ -1,3 +1,4 @@
+import { ConfigurationStore, type ConfigurationStoreError } from "@usine/config/configuration";
 import type { LoadedInstance } from "@usine/config/instance";
 import type { ItemKey } from "@usine/core/item";
 import type { RepositoryName } from "@usine/core/repository";
@@ -12,6 +13,7 @@ import { taskCards } from "../../board/tasks.ts";
 import { runView } from "../projection.ts";
 import { RunUsageReader } from "../usage.ts";
 import { cacheStatistics } from "./cache.ts";
+import { readWorkerCapacity } from "./workers.ts";
 import { runStatisticsView } from "./runs.ts";
 import { type MergedTask, taskStatisticsView } from "./tasks.ts";
 import type { RunStatisticsView, StatisticsView, StatisticsWindow } from "./view.ts";
@@ -26,6 +28,7 @@ const decodeMergedAt = Schema.decodeUnknownOption(
 
 const makeStatistics = Effect.gen(function* () {
   const reader = yield* RunReader;
+  const configuration = yield* ConfigurationStore;
   const itemReader = yield* ItemProjectionReader;
   const usageReader = yield* RunUsageReader;
   const budgets = yield* CycleBudgets;
@@ -168,10 +171,11 @@ const makeStatistics = Effect.gen(function* () {
       now,
       runs: [...closed, ...open],
       usage: yield* usageOf(closed),
-      workers: instance.config.workers.map(({ name, maxConcurrentAttempts }) => ({
-        name,
-        slots: maxConcurrentAttempts,
-      })),
+      workers: yield* Effect.forEach(
+        instance.config.workers,
+        (worker) => readWorkerCapacity(configuration, worker),
+        { concurrency: 4 },
+      ),
     });
     yield* Effect.logDebug("Computed the run statistics", {
       window,
@@ -201,7 +205,7 @@ export class OperatorStatistics extends Context.Service<
     readonly runStatistics: (
       instance: LoadedInstance,
       window: StatisticsWindow,
-    ) => Effect.Effect<RunStatisticsView, RunStoreError>;
+    ) => Effect.Effect<RunStatisticsView, RunStoreError | ConfigurationStoreError>;
   }
 >()("@usine/orchestrator/OperatorStatistics") {
   static readonly layer = Layer.effect(OperatorStatistics, makeStatistics);

@@ -1,3 +1,4 @@
+import { ConfigurationStoreError } from "@usine/config/configuration";
 import { ProjectId } from "@usine/core/project";
 import { Project } from "@usine/config/project";
 import { authenticatedRoutes } from "../src/auth/http.ts";
@@ -1276,4 +1277,33 @@ describe("operator HTTP API", () => {
       }
     },
   );
+});
+
+it("returns a typed server error when statistics cannot read worker configuration history", async () => {
+  const failing = HttpRouter.toWebHandler(
+    apiRoutes(Option.none()).pipe(
+      HttpRouter.provideRequest(
+        Layer.mock(FactoryBackend)({
+          runStatistics: () =>
+            Effect.fail(
+              new ConfigurationStoreError({
+                operation: "read revisions",
+                cause: "private database details",
+              }),
+            ),
+        }),
+      ),
+    ),
+    { disableLogger: true },
+  );
+  try {
+    const response = await failing.handler(new Request("http://localhost/api/statistics/runs"));
+    assert.strictEqual(response.status, 500);
+    assert.deepStrictEqual(await response.json(), {
+      error: "ConfigurationStoreError",
+      message: "Configuration store error: could not read revisions.",
+    });
+  } finally {
+    await failing.dispose();
+  }
 });

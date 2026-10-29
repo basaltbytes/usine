@@ -1,3 +1,4 @@
+import { configurationLayer } from "./support/configuration.ts";
 import { AttentionAcknowledgements, type AttentionAcknowledgement } from "@usine/engine/attention";
 import { attentionKey, partitionNeeds } from "../src/operator/attention.ts";
 import { CycleGeneration } from "@usine/core/cycle-budget";
@@ -702,7 +703,7 @@ const testLayer = (
     WorkerStatus.idle,
     Layer.succeed(UnconfirmedStops)({ list: unconfirmedStops }),
   );
-  return Operator.layer.pipe(Layer.provide(dependencies));
+  return Operator.layer.pipe(Layer.provide(configurationLayer), Layer.provide(dependencies));
 };
 
 describe("Operator", () => {

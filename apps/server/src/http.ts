@@ -67,6 +67,8 @@ const operatorFailure = (error: BackendError) => {
         return error.message;
       case "GitHubRateLimitError":
         return error.message;
+      case "ConfigurationStoreError":
+        return `Configuration store error: could not ${error.operation}.`;
       case "EnginePersistenceError":
         return `Runtime store error: could not ${error.operation}.`;
       case "AttemptCancellationError":

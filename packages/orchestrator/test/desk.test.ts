@@ -1,3 +1,4 @@
+import { configurationLayer } from "./support/configuration.ts";
 import { AttentionAcknowledgements } from "@usine/engine/attention";
 import { assert, describe, it } from "@effect/vitest";
 import { AgentFile } from "@usine/config/agent";
@@ -453,6 +454,7 @@ const deskLayer = (
     ]),
   });
   return OperatorObservation.layer.pipe(
+    Layer.provide(configurationLayer),
     Layer.provide(
       Layer.mock(AttentionAcknowledgements)({
         list: () => Effect.succeed([]),
