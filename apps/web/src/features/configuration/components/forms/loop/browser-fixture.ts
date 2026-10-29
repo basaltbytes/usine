@@ -4,6 +4,7 @@ import { Schema } from "effect";
 export const loopEditorResponses = async (
   { page }: { readonly page: Page },
   configuration: string,
+  resumeRejections: readonly { readonly status: number; readonly body: string }[] = [],
 ) => {
   const { ConfigurationView } = await import("@usine/orchestrator/operator");
   const current = Schema.decodeUnknownSync(ConfigurationView)(JSON.parse(configuration));
@@ -107,7 +108,13 @@ export const loopEditorResponses = async (
       }),
     });
   });
+  let resumeRequests = 0;
   await page.route("**/api/loops/draft-loop/unpause", async (route) => {
+    const rejection = resumeRejections[resumeRequests++];
+    if (rejection !== undefined) {
+      await route.fulfill({ ...rejection, contentType: "application/json" });
+      return;
+    }
     paused = false;
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ ok: true }) });
   });

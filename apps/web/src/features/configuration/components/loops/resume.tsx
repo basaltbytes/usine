@@ -34,7 +34,7 @@ export const ResumeLoop = ({ name, pause, close }: ResumeLoopProps) => {
         if (!open && !pause.isPending) close();
       }}
     >
-      <DialogContent>
+      <DialogContent onClick={(event) => event.stopPropagation()}>
         <DialogTitle>
           {loopFormCopy.confirm}: {name}
         </DialogTitle>

@@ -18,7 +18,10 @@ import "~/index.css";
 
 declare module "vitest/browser" {
   interface BrowserCommands {
-    loopEditorResponses: (configuration: string) => Promise<void>;
+    loopEditorResponses: (
+      configuration: string,
+      resumeRejections?: readonly { readonly status: number; readonly body: string }[],
+    ) => Promise<void>;
     delayConfigurationLookup: (identifier: string) => Promise<void>;
     releaseConfigurationLookup: (identifier: string) => Promise<void>;
     configurationEditorScreenshot: (name: string) => Promise<void>;
@@ -60,9 +63,10 @@ afterEach(() => {
 const mount = async (
   path = "/configuration/workers/local",
   rejections: readonly { readonly status: number; readonly body: string }[] = [],
+  resumeRejections: readonly { readonly status: number; readonly body: string }[] = [],
 ) => {
   await commands.configurationEditorResponses(rejections, JSON.stringify(configurationJson));
-  await commands.loopEditorResponses(JSON.stringify(configurationJson));
+  await commands.loopEditorResponses(JSON.stringify(configurationJson), resumeRejections);
   await page.viewport(390, 844);
   const router = createRouter({
     routeTree,
@@ -77,6 +81,7 @@ const mount = async (
       </QueryClientProvider>,
     ),
   );
+  return router;
 };
 const button = (name: string) => page.getByRole("button", { name, exact: true });
 const editText = async () => {
@@ -797,6 +802,46 @@ it("checks CEL while typing, completes payload fields, previews, saves paused, a
   await expect.element(confirmation.getByText("2 matching items", { exact: true })).toBeVisible();
   await confirmation.getByRole("button", { name: "Resume", exact: true }).click();
   await expect.element(button("Pause")).toBeVisible();
+});
+
+it("keeps resume confirmation, cancellation, and request errors on the loops list", async () => {
+  const router = await mount(
+    "/configuration/loops",
+    [],
+    [
+      {
+        status: 503,
+        body: JSON.stringify({
+          error: "BackendUnavailableError",
+          message: "Resume is unavailable",
+        }),
+      },
+    ],
+  );
+  await button("New").click();
+  await page.getByRole("textbox", { name: "Name", exact: true }).fill("draft-loop");
+  await button("Edit").click();
+  await button("Save").click();
+  await expect.element(button("Resume")).toBeVisible();
+  await router.navigate({ to: "/configuration/loops" });
+
+  const confirmation = page.getByRole("dialog", { name: "Resume loop: draft-loop" });
+  await button("Resume draft-loop").click();
+  await confirmation.getByText("2 matching items", { exact: true }).click();
+  await expect.element(confirmation).toBeVisible();
+  expect(router.state.location.pathname).toBe("/configuration/loops");
+  await confirmation.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect.element(confirmation).not.toBeInTheDocument();
+  expect(router.state.location.pathname).toBe("/configuration/loops");
+
+  await button("Resume draft-loop").click();
+  await confirmation.getByRole("button", { name: "Resume", exact: true }).click();
+  await expect.element(confirmation.getByRole("alert")).toHaveTextContent("Resume is unavailable");
+  expect(router.state.location.pathname).toBe("/configuration/loops");
+  await confirmation.getByRole("button", { name: "Resume", exact: true }).click();
+  await expect.element(confirmation).not.toBeInTheDocument();
+  await expect.element(button("Pause draft-loop")).toBeVisible();
+  expect(router.state.location.pathname).toBe("/configuration/loops");
 });
 
 it("matches and removes repository selections regardless of casing", async () => {
