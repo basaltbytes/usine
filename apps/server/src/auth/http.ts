@@ -252,6 +252,11 @@ export const authenticatedRoutes = (services: AuthServices) => {
   ] satisfies ReadonlyArray<HttpRouter.Route<AuthError>>;
   const guard = HttpRouter.middleware<{ handles: AuthError }>()((handler) =>
     Effect.gen(function* () {
+      const { route } = yield* HttpRouter.RouteContext;
+      if (route.method === "GET" && route.path === "/api/version") {
+        yield* Effect.logDebug("Serving public upgrade health check", { route: route.path });
+        return yield* handler;
+      }
       const request = yield* HttpServerRequest.HttpServerRequest;
       const access = yield* auth.authenticate(secretOf(request));
       const bearer = request.headers.authorization?.startsWith("Bearer ") === true;

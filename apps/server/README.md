@@ -133,7 +133,9 @@ Configuration entity writes accept kind `project`. CLI and API loop operations a
 
 ## Sign-in
 
-Every operator API request requires an instance token or a browser session, including requests from loopback. Every member has instance admin access.
+Operator API requests require an instance token or a browser session, including requests from loopback. Health and sign-in endpoints are public. Every member has instance admin access.
+
+`GET /api/version` is an upgrade health endpoint that returns only the running release string. It remains public so helpers copied by releases before member authentication can verify the new server during a managed upgrade. Upgrade status and upgrade requests require authentication.
 
 Start `usine up` and open the printed **Sign in** URL. The link expires after 10 minutes and works once. To print another link, run `usine sign-in-link` in the instance folder. This also works before GitHub user authorization is configured. Keep these URLs private.
 

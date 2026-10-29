@@ -1,7 +1,7 @@
 import { ProjectId } from "@usine/core/project";
 import { Project } from "@usine/config/project";
 import { authenticatedRoutes } from "../src/auth/http.ts";
-import { authFixture } from "./auth/fixture.ts";
+import { authFixture, localSecret } from "./auth/fixture.ts";
 import { UpgradeView } from "@usine/orchestrator/operator/http";
 import { ServerUpgrades } from "../src/upgrade/control.ts";
 import {
@@ -412,6 +412,7 @@ it("denies anonymous requests for every registered API route before decoding a r
       yield* Effect.addFinalizer(() => Effect.promise(() => secured.dispose()));
       const publicRoutes = new Set([
         "GET /api/health",
+        "GET /api/version",
         "GET /api/auth/info",
         "GET /api/auth/github",
         "GET /api/auth/callback",
@@ -469,22 +470,31 @@ describe("operator HTTP API", () => {
           requested.push(input.timing);
         }),
     });
+    const auth = await Effect.runPromise(authFixture().pipe(Effect.scoped));
     const upgradeApp = HttpRouter.toWebHandler(
       apiRoutes(Option.none()).pipe(
+        Layer.provide(authenticatedRoutes(auth).guard.layer),
         HttpRouter.provideRequest(Layer.merge(backend, upgradeBackend)),
       ),
       { disableLogger: true },
     );
+    const authorization = { authorization: `Bearer ${localSecret}` };
     try {
-      const version = await upgradeApp.handler(new Request("http://localhost/api/version"));
-      assert.strictEqual(await version.json(), "1.0.0");
-      const status = await upgradeApp.handler(new Request("http://localhost/api/upgrade"));
+      for (const path of ["/api/version", "/API/version", "//api/version", "/%61pi/version"]) {
+        const version = await upgradeApp.handler(new Request(`http://localhost${path}`));
+        assert.strictEqual(version.status, 200);
+        assert.strictEqual(await version.json(), "1.0.0");
+      }
+      const status = await upgradeApp.handler(
+        new Request("http://localhost/api/upgrade", { headers: authorization }),
+      );
       assert.strictEqual(
         Schema.decodeUnknownSync(UpgradeView)(await status.json()).channel,
         "next",
       );
       const invalid = await upgradeApp.handler(
         new Request("http://localhost/api/upgrade", {
+          headers: authorization,
           method: "POST",
           body: JSON.stringify({ timing: "tomorrow" }),
         }),
@@ -492,6 +502,7 @@ describe("operator HTTP API", () => {
       assert.strictEqual(invalid.status, 400);
       const invalidVersion = await upgradeApp.handler(
         new Request("http://localhost/api/upgrade", {
+          headers: authorization,
           method: "POST",
           body: JSON.stringify({ timing: "now", version: "1.0.0-01" }),
         }),
@@ -501,6 +512,7 @@ describe("operator HTTP API", () => {
       assert.deepStrictEqual(requested, []);
       const accepted = await upgradeApp.handler(
         new Request("http://localhost/api/upgrade", {
+          headers: authorization,
           method: "POST",
           body: JSON.stringify({ timing: "idle" }),
         }),

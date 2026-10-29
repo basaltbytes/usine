@@ -204,7 +204,7 @@ it.each(["missing-target", "missing-404"] as const)(
   },
 );
 
-it("authenticates health checks with the current token after upgrade and rollback starts", async () => {
+it.each(["legacy", "current"])("supports %s upgrade health checks", async (generation) => {
   const root = mkdtempSync(join(tmpdir(), "usine-upgrade-auth-"));
   const folder = join(root, "upgrade");
   mkdirSync(folder);
@@ -229,7 +229,9 @@ it("authenticates health checks with the current token after upgrade and rollbac
         );
         yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
         const statuses: Array<number> = [];
+        const authorizations: Array<string | undefined> = [];
         const server = createServer(async (request, response) => {
+          authorizations.push(request.headers.authorization);
           const result = await app.handler(
             new Request(`http://localhost${request.url}`, {
               headers: { authorization: request.headers.authorization ?? "" },
@@ -255,9 +257,12 @@ it("authenticates health checks with the current token after upgrade and rollbac
         const script = join(folder, "health.sh");
         writeFileSync(
           script,
-          `${helper.slice(0, helper.indexOf("# The lock"))}
+          `${generation === "legacy" ? readFileSync(new URL("./legacy-health.sh", import.meta.url), "utf8") : helper.slice(0, helper.indexOf("# The lock"))}
+set -eu
+systemctl() { echo failed; }
 folder=$1
 port=$2
+unit=usine.service
 printf '%s' '${localSecret}' > "$folder/../admin-token"
 healthy 2.0.0
 printf '%s' '${Redacted.value(session.secret)}' > "$folder/../admin-token"
@@ -268,6 +273,12 @@ healthy 1.0.0
           promisify(execFile)("bash", [script, folder, String(port)]),
         );
         assert.deepEqual(statuses, [200, 200]);
+        assert.deepEqual(
+          authorizations,
+          generation === "legacy"
+            ? [undefined, undefined]
+            : [`Bearer ${localSecret}`, `Bearer ${Redacted.value(session.secret)}`],
+        );
         assert.notInclude(output.stdout + output.stderr, localSecret);
         assert.notInclude(output.stdout + output.stderr, Redacted.value(session.secret));
       }).pipe(Effect.scoped),
