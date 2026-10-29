@@ -45,6 +45,7 @@ export const upgradeQuery = () =>
   queryOptions({
     queryKey: ["upgrade"] as const,
     queryFn: () => api((client) => client.upgradeStatus({})),
+    meta: { refreshLabel: "Upgrades" },
     refetchInterval: UPGRADE_REFRESH_MS,
     retry: 3,
   });

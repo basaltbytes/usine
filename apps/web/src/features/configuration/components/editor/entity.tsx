@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { ConfigurationEntityKey } from "@usine/config/configuration";
 import { useState, type ReactNode } from "react";
 import { ErrorAlert } from "~/components/error-alert";
-import { Button } from "~/components/ui/button";
+import { CommandButton } from "~/components/command-palette/button";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { entityReferences } from "~/features/configuration/lib/entities";
@@ -31,7 +31,8 @@ export const EntityEditor = ({ entity, children }: EntityEditorProps) => {
   return (
     <div className="flex min-w-0 flex-col gap-6">
       <div className="flex flex-wrap items-center gap-2">
-        <Button
+        <CommandButton
+          command={editorCopy.edit}
           variant="outline"
           disabled={current.data === undefined || current.isError || mode._tag !== "read"}
           onClick={() => {
@@ -40,8 +41,9 @@ export const EntityEditor = ({ entity, children }: EntityEditorProps) => {
           }}
         >
           {editorCopy.edit}
-        </Button>
-        <Button
+        </CommandButton>
+        <CommandButton
+          command={editorCopy.delete}
           variant="ghost"
           disabled={current.data === undefined || current.isError || mode._tag !== "read"}
           onClick={() => {
@@ -50,7 +52,7 @@ export const EntityEditor = ({ entity, children }: EntityEditorProps) => {
           }}
         >
           {editorCopy.delete}
-        </Button>
+        </CommandButton>
         {current.isPending && <span role="status">{editorCopy.loading}</span>}
         {saved && <span role="status">{editorCopy.saved}</span>}
         {write.isSuccess && current.isError && <span role="status">{editorCopy.deleted}</span>}
@@ -95,21 +97,23 @@ export const EntityEditor = ({ entity, children }: EntityEditorProps) => {
           </Label>
           {write.isError && <WriteFailure error={write.error} />}
           <div className="flex gap-2">
-            <Button
+            <CommandButton
+              command={editorCopy.confirmDelete}
               type="submit"
               variant="destructive"
               disabled={write.isPending || configuration.data === undefined}
             >
               {write.isPending ? editorCopy.saving : editorCopy.confirmDelete}
-            </Button>
-            <Button
+            </CommandButton>
+            <CommandButton
+              command={editorCopy.cancel}
               type="button"
               variant="ghost"
               disabled={write.isPending}
               onClick={() => setMode({ _tag: "read" })}
             >
               {editorCopy.cancel}
-            </Button>
+            </CommandButton>
           </div>
         </form>
       )}

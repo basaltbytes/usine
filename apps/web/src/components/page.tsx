@@ -1,3 +1,4 @@
+import { RefreshStatus } from "~/components/refresh/status";
 import type { Icon } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
 import { cn } from "~/lib/utils";
@@ -33,6 +34,7 @@ export const PageHeading = ({
     {actions !== undefined && (
       <div className="ml-auto flex items-center gap-2 self-center">{actions}</div>
     )}
+    <RefreshStatus />
   </header>
 );
 
@@ -85,6 +87,7 @@ export const PageHeader = ({
         </p>
       )}
       {heading}
+      <RefreshStatus />
       {facts !== undefined && (
         <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 pt-0.5 text-sm text-muted-foreground">
           {facts}

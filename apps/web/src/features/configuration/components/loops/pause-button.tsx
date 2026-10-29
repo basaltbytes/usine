@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ResumeLoop } from "./resume";
 import { PauseIcon, PlayIcon } from "@phosphor-icons/react";
 import type { LoopFileView } from "@usine/orchestrator/operator";
-import { Button } from "~/components/ui/button";
+import { CommandButton } from "~/components/command-palette/button";
 import { type PauseLoop } from "~/features/configuration/components/loops/list";
 
 type PauseButtonProps = {
@@ -17,7 +17,8 @@ export const PauseButton = ({ loop, pause, variant }: PauseButtonProps) => {
   const sending = pause.isPending && pause.variables.loop === loop.name;
   return (
     <>
-      <Button
+      <CommandButton
+        command={`${loop.paused ? "Resume" : "Pause"} ${loop.name}`}
         variant={variant}
         disabled={pause.isPending}
         className={variant === "ghost" ? "text-muted-foreground" : undefined}
@@ -36,7 +37,7 @@ export const PauseButton = ({ loop, pause, variant }: PauseButtonProps) => {
           {sending ? (loop.paused ? "Resuming…" : "Pausing…") : loop.paused ? "Resume" : "Pause"}
         </span>
         {variant === "ghost" && <span className="sr-only"> {loop.name}</span>}
-      </Button>
+      </CommandButton>
       {resuming && <ResumeLoop name={loop.name} pause={pause} close={() => setResuming(false)} />}
     </>
   );

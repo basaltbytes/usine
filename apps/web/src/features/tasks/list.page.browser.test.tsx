@@ -287,7 +287,7 @@ it("says No runs yet when no task has a run", async () => {
   await mount(list);
   const heading = page.getByRole("heading", { name: "Tasks", level: 1 }).element().parentElement;
   await expect.element(page.getByText("No runs yet", { exact: true })).toBeVisible();
-  expect(heading?.textContent).toBe("Tasks");
+  await expect.poll(() => heading?.textContent).toMatch(/^TasksLast updated/u);
   expect(table().elements()).toHaveLength(0);
 });
 
@@ -389,4 +389,37 @@ it("keeps only the elapsed time of the figures on a phone, without scrolling sid
   expect(title.element().getBoundingClientRect().width).toBeGreaterThan(100);
   const container = table().element().parentElement;
   expect(container?.scrollWidth).toBeLessThanOrEqual(container?.clientWidth ?? 0);
+});
+
+it("updates the running count beside Overview without counting waiting or queued runs", async () => {
+  const overview = boardOverview();
+  queryClient.setQueryData(
+    overviewQuery().queryKey,
+    new ReadyOverview({
+      ...overview,
+      projects: overview.projects.map(
+        (project) =>
+          new ProjectView({
+            ...project,
+            runs: project.board.lanes.flatMap(({ items }) => items.flatMap(({ runs }) => runs)),
+          }),
+      ),
+    }),
+  );
+  await mount(list);
+  await expect.element(page.getByTitle("Running", { exact: true })).toHaveTextContent("1 running");
+  queryClient.setQueryData(
+    overviewQuery().queryKey,
+    new ReadyOverview({
+      ...overview,
+      projects: overview.projects.map(
+        (project) =>
+          new ProjectView({
+            ...project,
+            runs: project.runs.filter(({ state }) => state !== "Running"),
+          }),
+      ),
+    }),
+  );
+  await expect.element(page.getByTitle("Running", { exact: true })).toHaveTextContent("0 running");
 });

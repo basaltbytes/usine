@@ -11,7 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "~/components/ui/dialog";
-import { Button } from "~/components/ui/button";
+import { CommandButton } from "~/components/command-palette/button";
 import { api } from "~/lib/api";
 import {
   cycleBudgetCounts,
@@ -64,9 +64,14 @@ export const CycleBudgetAsk = ({ need, dismiss }: CycleBudgetAskProps) => {
           </>
         }
         actions={
-          <Button variant="outline" disabled={reset.isPending} onClick={() => reset.mutate()}>
+          <CommandButton
+            command={`Reset cycle budget · ${need.itemLabel}`}
+            variant="outline"
+            disabled={reset.isPending}
+            onClick={() => reset.mutate()}
+          >
             {reset.isPending ? "Resetting…" : "Reset cycle budget"}
-          </Button>
+          </CommandButton>
         }
       />
       <Dialog open={showDetails} onOpenChange={setShowDetails}>

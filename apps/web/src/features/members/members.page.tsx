@@ -1,3 +1,5 @@
+import { CommandButton } from "~/components/command-palette/button";
+import { PageHeading } from "~/components/page";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "~/components/ui/button";
@@ -45,7 +47,7 @@ export const MembersPage = () => {
   return (
     <section className="space-y-6 p-4 md:p-5">
       <div>
-        <h1 className="text-xl font-semibold">{title}</h1>
+        <PageHeading title={title} />
         <p className="mt-2 text-sm text-muted-foreground">{adminAccess}</p>
       </div>
       {error !== undefined && <ErrorAlert message={error} />}
@@ -67,7 +69,9 @@ export const MembersPage = () => {
             maxLength={39}
           />
         </div>
-        <Button disabled={pending || login.trim() === ""}>{pending ? adding : addMember}</Button>
+        <CommandButton type="submit" command={addMember} disabled={pending || login.trim() === ""}>
+          {pending ? adding : addMember}
+        </CommandButton>
       </form>
       <ul className="divide-y divide-border">
         {data.map((member) => (
@@ -93,14 +97,15 @@ export const MembersPage = () => {
                   </Button>
                 </>
               ) : (
-                <Button
+                <CommandButton
+                  command={`${removeMember} · ${member.login}`}
                   variant="ghost"
                   disabled={pending || data.length === 1}
                   onClick={() => setRemoving(member.id)}
                   aria-label={`${removeMember} ${member.login}`}
                 >
                   {removeMember}
-                </Button>
+                </CommandButton>
               )}
             </div>
           </li>

@@ -2,7 +2,7 @@ import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-q
 import type { UpgradeTiming } from "@usine/core/upgrade";
 import { UpgradeRequest } from "@usine/orchestrator/operator/http";
 import { Option } from "effect";
-import { Button } from "~/components/ui/button";
+import { CommandButton } from "~/components/command-palette/button";
 import { upgradeQuery } from "~/features/configuration/queries";
 import {
   upgradeRunningLabel,
@@ -85,19 +85,24 @@ export const Upgrades = () => {
           {data.available !== null && !busy && data.phase !== "failed" && (
             <div className="flex flex-col gap-4 sm:flex-row sm:gap-8">
               <div className="flex max-w-sm flex-col items-start gap-2">
-                <Button disabled={request.isPending} onClick={() => request.mutate("idle")}>
+                <CommandButton
+                  command={upgradeWhenIdle}
+                  disabled={request.isPending}
+                  onClick={() => request.mutate("idle")}
+                >
                   {upgradeWhenIdle}
-                </Button>
+                </CommandButton>
                 <p className="text-xs text-muted-foreground">{upgradeIdleHelp}</p>
               </div>
               <div className="flex max-w-sm flex-col items-start gap-2">
-                <Button
+                <CommandButton
+                  command={upgradeNow}
                   variant="outline"
                   disabled={request.isPending}
                   onClick={() => request.mutate("now")}
                 >
                   {upgradeNow}
-                </Button>
+                </CommandButton>
                 <p className="text-xs text-muted-foreground">{upgradeNowHelp}</p>
               </div>
             </div>

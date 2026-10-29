@@ -12,7 +12,7 @@ import { SessionIntervention } from "@usine/orchestrator/operator";
 import { useId, useState } from "react";
 import { runDetailKey } from "~/lib/runs/queries";
 import { api } from "~/lib/api";
-import { Button } from "~/components/ui/button";
+import { CommandButton } from "~/components/command-palette/button";
 import { Textarea } from "~/components/ui/textarea";
 import { Label } from "~/components/ui/label";
 import { ErrorAlert } from "~/components/error-alert";
@@ -72,30 +72,33 @@ export const SessionComposer = ({
         }}
       />
       <div className="flex flex-wrap items-center gap-2">
-        <Button
+        <CommandButton
+          command={paused ? "Send and resume" : "Send"}
           size="sm"
           onClick={send}
           disabled={mutation.isPending || message.trim().length === 0}
         >
           {paused ? "Send and resume" : "Send"}
-        </Button>
-        <Button
+        </CommandButton>
+        <CommandButton
+          command={"Pause session"}
           size="sm"
           variant="outline"
           disabled={mutation.isPending || paused}
           onClick={() => mutation.mutate(new Interrupt())}
         >
           Pause session
-        </Button>
+        </CommandButton>
         {releasable && (
-          <Button
+          <CommandButton
+            command={child ? "Release child" : "Release parent"}
             size="sm"
             variant="secondary"
             disabled={mutation.isPending}
             onClick={() => mutation.mutate(new Release())}
           >
             {child ? "Release child" : "Release parent"}
-          </Button>
+          </CommandButton>
         )}
       </div>
       <p className="text-xs text-muted-foreground">

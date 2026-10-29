@@ -100,3 +100,10 @@ export const tryAgain = "Try again";
 export const membersLabel = "Members";
 export const tokensPageLabel = "Tokens";
 export const signOutLabel = "Sign out";
+
+export const refreshCopy = {
+  label: "Last updated",
+  waiting: "Waiting for the first refresh",
+  failed: (sources: string) =>
+    ` · Refresh failing for over a minute: ${sources}. Showing last available data.`,
+};

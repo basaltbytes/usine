@@ -19,7 +19,7 @@ import {
 } from "~/components/ui/breadcrumb";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "~/components/ui/sidebar";
 
-const CONFIGURATION_PAGES = [
+export const CONFIGURATION_PAGES = [
   { to: "/configuration/loops", label: "Loops", icon: ArrowsClockwiseIcon },
   { to: "/configuration/agents", label: "Agents", icon: RobotIcon },
   { to: "/configuration/workers", label: "Workers", icon: HardDrivesIcon },

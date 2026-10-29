@@ -14,6 +14,7 @@ export const taskQuery = (repository: RepositoryName, number: ItemNumber) => {
     queryKey: [...overviewQuery().queryKey, "task", repository, number] as const,
     queryFn: () =>
       api((client) => client.task({ params: { owner, repository: name, item: number } })),
+    meta: { refreshLabel: "Task" },
     refetchInterval: (query) =>
       query.state.data?.runs.some(({ canCancel }) => canCancel) === true
         ? ACTIVE_TASK_REFRESH_MS
