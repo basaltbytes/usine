@@ -1,9 +1,12 @@
 import { createServer } from "node:http";
 import { NodeServices } from "@effect/platform-node";
 import { Tracing } from "@usine/config/factory";
-import { ConfigProvider, Effect, Layer, Logger, Option, Schema, Tracer } from "effect";
+import { ConfigProvider, Effect, Layer, Logger, Option, Redacted, Schema, Tracer } from "effect";
+import { HttpRouter } from "effect/http";
 import { assert, describe, it } from "vitest";
+import { authenticatedRoutes } from "../src/auth/http.ts";
 import { tracingLayer } from "../src/tracing.ts";
+import { authFixture } from "./auth/fixture.ts";
 
 interface ReceivedRequest {
   readonly path: string | undefined;
@@ -55,16 +58,16 @@ interface SpanExportOptions {
 }
 
 /** Runs `effect` with span export to `tracing`, then closes the scope, which flushes the spans. */
-const withSpanExport = <A>(
+const withSpanExport = <A, E>(
   tracing: Tracing,
-  effect: Effect.Effect<A>,
+  effect: Effect.Effect<A, E>,
   options?: SpanExportOptions,
 ) => Effect.runPromise(spanExport(tracing, effect, options));
 
 /** The effect that `withSpanExport` runs. */
-const spanExport = <A>(
+const spanExport = <A, E>(
   tracing: Tracing,
-  effect: Effect.Effect<A>,
+  effect: Effect.Effect<A, E>,
   options: SpanExportOptions = {},
 ) =>
   Effect.scoped(
@@ -80,6 +83,56 @@ const spanExport = <A>(
   );
 
 describe("tracingLayer", () => {
+  it("redacts OAuth credentials in exported HTTP spans for rejected and successful callbacks", async () => {
+    const collector = await startCollector();
+    const secrets = ["unspent-code", "invalid-state", "exchanged-code", "signed-url-secret"];
+    try {
+      await withSpanExport(
+        new Tracing({ otlpUrl: collector.url, serviceName: "usine-test" }),
+        Effect.gen(function* () {
+          const services = yield* authFixture();
+          const app = HttpRouter.toWebHandler(authenticatedRoutes(services).routes);
+          yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
+          const context = yield* Effect.context<never>();
+          const rejected = yield* Effect.promise(() =>
+            app.handler(
+              new Request(
+                "https://usine.example/api/auth/callback?code=unspent-code&%73tate=invalid-state&Signature=signed-url-secret&display=kept",
+              ),
+              context,
+            ),
+          );
+          assert.include(rejected.headers.get("location") ?? "", "could%20not%20be%20verified");
+          const started = yield* services.authentication.startWeb(false);
+          const state = Redacted.value(started.state);
+          secrets.push(state);
+          const accepted = yield* Effect.promise(() =>
+            app.handler(
+              new Request(
+                `https://usine.example/%61pi/auth/callback?code=exchanged-code&state=${state}`,
+                { headers: { cookie: `usine_sign_in_state=${state}` } },
+              ),
+              context,
+            ),
+          );
+          assert.equal(accepted.headers.get("location"), "/");
+        }).pipe(Effect.scoped),
+      );
+      const exported = Buffer.concat(collector.received.map(({ body }) => body)).toString("utf8");
+      for (const attribute of [
+        "url.full",
+        "url.query",
+        "display=kept",
+        "code=REDACTED",
+        "state=REDACTED",
+      ])
+        assert.include(exported, attribute);
+      for (const secret of secrets) assert.notInclude(exported, secret);
+    } finally {
+      await collector.close();
+    }
+  });
+
   it("keeps the default tracer without a tracing block", async () => {
     const [fallback, provided] = await Effect.runPromise(
       Effect.scoped(

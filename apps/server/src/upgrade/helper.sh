@@ -42,9 +42,15 @@ stop_server() {
 }
 
 healthy() {
-  local wanted=$1
+  local wanted=$1 token
   for ((i=0; i<36; i++)); do
-    actual=$(curl --silent --fail --max-time 2 "http://127.0.0.1:$port/api/version") || actual=
+    actual=
+    if token=$(cat "$folder/../admin-token") && [[ "$token" =~ ^[A-Za-z0-9_-]{43}$ ]]; then
+      actual=$(printf 'Authorization: Bearer %s\n' "$token" |
+        curl --silent --fail --max-time 2 --header @- "http://127.0.0.1:$port/api/version") || actual=
+    else
+      printf 'upgrade health-check version=%s attempt=%s reason=admin-token-unavailable\n' "$wanted" "$i"
+    fi
     if [ "$actual" = "\"$wanted\"" ]; then return 0; fi
     state=$(systemctl show --property=ActiveState --value "$unit") || return 1
     if [ "$state" = failed ] || [ "$state" = inactive ]; then return 1; fi
