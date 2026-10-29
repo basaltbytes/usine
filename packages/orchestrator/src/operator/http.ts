@@ -1,3 +1,5 @@
+import { Harness, Effort } from "@usine/core/agent/brain";
+import { RepositoryLabel } from "@usine/github/polling";
 import {
   ConfigurationRevisionNumber,
   ConfigurationEntityId,
@@ -446,6 +448,16 @@ export const OperatorApi = HttpApi.make("OperatorApi").add(
       }),
     )
     .add(
+      HttpApiEndpoint.get("configurationCapabilities", "/api/configuration/capabilities", {
+        success: Schema.Struct({ harnesses: Schema.Array(Harness), efforts: Schema.Array(Effort) }),
+      }),
+      HttpApiEndpoint.get("configurationRepositories", "/api/configuration/repositories", {
+        success: Schema.Array(RepositoryName),
+      }),
+      HttpApiEndpoint.get("configurationLabels", "/api/configuration/labels/:repository", {
+        params: { repository: RepositoryName },
+        success: Schema.Array(RepositoryLabel),
+      }),
       HttpApiEndpoint.get("configurationRevisions", "/api/configuration/revisions", {
         query: Schema.Struct({
           kind: Schema.optionalKey(queryValue),

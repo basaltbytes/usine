@@ -133,5 +133,5 @@ export const runtimeLayer = (
     OperatorConfiguration.layer,
     Orchestrator.layer,
   ).pipe(Layer.provide(Layer.mergeAll(dependencies, triggers, itemHistory)));
-  return Layer.mergeAll(dependencies, triggers, services);
+  return Layer.mergeAll(dependencies, triggers, services, app);
 };

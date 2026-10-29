@@ -114,6 +114,7 @@ const mintPlan = (scope: TokenScope): { operation: GitHubOperation; body: Schema
 export class GitHubApp extends Context.Service<
   GitHubApp,
   {
+    readonly repositories: () => Effect.Effect<ReadonlyArray<RepositoryName>, GitHubAppError>;
     /** Returns the App installation after checking its required permissions. */
     readonly installation: () => Effect.Effect<Installation, GitHubAppError>;
     /**
@@ -353,6 +354,15 @@ export class GitHubApp extends Context.Service<
       );
 
       return {
+        repositories: Effect.fn("GitHubApp.repositories")(function* () {
+          const { token, installation } = yield* lease();
+          yield* Effect.annotateCurrentSpan({ installationId: installation.id });
+          const repositories = yield* installedRepositories(token);
+          yield* Effect.logDebug("Listed installation repositories", {
+            count: repositories.length,
+          });
+          return repositories.map(({ name }) => name);
+        }),
         installation: Effect.fn("GitHubApp.installation")(() =>
           Effect.map(lease(), (current) => current.installation),
         ),

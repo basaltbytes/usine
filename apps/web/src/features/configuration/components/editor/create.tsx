@@ -1,3 +1,4 @@
+import { RepositoryPicker } from "~/features/configuration/components/forms/repository-picker";
 import { useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ConfigurationEntityId, type ConfigurationEntityKind } from "@usine/config/configuration";
@@ -13,7 +14,7 @@ import { entityQuery } from "~/features/configuration/queries";
 import { editorCopy } from "~/features/configuration/strings";
 import { configurationQuery } from "~/lib/configuration/queries";
 import { rejectionMessage } from "~/lib/api";
-import { RawEditor } from "./form";
+import { ConfigurationEditorForm } from "./form";
 
 type CreateEntityProps = { readonly kind: ConfigurationEntityKind };
 
@@ -54,15 +55,19 @@ const CreationForm = ({ kind, cancel }: CreationFormProps) => {
               .finally(() => setChecking(false));
           }}
         >
-          <Label className="flex w-full flex-col items-start gap-2">
-            {editorCopy.name}
-            <Input
-              required
-              disabled={checking}
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-            />
-          </Label>
+          {kind === "repository" ? (
+            <RepositoryPicker value={name} onChange={setName} disabled={checking} />
+          ) : (
+            <Label className="flex w-full flex-col items-start gap-2">
+              {editorCopy.name}
+              <Input
+                required
+                disabled={checking}
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+              />
+            </Label>
+          )}
           {error !== null && <ErrorAlert message={error} />}
           {current.isError && <ErrorAlert message={current.error.message} />}
           <div className="flex gap-2">
@@ -79,7 +84,7 @@ const CreationForm = ({ kind, cancel }: CreationFormProps) => {
         </form>
       ) : (
         current.data !== undefined && (
-          <RawEditor
+          <ConfigurationEditorForm
             entity={entityKey(kind, editing)}
             initial={{
               number: current.data.number,

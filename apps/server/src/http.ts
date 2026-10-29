@@ -1,3 +1,7 @@
+import { HARNESSES, EFFORTS } from "@usine/core/agent/brain";
+import { GitHubApp } from "@usine/github/github-app";
+import { GitHubPolling } from "@usine/github/polling";
+import { configurationRepositories, configurationLabels } from "./configuration/catalog.ts";
 import { fromConfiguration, fromConfigurationRevision } from "./configuration/http.ts";
 import { type UpgradeError, ServerUpgrades } from "./upgrade/control.ts";
 import { createServer } from "node:http";
@@ -251,6 +255,11 @@ const handlers = HttpApiBuilder.group(OperatorApi, "operator", (routes) =>
         return yield* fromBackend((backend) => backend.task(repository, params.item));
       }),
     )
+    .handle("configurationCapabilities", () =>
+      Effect.succeed({ harnesses: HARNESSES, efforts: EFFORTS }),
+    )
+    .handle("configurationRepositories", () => configurationRepositories())
+    .handle("configurationLabels", ({ params }) => configurationLabels(params.repository))
     .handle("configurationRevisions", ({ query }) =>
       fromConfiguration((editor) => editor.list(query)),
     )
@@ -342,7 +351,9 @@ export const serverLayer = (
   webRoot: string,
   port: Port,
   origin: Option.Option<UiOrigin>,
-  services: Layer.Layer<ServerUpgrades | ConfigurationEditor> | Layer.Layer<never> = Layer.empty,
+  services:
+    | Layer.Layer<ServerUpgrades | ConfigurationEditor | GitHubApp | GitHubPolling>
+    | Layer.Layer<never> = Layer.empty,
 ) => {
   const routes = Layer.mergeAll(apiRoutes(origin), staticRoutes(webRoot)).pipe(
     HttpRouter.provideRequest(Layer.merge(backend, services)),

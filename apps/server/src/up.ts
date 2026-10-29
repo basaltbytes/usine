@@ -1,3 +1,4 @@
+import { GitHubPolling } from "@usine/github/polling";
 import { ServerUpgrades } from "./upgrade/control.ts";
 import { systemUpgradePlatform } from "./upgrade/platform.ts";
 import { localSqliteLayer } from "@usine/engine/local-sqlite";
@@ -10,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import { NodeServices } from "@effect/platform-node";
 import { InstanceDirectory, type InstanceId } from "@usine/core/instance";
 import { RunEngine, RunEngineShutdown } from "@usine/engine/engine";
-import { GitHubCredentials } from "@usine/github/github-app";
+import { GitHubApp, GitHubCredentials } from "@usine/github/github-app";
 import { loadLocalCredentials } from "@usine/github/local-secrets";
 import { CurrentInstance } from "@usine/orchestrator/current-instance";
 import {
@@ -70,6 +71,7 @@ const serve = Effect.fnUntraced(function* (options: {
   readonly openSetupPage: boolean;
   readonly upgrades: ServerUpgrades["Service"];
   readonly configurationEditor: ConfigurationEditor["Service"];
+  readonly catalog?: Layer.Layer<GitHubApp | GitHubPolling>;
 }) {
   yield* Layer.build(
     serverLayer(
@@ -77,7 +79,8 @@ const serve = Effect.fnUntraced(function* (options: {
       options.webRoot,
       options.port,
       options.origin,
-      Layer.merge(
+      Layer.mergeAll(
+        options.catalog ?? Layer.empty,
         Layer.succeed(ServerUpgrades, options.upgrades),
         Layer.succeed(ConfigurationEditor, options.configurationEditor),
       ),
@@ -215,6 +218,10 @@ const start = Effect.fnUntraced(function* (
             Context.get(context, OperatorConfiguration),
           ),
           configurationEditor,
+          catalog: Layer.merge(
+            Layer.succeed(GitHubApp, Context.get(context, GitHubApp)),
+            Layer.succeed(GitHubPolling, Context.get(context, GitHubPolling)),
+          ),
           webRoot,
           port,
           origin,
