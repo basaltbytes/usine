@@ -1,4 +1,5 @@
 import { LoopFile } from "@usine/config/loop";
+import { ManagedRepo } from "@usine/config/factory";
 import { migrateProjects } from "@usine/config/project";
 import {
   ItemProjection,
@@ -758,7 +759,7 @@ it("previews at most 20 stored matches with an exact total, a selected prompt, a
     ),
   ));
 
-it("edits projects, scopes preview to project membership, and refuses ambiguous short loop names", () =>
+it("preserves lanes across repository casing, scopes project previews, and refuses ambiguous loop names", () =>
   Effect.runPromise(
     Effect.gen(function* () {
       const { request, current, store } = yield* harness();
@@ -793,7 +794,7 @@ it("edits projects, scopes preview to project membership, and refuses ambiguous 
           value: {
             id: "acme-project",
             name: "Renamed",
-            repositories: ["acme/project"],
+            repositories: ["Acme/Project"],
             lanes: [{ name: "Ready", sources: [{ label: "ready" }] }],
           },
         }),
@@ -804,23 +805,34 @@ it("edits projects, scopes preview to project membership, and refuses ambiguous 
           value: Schema.encodeSync(Schema.toCodecJson(LoopFile))(loop),
         }),
       ).toMatchObject({ status: 200, body: { repositoriesWithoutItems: ["acme/project"] } });
-      expect(yield* request("GET", "/entities/repository/acme%2Fproject")).toMatchObject({
+      const repositoryResponse = yield* request("GET", "/entities/repository/acme%2Fproject");
+      expect(repositoryResponse).toMatchObject({
         status: 200,
         body: { value: { lanes: [{ name: "Ready" }] } },
       });
+      const repository = Schema.decodeUnknownSync(
+        Schema.Struct({ number: ConfigurationRevisionNumber, value: ManagedRepo }),
+      )(repositoryResponse.body);
+      const value = Schema.encodeSync(ManagedRepo)(repository.value);
       expect(
         yield* request("PUT", "/entities/repository/acme%2Fproject", {
-          expected: 3,
+          expected: repository.number,
           value: {
-            name: "acme/project",
-            tags: ["app"],
-            lanes: [{ name: "In review", sources: [{ label: "review" }] }],
+            ...value,
+            lanes: [...repository.value.lanes, { name: "Done", sources: [{ label: "done" }] }],
           },
         }),
       ).toMatchObject({ status: 200, body: { number: 4 } });
       expect(yield* request("GET", "/entities/project/acme-project")).toMatchObject({
         status: 200,
-        body: { value: { lanes: [{ name: "In review" }] } },
+        body: {
+          value: {
+            lanes: [
+              { name: "Ready", sources: [{ label: "ready" }] },
+              { name: "Done", sources: [{ label: "done" }] },
+            ],
+          },
+        },
       });
       expect(
         yield* request("PUT", "/entities/project/acme-project", {

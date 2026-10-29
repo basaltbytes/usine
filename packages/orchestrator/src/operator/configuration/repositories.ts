@@ -19,12 +19,11 @@ export const repositoryEditorEntity = (
   if (entity.key.kind !== "repository" || Option.isNone(snapshot.instance)) return entity;
   const { config } = snapshot.instance.value;
   const repository = config.repos.find(({ name }) => name === String(entity.key.identifier));
+  if (repository === undefined) return entity;
   const project = config.projects.find(
-    (project) =>
-      project.repositories.length === 1 &&
-      project.repositories.some((name) => name === String(entity.key.identifier)),
+    (project) => project.repositories.length === 1 && project.includes(repository.name),
   );
-  if (repository === undefined || project === undefined) return entity;
+  if (project === undefined) return entity;
   return new ConfigurationEntity({
     ...entity,
     value: Schema.encodeSync(ManagedRepo)(new ManagedRepo({ ...repository, lanes: project.lanes })),
