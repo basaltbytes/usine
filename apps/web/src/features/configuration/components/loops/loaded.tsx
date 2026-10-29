@@ -1,4 +1,3 @@
-import { entityKey } from "~/features/configuration/lib/entities";
 import { WarningIcon } from "@phosphor-icons/react";
 import type {
   ConfigurationView,
@@ -7,12 +6,9 @@ import type {
 } from "@usine/orchestrator/operator";
 import { ErrorAlert } from "~/components/error-alert";
 import { LoopFacts } from "~/features/configuration/components/loops/facts";
-import { LoopState } from "~/features/configuration/components/loops/state";
 import { type PauseLoop } from "~/features/configuration/components/loops/list";
-import { PauseButton } from "~/features/configuration/components/loops/pause-button";
 import { interpolations, PromptMarkdown } from "~/features/configuration/components/prompt";
 import {
-  ConfigurationPage,
   DetailColumns,
   DetailSection,
   Frontmatter,
@@ -43,13 +39,7 @@ type LoadedLoopProps = {
 export const LoadedLoop = ({ loop, configuration, pause }: LoadedLoopProps) => {
   const expressions = interpolations(loop.prompt).length;
   return (
-    <ConfigurationPage
-      entity={entityKey("loop", loop.name)}
-      title={loop.name}
-      marks={<LoopState paused={loop.paused} />}
-      file={loop.file}
-      actions={pause !== null && <PauseButton loop={loop} pause={pause} variant="outline" />}
-    >
+    <>
       {pause?.isError === true && <ErrorAlert message={pause.error.message} />}
       <DetailColumns facts={<LoopFacts loop={loop} configuration={configuration} />}>
         <DetailSection title="Trigger">
@@ -84,6 +74,6 @@ export const LoadedLoop = ({ loop, configuration, pause }: LoadedLoopProps) => {
           <PromptMarkdown template={loop.prompt} />
         </DetailSection>
       </DetailColumns>
-    </ConfigurationPage>
+    </>
   );
 };

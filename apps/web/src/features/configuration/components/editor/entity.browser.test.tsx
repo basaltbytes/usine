@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { ReadyOverview } from "@usine/orchestrator/operator";
+import { ConfigurationView, ReadyOverview } from "@usine/orchestrator/operator";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
@@ -242,6 +242,23 @@ it.each([
     url: `/api/configuration/entities/${kind}/${identifier}`,
     payload: { expected: 2, text: "changed text" },
   });
+});
+
+it("keeps a loop draft when a refresh removes the loop", async () => {
+  await mount("/configuration/loops/start-dev");
+  await button("Edit").click();
+  const source = page.getByRole("textbox", { name: "Configuration text" });
+  await source.fill("keep this loop draft");
+  client.setQueryData(
+    configurationQuery().queryKey,
+    new ConfigurationView({ ...configurationFixture(), loops: [] }),
+  );
+  await expect
+    .element(page.getByText("loops/start-dev.md", { exact: true }))
+    .not.toBeInTheDocument();
+  await expect.element(source).toHaveValue("keep this loop draft");
+  await button("Cancel").click();
+  await expect.element(page.getByText("Loop not found", { exact: true })).toBeVisible();
 });
 
 it("reports worker preflight refusals without discarding the draft", async () => {
