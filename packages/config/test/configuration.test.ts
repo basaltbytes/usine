@@ -243,13 +243,16 @@ for (const [name, layer] of adapters)
         expect(revision.changes).toEqual(configurationDiff([], canonical));
         const { instance } = yield* store.read;
         if (Option.isNone(instance)) return yield* Effect.die("configuration is uninitialized");
-        yield* folder.export(root, migrateProjects(instance.value));
+        yield* folder.export(root, yield* Effect.fromResult(migrateProjects(instance.value)));
         const imported = configurationEntities(yield* folder.load(root));
         expect(new Set(imported.map(({ key }) => key.kind))).toEqual(
           new Set(["settings", "worker", "repository", "project", "label", "loop", "agent"]),
         );
         expect(
-          configurationDiff(configurationEntities(migrateProjects(instance.value)), imported),
+          configurationDiff(
+            configurationEntities(yield* Effect.fromResult(migrateProjects(instance.value))),
+            imported,
+          ),
         ).toEqual([]);
         for (const entity of imported) {
           const edited = yield* parseConfigurationEntity(
@@ -559,10 +562,20 @@ it.effect(
       const fs = yield* FileSystem.FileSystem;
       const folder = yield* ConfigurationFolder;
       const root = InstanceDirectory.make(yield* fs.makeTempDirectoryScoped());
-      const original = migrateProjects(yield* fixture);
+      const original = yield* Effect.fromResult(migrateProjects(yield* fixture));
       yield* folder.export(root, original);
       const imported = yield* folder.load(root);
       expect(Equal.equals(imported, original)).toBe(true);
+      const withoutLoops = new LoadedInstance({ ...original, loops: [] });
+      yield* folder.export(root, withoutLoops);
+      yield* fs.remove(`${root}/projects`, { recursive: true });
+      expect(Equal.equals(yield* folder.load(root), withoutLoops)).toBe(true);
+      const [project] = original.config.projects;
+      if (project === undefined) return yield* Effect.die("fixture project missing");
+      yield* fs.makeDirectory(`${root}/projects/${project.id}`, { recursive: true });
+      yield* fs.writeFileString(`${root}/projects/${project.id}/loops`, "not a directory");
+      const unreadable = yield* folder.load(root).pipe(Effect.flip);
+      expect(unreadable.problems.map(({ file }) => file)).toContain(`projects/${project.id}/loops`);
       yield* fs.writeFileString(`${root}/usine.yaml`, "version: bad\nrepos: wrong\n");
       yield* fs.writeFileString(`${root}/agents/developer.md`, "broken");
       const failure = yield* folder.load(root).pipe(Effect.flip);

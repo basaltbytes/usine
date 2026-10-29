@@ -1,5 +1,4 @@
 import { Link } from "@tanstack/react-router";
-import type { RepositoryName } from "@usine/core/repository";
 import type { BoardTaskView } from "@usine/orchestrator/operator";
 import { projectParams } from "~/lib/overview";
 import { taskNumber } from "~/lib/tasks/model";
@@ -10,15 +9,14 @@ const titleClass =
 
 type CardTitleProps = {
   readonly item: BoardTaskView;
-  readonly repository: RepositoryName;
 };
 
 /** Renders the title as a link to the Task page at the originating Item's number. */
-export const CardTitle = ({ item, repository }: CardTitleProps) => (
+export const CardTitle = ({ item }: CardTitleProps) => (
   <h3 className="text-sm/snug font-medium text-card-foreground" title={item.title}>
     <Link
       to="/projects/$owner/$name/tasks/$number"
-      params={{ ...projectParams(repository), number: taskNumber(item) }}
+      params={{ ...projectParams(item.repository), number: taskNumber(item) }}
       draggable={false}
       className={titleClass}
     >

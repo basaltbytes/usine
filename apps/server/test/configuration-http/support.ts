@@ -81,10 +81,15 @@ export const harness = (
     const initial = new LoadedInstance({
       config: yield* parser.parseUsineYaml(
         InstancePath.make("usine.yaml"),
-        "version: 1\noperator: operator\nrepos:\n  - name: acme/project\n    tags: [app]\n  - name: acme/other\n    tags: [other]\n",
+        "version: 2\noperator: operator\nprojects: [{ id: acme-project, name: Project, repositories: [acme/project] }, { id: acme-other, name: Other, repositories: [acme/other] }]\nrepos:\n  - name: acme/project\n    tags: [app]\n  - name: acme/other\n    tags: [other]\n",
       ),
       agents: [yield* parser.parseAgentFile(InstancePath.make("agents/developer.md"), agentText)],
-      loops: [yield* parser.parseLoopFile(InstancePath.make("loops/implement.md"), loopText)],
+      loops: [
+        yield* parser.parseLoopFile(
+          InstancePath.make("projects/acme-project/loops/implement.md"),
+          loopText,
+        ),
+      ],
       invalidAgents: [],
       quarantinedLoops: [],
       warnings: [],

@@ -1,12 +1,14 @@
 import { ProjectId } from "@usine/core/project";
 import { LoopName } from "@usine/core/loop";
 import { canonicalRepositoryName, type RepositoryName } from "@usine/core/repository";
-import { Option } from "effect";
+import { Array as Arr, Option, Result, Schema } from "effect";
 import { ManagedRepo, UsineConfig } from "../factory.ts";
 import { LoadedInstance } from "../instance/instance.ts";
 import { LoopFile } from "../loop.ts";
 import { DeclaredLabel, canonicalLabelName } from "../label.ts";
-import { matchesSelector } from "../selector.ts";
+import { ConfigurationInvalid } from "../configuration/model.ts";
+import { ConfigFileError, InstancePath } from "../file.ts";
+import { Selector, matchesSelector } from "../selector.ts";
 import { Project } from "./project.ts";
 
 export { Project } from "./project.ts";
@@ -46,8 +48,27 @@ export const boardRepositories = (config: UsineConfig): ReadonlyArray<ManagedRep
       );
 
 /** Converts the version 1 registry and selectors without changing agent or loop content. */
-export const migrateProjects = (instance: LoadedInstance): LoadedInstance => {
-  if (instance.config.version === 2) return instance;
+export const migrateProjects = (
+  instance: LoadedInstance,
+): Result.Result<LoadedInstance, ConfigurationInvalid> => {
+  if (instance.config.version === 2) return Result.succeed(instance);
+  const problems = instance.loops
+    .filter((loop) => !instance.config.repos.some((repo) => matchesSelector(loop.selector, repo)))
+    .map(
+      (loop) =>
+        new ConfigFileError({
+          file: InstancePath.make(`loops/${loop.name}.md`),
+          stage: "reference",
+          expression: Option.none(),
+          message: `Cannot migrate loop ${loop.name}: selector ${JSON.stringify(
+            Option.match(loop.selector, {
+              onNone: () => null,
+              onSome: Schema.encodeSync(Selector),
+            }),
+          )} matches no registered repository. Register a matching repository or remove the loop before migrating.`,
+        }),
+    );
+  if (Arr.isArrayNonEmpty(problems)) return Result.fail(new ConfigurationInvalid({ problems }));
   const used = new Set<string>();
   const projects = instance.config.repos.map((repository) => {
     const base =
@@ -76,17 +97,19 @@ export const migrateProjects = (instance: LoadedInstance): LoadedInstance => {
           ),
       ),
   );
-  return new LoadedInstance({
-    ...instance,
-    config: new UsineConfig({
-      ...instance.config,
-      version: 2,
-      projects,
-      repos: instance.config.repos.map((repo) => new ManagedRepo({ ...repo, lanes: [] })),
+  return Result.succeed(
+    new LoadedInstance({
+      ...instance,
+      config: new UsineConfig({
+        ...instance.config,
+        version: 2,
+        projects,
+        repos: instance.config.repos.map((repo) => new ManagedRepo({ ...repo, lanes: [] })),
+      }),
+      loops,
+      warnings: [],
     }),
-    loops,
-    warnings: [],
-  });
+  );
 };
 
 export const labelsForRepository = (

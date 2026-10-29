@@ -572,6 +572,7 @@ describe("Board projection", () => {
 
   it("derives an authored lane mutation without trusting truncated card labels", () => {
     const card = new BoardTaskView({
+      repository,
       itemKey,
       kind: "issue",
       number: CoreItemNumber.make(33),
@@ -867,6 +868,12 @@ it.effect("matches a project's label lane by name in both repositories", () =>
       repository,
       RepositoryName.make("basaltbytes/second"),
     ]);
-    assert.strictEqual(projects[0]?.board.lanes[0]?.items.length, 2);
+    assert.deepStrictEqual(
+      projects[0]?.board.lanes[0]?.items.map(({ repository, number }) => ({ repository, number })),
+      [
+        { repository, number: item.number },
+        { repository: "basaltbytes/second", number: item.number },
+      ],
+    );
   }),
 );

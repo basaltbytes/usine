@@ -484,3 +484,62 @@ for (const scenario of [
     },
   );
 }
+
+for (const scenario of ["empty registry", "unmatched selector"] as const) {
+  test(`preserves authored loops and revisions when migration has an ${scenario}`, async ({
+    directory,
+  }) => {
+    const repos =
+      scenario === "empty registry"
+        ? []
+        : [
+            { name: "acme/one", tags: ["app"] },
+            { name: "acme/two", tags: ["other"] },
+          ];
+    await writeFile(join(directory, "usine.yaml"), stringify({ version: 1, repos }));
+    const selector =
+      scenario === "empty registry" ? "" : "selector: { repos: [acme/one], tags: [other] }\n";
+    for (const name of ["implement", "review"])
+      await writeFile(
+        join(directory, `loops/${name}.md`),
+        `---\ntrigger: { on: issue, if: 'true' }\nagent: developer\n${selector}---\nImplement.\n`,
+      );
+    const root = InstanceDirectory.make(directory);
+    const parser = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
+    const legacyStore = Layer.mergeAll(sqliteConfigurationLayer, InstanceFolder.layer).pipe(
+      Layer.provide(parser),
+      Layer.provide(localSqliteLayer(root)),
+      Layer.provide(NodeServices.layer),
+    );
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const instance = yield* (yield* InstanceFolder).load(root);
+        const store = yield* ConfigurationStore;
+        const current = yield* store.read;
+        yield* store.commit({
+          expected: current.number,
+          actor: instance.config.operator,
+          message: Option.some("Part 1 configuration"),
+          changes: configurationDiff([], configurationEntities(instance)),
+        });
+      }).pipe(Effect.provide(legacyStore), Effect.scoped),
+    );
+    const database = new DatabaseSync(join(directory, ".usine/runtime.sqlite"));
+    try {
+      const entities = () =>
+        database.prepare("SELECT * FROM usine_configuration_entities ORDER BY key").all();
+      const before = entities();
+      const result = run(directory, ["export", join(directory, "exported")]);
+      expect(result.status).not.toBe(0);
+      for (const name of ["implement", "review"])
+        expect(result.stdout + result.stderr).toContain(`Cannot migrate loop ${name}: selector`);
+      expect(entities()).toEqual(before);
+      expect(
+        database.prepare("SELECT count(*) AS count FROM usine_configuration_revisions").get()
+          ?.count,
+      ).toBe(1);
+    } finally {
+      database.close();
+    }
+  });
+}

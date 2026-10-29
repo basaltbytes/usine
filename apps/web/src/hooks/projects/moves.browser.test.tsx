@@ -28,6 +28,7 @@ import { taskUsageOf } from "~/lib/projects/fixture";
 declare module "vitest/browser" {
   interface BrowserCommands {
     boardResponses: (overview: string, moveStatus: 200 | 503) => Promise<void>;
+    boardMoveRequests: () => Promise<Array<{ url: string; body: unknown }>>;
     delayBoardMove: () => Promise<void>;
     releaseBoardMove: () => Promise<void>;
   }
@@ -72,6 +73,7 @@ const overview = (
                 });
                 return [
                   new BoardTaskView({
+                    repository: projectRepository,
                     ...link,
                     state: "issue-open",
                     labels: [label, ...additionalLabels.map((name) => GitHubLabelName.make(name))],
@@ -317,4 +319,63 @@ it("restores the original lane and explains a failed GitHub write", async () => 
   await expect.element(page.getByText("GitHub is unavailable")).toBeVisible();
   await expect.element(taskIn("Backlog")).toBeVisible();
   await expect.element(taskIn("Ready")).not.toBeInTheDocument();
+});
+
+it("moves and links cards with matching numbers using each card's repository", async () => {
+  const first = overview(["Backlog"]);
+  const second = overview(["Backlog"], "", [], RepositoryName.make("board-test/other"));
+  const [other] = second.projects;
+  if (other === undefined) throw new Error("Missing second project");
+  const data = new ReadyOverview({
+    ...first,
+    projects: first.projects.map(
+      (project) =>
+        new ProjectView({
+          ...project,
+          repositories: [project.repository, other.repository],
+          board: new BoardView({
+            failures: [],
+            lanes: project.board.lanes.map(
+              (lane) =>
+                new WritableBoardLaneView({
+                  ...lane,
+                  _tag: "WritableBoardLane",
+                  origin: "authored",
+                  labels: [GitHubLabelName.make(lane.name)],
+                  items: [
+                    ...lane.items,
+                    ...other.board.lanes
+                      .filter(({ id }) => id === lane.id)
+                      .flatMap(({ items }) => items),
+                  ],
+                }),
+            ),
+          }),
+        }),
+    ),
+  });
+  await respond(data);
+  await queryClient.refetchQueries({ queryKey: overviewQuery().queryKey });
+  const cards = lane("Backlog").getByRole("link", { name: "Task 1", exact: true });
+  await expect.element(cards.nth(0)).toHaveAttribute("href", "/projects/board-test/repo/tasks/1");
+  await expect.element(cards.nth(1)).toHaveAttribute("href", "/projects/board-test/other/tasks/1");
+  await lane("Backlog")
+    .getByRole("button", { name: "Actions for issue #1", exact: true })
+    .nth(1)
+    .click();
+  await moveTo().click();
+  await page.getByRole("menuitem", { name: "Ready", exact: true }).click();
+  await expect.element(lane("Ready").getByRole("status")).toMatchTextContent("Saved on GitHub");
+  expect(await commands.boardMoveRequests()).toEqual([
+    {
+      url: expect.stringMatching(/\/api\/projects\/board-test\/other\/items\/1\/lane$/),
+      body: { toLane: "Ready" },
+    },
+  ]);
+  await expect
+    .element(taskIn("Backlog"))
+    .toHaveAttribute("href", "/projects/board-test/repo/tasks/1");
+  await expect
+    .element(taskIn("Ready"))
+    .toHaveAttribute("href", "/projects/board-test/other/tasks/1");
 });

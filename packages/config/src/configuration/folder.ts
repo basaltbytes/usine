@@ -57,8 +57,15 @@ export class ConfigurationFolder extends Context.Service<
         fs
           .readFileString(path.join(root, file))
           .pipe(Effect.mapError((error) => fileError(file, error.message)));
-      const files = (root: InstanceDirectory, directory: string) =>
+      const files = (root: InstanceDirectory, directory: string, missing: "empty" | "error") =>
         fs.readDirectory(path.join(root, directory)).pipe(
+          Effect.catchIf(
+            (error) => missing === "empty" && error.reason._tag === "NotFound",
+            () =>
+              Effect.logDebug("Configuration folder has no loop files", { directory }).pipe(
+                Effect.as([]),
+              ),
+          ),
           Effect.map((names) => names.filter((name) => name.endsWith(".md")).sort()),
           Effect.mapError((error) => fileError(directory, error.message)),
         );
@@ -76,10 +83,11 @@ export class ConfigurationFolder extends Context.Service<
             if (Result.isFailure(config)) problems.push(config.failure);
             const load = <A>(
               directory: string,
+              missing: "empty" | "error",
               parse: (file: InstancePath, source: string) => Effect.Effect<A, ConfigFileError>,
             ) =>
               Effect.gen(function* () {
-                const names = yield* files(root, directory).pipe(Effect.result);
+                const names = yield* files(root, directory, missing).pipe(Effect.result);
                 if (Result.isFailure(names)) {
                   problems.push(names.failure);
                   return [];
@@ -102,13 +110,13 @@ export class ConfigurationFolder extends Context.Service<
                 }
                 return values;
               });
-            const agents = yield* load<AgentFile>("agents", parser.parseAgentFile);
+            const agents = yield* load<AgentFile>("agents", "error", parser.parseAgentFile);
             const loops =
               Result.isSuccess(config) && config.success.version === 2
                 ? (yield* Effect.forEach(config.success.projects, (project) =>
-                    load<LoopFile>(`projects/${project.id}/loops`, parser.parseLoopFile),
+                    load<LoopFile>(`projects/${project.id}/loops`, "empty", parser.parseLoopFile),
                   )).flat()
-                : yield* load<LoopFile>("loops", parser.parseLoopFile);
+                : yield* load<LoopFile>("loops", "error", parser.parseLoopFile);
             if (Result.isSuccess(config)) {
               const references = referenceIndex(config.success, agents);
               for (const loop of loops) {
@@ -119,19 +127,29 @@ export class ConfigurationFolder extends Context.Service<
             if (Arr.isArrayNonEmpty(problems)) return yield* new ConfigurationInvalid({ problems });
             if (Result.isFailure(config))
               return yield* new ConfigurationInvalid({ problems: [config.failure] });
-            return migrateProjects(
-              new LoadedInstance({
-                config: config.success,
-                agents,
-                loops,
-                warnings: yield* configurationWarnings(parser, config.success, loops),
-                invalidAgents: [],
-                quarantinedLoops: [],
-              }),
+            return yield* Effect.fromResult(
+              migrateProjects(
+                new LoadedInstance({
+                  config: config.success,
+                  agents,
+                  loops,
+                  warnings: yield* configurationWarnings(parser, config.success, loops),
+                  invalidAgents: [],
+                  quarantinedLoops: [],
+                }),
+              ),
             );
           },
           Effect.tapError(({ problems }) =>
-            Effect.logWarning("Configuration folder rejected", { problems: problems.length }),
+            Effect.forEach(
+              problems,
+              (problem) =>
+                Effect.logWarning("Configuration folder rejected", {
+                  file: problem.file,
+                  message: problem.message,
+                }),
+              { discard: true },
+            ),
           ),
         ),
         export: Effect.fn("ConfigurationFolder.export")(

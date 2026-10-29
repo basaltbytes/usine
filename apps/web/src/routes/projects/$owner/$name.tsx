@@ -1,7 +1,7 @@
 import { createFileRoute, notFound, Outlet } from "@tanstack/react-router";
 import { RepositoryName } from "@usine/core/repository";
 import { ProjectNotFound } from "~/components/project-not-found";
-import { overviewQuery } from "~/lib/overview";
+import { overviewQuery, projectForRepository } from "~/lib/overview";
 
 const ProjectLayout = () => <Outlet />;
 
@@ -16,7 +16,7 @@ export const Route = createFileRoute("/projects/$owner/$name")({
   },
   loader: async ({ context, params }) => {
     const overview = await context.queryClient.ensureQueryData(overviewQuery());
-    if (!overview.projects.some(({ repository }) => repository === params.repository)) {
+    if (projectForRepository(overview.projects, params.repository) === undefined) {
       throw notFound();
     }
   },

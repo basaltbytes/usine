@@ -99,7 +99,20 @@ export const initializeConfiguration = Effect.fn("Server.initializeConfiguration
   const store = yield* ConfigurationStore;
   const current = yield* store.read;
   if (Option.isSome(current.instance) && current.instance.value.config.version === 1) {
-    const migrated = migrateProjects(current.instance.value);
+    const migrated = yield* Effect.fromResult(migrateProjects(current.instance.value)).pipe(
+      Effect.tapError(({ problems }) =>
+        Effect.forEach(
+          problems,
+          (problem) =>
+            Effect.logError("Project migration would drop an authored loop", {
+              revision: current.number,
+              file: problem.file,
+              message: problem.message,
+            }),
+          { discard: true },
+        ),
+      ),
+    );
     yield* store
       .commit({
         expected: current.number,

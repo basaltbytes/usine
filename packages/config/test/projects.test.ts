@@ -92,7 +92,7 @@ it.effect(
         ["basaltbytes/usine"],
         ["start-dev", "review", "fix", "finish", "check"],
       );
-      const migrated = migrateProjects(five);
+      const migrated = yield* Effect.fromResult(migrateProjects(five));
       expect(migrated.config.projects.map(({ id }) => id)).toEqual(["basaltbytes-usine"]);
       expect(migrated.loops.map(({ name }) => name)).toEqual(
         five.loops.map(({ name }) => `basaltbytes-usine/${name}`),
@@ -100,10 +100,12 @@ it.effect(
       expect(
         configurationDiff(
           configurationEntities(migrated),
-          configurationEntities(migrateProjects(migrated)),
+          configurationEntities(yield* Effect.fromResult(migrateProjects(migrated))),
         ),
       ).toEqual([]);
-      const two = migrateProjects(yield* legacy(["acme/one", "acme/two"], ["start-dev"]));
+      const two = yield* Effect.fromResult(
+        migrateProjects(yield* legacy(["acme/one", "acme/two"], ["start-dev"])),
+      );
       expect(two.loops.map(({ name }) => name)).toEqual([
         "acme-one/start-dev",
         "acme-two/start-dev",

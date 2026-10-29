@@ -13,6 +13,7 @@ import vite from "./vite.config.ts";
 
 // Set on Workers from infra/hetzner/cloud-init.yaml, which use Debian's Chromium, not Playwright's.
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
+const boardMoveRequests = new WeakMap<Page, Array<{ url: string; body: unknown }>>();
 const delayedMoves = new WeakMap<Page, Promise<Route>>();
 const delayedRunAgains = new WeakMap<Page, Promise<Route>>();
 const interventionRequests = new WeakMap<
@@ -339,7 +340,7 @@ export default mergeConfig(
                     receive = resolve;
                   });
                   delayedMoves.set(page, request);
-                  await page.unroute("**/api/projects/board-test/repo/items/*/lane");
+                  await page.unroute("**/api/projects/board-test/*/items/*/lane");
                   await page.route("**/api/projects/board-test/repo/items/*/lane", (route) =>
                     receive(route),
                   );
@@ -433,14 +434,21 @@ export default mergeConfig(
                 },
                 statisticsRequests: async ({ page }) =>
                   statisticsWindows.get(page) ?? { tasks: [], runs: [] },
+                boardMoveRequests: async ({ page }) => boardMoveRequests.get(page) ?? [],
                 boardResponses: async ({ page }, overview: string, moveStatus: 200 | 503) => {
                   await page.unroute("**/api/overview");
-                  await page.unroute("**/api/projects/board-test/repo/items/*/lane");
+                  await page.unroute("**/api/projects/board-test/*/items/*/lane");
                   await page.route("**/api/overview", (route) =>
                     route.fulfill({ contentType: "application/json", body: overview }),
                   );
-                  await page.route("**/api/projects/board-test/repo/items/*/lane", (route) =>
-                    route.fulfill({
+                  const requests: Array<{ url: string; body: unknown }> = [];
+                  boardMoveRequests.set(page, requests);
+                  await page.route("**/api/projects/board-test/*/items/*/lane", (route) => {
+                    requests.push({
+                      url: route.request().url(),
+                      body: route.request().postDataJSON(),
+                    });
+                    return route.fulfill({
                       status: moveStatus,
                       contentType: "application/json",
                       body: JSON.stringify(
@@ -448,8 +456,8 @@ export default mergeConfig(
                           ? { ok: true }
                           : { error: "BackendUnavailableError", message: "GitHub is unavailable" },
                       ),
-                    }),
-                  );
+                    });
+                  });
                 },
               },
               instances: [{ browser: "chromium" }],

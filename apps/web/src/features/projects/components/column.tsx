@@ -2,7 +2,6 @@ import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { ArrowsInLineHorizontalIcon } from "@phosphor-icons/react";
 import { isSettledItemState } from "@usine/config/board";
-import type { RepositoryName } from "@usine/core/repository";
 import type { RunId } from "@usine/core/run";
 import type { BoardLaneView, BoardTaskView, StalledItemView } from "@usine/orchestrator/operator";
 import { useState } from "react";
@@ -79,7 +78,6 @@ type BoardColumnProps = {
   readonly stallOf: (task: BoardTaskView) => StalledItemView | null;
   readonly openRun: (runId: RunId) => void;
   readonly onMove: (item: BoardTaskView, lane: BoardLaneView) => void;
-  readonly repository: RepositoryName;
 };
 
 /** `stallOf` returns a Task's stall reason, if any; `readOnly` hides the actions during setup. */
@@ -95,7 +93,6 @@ export const BoardColumn = ({
   stallOf,
   openRun,
   onMove,
-  repository,
 }: BoardColumnProps) => {
   const foldable = foldsByDefault(lane);
   const [folded, setFolded] = useState(foldable);
@@ -182,7 +179,6 @@ export const BoardColumn = ({
                 stall={stallOf(item)}
                 readOnly={readOnly}
                 openRun={openRun}
-                repository={repository}
               />
             );
           })}

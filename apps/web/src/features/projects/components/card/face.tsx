@@ -1,5 +1,4 @@
 import { cardAttentionLabel, cardConflictLabel } from "~/features/projects/strings";
-import type { RepositoryName } from "@usine/core/repository";
 import type { BoardLaneView, BoardTaskView, StalledItemView } from "@usine/orchestrator/operator";
 import { ItemMark } from "~/components/item/mark";
 import { StallAction } from "~/components/stall/action";
@@ -21,7 +20,6 @@ type CardFaceProps = {
   readonly item: BoardTaskView;
   readonly lane: BoardLaneView;
   readonly catalog: LabelCatalog;
-  readonly repository: RepositoryName;
   readonly stall: StalledItemView | null;
   readonly readOnly: boolean;
   /** The card's Run actions, or `null` on the drag overlay copy. */
@@ -35,7 +33,6 @@ export const CardFace = ({
   item,
   lane,
   catalog,
-  repository,
   stall,
   readOnly,
   action,
@@ -66,7 +63,7 @@ export const CardFace = ({
           <ItemMark key={member.itemKey} item={member} className="relative z-10" />
         ))}
       </p>
-      <CardTitle item={item} repository={repository} />
+      <CardTitle item={item} />
       <CardLabels labels={cardLabels(item, lane)} catalog={catalog} />
       {run !== null && <RunLine run={run} />}
       {progress !== null && (

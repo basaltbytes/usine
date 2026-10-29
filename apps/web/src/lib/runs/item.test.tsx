@@ -172,6 +172,7 @@ const overviewWith = (members: readonly [BoardItemLink, ...Array<BoardItemLink>]
               origin: "fallback",
               items: [
                 new BoardTaskView({
+                  repository,
                   ...current,
                   title: members[0].title,
                   labels: [],

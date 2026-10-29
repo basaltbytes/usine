@@ -71,6 +71,7 @@ export const useBoardMoves = (project: ProjectView) => {
       toLane,
     }: {
       readonly repository: RepositoryName;
+      readonly boardRepository: RepositoryName;
       readonly itemKey: ItemKey;
       readonly item: ItemNumber;
       readonly toLane: BoardLaneView["id"];
@@ -83,16 +84,16 @@ export const useBoardMoves = (project: ProjectView) => {
         }),
       );
     },
-    // Callbacks use the request's repository because navigation can replace the observer's options
+    // Callbacks use the request's board because navigation can replace the observer's options
     // while the request is in flight.
-    onSuccess: (_, { repository, itemKey }) => {
-      updateMoves(repository, (moves) =>
+    onSuccess: (_, { boardRepository, itemKey }) => {
+      updateMoves(boardRepository, (moves) =>
         moves.map((move) => (move.itemKey === itemKey ? { ...move, phase: "syncing" } : move)),
       );
       return queryClient.invalidateQueries({ queryKey: overviewQuery().queryKey });
     },
-    onError: (_, { repository, itemKey }) => {
-      updateMoves(repository, (moves) => moves.filter((move) => move.itemKey !== itemKey));
+    onError: (_, { boardRepository, itemKey }) => {
+      updateMoves(boardRepository, (moves) => moves.filter((move) => move.itemKey !== itemKey));
       return queryClient.invalidateQueries({ queryKey: overviewQuery().queryKey });
     },
   });
@@ -126,13 +127,14 @@ export const useBoardMoves = (project: ProjectView) => {
       },
     ]);
     write.mutate({
-      repository: project.repository,
+      repository: item.repository,
+      boardRepository: project.repository,
       itemKey: item.itemKey,
       item: item.number,
       toLane: target.id,
     });
   };
-  const belongsToProject = write.variables?.repository === project.repository;
+  const belongsToProject = write.variables?.boardRepository === project.repository;
   return {
     moves,
     moveItem,
