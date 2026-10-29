@@ -607,8 +607,8 @@ export const makeExpressionEngine = () => {
  * `item.?milestone.?title` is empty.
  *
  * Before evaluation, converts JSON integers to `bigint` wherever the {@link Environment}
- * declares `int`, at any depth, and sets absent nullable fields to `null`. Values inside a
- * `map<K,V>` aren't converted, so declare integer map values as `double`.
+ * declares `int`, including list items, map values, and declared object fields, and sets absent
+ * nullable fields to `null`.
  *
  * `uint` isn't supported in `context`; declare such values as `int`. An expression that reads a
  * non-nullable `uint` value type-checks but fails evaluation. On a nullable field, comparing with a
