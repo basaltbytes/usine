@@ -82,7 +82,7 @@
   "devDependencies": {
     "@effect/platform-node": "catalog:",
     "@effect/vitest": "catalog:",
-    "@pwrdrvr/codex-app-server-protocol": "0.159.2",
+    "@pwrdrvr/codex-app-server-protocol": "0.164.0",
     "@usine/tsconfig": "workspace:*",
     "effect": "catalog:",
     "typescript": "catalog:",

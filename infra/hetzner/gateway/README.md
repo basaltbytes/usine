@@ -111,6 +111,8 @@ No client resolved a provider or registry name itself.
 
 ### Harness login hosts
 
+The worker images install Codex 0.164.0. Its gateway model-provider configuration is unchanged; the ChatGPT placeholder-swap test passes with that binary. The direct-login observations in this section describe the older versions used for that check.
+
 `egress-allowlist` lists these hosts in its harness logins section. They come from the gateway's journal on a Debian 13 worker with Claude Code 2.1.296 and Codex 0.153.4, while each login command ran up to its code and each harness sent a prompt with a made-up login; nothing else was requested. No login was completed, so the post-login calls come from URLs in Claude Code's binary: they go to `api.anthropic.com`.
 
 | Harness and login | Host | What calls it |
@@ -130,7 +132,7 @@ With both logins done, a one-prompt turn requested unlisted hosts and completed 
 | Codex | `github.com`, `api.github.com`, `sdmntpr<region>.oaiusercontent.com` | `features.plugins=false`, `features.remote_plugin=false`, and `features.apps=false` disable plugin downloads, their bundled skill sync, and account apps. `check_for_update_on_startup=false` disables update checks. |
 | Codex | `ab.chatgpt.com` | `analytics.enabled=false` disables analytics. |
 
-Claude's environment settings are documented in the [environment variable reference](https://code.claude.com/docs/en/env-vars) and were checked against Claude Code 2.1.308. Codex's `-c` overrides were accepted with strict configuration checking by every supported version: 0.153.4 and 0.159.0 through 0.159.3. In an unauthenticated startup and account-check probe through a refusing proxy, these overrides removed all CONNECT requests and plugin-sync files; local skills still loaded. Preflight uses the same overrides as children. See the [Codex configuration reference](https://developers.openai.com/codex/config-reference/).
+Claude's environment settings are documented in the [environment variable reference](https://code.claude.com/docs/en/env-vars) and were checked against Claude Code 2.1.308. Codex's `-c` overrides were accepted with strict configuration checking by every version checked at the time: 0.153.4 and 0.159.0 through 0.159.3. In an unauthenticated startup and account-check probe through a refusing proxy, these overrides removed all CONNECT requests and plugin-sync files; local skills still loaded. Preflight uses the same overrides as children. See the [Codex configuration reference](https://developers.openai.com/codex/config-reference/).
 
 After deployment, run one authenticated Claude attempt and one Codex attempt and inspect the gateway journal for these hosts. For Claude, also record any requests to `api.anthropic.com` outside its configured base URL, the remaining check in [#234](https://github.com/basaltbytes/usine/issues/234).
 

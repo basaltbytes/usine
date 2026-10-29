@@ -4,7 +4,7 @@ import { UsageCount } from "./count.ts";
 
 /**
  * The Codex app-server wire types: the request types that usine sends, copied from
- * `@pwrdrvr/codex-app-server-protocol@0.159.2` (codex-cli 0.159.2) because that package resolves
+ * `@pwrdrvr/codex-app-server-protocol@0.164.0` (codex-cli 0.164.0) because that package resolves
  * only under bundler module resolution, and the decoders for the responses and notifications that
  * usine reads. `protocol-conformance/check.ts` fails `pnpm check` if either drifts from the
  * package; it compiles this module without Node types, so nothing here imports a Node module.
@@ -143,7 +143,9 @@ export const TurnCompleted = Schema.Struct({
         message: Schema.String,
         additionalDetails: Schema.NullOr(Schema.String),
         codexErrorInfo: Schema.optionalKey(
-          Schema.NullOr(Schema.Union([Schema.String, Schema.Record(Schema.String, Schema.Json)])),
+          Schema.NullOr(
+            Schema.Union([Schema.String, Schema.Record(Schema.String, Schema.Unknown)]),
+          ),
         ),
       }),
     ),

@@ -11,7 +11,7 @@ FROM debian:trixie-slim
 ARG NODE_MAJOR=22
 ARG PNPM_VERSION=11.20.0
 ARG CLAUDE_CODE_VERSION=2.1.308
-ARG CODEX_VERSION=0.159.2
+ARG CODEX_VERSION=0.164.0
 # The worker's SSH user ID, so that files the attempt writes in its mounted
 # checkout belong to that user. Preflight compares the two.
 ARG USINE_UID=1000
