@@ -90,6 +90,9 @@ export default mergeConfig(
                 configurationEditorResponses,
                 configurationEditorRequests,
                 configurationEditorScreenshot,
+                reducedMotion: async ({ page }, reduce: boolean) => {
+                  await page.emulateMedia({ reducedMotion: reduce ? "reduce" : "no-preference" });
+                },
                 taskListAvatarResponse: async ({ page }) => {
                   await page.unroute("https://github.com/board-test.png?*");
                   await page.route("https://github.com/board-test.png?*", (route) =>
