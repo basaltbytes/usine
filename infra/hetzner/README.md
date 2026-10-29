@@ -87,38 +87,19 @@ The attempt image has the Claude Code and Codex versions that the usine release 
 
 The first image pushed to GHCR is private. Make the `usine-worker` package public in its package settings on GitHub, or run `docker login ghcr.io` as `usine` on each worker.
 
-The harnesses that `cloud-init.yaml` installs on the machine serve the logins, and run attempts only on a machine without Docker. `cloud-init.yaml` runs only when the server is created, so to change their versions on a running worker, install them by hand. `usine` has no sudo and root can't log in over SSH, so install them as root through `su` in an SSH session as `usine`:
+The harnesses that `cloud-init.yaml` installs on the machine serve worker-local logins and run attempts on machines without Docker. To update those binaries, replace the worker as described below. `usine up` checks the Codex version at startup and before every attempt.
 
-1. Give root a password with `hcloud server reset-password <name>`, which prints it, then switch to root:
+## Update host configuration
 
-   ```sh
-   ssh -t -i ~/.ssh/usine_worker usine@<address> 'su -'
-   ```
+Workers have no root maintenance path: SSH refuses root, and `usine` has no sudo. A change to host files, firewall rules, Docker setup, or the host toolchain requires a new worker. cloud-init applies those files only when it creates the machine.
 
-   For a worker behind the gateway, connect with its `Host` entry; see [`gateway/README.md`](gateway/README.md).
+For a long-lived worker, wait for its attempts to finish, then create a replacement with `create-worker.sh`. For a worker behind a gateway, use [Create a worker behind the gateway](gateway/README.md#create-a-worker-behind-the-gateway) so the replacement has the private network and gateway settings. Wait for cloud-init, record the new SSH host key, update the destination in `usine.yaml` or the SSH alias, and run preflight before deleting the old machine.
 
-2. Run the `npm install -g` line of the setup script in `cloud-init.yaml`, with the variables of `/etc/environment`, which contain the forward proxy behind the gateway. Then lock root's password again:
+For a provisioned worker, build a new snapshot with `snapshot.sh` and update its `provisioner.image`. Existing attempts finish on their original machines; later attempts use the new snapshot.
 
-   ```sh
-   set -a; . /etc/environment; set +a
-   npm install -g pnpm@11.20.0 @anthropic-ai/claude-code@2.1.308 @openai/codex@0.159.2
-   passwd -l root
-   ```
+With [subscription logins on the gateway](gateway/README.md#give-the-gateway-the-subscription-logins), replacing a worker preserves both logins without an interactive login on the replacement. Configure `llm_providers` for those providers before replacing a worker that still uses local logins. A worker without gateway credentials needs the operator to log in again.
 
-The harness logins stay. `usine up` checks the Codex version at startup and before every attempt.
-
-## Add Docker to an existing worker
-
-A worker created before `cloud-init.yaml` installed Docker runs attempts as `usine`. Stop `usine up` or wait until the worker runs no attempt: after Docker is installed, usine refuses to reattach or salvage a checkout from before, because that would run git as `usine`, who can then use Docker. Such a checkout stays for you to salvage and remove. Then, as root through `su` as above:
-
-```sh
-set -a; . /etc/environment; set +a
-apt-get install -y docker.io docker-cli
-usermod -aG docker usine
-passwd -l root
-```
-
-For a worker behind the gateway, write the Docker proxy drop-in and `daemon.json` of `gateway/worker-cloud-init.yaml` first, and add the `ghcr.io` hosts of `gateway/egress-allowlist` to the gateway's allowlist; see [`gateway/README.md`](gateway/README.md). Start `usine up`; preflight pulls the image.
+Update a running gateway with [`gateway.sh apply`](gateway/README.md#apply-host-configuration). For an older gateway, review its egress allowlist separately: apply preserves that operator-managed file.
 
 ## Provisioned workers
 

@@ -1,6 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "ignoreBinaries": ["codex"],
+  "ignoreBinaries": ["codex", "diff"],
   "ignoreDependencies": [
     "@earendil-works/chord",
     "@earendil-works/pi-agent-core",
@@ -12,7 +12,7 @@
   ],
   "workspaces": {
     ".": {
-      "entry": [],
+      "entry": ["infra/hetzner/gateway/apply.mjs"],
       "project": []
     },
     "packages/agents": {
