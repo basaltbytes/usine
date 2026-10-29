@@ -29,3 +29,5 @@ A fenced `mermaid` code block renders as a diagram in the browser and follows th
 The worker reference documents provisioner timing settings in seconds, machine checks, and cleanup when a worker is removed. The execution architecture describes attempt persistence before machine creation.
 
 The [worker guide](src/content/docs/guides/add-a-worker.mdx) describes shared pnpm and Turborepo volumes, Node.js 22 provisioning, and container limits derived from the host.
+
+The [`usine config` reference](src/content/docs/reference/configuration/config.md) documents editing stored configuration, bulk import and export, revision history, and restart requirements. The guides use configuration revisions after the first-start import; YAML and Markdown files are the bootstrap and export formats.

@@ -1,15 +1,23 @@
 ---
 title: Add a worker
-description: Configure local, SSH, and Cloudflare workers in usine.yaml, pass worker preflight, and run SSH workers on a private network behind a gateway.
+description: Configure local, SSH, and Cloudflare workers with configuration revisions, pass worker preflight, and run SSH workers on a private network behind a gateway.
 sidebar:
   order: 5
 ---
 
 import { Steps } from "@astrojs/starlight/components";
 
-A worker is the machine or sandbox that has an attempt's checkout and runs its Claude Code or Codex children. The Pi parent always runs in the orchestrator. The [`workers`](/reference/configuration/usine-yaml/#workers) list of `usine.yaml` declares the workers.
+A worker is the machine or sandbox that has an attempt's checkout and runs its Claude Code or Codex children. The Pi parent always runs in the orchestrator. Worker records are stored in the configuration database. The [`workers`](/reference/configuration/usine-yaml/#workers) list in an exported `usine.yaml` represents them.
 
-For an existing instance, add or edit workers under **Configuration > Workers**. The raw editor accepts one worker object; omit the enclosing `workers:` list from the examples below. Files remain available for bulk import and export.
+For an existing instance, add or edit workers under **Configuration > Workers**. The raw editor accepts one worker object; omit the enclosing `workers:` list from the examples below. For CLI changes to an existing worker, use `EDITOR=vi usine config edit worker <name>`, also without the enclosing list. To add a worker, export the current configuration, add the record to the exported `usine.yaml`, and import the complete folder:
+
+```sh
+usine config export ./config-export
+# Add the worker to config-export/usine.yaml, retaining the other configuration.
+usine config import ./config-export --message "Add a worker"
+```
+
+The revision applies live after preflight. An existing worker's connection settings require a restart; `max_concurrent_attempts` applies live. See [Restart requirements](/reference/configuration/config/#live-changes-and-restart-requirements). The YAML examples below are export-format fragments.
 
 ## Worker kinds
 
@@ -22,7 +30,7 @@ For an existing instance, add or edit workers under **Configuration > Workers**.
 | `cloudflare`             | in a Cloudflare container per attempt, through the sandbox Worker that you deploy          | none: the Worker's outbound handlers add the token and the provider API keys |
 | `exe.dev`                | not available: `usine up` refuses this kind at this commit                                 |                                                                              |
 
-[Add a provisioned worker](/guides/add-a-provisioned-worker/) covers `ssh` workers with a `provisioner`, and [Run attempts in Cloudflare sandboxes](/guides/cloudflare-sandboxes/) covers `cloudflare` workers. All workers in one `usine.yaml` must have the same kind. `max_concurrent_attempts` sets how many attempts a worker runs at once, and the worker needs at least 1.5 GiB of memory per attempt, 3 GiB to avoid a warning.
+[Add a provisioned worker](/guides/add-a-provisioned-worker/) covers `ssh` workers with a `provisioner`, and [Run attempts in Cloudflare sandboxes](/guides/cloudflare-sandboxes/) covers `cloudflare` workers. All workers in one instance must have the same kind. `max_concurrent_attempts` sets how many attempts a worker runs at once, and the worker needs at least 1.5 GiB of memory per attempt, 3 GiB to avoid a warning.
 
 ## Local workers
 
@@ -74,9 +82,9 @@ usine writes each attempt's token to `<root>/workers/<name>/credentials/<attempt
 
 ### A container per attempt
 
-Each attempt runs in its own container from an image with Node.js 22, pnpm, Git, gh, Chromium, Claude Code, and Codex, built from `infra/worker-image/Dockerfile` ([ADR 0011](https://github.com/basaltbytes/usine/blob/main/docs/adr/0011-github-app-identity-scoped-worker-tokens.md), amended 2026-10-25). The container mounts that attempt's checkout, the SSH user's harness login files, and the worker's shared pnpm store and Turborepo cache read-write, and its cached clone and credential directory read-only. The harnesses rewrite the login files when they refresh their tokens, as they do without containers. Every command of the attempt runs in it with `docker exec`, so attempts can't read each other's checkouts, tokens, or processes. The SSH user's shell starts and removes the container and fetches the cached clone. [`workers[].container`](/reference/configuration/usine-yaml/#workerscontainer) sets the image and the CPU, memory, and process limits of each container. Preflight derives each limit you leave out from the machine: its total, less a reserve for the machine's own processes, divided by `max_concurrent_attempts`. Choose `max_concurrent_attempts` so that each container has the memory of the heaviest command its agents run, such as the repository's tests: [usine's own tests](https://github.com/basaltbytes/usine/blob/main/apps/web/README.md#conversation-browser-tests) need about 4.7 GiB, so a machine with 7.7 GiB runs one of its attempts at a time. Limits that add up to more than the machine's memory don't stop attempts from starting, but heavy commands that run at the same time make the machine swap, and the kernel kills processes for memory. Under an attempt's outcome, the run page totals the processes the kernel killed for memory across the attempt's containers and separately gives the memory limit of the last container with recorded kills. The **Workers** page shows the limits that the last preflight applied.
+Each attempt runs in its own container from an image with Node.js 22, pnpm, Git, gh, Chromium, Claude Code, and Codex, built from `infra/worker-image/Dockerfile` ([ADR 0011](https://github.com/basaltbytes/usine/blob/main/docs/adr/0011-github-app-identity-scoped-worker-tokens.md), amended 2026-10-25). The container mounts that attempt's checkout, the SSH user's harness login files, and the worker's shared pnpm store and Turborepo cache read-write, and its cached clone and credential directory read-only. The harnesses rewrite the login files when they refresh their tokens, as they do without containers. Every command of the attempt runs in it with `docker exec`, so attempts can't read each other's checkouts, tokens, or processes. The SSH user's shell starts and removes the container and fetches the cached clone. [`workers[].container`](/reference/configuration/usine-yaml/#workerscontainer) sets the image and the CPU, memory, and process limits of each container. Preflight derives CPU limits from all host CPUs divided by `max_concurrent_attempts`, and memory limits from host memory minus a 1024 MiB reserve, divided by `max_concurrent_attempts`. Choose `max_concurrent_attempts` so that each container has the memory of the heaviest command its agents run, such as the repository's tests: [usine's own tests](https://github.com/basaltbytes/usine/blob/main/apps/web/README.md#conversation-browser-tests) need about 4.7 GiB, so a machine with 7.7 GiB runs one of its attempts at a time. Limits that add up to more than the machine's memory don't stop attempts from starting, but heavy commands that run at the same time make the machine swap, and the kernel kills processes for memory. Under an attempt's outcome, the run page totals the processes the kernel killed for memory across the attempt's containers and separately gives the memory limit of the last container with recorded kills. The **Workers** page shows the limits that the last preflight applied.
 
-The container is named `usine-<attempt id>` and is removed with the checkout when the attempt ends. A process that stops without removing it leaves it; the next process removes containers with both its App ID and instance ID labels before its first attempt on that machine, and removes the containers of workers that `usine.yaml` no longer declares too.
+The container is named `usine-<attempt id>` and is removed with the checkout when the attempt ends. A process that stops without removing it leaves it; the next process removes containers with both its App ID and instance ID labels before its first attempt on that machine, and removes the containers of workers that the stored configuration no longer declares too.
 
 The containers use the machine's network, so a worker behind a gateway still reaches only the gateway. The SSH user must be in the `docker` group, which lets it act as root on the machine; the attempts never get Docker access.
 
@@ -299,7 +307,7 @@ The scripts are in `infra/hetzner/gateway/`, and its `README.md` describes every
 
    Add `.env` to `.gitignore`, so that it stays out of git.
 
-10. Add a [`gateway`](/reference/configuration/usine-yaml/#workersgateway) to the worker in `usine.yaml`, with the `Host` aliases as destinations, the gateway's `DOMAIN`, and the name of the variable that will contain the admin token:
+10. Run `usine config edit worker worker-one` to add a [`gateway`](/reference/configuration/usine-yaml/#workersgateway). Omit the enclosing `workers:` list from this export-format example. Configure it with the `Host` aliases as destinations, the gateway's `DOMAIN`, and the name of the variable that will contain the admin token:
 
     ```yaml title="usine.yaml"
     workers:
@@ -318,7 +326,7 @@ The scripts are in `infra/hetzner/gateway/`, and its `README.md` describes every
 
     A subscription at the gateway is your own login used by your own agents. Anthropic's [legal and compliance page](https://code.claude.com/docs/en/legal-and-compliance) allows that, and forbids storing or relaying other people's subscription logins, so an instance with several users gives each user their own credential. The harness binaries run unmodified, and the plan's usage limits, meant for one person, apply to every attempt the gateway signs. [Provider terms](https://github.com/basaltbytes/usine/blob/main/infra/hetzner/gateway/README.md#provider-terms) in the gateway README has the full note.
 
-11. Start the orchestrator. It reads the token from `.env`, and so do `usine restart` and `usine upgrade` from any shell:
+11. Restart the orchestrator with `usine restart` to apply the gateway setting and read the new `.env` token. If it is stopped, start it with `usine up`. It reads the token from `.env`, and so do `usine restart` and `usine upgrade` from any shell:
 
     ```sh title="Instance folder"
     usine up
@@ -332,7 +340,7 @@ To read the gateway's log, run `ssh usine-gateway journalctl -u usine-gateway -o
 
 ## Remove a worker
 
-Remove the worker from `usine.yaml` and reload the configuration, or restart `usine up`. After a reload, wait until its running attempts end and the log shows `The last Attempt on a removed Worker ended; the Worker leaves the scheduler`. Then delete the machine. If an attempt on the worker kept its worktree because its salvage push failed, every later start reports a reconciliation error for it ([#268](https://github.com/basaltbytes/usine/issues/268)).
+Export the configuration with `usine config export ./config-export`, remove the worker from the exported `usine.yaml`, and save the removal with `usine config import ./config-export --message "Remove worker-one"`. The revision applies live. After it applies, wait until its running attempts end and the log shows `The last Attempt on a removed Worker ended; the Worker leaves the scheduler`. Then delete the machine. If an attempt on the worker kept its worktree because its salvage push failed, every later start reports a reconciliation error for it ([#268](https://github.com/basaltbytes/usine/issues/268)).
 
 ```sh title="usine checkout"
 hcloud server delete worker-one

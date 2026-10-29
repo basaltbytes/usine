@@ -331,6 +331,8 @@ describe("exe.dev launch", () => {
         // exe.dev's integration pushes, but the factory App's bot authors and commits.
         assert.deepStrictEqual(given.environment, {
           GH_HOST: "github.int.exe.xyz",
+          ENABLE_CLAUDEAI_MCP_SERVERS: "0",
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
           GIT_AUTHOR_NAME: COMMIT_AUTHOR.login,
           GIT_AUTHOR_EMAIL: COMMIT_AUTHOR.noreplyEmail,
           GIT_COMMITTER_NAME: COMMIT_AUTHOR.login,

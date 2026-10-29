@@ -866,6 +866,8 @@ describe("local worker", () => {
                 "GIT_AUTHOR_EMAIL",
                 "GIT_COMMITTER_NAME",
                 "GIT_COMMITTER_EMAIL",
+                "ENABLE_CLAUDEAI_MCP_SERVERS",
+                "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
                 "TURBO_CACHE_DIR",
               ]);
               assert.deepStrictEqual(
@@ -874,6 +876,8 @@ describe("local worker", () => {
               );
               const bot = "usine-test[bot] <4242+usine-test[bot]@users.noreply.github.com>";
               assert.deepStrictEqual(identities, [`${bot}|${bot}`]);
+              assert.strictEqual(environment.ENABLE_CLAUDEAI_MCP_SERVERS, "0");
+              assert.strictEqual(environment.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, "1");
               assert.strictEqual(
                 environment.TURBO_CACHE_DIR,
                 path.join(instance, ".usine", "workers", "local", "turbo"),

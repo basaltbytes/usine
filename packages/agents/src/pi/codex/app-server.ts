@@ -109,7 +109,14 @@ interface PendingRequest {
 
 const repositoryTrustOverride = (cwd: string): string =>
   `projects.${JSON.stringify(cwd)}.trust_level="untrusted"`;
-const disableRecursiveAgentsOverride = "features.multi_agent=false";
+export const codexConfigArgs: ReadonlyArray<string> = [
+  "features.multi_agent=false",
+  "features.plugins=false",
+  "features.remote_plugin=false",
+  "features.apps=false",
+  "check_for_update_on_startup=false",
+  "analytics.enabled=false",
+].flatMap((override) => ["-c", override]);
 
 /**
  * Returns the app-server command for `client` on its host. The process starts in the home directory,
@@ -138,8 +145,7 @@ export const codexAppServerCommand = (
         "--stdio",
         "-c",
         repositoryTrustOverride(client.cwd),
-        "-c",
-        disableRecursiveAgentsOverride,
+        ...codexConfigArgs,
       ],
     },
     stdin === undefined ? lifetime : { ...lifetime, stdin },

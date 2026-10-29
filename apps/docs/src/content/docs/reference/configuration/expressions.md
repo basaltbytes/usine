@@ -7,7 +7,7 @@ sidebar:
 
 Loop files use [CEL](https://github.com/google/cel-spec) expressions in `trigger.if`, which must produce a `bool`, and in each `{{ ... }}` of the body, which must produce a `string`, `int`, `uint`, `double`, `bool`, or `null`. The `@usine/expression` package evaluates them with [`@marcbachmann/cel-js`](https://www.npmjs.com/package/@marcbachmann/cel-js) 8.0.0 ([`marcbachmann-cel.ts`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/expression/src/marcbachmann-cel.ts#L245)).
 
-When a loop file loads, usine type-checks every expression against its stream's variables, and quarantines the loop on an unknown field, a type mismatch, or a wrong result type. Evaluation happens later, against each item's payload or tick.
+Before saving a revision, usine type-checks every expression against its stream's variables. An unknown field, a type mismatch, or a wrong result type rejects the edit or complete import; the stored configuration stays unchanged. Evaluation happens later, against each item's payload or tick.
 
 ## Variables
 
@@ -19,7 +19,7 @@ The managed repository that the item or tick belongs to ([`repositoryContext`](h
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `repo.name` | string | The full `owner/name`, as written in `usine.yaml`. |
+| `repo.name` | string | The full `owner/name`, as registered in the stored configuration. |
 | `repo.owner` | string | The owner part of the name. |
 | `repo.url` | string | `https://github.com/<owner>/<name>`. |
 
@@ -113,9 +113,9 @@ The fields marked nullable above are nullable in the CEL environment ([`payload-
 - Selecting a field of a null object with `.?` gives an empty optional instead of failing: `item.?milestone.?title.orValue("none")` is `"none"` on an issue without a milestone. The null field itself counts as present, so `item.?reviewDecision.orValue("NONE")` is `null` if the branch requires no review. See [Optional values](#optional-values).
 - `has(item.milestone.title)` is `false`, but `has(item.milestone)` is `true`, because the field exists. Test the value with `!= null`.
 
-Fields of a nullable object keep their types, so a misspelled `item.milestone.titel` still quarantines the loop. Field names after `.?` aren't checked.
+Fields of a nullable object keep their types, so a misspelled `item.milestone.titel` still rejects the edit or import. Field names after `.?` aren't checked.
 
-```yaml title="loops/plan-milestone.md"
+```yaml title="projects/widgets/loops/plan-milestone.md"
 trigger:
   on: issue
   if: item.milestone != null && item.milestone.title == "v1"
@@ -125,9 +125,9 @@ In the body, `{{ item.milestone != null ? item.milestone.title : "no milestone" 
 
 ## Evaluation failures
 
-An evaluation failure doesn't quarantine the loop:
+An evaluation failure leaves the stored loop definition unchanged:
 
-- **`if` of an `issue` or `pr` loop.** usine opens no run for that loop on that item and leaves the item's queued runs as they are. Other loops, other items, and the poll cursor continue. **Needs attention** shows the failure with the loop and the item while it lasts, and usine logs it once per loop, item, and content hash ([`evaluation-failures.ts`](https://github.com/basaltbytes/usine/blob/main/packages/orchestrator/src/polling/evaluation-failures.ts)). The first poll after a restart or a reload fetches failing items again, so a fixed loop evaluates them without waiting for a change.
+- **`if` of an `issue` or `pr` loop.** usine opens no run for that loop on that item and leaves the item's queued runs as they are. Other loops, other items, and the poll cursor continue. **Needs attention** shows the failure with the loop and the item while it lasts, and usine logs it once per loop, item, and content hash ([`evaluation-failures.ts`](https://github.com/basaltbytes/usine/blob/main/packages/orchestrator/src/polling/evaluation-failures.ts)). The first poll after a restart or an applied revision fetches failing items again, so a fixed loop evaluates them without waiting for a change.
 - **`if` of a `schedule` loop.** The tick fails for that repository, and usine evaluates it again at the next wake.
 - **The recheck before a queued run opens.** usine logs a warning, and the run opens as if the check had passed ([`TriggerCondition.recheck`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/trigger-condition.ts#L87)).
 - **A `{{ ... }}` interpolation.** See [Render failures](/reference/configuration/loop-files/#render-failures).
@@ -198,13 +198,13 @@ cel-js doesn't check field names after `.?`, so `item.?milestone.?titel.orValue(
 
 ## Label declarations
 
-When an instance loads, usine collects the string literals that a loop's `if` compares with a label `name` under `item.labels`, through `==`, `!=`, `in`, and the `exists`, `all`, `exists_one`, `filter`, and `map` macros ([`relatedStringLiterals`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/expression/src/marcbachmann-cel.ts#L225)). For each literal that `usine.yaml` doesn't declare under `labels`, it logs `Loop trigger references an undeclared GitHub label`. The loop still loads.
+When an instance loads, usine collects the string literals that a loop's `if` compares with a label `name` under `item.labels`, through `==`, `!=`, `in`, and the `exists`, `all`, `exists_one`, `filter`, and `map` macros ([`relatedStringLiterals`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/expression/src/marcbachmann-cel.ts#L225)). For each literal that the stored configuration doesn't declare under `labels`, it logs `Loop trigger references an undeclared GitHub label`. The loop still loads.
 
 ## Examples
 
 An issue is ready, and no open pull request closes it yet:
 
-```yaml title="loops/start-dev.md"
+```yaml title="projects/widgets/loops/start-dev.md"
 if: >-
   item.state == "OPEN" &&
   item.labels.nodes.exists(label, label.name == "ready-for-agent") &&
@@ -213,7 +213,7 @@ if: >-
 
 A pull request is ready for review, and no outcome label is present:
 
-```yaml title="loops/review-pr.md"
+```yaml title="projects/widgets/loops/review-pr.md"
 if: >-
   item.state == "OPEN" &&
   !item.isDraft &&
@@ -224,7 +224,7 @@ if: >-
 
 A review left findings to fix. The loop's `max_cycles`, not the condition, limits the rounds ([Write review and fix loops](/guides/review-fix-loops/)):
 
-```yaml title="loops/act-on-findings.md"
+```yaml title="projects/widgets/loops/act-on-findings.md"
 if: >-
   item.state == "OPEN" &&
   !item.isDraft &&
@@ -233,7 +233,7 @@ if: >-
 
 A review passed:
 
-```yaml title="loops/finish-pr.md"
+```yaml title="projects/widgets/loops/finish-pr.md"
 if: >-
   item.state == "OPEN" &&
   !item.isDraft &&
@@ -242,7 +242,7 @@ if: >-
 
 A pull request marked for merge has a conflicting branch:
 
-```yaml title="loops/rebase-pr.md"
+```yaml title="projects/widgets/loops/rebase-pr.md"
 if: >-
   item.state == "OPEN" &&
   !item.isDraft &&
@@ -252,7 +252,7 @@ if: >-
 
 A schedule that skips weekends in its own time zone:
 
-```yaml title="loops/daily-digest.md"
+```yaml title="projects/widgets/loops/daily-digest.md"
 if: >-
   timestamp(item.tick.scheduledAt).getDayOfWeek(item.tick.tz) != 0 &&
   timestamp(item.tick.scheduledAt).getDayOfWeek(item.tick.tz) != 6
@@ -260,6 +260,6 @@ if: >-
 
 Prompt interpolations from the same loops:
 
-```markdown title="loops/rebase-pr.md"
+```markdown title="projects/widgets/loops/rebase-pr.md"
 Pull request #{{ item.number }} is marked `ready-to-merge` but GitHub reports its branch `{{ item.headRefName }}` as conflicting with `{{ item.baseRefName }}`.
 ```

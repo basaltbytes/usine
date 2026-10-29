@@ -23,6 +23,8 @@ Preparation stays interruptible during clone, fetch, credential requests, and lo
 
 `CheckoutRequest.commitAuthor` is the GitHub App's bot account. Every worker kind sets it as `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME`, and `GIT_COMMITTER_EMAIL` in the parent's and children's environment, and in the environment of the executor's own git commands on the checkout, which git prefers to any `user.name` and `user.email` config on the machine. On a remote worker they're exported in each command line, since they aren't secret.
 
+Every worker kind sets `ENABLE_CLAUDEAI_MCP_SERVERS=0` and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` in the parent's and children's environment. These values override inherited settings to disable Claude Code's claude.ai connectors and nonessential traffic, including telemetry and update checks.
+
 `CheckoutRequest.permissions` is the loop's permission level. A `read` attempt's credential has `contents: read`, so it can't push. An exe.dev worker can't grant that, and refuses the attempt with a `credentials` `WorkerCapabilityError` before attaching the integration. A `read` checkout also gets a pre-push hook that stops `git push` with a message naming the loop, instead of GitHub's 403; `git push --no-verify` skips it, and the token still refuses. A `read` attempt is never salvaged.
 
 ### Salvage

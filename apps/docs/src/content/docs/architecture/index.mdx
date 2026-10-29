@@ -9,9 +9,10 @@ import { CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
 
 :::note
 This page describes commit [`7c0c3d3`](https://github.com/basaltbytes/usine/tree/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9) of basaltbytes/usine as it was on 2026-10-16. Code links point at that commit.
+Configuration storage and revision behavior on this page describe commit [`06a10bf`](https://github.com/basaltbytes/usine/tree/06a10bf04c2c7cb366ec6ad912ae7c0b0a5c268b) (2026-10-29). See [Storage and configuration](/architecture/storage-and-config/#configuration-store). Other sections retain the source versions cited above.
 :::
 
-usine is one long-running Node process, the orchestrator. It polls the issues and pull requests of the operator's repositories and, when one matches a loop, opens a run in which a coding agent works on it. Loops and agents are Markdown files in the instance folder. The process also serves the web UI on `127.0.0.1`.
+usine is one long-running Node process, the orchestrator. It polls the issues and pull requests of the operator's repositories and, when one matches a loop, opens a run in which a coding agent works on it. The runtime database stores loops and agents with configuration revisions. Markdown files are their import and export format. The process also serves the web UI on `127.0.0.1`.
 
 Each try of a run is an attempt. Its Pi parent runs in the orchestrator as a pi-durable task and delegates the coding to Claude Code, Codex, or Pi children on a worker: the orchestrator's machine, or an SSH machine, optionally behind a gateway VM that adds the GitHub token to its requests. See [`CONTEXT.md`](https://github.com/basaltbytes/usine/blob/main/CONTEXT.md) for the vocabulary and [`docs/adr/`](https://github.com/basaltbytes/usine/tree/main/docs/adr) for the decisions.
 
@@ -84,7 +85,7 @@ Dependencies are workspace packages only. `effect` is a peer dependency of every
 | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
 | `@usine/core` 0.3.0, `packages/core`                 | Domain model: event, run state machine, step, attempt, failures, salvage, attempt channel envelopes, worker and repository identities.            | none                                                            |
 | `@usine/expression` 0.2.0, `packages/expression`     | Checks and evaluates CEL with `@marcbachmann/cel-js` 8.0.0.                                                                                       | none                                                            |
-| `@usine/config` 0.2.1, `packages/config`             | Parses `usine.yaml`, loop files, and agent files; loads an instance folder with per-file quarantine; has a YAML writer that only tests call.      | core, expression                                                |
+| `@usine/config` 0.2.1, `packages/config`             | Validates configuration, stores entities and revisions, and imports and exports YAML and Markdown files.                                          | core, expression                                                |
 | `@usine/github` 0.1.2, `packages/github`             | GitHub App authentication and token minting, change detection, GraphQL payload slices, label writes.                                              | core                                                            |
 | `@usine/engine` 0.3.0, `packages/engine`             | Event ledger, run claims, supersede and revoke, one fiber per open run, cycle budgets, attempt admission and drain, the SQLite store.             | core                                                            |
 | `@usine/agents` 0.3.0, `packages/agents`             | Claude Code, Codex, and Pi child backends, where children run (`ChildHost`), prompt assembly, harness preflight.                                  | core                                                            |
@@ -160,7 +161,7 @@ sequenceDiagram
 
 <Steps>
 
-1. `usine up` ([up.ts:104](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/up.ts#L104)) loads the instance folder and the GitHub App credentials, then builds `runtimeLayer` ([runtime.ts:37](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/runtime.ts#L37)); without credentials, it serves the setup page.
+1. `usine up` ([up.ts:104](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/up.ts#L104)) reads stored configuration (importing bootstrap files only when the tables are empty) and the GitHub App credentials, then builds `runtimeLayer` ([runtime.ts:37](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/runtime.ts#L37)); without credentials, it serves the setup page.
 
 2. `PollingTriggers` and `ScheduleTriggers` submit GitHub state and clock ticks to `RunEngine.submit` ([engine.ts:52](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/engine/src/engine/engine.ts#L52)).
 
@@ -197,7 +198,7 @@ sequenceDiagram
   <LinkCard
     title="Storage and configuration"
     href="/architecture/storage-and-config/"
-    description="Runtime store, durable storage, and configuration files."
+    description="Runtime store, durable storage, configuration revisions, and export files."
   />
   <LinkCard
     title="Operator surfaces"

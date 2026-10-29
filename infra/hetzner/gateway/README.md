@@ -122,7 +122,17 @@ No client resolved a provider or registry name itself.
 
 Each login's URL opens in the operator's browser, not on the worker: `claude.com/cai/oauth/authorize` and `auth.openai.com/codex/device`. Preflight checks that the worker reaches each host through the forward proxy.
 
-With both logins done, a one-prompt turn also requests unlisted hosts and completes without them: Claude Code `mcp-proxy.anthropic.com` and the claude.ai connectors, Codex `ab.chatgpt.com` and `sdmntpr<region>.oaiusercontent.com` ([#261](https://github.com/basaltbytes/usine/issues/261)).
+With both logins done, a one-prompt turn requested unlisted hosts and completed without them ([#261](https://github.com/basaltbytes/usine/issues/261)). usine disables the associated features on every worker kind; these hosts remain outside the allowlist:
+
+| Harness | Hosts | Child configuration |
+| --- | --- | --- |
+| Claude Code | `mcp-proxy.anthropic.com` | `ENABLE_CLAUDEAI_MCP_SERVERS=0` disables claude.ai connectors. `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` also disables nonessential traffic. |
+| Codex | `github.com`, `api.github.com`, `sdmntpr<region>.oaiusercontent.com` | `features.plugins=false`, `features.remote_plugin=false`, and `features.apps=false` disable plugin downloads, their bundled skill sync, and account apps. `check_for_update_on_startup=false` disables update checks. |
+| Codex | `ab.chatgpt.com` | `analytics.enabled=false` disables analytics. |
+
+Claude's environment settings are documented in the [environment variable reference](https://code.claude.com/docs/en/env-vars) and were checked against Claude Code 2.1.308. Codex's `-c` overrides were accepted with strict configuration checking by every supported version: 0.153.4 and 0.159.0 through 0.159.3. In an unauthenticated startup and account-check probe through a refusing proxy, these overrides removed all CONNECT requests and plugin-sync files; local skills still loaded. Preflight uses the same overrides as children. See the [Codex configuration reference](https://developers.openai.com/codex/config-reference/).
+
+After deployment, run one authenticated Claude attempt and one Codex attempt and inspect the gateway journal for these hosts. For Claude, also record any requests to `api.anthropic.com` outside its configured base URL, the remaining check in [#234](https://github.com/basaltbytes/usine/issues/234).
 
 On 2026-10-15, all four hosts were behind Cloudflare. Through a tunnel to each host, a request with another site's `Host` header (`claude.ai`, `claude.com`, `www.cloudflare.com`, `api.openai.com`) got `403 Forbidden`. These results apply only to those probes; see the [allowlist audit](#allowlist-audit) for certificate scope and recheck requirements. Claude Code opens one tunnel to `api.anthropic.com` per prompt and closes it before its ClientHello; the gateway logs it at info level as abandoned, not refused.
 

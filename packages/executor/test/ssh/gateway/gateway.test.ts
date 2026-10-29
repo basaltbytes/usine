@@ -1084,7 +1084,10 @@ describe("SSH Worker behind a Gateway", () => {
         const executor = yield* Executor;
         yield* executor.preflight(WORKER, [CODEX_BRAIN], 1);
         const lines = machine.state.calls.map(({ line }) => line);
-        assert.include(lines, "exec 'codex' '--version'");
+        assert.include(
+          lines,
+          "exec 'codex' '-c' 'features.multi_agent=false' '-c' 'features.plugins=false' '-c' 'features.remote_plugin=false' '-c' 'features.apps=false' '-c' 'check_for_update_on_startup=false' '-c' 'analytics.enabled=false' '--version'",
+        );
         assert(!lines.some((line) => line.includes("http_connect")), "no login host is checked");
 
         const prepared = yield* executor.prepare(codexRequest);

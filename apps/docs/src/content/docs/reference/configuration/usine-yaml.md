@@ -5,9 +5,9 @@ sidebar:
   order: 1
 ---
 
-`usine.yaml` is the import and export format at the top of the instance folder, next to `projects/` and `agents/`. The first start imports these files once; later starts read the configuration store. Use [`usine config edit` or `usine config import`](/reference/configuration/cli/#configuration-revisions) to save changes. It contains the registry of managed repositories, labels, board lanes, settings, workers, and span export.
+`usine config export <folder>` writes `usine.yaml` at the top of the destination folder, next to `projects/` and `agents/`. `usine config import <folder>` reads that format, and `usine config edit` uses it for individual entities. The first start imports these files once; later starts read the configuration store. Use [`usine config edit` or `usine config import`](/reference/configuration/config/) to save changes. The export contains the registry of managed repositories, labels, board lanes, settings, workers, and span export.
 
-Accepted configuration revisions apply `labels`, `repos`, `projects`, `settings`, and `operator` to new work, and resize, add, or remove [workers](#workers). Changes to `webhooks` and `tracing`, and some `workers` changes, need a restart.
+Accepted configuration revisions apply `labels`, `repos`, `projects`, `settings`, and `operator` to new work, and resize, add, or remove [workers](#workers). Changes to `webhooks` and `tracing`, and some `workers` changes, need a restart. See [Live changes and restart requirements](/reference/configuration/config/#live-changes-and-restart-requirements) for the exact fields and the difference between saving a revision and applying it.
 
 The parser is strict:
 
@@ -114,7 +114,7 @@ repos:
   - name: acme/widgets
 ```
 
-## References between instance files
+## References between export files
 
 A loop exports to `projects/<project>/loops/<loop>.md` and references an agent in `agents/`. Its identity is `<project>/<loop>`; API and CLI operations also accept a short loop name when it is unique. A selector narrows the loop to repositories within its project. A project with no loops can omit its loops folder. usine checks label names in lanes and loop conditions against the declared labels.
 
@@ -274,16 +274,16 @@ Every kind takes these keys:
 
 A run takes a slot of the first worker in this list with a free slot ([`stepExecutorLayer`](https://github.com/basaltbytes/usine/blob/main/packages/orchestrator/src/scheduler.ts)). Waiting runs take free slots in [queue order](/reference/configuration/loop-files/#priority): runs in later [lanes](#projectslanes) first, then in the order that their events arrived. At startup, a failed preflight on any worker stops `usine up`.
 
-A [reload](/reference/configuration/cli/#reload) applies these `workers` changes without stopping running attempts:
+An automatically applied [revision](/reference/configuration/config/#live-changes-and-restart-requirements) applies these `workers` changes without stopping running attempts:
 
-| Change | What the reload does |
+| Change | What applying the revision does |
 | --- | --- |
 | A worker's `max_concurrent_attempts` goes up | Runs preflight on the worker with the new count and every harness in the roster. Then the new slots take waiting runs immediately. |
 | A worker's `max_concurrent_attempts` goes down | The worker starts no new attempt until it runs fewer attempts than the new count. Running attempts finish, and usine removes each extra slot when its attempt ends. |
 | A new worker | Runs preflight on it with every harness in the roster. The worker takes attempts after preflight passes. For an `ssh` worker behind a gateway, the reload first reads the variable named by `admin_token_env`, and refuses with `ReloadPreflightError` if it's unset. A new worker shares the admin API forward of a gateway that another worker uses. For a new gateway, usine opens a new forward. A reload can't add a `cloudflare` worker that `usine up` didn't start with, and refuses with `ReloadPreflightError`. |
 | A removed worker | The worker starts no new attempt, and its running attempts finish. **Needs attention** shows **Worker not configured** with the number of attempts that still run. After the last one ends, you can select **Discard leftovers**. Then the forward to an `ssh` worker's gateway closes, unless another worker uses that gateway. |
 
-A failed preflight refuses the whole reload with `ReloadPreflightError`. These changes need a restart, and a reload refuses them with `RestartRequiredError`, which includes the field, such as `workers.worker-2.destination`:
+A failed preflight keeps the running configuration unchanged with `ReloadPreflightError`; a revision saved by the CLI remains in the database. These changes need a restart, and a reload refuses them with `RestartRequiredError`, which includes the field, such as `workers.worker-2.destination`:
 
 - A worker's `kind`, or any key other than `name` and `max_concurrent_attempts`: `destination`, `identity_file`, `port`, `root`, `gateway`, `container`, or `provisioner` for `ssh`, and `worker_url`, `access_client_id_env`, `access_client_secret_env`, `image`, `instance_type`, or `llm_providers` for `cloudflare`.
 - A renamed worker: one worker removed and one added with the same `kind` and other keys.
@@ -355,7 +355,7 @@ Without Docker, the worker runs its attempts as the SSH user, as before containe
 
 A machine with 4 CPUs and 8 GiB of memory gives each container 4 CPUs and 7168 MiB with `max_concurrent_attempts: 1`, and 1.33 CPUs and 2389 MiB with `max_concurrent_attempts: 3`. No derived limit goes below 0.01 CPU, 256 MiB, or 64 processes. A provisioned worker's machines each run one attempt, so its first checked machine gets the limits for one attempt, and the worker's machines keep them until the next successful machine check.
 
-Preflight logs the limits with the worker's preflight line, `SSH Worker preflight verified`: `cpus`, `memoryMib`, `pids`, `derivedLimits` (the ones it derived), `slots`, and the machine's `machineCpus`, `machineMemoryMib`, and `machineTasks`. The **Workers** page shows the limits that the last preflight applied and which ones it derived. A value in the file always wins over a derived one. A reload that raises `max_concurrent_attempts` runs preflight, which derives the limits again for new containers; one that lowers it runs no preflight, so new containers keep the smaller limits until the next preflight.
+Preflight logs the limits with the worker's preflight line, `SSH Worker preflight verified`: `cpus`, `memoryMib`, `pids`, `derivedLimits` (the ones it derived), `slots`, and the machine's `machineCpus`, `machineMemoryMib`, and `machineTasks`. The **Workers** page shows the limits that the last preflight applied and which ones it derived. A stored explicit value always wins over a derived one. A reload that raises `max_concurrent_attempts` runs preflight, which derives the limits again for new containers; one that lowers it runs no preflight, so new containers keep the smaller limits until the next preflight.
 
 A custom image needs what the default one has: a `usine` user whose user ID is the SSH user's, with the home directory `/home/usine`, and Git, gh, curl, Node.js, and the harnesses on the `PATH`. Preflight compares the user IDs.
 
