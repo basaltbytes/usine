@@ -4,6 +4,7 @@ import { AppPermissionError } from "./access.ts";
 
 /** The GitHub request that failed, used by API, rate-limit, and response errors. */
 export const GitHubOperation = Schema.Literals([
+  "configure-webhook",
   "create-repository-label",
   "discover-installation",
   "fetch-base-ref-head",
