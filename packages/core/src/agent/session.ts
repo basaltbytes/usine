@@ -217,12 +217,20 @@ export class RateLimitsSnapshot extends Schema.Class<RateLimitsSnapshot>(
   secondary: Schema.OptionFromNullOr(RateLimitWindow),
 }) {}
 
+/** The login reported by the provider for a billing pool. */
+export const PoolLogin = Schema.NonEmptyString.pipe(Schema.brand("PoolLogin"));
+export type PoolLogin = typeof PoolLogin.Type;
+
 /** The latest rate-limit windows observed for `pool` during the session. */
 export class PoolRateLimitsUpdated extends Schema.TaggedClass<PoolRateLimitsUpdated>(
   "Agent/PoolRateLimitsUpdated",
 )("PoolRateLimitsUpdated", {
   session: AgentSession,
   pool: BillingPool,
+  /** Absent for older records and providers that don't report a login. */
+  login: Schema.OptionFromOptionalKey(PoolLogin).pipe(
+    Schema.withConstructorDefault(Effect.succeed(Option.none<PoolLogin>())),
+  ),
   rateLimits: RateLimitsSnapshot,
 }) {}
 
