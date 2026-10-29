@@ -1,3 +1,4 @@
+import type { ConfigurationStoreError } from "@usine/config/configuration";
 import { groupProjectViews } from "./projects.ts";
 import { readApprovalItems } from "./approval.ts";
 import { boardRepositories } from "@usine/config/project";
@@ -158,8 +159,12 @@ export type OperatorError =
   | TranscriptAttemptNotFoundError
   | BoardMoveError
   | CycleBudgetResetRejectedError
-  | RunGitHubChangesError;
-export type OperatorObservationError = RunStoreError | TranscriptAttemptNotFoundError;
+  | RunGitHubChangesError
+  | ConfigurationStoreError;
+export type OperatorObservationError =
+  | RunStoreError
+  | TranscriptAttemptNotFoundError
+  | ConfigurationStoreError;
 
 /** The number of closed Runs the overview keeps next to the open ones. */
 const OVERVIEW_CLOSED_RUNS = 100;

@@ -7,6 +7,7 @@ import { ReaderLine } from "~/components/runs/transcript/reader-line";
 import { ToolDetails, useToolDisclosure } from "~/components/runs/transcript/tool/tool";
 import { Button } from "~/components/ui/button";
 import { CollapsibleTrigger } from "~/components/ui/collapsible";
+import { UsineMark } from "~/components/usine-mark";
 import type { DelegationRow } from "~/lib/runs/transcript/document/model";
 import { presentTool } from "~/lib/runs/transcript/tool/presentation";
 import { durationLabel } from "~/lib/strings";
@@ -40,7 +41,12 @@ export const Delegation = ({ row, speaker }: DelegationProps) => {
           <CaretRightIcon aria-hidden="true" className="shrink-0 transition-transform" />
           <span>
             Delegated a task
-            {state === "Running" && <span className="text-run-active">, running</span>}
+            {state === "Running" && (
+              <span className="text-run-active">
+                , <UsineMark running className="mr-1 inline-block size-3 align-middle" />
+                running
+              </span>
+            )}
             {state === "Error" && <span className="text-destructive">, failed</span>}
             {Option.match(span, {
               onNone: () => null,

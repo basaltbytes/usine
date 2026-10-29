@@ -34,7 +34,7 @@ A task is done when its pull request merges in the window, and counts if usine r
 
 - **Tasks done**: the count, the median time in usine, and the median price. The time starts when the task's first run opened, which its trigger label caused, and ends when its last run closed, so the wait for you to merge a ready pull request is left out; a run still open at the merge counts until the merge. The median price covers the tasks whose sessions all have a price; a `~` marks an estimate from the Claude or ChatGPT plan. The chart has a dot per task, by merge day and time on a log scale, and a line at the median; select a dot to open the task. A window longer than 62 days shows tasks per week over the median per week instead.
 - **Time per task**: one bar that splits a task's time between the loops' attempts and waiting, which covers approval, the queue, and the time between runs, averaged over the tasks. Each line under it gives a loop's median run time, such as `finish-pr about 15 min`.
-- **First time right**: the share of tasks where no loop succeeded twice on one item, so no review round sent the task back, and the operator actions per task: approvals, retries, failures marked resolved, and cycle budget resets. A sparkline beside each shows its trend over the window.
+- **First time right**: the share of tasks where no loop succeeded twice on one item, including loops that rebase pull requests, and the operator actions per task: approvals, retries, failures marked resolved, and cycle budget resets. A sparkline beside each shows its trend over the window.
 - **Tokens per task**: the median tokens and their split by loop.
 
 The line under the blocks names the tasks left out, such as `19 tasks before 19 Oct lack timing and are left out`: their attempts ended before usine recorded end times, their runs reported no tokens, or a session has no price.
@@ -44,7 +44,7 @@ Select **Details** for the run statistics, read only once you open it:
 - **Runs closed**, **Median run time**, **Median attempt time**, **Runs in one attempt**: run time is from a run's opening to its close; attempt time is from an attempt's start to its end.
 - **Runs closed per day**, stacked by outcome, and **Needs attention entries per day**, with the median wait for an approval and from a failure to your first answer: **Retry**, **Edit and retry**, **Mark resolved**, or **Mark answered**. Separate figures show retry and resolution waits. A resolution followed by a retry counts once, as a resolution. Unanswered failures and resolutions recorded before this timing was available contribute no wait.
 - **Runs per loop**, **Runs per agent**, **Attempts per model**: outcomes, median time, tokens, and cost. A run has a price only if each of its sessions has one.
-- **Attempts per run**, **Queue wait** per worker, and **Worker utilization**: the share of the window that each worker's slots held attempts.
+- **Attempts per run**, **Queue wait** per worker, and **Worker utilization**: occupied attempt time divided by slot-time capacity over the window, using configuration revisions to account for slot changes. Before the first revision, capacity uses revision 1’s slot count. The displayed slot count is the current count.
 
 ### Stall reasons
 

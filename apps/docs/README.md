@@ -14,7 +14,7 @@ Pages are Markdown or MDX files in `src/content/docs/`. The `guides/`, `architec
 
 The [workers and gateway architecture page](src/content/docs/architecture/workers-and-gateway.mdx) describes gateway-held harness logins, caller tokens, and cleanup of attempt Codex homes.
 
-The [Operate runs guide](src/content/docs/guides/operate-runs.md) documents project boards across repositories, project configuration and repository filters, saved agent definitions for Retry, current definitions for Edit and retry, cancellation of open runs, and failure-to-answer statistics for retries and resolutions.
+The [Operate runs guide](src/content/docs/guides/operate-runs.md) documents project boards across repositories, project configuration and repository filters, saved agent definitions for Retry, current definitions for Edit and retry, and cancellation of open runs. It also covers failure-to-answer statistics for retries and resolutions, worker utilization from configuration revisions, and first-time-right counts that include rebase loops.
 
 The [review and fix loops guide](src/content/docs/guides/review-fix-loops.md) documents conflict findings for read-only reviewers, base-branch merges before pushing fixes, and CI checks before changing outcome labels.
 

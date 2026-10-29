@@ -176,7 +176,7 @@ components:
 
 A dense, quiet work tool at the standard of Linear, the Vercel dashboard, and Raycast: a standard kanban (dark sidebar, one inset work panel, lanes of cards), cleaner than stock shadcn, with fewer pills, fewer nested boxes, one type scale, and one action colour.
 
-Factory imagery appears only where it conveys information: thin arrows between authored lanes name the loops that match the left lane's tasks, and empty lanes have a dashed outline. No other factory imagery, logo, or ornament.
+Factory imagery appears only where it conveys information: thin arrows between authored lanes name the loops that match the left lane's tasks, and empty lanes have a dashed outline. The one logo is the usine mark, in the sidebar, the favicon, and every running state. No other factory imagery, logo, or ornament.
 
 Dark only: the `.dark` block in `src/index.css` is the shipped theme, and `:root` has a Catppuccin Latte fallback that no screen is designed for.
 
@@ -192,7 +192,7 @@ Dark only: the `.dark` block in `src/index.css` is the shipped theme, and `:root
 Catppuccin Mocha as published: neutral grounds from crust to text, one action accent, and four state colours.
 
 ### Primary
-- **Mauve** (`{colors.mauve}`): primary buttons, focus rings, links, the text caret, text selection (mixed to 32%), and item marks of closed issues and merged pull requests, and nothing else.
+- **Mauve** (`{colors.mauve}`): primary buttons, focus rings, links, the text caret, text selection (mixed to 32%), item marks of closed issues and merged pull requests, and the dot of the usine mark, and nothing else.
 
 ### Secondary
 - **Blue** (`{colors.blue}`): a run that is Pending, Queued, or Running; a flow arrow whose loops are working.
@@ -216,9 +216,9 @@ Catppuccin Mocha as published: neutral grounds from crust to text, one action ac
 GitHub label colours come unchanged from the repository, in the label chip (see Components): data, not palette.
 
 ### Named Rules
-**The One Action Colour Rule.** Mauve marks what the operator can act on or has focused. States never use mauve; actions use no state colour except destructive red. The one exception is the item mark, which uses GitHub's state colours (see Item mark).
+**The One Action Colour Rule.** Mauve marks what the operator can act on or has focused. States never use mauve; actions use no state colour except destructive red. The exceptions are the item mark, which uses GitHub's state colours (see Item mark), and the usine mark, whose dot is mauve in every state.
 
-**The State Tone Rule.** Blue running, peach waiting and Needs attention, red failed, green succeeded, overlay0 canceled. A state is a 6px dot in its tone beside the state's word, so colour is never the only signal. The same scale marks a project active (blue) or clear (green) and a loop active (live green) or paused (overlay0). An issue or pull request state is an item mark, never a dot.
+**The State Tone Rule.** Blue running, peach waiting and Needs attention, red failed, green succeeded, overlay0 canceled. A state is a 6px dot in its tone, 8px before the state's word, so colour is never the only signal. While a run, attempt, or tool call is running, the 12px running mark (see usine mark) takes the dot's place, centred on it, so rows keep their alignment. A dot that starts a line is indented 3px, so the running mark starts at the line's edge. The same scale marks a project active (blue) or clear (green) and a loop active (live green) or paused (overlay0). An issue or pull request state is an item mark, never a dot.
 
 ## Typography
 
@@ -293,7 +293,7 @@ Motion explains a change and is short. One curve and three durations, as tokens 
 - **`--duration-base`** (200ms): panels opening, the sheet sliding in, the overlay fading, the reading mark.
 - **`--duration-view`** (250ms): the drawer-to-page view transition.
 
-Content is visible without motion. Under `prefers-reduced-motion: reduce`, durations are zero and view transitions are off.
+Content is visible without motion. Under `prefers-reduced-motion: reduce`, durations are zero, view transitions are off, and the running mark is static.
 
 - **Drawer to run page:** Open run page navigates with a view transition. The run header's title (`run-title`) and state (`run-state`) share a `view-transition-name` in the drawer and on the page, so they move into the page while the rest cross-fades. Without view transitions, navigation is immediate.
 - **Sheet:** slides in, and its overlay fades in, over 200ms; both leave in 150ms.
@@ -301,6 +301,7 @@ Content is visible without motion. Under `prefers-reduced-motion: reduce`, durat
 - **Reading mark:** each checkpoint rail's 1px mark slides to the reading line's checkpoint over 200ms.
 - **Needs attention:** the tray uses the popover transition on desktop and the sheet transition on phones.
 - **Controls:** button colour, border, and ring changes take 100ms.
+- **Running mark:** a 1.3s linear loop of ten 130ms steps. Each tile is at full opacity for its step, fades over the next two, and stays at 20% for the rest of the cycle, so a bright tile travels the U with a two-tile trail, then three steps pass without one.
 
 ## Shapes
 
@@ -329,7 +330,7 @@ Compact and quiet, mostly 28px tall.
 - **Shadow Strategy:** none at rest; Raised while dragged.
 - **Border:** 7% white ring; 15% on hover; peach at 45% when the card needs the operator (65% on hover).
 - **Internal Padding:** 10px top and bottom, 12px sides; rows 6px apart.
-- **Content order:** each member's item mark, 10px apart; the task's title (two lines, 13px medium); labels; the run line (state dot, loop, state, mono elapsed time, agent at the right). A failure is red text on red at 8% with its action. A stall reason is 12px subtext0, at most three lines, after the loop in text colour if no run line shows it, then the action as an extra-small outline button.
+- **Content order:** each member's item mark, 10px apart; the task's title (two lines, 13px medium); labels; the run line (state mark, loop, state, mono elapsed time, agent at the right). A failure is red text on red at 8% with its action. A stall reason is 12px subtext0, at most three lines, after the loop in text colour if no run line shows it, then the action as an extra-small outline button.
 - **Menu:** a 20px ghost icon button in the top right corner, shown on hover or focus with a pointer, always on touch.
 
 ### Inputs / Fields
@@ -338,7 +339,7 @@ Compact and quiet, mostly 28px tall.
 - **Error / Disabled:** red stroke with a red ring at 25%; disabled at 50% opacity.
 
 ### Navigation
-- **Sidebar:** 232px mantle column: the wordmark `usine` in 14px semibold, then groups 20px apart, each a 12px subtext0 name over 32px rows in 13px subtext1. A row starts with a 16px regular-weight Phosphor icon, or a project's repository mark, so the wordmark, icons, marks, and group names share one column and the labels another. Under each project, Board and Tasks are 28px rows with their icons under the project name; projects are 6px apart. Icons are subtext0 at rest and text colour on hover and when active: Overview `SquaresFour`, Board `Kanban`, Tasks `ListChecks`, Loops `ArrowsClockwise`, Agents `Robot`, Workers `HardDrives`, Repositories `BookBookmark`, Settings `GearSix`. Hover fills surface0 at 60%; the active row is surface0 across the row's width, with text colour and medium weight. Needs attention counts are peach, 8px from the row's right edge, on hover too. The footer has the live dot, centred in the icon column, and `Live` or `Idle`.
+- **Sidebar:** 232px mantle column: the 18px usine mark, centred on the icon column and on the x-height, and the wordmark `usine` in 14px semibold, then groups 20px apart, each a 12px subtext0 name over 32px rows in 13px subtext1. A row starts with a 16px regular-weight Phosphor icon, or a project's repository mark, so the usine mark, icons, repository marks, and group names share one column, and the wordmark and labels another. Under each project, Board and Tasks are 28px rows with their icons under the project name; projects are 6px apart. Icons are subtext0 at rest and text colour on hover and when active: Overview `SquaresFour`, Board `Kanban`, Tasks `ListChecks`, Loops `ArrowsClockwise`, Agents `Robot`, Workers `HardDrives`, Repositories `BookBookmark`, Settings `GearSix`. Hover fills surface0 at 60%; the active row is surface0 across the row's width, with text colour and medium weight. Needs attention counts are peach, 8px from the row's right edge, on hover too. The footer has the live dot, centred in the icon column, and `Live` or `Idle`.
 - **Header:** 48px, hairline bottom border, sidebar toggle, breadcrumb, and a notification bell with a peach count at the right.
 - **Menus:** surface0 popup, 8px radius, 4px padding, Raised shadow; 28px items in 13px, focus fills surface1; destructive items red with a red 15% focus fill. Menus list only actions that apply.
 
@@ -404,6 +405,16 @@ The only way an issue or pull request number appears: its Octicon and `#number` 
 | Pull request | Closed | `GitPullRequestClosed` | red |
 | Either | Unknown | the kind's open icon | subtext0 |
 
+### usine mark
+Seven 16-unit tiles with a 4-unit radius form a U around a 6-unit dot on a 64-unit grid (`src/components/usine-mark.tsx`). The tiles are the current text colour at 30, 40, 50, 62, 74, 87, and 100% opacity, in the order work moves through the cell: down the left side, across the bottom, and up the right side. The dot is mauve. Uses:
+
+- **Sidebar:** 18px, text colour (see Navigation).
+- **Running mark:** 12px, the tiles in the state's tone, animated (see Motion): the running state of runs, attempts, and tool calls, including the fold line's running count, the reader's current activity, and the overview's Running rows before the loop.
+- **Boot screen:** 32px, text colour, animated, while the app or a page loads. Spinners in buttons and toasts stay; they mean loading.
+- **Favicon:** the mark on a base square with a 14-unit radius, with the tiles in the surface2 to text ramp (`src/favicon.svg`).
+
+The mark is hidden from screen readers; the word beside it, or a status label, names the state.
+
 ### Repository mark
 How a repository appears where it names a page or a navigation entry: the sidebar's project rows, the project breadcrumb, the board heading, and in the configuration section the Repositories list, a repository's heading and breadcrumb, and a loop's Repositories fact. The owner's GitHub avatar as a square tile with a 4px radius and a hairline ring, 8px before the name (6px in a breadcrumb): 16px beside 13px text, 20px beside a 20px heading, centred on the first line. GitHub has no per-repository image, so repositories with one owner share the avatar. If it doesn't load, the tile is the name's first letter or digit in 12px semibold text colour on surface1. The mark is hidden from screen readers. Run lines, Needs attention entries, and other mentions in running text show the name alone.
 
@@ -455,7 +466,7 @@ Every string on screen, from title to tooltip, states what is true in common app
 ### Do:
 - **Do** put new screens in the base work panel on the mantle ground, with mantle cards and surface0 popovers.
 - **Do** use mauve only for actions, focus, links, selection, and item marks.
-- **Do** show state as the State Tone Rule says; pulse the dot only while Running, never under reduced motion.
+- **Do** show state as the State Tone Rule says; animate the usine mark only while something runs or loads, never under reduced motion.
 - **Do** keep text on the 12/13/14/16/20 scale, with mono only for ids, numbers, times, and code.
 - **Do** keep surfaces flat behind 7% white hairlines, with the Raised shadow only on menus, popovers, and dragged items.
 - **Do** render GitHub labels as label chips.
@@ -467,7 +478,7 @@ Every string on screen, from title to tooltip, states what is true in common app
 - **Don't** use overlay0 for text; it fails contrast on these grounds.
 - **Don't** put run states in pill badges or nest filled boxes.
 - **Don't** set headings in mono or use uppercase, letter-spaced labels above headings.
-- **Don't** add factory imagery beyond the flow arrows and dashed empty lanes.
+- **Don't** add factory imagery beyond the usine mark, the flow arrows, and dashed empty lanes.
 - **Don't** design screens against the light `:root` fallback palette.
 - **Don't** break the Said Once Rule.
 - **Don't** add tabs or the conversation to the run drawer; the conversation is on the run page.

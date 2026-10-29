@@ -11,9 +11,9 @@ and [terminal.tsx](https://github.com/vercel/ai-elements/blob/6a9d5b1822ffb10bba
 
 These files retain the upstream collapsible tool composition, source panel and
 clipboard composition, and ANSI terminal rendering. Local adaptations use Base UI
-primitives, Phosphor icons, the usine theme, and the statuses the Run transcript
-actually records. Tool content is supplied by the caller; the upstream automatic
-JSON renderers and AI SDK types are omitted.
+primitives, Phosphor icons, the usine theme, the running mark for a running call,
+and the statuses the Run transcript actually records. Tool content is supplied by
+the caller; the upstream automatic JSON renderers and AI SDK types are omitted.
 
 Tool uses a flat disclosure row with a subtle header background while hovered or
 expanded. The background extends 8px beyond the text column; transcript row wrappers

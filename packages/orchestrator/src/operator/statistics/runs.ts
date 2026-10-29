@@ -6,6 +6,7 @@ import * as RunState from "@usine/core/run/state";
 import type { WorkerName } from "@usine/core/worker";
 import type { RunSummary } from "@usine/engine/run-reader";
 import { Array as EffectArray, DateTime, Option } from "effect";
+import { type WorkerCapacity, workerSlotMillis } from "./workers.ts";
 import type { RunUsageView, SessionUsageView } from "../usage.ts";
 import {
   AgentStatisticsView,
@@ -41,12 +42,6 @@ import {
 
 const POOLS: ReadonlyArray<BillingPool> = ["apiKeys", "claudePlan", "chatgptPlan"];
 
-/** A Worker that `usine.yaml` declares, with its `max_concurrent_attempts`. */
-interface DeclaredWorker {
-  readonly name: WorkerName;
-  readonly slots: number;
-}
-
 /** The stored facts that `runStatisticsView` reduces. */
 export interface RunStatisticsFacts {
   readonly window: StatisticsWindow;
@@ -55,7 +50,7 @@ export interface RunStatisticsFacts {
   readonly runs: ReadonlyArray<RunSummary>;
   /** The usage of each closed Run in `runs`. */
   readonly usage: ReadonlyMap<RunId, RunUsageView>;
-  readonly workers: ReadonlyArray<DeclaredWorker>;
+  readonly workers: ReadonlyArray<WorkerCapacity>;
 }
 
 /** Returns when a closed Run closed; the fallback only covers the nullable stored field. */
@@ -389,7 +384,6 @@ export const runStatisticsView = ({
   );
   const mostAttempts = attemptCounts.reduce((most, count) => Math.max(most, count), 0);
 
-  const windowMillis = Math.max(0, to - from);
   const occupied = (worker: WorkerName): number =>
     sum(
       runs.flatMap(({ attempts }) =>
@@ -447,7 +441,9 @@ export const runStatisticsView = ({
           runs: attemptCounts.filter((count) => count === index + 1).length,
         }),
     ),
-    utilization: workers.flatMap(({ name, slots }) => {
+    utilization: workers.flatMap((worker) => {
+      const { name, slots } = worker;
+      const capacity = workerSlotMillis(worker, from, to);
       if (slots < 1) return [];
       const held = occupied(name);
       return [
@@ -455,7 +451,7 @@ export const runStatisticsView = ({
           worker: name,
           slots,
           occupiedMillis: Math.round(held),
-          share: windowMillis === 0 ? 0 : Math.min(1, held / (slots * windowMillis)),
+          share: capacity === 0 ? 0 : Math.min(1, held / capacity),
         }),
       ];
     }),

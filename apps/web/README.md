@@ -46,6 +46,8 @@ The first screen, at `/`:
 
 A row about a run opens its run page. Empty blocks say what they would list, and loading blocks show skeleton rows. With no project configured, the overview links to **Configuration > Projects**.
 
+Statistics Details defines first time right as no loop succeeding twice on the same item, including rebase loops. Worker utilization uses configuration revisions to account for slot changes over the window; revision 1 supplies the count before recorded history. The slot count beside each meter is the current count.
+
 The Overview's run statistics show the median failure-to-answer time, with separate retry and resolution medians. The first recorded answer counts once, including when a resolved failure is later retried.
 
 ## Sidebar
@@ -71,7 +73,7 @@ Only authored label-backed lanes accept moves, and only if another writable lane
 A card joins explicitly linked issues and PRs. It shows:
 
 - Each member's mark, the task's title on at most two lines, and up to three labels besides the lane's own, with a count of the rest.
-- For an open run, or a failed run that still needs the operator: a dot in the state's color (pulsing while `Running`), then the loop, state, time, and agent. The time counts from the run's opening while `Waiting` or `Queued`, the current attempt's start while `Running`, and the failure once `Failed`; the tooltip gives the full timestamp and start point. Succeeded and canceled runs show only on the task page, in the drawer, and in **Run history**.
+- For an open run, or a failed run that still needs the operator: a dot in the state's color, or the animated usine mark while `Running`, then the loop, state, time, and agent. The time counts from the run's opening while `Waiting` or `Queued`, the current attempt's start while `Running`, and the failure once `Failed`; the tooltip gives the full timestamp and start point. Succeeded and canceled runs show only on the task page, in the drawer, and in **Run history**.
 - Under that line: failures on items that are still open, with **Retry** if retryable or **Mark answered** or **Mark resolved** for a question or blocker; merge conflicts; run action and **Run again** progress, including that no run opened because the cycle budget is used up; and move progress.
 - For a stalled task, the overview's reason (from `GET /api/desk`), after the loop if no run line shows it, and the one action that unblocks it, such as **Approve** or **Run again**.
 

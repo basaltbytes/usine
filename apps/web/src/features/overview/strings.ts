@@ -176,3 +176,9 @@ export const noProjectsCopy = {
   description: "Create a project from registered repositories in Configuration.",
   action: "Open projects",
 };
+
+export const firstTimeRightDetails =
+  "First time right means no loop succeeded twice on the same item in a task. Every loop counts, including loops that rebase pull requests.";
+
+export const workerUtilizationDetails =
+  "Utilization uses slot counts from configuration history over the selected window. Before the first revision, it uses revision 1’s slot count. The displayed slot count is the current count.";

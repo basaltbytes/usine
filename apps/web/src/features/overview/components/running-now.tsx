@@ -12,6 +12,7 @@ import {
   TableHeader,
   TableRow,
 } from "~/components/ui/table";
+import { UsineMark } from "~/components/usine-mark";
 import { agoLabel, dayTimeLabel, timestampLabel } from "~/lib/strings";
 import { nothingRunning, warningLine } from "~/features/overview/strings";
 import { EmptyLine, RunPageLink, RunRow } from "~/components/overview/section";
@@ -23,6 +24,11 @@ const startLabel = (instant: string, now: number): string => {
     ? timestampLabel(instant).slice(11)
     : dayTimeLabel(instant);
 };
+
+/** Marks the Loop of an Attempt in flight, in the Loop column or, below `md`, the second line. */
+const RunningMark = () => (
+  <UsineMark running className="mr-2 inline-block size-3 align-middle text-run-active" />
+);
 
 type RunningRowProps = {
   readonly running: RunningAttemptView;
@@ -52,6 +58,7 @@ const RunningRow = ({ running, overview, now }: RunningRowProps) => {
         </RunPageLink>
         <p className="mt-0.5 truncate text-xs text-muted-foreground lg:hidden">
           <span className="md:hidden">
+            <RunningMark />
             {run.loop}, {run.agent} on {attempt.worker}
           </span>
           <span className="max-md:hidden">
@@ -73,7 +80,10 @@ const RunningRow = ({ running, overview, now }: RunningRowProps) => {
           </p>
         ))}
       </FillCell>
-      <TableCell className="py-3 max-md:hidden align-top">{run.loop}</TableCell>
+      <TableCell className="py-3 max-md:hidden align-top">
+        <RunningMark />
+        {run.loop}
+      </TableCell>
       <TableCell className="py-3 max-lg:hidden align-top">{run.agent}</TableCell>
       <TableCell className="py-3 max-lg:hidden align-top">{attempt.worker}</TableCell>
       <TableCell className="py-3 max-sm:hidden align-top">

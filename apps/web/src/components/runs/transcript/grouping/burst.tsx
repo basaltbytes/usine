@@ -3,6 +3,7 @@ import { Option } from "effect";
 import { Button } from "~/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "~/components/ui/collapsible";
 import { MessageScrollerItem, useMessageScroller } from "~/components/ui/message-scroller";
+import { UsineMark } from "~/components/usine-mark";
 import { durationLabel } from "~/lib/strings";
 import type { Burst } from "~/lib/runs/transcript/document/model";
 import type { TranscriptTool } from "~/lib/runs/transcript/model";
@@ -60,7 +61,12 @@ export const ToolBurst = ({ burst }: ToolBurstProps) => {
         <span className="min-w-0">
           {burstSummary(burst)}
           {failed > 0 && <span className="text-destructive">, {failed} failed</span>}
-          {running > 0 && <span className="text-run-active">, {running} running</span>}
+          {running > 0 && (
+            <span className="text-run-active">
+              , <UsineMark running className="mr-1 inline-block size-3 align-middle" />
+              {running} running
+            </span>
+          )}
           {Option.match(span, {
             onNone: () => null,
             onSome: (milliseconds) => (

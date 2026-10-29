@@ -14,7 +14,7 @@ import { PiSdk, piSdkLive, usePiStart } from "../pi/sdk.ts";
 import { probeCommand, probeFailed, probeOutput } from "./command.ts";
 
 /** The Codex CLI version of the pinned app-server protocol package used by the conformance check. */
-export const CODEX_CLI_VERSION = "0.159.2";
+export const CODEX_CLI_VERSION = "0.164.0";
 
 /**
  * The Codex CLI versions that preflight accepts, the conformance baseline first. Adding a version
@@ -24,8 +24,8 @@ export const supportedCodexVersions: ReadonlyArray<string> = [
   CODEX_CLI_VERSION,
   "0.159.0",
   "0.159.1",
+  "0.159.2",
   "0.159.3",
-  "0.153.4",
 ];
 
 /** Returns the error for `codex --version` output that names no supported Codex CLI version. */

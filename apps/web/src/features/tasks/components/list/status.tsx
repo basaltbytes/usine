@@ -67,7 +67,7 @@ export const Status = ({ row, now }: StatusProps) => {
       {state === "Done" ? (
         <ItemMark item={row.task} linked={false} numbered={false} className="mt-0.75" />
       ) : (
-        <StateMark state={state} className="mt-1.75" />
+        <StateMark state={state} className="mt-1.75 mr-0.5 ml-0.75" />
       )}
       <span className="min-w-0 wrap-break-word">
         {words}

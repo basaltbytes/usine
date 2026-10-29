@@ -1,3 +1,4 @@
+import { configurationLayer } from "./support/configuration.ts";
 import { AttentionAcknowledgements } from "@usine/engine/attention";
 import { assert, describe, it } from "@effect/vitest";
 import { UsineConfig } from "@usine/config/factory";
@@ -409,6 +410,7 @@ const observation = (
     latest: Effect.succeed(Option.none()),
   });
   return OperatorObservation.layer.pipe(
+    Layer.provide(configurationLayer),
     Layer.provide(
       Layer.mock(AttentionAcknowledgements)({
         list: () => Effect.succeed([]),

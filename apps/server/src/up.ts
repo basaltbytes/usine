@@ -351,6 +351,6 @@ export const up = (command: UpCommand) =>
         database,
         configurationEditor,
         auth,
-      ).pipe(Effect.provideContext(tracer));
+      ).pipe(Effect.provideContext(tracer), Effect.provideContext(configurationContext));
     }),
   ).pipe(Effect.provideService(References.MinimumLogLevel, command.logLevel));

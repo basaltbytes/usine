@@ -225,14 +225,14 @@ it("shows the number and kind, a title clamped to two lines, and only labels the
   expect(labels(cardOf(/^Document the cycle budget/u))).toEqual(["docs"]);
 });
 
-/** Returns the animation of the state mark at the start of a Run line. */
+/** Returns the animation of the state mark at the start of a Run line: a running mark's tiles, or the dot. */
 const markAnimation = (row: HTMLElement) => {
   const mark = row.querySelector("[data-slot=state-mark]");
   if (mark === null) throw new Error("No state mark on the Run line");
-  return getComputedStyle(mark).animationName;
+  return getComputedStyle(mark.querySelector("rect") ?? mark).animationName;
 };
 
-it("times a running Run from its current Attempt, on one line with a pulsing mark", async () => {
+it("times a running Run from its current Attempt, on one line with the running mark", async () => {
   const running = cardOf(/^Redesign the Board/u);
   expect(running.textContent).toContain("#9#31");
   await expect
@@ -252,7 +252,7 @@ it("times a running Run from its current Attempt, on one line with a pulsing mar
   expect(row.getBoundingClientRect().height).toBeLessThanOrEqual(
     Number.parseFloat(getComputedStyle(state).lineHeight) + 1,
   );
-  expect(markAnimation(row)).not.toBe("none");
+  expect(markAnimation(row)).toBe("usine-mark-running");
   const startedAt = runOf("run-redesign").attempts[1]?.startedAt ?? "";
   const time = row.querySelector("time");
   expect(time?.dateTime).toBe(startedAt);
@@ -293,7 +293,7 @@ it("shows a card whose running Run's Loop removed its lane label in that lane, c
   await expect.element(page.getByText("8 lanes, 12 items", { exact: true })).toBeVisible();
   const row = runLine(card, "Running");
   expect(row.textContent).toBe("reviewRunning2mreviewer");
-  expect(markAnimation(row)).not.toBe("none");
+  expect(markAnimation(row)).toBe("usine-mark-running");
   // The card shows the pull request's current labels.
   expect([...card.querySelectorAll("[data-slot=badge]")].map((badge) => badge.textContent)).toEqual(
     ["ci"],
@@ -312,7 +312,7 @@ it("shows a running card whose Loop swapped its lane label in the lane of its cu
   expect(lane("Ready").element().contains(card)).toBe(false);
   const row = runLine(card, "Running");
   expect(row.textContent).toBe("implementRunning1mdeveloper");
-  expect(markAnimation(row)).not.toBe("none");
+  expect(markAnimation(row)).toBe("usine-mark-running");
 });
 
 it("offers Retry beside the failure only on the card whose Run failed", async () => {

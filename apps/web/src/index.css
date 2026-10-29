@@ -156,6 +156,26 @@
   }
 }
 
+/* A running mark's tile is bright for its 130ms step, fades over the next two, and stays dim for the
+   rest of the 1.3s cycle. */
+@keyframes usine-mark-running {
+  0%,
+  10% {
+    fill-opacity: 1;
+  }
+  30%,
+  100% {
+    fill-opacity: 0.2;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  [data-slot="usine-mark"][data-running] rect {
+    fill-opacity: 0.2;
+    animation: usine-mark-running 1.3s linear calc(var(--tile) * 130ms) infinite;
+  }
+}
+
 /* A Base UI Collapsible panel that grows and fades open from its measured height and closes faster.
    Base UI returns the height to auto once open, so content inside can still grow. */
 @utility collapsible-motion {

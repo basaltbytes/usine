@@ -20,6 +20,7 @@ import {
   SidebarMenuSubButton,
   SidebarMenuSubItem,
 } from "~/components/ui/sidebar";
+import { UsineMark } from "~/components/usine-mark";
 import { cn } from "~/lib/utils";
 import { ConfigurationMenu } from "~/components/configuration/navigation";
 import { projectId, projectName } from "~/lib/overview";
@@ -82,7 +83,11 @@ export const AppSidebar = ({
             render={<Link to="/" />}
             className="text-md font-semibold tracking-tight text-foreground"
           >
-            usine
+            {/* `align-middle` centers the mark on the x-height, and `-ml-px` on the icon column. */}
+            <span className="-ml-px">
+              <UsineMark className="mr-1.75 inline-block size-4.5! align-middle" />
+              usine
+            </span>
           </SidebarMenuButton>
         </SidebarMenuItem>
       </SidebarMenu>

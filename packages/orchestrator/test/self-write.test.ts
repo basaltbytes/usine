@@ -1,3 +1,4 @@
+import { configurationLayer } from "./support/configuration.ts";
 import { assert, describe, it } from "@effect/vitest";
 import { NodeServices } from "@effect/platform-node";
 import { AgentFile } from "@usine/config/agent";
@@ -234,7 +235,10 @@ describe("Board self-writes", () => {
             }),
           );
           const pollingLayer = PollingTriggers.layer.pipe(Layer.provideMerge(dependencies));
-          const layer = Operator.layer.pipe(Layer.provideMerge(pollingLayer));
+          const layer = Operator.layer.pipe(
+            Layer.provide(configurationLayer),
+            Layer.provideMerge(pollingLayer),
+          );
           yield* Effect.gen(function* () {
             const polling = yield* PollingTriggers;
             const operator = yield* Operator;

@@ -10,11 +10,7 @@ import { fileURLToPath } from "node:url";
 import { LocalProcess, RemoteShell } from "../src/child-host/child-host.ts";
 import { CodexAppServer, type CodexConnection } from "../src/pi/codex/app-server.ts";
 import { PiSdk, type PiStartOptions, type PiStartResult } from "../src/pi/sdk.ts";
-import {
-  CODEX_CLI_VERSION,
-  supportedCodexVersions,
-  verifyHarness,
-} from "../src/preflight/preflight.ts";
+import { CODEX_CLI_VERSION, verifyHarness } from "../src/preflight/preflight.ts";
 import packageJson from "../package.json" with { type: "json" };
 
 /** The Claude Code version that the installed Claude Agent SDK bundles. */
@@ -128,10 +124,9 @@ describe("worker harness readiness", () => {
       ).matchAll(pattern),
     ].map(([, version]) => version);
 
-  it("pins a supported Codex version in the Hetzner worker image", () => {
+  it("pins the Codex conformance baseline in the Hetzner worker image", () => {
     const pins = cloudInitPins(/@openai\/codex@(\S+)/gu);
-    assert.lengthOf(pins, 1);
-    assert.oneOf(pins[0], [...supportedCodexVersions]);
+    assert.deepStrictEqual(pins, [CODEX_CLI_VERSION]);
   });
 
   it("pins the Claude Agent SDK's Claude Code version in the Hetzner worker image", () => {
@@ -183,24 +178,28 @@ describe("worker harness readiness", () => {
   for (const result of [
     { stdout: "", exitCode: 127, capability: "binary" },
     { stdout: "codex-cli 0.144.0", exitCode: 0, capability: "version" },
+    { stdout: "codex-cli 0.153.4", exitCode: 0, capability: "version" },
   ]) {
-    it.effect(`refuses a Codex ${result.capability} gap before any account request`, () => {
-      const server = account(Effect.succeed(null));
-      return Effect.gen(function* () {
-        const error = yield* verifyHarness(coder, local, workerEnvironment).pipe(Effect.flip);
-        assert(error instanceof HarnessUnavailableError);
-        assert.strictEqual(error.capability, result.capability);
-        assert.strictEqual(server.opened(), 0);
-        assert(!JSON.stringify(error).includes("credential-shaped"));
-      }).pipe(
-        Effect.provide(commands({ [codexVersionCommand]: result })),
-        Effect.provide(server.layer),
-        Effect.provide(unusedPi),
-      );
-    });
+    it.effect(
+      `refuses a Codex ${result.capability} gap (${result.stdout || "missing binary"}) before any account request`,
+      () => {
+        const server = account(Effect.succeed(null));
+        return Effect.gen(function* () {
+          const error = yield* verifyHarness(coder, local, workerEnvironment).pipe(Effect.flip);
+          assert(error instanceof HarnessUnavailableError);
+          assert.strictEqual(error.capability, result.capability);
+          assert.strictEqual(server.opened(), 0);
+          assert(!JSON.stringify(error).includes("credential-shaped"));
+        }).pipe(
+          Effect.provide(commands({ [codexVersionCommand]: result })),
+          Effect.provide(server.layer),
+          Effect.provide(unusedPi),
+        );
+      },
+    );
   }
 
-  for (const version of ["0.159.2", "0.159.3", "0.153.4"]) {
+  for (const version of ["0.164.0", "0.159.0", "0.159.1", "0.159.2", "0.159.3"]) {
     for (const auth of [{ type: "apiKey" }, { type: "chatgpt" }]) {
       it.effect(
         `checks Codex ${version} ${auth.type} authentication and closes its unprompted connection`,
