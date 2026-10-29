@@ -144,7 +144,7 @@ Remove the trigger label first because the agent's comments and commits change t
    Post the review on GitHub. If you find any actionable issue, explain it with file and line references and add `agent-review-findings`. If there are none, make sure `agent-review-findings` is absent and add `review-passed`. Do not edit the branch or merge the pull request.
    ```
 
-4. Map the labels to [board lanes](/reference/configuration/usine-yaml/#reposlanes), so that dragging a card into a lane sets its label and starts a loop:
+4. Map the labels to [board lanes](/reference/configuration/usine-yaml/#projectslanes), so that dragging a card into a lane sets its label and starts a loop:
 
    ```yaml title="usine.yaml"
    repos:

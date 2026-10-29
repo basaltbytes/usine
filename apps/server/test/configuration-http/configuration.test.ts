@@ -165,14 +165,16 @@ it("refuses stale, invalid and incompatible writes without storing a revision", 
         },
       });
       expect(
-        yield* request("PUT", "/entities/loop/bad", {
+        yield* request("PUT", "/entities/loop/acme-project%2Fbad", {
           expected: 1,
           text: loopText.replace("'true'", "'missing.field'"),
         }),
       ).toMatchObject({
         status: 422,
         body: {
-          problems: [{ entity: { kind: "loop", identifier: "bad" }, path: ["trigger", "if"] }],
+          problems: [
+            { entity: { kind: "loop", identifier: "acme-project/bad" }, path: ["trigger", "if"] },
+          ],
         },
       });
       expect((yield* store.read).number).toBe(1);
