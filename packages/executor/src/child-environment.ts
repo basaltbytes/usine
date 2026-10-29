@@ -16,11 +16,21 @@ export const commitIdentity = (author: BotAccount) =>
   }) satisfies Record<string, string>;
 
 /**
- * Returns the environment for an Attempt's parent and children on every Worker kind:
- * `environment`, with `commitIdentity(author)`, and with `gitHooks` as `core.hooksPath` if set.
+ * Returns the environment for an attempt's parent and children on every worker kind.
+ * Disables Claude account connectors and nonessential traffic, sets `commitIdentity(author)`,
+ * and adds `gitHooks` as `core.hooksPath` if set.
  */
 export const childEnvironment = (
   environment: Readonly<Record<string, string>>,
   author: BotAccount,
   gitHooks: Option.Option<string>,
-): Record<string, string> => withGitHooks({ ...environment, ...commitIdentity(author) }, gitHooks);
+): Record<string, string> =>
+  withGitHooks(
+    {
+      ...environment,
+      ...commitIdentity(author),
+      ENABLE_CLAUDEAI_MCP_SERVERS: "0",
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+    },
+    gitHooks,
+  );
