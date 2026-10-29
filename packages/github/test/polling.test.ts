@@ -19,6 +19,7 @@ import {
   PollCursor,
 } from "../src/polling/detection.ts";
 import { RepositoryLabelCatalog, RepositoryLabelsNotModified } from "../src/polling/labels.ts";
+import { IssuePayload, PullRequestPayload } from "../src/polling/payload.ts";
 import { GitHubPolling } from "../src/polling/polling.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
@@ -98,6 +99,7 @@ const issuePayload = (timestamps: {
   author: { login: "PhilDL" },
   issueType: null,
   milestone: null,
+  timelineItems: { pageInfo: { hasPreviousPage: false, startCursor: null }, nodes: [] },
   labels: { totalCount: 1, nodes: [{ name: "ready" }] },
   assignees: { totalCount: 0, nodes: [] },
   comments: {
@@ -135,6 +137,7 @@ const pullRequestPayload = {
   mergeable: "MERGEABLE",
   mergeStateStatus: "CLEAN",
   statusCheckRollup: { state: "PENDING" },
+  timelineItems: { pageInfo: { hasPreviousPage: false, startCursor: null }, nodes: [] },
   labels: { totalCount: 0, nodes: [] },
   reviewRequests: {
     totalCount: 2,
@@ -425,6 +428,16 @@ describe("GitHubPolling", () => {
         commentCreatedAt: "2026-08-30T12:00:00Z",
       }),
       labels: { totalCount: labels.length, nodes: labels.slice(0, 50).map((name) => ({ name })) },
+      timelineItems: {
+        pageInfo: { hasPreviousPage: false, startCursor: null },
+        nodes: [
+          {
+            label: { name: finalLabel },
+            actor: { login: "operator", type: "User" },
+            createdAt: "2026-08-30T20:00:00Z",
+          },
+        ],
+      },
     };
     const client = HttpClient.make((request) => {
       requests.push(request);
@@ -457,6 +470,7 @@ describe("GitHubPolling", () => {
       assert.strictEqual(snapshot._tag, "IssueSnapshot");
       if (snapshot._tag !== "IssueSnapshot") return;
       assert.strictEqual(snapshot.payload.labels.totalCount, labels.length);
+      assert.strictEqual(snapshot.payload.labelEvents[finalLabel]?.actor?.login, "operator");
       assert.deepStrictEqual(
         snapshot.payload.labels.nodes.map(({ name }) => name),
         [...labels].sort((left, right) => left.localeCompare(right)),
@@ -743,6 +757,201 @@ describe("GitHubPolling", () => {
       assert.strictEqual(fromNulls.contentHash, fromEmpties.contentHash);
     }).pipe(Effect.provide(pollingLayer(client)));
   });
+
+  it.effect(
+    "keeps only the latest event of each current label in both streams and hashes actors, not times",
+    () => {
+      const labeled = (
+        name: string,
+        actor: { login: string; type: string } | null,
+        createdAt: string,
+      ) => ({ label: { name }, actor, createdAt });
+      const bot = { login: "usine", type: "Bot" };
+      const human = { login: "operator", type: "User" };
+      const oldTime = "2026-08-30T10:00:00Z";
+      const newTime = "2026-08-30T11:00:00Z";
+      const base = issuePayload({
+        createdAt: oldTime,
+        updatedAt: newTime,
+        commentCreatedAt: oldTime,
+      });
+      let actor = bot;
+      let time = oldTime;
+      const client = HttpClient.make((request) => {
+        const field = requestBody(request).query.includes("UsineIssuePayload")
+          ? "issue"
+          : "pullRequest";
+        return Effect.succeed(
+          response(request, {
+            data: {
+              repository: {
+                [field]: {
+                  ...(field === "issue" ? base : pullRequestPayload),
+                  labels: {
+                    totalCount: 4,
+                    nodes: ["ready", "createdAt", "__proto__", "unknown"].map((name) => ({ name })),
+                  },
+                  timelineItems: {
+                    pageInfo: { hasPreviousPage: false, startCursor: null },
+                    nodes: [
+                      labeled("ready", human, oldTime),
+                      null,
+                      labeled("removed", human, newTime),
+                      labeled("ready", bot, time),
+                      labeled("createdAt", actor, time),
+                      labeled("__proto__", null, time),
+                    ],
+                  },
+                },
+              },
+            },
+          }),
+        );
+      });
+      return Effect.gen(function* () {
+        const polling = yield* GitHubPolling;
+        assert.deepStrictEqual(Schema.decodeUnknownSync(IssuePayload)(base).labelEvents, {});
+        assert.deepStrictEqual(
+          Schema.decodeUnknownSync(PullRequestPayload)(pullRequestPayload).labelEvents,
+          {},
+        );
+        for (const item of [
+          new ChangedIssue({ number: 28, updatedAt: DateTime.makeUnsafe(newTime) }),
+          new ChangedPullRequest({ number: 51, updatedAt: DateTime.makeUnsafe(newTime) }),
+        ]) {
+          actor = bot;
+          time = oldTime;
+          const first = yield* polling.snapshot(repository, item);
+          assert.deepStrictEqual(
+            first.payload.labelEvents,
+            Object.fromEntries([
+              ["ready", { actor: bot, createdAt: oldTime }],
+              ["createdAt", { actor: bot, createdAt: oldTime }],
+              ["__proto__", { actor: null, createdAt: oldTime }],
+            ]),
+          );
+          time = newTime;
+          const later = yield* polling.snapshot(repository, item);
+          assert.strictEqual(first.contentHash, later.contentHash);
+          actor = human;
+          const reassigned = yield* polling.snapshot(repository, item);
+          assert.notStrictEqual(later.contentHash, reassigned.contentHash);
+        }
+      }).pipe(Effect.provide(pollingLayer(client)));
+    },
+  );
+
+  it.effect(
+    "walks older label pages until current labels are found without overwriting newer actors",
+    () => {
+      const requests: Array<HttpClientRequest.HttpClientRequest> = [];
+      const createdAt = "2026-08-30T10:00:00Z";
+      const recent = {
+        label: { name: "ready" },
+        actor: { login: "usine", type: "Bot" },
+        createdAt,
+      };
+      const older = {
+        label: { name: "old" },
+        actor: { login: "operator", type: "User" },
+        createdAt,
+      };
+      const client = HttpClient.make((request) => {
+        requests.push(request);
+        return Effect.succeed(
+          response(request, {
+            data: {
+              repository:
+                requests.length === 1
+                  ? {
+                      issue: {
+                        ...issuePayload({
+                          createdAt,
+                          updatedAt: createdAt,
+                          commentCreatedAt: createdAt,
+                        }),
+                        labels: { totalCount: 2, nodes: [{ name: "ready" }, { name: "old" }] },
+                        timelineItems: {
+                          pageInfo: { hasPreviousPage: true, startCursor: "page-1" },
+                          nodes: [recent],
+                        },
+                      },
+                    }
+                  : {
+                      issueOrPullRequest: {
+                        timelineItems: {
+                          pageInfo: { hasPreviousPage: true, startCursor: "page-2" },
+                          nodes: [older, { ...recent, actor: older.actor }],
+                        },
+                      },
+                    },
+            },
+          }),
+        );
+      });
+      return Effect.gen(function* () {
+        const polling = yield* GitHubPolling;
+        const result = yield* polling.snapshot(
+          repository,
+          new ChangedIssue({ number: 28, updatedAt: DateTime.makeUnsafe(createdAt) }),
+        );
+        assert.deepStrictEqual(result.payload.labelEvents, {
+          ready: { actor: recent.actor, createdAt },
+          old: { actor: older.actor, createdAt },
+        });
+        assert.strictEqual(requests.length, 2);
+        const first = requestBody(requests[0] ?? assert.fail("missing initial query"));
+        assert.include(first.query, "itemTypes: [LABELED_EVENT]");
+        const second = requests[1] ?? assert.fail("missing continuation query");
+        if (second.body._tag !== "Uint8Array") return assert.fail("missing request body");
+        assert.include(new TextDecoder().decode(second.body.body), '"before":"page-1"');
+      }).pipe(Effect.provide(pollingLayer(client)));
+    },
+  );
+
+  for (const startCursor of [null, "cursor"]) {
+    it.effect(
+      `rejects incomplete label history with ${startCursor === null ? "a missing cursor" : "more than ten pages"}`,
+      () => {
+        let requests = 0;
+        const createdAt = "2026-08-30T10:00:00Z";
+        const timelineItems = { pageInfo: { hasPreviousPage: true, startCursor }, nodes: [] };
+        const client = HttpClient.make((request) => {
+          requests += 1;
+          return Effect.succeed(
+            response(request, {
+              data: {
+                repository:
+                  requests === 1
+                    ? {
+                        issue: {
+                          ...issuePayload({
+                            createdAt,
+                            updatedAt: createdAt,
+                            commentCreatedAt: createdAt,
+                          }),
+                          timelineItems,
+                        },
+                      }
+                    : { issueOrPullRequest: { timelineItems } },
+              },
+            }),
+          );
+        });
+        return Effect.gen(function* () {
+          const polling = yield* GitHubPolling;
+          const failure = yield* Effect.flip(
+            polling.snapshot(
+              repository,
+              new ChangedIssue({ number: 28, updatedAt: DateTime.makeUnsafe(createdAt) }),
+            ),
+          );
+          assert.strictEqual(failure._tag, "InvalidGitHubResponseError");
+          assert.strictEqual(requests, startCursor === null ? 1 : 10);
+        }).pipe(Effect.provide(pollingLayer(client)));
+      },
+    );
+  }
 
   it.live("turns GitHub retry guidance into a typed rate-limit deadline", () => {
     const client = HttpClient.make((request) =>

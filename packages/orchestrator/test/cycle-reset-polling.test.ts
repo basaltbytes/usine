@@ -179,6 +179,7 @@ it.live(
         author: { login: "operator" },
         issueType: null,
         milestone: null,
+        labelEvents: {},
         labels: { totalCount: ready ? 1 : 0, nodes: ready ? [{ name: "ready" }] : [] },
         assignees: { totalCount: 0, nodes: [] },
         comments: { totalCount: 0, nodes: [] },

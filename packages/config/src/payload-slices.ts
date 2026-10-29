@@ -29,6 +29,14 @@ const objectType = (name: string, fields: ReadonlyArray<FieldDeclaration>): Obje
   });
 
 const actor = objectType("Actor", [["login", "string"]]);
+const labelActor = objectType("LabelActor", [
+  ["login", "string"],
+  ["type", "string"],
+]);
+const labelEvent = objectType("LabelEvent", [
+  ["actor", "LabelActor", "nullable"],
+  ["createdAt", "string"],
+]);
 const label = objectType("Label", [["name", "string"]]);
 const milestone = objectType("Milestone", [["title", "string"]]);
 const issueType = objectType("IssueType", [["name", "string"]]);
@@ -80,6 +88,7 @@ const issue = objectType("IssuePayload", [
   ["issueType", "IssueType", "nullable"],
   ["milestone", "Milestone", "nullable"],
   ["labels", "Labels"],
+  ["labelEvents", "map<string,LabelEvent>"],
   ["assignees", "Assignees"],
   ["comments", "IssueComments"],
   ["closedByPullRequestsReferences", "PullRequestReferences"],
@@ -163,6 +172,7 @@ const pullRequest = objectType("PullRequestPayload", [
   ["mergeStateStatus", "string"],
   ["statusCheckRollup", "StatusCheckRollup", "nullable"],
   ["labels", "Labels"],
+  ["labelEvents", "map<string,LabelEvent>"],
   ["reviewRequests", "ReviewRequests"],
   ["reviews", "Reviews"],
   ["reviewThreads", "ReviewThreads"],
@@ -191,6 +201,8 @@ const environment = (types: ReadonlyArray<ObjectType>, itemType: string): Enviro
 export const issueEnvironment = environment(
   [
     actor,
+    labelActor,
+    labelEvent,
     label,
     milestone,
     issueType,
@@ -209,6 +221,8 @@ export const issueEnvironment = environment(
 export const pullRequestEnvironment = environment(
   [
     actor,
+    labelActor,
+    labelEvent,
     label,
     commit,
     labels,

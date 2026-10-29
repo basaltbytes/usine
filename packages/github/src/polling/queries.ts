@@ -1,3 +1,27 @@
+const labelTimeline = (before: string) => `
+  timelineItems(last: 100, before: ${before}, itemTypes: [LABELED_EVENT]) {
+    pageInfo { hasPreviousPage startCursor }
+    nodes {
+      ... on LabeledEvent {
+        actor { login type: __typename }
+        createdAt
+        label { name }
+      }
+    }
+  }
+`;
+
+export const LABEL_EVENTS_QUERY = `
+  query UsineLabelEvents($owner: String!, $name: String!, $number: Int!, $before: String!) {
+    repository(owner: $owner, name: $name) {
+      issueOrPullRequest(number: $number) {
+        ... on Issue { ${labelTimeline("$before")} }
+        ... on PullRequest { ${labelTimeline("$before")} }
+      }
+    }
+  }
+`;
+
 export const ISSUE_PAYLOAD_QUERY = `
   query UsineIssuePayload($owner: String!, $name: String!, $number: Int!) {
     repository(owner: $owner, name: $name) {
@@ -14,6 +38,7 @@ export const ISSUE_PAYLOAD_QUERY = `
         author { login }
         issueType { name }
         milestone { title }
+        ${labelTimeline("null")}
         labels(first: 50) {
           totalCount
           nodes { name }
@@ -69,6 +94,7 @@ export const PULL_REQUEST_PAYLOAD_QUERY = `
         mergeable
         mergeStateStatus
         statusCheckRollup { state }
+        ${labelTimeline("null")}
         labels(first: 50) {
           totalCount
           nodes { name }

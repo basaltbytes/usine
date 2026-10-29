@@ -72,6 +72,14 @@ Pass a `CoveredProject` and the attempt's loop permission level to `GitHubApp.wo
 - `snapshot(repository, item)`: the issue or pull request payload through GraphQL, with its SHA-256 content hash. The stored payload keeps timestamps; the hash excludes timestamp fields at every level.
 - `missingIssues(repository, numbers)`: the numbers the repo no longer has, deleted or transferred. It sends one GraphQL request per 50 numbers, with an aliased `issue(number:)` field each; an issue that returns null is missing.
 
+Snapshots expose `labelEvents[labelName]` for each current label with available history:
+`actor.login`, `actor.type` (such as `Bot` or `User`), and `createdAt`. App actors use
+the App slug without `[bot]`; deleted actors are null. Missing history has no map
+entry. The initial GraphQL query reads the last 100 label additions. Polling reads
+older pages until it finds the current labels, with a ten-page limit; an incomplete
+walk at that limit fails the snapshot. Older stored payloads decode with an empty
+map. Actor changes affect the content hash; timestamp-only changes do not.
+
 Change detection separates `nextPollAt`, the earliest next conditional poll, from `backoffUntil`, a delay from `Retry-After` or rate-limit pressure. Self-write hints can fetch a snapshot within the poll interval while respecting backoff.
 
 The REST cursor overlaps its watermark by five seconds. Repeated items are expected; the engine's event ledger deduplicates. Provide `GitHubPollingLayer` with `GitHubApp`, an Effect HTTP client, and `Crypto.Crypto`.

@@ -164,6 +164,7 @@ const issuePayload = (labels: ReadonlyArray<string>, number = 28): IssuePayload 
   author: { login: "PhilDL" },
   issueType: null,
   milestone: null,
+  labelEvents: {},
   labels: { totalCount: labels.length, nodes: labels.map((name) => ({ name })) },
   assignees: { totalCount: 0, nodes: [] },
   comments: { totalCount: 0, nodes: [] },

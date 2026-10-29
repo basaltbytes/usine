@@ -101,6 +101,7 @@ const issuePayload = (number: number, milestone: string | null): IssuePayload =>
   author: null,
   issueType: null,
   milestone: milestone === null ? null : { title: milestone },
+  labelEvents: {},
   labels: { totalCount: 1, nodes: [{ name: "ready" }] },
   assignees: { totalCount: 0, nodes: [] },
   comments: { totalCount: 0, nodes: [] },
