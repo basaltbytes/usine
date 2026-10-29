@@ -6,7 +6,7 @@ import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/rea
 import { ConfigurationView, ReadyOverview } from "@usine/orchestrator/operator";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi, type MockInstance } from "vitest";
 import { commands, page, userEvent } from "vitest/browser";
 import { entityKey } from "~/features/configuration/lib/entities";
 import { entityQuery } from "~/features/configuration/queries";
@@ -38,8 +38,10 @@ let host: HTMLDivElement;
 let root: Root;
 let client: QueryClient;
 let wasDark: boolean;
+let consoleError: MockInstance<typeof console.error>;
 
 beforeEach(() => {
+  consoleError = vi.spyOn(console, "error");
   wasDark = document.documentElement.classList.contains("dark");
   document.documentElement.classList.add("dark");
   host = document.createElement("div");
@@ -58,6 +60,11 @@ afterEach(() => {
   client.clear();
   host.remove();
   document.documentElement.classList.toggle("dark", wasDark);
+  const renderWarnings = consoleError.mock.calls.filter(([message]) =>
+    String(message).includes("Cannot update a component"),
+  );
+  consoleError.mockRestore();
+  expect(renderWarnings).toEqual([]);
 });
 
 const mount = async (

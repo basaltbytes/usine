@@ -1,4 +1,4 @@
-import { useQueryClient } from "@tanstack/react-query";
+import { notifyManager, useQueryClient } from "@tanstack/react-query";
 import { isFunction } from "effect/Predicate";
 import { createContext, useEffect, useState, type ReactNode } from "react";
 
@@ -25,6 +25,7 @@ export const RefreshProvider = ({ children }: RefreshProviderProps) => {
   useEffect(() => {
     const cache = client.getQueryCache();
     const failures = new Map<string, number>();
+    let active = true;
     const update = () => {
       const next: RefreshSource[] = [];
       for (const query of cache.getAll()) {
@@ -53,26 +54,32 @@ export const RefreshProvider = ({ children }: RefreshProviderProps) => {
             failedSince: failures.get(query.queryHash) ?? null,
           });
       }
-      setSources((current) =>
-        current.length === next.length &&
-        current.every((source, index) => {
-          const other = next[index];
-          return (
-            source.label === other?.label &&
-            source.updatedAt === other.updatedAt &&
-            source.failedSince === other.failedSince
-          );
-        })
-          ? current
-          : next,
-      );
+      notifyManager.schedule(() => {
+        if (!active) return;
+        setSources((current) =>
+          current.length === next.length &&
+          current.every((source, index) => {
+            const other = next[index];
+            return (
+              source.label === other?.label &&
+              source.updatedAt === other.updatedAt &&
+              source.failedSince === other.failedSince
+            );
+          })
+            ? current
+            : next,
+        );
+      });
     };
     const unsubscribe = cache.subscribe((event) => {
       if (event.type === "removed") failures.delete(event.query.queryHash);
       update();
     });
     update();
-    return unsubscribe;
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, [client]);
   return <RefreshContext value={sources}>{children}</RefreshContext>;
 };

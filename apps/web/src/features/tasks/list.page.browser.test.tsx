@@ -287,7 +287,7 @@ it("says No runs yet when no task has a run", async () => {
   await mount(list);
   const heading = page.getByRole("heading", { name: "Tasks", level: 1 }).element().parentElement;
   await expect.element(page.getByText("No runs yet", { exact: true })).toBeVisible();
-  expect(heading?.textContent).toMatch(/^TasksLast updated/u);
+  await expect.poll(() => heading?.textContent).toMatch(/^TasksLast updated/u);
   expect(table().elements()).toHaveLength(0);
 });
 
