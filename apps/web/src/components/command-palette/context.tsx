@@ -12,7 +12,8 @@ export type PageCommand = { readonly label: string; readonly run: () => void };
 type RegisteredCommand = PageCommand & { readonly id: string };
 type RegisterCommands = (id: string, commands: ReadonlyArray<PageCommand>) => () => void;
 
-const RegisterContext = createContext<RegisterCommands>(() => () => {});
+const ignoreCommands: RegisterCommands = () => () => {};
+const RegisterContext = createContext<RegisterCommands>(ignoreCommands);
 export const PageCommandsContext = createContext<ReadonlyArray<RegisteredCommand>>([]);
 
 type PageCommandsProviderProps = { readonly children: ReactNode };
@@ -46,4 +47,12 @@ export const usePageCommands = (commands: ReadonlyArray<PageCommand>) => {
   const id = useId();
   const register = useContext(RegisterContext);
   useEffect(() => register(id, commands), [register, id, commands]);
+};
+
+type PageCommandsScopeProps = { readonly active: boolean; readonly children: ReactNode };
+
+/** Suspends commands on a surface covered by a drawer or closing its exit transition. */
+export const PageCommandsScope = ({ active, children }: PageCommandsScopeProps) => {
+  const register = useContext(RegisterContext);
+  return <RegisterContext value={active ? register : ignoreCommands}>{children}</RegisterContext>;
 };

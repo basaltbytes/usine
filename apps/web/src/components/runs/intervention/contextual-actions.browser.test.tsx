@@ -370,7 +370,16 @@ it("offers the run's overflow actions in the palette and retains cancellation co
   );
   await page.getByRole("button", { name: "Open commands" }).click();
   const dialog = page.getByRole("dialog", { name: "Commands", exact: true });
-  await expect.element(dialog.getByRole("option", { name: "Approve", exact: true })).toBeVisible();
+  await expect
+    .element(dialog.getByRole("option", { name: "Overview", exact: true }))
+    .toHaveAttribute("aria-selected", "true");
+  await userEvent.keyboard("{Enter}");
+  await expect.element(dialog).not.toBeInTheDocument();
+  expect(await commands.recordedInterventions()).toEqual([]);
+  await page.getByRole("button", { name: "Open commands" }).click();
+  await expect
+    .element(dialog.getByRole("option", { name: `Approve · ${run.id}`, exact: true }))
+    .toBeVisible();
   await expect
     .element(dialog.getByRole("option", { name: "Retry", exact: true }))
     .not.toBeInTheDocument();

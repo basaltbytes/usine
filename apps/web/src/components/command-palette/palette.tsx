@@ -95,6 +95,11 @@ export const CommandPalette = ({ overview }: CommandPaletteProps) => {
           />
           <CommandList className="max-h-[min(18rem,50dvh)]">
             <CommandEmpty>{paletteCopy.empty}</CommandEmpty>
+            <NavigationCommands
+              overview={overview}
+              select={select}
+              searching={search.trim().length > 0}
+            />
             {commands.length > 0 && (
               <CommandGroup heading={paletteCopy.actions}>
                 {commands.map(({ id, label }) => (
@@ -112,11 +117,6 @@ export const CommandPalette = ({ overview }: CommandPaletteProps) => {
                 ))}
               </CommandGroup>
             )}
-            <NavigationCommands
-              overview={overview}
-              select={select}
-              searching={search.trim().length > 0}
-            />
           </CommandList>
         </Command>
       </CommandDialog>

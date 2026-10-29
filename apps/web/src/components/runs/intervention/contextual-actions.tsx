@@ -68,7 +68,9 @@ export const ContextualActions = ({
     busy || confirmCancel
       ? []
       : [primary, secondary, ...more].flatMap((action) =>
-          action === null ? [] : [{ label: actionLabel(action), run: () => select(action) }],
+          action === null
+            ? []
+            : [{ label: `${actionLabel(action)} · ${run.id}`, run: () => select(action) }],
         ),
   );
   if (primary === null && secondary === null && more.length === 0) return null;

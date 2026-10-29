@@ -78,7 +78,9 @@ it("keeps the last successful time, warns after a minute of failures despite hea
   await expect
     .element(page.getByRole("status"))
     .toMatchTextContent("Refresh failing for over a minute: Activity");
-  expect(status.element().querySelector("time")?.dateTime).toBe(start.toISOString());
+  expect(status.element().querySelector("time")?.dateTime).toBe(
+    new Date(start.getTime() + 71_001).toISOString(),
+  );
   failing = false;
   await client.refetchQueries(primary());
   await expect.element(page.getByRole("status")).not.toBeInTheDocument();
@@ -114,4 +116,39 @@ it("excludes cached queries from pages that are no longer mounted", async () => 
           ?.dateTime,
     )
     .toBe(new Date(start.getTime() + 90_000).toISOString());
+});
+
+it("tracks the newest poll, ignores static and disabled observers, and drops queries that stop polling", async () => {
+  const ConditionalPage = () => {
+    useQuery({
+      ...primary(),
+      refetchInterval: (query) => (query.state.data === "finished" ? false : 2_000),
+    });
+    useQuery({ ...secondary(), refetchInterval: false });
+    useQuery({ ...secondary(), enabled: () => false, refetchInterval: 60_000 });
+    return <PageHeading title="Run" />;
+  };
+  flushSync(() =>
+    root.render(
+      <QueryClientProvider client={client}>
+        <RefreshProvider>
+          <ConditionalPage />
+        </RefreshProvider>
+      </QueryClientProvider>,
+    ),
+  );
+  vi.setSystemTime(new Date(start.getTime() + 5_000));
+  await client.refetchQueries(primary());
+  await expect
+    .poll(() => host.querySelector("time")?.dateTime)
+    .toBe(new Date(start.getTime() + 5_000).toISOString());
+  vi.setSystemTime(new Date(start.getTime() + 10_000));
+  client.setQueryData(secondary().queryKey, "static refresh");
+  await expect
+    .poll(() => host.querySelector("time")?.dateTime)
+    .toBe(new Date(start.getTime() + 5_000).toISOString());
+  client.setQueryData(primary().queryKey, "finished");
+  await expect
+    .element(page.getByLabelText("Last updated", { exact: true }))
+    .not.toBeInTheDocument();
 });

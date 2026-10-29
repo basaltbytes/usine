@@ -1,5 +1,5 @@
 import { CommandPalette } from "~/components/command-palette/palette";
-import { PageCommandsProvider } from "~/components/command-palette/context";
+import { PageCommandsProvider, PageCommandsScope } from "~/components/command-palette/context";
 import { RefreshProvider } from "~/components/refresh/provider";
 import { membersLabel, tokensPageLabel } from "~/lib/strings";
 import { WarningIcon } from "@phosphor-icons/react";
@@ -221,16 +221,25 @@ const Shell = () => {
                 </AlertDescription>
               </Alert>
             )}
-            <RefreshProvider>
-              <Outlet />
-            </RefreshProvider>
+            <PageCommandsScope active={run === undefined}>
+              <RefreshProvider>
+                <Outlet />
+              </RefreshProvider>
+            </PageCommandsScope>
           </div>
+          <PageCommandsScope active={run !== undefined}>
+            {shownRun !== undefined && (
+              <Suspense fallback={null}>
+                <RunDrawer
+                  key={shownRun}
+                  runId={shownRun}
+                  open={run !== undefined}
+                  close={closeRun}
+                />
+              </Suspense>
+            )}
+          </PageCommandsScope>
         </PageCommandsProvider>
-        {shownRun !== undefined && (
-          <Suspense fallback={null}>
-            <RunDrawer key={shownRun} runId={shownRun} open={run !== undefined} close={closeRun} />
-          </Suspense>
-        )}
       </SidebarInset>
     </SidebarProvider>
   );

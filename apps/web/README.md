@@ -256,7 +256,7 @@ Press **⌘K** or **Ctrl+K**, or select **Open commands** in the page header, to
 
 **On this page** lists available run actions, task moves, lane folds, session controls, and configuration controls. Actions use the page's pending states, form validation, and confirmation steps. Changing pages removes its actions.
 
-Polling pages show **Last updated** in the heading, using the oldest successful refresh among their active reads. A muted warning identifies reads that have failed continuously for more than a minute. Successful reads clear their warnings; inactive queries from other pages do not affect the heading.
+Polling pages show **Last updated** in the heading, using the newest successful refresh among queries that are still polling. A muted warning identifies reads that have failed continuously for more than a minute. Successful reads clear their warnings; inactive queries and reads that have stopped polling do not affect the heading.
 
 ## Browser tests
 

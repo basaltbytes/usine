@@ -1,11 +1,14 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { DeskView, ReadyOverview, ProjectView } from "@usine/orchestrator/operator";
+import { DeskView, ReadyOverview, ProjectView, RunDetailView } from "@usine/orchestrator/operator";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { commands, page, userEvent } from "vitest/browser";
-import { overviewQuery } from "~/lib/overview";
+import { RunId } from "@usine/core/run";
+import { runDetailQuery } from "~/lib/runs/queries";
+import { RepositoryName } from "@usine/core/repository";
+import { overviewQuery, projectParams } from "~/lib/overview";
 import { deskQuery } from "~/lib/desk/queries";
 import { configurationQuery } from "~/lib/configuration/queries";
 import { configurationFixture } from "~/lib/configuration/fixture";
@@ -190,5 +193,56 @@ it("removes board commands after navigation and changes the available fold actio
     .not.toBeInTheDocument();
   await expect
     .element(dialog().getByRole("option", { name: "Open Done lane", exact: true }))
+    .not.toBeInTheDocument();
+});
+
+it("uses drawer actions while open and restores the underlying page commands after closing", async () => {
+  await router.navigate({
+    to: "/projects/$owner/$name",
+    params: projectParams(RepositoryName.make("board-test/repo")),
+  });
+  const run = boardOverview()
+    .projects.flatMap(({ board }) =>
+      board.lanes.flatMap(({ items }) => items.flatMap(({ runs }) => runs)),
+    )
+    .find(({ id }) => id === "run-salvage");
+  if (run === undefined) throw new Error("Missing waiting run fixture");
+  client.setQueryData(
+    runDetailQuery(client, run.id).queryKey,
+    new RunDetailView({
+      run,
+      agentDefinitionChanged: false,
+      eventDedupKey: "event",
+      eventPayload: {},
+      transcript: [],
+      sessionState: [],
+      earlierTranscript: [],
+    }),
+  );
+  await router.navigate({ to: ".", search: { run: RunId.make("run-salvage") } });
+  await expect.element(page.getByRole("dialog", { name: /Retry salvage pushes/u })).toBeVisible();
+  await userEvent.keyboard("{Control>}k{/Control}");
+  await dialog().getByRole("combobox").fill("Approve");
+  await expect
+    .element(dialog().getByRole("option", { name: "Approve · run-salvage", exact: true }))
+    .toBeVisible();
+  await dialog().getByRole("combobox").fill("Done lane");
+  await expect
+    .element(dialog().getByRole("option", { name: "Open Done lane", exact: true }))
+    .not.toBeInTheDocument();
+  await dialog().getByRole("combobox").fill("Cancel run-salvage");
+  await dialog().getByRole("option", { name: "Cancel run · run-salvage", exact: true }).click();
+  await expect
+    .element(page.getByRole("button", { name: "Confirm cancel", exact: true }))
+    .toBeVisible();
+  await page.getByRole("button", { name: "Keep running", exact: true }).click();
+  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await search("Done lane");
+  await expect
+    .element(dialog().getByRole("option", { name: "Open Done lane", exact: true }))
+    .toBeVisible();
+  await dialog().getByRole("combobox").fill("Approve run-salvage");
+  await expect
+    .element(dialog().getByRole("option", { name: "Approve · run-salvage", exact: true }))
     .not.toBeInTheDocument();
 });

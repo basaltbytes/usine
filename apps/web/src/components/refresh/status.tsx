@@ -8,7 +8,7 @@ export const RefreshStatus = () => {
   const now = useNow(1_000);
   if (sources.length === 0) return null;
   const successful = sources.map((source) => source.updatedAt).filter((time) => time > 0);
-  const updatedAt = successful.length === 0 ? 0 : Math.min(...successful);
+  const updatedAt = successful.length === 0 ? 0 : Math.max(...successful);
   const failed = [
     ...new Set(
       sources

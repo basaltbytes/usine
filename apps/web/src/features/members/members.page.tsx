@@ -1,3 +1,4 @@
+import { CommandButton } from "~/components/command-palette/button";
 import { PageHeading } from "~/components/page";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useState } from "react";
@@ -68,7 +69,9 @@ export const MembersPage = () => {
             maxLength={39}
           />
         </div>
-        <Button disabled={pending || login.trim() === ""}>{pending ? adding : addMember}</Button>
+        <CommandButton type="submit" command={addMember} disabled={pending || login.trim() === ""}>
+          {pending ? adding : addMember}
+        </CommandButton>
       </form>
       <ul className="divide-y divide-border">
         {data.map((member) => (
@@ -94,14 +97,15 @@ export const MembersPage = () => {
                   </Button>
                 </>
               ) : (
-                <Button
+                <CommandButton
+                  command={`${removeMember} · ${member.login}`}
                   variant="ghost"
                   disabled={pending || data.length === 1}
                   onClick={() => setRemoving(member.id)}
                   aria-label={`${removeMember} ${member.login}`}
                 >
                   {removeMember}
-                </Button>
+                </CommandButton>
               )}
             </div>
           </li>

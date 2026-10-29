@@ -1,3 +1,4 @@
+import { CommandButton } from "~/components/command-palette/button";
 import { PageHeading } from "~/components/page";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useState } from "react";
@@ -73,9 +74,14 @@ export const TokensPage = () => {
                     </Button>
                   </>
                 ) : (
-                  <Button variant="ghost" disabled={pending} onClick={() => setSelected(token.id)}>
+                  <CommandButton
+                    command={`${revoke} · ${token.name} · ${token.id}`}
+                    variant="ghost"
+                    disabled={pending}
+                    onClick={() => setSelected(token.id)}
+                  >
                     {revoke}
-                  </Button>
+                  </CommandButton>
                 )}
               </div>
             </li>
