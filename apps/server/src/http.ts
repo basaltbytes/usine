@@ -426,10 +426,9 @@ export const serverLayer = (
 ) => {
   const authenticated = authenticatedRoutes(auth);
   const routes = Layer.mergeAll(
-    apiRoutes(origin),
+    apiRoutes(origin).pipe(Layer.provide(authenticated.guard.layer)),
     staticRoutes(webRoot),
     authenticated.routes,
-    authenticated.guard,
   ).pipe(HttpRouter.provideRequest(Layer.merge(backend, services)));
   return HttpRouter.serve(routes).pipe(
     Layer.provide(NodeHttpServer.layer(createServer, { host: SERVER_HOST, port })),

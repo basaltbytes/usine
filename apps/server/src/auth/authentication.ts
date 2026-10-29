@@ -5,6 +5,7 @@ import {
   AuthError,
   authFailure,
   GitHubIdentity,
+  type GitHubUserId,
   InstanceToken,
   Member,
   TokenId,
@@ -15,6 +16,7 @@ import { AuthStore } from "./store.ts";
 import { randomSecret, secretHash } from "./crypto.ts";
 
 export interface Access {
+  readonly credential: "local" | "bootstrap" | "member";
   readonly member: Option.Option<Member>;
   readonly token: Option.Option<InstanceToken>;
   readonly csrf: string;
@@ -76,7 +78,10 @@ export const authenticationLayer = (options: {
     Effect.gen(function* () {
       const store = yield* AuthStore;
       const github = yield* GitHubSignIn;
-      const links = new Map<TokenHash, number>();
+      const links = new Map<
+        TokenHash,
+        { readonly expires: number; readonly memberId: Option.Option<GitHubUserId> }
+      >();
       const bootstrapSessions = new Map<TokenHash, number>();
       const states = new Map<TokenHash, WebState>();
       const devices = new Map<TokenHash, DeviceState>();
@@ -85,7 +90,7 @@ export const authenticationLayer = (options: {
       const csrf = (secret: string) => secretHash(`csrf:${secret}`);
       const callback = `${options.origin}/api/auth/callback`;
       const prune = (now: number) => {
-        for (const [key, expires] of links) if (expires <= now) links.delete(key);
+        for (const [key, link] of links) if (link.expires <= now) links.delete(key);
         for (const [key, expires] of bootstrapSessions)
           if (expires <= now) bootstrapSessions.delete(key);
         for (const [key, value] of states) if (value.expires <= now) states.delete(key);
@@ -128,7 +133,7 @@ export const authenticationLayer = (options: {
         yield* Effect.annotateCurrentSpan({ githubUserId: identity.id, bootstrap });
         const members = yield* store.members;
         const member = members.find((entry) => entry.id === identity.id);
-        if (member !== undefined) return member;
+        if (member !== undefined) return yield* store.rename(identity);
         if (bootstrap && members.length === 0) {
           const first = new Member({
             ...identity,
@@ -153,11 +158,17 @@ export const authenticationLayer = (options: {
         const hash = secretHash(secret);
         if (hash === localHash || bootstrapSessions.has(hash)) {
           const member = Option.fromUndefinedOr((yield* store.members)[0]);
-          return { member, token: Option.none(), csrf: csrf(secret) };
+          return {
+            credential: hash === localHash ? ("local" as const) : ("bootstrap" as const),
+            member,
+            token: Option.none(),
+            csrf: csrf(secret),
+          };
         }
         const found = yield* store.authenticate(hash, now);
         if (Option.isNone(found)) return yield* authFailure("Sign in to continue.");
         return {
+          credential: "member" as const,
           member: Option.some(found.value.member),
           token: Option.some(found.value.token),
           csrf: csrf(secret),
@@ -185,25 +196,32 @@ export const authenticationLayer = (options: {
         link: Effect.gen(function* () {
           yield* limit("link");
           const secret = randomSecret();
-          links.set(
-            secretHash(Redacted.value(secret)),
-            (yield* Clock.currentTimeMillis) + TEN_MINUTES,
-          );
+          links.set(secretHash(Redacted.value(secret)), {
+            expires: (yield* Clock.currentTimeMillis) + TEN_MINUTES,
+            memberId: Option.fromUndefinedOr((yield* store.members)[0]?.id),
+          });
           yield* Effect.logInfo("One-time sign-in link issued");
           return `${options.origin}/sign-in#link=${Redacted.value(secret)}`;
         }),
         consumeLink: Effect.fn("Authentication.consumeLink")(function* (secret) {
-          yield* limit("consume-link");
           const hash = secretHash(secret);
-          const expiry = links.get(hash);
+          const link = links.get(hash);
           links.delete(hash);
-          if (expiry === undefined || expiry <= (yield* Clock.currentTimeMillis))
+          if (link === undefined || link.expires <= (yield* Clock.currentTimeMillis)) {
+            yield* limit("invalid-consume-link");
             return yield* authFailure(
               "This sign-in link expired or was already used. Run usine sign-in-link for a new link.",
             );
-          const member = (yield* store.members)[0];
-          if (member !== undefined)
+          }
+          const members = yield* store.members;
+          if (Option.isSome(link.memberId)) {
+            const memberId = link.memberId.value;
+            const member = members.find((entry) => entry.id === memberId);
+            if (member === undefined)
+              return yield* authFailure("This sign-in link is no longer valid.");
             return yield* issue(member, "session", TokenName.make("Browser"));
+          }
+          if (members.length > 0) return yield* authFailure("Setup has already completed.");
           const session = randomSecret();
           bootstrapSessions.set(
             secretHash(Redacted.value(session)),
@@ -223,12 +241,14 @@ export const authenticationLayer = (options: {
           return { state, url };
         }),
         finishWeb: Effect.fn("Authentication.finishWeb")(function* (state, code) {
-          yield* limit("callback");
           const hash = secretHash(state);
           const pending = states.get(hash);
-          states.delete(hash);
-          if (pending === undefined || pending.expires <= (yield* Clock.currentTimeMillis))
+          if (pending === undefined || pending.expires <= (yield* Clock.currentTimeMillis)) {
+            yield* limit("invalid-callback");
             return yield* authFailure("The GitHub sign-in expired. Start sign-in again.");
+          }
+          yield* limit("callback");
+          states.delete(hash);
           const member = yield* memberFor(yield* github.web(code, callback), pending.bootstrap);
           return yield* issue(member, "session", TokenName.make("Browser"));
         }),
@@ -252,14 +272,16 @@ export const authenticationLayer = (options: {
           };
         }),
         pollDevice: Effect.fn("Authentication.pollDevice")(function* (id) {
-          yield* limit("device-poll");
           const hash = secretHash(id);
           const state = devices.get(hash);
-          if (state === undefined)
+          if (state === undefined || state.expires <= (yield* Clock.currentTimeMillis)) {
+            yield* limit("invalid-device-poll");
             return yield* authFailure("Device sign-in expired. Start sign-in again.");
+          }
           const now = yield* Clock.currentTimeMillis;
           if (state.nextPoll > now)
             return yield* authFailure("Wait before checking device sign-in again.", 429);
+          yield* limit("device-poll");
           devices.delete(hash);
           const identity = yield* github.poll(state.code).pipe(
             Effect.catchTag("AuthError", (error) => {
@@ -304,9 +326,22 @@ export const seedOperator = Effect.fn("Authentication.seedOperator")(function* (
   }
   yield* Effect.annotateCurrentSpan({ login: login.value });
   const github = yield* GitHubSignIn;
-  const identity = yield* github.lookup(login.value);
+  const identity = yield* github.lookup(login.value).pipe(
+    Effect.map(Option.some),
+    Effect.catchTag("AuthError", (error) =>
+      Effect.logWarning("Operator enrollment deferred until the next start", {
+        login: login.value,
+        status: error.status,
+      }).pipe(Effect.as(Option.none())),
+    ),
+  );
+  if (Option.isNone(identity)) return;
   yield* store.add(
-    new Member({ ...identity, addedBy: identity.login, addedAt: yield* Clock.currentTimeMillis }),
+    new Member({
+      ...identity.value,
+      addedBy: identity.value.login,
+      addedAt: yield* Clock.currentTimeMillis,
+    }),
     true,
   );
 });

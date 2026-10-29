@@ -20,7 +20,7 @@ For an existing App, open **GitHub > Settings > Developer settings > GitHub Apps
 
 Use HTTPS for remote access through a reverse proxy. With Tailscale, publish the loopback listener with `tailscale serve --bg http://127.0.0.1:7331` and set `USINE_ORIGIN` to the HTTPS address it prints. `usine up` continues to bind only `127.0.0.1`.
 
-On upgrade, the configured `operator` becomes the first member after the instance resolves that login to a GitHub user ID. On a new instance, open the one-time link after configuring the App's user authorization and complete GitHub sign-in to become the first member. A public sign-in cannot enroll the first member.
+On upgrade, the configured `operator` becomes the first member after the instance resolves that login to a GitHub user ID. If GitHub is unavailable, the instance logs a warning and retries enrollment on the next start; the local sign-in link remains available. On a new instance, open the one-time link after configuring the App's user authorization and complete GitHub sign-in to become the first member. A public sign-in cannot enroll the first member.
 
 Add members by GitHub login on **Members**. The last member cannot be removed. Removing a member revokes that member's tokens. GitHub identity checks use the numeric user ID; a different GitHub account cannot sign in by reusing a member's former login.
 
@@ -30,4 +30,4 @@ Run `usine sign-in <instance-origin>`, open the GitHub device page, and enter th
 
 **Tokens** lists the signed-in member's browsers and devices, creation times, and last use. Revoke an entry to end access. Device tokens remain valid until revoked; browser sessions expire after 30 days. **Sign out** revokes the current browser session.
 
-Browser sessions use an `HttpOnly`, `SameSite=Strict` cookie, with `Secure` except for local HTTP origins. Browser writes require `X-Usine-CSRF`. The bundled UI reads its CSRF cookie and sends that header. Health and sign-in endpoints are public; the separate GitHub webhook listener verifies delivery signatures. Sign-in operations have an instance-wide limit of 60 requests per operation per minute and device polls also honor GitHub's interval.
+Browser sessions use an `HttpOnly`, `SameSite=Strict` cookie, with `Secure` except for local HTTP origins. Browser writes require `X-Usine-CSRF`. The bundled UI reads its CSRF cookie and sends that header. Health and sign-in endpoints are public; the separate GitHub webhook listener verifies delivery signatures. Sign-in initiation, link issuance, GitHub exchanges, and invalid challenges have separate instance-wide limits of 60 requests per operation per minute. Invalid challenges do not consume the limits for valid sign-ins. Device polls also honor GitHub's interval.

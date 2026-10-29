@@ -64,6 +64,37 @@ export const sqliteAuthLayer = Layer.effect(
           ),
         ),
       ),
+      rename: Effect.fn("AuthStore.rename")((identity) =>
+        Effect.gen(function* () {
+          yield* Effect.annotateCurrentSpan({ memberId: identity.id });
+          const current = yield* members;
+          const member = current.find((entry) => entry.id === identity.id);
+          if (member === undefined)
+            return yield* authFailure("This GitHub login is not a member.", 403);
+          if (member.login === identity.login) return member;
+          if (
+            current.some(
+              (entry) =>
+                entry.id !== identity.id &&
+                entry.login.toLowerCase() === identity.login.toLowerCase(),
+            )
+          )
+            return yield* authFailure("This GitHub login belongs to another member.", 409);
+          const renamed = new Member({ ...member, login: identity.login });
+          const value = yield* Schema.encodeEffect(MemberJson)(renamed);
+          yield* sql`UPDATE usine_members SET login = ${identity.login}, value = ${value} WHERE id = ${identity.id}`;
+          yield* Effect.logInfo("Member login updated", {
+            memberId: identity.id,
+            login: identity.login,
+          });
+          return renamed;
+        }).pipe(
+          transaction,
+          Effect.catch((error) =>
+            error instanceof AuthError ? Effect.fail(error) : failure("rename member")(error),
+          ),
+        ),
+      ),
       remove: Effect.fn("AuthStore.remove")((id) =>
         Effect.gen(function* () {
           const current = yield* members;

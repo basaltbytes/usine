@@ -1,10 +1,13 @@
 import { TestClock } from "effect/testing";
-import { ActingMember } from "@usine/core/operator";
+import { ActingMember, OperatorLogin } from "@usine/core/operator";
 import { Effect, Layer, Option, Redacted, Schema } from "effect";
 import { HttpRouter, HttpServerResponse } from "effect/http";
 import { assert, it } from "vitest";
 import { authenticatedRoutes } from "../../src/auth/http.ts";
-import { TokenName } from "../../src/auth/model.ts";
+import { seedOperator } from "../../src/auth/authentication.ts";
+import { GitHubSignIn } from "../../src/auth/github.ts";
+import { AuthStore } from "../../src/auth/store.ts";
+import { authFailure, Member, TokenName } from "../../src/auth/model.ts";
 import { authFixture, alice, bob, localSecret } from "./fixture.ts";
 
 const request = (
@@ -37,14 +40,13 @@ it("requires authentication even from loopback, binds cookie writes to CSRF, and
       const app = HttpRouter.toWebHandler(
         Layer.mergeAll(
           routes,
-          guard,
           HttpRouter.add(
             "POST",
             "/api/future-route",
             Effect.map(ActingMember, (member) =>
               HttpServerResponse.jsonUnsafe({ actor: Option.getOrNull(member) }),
             ),
-          ),
+          ).pipe(Layer.provide(guard.layer)),
         ),
         { disableLogger: true },
       );
@@ -115,8 +117,8 @@ it("enrolls the first admin only after a setup link and a cookie-bound GitHub we
   Effect.runPromise(
     Effect.gen(function* () {
       const services = yield* authFixture([]);
-      const { routes, guard } = authenticatedRoutes(services);
-      const app = HttpRouter.toWebHandler(Layer.mergeAll(routes, guard), { disableLogger: true });
+      const { routes } = authenticatedRoutes(services);
+      const app = HttpRouter.toWebHandler(routes, { disableLogger: true });
       yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
       const anonymous = yield* Effect.promise(() => request(app, "/api/auth/github"));
       const anonymousState =
@@ -204,8 +206,8 @@ it("limits sign-in attempts globally and refuses cross-site link consumption", a
   Effect.runPromise(
     Effect.gen(function* () {
       const services = yield* authFixture();
-      const { routes, guard } = authenticatedRoutes(services);
-      const app = HttpRouter.toWebHandler(Layer.mergeAll(routes, guard), { disableLogger: true });
+      const { routes } = authenticatedRoutes(services);
+      const app = HttpRouter.toWebHandler(routes, { disableLogger: true });
       yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
       const token = linkToken(yield* services.authentication.link);
       assert.equal(
@@ -229,5 +231,140 @@ it("limits sign-in attempts globally and refuses cross-site link consumption", a
           .status,
         429,
       );
+    }).pipe(Effect.scoped),
+  ));
+
+it("restricts link issuance to the local credential and binds links to the original member", async () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const services = yield* authFixture([alice, bob], bob);
+      const { routes } = authenticatedRoutes(services);
+      const app = HttpRouter.toWebHandler(routes, { disableLogger: true });
+      yield* Effect.addFinalizer(() => Effect.promise(() => app.dispose()));
+      const web = yield* services.authentication.startWeb(false);
+      const bobSession = yield* services.authentication.finishWeb(
+        Redacted.value(web.state),
+        "fake",
+      );
+      const headers = { authorization: `Bearer ${Redacted.value(bobSession.secret)}` };
+      assert.equal(
+        (yield* Effect.promise(() => request(app, "/api/auth/link", "POST", {}, headers))).status,
+        403,
+      );
+      assert.equal(
+        (yield* Effect.promise(() =>
+          request(
+            app,
+            "/api/auth/link",
+            "POST",
+            {},
+            {
+              cookie: `usine_session=${Redacted.value(bobSession.secret)}`,
+              "x-usine-csrf": bobSession.csrf,
+            },
+          ),
+        )).status,
+        403,
+      );
+      const response = yield* Effect.promise(() =>
+        request(app, "/api/auth/link", "POST", {}, { authorization: `Bearer ${localSecret}` }),
+      );
+      assert.equal(response.status, 200);
+      const { url } = Schema.decodeUnknownSync(Schema.Struct({ url: Schema.String }))(
+        yield* Effect.promise(() => response.json()),
+      );
+      yield* services.store.remove(alice.id);
+      assert.equal(
+        (yield* services.authentication.consumeLink(linkToken(url)).pipe(Effect.flip)).status,
+        401,
+      );
+      const setup = yield* authFixture([]);
+      const setupSession = yield* setup.authentication.consumeLink(
+        linkToken(yield* setup.authentication.link),
+      );
+      const setupApp = HttpRouter.toWebHandler(authenticatedRoutes(setup).routes, {
+        disableLogger: true,
+      });
+      yield* Effect.addFinalizer(() => Effect.promise(() => setupApp.dispose()));
+      assert.equal(
+        (yield* Effect.promise(() =>
+          request(
+            setupApp,
+            "/api/auth/link",
+            "POST",
+            {},
+            { authorization: `Bearer ${Redacted.value(setupSession.secret)}` },
+          ),
+        )).status,
+        403,
+      );
+    }).pipe(Effect.scoped),
+  ));
+
+it("keeps valid sign-ins available after invalid challenges exhaust their limits", async () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const { authentication: auth } = yield* authFixture();
+      const link = linkToken(yield* auth.link);
+      const web = yield* auth.startWeb(false);
+      const device = yield* auth.startDevice(TokenName.make("Phone"));
+      for (let count = 0; count < 61; count++) {
+        const status = count < 60 ? 401 : 429;
+        assert.equal((yield* auth.consumeLink("invalid").pipe(Effect.flip)).status, status);
+        assert.equal((yield* auth.finishWeb("invalid", "fake").pipe(Effect.flip)).status, status);
+        assert.equal((yield* auth.pollDevice("invalid").pipe(Effect.flip)).status, status);
+      }
+      yield* auth.consumeLink(link);
+      yield* auth.finishWeb(Redacted.value(web.state), "fake");
+      yield* TestClock.adjust("2 seconds");
+      assert.isTrue(Option.isSome(yield* auth.pollDevice(Redacted.value(device.id))));
+    }).pipe(Effect.provide(TestClock.layer()), Effect.scoped),
+  ));
+
+it("persists a GitHub login rename through web and device sign-in", async () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const renamed = new Member({ ...alice, login: OperatorLogin.make("alice-renamed") });
+      for (const flow of ["web", "device"] as const) {
+        const { authentication: auth, store } = yield* authFixture([alice], renamed);
+        const signIn =
+          flow === "web"
+            ? Effect.gen(function* () {
+                const started = yield* auth.startWeb(false);
+                return yield* auth.finishWeb(Redacted.value(started.state), "fake");
+              })
+            : Effect.gen(function* () {
+                const started = yield* auth.startDevice(TokenName.make("Phone"));
+                yield* TestClock.adjust("2 seconds");
+                const issued = yield* auth.pollDevice(Redacted.value(started.id));
+                assert.isTrue(Option.isSome(issued));
+                if (Option.isNone(issued)) return yield* authFailure("Expected a device token");
+                return issued.value;
+              });
+        const session = yield* signIn;
+        const access = yield* auth.authenticate(Redacted.value(session.secret));
+        assert.equal(Option.getOrNull(access.member)?.login, renamed.login);
+        assert.deepEqual(yield* store.members, [renamed]);
+        yield* store.add(new Member({ ...bob, login: alice.login }), false);
+      }
+    }).pipe(Effect.provide(TestClock.layer()), Effect.scoped),
+  ));
+
+it("defers operator enrollment when GitHub is unavailable and retries on the next start", async () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const services = yield* authFixture([]);
+      const seed = seedOperator(Option.some(alice.login)).pipe(
+        Effect.provideService(AuthStore, services.store),
+      );
+      yield* seed.pipe(
+        Effect.provideService(GitHubSignIn, {
+          ...services.github,
+          lookup: () => Effect.fail(authFailure("GitHub is unavailable", 502)),
+        }),
+      );
+      assert.deepEqual(yield* services.store.members, []);
+      yield* seed.pipe(Effect.provideService(GitHubSignIn, services.github));
+      assert.equal((yield* services.store.members)[0]?.id, alice.id);
     }).pipe(Effect.scoped),
   ));

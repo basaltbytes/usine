@@ -1,11 +1,5 @@
 import { Effect, Layer, Option } from "effect";
-import {
-  authFailure,
-  type GitHubUserId,
-  InstanceToken,
-  type Member,
-  type TokenId,
-} from "./model.ts";
+import { authFailure, type GitHubUserId, InstanceToken, Member, type TokenId } from "./model.ts";
 import { AuthStore } from "./store.ts";
 
 export const memoryAuthLayer = Layer.sync(AuthStore, () => {
@@ -26,6 +20,27 @@ export const memoryAuthLayer = Layer.sync(AuthStore, () => {
         return yield* authFailure("This member already exists or setup has completed.", 409);
       members.set(member.id, member);
       yield* Effect.logInfo("Member added", { memberId: member.id, actor: member.addedBy });
+    }),
+    rename: Effect.fn("AuthStore.rename")(function* (identity) {
+      yield* Effect.annotateCurrentSpan({ memberId: identity.id });
+      const member = members.get(identity.id);
+      if (member === undefined)
+        return yield* authFailure("This GitHub login is not a member.", 403);
+      if (member.login === identity.login) return member;
+      if (
+        [...members.values()].some(
+          (entry) =>
+            entry.id !== identity.id && entry.login.toLowerCase() === identity.login.toLowerCase(),
+        )
+      )
+        return yield* authFailure("This GitHub login belongs to another member.", 409);
+      const renamed = new Member({ ...member, login: identity.login });
+      members.set(identity.id, renamed);
+      yield* Effect.logInfo("Member login updated", {
+        memberId: identity.id,
+        login: identity.login,
+      });
+      return renamed;
     }),
     remove: Effect.fn("AuthStore.remove")(function* (id) {
       if (members.has(id) && members.size === 1)

@@ -1,3 +1,4 @@
+import { OperatorLogin } from "@usine/core/operator";
 import { NodeServices } from "@effect/platform-node";
 import { InstanceDirectory } from "@usine/core/instance";
 import { localSqliteLayer } from "@usine/engine/local-sqlite";
@@ -5,7 +6,14 @@ import { Effect, FileSystem, Layer, Option } from "effect";
 import { assert, describe, it } from "vitest";
 import { memoryAuthLayer } from "../../src/auth/memory.ts";
 import { sqliteAuthLayer } from "../../src/auth/sqlite.ts";
-import { InstanceToken, TokenId, TokenName } from "../../src/auth/model.ts";
+import {
+  GitHubUserId,
+  GitHubIdentity,
+  Member,
+  InstanceToken,
+  TokenId,
+  TokenName,
+} from "../../src/auth/model.ts";
 import { secretHash } from "../../src/auth/crypto.ts";
 import { AuthStore } from "../../src/auth/store.ts";
 import { alice, bob } from "./fixture.ts";
@@ -67,7 +75,31 @@ for (const [name, layer] of [
           assert.isTrue(Option.isNone(yield* store.authenticate(token.hash, 100)));
           yield* store.revoke(bob.id, token.id);
           assert.isTrue(Option.isSome(yield* store.authenticate(token.hash, 6)));
+          const renamed = yield* store.rename(
+            new GitHubIdentity({ id: alice.id, login: OperatorLogin.make("alice-renamed") }),
+          );
+          assert.deepEqual(
+            renamed,
+            new Member({ ...alice, login: OperatorLogin.make("alice-renamed") }),
+          );
+          assert.equal(
+            Option.getOrNull(yield* store.authenticate(token.hash, 6))?.member.login,
+            renamed.login,
+          );
+          assert.equal(
+            (yield* store
+              .rename(new GitHubIdentity({ id: alice.id, login: bob.login }))
+              .pipe(Effect.flip)).status,
+            409,
+          );
+          yield* store.add(new Member({ ...alice, id: GitHubUserId.make(3) }), false);
           yield* store.remove(alice.id);
+          assert.equal(
+            (yield* store
+              .rename(new GitHubIdentity({ id: alice.id, login: renamed.login }))
+              .pipe(Effect.flip)).status,
+            403,
+          );
           assert.isTrue(Option.isNone(yield* store.authenticate(token.hash, 7)));
           assert.deepEqual(yield* store.tokens(alice.id), []);
         }).pipe(Effect.provide(layer), Effect.scoped),

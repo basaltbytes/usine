@@ -1,5 +1,5 @@
 import { ActingMember, OperatorLogin } from "@usine/core/operator";
-import { Clock, Context, Effect, Option, Redacted, Schema } from "effect";
+import { Clock, Context, Effect, Layer, Option, Redacted, Schema } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { Authentication, type Access, type IssuedToken } from "./authentication.ts";
 import { GitHubSignIn } from "./github.ts";
@@ -89,7 +89,12 @@ export const authenticatedRoutes = (services: AuthServices) => {
     HttpRouter.route(
       "POST",
       "/api/auth/link",
-      Effect.map(auth.link, (url) => json({ url })),
+      Effect.gen(function* () {
+        const access = yield* accessEffect;
+        if (access.credential !== "local")
+          return yield* authFailure("Run usine sign-in-link on the instance machine.", 403);
+        return json({ url: yield* auth.link });
+      }),
     ),
     HttpRouter.route(
       "POST",
@@ -245,42 +250,58 @@ export const authenticatedRoutes = (services: AuthServices) => {
       }),
     ),
   ] satisfies ReadonlyArray<HttpRouter.Route<AuthError>>;
-  const guard = HttpRouter.middleware<{ handles: AuthError }>()(
-    (handler) =>
-      Effect.gen(function* () {
-        const request = yield* HttpServerRequest.HttpServerRequest;
-        const pathname = new URL(request.url, auth.origin).pathname;
-        if (
-          PUBLIC.has(pathname) &&
-          request.method !== "GET" &&
-          request.headers.origin !== undefined &&
-          request.headers.origin !== auth.origin
-        )
-          return yield* authFailure("Cross-site sign-in requests are not allowed.", 403);
-        if (!pathname.startsWith("/api/") || PUBLIC.has(pathname)) return yield* handler;
-        const access = yield* auth.authenticate(secretOf(request));
-        const bearer = request.headers.authorization?.startsWith("Bearer ") === true;
-        if (!bearer && request.method !== "GET" && request.headers["x-usine-csrf"] !== access.csrf)
-          return yield* authFailure(
-            "The session could not verify this request. Refresh the page and try again.",
-            403,
-          );
-        return yield* handler.pipe(
-          Effect.provideService(RequestAccess, Option.some(access)),
-          Effect.provideService(
-            ActingMember,
-            Option.map(access.member, ({ login }) => login),
-          ),
+  const guard = HttpRouter.middleware<{ handles: AuthError }>()((handler) =>
+    Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      const access = yield* auth.authenticate(secretOf(request));
+      const bearer = request.headers.authorization?.startsWith("Bearer ") === true;
+      if (!bearer && request.method !== "GET" && request.headers["x-usine-csrf"] !== access.csrf)
+        return yield* authFailure(
+          "The session could not verify this request. Refresh the page and try again.",
+          403,
         );
-      }).pipe(
-        Effect.catchTag("AuthError", (error) =>
-          Effect.logWarning("Authentication request refused", { status: error.status }).pipe(
-            Effect.as(json({ error: "AuthenticationError", message: error.message }, error.status)),
-          ),
+      return yield* handler.pipe(
+        Effect.provideService(RequestAccess, Option.some(access)),
+        Effect.provideService(
+          ActingMember,
+          Option.map(access.member, ({ login }) => login),
         ),
-        Effect.map(sensitive),
+      );
+    }).pipe(
+      Effect.catchTag("AuthError", (error) =>
+        Effect.logWarning("Authentication request refused", { status: error.status }).pipe(
+          Effect.as(json({ error: "AuthenticationError", message: error.message }, error.status)),
+        ),
       ),
-    { global: true },
+      Effect.map(sensitive),
+    ),
   );
-  return { endpoints, routes: HttpRouter.addAll(endpoints), guard };
+  const publicGuard = HttpRouter.middleware<{ handles: AuthError }>()((handler) =>
+    Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      if (
+        request.method !== "GET" &&
+        request.headers.origin !== undefined &&
+        request.headers.origin !== auth.origin
+      )
+        return yield* authFailure("Cross-site sign-in requests are not allowed.", 403);
+      return yield* handler;
+    }).pipe(
+      Effect.catchTag("AuthError", (error) =>
+        Effect.logWarning("Sign-in request refused", { status: error.status }).pipe(
+          Effect.as(json({ error: "AuthenticationError", message: error.message }, error.status)),
+        ),
+      ),
+      Effect.map(sensitive),
+    ),
+  );
+  const routes = Layer.merge(
+    HttpRouter.addAll(endpoints.filter((route) => PUBLIC.has(route.path))).pipe(
+      Layer.provide(publicGuard.layer),
+    ),
+    HttpRouter.addAll(endpoints.filter((route) => !PUBLIC.has(route.path))).pipe(
+      Layer.provide(guard.layer),
+    ),
+  );
+  return { endpoints, routes, guard };
 };

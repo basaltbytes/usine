@@ -403,9 +403,10 @@ it("denies anonymous requests for every registered API route before decoding a r
     Effect.gen(function* () {
       const auth = authenticatedRoutes(yield* authFixture());
       const secured = HttpRouter.toWebHandler(
-        Layer.mergeAll(apiRoutes(Option.none()), auth.routes, auth.guard).pipe(
-          HttpRouter.provideRequest(backend),
-        ),
+        Layer.mergeAll(
+          apiRoutes(Option.none()).pipe(Layer.provide(auth.guard.layer)),
+          auth.routes,
+        ).pipe(HttpRouter.provideRequest(backend)),
         { disableLogger: true },
       );
       yield* Effect.addFinalizer(() => Effect.promise(() => secured.dispose()));
@@ -425,15 +426,22 @@ it("denies anonymous requests for every registered API route before decoding a r
       for (const endpoint of endpoints) {
         if (publicRoutes.has(`${endpoint.method} ${endpoint.path}`)) continue;
         const path = endpoint.path.replace(/:[^/]+/gu, "test");
-        const response = yield* Effect.promise(() =>
-          secured.handler(
-            new Request(`http://127.0.0.1${path}`, {
-              method: endpoint.method,
-              headers: { "x-forwarded-for": "127.0.0.1" },
-            }),
-          ),
-        );
-        assert.equal(response.status, 401, `${endpoint.method} ${endpoint.path}`);
+        for (const spelling of [
+          path,
+          path.replace("/api/", "/API/"),
+          `/${path}`,
+          path.replace("/api/", "/%61pi/"),
+        ]) {
+          const response = yield* Effect.promise(() =>
+            secured.handler(
+              new Request(`http://127.0.0.1${spelling}`, {
+                method: endpoint.method,
+                headers: { "x-forwarded-for": "127.0.0.1" },
+              }),
+            ),
+          );
+          assert.equal(response.status, 401, `${endpoint.method} ${spelling}`);
+        }
       }
     }).pipe(Effect.scoped),
   );
