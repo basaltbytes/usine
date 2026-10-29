@@ -27,13 +27,72 @@ Release downloads use `git.<domain>` too, at `/OWNER/REPO/releases/download/TAG/
 
 If the gateway has a provider's credential (`llm_providers` in `usine.yaml`), its harness uses plain HTTP to `llm.<domain>`: Claude Code at `/anthropic`, Codex at `/openai`. The gateway swaps the caller token for its credential, a subscription login or an API key, calls the provider over HTTPS, and streams the response back unchanged. See [Give the gateway the subscription logins](#give-the-gateway-the-subscription-logins). Otherwise Claude Code and Codex use the operator's logins on the worker (a Claude subscription, a ChatGPT plan) through the forward proxy.
 
-Package managers and harness logins use the forward proxy at `<gateway>:3128` through `HTTPS_PROXY` and `HTTP_PROXY`, and apt through its own proxy setting. A tunnel opens only to an `egress-allowlist` host on port 443 whose name matches the TLS ClientHello and resolves to a public address; anything else is refused and logged. The ClientHello check keeps an allowed name on a shared CDN address from reaching another tenant. Before you list a CDN host, check its certificate's names and how its CDN routes: an HTTP/2 client can reuse an allowed connection for another name on the certificate ([#240](https://github.com/basaltbytes/usine/issues/240)). Plain HTTP requests lose their caller token before leaving; `CONNECT` tunnels are opaque, so nothing can be removed from them.
+Package managers and harness logins use the forward proxy at `<gateway>:3128` through `HTTPS_PROXY` and `HTTP_PROXY`, and apt through its own proxy setting. A tunnel opens only to an `egress-allowlist` host on port 443 whose name matches the TLS ClientHello and resolves to a public address; anything else is refused and logged. The ClientHello check rejects a different TLS server name, but cannot restrict the HTTP authority inside an allowed connection. Before adding a host, [check its certificate and CDN routing](#check-a-host-before-listing-it) for HTTP/2 connection coalescing and domain fronting. Plain HTTP requests lose their caller token before leaving; `CONNECT` tunnels are opaque, so nothing can be removed from them.
 
 Never allowlist github.com, or a provider whose credential the gateway has; workers reach those through `git.<domain>` and `llm.<domain>`, where the gateway controls access. A github.com tunnel would let a worker push with any credential it got, and Claude Code opens api.anthropic.com connections outside `ANTHROPIC_BASE_URL` that would carry the caller token, so if the gateway has the Anthropic credential, remove the Claude Code hosts from `egress-allowlist`, and if it has the OpenAI credential, the Codex hosts.
 
 The gateway uses its own public interface and forwards no worker packets.
 
 Attempt containers on a worker use the worker's network (`docker run --network host`), so the paths above and the worker's nftables rules apply to them as to any process on the worker. A bridge network would send their traffic through Docker's own forwarding and NAT rules instead, around the output chain. The worker's `daemon.json` turns Docker's rules off, so the worker's ruleset is the only one. Each container gets the attempt's caller token on `docker run`'s standard input, as container variables, so no command line and no shell of `usine` carries it, except the fetch into the cached clone, which runs as `usine` with the token sent over SSH. Docker pulls the attempt image from `ghcr.io` through the forward proxy, with the proxy in its systemd drop-in.
+
+### Check a host before listing it
+
+List a host only if its certificate covers that service alone and its CDN refuses requests for other services inside the TLS connection. Service-specific aliases can share a certificate; a shared provider domain or wildcard that covers other services does not meet this rule. The gateway checks the TLS server name (SNI), but cannot inspect the encrypted HTTP `Host` or HTTP/2 `:authority`. HTTP/2 connection coalescing can reuse a connection for another name on the certificate when the names resolve to the same address ([RFC 9113, section 9.1.1](https://www.rfc-editor.org/rfc/rfc9113.html#section-9.1.1)); domain fronting depends on whether the CDN routes a different HTTP authority through that connection.
+
+Run these checks from the gateway or an operator machine with direct internet access, before adding the host. Set `host` to the candidate and inspect every subject alternative name (SAN):
+
+```sh
+host=registry.example.com
+openssl s_client -connect "$host:443" -servername "$host" </dev/null |
+  openssl x509 -noout -ext subjectAltName
+```
+
+Choose another service on the same CDN as `other_host`, and replace `edge_ip` with an address returned by DNS for the candidate. Compare the normal response with a request for the other service:
+
+```sh
+other_host=other-service.example.net
+edge_ip=203.0.113.10
+curl --noproxy '*' --http1.1 --max-time 20 --include \
+  --connect-to "$host:443:$edge_ip:443" "https://$host/"
+curl --noproxy '*' --http1.1 --max-time 20 --include \
+  --connect-to "$host:443:$edge_ip:443" \
+  --header "Host: $other_host" "https://$host/"
+```
+
+`--connect-to` selects the TCP endpoint; the URL still sets SNI and certificate verification to the candidate. Only the second request changes the HTTP host. Keep certificate verification enabled and do not follow redirects. If curl supports HTTP/2, repeat with `--http2`; curl uses the custom `Host` value as `:authority`. Check the response body as well as the status: content from the other service demonstrates fronting, while a generic `200`, `404`, or failed connection proves neither acceptance nor isolation. A CDN rejection such as `403` or `421` applies only to the tested host pair, address, and protocol; repeat for other addresses and relevant tenants and check the CDN's routing policy. A rejected probe does not make a broad certificate acceptable.
+
+For a package host with a broad certificate or cross-service routing, use a pull-through mirror on the gateway, such as an npm or PyPI cache. Workers fetch from the mirror; the gateway fetches the upstream packages itself. Remove the upstream host from the workers' allowlist. Never use TLS interception: [ADR 0027](../../../docs/adr/0027-gateway-credential-proxy.md) rejects a worker-trusted certificate authority that can impersonate arbitrary hosts. For harness hosts, use gateway-held provider credentials and remove the provider's forward-proxy entries as described above.
+
+#### Allowlist audit
+
+The table covers all 24 entries in the checked-in `egress-allowlist`. Package-host certificates were inspected on 2026-10-29 through the gateway's CONNECT proxy, with the allowlisted name as SNI. The four harness rows retain the certificate observations from 2026-10-15; [Harness login hosts](#harness-login-hosts) records the routing probes from that date. The auditing gateway refused CONNECT to those hosts on 2026-10-29, so their certificates were not rechecked. Recheck certificates and routing before deployment and after certificate or CDN changes.
+
+“Broad” means the certificate includes names beyond the listed service, or a wildcard whose scope requires review. The checked-in list still includes these entries; it is not a list of hosts that passed this rule. Replace broad package-host entries with gateway mirrors before using them under this policy. A service-scoped certificate still needs the routing check.
+
+| Allowlist host | Observed certificate SANs | Scope |
+| --- | --- | --- |
+| `api.anthropic.com` | `api.anthropic.com` (2026-10-15) | Service only; recheck required. |
+| `platform.claude.com` | `platform.claude.com` (2026-10-15) | Service only; recheck required. |
+| `chatgpt.com` | Includes `amb-staging.chatgpt.com` and its subdomains (2026-10-15) | Broad: includes staging; recheck required. |
+| `auth.openai.com` | Includes `*.auth.openai.com` (2026-10-15) | Broad wildcard; recheck required. |
+| `deb.nodesource.com` | `deb.nodesource.com` | Service only. |
+| `registry.npmjs.org` | `npmjs.org`, `*.npmjs.org` | Broad: npm website and subdomains. |
+| `pypi.org` | `pypi.org`, `*.pypi.org`, `www.pypi.org`, `donate.pypi.org` | Broad: includes the donation site and a wildcard. |
+| `files.pythonhosted.org` | `*.pythonhosted.org` | Broad wildcard. |
+| `index.crates.io` | `index.crates.io`, `fastly-index.crates.io` | Registry index and its CDN alias. |
+| `static.crates.io` | `static.crates.io`, `fastly-static.crates.io` | Registry downloads and their CDN alias. |
+| `crates.io` | `crates.io`, `fastly-app.crates.io` | Registry application and its CDN alias. |
+| `static.rust-lang.org` | `static.rust-lang.org`, `fastly-static.rust-lang.org` | Rust distribution and its CDN alias. |
+| `proxy.golang.org`, `sum.golang.org` | Shared `misc-sni.google.com` certificate; includes `*.golang.org`, `abc.xyz`, `*.notebooks.cloud.google.com`, and many unrelated Google names. | Broad: multiple services. |
+| `objects.githubusercontent.com`, `release-assets.githubusercontent.com`, `cli.github.com`, `pkg-containers.githubusercontent.com` | `*.github.com`, `*.github.io`, `*.githubusercontent.com`, `github.com`, `github.io`, `githubusercontent.com` | Broad: includes GitHub and user-content domains. |
+| `codeload.github.com` | `*.github.com`, `github.com` | Broad: includes GitHub beyond archive downloads. |
+| `ghcr.io` | `*.ghcr.io`, `ghcr.io` | Broad wildcard. |
+| `deb.debian.org` | `cdn-fastly-v6.deb.debian.org`, `cdn-fastly.deb.debian.org`, `deb.debian.org`, `ftp.debian.org`, `ftp.ipv6.debian.org`, `httpredir.debian.org` | Debian package mirrors. |
+| `security.debian.org` | `security-cdn.debian.org`, `security-cdn1.debian.org`, `security.debian.org`, `security.eu.debian.org`, `security.ipv6.debian.org`, `security.na.debian.org`, `security.us.debian.org` | Debian security package mirrors. |
+| `mirror.hetzner.com` | `*.hetzner.com`, `hetzner.com` | Broad: includes other Hetzner services. |
+| `nodejs.org` | `nodejs.org`, `doc-kit.nodejs.org`, `*.doc-kit.nodejs.org` | Broad: includes documentation tooling. |
+
+Routing probes on 2026-10-29 kept SNI at the allowlisted host and changed only HTTP/1.1 `Host`, without credentials or redirect following. Both `pypi.org` and `files.pythonhosted.org` returned the Python.org homepage for `Host: www.python.org`; `proxy.golang.org` returned Alphabet Investor Relations for `Host: abc.xyz`. These hosts therefore permit cross-service routing. `registry.npmjs.org` and `nodejs.org` returned Cloudflare `403` responses for `Host: www.cloudflare.com`. Those refusals do not narrow their certificates or establish isolation for other host pairs or HTTP/2.
 
 ### Paths by client
 
@@ -65,7 +124,7 @@ Each login's URL opens in the operator's browser, not on the worker: `claude.com
 
 With both logins done, a one-prompt turn also requests unlisted hosts and completes without them: Claude Code `mcp-proxy.anthropic.com` and the claude.ai connectors, Codex `ab.chatgpt.com` and `sdmntpr<region>.oaiusercontent.com` ([#261](https://github.com/basaltbytes/usine/issues/261)).
 
-On [#240](https://github.com/basaltbytes/usine/issues/240): all four hosts are behind Cloudflare. The `api.anthropic.com` and `platform.claude.com` certificates cover only their name, `chatgpt.com`'s adds `amb-staging.chatgpt.com` and its subdomains, and `auth.openai.com`'s covers `*.auth.openai.com`, so HTTP/2 reuse reaches only the same provider. Through a tunnel to each host, a request with another site's `Host` header (`claude.ai`, `claude.com`, `www.cloudflare.com`, `api.openai.com`) got `403 Forbidden` from Cloudflare (checked on 2026-10-15). Claude Code opens one tunnel to `api.anthropic.com` per prompt and closes it before its ClientHello; the gateway logs it at info level as abandoned, not refused.
+On 2026-10-15, all four hosts were behind Cloudflare. Through a tunnel to each host, a request with another site's `Host` header (`claude.ai`, `claude.com`, `www.cloudflare.com`, `api.openai.com`) got `403 Forbidden`. These results apply only to those probes; see the [allowlist audit](#allowlist-audit) for certificate scope and recheck requirements. Claude Code opens one tunnel to `api.anthropic.com` per prompt and closes it before its ClientHello; the gateway logs it at info level as abandoned, not refused.
 
 ## Create a gateway
 
