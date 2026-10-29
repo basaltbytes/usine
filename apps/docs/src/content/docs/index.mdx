@@ -1,6 +1,6 @@
 ---
 title: usine
-description: usine runs coding agents on the GitHub issues and pull requests of the repositories that you register, following loops that you write as Markdown files.
+description: usine runs coding agents on the GitHub issues and pull requests of the repositories that you register, following loops stored in the instance database.
 head:
   - tag: title
     content: usine documentation
@@ -23,9 +23,9 @@ import { ContainerSection } from "lucode-starlight/components";
 
 ## Loop files
 
-Loops and agents are Markdown files that you write. A loop's frontmatter sets which issues or pull requests open a run, whether you approve each run, and which agent does the work. Its body is the agent's task. This loop runs usine on its own repository:
+usine stores loops and agents in its database, with a revision for each configuration change. Markdown files are their import and export format. A loop's frontmatter sets which issues or pull requests open a run, whether you approve each run, and which agent does the work. Its body is the agent's task. This loop runs usine on its own repository:
 
-```markdown title="loops/start-dev.md" wrap
+```markdown title="projects/usine/loops/start-dev.md (export format)" wrap
 ---
 trigger:
   on: issue
@@ -46,6 +46,8 @@ Before editing, remove `ready-for-agent` from the issue and add `agent-in-progre
 
 If work cannot continue, add a comment to the issue that states the exact blocker. Do not add a workaround that changes the issue's scope.
 ```
+
+Create the [bootstrap files](/guides/#create-the-instance-folder) before the first `usine up`, which imports them as revision 1. Later starts ignore those configuration files. Use [`usine config`](/reference/configuration/config/) to edit the stored configuration.
 
 You approve, follow, and steer the work in a local web UI.
 

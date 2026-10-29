@@ -33,9 +33,11 @@ Keep `rebase-pr` limited to conflicting PRs labeled `ready-to-merge`. Adding `re
 
 ## Example loops
 
+Export with `usine config export ./config-export` and save these loop files under `config-export/projects/<project>/loops/`, using an existing project. Add the labels and any new agents in that export, then run `usine config import ./config-export --message "Add review and fix loops"`. New loops start paused. To change an existing loop, use `usine config edit loop <project>/<loop>`.
+
 Declare `ready-for-review`, `agent-review-findings`, `review-passed`, and `ready-to-merge` in `labels`, and define the `reviewer` and `developer` agents. Add a `selector` if some repositories shouldn't use these loops.
 
-```markdown title="loops/review-pr.md"
+```markdown title="projects/widgets/loops/review-pr.md"
 ---
 trigger:
   on: pr
@@ -65,9 +67,9 @@ adds review-passed and removes agent-review-findings. Do not merge.
 
 The attempt starts at the head commit that the event recorded, `headRefOid`. The second head check detects a push during the review.
 
-`loops/act-on-findings.md` uses `agent: developer`, `max_cycles: 3`, and this trigger:
+`projects/widgets/loops/act-on-findings.md` uses `agent: developer`, `max_cycles: 3`, and this trigger:
 
-```yaml title="loops/act-on-findings.md"
+```yaml title="projects/widgets/loops/act-on-findings.md"
 trigger:
   on: pr
   if: >-
@@ -77,9 +79,9 @@ trigger:
 
 Use the complete [fixing prompt](/reference/configuration/loop-files/#more-examples), including the mergeability check before pushing and the CI watch before applying the "Fix pushed" labels. If the agent can't fix a finding, it leaves it visible. A finding that needs your decision becomes a question, which costs one attempt and one round, not three ([Answer a question](/guides/operate-runs/#answer-a-question)).
 
-`loops/finish-pr.md` runs only after a clean review:
+`projects/widgets/loops/finish-pr.md` runs only after a clean review:
 
-```markdown title="loops/finish-pr.md"
+```markdown title="projects/widgets/loops/finish-pr.md"
 ---
 trigger:
   on: pr

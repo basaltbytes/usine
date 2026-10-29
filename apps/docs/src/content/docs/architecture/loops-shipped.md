@@ -9,11 +9,11 @@ sidebar:
 This page describes commit [`7c0c3d3`](https://github.com/basaltbytes/usine/tree/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9) of basaltbytes/usine and the dogfood instance as they were on 2026-10-16.
 :::
 
-usine has no built-in loop; the engine runs the `loops/*.md` files of the instance folder ([ADR 0001](https://github.com/basaltbytes/usine/blob/main/docs/adr/0001-loops-live-in-the-instance-repo.md)). This repository has loop files only as parser test fixtures ([`packages/config/test/fixtures/acceptance/loops/`][fixtures]) and in [Bounded review and fix loops](/guides/review-fix-loops/). The loops below are copied unchanged from the dogfood instance at `~/Code/usine-factory` on 2026-10-16.
+usine has no built-in loop. At commit [`06a10bf`](https://github.com/basaltbytes/usine/tree/06a10bf04c2c7cb366ec6ad912ae7c0b0a5c268b), the engine reads stored loop definitions; [ADR 0031](https://github.com/basaltbytes/usine/blob/main/docs/adr/0031-authored-configuration-in-the-database.md) replaced file loading with configuration revisions. The examples below retain the historical version 1 import format. To use them now, import a complete folder with `usine config import <folder> --message <text>`; later exports use `projects/<project>/loops/`. This repository has loop files only as parser test fixtures ([`packages/config/test/fixtures/acceptance/loops/`][fixtures]) and in [Bounded review and fix loops](/guides/review-fix-loops/). The loops below are copied unchanged from the dogfood instance at `~/Code/usine-factory` on 2026-10-16.
 
 ## Instance settings
 
-`~/Code/usine-factory/usine.yaml` registers `basaltbytes/usine` with tag `dogfood` and maps its board lanes:
+The historical bootstrap `~/Code/usine-factory/usine.yaml` registers `basaltbytes/usine` with tag `dogfood` and maps its board lanes:
 
 | Lane | Sources |
 | --- | --- |

@@ -5,9 +5,9 @@ sidebar:
   order: 3
 ---
 
-An agent exports as one Markdown file in `agents/`. The file name without `.md` is the agent name, which loops use in their `agent` field. The frontmatter is the brain spec: the harness, model, and reasoning effort of the child sessions, and optional settings for the attempt's Pi parent. The body is the persona, the standing instructions for every session of the agent.
+`usine config export` writes one Markdown file per agent in `agents/`; `import` and `edit` read the same frontmatter and body format. The file name without `.md` is the agent name, which loops use in their `agent` field. The frontmatter is the brain spec: the harness, model, and reasoning effort of the child sessions, and optional settings for the attempt's Pi parent. The body is the persona, the standing instructions for every session of the agent.
 
-The first start imports the `agents/` folder, which must exist even if it is empty. Later starts and reloads read the configuration store. Use [`usine config edit agent <name>` or `usine config import <folder>`](/reference/configuration/cli/#configuration-revisions) to save changes. A run keeps the agent that it opened with, so an edited agent applies to new runs.
+The first start imports the `agents/` folder, which must exist even if it is empty. Later starts and live updates read the configuration store. Use [`usine config edit agent <name>` or `usine config import <folder>`](/reference/configuration/config/) to save changes. A run keeps the agent that it opened with, so an edited agent applies to new runs.
 
 The schema is [`AgentFrontmatter`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/parser.ts#L44) in `packages/config/src/parser.ts`, which produces an [`AgentFile`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/agent.ts#L7).
 
@@ -24,7 +24,7 @@ parent_effort: medium
 Finish one pull request at a time. Own the latest findings, direct fixes, final inspection, required checks, push, and outcome labels specified by the task. Keep changes within the pull request's scope and do not merge it.
 ```
 
-An agent without parent settings uses the factory defaults from `usine.yaml`:
+An agent without parent settings uses the stored factory defaults (the `settings` block in the export format):
 
 ```markdown title="agents/developer.md"
 ---
@@ -61,7 +61,7 @@ The effort values are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `m
 
 Every attempt runs a Pi parent session in the orchestrator, whatever harness the agent uses. The parent receives the rendered task and delegates work to child sessions that run the agent's harness, model, and effort on the worker.
 
-usine picks the parent model in this order: the agent's `parent_model`, `settings.parent_model` in `usine.yaml`, Pi's configured default model, and the first Pi model with a configured credential ([`resolveParent`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/durable/src/attempt/parent.ts#L101)). It picks the parent effort from the agent's `parent_effort`, then `settings.parent_effort`, then the agent's own `effort` ([`resolveParentEffort`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/core/src/agent/agent.ts#L39)).
+usine picks the parent model in this order: the agent's `parent_model`, the stored `settings.parent_model`, Pi's configured default model, and the first Pi model with a configured credential ([`resolveParent`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/durable/src/attempt/parent.ts#L101)). It picks the parent effort from the agent's `parent_effort`, then `settings.parent_effort`, then the agent's own `effort` ([`resolveParentEffort`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/core/src/agent/agent.ts#L39)).
 
 The parent reads Pi's configuration and credentials for the user who runs `usine up`, from `~/.pi/agent` or the folder in `PI_CODING_AGENT_DIR`. An `openai-codex` model needs a ChatGPT subscription login there and uses the ChatGPT plan. Any other provider needs an API key. usine doesn't check the parent model at startup. An attempt fails with `AgentFailure` before its conversation starts if Pi doesn't provide the parent model, the model doesn't support the parent effort, or no credential is available for the model's provider.
 
@@ -90,7 +90,7 @@ Every agent in a committed configuration is in the roster. An invalid agent file
 usine checks harnesses without installing anything ([`verifyHarness`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/agents/src/preflight/preflight.ts#L35)):
 
 - At startup, it checks every harness, model, and effort in the roster on every worker. A failed check stops startup with an error that gives the worker, the harness, and what is missing.
-- Before a reload replaces the roster, it checks each harness, model, and effort that no running agent uses, on every worker. A failed check refuses the reload with `ReloadPreflightError`. In setup mode, a reload checks nothing, and the next `usine up` checks the whole roster.
+- Before a revision replaces the running roster, it checks each harness, model, and effort that no running agent uses, on every worker. A failed check keeps the running roster unchanged with `ReloadPreflightError`. The CLI still saves the revision; fix the worker or commit a corrected agent definition. In setup mode, revisions run no harness checks, and the next `usine up` checks the whole roster.
 - When an attempt starts, it checks the attempt's agent on the chosen worker. A failed check fails the attempt with `AgentFailure`, and the run waits for you to fix the worker and retry.
 
 | `harness` | Runs | Preflight checks |

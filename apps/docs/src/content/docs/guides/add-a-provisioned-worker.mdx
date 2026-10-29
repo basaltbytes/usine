@@ -7,7 +7,7 @@ sidebar:
 
 import { Steps } from "@astrojs/starlight/components";
 
-A provisioned worker is an `ssh` worker that creates a machine at a cloud provider for each attempt and deletes it after the attempt ([ADR 0029](https://github.com/basaltbytes/usine/blob/main/docs/adr/0029-worker-kinds-and-adapter-set.md)). Each machine runs one attempt, in the attempt's own container, as on a [long-lived SSH worker](/guides/add-a-worker/#a-container-per-attempt). In `usine.yaml`, the worker has a [`provisioner`](/reference/configuration/usine-yaml/#workersprovisioner) instead of a `destination`.
+A provisioned worker is an `ssh` worker that creates a machine at a cloud provider for each attempt and deletes it after the attempt ([ADR 0029](https://github.com/basaltbytes/usine/blob/main/docs/adr/0029-worker-kinds-and-adapter-set.md)). Each machine runs one attempt, in the attempt's own container, as on a [long-lived SSH worker](/guides/add-a-worker/#a-container-per-attempt). In the export format, the worker has a [`provisioner`](/reference/configuration/usine-yaml/#workersprovisioner) instead of a `destination`.
 
 | Provider                        | Machine                                                                 | Network access   | GitHub token on the machine                         |
 | ------------------------------- | ----------------------------------------------------------------------- | ---------------- | --------------------------------------------------- |
@@ -19,7 +19,7 @@ Use **Configuration > Workers > New** to create a worker, or **Edit** on a worke
 
 ## Prerequisites
 
-- Every worker in `usine.yaml` has `kind: ssh`.
+- Every configured worker has `kind: ssh`.
 - An SSH key pair for the worker on the orchestrator machine. The worker's `identity_file` is its private key.
 - A credential for each harness that your agents use, outside the machine. See [Harness credentials](#harness-credentials).
 - For Hetzner Cloud: the `hcloud` CLI with an active context for the project, and `jq`. For a worker behind a gateway, the gateway of [SSH workers behind a gateway](/guides/add-a-worker/#ssh-workers-behind-a-gateway).
@@ -77,9 +77,9 @@ Each attempt gets a server created from a snapshot that you build with `infra/he
 
    The temporary server is a `cx23` in `fsn1` unless you set `SERVER_TYPE` and `LOCATION`. The type must be available in the location, and Hetzner's Cost-Optimized types, such as `cx23` and `cx33`, often aren't; a snapshot built on a `cpx12` runs `cpx32` servers. A server created from the snapshot needs a disk at least as large as the temporary server's, so build it on the smallest type that you set in `server_type`.
 
-5. Add the worker to `usine.yaml`:
+5. Run `usine config export ./config-export`, then add the worker below to the exported `usine.yaml`. Keep the other entities and import the complete folder with `usine config import ./config-export --message "Add Hetzner worker"`:
 
-   ```yaml title="usine.yaml"
+   ```yaml title="config-export/usine.yaml (fragment)"
    workers:
      - name: hetzner-pool
        kind: ssh
@@ -107,7 +107,7 @@ Each attempt gets a server created from a snapshot that you build with `infra/he
    - `image` is the description or ID that `snapshot.sh` printed. With a description, each server is created from the newest available snapshot that has it.
    - `network` is required with a `gateway`.
 
-6. Start the orchestrator. It reads `HCLOUD_TOKEN` and the gateway's `USINE_GATEWAY_ADMIN_TOKEN` from `.env`:
+6. Run `usine restart` if the orchestrator is running, or `usine up` if it is stopped. It reads `HCLOUD_TOKEN` and the gateway's `USINE_GATEWAY_ADMIN_TOKEN` from `.env`:
 
    ```sh title="Instance folder"
    usine up
@@ -145,7 +145,9 @@ The server's sshd accepts only the `usine` user's key, from any address. To acce
 hcloud firewall create --name usine-hetzner-pool --rules-file firewall.json
 ```
 
-```yaml title="usine.yaml"
+Run `usine config edit worker hetzner-pool` to set `provisioner.firewall`, then restart to apply it. This is the relevant part of the worker record:
+
+```yaml title="worker hetzner-pool (fragment)"
 provisioner:
   provider: hetzner
   firewall: usine-hetzner-pool
@@ -153,7 +155,7 @@ provisioner:
 
 ### Update the snapshot
 
-Build a new snapshot when a usine release changes the attempt image or `infra/hetzner/cloud-init.yaml`. Its description names the new harness versions, so export the configuration, change `image`, stop the instance, import it, and restart `usine up`; a live edit refuses a changed `provisioner` with `RestartRequiredError`. A new snapshot with the same description, from `DESCRIPTION`, needs no restart, because each server is created from the newest one. Delete the old snapshots, which Hetzner bills by size:
+Build a new snapshot when a usine release changes the attempt image or `infra/hetzner/cloud-init.yaml`. Its description names the new harness versions, so run `usine config edit worker hetzner-pool`, change `provisioner.image`, and run `usine restart` to apply the saved revision. The running process cannot apply a changed `provisioner` live and logs `RestartRequiredError`. A new snapshot with the same description, from `DESCRIPTION`, needs no restart, because each server is created from the newest one. Delete the old snapshots, which Hetzner bills by size:
 
 ```sh title="Orchestrator machine"
 hcloud image list --type snapshot --selector usine=snapshot
@@ -181,9 +183,9 @@ Each attempt gets a Boat sandbox: a VM with Boat's Ubuntu 24.04 image, which has
    ssh-keygen -t ed25519 -f ~/.ssh/usine_boat -C usine-boat
    ```
 
-3. Add the worker to `usine.yaml`:
+3. Run `usine config export ./config-export`, then add the worker below to the exported `usine.yaml`. Keep the other entities and import the complete folder with `usine config import ./config-export --message "Add Boat worker"`:
 
-   ```yaml title="usine.yaml"
+   ```yaml title="config-export/usine.yaml (fragment)"
    workers:
      - name: boat-pool
        kind: ssh
@@ -201,7 +203,7 @@ Each attempt gets a Boat sandbox: a VM with Boat's Ubuntu 24.04 image, which has
    - `size` is `small`, `default` (4 vCPU, 8 GB), `large`, or `xlarge`, which needs a Boat plan of $100 per month or more.
    - `identity_file` is required. A `region` is refused because Boat documents no region choice. For subscription logins, use the gateway setup below.
 
-4. Add the Anthropic API key to `.env` the same way, and start the orchestrator, which reads both keys from `.env`:
+4. Add the Anthropic API key to `.env` the same way. Restart a running instance with `usine restart`, or start a stopped instance as shown below, to read both keys:
 
    ```sh title="Instance folder"
    (umask 077; read -r key && echo "USINE_ANTHROPIC_API_KEY=$key" >> .env)
@@ -243,9 +245,9 @@ Use a gateway to keep the GitHub installation token, Claude subscription token, 
 
    The script requires `curl`, `jq`, OpenSSH, and a paid Boat plan; the free trial refuses saved snapshots. It creates a source sandbox with `noEnv: true`, installs Tailscale, pulls the image, and creates a stopped container so Boat retains the image. It stops Tailscale and removes its state before saving, so each sandbox creates its own node identity. It waits for the saved snapshot to become `ready`, then deletes the source sandbox. Rebuild the snapshot whenever the attempt image changes. Saved snapshot copies can be stored outside the EU, so keep credentials and repository checkouts out of the source sandbox.
 
-6. Configure the worker and import the configuration:
+6. Export with `usine config export ./config-export`. Update the worker in the exported `usine.yaml`, keeping the rest of the configuration, then import the folder and restart to apply the gateway and provisioner changes:
 
-   ```yaml title="usine.yaml"
+   ```yaml title="config-export/usine.yaml (fragment)"
    workers:
      - name: boat-pool
        kind: ssh
@@ -267,7 +269,7 @@ Use a gateway to keep the GitHub installation token, Claude subscription token, 
    ```
 
    ```sh
-   usine config import
+   usine config import ./config-export --message "Configure Boat gateway"
    usine restart
    ```
 
