@@ -21,10 +21,18 @@ const persistence =
 export class CursorStore extends Context.Service<
   CursorStore,
   {
+    /**
+     * Decodes the JSON stored under `key` with `schema`. Returns `None` for a missing or
+     * incompatible value, logging decode failures; storage failures remain typed errors.
+     */
     readonly read: <T, E extends Schema.Json>(
       key: CursorKey,
       schema: Schema.Codec<T, E, never, never>,
     ) => Effect.Effect<Option.Option<T>, EnginePersistenceError>;
+    /**
+     * Encodes `value` with `schema` and replaces the JSON stored under `key`. Encoding and storage
+     * failures return `EnginePersistenceError`.
+     */
     readonly write: <T, E extends Schema.Json>(
       key: CursorKey,
       schema: Schema.Codec<T, E, never, never>,
@@ -32,6 +40,7 @@ export class CursorStore extends Context.Service<
     ) => Effect.Effect<void, EnginePersistenceError>;
   }
 >()("@usine/engine/CursorStore") {
+  /** Stores JSON cursors in the supplied runtime database. */
   static readonly layer = Layer.effect(
     CursorStore,
     Effect.gen(function* () {

@@ -66,6 +66,10 @@ export class CycleBudgets extends Context.Service<
     ) => Effect.Effect<void, EnginePersistenceError>;
   }
 >()("@usine/engine/CycleBudgets") {
+  /**
+   * Uses the supplied runtime database for atomic budget resets and durable re-poll requests (ADR
+   * 0022).
+   */
   static readonly layer = Layer.effect(
     CycleBudgets,
     Effect.gen(function* () {

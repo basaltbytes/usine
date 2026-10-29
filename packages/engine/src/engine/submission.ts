@@ -18,10 +18,17 @@ import { Hex } from "effect/encoding";
 
 /** A matched Event with its Loop, Item, and Run settings. */
 export class Submission extends Schema.Class<Submission>("@usine/engine/Submission")({
+  /**
+   * The trigger match and its dedup key, recorded before the engine decides whether to open a run.
+   */
   event: Event,
+  /** The item identity used to serialize runs of this loop and apply its cycle budget. */
   itemKey: ItemKey,
+  /** The qualified loop identity for the match. */
   loop: LoopName,
+  /** The name under which the run stores its agent action result. */
   step: StepName,
+  /** Whether the run must wait for an operator approval before execution. */
   approval: ApprovalRequirement,
   /** The repository access of the Run's Attempts, from the Loop at match time. */
   permissions: LoopPermissions.pipe(
@@ -38,10 +45,15 @@ export class Submission extends Schema.Class<Submission>("@usine/engine/Submissi
     Schema.withDecodingDefaultKey(Effect.succeed(CycleGeneration.make(0))),
     Schema.withConstructorDefault(Effect.succeed(CycleGeneration.make(0))),
   ),
+  /** The managed repo checked out for attempts of this run. */
   repository: RepositoryName,
+  /** The repository revision to resolve when preparing an attempt checkout. */
   revision: RepositoryRevision,
+  /** The rendered loop task for the run, before any edit-and-retry amendment. */
   task: AttemptTask,
+  /** The agent definition saved at match time for the run. */
   agent: Agent,
+  /** The requested Pi parent model, or `None` to use the runtime default. */
   parentModel: Schema.Option(ModelId),
 }) {}
 
@@ -76,24 +88,33 @@ export const reopeningOf = (
 
 /** A result for an Event that has a Run; submitting it again returns the same Run ID. */
 export class Claimed extends Schema.TaggedClass<Claimed>("@usine/engine/Claimed")("Claimed", {
+  /** The recorded event associated with the run. */
   eventId: EventId,
+  /** The opened or previously claimed run; repeated submissions return this same ID. */
   runId: RunId,
 }) {}
 
 /** A result for an Event that waits until a running Attempt on the same Item finishes. */
 export class Queued extends Schema.TaggedClass<Queued>("@usine/engine/Queued")("Queued", {
+  /** The recorded event waiting behind an active attempt on this loop and item. */
   eventId: EventId,
 }) {}
 
 export const IGNORED_REASONS = ["superseded", "revoked"] as const;
 
+/**
+ * Why an event cannot open a run: `superseded` means a newer event or cycle generation replaced
+ * it; `revoked` means its item stopped matching.
+ */
 export const IgnoreReason = Schema.Literals(IGNORED_REASONS);
 
 export type IgnoreReason = typeof IgnoreReason.Type;
 
 /** A result for an Event that is recorded but can't open a Run. */
 export class Ignored extends Schema.TaggedClass<Ignored>("@usine/engine/Ignored")("Ignored", {
+  /** The recorded event that cannot open a run. */
   eventId: EventId,
+  /** Why this event was superseded or revoked; see `IgnoreReason`. */
   reason: IgnoreReason,
 }) {}
 
@@ -104,15 +125,29 @@ export class Ignored extends Schema.TaggedClass<Ignored>("@usine/engine/Ignored"
  */
 export class Suppressed extends Schema.TaggedClass<Suppressed>("@usine/engine/Suppressed")(
   "Suppressed",
-  { eventId: EventId, runId: RunId },
+  {
+    /** The event waiting for suppression to end. */
+    eventId: EventId,
+    /** The run whose unresolved question or blocker suppresses the item. */
+    runId: RunId,
+  },
 ) {}
 
 /** A result for an Event that opened no Run because the Item needs a cycle-budget reset. */
 export class CycleBlocked extends Schema.TaggedClass<CycleBlocked>("@usine/engine/CycleBlocked")(
   "CycleBlocked",
-  { eventId: EventId, ask: CycleBudgetAsk },
+  {
+    /** The event that could not open a run within the cycle budget. */
+    eventId: EventId,
+    /** The open ask that the operator must reset before further admission. */
+    ask: CycleBudgetAsk,
+  },
 ) {}
 
+/**
+ * The outcome of recording a trigger match: its run, queued event, suppression, ignore reason, or
+ * cycle-budget ask.
+ */
 export const SubmissionResult = Schema.Union([Claimed, Queued, Suppressed, Ignored, CycleBlocked]);
 
 export type SubmissionResult = typeof SubmissionResult.Type;

@@ -91,17 +91,26 @@ const makeWriter = Effect.gen(function* () {
   } as const;
 });
 
+/**
+ * Reads the last complete label catalog observed for a managed repo without fetching from GitHub.
+ */
 export class RepositoryLabelProjectionReader extends Context.Service<
   RepositoryLabelProjectionReader,
   {
+    /**
+     * Returns the last stored catalog for `repository`, or `None` before any catalog was recorded.
+     * Older name-only entries have no color or description.
+     */
     readonly get: (
       repository: RepositoryName,
     ) => Effect.Effect<Option.Option<RepositoryLabelProjection>, EnginePersistenceError>;
   }
 >()("@usine/engine/RepositoryLabelProjectionReader") {
+  /** Reads label catalogs from the supplied runtime database. */
   static readonly layer = Layer.effect(RepositoryLabelProjectionReader, makeReader);
 }
 
+/** Replaces a managed repo's stored label catalog after a complete observation. */
 export class RepositoryLabelProjectionWriter extends Context.Service<
   RepositoryLabelProjectionWriter,
   {
@@ -111,6 +120,10 @@ export class RepositoryLabelProjectionWriter extends Context.Service<
     ) => Effect.Effect<boolean, EnginePersistenceError>;
   }
 >()("@usine/engine/RepositoryLabelProjectionWriter") {
+  /**
+   * Writes label catalogs to the supplied runtime database, invalidating operator projections on
+   * changes.
+   */
   static readonly layer = Layer.effect(RepositoryLabelProjectionWriter, makeWriter);
 }
 
