@@ -5,6 +5,8 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { commands, page } from "vitest/browser";
+import { entityKey } from "~/features/configuration/lib/entities";
+import { entityQuery } from "~/features/configuration/queries";
 import { configurationFixture, configurationJson } from "~/lib/configuration/fixture";
 import { configurationQuery } from "~/lib/configuration/queries";
 import { overviewQuery } from "~/lib/overview";
@@ -13,6 +15,8 @@ import "~/index.css";
 
 declare module "vitest/browser" {
   interface BrowserCommands {
+    delayConfigurationLookup: (identifier: string) => Promise<void>;
+    releaseConfigurationLookup: (identifier: string) => Promise<void>;
     configurationEditorScreenshot: (name: string) => Promise<void>;
     configurationEditorResponses: (
       rejections: readonly { readonly status: number; readonly body: string }[],
@@ -312,3 +316,41 @@ it("keeps the raw editor within the page at desktop and phone widths", async () 
     await commands.configurationEditorScreenshot(name);
   }
 });
+
+it.each(["alpha", "developer"])(
+  "discards a canceled lookup for %s while another creation is pending",
+  async (identifier) => {
+    await mount("/configuration/agents");
+    await commands.delayConfigurationLookup(identifier);
+    await commands.delayConfigurationLookup("beta");
+    await button("New").click();
+    const name = page.getByRole("textbox", { name: "Name", exact: true });
+    await name.fill(identifier);
+    await button("Edit").click();
+    await expect.element(name).toBeDisabled();
+    await button("Cancel").click();
+    await button("New").click();
+    await expect.element(name).toHaveValue("");
+    await name.fill("beta");
+    await button("Edit").click();
+    await commands.releaseConfigurationLookup(identifier);
+    await expect
+      .poll(
+        () =>
+          client.getQueryState(entityQuery(entityKey("agent", identifier)).queryKey)?.fetchStatus,
+      )
+      .toBe("idle");
+    await expect.element(name).toHaveValue("beta");
+    await expect.element(name).toBeDisabled();
+    await expect.element(button("Loading…")).toBeDisabled();
+    await expect.element(page.getByRole("alert")).not.toBeInTheDocument();
+    await commands.releaseConfigurationLookup("beta");
+    await expect.element(page.getByRole("textbox", { name: "Configuration text" })).toBeVisible();
+    await button("Save").click();
+    await expect.poll(async () => (await commands.configurationEditorRequests()).length).toBe(1);
+    expect((await commands.configurationEditorRequests())[0]).toMatchObject({
+      method: "PUT",
+      url: "/api/configuration/entities/agent/beta",
+    });
+  },
+);

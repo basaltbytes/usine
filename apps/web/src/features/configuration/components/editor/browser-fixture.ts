@@ -1,12 +1,40 @@
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
-import type { Page } from "playwright";
+import type { Page, Route } from "playwright";
 
 interface WriteRequest {
   readonly method: string;
   readonly url: string;
   readonly payload: unknown;
 }
+const lookups = new WeakMap<Page, Map<string, Promise<Route>>>();
+
+export const delayConfigurationLookup = async (
+  { page }: { readonly page: Page },
+  identifier: string,
+) => {
+  let receive: (route: Route) => void;
+  const request = new Promise<Route>((resolve) => {
+    receive = resolve;
+  });
+  const pending = lookups.get(page) ?? new Map<string, Promise<Route>>();
+  pending.set(identifier, request);
+  lookups.set(page, pending);
+  await page.route(`**/api/configuration/entities/agent/${identifier}`, (route) => receive(route));
+};
+
+export const releaseConfigurationLookup = async (
+  { page }: { readonly page: Page },
+  identifier: string,
+) => {
+  const request = lookups.get(page)?.get(identifier);
+  if (request === undefined) throw new Error(`No delayed lookup for ${identifier}`);
+  const route = await request;
+  await route.fallback();
+  await page.unroute(`**/api/configuration/entities/agent/${identifier}`);
+  lookups.get(page)?.delete(identifier);
+};
+
 const requests = new WeakMap<Page, WriteRequest[]>();
 
 export const configurationEditorRequests = ({ page }: { readonly page: Page }) =>

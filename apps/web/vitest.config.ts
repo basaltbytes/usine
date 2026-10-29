@@ -1,4 +1,6 @@
 import {
+  delayConfigurationLookup,
+  releaseConfigurationLookup,
   configurationEditorResponses,
   configurationEditorScreenshot,
   configurationEditorRequests,
@@ -78,6 +80,8 @@ export default mergeConfig(
                 executablePath === undefined ? {} : { launchOptions: { executablePath } },
               ),
               commands: {
+                delayConfigurationLookup,
+                releaseConfigurationLookup,
                 configurationEditorResponses,
                 configurationEditorRequests,
                 configurationEditorScreenshot,
