@@ -153,12 +153,12 @@ export class PollingTriggers extends Context.Service<
      */
     readonly poll: (instance: LoadedInstance) => Effect.Effect<PollCycle, EnginePersistenceError>;
     /**
-     * Requests an Item fetch after a self-write, keeping the writer's request backoff. Duplicate
+     * Requests a repository or item fetch, keeping the writer's request backoff. Duplicate
      * hints coalesce, and polling repairs lost ones.
      */
     readonly hint: (
       repository: RepositoryName,
-      item: ChangedItem,
+      item?: ChangedItem,
       backoffUntil?: Option.Option<DateTime.Utc>,
     ) => Effect.Effect<void>;
     /**
@@ -172,6 +172,8 @@ export class PollingTriggers extends Context.Service<
      * completes.
      */
     readonly latest: Effect.Effect<Option.Option<PollCycle>>;
+    /** The last received hint in this process, including coalesced or dropped hints. */
+    readonly lastHint: Effect.Effect<Option.Option<DateTime.Utc>>;
   }
 >()("@usine/orchestrator/PollingTriggers") {
   static readonly layer = Layer.effect(
@@ -605,7 +607,7 @@ export class PollingTriggers extends Context.Service<
         function* (instance: LoadedInstance, hint: ItemHint) {
           yield* Effect.annotateCurrentSpan({
             repository: hint.repository,
-            item: hint.item.number,
+            item: Option.getOrUndefined(Option.map(hint.item, (item) => item.number)),
           });
           yield* hints.awaitBackoff;
           const paused = new Set(
@@ -619,31 +621,49 @@ export class PollingTriggers extends Context.Service<
               canonicalRepositoryName(repository.name) === canonicalRepositoryName(hint.repository),
           );
           if (watched === undefined) {
-            yield* Effect.logInfo("Self-write Hint ignored for an unmanaged repository", {
+            yield* Effect.logInfo("Hint ignored for an unmanaged repository", {
               repository: hint.repository,
-              item: hint.item.number,
+              item: Option.getOrUndefined(Option.map(hint.item, (item) => item.number)),
             });
             return;
           }
-          // Share the normal snapshot, projection and dedup path. Hints never
+          if (Option.isNone(hint.item)) {
+            const cycle = yield* pollRepository(watched).pipe(
+              Effect.catch((failure) => {
+                if (failure._tag !== "InterruptedRepositoryCycle") return Effect.fail(failure);
+                return hints
+                  .defer(failure.nextPollAt)
+                  .pipe(Effect.andThen(Effect.fail(failure.error)));
+              }),
+            );
+            yield* Effect.logInfo("Hint refreshed the repository", {
+              repository: hint.repository,
+              changedItems: cycle.changedItems,
+              submissions: cycle.submissions.length,
+              failures: cycle.failures,
+            });
+            return;
+          }
+          // Item hints share the normal snapshot, projection and dedup path. They never
           // advance a REST cursor or replace the latest complete cycle's findings.
-          const observed = yield* observeItem(watched.repository.name, hint.item);
+          const item = hint.item.value;
+          const observed = yield* observeItem(watched.repository.name, item);
           const result = yield* evaluateItem(watched.repository, watched.loops, observed);
           // The self-write changed the Item, so the next poll fetches it again
           // and records these failures for Needs you.
           for (const failure of result.failures) {
-            yield* Effect.logWarning("Self-write Hint could not evaluate a Loop on the Item", {
+            yield* Effect.logWarning("Hint could not evaluate a Loop on the Item", {
               repository: hint.repository,
-              item: hint.item.number,
+              item: item.number,
               loop: failure.loop,
               stage: failure.stage,
               errorTag: failure.errorTag,
               message: failure.message,
             });
           }
-          yield* Effect.logInfo("Self-write Hint refreshed the Item", {
+          yield* Effect.logInfo("Hint refreshed the Item", {
             repository: hint.repository,
-            item: hint.item.number,
+            item: item.number,
             submissions: result.submissions.length,
             revokedRuns: result.revokedRuns,
             failures: result.failures.length,
@@ -656,14 +676,11 @@ export class PollingTriggers extends Context.Service<
               Effect.gen(function* () {
                 if (error._tag === "GitHubRateLimitError")
                   yield* hints.defer(Option.some(error.retryAt));
-                yield* Effect.logWarning(
-                  "Self-write Hint refresh failed; the normal poll will retry",
-                  {
-                    repository: hint.repository,
-                    item: hint.item.number,
-                    ...repositoryFailureLogFields(error),
-                  },
-                );
+                yield* Effect.logWarning("Hint refresh failed; the normal poll will retry", {
+                  repository: hint.repository,
+                  item: Option.getOrUndefined(Option.map(hint.item, (item) => item.number)),
+                  ...repositoryFailureLogFields(error),
+                });
               }),
             ),
             ownership.withPermits(1),
@@ -752,7 +769,7 @@ export class PollingTriggers extends Context.Service<
           yield* waitForNextPoll(instances, instance, intervalAt, requestedAt);
         }).pipe(Effect.forever);
 
-      return { latest: Ref.get(latest), poll, run, hint: hints.offer };
+      return { latest: Ref.get(latest), poll, run, hint: hints.offer, lastHint: hints.lastHint };
     }),
   ).pipe(Layer.provide(ItemHints.layer));
 }

@@ -19,7 +19,7 @@ import { RepositoriesList } from "~/features/configuration/components/repositori
 import { SettingsPage } from "~/features/configuration/settings.page";
 import { WorkersList } from "~/features/configuration/components/workers/list";
 import { WorkerDetail } from "~/features/configuration/components/workers/detail";
-import { ConfigurationView } from "@usine/orchestrator/operator";
+import { ConfigurationView, SettingsView } from "@usine/orchestrator/operator";
 import { Schema } from "effect";
 import {
   configurationFixture,
@@ -379,7 +379,31 @@ describe("Settings page", () => {
     assert.include(page, "settings.max_attempt_tokens 20000000");
     assert.include(page, "operator PhilDL");
     assert.include(page, "webhooks.mode off");
+    assert.include(page, "Last hint received None since startup");
     assert.include(page, "tracing.otlp_url http://localhost:4318/v1/traces");
     assert.include(page, "tracing.service_name usine-eu");
+  });
+  it("shows deliveries mode and the last received hint", async () => {
+    const configuration = configurationFixture();
+    const at = "2026-10-29T12:00:00.000Z";
+    const page = text(
+      await render(() => (
+        <SettingsPage
+          configuration={
+            new ConfigurationView({
+              ...configuration,
+              settings: new SettingsView({
+                ...configuration.settings,
+                webhooks: "deliveries",
+                lastHintAt: at,
+              }),
+            })
+          }
+        />
+      )),
+    );
+    assert.include(page, "webhooks.mode deliveries");
+    assert.include(page, "Checks delivery summaries every 10 seconds");
+    assert.include(page, `Last hint received ${at}`);
   });
 });

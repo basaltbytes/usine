@@ -100,6 +100,10 @@ Polling also fetches an open pull request on every cycle while its check rollup 
 
 An `if:` or prompt that fails on an item affects only that loop and item, and the cursor advances. The cursor records the failing item, so each cycle reports it until the loop evaluates, logging the error once per loop, item, and content hash. The first cycle after a restart or instance change fetches failing items again, so a fix applies without waiting for a change.
 
+Set `webhooks.mode: deliveries` in `usine.yaml` and restart to check the App's delivery summaries about every 10 seconds. `Orchestrator.layer` uses `GitHubApp` and `CursorStore` for this source. It ignores `ping` and repositories outside the registry, coalesces repository hints, and persists the newest delivery ID per installation. Each read processes up to 1,000 summaries; older hints beyond that limit are dropped. API failures and rate limits delay this source without stopping normal polling.
+
+`PollingTriggers.hint(repository)` requests early change detection for one repository; passing an item requests its snapshot instead. Both use the dropping queue of 128 and the existing projection, loop evaluation, and event ledger. Repository hints advance the repository cursor through normal change detection; item hints leave it unchanged. Neither moves the configured backstop cadence. `lastHint` reports the most recent hint received in this process, including hints coalesced or dropped by the queue.
+
 Cursors live in the engine's `CursorStore`. When a loop starts watching a repo or its trigger changes, the orchestrator drops that repo's cursor and polls cold; the event ledger absorbs repeats.
 
 Before a queued event's run opens, the orchestrator re-checks its trigger against the item's GitHub state, with a five-second limit. A failed or timed-out check logs a warning and lets the event proceed; later polling can revoke the run. If GitHub no longer has the item, the engine revokes its queued events and marks it gone.

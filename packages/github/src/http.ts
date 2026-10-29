@@ -128,3 +128,10 @@ export const statusError = (
         message: `GitHub returned HTTP status ${response.status}`,
       });
 };
+
+/** Returns the `rel="next"` URL from a Link header, if GitHub has more pages. */
+export const nextPageUrl = (link: string | undefined): Option.Option<string> => {
+  if (link === undefined) return Option.none();
+  const match = /<(?<url>[^>]+)>;\s*rel="next"/u.exec(link);
+  return Option.fromNullishOr(match?.groups?.["url"]);
+};

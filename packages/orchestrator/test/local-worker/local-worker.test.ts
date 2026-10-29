@@ -936,6 +936,7 @@ describe("local worker", () => {
           repositories: () => Effect.die("unused installation repositories"),
           installationToken: () => Effect.die("unused"),
           projectAccess: () => Effect.die("unused"),
+          deliveries: () => Effect.die("unused webhook deliveries"),
           workerToken: () => Effect.die("unused"),
         });
         const author = "4242+usine-test[bot]@users.noreply.github.com";

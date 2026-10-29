@@ -18,6 +18,7 @@ import {
   API_ROOT,
   authorized,
   invalidResponse,
+  nextPageUrl,
   statusError,
   transportError,
   withGitHubReason,
@@ -51,6 +52,8 @@ import {
   SingleRepository,
   type TokenScope,
 } from "./installation.ts";
+
+import { WebhookDelivery, WebhookDeliveryId, WebhookDeliveryFromApi } from "./delivery.ts";
 
 const TOKEN_MAX_LIFETIME_MS = 60 * 60 * 1_000;
 /** The margin for clock skew between GitHub and this machine when checking token expiry, in milliseconds. */
@@ -114,6 +117,10 @@ const mintPlan = (scope: TokenScope): { operation: GitHubOperation; body: Schema
 export class GitHubApp extends Context.Service<
   GitHubApp,
   {
+    /** Reads new delivery summaries, newest first, with at most ten pages per call. */
+    readonly deliveries: (
+      after: Option.Option<WebhookDeliveryId>,
+    ) => Effect.Effect<ReadonlyArray<WebhookDelivery>, GitHubAppError>;
     readonly repositories: () => Effect.Effect<ReadonlyArray<RepositoryName>, GitHubAppError>;
     /** Returns the App installation after checking its required permissions. */
     readonly installation: () => Effect.Effect<Installation, GitHubAppError>;
@@ -149,7 +156,23 @@ export class GitHubApp extends Context.Service<
       const sign = yield* appJwtSigner(credentials);
       const http = yield* HttpClient.HttpClient;
 
-      /** Sends one request and decodes its JSON body. Fails with a typed GitHub error otherwise. */
+      const fetchResponse = Effect.fn("GitHubApp.fetch")(function* (
+        operation: GitHubOperation,
+        request: HttpClientRequest.HttpClientRequest,
+      ) {
+        yield* Effect.annotateCurrentSpan({ appId: credentials.appId, operation });
+        const response = yield* http
+          .execute(request)
+          .pipe(Effect.mapError((error) => transportError(operation, error)));
+        if (response.status < 200 || response.status >= 300) {
+          const failure = statusError(operation, response, yield* Clock.currentTimeMillis);
+          if (failure._tag === "GitHubRateLimitError") return yield* failure;
+          const explained = yield* withGitHubReason(failure, response);
+          return yield* explained;
+        }
+        return response;
+      });
+
       const fetchJson = <S extends Schema.Codec<unknown, unknown, never, unknown>>(
         operation: GitHubOperation,
         request: HttpClientRequest.HttpClientRequest,
@@ -158,20 +181,49 @@ export class GitHubApp extends Context.Service<
         S["Type"],
         GitHubApiError | GitHubRateLimitError | InvalidGitHubResponseError
       > =>
-        Effect.gen(function* () {
-          const response = yield* http
-            .execute(request)
-            .pipe(Effect.mapError((error) => transportError(operation, error)));
-          if (response.status < 200 || response.status >= 300) {
-            const failure = statusError(operation, response, yield* Clock.currentTimeMillis);
-            if (failure._tag === "GitHubRateLimitError") return yield* failure;
-            const explained = yield* withGitHubReason(failure, response);
-            return yield* explained;
-          }
-          return yield* HttpClientResponse.schemaBodyJson(schema)(response).pipe(
-            Effect.mapError((error) => invalidResponse(operation, error.message)),
-          );
+        fetchResponse(operation, request).pipe(
+          Effect.flatMap((response) =>
+            HttpClientResponse.schemaBodyJson(schema)(response).pipe(
+              Effect.mapError((error) => invalidResponse(operation, error.message)),
+            ),
+          ),
+        );
+
+      const deliveries = Effect.fn("GitHubApp.deliveries")(function* (
+        after: Option.Option<WebhookDeliveryId>,
+      ) {
+        yield* Effect.annotateCurrentSpan({
+          appId: credentials.appId,
+          after: Option.getOrNull(after),
         });
+        const jwt = yield* sign();
+        let next = Option.some(`${API_ROOT}/app/hook/deliveries?per_page=100`);
+        const found: Array<WebhookDelivery> = [];
+        for (let page = 0; page < 10 && Option.isSome(next); page += 1) {
+          const response = yield* fetchResponse(
+            "poll-webhook-deliveries",
+            HttpClientRequest.get(next.value).pipe(authorized(jwt)),
+          );
+          const summaries = yield* HttpClientResponse.schemaBodyJson(
+            Schema.Array(WebhookDeliveryFromApi),
+          )(response).pipe(
+            Effect.mapError((error) => invalidResponse("poll-webhook-deliveries", error.message)),
+          );
+          const fresh = summaries.filter(
+            (delivery) => Option.isNone(after) || delivery.id > after.value,
+          );
+          found.push(...fresh);
+          if (fresh.length < summaries.length) return found;
+          next = nextPageUrl(response.headers.link);
+        }
+        if (Option.isSome(next)) {
+          yield* Effect.logWarning("Webhook delivery page limit reached; older hints dropped", {
+            appId: credentials.appId,
+            deliveries: found.length,
+          });
+        }
+        return found;
+      });
 
       const discoverInstallation = Effect.fn("GitHubApp.discoverInstallation")(function* () {
         const jwt = yield* sign();
@@ -354,6 +406,7 @@ export class GitHubApp extends Context.Service<
       );
 
       return {
+        deliveries,
         repositories: Effect.fn("GitHubApp.repositories")(function* () {
           const { token, installation } = yield* lease();
           yield* Effect.annotateCurrentSpan({ installationId: installation.id });
@@ -433,3 +486,5 @@ export {
   GitHubAppError,
   isRefusal,
 } from "./error.ts";
+
+export { WebhookDelivery, WebhookDeliveryId } from "./delivery.ts";

@@ -522,6 +522,7 @@ it("serves installation repositories, live labels and supported harnesses, and r
         installationToken: unused,
         botAccount: unused,
         projectAccess: unused,
+        deliveries: () => Effect.die("unused webhook deliveries"),
         workerToken: unused,
         repositories: () => Effect.succeed([repository]),
       });

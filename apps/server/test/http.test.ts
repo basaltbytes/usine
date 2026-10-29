@@ -361,6 +361,7 @@ const configurationView = new ConfigurationView({
     parentEffort: null,
     operator: null,
     webhooks: "off",
+    lastHintAt: null,
     webhooksPublicUrl: null,
     tracing: null,
   }),

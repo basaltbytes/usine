@@ -13,7 +13,7 @@ The 0.x APIs can change between minor releases.
 
 ## Set up the App
 
-[Run a factory](https://docs.usine.dev/guides/) gives the steps under Connect a GitHub App: an App installable only on your account, without active webhooks, with Contents, Issues, and Pull requests read and write, Checks and Metadata read-only, and **No access** for everything else, including Workflows, Administration, and all organization and account permissions.
+[Run a factory](https://docs.usine.dev/guides/) gives the steps under Connect a GitHub App: an App installable only on your account, with an active webhook for deliveries mode, with Contents, Issues, and Pull requests read and write, Checks and Metadata read-only, and **No access** for everything else, including Workflows, Administration, and all organization and account permissions.
 
 GitHub grants Metadata read access automatically. Contents lets installation tokens use Git over HTTPS; with Workflows off, worker tokens can't edit `.github/workflows/`. User authorization isn't required. Install the App once, on the account that owns the managed repos, for every repo in `usine.yaml`; a factory expects one installation. GitHub's references are [Registering a GitHub App](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app) and [Choosing permissions for a GitHub App](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/choosing-permissions-for-a-github-app).
 
@@ -99,3 +99,9 @@ pnpm --filter @usine/github test:integration
 It mints both token kinds, posts an issue comment with the repo token, checks the author against `<app>[bot]`, and deletes the comment at cleanup. `@usine/orchestrator` has a separate live polling test that creates and applies a repo label.
 
 `GitHubApp.repositories()` lists the repository names accessible to the GitHub App installation, following every page. Configuration pickers can compare these names with the registry before offering a repository to add.
+
+## Webhook delivery summaries
+
+`GitHubApp.deliveries(after)` uses the App JWT to read new summaries from `GET /app/hook/deliveries`. Pass the last recorded `WebhookDeliveryId`, or `Option.none()` on the first read. Each `WebhookDelivery` contains its ID, event, and optional repository ID. The adapter follows pagination until it reaches the recorded ID, the end of the log, or ten pages. It fetches no delivery payloads.
+
+Enable the App webhook to record deliveries. A delivery with a failed HTTP status can still request a refresh; no reachable webhook endpoint is needed for deliveries mode.

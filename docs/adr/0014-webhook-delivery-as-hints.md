@@ -28,3 +28,11 @@ Bootstrap always creates the App webhook **active**, with a dead `.invalid` plac
 ## Board self-write implementation
 
 Board label writes queue bounded, coalesced item hints in the poller, even after a failed or interrupted write, since GitHub may have applied part of the swap. The original outcome stands; writer rate limits extend hint backoff. The poller serializes each authoritative snapshot and loop evaluation with normal cycles, through the existing projection and ledger. Hints never advance a REST cursor or overwrite the last full cycle's findings; request backoff delays hint snapshots too.
+
+## Deliveries implementation
+
+The deliveries source extends `GitHubApp` for authenticated summary reads and reuses `CursorStore` for the last delivery ID, scoped to the installation. The `WebhookDeliveries` service owns the polling cadence and repository routing; it adds no transport or storage adapter. `Orchestrator` runs it beside polling and schedule triggers. The mode is read at startup, while each delivery cycle reads the current registry.
+
+A cycle reads at most ten pages of 100 summaries and coalesces hints by registered repository. Reaching the page limit drops older hints and logs the decision. Each cycle has a 30-second timeout; typed failures retry after 10 seconds or GitHub's later rate-limit deadline. These limits affect freshness only. The normal poll and event ledger retain their existing behavior.
+
+Repository hints use the existing repository cycle, including cursor updates, backoff, projection, and loop evaluation. Item hints continue to fetch a snapshot without advancing a REST cursor. Settings reports the last hint received in the running process; the engine does not use that timestamp for scheduling.

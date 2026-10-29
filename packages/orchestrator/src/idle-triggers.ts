@@ -5,6 +5,7 @@ import { ScheduleCycle, ScheduleTriggers } from "./schedule-triggers.ts";
 /** Trigger services that never poll or tick, for an instance that still needs setup. */
 export const idleTriggersLayer = Layer.mergeAll(
   Layer.succeed(PollingTriggers)({
+    lastHint: Effect.succeed(Option.none()),
     hint: () => Effect.void,
     latest: Effect.succeed(Option.none()),
     poll: () =>

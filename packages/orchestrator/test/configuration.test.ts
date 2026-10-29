@@ -185,6 +185,7 @@ const finding = new LabelPreflightFinding({
 });
 
 const polling = Layer.succeed(PollingTriggers)({
+  lastHint: Effect.succeed(Option.some(DateTime.makeUnsafe("2026-10-29T12:00:00Z"))),
   hint: () => Effect.void,
   poll: () => Effect.die("unused"),
   run: () => Effect.never,
@@ -490,6 +491,7 @@ describe("Configuration view", () => {
         parentEffort: null,
         operator: "PhilDL",
         webhooks: "endpoint",
+        lastHintAt: "2026-10-29T12:00:00.000Z",
         webhooksPublicUrl: "https://factory.example/webhooks",
         tracing: { otlpUrl: "http://localhost:4318/v1/traces", serviceName: "usine" },
       });

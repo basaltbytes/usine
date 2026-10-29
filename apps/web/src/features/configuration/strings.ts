@@ -346,7 +346,7 @@ export const settingsFormFields = [
     label: "Webhooks mode",
     options: ["off", "deliveries", "endpoint"],
     description:
-      "Parsed and validated; GitHub changes are read by polling. A change requires a restart.",
+      "Deliveries mode checks webhook summaries every 10 seconds. A change requires a restart.",
   },
 ] as const;
 
@@ -457,4 +457,18 @@ export const projectCopy = {
   down: "Move repository down",
   remove: "Remove repository",
   project: "Project",
+};
+
+export const webhookStatusCopy = {
+  mode: {
+    off: "Self-write hints are enabled. A mode change requires a restart.",
+    deliveries:
+      "Checks delivery summaries every 10 seconds to refresh repositories sooner. A mode change requires a restart.",
+    endpoint:
+      "Endpoint delivery is unavailable in this version. Polling and self-write hints remain active.",
+  },
+  lastHint: "Last hint received",
+  never: "None since startup",
+  hintEffect:
+    "The last self-write or webhook hint received since startup. Polling runs independently.",
 };

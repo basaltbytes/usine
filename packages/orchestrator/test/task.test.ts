@@ -399,6 +399,7 @@ const observation = (
     get: () => Effect.succeed(Option.none()),
   });
   const polling = Layer.succeed(PollingTriggers)({
+    lastHint: Effect.succeed(Option.none()),
     hint: () => Effect.die("unused"),
     poll: () => Effect.die("unused"),
     run: () => Effect.never,

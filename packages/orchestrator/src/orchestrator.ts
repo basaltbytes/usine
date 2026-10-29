@@ -1,17 +1,20 @@
 import { Context, Effect, Layer } from "effect";
 import { CurrentInstance } from "./current-instance/current-instance.ts";
 import { PollingTriggers } from "./polling-triggers.ts";
+import { WebhookDeliveries } from "./polling/deliveries.ts";
 import { ScheduleTriggers } from "./schedule-triggers.ts";
 
 const makeOrchestrator = Effect.gen(function* () {
   const polling = yield* PollingTriggers;
   const schedules = yield* ScheduleTriggers;
   const instances = yield* CurrentInstance;
+  const deliveries = yield* WebhookDeliveries;
 
-  const run: Effect.Effect<never> = Effect.raceFirst(
+  const run: Effect.Effect<never> = Effect.raceAllFirst([
     polling.run(instances),
     schedules.run(instances),
-  );
+    deliveries.run(instances),
+  ]);
 
   return { run } as const;
 });
@@ -27,5 +30,7 @@ export class Orchestrator extends Context.Service<
     readonly run: Effect.Effect<never>;
   }
 >()("@usine/orchestrator/Orchestrator") {
-  static readonly layer = Layer.effect(Orchestrator, makeOrchestrator);
+  static readonly layer = Layer.effect(Orchestrator, makeOrchestrator).pipe(
+    Layer.provide(WebhookDeliveries.layer),
+  );
 }
