@@ -1,5 +1,6 @@
+import { RepositoryFilter } from "~/components/repository-filter";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { Navigate } from "@tanstack/react-router";
+import { Navigate, useNavigate } from "@tanstack/react-router";
 import type { ItemNumber } from "@usine/core/item";
 import type { RepositoryName } from "@usine/core/repository";
 import { OperatorHttpError } from "@usine/orchestrator/operator/http";
@@ -7,7 +8,7 @@ import type { ReactNode } from "react";
 import { TaskNotFound } from "~/features/tasks/components/not-found";
 import { ErrorAlert } from "~/components/error-alert";
 import { useOpenRun } from "~/hooks/use-open-run";
-import { overviewQuery, projectParams } from "~/lib/overview";
+import { overviewQuery, projectId, projectForRepository } from "~/lib/overview";
 import { TaskComments } from "~/features/tasks/components/comments";
 import { TaskHeader } from "~/features/tasks/components/header";
 import { TaskPullRequests } from "~/features/tasks/components/pull-requests";
@@ -29,7 +30,8 @@ type TaskPageProps = {
 
 export const TaskPage = ({ repository, number }: TaskPageProps) => {
   const { data: overview } = useSuspenseQuery(overviewQuery());
-  const project = overview.projects.find((candidate) => candidate.repository === repository);
+  const project = projectForRepository(overview.projects, repository);
+  const navigate = useNavigate();
   const openRun = useOpenRun();
   const task = useSuspenseQuery(taskQuery(repository, number));
   if (task.error instanceof OperatorHttpError && task.error.error === "BoardItemNotFoundError")
@@ -42,17 +44,30 @@ export const TaskPage = ({ repository, number }: TaskPageProps) => {
     />
   );
   const view = task.data;
-  if (view.number !== number)
+  if (view.number !== number && project !== undefined)
     return (
       <Navigate
-        to="/projects/$owner/$name/tasks/$number"
-        params={{ ...projectParams(repository), number: String(view.number) }}
-        search={(previous) => previous}
+        to="/projects/$project/tasks/$number"
+        params={{ project: projectId(project), number: String(view.number) }}
+        search={(previous) => ({ ...previous, repository })}
         replace
       />
     );
   return (
     <TaskLayout>
+      {project !== undefined && project.repositories.length > 1 && (
+        <RepositoryFilter
+          repositories={project.repositories}
+          value={repository}
+          onChange={(repository) =>
+            void navigate({
+              to: "/projects/$project/tasks",
+              params: { project: projectId(project) },
+              search: { repository },
+            })
+          }
+        />
+      )}
       {failure}
       {project !== undefined && (
         <TaskHeader task={view} project={project} disabled={overview._tag === "NeedsSetup"} />

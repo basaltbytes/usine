@@ -12,3 +12,6 @@ export const runLineTimeTitle = (state: RunView["state"], since: string): string
 export const cardConflictLabel = "Conflicts with base";
 
 export const cardAttentionLabel = "Needs attention";
+
+export const proposedLanesHint =
+  "Proposed lanes are read-only. Add lanes with labels in Configuration > Projects to enable moves.";

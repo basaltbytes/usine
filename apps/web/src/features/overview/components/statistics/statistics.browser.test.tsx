@@ -245,7 +245,7 @@ it("keeps setup mode usable when statistics fail and recovers on refetch", async
   const unavailable = { "7d": "{}", "30d": "{}", all: "{}" };
   await renderOverview(unavailable, runFixtures, state);
   await expect.element(page.getByText("GitHub App not set up", { exact: true })).toBeVisible();
-  await expect.element(page.getByText("No projects registered", { exact: true })).toBeVisible();
+  await expect.element(page.getByText("No projects", { exact: true })).toBeVisible();
   await expect
     .element(statistics.getByText("Could not load the statistics", { exact: true }))
     .toBeVisible();

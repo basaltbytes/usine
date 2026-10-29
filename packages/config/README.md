@@ -100,7 +100,7 @@ Boat workers accept a gateway with `provisioner.snapshot` and `provisioner.tailn
 
 Both SSH provisioners accept `timings` with `ssh_wait`, `creation_backoff_min`, `creation_backoff_max`, and `machine_check_interval`, in positive whole seconds. Parsing defaults them to 600, 30, 600, and 86400 and rejects reversed backoff bounds.
 
-`parseConfigurationForm(key, text)` and `validateConfigurationForm(key, value)` from `/folder-codec` support agent, worker, repository, and settings forms. They use the entity schemas and return `ConfigFileError` with field paths. Agent drafts use the JSON codec of `AgentFile`; other drafts use the export-format keys. `WorkerFromYaml` from `/factory` exposes the worker schema with snake_case keys and cross-field checks.
+`parseConfigurationForm(key, text)` and `validateConfigurationForm(key, value)` from `/folder-codec` support agent, worker, project, repository, and settings forms. Project drafts preserve repository order and lane sources; saving validates nonempty membership and lane constraints. Repository form drafts omit project lanes. They use the entity schemas and return `ConfigFileError` with field paths. Agent drafts use the JSON codec of `AgentFile`; other drafts use the export-format keys. `WorkerFromYaml` from `/factory` exposes the worker schema with snake_case keys and cross-field checks.
 
 Loop form drafts use `parseConfigurationForm` and `validateConfigurationForm` from `/folder-codec`. They preserve the loop's JSON representation while expressions are incomplete. Saving checks the schema, CEL expressions, prompt interpolations, and references. Expression diagnostics include the field path, expression, and a zero-based position when the CEL checker provides one.
 

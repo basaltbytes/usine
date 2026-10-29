@@ -12,11 +12,12 @@ import {
   useNavigate,
   useMatchRoute,
   useParams,
+  useSearch,
   useRouter,
 } from "@tanstack/react-router";
-import { RepositoryName } from "@usine/core/repository";
+import { RepositoryName, canonicalRepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
-import type { FactoryOverview } from "@usine/orchestrator/operator";
+import type { FactoryOverview, ProjectView } from "@usine/orchestrator/operator";
 import { Schema } from "effect";
 import { Suspense, lazy, useState } from "react";
 import { runDetailQuery } from "~/lib/runs/queries";
@@ -39,7 +40,13 @@ import { SidebarInset, SidebarProvider, SidebarTrigger } from "~/components/ui/s
 import { ConfigurationCrumbs } from "~/components/configuration/navigation";
 import { NotificationTray } from "~/components/needs-you/notification-tray";
 import { rejectionMessage } from "~/lib/api";
-import { needsYouByProject, overviewQuery, projectParams } from "~/lib/overview";
+import {
+  needsYouByProject,
+  overviewQuery,
+  projectId,
+  projectName,
+  projectForRepository,
+} from "~/lib/overview";
 
 // Loaded on first open; it includes the transcript, Markdown, and message components.
 const RunDrawer = lazy(() =>
@@ -68,10 +75,13 @@ const Unreachable = ({ error }: UnreachableProps) => {
 
 /** Returns the name of the Task with the item `number`: its originating item, else the item. */
 const taskCrumb = (overview: FactoryOverview, repository: RepositoryName, number: string) => {
-  const card = overview.projects
-    .find((project) => project.repository === repository)
+  const card = projectForRepository(overview.projects, repository)
     ?.board.lanes.flatMap(({ items }) => items)
-    .find(({ items }) => items.some((member) => String(member.number) === number));
+    .find(
+      (card) =>
+        canonicalRepositoryName(card.repository) === canonicalRepositoryName(repository) &&
+        card.items.some((member) => String(member.number) === number),
+    );
   return card === undefined
     ? `Item #${number}`
     : itemLabel({ ...cardIdentity(card).origin, state: null });
@@ -79,7 +89,7 @@ const taskCrumb = (overview: FactoryOverview, repository: RepositoryName, number
 
 type CrumbsProps = {
   readonly view: OperatorView;
-  readonly project: RepositoryName | undefined;
+  readonly project: ProjectView | undefined;
   readonly runId: RunId | undefined;
   /** The open Task page's originating item, such as `Issue #481`. */
   readonly task: string | undefined;
@@ -104,16 +114,16 @@ const Crumbs = ({ view, project, runId, task }: CrumbsProps) => {
       <BreadcrumbItem>
         {view === "board" ? (
           <BreadcrumbPage className="flex items-center gap-1.5">
-            <RepositoryMark repository={project} />
-            {project}
+            <RepositoryMark repository={project.repository} />
+            {projectName(project)}
           </BreadcrumbPage>
         ) : (
           <BreadcrumbLink
             className="flex items-center gap-1.5"
-            render={<Link to="/projects/$owner/$name" params={projectParams(project)} />}
+            render={<Link to="/projects/$project" params={{ project: projectId(project) }} />}
           >
-            <RepositoryMark repository={project} />
-            {project}
+            <RepositoryMark repository={project.repository} />
+            {projectName(project)}
           </BreadcrumbLink>
         )}
       </BreadcrumbItem>
@@ -125,7 +135,9 @@ const Crumbs = ({ view, project, runId, task }: CrumbsProps) => {
               <BreadcrumbPage>Tasks</BreadcrumbPage>
             ) : (
               <BreadcrumbLink
-                render={<Link to="/projects/$owner/$name/tasks" params={projectParams(project)} />}
+                render={
+                  <Link to="/projects/$project/tasks" params={{ project: projectId(project) }} />
+                }
               >
                 Tasks
               </BreadcrumbLink>
@@ -161,7 +173,14 @@ const Shell = () => {
   // Plain useNavigate resolves "." against the current route; Route.useNavigate would pin it to "/".
   const navigate = useNavigate();
   const params = useParams({ strict: false });
-  const project = params.repository;
+  const search = useSearch({ strict: false });
+  const repository =
+    params.name === undefined || params.project === undefined
+      ? search.repository
+      : RepositoryName.make(`${params.project}/${params.name}`);
+  const project =
+    data.projects.find((entry) => projectId(entry) === params.project) ??
+    (repository === undefined ? undefined : projectForRepository(data.projects, repository));
   const view = useOperatorView();
   const closeRun = () => void navigate({ to: ".", search: ({ run: _run, ...rest }) => rest });
   // Keeps the last opened Run so the Sheet stays mounted during its exit transition.
@@ -173,8 +192,8 @@ const Shell = () => {
       <AppSidebar
         projects={data.projects}
         view={view}
-        project={project}
-        needsYou={needsYouByProject(data.needsYou)}
+        project={project === undefined ? undefined : projectId(project)}
+        needsYou={needsYouByProject(data.needsYou, data.projects)}
         needsYouTotal={data.needsYou.length}
         runningTotal={
           new Set(
@@ -185,7 +204,7 @@ const Shell = () => {
         }
         live={live}
       />
-      <SidebarInset className="h-svh overflow-hidden">
+      <SidebarInset className="h-svh min-w-0 overflow-hidden">
         <PageCommandsProvider>
           <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3 md:px-4">
             <SidebarTrigger className="text-muted-foreground hover:text-foreground" />
@@ -194,11 +213,11 @@ const Shell = () => {
                 <Crumbs
                   view={view}
                   project={project}
-                  runId={params.run}
+                  runId={params.run === undefined ? undefined : RunId.make(params.run)}
                   task={
                     project === undefined || params.number === undefined
                       ? undefined
-                      : taskCrumb(data, project, params.number)
+                      : taskCrumb(data, repository ?? project.repository, params.number)
                   }
                 />
               </BreadcrumbList>

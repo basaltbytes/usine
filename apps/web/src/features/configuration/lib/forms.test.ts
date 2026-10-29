@@ -15,3 +15,14 @@ it("preserves loop selectors, priority, schedule, and prompt when switching betw
   expect(exported).toContain("priority: 10");
   expect(readForm(key, exported)).toEqual(draft);
 });
+
+it("preserves project repository order and lanes through form/text edits", () => {
+  const key = entityKey("project", "product");
+  const draft = readForm(
+    key,
+    "id: product\nname: Product\nrepositories: [acme/api, acme/web]\nlanes: [{ name: Ready, sources: [{ label: ready }] }]\n",
+  );
+  expect(Result.isSuccess(draft)).toBe(true);
+  if (Result.isFailure(draft)) return;
+  expect(readForm(key, formText(key, draft.success))).toEqual(draft);
+});

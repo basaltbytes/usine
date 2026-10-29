@@ -4,15 +4,15 @@ import { RouteError, RoutePending } from "~/components/route-status";
 import { ProjectNotFound } from "~/components/project-not-found";
 import { ProjectBoard } from "~/features/projects/board.page";
 import { deskQuery } from "~/lib/desk/queries";
-import { overviewQuery, projectForRepository } from "~/lib/overview";
+import { overviewQuery, projectId } from "~/lib/overview";
 import { useOpenRun } from "~/hooks/use-open-run";
 
 const BoardRoute = () => {
-  const { repository } = Route.useParams();
+  const { project: slug } = Route.useParams();
   const { data } = useSuspenseQuery(overviewQuery());
   const desk = useSuspenseQuery(deskQuery());
   const openRun = useOpenRun();
-  const project = projectForRepository(data.projects, repository);
+  const project = data.projects.find((entry) => projectId(entry) === slug);
   // A refetch after the loader ran can remove the project.
   if (project === undefined) return <ProjectNotFound />;
   return (
@@ -26,7 +26,7 @@ const BoardRoute = () => {
   );
 };
 
-export const Route = createFileRoute("/projects/$owner/$name/")({
+export const Route = createFileRoute("/projects/$project/")({
   loader: ({ context }) => context.queryClient.ensureQueryData(deskQuery()),
   pendingComponent: RoutePending,
   errorComponent: RouteError,

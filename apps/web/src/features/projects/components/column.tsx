@@ -1,3 +1,5 @@
+import type { ProjectId } from "@usine/core/project";
+
 import { usePageCommands } from "~/components/command-palette/context";
 import { laneFoldCommand } from "~/lib/projects/strings";
 import { useDroppable } from "@dnd-kit/core";
@@ -69,6 +71,8 @@ const LaneRail = ({ lane, open }: LaneRailProps) => (
 );
 
 type BoardColumnProps = {
+  readonly project?: ProjectId | undefined;
+  readonly showRepository?: boolean | undefined;
   readonly lane: BoardLaneView;
   readonly lanes: ReadonlyArray<BoardLaneView>;
   readonly flow: LaneFlow | undefined;
@@ -84,6 +88,8 @@ type BoardColumnProps = {
 
 /** `stallOf` returns a Task's stall reason, if any; `readOnly` hides the actions during setup. */
 export const BoardColumn = ({
+  project,
+  showRepository,
   lane,
   lanes,
   flow,
@@ -176,6 +182,8 @@ export const BoardColumn = ({
               <BoardCard
                 key={item.itemKey}
                 item={item}
+                project={project}
+                showRepository={showRepository}
                 lane={lane}
                 catalog={catalog}
                 draggable={!moveDisabled && targets.length > 0}

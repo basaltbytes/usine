@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import type { LoopName } from "@usine/core/loop";
 import type { ItemKey } from "@usine/core/item";
-import { splitRepositoryName } from "@usine/core/repository";
+import { useProjectLinks } from "~/hooks/use-project-links";
 import { LoopPreviewRequest } from "@usine/orchestrator/operator/http";
 import { Option, type Schema } from "effect";
 import { ErrorAlert } from "~/components/error-alert";
@@ -17,6 +17,7 @@ import { loopFormCopy } from "~/features/configuration/strings";
 
 type LoopPreviewProps = { readonly name: LoopName; readonly value: Schema.Json };
 export const LoopPreview = ({ name, value }: LoopPreviewProps) => {
+  const projectLinks = useProjectLinks();
   const [itemKey, setItemKey] = useState<ItemKey>();
   const input = { name, value };
   const preview = useQuery(
@@ -44,18 +45,11 @@ export const LoopPreview = ({ name, value }: LoopPreviewProps) => {
         <Table>
           <TableBody>
             {data.items.map((item) => {
-              const repository = splitRepositoryName(item.repository);
               return (
                 <TableRow key={item.itemKey}>
                   <FillCell>
                     <Link
-                      to="/projects/$owner/$name/tasks/$number"
-                      params={{
-                        repository: item.repository,
-                        owner: repository.owner,
-                        name: repository.name,
-                        number: String(item.number),
-                      }}
+                      {...projectLinks.task(item.repository, String(item.number))}
                       className="text-primary"
                     >
                       <ItemHeading

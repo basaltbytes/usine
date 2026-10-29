@@ -5,10 +5,11 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { commands, page, userEvent } from "vitest/browser";
+import { ProjectId } from "@usine/core/project";
 import { RunId } from "@usine/core/run";
 import { runDetailQuery } from "~/lib/runs/queries";
 import { RepositoryName } from "@usine/core/repository";
-import { overviewQuery, projectParams } from "~/lib/overview";
+import { overviewQuery } from "~/lib/overview";
 import { deskQuery } from "~/lib/desk/queries";
 import { configurationQuery } from "~/lib/configuration/queries";
 import { configurationFixture } from "~/lib/configuration/fixture";
@@ -45,6 +46,10 @@ beforeEach(async () => {
         (project) =>
           new ProjectView({
             ...project,
+            id: ProjectId.make("product"),
+            name: "Product",
+            repository: RepositoryName.make("board-test/primary"),
+            repositories: [RepositoryName.make("board-test/primary"), project.repository],
             runs: project.board.lanes.flatMap(({ items }) => items.flatMap(({ runs }) => runs)),
           }),
       ),
@@ -64,7 +69,7 @@ beforeEach(async () => {
   router = createRouter({
     routeTree,
     context: { queryClient: client },
-    history: createMemoryHistory({ initialEntries: ["/projects/board-test/repo/tasks"] }),
+    history: createMemoryHistory({ initialEntries: ["/projects/product/tasks"] }),
   });
   await router.load();
   flushSync(() =>
@@ -89,7 +94,7 @@ const search = async (text: string) => {
 
 it("navigates to project boards, task lists, and configuration pages with keyboard selection", async () => {
   await page.screenshot({ path: "../../../../../.impeccable/review/operator-count-refresh.png" });
-  await search("board-test/repo board");
+  await search("Product board");
   await expect
     .poll(
       () =>
@@ -101,20 +106,20 @@ it("navigates to project boards, task lists, and configuration pages with keyboa
     .toBe(0);
   await page.screenshot({ path: "../../../../../.impeccable/review/commands-desktop.png" });
   await expect
-    .element(dialog().getByRole("option", { name: "board-test/repo · Board", exact: true }))
+    .element(dialog().getByRole("option", { name: "Product · Board", exact: true }))
     .toHaveAttribute("aria-selected", "true");
   await userEvent.keyboard("{Enter}");
   await expect
     .poll(() => router.state.location.pathname, { timeout: 5_000 })
-    .toBe("/projects/board-test/repo");
-  await search("board-test/repo tasks");
+    .toBe("/projects/product");
+  await search("Product tasks");
   await expect
-    .element(dialog().getByRole("option", { name: "board-test/repo · Tasks", exact: true }))
+    .element(dialog().getByRole("option", { name: "Product · Tasks", exact: true }))
     .toHaveAttribute("aria-selected", "true");
   await userEvent.keyboard("{Enter}");
   await expect
     .poll(() => router.state.location.pathname, { timeout: 5_000 })
-    .toBe("/projects/board-test/repo/tasks");
+    .toBe("/projects/product/tasks");
   await search("Configuration Loops");
   await expect
     .element(dialog().getByRole("option", { name: "Configuration · Loops", exact: true }))
@@ -125,14 +130,15 @@ it("navigates to project boards, task lists, and configuration pages with keyboa
     .toBe("/configuration/loops");
 });
 
-it("finds a task by a linked pull request number and opens its originating item", async () => {
+it("finds a secondary repository task by a linked pull request and preserves its repository", async () => {
   await search("#31");
   await dialog()
     .getByRole("option", { name: /Redesign the Board/u })
     .click();
   await expect
     .poll(() => router.state.location.pathname, { timeout: 5_000 })
-    .toBe("/projects/board-test/repo/tasks/9");
+    .toBe("/projects/product/tasks/9");
+  expect(router.state.location.search).toMatchObject({ repository: "board-test/repo" });
 });
 
 it("finds related runs by item number and can select a run by its identifier", async () => {
@@ -144,7 +150,7 @@ it("finds related runs by item number and can select a run by its identifier", a
   await userEvent.keyboard("{Enter}");
   await expect
     .poll(() => router.state.location.pathname)
-    .toBe("/projects/board-test/repo/runs/run-redesign-plan");
+    .toBe("/projects/product/runs/run-redesign-plan");
 });
 
 it("shows no-results feedback and keeps the palette within a phone viewport", async () => {
@@ -171,11 +177,11 @@ it("shows no-results feedback and keeps the palette within a phone viewport", as
 });
 
 it("removes board commands after navigation and changes the available fold action", async () => {
-  await search("board-test/repo board");
-  await dialog().getByRole("option", { name: "board-test/repo · Board", exact: true }).click();
+  await search("Product board");
+  await dialog().getByRole("option", { name: "Product · Board", exact: true }).click();
   await expect
     .poll(() => router.state.location.pathname, { timeout: 5_000 })
-    .toBe("/projects/board-test/repo");
+    .toBe("/projects/product");
   await search("Open Done lane");
   await dialog().getByRole("option", { name: "Open Done lane", exact: true }).click();
   await search("Fold Done lane");
@@ -183,10 +189,10 @@ it("removes board commands after navigation and changes the available fold actio
     .element(dialog().getByRole("option", { name: "Fold Done lane", exact: true }))
     .toBeVisible();
   await dialog().getByRole("combobox").fill("board-test/repo tasks");
-  await dialog().getByRole("option", { name: "board-test/repo · Tasks", exact: true }).click();
+  await dialog().getByRole("option", { name: "Product · Tasks", exact: true }).click();
   await expect
     .poll(() => router.state.location.pathname, { timeout: 5_000 })
-    .toBe("/projects/board-test/repo/tasks");
+    .toBe("/projects/product/tasks");
   await search("Done lane");
   await expect
     .element(dialog().getByRole("option", { name: "Fold Done lane", exact: true }))
@@ -198,8 +204,8 @@ it("removes board commands after navigation and changes the available fold actio
 
 it("uses drawer actions while open and restores the underlying page commands after closing", async () => {
   await router.navigate({
-    to: "/projects/$owner/$name",
-    params: projectParams(RepositoryName.make("board-test/repo")),
+    to: "/projects/$project",
+    params: { project: ProjectId.make("product") },
   });
   const run = boardOverview()
     .projects.flatMap(({ board }) =>

@@ -1,10 +1,11 @@
+import { useProjectLinks } from "~/hooks/use-project-links";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import type { RunId } from "@usine/core/run";
 import { useState } from "react";
 import { runDetailQuery } from "~/lib/runs/queries";
 import { ErrorAlert } from "~/components/error-alert";
-import { overviewQuery, projectParams } from "~/lib/overview";
+import { overviewQuery } from "~/lib/overview";
 import { ContextualActions } from "~/components/runs/intervention/contextual-actions";
 import {
   EditAndRetry,
@@ -18,6 +19,7 @@ import { RunWorkspace } from "~/features/runs/components/workspace";
 type RunPageProps = { readonly runId: RunId };
 
 export const RunPage = ({ runId }: RunPageProps) => {
+  const projectLinks = useProjectLinks();
   const { data: overview } = useSuspenseQuery(overviewQuery());
   const queryClient = useQueryClient();
   const detail = useSuspenseQuery(runDetailQuery(queryClient, runId));
@@ -30,8 +32,7 @@ export const RunPage = ({ runId }: RunPageProps) => {
   const openRun = (opened: RunId) => {
     setEditing(null);
     void navigate({
-      to: "/projects/$owner/$name/runs/$run",
-      params: { ...projectParams(run.repository), run: opened },
+      ...projectLinks.run(run.repository, opened),
     });
   };
   return (

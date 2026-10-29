@@ -1,5 +1,6 @@
 import {
   ArrowsClockwiseIcon,
+  KanbanIcon,
   BookBookmarkIcon,
   GearSixIcon,
   ClockCounterClockwiseIcon,
@@ -23,6 +24,7 @@ export const CONFIGURATION_PAGES = [
   { to: "/configuration/loops", label: "Loops", icon: ArrowsClockwiseIcon },
   { to: "/configuration/agents", label: "Agents", icon: RobotIcon },
   { to: "/configuration/workers", label: "Workers", icon: HardDrivesIcon },
+  { to: "/configuration/projects", label: "Projects", icon: KanbanIcon },
   { to: "/configuration/repositories", label: "Repositories", icon: BookBookmarkIcon },
   { to: "/configuration/labels", label: "Labels", icon: TagIcon },
   { to: "/configuration/history", label: "History", icon: ClockCounterClockwiseIcon },
@@ -60,7 +62,8 @@ export const ConfigurationCrumbs = () => {
     params.owner !== undefined && params.name !== undefined
       ? `${params.owner}/${params.name}`
       : undefined;
-  const entry = params.loop ?? params.agent ?? params.worker ?? params.label ?? repository;
+  const entry =
+    params.loop ?? params.agent ?? params.worker ?? params.label ?? params.project ?? repository;
   return (
     <>
       <BreadcrumbItem>

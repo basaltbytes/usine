@@ -20,7 +20,7 @@ export const QuarantinedRow = ({ loop }: QuarantinedRowProps) => {
           {loop.name}
         </Link>
       </TableCell>
-      <TableCell colSpan={4} className="max-w-0">
+      <TableCell colSpan={5} className="max-w-0">
         <p className="truncate text-destructive" title={loop.error.message}>
           {loop.error.message}
         </p>

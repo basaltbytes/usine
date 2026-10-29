@@ -11,7 +11,7 @@ export const loopEditorResponses = async (
   let saved = false;
   let paused = true;
   let value: Schema.JsonObject = {
-    name: "draft-loop",
+    name: "usine/draft-loop",
     trigger: { on: "issue", if: "true" },
     selector: { _tag: "None" },
     priority: { _tag: "None" },
@@ -24,7 +24,7 @@ export const loopEditorResponses = async (
   };
   const text =
     '---\ntrigger: { on: issue, if: "true" }\nagent: developer\n---\nImplement {{ item.title }}.';
-  await page.route("**/api/configuration/entities/loop/draft-loop", async (route) => {
+  await page.route("**/api/configuration/entities/loop/usine%2Fdraft-loop", async (route) => {
     if (route.request().method() === "PUT") {
       const body = Schema.decodeUnknownSync(Schema.Struct({ value: Schema.JsonObject }))(
         route.request().postDataJSON(),
@@ -38,7 +38,7 @@ export const loopEditorResponses = async (
         contentType: "application/json",
         body: JSON.stringify(
           saved
-            ? { key: { kind: "loop", identifier: "draft-loop" }, value, text, number: 3 }
+            ? { key: { kind: "loop", identifier: "usine/draft-loop" }, value, text, number: 3 }
             : { error: "ConfigurationNotFound", message: "Entity not found" },
         ),
       });
@@ -51,7 +51,12 @@ export const loopEditorResponses = async (
         loops: saved
           ? [
               ...current.loops,
-              { ...current.loops[0], name: "draft-loop", file: "loops/draft-loop.md", paused },
+              {
+                ...current.loops[0],
+                name: "usine/draft-loop",
+                file: "loops/draft-loop.md",
+                paused,
+              },
             ]
           : current.loops,
       }),
@@ -109,7 +114,7 @@ export const loopEditorResponses = async (
     });
   });
   let resumeRequests = 0;
-  await page.route("**/api/loops/draft-loop/unpause", async (route) => {
+  await page.route("**/api/loops/usine%2Fdraft-loop/unpause", async (route) => {
     const rejection = resumeRejections[resumeRequests++];
     if (rejection !== undefined) {
       await route.fulfill({ ...rejection, contentType: "application/json" });

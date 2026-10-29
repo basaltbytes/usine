@@ -1,3 +1,4 @@
+import type { ProjectId } from "@usine/core/project";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { RunId } from "@usine/core/run";
@@ -27,6 +28,8 @@ const progressMessage = (
 };
 
 type BoardCardProps = {
+  readonly project?: ProjectId | undefined;
+  readonly showRepository?: boolean | undefined;
   readonly item: BoardTaskView;
   readonly lane: BoardLaneView;
   readonly catalog: LabelCatalog;
@@ -41,6 +44,8 @@ type BoardCardProps = {
 };
 
 export const BoardCard = ({
+  project,
+  showRepository,
   item,
   lane,
   catalog,
@@ -83,6 +88,8 @@ export const BoardCard = ({
         {...(draggable && listeners)}
       >
         <CardFace
+          project={project}
+          showRepository={showRepository}
           item={item}
           lane={lane}
           catalog={catalog}

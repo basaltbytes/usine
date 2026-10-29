@@ -25,7 +25,7 @@ declare module "vitest/browser" {
   }
 }
 
-const list = "/projects/board-test/repo/tasks";
+const list = "/projects/board-test-repo/tasks";
 
 // Task pages request their Task; this fake server returns not found, so only the URL is checked.
 globalThis.fetch = async () =>
@@ -314,13 +314,13 @@ it("shows Board and Tasks under the project in the sidebar, the open page's row 
   await expect.poll(crumbTexts).toEqual(["board-test/repo", "Tasks"]);
   await expect
     .element(crumbs().getByRole("link", { name: "board-test/repo" }))
-    .toHaveAttribute("href", "/projects/board-test/repo");
+    .toHaveAttribute("href", "/projects/board-test-repo");
   await expect.element(sidebarLink("Tasks")).toHaveAttribute("data-active");
   await expect.element(sidebarLink("Board")).not.toHaveAttribute("data-active");
   await expect.element(sidebarLink("board-test/repo")).not.toHaveAttribute("data-active");
 
   await sidebarLink("Board").click();
-  await expect.poll(() => router.state.location.pathname).toBe("/projects/board-test/repo");
+  await expect.poll(() => router.state.location.pathname).toBe("/projects/board-test-repo");
   await expect.element(sidebarLink("Board")).toHaveAttribute("data-active");
   await expect.element(sidebarLink("Tasks")).not.toHaveAttribute("data-active");
 });

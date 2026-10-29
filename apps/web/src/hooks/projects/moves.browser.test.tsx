@@ -357,8 +357,12 @@ it("moves and links cards with matching numbers using each card's repository", a
   await respond(data);
   await queryClient.refetchQueries({ queryKey: overviewQuery().queryKey });
   const cards = lane("Backlog").getByRole("link", { name: "Task 1", exact: true });
-  await expect.element(cards.nth(0)).toHaveAttribute("href", "/projects/board-test/repo/tasks/1");
-  await expect.element(cards.nth(1)).toHaveAttribute("href", "/projects/board-test/other/tasks/1");
+  await expect
+    .element(cards.nth(0))
+    .toHaveAttribute("href", "/projects/board-test-repo/tasks/1?repository=board-test%2Frepo");
+  await expect
+    .element(cards.nth(1))
+    .toHaveAttribute("href", "/projects/board-test-repo/tasks/1?repository=board-test%2Fother");
   await lane("Backlog")
     .getByRole("button", { name: "Actions for issue #1", exact: true })
     .nth(1)
@@ -374,8 +378,8 @@ it("moves and links cards with matching numbers using each card's repository", a
   ]);
   await expect
     .element(taskIn("Backlog"))
-    .toHaveAttribute("href", "/projects/board-test/repo/tasks/1");
+    .toHaveAttribute("href", "/projects/board-test-repo/tasks/1?repository=board-test%2Frepo");
   await expect
     .element(taskIn("Ready"))
-    .toHaveAttribute("href", "/projects/board-test/other/tasks/1");
+    .toHaveAttribute("href", "/projects/board-test-repo/tasks/1?repository=board-test%2Fother");
 });

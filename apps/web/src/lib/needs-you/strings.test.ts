@@ -1,3 +1,6 @@
+import { ProjectView } from "@usine/orchestrator/operator";
+import { ProjectId } from "@usine/core/project";
+import { boardOverview } from "~/lib/projects/fixture";
 import { AttemptId, AttemptNumber } from "@usine/core/attempt";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
@@ -155,13 +158,16 @@ it("counts a worker alert once for each affected project", () => {
       attemptNumber: AttemptNumber.make(1),
     })),
   });
-  assert.deepStrictEqual(
-    [...needsYouByProject([need])],
-    [
-      ["test/one", 1],
-      ["test/two", 1],
-    ],
+  const projects = boardOverview().projects.map(
+    (project) =>
+      new ProjectView({
+        ...project,
+        id: ProjectId.make("combined"),
+        repository: RepositoryName.make("test/one"),
+        repositories: [RepositoryName.make("test/one"), RepositoryName.make("test/two")],
+      }),
   );
+  assert.deepStrictEqual([...needsYouByProject([need], projects)], [["combined", 1]]);
   assert.include(needCopy(need).detail, "3 attempts are still running");
 });
 
@@ -175,5 +181,5 @@ it("identifies an unrecorded pool login without assigning its warning to a proje
     resetsAt: DateTime.makeUnsafe("2026-10-29T15:00:00Z"),
   });
   assert.include(needCopy(need).detail, "Login unavailable");
-  assert.deepStrictEqual([...needsYouByProject([need])], []);
+  assert.deepStrictEqual([...needsYouByProject([need], [])], []);
 });

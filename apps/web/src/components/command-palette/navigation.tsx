@@ -6,7 +6,8 @@ import { ItemHeading } from "~/components/item/heading";
 import { cardIdentity } from "~/components/item/identity";
 import { RepositoryMark } from "~/components/repository-mark";
 import { CommandGroup, CommandItem } from "~/components/ui/command";
-import { projectParams } from "~/lib/overview";
+import { projectId, projectName } from "~/lib/overview";
+import { useProjectLinks } from "~/hooks/use-project-links";
 import { paletteCopy } from "./strings";
 
 type NavigationCommandsProps = {
@@ -17,6 +18,7 @@ type NavigationCommandsProps = {
 
 export const NavigationCommands = ({ overview, select, searching }: NavigationCommandsProps) => {
   const navigate = useNavigate();
+  const projectLinks = useProjectLinks();
   const tasks = new Map(
     overview.projects
       .flatMap(({ board }) => board.lanes.flatMap(({ items }) => items))
@@ -48,36 +50,36 @@ export const NavigationCommands = ({ overview, select, searching }: NavigationCo
       <CommandGroup heading={paletteCopy.projects}>
         {overview.projects.flatMap((project) => [
           <CommandItem
-            key={`${project.repository}:board`}
-            value={`${project.repository} board`}
+            key={`${projectId(project)}:board`}
+            value={`${projectName(project)} ${project.repositories.join(" ")} board`}
             onSelect={() =>
               select(
                 () =>
                   void navigate({
-                    to: "/projects/$owner/$name",
-                    params: projectParams(project.repository),
+                    to: "/projects/$project",
+                    params: { project: projectId(project) },
                   }),
               )
             }
           >
             <RepositoryMark repository={project.repository} />
-            {project.repository} · Board
+            {projectName(project)} · Board
           </CommandItem>,
           <CommandItem
-            key={`${project.repository}:tasks`}
-            value={`${project.repository} tasks`}
+            key={`${projectId(project)}:tasks`}
+            value={`${projectName(project)} ${project.repositories.join(" ")} tasks`}
             onSelect={() =>
               select(
                 () =>
                   void navigate({
-                    to: "/projects/$owner/$name/tasks",
-                    params: projectParams(project.repository),
+                    to: "/projects/$project/tasks",
+                    params: { project: projectId(project) },
                   }),
               )
             }
           >
             <RepositoryMark repository={project.repository} />
-            {project.repository} · Tasks
+            {projectName(project)} · Tasks
           </CommandItem>,
         ])}
       </CommandGroup>
@@ -93,13 +95,7 @@ export const NavigationCommands = ({ overview, select, searching }: NavigationCo
                   onSelect={() =>
                     select(
                       () =>
-                        void navigate({
-                          to: "/projects/$owner/$name/tasks/$number",
-                          params: {
-                            ...projectParams(task.repository),
-                            number: String(origin.number),
-                          },
-                        }),
+                        void navigate(projectLinks.task(task.repository, String(origin.number))),
                     )
                   }
                 >
@@ -124,13 +120,7 @@ export const NavigationCommands = ({ overview, select, searching }: NavigationCo
                   key={run.id}
                   value={`run ${run.id} ${run.loop} ${run.repository} ${task?.items.map(({ number }) => `#${number}`).join(" ") ?? ""}`}
                   onSelect={() =>
-                    select(
-                      () =>
-                        void navigate({
-                          to: "/projects/$owner/$name/runs/$run",
-                          params: { ...projectParams(run.repository), run: run.id },
-                        }),
-                    )
+                    select(() => void navigate(projectLinks.run(run.repository, run.id)))
                   }
                 >
                   <span className="min-w-0 truncate">

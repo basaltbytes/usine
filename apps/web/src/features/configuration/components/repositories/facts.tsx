@@ -1,21 +1,40 @@
+import type { Project } from "@usine/config/project";
+import { projectCopy } from "~/features/configuration/strings";
 import { Link } from "@tanstack/react-router";
 import type { RepositoryConfigurationView } from "@usine/orchestrator/operator";
 import { Fact, Facts, Unset } from "~/features/configuration/components/section";
-import { projectParams } from "~/lib/overview";
 
-type RepositoryFactsProps = { readonly repository: RepositoryConfigurationView };
+type RepositoryFactsProps = {
+  readonly repository: RepositoryConfigurationView;
+  readonly project: Project | undefined;
+};
 
-export const RepositoryFacts = ({ repository }: RepositoryFactsProps) => (
+export const RepositoryFacts = ({ repository, project }: RepositoryFactsProps) => (
   <Facts>
-    <Fact label="Board">
-      <Link
-        to="/projects/$owner/$name"
-        params={projectParams(repository.name)}
-        className="text-primary hover:underline"
-      >
-        Open the board
-      </Link>
+    <Fact label={projectCopy.project}>
+      {project === undefined ? (
+        <Unset>{projectCopy.unassignedProject}</Unset>
+      ) : (
+        <Link
+          to="/configuration/projects/$project"
+          params={{ project: project.id }}
+          className="text-primary hover:underline"
+        >
+          {project.name}
+        </Link>
+      )}
     </Fact>
+    {project !== undefined && (
+      <Fact label="Board">
+        <Link
+          to="/projects/$project"
+          params={{ project: project.id }}
+          className="text-primary hover:underline"
+        >
+          {projectCopy.board}
+        </Link>
+      </Fact>
+    )}
     <Fact label="Tags">
       {repository.tags.length === 0 ? <Unset>None</Unset> : repository.tags.join(", ")}
     </Fact>

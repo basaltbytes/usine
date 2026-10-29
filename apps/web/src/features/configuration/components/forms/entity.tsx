@@ -1,6 +1,6 @@
 import { LoopFields } from "~/features/configuration/components/forms/loop/fields";
 import type { ConfigurationEntityKey } from "@usine/config/configuration";
-import { RepositoryName } from "@usine/core/repository";
+import { ProjectFields } from "~/features/configuration/components/forms/project/fields";
 import type { FormFieldsProps } from "~/features/configuration/lib/forms";
 import { AgentFields } from "./agent";
 import { WorkerFields } from "./worker";
@@ -18,8 +18,10 @@ export const EntityFields = ({ entity, ...fields }: EntityFieldsProps) => {
       return <WorkerFields {...fields} />;
     case "settings":
       return <SettingsFields {...fields} />;
+    case "project":
+      return <ProjectFields {...fields} />;
     case "repository":
-      return <RepositoryFields {...fields} repository={RepositoryName.make(entity.identifier)} />;
+      return <RepositoryFields {...fields} />;
     default:
       return null;
   }

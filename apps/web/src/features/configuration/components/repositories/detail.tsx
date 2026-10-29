@@ -4,8 +4,6 @@ import type { ConfigurationView } from "@usine/orchestrator/operator";
 import { LabelBadge } from "~/components/label-badge";
 import { RepositoryMark } from "~/components/repository-mark";
 import { LabelStanding } from "~/features/configuration/components/repositories/label-standing";
-import { LanesTable } from "~/features/configuration/components/repositories/lanes";
-import { laneLabels } from "~/features/configuration/lib/repositories";
 import { RepositoryFacts } from "~/features/configuration/components/repositories/facts";
 import {
   ConfigurationPage,
@@ -44,30 +42,14 @@ export const RepositoryDetail = ({ owner, name, configuration }: RepositoryDetai
       title={repository.name}
       leading={<RepositoryMark repository={repository.name} size="title" />}
     >
-      <DetailColumns facts={<RepositoryFacts repository={repository} />}>
-        <DetailSection
-          title="Lanes"
-          aside={
-            repository.lanes.length === 0 ? undefined : "In board order, as listed in repos[].lanes"
-          }
-        >
-          {[...repository.declaredLabels, ...laneLabels(repository)].some(
-            ({ onGitHub }) => onGitHub === null,
-          ) && (
-            <p className="text-muted-foreground">
-              Labels not polled yet. Whether each label is on GitHub shows after the first poll.
-            </p>
-          )}
-          {repository.lanes.length === 0 ? (
-            <p className="max-w-[72ch] text-muted-foreground">
-              <code>usine.yaml</code> has no lanes for this repository. The board shows lanes
-              proposed from the repository labels, and cards cannot be moved. To move cards, add
-              lanes under <code>repos[].lanes</code>.
-            </p>
-          ) : (
-            <LanesTable repository={repository} />
-          )}
-        </DetailSection>
+      <DetailColumns
+        facts={
+          <RepositoryFacts
+            repository={repository}
+            project={configuration.projects.find((project) => project.includes(repository.name))}
+          />
+        }
+      >
         <DetailSection title="Labels usine creates" aside="From labels in usine.yaml">
           {repository.declaredLabels.length === 0 ? (
             <p className="text-muted-foreground">

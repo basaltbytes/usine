@@ -1,3 +1,4 @@
+import { proposedLanesHint } from "~/features/projects/strings";
 import {
   DndContext,
   type DragEndEvent,
@@ -18,6 +19,7 @@ import type {
   ProjectView,
   StalledItemView,
 } from "@usine/orchestrator/operator";
+import { projectId, projectName } from "~/lib/overview";
 import { useState } from "react";
 import { ErrorAlert } from "~/components/error-alert";
 import { PageHeading } from "~/components/page";
@@ -66,7 +68,12 @@ export const ProjectBoard = ({ project, loops, stalled, disabled, openRun }: Pro
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: laneKeyboardCoordinates(lanes) }),
   );
-  const flows = laneFlows(lanes, loops);
+  const flows = laneFlows(
+    lanes,
+    project.id === undefined
+      ? loops
+      : loops.filter((loop) => loop.name.startsWith(`${project.id}/`)),
+  );
   const itemCount = lanes.reduce((total, lane) => total + lane.items.length, 0);
   const stallOf = (task: BoardTaskView): StalledItemView | null => taskStall(stalled, task);
   const catalog: LabelCatalog = new Map(project.labels.map((label) => [label.name, label]));
@@ -89,9 +96,9 @@ export const ProjectBoard = ({ project, loops, stalled, disabled, openRun }: Pro
     if (lane !== undefined) moveItem(active.item, lane);
   };
   return (
-    <div className="flex min-h-96 flex-1 flex-col gap-4 pt-5">
+    <div className="flex min-w-0 min-h-96 flex-1 flex-col gap-4 pt-5">
       <PageHeading
-        title={project.repository}
+        title={projectName(project)}
         leading={<RepositoryMark repository={project.repository} size="title" />}
         counts={`${lanes.length} lane${lanes.length === 1 ? "" : "s"}, ${itemCount} item${itemCount === 1 ? "" : "s"}`}
         className="px-4 md:px-5"
@@ -99,11 +106,7 @@ export const ProjectBoard = ({ project, loops, stalled, disabled, openRun }: Pro
         {project.status === "needs-you" && <NeedsYouBadge />}
       </PageHeading>
       {project.board.lanes.some(({ origin }) => origin === "proposed") && (
-        <p className="mx-4 max-w-3xl text-muted-foreground md:mx-5">
-          Proposed lanes are read-only. To enable moves, add lanes with labels for this project
-          under <code>repos[].lanes</code> in <code>usine.yaml</code>, then reload the configuration
-          from Configuration &gt; Loops.
-        </p>
+        <p className="mx-4 max-w-3xl text-muted-foreground md:mx-5">{proposedLanesHint}</p>
       )}
       {project.board.failures.length > 0 && (
         <ErrorAlert
@@ -123,7 +126,7 @@ export const ProjectBoard = ({ project, loops, stalled, disabled, openRun }: Pro
       >
         <div
           className="min-h-0 flex-1 overflow-auto overscroll-contain [container-type:size]"
-          aria-label={`${project.repository} project board`}
+          aria-label={`${projectName(project)} project board`}
         >
           <div className="flex w-max min-w-full flex-col gap-6 px-4 pb-4 md:px-5">
             {/* Fills the visible height so each lane scrolls its own cards. */}
@@ -131,6 +134,8 @@ export const ProjectBoard = ({ project, loops, stalled, disabled, openRun }: Pro
               {lanes.map((lane) => (
                 <BoardColumn
                   key={lane.id}
+                  project={projectId(project)}
+                  showRepository={project.repositories.length > 1}
                   lane={lane}
                   lanes={lanes}
                   flow={flows.get(lane.id)}
@@ -157,6 +162,8 @@ export const ProjectBoard = ({ project, loops, stalled, disabled, openRun }: Pro
           {active !== null && (
             <DraggedCard
               item={active.item}
+              project={projectId(project)}
+              showRepository={project.repositories.length > 1}
               lane={active.lane}
               catalog={catalog}
               stall={stallOf(active.item)}

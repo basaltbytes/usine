@@ -1,3 +1,4 @@
+import { ProjectDetail } from "~/features/configuration/components/projects/detail";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
@@ -15,7 +16,6 @@ import { LoopDetail } from "~/features/configuration/components/loops/detail";
 import { interpolations } from "~/features/configuration/components/prompt";
 import { usePauseLoop } from "~/features/configuration/queries";
 import { RepositoriesList } from "~/features/configuration/components/repositories/list";
-import { RepositoryDetail } from "~/features/configuration/components/repositories/detail";
 import { SettingsPage } from "~/features/configuration/settings.page";
 import { WorkersList } from "~/features/configuration/components/workers/list";
 import { WorkerDetail } from "~/features/configuration/components/workers/detail";
@@ -354,25 +354,13 @@ describe("Repositories page", () => {
     assert.include(page, "Not polled yet");
   });
 
-  it("shows lanes in order with each label as GitHub has it", async () => {
-    const markup = await render(() => (
-      <RepositoryDetail owner="basaltbytes" name="usine" configuration={configurationFixture()} />
-    ));
-    const page = text(markup);
-    assert.isBelow(page.indexOf("Ready"), page.indexOf("In review"));
-    assert.include(page, "GitHub rejected the request with status 403");
-    assert.include(page, "pr-open");
-    assert.include(page, "On GitHub");
-    assert.include(markup, 'href="/projects/basaltbytes/usine"');
-  });
-
-  it("explains a repository without lanes", async () => {
+  it("shows project repositories and lanes in configured order", async () => {
     const page = text(
-      await render(() => (
-        <RepositoryDetail owner="basaltbytes" name="site" configuration={configurationFixture()} />
-      )),
+      await render(() => <ProjectDetail id="usine" configuration={configurationFixture()} />),
     );
-    assert.include(page, "has no lanes for this repository");
+    assert.include(page, "Usine");
+    assert.include(page, "basaltbytes/usine");
+    assert.include(page, "Ready ready Review review");
   });
 
   it("says how to register a repository when there is none", async () => {

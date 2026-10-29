@@ -356,17 +356,17 @@ it("opens the Task page from anywhere on the card body, with or without a Run", 
   await userEvent.click(page.elementLocator(cardOf(/^Retry salvage/u)), {
     position: { x: 24, y: 70 },
   });
-  await expect.poll(() => router.state.location.pathname).toBe("/projects/board-test/repo/tasks/7");
+  await expect.poll(() => router.state.location.pathname).toBe("/projects/board-test-repo/tasks/7");
   expect(opened).toEqual([]);
   await userEvent.click(page.elementLocator(cardOf(/^Document the cycle budget/u)), {
     position: { x: 24, y: 40 },
   });
   await expect
     .poll(() => router.state.location.pathname)
-    .toBe("/projects/board-test/repo/tasks/12");
+    .toBe("/projects/board-test-repo/tasks/12");
   // A Task with an issue and its pull request opens at the issue's number.
   await userEvent.click(page.elementLocator(cardOf(/^Redesign the Board columns/u)));
-  await expect.poll(() => router.state.location.pathname).toBe("/projects/board-test/repo/tasks/9");
+  await expect.poll(() => router.state.location.pathname).toBe("/projects/board-test-repo/tasks/9");
 });
 
 it("lists only the actions that apply to a card without a Run", async () => {

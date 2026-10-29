@@ -329,6 +329,17 @@ export const configurationJson = {
     },
   ],
   removedWorkers: [{ name: "spare", running: 1 }],
+  projects: [
+    {
+      id: "usine",
+      name: "Usine",
+      repositories: ["basaltbytes/usine"],
+      lanes: [
+        { name: "Ready", sources: [{ label: "ready" }] },
+        { name: "Review", sources: [{ label: "review" }] },
+      ],
+    },
+  ],
   repositories: [
     {
       name: "basaltbytes/usine",

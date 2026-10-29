@@ -1,3 +1,5 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { overviewQuery } from "~/lib/overview";
 import { LaneName, type SettledItemState } from "@usine/config/board";
 import { AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
@@ -834,12 +836,22 @@ describe("Run approval", () => {
   const fromUi = approved(new ApprovalSource({ channel: "ui", approver: philippe }));
   // Approved before usine recorded the approver.
   const unrecorded = approved(null);
-  const eventDocument = (view: RunView) =>
-    renderToStaticMarkup(
-      <WithRouter>
-        <EventDocument detail={detail(view)} />
-      </WithRouter>,
+  const eventDocument = (view: RunView) => {
+    const client = new QueryClient();
+    client.setQueryData(
+      overviewQuery().queryKey,
+      overviewWith([member(33, "issue", "issue-open")]),
     );
+    const html = renderToStaticMarkup(
+      <QueryClientProvider client={client}>
+        <WithRouter>
+          <EventDocument detail={detail(view)} />
+        </WithRouter>
+      </QueryClientProvider>,
+    );
+    client.clear();
+    return html;
+  };
   const outline = (view: RunView) =>
     renderToStaticMarkup(
       <Outline
@@ -897,7 +909,7 @@ describe("Run approval", () => {
     // The Event document links to the earlier Run's page; the outline entry is a button instead.
     assert.include(
       eventDocument(ranAgain(philippe)),
-      `href="/projects/basaltbytes/usine/runs/${from}"`,
+      `href="/projects/basaltbytes-usine/runs/${from}"`,
     );
     assert.notInclude(outline(ranAgain(philippe)), `/runs/${from}`);
   });

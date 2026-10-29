@@ -91,3 +91,45 @@ it.effect("rejects duplicate lane sources and settings typos with field paths", 
     );
   }),
 );
+
+it.effect(
+  "accepts an empty project draft but requires repositories when saving and rejects unknown keys",
+  () =>
+    Effect.gen(function* () {
+      const key = new ConfigurationEntityKey({
+        kind: "project",
+        identifier: ConfigurationEntityId.make("product"),
+      });
+      const draft = yield* parseConfigurationForm(
+        key,
+        "id: product\nname: Product\nrepositories: []\nlanes: []\n",
+      );
+      const empty = yield* validateConfigurationForm(key, draft).pipe(Effect.flip);
+      expect(empty.details).toEqual(
+        expect.arrayContaining([expect.objectContaining({ path: ["repositories", 0] })]),
+      );
+      const value = { ...draft, repositories: ["acme/api", "acme/web"] };
+      expect(yield* validateConfigurationForm(key, value)).toEqual(value);
+      const unknown = yield* parseConfigurationForm(
+        key,
+        "id: product\nname: Product\nrepositories: []\ntypo: true\n",
+      ).pipe(Effect.flip);
+      expect(unknown.details).toEqual(
+        expect.arrayContaining([expect.objectContaining({ path: ["typo"] })]),
+      );
+    }),
+);
+
+it.effect("keeps repository tag edits from writing project lanes", () =>
+  Effect.gen(function* () {
+    const key = new ConfigurationEntityKey({
+      kind: "repository",
+      identifier: ConfigurationEntityId.make("acme/api"),
+    });
+    const draft = yield* parseConfigurationForm(
+      key,
+      "name: acme/api\ntags: [backend]\nlanes: [{ name: Ready, sources: [{ label: ready }] }]\n",
+    );
+    expect(draft).toEqual({ name: "acme/api", tags: ["backend"] });
+  }),
+);

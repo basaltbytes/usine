@@ -1,9 +1,11 @@
+import { ProjectId } from "@usine/core/project";
+import { taskOverview } from "~/lib/tasks/fixture";
 import { RegistryTag } from "@usine/config/factory";
 import { ContainerLimits } from "@usine/core/worker";
 import { Schema } from "effect";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { ConfigurationView, ReadyOverview } from "@usine/orchestrator/operator";
+import { ConfigurationView, ProjectView, ReadyOverview } from "@usine/orchestrator/operator";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi, type MockInstance } from "vitest";
@@ -575,8 +577,8 @@ it("uses supported harnesses, accepts a custom model, and previews the edited Ma
   });
 });
 
-it("reorders lanes by keyboard and pointer, then saves renamed lanes and live label choices", async () => {
-  await mount("/configuration/repositories/basaltbytes/usine");
+it("reorders project lanes by keyboard and pointer, then saves renamed lanes and live label choices", async () => {
+  await mount("/configuration/projects/usine");
   await page.viewport(1440, 1100);
   await button("Edit").click();
   const names = page.getByRole("textbox", { name: "Lane name", exact: true });
@@ -761,8 +763,18 @@ it.each([
 });
 
 it("checks CEL while typing, completes payload fields, previews, saves paused, and confirms resume", async () => {
+  client.setQueryData(
+    overviewQuery().queryKey,
+    new ReadyOverview({
+      ...taskOverview(),
+      projects: taskOverview().projects.map(
+        (project) => new ProjectView({ ...project, id: ProjectId.make("usine") }),
+      ),
+    }),
+  );
   await mount("/configuration/loops");
   await button("New").click();
+  await page.getByRole("combobox", { name: "Project", exact: true }).selectOptions("usine");
   await page.getByRole("textbox", { name: "Name", exact: true }).fill("draft-loop");
   await button("Edit").click();
   const condition = page.getByRole("textbox", { name: "Condition (CEL)", exact: true });
@@ -781,7 +793,7 @@ it("checks CEL while typing, completes payload fields, previews, saves paused, a
   await expect.element(page.getByRole("heading", { name: "2 matching items" })).toBeVisible();
   await expect
     .element(page.getByRole("link", { name: "Issue #1, open Fix issue 1" }))
-    .toHaveAttribute("href", "/projects/basaltbytes/usine/tasks/1");
+    .toHaveAttribute("href", "/projects/usine/tasks/1?repository=basaltbytes%2Fusine");
   await page.getByRole("button", { name: "Render prompt", exact: true }).nth(1).click();
   await expect.element(page.getByText("Implement Fix issue 2.", { exact: true })).toBeVisible();
   page.getByRole("heading", { name: "New loop", exact: true }).element().scrollIntoView();
@@ -798,14 +810,14 @@ it("checks CEL while typing, completes payload fields, previews, saves paused, a
     method: "PUT",
     payload: {
       value: {
-        name: "draft-loop",
+        name: "usine/draft-loop",
         approval: "required",
         selector: { _tag: "Some", value: { repos: ["basaltbytes/usine"] } },
       },
     },
   });
   await button("Resume").click();
-  const confirmation = page.getByRole("dialog", { name: "Resume loop: draft-loop" });
+  const confirmation = page.getByRole("dialog", { name: "Resume loop: usine/draft-loop" });
   await expect.element(confirmation.getByText("2 matching items", { exact: true })).toBeVisible();
   await confirmation.getByRole("button", { name: "Resume", exact: true }).click();
   await expect.element(button("Pause")).toBeVisible();
@@ -826,14 +838,15 @@ it("keeps resume confirmation, cancellation, and request errors on the loops lis
     ],
   );
   await button("New").click();
+  await page.getByRole("combobox", { name: "Project", exact: true }).selectOptions("usine");
   await page.getByRole("textbox", { name: "Name", exact: true }).fill("draft-loop");
   await button("Edit").click();
   await button("Save").click();
   await expect.element(button("Resume")).toBeVisible();
   await router.navigate({ to: "/configuration/loops" });
 
-  const confirmation = page.getByRole("dialog", { name: "Resume loop: draft-loop" });
-  await button("Resume draft-loop").click();
+  const confirmation = page.getByRole("dialog", { name: "Resume loop: usine/draft-loop" });
+  await button("Resume usine/draft-loop").click();
   await confirmation.getByText("2 matching items", { exact: true }).click();
   await expect.element(confirmation).toBeVisible();
   expect(router.state.location.pathname).toBe("/configuration/loops");
@@ -841,18 +854,18 @@ it("keeps resume confirmation, cancellation, and request errors on the loops lis
   await expect.element(confirmation).not.toBeInTheDocument();
   expect(router.state.location.pathname).toBe("/configuration/loops");
 
-  await button("Resume draft-loop").click();
+  await button("Resume usine/draft-loop").click();
   await confirmation.getByRole("button", { name: "Resume", exact: true }).click();
   await expect.element(confirmation.getByRole("alert")).toHaveTextContent("Resume is unavailable");
   expect(router.state.location.pathname).toBe("/configuration/loops");
   await confirmation.getByRole("button", { name: "Resume", exact: true }).click();
   await expect.element(confirmation).not.toBeInTheDocument();
-  await expect.element(button("Pause draft-loop")).toBeVisible();
+  await expect.element(button("Pause usine/draft-loop")).toBeVisible();
   expect(router.state.location.pathname).toBe("/configuration/loops");
 });
 
 it("matches and removes repository selections regardless of casing", async () => {
-  await mount("/configuration/loops/start-dev");
+  await mount("/configuration/loops/usine%2Fstart-dev");
   client.setQueryData(
     configurationQuery().queryKey,
     new ConfigurationView({
@@ -950,6 +963,59 @@ it.each(["form", "text"])("clears a save refusal after changing the %s draft", a
   await expect.element(page.getByRole("alert")).not.toBeInTheDocument();
   await button("Preview").click();
   await expect.element(page.getByRole("heading", { name: "2 matching items" })).toBeVisible();
+});
+
+it("creates a project with two ordered repositories and lanes without phone page overflow", async () => {
+  await mount("/configuration/projects");
+  client.setQueryData(
+    configurationQuery().queryKey,
+    new ConfigurationView({ ...configurationFixture(), projects: [] }),
+  );
+  await button("New").click();
+  const identifier = page.getByRole("textbox", { name: "Project ID", exact: true });
+  await identifier.fill("My Product");
+  await button("Edit").click();
+  await expect
+    .element(page.getByRole("alert"))
+    .toHaveTextContent("Use lowercase letters, numbers, and hyphens for the project ID");
+  await expect.element(identifier).toBeEnabled();
+  await identifier.fill("product");
+  await button("Edit").click();
+  await page.getByRole("textbox", { name: "Display name", exact: true }).fill("Product");
+  const repositories = page.getByRole("combobox", { name: "Add a repository", exact: true });
+  await repositories.selectOptions("basaltbytes/usine");
+  await repositories.selectOptions("basaltbytes/site");
+  await button("Move repository up: basaltbytes/site").click();
+  await button("Add lane").click();
+  await page.getByRole("textbox", { name: "Lane name", exact: true }).fill("Ready");
+  await page.getByRole("checkbox", { name: "ready", exact: true }).click();
+  await expect.poll(() => document.documentElement.scrollWidth).toBeLessThanOrEqual(390);
+  for (const theme of ["dark", "light"]) {
+    document.documentElement.classList.toggle("dark", theme === "dark");
+    host.classList.toggle("dark", theme === "dark");
+    for (const [width, device] of [
+      [1440, "desktop"],
+      [390, "phone"],
+    ] as const) {
+      await page.viewport(width, 900);
+      await expect.poll(() => document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+      await commands.configurationEditorScreenshot(`673-project-form-${device}-${theme}`);
+    }
+  }
+  await button("Save").click();
+  await expect.poll(async () => (await commands.configurationEditorRequests()).length).toBe(1);
+  expect((await commands.configurationEditorRequests())[0]).toMatchObject({
+    method: "PUT",
+    url: "/api/configuration/entities/project/product",
+    payload: {
+      value: {
+        id: "product",
+        name: "Product",
+        repositories: ["basaltbytes/site", "basaltbytes/usine"],
+        lanes: [{ name: "Ready", sources: [{ label: "ready" }] }],
+      },
+    },
+  });
 });
 
 it("opens the palette on both shortcuts and offers only the current editor's available actions", async () => {

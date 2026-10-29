@@ -1,3 +1,6 @@
+import { canonicalRepositoryName, type RepositoryName } from "@usine/core/repository";
+import { RepositoryFilter } from "~/components/repository-filter";
+import { projectId, projectName } from "~/lib/overview";
 import type { ProjectView, StalledItemView } from "@usine/orchestrator/operator";
 import { EmptyLine } from "~/components/overview/section";
 import { Page, PageHeading } from "~/components/page";
@@ -20,6 +23,8 @@ const SIDE_SHARE = [
 ].join(" ");
 
 type TaskListProps = {
+  readonly repository?: RepositoryName | undefined;
+  readonly onRepositoryChange?: (repository: RepositoryName | undefined) => void;
   readonly project: ProjectView;
   readonly stalled: ReadonlyArray<StalledItemView>;
 };
@@ -28,19 +33,30 @@ type TaskListProps = {
  * Renders the Project's Tasks that usine ran at least once, in `taskRows` order. `stalled` is the
  * desk's list of stalled Items, used for the status of stalled Tasks.
  */
-export const TaskList = ({ project, stalled }: TaskListProps) => {
+export const TaskList = ({ project, stalled, repository, onRepositoryChange }: TaskListProps) => {
   const now = useNow(30_000);
-  const rows = taskRows(project.board.lanes, stalled);
+  const rows = taskRows(project.board.lanes, stalled).filter(
+    (row) =>
+      repository === undefined ||
+      canonicalRepositoryName(row.task.repository) === canonicalRepositoryName(repository),
+  );
   return (
     <Page width="full">
       <PageHeading title="Tasks" counts={taskCounts(rows)} />
+      {project.repositories.length > 1 && onRepositoryChange !== undefined && (
+        <RepositoryFilter
+          repositories={project.repositories}
+          value={repository}
+          onChange={onRepositoryChange}
+        />
+      )}
       {rows.length === 0 ? (
         <EmptyLine>No runs yet</EmptyLine>
       ) : (
         <>
           <TotalsLine totals={taskTotals(rows, now)} />
           <div className="@container -mx-2">
-            <Table aria-label={`${project.repository} tasks`} className={SIDE_SHARE}>
+            <Table aria-label={`${projectName(project)} tasks`} className={SIDE_SHARE}>
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
                   <TableHead>Task</TableHead>
@@ -57,6 +73,8 @@ export const TaskList = ({ project, stalled }: TaskListProps) => {
                   <TaskListRow
                     key={row.task.itemKey}
                     row={row}
+                    project={projectId(project)}
+                    showRepository={project.repositories.length > 1}
                     repository={row.task.repository}
                     now={now}
                   />

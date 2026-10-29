@@ -172,9 +172,9 @@ export const medianResolutionWait = "Median failure to resolution";
 export const overviewRefreshFailed = "Could not refresh the overview";
 
 export const noProjectsCopy = {
-  title: "No projects registered",
-  description: "Register a repository in Configuration.",
-  action: "Open repositories",
+  title: "No projects",
+  description: "Create a project from registered repositories in Configuration.",
+  action: "Open projects",
 };
 
 export const firstTimeRightDetails =

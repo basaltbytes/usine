@@ -1,3 +1,4 @@
+import { useProjectLinks } from "~/hooks/use-project-links";
 import { ArrowsOutSimpleIcon } from "@phosphor-icons/react";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
@@ -20,7 +21,7 @@ import { useNow } from "~/hooks/use-now";
 import { clockLabel, timestampLabel } from "~/lib/strings";
 import { machineCreationLine } from "~/lib/workers/strings";
 import { queuedMessageLabel } from "~/lib/runs/strings";
-import { overviewQuery, projectParams } from "~/lib/overview";
+import { overviewQuery } from "~/lib/overview";
 import { RunHeader } from "~/components/runs/header";
 import { ContextualActions } from "~/components/runs/intervention/contextual-actions";
 import {
@@ -137,6 +138,7 @@ type RunDrawerProps = {
 };
 
 export const RunDrawer = ({ runId, open, close }: RunDrawerProps) => {
+  const projectLinks = useProjectLinks();
   const { data: overview } = useSuspenseQuery(overviewQuery());
   const queryClient = useQueryClient();
   const detail = useQuery({ ...runDetailQuery(queryClient, runId), enabled: open });
@@ -193,8 +195,7 @@ export const RunDrawer = ({ runId, open, close }: RunDrawerProps) => {
           {detail.data !== undefined && <RunSummary detail={detail.data} />}
           {run !== undefined && (
             <Link
-              to="/projects/$owner/$name/runs/$run"
-              params={{ ...projectParams(run.repository), run: run.id }}
+              {...projectLinks.run(run.repository, run.id)}
               search={{}}
               viewTransition
               className={buttonVariants({ variant: "outline" })}
@@ -208,8 +209,7 @@ export const RunDrawer = ({ runId, open, close }: RunDrawerProps) => {
             <TooltipTrigger
               render={
                 <Link
-                  to="/projects/$owner/$name/runs/$run"
-                  params={{ ...projectParams(run.repository), run: run.id }}
+                  {...projectLinks.run(run.repository, run.id)}
                   search={{}}
                   viewTransition
                   aria-label="Open run page"
