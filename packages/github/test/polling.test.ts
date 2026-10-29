@@ -911,28 +911,37 @@ describe("GitHubPolling", () => {
 
   for (const startCursor of [null, "cursor"]) {
     it.effect(
-      `rejects incomplete label history with ${startCursor === null ? "a missing cursor" : "more than ten pages"}`,
+      startCursor === null
+        ? "rejects label history with a missing pagination cursor"
+        : "preserves the snapshot and partial label provenance at the ten-page limit",
       () => {
         let requests = 0;
         const createdAt = "2026-08-30T10:00:00Z";
-        const timelineItems = { pageInfo: { hasPreviousPage: true, startCursor }, nodes: [] };
+        const event = { actor: { login: "PhilDL", type: "User" }, createdAt };
+        const labels = {
+          totalCount: 3,
+          nodes: ["ready", "old", "unknown"].map((name) => ({ name })),
+        };
+        const payload = issuePayload({
+          createdAt,
+          updatedAt: createdAt,
+          commentCreatedAt: createdAt,
+        });
         const client = HttpClient.make((request) => {
           requests += 1;
+          const timelineItems = {
+            pageInfo: { hasPreviousPage: true, startCursor },
+            nodes:
+              requests === 1 || requests === 10
+                ? [{ ...event, label: { name: requests === 1 ? "ready" : "old" } }]
+                : [],
+          };
           return Effect.succeed(
             response(request, {
               data: {
                 repository:
                   requests === 1
-                    ? {
-                        issue: {
-                          ...issuePayload({
-                            createdAt,
-                            updatedAt: createdAt,
-                            commentCreatedAt: createdAt,
-                          }),
-                          timelineItems,
-                        },
-                      }
+                    ? { issue: { ...payload, labels, timelineItems } }
                     : { issueOrPullRequest: { timelineItems } },
               },
             }),
@@ -940,14 +949,20 @@ describe("GitHubPolling", () => {
         });
         return Effect.gen(function* () {
           const polling = yield* GitHubPolling;
-          const failure = yield* Effect.flip(
-            polling.snapshot(
-              repository,
-              new ChangedIssue({ number: 28, updatedAt: DateTime.makeUnsafe(createdAt) }),
-            ),
+          const snapshot = polling.snapshot(
+            repository,
+            new ChangedIssue({ number: 28, updatedAt: DateTime.makeUnsafe(createdAt) }),
           );
-          assert.strictEqual(failure._tag, "InvalidGitHubResponseError");
-          assert.strictEqual(requests, startCursor === null ? 1 : 10);
+          if (startCursor === null) {
+            const failure = yield* Effect.flip(snapshot);
+            assert.strictEqual(failure._tag, "InvalidGitHubResponseError");
+            assert.strictEqual(requests, 1);
+          } else {
+            const result = yield* snapshot;
+            assert.deepStrictEqual(result.payload.labels, labels);
+            assert.deepStrictEqual(result.payload.labelEvents, { ready: event, old: event });
+            assert.strictEqual(requests, 10);
+          }
         }).pipe(Effect.provide(pollingLayer(client)));
       },
     );

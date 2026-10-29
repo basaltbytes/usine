@@ -76,9 +76,10 @@ Snapshots expose `labelEvents[labelName]` for each current label with available 
 `actor.login`, `actor.type` (such as `Bot` or `User`), and `createdAt`. App actors use
 the App slug without `[bot]`; deleted actors are null. Missing history has no map
 entry. The initial GraphQL query reads the last 100 label additions. Polling reads
-older pages until it finds the current labels, with a ten-page limit; an incomplete
-walk at that limit fails the snapshot. Older stored payloads decode with an empty
-map. Actor changes affect the content hash; timestamp-only changes do not.
+older pages until it finds the current labels, with a ten-page limit. At that limit,
+the snapshot keeps the events found and omits labels whose history is unavailable.
+Older stored payloads decode with an empty map. Actor changes affect the content
+hash; timestamp-only changes do not.
 
 Change detection separates `nextPollAt`, the earliest next conditional poll, from `backoffUntil`, a delay from `Retry-After` or rate-limit pressure. Self-write hints can fetch a snapshot within the poll interval while respecting backoff.
 

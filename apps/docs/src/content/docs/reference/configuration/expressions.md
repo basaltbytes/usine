@@ -112,9 +112,9 @@ before reading its fields.
 
 Polling fetches the last 100 `LabeledEvent` entries in the snapshot query. It reads
 older pages only while current labels lack an event, up to ten pages in total. If
-that limit prevents completing the map, polling fails the snapshot instead of
-using partial history. The map's actor fields affect event deduplication; timestamps
-do not. See [ADR 0007](https://github.com/basaltbytes/usine/blob/main/docs/adr/0007-polling-triggers-content-hashed-events.md) for
+that limit prevents completing the map, the snapshot keeps the events found and
+omits labels whose history is unavailable. The map's actor fields affect event
+deduplication; timestamps do not. See [ADR 0007](https://github.com/basaltbytes/usine/blob/main/docs/adr/0007-polling-triggers-content-hashed-events.md) for
 the content-hash rules.
 
 The actor identifies the GitHub account that applied the label. An operator action

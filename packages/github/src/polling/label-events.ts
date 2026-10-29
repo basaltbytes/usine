@@ -63,12 +63,13 @@ export const readLabelEvents = Effect.fn("GitHubPolling.labelEvents")(function* 
         pages,
         missingLabels: [...missing],
       });
-      return yield* invalidResponse(
-        "fetch-item-timeline",
-        page.pageInfo.startCursor === null
-          ? "GitHub returned hasPreviousPage for label events without a startCursor"
-          : `current label provenance requires more than ${MAX_LABEL_EVENT_PAGES} timeline pages`,
-      );
+      if (page.pageInfo.startCursor === null) {
+        return yield* invalidResponse(
+          "fetch-item-timeline",
+          "GitHub returned hasPreviousPage for label events without a startCursor",
+        );
+      }
+      break;
     }
     yield* Effect.logDebug("Reading older events for current labels", {
       repository,
@@ -100,7 +101,7 @@ export const readLabelEvents = Effect.fn("GitHubPolling.labelEvents")(function* 
     page = item.value.timelineItems;
     pages += 1;
   }
-  if (missing.size > 0) {
+  if (missing.size > 0 && !page.pageInfo.hasPreviousPage) {
     yield* Effect.logWarning("GitHub has no label event for some current labels", {
       repository,
       item: number,
