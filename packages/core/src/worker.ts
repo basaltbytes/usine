@@ -1,5 +1,6 @@
 import { Effect, Schema } from "effect";
 
+/** A worker's kebab-case name in the instance configuration. */
 export const WorkerName = Schema.String.check(
   Schema.isPattern(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u, {
     message: "Expected a kebab-case worker name",
@@ -8,7 +9,9 @@ export const WorkerName = Schema.String.check(
 
 export type WorkerName = typeof WorkerName.Type;
 
+/** The supported worker adapters: local, exe.dev, SSH, and Cloudflare. */
 export const WORKER_KINDS = ["local", "exe.dev", "ssh", "cloudflare"] as const;
+/** The adapter used to run attempts on a worker. */
 export const WorkerKind = Schema.Literals(WORKER_KINDS);
 export type WorkerKind = typeof WorkerKind.Type;
 
@@ -34,7 +37,9 @@ export type BotUserId = typeof BotUserId.Type;
  * commits on every Worker kind (ADR 0011).
  */
 export class BotAccount extends Schema.Class<BotAccount>("BotAccount")({
+  /** The GitHub bot login used to author attempt commits. */
   login: BotLogin,
+  /** The bot account's user ID, used in its noreply email address. */
   id: BotUserId,
 }) {
   /** The ID-based noreply address, which GitHub links to the account even after a rename. */
@@ -58,6 +63,7 @@ export const SshDestination = Schema.String.check(
 ).pipe(Schema.brand("SshDestination"));
 export type SshDestination = typeof SshDestination.Type;
 
+/** The SSH server's TCP port, from 1 through 65535. */
 export const SshPort = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65_535 })).pipe(
   Schema.brand("SshPort"),
 );
@@ -85,7 +91,7 @@ export type WorkerRoot = typeof WorkerRoot.Type;
 /**
  * The Gateway's private DNS domain, which serves `git.<domain>` for GitHub, `llm.<domain>` for
  * LLM providers, and `<domain>` for the forward proxy
- * ([ADR 0027](../../../docs/adr/0027-gateway-credential-proxy.md)).
+ * (ADR 0027).
  */
 export const GatewayDomain = Schema.String.check(
   Schema.isPattern(
@@ -114,7 +120,7 @@ export type GatewayLlmProvider = typeof GatewayLlmProvider.Type;
  * that a Cloudflare Worker's outbound handler holds, always `api-key`. `api-key` is billed at
  * API rates; `subscription` uses a plan: a Claude plan from `claude setup-token`, or a ChatGPT
  * plan from `codex login`
- * ([ADR 0013](../../../docs/adr/0013-cost-accounting-native-meters-guardrails.md)).
+ * (ADR 0013).
  */
 export const GatewayCredentialKind = Schema.Literals(["api-key", "subscription"]);
 export type GatewayCredentialKind = typeof GatewayCredentialKind.Type;
@@ -163,8 +169,11 @@ export type ContainerPids = typeof ContainerPids.Type;
 
 /** The CPU, memory, and process limits of one Attempt container. */
 export class ContainerLimits extends Schema.Class<ContainerLimits>("ContainerLimits")({
+  /** The CPU capacity available to the container, including fractional CPUs. */
   cpus: ContainerCpus,
+  /** The container's memory ceiling in MiB, at least 256. */
   memoryMib: ContainerMemoryMib,
+  /** The maximum processes and threads in the container, at least 64. */
   pids: ContainerPids,
 }) {}
 
@@ -172,6 +181,7 @@ export class ContainerLimits extends Schema.Class<ContainerLimits>("ContainerLim
 export const CONTAINER_LIMITS = ["cpus", "memoryMib", "pids"] as const satisfies ReadonlyArray<
   keyof typeof ContainerLimits.fields
 >;
+/** A container resource limit name used to index `ContainerLimits`. */
 export type ContainerLimit = (typeof CONTAINER_LIMITS)[number];
 
 /**
@@ -332,9 +342,13 @@ const secondsWithDefault = (seconds: number) =>
 /** Provisioner timings, in seconds. Creation failures double their delay up to the maximum. */
 export class ProvisionerTimings extends Schema.Class<ProvisionerTimings>("ProvisionerTimings")(
   Schema.Struct({
+    /** Seconds to wait for SSH readiness after machine creation; defaults to 600. */
     sshWait: secondsWithDefault(600),
+    /** The initial delay after a creation failure, in seconds; defaults to 30. */
     creationBackoffMin: secondsWithDefault(30),
+    /** The maximum creation retry delay, in seconds; at least `creationBackoffMin`, defaulting to 600. */
     creationBackoffMax: secondsWithDefault(600),
+    /** Seconds between machine capability checks; defaults to 86400. */
     machineCheckInterval: secondsWithDefault(86_400),
   }).check(
     Schema.makeFilter(

@@ -583,7 +583,7 @@ export const makeExpressionEngine = () => {
 
 /**
  * Provides {@link ExpressionEngine} with `@marcbachmann/cel-js` 8.0.0
- * ([ADR 0004](../../../docs/adr/0004-loop-files-markdown-cel-frontmatter.md)).
+ * (ADR 0004).
  *
  * Expressions can use CEL optional values, such as `item.?milestone.?title.orValue("none")`. A
  * nullable field that holds `null` counts as present, so `item.?milestone` holds `null` and

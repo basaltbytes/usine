@@ -38,8 +38,11 @@ export type HarvestCommand<E> = (
 export class HarvestError extends Schema.TaggedError<HarvestError>("@usine/core/HarvestError")(
   "HarvestError",
   {
+    /** The source of the invalid output or failed window read. */
     stage: Schema.Literals(["git", "github", "windows"]),
+    /** The diagnostic describing which harvest input could not be read. */
     message: Schema.NonEmptyString,
+    /** The original decoding or storage failure preserved for diagnosis. */
     cause: Schema.Defect(),
   },
 ) {}

@@ -9,6 +9,7 @@ export const OperatorLogin = Schema.String.check(
 
 export type OperatorLogin = typeof OperatorLogin.Type;
 
+/** The authenticated member for the current request, or `None` outside an authenticated request. */
 export const ActingMember = Context.Reference<Option.Option<OperatorLogin>>(
   "@usine/core/ActingMember",
   { defaultValue: Option.none },

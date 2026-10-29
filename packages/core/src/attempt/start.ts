@@ -7,19 +7,25 @@ export class StartedByEvent extends Schema.TaggedClass<StartedByEvent>("AttemptS
   {},
 ) {}
 
-/** An operator retry of the failed Run; `operator` is `None` if `usine.yaml` sets no operator login. */
+/** An operator retry of the failed Run; `operator` is `None` if no login was recorded. */
 export class StartedByRetry extends Schema.TaggedClass<StartedByRetry>("AttemptStart/Retry")(
   "OperatorRetry",
-  { operator: Schema.OptionFromNullOr(OperatorLogin) },
+  {
+    /** The operator who requested the retry, or `None` if no login was recorded. */
+    operator: Schema.OptionFromNullOr(OperatorLogin),
+  },
 ) {}
 
 /**
  * An operator retry of the failed Run with a changed task or Agent (ADR 0018). `operator` is
- * `None` if `usine.yaml` sets no operator login.
+ * `None` if no login was recorded.
  */
 export class StartedByEditAndRetry extends Schema.TaggedClass<StartedByEditAndRetry>(
   "AttemptStart/EditAndRetry",
-)("EditAndRetry", { operator: Schema.OptionFromNullOr(OperatorLogin) }) {}
+)("EditAndRetry", {
+  /** The operator who changed the task or agent and requested the retry, or `None` if unavailable. */
+  operator: Schema.OptionFromNullOr(OperatorLogin),
+}) {}
 
 /** An automatic retry after the previous Attempt's `InfraFailure` (ADR 0002). */
 export class StartedByInfraRetry extends Schema.TaggedClass<StartedByInfraRetry>(
@@ -36,6 +42,7 @@ export class StartedAfterRestart extends Schema.TaggedClass<StartedAfterRestart>
   "AttemptStart/AfterRestart",
 )("AfterRestart", {}) {}
 
+/** An operator retry, with or without a changed task or agent. */
 export const OperatorRetryStart = Schema.Union([StartedByRetry, StartedByEditAndRetry]);
 export type OperatorRetryStart = typeof OperatorRetryStart.Type;
 

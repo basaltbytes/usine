@@ -6,8 +6,11 @@ import { RepositoryName } from "../repository.ts";
 export class GitHubPushFailure extends Schema.TaggedError<GitHubPushFailure>(
   "AttemptFailure/GitHubPushFailure",
 )("GitHubPushFailure", {
+  /** The managed repo whose installation token could not push. */
   repository: RepositoryName,
+  /** The Git ref that the remote refused to update. */
   ref: Schema.NonEmptyString,
+  /** The push diagnostic explaining the HTTP 403 refusal. */
   message: Schema.String,
 }) {}
 
@@ -18,7 +21,9 @@ export class GitHubPushFailure extends Schema.TaggedError<GitHubPushFailure>(
 export class InfraFailure extends Schema.TaggedError<InfraFailure>("AttemptFailure/InfraFailure")(
   "InfraFailure",
   {
+    /** The infrastructure failure diagnostic shown to the operator. */
     message: Schema.String,
+    /** The original infrastructure error, encoded for durable storage. */
     cause: Schema.Defect(),
   },
 ) {}
@@ -26,17 +31,26 @@ export class InfraFailure extends Schema.TaggedError<InfraFailure>("AttemptFailu
 /** A programmer defect caught at the durable execution boundary; not retried automatically. */
 export class DefectFailure extends Schema.TaggedError<DefectFailure>(
   "AttemptFailure/DefectFailure",
-)("DefectFailure", { message: Schema.String, cause: Schema.Defect() }) {}
+)("DefectFailure", {
+  /** The diagnostic describing the programming defect. */
+  message: Schema.String,
+  /** The original defect preserved at the durable execution boundary. */
+  cause: Schema.Defect(),
+}) {}
 
 /** A temporary refusal because the model provider has no capacity. */
 export class ProviderCapacityFailure extends Schema.TaggedError<ProviderCapacityFailure>(
   "AttemptFailure/ProviderCapacityFailure",
-)("ProviderCapacityFailure", { message: Schema.NonEmptyString }) {}
+)("ProviderCapacityFailure", {
+  /** The provider's temporary capacity refusal used in the retry notice. */
+  message: Schema.NonEmptyString,
+}) {}
 
 /** A task failure reported by the agent; not retried automatically. */
 export class AgentFailure extends Schema.TaggedError<AgentFailure>("AttemptFailure/AgentFailure")(
   "AgentFailure",
   {
+    /** The agent's explanation of why it could not complete the task. */
     message: Schema.String,
   },
 ) {}
@@ -49,6 +63,7 @@ export class AgentFailure extends Schema.TaggedError<AgentFailure>("AttemptFailu
 export class BlockedFailure extends Schema.TaggedError<BlockedFailure>(
   "AttemptFailure/BlockedFailure",
 )("BlockedFailure", {
+  /** The exact blocker and the work that remains incomplete. */
   message: Schema.NonEmptyString,
 }) {}
 
@@ -59,6 +74,7 @@ export class BlockedFailure extends Schema.TaggedError<BlockedFailure>(
 export class QuestionFailure extends Schema.TaggedError<QuestionFailure>(
   "AttemptFailure/QuestionFailure",
 )("QuestionFailure", {
+  /** The decision the operator must make before work can continue. */
   question: Schema.NonEmptyString,
 }) {}
 
@@ -70,6 +86,7 @@ export type RunawayCeiling = typeof RunawayCeiling.Type;
 export class RunawayFailure extends Schema.TaggedError<RunawayFailure>(
   "AttemptFailure/RunawayFailure",
 )("RunawayFailure", {
+  /** The wall-clock or token limit that stopped the attempt. */
   ceiling: RunawayCeiling,
 }) {}
 
@@ -77,10 +94,13 @@ export class RunawayFailure extends Schema.TaggedError<RunawayFailure>(
 export class ChildSessionBudgetFailure extends Schema.TaggedError<ChildSessionBudgetFailure>(
   "AttemptFailure/ChildSessionBudgetFailure",
 )("ChildSessionBudgetFailure", {
+  /** The maximum child sessions allowed for the attempt, including sequential starts. */
   maxChildren: ChildSessionBudget,
+  /** The count including the child request that exceeded the budget. */
   attemptedChildren: ChildSessionCount,
 }) {}
 
+/** The recorded reasons an attempt can fail, including failures that require an operator decision. */
 export const AttemptFailure = Schema.Union([
   GitHubPushFailure,
   InfraFailure,

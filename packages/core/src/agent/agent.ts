@@ -22,7 +22,9 @@ export const AgentPersona = Schema.String.check(
 ).pipe(Schema.brand("AgentPersona"));
 export type AgentPersona = typeof AgentPersona.Type;
 
+/** A named definition of standing instructions and the brain settings for its parent and child sessions. */
 export class Agent extends Schema.Class<Agent>("Agent")({
+  /** The agent's identity in the roster. */
   name: AgentName,
   /** The harness, model, and effort of the Agent's child sessions. */
   brain: BrainSpec,
@@ -31,6 +33,7 @@ export class Agent extends Schema.Class<Agent>("Agent")({
   // Optional key rather than null: older stored agent rows have no such key.
   /** The parent session's reasoning effort, or `None` for the instance default, then `brain.effort`. */
   parentEffort: Schema.OptionFromOptionalKey(Effort),
+  /** The standing Markdown instructions included with its tasks. */
   persona: AgentPersona,
 }) {}
 

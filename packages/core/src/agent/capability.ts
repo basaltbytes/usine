@@ -9,13 +9,17 @@ export type HarnessCapability = typeof HarnessCapability.Type;
 export class HarnessUnavailableError extends Schema.TaggedError<HarnessUnavailableError>(
   "HarnessUnavailableError",
 )("HarnessUnavailableError", {
+  /** The coding-agent CLI that failed preflight. */
   harness: Harness,
+  /** The missing or unsupported prerequisite that the operator must provision. */
   capability: HarnessCapability,
+  /** The diagnostic describing how the prerequisite failed verification. */
   message: Schema.NonEmptyString,
 }) {}
 
 /** The result of a verify-only probe that found the harness available on the Worker. */
 export class HarnessReady extends Schema.TaggedClass<HarnessReady>("HarnessReady")("HarnessReady", {
+  /** The coding-agent CLI whose prerequisites passed verification. */
   harness: Harness,
 }) {}
 
