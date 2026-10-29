@@ -1,7 +1,10 @@
 import { RepositoryName } from "@usine/core/repository";
-import type { SshDestination } from "@usine/core/worker";
+import { BotLogin, type SshDestination } from "@usine/core/worker";
 import { Schema, type Effect } from "effect";
 import type { SshCommand } from "@usine/agents/child-host";
+
+/** The bot used by exe.dev's native GitHub integration (ADR 0011). */
+export const EXE_DEV_BOT_LOGIN = BotLogin.make("exe-dev-github-integration[bot]");
 
 export const IntegrationName = Schema.String.check(
   Schema.isPattern(/^[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*$/u, {

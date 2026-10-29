@@ -20,6 +20,19 @@ import {
 } from "@usine/core/worker";
 import { StepResult } from "@usine/core/step/result";
 import { Context, Effect, Option, Predicate, Redacted, type Result, Schema, Scope } from "effect";
+import { EXE_DEV_BOT_LOGIN } from "./exe-dev/model.ts";
+
+/** Returns the GitHub writer for a worker kind; provisioned workers use the SSH kind. */
+export const githubBotLogin = (kind: WorkerKind, appLogin: BotLogin): BotLogin => {
+  switch (kind) {
+    case "local":
+    case "ssh":
+    case "cloudflare":
+      return appLogin;
+    case "exe.dev":
+      return EXE_DEV_BOT_LOGIN;
+  }
+};
 
 export const ExecutorOperation = Schema.Literals([
   "preflight",

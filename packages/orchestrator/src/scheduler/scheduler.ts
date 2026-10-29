@@ -10,12 +10,13 @@ import type { ItemKey } from "@usine/core/item";
 import type { LoopName } from "@usine/core/loop";
 import { canonicalRepositoryName } from "@usine/core/repository";
 import type { RunId } from "@usine/core/run";
-import { BotLogin, ProvisionerTimings, WorkerName } from "@usine/core/worker";
+import { ProvisionerTimings, WorkerName } from "@usine/core/worker";
 import {
   CheckoutRequest,
   Executor,
   ExecutorError,
   fullPreflight,
+  githubBotLogin,
   type MachineHold,
   type MachineUnavailableError,
   type WorkerCapabilityError,
@@ -223,9 +224,6 @@ const validateWorkers = (
 };
 
 const brainLabel = ({ harness, model, effort }: BrainSpec) => `${harness}/${model}/${effort}`;
-
-/** The login that exe.dev Workers write to GitHub as, through exe.dev's integration (ADR 0011). */
-const EXE_DEV_BOT_LOGIN = BotLogin.make("exe-dev-github-integration[bot]");
 
 /** Returns the Attempt's failure for an unreadable bot account. A refusal isn't retried. */
 const botAccountFailure = (error: GitHubAppError) => {
@@ -884,7 +882,7 @@ export const stepExecutorLayer = (
         function* (attemptId: AttemptId) {
           yield* Effect.annotateCurrentSpan({ attemptId });
           const commitAuthor = yield* app.botAccount();
-          const botLogin = executor.kind === "exe.dev" ? EXE_DEV_BOT_LOGIN : commitAuthor.login;
+          const botLogin = githubBotLogin(executor.kind, commitAuthor.login);
           return { commitAuthor, botLogin };
         },
         (effect, attemptId) =>
