@@ -204,7 +204,7 @@ export const fullTask = () =>
           approval: new ApprovalView({
             approvedAt: "2026-10-04T08:58:00.000Z",
             source: new ApprovalSource({
-              channel: "github-ask",
+              channel: "ui",
               approver: Option.some(OperatorLogin.make("PhilDL")),
             }),
           }),

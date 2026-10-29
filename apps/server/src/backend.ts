@@ -1,4 +1,5 @@
 import { resolveLoopName } from "@usine/config/project";
+import { requestActor } from "@usine/core/operator";
 import {
   AttentionAcknowledgement,
   type AttentionAcknowledgements,
@@ -193,7 +194,7 @@ export const needsSetupBackendLayer = (
       yield* acknowledgements.dismiss(
         new AttentionAcknowledgement({
           ...key,
-          dismissedBy: instance.config.operator,
+          dismissedBy: yield* requestActor(instance.config.operator),
           dismissedAt: yield* DateTime.now,
         }),
       );

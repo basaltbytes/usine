@@ -1,5 +1,6 @@
 import { type ProjectId } from "@usine/core/project";
 import { LoopName } from "@usine/core/loop";
+import { authenticatedRoutes, type AuthServices } from "./auth/http.ts";
 import { HARNESSES, EFFORTS } from "@usine/core/agent/brain";
 import { GitHubApp } from "@usine/github/github-app";
 import { GitHubPolling } from "@usine/github/polling";
@@ -418,13 +419,18 @@ export const serverLayer = (
   webRoot: string,
   port: Port,
   origin: Option.Option<UiOrigin>,
+  auth: AuthServices,
   services:
     | Layer.Layer<ServerUpgrades | ConfigurationEditor | GitHubApp | GitHubPolling>
     | Layer.Layer<never> = Layer.empty,
 ) => {
-  const routes = Layer.mergeAll(apiRoutes(origin), staticRoutes(webRoot)).pipe(
-    HttpRouter.provideRequest(Layer.merge(backend, services)),
-  );
+  const authenticated = authenticatedRoutes(auth);
+  const routes = Layer.mergeAll(
+    apiRoutes(origin),
+    staticRoutes(webRoot),
+    authenticated.routes,
+    authenticated.guard,
+  ).pipe(HttpRouter.provideRequest(Layer.merge(backend, services)));
   return HttpRouter.serve(routes).pipe(
     Layer.provide(NodeHttpServer.layer(createServer, { host: SERVER_HOST, port })),
   );

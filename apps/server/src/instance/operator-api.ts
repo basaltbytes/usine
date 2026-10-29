@@ -1,5 +1,7 @@
+import { InstanceDirectory } from "@usine/core/instance";
+import { readAdminToken } from "../auth/local.ts";
 import { RunId } from "@usine/core/run";
-import { Effect, Schema } from "effect";
+import { Effect, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { type Port, SERVER_HOST } from "../cli.ts";
 
@@ -33,11 +35,20 @@ export class OperatorApiError extends Schema.TaggedError<OperatorApiError>(
 
 const apiUrl = (port: Port, path: string) => `http://${SERVER_HOST}:${port}${path}`;
 
-const getJson = <A, I>(port: Port, path: string, schema: Schema.Codec<A, I>) => {
+const getJson = <A, I>(
+  port: Port,
+  path: string,
+  schema: Schema.Codec<A, I>,
+  directory: InstanceDirectory,
+) => {
   const url = apiUrl(port, path);
-  return Effect.flatMap(HttpClient.HttpClient, (client) =>
-    HttpClient.filterStatusOk(client).get(url),
-  ).pipe(
+  return Effect.gen(function* () {
+    const token = yield* readAdminToken(directory);
+    const client = yield* HttpClient.HttpClient;
+    return yield* HttpClient.filterStatusOk(client).get(url, {
+      headers: { authorization: `Bearer ${Redacted.value(token)}` },
+    });
+  }).pipe(
     Effect.flatMap(HttpClientResponse.schemaBodyJson(schema)),
     Effect.timeout(OPERATOR_API_TIMEOUT),
     Effect.mapError((error) => new OperatorApiError({ url, reason: error.message })),
@@ -45,8 +56,11 @@ const getJson = <A, I>(port: Port, path: string, schema: Schema.Codec<A, I>) => 
 };
 
 /** Lists the Runs of the instance that listens on `port`, with one `GET /api/overview`. */
-export const listRuns = Effect.fn("Instance.listRuns")(function* (port: Port) {
-  const overview = yield* getJson(port, "/api/overview", Overview);
+export const listRuns = Effect.fn("Instance.listRuns")(function* (
+  port: Port,
+  directory: InstanceDirectory = InstanceDirectory.make(process.cwd()),
+) {
+  const overview = yield* getJson(port, "/api/overview", Overview, directory);
   return overview.projects.flatMap(({ runs }) => runs);
 });
 
@@ -56,8 +70,9 @@ export const listRuns = Effect.fn("Instance.listRuns")(function* (port: Port) {
  */
 export const gatewayTokenVariables = Effect.fn("Instance.gatewayTokenVariables")(function* (
   port: Port,
+  directory: InstanceDirectory = InstanceDirectory.make(process.cwd()),
 ) {
-  const configuration = yield* getJson(port, "/api/configuration", Configuration);
+  const configuration = yield* getJson(port, "/api/configuration", Configuration, directory);
   return [...new Set(configuration.workers.flatMap(({ gateway }) => gateway?.adminTokenEnv ?? []))];
 });
 

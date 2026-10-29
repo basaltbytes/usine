@@ -1,4 +1,4 @@
-import type { InstanceDirectory } from "@usine/core/instance";
+import { InstanceDirectory } from "@usine/core/instance";
 import { RunId } from "@usine/core/run";
 import { Config, Console, Duration, Effect, Option, Schema } from "effect";
 import type { LifecycleOptions, Port } from "./cli.ts";
@@ -77,8 +77,9 @@ export class MissingEnvironmentError extends Schema.TaggedError<MissingEnvironme
 export const refuseMissingEnvironment = Effect.fn("Cli.refuseMissingEnvironment")(function* (
   command: LifecycleCommandName,
   port: Port,
+  directory: InstanceDirectory,
 ) {
-  const names = yield* gatewayTokenVariables(port).pipe(
+  const names = yield* gatewayTokenVariables(port, directory).pipe(
     Effect.tapError((error) =>
       Effect.logWarning("Could not read the gateway token variables of the instance", {
         url: error.url,
@@ -103,8 +104,8 @@ export const refuseMissingEnvironment = Effect.fn("Cli.refuseMissingEnvironment"
 });
 
 /** Returns the Runs with a live Attempt, or none if the operator API doesn't answer. */
-const liveRuns = (port: Port) =>
-  listRuns(port).pipe(
+const liveRuns = (port: Port, directory: InstanceDirectory) =>
+  listRuns(port, directory).pipe(
     Effect.map((runs) => runs.filter(hasLiveAttempt).map(({ id }) => id)),
     Effect.tapError((error) =>
       Effect.logWarning("Could not list the running runs; the drain still waits for them", {
@@ -123,9 +124,10 @@ export const refuseLiveAttempts = Effect.fn("Cli.refuseLiveAttempts")(function* 
   command: LifecycleCommandName,
   port: Port,
   force: boolean,
+  directory: InstanceDirectory = InstanceDirectory.make(process.cwd()),
 ) {
   if (force) return;
-  const runs = yield* liveRuns(port);
+  const runs = yield* liveRuns(port, directory);
   if (runs.length === 0) return;
   yield* Effect.logInfo("Refusing to stop the instance while runs have live attempts", {
     command,
@@ -176,6 +178,7 @@ export const stopProcess = Effect.fn("Cli.stopProcess")(function* (
   record: Option.Option<InstanceRecord>,
   unit: Option.Option<SystemdUnit>,
   options: LifecycleOptions,
+  directory: InstanceDirectory = InstanceDirectory.make(process.cwd()),
 ) {
   yield* Effect.annotateCurrentSpan({
     command,
@@ -184,7 +187,7 @@ export const stopProcess = Effect.fn("Cli.stopProcess")(function* (
     unit: Option.getOrUndefined(unit),
   });
   const stopping = Option.exists(record, ({ stoppingSince }) => stoppingSince !== undefined);
-  const runs = Option.isSome(record) ? yield* liveRuns(record.value.launch.port) : [];
+  const runs = Option.isSome(record) ? yield* liveRuns(record.value.launch.port, directory) : [];
   if (stopping) {
     yield* Console.log(`usine (pid ${pid}) is already stopping. Waiting for it to exit.`);
   } else if (Option.isSome(unit)) {
@@ -241,10 +244,17 @@ export const stop = Effect.fn("Cli.stop")(function* (
   if (state._tag === "Running") {
     const { record } = state;
     const unit = yield* supervisingUnit(record.pid, record.systemdUnit);
-    return yield* stopProcess("stop", record.pid, Option.some(record), unit, options);
+    return yield* stopProcess("stop", record.pid, Option.some(record), unit, options, directory);
   }
   if (Option.isNone(state.pid)) {
     return yield* new UnrecordedInstanceError({ command: "stop", directory, pid: state.pid });
   }
-  return yield* stopProcess("stop", state.pid.value, Option.none(), Option.none(), options);
+  return yield* stopProcess(
+    "stop",
+    state.pid.value,
+    Option.none(),
+    Option.none(),
+    options,
+    directory,
+  );
 });

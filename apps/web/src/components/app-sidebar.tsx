@@ -1,3 +1,4 @@
+import { SessionMenu } from "~/components/session-menu";
 import { KanbanIcon, ListChecksIcon, SquaresFourIcon } from "@phosphor-icons/react";
 import { Link, useMatchRoute } from "@tanstack/react-router";
 import type { RepositoryName } from "@usine/core/repository";
@@ -25,10 +26,19 @@ import { projectParams } from "~/lib/overview";
 
 /** `tasks` covers the Tasks list and Task pages; `project` covers other Project pages, such as a
  * Run page. */
-export type OperatorView = "desk" | "board" | "tasks" | "project" | "configuration";
+export type OperatorView =
+  | "desk"
+  | "board"
+  | "tasks"
+  | "project"
+  | "configuration"
+  | "members"
+  | "tokens";
 
 export const useOperatorView = (): OperatorView => {
   const matchRoute = useMatchRoute();
+  if (matchRoute({ to: "/members" }) !== false) return "members";
+  if (matchRoute({ to: "/tokens" }) !== false) return "tokens";
   if (matchRoute({ to: "/configuration", fuzzy: true }) !== false) return "configuration";
   if (matchRoute({ to: "/" }) !== false) return "desk";
   if (matchRoute({ to: "/projects/$owner/$name/tasks", fuzzy: true }) !== false) return "tasks";
@@ -153,6 +163,7 @@ export const AppSidebar = ({
       </SidebarGroup>
     </SidebarContent>
     <SidebarFooter className="px-2 pb-3">
+      <SessionMenu />
       {/* Shows trigger stream state, not server state, so idle pollers are not shown as running. */}
       <p className="flex h-8 items-center gap-2 px-2 text-xs text-muted-foreground">
         <span aria-hidden="true" className="flex size-4 items-center justify-center">

@@ -11,6 +11,9 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ConfigurationRouteRouteImport } from './routes/configuration/route'
+import { Route as MembersRouteImport } from './routes/members'
+import { Route as SignInRouteImport } from './routes/sign-in'
+import { Route as TokensRouteImport } from './routes/tokens'
 import { Route as ConfigurationIndexRouteImport } from './routes/configuration/index'
 import { Route as ConfigurationHistoryRouteImport } from './routes/configuration/history'
 import { Route as ConfigurationSettingsRouteImport } from './routes/configuration/settings'
@@ -39,6 +42,21 @@ const IndexRoute = IndexRouteImport.update({
 const ConfigurationRouteRoute = ConfigurationRouteRouteImport.update({
   id: '/configuration',
   path: '/configuration',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MembersRoute = MembersRouteImport.update({
+  id: '/members',
+  path: '/members',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SignInRoute = SignInRouteImport.update({
+  id: '/sign-in',
+  path: '/sign-in',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TokensRoute = TokensRouteImport.update({
+  id: '/tokens',
+  path: '/tokens',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ConfigurationIndexRoute = ConfigurationIndexRouteImport.update({
@@ -152,6 +170,9 @@ const ProjectsOwnerNameTasksNumberRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/configuration': typeof ConfigurationRouteRouteWithChildren
+  '/members': typeof MembersRoute
+  '/sign-in': typeof SignInRoute
+  '/tokens': typeof TokensRoute
   '/configuration/history': typeof ConfigurationHistoryRoute
   '/configuration/settings': typeof ConfigurationSettingsRoute
   '/configuration/': typeof ConfigurationIndexRoute
@@ -174,6 +195,9 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/members': typeof MembersRoute
+  '/sign-in': typeof SignInRoute
+  '/tokens': typeof TokensRoute
   '/configuration/history': typeof ConfigurationHistoryRoute
   '/configuration/settings': typeof ConfigurationSettingsRoute
   '/configuration': typeof ConfigurationIndexRoute
@@ -197,6 +221,9 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/configuration': typeof ConfigurationRouteRouteWithChildren
+  '/members': typeof MembersRoute
+  '/sign-in': typeof SignInRoute
+  '/tokens': typeof TokensRoute
   '/configuration/history': typeof ConfigurationHistoryRoute
   '/configuration/settings': typeof ConfigurationSettingsRoute
   '/configuration/': typeof ConfigurationIndexRoute
@@ -222,6 +249,9 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/configuration'
+    | '/members'
+    | '/sign-in'
+    | '/tokens'
     | '/configuration/history'
     | '/configuration/settings'
     | '/configuration/'
@@ -244,6 +274,9 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/members'
+    | '/sign-in'
+    | '/tokens'
     | '/configuration/history'
     | '/configuration/settings'
     | '/configuration'
@@ -266,6 +299,9 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/configuration'
+    | '/members'
+    | '/sign-in'
+    | '/tokens'
     | '/configuration/history'
     | '/configuration/settings'
     | '/configuration/'
@@ -290,6 +326,9 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ConfigurationRouteRoute: typeof ConfigurationRouteRouteWithChildren
+  MembersRoute: typeof MembersRoute
+  SignInRoute: typeof SignInRoute
+  TokensRoute: typeof TokensRoute
   ProjectsOwnerNameRoute: typeof ProjectsOwnerNameRouteWithChildren
 }
 
@@ -307,6 +346,27 @@ declare module '@tanstack/react-router' {
       path: '/configuration'
       fullPath: '/configuration'
       preLoaderRoute: typeof ConfigurationRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/members': {
+      id: '/members'
+      path: '/members'
+      fullPath: '/members'
+      preLoaderRoute: typeof MembersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sign-in': {
+      id: '/sign-in'
+      path: '/sign-in'
+      fullPath: '/sign-in'
+      preLoaderRoute: typeof SignInRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/tokens': {
+      id: '/tokens'
+      path: '/tokens'
+      fullPath: '/tokens'
+      preLoaderRoute: typeof TokensRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/configuration/': {
@@ -503,6 +563,9 @@ const ProjectsOwnerNameRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ConfigurationRouteRoute: ConfigurationRouteRouteWithChildren,
+  MembersRoute: MembersRoute,
+  SignInRoute: SignInRoute,
+  TokensRoute: TokensRoute,
   ProjectsOwnerNameRoute: ProjectsOwnerNameRouteWithChildren,
 }
 export const routeTree = rootRouteImport

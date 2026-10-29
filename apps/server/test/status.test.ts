@@ -31,6 +31,8 @@ afterEach(async () => {
 const instanceFolder = () => {
   const folder = mkdtempSync(join(tmpdir(), "usine-status-"));
   folders.push(folder);
+  mkdirSync(join(folder, ".usine"));
+  writeFileSync(join(folder, ".usine/admin-token"), "l".repeat(43), { mode: 0o600 });
   return InstanceDirectory.make(folder);
 };
 
@@ -134,7 +136,7 @@ describe("usine status", () => {
     assert.deepStrictEqual(clean.lines, [`usine is not running in ${directory}.`]);
 
     const files = instanceFiles(directory);
-    mkdirSync(files.folder);
+    mkdirSync(files.folder, { recursive: true });
     writeFileSync(files.pid, "4242\n");
     const crashed = await Effect.runPromise(status(directory).pipe(Effect.provide(services)));
     assert.isFalse(crashed.running);

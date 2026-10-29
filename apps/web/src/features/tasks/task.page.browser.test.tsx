@@ -172,7 +172,7 @@ it("lists every Run newest first, each opening its Run page with why it ended", 
     .element(rowOf("start-dev").getByRole("link", { name: "Issue #40, open", exact: true }))
     .toBeInTheDocument();
   await expect.element(rowOf("review-pr")).toMatchTextContent("Approved by PhilDL");
-  await expect.element(rowOf("review-pr")).toMatchTextContent("from GitHub");
+  await expect.element(rowOf("review-pr")).toMatchTextContent("from the UI");
   await expect.element(rowOf("fix-ci", 1)).toMatchTextContent("Run again by PhilDL");
   // Two Attempts of 30 minutes each.
   await expect.element(rowOf("start-dev")).toMatchTextContent("1 h");

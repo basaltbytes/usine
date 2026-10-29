@@ -16,7 +16,7 @@ import {
 } from "@usine/config/configuration";
 import { Effect, Layer, Option, Schema } from "effect";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -249,6 +249,10 @@ test(
   "imports at first server start, follows CLI commits, and ignores later file edits",
   { timeout: 60_000 },
   async ({ directory }) => {
+    await writeFile(join(directory, "usine.yaml"), "version: 1\nrepos: [{ name: acme/project }]\n");
+    const authorization = async () => ({
+      authorization: `Bearer ${(await readFile(join(directory, ".usine/admin-token"), "utf8")).trim()}`,
+    });
     const reservation = createServer();
     await new Promise<void>((resolve) => reservation.listen(0, "127.0.0.1", resolve));
     const { port } = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Int }))(
@@ -275,8 +279,11 @@ test(
     const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
     const origin = `http://127.0.0.1:${port}`;
     const harness = async () =>
-      Schema.decodeUnknownSync(AgentView)(await (await fetch(`${origin}/api/configuration`)).json())
-        .agents[0]?.harness;
+      Schema.decodeUnknownSync(AgentView)(
+        await (
+          await fetch(`${origin}/api/configuration`, { headers: await authorization() })
+        ).json(),
+      ).agents[0]?.harness;
     try {
       await expect
         .poll(
@@ -291,8 +298,30 @@ test(
         )
         .toBe("codex");
       expect(run(directory, ["log"]).stdout).toContain("Imported from the instance folder");
+      expect((await stat(join(directory, ".usine/admin-token"))).mode & 0o777).toBe(0o600);
+      expect((await fetch(`${origin}/api/configuration`)).status).toBe(401);
+      const linkCommand = spawnSync(process.execPath, [cli, "sign-in-link"], {
+        cwd: directory,
+        encoding: "utf8",
+      });
+      expect(linkCommand.status, linkCommand.stderr).toBe(0);
+      const link = linkCommand.stdout.match(
+        /http:\/\/127\.0\.0\.1:\d+\/sign-in#link=([A-Za-z0-9_-]+)/u,
+      );
+      expect(link).not.toBeNull();
+      const consume = () =>
+        fetch(`${origin}/api/auth/link/consume`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ token: link?.[1] }),
+        });
+      expect((await consume()).status).toBe(200);
+      expect((await consume()).status).toBe(401);
+
       const upgrades = async () =>
-        Schema.decodeUnknownSync(UpgradeView)(await (await fetch(`${origin}/api/upgrade`)).json());
+        Schema.decodeUnknownSync(UpgradeView)(
+          await (await fetch(`${origin}/api/upgrade`, { headers: await authorization() })).json(),
+        );
       expect(await upgrades()).toMatchObject({ channel: "latest", mode: "propose" });
       const settingsEditor = join(directory, "settings-editor.mjs");
       await writeFile(
@@ -328,11 +357,15 @@ writeFileSync(file, readFileSync(file, "utf8").replace("harness: codex", "harnes
       await writeFile(join(directory, "agents/developer.md"), "invalid");
       expect(await harness()).toBe("claude");
       const entity = Schema.decodeUnknownSync(ConfigurationEntityView)(
-        await (await fetch(`${origin}/api/configuration/entities/agent/developer`)).json(),
+        await (
+          await fetch(`${origin}/api/configuration/entities/agent/developer`, {
+            headers: await authorization(),
+          })
+        ).json(),
       );
       const saved = await fetch(`${origin}/api/configuration/entities/agent/developer`, {
         method: "PUT",
-        headers: { Origin: origin },
+        headers: { Origin: origin, ...(await authorization()) },
         body: JSON.stringify({
           expected: entity.number,
           text: entity.text.replace("harness: claude", "harness: codex"),

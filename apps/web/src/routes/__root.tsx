@@ -1,3 +1,4 @@
+import { membersLabel, tokensPageLabel } from "~/lib/strings";
 import { WarningIcon } from "@phosphor-icons/react";
 import { useSuspenseQuery, type QueryClient } from "@tanstack/react-query";
 import {
@@ -6,6 +7,7 @@ import {
   Link,
   Outlet,
   useNavigate,
+  useMatchRoute,
   useParams,
   useRouter,
 } from "@tanstack/react-router";
@@ -81,6 +83,12 @@ type CrumbsProps = {
 };
 
 const Crumbs = ({ view, project, runId, task }: CrumbsProps) => {
+  if (view === "members" || view === "tokens")
+    return (
+      <BreadcrumbItem>
+        <BreadcrumbPage>{view === "members" ? membersLabel : tokensPageLabel}</BreadcrumbPage>
+      </BreadcrumbItem>
+    );
   if (view === "configuration") return <ConfigurationCrumbs />;
   if (project === undefined)
     return (
@@ -214,10 +222,16 @@ const Shell = () => {
   );
 };
 
+const Root = () => {
+  const matchRoute = useMatchRoute();
+  return matchRoute({ to: "/sign-in" }) !== false ? <Outlet /> : <Shell />;
+};
+
 export const Route = createRootRouteWithContext<RouterContext>()({
   validateSearch: RootSearch,
   loaderDeps: ({ search }) => ({ run: search.run }),
-  loader: async ({ context: { queryClient }, deps: { run } }) => {
+  loader: async ({ context: { queryClient }, deps: { run }, location }) => {
+    if (location.pathname === "/sign-in") return;
     await Promise.all([
       queryClient.ensureQueryData(overviewQuery()),
       // A rejected drawer query is displayed inside the drawer.
@@ -228,5 +242,5 @@ export const Route = createRootRouteWithContext<RouterContext>()({
   },
   pendingComponent: () => <BootScreen title="usine" description="Loading…" />,
   errorComponent: Unreachable,
-  component: Shell,
+  component: Root,
 });

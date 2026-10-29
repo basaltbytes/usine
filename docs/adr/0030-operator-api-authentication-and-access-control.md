@@ -18,6 +18,12 @@ Decided on 2026-10-29 ([#632](https://github.com/basaltbytes/usine/issues/632)):
 - **TLS comes from a reverse proxy.** `usine up` keeps listening on loopback and refuses a non-loopback address without TLS. The deployment guide documents Caddy, `tailscale serve`, and Cloudflare Tunnel. Built-in ACME would make usine bind ports 80 and 443, store keys, and handle renewal failures.
 - **The bundled UI uses an `HttpOnly` cookie.** The session cookie is `SameSite=Strict`, and every write carries a CSRF token. A script can't read the cookie, so a cross-site scripting bug can't take the session. Other clients use bearer tokens.
 
+## First authentication slice
+
+Implemented for [#701](https://github.com/basaltbytes/usine/issues/701): every member is an instance admin until role bindings are implemented. The server owns the authentication model and `AuthStore` port, with in-memory and `SqlClient` adapters. The SQL adapter uses a separate `usine_auth_migrations` ledger in the instance database, following the configuration store pattern. Keeping credential persistence outside the engine prevents the run lifecycle from depending on sign-in. Contract tests exercise both adapters.
+
+GitHub user IDs bind membership to accounts across login changes. Sessions and device tokens persist only hashes; OAuth state, device challenges, setup sessions, and single-use links remain in memory and expire. Restarting the server invalidates those challenges and replaces the local admin token, while enrolled member sessions survive. First enrollment requires a setup session opened through a one-time link. Removing a member revokes their credentials in the same transaction, and the last admin cannot be removed.
+
 ## Considered options
 
 - **The network as the only boundary** (until 2026-10-28): enough for one operator behind a tailnet, but it has no identity, no per-device revocation, and no protection once the address is public.

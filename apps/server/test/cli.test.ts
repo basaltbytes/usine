@@ -266,8 +266,8 @@ describe("usine CLI", () => {
       Option.some(serve),
     );
     assert.deepStrictEqual(
-      await origin(["--origin=http://100.64.0.20:8080"]),
-      Option.some("http://100.64.0.20:8080"),
+      await origin(["--origin=http://127.0.0.1:8080"]),
+      Option.some("http://127.0.0.1:8080"),
     );
     for (const value of [
       "usine-orchestrator.tail1234.ts.net",
@@ -276,6 +276,7 @@ describe("usine CLI", () => {
       "https://operator@usine-orchestrator.tail1234.ts.net",
       "ftp://usine-orchestrator.tail1234.ts.net",
       "file:///home/usine",
+      "http://100.64.0.20:8080",
     ]) {
       const error = await Effect.runPromise(
         parseCli(["up", "--origin", value], noEnvironment).pipe(Effect.flip),

@@ -1,5 +1,7 @@
 import { ProjectId } from "@usine/core/project";
 import { Project } from "@usine/config/project";
+import { authenticatedRoutes } from "../src/auth/http.ts";
+import { authFixture } from "./auth/fixture.ts";
 import { UpgradeView } from "@usine/orchestrator/operator/http";
 import { ServerUpgrades } from "../src/upgrade/control.ts";
 import {
@@ -395,6 +397,47 @@ const app = HttpRouter.toWebHandler(
 );
 
 afterAll(() => app.dispose());
+
+it("denies anonymous requests for every registered API route before decoding a request", async () => {
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const auth = authenticatedRoutes(yield* authFixture());
+      const secured = HttpRouter.toWebHandler(
+        Layer.mergeAll(apiRoutes(Option.none()), auth.routes, auth.guard).pipe(
+          HttpRouter.provideRequest(backend),
+        ),
+        { disableLogger: true },
+      );
+      yield* Effect.addFinalizer(() => Effect.promise(() => secured.dispose()));
+      const publicRoutes = new Set([
+        "GET /api/health",
+        "GET /api/auth/info",
+        "GET /api/auth/github",
+        "GET /api/auth/callback",
+        "POST /api/auth/device",
+        "POST /api/auth/device/poll",
+        "POST /api/auth/link/consume",
+      ]);
+      const endpoints = [
+        ...Object.values(OperatorApi.groups).flatMap((group) => Object.values(group.endpoints)),
+        ...auth.endpoints,
+      ];
+      for (const endpoint of endpoints) {
+        if (publicRoutes.has(`${endpoint.method} ${endpoint.path}`)) continue;
+        const path = endpoint.path.replace(/:[^/]+/gu, "test");
+        const response = yield* Effect.promise(() =>
+          secured.handler(
+            new Request(`http://127.0.0.1${path}`, {
+              method: endpoint.method,
+              headers: { "x-forwarded-for": "127.0.0.1" },
+            }),
+          ),
+        );
+        assert.equal(response.status, 401, `${endpoint.method} ${endpoint.path}`);
+      }
+    }).pipe(Effect.scoped),
+  );
+});
 
 describe("operator HTTP API", () => {
   it("reports the running release and validates upgrade requests before accepting them", async () => {
@@ -1201,12 +1244,13 @@ describe("operator HTTP API", () => {
                 webRoot,
                 port,
                 Option.some(UiOrigin.make("https://usine-orchestrator.tail1234.ts.net")),
+                yield* authFixture(),
               ),
             );
             return yield* Effect.all([overview("127.0.0.1"), overview("127.0.0.2")]);
           }).pipe(Effect.scoped),
         );
-        assert.deepStrictEqual(statuses, [200, "unreachable"]);
+        assert.deepStrictEqual(statuses, [401, "unreachable"]);
       } finally {
         await rm(webRoot, { recursive: true });
       }

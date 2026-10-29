@@ -393,7 +393,7 @@ describe("durable run engine", () => {
 
             const approval = approvalEvent(2);
             const askAnswer = new ApprovalSource({
-              channel: "github-ask",
+              channel: "ui",
               approver: Option.some(OperatorLogin.make("Philippe")),
             });
             yield* engine.approve(first.runId, approval, askAnswer);
