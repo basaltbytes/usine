@@ -1,27 +1,21 @@
-import { useRef, type ReactNode, type RefObject } from "react";
+import { useEffect, useRef, type ReactNode, type RefObject } from "react";
 import { MessageScrollerViewport, useMessageScroller } from "~/components/ui/message-scroller";
 
 const SCROLL_KEYS = ["ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown", " "];
-const KEYS_TOWARD_START = ["ArrowUp", "Home", "PageUp"];
-
-/**
- * Returns whether scrolling `delta` pixels (negative toward the start) from `target` scrolls a nested
- * area, such as a long tool output, instead of the viewport.
- */
-const scrollsNestedArea = (target: EventTarget, viewport: Element, delta: number) => {
-  if (delta === 0) return false;
+const atLatest = (viewport: HTMLDivElement) =>
+  viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 8;
+const insideScrollableArea = (target: EventTarget, viewport: Element) => {
   for (
     let element = target instanceof Element ? target : null;
     element !== null && element !== viewport;
     element = element.parentElement
   ) {
-    const room =
-      delta < 0
-        ? element.scrollTop
-        : element.scrollHeight - element.clientHeight - element.scrollTop;
-    if (room < 1) continue;
-    const { overflowY } = getComputedStyle(element);
-    if (overflowY === "auto" || overflowY === "scroll") return true;
+    const { overflowX, overflowY } = getComputedStyle(element);
+    if (
+      (element.scrollHeight > element.clientHeight && /^(auto|scroll)$/u.test(overflowY)) ||
+      (element.scrollWidth > element.clientWidth && /^(auto|scroll)$/u.test(overflowX))
+    )
+      return true;
   }
   return false;
 };
@@ -39,8 +33,7 @@ type ConversationViewportProps = {
 
 /**
  * The scroller stops following on every wheel, swipe, or scroll key before these handlers run.
- * Following resumes after a scroll that ends at the latest row, including one toward the end when
- * already there; a wheel or swipe that scrolls a nested area does not change it.
+ * Restore following when input leaves the viewport still; only viewport movement is navigation.
  */
 export const ConversationViewport = ({
   viewportRef,
@@ -50,35 +43,71 @@ export const ConversationViewport = ({
   children,
 }: ConversationViewportProps) => {
   const { scrollToEnd } = useMessageScroller();
-  const touchY = useRef(0);
+  const inputTop = useRef(0);
+  const pendingScroll = useRef<{ top: number; following: boolean; frame: number } | null>(null);
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (viewport === null) return;
+    const recordPosition = () => {
+      inputTop.current = viewport.scrollTop;
+    };
+    // React's passive listeners can run after Chromium has already scrolled.
+    viewport.addEventListener("wheel", recordPosition, { passive: false });
+    viewport.addEventListener("touchmove", recordPosition, { passive: false });
+    return () => {
+      viewport.removeEventListener("wheel", recordPosition);
+      viewport.removeEventListener("touchmove", recordPosition);
+    };
+  }, [viewportRef]);
+  useEffect(
+    () => () => {
+      if (pendingScroll.current !== null) cancelAnimationFrame(pendingScroll.current.frame);
+      pendingScroll.current = null;
+    },
+    [],
+  );
+  // Navigation can enable following after the scroller has handled the native scroll event.
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (following && viewport !== null && atLatest(viewport)) scrollToEnd({ behavior: "instant" });
+  }, [following, scrollToEnd, viewportRef]);
   const keepFollowing = (viewport: HTMLDivElement) => {
-    if (following && viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 8)
-      scrollToEnd({ behavior: "instant" });
+    if (following && atLatest(viewport)) scrollToEnd({ behavior: "instant" });
   };
-  const navigate = (viewport: HTMLDivElement, toward: "start" | "end") => {
-    onNavigate();
-    if (toward === "end") keepFollowing(viewport);
+  const observeScroll = (viewport: HTMLDivElement) => {
+    const pending = pendingScroll.current;
+    if (pending === null) return;
+    cancelAnimationFrame(pending.frame);
+    pendingScroll.current = null;
+    if (viewport.scrollTop !== pending.top) onNavigate();
+    else if (pending.following) scrollToEnd({ behavior: "instant" });
   };
-  const scroll = (target: EventTarget, viewport: HTMLDivElement, delta: number) => {
-    if (scrollsNestedArea(target, viewport, delta)) {
-      onInteract();
-      keepFollowing(viewport);
-    } else navigate(viewport, delta < 0 ? "start" : "end");
+  const scroll = (viewport: HTMLDivElement, top = viewport.scrollTop) => {
+    onInteract();
+    if (pendingScroll.current !== null) return;
+    pendingScroll.current = {
+      top,
+      following: following && atLatest(viewport),
+      // Chromium can deliver the native scroll after the first animation frame.
+      frame: requestAnimationFrame(() => {
+        const pending = pendingScroll.current;
+        if (pending !== null) pending.frame = requestAnimationFrame(() => observeScroll(viewport));
+      }),
+    };
   };
   return (
     <MessageScrollerViewport
       ref={viewportRef}
       aria-label="Run conversation"
       preserveScrollOnPrepend={false}
-      onWheel={(event) => scroll(event.target, event.currentTarget, event.deltaY)}
-      onTouchStart={(event) => {
-        touchY.current = event.touches[0]?.clientY ?? touchY.current;
+      onScroll={(event) => {
+        if (event.target === event.currentTarget) observeScroll(event.currentTarget);
       }}
-      onTouchMove={(event) => {
-        const y = event.touches[0]?.clientY ?? touchY.current;
-        scroll(event.target, event.currentTarget, touchY.current - y);
-        touchY.current = y;
+      onWheel={(event) => {
+        if (event.deltaY === 0) keepFollowing(event.currentTarget);
+        else scroll(event.currentTarget, inputTop.current);
       }}
+      onTouchMove={(event) => scroll(event.currentTarget, inputTop.current)}
       onPointerDown={(event) => {
         if (event.target === event.currentTarget) onNavigate();
         else onInteract();
@@ -93,13 +122,12 @@ export const ConversationViewport = ({
           onInteract();
           return;
         }
-        if (!event.defaultPrevented && SCROLL_KEYS.includes(event.key))
-          navigate(
-            event.currentTarget,
-            KEYS_TOWARD_START.includes(event.key) || (event.key === " " && event.shiftKey)
-              ? "start"
-              : "end",
-          );
+        if (!event.defaultPrevented && SCROLL_KEYS.includes(event.key)) {
+          if (insideScrollableArea(event.target, event.currentTarget)) {
+            onInteract();
+            keepFollowing(event.currentTarget);
+          } else scroll(event.currentTarget);
+        }
       }}
     >
       {children}
