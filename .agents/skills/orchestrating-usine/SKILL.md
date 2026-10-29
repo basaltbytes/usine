@@ -22,7 +22,7 @@ Repeat until the human says stop. Every pass ends with the ledger updated and, w
 
    | Signal | Move |
    | --- | --- |
-   | Approval needed | Approve if the issue is in the queue the human set (`scripts/approve-runs.sh <issue>...` waits for the entry); otherwise leave it and list it under Decisions. |
+   | Approval needed | Approve if the issue is in the queue the human set (`scripts/approve-runs.sh [--repo owner/name] <issue>...` waits for the entry); otherwise leave it and list it under Decisions. |
    | Run failed | Read the attempt transcript. Retry an infrastructure failure once. Edit and retry when the prompt was wrong. Mark resolved when the item moved on. File an issue for every failure usine should have handled. |
    | Question from the agent | Answer from the issue, the ADRs, and the ledger. If the answer is the human's, put the question under Decisions and leave the run on hold. |
    | Cycle budget used | Read why the rounds failed. Reset only with a reason you can state; otherwise Decisions. |

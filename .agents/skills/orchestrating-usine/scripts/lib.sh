@@ -9,7 +9,17 @@ usine_root() {
 USINE_STATE="${USINE_STATE:-$(usine_root)/.scratchpad/orchestrating-usine}"
 ENV_FILE="$USINE_STATE/env.sh"
 
+# env.sh is sourced only when it is the current user's own untracked file with no group or world access.
 if [ -f "$ENV_FILE" ]; then
+  if [ ! -O "$ENV_FILE" ]; then
+    echo "refusing $ENV_FILE: not owned by $(id -un)" >&2; exit 1
+  fi
+  if [ -n "$(find "$ENV_FILE" -perm +077 2>/dev/null || find "$ENV_FILE" -perm /077 2>/dev/null)" ]; then
+    echo "refusing $ENV_FILE: mode must be 0600" >&2; exit 1
+  fi
+  if git -C "$(dirname "$ENV_FILE")" ls-files --error-unmatch "$ENV_FILE" >/dev/null 2>&1; then
+    echo "refusing $ENV_FILE: tracked by git" >&2; exit 1
+  fi
   # shellcheck disable=SC1090
   . "$ENV_FILE"
 fi
