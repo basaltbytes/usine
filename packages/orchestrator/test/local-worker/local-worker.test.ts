@@ -867,6 +867,7 @@ describe("local worker", () => {
                 "GIT_COMMITTER_NAME",
                 "GIT_COMMITTER_EMAIL",
                 "GIT_TRACE2_EVENT",
+                "GIT_EXEC_PATH",
                 "TURBO_CACHE_DIR",
               ]);
               assert.deepStrictEqual(

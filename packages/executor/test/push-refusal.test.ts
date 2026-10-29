@@ -19,14 +19,24 @@ it.effect(
         { event: "error", sid: "push/transport", msg: diagnostic },
       ];
       const commit = CommitSha.make("a".repeat(40));
-      const read = (trace: string) =>
+      const serverMessage = `remote: Permission to acme/demo.git denied to usine-test[bot]. ${token}\n${diagnostic}`;
+      const read = (trace: string, response = "") =>
         readPushRefusal({
           attemptId: AttemptId.make("run/execute/1"),
           repository: RepositoryName.make("acme/demo"),
           worktree: "/checkout",
           git: (args) =>
             Effect.succeed(args.includes("--absolute-git-dir") ? "/checkout/.git" : commit),
-          readFile: () => Effect.succeed(trace),
+          readFile: (path) =>
+            Effect.succeed(
+              path.endsWith(".jsonl")
+                ? trace
+                : path.endsWith("/push.stderr")
+                  ? response
+                  : path.endsWith("/fetch.stderr")
+                    ? "unrelated fetch response"
+                    : "",
+            ),
         });
       assert(
         Option.isNone(
@@ -38,11 +48,17 @@ it.effect(
           ),
         ),
       );
-      const retained = yield* read(events.map((event) => JSON.stringify(event)).join("\n"));
+      const pushTrace = events.map((event) => JSON.stringify(event)).join("\n");
+      const legacy = yield* read(pushTrace);
+      assert(Option.isSome(legacy));
+      assert.include(legacy.value.message, "The requested URL returned error: 403");
+      const retained = yield* read(pushTrace, serverMessage);
       assert(Option.isSome(retained) && Option.isSome(retained.value.pushFailure));
       const failure = retained.value.pushFailure.value;
       assert.strictEqual(failure.ref, "refs/heads/feature");
       assert.include(failure.message, "The requested URL returned error: 403");
+      assert.include(failure.message, "Permission to acme/demo.git denied to usine-test[bot].");
+      assert.notInclude(failure.message, "unrelated fetch response");
       assert.include(failure.message, "[REDACTED]");
       assert.notInclude(failure.message, token);
       assert.deepStrictEqual(retained.value.commit, Option.some(commit));

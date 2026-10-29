@@ -331,6 +331,8 @@ describe("exe.dev launch", () => {
         // exe.dev's integration pushes, but the factory App's bot authors and commits.
         assert.deepStrictEqual(given.environment, {
           GH_HOST: "github.int.exe.xyz",
+          GIT_EXEC_PATH:
+            "/home/exedev/.usine/workers/remote-one/repos/acme_demo.git/worktrees/remote-run_execute_1/usine-git-trace.jsonl.helpers",
           GIT_TRACE2_EVENT:
             "/home/exedev/.usine/workers/remote-one/repos/acme_demo.git/worktrees/remote-run_execute_1/usine-git-trace.jsonl",
           GIT_AUTHOR_NAME: COMMIT_AUTHOR.login,

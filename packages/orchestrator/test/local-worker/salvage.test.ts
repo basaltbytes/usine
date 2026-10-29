@@ -112,6 +112,7 @@ describe("local worker salvage", () => {
 
   it.live.each([
     ["push", "origin", "HEAD:refs/heads/feature"],
+    ["push", "-u", "origin", "HEAD"],
     ["push", "--repo=origin"],
     ["-c", "alias.publish=push", "publish", "origin", "HEAD:refs/heads/feature"],
     ["push"],
@@ -126,7 +127,7 @@ describe("local worker salvage", () => {
             createServer((request, response) => {
               requests.push(request.url);
               response.writeHead(403, { "content-type": "text/plain" });
-              response.end(githubMessage);
+              response.end(`${githubMessage} ghs_expiredInstallationToken`);
             }),
           { host: "127.0.0.1", port: 0 },
         );
@@ -165,7 +166,9 @@ describe("local worker salvage", () => {
             const diagnostic = yield* pushed.stderr.pipe(Stream.decodeText(), Stream.mkString);
             assert.notStrictEqual(Number(yield* pushed.exitCode), 0);
             assert.include(diagnostic, "The requested URL returned error: 403");
+            assert.include(diagnostic, githubMessage);
             yield* run("git", ["remote", "set-url", "--push", "origin", remote], request.cwd);
+            if (push.includes("HEAD")) yield* git(["switch", "-c", "later-branch"]);
             return "The push was refused by GitHub.";
           }).pipe(Effect.scoped, Effect.provide(NodeServices.layer), Effect.orDie),
         );
@@ -187,6 +190,9 @@ describe("local worker salvage", () => {
             push.length === 1 ? "refs/heads/main" : "refs/heads/feature",
           );
           assert.include(failure.message, "The requested URL returned error: 403");
+          assert.include(failure.message, githubMessage);
+          assert.notInclude(failure.message, "ghs_expiredInstallationToken");
+          assert.include(failure.message, "[REDACTED]");
           assert.include(failure.message, failure.repository);
           assert.include(failure.message, failure.ref);
           assert.include(failure.message, "single-repository installation token");

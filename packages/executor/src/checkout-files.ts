@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import type { CheckoutOps } from "./provision.ts";
+import { HTTP_TRANSPORT, INSTALL_GIT_DIAGNOSTICS } from "./git-diagnostics.ts";
 
 const WRITE_FILE = String.raw`
 set -e
@@ -16,7 +17,11 @@ export const checkoutFiles = <E>(
     command: string,
     args: ReadonlyArray<string>,
   ) => Effect.Effect<string, E>,
-): Pick<CheckoutOps<E>, "readFile" | "writeFile"> => ({
+): Pick<CheckoutOps<E>, "readFile" | "writeFile" | "installGitDiagnostics"> => ({
+  installGitDiagnostics: (trace) =>
+    Effect.asVoid(
+      run("prepare", "sh", ["-c", INSTALL_GIT_DIAGNOSTICS, "sh", trace, HTTP_TRANSPORT]),
+    ),
   readFile: (path) =>
     run("cleanup", "sh", ["-c", 'if test -f "$1"; then cat "$1"; fi', "sh", path]),
   writeFile: (path, content, mode) =>

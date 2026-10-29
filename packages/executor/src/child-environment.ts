@@ -25,4 +25,12 @@ export const childEnvironment = (
   gitHooks: Option.Option<string>,
   gitTrace: string,
 ): Record<string, string> =>
-  withGitHooks({ ...environment, ...commitIdentity(author), GIT_TRACE2_EVENT: gitTrace }, gitHooks);
+  withGitHooks(
+    {
+      ...environment,
+      ...commitIdentity(author),
+      GIT_TRACE2_EVENT: gitTrace,
+      GIT_EXEC_PATH: `${gitTrace}.helpers`,
+    },
+    gitHooks,
+  );

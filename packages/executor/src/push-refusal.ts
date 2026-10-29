@@ -28,8 +28,11 @@ export const githubPushFailure = (repository: RepositoryName, ref: string, messa
     message: `GitHub refused the push to ${repository} at ${scrubDiagnostic(ref)} (HTTP 403). The token is a single-repository installation token. GitHub's message: ${scrubDiagnostic(message)}`,
   });
 
-/** Returns the explicit destination refspecs; Git options that take a value consume it. */
-const destinations = (argv: ReadonlyArray<string>) => {
+/** Git options that take a value consume it before refspecs are resolved. */
+const destinations = Effect.fn("Executor.pushDestinations")(function* <E>(
+  argv: ReadonlyArray<string>,
+  git: (args: ReadonlyArray<string>) => Effect.Effect<string, E>,
+) {
   const args = argv.slice(argv.indexOf("push") + 1);
   const positional: Array<string> = [];
   let skip = false;
@@ -60,13 +63,19 @@ const destinations = (argv: ReadonlyArray<string>) => {
     remote,
     refs: [
       ...patterns,
-      ...specs.map((spec) => {
-        const ref = spec.replace(/^\+/u, "").split(":").at(-1) ?? spec;
-        return ref.startsWith("refs/") ? ref : `refs/heads/${ref}`;
-      }),
+      ...(yield* Effect.forEach(specs, (spec) => {
+        const unforced = spec.replace(/^\+/u, "");
+        if (unforced.includes(":")) {
+          const ref = unforced.split(":").at(-1) ?? unforced;
+          return Effect.succeed(ref.startsWith("refs/") ? ref : `refs/heads/${ref}`);
+        }
+        return git(["rev-parse", "--symbolic-full-name", unforced]).pipe(
+          Effect.map((ref) => ref.trim() || unforced),
+        );
+      })),
     ],
   };
-};
+});
 
 const defaultDestination = Effect.fn("Executor.defaultPushDestination")(function* <E>(
   explicitRemote: Option.Option<string>,
@@ -91,7 +100,8 @@ const defaultDestination = Effect.fn("Executor.defaultPushDestination")(function
   const configured = entries
     .filter(([key]) => key === `remote.${remote}.push`)
     .map(([, spec]) => spec);
-  if (configured.length > 0) return destinations(["push", remote, ...configured]).refs.join(", ");
+  if (configured.length > 0)
+    return (yield* destinations(["push", remote, ...configured], git)).refs.join(", ");
   const mode = config.get("push.default") ?? "simple";
   if (mode === "matching") return "refs/heads/*";
   if (mode !== "current" && remote === upstreamRemote)
@@ -136,12 +146,31 @@ export const readPushRefusal = Effect.fn("Executor.readPushRefusal")(function* <
       continue;
     const push = [...pushes].find((sid) => event.sid === sid || event.sid.startsWith(`${sid}/`));
     if (!push) continue;
-    const destination = destinations(starts.get(push) ?? []);
+    const transportSession = event.sid.split("/").slice(0, -1);
+    const diagnosticPath =
+      transportSession.length > 0 &&
+      transportSession.every((part) => /^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(part))
+        ? Option.some(`${directory}/${PUSH_TRACE_FILE}.http/${transportSession.join("/")}.stderr`)
+        : Option.none();
+    const diagnostic = Option.isSome(diagnosticPath)
+      ? yield* options.readFile(diagnosticPath.value)
+      : "";
+    const head = Option.isSome(diagnosticPath)
+      ? (yield* options.readFile(`${diagnosticPath.value}.head`)).trim()
+      : "";
+    const resolve = (args: ReadonlyArray<string>) =>
+      head &&
+      args[0] === "rev-parse" &&
+      args[1] === "--symbolic-full-name" &&
+      (args[2] === "HEAD" || args[2] === "@")
+        ? Effect.succeed(head)
+        : git(args);
+    const destination = yield* destinations(starts.get(push) ?? [], resolve);
     const ref =
       destination.refs.length > 0
         ? destination.refs.join(", ")
-        : yield* defaultDestination(destination.remote, git);
-    const failure = githubPushFailure(options.repository, ref, event.msg);
+        : yield* defaultDestination(destination.remote, resolve);
+    const failure = githubPushFailure(options.repository, ref, diagnostic.trim() || event.msg);
     yield* Effect.logError("GitHub refused an agent push; retaining its checkout", {
       attemptId: options.attemptId,
       repository: options.repository,

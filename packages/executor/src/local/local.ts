@@ -1,3 +1,4 @@
+import { checkoutFiles } from "../checkout-files.ts";
 import { workerLeftoversFor } from "./leftovers.ts";
 import { localCredentialsFor } from "./credentials.ts";
 import { LocalProcess } from "@usine/agents/child-host";
@@ -531,26 +532,11 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         checkout: linkedWorktree(
           host,
           { cache, worktree },
-          {
-            writeFile: (target, content, mode) =>
-              fileSystem
-                .makeDirectory(path.dirname(target), { recursive: true })
-                .pipe(
-                  Effect.andThen(
-                    fileSystem.writeFileString(target, content, { mode: Number.parseInt(mode, 8) }),
-                  ),
-                ),
-            readFile: (target) =>
-              fileSystem
-                .exists(target)
-                .pipe(
-                  Effect.flatMap((exists) =>
-                    exists
-                      ? fileSystem.readFileString(target).pipe(Effect.map(credential.scrub))
-                      : Effect.succeed(""),
-                  ),
-                ),
-          },
+          checkoutFiles((operation, command, args) =>
+            executeCommand(operation, command, args, { env: credential.environment }).pipe(
+              Effect.map(credential.scrub),
+            ),
+          ),
         ),
       };
       const acquire = Effect.gen(function* () {

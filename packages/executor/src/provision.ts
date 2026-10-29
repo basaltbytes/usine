@@ -68,6 +68,8 @@ export interface CheckoutOps<E> {
   ) => Effect.Effect<void, E>;
   /** Reads a file with credential scrubbing; returns an empty string if it is absent. */
   readonly readFile: (path: string) => Effect.Effect<string, E>;
+  /** Installs HTTP helpers that preserve scrubbed server diagnostics by Git trace session. */
+  readonly installGitDiagnostics: (trace: string) => Effect.Effect<void, E>;
   /** Removes the checkout when the Attempt releases it, running each step through `cleanup`. */
   readonly remove: (cleanup: CleanupStep<E>) => Effect.Effect<void>;
 }
@@ -94,7 +96,7 @@ export interface WorkspaceOps<E> {
 export const linkedWorktree = <E>(
   ops: Pick<WorkspaceOps<E>, "cacheExists" | "git" | "removePath">,
   layout: Pick<WorkspaceLayout, "cache" | "worktree">,
-  files: Pick<CheckoutOps<E>, "writeFile" | "readFile">,
+  files: Pick<CheckoutOps<E>, "writeFile" | "readFile" | "installGitDiagnostics">,
 ): CheckoutOps<E> => ({
   add: (commit) =>
     Effect.asVoid(
@@ -592,6 +594,7 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
   ])).trim();
   const gitTrace = `${gitDirectory}/${PUSH_TRACE_FILE}`;
   yield* ops.checkout.writeFile(gitTrace, "", "600");
+  yield* ops.checkout.installGitDiagnostics(gitTrace);
   const preparedAt = yield* DateTime.now;
   return {
     workspace: new AttemptWorkspace({
@@ -653,6 +656,7 @@ export const reattachWorktree = Effect.fn("Executor.reattachWorktree")(function*
     "--absolute-git-dir",
   ])).trim();
   const gitTrace = `${gitDirectory}/${PUSH_TRACE_FILE}`;
+  yield* ops.checkout.installGitDiagnostics(gitTrace);
   return {
     workspace: new AttemptWorkspace({
       worker: request.worker,
