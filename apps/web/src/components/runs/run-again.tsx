@@ -1,9 +1,9 @@
+import { useProjectLinks } from "~/hooks/use-project-links";
 import { Link } from "@tanstack/react-router";
 import type { RunView } from "@usine/orchestrator/operator";
 import { Option } from "effect";
 import { cn } from "~/lib/utils";
 import { dayTimeLabel, timestampLabel } from "~/lib/strings";
-import { projectParams } from "~/lib/overview";
 
 type RunAgainLineProps = {
   readonly run: Pick<RunView, "runAgain" | "openedAt" | "repository">;
@@ -37,18 +37,29 @@ export const RunAgainLine = ({ run, source, className }: RunAgainLineProps) => {
       <span className="whitespace-nowrap">
         from run{" "}
         {source === "link" ? (
-          // Raised above the row-covering link on a Task page.
-          <Link
-            to="/projects/$project/$name/runs/$run"
-            params={{ ...projectParams(run.repository), run: from }}
-            className="relative z-10 font-mono text-xs text-primary underline-offset-4 hover:underline"
-          >
-            {id}
-          </Link>
+          <EarlierRunLink run={run} from={from} label={id} />
         ) : (
           <span className="font-mono text-xs">{id}</span>
         )}
       </span>
     </span>
+  );
+};
+
+type EarlierRunLinkProps = {
+  readonly run: Pick<RunView, "repository">;
+  readonly from: RunView["id"];
+  readonly label: string;
+};
+
+const EarlierRunLink = ({ run, from, label }: EarlierRunLinkProps) => {
+  const projectLinks = useProjectLinks();
+  return (
+    <Link
+      {...projectLinks.run(run.repository, from)}
+      className="relative z-10 font-mono text-xs text-primary underline-offset-4 hover:underline"
+    >
+      {label}
+    </Link>
   );
 };

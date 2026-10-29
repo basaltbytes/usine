@@ -1,4 +1,4 @@
-import { createFileRoute, notFound } from "@tanstack/react-router";
+import { createFileRoute, notFound, redirect } from "@tanstack/react-router";
 import { ItemNumber } from "@usine/core/item";
 import { RepositoryName } from "@usine/core/repository";
 import { OperatorHttpError } from "@usine/orchestrator/operator/http";
@@ -26,6 +26,20 @@ const MissingTask = () => {
   );
 };
 export const Route = createFileRoute("/projects/$project/tasks/$number")({
+  beforeLoad: async ({ context, params, location }) => {
+    if (params.number !== "tasks") return;
+    const overview = await context.queryClient.ensureQueryData(overviewQuery());
+    if (overview.projects.some((project) => projectId(project) === params.project)) return;
+    const repository = RepositoryName.make(`${params.project}/tasks`);
+    const project = projectForRepository(overview.projects, repository);
+    if (project !== undefined)
+      throw redirect({
+        to: "/projects/$project/tasks",
+        params: { project: projectId(project) },
+        search: { ...location.search, repository },
+        replace: true,
+      });
+  },
   validateSearch: Schema.toStandardSchemaV1(
     Schema.Struct({ repository: Schema.optional(RepositoryName) }),
   ),

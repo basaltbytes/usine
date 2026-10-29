@@ -163,7 +163,7 @@ it("lists every Run newest first, each opening its Run page with why it ended", 
   ).toEqual(["Waiting", "Running", "Canceled", "Succeeded", "Failed", "Succeeded"]);
   await expect
     .element(rowOf("start-dev").getByRole("link", { name: "start-dev" }))
-    .toHaveAttribute("href", `/projects/${taskRepository}/runs/run-dev`);
+    .toHaveAttribute("href", "/projects/basaltbytes-usine/runs/run-dev");
   await expect.element(rowOf("start-dev")).toMatchTextContent("Agent failure");
   await expect
     .element(rowOf("start-dev"))
@@ -261,7 +261,7 @@ it("lists the pull requests with their state and the comments the Runs posted", 
     .toHaveAttribute("href", `https://github.com/${taskRepository}/pull/41#pullrequestreview-7`);
   await expect
     .element(review.getByRole("link", { name: "review-pr" }))
-    .toHaveAttribute("href", `/projects/${taskRepository}/runs/run-review`);
+    .toHaveAttribute("href", "/projects/basaltbytes-usine/runs/run-review");
   // A comment's date is GitHub's posted time, or its Attempt's end time when GitHub has none.
   const posted = review.getByTitle(/^Posted 2026-10-04 /u);
   await expect.element(posted).toHaveAttribute("datetime", "2026-10-04T09:05:00.000Z");

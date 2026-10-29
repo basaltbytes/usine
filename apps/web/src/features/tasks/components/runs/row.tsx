@@ -1,3 +1,4 @@
+import { useProjectLinks } from "~/hooks/use-project-links";
 import { Link } from "@tanstack/react-router";
 import type { RunId } from "@usine/core/run";
 import type { RunView, TaskItemView } from "@usine/orchestrator/operator";
@@ -21,7 +22,7 @@ import { Opened } from "~/features/tasks/components/runs/opened";
 import { PullRequest } from "~/features/tasks/components/runs/pull-request";
 import { RowActions } from "~/features/tasks/components/runs/actions";
 import { linkedRow, rowLink } from "~/features/tasks/components/section";
-import { projectParams } from "~/lib/overview";
+
 import { cn } from "~/lib/utils";
 
 const COLUMNS = 8;
@@ -36,6 +37,7 @@ type RunRowProps = {
 };
 
 export const RunRow = ({ run, item, pullRequest, openRun }: RunRowProps) => {
+  const projectLinks = useProjectLinks();
   const [editing, setEditing] = useState<EditIntent | null>(null);
   const [status, setStatus] = useState<ReactNode>(null);
   return (
@@ -53,8 +55,7 @@ export const RunRow = ({ run, item, pullRequest, openRun }: RunRowProps) => {
               <StateMark state={run.state} className="self-center sm:hidden" />
               <Link
                 data-row-link
-                to="/projects/$project/$name/runs/$run"
-                params={{ ...projectParams(run.repository), run: run.id }}
+                {...projectLinks.run(run.repository, run.id)}
                 className={cn("font-medium wrap-anywhere", rowLink)}
               >
                 {run.loop}

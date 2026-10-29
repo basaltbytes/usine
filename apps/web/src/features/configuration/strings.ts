@@ -439,6 +439,7 @@ export const loopFormCopy = {
 };
 
 export const projectCopy = {
+  invalidId: "Use lowercase letters, numbers, and hyphens for the project ID",
   title: "Projects",
   chooseProject: "Choose a project",
   missing: "Project not found",

@@ -1,3 +1,4 @@
+import { overviewQuery } from "~/lib/overview";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterContextProvider } from "@tanstack/react-router";
 import type { ReactNode } from "react";
@@ -31,6 +32,7 @@ const { desk, empty, overview } = deskFixture(now);
 /** Renders `node` to static HTML inside a router and query client. */
 const render = (node: ReactNode) => {
   const queryClient = new QueryClient();
+  queryClient.setQueryData(overviewQuery().queryKey, overview);
   const router = createRouter({
     routeTree,
     context: { queryClient },
@@ -100,7 +102,7 @@ describe("Desk", () => {
     assert.include(visible, "1m ago");
     assert.include(visible, "local silent since");
     assert.include(visible, "researcher: provider unreachable, 27 retries since");
-    assert.include(html, 'href="/projects/basaltbytes/usine/runs/run-desk-403"');
+    assert.include(html, 'href="/projects/basaltbytes-usine/runs/run-desk-403"');
   });
 
   it("says nothing is stalled, or that no poll has finished yet", () => {
@@ -143,7 +145,7 @@ describe("Desk", () => {
       "Run again",
       "Resume",
     ]);
-    assert.include(html, 'href="/projects/basaltbytes/usine/runs/run-canceled-345"');
+    assert.include(html, 'href="/projects/basaltbytes-usine/runs/run-canceled-345"');
   });
 
   it("offers no action on stalled Items while the factory needs setup", () => {
@@ -163,7 +165,7 @@ describe("Desk", () => {
     assert.include(visible, "Canceled");
     assert.include(html, 'href="https://github.com/basaltbytes/usine/pull/402"');
     assert.include(visible, "#402");
-    assert.include(html, 'href="/projects/basaltbytes/usine/runs/run-done-399"');
+    assert.include(html, 'href="/projects/basaltbytes-usine/runs/run-done-399"');
   });
 
   it("shows each Worker's slots in use and its last preflight", () => {

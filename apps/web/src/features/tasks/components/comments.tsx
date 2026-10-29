@@ -1,10 +1,11 @@
+import { useProjectLinks } from "~/hooks/use-project-links";
 import { Link } from "@tanstack/react-router";
 import type { TaskView } from "@usine/orchestrator/operator";
 import { FillCell } from "~/components/fill-cell";
 import { ItemMark } from "~/components/item/mark";
 import { Table, TableBody, TableCell, TableRow } from "~/components/ui/table";
 import { dayTimeLabel, timestampLabel } from "~/lib/strings";
-import { projectParams } from "~/lib/overview";
+
 import { commentKindLabel } from "~/lib/tasks/model";
 import {
   linkedRow,
@@ -29,6 +30,7 @@ const commentTime = (comment: TaskView["comments"][number]) => {
 type TaskCommentsProps = { readonly task: TaskView };
 
 export const TaskComments = ({ task }: TaskCommentsProps) => {
+  const projectLinks = useProjectLinks();
   const runs = new Map(task.runs.map((run) => [run.id, run]));
   const items = new Map(task.items.map((item) => [item.itemKey, item]));
   return (
@@ -71,8 +73,7 @@ export const TaskComments = ({ task }: TaskCommentsProps) => {
                     <TableCell className="py-3">
                       {run !== undefined && (
                         <Link
-                          to="/projects/$project/$name/runs/$run"
-                          params={{ ...projectParams(run.repository), run: run.id }}
+                          {...projectLinks.run(run.repository, run.id)}
                           className="relative z-10 rounded-sm text-muted-foreground underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring/70 focus-visible:outline-solid"
                         >
                           {run.loop}

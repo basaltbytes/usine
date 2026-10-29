@@ -1,4 +1,4 @@
-import type { RepositoryName } from "@usine/core/repository";
+import { canonicalRepositoryName, type RepositoryName } from "@usine/core/repository";
 import { RepositoryFilter } from "~/components/repository-filter";
 import { projectId, projectName } from "~/lib/overview";
 import type { ProjectView, StalledItemView } from "@usine/orchestrator/operator";
@@ -36,7 +36,9 @@ type TaskListProps = {
 export const TaskList = ({ project, stalled, repository, onRepositoryChange }: TaskListProps) => {
   const now = useNow(30_000);
   const rows = taskRows(project.board.lanes, stalled).filter(
-    (row) => repository === undefined || row.task.repository === repository,
+    (row) =>
+      repository === undefined ||
+      canonicalRepositoryName(row.task.repository) === canonicalRepositoryName(repository),
   );
   return (
     <Page width="full">

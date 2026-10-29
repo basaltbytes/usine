@@ -208,7 +208,7 @@ it("resolves a failure from Needs attention while retaining unrelated attention,
     const toPage = drawer.getByRole("link", { name: "Open run page" });
     await expect.poll(() => toPage.elements().length).toBe(2);
     expect(new Set(toPage.elements().map((link) => link.getAttribute("href")))).toEqual(
-      new Set(["/projects/resolution/project/runs/resolution-run"]),
+      new Set(["/projects/resolution-project/runs/resolution-run"]),
     );
     await page.getByRole("button", { name: "Close", exact: true }).click();
     const needs = page.getByRole("region", { name: "Needs attention" });

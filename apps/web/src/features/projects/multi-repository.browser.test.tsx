@@ -64,7 +64,7 @@ const overview = () => {
     ...project,
     id: ProjectId.make("product"),
     name: "Product",
-    repositories: [project.repository, second],
+    repositories: [project.repository, RepositoryName.make("Board-Test/API")],
     board: new BoardView({
       failures: [],
       lanes: project.board.lanes.map((lane) =>
@@ -124,6 +124,20 @@ it("shows both repositories, preserves the card repository when moving, and cont
   const container = card.element().closest('[class~="group/task"]');
   expect(container?.textContent).toContain(second);
   expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(390);
+  for (const theme of ["dark", "light"]) {
+    document.documentElement.classList.toggle("dark", theme === "dark");
+    for (const [width, device] of [
+      [1440, "desktop"],
+      [390, "phone"],
+    ] as const) {
+      await page.viewport(width, 900);
+      if (width === 1440)
+        await expect
+          .element(page.getByRole("link", { name: "Product", exact: true }).first())
+          .toHaveAttribute("title", "2 repositories");
+      await commands.configurationEditorScreenshot(`673-board-${device}-${theme}`);
+    }
+  }
   const trigger = container?.querySelector<HTMLButtonElement>("button[aria-label^='Actions for']");
   if (trigger === null || trigger === undefined) throw new Error("Missing card actions");
   trigger.click();
@@ -133,13 +147,6 @@ it("shows both repositories, preserves the card repository when moving, and cont
   expect((await commands.boardMoveRequests())[0]?.url).toContain(
     "/api/projects/board-test/api/items/",
   );
-  await page.viewport(1440, 900);
-  await expect
-    .element(page.getByRole("link", { name: "Product", exact: true }).first())
-    .toHaveAttribute("title", "2 repositories");
-  await commands.configurationEditorScreenshot("project-board-desktop");
-  await page.viewport(390, 844);
-  await commands.configurationEditorScreenshot("project-board-mobile");
 });
 
 it("redirects a legacy URL for the second repository to its project", async () => {
@@ -152,14 +159,26 @@ it("filters the project task list by repository without changing the project", a
   const router = await mount("/projects/product/tasks", 390);
   const card = page.getByRole("link", { name: /API task/u });
   await expect.element(card).toBeVisible();
+  for (const theme of ["dark", "light"]) {
+    document.documentElement.classList.toggle("dark", theme === "dark");
+    for (const [width, device] of [
+      [1440, "desktop"],
+      [390, "phone"],
+    ] as const) {
+      await page.viewport(width, 900);
+      await commands.configurationEditorScreenshot(`673-tasks-${device}-${theme}`);
+    }
+  }
   await page
     .getByRole("combobox", { name: "Repository", exact: true })
     .selectOptions("board-test/repo");
   await expect.element(card).not.toBeInTheDocument();
-  await page.getByRole("combobox", { name: "Repository", exact: true }).selectOptions(second);
+  await page
+    .getByRole("combobox", { name: "Repository", exact: true })
+    .selectOptions("Board-Test/API");
   await expect.element(card).toBeVisible();
   expect(router.state.location.pathname).toBe("/projects/product/tasks");
-  expect(router.state.location.search).toMatchObject({ repository: second });
+  expect(router.state.location.search).toMatchObject({ repository: "Board-Test/API" });
   expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(390);
 });
 
@@ -180,3 +199,29 @@ it("redirects a legacy repository named tasks instead of treating its owner as a
   const router = await mount("/projects/board-test/tasks", 1440);
   await expect.poll(() => router.state.location.pathname).toBe("/projects/product");
 });
+
+it.each(["tasks", "runs"])(
+  "redirects the legacy task list for a repository named %s",
+  async (name) => {
+    const repository = RepositoryName.make(`board-test/${name}`);
+    client.setQueryData(
+      overviewQuery().queryKey,
+      new ReadyOverview({
+        ...overview(),
+        projects: overview().projects.map(
+          (project) =>
+            new ProjectView({
+              ...project,
+              repositories: [...project.repositories, repository],
+            }),
+        ),
+      }),
+    );
+    const router = await mount(`/projects/board-test/${name}/tasks`, 1440);
+    await expect.poll(() => router.state.location.pathname).toBe("/projects/product/tasks");
+    expect(router.state.location.search).toMatchObject({ repository });
+    await expect
+      .element(page.getByRole("combobox", { name: "Repository", exact: true }))
+      .toHaveValue(repository);
+  },
+);

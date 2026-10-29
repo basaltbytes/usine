@@ -1,20 +1,9 @@
 import { ProjectId } from "@usine/core/project";
 import { queryOptions } from "@tanstack/react-query";
-import {
-  RepositoryName,
-  canonicalRepositoryName,
-  splitRepositoryName,
-} from "@usine/core/repository";
+import { RepositoryName, canonicalRepositoryName } from "@usine/core/repository";
 import type { NeedView, ProjectView } from "@usine/orchestrator/operator";
 import { api } from "~/lib/api";
 import { needCopy } from "~/lib/needs-you/strings";
-
-/** Returns the path params for `/projects/$project/$name`. */
-export const projectParams = (repository: RepositoryName) => ({
-  ...splitRepositoryName(repository),
-  project: splitRepositoryName(repository).owner,
-  repository,
-});
 
 export const projectForRepository = (
   projects: ReadonlyArray<ProjectView>,
@@ -77,3 +66,8 @@ export const projectId = (project: ProjectView): ProjectId =>
   );
 
 export const projectName = (project: ProjectView): string => project.name ?? project.repository;
+
+export const projectParams = (projects: ReadonlyArray<ProjectView>, repository: RepositoryName) => {
+  const project = projectForRepository(projects, repository);
+  return project === undefined ? undefined : { project: projectId(project) };
+};

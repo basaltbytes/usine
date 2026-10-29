@@ -1,3 +1,4 @@
+import { useProjectLinks } from "~/hooks/use-project-links";
 import { useNavigate } from "@tanstack/react-router";
 import type { StatisticsView, TaskDoneView } from "@usine/orchestrator/operator";
 import { CartesianGrid, ReferenceLine, Scatter, ScatterChart, XAxis, YAxis, ZAxis } from "recharts";
@@ -11,7 +12,6 @@ import {
   tooltipClass,
 } from "~/features/overview/lib/statistics/chart";
 import { instantDayLabel, spanLabel } from "~/features/overview/strings";
-import { projectParams } from "~/lib/overview";
 
 /** Returns a tick every day for a week or less, else every 7 days, from the window's start. */
 const dayTicks = (from: number, to: number): ReadonlyArray<number> => {
@@ -41,6 +41,7 @@ type TaskScatterProps = { readonly statistics: StatisticsView };
 
 /** One dot per task done: merge day across, time in usine up a log axis. */
 export const TaskScatter = ({ statistics }: TaskScatterProps) => {
+  const projectLinks = useProjectLinks();
   const navigate = useNavigate();
   const from = Date.parse(statistics.from);
   const to = Date.parse(statistics.to);
@@ -120,8 +121,7 @@ export const TaskScatter = ({ statistics }: TaskScatterProps) => {
             const task = entry.payload?.task;
             if (task !== undefined)
               void navigate({
-                to: "/projects/$project/$name/tasks/$number",
-                params: { ...projectParams(task.repository), number: String(task.number) },
+                ...projectLinks.task(task.repository, String(task.number)),
               });
           }}
         />

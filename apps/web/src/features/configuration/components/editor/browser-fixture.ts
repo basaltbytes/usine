@@ -205,5 +205,9 @@ export const configurationEditorScreenshot = async (
   name: string,
 ) => {
   await mkdir(resolve("../../.impeccable/review"), { recursive: true });
-  await page.screenshot({ path: resolve(`../../.impeccable/review/${name}.png`), fullPage: true });
+  await page.screenshot({
+    path: resolve(`../../.impeccable/review/${name}.png`),
+    fullPage: true,
+    animations: "disabled",
+  });
 };

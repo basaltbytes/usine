@@ -1,9 +1,11 @@
+import { ProjectId } from "@usine/core/project";
+import { taskOverview } from "~/lib/tasks/fixture";
 import { RegistryTag } from "@usine/config/factory";
 import { ContainerLimits } from "@usine/core/worker";
 import { Schema } from "effect";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { ConfigurationView, ReadyOverview } from "@usine/orchestrator/operator";
+import { ConfigurationView, ProjectView, ReadyOverview } from "@usine/orchestrator/operator";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
@@ -754,6 +756,15 @@ it.each([
 });
 
 it("checks CEL while typing, completes payload fields, previews, saves paused, and confirms resume", async () => {
+  client.setQueryData(
+    overviewQuery().queryKey,
+    new ReadyOverview({
+      ...taskOverview(),
+      projects: taskOverview().projects.map(
+        (project) => new ProjectView({ ...project, id: ProjectId.make("usine") }),
+      ),
+    }),
+  );
   await mount("/configuration/loops");
   await button("New").click();
   await page.getByRole("combobox", { name: "Project", exact: true }).selectOptions("usine");
@@ -775,7 +786,7 @@ it("checks CEL while typing, completes payload fields, previews, saves paused, a
   await expect.element(page.getByRole("heading", { name: "2 matching items" })).toBeVisible();
   await expect
     .element(page.getByRole("link", { name: "Issue #1, open Fix issue 1" }))
-    .toHaveAttribute("href", "/projects/basaltbytes/usine/tasks/1");
+    .toHaveAttribute("href", "/projects/usine/tasks/1?repository=basaltbytes%2Fusine");
   await page.getByRole("button", { name: "Render prompt", exact: true }).nth(1).click();
   await expect.element(page.getByText("Implement Fix issue 2.", { exact: true })).toBeVisible();
   page.getByRole("heading", { name: "New loop", exact: true }).element().scrollIntoView();
@@ -954,7 +965,14 @@ it("creates a project with two ordered repositories and lanes without phone page
     new ConfigurationView({ ...configurationFixture(), projects: [] }),
   );
   await button("New").click();
-  await page.getByRole("textbox", { name: "Name", exact: true }).fill("product");
+  const identifier = page.getByRole("textbox", { name: "Project ID", exact: true });
+  await identifier.fill("My Product");
+  await button("Edit").click();
+  await expect
+    .element(page.getByRole("alert"))
+    .toHaveTextContent("Use lowercase letters, numbers, and hyphens for the project ID");
+  await expect.element(identifier).toBeEnabled();
+  await identifier.fill("product");
   await button("Edit").click();
   await page.getByRole("textbox", { name: "Display name", exact: true }).fill("Product");
   const repositories = page.getByRole("combobox", { name: "Add a repository", exact: true });
@@ -965,9 +983,18 @@ it("creates a project with two ordered repositories and lanes without phone page
   await page.getByRole("textbox", { name: "Lane name", exact: true }).fill("Ready");
   await page.getByRole("checkbox", { name: "ready", exact: true }).click();
   await expect.poll(() => document.documentElement.scrollWidth).toBeLessThanOrEqual(390);
-  await commands.configurationEditorScreenshot("project-form-mobile");
-  await page.viewport(1440, 900);
-  await commands.configurationEditorScreenshot("project-form-desktop");
+  for (const theme of ["dark", "light"]) {
+    document.documentElement.classList.toggle("dark", theme === "dark");
+    host.classList.toggle("dark", theme === "dark");
+    for (const [width, device] of [
+      [1440, "desktop"],
+      [390, "phone"],
+    ] as const) {
+      await page.viewport(width, 900);
+      await expect.poll(() => document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+      await commands.configurationEditorScreenshot(`673-project-form-${device}-${theme}`);
+    }
+  }
   await button("Save").click();
   await expect.poll(async () => (await commands.configurationEditorRequests()).length).toBe(1);
   expect((await commands.configurationEditorRequests())[0]).toMatchObject({

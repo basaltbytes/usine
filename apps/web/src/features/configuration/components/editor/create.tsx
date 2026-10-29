@@ -1,3 +1,4 @@
+import { ProjectId } from "@usine/core/project";
 import { NativeSelect } from "~/components/ui/native-select";
 import { projectCopy } from "~/features/configuration/strings";
 import { RepositoryPicker } from "~/features/configuration/components/forms/repository-picker";
@@ -41,10 +42,16 @@ const CreationForm = ({ kind, cancel }: CreationFormProps) => {
           className="flex flex-col items-start gap-3"
           onSubmit={(event) => {
             event.preventDefault();
-            const identifier = Schema.decodeUnknownOption(ConfigurationEntityId)(
-              kind === "loop" ? `${project}/${name.trim()}` : name.trim(),
-            );
-            if (Option.isNone(identifier)) return;
+            const identifier: Option.Option<ProjectId | ConfigurationEntityId> =
+              kind === "project"
+                ? Schema.decodeUnknownOption(ProjectId)(name.trim())
+                : Schema.decodeUnknownOption(ConfigurationEntityId)(
+                    kind === "loop" ? `${project}/${name.trim()}` : name.trim(),
+                  );
+            if (Option.isNone(identifier)) {
+              if (kind === "project") setError(projectCopy.invalidId);
+              return;
+            }
             setChecking(true);
             setError(null);
             void client
@@ -83,7 +90,7 @@ const CreationForm = ({ kind, cancel }: CreationFormProps) => {
             <RepositoryPicker value={name} onChange={setName} disabled={checking} />
           ) : (
             <Label className="flex w-full flex-col items-start gap-2">
-              {editorCopy.name}
+              {kind === "project" ? projectCopy.id : editorCopy.name}
               <Input
                 required
                 disabled={checking || (kind === "loop" && project === "")}
