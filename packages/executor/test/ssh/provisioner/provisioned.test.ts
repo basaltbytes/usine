@@ -515,8 +515,8 @@ describe("Provisioned SSH Worker", () => {
           machine.state.calls.filter(({ line }) => matches(line)).length;
         const memoryChecks = () => count((line) => line === "exec 'cat' '/proc/meminfo'");
         const resourceReads = () => count((line) => line.includes("nproc"));
-        const storePreparations = () => count((line) => line.includes("volume create"));
-        assert.strictEqual(storePreparations(), 1);
+        const cachePreparations = () => count((line) => line.includes("volume create"));
+        assert.strictEqual(cachePreparations(), 2);
         assert.strictEqual(memoryChecks(), 1);
         // Each machine runs one Attempt, so the limits are the machine's less the host's reserve.
         assert.deepStrictEqual(
@@ -526,7 +526,7 @@ describe("Provisioned SSH Worker", () => {
               brains: [TEST_AGENT.brain],
               containerLimits: Option.some(
                 new ContainerLimits({
-                  cpus: ContainerCpus.make(3.5),
+                  cpus: ContainerCpus.make(4),
                   memoryMib: ContainerMemoryMib.make(7168),
                   pids: ContainerPids.make(60976),
                 }),
@@ -543,18 +543,18 @@ describe("Provisioned SSH Worker", () => {
         assert.isTrue(Option.isNone(second.checked));
         assert.strictEqual(memoryChecks(), 1);
         assert.strictEqual(resourceReads(), 1);
-        assert.strictEqual(storePreparations(), 1);
+        assert.strictEqual(cachePreparations(), 2);
         assert.strictEqual(providers.hetzner.servers.size, 2);
 
         const prepared = yield* executor.prepare(request);
         yield* prepared.launch(sink);
-        assert.strictEqual(storePreparations(), 2);
+        assert.strictEqual(cachePreparations(), 4);
         const run = machine.state.calls.find(({ line }) =>
           line.startsWith("exec 'docker' 'run' '--detach' '--name' 'usine-remote-run_execute_1'"),
         );
         assert.include(
           run?.line,
-          "'--cpus' '3.5' '--memory' '7168m' '--memory-swap' '7168m' '--pids-limit' '60976'",
+          "'--cpus' '4' '--memory' '7168m' '--memory-swap' '7168m' '--pids-limit' '60976'",
         );
         yield* TestClock.adjust("1 second");
         const third = yield* machines.create(WORKER, RUN, AttemptId.make("third/execute/1"), [

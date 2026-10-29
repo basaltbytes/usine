@@ -349,11 +349,11 @@ Without Docker, the worker runs its attempts as the SSH user, as before containe
 
 | Limit | The machine's total | Reserve | Each container gets |
 | --- | --- | --- | --- |
-| `cpus` | the CPUs that `nproc` counts | 0.5 CPU | (total − 0.5) ÷ `max_concurrent_attempts`, rounded down to a hundredth |
+| `cpus` | the CPUs that `nproc` counts | none | total ÷ `max_concurrent_attempts`, rounded down to a hundredth |
 | `memory_mib` | `MemTotal` in `/proc/meminfo` | 1024 MiB | (total − 1024) ÷ `max_concurrent_attempts`, rounded down to a MiB |
 | `pids` | the lower of `/proc/sys/kernel/threads-max` and `/proc/sys/kernel/pid_max` | 1024 | (total − 1024) ÷ `max_concurrent_attempts`, rounded down |
 
-A machine with 4 CPUs and 8 GiB of memory gives each container 3.5 CPUs and 7168 MiB with `max_concurrent_attempts: 1`, and 1.16 CPUs and 2389 MiB with `max_concurrent_attempts: 3`. No derived limit goes below 0.01 CPU, 256 MiB, or 64 processes. A provisioned worker's machines each run one attempt, so its first checked machine gets the limits for one attempt, and the worker's machines keep them until the next successful machine check.
+A machine with 4 CPUs and 8 GiB of memory gives each container 4 CPUs and 7168 MiB with `max_concurrent_attempts: 1`, and 1.33 CPUs and 2389 MiB with `max_concurrent_attempts: 3`. No derived limit goes below 0.01 CPU, 256 MiB, or 64 processes. A provisioned worker's machines each run one attempt, so its first checked machine gets the limits for one attempt, and the worker's machines keep them until the next successful machine check.
 
 Preflight logs the limits with the worker's preflight line, `SSH Worker preflight verified`: `cpus`, `memoryMib`, `pids`, `derivedLimits` (the ones it derived), `slots`, and the machine's `machineCpus`, `machineMemoryMib`, and `machineTasks`. The **Workers** page shows the limits that the last preflight applied and which ones it derived. A value in the file always wins over a derived one. A reload that raises `max_concurrent_attempts` runs preflight, which derives the limits again for new containers; one that lowers it runs no preflight, so new containers keep the smaller limits until the next preflight.
 

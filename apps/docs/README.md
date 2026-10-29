@@ -27,3 +27,5 @@ A fenced `mermaid` code block renders as a diagram in the browser and follows th
 `wrangler.jsonc` makes the Worker serve `dist/` as static assets on the `docs.usine.dev` custom domain, with no Worker script. The `Deploy docs` workflow (`.github/workflows/deploy-docs.yml`) builds and deploys on every push to `main`, with the `CLOUDFLARE_API_TOKEN` repository secret. To deploy by hand, run `pnpm turbo run build --filter=@usine/docs` first, because `deploy` uploads `dist/` as it is, after `npx wrangler login` to the Basaltbytes account.
 
 The worker reference documents provisioner timing settings in seconds, machine checks, and cleanup when a worker is removed. The execution architecture describes attempt persistence before machine creation.
+
+The [worker guide](src/content/docs/guides/add-a-worker.mdx) describes shared pnpm and Turborepo volumes, Node.js 22 provisioning, and container limits derived from the host.

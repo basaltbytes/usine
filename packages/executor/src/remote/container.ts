@@ -21,8 +21,20 @@ export const PNPM_STORE_VOLUME = "usine-pnpm-store";
 export const PNPM_STORE_PATH = "/home/usine/.local/share/pnpm/store";
 export const PNPM_STORE_MOUNT = `type=volume,source=${PNPM_STORE_VOLUME},destination=${PNPM_STORE_PATH},volume-nocopy`;
 
+const SHARED_CACHES = [
+  { volume: PNPM_STORE_VOLUME, path: PNPM_STORE_PATH },
+  {
+    volume: "usine-turbo-cache",
+    path: "/home/usine/.cache/turbo",
+  },
+].map(({ volume, path }) => ({
+  volume,
+  path,
+  mount: `type=volume,source=${volume},destination=${path},volume-nocopy`,
+}));
+
 /** Initializes volume `$3` using runtime `$1`, image `$2`, mount `$4`, and path `$5`. */
-export const PREPARE_PNPM_STORE_SCRIPT = String.raw`
+export const PREPARE_CACHE_SCRIPT = String.raw`
 set -eu
 "$1" volume create "$3" >/dev/null
 exec "$1" run --rm --network none --user 0 --mount "$4" --entrypoint sh "$2" -ec '
@@ -30,7 +42,7 @@ exec "$1" run --rm --network none --user 0 --mount "$4" --entrypoint sh "$2" -ec
   current=$(stat -c %u "$1")
   if [ "$current" = "$owner" ]; then exit 0; fi
   if [ "$current" != 0 ] || [ -n "$(find "$1" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
-    echo "The pnpm store belongs to UID $current, but the image usine user has UID $owner. Remove containers that reference it, then run: docker volume rm $2" >&2
+    echo "Cache volume $2 belongs to UID $current, but the image usine user has UID $owner. Remove containers that reference it, then run: docker volume rm $2" >&2
     exit 1
   fi
   chmod 0755 "$1"
@@ -260,34 +272,36 @@ const containerShell = (shell: RemoteShell, name: string): RemoteShell => {
  * process left.
  */
 export const containersFor = (commands: RemoteCommands) => {
-  const prepareStore = Effect.fn("RemoteExecutor.preparePnpmStore")(function* (
+  const prepareCaches = Effect.fn("RemoteExecutor.prepareSharedCaches")(function* (
     operation: ExecutorOperation,
     shell: RemoteShell,
     image: ContainerImage,
     worker: WorkerName,
   ) {
-    const fields = { worker, host: shell.destination, image, volume: PNPM_STORE_VOLUME };
+    const fields = { worker, host: shell.destination, image };
     yield* Effect.annotateCurrentSpan(fields);
-    const prepared = yield* commands.inspect(operation, shell, "sh", [
-      "-c",
-      PREPARE_PNPM_STORE_SCRIPT,
-      "sh",
-      CONTAINER_RUNTIME,
-      image,
-      PNPM_STORE_VOLUME,
-      PNPM_STORE_MOUNT,
-      PNPM_STORE_PATH,
-    ]);
-    if (prepared.exitCode !== 0) {
-      const message = `Can't prepare pnpm store volume ${PNPM_STORE_VOLUME}: ${prepared.stderr.trim() || `exit code ${prepared.exitCode}`}`;
-      yield* Effect.logWarning(message, { ...fields, exitCode: prepared.exitCode });
-      return yield* new ExecutorOperationError({
-        operation,
-        message,
-        cause: new Error(prepared.stderr),
-      });
+    for (const { volume, mount, path } of SHARED_CACHES) {
+      const prepared = yield* commands.inspect(operation, shell, "sh", [
+        "-c",
+        PREPARE_CACHE_SCRIPT,
+        "sh",
+        CONTAINER_RUNTIME,
+        image,
+        volume,
+        mount,
+        path,
+      ]);
+      if (prepared.exitCode !== 0) {
+        const message = `Can't prepare shared cache volume ${volume}: ${prepared.stderr.trim() || `exit code ${prepared.exitCode}`}`;
+        yield* Effect.logWarning(message, { ...fields, volume, exitCode: prepared.exitCode });
+        return yield* new ExecutorOperationError({
+          operation,
+          message,
+          cause: new Error(prepared.stderr),
+        });
+      }
+      yield* Effect.logInfo("Prepared shared cache volume", { ...fields, volume, path });
     }
-    yield* Effect.logInfo("Prepared shared pnpm store volume", fields);
   });
 
   const remove = Effect.fn("RemoteExecutor.removeContainer")(function* (
@@ -374,7 +388,7 @@ export const containersFor = (commands: RemoteCommands) => {
       }),
     });
     const mounts = [
-      PNPM_STORE_MOUNT,
+      ...SHARED_CACHES.map(({ mount }) => mount),
       ...Option.match(spec.checkout, {
         onNone: () => [],
         onSome: ({ path, parent }) => [
@@ -668,5 +682,5 @@ export const containersFor = (commands: RemoteCommands) => {
     });
   });
 
-  return { start, trackMemory, stopChildren, sweep, remove, mark, marked, prepareStore };
+  return { start, trackMemory, stopChildren, sweep, remove, mark, marked, prepareCaches };
 };

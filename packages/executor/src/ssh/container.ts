@@ -92,20 +92,20 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
   instanceId: InstanceId,
 ) {
   const containers = containersFor(commands);
-  const preparedStores = new WeakSet<SshMachine>();
-  const storeLocks = yield* keyedLockFor<WorkerName>();
-  const prepareStore = Effect.fn("SshExecutor.preparePnpmStore")(
+  const preparedCaches = new WeakSet<SshMachine>();
+  const cacheLocks = yield* keyedLockFor<WorkerName>();
+  const prepareCaches = Effect.fn("SshExecutor.prepareSharedCaches")(
     function* (machine: SshMachine, image: ContainerImage) {
       const fields = { worker: machine.address.name, host: machine.shell.destination, image };
       yield* Effect.annotateCurrentSpan(fields);
-      if (preparedStores.has(machine)) {
-        yield* Effect.logDebug("Shared pnpm store already prepared on this machine", fields);
+      if (preparedCaches.has(machine)) {
+        yield* Effect.logDebug("Shared caches already prepared on this machine", fields);
         return;
       }
-      yield* containers.prepareStore("prepare", machine.shell, image, machine.address.name);
-      preparedStores.add(machine);
+      yield* containers.prepareCaches("prepare", machine.shell, image, machine.address.name);
+      preparedCaches.add(machine);
     },
-    (effect, machine) => effect.pipe(storeLocks.withLock(machine.address.name)),
+    (effect, machine) => effect.pipe(cacheLocks.withLock(machine.address.name)),
   );
   const isolations = yield* Ref.make(new Map<WorkerName, AttemptIsolation>());
   // Workers whose earlier containers this process removed. Their containers on a shared machine
@@ -316,13 +316,13 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
         new Error(`user IDs ${hostId} and ${imageId}`),
       );
     yield* containers
-      .prepareStore("preflight", machine.shell, image, worker)
+      .prepareCaches("preflight", machine.shell, image, worker)
       .pipe(
         Effect.mapError((error) =>
-          containerGap(worker, `Can't prepare the shared pnpm store: ${error.message}`, error),
+          containerGap(worker, `Can't prepare the shared caches: ${error.message}`, error),
         ),
       );
-    preparedStores.add(machine);
+    preparedCaches.add(machine);
     const size = yield* commands
       .run("preflight", machine.shell, CONTAINER_RUNTIME, [
         "run",
@@ -360,12 +360,12 @@ export const sshContainersFor = Effect.fn("SshExecutor.containersFor")(function*
   const isolationOf = Effect.fn("SshExecutor.isolation")(function* (machine: SshMachine) {
     const recorded = (yield* Ref.get(isolations)).get(machine.address.name);
     if (recorded !== undefined) {
-      if (recorded._tag === "Container") yield* prepareStore(machine, recorded.settings.image);
+      if (recorded._tag === "Container") yield* prepareCaches(machine, recorded.settings.image);
       return recorded;
     }
     const version = yield* detect(machine);
     if (Option.isNone(version)) return yield* recordSharedUser(machine);
-    yield* prepareStore(machine, imageFor(machine));
+    yield* prepareCaches(machine, imageFor(machine));
     const { settings } = yield* recordContainer(machine, version.value, 1);
     return { _tag: "Container", settings } satisfies AttemptIsolation;
   });
