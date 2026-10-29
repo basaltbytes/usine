@@ -351,11 +351,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         ]),
       );
 
-    /**
-     * Stops the children in `attempt`'s checkout at `worktree`, salvages it with a new
-     * credential, records the salvage through `record`, and removes the checkout once its work is
-     * pushed. See `recoverWorktree`.
-     */
+    /** Stops children, salvages with a fresh credential, and removes the preserved checkout. */
     const reconcileCheckout = Effect.fn(span("reconcileCheckout"))(function* <E, A>(
       attempt: AttemptRecovery,
       machine: M,
@@ -434,6 +430,43 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       );
     });
 
+    const recoveryComments =
+      (attempt: AttemptRecovery, machine: M, worktree: string): PostedCommentsHarvest =>
+      (spec, windows) =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const grant = yield* worker.grantFor(attempt.repository);
+            const access = yield* grant.acquire(
+              attempt.attemptId,
+              attempt.worker,
+              attempt.permissions,
+              machine,
+              "cleanup",
+            );
+            const checkout = yield* checkoutHostFor(
+              "cleanup",
+              yield* Effect.scope,
+              machine,
+              attempt,
+              worktree,
+              access,
+              yield* isolationOfCheckout(
+                "cleanup",
+                machine,
+                attempt.attemptId,
+                worktree,
+                yield* worker.isolation(machine),
+              ),
+              [],
+            );
+            return yield* harvestPostedComments(
+              spec,
+              harvestCommand("cleanup", worktree, access, yield* checkout.shell),
+              windows,
+            );
+          }),
+        );
+
     const recover = Effect.fn(span("recover"))(function* <E, A>(
       attempt: AttemptRecovery,
       record: RecoverySink<E>,
@@ -459,41 +492,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       yield* session.recoverPostedComments(
         attempt,
         present
-          ? Option.some<PostedCommentsHarvest>((spec, windows) =>
-              Effect.scoped(
-                Effect.gen(function* () {
-                  const grant = yield* worker.grantFor(attempt.repository);
-                  const access = yield* grant.acquire(
-                    attempt.attemptId,
-                    attempt.worker,
-                    attempt.permissions,
-                    machine,
-                    "cleanup",
-                  );
-                  const checkout = yield* checkoutHostFor(
-                    "cleanup",
-                    yield* Effect.scope,
-                    machine,
-                    attempt,
-                    worktree,
-                    access,
-                    yield* isolationOfCheckout(
-                      "cleanup",
-                      machine,
-                      attempt.attemptId,
-                      worktree,
-                      yield* worker.isolation(machine),
-                    ),
-                    [],
-                  );
-                  return yield* harvestPostedComments(
-                    spec,
-                    harvestCommand("cleanup", worktree, access, yield* checkout.shell),
-                    windows,
-                  );
-                }),
-              ),
-            )
+          ? Option.some<PostedCommentsHarvest>(recoveryComments(attempt, machine, worktree))
           : Option.none(),
         record,
       );
@@ -501,10 +500,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       yield* reconcileCheckout(attempt, machine, worktree, record.salvage, commitAuthor);
     }, Effect.scoped);
 
-    /**
-     * Reconciles the checkout at `worktree` on `machine` that the launch of `request` kept while
-     * its parent task's stop was unconfirmed. Does nothing if the checkout is gone.
-     */
+    /** Reconciles a kept checkout after its parent stops; skips a missing checkout. */
     const reconcileKept = Effect.fn(span("reconcileKept"))(function* (
       request: CheckoutRequest,
       machine: M,
@@ -885,7 +881,15 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
               layout: { cache, staging, worktree },
               ops,
             }),
-          onSome: (spec) => reattachWorktree({ request, host, layout: { worktree }, ops, spec }),
+          onSome: (spec) =>
+            reattachWorktree({
+              request,
+              host,
+              layout: { worktree },
+              ops,
+              spec,
+              confirmStop: session.stopForRecovery(keptCheckoutRecovery(request)),
+            }),
         });
         const { provisioned } = yield* Effect.acquireRelease(
           Effect.uninterruptibleMask((restore) =>
@@ -972,6 +976,12 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
                     harvestCommand("launch", prepared.worktree, access, shell),
                     windows,
                   ),
+                harvestKeptComments: (windows) =>
+                  recoveryComments(
+                    keptCheckoutRecovery(request),
+                    machine,
+                    worktree,
+                  )(prepared.spec, windows),
                 keepForReattach: provisioned.keepForReattach,
                 keepUntilStopped: provisioned.keepUntilStopped,
                 reconcileKept: (record) => reconcileKept(request, machine, worktree, record),

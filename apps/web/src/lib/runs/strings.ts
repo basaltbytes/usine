@@ -92,6 +92,7 @@ export const runStateLine = (
 
 export const failureReason = (failure: FailureView): string =>
   Match.valueTags(failure, {
+    GitHubPushFailure: () => "GitHub refused push",
     InfraFailure: () => "Infrastructure failure",
     DefectFailure: () => "Executor defect",
     AgentFailure: () => "Agent failure",
@@ -119,6 +120,7 @@ export const runActionProgress = {
 
 export const failureMessage = (failure: FailureView): string =>
   Match.valueTags(failure, {
+    GitHubPushFailure: ({ message }) => message,
     InfraFailure: ({ message }) => message,
     DefectFailure: ({ message }) => message,
     AgentFailure: ({ message }) => message,

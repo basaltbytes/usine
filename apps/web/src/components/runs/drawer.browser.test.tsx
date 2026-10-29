@@ -9,11 +9,13 @@ import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
 import { ItemKey, ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
+import { SalvageRetained } from "@usine/core/attempt/salvage";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { WorkerName } from "@usine/core/worker";
 import {
   AgentFailureView,
+  GitHubPushFailureView,
   ApprovalNeed,
   AttemptView,
   BoardItemLink,
@@ -27,7 +29,7 @@ import {
   RunView,
   LocalWorkerAccess,
 } from "@usine/orchestrator/operator";
-import { Schema } from "effect";
+import { Option, Schema } from "effect";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { expect, it } from "vitest";
@@ -449,6 +451,93 @@ it("shares a direct-link drawer's transcript with the run page and merges earlie
     await expect
       .element(page.getByText("Transcript message 5", { exact: true }))
       .toBeInTheDocument();
+  } finally {
+    flushSync(() => root.unmount());
+    queryClient.clear();
+    host.remove();
+  }
+});
+
+it("shows the push refusal on the run page and in Needs attention alongside retained salvage", async () => {
+  const message =
+    "GitHub refused the push to resolution/project at refs/heads/usine/salvage/resolution-run/1 (HTTP 403). The token is a single-repository installation token. GitHub's message: Permission to resolution/project.git denied to usine-test[bot].";
+  const pushFailure = new GitHubPushFailureView({ message });
+  const retained = new SalvageRetained({
+    path: "/worker/checkout",
+    commit: Option.none(),
+    message,
+  });
+  const failedRun = new RunView({
+    ...run,
+    attempts: run.attempts.map(
+      (attempt) =>
+        new AttemptView({
+          ...attempt,
+          outcome: new FailedAttemptView({ failure: pushFailure }),
+          salvage: retained,
+        }),
+    ),
+  });
+  const overview = new ReadyOverview({
+    projects: [
+      new ProjectView({
+        repository,
+        status: "needs-you",
+        runs: [failedRun],
+        board: new BoardView({ lanes: [], failures: [] }),
+        labels: [],
+        preflightFindings: [],
+      }),
+    ],
+    loops: [],
+    needsYou: [
+      new RunFailureNeed({ id: "push-refused", repository, runId, loop, failure: pushFailure }),
+    ],
+  });
+  const detail = new RunDetailView({
+    agentDefinitionChanged: false,
+    run: failedRun,
+    eventDedupKey: "event",
+    eventPayload: {},
+    transcript: [],
+    sessionState: [],
+    earlierTranscript: [],
+  });
+  const overviewJson = JSON.stringify(Schema.encodeSync(FactoryOverview)(overview));
+  const detailJson = JSON.stringify(Schema.encodeSync(RunDetailView)(detail));
+  await commands.failureResolutionResponses(
+    overviewJson,
+    overviewJson,
+    detailJson,
+    detailJson,
+    attemptId,
+  );
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const router = createRouter({
+    routeTree,
+    context: { queryClient },
+    history: createMemoryHistory({ initialEntries: [`/projects/${repository}/runs/${runId}`] }),
+  });
+  await router.load();
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    flushSync(() =>
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>,
+      ),
+    );
+    const needs = page.getByRole("region", { name: "Needs attention" });
+    await expect
+      .element(needs.getByRole("button", { name: /implement: github refused push/ }))
+      .toBeVisible();
+    await expect.element(needs.getByText(message, { exact: true })).toBeVisible();
+    await expect.element(page.getByText("GitHub refused push", { exact: true })).toBeVisible();
+    await expect.element(page.getByText(message, { exact: true }).last()).toBeVisible();
+    await expect.element(page.getByText("/worker/checkout", { exact: true })).toBeVisible();
   } finally {
     flushSync(() => root.unmount());
     queryClient.clear();

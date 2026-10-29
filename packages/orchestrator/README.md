@@ -32,6 +32,8 @@ A malformed item projection is quarantined and reported on the board and the nee
 
 ### Run detail
 
+A `GitHubPushFailureView` shows a refused push in the run's attempt outcome and Needs attention. Its message includes the repository, refused ref, GitHub's diagnostic, and the single-repository installation token scope. The attempt's salvage still identifies the retained checkout.
+
 `Operator.detail` takes distinct cold, live-tail, and earlier-page requests. A cold read keeps the newest 500 rows per attempt, with an earlier cursor per truncated attempt for paging back. A live tail returns at most 500 rows across the run and advances its cursor from the last row. Each response also has:
 
 - the newest attempt's worker;
@@ -61,6 +63,8 @@ Cycle exhaustion is a `CycleBudgetNeed` in the overview and marks the card as ne
 Each poll cycle closes the ask of an item that is closed, merged, or gone from GitHub with the reason `ItemClosed`, without a reset, so the ask leaves the overview and the item keeps its budget. A failed run on such an item stays in `ProjectView.runs` with `canResolveFailure`, but the overview lists no `RunFailureNeed` for it, and it doesn't count toward `ProjectView.status`, the card's `needsYou`, or the run the card shows (`BoardTaskView.run`). `RunDetailView.settledItemState` gives the item's state. A waiting run on a closed item is revoked when its loop's `if:` stops matching, as with a label change. The overview lists no `ApprovalNeed` or `RunFailureNeed` for a run in a repository that `usine.yaml` no longer lists, which has no `ProjectView`.
 
 `Operator.runAgain(instance, runId, edit)` opens a new run for a succeeded or canceled run's item state, with the edit's task and roster agent and the loaded loop's step, approval, and cycle limit, as the `operator` login. It returns `Claimed` or `CycleBlocked` with the ask, and fails with `LoopNotFoundError` if the loop isn't loaded. API: `POST /api/runs/:runId/run-again` with `{ "task": "...", "agent": "..." }`. `RunView.canRunAgain` says when it applies; `RunView.runAgain` names the original run.
+
+The overview and run detail show a waiting-for-stop reason when an unconfirmed parent stop blocks the item, including a stop from another loop.
 
 `Operator.resolveFailure(instance, runId, attemptId)` clears attention for the current failed attempt, at `POST /api/runs/:runId/resolve-failure` with `{ "attemptId": "..." }`. The resolution records its time and the instance's configured operator login. The failure stays in history with retry available; Needs attention, project status, and board attention reflect it, and a later failure asks again. For a question (`QuestionFailureView`) or blocker (`BlockedFailureView`), it lifts the loop's suppression of the item and gives the newest queued event its turn.
 

@@ -545,12 +545,10 @@ const makeDesk = Effect.gen(function* () {
       (left, right) =>
         right.openedAt.localeCompare(left.openedAt) || right.id.localeCompare(left.id),
     );
-    /** Returns the unconfirmed stop on `loop` and `itemKey`, if the desk read its Run. */
-    const stopOn = (loop: LoopName, itemKey: ItemKey): Option.Option<UnconfirmedStopView> =>
+    /** Returns the unconfirmed stop on `itemKey`, if the desk read its Run. */
+    const stopOn = (itemKey: ItemKey): Option.Option<UnconfirmedStopView> =>
       Option.flatMap(
-        Option.fromNullishOr(
-          unconfirmedStops.find((stop) => stop.loop === loop && stop.itemKey === itemKey),
-        ),
+        Option.fromNullishOr(unconfirmedStops.find((stop) => stop.itemKey === itemKey)),
         (stop) =>
           Option.map(
             Option.fromNullishOr(
@@ -580,7 +578,7 @@ const makeDesk = Effect.gen(function* () {
         ask: Option.fromNullishOr(asks.find(({ itemKey }) => itemKey === item.itemKey)),
         ahead,
         creating,
-        stop: stopOn(loop.name, item.itemKey),
+        stop: stopOn(item.itemKey),
       });
       if (Option.isNone(reason)) continue;
       yield* Effect.logDebug("Matched Item is not moving", {

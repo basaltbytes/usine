@@ -24,6 +24,7 @@ import {
   FailedAttemptView,
   type FailureView,
   InfraFailureView,
+  GitHubPushFailureView,
   LocalWorkerAccess,
   QuestionFailureView,
   RunawayFailureView,
@@ -49,6 +50,7 @@ const TAIL_TRANSCRIPT_LIMIT = 500;
 
 export const failureView = (failure: AttemptFailure): FailureView =>
   Match.valueTags(failure, {
+    GitHubPushFailure: ({ message }) => new GitHubPushFailureView({ message }),
     InfraFailure: ({ message }) => new InfraFailureView({ message }),
     DefectFailure: ({ message }) => new DefectFailureView({ message }),
     AgentFailure: ({ message }) => new AgentFailureView({ message }),

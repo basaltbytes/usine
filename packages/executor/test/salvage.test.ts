@@ -2,7 +2,7 @@ import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { AttemptId } from "@usine/core/attempt";
 import { SalvageRef, SalvageRejected } from "@usine/core/attempt/salvage";
-import { CommitSha } from "@usine/core/repository";
+import { CommitSha, RepositoryName } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
 import { Cause, Effect, Fiber, FileSystem, Option } from "effect";
 import { TestClock } from "effect/testing";
@@ -100,6 +100,7 @@ const salvage = (script: Scripted, rejected = Option.none<SalvageRejected>()) =>
   const { git, calls } = fakeGit(script);
   return salvageWorktree({
     attemptId: AttemptId.make("run/execute/1"),
+    repository: RepositoryName.make("acme/demo"),
     worker: WorkerName.make("local"),
     host: "local",
     worktree: WORKTREE,
@@ -217,6 +218,7 @@ describe("salvageWorktree", () => {
       // The exit code alone can't distinguish a deleted remote from a revoked App.
       assert.include(result.value.message, "git exited with code 128");
       assert.include(result.value.message, "remote: Repository not found.");
+      assert(Option.isNone(result.value.pushFailure));
     }),
   );
 
@@ -341,6 +343,7 @@ const gitCheckout = Effect.gen(function* () {
       .pipe(Effect.andThen(fileSystem.truncate(`${worktree}/${file}`, 100 * 1024 * 1024 + 1)));
   const salvage = salvageWorktree({
     attemptId: AttemptId.make("run/execute/1"),
+    repository: RepositoryName.make("acme/demo"),
     worker: WorkerName.make("local"),
     host: "local",
     worktree,

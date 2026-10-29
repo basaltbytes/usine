@@ -31,6 +31,7 @@ const decodeResult = Schema.decodeUnknownOption(
 
 const failureMessage = (failure: AttemptFailure): string =>
   Match.valueTags(failure, {
+    GitHubPushFailure: ({ message }) => message,
     InfraFailure: ({ message }) => message,
     DefectFailure: ({ message }) => message,
     AgentFailure: ({ message }) => message,
