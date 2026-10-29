@@ -101,7 +101,9 @@ pnpm --filter @usine/core --filter @usine/gateway pack
 ./gateway.sh install -i ~/.ssh/usine_worker ./usine-core-0.3.0.tgz ./usine-gateway-0.0.0.tgz
 ```
 
-Run `install` again to upgrade.
+Run `install` again to upgrade. Each `install` builds a new tree, moves it to `/opt/usine-gateway`, and keeps the one before in `/opt/usine-gateway.previous`.
+
+Gateways created before the new-tree install keep their packages and fail with `ERESOLVE` when a release needs another `effect`. Copy the `usine-gateway-install` script from `gateway-cloud-init.yaml` to `/usr/local/sbin/usine-gateway-install` on the gateway, as root, then run `install` again.
 
 At first boot, the VM writes its admin token and caller key to `/etc/usine-gateway/secrets.env`, readable by root and the `usine-gateway` group. The service reads `settings.env` and `secrets.env`, listed in its unit's `USINE_GATEWAY_ENVIRONMENT_FILES`, at startup and each reload. To give the gateway the operator's subscription logins, see [Give the gateway the subscription logins](#give-the-gateway-the-subscription-logins). To use API keys instead, add them to `secrets.env` and reload:
 
