@@ -416,6 +416,7 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
     Effect.sync(() => {
       if (Option.isSome(hub.channel)) return false;
       hub.channel = Option.some({ io, progress: progressOf(loaded) });
+      Deferred.doneUnsafe(hub.attached, Effect.succeed(request));
       return true;
     }),
     (attachedHere) =>
@@ -459,7 +460,6 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
     yield* Effect.logInfo("The Attempt's terminal envelope was relayed");
     return settledOf(task);
   }
-  Deferred.doneUnsafe(hub.attached, Effect.succeed(request));
   let session = Option.map(Option.fromNullishOr(loaded.parentModel), (model) =>
     parentSession(spec, ModelId.make(model)),
   );

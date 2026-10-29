@@ -472,15 +472,13 @@ describe("durable AttemptRuntime", () => {
         const request = attemptRequest(`outbox/terminal/${boundary}`);
         const recording = recordingSink();
         const deliveries: Array<AttemptChannel.OutboundEnvelope> = [];
-        let stopped = false;
         const sink: AttemptChannel.Sink = {
           ...recording.sink,
           append: (direction, envelope) =>
             Effect.gen(function* () {
               if (envelope._tag === "OutboundEnvelope" && envelope.payload._tag === "Final") {
                 deliveries.push(envelope);
-                if (!stopped) {
-                  stopped = true;
+                if (deliveries.length <= 2) {
                   if (boundary === "after") yield* recording.sink.append(direction, envelope);
                   return yield* new InfraFailure({
                     message: "The orchestrator stopped",
@@ -505,7 +503,25 @@ describe("durable AttemptRuntime", () => {
             const services = yield* Layer.build(layer({ database, parent: [] }));
             const runtime = Context.get(services, AttemptRuntime);
             assert.isTrue(yield* runtime.isLive(request.spec.attemptId));
+            const attached = yield* Effect.forkChild(runtime.attached(request.spec.attemptId), {
+              startImmediately: true,
+            });
+            const failure = yield* runtime.execute(request, sink).pipe(Effect.flip);
+            assert.strictEqual(failure._tag, "InfraFailure");
+            yield* Fiber.join(attached).pipe(Effect.timeout("1 second"));
+            assert.isTrue(yield* runtime.isLive(request.spec.attemptId));
+            assert.isTrue(Option.isNone(yield* runtime.finished(request.spec.attemptId)));
+          }),
+        );
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const services = yield* Layer.build(layer({ database, parent: [] }));
+            const runtime = Context.get(services, AttemptRuntime);
+            const attached = yield* Effect.forkChild(runtime.attached(request.spec.attemptId), {
+              startImmediately: true,
+            });
             assert.strictEqual((yield* runtime.execute(request, sink)).message, "Finished");
+            yield* Fiber.join(attached).pipe(Effect.timeout("1 second"));
             assert.isFalse(yield* runtime.isLive(request.spec.attemptId));
             assert.isTrue(Option.isSome(yield* runtime.finished(request.spec.attemptId)));
             const record = yield* Context.get(services, DurableHarness).use(
@@ -516,8 +532,9 @@ describe("durable AttemptRuntime", () => {
             assert.deepStrictEqual(record?.pendingOutbound, []);
           }),
         );
-        assert.strictEqual(deliveries.length, 2);
+        assert.strictEqual(deliveries.length, 3);
         assert.deepStrictEqual(deliveries[1], deliveries[0]);
+        assert.deepStrictEqual(deliveries[2], deliveries[0]);
         assertAdmitted(request.spec.attemptId, recording.outbound());
       }).pipe(Effect.scoped),
     );
