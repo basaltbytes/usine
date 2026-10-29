@@ -122,7 +122,7 @@ The secrets file is JSON with two keys, and must be a regular file with mode `06
 
 ### Reload
 
-Committed revisions apply automatically. To re-read the store explicitly, send `SIGHUP`, select **Reload configuration** on any **Configuration** page, or send `POST /api/instance/reload`; the page and response list what changed. None of these actions imports edited files. Use `usine config import` to commit file changes.
+Committed revisions apply automatically. To re-read the store explicitly, send `SIGHUP`. This does not import edited files. The web UI edits stored entities and shows revision history directly. Use `usine config import` to commit file changes.
 
 New runs, the next poll and schedule tick, and the next attempt use the new configuration. An open run keeps the agent, task, and parent model that it opened with, including on retries, and so does an event that waits behind a running run. An accepted reload starts the next poll immediately, or when a wait that GitHub requested ends, if that is later. If the set of loops that apply to a repository changes (a loop is added or removed, or its `on` or `if:` changes), that poll reads the repository's items from the start. It logs `Stored configuration applied; new runs use the new configuration` with the changes, or `Configuration revision could not be applied; the running configuration is unchanged` with the reason, and keeps running.
 

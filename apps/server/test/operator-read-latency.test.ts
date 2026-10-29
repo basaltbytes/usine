@@ -224,7 +224,7 @@ describe("operator read latency", () => {
           Layer.mock(OperatorConfiguration)({}),
         );
         const backend = liveBackendLayer(
-          { get: Effect.succeed(instance), reload: Effect.die("unused") },
+          { get: Effect.succeed(instance) },
           operator,
           configuration,
         );

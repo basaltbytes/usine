@@ -1,3 +1,4 @@
+import { addRepository } from "~/features/configuration/strings";
 import type { ConfigurationView } from "@usine/orchestrator/operator";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "~/components/ui/table";
 import { RepositoryRow } from "~/features/configuration/components/repositories/row";
@@ -10,13 +11,11 @@ type RepositoriesListProps = {
 export const RepositoriesList = ({ configuration }: RepositoriesListProps) => (
   <ConfigurationPage
     title="Repositories"
+    createKind="repository"
     counts={`${configuration.repositories.length} ${configuration.repositories.length === 1 ? "repository" : "repositories"}`}
   >
     {configuration.repositories.length === 0 ? (
-      <Missing title="No repositories registered">
-        Add each repository under <code>repos</code> in <code>usine.yaml</code>, then reload the
-        configuration.
-      </Missing>
+      <Missing title="No repositories registered">{addRepository}</Missing>
     ) : (
       <div className="@container -mx-2">
         <Table>

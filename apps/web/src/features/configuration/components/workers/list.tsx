@@ -10,7 +10,11 @@ type WorkersListProps = { readonly configuration: ConfigurationView };
 export const WorkersList = ({ configuration }: WorkersListProps) => {
   const running = configuration.workers.some(({ slots }) => slots !== null);
   return (
-    <ConfigurationPage title="Workers" counts={plural(configuration.workers.length, "worker")}>
+    <ConfigurationPage
+      title="Workers"
+      createKind="worker"
+      counts={plural(configuration.workers.length, "worker")}
+    >
       {!running && (
         <p className="text-muted-foreground">No attempts run until the GitHub App is set up.</p>
       )}

@@ -61,6 +61,7 @@ const unprovisioned = { provisioner: null, machines: [], provisioning: null };
  * failed creation, a Boat Worker, and two repositories. Machine times are relative to the load.
  */
 export const configurationJson = {
+  labels: [{ name: "ready", color: "0e8a16", description: "Ready for work" }],
   loops: [
     {
       name: "start-dev",

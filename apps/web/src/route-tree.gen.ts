@@ -12,9 +12,12 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ConfigurationRouteRouteImport } from './routes/configuration/route'
 import { Route as ConfigurationIndexRouteImport } from './routes/configuration/index'
+import { Route as ConfigurationHistoryRouteImport } from './routes/configuration/history'
 import { Route as ConfigurationSettingsRouteImport } from './routes/configuration/settings'
 import { Route as ConfigurationAgentsIndexRouteImport } from './routes/configuration/agents/index'
 import { Route as ConfigurationAgentsAgentRouteImport } from './routes/configuration/agents/$agent'
+import { Route as ConfigurationLabelsIndexRouteImport } from './routes/configuration/labels/index'
+import { Route as ConfigurationLabelsLabelRouteImport } from './routes/configuration/labels/$label'
 import { Route as ConfigurationLoopsIndexRouteImport } from './routes/configuration/loops/index'
 import { Route as ConfigurationLoopsLoopRouteImport } from './routes/configuration/loops/$loop'
 import { Route as ConfigurationRepositoriesIndexRouteImport } from './routes/configuration/repositories/index'
@@ -42,6 +45,11 @@ const ConfigurationIndexRoute = ConfigurationIndexRouteImport.update({
   path: '/',
   getParentRoute: () => ConfigurationRouteRoute,
 } as any)
+const ConfigurationHistoryRoute = ConfigurationHistoryRouteImport.update({
+  id: '/history',
+  path: '/history',
+  getParentRoute: () => ConfigurationRouteRoute,
+} as any)
 const ConfigurationSettingsRoute = ConfigurationSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -57,6 +65,18 @@ const ConfigurationAgentsAgentRoute =
   ConfigurationAgentsAgentRouteImport.update({
     id: '/agents/$agent',
     path: '/agents/$agent',
+    getParentRoute: () => ConfigurationRouteRoute,
+  } as any)
+const ConfigurationLabelsIndexRoute =
+  ConfigurationLabelsIndexRouteImport.update({
+    id: '/labels/',
+    path: '/labels/',
+    getParentRoute: () => ConfigurationRouteRoute,
+  } as any)
+const ConfigurationLabelsLabelRoute =
+  ConfigurationLabelsLabelRouteImport.update({
+    id: '/labels/$label',
+    path: '/labels/$label',
     getParentRoute: () => ConfigurationRouteRoute,
   } as any)
 const ConfigurationLoopsIndexRoute = ConfigurationLoopsIndexRouteImport.update({
@@ -125,13 +145,16 @@ const ProjectsOwnerNameTasksNumberRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/configuration': typeof ConfigurationRouteRouteWithChildren
+  '/configuration/history': typeof ConfigurationHistoryRoute
   '/configuration/settings': typeof ConfigurationSettingsRoute
   '/configuration/': typeof ConfigurationIndexRoute
   '/configuration/agents/$agent': typeof ConfigurationAgentsAgentRoute
+  '/configuration/labels/$label': typeof ConfigurationLabelsLabelRoute
   '/configuration/loops/$loop': typeof ConfigurationLoopsLoopRoute
   '/configuration/workers/$worker': typeof ConfigurationWorkersWorkerRoute
   '/projects/$owner/$name': typeof ProjectsOwnerNameRouteWithChildren
   '/configuration/agents/': typeof ConfigurationAgentsIndexRoute
+  '/configuration/labels/': typeof ConfigurationLabelsIndexRoute
   '/configuration/loops/': typeof ConfigurationLoopsIndexRoute
   '/configuration/repositories/': typeof ConfigurationRepositoriesIndexRoute
   '/configuration/workers/': typeof ConfigurationWorkersIndexRoute
@@ -143,12 +166,15 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/configuration/history': typeof ConfigurationHistoryRoute
   '/configuration/settings': typeof ConfigurationSettingsRoute
   '/configuration': typeof ConfigurationIndexRoute
   '/configuration/agents/$agent': typeof ConfigurationAgentsAgentRoute
+  '/configuration/labels/$label': typeof ConfigurationLabelsLabelRoute
   '/configuration/loops/$loop': typeof ConfigurationLoopsLoopRoute
   '/configuration/workers/$worker': typeof ConfigurationWorkersWorkerRoute
   '/configuration/agents': typeof ConfigurationAgentsIndexRoute
+  '/configuration/labels': typeof ConfigurationLabelsIndexRoute
   '/configuration/loops': typeof ConfigurationLoopsIndexRoute
   '/configuration/repositories': typeof ConfigurationRepositoriesIndexRoute
   '/configuration/workers': typeof ConfigurationWorkersIndexRoute
@@ -162,13 +188,16 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/configuration': typeof ConfigurationRouteRouteWithChildren
+  '/configuration/history': typeof ConfigurationHistoryRoute
   '/configuration/settings': typeof ConfigurationSettingsRoute
   '/configuration/': typeof ConfigurationIndexRoute
   '/configuration/agents/$agent': typeof ConfigurationAgentsAgentRoute
+  '/configuration/labels/$label': typeof ConfigurationLabelsLabelRoute
   '/configuration/loops/$loop': typeof ConfigurationLoopsLoopRoute
   '/configuration/workers/$worker': typeof ConfigurationWorkersWorkerRoute
   '/projects/$owner/$name': typeof ProjectsOwnerNameRouteWithChildren
   '/configuration/agents/': typeof ConfigurationAgentsIndexRoute
+  '/configuration/labels/': typeof ConfigurationLabelsIndexRoute
   '/configuration/loops/': typeof ConfigurationLoopsIndexRoute
   '/configuration/repositories/': typeof ConfigurationRepositoriesIndexRoute
   '/configuration/workers/': typeof ConfigurationWorkersIndexRoute
@@ -183,13 +212,16 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/configuration'
+    | '/configuration/history'
     | '/configuration/settings'
     | '/configuration/'
     | '/configuration/agents/$agent'
+    | '/configuration/labels/$label'
     | '/configuration/loops/$loop'
     | '/configuration/workers/$worker'
     | '/projects/$owner/$name'
     | '/configuration/agents/'
+    | '/configuration/labels/'
     | '/configuration/loops/'
     | '/configuration/repositories/'
     | '/configuration/workers/'
@@ -201,12 +233,15 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/configuration/history'
     | '/configuration/settings'
     | '/configuration'
     | '/configuration/agents/$agent'
+    | '/configuration/labels/$label'
     | '/configuration/loops/$loop'
     | '/configuration/workers/$worker'
     | '/configuration/agents'
+    | '/configuration/labels'
     | '/configuration/loops'
     | '/configuration/repositories'
     | '/configuration/workers'
@@ -219,13 +254,16 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/configuration'
+    | '/configuration/history'
     | '/configuration/settings'
     | '/configuration/'
     | '/configuration/agents/$agent'
+    | '/configuration/labels/$label'
     | '/configuration/loops/$loop'
     | '/configuration/workers/$worker'
     | '/projects/$owner/$name'
     | '/configuration/agents/'
+    | '/configuration/labels/'
     | '/configuration/loops/'
     | '/configuration/repositories/'
     | '/configuration/workers/'
@@ -265,6 +303,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ConfigurationIndexRouteImport
       parentRoute: typeof ConfigurationRouteRoute
     }
+    '/configuration/history': {
+      id: '/configuration/history'
+      path: '/history'
+      fullPath: '/configuration/history'
+      preLoaderRoute: typeof ConfigurationHistoryRouteImport
+      parentRoute: typeof ConfigurationRouteRoute
+    }
     '/configuration/settings': {
       id: '/configuration/settings'
       path: '/settings'
@@ -284,6 +329,20 @@ declare module '@tanstack/react-router' {
       path: '/agents/$agent'
       fullPath: '/configuration/agents/$agent'
       preLoaderRoute: typeof ConfigurationAgentsAgentRouteImport
+      parentRoute: typeof ConfigurationRouteRoute
+    }
+    '/configuration/labels/': {
+      id: '/configuration/labels/'
+      path: '/labels'
+      fullPath: '/configuration/labels/'
+      preLoaderRoute: typeof ConfigurationLabelsIndexRouteImport
+      parentRoute: typeof ConfigurationRouteRoute
+    }
+    '/configuration/labels/$label': {
+      id: '/configuration/labels/$label'
+      path: '/labels/$label'
+      fullPath: '/configuration/labels/$label'
+      preLoaderRoute: typeof ConfigurationLabelsLabelRouteImport
       parentRoute: typeof ConfigurationRouteRoute
     }
     '/configuration/loops/': {
@@ -367,12 +426,15 @@ declare module '@tanstack/react-router' {
 }
 
 interface ConfigurationRouteRouteChildren {
+  ConfigurationHistoryRoute: typeof ConfigurationHistoryRoute
   ConfigurationSettingsRoute: typeof ConfigurationSettingsRoute
   ConfigurationIndexRoute: typeof ConfigurationIndexRoute
   ConfigurationAgentsAgentRoute: typeof ConfigurationAgentsAgentRoute
+  ConfigurationLabelsLabelRoute: typeof ConfigurationLabelsLabelRoute
   ConfigurationLoopsLoopRoute: typeof ConfigurationLoopsLoopRoute
   ConfigurationWorkersWorkerRoute: typeof ConfigurationWorkersWorkerRoute
   ConfigurationAgentsIndexRoute: typeof ConfigurationAgentsIndexRoute
+  ConfigurationLabelsIndexRoute: typeof ConfigurationLabelsIndexRoute
   ConfigurationLoopsIndexRoute: typeof ConfigurationLoopsIndexRoute
   ConfigurationRepositoriesIndexRoute: typeof ConfigurationRepositoriesIndexRoute
   ConfigurationWorkersIndexRoute: typeof ConfigurationWorkersIndexRoute
@@ -380,12 +442,15 @@ interface ConfigurationRouteRouteChildren {
 }
 
 const ConfigurationRouteRouteChildren: ConfigurationRouteRouteChildren = {
+  ConfigurationHistoryRoute: ConfigurationHistoryRoute,
   ConfigurationSettingsRoute: ConfigurationSettingsRoute,
   ConfigurationIndexRoute: ConfigurationIndexRoute,
   ConfigurationAgentsAgentRoute: ConfigurationAgentsAgentRoute,
+  ConfigurationLabelsLabelRoute: ConfigurationLabelsLabelRoute,
   ConfigurationLoopsLoopRoute: ConfigurationLoopsLoopRoute,
   ConfigurationWorkersWorkerRoute: ConfigurationWorkersWorkerRoute,
   ConfigurationAgentsIndexRoute: ConfigurationAgentsIndexRoute,
+  ConfigurationLabelsIndexRoute: ConfigurationLabelsIndexRoute,
   ConfigurationLoopsIndexRoute: ConfigurationLoopsIndexRoute,
   ConfigurationRepositoriesIndexRoute: ConfigurationRepositoriesIndexRoute,
   ConfigurationWorkersIndexRoute: ConfigurationWorkersIndexRoute,

@@ -40,7 +40,7 @@ The first screen, at `/`:
 - **Recent runs**: the last 10 closed runs, with outcome and the pull request the run opened, unless it names the task.
 - One line with each worker's slots in use and last preflight. A provisioned worker adds the count of its machines, if any, and while machine creation is paused, the failure and the next try in red, such as `Machine creation failed: quota reached. Next try at 19:46`.
 
-A row about a run opens its run page. Empty blocks say what they would list, and loading blocks show skeleton rows. With no project registered, the overview points to `repos` in `usine.yaml` and offers **Reload configuration**.
+A row about a run opens its run page. Empty blocks say what they would list, and loading blocks show skeleton rows. With no project registered, the overview links to **Configuration > Repositories**.
 
 The Overview's run statistics show the median failure-to-answer time, with separate retry and resolution medians. The first recorded answer counts once, including when a resolved failure is later retried.
 
@@ -60,7 +60,7 @@ The lane heading shows the name, card count, and the labels (in GitHub colors) a
 
 Between two adjacent authored label-backed lanes, an arrow at the end of the left lane's heading points to the next lane and names the loops whose trigger currently matches one of its tasks, open run or not, with `paused` after paused ones. It's blue if one has a queued or running run on the lane's tasks, peach if all their open runs wait for approval, and unlabeled if no loop matches.
 
-Only authored label-backed lanes accept moves, and only if another writable lane exists; proposed, state-only, and unmatched lanes are read-only. A board with proposed lanes explains how to enable moves: configure `repos[].lanes` in `usine.yaml` and reload the configuration.
+Only authored label-backed lanes accept moves, and only if another writable lane exists; proposed, state-only, and unmatched lanes are read-only. A board with proposed lanes explains how to enable moves: edit the repository in **Configuration > Repositories** and add `lanes`.
 
 ### Task cards
 
@@ -205,7 +205,7 @@ A live attempt shows its current activity under the last message, and the reader
 
 ## Configuration
 
-The instance folder as the orchestrator parsed it, read-only, in five full-panel pages: **Loops**, **Agents**, **Workers**, **Repositories**, and **Settings**. List rows open detail pages with the file's long parts beside a rail of short facts (rail first on phones).
+The stored configuration in full-panel pages: **Loops**, **Agents**, **Workers**, **Repositories**, **Labels**, and **Settings**, with instance-wide **History**. List rows open detail pages with the file's long parts beside a rail of short facts (rail first on phones).
 
 - **Loop**: trigger and selector as written, the agent with its brain, the selected repositories, approval, cycle limit, permissions, step, and the prompt as Markdown with each `{{ }}` expression outlined. The database-backed **Pause** or **Resume** control is in the heading and on each list row.
 - **Agent**: the persona and where its parent model and effort come from.
@@ -216,7 +216,13 @@ The instance folder as the orchestrator parsed it, read-only, in five full-panel
 
 A loop or agent file that didn't load comes first in its list; its page shows the parse stage, the message, and how to recover.
 
-**Reload configuration**, in every page heading of the section, reloads the instance folder; the changes, skipped files, or refusal reason stay under the heading until dismissed or until you leave the section. **Pause** and **Resume** are absent in setup mode. Needs-setup mode states that new GitHub App credentials require restarting `usine up`, because the process reads them only at startup.
+Each detail page has **Edit** for the export-format text, with line numbers and an optional revision message. **Save** uses the revision loaded when editing began. Validation errors list every field path below the editor. A concurrent change shows the newer text as a diff; **Reload text** retains the unsaved draft in a separate copyable field. Restart and worker preflight refusals display the server's reason.
+
+**New** on each list starts from a template. New loops start paused. **Delete** confirms the entity name and the loops or projects that reference it before sending the request. Deleting a label removes its declaration, not the label on GitHub.
+
+**History** lists revisions newest first, with the actor, time, and message. Select a revision for an export-format unified diff. **Revert** accepts an optional message and restores all entities changed by that revision; later changes can prevent it. The section-level history links to every changed entity, including deleted ones. **Older revisions** loads the next page.
+
+Committed revisions apply live. There is no reload control. **Pause** and **Resume** are absent in setup mode; new GitHub App credentials still require restarting `usine up`.
 
 ## Intervening in a run
 
@@ -282,7 +288,7 @@ The registry is the component library, and the theme is the only place for color
 - **Keep dependencies in one direction.** Routes compose features; features use shared `components/`, `hooks/`, and `lib/`. Features never import another feature. Put UI rendered by several features in `components/<feature>/`, and shared data or hooks in `lib/` or `hooks/`. Use `~/` for imports outside the current folder and named exports in application code.
 - **Keep components small.** Declare `type <Component>Props` above each component with readonly fields. Extract subcomponents before a component file reaches 300 lines. Vendored `components/ui/` and `components/ai-elements/` keep their upstream structure. Put display text in feature `strings.ts` files, or shared `lib/strings.ts` modules.
 - **Colocate tests.** Put unit and browser tests beside their implementation in `src/`; Vitest discovers `*.test.ts`, `*.test.tsx`, and `*.browser.test.tsx` there. Shared fixtures are in the corresponding `lib/<feature>/` folder; the memory router helper is in `lib/testing/`.
-- **A rebuilt bundle needs no restart.** `@usine/server` reads `index.html` and `assets/*` from `apps/server/dist/web` on every request, so after `pnpm build`, reload the page. GitHub credentials, the `webhooks` and `tracing` blocks of `usine.yaml`, and some `workers` changes are read only at startup; the rest of the instance folder reloads from any configuration page.
+- **A rebuilt bundle needs no restart.** `@usine/server` reads `index.html` and `assets/*` from `apps/server/dist/web` on every request, so after `pnpm build`, reload the page. GitHub credentials, the `webhooks` and `tracing` blocks of `usine.yaml`, and some `workers` changes are read only at startup; other accepted configuration revisions apply live.
 - **Navigation is in `src/components/app-sidebar.tsx`**, built from the `sidebar` registry component. Screens render inside `SidebarInset` under a breadcrumb header; the panel has the viewport's height, and content below the header scrolls inside it.
 - **Give a table's fill column `FillCell`** (`src/components/fill-cell.tsx`) instead of `w-full`. The column takes the remaining width, and its content wraps or is cut short instead of widening the table. Every other column shrinks to its content's narrowest width, so keep that content on one line, or give its cell a minimum width to wrap at.
 - **Pick the page width.** `Page` takes `width="prose"` (default; content stops at 768px) for prose and short lists, or `width="full"` for tables and side-by-side layouts such as the configuration section.

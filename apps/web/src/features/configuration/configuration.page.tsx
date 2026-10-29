@@ -4,17 +4,11 @@ import { ErrorAlert } from "~/components/error-alert";
 import { Page } from "~/components/page";
 import { Button } from "~/components/ui/button";
 import { Skeleton } from "~/components/ui/skeleton";
-import { SectionReloadProvider } from "~/features/configuration/components/reload";
 import { usePauseLoop } from "~/features/configuration/queries";
 import { rejectionMessage } from "~/lib/api";
 import { overviewQuery } from "~/lib/overview";
 
-/** Shares one reload state across all Configuration pages. */
-export const ConfigurationSection = () => (
-  <SectionReloadProvider>
-    <Outlet />
-  </SectionReloadProvider>
-);
+export const ConfigurationSection = () => <Outlet />;
 
 export const ConfigurationPending = () => (
   <Page width="full">

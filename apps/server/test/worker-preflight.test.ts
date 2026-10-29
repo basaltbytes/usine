@@ -150,11 +150,7 @@ it("serves the API and runs on a healthy worker, then restores a failed worker a
       const configuration = yield* OperatorConfiguration.pipe(
         Effect.provide(Layer.mock(OperatorConfiguration)({})),
       );
-      const backend = liveBackendLayer(
-        { get: Effect.succeed(instance), reload: Effect.die("unused") },
-        operator,
-        configuration,
-      );
+      const backend = liveBackendLayer({ get: Effect.succeed(instance) }, operator, configuration);
       const server = HttpRouter.serve(
         apiRoutes(Option.none()).pipe(HttpRouter.provideRequest(backend)),
         { disableLogger: true },

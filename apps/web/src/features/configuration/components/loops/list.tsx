@@ -5,7 +5,7 @@ import { LoopRow } from "~/features/configuration/components/loops/row";
 import { QuarantinedRow } from "~/features/configuration/components/loops/quarantined-row";
 import { ConfigurationPage, Missing } from "~/features/configuration/components/section";
 import { usePauseLoop } from "~/features/configuration/queries";
-import { loopCounts } from "~/features/configuration/strings";
+import { addLoop, loopCounts } from "~/features/configuration/strings";
 
 export type PauseLoop = ReturnType<typeof usePauseLoop>;
 
@@ -16,13 +16,10 @@ type LoopsListProps = {
 
 /** `pause` is `null` if operator actions are unavailable. */
 export const LoopsList = ({ configuration, pause }: LoopsListProps) => (
-  <ConfigurationPage title="Loops" counts={loopCounts(configuration)}>
+  <ConfigurationPage title="Loops" createKind="loop" counts={loopCounts(configuration)}>
     {pause?.isError === true && <ErrorAlert message={pause.error.message} />}
     {configuration.loops.length === 0 && configuration.quarantinedLoops.length === 0 ? (
-      <Missing title="No loops">
-        Add a Markdown file under <code>loops/</code> in the instance folder, then reload the
-        configuration.
-      </Missing>
+      <Missing title="No loops">{addLoop}</Missing>
     ) : (
       <div className="-mx-2">
         <Table>

@@ -1,3 +1,4 @@
+import { entityKey } from "~/features/configuration/lib/entities";
 import { Link, useNavigate } from "@tanstack/react-router";
 import type {
   AgentFileView,
@@ -14,7 +15,7 @@ import {
   TableHeader,
   TableRow,
 } from "~/components/ui/table";
-import { harnessLabel, plural } from "~/features/configuration/strings";
+import { agentCopy, harnessLabel, plural } from "~/features/configuration/strings";
 import { FileError } from "~/features/configuration/components/file-error";
 import {
   ConfigurationPage,
@@ -101,12 +102,9 @@ const InvalidAgentRow = ({ agent }: InvalidAgentRowProps) => {
 type AgentsListProps = { readonly configuration: ConfigurationView };
 
 export const AgentsList = ({ configuration }: AgentsListProps) => (
-  <ConfigurationPage title="Agents" counts={agentCounts(configuration)}>
+  <ConfigurationPage title="Agents" createKind="agent" counts={agentCounts(configuration)}>
     {configuration.agents.length === 0 && configuration.invalidAgents.length === 0 ? (
-      <Missing title="No agents">
-        Add a Markdown file under <code>agents/</code> in the instance folder, then reload the
-        configuration.
-      </Missing>
+      <Missing title="No agents">{agentCopy.add}</Missing>
     ) : (
       <div className="-mx-2">
         <Table>
@@ -161,17 +159,17 @@ const AgentFacts = ({ agent, configuration }: AgentFactsProps) => (
       )}
       <Source>
         {agent.parentModel !== null
-          ? "Set in this file"
+          ? agentCopy.parentOverride
           : configuration.settings.parentModel !== null
             ? "From settings.parent_model"
-            : "Not set in this file or in settings"}
+            : agentCopy.parentModelUnset}
       </Source>
     </Fact>
     <Fact label="Parent effort">
       {agent.resolvedParentEffort}
       <Source>
         {agent.parentEffort !== null
-          ? "Set in this file"
+          ? agentCopy.parentOverride
           : configuration.settings.parentEffort !== null
             ? "From settings.parent_effort"
             : "Same as effort"}
@@ -209,7 +207,7 @@ export const AgentDetail = ({ name, configuration }: AgentDetailProps) => {
   const agent = configuration.agents.find((candidate) => candidate.name === name);
   if (agent !== undefined)
     return (
-      <ConfigurationPage title={agent.name} file={agent.file}>
+      <ConfigurationPage entity={entityKey("agent", name)} title={agent.name} file={agent.file}>
         <DetailColumns facts={<AgentFacts agent={agent} configuration={configuration} />}>
           <DetailSection title="Persona" aside="Sent to the agent with every task">
             <Markdown className="max-w-[72ch] text-md">{agent.persona}</Markdown>
@@ -220,12 +218,17 @@ export const AgentDetail = ({ name, configuration }: AgentDetailProps) => {
   const invalid = configuration.invalidAgents.find((candidate) => candidate.name === name);
   if (invalid !== undefined)
     return (
-      <ConfigurationPage title={invalid.name} marks={<NotLoaded />} file={invalid.file}>
+      <ConfigurationPage
+        entity={entityKey("agent", name)}
+        title={invalid.name}
+        marks={<NotLoaded />}
+        file={invalid.file}
+      >
         <FileError error={invalid.error} consequence="Loops that use this agent are not loaded." />
       </ConfigurationPage>
     );
   return (
-    <ConfigurationPage title={name}>
+    <ConfigurationPage entity={entityKey("agent", name)} title={name}>
       <Missing title="Agent not found">
         The configuration has no file <code>agents/{name}.md</code>.{" "}
         <Link to="/configuration/agents" className="text-primary hover:underline">

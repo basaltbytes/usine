@@ -5,7 +5,7 @@ sidebar:
   order: 2
 ---
 
-An agent is a Markdown file in `agents/`. Its frontmatter sets the harness, model, and effort. Its body is the persona, the agent's standing instructions. Each loop's `agent` is the agent that does its work, and **Edit and retry** can give a failed run to another agent.
+Create an agent in **Configuration > Agents > New**, or import a Markdown file from `agents/`. The export-format frontmatter sets the harness, model, and effort. Its body is the persona, the agent's standing instructions. Each loop's `agent` is the agent that does its work, and **Edit and retry** can give a failed run to another agent.
 
 ## Agent file
 
@@ -71,4 +71,4 @@ codex login --device-auth  # ChatGPT plan: open the URL it prints and enter the 
 
 To check the result, run `claude auth status` and `codex login status`. A worker behind a gateway with `llm_providers: [anthropic]` needs no Claude Code login.
 
-After you add or change an agent file, [reload the configuration](/guides/#change-the-configuration).
+Select **Save** to apply the revision. The editor reports validation and worker preflight failures without discarding the text. Use **History** on the agent page to inspect or revert a change. See [Configuration editing](/guides/#change-the-configuration).

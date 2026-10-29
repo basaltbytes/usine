@@ -234,7 +234,7 @@ const AgentView = Schema.Struct({
 });
 
 test(
-  "imports at first server start, follows CLI commits, and reloads the store instead of files",
+  "imports at first server start, follows CLI commits, and ignores later file edits",
   { timeout: 60_000 },
   async ({ directory }) => {
     const reservation = createServer();
@@ -314,11 +314,6 @@ writeFileSync(file, readFileSync(file, "utf8").replace("harness: codex", "harnes
       await expect.poll(harness, { timeout: 10_000 }).toBe("claude");
       await writeFile(join(directory, "usine.yaml"), "invalid");
       await writeFile(join(directory, "agents/developer.md"), "invalid");
-      const reloaded = await fetch(`${origin}/api/instance/reload`, {
-        method: "POST",
-        headers: { Origin: origin },
-      });
-      expect(reloaded.status, await reloaded.text()).toBe(200);
       expect(await harness()).toBe("claude");
       const entity = Schema.decodeUnknownSync(ConfigurationEntityView)(
         await (await fetch(`${origin}/api/configuration/entities/agent/developer`)).json(),

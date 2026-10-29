@@ -2,6 +2,8 @@ import {
   ArrowsClockwiseIcon,
   BookBookmarkIcon,
   GearSixIcon,
+  ClockCounterClockwiseIcon,
+  TagIcon,
   HardDrivesIcon,
   RobotIcon,
 } from "@phosphor-icons/react";
@@ -22,6 +24,8 @@ const CONFIGURATION_PAGES = [
   { to: "/configuration/agents", label: "Agents", icon: RobotIcon },
   { to: "/configuration/workers", label: "Workers", icon: HardDrivesIcon },
   { to: "/configuration/repositories", label: "Repositories", icon: BookBookmarkIcon },
+  { to: "/configuration/labels", label: "Labels", icon: TagIcon },
+  { to: "/configuration/history", label: "History", icon: ClockCounterClockwiseIcon },
   { to: "/configuration/settings", label: "Settings", icon: GearSixIcon },
 ] as const;
 
@@ -56,7 +60,7 @@ export const ConfigurationCrumbs = () => {
     params.owner !== undefined && params.name !== undefined
       ? `${params.owner}/${params.name}`
       : undefined;
-  const entry = params.loop ?? params.agent ?? params.worker ?? repository;
+  const entry = params.loop ?? params.agent ?? params.worker ?? params.label ?? repository;
   return (
     <>
       <BreadcrumbItem>

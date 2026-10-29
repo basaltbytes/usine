@@ -220,7 +220,13 @@ The runtime store records every event, so that a loop doesn't act twice on the s
 
 ## Change the configuration
 
-Configuration revisions apply live. Use `usine config edit agent developer` for an agent, or export a folder, edit it, and run `usine config import <folder>`. Running attempts continue, and new work uses the accepted revision. Some worker changes and the `webhooks` and `tracing` keys need a restart. **Reload configuration**, `POST /api/instance/reload`, and `SIGHUP` re-read the store. See [Configuration revisions](/reference/configuration/cli/#configuration-revisions).
+Open **Configuration** to change loops, agents, workers, repositories, labels, or settings. On a detail page, select **Edit**, change the export-format text, optionally enter a message, and select **Save**. Errors appear below the editor with their field paths. If another change was saved first, review the newer revision's diff and select **Reload text**; your draft remains below the editor for copying.
+
+Use **New** on a list to create an entity from a template. New loops start paused; review the trigger and prompt before selecting **Resume**. **Delete** shows the entity name and affected loops or projects before confirmation. Removing a label declaration does not delete labels on GitHub.
+
+Each detail page has **History**, with revision numbers, actors, times, and messages. Select a revision to see the before-and-after text as a diff. **Revert** creates a revision restoring every entity in the selected revision, with an optional message. A later change to an affected entity can prevent a revert. **Configuration > History** lists all revisions and links to the changed entities.
+
+Accepted revisions apply live to new work; running attempts continue. A change that needs a restart or fails worker preflight is refused with the reason. For command-line editing and bulk changes, use [`usine config edit`, `import`, `export`, and `log`](/reference/configuration/cli/#configuration-revisions). Files are an import and export format; editing the original files does not change the stored configuration.
 
 ## Next steps
 

@@ -36,7 +36,7 @@ import { TranscriptSequence } from "@usine/engine/transcript";
 import { ExecutorOperation, WorkerCapability } from "@usine/executor";
 import { Effect, Match, Record, Schema, SchemaTransformation } from "effect";
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware } from "effect/http-api";
-import { InstanceReload, RestartBlock } from "../current-instance/changes.ts";
+import { RestartBlock } from "../current-instance/changes.ts";
 import type { InstanceReloadError } from "../current-instance/current-instance.ts";
 import { BoardLaneId } from "./board.ts";
 import {
@@ -433,10 +433,6 @@ export const OperatorApi = HttpApi.make("OperatorApi").add(
       HttpApiEndpoint.post("unpause", "/api/loops/:loop/unpause", {
         params: loopParams,
         success: acknowledged,
-      }),
-      HttpApiEndpoint.post("reload", "/api/instance/reload", {
-        success: InstanceReload,
-        error: [RestartRequiredRefusal, ReloadPreflightRefusal, FactoryConfigRefusal],
       }),
     )
     .add(

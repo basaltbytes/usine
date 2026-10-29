@@ -1,3 +1,5 @@
+import { preflightTiming } from "~/features/configuration/strings";
+import { entityKey } from "~/features/configuration/lib/entities";
 import { Link } from "@tanstack/react-router";
 import type { ConfigurationView, WorkerSlotsView } from "@usine/orchestrator/operator";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "~/components/ui/table";
@@ -30,7 +32,7 @@ export const WorkerDetail = ({ name, configuration }: WorkerDetailProps) => {
   const worker = configuration.workers.find((candidate) => candidate.name === name);
   if (worker === undefined)
     return (
-      <ConfigurationPage title={name}>
+      <ConfigurationPage entity={entityKey("worker", name)} title={name}>
         <Missing title="Worker not found">
           <code>usine.yaml</code> has no worker {name}.{" "}
           <Link to="/configuration/workers" className="text-primary hover:underline">
@@ -63,6 +65,7 @@ export const WorkerDetail = ({ name, configuration }: WorkerDetailProps) => {
   ];
   return (
     <ConfigurationPage
+      entity={entityKey("worker", name)}
       title={worker.name}
       marks={
         <span className="text-sm text-muted-foreground">{workerKindLabel[worker.kind]} worker</span>
@@ -80,10 +83,7 @@ export const WorkerDetail = ({ name, configuration }: WorkerDetailProps) => {
           )}
         </DetailSection>
         {worker.provisioner !== null && <Machines worker={worker} />}
-        <DetailSection
-          title="Preflight"
-          aside="At startup, and when a reload adds workers, slots, or an agent with a new harness, model, or effort"
-        >
+        <DetailSection title="Preflight" aside={preflightTiming}>
           {worker.provisioner !== null && (
             <p className="text-muted-foreground">{provisionedHarnessCheckDescription}</p>
           )}

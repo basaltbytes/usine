@@ -1,3 +1,4 @@
+import { entityKey } from "~/features/configuration/lib/entities";
 import { Link } from "@tanstack/react-router";
 import type { ConfigurationView } from "@usine/orchestrator/operator";
 import { LabelBadge } from "~/components/label-badge";
@@ -27,7 +28,7 @@ export const RepositoryDetail = ({ owner, name, configuration }: RepositoryDetai
   );
   if (repository === undefined)
     return (
-      <ConfigurationPage title={full}>
+      <ConfigurationPage entity={entityKey("repository", full)} title={full}>
         <Missing title="Repository not registered">
           {full} is not under <code>repos</code> in <code>usine.yaml</code>.{" "}
           <Link to="/configuration/repositories" className="text-primary hover:underline">
@@ -39,6 +40,7 @@ export const RepositoryDetail = ({ owner, name, configuration }: RepositoryDetai
     );
   return (
     <ConfigurationPage
+      entity={entityKey("repository", repository.name)}
       title={repository.name}
       leading={<RepositoryMark repository={repository.name} size="title" />}
     >

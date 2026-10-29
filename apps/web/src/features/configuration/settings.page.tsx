@@ -1,3 +1,4 @@
+import { entityKey } from "~/features/configuration/lib/entities";
 import type { ConfigurationView, SettingsView } from "@usine/orchestrator/operator";
 import type { ReactNode } from "react";
 import { ConfigurationPage } from "~/features/configuration/components/section";
@@ -142,7 +143,7 @@ type SettingsPageProps = {
 
 /** Renders the `settings`, `operator`, and `tracing` keys of `usine.yaml` and the webhooks mode, with defaults applied. */
 export const SettingsPage = ({ configuration, children }: SettingsPageProps) => (
-  <ConfigurationPage title="Settings">
+  <ConfigurationPage entity={entityKey("settings", "instance")} title="Settings">
     <div className="flex max-w-4xl flex-col gap-8 pt-2">
       {children}
       {groups(configuration.settings).map(([group, settings]) => (

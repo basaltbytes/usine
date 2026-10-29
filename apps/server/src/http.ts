@@ -9,7 +9,6 @@ import {
   OperatorApi,
   OperatorHttpError,
   OperatorHttpPolicy,
-  reloadRefusal,
 } from "@usine/orchestrator/operator/http";
 import { Effect, Layer, Option, Schema, type Types } from "effect";
 import { Headers, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
@@ -65,13 +64,6 @@ const operatorFailure = (error: BackendError) => {
         return `Runtime store error: could not ${error.operation}.`;
       case "AttemptCancellationError":
         return `Attempt ${error.attemptId} could not be canceled.`;
-      case "FactoryConfigError":
-        return error.stage === "read"
-          ? `Could not read ${error.file}: ${error.message.replace(/\.$/u, "")}. The running configuration is unchanged.`
-          : `${error.file} is invalid (${error.stage}): ${error.message.replace(/\.$/u, "")}. The running configuration is unchanged.`;
-      case "RestartRequiredError":
-      case "ReloadPreflightError":
-        return error.message;
     }
   })();
   return new OperatorHttpError({ error: error._tag, message });
@@ -250,21 +242,6 @@ const handlers = HttpApiBuilder.group(OperatorApi, "operator", (routes) =>
     )
     .handle("unpause", ({ params }) =>
       fromBackend((backend) => backend.unpause(params.loop)).pipe(acknowledge),
-    )
-    .handle("reload", () =>
-      Effect.flatMap(FactoryBackend, (backend) => backend.reload).pipe(
-        Effect.mapError((error) => {
-          const failure = operatorFailure(error);
-          switch (error._tag) {
-            case "FactoryConfigError":
-            case "RestartRequiredError":
-            case "ReloadPreflightError":
-              return reloadRefusal(error, failure.message);
-            default:
-              return failure;
-          }
-        }),
-      ),
     )
     .handle(
       "task",

@@ -4,13 +4,14 @@ import { StatusBadge } from "~/components/status-badge";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "~/components/ui/empty";
 import { TableRow } from "~/components/ui/table";
 import { cn } from "~/lib/utils";
-import {
-  SectionReloadButton,
-  SectionReloadResult,
-} from "~/features/configuration/components/reload";
+import type { ConfigurationEntityKey, ConfigurationEntityKind } from "@usine/config/configuration";
+import { EntityEditor } from "~/features/configuration/components/editor/entity";
+import { CreateEntity } from "~/features/configuration/components/editor/create";
 
 type ConfigurationPageProps = {
   readonly title: string;
+  readonly entity?: ConfigurationEntityKey;
+  readonly createKind?: ConfigurationEntityKind;
   readonly leading?: ReactNode;
   readonly counts?: string;
   readonly marks?: ReactNode;
@@ -19,9 +20,11 @@ type ConfigurationPageProps = {
   readonly children: ReactNode;
 };
 
-/** `file` is the authored file shown on a detail page. */
+/** `file` is the export path shown on a detail page. */
 export const ConfigurationPage = ({
   title,
+  entity,
+  createKind,
   leading,
   counts,
   marks,
@@ -37,13 +40,16 @@ export const ConfigurationPage = ({
         </PageHeading>
         {file !== undefined && <p className="font-mono text-xs text-muted-foreground">{file}</p>}
       </div>
-      <div className="flex items-center gap-2">
-        {actions}
-        <SectionReloadButton />
-      </div>
+      <div className="flex items-center gap-2">{actions}</div>
     </div>
-    <SectionReloadResult />
-    {children}
+    {createKind !== undefined && <CreateEntity kind={createKind} />}
+    {entity === undefined ? (
+      children
+    ) : (
+      <EntityEditor key={entity.key} entity={entity}>
+        {children}
+      </EntityEditor>
+    )}
   </Page>
 );
 
