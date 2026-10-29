@@ -3,11 +3,11 @@ import type { UsineConfig } from "../factory.ts";
 import { AgentFile } from "../agent.ts";
 import { ConfigFileError, InstancePath } from "../file.ts";
 import { LoadedInstance } from "../instance/instance.ts";
-import { loopReferenceFailure, referenceIndex } from "../instance/references.ts";
-import { LoopFile, loopPath } from "../loop.ts";
-import { type ConfigParser, formatAgent, formatLoop } from "../parser.ts";
+import { referenceIndex } from "../instance/references.ts";
+import { LoopFile } from "../loop.ts";
+import { type ConfigParser, formatAgent } from "../parser.ts";
 import { writeYaml } from "../yaml/writer.ts";
-import { AgentJson, LoopJson, configurationDiff, configurationEntities } from "./entities.ts";
+import { AgentJson, configurationDiff, configurationEntities } from "./entities.ts";
 import {
   Configuration,
   ConfigurationChange,
@@ -109,7 +109,7 @@ export const validateConfiguration = (
     const loops: Array<LoopFile> = [];
     for (const entry of entities) {
       const { kind, identifier } = entry.key;
-      if (kind !== "settings") {
+      if (kind !== "settings" && kind !== "loop") {
         const named = Schema.decodeUnknownResult(Schema.Struct({ name: Schema.NonEmptyString }))(
           entry.value,
         );
@@ -117,36 +117,34 @@ export const validateConfiguration = (
           problems.push(problem(entry.key.key, "Entity identifier does not match its name"));
         }
       }
-      if (kind !== "loop" && kind !== "agent") continue;
-      const file = InstancePath.make(`${kind}s/${identifier}.md`);
-      const parsed = yield* (
-        kind === "agent"
-          ? Schema.decodeUnknownEffect(AgentJson)(entry.value, {
-              errors: "all",
-              onExcessProperty: "error",
-            }).pipe(
-              Effect.mapError((e) => ConfigFileError.fromSchema(file, e)),
-              Effect.flatMap((value) => parser.parseAgentFile(file, formatAgent(value))),
-              Effect.tap((value) => Effect.sync(() => agents.push(value))),
-              Effect.asVoid,
-            )
-          : Schema.decodeUnknownEffect(LoopJson)(entry.value, {
-              errors: "all",
-              onExcessProperty: "error",
-            }).pipe(
-              Effect.mapError((e) => ConfigFileError.fromSchema(file, e)),
-              Effect.tap((value) => Effect.sync(() => loops.push(value))),
-              Effect.flatMap((value) => parser.parseLoopFile(file, formatLoop(value))),
-              Effect.asVoid,
-            )
-      ).pipe(Effect.result);
+      if (kind !== "agent") continue;
+      const file = InstancePath.make(`agents/${identifier}.md`);
+      const parsed = yield* Schema.decodeUnknownEffect(AgentJson)(entry.value, {
+        errors: "all",
+        onExcessProperty: "error",
+      }).pipe(
+        Effect.mapError((e) => ConfigFileError.fromSchema(file, e)),
+        Effect.flatMap((value) => parser.parseAgentFile(file, formatAgent(value))),
+        Effect.result,
+      );
       if (Result.isFailure(parsed)) problems.push(parsed.failure);
+      else agents.push(parsed.success);
     }
-    if (Result.isSuccess(config)) {
-      const references = referenceIndex(config.success, agents);
-      for (const loop of loops) {
-        const failure = loopReferenceFailure(loopPath(loop.name), loop, references);
-        if (Option.isSome(failure)) problems.push(failure.value);
+    const references = Result.isSuccess(config)
+      ? Option.some(referenceIndex(config.success, agents))
+      : Option.none();
+    for (const entry of entities.filter(({ key }) => key.kind === "loop")) {
+      const checked = yield* parser
+        .checkLoopDraft(
+          InstancePath.make(`loops/${entry.key.identifier}.md`),
+          { value: entry.value },
+          references,
+        )
+        .pipe(Effect.result);
+      if (Result.isFailure(checked)) problems.push(checked.failure);
+      else {
+        problems.push(...checked.success.problems);
+        if (Option.isSome(checked.success.loop)) loops.push(checked.success.loop.value);
       }
     }
     if (Arr.isArrayNonEmpty(problems)) return yield* new ConfigurationInvalid({ problems });

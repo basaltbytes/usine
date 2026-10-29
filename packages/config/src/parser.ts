@@ -2,7 +2,6 @@ import { StepName } from "@usine/core/step";
 import { ApprovalRequirement, LoopName } from "@usine/core/loop";
 import {
   ExpressionEngine,
-  type Environment,
   type ExpressionCheckError,
   type ExpressionError,
   Source,
@@ -30,13 +29,14 @@ import {
 } from "./instance/diagnostics.ts";
 import { LoopFile, loopPath, LoopPriority, PromptTemplate } from "./loop.ts";
 import { AgentPersona, AgentName } from "@usine/core/agent";
-import { IssueTrigger, PullRequestTrigger, ScheduleTrigger } from "./trigger.ts";
+import { IssueTrigger, PullRequestTrigger, ScheduleTrigger, Stream } from "./trigger.ts";
 import { UsineConfig } from "./factory.ts";
 import { ValidSelector } from "./selector.ts";
 import { Effort, Harness, ModelId } from "@usine/core/agent/brain";
 import { environmentFor } from "./payload-slices.ts";
 import { parseYamlDocument } from "./yaml/document.ts";
 import { writeYaml } from "./yaml/writer.ts";
+import { loopReferenceFailure, type ReferenceIndex } from "./instance/references.ts";
 
 const formatIssue = SchemaIssue.makeFormatterDefault();
 
@@ -310,6 +310,7 @@ export const parseLoopDraft = (file: InstancePath, source: string) =>
         const failure = schemaError(file, error);
         return new ConfigFileError({
           ...failure,
+          message: failure.message,
           details: [{ path: ["body"], message: failure.message }],
         });
       }),
@@ -317,28 +318,158 @@ export const parseLoopDraft = (file: InstancePath, source: string) =>
     return new LoopFile({ name, ...frontmatter, body });
   });
 
+const checkExpressions = (
+  engine: ExpressionEngine["Service"],
+  file: InstancePath,
+  stream: Option.Option<Stream>,
+  condition: Option.Option<Source>,
+  body: Option.Option<PromptTemplate>,
+) =>
+  Effect.gen(function* () {
+    const failures: Array<ConfigFileError> = [];
+    const prompt = Option.isNone(body)
+      ? { expressions: [], problems: [] }
+      : interpolations(file, body.value);
+    failures.push(...prompt.problems);
+    if (Option.isNone(stream)) return failures;
+    const environment = environmentFor(stream.value);
+    if (Option.isSome(condition)) {
+      const checked = yield* engine.checkBoolean(condition.value, environment).pipe(Effect.result);
+      if (Result.isFailure(checked))
+        failures.push(expressionError(file, checked.failure, ["trigger", "if"]));
+    }
+    for (const { source } of prompt.expressions) {
+      const checked = yield* engine.checkScalar(source, environment).pipe(Effect.result);
+      if (Result.isFailure(checked))
+        failures.push(expressionError(file, checked.failure, ["body"]));
+    }
+    return failures;
+  });
+
+const LoopJson = Schema.toCodecJson(LoopFile);
+const LoopText = Schema.Struct({
+  frontmatter: AuthoredLoopFrontmatter,
+  name: LoopFile.fields.name,
+  body: PromptTemplate,
+});
+
+const makeCheckLoopDraft = (engine: ExpressionEngine["Service"]) =>
+  Effect.fn("ConfigParser.checkLoopDraft")(function* (
+    file: InstancePath,
+    input: { readonly text: string } | { readonly value: Schema.Json },
+    references: Option.Option<ReferenceIndex>,
+  ) {
+    yield* Effect.annotateCurrentSpan({ file });
+    const authored = "text" in input;
+    const { value, parsed } = yield* authored
+      ? Effect.gen(function* () {
+          const markdown = yield* splitMarkdown(file, input.text);
+          const yaml = yield* parseYaml(file, markdown.yaml);
+          const fields = yield* Schema.decodeUnknownEffect(Schema.JsonObject)(yaml).pipe(
+            Effect.mapError((error) => schemaError(file, error)),
+          );
+          const parsed = Schema.decodeUnknownResult(LoopText)(
+            {
+              frontmatter: fields,
+              name: yield* markdownName(file),
+              body: markdown.body,
+            },
+            { errors: "all", onExcessProperty: "error" },
+          ).pipe(
+            Result.map(({ frontmatter, ...rest }) => new LoopFile({ ...frontmatter, ...rest })),
+            Result.mapError((error) => {
+              const failure = schemaError(file, error);
+              return new ConfigFileError({
+                ...failure,
+                message: failure.message,
+                details: (failure.details ?? []).map((detail) => ({
+                  ...detail,
+                  path: detail.path[0] === "frontmatter" ? detail.path.slice(1) : detail.path,
+                })),
+              });
+            }),
+          );
+          return { value: { ...fields, body: markdown.body }, parsed };
+        })
+      : Effect.succeed({
+          value: input.value,
+          parsed: Schema.decodeUnknownResult(LoopJson)(input.value, {
+            errors: "all",
+            onExcessProperty: "error",
+          }).pipe(Result.mapError((error) => schemaError(file, error))),
+        });
+    const problems: Array<ConfigFileError> = Result.isFailure(parsed) ? [parsed.failure] : [];
+    if (!authored) {
+      const named = Schema.decodeUnknownOption(Schema.Struct({ name: LoopFile.fields.name }))(
+        value,
+      );
+      if (Option.isSome(named) && named.value.name !== (yield* markdownName(file))) {
+        const message = "Entity identifier does not match its name";
+        problems.push(
+          new ConfigFileError({
+            file,
+            stage: "schema",
+            expression: Option.none(),
+            message,
+            details: [{ path: ["name"], message }],
+          }),
+        );
+      }
+    }
+    const stream = Schema.decodeUnknownOption(
+      Schema.Struct({ trigger: Schema.Struct({ on: Stream }) }),
+    )(value);
+    const condition = Schema.decodeUnknownOption(
+      Schema.Struct({ trigger: Schema.Struct({ if: authored ? ConditionFromYaml : Source }) }),
+    )(value);
+    const body = Schema.decodeUnknownOption(Schema.Struct({ body: PromptTemplate }))(value);
+    problems.push(
+      ...(yield* checkExpressions(
+        engine,
+        file,
+        Option.map(stream, ({ trigger }) => trigger.on),
+        Option.map(condition, ({ trigger }) => trigger.if),
+        Option.map(body, ({ body }) => body),
+      )),
+    );
+    const agent = Schema.decodeUnknownOption(Schema.Struct({ agent: AgentName }))(value);
+    const selector = Schema.decodeUnknownOption(
+      Schema.Struct({
+        selector: authored
+          ? LoopFrontmatter.fields.selector
+          : Schema.toCodecJson(LoopFile.fields.selector),
+      }),
+    )(value);
+    const reference = Option.flatMap(references, (index) =>
+      loopReferenceFailure(
+        file,
+        {
+          agent: Option.getOrUndefined(Option.map(agent, ({ agent }) => agent)),
+          selector: Option.flatMap(selector, ({ selector }) => selector),
+        },
+        index,
+      ),
+    );
+    if (Option.isSome(reference)) problems.push(reference.value);
+    yield* Effect.logDebug("Checked independent loop fields", { file, problems: problems.length });
+    return {
+      loop: Result.isSuccess(parsed) ? Option.some(parsed.success) : Option.none<LoopFile>(),
+      problems,
+    };
+  });
+
 const makeParseLoopFile = (engine: ExpressionEngine["Service"]) =>
   Effect.fn("ConfigParser.parseLoopFile")(
     (file: InstancePath, source: string): Effect.Effect<LoopFile, ConfigFileError> =>
       Effect.gen(function* () {
         const loop = yield* parseLoopDraft(file, source);
-        const { body } = loop;
-        const environment: Environment = environmentFor(loop.trigger.on);
-        const failures: Array<ConfigFileError> = [];
-        const condition = yield* engine.checkBoolean(loop.trigger.if, environment).pipe(
-          Effect.mapError((error) => expressionError(file, error, ["trigger", "if"])),
-          Effect.result,
+        const failures = yield* checkExpressions(
+          engine,
+          file,
+          Option.some(loop.trigger.on),
+          Option.some(loop.trigger.if),
+          Option.some(loop.body),
         );
-        if (Result.isFailure(condition)) failures.push(condition.failure);
-        const prompt = interpolations(file, body);
-        failures.push(...prompt.problems);
-        const checked = yield* Effect.forEach(prompt.expressions, ({ source }) =>
-          engine.checkScalar(source, environment).pipe(
-            Effect.mapError((error) => expressionError(file, error, ["body"])),
-            Effect.result,
-          ),
-        );
-        for (const result of checked) if (Result.isFailure(result)) failures.push(result.failure);
         if (Arr.isArrayNonEmpty(failures)) return yield* expressionFailures(file, failures);
         return loop;
       }),
@@ -399,6 +530,15 @@ export class ConfigParser extends Context.Service<
       file: InstancePath,
       source: string,
     ) => Effect.Effect<LoopFile, ConfigFileError>;
+    /** Collects schema, expression, template, and reference problems from usable draft fields. */
+    readonly checkLoopDraft: (
+      file: InstancePath,
+      input: { readonly text: string } | { readonly value: Schema.Json },
+      references: Option.Option<ReferenceIndex>,
+    ) => Effect.Effect<
+      { readonly loop: Option.Option<LoopFile>; readonly problems: ReadonlyArray<ConfigFileError> },
+      ConfigFileError
+    >;
     /** Returns warnings for undeclared labels used by Board lanes or Loop conditions. */
     readonly configWarnings: (
       config: UsineConfig,
@@ -423,6 +563,7 @@ export class ConfigParser extends Context.Service<
 /** Builds the parser from an explicit expression engine without a layer. */
 export const makeConfigParser = (engine: ExpressionEngine["Service"]): ConfigParser["Service"] => ({
   configWarnings: makeConfigWarnings(engine),
+  checkLoopDraft: makeCheckLoopDraft(engine),
   parseUsineYaml,
   parseAgentFile,
   parseLoopFile: makeParseLoopFile(engine),

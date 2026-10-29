@@ -9,7 +9,8 @@ import {
   configurationEntities,
   validateConfiguration,
 } from "@usine/config/configuration";
-import { parseConfigurationForm } from "@usine/config/folder-codec";
+import { referenceIndex } from "@usine/config/instance";
+import { loopPath } from "@usine/config/loop";
 import { ConfigParser } from "@usine/config/parser";
 import { repositoryContext } from "@usine/config/payload-slices";
 import { matchesSelector } from "@usine/config/selector";
@@ -27,18 +28,12 @@ export const configurationLoopOperations = Effect.gen(function* () {
   const items = yield* ItemProjectionReader;
   const expressions = yield* ExpressionEngine;
 
-  const candidate = (input: LoopDraft) =>
+  const candidate = (input: LoopPreviewRequest) =>
     Effect.gen(function* () {
       const key = new ConfigurationEntityKey({
         kind: "loop",
         identifier: ConfigurationEntityId.make(input.name),
       });
-      const value =
-        input.text === undefined
-          ? input.value
-          : yield* parseConfigurationForm(key, input.text).pipe(
-              Effect.mapError((problem) => new ConfigurationInvalid({ problems: [problem] })),
-            );
       const snapshot = yield* store.read;
       const entities = Option.match(snapshot.instance, {
         onNone: () => [],
@@ -46,7 +41,7 @@ export const configurationLoopOperations = Effect.gen(function* () {
       });
       const instance = yield* validateConfiguration(parser, [
         ...entities.filter((entity) => entity.key.key !== key.key),
-        new ConfigurationEntity({ key, value }),
+        new ConfigurationEntity({ key, value: input.value }),
       ]);
       const loop = instance.loops.find((loop) => loop.name === input.name);
       if (loop === undefined)
@@ -58,15 +53,21 @@ export const configurationLoopOperations = Effect.gen(function* () {
 
   const check = Effect.fn("ConfigurationEditor.checkLoop")(function* (input: LoopDraft) {
     yield* Effect.annotateCurrentSpan({ loop: input.name });
-    const problems = yield* candidate(input).pipe(
-      Effect.as([]),
-      Effect.catchTag("ConfigurationInvalid", (error) =>
-        Effect.succeed(
-          error.problems.flatMap(
-            (problem) => problem.details ?? [{ path: [], message: problem.message }],
-          ),
+    const snapshot = yield* store.read;
+    const errors = yield* parser
+      .checkLoopDraft(
+        loopPath(input.name),
+        input.text === undefined ? { value: input.value } : { text: input.text },
+        Option.map(snapshot.instance, (instance) =>
+          referenceIndex(instance.config, instance.agents),
         ),
-      ),
+      )
+      .pipe(
+        Effect.map(({ problems }) => problems),
+        Effect.catchTag("ConfigFileError", (error) => Effect.succeed([error])),
+      );
+    const problems = errors.flatMap(
+      (problem) => problem.details ?? [{ path: [], message: problem.message }],
     );
     yield* Effect.logDebug("Checked loop draft without saving", {
       loop: input.name,

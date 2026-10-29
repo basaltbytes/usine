@@ -855,6 +855,77 @@ it("checks drafts without saving and returns CEL positions, template errors, and
     ),
   ));
 
+it.each(["text", "json"])("collects independent mixed diagnostics from a %s loop draft", (format) =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { request, store } = yield* harness();
+        const value = {
+          name: "different-name",
+          trigger: { on: "issue", if: "item.unknown == 1" },
+          agent: "missing",
+          body: "{{ }} {{ item.nope }}",
+          maxCycles: 0,
+          permissions: "invalid",
+          step: "run",
+          approval: "none",
+          selector: { _tag: "Some", value: { repos: ["acme/missing"] } },
+          priority: { _tag: "None" },
+        };
+        const text =
+          '---\nname: different-name\ntrigger: { on: issue, if: "item.unknown == 1" }\nagent: missing\nmax_cycles: 0\npermissions: invalid\nselector: { repos: [acme/missing] }\n---\n{{ }} {{ item.nope }}';
+        const draft = format === "text" ? { text } : { value };
+        const checked = yield* request("POST", "/loops/check", { name: "draft", ...draft });
+        expect(checked.status).toBe(200);
+        expect(checked.body).toMatchObject({
+          problems: expect.arrayContaining([
+            expect.objectContaining({ path: [format === "text" ? "max_cycles" : "maxCycles"] }),
+            expect.objectContaining({ path: ["permissions"] }),
+            expect.objectContaining({ path: ["name"] }),
+            expect.objectContaining({ path: ["trigger", "if"], position: expect.any(Number) }),
+            expect.objectContaining({ path: ["body"], expression: "item.nope" }),
+            expect.objectContaining({
+              path: ["body"],
+              message: expect.stringContaining("empty expression"),
+            }),
+            expect.objectContaining({
+              path: ["agent"],
+              message: expect.stringContaining("Unknown agent"),
+            }),
+            expect.objectContaining({ path: ["selector", "repos"] }),
+          ]),
+        });
+        const malformedCondition = yield* request("POST", "/loops/check", {
+          name: "draft",
+          ...(format === "text"
+            ? { text: text.replace('"item.unknown == 1"', "42") }
+            : { value: { ...value, trigger: { on: "issue", if: 42 } } }),
+        });
+        expect(malformedCondition.body).toMatchObject({
+          problems: expect.arrayContaining([
+            expect.objectContaining({ path: ["trigger", "if"] }),
+            expect.objectContaining({ path: ["body"], expression: "item.nope" }),
+            expect.objectContaining({ path: ["agent"] }),
+          ]),
+        });
+        if (format === "json") {
+          const saved = yield* request("PUT", "/entities/loop/draft", { expected: 1, value });
+          expect(saved.status).toBe(422);
+          expect(saved.body).toMatchObject({
+            problems: expect.arrayContaining([
+              expect.objectContaining({ path: ["maxCycles"] }),
+              expect.objectContaining({ path: ["body"], message: expect.stringContaining("nope") }),
+              expect.objectContaining({ path: ["agent"] }),
+            ]),
+          });
+        }
+        expect((yield* store.read).number).toBe(1);
+        expect(yield* store.list(Option.none())).toHaveLength(1);
+      }),
+    ),
+  ),
+);
+
 it("previews at most 20 stored matches with an exact total, a selected prompt, and empty selector results", () =>
   Effect.runPromise(
     Effect.scoped(
