@@ -5,11 +5,19 @@ import { AttemptId, AttemptNumber } from "@usine/core/attempt";
 import { WorkerName } from "@usine/core/worker";
 import { AgentName } from "@usine/core/agent";
 import { ItemKey, ItemNumber } from "@usine/core/item";
+import {
+  CycleBudgetAsk,
+  CycleBudgetAskId,
+  CycleCount,
+  CycleLimit,
+  LoopCycleCount,
+} from "@usine/core/cycle-budget";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import {
   ApprovalNeed,
+  CycleBudgetNeed,
   UnresponsiveWorkerNeed,
   WorkerPreflightNeed,
   BoardItemLink,
@@ -290,6 +298,78 @@ const replaceNeeds = async (
   );
   await queryClient.invalidateQueries({ queryKey: overviewQuery().queryKey });
 };
+
+it.each([1280, 390])(
+  "opens cycle-budget loop counts from Overview and the tray without hover at %ipx",
+  async (width) => {
+    await page.viewport(width, 844);
+    const need = new CycleBudgetNeed({
+      id: "cycle-budget:exhausted",
+      itemLabel: "approval/project#367",
+      itemUrl: "https://github.com/approval/project/issues/367",
+      ask: new CycleBudgetAsk({
+        id: CycleBudgetAskId.make("exhausted"),
+        itemKey: waiting.itemKey,
+        repository,
+        loop,
+        limit: CycleLimit.make(3),
+        counts: [
+          new LoopCycleCount({
+            loop,
+            admitted: CycleCount.make(3),
+            completed: CycleCount.make(2),
+          }),
+          new LoopCycleCount({
+            loop: LoopName.make("review-pr"),
+            admitted: CycleCount.make(1),
+            completed: CycleCount.make(1),
+          }),
+        ],
+      }),
+    });
+    await replaceNeeds([need]);
+    for (const surface of [needs, tray()]) {
+      if (surface !== needs) await bell(1).click();
+      const row = surface.getByRole("listitem").filter({ hasText: need.itemLabel });
+      await expect
+        .element(row.getByText("start-dev · approval/project", { exact: true }))
+        .toBeVisible();
+      await expect.element(row.getByRole("button", { name: "Reset cycle budget" })).toBeEnabled();
+      const actions = row.getByRole("button", { name: /^Actions for/ });
+      if (width === 1280) {
+        actions.element().focus();
+        await userEvent.keyboard("{Enter}");
+        await expect
+          .element(page.getByRole("menuitem", { name: "Details", exact: true }))
+          .toHaveFocus();
+        await userEvent.keyboard("{Enter}");
+      } else {
+        await actions.click();
+        await page.getByRole("menuitem", { name: "Details", exact: true }).click();
+      }
+      const details = page.getByRole("dialog", { name: "Cycle budget exhausted", exact: true });
+      await expect.element(details).toBeVisible();
+      await expect
+        .element(
+          details.getByText(
+            "approval/project#367: 2 completed rounds. start-dev: 3 runs; review-pr: 1 run",
+            { exact: true },
+          ),
+        )
+        .toBeVisible();
+      expect(details.element().scrollWidth).toBeLessThanOrEqual(details.element().clientWidth);
+      await expect.poll(() => details.element().getAnimations().length).toBe(0);
+      await page.screenshot({
+        path: `../../../../../.impeccable/review/cycle-budget-${surface === needs ? "overview" : "tray"}-${width}.png`,
+      });
+      if (width === 1280) await userEvent.keyboard("{Escape}");
+      else await details.getByRole("button", { name: "Close", exact: true }).click();
+      await expect.element(details).not.toBeInTheDocument();
+      await expect.element(actions).toHaveFocus();
+      await expect.element(row.getByRole("button", { name: "Reset cycle budget" })).toBeEnabled();
+    }
+  },
+);
 
 it("opens with Enter and Space, tabs through row actions, and returns focus to the bell on Escape", async () => {
   await expect.element(bell(2)).toBeVisible();
