@@ -25,6 +25,7 @@ import {
   withGitHubCredential,
 } from "../github/github.ts";
 import { confirmRename, PERMANENT_REDIRECTS, redirectedName } from "../github/rename.ts";
+import { githubDownloadClient } from "../github/download.ts";
 import { type ChatGptLoginUnavailable, ChatGptLogins } from "../chatgpt/logins.ts";
 import {
   type ChatGptLogin,
@@ -301,7 +302,12 @@ export class GatewayProxy extends Context.Service<
           withoutCallerCredentials(endToEndHeaders(request.headers)),
         );
         const response = yield* throughGateway(
-          yield* forwardRequest(client, request, route.value.upstream, headers),
+          yield* forwardRequest(
+            githubDownloadClient(client, settings.github, attachment, route.value, request.method),
+            request,
+            route.value.upstream,
+            headers,
+          ),
           live,
           route.value,
         );
@@ -428,6 +434,13 @@ export class GatewayProxy extends Context.Service<
             Refused: (error) =>
               logRefusal(request, target.value, error).pipe(Effect.as(refusalResponse(error))),
             HttpClientError: (error) => upstreamFailure(request, target.value, error),
+            DownloadRedirectFailed: ({ reason }) =>
+              Effect.succeed(
+                HttpServerResponse.jsonUnsafe(
+                  { message: "usine gateway: the download redirect failed.", reason },
+                  { status: 502 },
+                ),
+              ),
           }),
         );
       }).pipe(Effect.withSpan("GatewayProxy.handle"));

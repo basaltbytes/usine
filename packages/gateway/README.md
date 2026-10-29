@@ -32,7 +32,7 @@ On Hetzner Cloud, `gateway.sh install` does either on the gateway VM and restart
 
 | Import | Contents |
 | --- | --- |
-| `@usine/gateway` | The platform-free core: `GatewaySettings`, `SettingsInForce` (the allowlist and LLM providers that a reload replaces), `Attachments`, `CallerTokens`, `ChatGptLogins` (the ChatGPT logins and their refresh), `GatewayProxy` (the reverse proxy as an `HttpServerRequest` handler), `adminRoutes` (the admin API for an `HttpRouter`), `gatewayServices`, the egress allowlist parser, and the domain records. It needs an `HttpClient` that leaves `content-encoding` alone, and a `FileSystem` for ChatGPT auth files. |
+| `@usine/gateway` | The platform-free core: `GatewaySettings`, `SettingsInForce` (the allowlist and LLM providers that a reload replaces), `Attachments`, `CallerTokens`, `ChatGptLogins` (the ChatGPT logins and their refresh), `GatewayProxy` (the reverse proxy as an `HttpServerRequest` handler), `adminRoutes` (the admin API for an `HttpRouter`), `gatewayServices`, the egress allowlist parser, and the domain records. It needs an `HttpClient` that leaves `content-encoding` alone and returns redirects without following them, and a `FileSystem` for ChatGPT auth files. |
 | `@usine/gateway/admin` | `GatewayAdminApi`, the admin API contract for `HttpApiClient.make` in the executor, with the records a client sends and reads (`AttachRequest`, `InstallationCredential`, `Attached`, `AttachmentId`, `CallerToken`, `Detached`, `AttachmentList`, `LlmProviderList`) and `GATEWAY_TOKEN_HEADER`. |
 | `@usine/gateway/node` | `gatewayLayer` (the three servers on Node, with undici upstream), `gatewayFromEnvironment`, `settingsFromEnvironment`, `GatewayAddresses`, and `GatewayReload`. |
 | `usine-gateway` | The gateway VM's command. It reads the settings below, reloads on SIGHUP, and logs one JSON object per line. |
@@ -79,23 +79,36 @@ A child sends its caller token wherever its tool sends a credential: the `X-Usin
 | `/api/v3/...`, `/api/graphql` | `https://api.github.com` | a bearer token |
 | `/api/uploads/...` | `https://uploads.github.com` | a bearer token |
 
-GitHub answers a release download with a redirect to an asset host, such as `release-assets.githubusercontent.com` or `objects.githubusercontent.com`, in a URL signed for that file for a few minutes. The gateway returns the redirect unchanged and doesn't follow it, so the token goes only to github.com. The worker fetches the asset through the forward proxy, which needs the asset hosts on the egress allowlist: the GitHub release assets rows of [`egress-allowlist`](../../infra/hetzner/gateway/egress-allowlist). On a worker, where `GH_TOKEN` holds the caller token:
+For a `GET` on these download paths, the gateway follows GitHub's redirect to the download host and streams its response to the worker:
+
+| Path | Download |
+| --- | --- |
+| `/api/v3/repos/OWNER/REPO/actions/jobs/ID/logs` | Job log |
+| `/api/v3/repos/OWNER/REPO/actions/runs/ID/logs` | Run logs |
+| `/api/v3/repos/OWNER/REPO/actions/runs/ID/attempts/NUMBER/logs` | Run attempt logs |
+| `/api/v3/repos/OWNER/REPO/actions/artifacts/ID/zip` | Artifact ZIP |
+| `/api/v3/repos/OWNER/REPO/releases/assets/ID` | Release asset with `Accept: application/octet-stream` |
+| `/OWNER/REPO/releases/download/TAG/FILE`, `/OWNER/REPO/releases/latest/download/FILE` | Release asset |
+
+The attachment must serve the repository in the path. The API paths also work directly on `api.github.com`, without `/api/v3`, when gh uses its socket. `gh run view --log`, `gh run view --log-failed`, `gh run download`, and `gh release download` can use these paths without connecting to download hosts themselves. curl can use the same gateway paths:
 
 ```sh
 curl -fL -u ":$GH_TOKEN" -o tool.tar.gz http://git.<domain>/OWNER/REPO/releases/download/TAG/FILE
 ```
 
-curl sends `-u` credentials only to the host of the first URL; a header set with `-H` would also reach the asset host.
+Each followed request is a fresh GET with no worker headers, cookies, credential, or body. The gateway follows at most three HTTPS redirects and returns 502 for an invalid location or a longer chain. It preserves the final response's status, end-to-end headers, and streamed body. An initial redirect to GitHub itself retains the repository checks described below. Other methods and paths retain their existing redirect behavior.
 
-gh can't download from these hosts. It sends every request to the gateway through its socket, followed redirects included, so `gh release download` reaches the reverse proxy for the asset host, which refuses it with `unknown-host`. For a host on the egress allowlist, the refusal says to use curl instead: the command above for a release asset, or this one for an archive, which GitHub redirects to `codeload.github.com`:
+The download hosts, including `results-receiver.actions.githubusercontent.com` and Azure Blob Storage, need no egress allowlist entry. The gateway trusts GitHub to choose the destination for these fixed download paths; workers cannot use this behavior to request arbitrary URLs. [ADR 0027](../../docs/adr/0027-gateway-credential-proxy.md) records this exception to the allowlist model. Each followed redirect logs `Following a GitHub download redirect without credentials`, with the attachment, worker, repository, target host, status, and redirect count. Signed URLs and headers are excluded from logs and client traces.
+
+Repository archives retain their redirects to `codeload.github.com`. Download them with curl through the forward proxy, with that host on the egress allowlist:
 
 ```sh
 curl -fL -u ":$GH_TOKEN" -o repo.tar.gz http://git.<domain>/api/v3/repos/OWNER/REPO/tarball/REF
 ```
 
-Actions logs and artifacts redirect to `results-receiver.actions.githubusercontent.com` and Azure Blob Storage, which the allowlist doesn't list, so `gh run view --log`, `gh run view --log-failed`, and `gh run download` don't work on a worker, with gh or curl ([#540](https://github.com/basaltbytes/usine/issues/540)). [ADR 0027](../../docs/adr/0027-gateway-credential-proxy.md) records why the reverse proxy doesn't fetch other hosts.
+curl sends `-u` credentials only to the host of the first URL; a header set with `-H` would also reach the archive host. gh sends redirected requests through its socket, where the reverse proxy refuses these hosts with `unknown-host`.
 
-GitHub redirects some requests for a renamed or transferred repo: API calls to `https://api.github.com/repositories/ID/...`, and release downloads to the new name on github.com. The gateway rewrites a `Location` on github.com or api.github.com to `http://git.<domain>`, with API paths under `/api/v3`, and keeps the path and query, so the client follows it through the gateway. A `Location` on any other host passes unchanged.
+GitHub redirects some requests for a renamed or transferred repo: API calls to `https://api.github.com/repositories/ID/...`, and release downloads to the new name on github.com. The gateway rewrites a `Location` on github.com or api.github.com to `http://git.<domain>`, with API paths under `/api/v3`, and keeps the path and query, so the client follows it through the gateway. A `Location` on another host passes unchanged except for the download GETs listed above.
 
 The gateway checks the followed request like any other. An attachment learns the repo's new name only from a permanent redirect (301 or 308) of the repo itself to the same path with another owner or repo name: git's `/OWNER/REPO/info/refs`, which starts every clone and fetch, or the API's `/repos/OWNER/REPO`. Before the attachment learns the name, the gateway confirms it with GitHub's API and the attachment's credential: `/repos/OWNER/REPO` with the attached name must redirect to `/repositories/ID`, and the `full_name` of that repo must be the new name. The attachment then serves paths with either name until it's detached or expires. Other attachments, temporary redirects, redirects of anything else, such as a release download or `/repositories/ID/...`, and names that the API doesn't confirm teach no name, so a path with another name is still refused with `repository-mismatch`. A release download under the repo's former name works once a git clone or fetch under that name has taught the attachment the new name.
 
