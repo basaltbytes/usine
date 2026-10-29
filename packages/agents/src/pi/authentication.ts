@@ -1,8 +1,18 @@
 import type { BillingPool } from "@usine/core/agent/session";
 
+/** A Pi credential category; OAuth credentials also record whether the provider identifies a subscription. */
 export type PiAuthentication =
-  | { readonly _tag: "ApiKey" }
-  | { readonly _tag: "OAuth"; readonly subscription: boolean };
+  | {
+      /** The provider uses an API key. */
+      readonly _tag: "ApiKey";
+    }
+  | {
+      /** The provider uses an OAuth login. */
+      readonly _tag: "OAuth";
+      /** Whether the provider identifies the login as a subscription credential. */
+      readonly subscription: boolean;
+    };
+/** The billing pools supported by Pi: API keys and the ChatGPT subscription for `openai-codex`. */
 export type PiPool = Extract<BillingPool, "apiKeys" | "chatgptPlan">;
 
 /** Splits `provider/model` into provider and model ID; `undefined` unless both parts are present. */
