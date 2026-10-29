@@ -363,7 +363,7 @@ A `{{ }}` expression in a rendered prompt is outlined, not filled: mono, no fill
 One 10px cell per worker slot, 4px apart on one line: running blue while an attempt uses it, an empty ring otherwise, with the count beside them.
 
 ### Needs attention item
-Flat rows separated by hairlines, with 12px padding, a 13px medium title, and 12px context and recorded age. Item marks and titles link to GitHub; a run's need title opens the drawer. Primary and ghost actions wrap below the text in narrow containers. Overview and the notification tray use the same row. Groups have a 12px heading and count, peach in dark mode and foreground in light mode.
+Flat two-line rows separated by hairlines, with 12px horizontal and 6px vertical padding. The first line has the item mark and a truncated 13px medium title, the primary action, and a row menu. The second line has 12px muted context: loop, repository, and recorded age, separated by middle dots. Worker rows show the worker and diagnostic context. Item marks and titles link to GitHub. Secondary actions appear in the row menu; Open run or the primary Details button opens the drawer. Actions stay beside the first line on phones. Seven rows fit in the tray at 1280 × 800. Overview and the notification tray use the same row. Groups have a 12px heading and count, peach in dark mode and foreground in light mode.
 
 The notification tray opens below the bell, aligned to the right: 400px wide on the popover ground, with the Needs attention title and count above a scrolling list and a link to Overview below. On phones it opens as a full-width bottom sheet. Both stop at 70% of the viewport height. The bell's badge is absent when the count is zero.
 

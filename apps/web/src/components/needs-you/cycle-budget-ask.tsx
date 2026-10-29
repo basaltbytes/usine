@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { CycleBudgetNeed } from "@usine/orchestrator/operator";
 import { Option } from "effect";
 import { taskCard, useOverview } from "~/components/item/identity";
+import { DropdownMenuLinkItem } from "~/components/ui/dropdown-menu";
 import { Button } from "~/components/ui/button";
 import { api } from "~/lib/api";
 import { cycleBudgetCounts, needCopy } from "~/lib/needs-you/strings";
@@ -34,21 +35,18 @@ export const CycleBudgetAsk = ({ need, dismiss }: CycleBudgetAskProps) => {
       item={Option.getOrUndefined(item)}
       dismiss={dismiss}
       error={reset.isError ? reset.error.message : null}
+      heading={need.itemLabel}
+      menu={
+        Option.isNone(item) && need.itemUrl !== null ? (
+          <DropdownMenuLinkItem href={need.itemUrl} target="_blank" rel="noreferrer">
+            Open item
+          </DropdownMenuLinkItem>
+        ) : undefined
+      }
       actions={
-        <>
-          {Option.isNone(item) && need.itemUrl !== null && (
-            <Button
-              variant="ghost"
-              nativeButton={false}
-              render={<a href={need.itemUrl} target="_blank" rel="noreferrer" />}
-            >
-              Open item
-            </Button>
-          )}
-          <Button variant="outline" disabled={reset.isPending} onClick={() => reset.mutate()}>
-            {reset.isPending ? "Resetting…" : "Reset cycle budget"}
-          </Button>
-        </>
+        <Button variant="outline" disabled={reset.isPending} onClick={() => reset.mutate()}>
+          {reset.isPending ? "Resetting…" : "Reset cycle budget"}
+        </Button>
       }
     />
   );

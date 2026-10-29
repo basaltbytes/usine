@@ -170,15 +170,11 @@ const entry = (title: string) =>
 
 it("holds the Run's approval in Needs attention while the drawer approves it, and drops it when the approve returns, before the slow overview refresh", async () => {
   const held = entry("#367 Keep Needs attention current");
-  await held
-    .getByRole("button", { name: "start-dev: approval needed", includeHidden: true })
-    .click();
+  await held.getByRole("button", { name: /^Actions for/ }).click();
+  await page.getByRole("menuitem", { name: "Open run", exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Approve", exact: true }).click();
   await expect
     .element(held.getByRole("button", { name: "Approving…", includeHidden: true }))
-    .toBeDisabled();
-  await expect
-    .element(held.getByRole("button", { name: "Cancel run", includeHidden: true }))
     .toBeDisabled();
   await expect
     .element(
@@ -225,8 +221,9 @@ it("shows no error on a Needs attention approval refused because the Run was app
 
 it("explains in the drawer an approve refused because the Run was approved elsewhere", async () => {
   await entry("#367 Keep Needs attention current")
-    .getByRole("button", { name: "start-dev: approval needed" })
+    .getByRole("button", { name: /^Actions for/ })
     .click();
+  await page.getByRole("menuitem", { name: "Open run", exact: true }).click();
   const drawer = page.getByRole("dialog");
   await drawer.getByRole("button", { name: "Approve", exact: true }).click();
   await commands.answerApproval(409, rejection);
@@ -257,20 +254,24 @@ it("shows a silent worker's last answer and opens an affected run", async () => 
     detail(running),
   );
   await queryClient.invalidateQueries({ queryKey: overviewQuery().queryKey });
-  const held = entry("remote: worker not responding");
+  const held = entry("remote");
   await expect.element(held.getByText(/Last answered 2026-10-28T14:35:00.000Z/)).toBeVisible();
+  await held.getByRole("button", { name: /^Actions for/ }).click();
   await expect
-    .element(held.getByRole("button", { name: "approval/project · start-dev · attempt 2" }))
+    .element(page.getByRole("menuitem", { name: "approval/project · start-dev · attempt 2" }))
     .toBeVisible();
+  await expect.element(page.getByRole("menuitem", { name: "Cancel run" })).not.toBeInTheDocument();
+  await userEvent.keyboard("{Escape}");
   for (const { width, height } of [
     { width: 1280, height: 800 },
     { width: 390, height: 844 },
   ]) {
     await page.viewport(width, height);
     await expect.element(held).toBeVisible();
-    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+    await expect.poll(() => document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
   }
-  await held.getByRole("button", { name: "approval/project · start-dev · attempt 1" }).click();
+  await held.getByRole("button", { name: /^Actions for/ }).click();
+  await page.getByRole("menuitem", { name: "approval/project · start-dev · attempt 1" }).click();
   await expect.element(page.getByRole("dialog")).toBeVisible();
 });
 
@@ -297,12 +298,20 @@ it("opens with Enter and Space, tabs through row actions, and returns focus to t
   await userEvent.keyboard("{Enter}");
   await expect.element(tray()).toBeVisible();
   await expect.element(tray().getByRole("region", { name: "Approval needed (2)" })).toBeVisible();
-  await userEvent.tab();
   await expect.element(tray().getByRole("link", { name: /#367/ })).toHaveFocus();
   await userEvent.tab();
   await expect
     .element(tray().getByRole("button", { name: "Approve", exact: true }).first())
     .toHaveFocus();
+  await userEvent.tab();
+  const actions = tray().getByRole("button", { name: "Actions for Keep Needs attention current" });
+  await expect.element(actions).toHaveFocus();
+  await userEvent.keyboard("{Enter}");
+  await expect
+    .element(page.getByRole("menuitem", { name: "Cancel run", exact: true }))
+    .toBeVisible();
+  await userEvent.keyboard("{Escape}");
+  await expect.element(actions).toHaveFocus();
   await userEvent.keyboard("{Escape}");
   await expect.element(tray()).not.toBeInTheDocument();
   await expect.element(bell(2)).toHaveFocus();
@@ -335,6 +344,30 @@ it("approves in the dropdown and updates both counts before the slow refresh", a
     .toBe("idle");
 });
 
+it("confirms cancellation from the row menu and disables cancellation during approval", async () => {
+  await bell(2).click();
+  const row = tray().getByRole("listitem").filter({ hasText: "#367" });
+  const actions = row.getByRole("button", { name: /^Actions for/ });
+  await actions.click();
+  await page.getByRole("menuitem", { name: "Cancel run", exact: true }).click();
+  const confirmation = page.getByRole("alertdialog");
+  await expect.element(confirmation).toBeVisible();
+  await confirmation.getByRole("button", { name: "Keep running" }).click();
+  await row.getByRole("button", { name: "Approve", exact: true }).click();
+  await actions.click();
+  await expect
+    .element(page.getByRole("menuitem", { name: "Cancel run", exact: true }))
+    .toBeDisabled();
+  await userEvent.keyboard("{Escape}");
+  await commands.answerApproval(200, '{"ok":true}');
+  await expect.element(row, { timeout: 2_000 }).not.toBeInTheDocument();
+  await expect
+    .poll(() => queryClient.getQueryState(overviewQuery().queryKey)?.fetchStatus, {
+      timeout: 10_000,
+    })
+    .toBe("idle");
+});
+
 it("updates the open tray to an empty line and removes the bell badge", async () => {
   await bell(2).click();
   await replaceNeeds([]);
@@ -351,7 +384,7 @@ const eightNeeds = [
   unrelated,
   ...[
     "Show worker capacity",
-    "Keep the run outcome visible",
+    "Keep the run outcome visible after another attempt has started",
     "Retry a failed preflight",
     "Update loop settings",
     "Fix repository polling",
@@ -389,6 +422,26 @@ it.each(["dark", "light"])(
     const scroll = tray().getByRole("region", { name: "Approval needed (7)" }).element()
       .parentElement?.parentElement;
     expect(scroll?.scrollHeight).toBeGreaterThan(scroll?.clientHeight ?? Infinity);
+    const visibleRows = () => {
+      const bounds = tray()
+        .getByRole("region", { name: "Approval needed (7)" })
+        .element()
+        .parentElement?.parentElement?.getBoundingClientRect();
+      return tray()
+        .getByRole("listitem")
+        .elements()
+        .filter((row) => {
+          const rect = row.getBoundingClientRect();
+          return bounds !== undefined && rect.top >= bounds.top && rect.bottom <= bounds.bottom;
+        }).length;
+    };
+    expect(visibleRows()).toBeGreaterThanOrEqual(7);
+    expect(
+      tray()
+        .getByRole("listitem")
+        .elements()
+        .every((row) => row.getBoundingClientRect().height <= 57),
+    ).toBe(true);
     await page.screenshot({
       path: `../../../../../.impeccable/review/notification-open-${theme}.png`,
     });
@@ -399,6 +452,13 @@ it.each(["dark", "light"])(
     await expect.poll(() => tray().element().getBoundingClientRect().width).toBe(390);
     expect(tray().element().getBoundingClientRect().height).toBeLessThanOrEqual(591);
     expect(document.documentElement.scrollWidth).toBe(390);
+    expect(visibleRows()).toBeGreaterThanOrEqual(7);
+    expect(
+      tray()
+        .getByRole("listitem")
+        .elements()
+        .every((row) => row.getBoundingClientRect().height <= 57),
+    ).toBe(true);
     await page.screenshot({
       path: `../../../../../.impeccable/review/notification-phone-${theme}.png`,
     });

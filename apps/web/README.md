@@ -10,11 +10,11 @@ A mark is the item's GitHub icon and number in GitHub's state colour: an issue i
 
 ## Needs attention
 
-The bell at the right end of every page header shows the open count. It opens a 400px notification tray on desktop and a full-width bottom sheet on phones, capped at 70% of the viewport height with a scrolling list. Entries are grouped by kind, with a count per group. Each row shows the need, linked item and title when available, project or worker, recorded age when available, and actions. Select a run's need title to open its drawer. **View all on Overview** opens the full list, which uses the same rows. The sidebar shows the same total beside **Overview** and a count per project.
+The bell at the right end of every page header shows the open count. It opens a 400px notification tray on desktop and a full-width bottom sheet on phones, capped at 70% of the viewport height with a scrolling list. Entries are grouped by kind, with a count per group. Each row has two lines: the linked item and title beside the primary action, then the loop, project, and recorded age when available. Worker rows show the worker and diagnostic context. The row menu contains secondary actions, including **Open run**, **Cancel run**, and **Dismiss**, when available. For a run without another primary action, **Details** opens its drawer. **View all on Overview** opens the full list, which uses the same rows. The sidebar shows the same total beside **Overview** and a count per project.
 
 Enter or Space opens the tray, Tab moves through links and actions, and Escape closes it and returns focus to the bell. The count and list update from live overview data. An empty tray shows **Nothing needs attention** and the bell has no badge.
 
-Every entry has **Dismiss**. It leaves attention lists, counts, and badges immediately after the acknowledgement saves. The overview's **Dismissed** section is collapsed by default and offers **Undo** for each acknowledged entry. A changed finding, count, or failed attempt appears again. Run drawers, run pages, and board cards retain the underlying states and actions: dismissal does not approve a run, resolve a failure, or reset a cycle budget.
+Every entry has **Dismiss** in the row menu. It leaves attention lists, counts, and badges immediately after the acknowledgement saves. The overview's **Dismissed** section is collapsed by default and offers **Undo** for each acknowledged entry. A changed finding, count, or failed attempt appears again. Run drawers, run pages, and board cards retain the underlying states and actions: dismissal does not approve a run, resolve a failure, or reset a cycle budget.
 
 Entries:
 

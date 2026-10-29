@@ -142,3 +142,7 @@ export const needKindLabel = {
   ConfigFileNeed: "Configuration file not loaded",
   UnconfirmedStopNeed: "Parent task not stopped",
 } satisfies Record<NeedView["_tag"], string>;
+
+export const needDetailsLabel = "Details";
+export const needOpenRunLabel = "Open run";
+export const needActionsLabel = (title: string) => `Actions for ${title}`;

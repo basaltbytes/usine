@@ -12,6 +12,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "~/components/ui/alert-dialog";
+import { DropdownMenuItem } from "~/components/ui/dropdown-menu";
 import { Button } from "~/components/ui/button";
 import { itemIdentity, useOverview } from "~/components/item/identity";
 import { useOpenRun } from "~/hooks/use-open-run";
@@ -47,7 +48,9 @@ const ApprovalAsk = ({ need, dismiss }: ApprovalAskProps) => {
   return (
     <>
       <NeedItem
-        copy={origin === undefined ? copy : { ...copy, detail: origin.title }}
+        copy={copy}
+        loop={need.loop}
+        heading={need.loop}
         item={origin}
         dismiss={dismiss}
         open={() => openRun(need.runId)}
@@ -57,21 +60,21 @@ const ApprovalAsk = ({ need, dismiss }: ApprovalAskProps) => {
             : action.error.message
         }
         actions={
-          <>
-            <Button
-              disabled={sent !== undefined}
-              onClick={() => action.mutate({ runId: need.runId, request: { action: "approve" } })}
-            >
-              {sent === "approve" ? runActionProgress.approve : runActionLabel.approve}
-            </Button>
-            <Button
-              variant="ghost"
-              disabled={sent !== undefined}
-              onClick={() => setConfirmingCancel(true)}
-            >
-              {sent === "cancel" ? runActionProgress.cancel : runActionLabel.cancel}
-            </Button>
-          </>
+          <Button
+            disabled={sent !== undefined}
+            onClick={() => action.mutate({ runId: need.runId, request: { action: "approve" } })}
+          >
+            {sent === "approve" ? runActionProgress.approve : runActionLabel.approve}
+          </Button>
+        }
+        menu={
+          <DropdownMenuItem
+            variant="destructive"
+            disabled={sent !== undefined}
+            onClick={() => setConfirmingCancel(true)}
+          >
+            {sent === "cancel" ? runActionProgress.cancel : runActionLabel.cancel}
+          </DropdownMenuItem>
         }
       />
       <AlertDialog open={confirmingCancel} onOpenChange={setConfirmingCancel}>
@@ -116,6 +119,7 @@ const NeedEntry = ({ need }: NeedEntryProps) => {
       return (
         <NeedItem
           copy={needCopy(need)}
+          heading={`${need.worker} · ${need.message}`}
           dismiss={dismiss}
           actions={
             <Button
@@ -136,15 +140,20 @@ const NeedEntry = ({ need }: NeedEntryProps) => {
           since={need.lastAnsweredAt}
           copy={needCopy(need)}
           dismiss={dismiss}
-          actions={need.attempts.map((attempt) => (
+          heading={need.worker}
+          actions={
             <Button
-              key={attempt.attemptId}
               variant="ghost"
-              className="h-auto min-h-7 max-w-full text-left whitespace-normal wrap-anywhere"
-              onClick={() => openRun(attempt.runId)}
+              nativeButton={false}
+              render={<Link to="/configuration/workers/$worker" params={{ worker: need.worker }} />}
             >
-              {workerAttemptLabel(attempt)}
+              {openWorkerLabel}
             </Button>
+          }
+          menu={need.attempts.map((attempt) => (
+            <DropdownMenuItem key={attempt.attemptId} onClick={() => openRun(attempt.runId)}>
+              {workerAttemptLabel(attempt)}
+            </DropdownMenuItem>
           ))}
         />
       );
@@ -154,6 +163,7 @@ const NeedEntry = ({ need }: NeedEntryProps) => {
       return (
         <NeedItem
           copy={copy}
+          loop={"loop" in need ? need.loop : undefined}
           dismiss={dismiss}
           open={runId === null ? undefined : () => openRun(runId)}
         />

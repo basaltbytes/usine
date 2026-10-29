@@ -181,7 +181,10 @@ it("resolves a failure from Needs attention while retaining unrelated attention,
         </QueryClientProvider>,
       ),
     );
-    await page.getByRole("button", { name: "implement: agent failure", exact: true }).click();
+    await page
+      .getByRole("region", { name: "Run failed (1)" })
+      .getByRole("button", { name: "Details", exact: true })
+      .click();
     await page.getByRole("button", { name: "More actions", exact: true }).click();
     await page.getByRole("menuitem", { name: "Mark resolved", exact: true }).click();
     await expect
@@ -210,19 +213,20 @@ it("resolves a failure from Needs attention while retaining unrelated attention,
     await page.getByRole("button", { name: "Close", exact: true }).click();
     const needs = page.getByRole("region", { name: "Needs attention" });
     await expect
-      .element(needs.getByRole("button", { name: /implement: agent failure/ }))
+      .element(needs.getByRole("region", { name: "Run failed (1)", includeHidden: true }))
       .not.toBeInTheDocument();
     await expect
       .element(
-        needs.getByRole("button", {
-          name: "implement: approval needed",
+        needs.getByRole("link", {
+          name: /Write the release notes/,
           exact: true,
         }),
       )
       .toBeVisible();
     await expect.element(needs.getByRole("button", { name: "Approve", exact: true })).toBeVisible();
+    await needs.getByRole("button", { name: /^Actions for/ }).click();
     await expect
-      .element(needs.getByRole("button", { name: "Cancel run", exact: true }))
+      .element(page.getByRole("menuitem", { name: "Cancel run", exact: true }))
       .toBeVisible();
     expect(
       queryClient.getQueryData<ReadyOverview>(overviewQuery().queryKey)?.projects[0]?.status,
@@ -303,15 +307,15 @@ it("leaves a closed issue's failed run out of Needs attention and marks the issu
     const needs = page.getByRole("region", { name: "Needs attention", includeHidden: true });
     await expect
       .element(
-        needs.getByRole("button", {
-          name: "implement: approval needed",
+        needs.getByRole("link", {
+          name: /Write the release notes/,
           exact: true,
           includeHidden: true,
         }),
       )
       .toBeInTheDocument();
     await expect
-      .element(needs.getByRole("button", { name: /implement: agent failure/, includeHidden: true }))
+      .element(needs.getByRole("region", { name: "Run failed (1)", includeHidden: true }))
       .not.toBeInTheDocument();
   } finally {
     flushSync(() => root.unmount());
@@ -532,10 +536,10 @@ it("shows the push refusal on the run page and in Needs attention alongside reta
     );
     await page.getByRole("button", { name: "Needs attention (1)", exact: true }).click();
     const needs = page.getByRole("dialog", { name: "Needs attention 1" });
+    await expect.element(needs.getByRole("button", { name: "Details", exact: true })).toBeVisible();
     await expect
-      .element(needs.getByRole("button", { name: /implement: github refused push/ }))
-      .toBeVisible();
-    await expect.element(needs.getByText(message, { exact: true })).toBeVisible();
+      .element(needs.getByText("implement · resolution/project", { exact: false }))
+      .toHaveAttribute("title", message);
     await userEvent.keyboard("{Escape}");
     await expect.element(page.getByText("GitHub refused push", { exact: true })).toBeVisible();
     await expect.element(page.getByText(message, { exact: true }).last()).toBeVisible();
