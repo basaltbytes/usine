@@ -81,6 +81,7 @@ export const AttemptRecordDoc = defineDocFamily<AttemptRecord, null>({
   version: 1,
   scope: "session",
   family: true,
+  checkpointWhen: () => false,
   initial: () => ({
     taskId: null,
     parentModel: null,
@@ -114,5 +115,6 @@ export const HoldDoc = defineDoc<Hold>({
   kind: "usine.hold",
   version: 1,
   scope: "task",
+  checkpointWhen: () => false,
   initial: () => ({ paused: false, guidance: [], held: [] }),
 });
