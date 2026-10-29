@@ -9,10 +9,12 @@ const author = new BotAccount({
 });
 
 describe("childEnvironment", () => {
-  it("makes the bot account the author and committer and adds the hooks directory last", () => {
+  it("sets bot identity and hooks and overrides inherited Claude connector and traffic settings", () => {
     const environment = childEnvironment(
       {
         GIT_AUTHOR_NAME: "Operator",
+        ENABLE_CLAUDEAI_MCP_SERVERS: "1",
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "0",
         GIT_CONFIG_COUNT: "1",
         GIT_CONFIG_KEY_0: "credential.helper",
         GIT_CONFIG_VALUE_0: "",
@@ -26,6 +28,8 @@ describe("childEnvironment", () => {
       GIT_AUTHOR_EMAIL: email,
       GIT_COMMITTER_NAME: "usine-phildl[bot]",
       GIT_COMMITTER_EMAIL: email,
+      ENABLE_CLAUDEAI_MCP_SERVERS: "0",
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
       GIT_CONFIG_COUNT: "2",
       GIT_CONFIG_KEY_0: "credential.helper",
       GIT_CONFIG_VALUE_0: "",

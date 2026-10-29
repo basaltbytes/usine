@@ -1,4 +1,5 @@
 import { type RemoteShell, SSH_FAILURE } from "@usine/agents/child-host";
+import { codexConfigArgs } from "@usine/agents/codex";
 import { unsupportedCodexVersion } from "@usine/agents/preflight";
 import type { BrainSpec, Harness } from "@usine/core/agent/brain";
 import { HarnessReady, HarnessUnavailableError } from "@usine/core/agent/capability";
@@ -281,7 +282,8 @@ export const harnessBinaryProbe = Effect.fn("SshExecutor.probeHarnessBinary")(fu
 ) {
   const label = harness === "claude" ? "Claude Code" : "Codex";
   yield* Effect.annotateCurrentSpan({ host, harness, credential });
-  const result = yield* commands.inspect("preflight", shell, harness, ["--version"]);
+  const args = harness === "codex" ? [...codexConfigArgs, "--version"] : ["--version"];
+  const result = yield* commands.inspect("preflight", shell, harness, args);
   if (result.exitCode === SSH_FAILURE) return yield* unreachable(host, harness, result);
   if (result.exitCode !== 0)
     return new HarnessUnavailableError({

@@ -296,24 +296,36 @@ describe("Codex app-server transport", () => {
     host,
   });
 
-  it("starts outside the worktree with repository trust and recursive agents disabled", () => {
-    const command = codexAppServerCommand(client(new LocalProcess()));
-    assert.strictEqual(command._tag, "StandardCommand");
-    if (command._tag !== "StandardCommand") return;
-    assert.notStrictEqual(command.options.cwd, "/workspace/repo");
-    assert.deepStrictEqual(command.options.env, request.environment);
-    assert.strictEqual(command.options.extendEnv, false);
-    assert.strictEqual(command.options.detached, false);
-    assert.strictEqual(command.options.forceKillAfter, "5 seconds");
-    assert.deepStrictEqual(command.args, [
-      "app-server",
-      "--stdio",
-      "-c",
-      'projects."/workspace/repo".trust_level="untrusted"',
-      "-c",
-      "features.multi_agent=false",
-    ]);
-  });
+  for (const sessionId of [Option.some(request.session.id), Option.none<AgentSessionId>()]) {
+    it(`disables repository trust, recursive agents, and background traffic for ${Option.isSome(sessionId) ? "children" : "preflight"}`, () => {
+      const command = codexAppServerCommand({ ...client(new LocalProcess()), sessionId });
+      assert.strictEqual(command._tag, "StandardCommand");
+      if (command._tag !== "StandardCommand") return;
+      assert.notStrictEqual(command.options.cwd, "/workspace/repo");
+      assert.deepStrictEqual(command.options.env, request.environment);
+      assert.strictEqual(command.options.extendEnv, false);
+      assert.strictEqual(command.options.detached, false);
+      assert.strictEqual(command.options.forceKillAfter, "5 seconds");
+      assert.deepStrictEqual(command.args, [
+        "app-server",
+        "--stdio",
+        "-c",
+        'projects."/workspace/repo".trust_level="untrusted"',
+        "-c",
+        "features.multi_agent=false",
+        "-c",
+        "features.plugins=false",
+        "-c",
+        "features.remote_plugin=false",
+        "-c",
+        "features.apps=false",
+        "-c",
+        "check_for_update_on_startup=false",
+        "-c",
+        "analytics.enabled=false",
+      ]);
+    });
+  }
 
   it("runs the app server on a remote host as one SSH command with its pid recorded", () => {
     const host = new RemoteShell({
@@ -331,7 +343,7 @@ describe("Codex app-server transport", () => {
       "BatchMode=yes",
       "worker.exe.xyz",
       "--",
-      `export GH_HOST='github.int.exe.xyz' && sh -c 'printf %s "$$" > "$0" && exec "$@"' '/workspace/repo.child-2.pid' 'codex' 'app-server' '--stdio' '-c' 'projects."/workspace/repo".trust_level="untrusted"' '-c' 'features.multi_agent=false'; code=$?; rm -f '/workspace/repo.child-2.pid'; exit "$code"`,
+      `export GH_HOST='github.int.exe.xyz' && sh -c 'printf %s "$$" > "$0" && exec "$@"' '/workspace/repo.child-2.pid' 'codex' 'app-server' '--stdio' '-c' 'projects."/workspace/repo".trust_level="untrusted"' '-c' 'features.multi_agent=false' '-c' 'features.plugins=false' '-c' 'features.remote_plugin=false' '-c' 'features.apps=false' '-c' 'check_for_update_on_startup=false' '-c' 'analytics.enabled=false'; code=$?; rm -f '/workspace/repo.child-2.pid'; exit "$code"`,
     ]);
     assert.deepStrictEqual(command.options.env, host.sshEnvironment);
     assert.strictEqual(command.options.extendEnv, false);

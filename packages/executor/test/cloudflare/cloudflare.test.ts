@@ -1,6 +1,7 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { RemoteShell, sshArguments } from "@usine/agents/child-host";
+import { codexConfigArgs } from "@usine/agents/codex";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { Agent } from "@usine/core/agent";
 import type { AttemptSalvage } from "@usine/core/attempt/salvage";
@@ -575,14 +576,20 @@ describe("cloudflare Worker", () => {
       const worker = yield* fakeWorker;
       const credentials = mintingProvider();
       const codex = new CheckoutRequest({ ...request, agent: brain("codex") });
+      const probes: Array<{ sandbox: string; words: ReadonlyArray<string> }> = [];
+      worker.state.respond = (sandbox, words) => {
+        if (words[0] === "codex") probes.push({ sandbox: sandbox.name, words });
+        return Option.none();
+      };
       const refused = yield* Effect.gen(function* () {
         const cloudflare = yield* Executor;
         yield* cloudflare.preflight(WORKER, [codex.agent.brain], 1);
         // The Worker's image is redeployed under the same name, with a Codex usine doesn't support.
-        worker.state.respond = (_sandbox, words) =>
-          words[0] === "codex"
-            ? Option.some({ stdout: "codex-cli 0.150.0\n", exitCode: 0 })
-            : Option.none();
+        worker.state.respond = (sandbox, words) => {
+          if (words[0] !== "codex") return Option.none();
+          probes.push({ sandbox: sandbox.name, words });
+          return Option.some({ stdout: "codex-cli 0.150.0\n", exitCode: 0 });
+        };
         return yield* cloudflare.prepare(codex).pipe(Effect.flip);
       }).pipe(
         Effect.scoped,
@@ -592,6 +599,10 @@ describe("cloudflare Worker", () => {
       assert(refused instanceof WorkerCapabilityError);
       assert.strictEqual(refused.capability, "toolchain");
       assert.include(refused.message, "codex-cli 0.150.0");
+      assert.deepStrictEqual(probes, [
+        { sandbox: `${OWNER}.preflight`, words: ["codex", ...codexConfigArgs, "--version"] },
+        { sandbox: SANDBOX, words: ["codex", ...codexConfigArgs, "--version"] },
+      ]);
       assert.deepStrictEqual(credentials.minted, []);
       assert.deepStrictEqual(
         worker.state.requests.filter((line) => line.startsWith(`PUT /v1/sandboxes/${SANDBOX}`)),

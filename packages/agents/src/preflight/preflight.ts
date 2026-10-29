@@ -8,7 +8,7 @@ import { Effect, Option, Schema } from "effect";
 import { homedir } from "node:os";
 import type { ChildHost } from "../child-host/child-host.ts";
 import { SessionOperationError, WorkingDirectory } from "../runtime.ts";
-import { CodexAppServer, codexAppServerLive } from "../pi/codex/app-server.ts";
+import { CodexAppServer, codexAppServerLive, codexConfigArgs } from "../pi/codex/app-server.ts";
 import { initializeCodex, verifyCodexAccount } from "../pi/codex/account.ts";
 import { PiSdk, piSdkLive, usePiStart } from "../pi/sdk.ts";
 import { probeCommand, probeFailed, probeOutput } from "./command.ts";
@@ -72,7 +72,7 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
       probeCommand(host, environment, brain.harness, capability, command, args);
     switch (brain.harness) {
       case "codex": {
-        const version = yield* probe("binary", "codex", ["--version"]);
+        const version = yield* probe("binary", "codex", [...codexConfigArgs, "--version"]);
         const unsupported = unsupportedCodexVersion(version);
         if (Option.isSome(unsupported)) return yield* unsupported.value;
         yield* Effect.scoped(

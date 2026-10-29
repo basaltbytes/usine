@@ -160,7 +160,25 @@ const runCodex = (env: Record<string, string>, cwd: string) =>
   Effect.callback<{ code: number; stdout: string; stderr: string }>((resume) => {
     const child = execFile(
       "codex",
-      ["exec", "--skip-git-repo-check", "-m", "gpt-5.5", "Reply with the single word OK."],
+      [
+        "exec",
+        "-c",
+        "features.multi_agent=false",
+        "-c",
+        "features.plugins=false",
+        "-c",
+        "features.remote_plugin=false",
+        "-c",
+        "features.apps=false",
+        "-c",
+        "check_for_update_on_startup=false",
+        "-c",
+        "analytics.enabled=false",
+        "--skip-git-repo-check",
+        "-m",
+        "gpt-5.5",
+        "Reply with the single word OK.",
+      ],
       { env, cwd, timeout: 180_000 },
       (error, stdout, stderr) =>
         resume(

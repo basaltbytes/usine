@@ -223,7 +223,10 @@ describe("Provisioned SSH Worker behind a Gateway", () => {
         assert.isTrue(Option.isSome(report.deferred));
         const grant = yield* machines.create(WORKER, RUN, request.attemptId, [codexAgent.brain]);
         const lines = machine.state.calls.map(({ line }) => line);
-        assert.include(lines, "exec 'codex' '--version'");
+        assert.include(
+          lines,
+          "exec 'codex' '-c' 'features.multi_agent=false' '-c' 'features.plugins=false' '-c' 'features.remote_plugin=false' '-c' 'features.apps=false' '-c' 'check_for_update_on_startup=false' '-c' 'analytics.enabled=false' '--version'",
+        );
         assert.isFalse(
           lines.some((line) => line.includes("http_connect")),
           "no login host is checked",
@@ -875,7 +878,7 @@ describe("Provisioned SSH Worker", () => {
         const grant = yield* machines.create(WORKER, RUN, request.attemptId, [codexAgent.brain]);
         assert.include(
           machine.state.calls.map(({ line }) => line),
-          "exec 'codex' '--version'",
+          "exec 'codex' '-c' 'features.multi_agent=false' '-c' 'features.plugins=false' '-c' 'features.remote_plugin=false' '-c' 'features.apps=false' '-c' 'check_for_update_on_startup=false' '-c' 'analytics.enabled=false' '--version'",
         );
 
         yield* (yield* executor.prepare(codexRequest)).launch(sink);

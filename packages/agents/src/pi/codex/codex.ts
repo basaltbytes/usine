@@ -573,3 +573,5 @@ const makeCodexChild = Effect.gen(function* () {
 });
 
 export const codexChildBackendLayer = Layer.effect(CodexChildBackend, makeCodexChild);
+
+export { codexConfigArgs } from "./app-server.ts";

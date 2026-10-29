@@ -41,6 +41,8 @@ const overSsh = (line: string) => `ssh -o BatchMode=yes worker.exe.xyz -- ${line
 /** The environment for local checks, used instead of the test process's environment. */
 const workerEnvironment = { PATH: "/usr/bin:/bin" };
 const encoder = new TextEncoder();
+const codexVersionCommand =
+  "codex -c features.multi_agent=false -c features.plugins=false -c features.remote_plugin=false -c features.apps=false -c check_for_update_on_startup=false -c analytics.enabled=false --version";
 
 const commands = (
   responses: Readonly<Record<string, { readonly stdout: string; readonly exitCode: number }>>,
@@ -191,7 +193,7 @@ describe("worker harness readiness", () => {
         assert.strictEqual(server.opened(), 0);
         assert(!JSON.stringify(error).includes("credential-shaped"));
       }).pipe(
-        Effect.provide(commands({ "codex --version": result })),
+        Effect.provide(commands({ [codexVersionCommand]: result })),
         Effect.provide(server.layer),
         Effect.provide(unusedPi),
       );
@@ -220,7 +222,7 @@ describe("worker harness readiness", () => {
           }).pipe(
             Effect.provide(
               commands({
-                "codex --version": { stdout: `codex-cli ${version}`, exitCode: 0 },
+                [codexVersionCommand]: { stdout: `codex-cli ${version}`, exitCode: 0 },
               }),
             ),
             Effect.provide(server.layer),
@@ -241,7 +243,7 @@ describe("worker harness readiness", () => {
         Effect.flip,
         Effect.provide(
           commands({
-            "codex --version": { stdout: `codex-cli ${CODEX_CLI_VERSION}`, exitCode: 0 },
+            [codexVersionCommand]: { stdout: `codex-cli ${CODEX_CLI_VERSION}`, exitCode: 0 },
           }),
         ),
         Effect.provide(server.layer),
