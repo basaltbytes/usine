@@ -51,6 +51,7 @@ const snapshot = new IssueSnapshot({
     author: null,
     issueType: null,
     milestone: null,
+    labelEvents: {},
     labels: { totalCount: 0, nodes: [] },
     assignees: { totalCount: 0, nodes: [] },
     comments: { totalCount: 0, nodes: [] },

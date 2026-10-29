@@ -6,6 +6,9 @@ Import `ExpressionEngine`, `Source`, `Environment`, the environment descriptors,
 
 A `nullable` `ObjectField` can be `null`, and an absent key reads as `null`. Expressions compare it with `null` in either order, and paths below it stay type-checked. Unknown variables and paths fail checking, also inside macros such as `exists`.
 
+Typed `map<string,T>` fields accept JSON object values. Reads through a map keep
+`T`'s field checks, nullable-field handling, and integer normalization.
+
 Expressions can use CEL optional values: `.?` and `[?]` select a value that might be missing, and `optional` helpers such as `orValue` give a fallback. `item.?milestone.?title.orValue("none")` is `"none"` if `milestone` is null or absent. A null field counts as present, so `item.?milestone` holds `null`, not an empty optional.
 
 Errors: `ExpressionCheckError` (parse, type, or result type), `ExpressionEvaluationError`, and the union `ExpressionError`. JSON integers declared as CEL `int` or `uint` become `bigint` before evaluation, so GraphQL payloads keep CEL integer semantics.

@@ -100,6 +100,7 @@ const issue28 = new IssueSnapshot({
     author: { login: "PhilDL" },
     issueType: null,
     milestone: null,
+    labelEvents: {},
     labels: { totalCount: 0, nodes: [] },
     assignees: { totalCount: 0, nodes: [] },
     comments: { totalCount: 0, nodes: [] },

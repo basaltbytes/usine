@@ -252,16 +252,21 @@ type EnvironmentPurpose = "check" | "evaluate";
 /**
  * Creates the cel-js environment for checking or evaluating `descriptor`. Because cel-js rejects
  * `null` in a typed field and can't index `dyn<T>`, evaluation declares nullable fields as `dyn`.
- * Both register `T == null`; cel-js derives `!=` and the reversed operand order from it.
+ * Map values use `dyn` during evaluation because cel-js does not convert JSON map values to
+ * registered object types. Both environments register `T == null`.
  */
 const makeEnvironment = (descriptor: Environment, purpose: EnvironmentPurpose): CelEnvironment => {
   const environment = new CelEnvironment(ENVIRONMENT_OPTIONS);
   const nullableTypes = new Set<TypeReference>();
+  const runtimeType = (type: TypeReference) =>
+    purpose === "evaluate" && type.startsWith("map<")
+      ? `${type.slice(0, type.indexOf(",") + 1)}dyn>`
+      : type;
   for (const objectType of descriptor.types) {
     environment.registerType(objectType.name, {
       fields: Object.fromEntries(
         objectType.fields.map((field) => {
-          if (!field.nullable) return [field.name, field.type];
+          if (!field.nullable) return [field.name, runtimeType(field.type)];
           nullableTypes.add(field.type);
           return [field.name, purpose === "check" ? field.type : "dyn"];
         }),
@@ -275,7 +280,7 @@ const makeEnvironment = (descriptor: Environment, purpose: EnvironmentPurpose): 
     );
   }
   for (const variable of descriptor.variables) {
-    environment.registerVariable(variable.name, variable.type);
+    environment.registerVariable(variable.name, runtimeType(variable.type));
   }
   return environment;
 };
@@ -308,7 +313,7 @@ const setField = (target: NormalizedObject, name: string, value: RuntimeValue) =
 
 /**
  * Returns the context normalizer for `descriptor`, which converts `int` and `uint` numbers to
- * `bigint` and sets absent nullable fields to `null`, recursing into `list<T>` items and declared
+ * `bigint` and sets absent nullable fields to `null`, recursing into list items, map values, and declared
  * object fields. Returns unchanged values as is, and shallow-copies changed objects.
  */
 const contextNormalizer = (
@@ -333,6 +338,18 @@ const contextNormalizer = (
       const normalizeItem = normalizerOf(decodeTypeReference(type.slice(5, -1)));
       if (normalizeItem === unchanged) return unchanged;
       return (value) => (Array.isArray(value) ? value.map(normalizeItem) : value);
+    }
+    if (type.startsWith("map<") && type.endsWith(">")) {
+      const normalizeValue = normalizerOf(
+        decodeTypeReference(type.slice(type.indexOf(",") + 1, -1)),
+      );
+      if (normalizeValue === unchanged) return unchanged;
+      return (value) =>
+        isJsonObject(value)
+          ? Object.fromEntries(
+              Object.entries(value).map(([key, entry]) => [key, normalizeValue(entry)]),
+            )
+          : value;
     }
     const objectType = objectTypes.get(type);
     if (objectType === undefined) return unchanged;
@@ -590,8 +607,8 @@ export const makeExpressionEngine = () => {
  * `item.?milestone.?title` is empty.
  *
  * Before evaluation, converts JSON integers to `bigint` wherever the {@link Environment}
- * declares `int`, at any depth, and sets absent nullable fields to `null`. Values inside a
- * `map<K,V>` aren't converted, so declare integer map values as `double`.
+ * declares `int`, including list items, map values, and declared object fields, and sets absent
+ * nullable fields to `null`.
  *
  * `uint` isn't supported in `context`; declare such values as `int`. An expression that reads a
  * non-nullable `uint` value type-checks but fails evaluation. On a nullable field, comparing with a

@@ -42,7 +42,11 @@ The issue payload slice ([`IssuePayload`](https://github.com/basaltbytes/usine/b
 | `issueType.name` | string | `issueType` | `issueType` is null if the issue has no type. |
 | `milestone.title` | string | `milestone` | `milestone` is null if the issue has no milestone. |
 | `labels.totalCount` | int | | |
-| `labels.nodes[].name` | string | | The first 50 labels. |
+| `labels.nodes[].name` | string | | All current labels. Polling completes a truncated label connection. |
+| `labelEvents` | map | | The last label-addition event for each current label with available history, indexed by label name. See [Label actors](#label-actors). |
+| `labelEvents["name"].actor.login` | string | `actor` | The GitHub actor's login. For a GitHub App, this is the App slug without `[bot]`. |
+| `labelEvents["name"].actor.type` | string | `actor` | GitHub's actor type, such as `Bot` or `User`. |
+| `labelEvents["name"].createdAt` | string | | ISO 8601 UTC time of the last `LabeledEvent`. |
 | `assignees.totalCount` | int | | |
 | `assignees.nodes[].login` | string | | The first 10 assignees. |
 | `comments.totalCount` | int | | |
@@ -78,7 +82,11 @@ The pull-request payload slice ([`PullRequestPayload`](https://github.com/basalt
 | `mergeStateStatus` | string | | GitHub's merge state, such as `CLEAN`, `BLOCKED`, `BEHIND`, or `DIRTY`. |
 | `statusCheckRollup.state` | string | `statusCheckRollup` | The combined check state, such as `SUCCESS`, `FAILURE`, or `PENDING`. `statusCheckRollup` is null if the head commit has no checks. |
 | `labels.totalCount` | int | | |
-| `labels.nodes[].name` | string | | The first 50 labels. |
+| `labels.nodes[].name` | string | | All current labels. Polling completes a truncated label connection. |
+| `labelEvents` | map | | The last label-addition event for each current label with available history, indexed by label name. See [Label actors](#label-actors). |
+| `labelEvents["name"].actor.login` | string | `actor` | The GitHub actor's login. For a GitHub App, this is the App slug without `[bot]`. |
+| `labelEvents["name"].actor.type` | string | `actor` | GitHub's actor type, such as `Bot` or `User`. |
+| `labelEvents["name"].createdAt` | string | | ISO 8601 UTC time of the last `LabeledEvent`. |
 | `reviewRequests.totalCount` | int | | |
 | `reviewRequests.nodes[].requestedReviewer.login` | string | see below | The first 10 review requests. |
 | `reviews.totalCount` | int | | |
@@ -91,6 +99,26 @@ The pull-request payload slice ([`PullRequestPayload`](https://github.com/basalt
 | `closingIssuesReferences.nodes[]` | list | | The first 10 issues that the pull request closes: `number`, `state`. |
 
 `requestedReviewer` is null if the reviewer is a deleted account. A team review request has no `login`, so `login` reads as `null`.
+
+### Label actors
+
+Issue and pull request expressions can read `item.labelEvents["ready-for-agent"]`.
+Only current labels appear in the map. Removing and reapplying a label replaces its
+entry with the latest addition's actor and time. A deleted actor is `null`; a label
+with no available history has no entry. Older stored payloads decode with an empty
+map until polling refreshes them. Check membership with
+`"ready-for-agent" in item.labelEvents` before indexing, then check `actor != null`
+before reading its fields.
+
+Polling fetches the last 100 `LabeledEvent` entries in the snapshot query. It reads
+older pages only while current labels lack an event, up to ten pages in total. If
+that limit prevents completing the map, the snapshot keeps the events found and
+omits labels whose history is unavailable. The map's actor fields affect event
+deduplication; timestamps do not. See [ADR 0007](https://github.com/basaltbytes/usine/blob/main/docs/adr/0007-polling-triggers-content-hashed-events.md) for
+the content-hash rules.
+
+The actor identifies the GitHub account that applied the label. An operator action
+through the board uses the App's identity too.
 
 ### `item` for `on: schedule`
 
@@ -210,6 +238,41 @@ if: >-
   item.labels.nodes.exists(label, label.name == "ready-for-agent") &&
   !item.closedByPullRequestsReferences.nodes.exists(pr, pr.state == "OPEN")
 ```
+
+Require approval when the factory App applied `ready-for-agent`. Replace
+`your-app-slug` with the App's slug, without `[bot]`:
+
+```yaml title="projects/widgets/loops/start-app-labeled.md"
+trigger:
+  on: issue
+  if: >-
+    item.state == "OPEN" &&
+    "ready-for-agent" in item.labelEvents &&
+    item.labelEvents["ready-for-agent"].actor != null &&
+    item.labelEvents["ready-for-agent"].actor.type == "Bot" &&
+    item.labelEvents["ready-for-agent"].actor.login == "your-app-slug"
+approval: required
+agent: developer
+```
+
+`approval` is a fixed loop setting. To start human-labeled issues automatically,
+use a separate loop with `approval: none` and this condition:
+
+```yaml title="projects/widgets/loops/start-human-labeled.md"
+trigger:
+  on: issue
+  if: >-
+    item.state == "OPEN" &&
+    "ready-for-agent" in item.labelEvents &&
+    item.labelEvents["ready-for-agent"].actor != null &&
+    item.labelEvents["ready-for-agent"].actor.type == "User"
+approval: none
+agent: developer
+```
+
+These conditions skip unknown actors and missing history. Keep other loops that
+start the same work equally restrictive. Use `on: pr` for the same policy on pull
+requests. Each loop's existing `max_cycles` limit still applies.
 
 A pull request is ready for review, and no outcome label is present:
 

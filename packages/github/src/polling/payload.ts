@@ -33,6 +33,17 @@ const Label = Schema.Struct({ name: Schema.NonEmptyString });
 
 const Labels = Schema.Struct({ totalCount: NonNegativeInt, nodes: Schema.Array(Label) });
 
+export const LabelEvent = Schema.Struct({
+  actor: Schema.NullOr(
+    Schema.Struct({ login: Schema.NonEmptyString, type: Schema.NonEmptyString }),
+  ),
+  createdAt: Timestamp,
+});
+
+const LabelEvents = Schema.Record(Schema.String, LabelEvent).pipe(
+  Schema.withDecodingDefaultKey(Effect.succeed({})),
+);
+
 const IssueComment = Schema.Struct({
   author: NullableActor,
   body: Schema.String,
@@ -59,6 +70,7 @@ export const IssuePayload = Schema.Struct({
   issueType: Schema.NullOr(Schema.Struct({ name: Schema.String })),
   milestone: Schema.NullOr(Schema.Struct({ title: Schema.String })),
   labels: orEmpty(Labels, emptyConnection),
+  labelEvents: LabelEvents,
   assignees: Schema.Struct({ totalCount: NonNegativeInt, nodes: Schema.Array(Actor) }),
   comments: IssueComments,
   closedByPullRequestsReferences: orEmpty(
@@ -120,6 +132,7 @@ export const PullRequestPayload = Schema.Struct({
   mergeStateStatus: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed("UNKNOWN"))),
   statusCheckRollup: Schema.NullOr(Schema.Struct({ state: Schema.String })),
   labels: orEmpty(Labels, emptyConnection),
+  labelEvents: LabelEvents,
   reviewRequests: orEmpty(
     Schema.Struct({
       totalCount: NonNegativeInt,

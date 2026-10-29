@@ -1,3 +1,4 @@
+import { LabelTimeline, readLabelEvents } from "./label-events.ts";
 import { canonicalContent } from "./content.ts";
 import { ItemNumber } from "@usine/core/item";
 import { CommitSha, RepositoryName, splitRepositoryName } from "@usine/core/repository";
@@ -89,12 +90,20 @@ const catalogLabel = ({
 
 const IssueData = Schema.Struct({
   repository: Schema.OptionFromNullOr(
-    Schema.Struct({ issue: Schema.OptionFromNullOr(IssuePayload) }),
+    Schema.Struct({
+      issue: Schema.OptionFromNullOr(
+        Schema.Struct({ ...IssuePayload.fields, timelineItems: LabelTimeline }),
+      ),
+    }),
   ),
 });
 const PullRequestData = Schema.Struct({
   repository: Schema.OptionFromNullOr(
-    Schema.Struct({ pullRequest: Schema.OptionFromNullOr(PullRequestPayload) }),
+    Schema.Struct({
+      pullRequest: Schema.OptionFromNullOr(
+        Schema.Struct({ ...PullRequestPayload.fields, timelineItems: LabelTimeline }),
+      ),
+    }),
   ),
 });
 const IssuePresence = Schema.NullOr(Schema.Struct({ number: Schema.Int }));
@@ -535,9 +544,18 @@ export class GitHubPolling extends Context.Service<
                 return yield* repositoryGone("fetch-issue-snapshot");
               const payload = data.repository.value.issue;
               if (Option.isNone(payload)) return yield* itemGone("fetch-issue-snapshot", "issue");
+              const { timelineItems, ...itemPayload } = payload.value;
+              const labels = yield* completeLabels(itemPayload);
               const completePayload = {
-                ...payload.value,
-                labels: yield* completeLabels(payload.value),
+                ...itemPayload,
+                labels,
+                labelEvents: yield* readLabelEvents(
+                  { http, app },
+                  repository,
+                  item.number,
+                  labels.nodes,
+                  timelineItems,
+                ),
               };
               return new IssueSnapshot({
                 payload: completePayload,
@@ -557,9 +575,18 @@ export class GitHubPolling extends Context.Service<
             const payload = data.repository.value.pullRequest;
             if (Option.isNone(payload))
               return yield* itemGone("fetch-pull-request-snapshot", "pull request");
+            const { timelineItems, ...itemPayload } = payload.value;
+            const labels = yield* completeLabels(itemPayload);
             const completePayload = {
-              ...payload.value,
-              labels: yield* completeLabels(payload.value),
+              ...itemPayload,
+              labels,
+              labelEvents: yield* readLabelEvents(
+                { http, app },
+                repository,
+                item.number,
+                labels.nodes,
+                timelineItems,
+              ),
             };
             return new PullRequestSnapshot({
               payload: completePayload,
