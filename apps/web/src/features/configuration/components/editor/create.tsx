@@ -1,3 +1,5 @@
+import { NativeSelect } from "~/components/ui/native-select";
+import { projectCopy } from "~/features/configuration/strings";
 import { RepositoryPicker } from "~/features/configuration/components/forms/repository-picker";
 import { useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -21,6 +23,7 @@ type CreateEntityProps = { readonly kind: ConfigurationEntityKind };
 type CreationFormProps = CreateEntityProps & { readonly cancel: () => void };
 
 const CreationForm = ({ kind, cancel }: CreationFormProps) => {
+  const [project, setProject] = useState("");
   const [name, setName] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -38,7 +41,9 @@ const CreationForm = ({ kind, cancel }: CreationFormProps) => {
           className="flex flex-col items-start gap-3"
           onSubmit={(event) => {
             event.preventDefault();
-            const identifier = Schema.decodeUnknownOption(ConfigurationEntityId)(name.trim());
+            const identifier = Schema.decodeUnknownOption(ConfigurationEntityId)(
+              kind === "loop" ? `${project}/${name.trim()}` : name.trim(),
+            );
             if (Option.isNone(identifier)) return;
             setChecking(true);
             setError(null);
@@ -55,6 +60,25 @@ const CreationForm = ({ kind, cancel }: CreationFormProps) => {
               .finally(() => setChecking(false));
           }}
         >
+          {kind === "loop" && (
+            <Label className="flex w-full flex-col items-start gap-2">
+              {projectCopy.project}
+              <NativeSelect
+                className="w-full"
+                value={project}
+                required
+                disabled={checking}
+                onChange={(event) => setProject(event.target.value)}
+              >
+                <option value="">{projectCopy.chooseProject}</option>
+                {configuration.data?.projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name}
+                  </option>
+                ))}
+              </NativeSelect>
+            </Label>
+          )}
           {kind === "repository" ? (
             <RepositoryPicker value={name} onChange={setName} disabled={checking} />
           ) : (
@@ -62,7 +86,7 @@ const CreationForm = ({ kind, cancel }: CreationFormProps) => {
               {editorCopy.name}
               <Input
                 required
-                disabled={checking}
+                disabled={checking || (kind === "loop" && project === "")}
                 value={name}
                 onChange={(event) => setName(event.target.value)}
               />
@@ -73,7 +97,12 @@ const CreationForm = ({ kind, cancel }: CreationFormProps) => {
           <div className="flex gap-2">
             <Button
               type="submit"
-              disabled={checking || current.data === undefined || name.trim() === ""}
+              disabled={
+                checking ||
+                current.data === undefined ||
+                name.trim() === "" ||
+                (kind === "loop" && project === "")
+              }
             >
               {checking ? editorCopy.loading : editorCopy.edit}
             </Button>

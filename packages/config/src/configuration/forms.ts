@@ -1,3 +1,5 @@
+import { RepositoryName } from "@usine/core/repository";
+import { Project } from "../project/project.ts";
 import { Effect, Option, Record, Schema } from "effect";
 import { ManagedRepo, UsineConfig, WorkerFromYaml } from "../factory.ts";
 import { ConfigFileError, InstancePath } from "../file.ts";
@@ -14,7 +16,12 @@ const {
   ...settings
 } = UsineConfig.fields;
 const SettingsEntity = Schema.Struct(settings);
+const ProjectDraft = Schema.Struct({
+  ...Project.fields,
+  repositories: Schema.Array(RepositoryName),
+});
 const formSchemas = {
+  project: Project,
   agent: AgentJson,
   loop: LoopJson,
   worker: WorkerFromYaml,
@@ -70,6 +77,20 @@ export const parseConfigurationForm = (key: ConfigurationEntityKey, text: string
   return parseYamlDocument(file, text).pipe(
     Effect.flatMap((document) => Schema.decodeUnknownEffect(Schema.JsonObject)(document.toJS())),
     Effect.catchTag("SchemaError", (error) => Effect.fail(ConfigFileError.fromSchema(file, error))),
-    Effect.flatMap((value) => validateConfigurationForm(key, value)),
+    Effect.flatMap((value) => {
+      if (key.kind === "project")
+        return Schema.decodeUnknownEffect(ProjectDraft)(value, {
+          onExcessProperty: "error",
+          errors: "all",
+        }).pipe(
+          Effect.as(value),
+          Effect.mapError((error) => ConfigFileError.fromSchema(file, error)),
+        );
+      if (key.kind === "repository") {
+        const { lanes: _lanes, ...repository } = value;
+        return validateConfigurationForm(key, repository);
+      }
+      return validateConfigurationForm(key, value);
+    }),
   );
 };

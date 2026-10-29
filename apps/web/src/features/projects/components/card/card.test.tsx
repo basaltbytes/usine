@@ -519,8 +519,7 @@ describe("Board drag targets", () => {
       assert.ok(!readOnly.includes('role="button"'));
       assert.ok(readOnly.includes("Actions for issue #33"));
     }
-    assert.ok(proposed.includes("repos[].lanes"));
-    assert.ok(proposed.includes("usine.yaml"));
+    assert.ok(proposed.includes("Configuration &gt; Projects"));
     const authored = render("authored", ["ready", "review"]);
     assert.ok(authored.includes('role="button"'));
     assert.ok(authored.includes('aria-roledescription="sortable"'));
@@ -620,9 +619,9 @@ describe("Board card link", () => {
       ([, href]) => href,
     );
     assert.deepStrictEqual(titleLinks, [
-      "/projects/basaltbytes/usine/tasks/33",
-      "/projects/basaltbytes/usine/tasks/33",
-      "/projects/basaltbytes/usine/tasks/12",
+      "/projects/basaltbytes-usine/tasks/33?repository=basaltbytes%2Fusine",
+      "/projects/basaltbytes-usine/tasks/33?repository=basaltbytes%2Fusine",
+      "/projects/basaltbytes-usine/tasks/12?repository=basaltbytes%2Fusine",
     ]);
   });
 });

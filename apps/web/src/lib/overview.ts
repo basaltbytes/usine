@@ -1,3 +1,4 @@
+import { ProjectId } from "@usine/core/project";
 import { queryOptions } from "@tanstack/react-query";
 import {
   RepositoryName,
@@ -8,9 +9,10 @@ import type { NeedView, ProjectView } from "@usine/orchestrator/operator";
 import { api } from "~/lib/api";
 import { needCopy } from "~/lib/needs-you/strings";
 
-/** Returns the path params for `/projects/$owner/$name`. */
+/** Returns the path params for `/projects/$project/$name`. */
 export const projectParams = (repository: RepositoryName) => ({
   ...splitRepositoryName(repository),
+  project: splitRepositoryName(repository).owner,
   repository,
 });
 
@@ -27,15 +29,22 @@ export const projectForRepository = (
 /** Returns the count of Needs you entries per Project; entries without a Project are omitted. */
 export const needsYouByProject = (
   needs: ReadonlyArray<NeedView>,
-): ReadonlyMap<RepositoryName, number> => {
-  const counts = new Map<RepositoryName, number>();
+  projects: ReadonlyArray<ProjectView>,
+): ReadonlyMap<ProjectId, number> => {
+  const counts = new Map<ProjectId, number>();
   for (const need of needs) {
     const repositories =
       need._tag === "UnresponsiveWorkerNeed"
         ? need.attempts.map(({ repository }) => repository)
         : [needCopy(need).repository];
-    for (const repository of new Set(repositories))
-      if (repository !== null) counts.set(repository, (counts.get(repository) ?? 0) + 1);
+    const affected = new Set(
+      repositories.flatMap((repository) => {
+        const project =
+          repository === null ? undefined : projectForRepository(projects, repository);
+        return project === undefined ? [] : [projectId(project)];
+      }),
+    );
+    for (const project of affected) counts.set(project, (counts.get(project) ?? 0) + 1);
   }
   return counts;
 };
@@ -57,3 +66,14 @@ export const overviewQuery = () =>
       return hasOpenRun === true ? ACTIVE_OVERVIEW_REFRESH_MS : IDLE_OVERVIEW_REFRESH_MS;
     },
   });
+
+export const projectId = (project: ProjectView): ProjectId =>
+  project.id ??
+  ProjectId.make(
+    project.repository
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/gu, "-")
+      .replace(/^-|-$/gu, ""),
+  );
+
+export const projectName = (project: ProjectView): string => project.name ?? project.repository;

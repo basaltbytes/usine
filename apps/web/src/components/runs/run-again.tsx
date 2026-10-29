@@ -39,7 +39,7 @@ export const RunAgainLine = ({ run, source, className }: RunAgainLineProps) => {
         {source === "link" ? (
           // Raised above the row-covering link on a Task page.
           <Link
-            to="/projects/$owner/$name/runs/$run"
+            to="/projects/$project/$name/runs/$run"
             params={{ ...projectParams(run.repository), run: from }}
             className="relative z-10 font-mono text-xs text-primary underline-offset-4 hover:underline"
           >

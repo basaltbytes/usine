@@ -49,10 +49,9 @@ export const LoopPreview = ({ name, value }: LoopPreviewProps) => {
                 <TableRow key={item.itemKey}>
                   <FillCell>
                     <Link
-                      to="/projects/$owner/$name/tasks/$number"
+                      to="/projects/$project/$name/tasks/$number"
                       params={{
-                        repository: item.repository,
-                        owner: repository.owner,
+                        project: repository.owner,
                         name: repository.name,
                         number: String(item.number),
                       }}

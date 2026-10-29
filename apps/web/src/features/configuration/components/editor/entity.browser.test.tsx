@@ -568,8 +568,8 @@ it("uses supported harnesses, accepts a custom model, and previews the edited Ma
   });
 });
 
-it("reorders lanes by keyboard and pointer, then saves renamed lanes and live label choices", async () => {
-  await mount("/configuration/repositories/basaltbytes/usine");
+it("reorders project lanes by keyboard and pointer, then saves renamed lanes and live label choices", async () => {
+  await mount("/configuration/projects/usine");
   await page.viewport(1440, 1100);
   await button("Edit").click();
   const names = page.getByRole("textbox", { name: "Lane name", exact: true });
@@ -756,6 +756,7 @@ it.each([
 it("checks CEL while typing, completes payload fields, previews, saves paused, and confirms resume", async () => {
   await mount("/configuration/loops");
   await button("New").click();
+  await page.getByRole("combobox", { name: "Project", exact: true }).selectOptions("usine");
   await page.getByRole("textbox", { name: "Name", exact: true }).fill("draft-loop");
   await button("Edit").click();
   const condition = page.getByRole("textbox", { name: "Condition (CEL)", exact: true });
@@ -791,14 +792,14 @@ it("checks CEL while typing, completes payload fields, previews, saves paused, a
     method: "PUT",
     payload: {
       value: {
-        name: "draft-loop",
+        name: "usine/draft-loop",
         approval: "required",
         selector: { _tag: "Some", value: { repos: ["basaltbytes/usine"] } },
       },
     },
   });
   await button("Resume").click();
-  const confirmation = page.getByRole("dialog", { name: "Resume loop: draft-loop" });
+  const confirmation = page.getByRole("dialog", { name: "Resume loop: usine/draft-loop" });
   await expect.element(confirmation.getByText("2 matching items", { exact: true })).toBeVisible();
   await confirmation.getByRole("button", { name: "Resume", exact: true }).click();
   await expect.element(button("Pause")).toBeVisible();
@@ -819,14 +820,15 @@ it("keeps resume confirmation, cancellation, and request errors on the loops lis
     ],
   );
   await button("New").click();
+  await page.getByRole("combobox", { name: "Project", exact: true }).selectOptions("usine");
   await page.getByRole("textbox", { name: "Name", exact: true }).fill("draft-loop");
   await button("Edit").click();
   await button("Save").click();
   await expect.element(button("Resume")).toBeVisible();
   await router.navigate({ to: "/configuration/loops" });
 
-  const confirmation = page.getByRole("dialog", { name: "Resume loop: draft-loop" });
-  await button("Resume draft-loop").click();
+  const confirmation = page.getByRole("dialog", { name: "Resume loop: usine/draft-loop" });
+  await button("Resume usine/draft-loop").click();
   await confirmation.getByText("2 matching items", { exact: true }).click();
   await expect.element(confirmation).toBeVisible();
   expect(router.state.location.pathname).toBe("/configuration/loops");
@@ -834,18 +836,18 @@ it("keeps resume confirmation, cancellation, and request errors on the loops lis
   await expect.element(confirmation).not.toBeInTheDocument();
   expect(router.state.location.pathname).toBe("/configuration/loops");
 
-  await button("Resume draft-loop").click();
+  await button("Resume usine/draft-loop").click();
   await confirmation.getByRole("button", { name: "Resume", exact: true }).click();
   await expect.element(confirmation.getByRole("alert")).toHaveTextContent("Resume is unavailable");
   expect(router.state.location.pathname).toBe("/configuration/loops");
   await confirmation.getByRole("button", { name: "Resume", exact: true }).click();
   await expect.element(confirmation).not.toBeInTheDocument();
-  await expect.element(button("Pause draft-loop")).toBeVisible();
+  await expect.element(button("Pause usine/draft-loop")).toBeVisible();
   expect(router.state.location.pathname).toBe("/configuration/loops");
 });
 
 it("matches and removes repository selections regardless of casing", async () => {
-  await mount("/configuration/loops/start-dev");
+  await mount("/configuration/loops/usine%2Fstart-dev");
   client.setQueryData(
     configurationQuery().queryKey,
     new ConfigurationView({
@@ -943,4 +945,41 @@ it.each(["form", "text"])("clears a save refusal after changing the %s draft", a
   await expect.element(page.getByRole("alert")).not.toBeInTheDocument();
   await button("Preview").click();
   await expect.element(page.getByRole("heading", { name: "2 matching items" })).toBeVisible();
+});
+
+it("creates a project with two ordered repositories and lanes without phone page overflow", async () => {
+  await mount("/configuration/projects");
+  client.setQueryData(
+    configurationQuery().queryKey,
+    new ConfigurationView({ ...configurationFixture(), projects: [] }),
+  );
+  await button("New").click();
+  await page.getByRole("textbox", { name: "Name", exact: true }).fill("product");
+  await button("Edit").click();
+  await page.getByRole("textbox", { name: "Display name", exact: true }).fill("Product");
+  const repositories = page.getByRole("combobox", { name: "Add a repository", exact: true });
+  await repositories.selectOptions("basaltbytes/usine");
+  await repositories.selectOptions("basaltbytes/site");
+  await button("Move repository up: basaltbytes/site").click();
+  await button("Add lane").click();
+  await page.getByRole("textbox", { name: "Lane name", exact: true }).fill("Ready");
+  await page.getByRole("checkbox", { name: "ready", exact: true }).click();
+  await expect.poll(() => document.documentElement.scrollWidth).toBeLessThanOrEqual(390);
+  await commands.configurationEditorScreenshot("project-form-mobile");
+  await page.viewport(1440, 900);
+  await commands.configurationEditorScreenshot("project-form-desktop");
+  await button("Save").click();
+  await expect.poll(async () => (await commands.configurationEditorRequests()).length).toBe(1);
+  expect((await commands.configurationEditorRequests())[0]).toMatchObject({
+    method: "PUT",
+    url: "/api/configuration/entities/project/product",
+    payload: {
+      value: {
+        id: "product",
+        name: "Product",
+        repositories: ["basaltbytes/site", "basaltbytes/usine"],
+        lanes: [{ name: "Ready", sources: [{ label: "ready" }] }],
+      },
+    },
+  });
 });

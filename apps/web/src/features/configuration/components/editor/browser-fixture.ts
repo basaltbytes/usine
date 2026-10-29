@@ -163,8 +163,10 @@ export const configurationEditorResponses = async (
     const kind = parts.at(-2);
     const known = [
       "instance",
+      "usine",
       "local",
       "start-dev",
+      "usine/start-dev",
       "developer",
       "basaltbytes/usine",
       "ready",
@@ -183,13 +185,15 @@ export const configurationEditorResponses = async (
         key: { kind, identifier: last },
         value: {},
         text:
-          kind === "settings"
-            ? "version: 1\nsettings:\n  poll_interval: 60\n  max_children: 4\n  upgrade_channel: latest\n  upgrade_mode: propose\nwebhooks: { mode: off }\n"
-            : kind === "agent"
-              ? "---\nharness: codex\nmodel: gpt-6.1-sol\neffort: high\n---\nImplement.\n"
-              : kind === "repository"
-                ? "name: basaltbytes/usine\ntags: []\nlanes:\n  - name: Ready\n    sources: [{ label: ready }]\n  - name: Review\n    sources: [{ label: review }]\n"
-                : text,
+          kind === "project"
+            ? "id: usine\nname: Usine\nrepositories: [basaltbytes/usine]\nlanes:\n  - name: Ready\n    sources: [{ label: ready }]\n  - name: Review\n    sources: [{ label: review }]\n"
+            : kind === "settings"
+              ? "version: 1\nsettings:\n  poll_interval: 60\n  max_children: 4\n  upgrade_channel: latest\n  upgrade_mode: propose\nwebhooks: { mode: off }\n"
+              : kind === "agent"
+                ? "---\nharness: codex\nmodel: gpt-6.1-sol\neffort: high\n---\nImplement.\n"
+                : kind === "repository"
+                  ? "name: basaltbytes/usine\ntags: []\nlanes:\n  - name: Ready\n    sources: [{ label: ready }]\n  - name: Review\n    sources: [{ label: review }]\n"
+                  : text,
         number,
       }),
     });

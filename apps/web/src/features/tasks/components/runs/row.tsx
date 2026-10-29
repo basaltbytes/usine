@@ -53,7 +53,7 @@ export const RunRow = ({ run, item, pullRequest, openRun }: RunRowProps) => {
               <StateMark state={run.state} className="self-center sm:hidden" />
               <Link
                 data-row-link
-                to="/projects/$owner/$name/runs/$run"
+                to="/projects/$project/$name/runs/$run"
                 params={{ ...projectParams(run.repository), run: run.id }}
                 className={cn("font-medium wrap-anywhere", rowLink)}
               >

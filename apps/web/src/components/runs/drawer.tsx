@@ -193,7 +193,7 @@ export const RunDrawer = ({ runId, open, close }: RunDrawerProps) => {
           {detail.data !== undefined && <RunSummary detail={detail.data} />}
           {run !== undefined && (
             <Link
-              to="/projects/$owner/$name/runs/$run"
+              to="/projects/$project/$name/runs/$run"
               params={{ ...projectParams(run.repository), run: run.id }}
               search={{}}
               viewTransition
@@ -208,7 +208,7 @@ export const RunDrawer = ({ runId, open, close }: RunDrawerProps) => {
             <TooltipTrigger
               render={
                 <Link
-                  to="/projects/$owner/$name/runs/$run"
+                  to="/projects/$project/$name/runs/$run"
                   params={{ ...projectParams(run.repository), run: run.id }}
                   search={{}}
                   viewTransition

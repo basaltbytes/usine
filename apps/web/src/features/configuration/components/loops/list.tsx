@@ -26,6 +26,7 @@ export const LoopsList = ({ configuration, pause }: LoopsListProps) => (
           <TableHeader>
             <TableRow className="hover:bg-transparent">
               <TableHead className="lg:w-56">Loop</TableHead>
+              <TableHead>Project</TableHead>
               <TableHead>Trigger</TableHead>
               <TableHead className="hidden lg:table-cell">Condition</TableHead>
               <TableHead className="hidden sm:table-cell">Agent</TableHead>
@@ -41,7 +42,12 @@ export const LoopsList = ({ configuration, pause }: LoopsListProps) => (
               <QuarantinedRow key={loop.file} loop={loop} />
             ))}
             {configuration.loops.map((loop) => (
-              <LoopRow key={loop.name} loop={loop} pause={pause} />
+              <LoopRow
+                key={loop.name}
+                loop={loop}
+                pause={pause}
+                projects={configuration.projects}
+              />
             ))}
           </TableBody>
         </Table>

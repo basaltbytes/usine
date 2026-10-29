@@ -17,22 +17,28 @@ import { Route as TokensRouteImport } from './routes/tokens'
 import { Route as ConfigurationIndexRouteImport } from './routes/configuration/index'
 import { Route as ConfigurationHistoryRouteImport } from './routes/configuration/history'
 import { Route as ConfigurationSettingsRouteImport } from './routes/configuration/settings'
+import { Route as ProjectsProjectRouteImport } from './routes/projects/$project'
 import { Route as ConfigurationAgentsIndexRouteImport } from './routes/configuration/agents/index'
 import { Route as ConfigurationAgentsAgentRouteImport } from './routes/configuration/agents/$agent'
 import { Route as ConfigurationLabelsIndexRouteImport } from './routes/configuration/labels/index'
 import { Route as ConfigurationLabelsLabelRouteImport } from './routes/configuration/labels/$label'
 import { Route as ConfigurationLoopsIndexRouteImport } from './routes/configuration/loops/index'
 import { Route as ConfigurationLoopsLoopRouteImport } from './routes/configuration/loops/$loop'
+import { Route as ConfigurationProjectsIndexRouteImport } from './routes/configuration/projects/index'
 import { Route as ConfigurationProjectsProjectRouteImport } from './routes/configuration/projects/$project'
 import { Route as ConfigurationRepositoriesIndexRouteImport } from './routes/configuration/repositories/index'
 import { Route as ConfigurationWorkersIndexRouteImport } from './routes/configuration/workers/index'
 import { Route as ConfigurationWorkersWorkerRouteImport } from './routes/configuration/workers/$worker'
-import { Route as ProjectsOwnerNameRouteImport } from './routes/projects/$owner/$name'
+import { Route as ProjectsProjectIndexRouteImport } from './routes/projects/$project/index'
+import { Route as ProjectsProjectNameRouteImport } from './routes/projects/$project/$name'
 import { Route as ConfigurationRepositoriesOwnerNameRouteImport } from './routes/configuration/repositories/$owner/$name'
-import { Route as ProjectsOwnerNameIndexRouteImport } from './routes/projects/$owner/$name/index'
-import { Route as ProjectsOwnerNameRunsRunRouteImport } from './routes/projects/$owner/$name/runs/$run'
-import { Route as ProjectsOwnerNameTasksIndexRouteImport } from './routes/projects/$owner/$name/tasks/index'
-import { Route as ProjectsOwnerNameTasksNumberRouteImport } from './routes/projects/$owner/$name/tasks/$number'
+import { Route as ProjectsProjectNameIndexRouteImport } from './routes/projects/$project/$name/index'
+import { Route as ProjectsProjectRunsRunRouteImport } from './routes/projects/$project/runs/$run'
+import { Route as ProjectsProjectTasksIndexRouteImport } from './routes/projects/$project/tasks/index'
+import { Route as ProjectsProjectTasksNumberRouteImport } from './routes/projects/$project/tasks/$number'
+import { Route as ProjectsProjectNameRunsRunRouteImport } from './routes/projects/$project/$name/runs/$run'
+import { Route as ProjectsProjectNameTasksIndexRouteImport } from './routes/projects/$project/$name/tasks/index'
+import { Route as ProjectsProjectNameTasksNumberRouteImport } from './routes/projects/$project/$name/tasks/$number'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -74,6 +80,11 @@ const ConfigurationSettingsRoute = ConfigurationSettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => ConfigurationRouteRoute,
 } as any)
+const ProjectsProjectRoute = ProjectsProjectRouteImport.update({
+  id: '/projects/$project',
+  path: '/projects/$project',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ConfigurationAgentsIndexRoute =
   ConfigurationAgentsIndexRouteImport.update({
     id: '/agents/',
@@ -108,6 +119,12 @@ const ConfigurationLoopsLoopRoute = ConfigurationLoopsLoopRouteImport.update({
   path: '/loops/$loop',
   getParentRoute: () => ConfigurationRouteRoute,
 } as any)
+const ConfigurationProjectsIndexRoute =
+  ConfigurationProjectsIndexRouteImport.update({
+    id: '/projects/',
+    path: '/projects/',
+    getParentRoute: () => ConfigurationRouteRoute,
+  } as any)
 const ConfigurationProjectsProjectRoute =
   ConfigurationProjectsProjectRouteImport.update({
     id: '/projects/$project',
@@ -132,10 +149,15 @@ const ConfigurationWorkersWorkerRoute =
     path: '/workers/$worker',
     getParentRoute: () => ConfigurationRouteRoute,
   } as any)
-const ProjectsOwnerNameRoute = ProjectsOwnerNameRouteImport.update({
-  id: '/projects/$owner/$name',
-  path: '/projects/$owner/$name',
-  getParentRoute: () => rootRouteImport,
+const ProjectsProjectIndexRoute = ProjectsProjectIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => ProjectsProjectRoute,
+} as any)
+const ProjectsProjectNameRoute = ProjectsProjectNameRouteImport.update({
+  id: '/$name',
+  path: '/$name',
+  getParentRoute: () => ProjectsProjectRoute,
 } as any)
 const ConfigurationRepositoriesOwnerNameRoute =
   ConfigurationRepositoriesOwnerNameRouteImport.update({
@@ -143,28 +165,46 @@ const ConfigurationRepositoriesOwnerNameRoute =
     path: '/repositories/$owner/$name',
     getParentRoute: () => ConfigurationRouteRoute,
   } as any)
-const ProjectsOwnerNameIndexRoute = ProjectsOwnerNameIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => ProjectsOwnerNameRoute,
-} as any)
-const ProjectsOwnerNameRunsRunRoute =
-  ProjectsOwnerNameRunsRunRouteImport.update({
-    id: '/runs/$run',
-    path: '/runs/$run',
-    getParentRoute: () => ProjectsOwnerNameRoute,
+const ProjectsProjectNameIndexRoute =
+  ProjectsProjectNameIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => ProjectsProjectNameRoute,
   } as any)
-const ProjectsOwnerNameTasksIndexRoute =
-  ProjectsOwnerNameTasksIndexRouteImport.update({
+const ProjectsProjectRunsRunRoute = ProjectsProjectRunsRunRouteImport.update({
+  id: '/runs/$run',
+  path: '/runs/$run',
+  getParentRoute: () => ProjectsProjectRoute,
+} as any)
+const ProjectsProjectTasksIndexRoute =
+  ProjectsProjectTasksIndexRouteImport.update({
     id: '/tasks/',
     path: '/tasks/',
-    getParentRoute: () => ProjectsOwnerNameRoute,
+    getParentRoute: () => ProjectsProjectRoute,
   } as any)
-const ProjectsOwnerNameTasksNumberRoute =
-  ProjectsOwnerNameTasksNumberRouteImport.update({
+const ProjectsProjectTasksNumberRoute =
+  ProjectsProjectTasksNumberRouteImport.update({
     id: '/tasks/$number',
     path: '/tasks/$number',
-    getParentRoute: () => ProjectsOwnerNameRoute,
+    getParentRoute: () => ProjectsProjectRoute,
+  } as any)
+const ProjectsProjectNameRunsRunRoute =
+  ProjectsProjectNameRunsRunRouteImport.update({
+    id: '/runs/$run',
+    path: '/runs/$run',
+    getParentRoute: () => ProjectsProjectNameRoute,
+  } as any)
+const ProjectsProjectNameTasksIndexRoute =
+  ProjectsProjectNameTasksIndexRouteImport.update({
+    id: '/tasks/',
+    path: '/tasks/',
+    getParentRoute: () => ProjectsProjectNameRoute,
+  } as any)
+const ProjectsProjectNameTasksNumberRoute =
+  ProjectsProjectNameTasksNumberRouteImport.update({
+    id: '/tasks/$number',
+    path: '/tasks/$number',
+    getParentRoute: () => ProjectsProjectNameRoute,
   } as any)
 
 export interface FileRoutesByFullPath {
@@ -175,23 +215,29 @@ export interface FileRoutesByFullPath {
   '/tokens': typeof TokensRoute
   '/configuration/history': typeof ConfigurationHistoryRoute
   '/configuration/settings': typeof ConfigurationSettingsRoute
+  '/projects/$project': typeof ProjectsProjectRouteWithChildren
   '/configuration/': typeof ConfigurationIndexRoute
   '/configuration/agents/$agent': typeof ConfigurationAgentsAgentRoute
   '/configuration/labels/$label': typeof ConfigurationLabelsLabelRoute
   '/configuration/loops/$loop': typeof ConfigurationLoopsLoopRoute
   '/configuration/projects/$project': typeof ConfigurationProjectsProjectRoute
   '/configuration/workers/$worker': typeof ConfigurationWorkersWorkerRoute
-  '/projects/$owner/$name': typeof ProjectsOwnerNameRouteWithChildren
+  '/projects/$project/$name': typeof ProjectsProjectNameRouteWithChildren
   '/configuration/agents/': typeof ConfigurationAgentsIndexRoute
   '/configuration/labels/': typeof ConfigurationLabelsIndexRoute
   '/configuration/loops/': typeof ConfigurationLoopsIndexRoute
+  '/configuration/projects/': typeof ConfigurationProjectsIndexRoute
   '/configuration/repositories/': typeof ConfigurationRepositoriesIndexRoute
   '/configuration/workers/': typeof ConfigurationWorkersIndexRoute
+  '/projects/$project/': typeof ProjectsProjectIndexRoute
   '/configuration/repositories/$owner/$name': typeof ConfigurationRepositoriesOwnerNameRoute
-  '/projects/$owner/$name/': typeof ProjectsOwnerNameIndexRoute
-  '/projects/$owner/$name/runs/$run': typeof ProjectsOwnerNameRunsRunRoute
-  '/projects/$owner/$name/tasks/$number': typeof ProjectsOwnerNameTasksNumberRoute
-  '/projects/$owner/$name/tasks/': typeof ProjectsOwnerNameTasksIndexRoute
+  '/projects/$project/runs/$run': typeof ProjectsProjectRunsRunRoute
+  '/projects/$project/tasks/$number': typeof ProjectsProjectTasksNumberRoute
+  '/projects/$project/$name/': typeof ProjectsProjectNameIndexRoute
+  '/projects/$project/tasks/': typeof ProjectsProjectTasksIndexRoute
+  '/projects/$project/$name/runs/$run': typeof ProjectsProjectNameRunsRunRoute
+  '/projects/$project/$name/tasks/$number': typeof ProjectsProjectNameTasksNumberRoute
+  '/projects/$project/$name/tasks/': typeof ProjectsProjectNameTasksIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -209,13 +255,18 @@ export interface FileRoutesByTo {
   '/configuration/agents': typeof ConfigurationAgentsIndexRoute
   '/configuration/labels': typeof ConfigurationLabelsIndexRoute
   '/configuration/loops': typeof ConfigurationLoopsIndexRoute
+  '/configuration/projects': typeof ConfigurationProjectsIndexRoute
   '/configuration/repositories': typeof ConfigurationRepositoriesIndexRoute
   '/configuration/workers': typeof ConfigurationWorkersIndexRoute
+  '/projects/$project': typeof ProjectsProjectIndexRoute
   '/configuration/repositories/$owner/$name': typeof ConfigurationRepositoriesOwnerNameRoute
-  '/projects/$owner/$name': typeof ProjectsOwnerNameIndexRoute
-  '/projects/$owner/$name/runs/$run': typeof ProjectsOwnerNameRunsRunRoute
-  '/projects/$owner/$name/tasks/$number': typeof ProjectsOwnerNameTasksNumberRoute
-  '/projects/$owner/$name/tasks': typeof ProjectsOwnerNameTasksIndexRoute
+  '/projects/$project/runs/$run': typeof ProjectsProjectRunsRunRoute
+  '/projects/$project/tasks/$number': typeof ProjectsProjectTasksNumberRoute
+  '/projects/$project/$name': typeof ProjectsProjectNameIndexRoute
+  '/projects/$project/tasks': typeof ProjectsProjectTasksIndexRoute
+  '/projects/$project/$name/runs/$run': typeof ProjectsProjectNameRunsRunRoute
+  '/projects/$project/$name/tasks/$number': typeof ProjectsProjectNameTasksNumberRoute
+  '/projects/$project/$name/tasks': typeof ProjectsProjectNameTasksIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -226,23 +277,29 @@ export interface FileRoutesById {
   '/tokens': typeof TokensRoute
   '/configuration/history': typeof ConfigurationHistoryRoute
   '/configuration/settings': typeof ConfigurationSettingsRoute
+  '/projects/$project': typeof ProjectsProjectRouteWithChildren
   '/configuration/': typeof ConfigurationIndexRoute
   '/configuration/agents/$agent': typeof ConfigurationAgentsAgentRoute
   '/configuration/labels/$label': typeof ConfigurationLabelsLabelRoute
   '/configuration/loops/$loop': typeof ConfigurationLoopsLoopRoute
   '/configuration/projects/$project': typeof ConfigurationProjectsProjectRoute
   '/configuration/workers/$worker': typeof ConfigurationWorkersWorkerRoute
-  '/projects/$owner/$name': typeof ProjectsOwnerNameRouteWithChildren
+  '/projects/$project/$name': typeof ProjectsProjectNameRouteWithChildren
   '/configuration/agents/': typeof ConfigurationAgentsIndexRoute
   '/configuration/labels/': typeof ConfigurationLabelsIndexRoute
   '/configuration/loops/': typeof ConfigurationLoopsIndexRoute
+  '/configuration/projects/': typeof ConfigurationProjectsIndexRoute
   '/configuration/repositories/': typeof ConfigurationRepositoriesIndexRoute
   '/configuration/workers/': typeof ConfigurationWorkersIndexRoute
+  '/projects/$project/': typeof ProjectsProjectIndexRoute
   '/configuration/repositories/$owner/$name': typeof ConfigurationRepositoriesOwnerNameRoute
-  '/projects/$owner/$name/': typeof ProjectsOwnerNameIndexRoute
-  '/projects/$owner/$name/runs/$run': typeof ProjectsOwnerNameRunsRunRoute
-  '/projects/$owner/$name/tasks/$number': typeof ProjectsOwnerNameTasksNumberRoute
-  '/projects/$owner/$name/tasks/': typeof ProjectsOwnerNameTasksIndexRoute
+  '/projects/$project/runs/$run': typeof ProjectsProjectRunsRunRoute
+  '/projects/$project/tasks/$number': typeof ProjectsProjectTasksNumberRoute
+  '/projects/$project/$name/': typeof ProjectsProjectNameIndexRoute
+  '/projects/$project/tasks/': typeof ProjectsProjectTasksIndexRoute
+  '/projects/$project/$name/runs/$run': typeof ProjectsProjectNameRunsRunRoute
+  '/projects/$project/$name/tasks/$number': typeof ProjectsProjectNameTasksNumberRoute
+  '/projects/$project/$name/tasks/': typeof ProjectsProjectNameTasksIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -254,23 +311,29 @@ export interface FileRouteTypes {
     | '/tokens'
     | '/configuration/history'
     | '/configuration/settings'
+    | '/projects/$project'
     | '/configuration/'
     | '/configuration/agents/$agent'
     | '/configuration/labels/$label'
     | '/configuration/loops/$loop'
     | '/configuration/projects/$project'
     | '/configuration/workers/$worker'
-    | '/projects/$owner/$name'
+    | '/projects/$project/$name'
     | '/configuration/agents/'
     | '/configuration/labels/'
     | '/configuration/loops/'
+    | '/configuration/projects/'
     | '/configuration/repositories/'
     | '/configuration/workers/'
+    | '/projects/$project/'
     | '/configuration/repositories/$owner/$name'
-    | '/projects/$owner/$name/'
-    | '/projects/$owner/$name/runs/$run'
-    | '/projects/$owner/$name/tasks/$number'
-    | '/projects/$owner/$name/tasks/'
+    | '/projects/$project/runs/$run'
+    | '/projects/$project/tasks/$number'
+    | '/projects/$project/$name/'
+    | '/projects/$project/tasks/'
+    | '/projects/$project/$name/runs/$run'
+    | '/projects/$project/$name/tasks/$number'
+    | '/projects/$project/$name/tasks/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -288,13 +351,18 @@ export interface FileRouteTypes {
     | '/configuration/agents'
     | '/configuration/labels'
     | '/configuration/loops'
+    | '/configuration/projects'
     | '/configuration/repositories'
     | '/configuration/workers'
+    | '/projects/$project'
     | '/configuration/repositories/$owner/$name'
-    | '/projects/$owner/$name'
-    | '/projects/$owner/$name/runs/$run'
-    | '/projects/$owner/$name/tasks/$number'
-    | '/projects/$owner/$name/tasks'
+    | '/projects/$project/runs/$run'
+    | '/projects/$project/tasks/$number'
+    | '/projects/$project/$name'
+    | '/projects/$project/tasks'
+    | '/projects/$project/$name/runs/$run'
+    | '/projects/$project/$name/tasks/$number'
+    | '/projects/$project/$name/tasks'
   id:
     | '__root__'
     | '/'
@@ -304,23 +372,29 @@ export interface FileRouteTypes {
     | '/tokens'
     | '/configuration/history'
     | '/configuration/settings'
+    | '/projects/$project'
     | '/configuration/'
     | '/configuration/agents/$agent'
     | '/configuration/labels/$label'
     | '/configuration/loops/$loop'
     | '/configuration/projects/$project'
     | '/configuration/workers/$worker'
-    | '/projects/$owner/$name'
+    | '/projects/$project/$name'
     | '/configuration/agents/'
     | '/configuration/labels/'
     | '/configuration/loops/'
+    | '/configuration/projects/'
     | '/configuration/repositories/'
     | '/configuration/workers/'
+    | '/projects/$project/'
     | '/configuration/repositories/$owner/$name'
-    | '/projects/$owner/$name/'
-    | '/projects/$owner/$name/runs/$run'
-    | '/projects/$owner/$name/tasks/$number'
-    | '/projects/$owner/$name/tasks/'
+    | '/projects/$project/runs/$run'
+    | '/projects/$project/tasks/$number'
+    | '/projects/$project/$name/'
+    | '/projects/$project/tasks/'
+    | '/projects/$project/$name/runs/$run'
+    | '/projects/$project/$name/tasks/$number'
+    | '/projects/$project/$name/tasks/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -329,7 +403,7 @@ export interface RootRouteChildren {
   MembersRoute: typeof MembersRoute
   SignInRoute: typeof SignInRoute
   TokensRoute: typeof TokensRoute
-  ProjectsOwnerNameRoute: typeof ProjectsOwnerNameRouteWithChildren
+  ProjectsProjectRoute: typeof ProjectsProjectRouteWithChildren
 }
 
 declare module '@tanstack/react-router' {
@@ -390,6 +464,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ConfigurationSettingsRouteImport
       parentRoute: typeof ConfigurationRouteRoute
     }
+    '/projects/$project': {
+      id: '/projects/$project'
+      path: '/projects/$project'
+      fullPath: '/projects/$project'
+      preLoaderRoute: typeof ProjectsProjectRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/configuration/agents/': {
       id: '/configuration/agents/'
       path: '/agents'
@@ -432,6 +513,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ConfigurationLoopsLoopRouteImport
       parentRoute: typeof ConfigurationRouteRoute
     }
+    '/configuration/projects/': {
+      id: '/configuration/projects/'
+      path: '/projects'
+      fullPath: '/configuration/projects/'
+      preLoaderRoute: typeof ConfigurationProjectsIndexRouteImport
+      parentRoute: typeof ConfigurationRouteRoute
+    }
     '/configuration/projects/$project': {
       id: '/configuration/projects/$project'
       path: '/projects/$project'
@@ -460,12 +548,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ConfigurationWorkersWorkerRouteImport
       parentRoute: typeof ConfigurationRouteRoute
     }
-    '/projects/$owner/$name': {
-      id: '/projects/$owner/$name'
-      path: '/projects/$owner/$name'
-      fullPath: '/projects/$owner/$name'
-      preLoaderRoute: typeof ProjectsOwnerNameRouteImport
-      parentRoute: typeof rootRouteImport
+    '/projects/$project/': {
+      id: '/projects/$project/'
+      path: '/'
+      fullPath: '/projects/$project/'
+      preLoaderRoute: typeof ProjectsProjectIndexRouteImport
+      parentRoute: typeof ProjectsProjectRoute
+    }
+    '/projects/$project/$name': {
+      id: '/projects/$project/$name'
+      path: '/$name'
+      fullPath: '/projects/$project/$name'
+      preLoaderRoute: typeof ProjectsProjectNameRouteImport
+      parentRoute: typeof ProjectsProjectRoute
     }
     '/configuration/repositories/$owner/$name': {
       id: '/configuration/repositories/$owner/$name'
@@ -474,33 +569,54 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ConfigurationRepositoriesOwnerNameRouteImport
       parentRoute: typeof ConfigurationRouteRoute
     }
-    '/projects/$owner/$name/': {
-      id: '/projects/$owner/$name/'
+    '/projects/$project/$name/': {
+      id: '/projects/$project/$name/'
       path: '/'
-      fullPath: '/projects/$owner/$name/'
-      preLoaderRoute: typeof ProjectsOwnerNameIndexRouteImport
-      parentRoute: typeof ProjectsOwnerNameRoute
+      fullPath: '/projects/$project/$name/'
+      preLoaderRoute: typeof ProjectsProjectNameIndexRouteImport
+      parentRoute: typeof ProjectsProjectNameRoute
     }
-    '/projects/$owner/$name/runs/$run': {
-      id: '/projects/$owner/$name/runs/$run'
+    '/projects/$project/runs/$run': {
+      id: '/projects/$project/runs/$run'
       path: '/runs/$run'
-      fullPath: '/projects/$owner/$name/runs/$run'
-      preLoaderRoute: typeof ProjectsOwnerNameRunsRunRouteImport
-      parentRoute: typeof ProjectsOwnerNameRoute
+      fullPath: '/projects/$project/runs/$run'
+      preLoaderRoute: typeof ProjectsProjectRunsRunRouteImport
+      parentRoute: typeof ProjectsProjectRoute
     }
-    '/projects/$owner/$name/tasks/': {
-      id: '/projects/$owner/$name/tasks/'
+    '/projects/$project/tasks/': {
+      id: '/projects/$project/tasks/'
       path: '/tasks'
-      fullPath: '/projects/$owner/$name/tasks/'
-      preLoaderRoute: typeof ProjectsOwnerNameTasksIndexRouteImport
-      parentRoute: typeof ProjectsOwnerNameRoute
+      fullPath: '/projects/$project/tasks/'
+      preLoaderRoute: typeof ProjectsProjectTasksIndexRouteImport
+      parentRoute: typeof ProjectsProjectRoute
     }
-    '/projects/$owner/$name/tasks/$number': {
-      id: '/projects/$owner/$name/tasks/$number'
+    '/projects/$project/tasks/$number': {
+      id: '/projects/$project/tasks/$number'
       path: '/tasks/$number'
-      fullPath: '/projects/$owner/$name/tasks/$number'
-      preLoaderRoute: typeof ProjectsOwnerNameTasksNumberRouteImport
-      parentRoute: typeof ProjectsOwnerNameRoute
+      fullPath: '/projects/$project/tasks/$number'
+      preLoaderRoute: typeof ProjectsProjectTasksNumberRouteImport
+      parentRoute: typeof ProjectsProjectRoute
+    }
+    '/projects/$project/$name/runs/$run': {
+      id: '/projects/$project/$name/runs/$run'
+      path: '/runs/$run'
+      fullPath: '/projects/$project/$name/runs/$run'
+      preLoaderRoute: typeof ProjectsProjectNameRunsRunRouteImport
+      parentRoute: typeof ProjectsProjectNameRoute
+    }
+    '/projects/$project/$name/tasks/': {
+      id: '/projects/$project/$name/tasks/'
+      path: '/tasks'
+      fullPath: '/projects/$project/$name/tasks/'
+      preLoaderRoute: typeof ProjectsProjectNameTasksIndexRouteImport
+      parentRoute: typeof ProjectsProjectNameRoute
+    }
+    '/projects/$project/$name/tasks/$number': {
+      id: '/projects/$project/$name/tasks/$number'
+      path: '/tasks/$number'
+      fullPath: '/projects/$project/$name/tasks/$number'
+      preLoaderRoute: typeof ProjectsProjectNameTasksNumberRouteImport
+      parentRoute: typeof ProjectsProjectNameRoute
     }
   }
 }
@@ -517,6 +633,7 @@ interface ConfigurationRouteRouteChildren {
   ConfigurationAgentsIndexRoute: typeof ConfigurationAgentsIndexRoute
   ConfigurationLabelsIndexRoute: typeof ConfigurationLabelsIndexRoute
   ConfigurationLoopsIndexRoute: typeof ConfigurationLoopsIndexRoute
+  ConfigurationProjectsIndexRoute: typeof ConfigurationProjectsIndexRoute
   ConfigurationRepositoriesIndexRoute: typeof ConfigurationRepositoriesIndexRoute
   ConfigurationWorkersIndexRoute: typeof ConfigurationWorkersIndexRoute
   ConfigurationRepositoriesOwnerNameRoute: typeof ConfigurationRepositoriesOwnerNameRoute
@@ -534,6 +651,7 @@ const ConfigurationRouteRouteChildren: ConfigurationRouteRouteChildren = {
   ConfigurationAgentsIndexRoute: ConfigurationAgentsIndexRoute,
   ConfigurationLabelsIndexRoute: ConfigurationLabelsIndexRoute,
   ConfigurationLoopsIndexRoute: ConfigurationLoopsIndexRoute,
+  ConfigurationProjectsIndexRoute: ConfigurationProjectsIndexRoute,
   ConfigurationRepositoriesIndexRoute: ConfigurationRepositoriesIndexRoute,
   ConfigurationWorkersIndexRoute: ConfigurationWorkersIndexRoute,
   ConfigurationRepositoriesOwnerNameRoute:
@@ -543,22 +661,42 @@ const ConfigurationRouteRouteChildren: ConfigurationRouteRouteChildren = {
 const ConfigurationRouteRouteWithChildren =
   ConfigurationRouteRoute._addFileChildren(ConfigurationRouteRouteChildren)
 
-interface ProjectsOwnerNameRouteChildren {
-  ProjectsOwnerNameIndexRoute: typeof ProjectsOwnerNameIndexRoute
-  ProjectsOwnerNameRunsRunRoute: typeof ProjectsOwnerNameRunsRunRoute
-  ProjectsOwnerNameTasksNumberRoute: typeof ProjectsOwnerNameTasksNumberRoute
-  ProjectsOwnerNameTasksIndexRoute: typeof ProjectsOwnerNameTasksIndexRoute
+interface ProjectsProjectNameRouteChildren {
+  ProjectsProjectNameIndexRoute: typeof ProjectsProjectNameIndexRoute
+  ProjectsProjectNameRunsRunRoute: typeof ProjectsProjectNameRunsRunRoute
+  ProjectsProjectNameTasksNumberRoute: typeof ProjectsProjectNameTasksNumberRoute
+  ProjectsProjectNameTasksIndexRoute: typeof ProjectsProjectNameTasksIndexRoute
 }
 
-const ProjectsOwnerNameRouteChildren: ProjectsOwnerNameRouteChildren = {
-  ProjectsOwnerNameIndexRoute: ProjectsOwnerNameIndexRoute,
-  ProjectsOwnerNameRunsRunRoute: ProjectsOwnerNameRunsRunRoute,
-  ProjectsOwnerNameTasksNumberRoute: ProjectsOwnerNameTasksNumberRoute,
-  ProjectsOwnerNameTasksIndexRoute: ProjectsOwnerNameTasksIndexRoute,
+const ProjectsProjectNameRouteChildren: ProjectsProjectNameRouteChildren = {
+  ProjectsProjectNameIndexRoute: ProjectsProjectNameIndexRoute,
+  ProjectsProjectNameRunsRunRoute: ProjectsProjectNameRunsRunRoute,
+  ProjectsProjectNameTasksNumberRoute: ProjectsProjectNameTasksNumberRoute,
+  ProjectsProjectNameTasksIndexRoute: ProjectsProjectNameTasksIndexRoute,
 }
 
-const ProjectsOwnerNameRouteWithChildren =
-  ProjectsOwnerNameRoute._addFileChildren(ProjectsOwnerNameRouteChildren)
+const ProjectsProjectNameRouteWithChildren =
+  ProjectsProjectNameRoute._addFileChildren(ProjectsProjectNameRouteChildren)
+
+interface ProjectsProjectRouteChildren {
+  ProjectsProjectNameRoute: typeof ProjectsProjectNameRouteWithChildren
+  ProjectsProjectIndexRoute: typeof ProjectsProjectIndexRoute
+  ProjectsProjectRunsRunRoute: typeof ProjectsProjectRunsRunRoute
+  ProjectsProjectTasksNumberRoute: typeof ProjectsProjectTasksNumberRoute
+  ProjectsProjectTasksIndexRoute: typeof ProjectsProjectTasksIndexRoute
+}
+
+const ProjectsProjectRouteChildren: ProjectsProjectRouteChildren = {
+  ProjectsProjectNameRoute: ProjectsProjectNameRouteWithChildren,
+  ProjectsProjectIndexRoute: ProjectsProjectIndexRoute,
+  ProjectsProjectRunsRunRoute: ProjectsProjectRunsRunRoute,
+  ProjectsProjectTasksNumberRoute: ProjectsProjectTasksNumberRoute,
+  ProjectsProjectTasksIndexRoute: ProjectsProjectTasksIndexRoute,
+}
+
+const ProjectsProjectRouteWithChildren = ProjectsProjectRoute._addFileChildren(
+  ProjectsProjectRouteChildren,
+)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
@@ -566,7 +704,7 @@ const rootRouteChildren: RootRouteChildren = {
   MembersRoute: MembersRoute,
   SignInRoute: SignInRoute,
   TokensRoute: TokensRoute,
-  ProjectsOwnerNameRoute: ProjectsOwnerNameRouteWithChildren,
+  ProjectsProjectRoute: ProjectsProjectRouteWithChildren,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

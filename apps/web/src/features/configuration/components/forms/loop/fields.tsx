@@ -9,7 +9,7 @@ import { Switch } from "~/components/ui/switch";
 import { PromptMarkdown } from "~/features/configuration/components/prompt";
 import { objectValue, stringValue, type FormFieldsProps } from "~/features/configuration/lib/forms";
 import { loopCheckQuery } from "~/features/configuration/queries";
-import { loopFormCopy } from "~/features/configuration/strings";
+import { loopFormCopy, projectCopy } from "~/features/configuration/strings";
 import { configurationQuery } from "~/lib/configuration/queries";
 import { Fields } from "~/features/configuration/components/forms/fields";
 import { ExpressionField } from "./expression";
@@ -19,6 +19,10 @@ import { LoopPreview } from "./preview";
 type LoopFieldsProps = FormFieldsProps & { readonly name: string };
 export const LoopFields = ({ name, ...fields }: LoopFieldsProps) => {
   const configuration = useQuery(configurationQuery());
+  const project = configuration.data?.projects.find((project) => name.startsWith(`${project.id}/`));
+  const repositories =
+    configuration.data?.repositories.filter((repository) => project?.includes(repository.name)) ??
+    [];
   const [checkedValue, setCheckedValue] = useState(fields.value);
   const [preview, setPreview] = useState<typeof fields.value>();
   useEffect(() => {
@@ -34,6 +38,10 @@ export const LoopFields = ({ name, ...fields }: LoopFieldsProps) => {
   return (
     <div className="flex min-w-0 flex-col gap-4">
       {configuration.isError && <ErrorAlert message={configuration.error.message} />}
+      <p>
+        <span className="text-muted-foreground">{projectCopy.project}: </span>
+        {project?.name ?? name.split("/")[0]}
+      </p>
       <Fields
         {...props}
         onChange={(value) => {
@@ -65,8 +73,8 @@ export const LoopFields = ({ name, ...fields }: LoopFieldsProps) => {
       />
       <SelectorFields
         {...props}
-        repositories={configuration.data?.repositories.map(({ name }) => name) ?? []}
-        tags={[...new Set(configuration.data?.repositories.flatMap(({ tags }) => tags) ?? [])]}
+        repositories={repositories.map(({ name }) => name)}
+        tags={[...new Set(repositories.flatMap(({ tags }) => tags))]}
       />
       <Label className="flex items-center gap-2">
         <Switch

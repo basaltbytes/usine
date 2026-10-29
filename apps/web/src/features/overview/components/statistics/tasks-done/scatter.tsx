@@ -120,7 +120,7 @@ export const TaskScatter = ({ statistics }: TaskScatterProps) => {
             const task = entry.payload?.task;
             if (task !== undefined)
               void navigate({
-                to: "/projects/$owner/$name/tasks/$number",
+                to: "/projects/$project/$name/tasks/$number",
                 params: { ...projectParams(task.repository), number: String(task.number) },
               });
           }}

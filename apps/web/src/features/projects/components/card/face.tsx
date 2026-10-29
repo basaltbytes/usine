@@ -1,3 +1,5 @@
+import { RepositoryMark } from "~/components/repository-mark";
+import type { ProjectId } from "@usine/core/project";
 import { cardAttentionLabel, cardConflictLabel } from "~/features/projects/strings";
 import type { BoardLaneView, BoardTaskView, StalledItemView } from "@usine/orchestrator/operator";
 import { ItemMark } from "~/components/item/mark";
@@ -17,6 +19,8 @@ import { runAgainBlocked } from "~/lib/runs/strings";
 import { stallRun } from "~/lib/tasks/model";
 
 type CardFaceProps = {
+  readonly project?: ProjectId | undefined;
+  readonly showRepository?: boolean | undefined;
   readonly item: BoardTaskView;
   readonly lane: BoardLaneView;
   readonly catalog: LabelCatalog;
@@ -30,6 +34,8 @@ type CardFaceProps = {
 };
 
 export const CardFace = ({
+  project,
+  showRepository,
   item,
   lane,
   catalog,
@@ -63,7 +69,13 @@ export const CardFace = ({
           <ItemMark key={member.itemKey} item={member} className="relative z-10" />
         ))}
       </p>
-      <CardTitle item={item} />
+      {showRepository && (
+        <p className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+          <RepositoryMark repository={item.repository} />
+          <span className="truncate">{item.repository}</span>
+        </p>
+      )}
+      <CardTitle item={item} project={project} />
       <CardLabels labels={cardLabels(item, lane)} catalog={catalog} />
       {run !== null && <RunLine run={run} />}
       {progress !== null && (

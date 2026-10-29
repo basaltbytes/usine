@@ -29,7 +29,7 @@ const NoProjects = () => {
         <h2 className="text-md font-medium">{noProjectsCopy.title}</h2>
         <p className="text-muted-foreground">{noProjectsCopy.description}</p>
       </div>
-      <Button variant="outline" render={<Link to="/configuration/repositories" />}>
+      <Button variant="outline" render={<Link to="/configuration/projects" />}>
         {noProjectsCopy.action}
       </Button>
     </section>

@@ -20,7 +20,7 @@ export const TaskNotFound = ({ repository, number }: TaskNotFoundProps) => (
     <Button
       variant="outline"
       nativeButton={false}
-      render={<Link to="/projects/$owner/$name" params={projectParams(repository)} />}
+      render={<Link to="/projects/$project/$name" params={projectParams(repository)} />}
     >
       {backToBoard}
     </Button>

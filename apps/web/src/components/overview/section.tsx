@@ -66,7 +66,7 @@ type RunPageLinkProps = {
 /** Renders a link to the Run page of `run`; the enclosing row opens the same page on click. */
 export const RunPageLink = ({ run, children }: RunPageLinkProps) => (
   <Link
-    to="/projects/$owner/$name/runs/$run"
+    to="/projects/$project/$name/runs/$run"
     params={{ ...projectParams(run.repository), run: run.id }}
     onClick={(event) => event.stopPropagation()}
     className="block min-w-0 rounded-sm outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring/70 focus-visible:outline-solid"
@@ -102,7 +102,7 @@ export const RunRow = ({ run, className, children }: RunRowProps) => {
               if (event.target instanceof Element && event.target.closest("a, button") !== null)
                 return;
               void navigate({
-                to: "/projects/$owner/$name/runs/$run",
+                to: "/projects/$project/$name/runs/$run",
                 params: { ...projectParams(run.repository), run: run.id },
               });
             }

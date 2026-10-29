@@ -1,10 +1,11 @@
+import type { ProjectId } from "@usine/core/project";
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ItemKey, ItemNumber } from "@usine/core/item";
 import { RepositoryName, splitRepositoryName } from "@usine/core/repository";
 import type { BoardLaneView, BoardTaskView, ProjectView } from "@usine/orchestrator/operator";
 import { useEffect } from "react";
 import { api } from "~/lib/api";
-import { overviewQuery } from "~/lib/overview";
+import { projectId, overviewQuery } from "~/lib/overview";
 
 /** A card whose label change is still saving or not yet shown on the Board. */
 export interface BoardMoveProgress {
@@ -18,7 +19,7 @@ interface TrackedMove extends BoardMoveProgress {
   readonly laneLabels: ReadonlyArray<BoardTaskView["labels"][number]>;
 }
 
-const moveKey = (repository: RepositoryName) => ["board-moves", repository] as const;
+const moveKey = (project: ProjectId) => ["board-moves", project] as const;
 
 // A move ends once the Item's state or lane labels differ from the source, even if they no longer
 // match the drop lane; other labels and Run updates are ignored.
@@ -40,16 +41,16 @@ export const useBoardMoves = (project: ProjectView) => {
   const queryClient = useQueryClient();
   // The query cache outlives routes, so moves are kept if the Project reopens during a backoff.
   const { data: pendingMoves = [] } = useQuery<ReadonlyArray<TrackedMove>>({
-    queryKey: moveKey(project.repository),
+    queryKey: moveKey(projectId(project)),
     queryFn: skipToken,
     initialData: [],
     gcTime: Infinity,
   });
   const updateMoves = (
-    repository: RepositoryName,
+    project: ProjectId,
     update: (moves: ReadonlyArray<TrackedMove>) => ReadonlyArray<TrackedMove>,
   ) =>
-    queryClient.setQueryData<ReadonlyArray<TrackedMove>>(moveKey(repository), (current = []) =>
+    queryClient.setQueryData<ReadonlyArray<TrackedMove>>(moveKey(project), (current = []) =>
       update(current),
     );
   const moves: ReadonlyArray<BoardMoveProgress> = pendingMoves.filter((move) =>
@@ -58,11 +59,11 @@ export const useBoardMoves = (project: ProjectView) => {
   // A first move has no open Run, so the idle interval would delay confirmation and approval.
   useQuery({ ...overviewQuery(), enabled: moves.length > 0, refetchInterval: 1_000 });
   useEffect(() => {
-    queryClient.setQueryData<ReadonlyArray<TrackedMove>>(moveKey(project.repository), (current) => {
+    queryClient.setQueryData<ReadonlyArray<TrackedMove>>(moveKey(projectId(project)), (current) => {
       const remaining = current?.filter((move) => stillSyncing(move, project.board.lanes));
       return remaining?.length === current?.length ? current : remaining;
     });
-  }, [queryClient, project.repository, project.board.lanes, pendingMoves]);
+  }, [queryClient, project, project.board.lanes, pendingMoves]);
 
   const write = useMutation({
     mutationFn: ({
@@ -71,7 +72,7 @@ export const useBoardMoves = (project: ProjectView) => {
       toLane,
     }: {
       readonly repository: RepositoryName;
-      readonly boardRepository: RepositoryName;
+      readonly boardProject: ProjectId;
       readonly itemKey: ItemKey;
       readonly item: ItemNumber;
       readonly toLane: BoardLaneView["id"];
@@ -86,14 +87,14 @@ export const useBoardMoves = (project: ProjectView) => {
     },
     // Callbacks use the request's board because navigation can replace the observer's options
     // while the request is in flight.
-    onSuccess: (_, { boardRepository, itemKey }) => {
-      updateMoves(boardRepository, (moves) =>
+    onSuccess: (_, { boardProject, itemKey }) => {
+      updateMoves(boardProject, (moves) =>
         moves.map((move) => (move.itemKey === itemKey ? { ...move, phase: "syncing" } : move)),
       );
       return queryClient.invalidateQueries({ queryKey: overviewQuery().queryKey });
     },
-    onError: (_, { boardRepository, itemKey }) => {
-      updateMoves(boardRepository, (moves) => moves.filter((move) => move.itemKey !== itemKey));
+    onError: (_, { boardProject, itemKey }) => {
+      updateMoves(boardProject, (moves) => moves.filter((move) => move.itemKey !== itemKey));
       return queryClient.invalidateQueries({ queryKey: overviewQuery().queryKey });
     },
   });
@@ -113,7 +114,7 @@ export const useBoardMoves = (project: ProjectView) => {
     const laneLabels = project.board.lanes.flatMap((lane) =>
       lane._tag === "WritableBoardLane" ? lane.labels : [],
     );
-    updateMoves(project.repository, (moves) => [
+    updateMoves(projectId(project), (moves) => [
       ...moves,
       {
         itemKey: item.itemKey,
@@ -128,13 +129,13 @@ export const useBoardMoves = (project: ProjectView) => {
     ]);
     write.mutate({
       repository: item.repository,
-      boardRepository: project.repository,
+      boardProject: projectId(project),
       itemKey: item.itemKey,
       item: item.number,
       toLane: target.id,
     });
   };
-  const belongsToProject = write.variables?.boardRepository === project.repository;
+  const belongsToProject = write.variables?.boardProject === projectId(project);
   return {
     moves,
     moveItem,

@@ -30,7 +30,7 @@ export const RunPage = ({ runId }: RunPageProps) => {
   const openRun = (opened: RunId) => {
     setEditing(null);
     void navigate({
-      to: "/projects/$owner/$name/runs/$run",
+      to: "/projects/$project/$name/runs/$run",
       params: { ...projectParams(run.repository), run: opened },
     });
   };

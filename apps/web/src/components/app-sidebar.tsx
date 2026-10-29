@@ -1,7 +1,7 @@
 import { SessionMenu } from "~/components/session-menu";
 import { KanbanIcon, ListChecksIcon, SquaresFourIcon } from "@phosphor-icons/react";
 import { Link, useMatchRoute } from "@tanstack/react-router";
-import type { RepositoryName } from "@usine/core/repository";
+import type { ProjectId } from "@usine/core/project";
 import type { ProjectView } from "@usine/orchestrator/operator";
 import { RepositoryMark } from "~/components/repository-mark";
 import {
@@ -22,7 +22,7 @@ import {
 } from "~/components/ui/sidebar";
 import { cn } from "~/lib/utils";
 import { ConfigurationMenu } from "~/components/configuration/navigation";
-import { projectParams } from "~/lib/overview";
+import { projectId, projectName } from "~/lib/overview";
 
 /** `tasks` covers the Tasks list and Task pages; `project` covers other Project pages, such as a
  * Run page. */
@@ -41,8 +41,8 @@ export const useOperatorView = (): OperatorView => {
   if (matchRoute({ to: "/tokens" }) !== false) return "tokens";
   if (matchRoute({ to: "/configuration", fuzzy: true }) !== false) return "configuration";
   if (matchRoute({ to: "/" }) !== false) return "desk";
-  if (matchRoute({ to: "/projects/$owner/$name/tasks", fuzzy: true }) !== false) return "tasks";
-  if (matchRoute({ to: "/projects/$owner/$name" }) !== false) return "board";
+  if (matchRoute({ to: "/projects/$project/tasks", fuzzy: true }) !== false) return "tasks";
+  if (matchRoute({ to: "/projects/$project" }) !== false) return "board";
   return "project";
 };
 
@@ -58,9 +58,9 @@ const AttentionCount = ({ count }: AttentionCountProps) => (
 type AppSidebarProps = {
   readonly projects: ReadonlyArray<ProjectView>;
   readonly view: OperatorView;
-  readonly project: RepositoryName | undefined;
+  readonly project: ProjectId | undefined;
   /** Needs you entry count per Project. */
-  readonly needsYou: ReadonlyMap<RepositoryName, number>;
+  readonly needsYou: ReadonlyMap<ProjectId, number>;
   /** Total Needs you entries, including those without a Project. */
   readonly needsYouTotal: number;
   readonly live: boolean;
@@ -110,20 +110,25 @@ export const AppSidebar = ({
         <SidebarGroupContent>
           <SidebarMenu className="gap-1.5">
             {projects.map((entry) => {
-              const count = needsYou.get(entry.repository) ?? 0;
-              const params = projectParams(entry.repository);
-              const current = project === entry.repository;
+              const count = needsYou.get(projectId(entry)) ?? 0;
+              const params = { project: projectId(entry) };
+              const current = project === projectId(entry);
               return (
-                <SidebarMenuItem key={entry.repository}>
+                <SidebarMenuItem key={projectId(entry)}>
                   {/* On Board and Tasks pages that row is active; on other Project pages, such as
                       a Run page, the Project row is active. */}
                   <SidebarMenuButton
                     isActive={current && view === "project"}
+                    title={
+                      entry.repositories.length > 1
+                        ? `${entry.repositories.length} repositories`
+                        : undefined
+                    }
                     className={cn(count > 0 && "pr-8")}
-                    render={<Link to="/projects/$owner/$name" params={params} />}
+                    render={<Link to="/projects/$project" params={params} />}
                   >
                     <RepositoryMark repository={entry.repository} />
-                    <span>{entry.repository}</span>
+                    <span>{projectName(entry)}</span>
                   </SidebarMenuButton>
                   {count > 0 && <AttentionCount count={count} />}
                   {/* Sub-row icons line up with the project name, and fills span the full row. */}
@@ -132,7 +137,7 @@ export const AppSidebar = ({
                       <SidebarMenuSubButton
                         isActive={current && view === "board"}
                         className="translate-x-0 pl-8"
-                        render={<Link to="/projects/$owner/$name" params={params} />}
+                        render={<Link to="/projects/$project" params={params} />}
                       >
                         <KanbanIcon aria-hidden="true" />
                         <span>Board</span>
@@ -142,7 +147,7 @@ export const AppSidebar = ({
                       <SidebarMenuSubButton
                         isActive={current && view === "tasks"}
                         className="translate-x-0 pl-8"
-                        render={<Link to="/projects/$owner/$name/tasks" params={params} />}
+                        render={<Link to="/projects/$project/tasks" params={params} />}
                       >
                         <ListChecksIcon aria-hidden="true" />
                         <span>Tasks</span>

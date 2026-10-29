@@ -11,9 +11,21 @@ type LoopFactsProps = {
 };
 
 export const LoopFacts = ({ loop, configuration }: LoopFactsProps) => {
+  const project = configuration.projects.find((project) => loop.name.startsWith(`${project.id}/`));
   const agent = configuration.agents.find(({ name }) => name === loop.agent);
   return (
     <Facts>
+      {project !== undefined && (
+        <Fact label="Project">
+          <Link
+            to="/configuration/projects/$project"
+            params={{ project: project.id }}
+            className="text-primary hover:underline"
+          >
+            {project.name}
+          </Link>
+        </Fact>
+      )}
       <Fact label="Agent">
         <Link
           to="/configuration/agents/$agent"

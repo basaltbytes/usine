@@ -189,7 +189,7 @@ it("lists every Run newest first, each opening its Run page with why it ended", 
   await rowOf("fix-ci", 1).getByRole("link", { name: "run-canc", exact: true }).click();
   await expect
     .poll(() => router.state.location.pathname)
-    .toBe(`/projects/${taskRepository}/runs/run-canceled`);
+    .toBe("/projects/basaltbytes-usine/runs/run-canceled");
 });
 
 it("offers only the actions that apply to each Run, and never a disabled button", async () => {
@@ -288,7 +288,7 @@ it("moves to the originating Item's address, and explains an Item off the Board"
   await mount(42);
   await expect
     .poll(() => router.state.location.pathname)
-    .toBe(`/projects/${taskRepository}/tasks/40`);
+    .toBe("/projects/basaltbytes-usine/tasks/40");
   await expect.element(page.getByRole("heading", { level: 1 })).toBeVisible();
 
   flushSync(() => root.render(null));

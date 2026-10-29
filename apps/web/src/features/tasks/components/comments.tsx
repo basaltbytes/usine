@@ -71,7 +71,7 @@ export const TaskComments = ({ task }: TaskCommentsProps) => {
                     <TableCell className="py-3">
                       {run !== undefined && (
                         <Link
-                          to="/projects/$owner/$name/runs/$run"
+                          to="/projects/$project/$name/runs/$run"
                           params={{ ...projectParams(run.repository), run: run.id }}
                           className="relative z-10 rounded-sm text-muted-foreground underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring/70 focus-visible:outline-solid"
                         >

@@ -100,3 +100,6 @@ export const tryAgain = "Try again";
 export const membersLabel = "Members";
 export const tokensPageLabel = "Tokens";
 export const signOutLabel = "Sign out";
+
+export const repositoryFilterLabel = "Repository";
+export const allRepositoriesLabel = "All repositories";

@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "@tanstack/react-router";
-import type { LoopFileView } from "@usine/orchestrator/operator";
+import type { LoopFileView, ConfigurationView } from "@usine/orchestrator/operator";
 import { FillCell } from "~/components/fill-cell";
 import { TableCell } from "~/components/ui/table";
 import { LoopState } from "~/features/configuration/components/loops/state";
@@ -10,11 +10,13 @@ import { approvalLabel } from "~/features/configuration/strings";
 import { triggerLabel } from "~/lib/strings";
 
 type LoopRowProps = {
+  readonly projects: ConfigurationView["projects"];
   readonly loop: LoopFileView;
   readonly pause: PauseLoop | null;
 };
 
-export const LoopRow = ({ loop, pause }: LoopRowProps) => {
+export const LoopRow = ({ loop, pause, projects }: LoopRowProps) => {
+  const project = projects.find((project) => loop.name.startsWith(`${project.id}/`));
   const navigate = useNavigate();
   const params = { loop: loop.name };
   return (
@@ -26,8 +28,22 @@ export const LoopRow = ({ loop, pause }: LoopRowProps) => {
           onClick={(event) => event.stopPropagation()}
           className={rowLinkClass}
         >
-          {loop.name}
+          {loop.name.split("/").at(-1)}
         </Link>
+      </TableCell>
+      <TableCell className="max-w-40 whitespace-normal">
+        {project === undefined ? (
+          "—"
+        ) : (
+          <Link
+            to="/configuration/projects/$project"
+            params={{ project: project.id }}
+            onClick={(event) => event.stopPropagation()}
+            className="text-primary hover:underline"
+          >
+            {project.name}
+          </Link>
+        )}
       </TableCell>
       <TableCell>{triggerLabel(loop.stream)}</TableCell>
       <FillCell className="hidden lg:table-cell">
