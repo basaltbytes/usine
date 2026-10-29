@@ -662,7 +662,7 @@ it.each(["pointer", "Space"] as const)(
   },
 );
 
-it("lets Space on the viewport resume following a paused reader at latest", async () => {
+it("keeps a paused reader paused when Space at latest moves nothing", async () => {
   const started = record(
     46,
     new ToolStarted({
@@ -686,10 +686,13 @@ it("lets Space on the viewport resume following a paused reader at latest", asyn
   await expect.poll(atLatest).toBeLessThan(9);
   viewport().focus();
   await userEvent.keyboard(" ");
+  await new Promise(requestAnimationFrame);
   mount([...initial, message(47)]);
-  await expect.poll(atLatest).toBeLessThan(9);
+  await expect
+    .element(page.getByRole("button", { name: "1 new update", exact: true }))
+    .toBeVisible();
   close();
-  expect(bookmark()?.position._tag).toBe("Latest");
+  expect(bookmark()?.position._tag).toBe("Anchor");
 });
 
 const swipe = (element: Element, fromY: number, toY: number) => {
@@ -729,7 +732,9 @@ const longRead = [
       session: parent,
       callId: "long",
       tool: "read",
-      output: Array.from({ length: 100 }, (_, line) => `source line ${line}`).join("\n"),
+      output: Array.from({ length: 100 }, (_, line) => `source line ${line} `.repeat(20)).join(
+        "\n",
+      ),
       isError: false,
     }),
   ),
@@ -765,6 +770,55 @@ it.each(["wheel", "swipe"] as const)(
       await userEvent.wheel(output, { delta: { y: -100 } });
       await expect.poll(() => output.scrollTop).toBeLessThan(end);
     } else swipe(output, 300, 400);
+    mount([...events, ...longRead, message(48)]);
+    await expect.poll(atLatest).toBeLessThan(9);
+  },
+);
+
+it("keeps following when a wheel at a nested area's edge leaves the viewport still", async () => {
+  const output = await followLongOutput();
+  expect(output.scrollTop).toBe(0);
+  const top = viewport().scrollTop;
+  // Synthetic input models a latched gesture: the event reaches the viewport without scrolling it.
+  output.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -100 }));
+  await new Promise(requestAnimationFrame);
+  expect(viewport().scrollTop).toBe(top);
+  mount([...events, ...longRead, message(48)]);
+  await expect.poll(atLatest).toBeLessThan(9);
+});
+
+it.each([true, false])(
+  "preserves following=%s when a code block scrolls horizontally",
+  async (following) => {
+    const output = following ? await followLongOutput() : await openLongOutput();
+    viewport().scrollTop = viewport().scrollHeight;
+    await expect.poll(atLatest).toBeLessThan(9);
+    await ownScrollEnded();
+    const top = viewport().scrollTop;
+    await userEvent.wheel(output, { delta: { x: 100, y: 0 } });
+    await expect.poll(() => output.scrollLeft).toBeGreaterThan(0);
+    expect(viewport().scrollTop).toBe(top);
+    mount([...events, ...longRead, message(48)]);
+    if (following) await expect.poll(atLatest).toBeLessThan(9);
+    else
+      await expect
+        .element(page.getByRole("button", { name: "1 new update", exact: true }))
+        .toBeVisible();
+  },
+);
+
+it.each(["Home", "ArrowUp"])(
+  "keeps following when %s scrolls a focused nested area",
+  async (key) => {
+    const output = await followLongOutput();
+    output.scrollTop = output.scrollHeight;
+    const end = output.scrollTop;
+    output.tabIndex = 0;
+    output.focus({ preventScroll: true });
+    const top = viewport().scrollTop;
+    await userEvent.keyboard(`{${key}}`);
+    await expect.poll(() => output.scrollTop).toBeLessThan(end);
+    expect(viewport().scrollTop).toBe(top);
     mount([...events, ...longRead, message(48)]);
     await expect.poll(atLatest).toBeLessThan(9);
   },
