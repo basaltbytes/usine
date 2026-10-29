@@ -1,3 +1,4 @@
+import { testAppLayer } from "./support/github-app.ts";
 import { configurationLayer } from "./support/configuration.ts";
 import { createHash } from "node:crypto";
 import { NodeServices } from "@effect/platform-node";
@@ -260,6 +261,7 @@ const withFactory = <A, E>(
       Layer.provide(alwaysHoldsLayer),
     );
     const dependencies = Layer.mergeAll(
+      testAppLayer,
       engine,
       MarcbachmannCelLayer,
       WorkerStatus.idle,

@@ -1221,7 +1221,8 @@ const makeOperator = Effect.gen(function* () {
     cancel,
     discardLeftovers: (worker: WorkerName) => runs.discardLeftovers(worker).pipe(Effect.asVoid),
     moveBoardItem,
-    githubChanges: githubChanges.read,
+    githubChanges: (instance: LoadedInstance, runId: RunId) =>
+      githubChanges.read(instance.config.workers, runId),
     pause,
     retry,
     resolveFailure,
@@ -1312,6 +1313,7 @@ export class Operator extends Context.Service<
      * Agent's label, comment, and review changes, and the operator's Board moves.
      */
     readonly githubChanges: (
+      instance: LoadedInstance,
       runId: RunId,
     ) => Effect.Effect<RunGitHubChangesView, RunGitHubChangesError>;
     /** Pauses new work for a Loop; its existing Runs continue. */

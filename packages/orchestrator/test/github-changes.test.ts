@@ -1,3 +1,5 @@
+import { LocalWorker, ExeDevWorker } from "@usine/config/factory";
+import { testAppLayer } from "./support/github-app.ts";
 import { assert, describe, it } from "@effect/vitest";
 import { Agent, AgentName, AgentPersona } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
@@ -12,7 +14,7 @@ import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { Run, RunId } from "@usine/core/run";
 import * as RunState from "@usine/core/run/state";
 import { Step, StepName } from "@usine/core/step";
-import { WorkerName } from "@usine/core/worker";
+import { BotLogin, WorkerName } from "@usine/core/worker";
 import { BoardMoveRecord, BoardMoves } from "@usine/engine/board-moves";
 import { RunReader, RunSnapshot, RunSummary } from "@usine/engine/run-reader";
 import { TranscriptEntry, TranscriptSequence } from "@usine/engine/transcript";
@@ -22,12 +24,27 @@ import {
   type ItemChange,
   LabelAdded,
   LabelRemoved,
+  Reviewed,
 } from "@usine/github/item-history";
 import { RepositoryLabel, RepositoryLabelColor, RepositoryLabelName } from "@usine/github/polling";
 import { DateTime, Effect, Layer, Option, Ref } from "effect";
 import { TestClock } from "effect/testing";
 import { RunGitHubChanges, type RunGitHubChangesView } from "../src/operator/github-changes.ts";
 import { gitHubItemKey } from "../src/polling/repository-sync.ts";
+
+const appActor = BotLogin.make("usine-test[bot]");
+const exeActor = BotLogin.make("exe-dev-github-integration[bot]");
+const localWorker = new LocalWorker({
+  name: WorkerName.make("usine-worker-1"),
+  kind: "local",
+  maxConcurrentAttempts: 1,
+});
+const exeWorker = new ExeDevWorker({
+  name: WorkerName.make("exe-one"),
+  kind: "exe.dev",
+  maxConcurrentAttempts: 1,
+});
+const workers = [localWorker, exeWorker];
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const itemKey = gitHubItemKey(repository, 247);
@@ -201,7 +218,11 @@ const boardMove = new BoardMoveRecord({
   removed: ["agent-in-progress", "ready-for-agent"],
 });
 
-const testLayer = (current: Ref.Ref<RunSnapshot>, requests: Ref.Ref<ReadonlyArray<string>>) => {
+const testLayer = (
+  current: Ref.Ref<RunSnapshot>,
+  requests: Ref.Ref<ReadonlyArray<string>>,
+  timelines: ReadonlyMap<BotLogin, ReadonlyArray<ItemChange>> = new Map([[appActor, appChanges]]),
+) => {
   const reader = Layer.succeed(RunReader)({
     latestPoolRateLimits: () => Effect.succeed([]),
     inspect: () => Ref.get(current),
@@ -235,9 +256,13 @@ const testLayer = (current: Ref.Ref<RunSnapshot>, requests: Ref.Ref<ReadonlyArra
     sightings: () => Effect.die("unused"),
   });
   const history = Layer.succeed(GitHubItemHistory)({
-    appChanges: (_repository, _item, since) =>
+    appChanges: (_repository, _item, since, actor) =>
       Ref.update(requests, (sent) => [...sent, DateTime.formatIso(since)]).pipe(
-        Effect.as(appChanges.filter(({ at }) => DateTime.isGreaterThanOrEqualTo(at, since))),
+        Effect.as(
+          (timelines.get(actor) ?? []).filter(({ at }) =>
+            DateTime.isGreaterThanOrEqualTo(at, since),
+          ),
+        ),
       ),
   });
   const boardMoves = Layer.succeed(BoardMoves)({
@@ -249,7 +274,9 @@ const testLayer = (current: Ref.Ref<RunSnapshot>, requests: Ref.Ref<ReadonlyArra
         ),
       ),
   });
-  return RunGitHubChanges.layer.pipe(Layer.provide(Layer.mergeAll(reader, history, boardMoves)));
+  return RunGitHubChanges.layer.pipe(
+    Layer.provide(Layer.mergeAll(reader, history, boardMoves, testAppLayer)),
+  );
 };
 
 const summary = (view: RunGitHubChangesView) =>
@@ -265,6 +292,80 @@ const summary = (view: RunGitHubChangesView) =>
 
 describe("RunGitHubChanges", () => {
   it.effect(
+    "matches exe.dev writes, separates App board moves, and invalidates cached identities",
+    () =>
+      Effect.gen(function* () {
+        const exeSecond = new Attempt({ ...second, worker: exeWorker.name });
+        const exeThird = new Attempt({ ...third, worker: exeWorker.name });
+        const current = yield* Ref.make(snapshot([first, exeSecond, exeThird]));
+        const requests = yield* Ref.make<ReadonlyArray<string>>([]);
+        const exeChanges = [
+          new LabelAdded({
+            at: time("2026-10-16T09:47:10Z"),
+            label: label("ready-for-review", "0e8a16"),
+          }),
+          new LabelRemoved({
+            at: time("2026-10-16T09:47:12Z"),
+            label: label("agent-in-progress", "fbca04"),
+          }),
+          comment("2026-10-16T09:48:00Z", 50),
+          comment("2026-10-16T13:05:08Z", 51),
+          new Reviewed({
+            at: time("2026-10-16T13:05:10Z"),
+            url: "https://github.com/basaltbytes/usine/pull/247#pullrequestreview-52",
+            state: "COMMENTED",
+          }),
+        ];
+        yield* TestClock.setTime(DateTime.toEpochMillis(time("2026-10-16T13:10:00Z")));
+        yield* Effect.gen(function* () {
+          const changes = yield* RunGitHubChanges;
+          const read = yield* changes.read(workers, runId);
+          assert.deepStrictEqual(summary(read).slice(1), [
+            [
+              "2026-10-16T09:47:10.000Z LabelAdded ready-for-review #0e8a16",
+              "2026-10-16T09:47:10.250Z BoardMoved In progress -> Review",
+              "2026-10-16T09:47:12.000Z LabelRemoved agent-in-progress #fbca04",
+              "2026-10-16T09:48:00.000Z Commented issuecomment-50",
+            ],
+            [
+              "2026-10-16T13:05:08.000Z Commented issuecomment-51",
+              "2026-10-16T13:05:10.000Z Reviewed pullrequestreview-52",
+            ],
+          ]);
+          assert.deepStrictEqual(summary(yield* changes.read(workers, runId)), summary(read));
+          const removed = yield* changes.read([localWorker], runId);
+          assert.deepStrictEqual(summary(removed).slice(1), [
+            ["2026-10-16T09:47:10.250Z BoardMoved In progress -> Review"],
+            [],
+          ]);
+          const replaced = yield* changes.read(
+            [localWorker, new LocalWorker({ ...exeWorker, kind: "local" })],
+            runId,
+          );
+          assert.deepStrictEqual(summary(replaced)[2], [
+            "2026-10-16T13:03:00.000Z Commented issuecomment-2",
+          ]);
+          assert(
+            summary(replaced)[1]?.includes(
+              "2026-10-16T09:48:00.000Z Commented issuecomment-6212798620",
+            ),
+          );
+        }).pipe(
+          Effect.provide(
+            testLayer(
+              current,
+              requests,
+              new Map([
+                [appActor, appChanges],
+                [exeActor, exeChanges],
+              ]),
+            ),
+          ),
+        );
+      }),
+  );
+
+  it.effect(
     "places the App's changes in the one Attempt at work, a Board move's as the operator's, and caches settled Attempts",
     () =>
       Effect.gen(function* () {
@@ -273,7 +374,7 @@ describe("RunGitHubChanges", () => {
         yield* TestClock.setTime(DateTime.toEpochMillis(time("2026-10-16T13:10:00Z")));
         yield* Effect.gen(function* () {
           const changes = yield* RunGitHubChanges;
-          const read = yield* changes.read(runId);
+          const read = yield* changes.read(workers, runId);
           assert.deepStrictEqual(summary(read), [
             [
               "2026-10-15T19:30:39.000Z LabelRemoved ready-for-agent #1f883d",
@@ -293,7 +394,7 @@ describe("RunGitHubChanges", () => {
           assert.deepStrictEqual(yield* Ref.get(requests), ["2026-10-15T19:30:39.000Z"]);
 
           // Ended Attempts come from the cache; GitHub is asked only about the live one.
-          assert.deepStrictEqual(summary(yield* changes.read(runId)), summary(read));
+          assert.deepStrictEqual(summary(yield* changes.read(workers, runId)), summary(read));
           assert.deepStrictEqual((yield* Ref.get(requests)).slice(1), ["2026-10-16T13:02:00.000Z"]);
 
           // A recently ended Attempt is read again until GitHub's record is final.
@@ -305,10 +406,10 @@ describe("RunGitHubChanges", () => {
               attempt(runId, 3, "2026-10-16T13:02:00.345Z", { endedAt: "2026-10-16T13:09:30Z" }),
             ]),
           );
-          yield* changes.read(runId);
+          yield* changes.read(workers, runId);
           yield* TestClock.adjust("1 minute");
-          yield* changes.read(runId);
-          yield* changes.read(runId);
+          yield* changes.read(workers, runId);
+          yield* changes.read(workers, runId);
           assert.strictEqual((yield* Ref.get(requests)).length, 4);
         }).pipe(Effect.provide(testLayer(current, requests)));
       }),

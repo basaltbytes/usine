@@ -1,3 +1,6 @@
+import type { Worker } from "@usine/config/factory";
+import { BotLogin } from "@usine/core/worker";
+import { githubBotLogin } from "@usine/executor";
 import { LaneName } from "@usine/config/board";
 import { canonicalLabelName, GitHubLabelName } from "@usine/config/label";
 import { type Attempt, AttemptId, AttemptWindow, windowHolds, windowOf } from "@usine/core/attempt";
@@ -6,7 +9,7 @@ import { type BoardMoveRecord, BoardMoves } from "@usine/engine/board-moves";
 import type { RunStoreError } from "@usine/engine/engine";
 import { RunReader } from "@usine/engine/run-reader";
 import { TranscriptPageQuery } from "@usine/engine/transcript";
-import type { GitHubAppError } from "@usine/github/github-app";
+import { GitHubApp, type GitHubAppError } from "@usine/github/github-app";
 import {
   GitHubItemHistory,
   type GitHubItemNotFoundError,
@@ -98,7 +101,7 @@ const MOVE_SPAN_MILLIS = 10_000;
 
 /**
  * Assigns each change to the one Attempt whose window contains it. A change inside two Attempts'
- * windows is assigned to neither, since every Agent writes as the same App.
+ * windows with the same bot identity is assigned to neither.
  */
 const attribute = (windows: ReadonlyArray<AttemptWindow>, changes: ReadonlyArray<ItemChange>) => {
   const attributed = new Map<AttemptId, Array<ItemChange>>();
@@ -182,11 +185,13 @@ const moveView = (move: BoardMoveRecord) =>
 const makeRunGitHubChanges = Effect.gen(function* () {
   const reader = yield* RunReader;
   const history = yield* GitHubItemHistory;
+  const app = yield* GitHubApp;
   const boardMoves = yield* BoardMoves;
-  const cache = yield* Ref.make(new Map<AttemptId, ReadonlyArray<GitHubChangeView>>());
+  const cache = yield* Ref.make(new Map<string, ReadonlyArray<GitHubChangeView>>());
 
   // Attempts that ended before end times were recorded end at their last transcript row.
   const windowFor = Effect.fn("RunGitHubChanges.windowFor")(function* (attempt: Attempt) {
+    yield* Effect.annotateCurrentSpan({ attemptId: attempt.id, worker: attempt.worker });
     const recorded = windowOf(attempt);
     if (Option.isSome(recorded)) return recorded;
     const [last] = yield* reader.transcript(
@@ -208,7 +213,10 @@ const makeRunGitHubChanges = Effect.gen(function* () {
     );
   });
 
-  const read = Effect.fn("RunGitHubChanges.read")(function* (runId: RunId) {
+  const read = Effect.fn("RunGitHubChanges.read")(function* (
+    workers: ReadonlyArray<Worker>,
+    runId: RunId,
+  ) {
     yield* Effect.annotateCurrentSpan({ runId });
     const snapshot = yield* reader.inspect(runId);
     const item = Schema.decodeOption(GitHubItemKey)(snapshot.itemKey);
@@ -226,7 +234,30 @@ const makeRunGitHubChanges = Effect.gen(function* () {
             new AttemptGitHubChangesView({ attemptId: id, changes: changes.get(id) ?? [] }),
         ),
       });
-    const cached = yield* Ref.get(cache);
+    if (snapshot.attempts.length === 0) return view(new Map());
+    const { appSlug } = yield* app.installation();
+    const appActor = BotLogin.make(`${appSlug}[bot]`);
+    const workerActors = new Map(
+      workers.map(({ name, kind }) => [name, githubBotLogin(kind, appActor)]),
+    );
+    const cacheKey = (attempt: Attempt) =>
+      Option.map(
+        Option.fromUndefinedOr(workerActors.get(attempt.worker)),
+        (actor) => `${attempt.id}/${actor}`,
+      );
+    const stored = yield* Ref.get(cache);
+    const cached = new Map(
+      snapshot.attempts.flatMap((attempt) =>
+        Option.toArray(
+          Option.flatMap(cacheKey(attempt), (key) =>
+            Option.map(
+              Option.fromUndefinedOr(stored.get(key)),
+              (changes) => [attempt.id, changes] as const,
+            ),
+          ),
+        ),
+      ),
+    );
     const missing = snapshot.attempts.filter(({ id }) => !cached.has(id));
     if (missing.length === 0) {
       yield* Effect.logDebug("Served the Run's GitHub changes from the Attempt cache", {
@@ -243,6 +274,20 @@ const makeRunGitHubChanges = Effect.gen(function* () {
         attempt,
       ]),
     );
+    const actors = new Map<AttemptId, BotLogin>();
+    for (const attempt of onItem.values()) {
+      const actor = workerActors.get(attempt.worker);
+      if (actor === undefined) {
+        yield* Effect.logWarning(
+          "Attempt worker is no longer configured; its GitHub writer is unknown",
+          {
+            runId,
+            attemptId: attempt.id,
+            worker: attempt.worker,
+          },
+        );
+      } else actors.set(attempt.id, actor);
+    }
     const windows = (yield* Effect.forEach([...onItem.values()], windowFor)).flatMap(
       Option.toArray,
     );
@@ -262,9 +307,23 @@ const makeRunGitHubChanges = Effect.gen(function* () {
       );
       const since = DateTime.makeUnsafe(earliest - (earliest % 1_000));
       // A move recorded shortly before the earliest window can still appear in it.
-      const [changes, recorded] = yield* Effect.all(
+      const [timelines, recorded] = yield* Effect.all(
         [
-          history.appChanges(repository, number, since),
+          Effect.forEach(
+            [
+              ...new Set([
+                appActor,
+                ...placeable.flatMap(({ attemptId }) =>
+                  Option.toArray(Option.fromUndefinedOr(actors.get(attemptId))),
+                ),
+              ]),
+            ],
+            (actor) =>
+              history
+                .appChanges(repository, number, since, actor)
+                .pipe(Effect.map((changes) => [actor, changes] as const)),
+            { concurrency: "unbounded" },
+          ),
           boardMoves.onItem(
             snapshot.itemKey,
             DateTime.subtract(since, { milliseconds: MOVE_SPAN_MILLIS }),
@@ -272,19 +331,31 @@ const makeRunGitHubChanges = Effect.gen(function* () {
         ],
         { concurrency: "unbounded" },
       );
-      const { moves, rest } = separateBoardMoves(recorded, changes);
-      const { attributed, ambiguous } = attribute(windows, rest);
-      if (ambiguous.length > 0)
-        yield* Effect.logInfo(
-          "Left out GitHub changes that overlapping Attempts on the Item could each have made",
-          {
-            runId,
-            repository,
-            item: number,
-            changes: ambiguous.length,
-            at: ambiguous.map(({ at }) => DateTime.formatIso(at)).join(", "),
-          },
+      const byActor = new Map(timelines);
+      const appChanges = byActor.get(appActor) ?? [];
+      const { moves, rest } = separateBoardMoves(recorded, appChanges);
+      byActor.set(appActor, rest);
+      const attributed = new Map<AttemptId, ReadonlyArray<ItemChange>>();
+      for (const [actor, changes] of byActor) {
+        const matching = windows.filter(
+          ({ attemptId }) => !actors.has(attemptId) || actors.get(attemptId) === actor,
         );
+        const result = attribute(matching, changes);
+        for (const [attemptId, own] of result.attributed)
+          if (actors.get(attemptId) === actor) attributed.set(attemptId, own);
+        if (result.ambiguous.length > 0)
+          yield* Effect.logInfo(
+            "Left out GitHub changes that overlapping attempts with the same writer could each have made",
+            {
+              runId,
+              repository,
+              item: number,
+              actor,
+              changes: result.ambiguous.length,
+              at: result.ambiguous.map(({ at }) => DateTime.formatIso(at)).join(", "),
+            },
+          );
+      }
       for (const window of placeable) {
         const own = [
           ...(attributed.get(window.attemptId) ?? []).map((change) => ({
@@ -312,14 +383,14 @@ const makeRunGitHubChanges = Effect.gen(function* () {
         )
           settled.push(window.attemptId);
       }
-      yield* Effect.logInfo("Read the App's GitHub changes on a Run's Item", {
+      yield* Effect.logInfo("Read worker GitHub changes on a run item", {
         runId,
         repository,
         item: number,
         since: DateTime.formatIso(since),
-        appChanges: changes.length,
+        appChanges: timelines.reduce((count, [, changes]) => count + changes.length, 0),
         boardMoves: recorded.length,
-        boardMoveChanges: changes.length - rest.length,
+        boardMoveChanges: appChanges.length - rest.length,
         placed: placeable.reduce(
           (count, { attemptId }) => count + (attributed.get(attemptId)?.length ?? 0),
           0,
@@ -327,27 +398,37 @@ const makeRunGitHubChanges = Effect.gen(function* () {
         cachedAttempts: settled.length,
       });
     }
-    const merged = yield* Ref.updateAndGet(cache, (current) => {
+    yield* Ref.update(cache, (current) => {
       const next = new Map(current);
-      for (const attemptId of settled) next.set(attemptId, fresh.get(attemptId) ?? []);
+      for (const attempt of missing) {
+        if (!settled.includes(attempt.id)) continue;
+        for (const key of Option.toArray(cacheKey(attempt)))
+          next.set(key, fresh.get(attempt.id) ?? []);
+      }
       for (const oldest of [...next.keys()].slice(0, Math.max(0, next.size - CACHE_CAPACITY)))
         next.delete(oldest);
       return next;
     });
-    return view(new Map([...merged, ...fresh]));
+    return view(new Map([...cached, ...fresh]));
   });
 
   return { read } as const;
 });
 
 /**
- * Reads the Agent's label, comment, and review changes and the operator's Board moves on the Run's
- * GitHub Item during each Attempt. Label changes made by a recorded Board move are the operator's.
+ * Reads the agent's label, comment, and review changes and the operator's board moves on the run's
+ * GitHub item during each attempt, using the configured kind of its worker. A removed worker's
+ * writer is unknown, so its agent changes are omitted. Label changes made by a recorded board move
+ * are the operator's. Another exe.dev VM writing in the same attempt window can be attributed to
+ * the attempt because exe.dev VMs share one integration bot.
  */
 export class RunGitHubChanges extends Context.Service<
   RunGitHubChanges,
   {
-    readonly read: (runId: RunId) => Effect.Effect<RunGitHubChangesView, RunGitHubChangesError>;
+    readonly read: (
+      workers: ReadonlyArray<Worker>,
+      runId: RunId,
+    ) => Effect.Effect<RunGitHubChangesView, RunGitHubChangesError>;
   }
 >()("@usine/orchestrator/RunGitHubChanges") {
   static readonly layer = Layer.effect(RunGitHubChanges, makeRunGitHubChanges);
