@@ -242,11 +242,11 @@ GitHub label colours come unchanged from the repository, in the label chip (see 
 
 ## Layout
 
-A 232px mantle sidebar, then the base work panel, inset 8px from the window's top, right, and bottom, with a 10px radius and a hairline border. Below `md`, the panel fills the screen and the sidebar becomes a sheet. The panel starts with a 48px breadcrumb-only header, then the Needs attention row (on the overview, the screen's first block), then the screen.
+A 232px mantle sidebar, then the base work panel, inset 8px from the window's top, right, and bottom, with a 10px radius and a hairline border. Below `md`, the panel fills the screen and the sidebar becomes a sheet. The panel starts with a 48px header with the sidebar toggle, breadcrumb, and a notification bell at the right, then the screen.
 
 Page gutters are 16px, 20px from `md`. The page shell is prose (content stops at 768px) or full (fills the panel: the overview and every configuration page). List screens, such as Loops, are flat on the panel with no card: the page heading, then a table whose text aligns with the heading, so its hairlines and row fills extend 8px past it on each side. Below `sm`, tables drop or fold their least important columns instead of scrolling sideways. The Workers list shows **Location**, and the Repositories list **Tags**, from a 672px table.
 
-**Board.** Needs attention items form a two-column grid from `lg` (one column below) with 10px gaps. Then the project title and counts, then the lanes: 272px wide, 12px apart, scrolling sideways together, with headings sticky on the base ground. Folded lanes are 40px rails with the name set vertically and the count.
+**Board.** The project title and counts, then the lanes: 272px wide, 12px apart, scrolling sideways together, with headings sticky on the base ground. Folded lanes are 40px rails with the name set vertically and the count.
 
 **Overview** (`/`). The page heading with counts (`2 running, 7 stalled`), then Statistics, Needs attention, Running, Stalled, and Recent runs, 36px apart, each a 16px semibold title with its count in 13px subtext0, then the Workers line. An empty block is one 13px subtext0 fragment, such as `Nothing running`.
 
@@ -264,7 +264,7 @@ Columns follow the table's width, not the window's: **Tokens** and **Estimated c
 
 **Task page** (`repository › Tasks › Issue #<number>`, the breadcrumb naming the originating item in plain words). At most 1024px wide, flat, with the page gutters, 20px above and 40px below. Header: the page header with the task's item heading; facts are the task's other pull requests as item marks, the lane after `Kanban` (tooltip `Lane`), chips, and Needs attention; Move to is an outline button right of the heading from `sm`. Then Runs, Pull requests, and Comments and reviews, 32px apart, each a 16px semibold title with its count in 13px subtext0, 8px above a flat table. Runs shows every column from `xl`; below, agent, attempts, duration, opened, and pull request fold into one 12px line under the loop, and below `sm` the state's dot joins that line before the loop. Run row cells align to the top, so a failure, approval, or Run again line under the loop doesn't move other cells. An empty section is a hairline, a 13px medium title, and one sentence on how it fills.
 
-**Run page.** Below the breadcrumb (`repository › Run <short id>`) and any Needs attention row, the header is 16px from the panel edges (20px from `md`), with actions right of the title from `lg` and under the facts line otherwise. From `lg`, the outline and reader are side by side:
+**Run page.** Below the breadcrumb (`repository › Run <short id>`), the header is 16px from the panel edges (20px from `md`), with actions right of the title from `lg` and under the facts line otherwise. From `lg`, the outline and reader are side by side:
 
 - **Outline:** a 288px column with a hairline on its right, its own scroll, and 12px side padding. It scrolls to keep the reading-line mark in view with 8px to spare. Below `lg`, it folds into a 36px Outline button naming the part being read, which opens a hairline box at most 60% of the screen tall that closes on a choice.
 - **Reader:** at most 616px wide, centred beside the outline, 20px above and 32px below. Each row is a 72px time-and-speaker gutter, a 24px gap, and content at most 504px wide (about 72 characters of 14px prose); below `sm`, time and speaker are one line above the content. It opens on the latest attempt, or below `lg`, at a finished run's outcome.
@@ -299,7 +299,7 @@ Content is visible without motion. Under `prefers-reduced-motion: reduce`, durat
 - **Sheet:** slides in, and its overlay fades in, over 200ms; both leave in 150ms.
 - **Panels:** fold lines, delegations, and outline attempts open from 0 to Base UI's `--collapsible-panel-height` while fading in (the `collapsible-motion` utility), and close in 150ms.
 - **Reading mark:** each checkpoint rail's 1px mark slides to the reading line's checkpoint over 200ms.
-- **Needs attention:** a new entry fades in over 150ms.
+- **Needs attention:** the tray uses the popover transition on desktop and the sheet transition on phones.
 - **Controls:** button colour, border, and ring changes take 100ms.
 
 ## Shapes
@@ -339,7 +339,7 @@ Compact and quiet, mostly 28px tall.
 
 ### Navigation
 - **Sidebar:** 232px mantle column: the wordmark `usine` in 14px semibold, then groups 20px apart, each a 12px subtext0 name over 32px rows in 13px subtext1. A row starts with a 16px regular-weight Phosphor icon, or a project's repository mark, so the wordmark, icons, marks, and group names share one column and the labels another. Under each project, Board and Tasks are 28px rows with their icons under the project name; projects are 6px apart. Icons are subtext0 at rest and text colour on hover and when active: Overview `SquaresFour`, Board `Kanban`, Tasks `ListChecks`, Loops `ArrowsClockwise`, Agents `Robot`, Workers `HardDrives`, Repositories `BookBookmark`, Settings `GearSix`. Hover fills surface0 at 60%; the active row is surface0 across the row's width, with text colour and medium weight. Needs attention counts are peach, 8px from the row's right edge, on hover too. The footer has the live dot, centred in the icon column, and `Live` or `Idle`.
-- **Header:** 48px, hairline bottom border, sidebar toggle and breadcrumb only.
+- **Header:** 48px, hairline bottom border, sidebar toggle, breadcrumb, and a notification bell with a peach count at the right.
 - **Menus:** surface0 popup, 8px radius, 4px padding, Raised shadow; 28px items in 13px, focus fills surface1; destructive items red with a red 15% focus fill. Menus list only actions that apply.
 
 ### Page heading
@@ -363,9 +363,9 @@ A `{{ }}` expression in a rendered prompt is outlined, not filled: mono, no fill
 One 10px cell per worker slot, 4px apart on one line: running blue while an attempt uses it, an empty ring otherwise, with the count beside them.
 
 ### Needs attention item
-8px radius, peach border at 25%, peach fill at 5% (8% on hover), 14px by 10px padding. Title in 13px medium, context in 12px, actions (primary and ghost buttons) at the right; the whole row opens the related run. An entry about an item starts its context with the item mark: an approval's is the task's name, a cycle budget's the item and its counts.
+Flat rows separated by hairlines, with 12px padding, a 13px medium title, and 12px context and recorded age. Item marks and titles link to GitHub; a run's need title opens the drawer. Primary and ghost actions wrap below the text in narrow containers. Overview and the notification tray use the same row. Groups have a 12px heading and count, peach in dark mode and foreground in light mode.
 
-**Compact:** on the run page, to leave height for the reader: one entry per row, 6px apart, 12px by 4px padding, no repository, the title whole. From `sm`, an entry is one line with the detail shortened 12px after the title, in full in its tooltip; below `sm`, the detail wraps to two lines under the title.
+The notification tray opens below the bell, aligned to the right: 400px wide on the popover ground, with the Needs attention title and count above a scrolling list and a link to Overview below. On phones it opens as a full-width bottom sheet. Both stop at 70% of the viewport height. The bell's badge is absent when the count is zero.
 
 ### Flow arrow
 A 22 by 8 one-pixel arrow at the end of an authored lane's heading, crossing the gap to the next authored lane, after the matching loops' names in 12px (`paused` after a paused one). Blue if one has a queued or running run on the lane's tasks, peach if all their open runs wait, otherwise subtext0 with the arrow in overlay0. With no such loop, the arrow is alone, in overlay0.

@@ -1,122 +1,80 @@
-import { CaretRightIcon } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
-import { ItemMark, type ItemRef } from "~/components/item/mark";
-import { cn } from "~/lib/utils";
+import { Option } from "effect";
+import { ItemMark } from "~/components/item/mark";
+import { cardIdentity, taskCard, type TitledItem, useOverview } from "~/components/item/identity";
+import { useNow } from "~/hooks/use-now";
+import { agoLabel } from "~/lib/strings";
 import type { NeedCopy } from "~/lib/needs-you/strings";
 
 type NeedItemProps = {
-  readonly copy: Pick<NeedCopy, "title" | "detail" | "repository">;
-  /** The item the entry is about, marked before the detail; linked only if `open` is absent. */
-  readonly item?: ItemRef | undefined;
+  readonly copy: NeedCopy;
+  readonly item?: TitledItem | undefined;
   readonly open?: (() => void) | undefined;
   readonly actions?: ReactNode;
   readonly dismiss?: ReactNode;
-  /** The error message of the last failed action on this entry. */
   readonly error?: string | null;
-  readonly fullDetail?: boolean;
-  readonly compact?: boolean;
+  readonly since?: string;
 };
 
-/** `open` makes the whole entry clickable, for example to open the Run drawer. `fullDetail` wraps the detail
- * and puts the actions below it. `compact` keeps the entry on one line, with the detail truncated
- * and the full text in a tooltip. */
-export const NeedItem = ({
-  copy,
-  item,
-  open,
-  actions,
-  dismiss,
-  error,
-  fullDetail = false,
-  compact = false,
-}: NeedItemProps) => {
-  const wraps = fullDetail && !compact;
-  // A compact entry never truncates the title: below sm the detail wraps to two lines under it;
-  // from sm the detail is truncated beside the title.
-  const title = (
-    <span
-      className={cn(
-        "text-sm font-medium text-foreground",
-        compact ? "sm:shrink-0 sm:whitespace-nowrap" : "truncate",
-      )}
-    >
-      {copy.title}
-    </span>
-  );
-  const detail = (
-    <span
-      className={cn(
-        "text-xs text-foreground/75",
-        compact
-          ? "min-w-0 line-clamp-2 sm:block sm:flex-1 sm:text-ellipsis sm:whitespace-nowrap"
-          : "block",
-        !wraps && !compact && "truncate",
-      )}
-      title={wraps ? undefined : copy.detail}
-    >
-      {item !== undefined && (
-        <>
-          <ItemMark item={item} linked={open === undefined} />{" "}
-        </>
-      )}
-      {copy.detail}
-    </span>
-  );
-  const text = compact ? (
-    <span className="flex min-w-0 flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-3">
-      {title}
-      {detail}
-    </span>
-  ) : (
-    <>
-      <span className="flex min-w-0 items-baseline gap-2">
-        {title}
-        {copy.repository !== null && (
-          <span className="shrink-0 text-xs text-foreground/70">{copy.repository}</span>
-        )}
-      </span>
-      {detail}
-    </>
-  );
+export const NeedItem = ({ copy, item, open, actions, dismiss, error, since }: NeedItemProps) => {
+  const overview = useOverview();
+  const now = useNow(15_000);
+  const run = overview?.projects.flatMap(({ runs }) => runs).find(({ id }) => id === copy.runId);
+  const subject =
+    item ??
+    Option.getOrUndefined(
+      Option.map(
+        run === undefined ? Option.none() : taskCard(overview, run.itemKey),
+        (card) => cardIdentity(card).origin,
+      ),
+    );
+  const at = since ?? run?.closedAt ?? run?.openedAt;
   return (
-    <li
-      className={cn(
-        "relative flex min-w-0 flex-wrap items-center gap-x-3 rounded-lg border border-needs-you/25 bg-needs-you/5 transition-colors duration-(--duration-fast) ease-out-expo motion-safe:animate-in motion-safe:fade-in has-[[data-need-open]:hover]:bg-needs-you/8",
-        compact ? "gap-y-1 px-3 py-1" : "min-h-14 gap-y-2 px-3.5 py-2.5",
-      )}
-    >
-      <div
-        className={cn(
-          "flex flex-1 flex-col gap-0.5",
-          compact ? "min-w-0" : "min-w-56",
-          wraps && "basis-full",
-        )}
-      >
+    <li className="flex min-w-0 flex-wrap items-start gap-x-4 gap-y-2 px-3 py-3 text-sm wrap-anywhere hover:bg-muted/40">
+      <div className="min-w-0 flex-1 basis-56 space-y-1">
         {open === undefined ? (
-          text
+          <p className="font-medium">{copy.title}</p>
         ) : (
           <button
             type="button"
-            data-need-open=""
             onClick={open}
-            className="flex min-w-0 flex-col gap-0.5 text-left outline-none after:absolute after:inset-0 after:rounded-lg focus-visible:after:ring-2 focus-visible:after:ring-ring/70"
+            className="rounded-sm text-left font-medium underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/70"
           >
-            {text}
+            {copy.title}
           </button>
         )}
+        {subject !== undefined && (
+          <a
+            href={subject.url}
+            target="_blank"
+            rel="noreferrer"
+            className="block rounded-sm text-foreground underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/70"
+          >
+            <ItemMark item={subject} linked={false} /> {subject.title}
+          </a>
+        )}
+        {copy.detail !== subject?.title && (
+          <p className="text-xs text-muted-foreground">{copy.detail}</p>
+        )}
+        <div className="flex flex-wrap items-baseline gap-x-2 text-xs text-muted-foreground">
+          {copy.repository !== null && <span>{copy.repository}</span>}
+          {at !== undefined && (
+            <time dateTime={at} title={at} className="font-mono tabular-nums">
+              {agoLabel(at, now)}
+            </time>
+          )}
+        </div>
         {error !== undefined && error !== null && (
-          <p className="text-xs text-destructive wrap-anywhere">{error}</p>
+          <p role="alert" className="text-xs text-destructive">
+            {error}
+          </p>
         )}
       </div>
-      {actions !== undefined || dismiss !== undefined ? (
-        <div className="relative z-10 ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-1.5">
+      {(actions !== undefined || dismiss !== undefined) && (
+        <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-1.5">
           {actions}
           {dismiss}
         </div>
-      ) : (
-        open !== undefined && (
-          <CaretRightIcon aria-hidden="true" className="size-3.5 shrink-0 text-needs-you/70" />
-        )
       )}
     </li>
   );

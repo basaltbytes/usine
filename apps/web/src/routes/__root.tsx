@@ -32,7 +32,7 @@ import {
 import { Button } from "~/components/ui/button";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "~/components/ui/sidebar";
 import { ConfigurationCrumbs } from "~/components/configuration/navigation";
-import { NeedsYou } from "~/components/needs-you/needs-you";
+import { NotificationTray } from "~/components/needs-you/notification-tray";
 import { rejectionMessage } from "~/lib/api";
 import { needsYouByProject, overviewQuery, projectParams } from "~/lib/overview";
 
@@ -170,7 +170,7 @@ const Shell = () => {
       <SidebarInset className="h-svh overflow-hidden">
         <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3 md:px-4">
           <SidebarTrigger className="text-muted-foreground hover:text-foreground" />
-          <Breadcrumb>
+          <Breadcrumb className="min-w-0 flex-1">
             <BreadcrumbList>
               <Crumbs
                 view={view}
@@ -184,6 +184,7 @@ const Shell = () => {
               />
             </BreadcrumbList>
           </Breadcrumb>
+          <NotificationTray needs={data.needsYou} />
         </header>
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
           {data._tag === "NeedsSetup" && (
@@ -200,8 +201,6 @@ const Shell = () => {
               </AlertDescription>
             </Alert>
           )}
-          {/* The Overview page renders Needs attention itself. */}
-          {view !== "desk" && <NeedsYou needs={data.needsYou} compact={params.run !== undefined} />}
           <Outlet />
         </div>
         {shownRun !== undefined && (

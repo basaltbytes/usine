@@ -30,7 +30,7 @@ export const DismissedNeeds = ({ needs }: DismissedNeedsProps) => {
         {dismissedAttentionTitle} ({needs.length})
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <ul className="mt-2.5 grid grid-cols-1 items-start gap-2.5 lg:grid-cols-2">
+        <ul className="mt-2.5 divide-y divide-border">
           {needs.map((need) => {
             const copy = needCopy(need);
             const runId = copy.runId;

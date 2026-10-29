@@ -11,6 +11,7 @@ import { RunId } from "@usine/core/run";
 import {
   ApprovalNeed,
   UnresponsiveWorkerNeed,
+  WorkerPreflightNeed,
   BoardItemLink,
   BoardView,
   FactoryOverview,
@@ -24,7 +25,7 @@ import { Schema } from "effect";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
-import { commands, page } from "vitest/browser";
+import { commands, page, userEvent } from "vitest/browser";
 import { overviewQuery } from "~/lib/overview";
 import { routeTree } from "~/route-tree.gen";
 import "~/index.css";
@@ -92,7 +93,7 @@ const approval = approvalOf(runId, 367, "Keep Needs attention current");
 const unrelated = approvalOf(RunId.make("other-run"), 12, "Wait for the operator");
 // The Project has no Runs, so the overview polls at its idle interval and the slow stub only
 // receives the requests a test sends.
-const overview = (needsYou: ReadonlyArray<NeedView>) =>
+const overview = (needsYou: ReadonlyArray<NeedView>, runs: ReadonlyArray<RunView> = []) =>
   JSON.stringify(
     Schema.encodeSync(FactoryOverview)(
       new ReadyOverview({
@@ -100,7 +101,7 @@ const overview = (needsYou: ReadonlyArray<NeedView>) =>
           new ProjectView({
             repository,
             status: "needs-you",
-            runs: [],
+            runs,
             board: new BoardView({ lanes: [], failures: [] }),
             labels: [],
             preflightFindings: [],
@@ -130,6 +131,7 @@ let host: HTMLDivElement;
 let root: Root;
 let queryClient: QueryClient;
 beforeEach(async () => {
+  await page.viewport(1280, 800);
   await commands.approvalResponses(
     overview([approval, unrelated]),
     overview([unrelated]),
@@ -155,6 +157,7 @@ beforeEach(async () => {
   );
 });
 afterEach(() => {
+  document.documentElement.classList.remove("dark");
   flushSync(() => root.unmount());
   queryClient.clear();
   host.remove();
@@ -167,8 +170,8 @@ const entry = (title: string) =>
 
 it("holds the Run's approval in Needs attention while the drawer approves it, and drops it when the approve returns, before the slow overview refresh", async () => {
   const held = entry("#367 Keep Needs attention current");
-  await needs
-    .getByRole("button", { name: /start-dev: approval needed.*#367/, includeHidden: true })
+  await held
+    .getByRole("button", { name: "start-dev: approval needed", includeHidden: true })
     .click();
   await page.getByRole("dialog").getByRole("button", { name: "Approve", exact: true }).click();
   await expect
@@ -221,7 +224,9 @@ it("shows no error on a Needs attention approval refused because the Run was app
 });
 
 it("explains in the drawer an approve refused because the Run was approved elsewhere", async () => {
-  await needs.getByRole("button", { name: /start-dev: approval needed.*#367/ }).click();
+  await entry("#367 Keep Needs attention current")
+    .getByRole("button", { name: "start-dev: approval needed" })
+    .click();
   const drawer = page.getByRole("dialog");
   await drawer.getByRole("button", { name: "Approve", exact: true }).click();
   await commands.answerApproval(409, rejection);
@@ -268,3 +273,137 @@ it("shows a silent worker's last answer and opens an affected run", async () => 
   await held.getByRole("button", { name: "approval/project · start-dev · attempt 1" }).click();
   await expect.element(page.getByRole("dialog")).toBeVisible();
 });
+
+const bell = (count: number) =>
+  page.getByRole("button", { name: `Needs attention (${count})`, exact: true });
+const tray = () => page.getByRole("dialog", { name: /^Needs attention/ });
+const replaceNeeds = async (
+  needsYou: ReadonlyArray<NeedView>,
+  runs: ReadonlyArray<RunView> = [],
+) => {
+  await commands.approvalResponses(
+    overview(needsYou, runs),
+    overview(needsYou, runs),
+    detail(waiting),
+    detail(running),
+  );
+  await queryClient.invalidateQueries({ queryKey: overviewQuery().queryKey });
+};
+
+it("opens with Enter and Space, tabs through row actions, and returns focus to the bell on Escape", async () => {
+  await expect.element(bell(2)).toBeVisible();
+  await expect.element(bell(2).getByText("2", { exact: true })).toBeVisible();
+  bell(2).element().focus();
+  await userEvent.keyboard("{Enter}");
+  await expect.element(tray()).toBeVisible();
+  await expect.element(tray().getByRole("region", { name: "Approval needed (2)" })).toBeVisible();
+  await userEvent.tab();
+  await expect.element(tray().getByRole("link", { name: /#367/ })).toHaveFocus();
+  await userEvent.tab();
+  await expect
+    .element(tray().getByRole("button", { name: "Approve", exact: true }).first())
+    .toHaveFocus();
+  await userEvent.keyboard("{Escape}");
+  await expect.element(tray()).not.toBeInTheDocument();
+  await expect.element(bell(2)).toHaveFocus();
+  await userEvent.keyboard(" ");
+  await expect.element(tray()).toBeVisible();
+  await userEvent.keyboard("{Escape}");
+  await expect.element(bell(2)).toHaveFocus();
+});
+
+it("approves in the dropdown and updates both counts before the slow refresh", async () => {
+  await bell(2).click();
+  const row = tray().getByRole("listitem").filter({ hasText: "#367" });
+  await row.getByRole("button", { name: "Approve", exact: true }).click();
+  await expect.element(row.getByRole("button", { name: "Approving…" })).toBeDisabled();
+  await commands.answerApproval(200, '{"ok":true}');
+  await expect.element(row, { timeout: 2_000 }).not.toBeInTheDocument();
+  await expect.element(bell(1)).toBeVisible();
+  await expect
+    .poll(
+      () =>
+        page.getByRole("link", { name: "Overview", exact: true }).first().element().closest("li")
+          ?.textContent,
+    )
+    .toContain("1 need attention");
+  await expect.element(tray().getByRole("region", { name: "Approval needed (1)" })).toBeVisible();
+  await expect
+    .poll(() => queryClient.getQueryState(overviewQuery().queryKey)?.fetchStatus, {
+      timeout: 10_000,
+    })
+    .toBe("idle");
+});
+
+it("updates the open tray to an empty line and removes the bell badge", async () => {
+  await bell(2).click();
+  await replaceNeeds([]);
+  await expect.element(bell(0)).toBeVisible();
+  await expect.element(bell(0).getByText("0", { exact: true })).not.toBeInTheDocument();
+  await expect.element(tray().getByText("Nothing needs attention", { exact: true })).toBeVisible();
+  await tray().getByRole("link", { name: "View all on Overview" }).click();
+  await expect.element(tray()).not.toBeInTheDocument();
+  await expect.element(needs.getByText("Nothing needs attention", { exact: true })).toBeVisible();
+});
+
+const eightNeeds = [
+  approval,
+  unrelated,
+  ...[
+    "Show worker capacity",
+    "Keep the run outcome visible",
+    "Retry a failed preflight",
+    "Update loop settings",
+    "Fix repository polling",
+  ].map((title, index) => approvalOf(RunId.make(`approval-${index}`), 368 + index, title)),
+  new WorkerPreflightNeed({
+    id: "preflight-remote",
+    worker: WorkerName.make("remote"),
+    message: "SSH connection refused",
+  }),
+];
+
+it.each(["dark", "light"])(
+  "groups eight needs in a scrolling dropdown and a full-width phone sheet (%s)",
+  async (theme) => {
+    document.documentElement.classList.toggle("dark", theme === "dark");
+    await replaceNeeds(
+      eightNeeds,
+      eightNeeds.flatMap((need) =>
+        need._tag === "ApprovalNeed" ? [new RunView({ ...waiting, id: need.runId })] : [],
+      ),
+    );
+    await page.getByRole("link", { name: "Board", exact: true }).click();
+    await expect.element(bell(8)).toBeVisible();
+    await expect.poll(() => [...document.images].every((image) => image.complete)).toBe(true);
+    await page.screenshot({
+      path: `../../../../../.impeccable/review/notification-closed-${theme}.png`,
+    });
+    await bell(8).click();
+    await expect.element(tray().getByRole("region", { name: "Approval needed (7)" })).toBeVisible();
+    expect(tray().getByRole("listitem").all()).toHaveLength(8);
+    await expect.element(tray().getByText(/ago/, { exact: false }).first()).toBeVisible();
+    const popup = tray().element();
+    await expect.poll(() => popup.getBoundingClientRect().width).toBe(400);
+    expect(popup.getBoundingClientRect().height).toBeLessThanOrEqual(560);
+    const scroll = tray().getByRole("region", { name: "Approval needed (7)" }).element()
+      .parentElement?.parentElement;
+    expect(scroll?.scrollHeight).toBeGreaterThan(scroll?.clientHeight ?? Infinity);
+    await page.screenshot({
+      path: `../../../../../.impeccable/review/notification-open-${theme}.png`,
+    });
+    await userEvent.keyboard("{Escape}");
+    await page.viewport(390, 844);
+    await bell(8).click();
+    await expect.element(tray()).toBeVisible();
+    await expect.poll(() => tray().element().getBoundingClientRect().width).toBe(390);
+    expect(tray().element().getBoundingClientRect().height).toBeLessThanOrEqual(591);
+    expect(document.documentElement.scrollWidth).toBe(390);
+    await page.screenshot({
+      path: `../../../../../.impeccable/review/notification-phone-${theme}.png`,
+    });
+    await userEvent.keyboard("{Escape}");
+    await expect.element(tray()).not.toBeInTheDocument();
+    await expect.element(bell(8)).toHaveFocus();
+  },
+);

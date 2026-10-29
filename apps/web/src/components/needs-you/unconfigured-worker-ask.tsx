@@ -10,13 +10,12 @@ import { NeedItem } from "~/components/needs-you/need-item";
 
 type DiscardLeftoversAskProps = {
   readonly need: UnconfiguredWorkerNeed;
-  readonly compact: boolean;
   readonly dismiss?: ReactNode;
 };
 
 /** Discards leftovers after a confirmation; a rejection, such as for a Worker declared again since
  * the overview loaded, is shown under the entry. */
-const DiscardLeftoversAsk = ({ need, compact, dismiss }: DiscardLeftoversAskProps) => {
+const DiscardLeftoversAsk = ({ need, dismiss }: DiscardLeftoversAskProps) => {
   const queries = useQueryClient();
   const [confirming, setConfirming] = useState(false);
   const discard = useMutation({
@@ -26,9 +25,7 @@ const DiscardLeftoversAsk = ({ need, compact, dismiss }: DiscardLeftoversAskProp
   return (
     <NeedItem
       copy={needCopy(need)}
-      compact={compact}
       dismiss={dismiss}
-      fullDetail
       error={discard.isError ? discard.error.message : null}
       actions={
         <>
@@ -60,15 +57,14 @@ const DiscardLeftoversAsk = ({ need, compact, dismiss }: DiscardLeftoversAskProp
 
 type UnconfiguredWorkerAskProps = {
   readonly need: UnconfiguredWorkerNeed;
-  readonly compact: boolean;
   readonly dismiss?: ReactNode;
 };
 
 /** Renders the Ask for a Worker no longer declared in `usine.yaml`. Leftovers can be discarded once
  * no Attempt runs on it; until then the entry shows how many still run. */
-export const UnconfiguredWorkerAsk = ({ need, compact, dismiss }: UnconfiguredWorkerAskProps) =>
+export const UnconfiguredWorkerAsk = ({ need, dismiss }: UnconfiguredWorkerAskProps) =>
   need.running > 0 ? (
-    <NeedItem copy={needCopy(need)} compact={compact} dismiss={dismiss} fullDetail />
+    <NeedItem copy={needCopy(need)} dismiss={dismiss} />
   ) : (
-    <DiscardLeftoversAsk need={need} compact={compact} dismiss={dismiss} />
+    <DiscardLeftoversAsk need={need} dismiss={dismiss} />
   );

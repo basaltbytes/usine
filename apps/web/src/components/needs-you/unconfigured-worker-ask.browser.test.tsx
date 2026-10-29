@@ -38,7 +38,7 @@ const renderNeeds = (need: UnconfiguredWorkerNeed) =>
     ),
   );
 
-const needs = () => page.getByRole("region", { name: "Needs attention" });
+const needs = () => page.getByRole("region", { name: "Unconfigured worker (1)" });
 
 beforeEach(() => {
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });

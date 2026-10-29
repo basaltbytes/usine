@@ -6,7 +6,7 @@ import { Page, PageHeading } from "~/components/page";
 import { Link } from "@tanstack/react-router";
 import { Button } from "~/components/ui/button";
 import { useNow } from "~/hooks/use-now";
-import { NeedEntry } from "~/components/needs-you/needs-you";
+import { NeedsYou } from "~/components/needs-you/needs-you";
 import { overviewQuery } from "~/lib/overview";
 import {
   deskCounts,
@@ -54,11 +54,7 @@ export const DeskNeedsYou = ({ needs, dismissedNeeds = [], polls, now }: DeskNee
     {needs.length === 0 ? (
       <EmptyLine>Nothing needs attention</EmptyLine>
     ) : (
-      <ul className="grid grid-cols-1 items-start gap-2.5 lg:grid-cols-2">
-        {needs.map((need) => (
-          <NeedEntry key={need.id} need={need} compact={false} />
-        ))}
-      </ul>
+      <NeedsYou needs={needs} />
     )}
     <DismissedNeeds needs={dismissedNeeds} />
   </DeskSection>
