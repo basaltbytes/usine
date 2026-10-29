@@ -16,6 +16,8 @@ At startup, a failed worker preflight excludes that worker from scheduling while
 
 ## Manage the instance
 
+The first parent harness installs Pi's HTTP dispatcher for all server requests, including GitHub, gateway administration, and Boat. It uses five-minute stream timeouts and respects `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY`; Pi's global `httpProxy` setting fills unset proxy variables. Restart the server after changing proxy settings.
+
 ```sh
 usine up --detach   # start in the background, with the output in .usine/usine.log
 usine status        # running or not, pid, address, version, uptime, open runs; exit 3 if stopped

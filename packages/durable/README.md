@@ -20,6 +20,10 @@ const attempts = durableLayer(instanceDirectory);
 
 Building the layer installs the usine extension and resumes tasks. Closing it writes no task outcome, so the next start resumes the same work.
 
+Before opening the first harness, `/live` installs Pi's HTTP dispatcher once for the process. It uses HTTP/1.1, CONNECT proxy tunnels, five-minute body and header timeouts, and a two-second address-family connection attempt timeout. Pi's global `httpProxy` setting fills unset `HTTP_PROXY` and `HTTPS_PROXY` variables; existing environment values and `NO_PROXY` retain their precedence. Project settings do not configure the proxy.
+
+The dispatcher applies to all server requests, including GitHub, gateway administration, and Boat. The adapter installs undici's fetch globals together with the dispatcher, preserving a fetch override made after importing `/live`. Reopening a harness reuses the dispatcher. Restart the server to apply proxy changes.
+
 The Pi packages are pinned together at 1.4.0. The attempt and hold documents use explicit checkpoint policies that keep ordinary updates as deltas, preserving their stored format and behavior from Pi 1.2.0.
 
 ## Run an attempt

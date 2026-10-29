@@ -15,6 +15,7 @@ import {
   layer as durableHarnessLayer,
 } from "./harness.ts";
 import { durableStoragePath } from "./storage-path.ts";
+import { configureHarnessHttp } from "./http-dispatcher.ts";
 
 const nodeOptions = Effect.fn("DurableHarness.nodeOptions")(function* (
   instanceDirectory: InstanceDirectory,
@@ -22,13 +23,14 @@ const nodeOptions = Effect.fn("DurableHarness.nodeOptions")(function* (
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const file = durableStoragePath(path, instanceDirectory);
-  const models = yield* Effect.tryPromise({
-    try: (signal) => ModelRuntime.create({ signal }),
-    catch: (cause) => durableError("load the Pi model runtime", cause),
-  });
   // Only the Pi user's global settings: the instance folder's own `.pi/` is not trusted.
   const settings = SettingsManager.create(instanceDirectory, getAgentDir(), {
     projectTrusted: false,
+  });
+  yield* configureHarnessHttp(settings.getGlobalSettings().httpProxy);
+  const models = yield* Effect.tryPromise({
+    try: (signal) => ModelRuntime.create({ signal }),
+    catch: (cause) => durableError("load the Pi model runtime", cause),
   });
   const defaultModel = Option.flatMap(
     Option.fromNullishOr(settings.getDefaultProvider()),
