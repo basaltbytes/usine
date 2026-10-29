@@ -94,12 +94,12 @@ cloud-init sets up the server from `infra/hetzner/orchestrator-cloud-init.yaml`:
 - Node.js from NodeSource, at the major version of the attempt image, and `@usine/server` installed with `npm install --global` in `/home/usine/.local`, whose `bin` folder is on `usine`'s `PATH` in a login shell.
 - Tailscale from its apt repository, with the signing key that the gateway pins, and chrony, with the gateway as its preferred time source.
 - The nftables rules of `infra/hetzner/orchestrator-nftables.conf`. They accept new connections only to SSH from `tailscale0`, and forward nothing. cloud-init doesn't enable them, because they refuse SSH through the gateway, the only path to the server until `orchestrator-tailnet-up` logs it in to the tailnet.
-- The `usine.service` unit, which runs `/home/usine/.local/bin/usine up` as `usine` in the instance folder `/home/usine/factory`. It starts at boot once the folder has a `usine.yaml`.
+- The `usine.service` unit, which runs `/home/usine/.local/bin/usine up` as `usine` in the instance folder `/home/usine/factory`. Its systemd unit starts at boot once the bootstrap `usine.yaml` exists; retain that file for the unit condition even after import.
 - A polkit rule that lets `usine` start, stop, and restart `usine.service`, which `usine stop`, `usine restart`, and `usine upgrade` do.
 
 ## Set up the usine user's SSH access
 
-The orchestrator connects to the gateway and the workers as `usine`, with the entries of `/home/usine/.ssh/config`. The gateway's entry uses its private address; the workers jump through it. Copy the identity files that `usine.yaml` and these entries name, with mode `0600`:
+The orchestrator connects to the gateway and the workers as `usine`, with the entries of `/home/usine/.ssh/config`. The gateway's entry uses its private address; the workers jump through it. Copy the identity files that the stored worker configuration and these entries name, with mode `0600`:
 
 ```text title="/home/usine/.ssh/config"
 Host usine-gateway
@@ -132,7 +132,7 @@ Provisioned workers behind the gateway need no entry: the executor jumps through
    chmod 600 .env
    ```
 
-3. Start `usine up` once in the foreground, to see that it starts, then stop it with Ctrl+C:
+3. Start `usine up` once in the foreground. For a new instance, this imports the bootstrap files as revision 1; an existing database retains its configuration. Later starts ignore the original configuration files. Make later changes with `usine config edit <kind> <name>` or `usine config import <folder> --message <text>`. After checking startup, stop it with Ctrl+C:
 
    ```sh title="/home/usine/factory"
    usine up
@@ -155,7 +155,7 @@ The unit has no `EnvironmentFile=`: `usine up` reads `.env` itself, with the [en
 
 `usine status` adds the line `service   usine.service, managed with systemctl`. `usine stop`, `usine restart`, and `usine upgrade` stop the service with `systemctl stop --no-block` and start it with `systemctl start`, so that systemd keeps managing it ([Instances that systemd runs](/reference/configuration/cli/#instances-that-systemd-runs)). They refuse and drain as for any instance: `usine restart` refuses while a run has a running attempt, and `usine restart --force` stops without waiting, after which the new process reattaches the attempt.
 
-`systemctl restart usine.service` doesn't refuse. systemd sends `SIGTERM` to `usine up` alone, and `usine up` drains: it starts no new attempts and waits for the running ones to end, for at most `settings.max_attempt_minutes` if `usine.yaml` sets it. The command waits until the old process exits, then starts a new one. If the drain lasts more than an hour (`TimeoutStopSec=1h`), systemd sends `SIGKILL`: the attempts keep running on the workers, and the new process reattaches them, as after `usine restart --force`. To end a drain at once, run `usine stop --force`, which sends the second `SIGTERM`.
+`systemctl restart usine.service` doesn't refuse. systemd sends `SIGTERM` to `usine up` alone, and `usine up` drains: it starts no new attempts and waits for the running ones to end, for at most `settings.max_attempt_minutes` if the stored configuration sets it. The command waits until the old process exits, then starts a new one. If the drain lasts more than an hour (`TimeoutStopSec=1h`), systemd sends `SIGKILL`: the attempts keep running on the workers, and the new process reattaches them, as after `usine restart --force`. To end a drain at once, run `usine stop --force`, which sends the second `SIGTERM`.
 
 systemd also starts the service at boot and restarts it 10 seconds after it fails. A drained `usine up` exits with status 130, which the unit counts as a clean stop.
 
@@ -260,14 +260,14 @@ The runtime store and the durable storage move with the instance folder, so the 
 
    The copy has these files, with the instance folder's Git history:
 
-   | Path                                                            | Contents                                                                                                                                    |
-   | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-   | `usine.yaml`, `loops/`, `agents/`                               | The configuration.                                                                                                                          |
-   | `.env`                                                          | The variables that `usine up` reads, such as gateway admin tokens and `HCLOUD_TOKEN`.                                                       |
-   | `.usine/github-app.json`                                        | The GitHub App ID and private key, if you don't set them in `.env`.                                                                         |
-   | `.usine/runtime.sqlite`, `.usine/durable.sqlite`                | The runs, transcripts, and Pi parent tasks. After a clean stop, their `-wal` and `-shm` files can be absent.                                |
-   | `.usine/instance-id`                                            | The instance ID, which labels the attempt containers on SSH workers. Without it, usine no longer removes the containers that it left there. |
-   | `.usine/workers/`, `.usine/ssh-workers/`, `.usine/known-hosts/` | The workers' state, how to reach them, and the host keys of provisioned servers.                                                            |
+   | Path                                                            | Contents                                                                                                                                         |
+   | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+   | `usine.yaml`, `projects/`, `agents/`                            | Bootstrap or exported configuration files; later starts ignore them.                                                                             |
+   | `.env`                                                          | The variables that `usine up` reads, such as gateway admin tokens and `HCLOUD_TOKEN`.                                                            |
+   | `.usine/github-app.json`                                        | The GitHub App ID and private key, if you don't set them in `.env`.                                                                              |
+   | `.usine/runtime.sqlite`, `.usine/durable.sqlite`                | The configuration and revision history, runs, transcripts, and Pi parent tasks. After a clean stop, their `-wal` and `-shm` files can be absent. |
+   | `.usine/instance-id`                                            | The instance ID, which labels the attempt containers on SSH workers. Without it, usine no longer removes the containers that it left there.      |
+   | `.usine/workers/`, `.usine/ssh-workers/`, `.usine/known-hosts/` | The workers' state, how to reach them, and the host keys of provisioned servers.                                                                 |
 
 4. Copy the identity files of the gateway and the workers to `/home/usine/.ssh/`, with the `config` and `known_hosts` entries of [Set up the usine user's SSH access](#set-up-the-usine-users-ssh-access).
 

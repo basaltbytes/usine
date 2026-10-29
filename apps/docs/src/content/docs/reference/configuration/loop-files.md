@@ -5,9 +5,9 @@ sidebar:
   order: 2
 ---
 
-A loop exports as one Markdown file in `projects/<project>/loops/`. Its identity is `<project>/<loop>`, with the loop name taken from the file name without `.md`: importing a renamed file removes the old loop and creates a new one, and importing a folder without it removes the loop. The YAML frontmatter declares the trigger, the selector, and the agent. The body is the prompt template for the agent's task. usine has no built-in loops.
+`usine config export` writes one Markdown file per loop in `projects/<project>/loops/`; `import` and `edit` read the same frontmatter and body format. Its identity is `<project>/<loop>`, with the loop name taken from the file name without `.md`: importing a renamed file removes the old loop and creates a new one, and importing a folder without it removes the loop. The YAML frontmatter declares the trigger, the selector, and the agent. The body is the prompt template for the agent's task. usine has no built-in loops.
 
-The first start imports `.md` files from each project's loops folder and from `agents/`, in name order. The agents folder must exist; a project without loops can omit its loops folder. Legacy version 1 imports accept `loops/` and convert loops to project identities. Later starts and reloads read the configuration store. Use [`usine config edit loop <name>` or `usine config import <folder>`](/reference/configuration/cli/#configuration-revisions) to save changes.
+The first start imports `.md` files from each project's loops folder and from `agents/`, in name order. The agents folder must exist; a project without loops can omit its loops folder. Legacy version 1 imports accept `loops/` and convert loops to project identities. Later starts and live updates read the configuration store. Use [`usine config edit loop <name>` or `usine config import <folder>`](/reference/configuration/config/) to save changes.
 
 The schema is [`LoopFrontmatter`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/parser.ts#L31) in `packages/config/src/parser.ts`, which produces a [`LoopFile`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/loop.ts#L25).
 
@@ -145,7 +145,7 @@ A non-empty string that sets the name of the run's single step ([`StepName`](htt
 
 ### `agent`
 
-The kebab-case name of an [agent file](/reference/configuration/agent-files/). The agent must be in the roster. usine quarantines a loop that references a missing or invalid agent file, with the message `Unknown agent "<name>": agents/<name>.md is missing or invalid. Fix the agent file, or set agent to an existing agent.`
+The kebab-case name of an [agent file](/reference/configuration/agent-files/). The agent must be in the roster. An import or edit rejects a loop that references a missing or invalid agent, with the message `Unknown agent "<name>": agents/<name>.md is missing or invalid. Fix the agent file, or set agent to an existing agent.`
 
 ### `max_cycles`
 
@@ -192,7 +192,7 @@ When every worker slot is taken, runs wait in a queue. A free slot goes to the f
 
 Runs at the same position keep the order in which their events arrived.
 
-With lanes ordered as the pipeline runs, later stages go first without any `priority`. In this `usine.yaml`, a `review-pr` run on a pull request labeled `ready-for-review` goes before every `start-dev` run on an issue labeled `ready-for-agent`, even one whose event arrived earlier:
+With lanes ordered as the pipeline runs, later stages go first without any `priority`. In this `usine.yaml` export example, a `review-pr` run on a pull request labeled `ready-for-review` goes before every `start-dev` run on an issue labeled `ready-for-agent`, even one whose event arrived earlier:
 
 ```yaml title="usine.yaml"
 version: 2
@@ -217,7 +217,7 @@ Set `priority` for a loop that lane order doesn't rank, or ranks wrong. A loop w
 priority: 1
 ```
 
-The scheduler reads the loop file and the lanes when a run starts waiting, so a reload doesn't reorder runs that already wait. **Overview** shows a waiting run as `Waiting for a free worker slot, behind 2 runs`. Each lease logs `Worker slot leased in lease order` with the run, the loop, `positionSource` (`priority`, `lane`, or `none`), `position`, and `passed`: the number of waiting runs whose events arrived earlier.
+The scheduler reads the stored loop and lanes when a run starts waiting, so a configuration revision doesn't reorder runs that already wait. **Overview** shows a waiting run as `Waiting for a free worker slot, behind 2 runs`. Each lease logs `Worker slot leased in lease order` with the run, the loop, `positionSource` (`priority`, `lane`, or `none`), `position`, and `passed`: the number of waiting runs whose events arrived earlier.
 
 ## Prompt template
 
@@ -266,7 +266,7 @@ The task doesn't need to repeat payload fields or these rules. Interpolate value
 
 ## Validation and quarantine
 
-Configuration imports validate every loop file and reject the complete import if any file is invalid. No revision is saved, and the running configuration stays unchanged. Diagnostics name the file and validation stage:
+Configuration imports validate every loop file and reject the complete import if any file is invalid. No revision is saved, and the running configuration stays unchanged. Diagnostics name the export file and validation stage. File references in these messages refer to the import folder:
 
 | Stage | Checks | Example message |
 | --- | --- | --- |
@@ -276,11 +276,11 @@ Configuration imports validate every loop file and reject the complete import if
 | `yaml` | YAML syntax, no duplicate keys, no parser warnings. | |
 | `schema` | Frontmatter keys and values, including a valid `cron` and IANA `tz`, and a non-blank body. | `Expected no excess property at ["trigger"]["cron"]` |
 | `expression` | `if` type-checks as a boolean, and each interpolation is closed and type-checks as a scalar. | `No such key: nmae` |
-| `reference` | The agent is in the roster, and the selected repositories and tags exist in `usine.yaml`. | `Unknown tags in selector.tags: "mobile". Add them to a repository's tags in usine.yaml.` |
+| `reference` | The agent is in the roster, and the selected repositories and tags exist in the registry. | `Unknown tags in selector.tags: "mobile". Add them to a repository's tags in usine.yaml.` |
 
 Fix each reported file and import the folder again. Invalid loops never enter the configuration store.
 
-Two checks add a non-blocking diagnostic: a label name in `if` ([label declarations](/reference/configuration/expressions/#label-declarations)) or in a [lane](/reference/configuration/usine-yaml/#projectslanes) that `usine.yaml` doesn't declare.
+Two checks add a non-blocking diagnostic: a label name in `if` ([label declarations](/reference/configuration/expressions/#label-declarations)) or in a [lane](/reference/configuration/usine-yaml/#projectslanes) that the stored configuration doesn't declare.
 
 ## More examples
 

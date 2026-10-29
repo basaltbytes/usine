@@ -11,6 +11,8 @@ Create a loop in **Configuration > Loops > New**, or import a Markdown file from
 
 ## Create a minimal loop
 
+For a CLI import, export the current configuration with `usine config export ./config-export`. Ensure the `widgets` project and `developer` agent exist, then write the example below to `config-export/projects/widgets/loops/start-dev.md`. Run `usine config import ./config-export --message "Add start-dev loop"`. Keep the other exported entities; import replaces the complete configuration. To change the loop later, run `EDITOR=vi usine config edit loop widgets/start-dev`.
+
 Choose **New**, enter a `project/loop` name, and edit the template below. A short name also works when the configuration has one project. Save the loop, then select **Resume** after reviewing it; new loops start paused.
 
 ```markdown title="projects/widgets/loops/start-dev.md"
@@ -86,9 +88,9 @@ Remove the trigger label first because the agent's comments and commits change t
 
 <Steps>
 
-1. Declare the labels in [`labels`](/reference/configuration/usine-yaml/#labels). usine creates them in every repository that lacks them.
+1. Export the current configuration with `usine config export ./config-export`. Declare the labels below in the exported `usine.yaml` under [`labels`](/reference/configuration/usine-yaml/#labels). usine creates them in every repository that lacks them.
 
-   ```yaml title="usine.yaml"
+   ```yaml title="config-export/usine.yaml (fragment)"
    labels:
      - name: ready-for-agent
        color: "0e8a16"
@@ -146,7 +148,7 @@ Remove the trigger label first because the agent's comments and commits change t
 
 4. Map the labels to [board lanes](/reference/configuration/usine-yaml/#projectslanes), so that dragging a card into a lane sets its label and starts a loop:
 
-   ```yaml title="usine.yaml"
+   ```yaml title="config-export/usine.yaml (fragment)"
    version: 2
    repos:
      - name: acme/widgets
@@ -170,6 +172,8 @@ Remove the trigger label first because the agent's comments and commits change t
    ```
 
 </Steps>
+
+Save these files in the export folder and run `usine config import ./config-export --message "Connect development and review loops"`. New loops start paused; review them before resuming. Later edits can use `usine config edit loop widgets/start-dev`, `usine config edit label ready-for-agent`, or `usine config edit project widgets`.
 
 [Write review and fix loops](/guides/review-fix-loops/) adds a fixing loop and a finishing loop to this flow:
 
@@ -203,10 +207,10 @@ Quote the `cron` value, because YAML reads a leading `*` as an alias. The loop f
 
 ## Pause a loop
 
-On the **Loops** page under **Configuration**, select **Pause** on a loop, and **Resume** to undo it. The page lists every loop file, with the ones that failed to load first, and shows each one as usine parsed it, with its prompt expressions outlined, or the error that prevents it from loading. `POST /api/loops/<project>/<loop>/pause` and `POST /api/loops/<project>/<loop>/unpause` do the same.
+On the **Loops** page under **Configuration**, select **Pause** on a loop, and **Resume** to undo it. The page lists the stored loops and their parsed definitions. `POST /api/loops/<project>/<loop>/pause` and `POST /api/loops/<project>/<loop>/unpause` do the same.
 
 A paused loop opens no new runs, and its open runs continue. usine stores the flag in the runtime store, never in the loop file, so it persists across restarts. When you unpause an `issue` or `pr` loop, the next poll reads the repository's items from the start, so the loop sees what changed while it was paused. To remove a loop, open its detail page, select **Delete**, and confirm.
 
 ## Fix a loop that doesn't load
 
-If a loop file has an error, usine skips it, loads the other loops, logs the reason, and lists the file in **Needs attention** as **Loop file not loaded**. [Validation and quarantine](/reference/configuration/loop-files/#validation-and-quarantine) lists the checks. The raw editor validates changes before saving and lists field errors below the text. Correct the text and save again. See [Configuration history and editing](/guides/#change-the-configuration).
+If a loop fails validation, usine rejects the complete import or edit and saves no revision. Fix each reported error in the export folder and import again, or retry `usine config edit loop <project>/<loop>`. [Validation and quarantine](/reference/configuration/loop-files/#validation-and-quarantine) lists the checks. The raw editor validates changes before saving and lists field errors below the text. Correct the text and save again. See [Configuration history and editing](/guides/#change-the-configuration).

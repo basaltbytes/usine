@@ -1,12 +1,14 @@
 ---
 title: Reference
-description: The files in an instance repository, the usine command, and the public API of the @usine packages.
+description: Configuration revisions, their import and export files, the usine commands, and the public API of the @usine packages.
 ---
 
 ## Configuration
 
-- [`usine.yaml`](/reference/configuration/usine-yaml/): the instance settings.
-- [Loop files](/reference/configuration/loop-files/): the files in `loops/`, one loop each.
+- [`usine config`](/reference/configuration/config/): edit configuration, import or export a folder, and list revisions.
+
+- [`usine.yaml`](/reference/configuration/usine-yaml/): the YAML import and export format for instance settings, projects, and workers.
+- [Loop files](/reference/configuration/loop-files/): the export files in `projects/<project>/loops/`, one loop each.
 - [Agent files](/reference/configuration/agent-files/): the files in `agents/`, one agent each.
 - [Expressions](/reference/configuration/expressions/): the CEL that loop conditions and prompt templates use.
 - [CLI](/reference/configuration/cli/): the `usine` commands, their flags, and the environment variables they read.
@@ -17,7 +19,7 @@ The site build generates these pages from the TSDoc comments of each package's p
 
 - [`@usine/core`](/reference/api/core/): the domain model, from event to run, step, and attempt, with the typed failures.
 - [`@usine/expression`](/reference/api/expression/): checks and evaluates the CEL expressions in loop files.
-- [`@usine/config`](/reference/api/config/): parses, validates, and rewrites `usine.yaml`, loop files, and agent files.
+- [`@usine/config`](/reference/api/config/): validates and stores configuration revisions, and imports and exports YAML and Markdown files.
 - [`@usine/github`](/reference/api/github/): GitHub App authentication, polling, and item and label writes.
 - [`@usine/engine`](/reference/api/engine/): the event ledger, run scheduling, restart recovery, and the SQLite store.
 - [`@usine/agents`](/reference/api/agents/): the Claude Code, Codex, and Pi child backends, attempt prompts, and preflight.
