@@ -1,7 +1,12 @@
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 import { ChildSession } from "@usine/core/agent/session";
 import { Effect, Fiber, Option } from "effect";
-import { type AgentSessionError, type RunningSession } from "../runtime.ts";
+import {
+  AgentCapacityError,
+  type AgentSessionError,
+  harnessFailure,
+  type RunningSession,
+} from "../runtime.ts";
 import { type MessageTaken, sessionConversation } from "./conversation.ts";
 import type { PiSession } from "./sdk.ts";
 import { lastPiMessageText, piUserMessageText, type SessionChannel } from "./session.ts";
@@ -49,11 +54,21 @@ export const piTurns = Effect.fn("PiTurns.start")(function* (options: {
       try: () => options.sdk.prompt(message),
       catch: (cause) => options.error("stream", cause),
     }).pipe(
-      Effect.flatMap(() =>
-        conversation.finish(
+      Effect.flatMap(() => {
+        const lastAssistant = [...options.sdk.messages]
+          .reverse()
+          .find((message) => message.role === "assistant");
+        if (lastAssistant?.stopReason === "error" && lastAssistant.errorMessage) {
+          const failure = harnessFailure(
+            Option.some(options.session.id),
+            lastAssistant.errorMessage,
+          );
+          if (failure instanceof AgentCapacityError) return Effect.fail(failure);
+        }
+        return conversation.finish(
           options.lastText() ?? lastPiMessageText(options.sdk.messages) ?? "Pi session completed",
-        ),
-      ),
+        );
+      }),
       Effect.catch(options.channel.fail),
       Effect.forkIn(scope),
       Effect.asVoid,

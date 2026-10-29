@@ -3,6 +3,7 @@ import { DateTime, Option, Schema } from "effect";
 import { ChildSessionBudget, ChildSessionCount } from "../src/agent/session.ts";
 import {
   AttemptId,
+  ProviderRetry,
   FailureResolution,
   AttemptNumber,
   AttemptWindow,
@@ -15,6 +16,7 @@ import {
   ChildSessionBudgetFailure,
   DefectFailure,
   InfraFailure,
+  ProviderCapacityFailure,
   isAutoRetryableFailure,
   RunawayFailure,
 } from "../src/attempt/failure.ts";
@@ -35,18 +37,24 @@ const decodeAttemptNumber = Schema.decodeUnknownSync(AttemptNumber);
 const decodeChildSessionBudget = Schema.decodeUnknownSync(ChildSessionBudget);
 
 describe("auto-retry law (ADR 0002, ADR 0013)", () => {
-  it("only infra failures are auto-retryable at the class level", () => {
+  it("infrastructure and capacity failures permit automatic retries", () => {
     expect(isAutoRetryableFailure(infra)).toBe(true);
+    expect(isAutoRetryableFailure(new ProviderCapacityFailure({ message: "At capacity" }))).toBe(
+      true,
+    );
     expect(isAutoRetryableFailure(agent)).toBe(false);
     expect(isAutoRetryableFailure(defect)).toBe(false);
     expect(isAutoRetryableFailure(runaway)).toBe(false);
     expect(isAutoRetryableFailure(childBudget)).toBe(false);
   });
 
-  it("infra auto-retry stops at the cap", () => {
-    expect(shouldAutoRetry({ failure: infra, number: n(1), maxAutoAttempts: n(3) })).toBe(true);
-    expect(shouldAutoRetry({ failure: infra, number: n(3), maxAutoAttempts: n(3) })).toBe(false);
-  });
+  it.each([infra, new ProviderCapacityFailure({ message: "At capacity" })])(
+    "automatic retries stop at the cap: $_tag",
+    (failure) => {
+      expect(shouldAutoRetry({ failure, number: n(1), maxAutoAttempts: n(3) })).toBe(true);
+      expect(shouldAutoRetry({ failure, number: n(3), maxAutoAttempts: n(3) })).toBe(false);
+    },
+  );
 
   it("agent, defect, and guard failures never auto-retry, even on the first attempt", () => {
     expect(shouldAutoRetry({ failure: defect, number: n(1), maxAutoAttempts: n(3) })).toBe(false);
@@ -59,6 +67,16 @@ describe("auto-retry law (ADR 0002, ADR 0013)", () => {
 });
 
 describe("construction is the only door", () => {
+  it("rejects a provider retry that names the first attempt", () => {
+    expect(
+      () =>
+        new ProviderRetry({
+          nextAttempt: n(1),
+          retryAt: DateTime.makeUnsafe(0),
+          message: "At capacity",
+        }),
+    ).toThrow();
+  });
   it("rejects a resolution with an invalid time, operator, or unknown field", () => {
     const decode = Schema.decodeUnknownSync(FailureResolution);
     const resolution = { resolvedAt: "2026-10-27T00:00:00Z", operator: "Philippe" };

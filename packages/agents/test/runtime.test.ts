@@ -13,6 +13,10 @@ import { Option, Schema } from "effect";
 import { RemoteShell } from "../src/child-host/child-host.ts";
 import {
   AgentBlockedError,
+  AgentCapacityError,
+  harnessFailure,
+  reportedOutcome,
+  reportText,
   AgentQuestionError,
   AgentResultError,
   ChildRequest,
@@ -130,4 +134,28 @@ describe("agent runtime contract", () => {
       assert.strictEqual(budget.attemptedChildren, 5);
     }
   });
+});
+
+it.each([
+  ["Selected model is at capacity. Please try a different model.", true],
+  ['529 {"error":{"type":"overloaded_error","message":"Overloaded"}}', true],
+  ["HTTP 529: Overloaded", true],
+  ["529: Overloaded", true],
+  ["API Error: 529", true],
+  ["HTTP 503: retry after 30 seconds", true],
+  ["503: please try again later", true],
+  ["HTTP 503: unsupported service", false],
+  ["HTTP 429: rate limit", false],
+  ["authentication failed", false],
+  ["ran out of turns", false],
+])("classifies harness refusal %s without retrying task failures", (message, capacity) => {
+  const error = harnessFailure(Option.none(), message);
+  assert.strictEqual(error instanceof AgentCapacityError, capacity);
+  const report = reportedOutcome(Option.none(), reportText(error));
+  assert(Option.isSome(report));
+  assert.strictEqual(
+    toAttemptFailure(report.value)._tag,
+    capacity ? "ProviderCapacityFailure" : "AgentFailure",
+  );
+  assert.strictEqual(report.value.message, message);
 });

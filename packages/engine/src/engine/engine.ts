@@ -199,6 +199,7 @@ const makeRunEngine = Effect.gen(function* () {
               BlockedFailure: ({ message }) => message,
               GitHubPushFailure: ({ message }) => message,
               InfraFailure: ({ message }) => message,
+              ProviderCapacityFailure: ({ message }) => message,
               DefectFailure: ({ message }) => message,
               AgentFailure: ({ message }) => message,
             }),

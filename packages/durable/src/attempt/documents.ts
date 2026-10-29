@@ -45,7 +45,7 @@ export type AttemptRecord = {
   childBlocker: {
     sessionId: string;
     message: string;
-    kind?: "blocked" | "question" | "failed";
+    kind?: "blocked" | "question" | "failed" | "capacity";
   } | null;
   childBudgetExceeded: { attempted: number; max: number } | null;
   /** The next outbound and inbound sequence numbers. */
@@ -58,6 +58,8 @@ export type AttemptRecord = {
   relayedEntry: number;
   relayedTokens: number;
   terminalRelayed: boolean;
+  /** The caller confirmed cancellation and stopped relaying. Absent means false on older records. */
+  settled?: boolean;
   /** The harvested `StepResult` as JSON, absent until the executor records it. */
   result?: string;
   /**
@@ -94,6 +96,7 @@ export const AttemptRecordDoc = defineDocFamily<AttemptRecord, null>({
     relayedEntry: 0,
     relayedTokens: 0,
     terminalRelayed: false,
+    settled: false,
   }),
 });
 

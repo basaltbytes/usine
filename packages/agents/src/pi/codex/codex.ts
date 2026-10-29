@@ -38,11 +38,11 @@ import {
   decodeResponse,
   decodeNotification,
   providerRetryMessage,
+  turnFailure,
   toolName,
   rateLimitWindow,
 } from "./codec.ts";
 import {
-  AgentResultError,
   type AgentSessionError,
   CodexChildBackend,
   type RunningSession,
@@ -514,12 +514,7 @@ const makeCodexChild = Effect.gen(function* () {
                 (completed.turn.status === "interrupted"
                   ? "Codex child session was interrupted"
                   : "Codex child session failed");
-              return yield* fail(
-                new AgentResultError({
-                  sessionId: Option.some(session.id),
-                  message: detail,
-                }),
-              );
+              return yield* fail(turnFailure(session.id, completed.turn.error, detail));
             }
             if (DIAGNOSTIC_METHODS.has(method)) {
               return yield* Effect.logWarning("Codex reported a diagnostic", {

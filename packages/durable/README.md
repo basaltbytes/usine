@@ -24,7 +24,9 @@ The Pi packages are pinned together at 1.4.0. The attempt and hold documents use
 
 ## Run an attempt
 
-`execute(request, io)` creates the attempt's task, or finds it by attempt id after a restart, and waits for the outcome. Attempt and task ids are committed together, so a later call always finds the task. `isLive(attemptId)` is true from the first `execute` until the terminal envelope is sent or the task is canceled, so a restarted orchestrator reattaches the attempt.
+`execute(request, io)` creates the attempt's task, or finds it by attempt id after a restart, and waits for the outcome. Attempt and task ids are committed together, so a later call always finds the task. `isLive(attemptId)` is true from the first `execute` until the terminal envelope is sent or the task is canceled or settled, so a restarted orchestrator reattaches the attempt.
+
+After confirming cancellation and stopping the relay, the caller can call `settle(attemptId)` to persist that the attempt is no longer live. This also handles a task that completed or failed before cancellation, when its terminal envelope couldn't be delivered. Settlement preserves the task's outcome and delivery state: it doesn't make an undelivered report available through `finished`. Repeated calls are safe.
 
 After the terminal envelope, `finished(attemptId)` returns `ParentReported` with the report, `ParentFailed` with the failure, or `ResultRecorded` once the executor calls `recordResult(attemptId, result)` with the harvested result. If the orchestrator stopped before the engine recorded the outcome, it finishes the attempt with this instead of running the agent again. A canceled task leaves nothing.
 
@@ -86,3 +88,5 @@ const attempts = layer({
 - `stubAttemptRuntime(storage, parent)` is an in-memory `AttemptRuntime` for executor and engine tests without a parent model. `parent` scripts each attempt's final message or `AttemptReport` (`completes`, `worksFor(millis)`, or a `StubParent`). Rebuilding it on the same `StubStorage` simulates a restart. `StubStorage.unsupervised` contains what `recordUnsupervised` stored, and `attached` completes when `execute` starts recording.
 
 Push refusals recorded as `GitHubPushFailure` retain their diagnostic when serialized as a failed task outcome.
+
+A child's provider capacity refusal remains `ProviderCapacityFailure` when the parent relays `[usine:provider-capacity]` or ends without relaying the child's report. The saved child report retains the classification across a restart. Direct Pi parent capacity errors also preserve the provider's message for the engine's delayed retry. The testing stub's `fail` method classifies message-only harness failures in the same way.

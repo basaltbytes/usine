@@ -1,5 +1,5 @@
 // The reserved markers at the start of an Agent's final answer (see @usine/agents).
-const MARKER = /^\s*\[usine:(blocked|question|failed)\]/u;
+const MARKER = /^\s*\[usine:(blocked|question|failed|provider-capacity)\]/u;
 
 /** Returns the `blocked` or `question` marker at the start of an Agent message, or `null`. */
 export const answerMarker = (text: string): "blocked" | "question" | null => {

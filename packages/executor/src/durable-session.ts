@@ -161,13 +161,14 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
   };
 
   /**
-   * Cancels the Attempt's parent task if durable storage reports it live. Fails with a `cancel`
-   * `ExecutorOperationError` if liveness can't be read, or the cancel fails or exceeds
-   * `interruptGrace`.
+   * Cancels a live parent task, then settles its record unless draining. Fails with a `cancel`
+   * `ExecutorOperationError` if liveness can't be read, cancellation fails or exceeds
+   * `interruptGrace`, or settlement fails.
    */
   const stopTask = Effect.fn("DurableSession.stopTask")(function* (
     attemptId: AttemptId,
     reason: string,
+    disposition: "settle" | "drain" = "settle",
   ) {
     yield* Effect.annotateCurrentSpan({ attemptId, reason });
     const live = yield* runtime.isLive(attemptId).pipe(Effect.result);
@@ -210,6 +211,20 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
         new Error("canceling the parent task exceeded the interrupt grace"),
       );
     }
+    if (disposition === "settle")
+      yield* runtime.settle(attemptId).pipe(
+        Effect.tapError((error) =>
+          Effect.logWarning("Could not settle the stopped attempt", {
+            attemptId,
+            reason,
+            errorTag: error._tag,
+            message: error.message,
+          }),
+        ),
+        Effect.mapError((error) => cancelError(attemptId, error)),
+      );
+    else
+      yield* Effect.logDebug("The drained attempt's record stays unsettled", { attemptId, reason });
   });
 
   /** Calls `record` with `comments`; failures are logged, not raised. */
@@ -416,6 +431,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
                       Drain: () => "the Worker is losing the Attempt's machine",
                     }),
                 }),
+                Option.exists(stop, ({ _tag }) => _tag === "Drain") ? "drain" : "settle",
               ).pipe(Effect.result);
               if (Result.isFailure(stopped))
                 yield* keepUntilStopped(attemptId, prepared.worker, checkout, io);

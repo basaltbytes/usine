@@ -1,12 +1,14 @@
 import {
   type AgentSessionEvent,
+  AgentSessionId,
   type ChildSession,
   HarnessSessionId,
   TextOutput,
   ToolFinished,
   ToolStarted,
 } from "@usine/core/agent/session";
-import { Schema } from "effect";
+import { Option, Schema } from "effect";
+import { AgentCapacityError, AgentResultError, harnessFailure } from "../../runtime.ts";
 
 export const decodeClaudeInit = Schema.decodeUnknownOption(
   Schema.Struct({
@@ -36,6 +38,14 @@ const ClaudeToolResultBlock = Schema.Struct({
   content: Schema.Json,
   is_error: Schema.optionalKey(Schema.Boolean),
 });
+const decodeAssistantError = Schema.decodeUnknownOption(
+  Schema.Struct({
+    type: Schema.Literal("assistant"),
+    error: Schema.String,
+    message: Schema.Struct({ content: Schema.Array(ClaudeTextBlock) }),
+  }),
+);
+
 export const ClaudeResultMessage = Schema.Struct({
   type: Schema.Literal("result"),
   subtype: Schema.String,
@@ -171,4 +181,50 @@ export const sessionEventsFrom = (
     }
   }
   return events;
+};
+
+/** Returns the capacity failure of a retry that exposes an overload code or HTTP status. */
+export const apiRetryFailure = (sessionId: AgentSessionId, retry: typeof ClaudeApiRetry.Type) =>
+  retry.error_status === 529 ||
+  retry.error === "overloaded_error" ||
+  (retry.error_status === 503 && retry.retry_delay_ms > 0)
+    ? Option.some(
+        new AgentCapacityError({
+          sessionId: Option.some(sessionId),
+          message: apiRetryMessage(retry),
+        }),
+      )
+    : Option.none<AgentCapacityError>();
+
+/** Uses the assistant's error code, retaining the last HTTP status for a generic server error. */
+export const assistantFailure = (
+  sessionId: AgentSessionId,
+  message: Schema.Json,
+  previous: Option.Option<AgentCapacityError | AgentResultError>,
+): Option.Option<AgentCapacityError | AgentResultError> =>
+  Option.map(decodeAssistantError(message), (error) => {
+    const fields = {
+      sessionId: Option.some(sessionId),
+      message:
+        error.message.content.map(({ text }) => text).join("\n") || "Claude API request failed.",
+    };
+    if (error.error === "overloaded") return new AgentCapacityError(fields);
+    if (error.error === "server_error" || error.error === "unknown") {
+      return Option.exists(previous, (failure) => failure instanceof AgentCapacityError)
+        ? new AgentCapacityError(fields)
+        : harnessFailure(fields.sessionId, fields.message);
+    }
+    return new AgentResultError(fields);
+  });
+
+/** Keeps task limits terminal even if the turn previously retried a provider request. */
+export const resultFailure = (
+  sessionId: AgentSessionId,
+  result: typeof ClaudeResultMessage.Type,
+  providerFailure: Option.Option<AgentCapacityError | AgentResultError>,
+): AgentCapacityError | AgentResultError => {
+  const message = result.errors?.join("; ") || "Claude returned an unsuccessful result";
+  return result.subtype === "error_during_execution"
+    ? Option.getOrElse(providerFailure, () => harnessFailure(Option.some(sessionId), message))
+    : new AgentResultError({ sessionId: Option.some(sessionId), message });
 };
