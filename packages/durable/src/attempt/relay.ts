@@ -55,20 +55,19 @@ const entryQuery = (
     onSome: (max) => ({ minEntryId: entryId(from), maxEntryId: max, order: "ascending" }),
   });
 
-const progressOf = (record: Readonly<AttemptRecord>): RelayProgress => ({
-  outbound: {
-    state:
-      record.nextOutbound === 1
-        ? "AwaitingStarted"
-        : record.terminalRelayed
-          ? "Terminal"
-          : "Running",
-    nextSequence: record.nextOutbound,
-  },
-  inbound: record.nextInbound,
-  entry: record.relayedEntry,
-  tokens: record.relayedTokens,
-});
+const progressOf = (record: Readonly<AttemptRecord>): RelayProgress => {
+  const nextSequence = record.nextOutbound - (record.pendingOutbound?.length ?? 0);
+  return {
+    outbound: {
+      state:
+        nextSequence === 1 ? "AwaitingStarted" : record.terminalRelayed ? "Terminal" : "Running",
+      nextSequence,
+    },
+    inbound: record.nextInbound,
+    entry: record.relayedEntry,
+    tokens: record.relayedTokens,
+  };
+};
 
 type RelayCursor = Pick<RelayProgress, "entry" | "tokens">;
 
@@ -83,10 +82,65 @@ export const readRecord = (durable: DurableHarness["Service"], attemptId: string
     harness.snapshot(AttemptRecordDoc, attemptId, context),
   );
 
-/**
- * Appends `payloads` with the next sequence numbers, then commits the progress. Appending first
- * means a crash resends the payloads with the same sequence numbers instead of leaving a gap.
- */
+const outboundJson = Schema.fromJsonString(AttemptChannel.OutboundEnvelope);
+const encodeOutbound = Schema.encodeSync(outboundJson);
+const decodeOutbound = Schema.decodeUnknownEffect(Schema.Array(outboundJson));
+
+const admitOutbound = (
+  hub: AttemptHub,
+  progress: AttemptChannel.Progress,
+  envelope: AttemptChannel.OutboundEnvelope,
+) =>
+  Effect.fromResult(AttemptChannel.admit(progress, hub.attemptId, envelope)).pipe(
+    Effect.mapError((violation) => new Error(`${violation.message}: ${violation.detail}`)),
+    Effect.orDie,
+  );
+
+/** Delivers the stored batch before clearing it. The caller must hold the emission permit. */
+const flushPending = Effect.fn("AttemptRelay.flushPending")(function* (
+  durable: DurableHarness["Service"],
+  hub: AttemptHub,
+) {
+  yield* Effect.annotateCurrentSpan({ attemptId: hub.attemptId, taskId: hub.taskId });
+  if (Option.isNone(hub.channel)) return yield* unavailable();
+  const { io, progress } = hub.channel.value;
+  const record = yield* readRecord(durable, hub.attemptId);
+  if (record === undefined) {
+    return yield* Effect.die(new Error(`Attempt ${hub.attemptId} has no durable record`));
+  }
+  const pending = yield* decodeOutbound(record.pendingOutbound ?? []).pipe(Effect.orDie);
+  if (pending.length === 0) return;
+  let outbound = progressOf(record).outbound;
+  for (const envelope of pending) {
+    outbound = yield* admitOutbound(hub, outbound, envelope);
+    yield* io.append("outbound", envelope).pipe(
+      Effect.tapError((failure) =>
+        Effect.logWarning("Outbound delivery failed; the batch remains pending", {
+          attemptId: hub.attemptId,
+          sequence: envelope.sequence,
+          failure: failure._tag,
+        }),
+      ),
+    );
+  }
+  yield* durable.use("clear the delivered envelopes", (harness, context) =>
+    harness.commit(async (tx) => {
+      const current = await tx.doc(AttemptRecordDoc, hub.attemptId, null);
+      current.pendingOutbound = [];
+      current.terminalRelayed = outbound.state === "Terminal";
+    }, context),
+  );
+  progress.outbound = outbound;
+  progress.entry = record.relayedEntry;
+  progress.tokens = record.relayedTokens;
+  yield* Effect.logDebug("Delivered the Attempt's outbound batch", {
+    envelopes: pending.length,
+    nextSequence: outbound.nextSequence,
+    terminal: outbound.state === "Terminal",
+  });
+});
+
+/** Reserves a batch and its cursor atomically, then delivers it from durable storage. */
 const emit = (
   durable: DurableHarness["Service"],
   hub: AttemptHub,
@@ -95,8 +149,10 @@ const emit = (
 ): Effect.Effect<void, AttemptFailure | DurableHarnessError> =>
   hub.emission.withPermits(1)(
     Effect.gen(function* () {
+      yield* flushPending(durable, hub);
       if (Option.isNone(hub.channel)) return yield* unavailable();
-      const { io, progress } = hub.channel.value;
+      const { progress } = hub.channel.value;
+      const pending: Array<string> = [];
       let outbound = progress.outbound;
       for (const payload of payloads) {
         const envelope = new AttemptChannel.OutboundEnvelope({
@@ -106,28 +162,20 @@ const emit = (
           sentAt: yield* DateTime.now,
           payload,
         });
-        const admitted = AttemptChannel.admit(outbound, hub.attemptId, envelope);
-        if (Result.isFailure(admitted)) {
-          return yield* Effect.die(
-            new Error(`${admitted.failure.message}: ${admitted.failure.detail}`),
-          );
-        }
-        yield* io.append("outbound", envelope);
-        outbound = admitted.success;
+        outbound = yield* admitOutbound(hub, outbound, envelope);
+        pending.push(encodeOutbound(envelope));
       }
       const cursor = advance(progress);
-      yield* durable.use("record the relayed envelopes", (harness, context) =>
+      yield* durable.use("reserve the outbound envelopes", (harness, context) =>
         harness.commit(async (tx) => {
           const record = await tx.doc(AttemptRecordDoc, hub.attemptId, null);
+          record.pendingOutbound = pending;
           record.nextOutbound = outbound.nextSequence;
           record.relayedEntry = cursor.entry;
           record.relayedTokens = cursor.tokens;
-          record.terminalRelayed = outbound.state === "Terminal";
         }, context),
       );
-      progress.outbound = outbound;
-      progress.entry = cursor.entry;
-      progress.tokens = cursor.tokens;
+      yield* flushPending(durable, hub);
     }),
   );
 
@@ -364,19 +412,10 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
   const readTask = durable.use("read the Attempt task", (harness, context) =>
     harness.getTask(hub.taskId, context),
   );
-  if (loaded.terminalRelayed) {
-    const task = yield* readTask;
-    if (task === undefined) {
-      return yield* Effect.die(new Error(`Attempt task ${hub.taskId} is missing`));
-    }
-    yield* Effect.logInfo("The Attempt's terminal envelope was already relayed");
-    return settledOf(task);
-  }
   const attached = yield* Effect.acquireRelease(
     Effect.sync(() => {
       if (Option.isSome(hub.channel)) return false;
       hub.channel = Option.some({ io, progress: progressOf(loaded) });
-      Deferred.doneUnsafe(hub.attached, Effect.succeed(request));
       return true;
     }),
     (attachedHere) =>
@@ -405,6 +444,22 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
       onNone: () => progressOf(loaded),
       onSome: (channel) => channel.progress,
     });
+  if ((loaded.pendingOutbound?.length ?? 0) > 0) {
+    yield* Effect.logInfo("Replaying the Attempt's pending outbound envelopes", {
+      envelopes: loaded.pendingOutbound?.length,
+      nextSequence: progress().outbound.nextSequence,
+    });
+  }
+  yield* hub.emission.withPermits(1)(flushPending(durable, hub));
+  if (progress().outbound.state === "Terminal") {
+    const task = yield* readTask;
+    if (task === undefined) {
+      return yield* Effect.die(new Error(`Attempt task ${hub.taskId} is missing`));
+    }
+    yield* Effect.logInfo("The Attempt's terminal envelope was relayed");
+    return settledOf(task);
+  }
+  Deferred.doneUnsafe(hub.attached, Effect.succeed(request));
   let session = Option.map(Option.fromNullishOr(loaded.parentModel), (model) =>
     parentSession(spec, ModelId.make(model)),
   );
