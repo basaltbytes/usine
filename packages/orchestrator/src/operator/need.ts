@@ -21,8 +21,8 @@ export class ApprovalNeed extends Schema.TaggedClass<ApprovalNeed>(
   runId: RunId,
   loop: LoopName,
   /**
-   * The Run's Item as its Board card shows it, or null if no card on the Board has that Item, such
-   * as for a schedule Run.
+   * The run's item, read from its board card or the item store. Null if no readable item is
+   * available, such as for a schedule run.
    */
   item: Schema.NullOr(BoardItemLink),
 }) {}

@@ -1,4 +1,5 @@
 import { groupProjectViews } from "./projects.ts";
+import { readApprovalItems } from "./approval.ts";
 import { boardRepositories } from "@usine/config/project";
 import {
   AttentionAcknowledgements,
@@ -418,6 +419,9 @@ const makeOperatorObservation = Effect.gen(function* () {
         ),
       ),
     );
+    const approvalItems = yield* readApprovalItems(managedRuns, cardedItems).pipe(
+      Effect.provideService(ItemProjectionReader, itemReader),
+    );
     for (const run of managedRuns) {
       if (run.state === "Waiting") {
         needsYou.push(
@@ -426,7 +430,7 @@ const makeOperatorObservation = Effect.gen(function* () {
             repository: run.repository,
             runId: run.id,
             loop: run.loop,
-            item: cardedItems.get(run.itemKey) ?? null,
+            item: approvalItems.get(run.itemKey) ?? null,
           }),
         );
       } else if (run.canResolveFailure) {

@@ -19,6 +19,12 @@ import { StepName } from "@usine/core/step";
 import { StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
 import { CycleBudgets } from "@usine/engine/cycle-budget";
+import {
+  ItemContentHash,
+  ItemProjection,
+  ItemProjectionReader,
+  ItemProjectionWriter,
+} from "@usine/engine/item-projection";
 import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
 import { RunReader, type RunSummary } from "@usine/engine/run-reader";
 import { StepExecutor } from "@usine/engine/step-executor";
@@ -232,7 +238,16 @@ const executor = Layer.succeed(StepExecutor)({
 /** Runs `test` against a real engine in a fresh instance folder, a fake GitHub, and the Operator. */
 const withFactory = <A, E>(
   items: Map<number, GitHubItem>,
-  test: Effect.Effect<A, E, Operator | PollingTriggers | CycleBudgets | RunReader>,
+  test: Effect.Effect<
+    A,
+    E,
+    | Operator
+    | PollingTriggers
+    | CycleBudgets
+    | RunReader
+    | ItemProjectionReader
+    | ItemProjectionWriter
+  >,
 ) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -408,6 +423,83 @@ describe("Items no Loop acts on", () => {
           const overview = yield* operator.overview(instance);
           const run = overview.projects[0]?.runs.find(({ id }) => id === failed.run.id);
           assert.isTrue(run?.canResolveFailure);
+        }),
+      );
+    },
+  );
+
+  it.live.each(["issue", "pr"] as const)(
+    "identifies waiting %s items outside the 500-item board window",
+    (kind) => {
+      const label = kind === "issue" ? "ready-for-agent" : "ready-for-review";
+      const items = new Map<number, GitHubItem>(
+        [182, 195, ...Array.from({ length: 500 }, (_, index) => index + 203)].map((number) => [
+          number,
+          {
+            kind,
+            number,
+            state: "OPEN",
+            label: number < 203 ? label : "backlog",
+            round: 1,
+          },
+        ]),
+      );
+      const instance = instanceWith([
+        kind === "issue"
+          ? startDev("required")
+          : new LoopFile({ ...reviewPr, approval: "required" }),
+      ]);
+      return withFactory(
+        items,
+        Effect.gen(function* () {
+          const polling = yield* PollingTriggers;
+          const operator = yield* Operator;
+          yield* polling.poll(instance);
+          const overview = yield* operator.overview(instance);
+          const cards = overview.projects.flatMap(({ board }) =>
+            board.lanes.flatMap(({ items }) => items),
+          );
+          assert.lengthOf(cards, 500);
+          assert(cards.every(({ number }) => number >= 203));
+          const approvals = overview.needsYou.filter((need) => need._tag === "ApprovalNeed");
+          assert.lengthOf(approvals, 2);
+          assert.deepStrictEqual(approvals.map(({ item }) => item?.number).sort(), [
+            ItemNumber.make(182),
+            ItemNumber.make(195),
+          ]);
+          for (const approval of approvals) {
+            assert(approval.item !== null);
+            assert.strictEqual(
+              approval.item.title,
+              `${kind === "issue" ? "Issue" : "Pull request"} ${approval.item.number}`,
+            );
+            assert.strictEqual(
+              approval.item.url,
+              `https://github.com/${repository}/${kind === "issue" ? "issues" : "pull"}/${approval.item.number}`,
+            );
+            assert.strictEqual(approval.item.kind, kind);
+            assert.strictEqual(approval.item.state, `${kind}-open`);
+          }
+          const reader = yield* ItemProjectionReader;
+          const writer = yield* ItemProjectionWriter;
+          const stored = yield* reader.get(gitHubItemKey(repository, 182));
+          assert(Option.isSome(stored));
+          yield* writer.upsert(
+            new ItemProjection({
+              ...stored.value,
+              contentHash: ItemContentHash.make("malformed"),
+              payload: { number: 182 },
+            }),
+          );
+          const refreshed = (yield* operator.overview(instance)).needsYou.filter(
+            (need) => need._tag === "ApprovalNeed",
+          );
+          assert.lengthOf(refreshed, 2);
+          assert.lengthOf(
+            refreshed.filter(({ item }) => item === null),
+            1,
+          );
+          assert.strictEqual(refreshed.find(({ item }) => item !== null)?.item?.number, 195);
         }),
       );
     },
