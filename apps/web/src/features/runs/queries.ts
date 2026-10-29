@@ -16,6 +16,7 @@ export const runGitHubChangesQuery = (run: Pick<RunView, "id" | "attempts">) => 
     queryFn: () => api((client) => client.githubChanges({ params: { runId: run.id } })),
     placeholderData: keepPreviousData,
     staleTime: LIVE_REFRESH_MILLIS,
+    meta: { refreshLabel: "GitHub changes" },
     refetchInterval: live ? LIVE_REFRESH_MILLIS : false,
     retry: 1,
   });

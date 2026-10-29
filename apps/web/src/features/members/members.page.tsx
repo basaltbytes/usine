@@ -1,3 +1,4 @@
+import { PageHeading } from "~/components/page";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "~/components/ui/button";
@@ -45,7 +46,7 @@ export const MembersPage = () => {
   return (
     <section className="space-y-6 p-4 md:p-5">
       <div>
-        <h1 className="text-xl font-semibold">{title}</h1>
+        <PageHeading title={title} />
         <p className="mt-2 text-sm text-muted-foreground">{adminAccess}</p>
       </div>
       {error !== undefined && <ErrorAlert message={error} />}

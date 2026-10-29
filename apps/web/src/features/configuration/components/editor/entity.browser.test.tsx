@@ -944,3 +944,30 @@ it.each(["form", "text"])("clears a save refusal after changing the %s draft", a
   await button("Preview").click();
   await expect.element(page.getByRole("heading", { name: "2 matching items" })).toBeVisible();
 });
+
+it("opens the palette on both shortcuts and offers only the current editor's available actions", async () => {
+  await mount();
+  await expect.element(button("Edit")).toBeEnabled();
+  await userEvent.keyboard("{Control>}k{/Control}");
+  const dialog = page.getByRole("dialog", { name: "Commands", exact: true });
+  await expect.element(dialog).toBeVisible();
+  const input = dialog.getByRole("combobox");
+  await expect.element(input).toHaveFocus();
+  await input.fill("Edit");
+  await userEvent.keyboard("{Enter}");
+  await expect.element(dialog).not.toBeInTheDocument();
+  await expect.element(button("Save")).toBeVisible();
+  await userEvent.keyboard("{Meta>}k{/Meta}");
+  await expect.element(dialog).toBeVisible();
+  await expect
+    .element(dialog.getByRole("option", { name: "Edit", exact: true }))
+    .not.toBeInTheDocument();
+  await expect.element(dialog.getByRole("option", { name: "Save", exact: true })).toBeVisible();
+  await dialog.getByRole("combobox").fill("Cancel");
+  await userEvent.keyboard("{Enter}");
+  await expect.element(button("Edit")).toBeEnabled();
+  await expect.element(button("Save")).not.toBeInTheDocument();
+  await button("Open commands").click();
+  await userEvent.keyboard("{Escape}");
+  await expect.element(button("Open commands")).toHaveFocus();
+});

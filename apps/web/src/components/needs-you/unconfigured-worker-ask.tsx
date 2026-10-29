@@ -10,7 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "~/components/ui/dialog";
-import { Button } from "~/components/ui/button";
+import { CommandButton } from "~/components/command-palette/button";
 import { api } from "~/lib/api";
 import { needCopy, needDetailsLabel } from "~/lib/needs-you/strings";
 import { overviewQuery } from "~/lib/overview";
@@ -51,7 +51,8 @@ export const UnconfiguredWorkerAsk = ({ need, dismiss }: UnconfiguredWorkerAskPr
         }
         actions={
           need.running === 0 ? (
-            <Button
+            <CommandButton
+              command={`${confirming ? "Confirm discard" : "Discard leftovers"} · ${need.worker}`}
               variant={confirming ? "destructive" : "outline"}
               disabled={discard.isPending}
               onClick={() => (confirming ? discard.mutate() : setConfirming(true))}
@@ -61,7 +62,7 @@ export const UnconfiguredWorkerAsk = ({ need, dismiss }: UnconfiguredWorkerAskPr
                 : confirming
                   ? "Confirm discard"
                   : "Discard leftovers"}
-            </Button>
+            </CommandButton>
           ) : undefined
         }
       />

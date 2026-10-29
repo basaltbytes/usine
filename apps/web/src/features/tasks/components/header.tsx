@@ -1,3 +1,5 @@
+import { usePageCommands } from "~/components/command-palette/context";
+import { moveToLaneLabel } from "~/lib/projects/strings";
 import { CaretDownIcon, KanbanIcon } from "@phosphor-icons/react";
 import type { ProjectView, TaskView } from "@usine/orchestrator/operator";
 import { Option } from "effect";
@@ -62,6 +64,14 @@ export const TaskHeader = ({ task, project, disabled }: TaskHeaderProps) => {
         );
   const catalog: LabelCatalog = new Map(project.labels.map((label) => [label.name, label]));
   const movable = !disabled && !moves.isPending && pending === undefined && targets.length > 0;
+  usePageCommands(
+    placed !== undefined && movable
+      ? targets.map((lane) => ({
+          label: moveToLaneLabel(lane.name),
+          run: () => moves.moveItem(placed.card, lane),
+        }))
+      : [],
+  );
   const { origin, pullRequests } = taskIdentity(task.items);
   return (
     <div className="flex flex-col gap-3">

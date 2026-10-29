@@ -1,3 +1,5 @@
+import { usePageCommands } from "~/components/command-palette/context";
+import { laneFoldCommand } from "~/lib/projects/strings";
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { ArrowsInLineHorizontalIcon } from "@phosphor-icons/react";
@@ -103,6 +105,9 @@ export const BoardColumn = ({
   );
   const count = lane.items.length;
   const [listRef, edges] = useScrollEdges();
+  usePageCommands(
+    foldable ? [{ label: laneFoldCommand(lane.name, folded), run: () => setFolded(!folded) }] : [],
+  );
   if (foldable && folded) return <LaneRail lane={lane} open={() => setFolded(false)} />;
   return (
     <section

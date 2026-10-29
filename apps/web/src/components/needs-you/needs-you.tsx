@@ -1,3 +1,5 @@
+import { itemName } from "~/components/item/mark";
+import { usePageCommands } from "~/components/command-palette/context";
 import { Link } from "@tanstack/react-router";
 import { DismissNeed } from "./dismiss";
 import type { ApprovalNeed, NeedView } from "@usine/orchestrator/operator";
@@ -45,6 +47,21 @@ const ApprovalAsk = ({ need, dismiss }: ApprovalAskProps) => {
   const overview = useOverview();
   const origin = need.item === null ? undefined : itemIdentity(overview, need.item).origin;
   const copy = needCopy(need);
+  const subject = origin === undefined ? need.runId.slice(0, 8) : itemName(origin);
+  usePageCommands(
+    sent !== undefined || confirmingCancel
+      ? []
+      : [
+          {
+            label: `${runActionLabel.approve} · ${need.repository} · ${subject} · ${need.loop}`,
+            run: () => action.mutate({ runId: need.runId, request: { action: "approve" } }),
+          },
+          {
+            label: `${runActionLabel.cancel} · ${need.repository} · ${subject} · ${need.loop}`,
+            run: () => setConfirmingCancel(true),
+          },
+        ],
+  );
   return (
     <>
       <NeedItem

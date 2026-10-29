@@ -10,6 +10,7 @@ export const statisticsQuery = (window: StatisticsWindow) =>
     queryKey: ["statistics", window] as const,
     queryFn: () => api((client) => client.statistics({ query: { window } })),
     staleTime: STATISTICS_REFRESH_MS,
+    meta: { refreshLabel: "Statistics" },
     refetchInterval: STATISTICS_REFRESH_MS,
     placeholderData: keepPreviousData,
   });
@@ -20,6 +21,7 @@ export const runStatisticsQuery = (window: StatisticsWindow) =>
     queryKey: ["statistics", "runs", window] as const,
     queryFn: () => api((client) => client.runStatistics({ query: { window } })),
     staleTime: STATISTICS_REFRESH_MS,
+    meta: { refreshLabel: "Statistics" },
     refetchInterval: STATISTICS_REFRESH_MS,
     placeholderData: keepPreviousData,
   });
