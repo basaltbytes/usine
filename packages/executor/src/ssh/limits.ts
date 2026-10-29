@@ -46,20 +46,20 @@ export const resourcesFromOutput = (output: string): Option.Option<MachineResour
 
 /** What the Attempt containers leave to the machine's own processes, such as sshd, Docker, and the cached clones' fetches. */
 export const HOST_MEMORY_RESERVE_MIB = 1024;
-const HOST_RESERVE = { cpus: 0.5, memoryMib: HOST_MEMORY_RESERVE_MIB, tasks: 1024 } as const;
+const HOST_RESERVE = { memoryMib: HOST_MEMORY_RESERVE_MIB, tasks: 1024 } as const;
 
 /** The smallest limits that `usine.yaml` and Docker accept. */
 const SMALLEST = { cpus: 0.01, memoryMib: 256, pids: 64 } as const;
 
 /**
  * Returns the limits of each container when `slots` Attempts run on `machine` at once: the
- * machine's total less a reserve for its own processes, divided by `slots`, rounded down to a
- * hundredth of a CPU, a MiB, and a task, and no lower than the smallest limits Docker accepts.
+ * machine's CPUs and its memory and tasks less their host reserves, divided by `slots`. Rounds
+ * down to a hundredth of a CPU, a MiB, and a task, with Docker's minimum limits as a floor.
  */
 const deriveLimits = (machine: MachineResources, slots: number): ContainerLimits =>
   new ContainerLimits({
     cpus: ContainerCpus.make(
-      Math.max(SMALLEST.cpus, Math.floor(((machine.cpus - HOST_RESERVE.cpus) / slots) * 100) / 100),
+      Math.max(SMALLEST.cpus, Math.floor((machine.cpus / slots) * 100) / 100),
     ),
     memoryMib: ContainerMemoryMib.make(
       Math.max(

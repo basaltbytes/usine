@@ -195,7 +195,7 @@ interface FakeMachineState {
   /** The user IDs on the machine and inside the Attempt image. */
   hostUserId: string;
   imageUserId: string;
-  storePreparationFails: boolean;
+  cachePreparationFailure: string | undefined;
   storeSizeKiB: string;
   /** The containers on the machine, by name. */
   readonly containers: Map<string, FakeContainer>;
@@ -332,7 +332,7 @@ export const fakeMachine = () => {
     imageOnMachine: true,
     imageUserId: "1000",
     hostUserId: "1000",
-    storePreparationFails: false,
+    cachePreparationFailure: undefined,
     storeSizeKiB: "4096",
     containers: new Map(),
     containersCreated: 0,
@@ -367,8 +367,9 @@ export const fakeMachine = () => {
         state.imageOnMachine ? 0 : 1,
       );
     if (line.includes("volume create"))
-      return state.storePreparationFails
-        ? oneShotHandle("", 1, "pnpm store: permission denied")
+      return state.cachePreparationFailure !== undefined &&
+        words.includes(state.cachePreparationFailure)
+        ? oneShotHandle("", 1, "cache volume: permission denied")
         : oneShotHandle("", 0);
     if (words.includes("du")) return oneShotHandle(`${state.storeSizeKiB}\t/store\n`, 0);
     if (line.includes("--entrypoint"))
