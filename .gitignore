@@ -15,3 +15,6 @@ apps/docs/src/content/docs/reference/api/
 
 # Impeccable platform binaries (downloaded per machine)
 **/skills/impeccable/scripts/bin/
+
+# Overseer ledger and helper state (orchestrating-usine skill)
+.scratchpad/
