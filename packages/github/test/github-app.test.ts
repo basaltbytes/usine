@@ -3,7 +3,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { RepositoryName } from "@usine/core/repository";
 import { Clock, DateTime, Effect, Layer, Option, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
-import { GitHubApp, isRefusal } from "../src/github-app.ts";
+import { GitHubApp, isRefusal, WebhookDeliveryId } from "../src/github-app.ts";
 import { AppCredentials, AppId, GitHubCredentials, PrivateKey } from "../src/credentials.ts";
 import { CoveredProject, REQUIRED_REPOSITORY_PERMISSIONS } from "../src/access.ts";
 import { InstallationId, RepositoryId } from "../src/installation.ts";
@@ -466,6 +466,69 @@ describe("GitHubApp", () => {
         assert.deepStrictEqual(failure.missing, ["contents:write"]);
       }
       assert.isTrue(isRefusal(failure));
+    }).pipe(Effect.provide(appLayer(client)));
+  });
+});
+
+describe("GitHubApp webhook deliveries", () => {
+  it.live("uses an App JWT and summary pagination until the persisted delivery ID", () => {
+    const requests: Array<string> = [];
+    const client = HttpClient.make((request) =>
+      Effect.sync(() => {
+        requests.push(request.url);
+        const bearer = request.headers.authorization ?? "";
+        const claims = Schema.decodeUnknownSync(JwtClaims)(jwtJson(bearer.split(".")[1] ?? ""));
+        assert.strictEqual(claims.iss, credentials.appId);
+        const first = request.url === "https://api.github.com/app/hook/deliveries?per_page=100";
+        assert(
+          first ||
+            request.url === "https://api.github.com/app/hook/deliveries?per_page=100&cursor=older",
+        );
+        return HttpClientResponse.fromWeb(
+          request,
+          new Response(
+            JSON.stringify(
+              first
+                ? [
+                    { id: 15, event: "ping", repository_id: null },
+                    { id: 14, event: "issues", repository_id: 99 },
+                  ]
+                : [
+                    { id: 13, event: "pull_request", repository_id: 99 },
+                    { id: 12, event: "issues", repository_id: 99 },
+                  ],
+            ),
+            {
+              headers: {
+                "content-type": "application/json",
+                link: first
+                  ? '<https://api.github.com/app/hook/deliveries?per_page=100&cursor=older>; rel="next"'
+                  : '<https://api.github.com/app/hook/deliveries?per_page=100&cursor=unused>; rel="next"',
+              },
+            },
+          ),
+        );
+      }),
+    );
+    return Effect.gen(function* () {
+      const app = yield* GitHubApp;
+      const summaries = yield* app.deliveries(Option.some(WebhookDeliveryId.make(12)));
+      assert.deepStrictEqual(
+        summaries.map(({ id }) => id),
+        [15, 14, 13],
+      );
+      assert(Option.isNone(summaries[0]?.repositoryId ?? Option.some(RepositoryId.make(1))));
+      assert.strictEqual(requests.length, 2);
+    }).pipe(Effect.provide(appLayer(client)));
+  });
+
+  it.live("rejects malformed delivery summaries through the typed response error", () => {
+    const client = HttpClient.make((request) =>
+      Effect.succeed(jsonResponse(request, [{ id: 0, event: "issues", repository_id: 99 }])),
+    );
+    return Effect.gen(function* () {
+      const error = yield* (yield* GitHubApp).deliveries(Option.none()).pipe(Effect.flip);
+      assert.strictEqual(error._tag, "InvalidGitHubResponseError");
     }).pipe(Effect.provide(appLayer(client)));
   });
 });

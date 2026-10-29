@@ -330,6 +330,8 @@ export class SettingsView extends Schema.Class<SettingsView>("@usine/orchestrato
   webhooks: Schema.Literals(["off", "deliveries", "endpoint"]),
   /** The public URL for `endpoint` webhooks, or null for the other modes. */
   webhooksPublicUrl: Schema.NullOr(Schema.String),
+  /** The last hint received in this process, or null before any hint. */
+  lastHintAt: Schema.NullOr(Schema.String),
   /** The span export settings, or null if `usine.yaml` has no `tracing` block. */
   tracing: Schema.NullOr(Schema.Struct({ otlpUrl: Schema.String, serviceName: Schema.String })),
 }) {}
@@ -619,6 +621,7 @@ const makeOperatorConfiguration = Effect.gen(function* () {
         parentEffort: Option.getOrNull(settings.parentEffort),
         operator: Option.getOrNull(config.operator),
         webhooks: webhooks.mode,
+        lastHintAt: Option.getOrNull(Option.map(yield* polling.lastHint, DateTime.formatIso)),
         webhooksPublicUrl: webhooks.mode === "endpoint" ? webhooks.publicUrl.href : null,
         tracing: Option.match(tracing, {
           onNone: () => null,

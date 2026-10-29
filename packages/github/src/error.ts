@@ -17,6 +17,7 @@ export const GitHubOperation = Schema.Literals([
   "mint-installation-token",
   "mint-worker-token",
   "poll-repository-changes",
+  "poll-webhook-deliveries",
   "read-bot-account",
   "update-item-labels",
 ]);

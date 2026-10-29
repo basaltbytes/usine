@@ -41,6 +41,7 @@ const appLayer = Layer.succeed(GitHubApp)({
   installationToken: () => Effect.succeed(token),
   botAccount: () => Effect.die("not used by polling tests"),
   projectAccess: () => Effect.die("not used by polling tests"),
+  deliveries: () => Effect.die("unused webhook deliveries"),
   workerToken: () => Effect.die("not used by polling tests"),
 });
 

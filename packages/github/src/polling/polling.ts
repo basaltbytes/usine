@@ -19,6 +19,7 @@ import {
   API_ROOT,
   authorized,
   invalidResponse,
+  nextPageUrl,
   pollIntervalMillis,
   rateLimitResetMillis,
   retryAfterMillis,
@@ -140,13 +141,6 @@ const nextPollAt = (headers: Headers, now: number) =>
     retryAfterMillis(headers["retry-after"], now),
     rateLimitResetMillis(headers, RATE_LIMIT_PRESSURE_THRESHOLD),
   ]);
-
-/** Returns the `rel="next"` URL from a Link header, if GitHub has more pages. */
-const nextPageUrl = (link: string | undefined): Option.Option<string> => {
-  if (link === undefined) return Option.none();
-  const match = /<(?<url>[^>]+)>;\s*rel="next"/u.exec(link);
-  return Option.fromNullishOr(match?.groups?.["url"]);
-};
 
 const sinceParameter = (watermark: DateTime.Utc): string => {
   const epoch = DateTime.toEpochMillis(watermark) - WATERMARK_OVERLAP_MS;

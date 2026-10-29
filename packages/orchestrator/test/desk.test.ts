@@ -381,6 +381,7 @@ const deskLayer = (
     sightings: (keys) => Effect.succeed(sightings.filter(({ itemKey }) => keys.includes(itemKey))),
   });
   const polling = Layer.succeed(PollingTriggers)({
+    lastHint: Effect.succeed(Option.none()),
     hint: () => Effect.void,
     poll: () => Effect.die("unused"),
     run: () => Effect.never,

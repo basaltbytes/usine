@@ -582,6 +582,7 @@ const testLayer = (
       Ref.set(movedLabels, mutation).pipe(Effect.as(mutation.add)),
   });
   const polling = Layer.succeed(PollingTriggers)({
+    lastHint: Effect.succeed(Option.none()),
     hint: () =>
       Ref.get(movedLabels).pipe(
         Effect.flatMap((mutation) =>

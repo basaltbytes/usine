@@ -39,6 +39,7 @@ describe("GitHub credential provider", () => {
       installationToken: () => Effect.die("unused"),
       botAccount: () => Effect.die("unused"),
       projectAccess: () => Effect.succeed([project]),
+      deliveries: () => Effect.die("unused webhook deliveries"),
       workerToken: (_project, permissions) =>
         Effect.sync(() => {
           requested.push(permissions);
@@ -83,6 +84,7 @@ describe("GitHub credential provider failures", () => {
           installationToken: () => Effect.die("unused"),
           botAccount: () => Effect.die("unused"),
           projectAccess: () => Effect.succeed(projects),
+          deliveries: () => Effect.die("unused webhook deliveries"),
           workerToken: () => Effect.fail(mint),
         }),
       ),

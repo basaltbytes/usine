@@ -1,10 +1,10 @@
+import { webhookStatusCopy } from "~/features/configuration/strings";
 import { entityKey } from "~/features/configuration/lib/entities";
 import type { ConfigurationView, SettingsView } from "@usine/orchestrator/operator";
 import type { ReactNode } from "react";
 import { ConfigurationPage } from "~/features/configuration/components/section";
 
 interface Setting {
-  /** The key as written in `usine.yaml`. */
   readonly key: string;
   readonly value: ReactNode;
   /** A one-sentence description of what the value does. */
@@ -96,8 +96,17 @@ const groups = (
       {
         key: "webhooks.mode",
         value: mono(settings.webhooks),
-        effect:
-          "Parsed and validated but not used: this version reads GitHub changes by polling only. A change applies after usine up restarts.",
+        effect: webhookStatusCopy.mode[settings.webhooks],
+      },
+      {
+        key: webhookStatusCopy.lastHint,
+        value:
+          settings.lastHintAt === null ? (
+            unset(webhookStatusCopy.never)
+          ) : (
+            <time dateTime={settings.lastHintAt}>{settings.lastHintAt}</time>
+          ),
+        effect: webhookStatusCopy.hintEffect,
       },
       ...(settings.webhooksPublicUrl === null
         ? []

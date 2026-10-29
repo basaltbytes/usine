@@ -2,19 +2,20 @@ import { canonicalRepositoryName, type RepositoryName } from "@usine/core/reposi
 import type { ChangedItem } from "@usine/github/polling";
 import { Clock, Context, DateTime, Duration, Effect, Layer, Option, Queue, Ref } from "effect";
 
-/** An Item to fetch after a self-write. The payload still comes from GitHub. */
+/** A repository or item to fetch early. The payload still comes from GitHub. */
 export interface ItemHint {
   readonly repository: RepositoryName;
-  readonly item: ChangedItem;
+  readonly item: Option.Option<ChangedItem>;
 }
 
 /** Pending hints are bounded and coalesced; the normal poll repairs dropped hints. */
 const make = Effect.gen(function* () {
   const pending = new Set<string>();
   const queue = yield* Queue.make<ItemHint>({ capacity: 128, strategy: "dropping" });
+  const lastHint = yield* Ref.make(Option.none<DateTime.Utc>());
   const backoffUntil = yield* Ref.make(0);
   const key = ({ repository, item }: ItemHint) =>
-    `${canonicalRepositoryName(repository)}:${item.number}`;
+    `${canonicalRepositoryName(repository)}:${Option.match(item, { onNone: () => "*", onSome: (value) => String(value.number) })}`;
 
   const defer = (until: Option.Option<DateTime.Utc>) =>
     Option.match(until, {
@@ -25,29 +26,30 @@ const make = Effect.gen(function* () {
 
   const offer = Effect.fn("PollingTriggers.hint")(function* (
     repository: RepositoryName,
-    item: ChangedItem,
+    item?: ChangedItem,
     requestBackoff: Option.Option<DateTime.Utc> = Option.none(),
   ) {
-    yield* Effect.annotateCurrentSpan({ repository, item: item.number });
+    yield* Effect.annotateCurrentSpan({ repository, item: item?.number });
+    yield* Ref.set(lastHint, Option.some(yield* DateTime.now));
     yield* defer(requestBackoff);
-    const hint = { repository, item };
+    const hint = { repository, item: Option.fromUndefinedOr(item) };
     const id = key(hint);
     if (pending.has(id)) {
-      yield* Effect.logDebug("Self-write Hint coalesced with a pending Item fetch", {
+      yield* Effect.logDebug("Hint coalesced with a pending fetch", {
         repository,
-        item: item.number,
+        item: item?.number,
       });
       return;
     }
     pending.add(id);
     if (yield* Queue.offer(queue, hint)) {
-      yield* Effect.logDebug("Self-write Hint queued", { repository, item: item.number });
+      yield* Effect.logDebug("Hint queued", { repository, item: item?.number });
     } else {
       pending.delete(id);
-      yield* Effect.logWarning(
-        "Self-write Hint queue full; the normal poll will refresh the Item",
-        { repository, item: item.number },
-      );
+      yield* Effect.logWarning("Hint queue full; the normal poll will refresh the repository", {
+        repository,
+        item: item?.number,
+      });
     }
   }, Effect.uninterruptible);
 
@@ -69,7 +71,7 @@ const make = Effect.gen(function* () {
     }
   });
 
-  return { offer, take, defer, awaitBackoff };
+  return { offer, take, defer, awaitBackoff, lastHint: Ref.get(lastHint) };
 });
 
 /** The pending hint and request-backoff state of a polling runtime. */

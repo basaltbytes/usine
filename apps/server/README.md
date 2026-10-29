@@ -64,6 +64,10 @@ Direct browser requests for UI routes serve the app shell, so refreshing or shar
 
 After `pnpm build`, reload the page to use the new web bundle; no restart is needed.
 
+## Webhook delivery hints
+
+Set `webhooks.mode: deliveries` in `usine.yaml` and restart `usine up` to check the GitHub App's delivery summaries about every 10 seconds. The App webhook must be active, but it does not need a reachable endpoint. The runtime persists its delivery cursor and uses hints to refresh registered repositories sooner; the normal poll remains active. **Configuration > Settings** shows the running mode and the last hint received since startup.
+
 ## Change the configuration
 
 The web UI edits stored entities in their export format, validates each save, and shows revision history and diffs. Concurrent writes return a conflict; the editor retains the draft while the operator reviews the newer text. Create, delete, and revert actions use the same API as other configuration writes. New loops start paused.

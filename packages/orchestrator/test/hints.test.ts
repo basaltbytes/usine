@@ -61,6 +61,36 @@ const labels = () =>
   Effect.succeed(new RepositoryLabelCatalog({ entityTag: Option.none(), labels: [] }));
 
 describe("Polling self-write Hints", () => {
+  it.effect("coalesces repository hints without moving the 60-second backstop", () => {
+    let requests = 0;
+    const github: GitHubPolling["Service"] = {
+      baseRefHead: unmovedBaseRefHead,
+      missingIssues: () => Effect.succeed([]),
+      labels,
+      changes: (_repository, cursor) =>
+        Effect.sync(() => {
+          requests += 1;
+          return new RepositoryNotModified({ cursor, nextPollAt: Option.none() });
+        }),
+      snapshot: () => Effect.die("no item changed"),
+    };
+    return Effect.gen(function* () {
+      const polling = yield* PollingTriggers;
+      assert(Option.isNone(yield* polling.lastHint));
+      for (let index = 0; index < 20; index += 1) yield* polling.hint(repository);
+      yield* polling.hint(RepositoryName.make("unknown/repository"));
+      assert(Option.isSome(yield* polling.lastHint));
+      const fiber = yield* polling.run(fixedInstance(instance)).pipe(Effect.forkChild);
+      yield* TestClock.adjust("1 millis");
+      assert.strictEqual(requests, 2, "one full poll and one coalesced repository refresh");
+      yield* TestClock.adjust("59998 millis");
+      assert.strictEqual(requests, 2);
+      yield* TestClock.adjust("1 millis");
+      assert.strictEqual(requests, 3, "the backstop still starts at 60 seconds");
+      yield* Fiber.interrupt(fiber);
+    }).pipe(Effect.provide(pollingTestLayer(github)));
+  });
+
   it.effect("extends an in-flight wait when another writer reports a later retry deadline", () => {
     let snapshots = 0;
     const github: GitHubPolling["Service"] = {
