@@ -132,7 +132,7 @@ describe("SSH Worker with Docker", () => {
   });
 
   it.effect(
-    "runs the Attempt's commands in its own container with its paths and the shared pnpm store",
+    "runs the Attempt's commands in its own container with its paths and shared cache volumes",
     () => {
       const machine = dockerMachine();
       machine.state.hostUserId = "2345";
@@ -179,6 +179,7 @@ describe("SSH Worker with Docker", () => {
         assert.strictEqual(words.at(-1), ATTEMPT_IMAGE);
         assert.deepStrictEqual(mountsOf(words), [
           "type=volume,source=usine-pnpm-store,destination=/home/usine/.local/share/pnpm/store,volume-nocopy",
+          "type=volume,source=usine-turbo-cache,destination=/home/usine/.cache/turbo,volume-nocopy",
           `type=tmpfs,"destination=${WORKER_ROOT}/attempts",tmpfs-mode=1777`,
           `type=bind,"source=${WORKTREE}","destination=${WORKTREE}"`,
           `type=bind,"source=${CACHE}","destination=${CACHE}",readonly`,
@@ -219,7 +220,7 @@ describe("SSH Worker with Docker", () => {
         assert.strictEqual(machine.state.containers.size, 0);
         assert.lengthOf(
           linesOf(machine).filter((line) => line.includes("volume create")),
-          1,
+          2,
         );
       }).pipe(
         Effect.scoped,
@@ -277,21 +278,21 @@ describe("SSH Worker with Docker", () => {
       case: "one slot",
       slots: 1,
       memoryMib: Option.none(),
-      limits: ["3.5", "7168m", "60976"],
+      limits: ["4", "7168m", "60976"],
       derived: "cpus,memoryMib,pids",
     },
     {
       case: "three slots",
       slots: 3,
       memoryMib: Option.none(),
-      limits: ["1.16", "2389m", "20325"],
+      limits: ["1.33", "2389m", "20325"],
       derived: "cpus,memoryMib,pids",
     },
     {
       case: "three slots and memory_mib in usine.yaml",
       slots: 3,
       memoryMib: Option.some(ContainerMemoryMib.make(3072)),
-      limits: ["1.16", "3072m", "20325"],
+      limits: ["1.33", "3072m", "20325"],
       derived: "cpus,pids",
     },
   ])(
@@ -486,16 +487,17 @@ describe("SSH Worker with Docker", () => {
     },
   );
 
-  it.effect(
-    "refuses container startup when store initialization fails without a preceding preflight",
-    () => {
+  it.effect.each(["usine-pnpm-store", "usine-turbo-cache"])(
+    "refuses container startup when %s initialization fails without a preceding preflight",
+    (volume) => {
       const machine = dockerMachine();
-      machine.state.storePreparationFails = true;
+      machine.state.cachePreparationFailure = volume;
       return Effect.gen(function* () {
         const executor = yield* Executor;
         const failure = yield* executor.prepare(request).pipe(Effect.flip);
         assert.strictEqual(failure._tag, "ExecutorOperationError");
         assert.include(failure.message, "permission denied");
+        assert.include(failure.message, volume);
         assert.strictEqual(machine.state.containers.size, 0);
       }).pipe(Effect.scoped, Effect.provide(runtime(machine, mintingProvider())));
     },
@@ -520,10 +522,20 @@ describe("SSH Worker with Docker", () => {
         });
         const otherUser = yield* failureOf((machine) => (machine.state.hostUserId = "2345"));
         const storeFailed = yield* failureOf(
-          (machine) => (machine.state.storePreparationFails = true),
+          (machine) => (machine.state.cachePreparationFailure = "usine-pnpm-store"),
+        );
+        const turboFailed = yield* failureOf(
+          (machine) => (machine.state.cachePreparationFailure = "usine-turbo-cache"),
         );
         const invalidSize = yield* failureOf((machine) => (machine.state.storeSizeKiB = "invalid"));
-        for (const failure of [unusable, unpulled, otherUser, storeFailed, invalidSize]) {
+        for (const failure of [
+          unusable,
+          unpulled,
+          otherUser,
+          storeFailed,
+          turboFailed,
+          invalidSize,
+        ]) {
           assert.strictEqual(failure._tag, "WorkerCapabilityError");
           if (failure._tag === "WorkerCapabilityError")
             assert.strictEqual(failure.capability, "container");
@@ -531,7 +543,8 @@ describe("SSH Worker with Docker", () => {
         assert.include(unusable.message, "add the user to the docker group");
         assert.include(unpulled.message, `can't pull the attempt image ${ATTEMPT_IMAGE}`);
         assert.include(otherUser.message, "--build-arg USINE_UID=2345");
-        assert.include(storeFailed.message, "Can't prepare the shared pnpm store");
+        assert.include(storeFailed.message, "usine-pnpm-store");
+        assert.include(turboFailed.message, "usine-turbo-cache");
         assert.include(invalidSize.message, "Can't measure the shared pnpm store");
 
         const cached = dockerMachine();
@@ -866,7 +879,7 @@ describe("SSH Worker with Docker", () => {
         assert(contained !== undefined, "the recovery logged the limits it applied");
         assert.deepInclude(JSON.parse(contained)[1], {
           worker: WORKER,
-          cpus: 3.5,
+          cpus: 4,
           memoryMib: 7168,
           pids: 60_976,
           derivedLimits: "cpus,memoryMib,pids",
