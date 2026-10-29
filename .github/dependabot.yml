@@ -6,10 +6,15 @@ updates:
       interval: monthly
   - package-ecosystem: npm
     directory: /
-    exclude-paths:
-      - apps/docs/**
     schedule:
       interval: weekly
+    ignore:
+      # TypeDoc requires TypeScript 6 in apps/docs. See #497.
+      # The shared pnpm lockfile requires one root job, so this also limits
+      # catalog updates: Dependabot compares against the lowest version (6).
+      - dependency-name: typescript
+        update-types:
+          - version-update:semver-major
     groups:
       npm:
         patterns:
@@ -17,23 +22,6 @@ updates:
       # Security updates, which also reach transitive dependencies such as
       # undici, open as one grouped PR instead of one PR per advisory.
       npm-security:
-        applies-to: security-updates
-        patterns:
-          - "*"
-  - package-ecosystem: npm
-    directory: /apps/docs
-    schedule:
-      interval: weekly
-    ignore:
-      # TypeDoc 0.28.20 supports TypeScript through 6.0. See #497.
-      - dependency-name: typescript
-        update-types:
-          - version-update:semver-major
-    groups:
-      npm-docs:
-        patterns:
-          - "*"
-      npm-docs-security:
         applies-to: security-updates
         patterns:
           - "*"
