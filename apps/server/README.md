@@ -70,7 +70,7 @@ The reload HTTP endpoint has been removed. Revisions apply automatically; `SIGHU
 
 ## Back up and export
 
-While the orchestrator runs, `usine backup` copies `.usine/runtime.sqlite` to the path you give, and `.usine/durable.sqlite` next to it with `.durable` before the extension (`/path/to/runtime-backup.durable.sqlite`):
+While the orchestrator runs, `usine backup` copies `.usine/runtime.sqlite` to the path you give, and `.usine/durable.sqlite` next to it. For destinations ending in `.sqlite` or `.db`, the durable copy has `.durable` before that extension: `backup.sqlite` becomes `backup.durable.sqlite`, and `backup.db` becomes `backup.durable.db`. For all other names, the command appends `.durable.sqlite`: `before-pi-1.4-2026-10-29` becomes `before-pi-1.4-2026-10-29.durable.sqlite`, and `nightly` becomes `nightly.durable.sqlite`.
 
 ```sh
 usine backup /path/to/runtime-backup.sqlite

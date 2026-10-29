@@ -6,7 +6,9 @@ import { Console, Effect, FileSystem, Path } from "effect";
 /** Returns the durable storage copy path: `backup.sqlite` becomes `backup.durable.sqlite`. */
 const durableDestination = (path: Path.Path, destination: string): string => {
   const { dir, name, ext } = path.parse(destination);
-  return path.join(dir, `${name}.durable${ext === "" ? ".sqlite" : ext}`);
+  return ext === ".sqlite" || ext === ".db"
+    ? path.join(dir, `${name}.durable${ext}`)
+    : `${destination}.durable.sqlite`;
 };
 
 /**

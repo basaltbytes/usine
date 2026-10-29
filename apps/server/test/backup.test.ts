@@ -88,10 +88,18 @@ test.for([
   },
 );
 
-test(
-  "copies the runtime and durable stores while both are open",
+test.for([
+  { outputName: "backup.sqlite", durableName: "backup.durable.sqlite" },
+  { outputName: "backup.db", durableName: "backup.durable.db" },
+  {
+    outputName: "before-pi-1.4-2026-10-29",
+    durableName: "before-pi-1.4-2026-10-29.durable.sqlite",
+  },
+  { outputName: "nightly", durableName: "nightly.durable.sqlite" },
+])(
+  "copies open stores to $outputName and $durableName",
   slowCli,
-  async ({ directory }) => {
+  async ({ outputName, durableName }, { directory }) => {
     const runtime = join(directory, ".usine");
     await mkdir(runtime);
     const open = [
@@ -99,12 +107,12 @@ test(
       openWithUncheckpointedRow(join(runtime, "durable.sqlite"), 176),
     ];
     try {
-      const output = join(directory, "backup.sqlite");
+      const output = join(directory, outputName);
 
       const result = runBackup(directory, output);
 
       assert.strictEqual(result.status, 0, result.stderr);
-      const durable = join(directory, "backup.durable.sqlite");
+      const durable = join(directory, durableName);
       assert.include(result.stdout, output);
       assert.include(result.stdout, durable);
       assert.deepStrictEqual(evidence(output), [{ value: 183 }]);
