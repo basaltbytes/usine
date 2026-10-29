@@ -23,6 +23,7 @@
       "ignoreDependencies": ["cloudflare"]
     },
     "tooling/oxlint": {
+      "entry": ["plugin.ts"],
       "project": ["**/*.ts"]
     },
     "tooling/tsconfig": {

@@ -61,7 +61,39 @@ Tests import other workspace packages from their `dist`, and the `@usine/server`
 
 ## Releases
 
-[Changesets](https://github.com/changesets/changesets) handles releases: add a changeset for each user-visible change; CI opens a release PR, and merging it publishes. 0.x APIs change without notice.
+[Changesets](https://github.com/changesets/changesets) handles releases: add a changeset for each user-visible change. CI opens a **Version Packages** PR. Merging it stages the changed versions for npm's `latest` dist-tag; an npm maintainer approves them before they become installable. 0.x APIs change without notice.
+
+The repository pins pnpm 11.20.0, which supports [`pnpm stage`](https://pnpm.io/11.x/cli/stage) and OIDC trusted publishing. The `release` job uses `pnpm stage publish -r --tag latest --no-git-checks`. The `next` job continues to publish snapshots directly with `pnpm -r publish --tag next --no-git-checks`, so keep **Allow npm publish** enabled on every `@usine` trusted publisher. Both jobs use `release.yml`, the workflow registered with npm.
+
+### Approval
+
+After the Version Packages release job succeeds, use a local npm account with publish access and 2FA enabled:
+
+```sh
+pnpm stage list
+pnpm stage view <stage-id>
+pnpm stage approve <stage-id> --otp <code>
+```
+
+Review the package name, version, and source commit before approving each stage ID from the release job's output. Approve workspace dependencies before their dependents. You can also review and approve versions in the **Staged Packages** tab on npmjs.com. Approve every package in the release before continuing.
+
+Check that the new version is public and that `latest` points to it. For example, for `@usine/core`:
+
+```sh
+curl --fail --silent --show-error https://registry.npmjs.org/@usine%2fcore | jq '."dist-tags".latest'
+pnpm view @usine/core@<version> version
+```
+
+Rerun only the `release` job of the original Version Packages workflow run. Use `gh run view <run-id> --json jobs` to find its database ID, then:
+
+```sh
+gh run rerun <run-id> --job <release-job-id>
+gh run watch <run-id> --exit-status
+```
+
+The rerun skips versions that npm already exposes. The tag step checks every publishable workspace version against the public npm registry before running `changeset git-tag`; Changesets then pushes the tags and creates GitHub releases. A pending approval skips all tags and releases, and a registry error fails the job. Rerunning the original job preserves the source commit. GitHub also reruns dependent jobs; `next` skips snapshot versions that are already public. Do not run `changeset git-tag` directly or dispatch a new release at a newer commit to finalize an older release.
+
+If a release fails after staging some packages, inspect its stage IDs and approve the valid artifacts before retrying that job. Use `pnpm stage reject <stage-id> --otp <code>` for artifacts that need replacement. The retry stages any versions that are still absent from the public registry; repeat approval and rerun until all versions are public and the GitHub releases exist.
 
 If the `usine` npm org is unavailable, ADR 0012 moves every package to the `@usine-dev` scope. The unscoped `usine` name belongs to an unrelated, unmaintained package.
 
