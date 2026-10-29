@@ -554,7 +554,11 @@ export const fakeMachine = () => {
     }
     if (line === "exec 'git' '--version'") return oneShotHandle("git version 2.47.3\n", 0);
     if (line === "exec 'claude' '--version'") return oneShotHandle(claudeVersionOutput, 0);
-    if (line === "exec 'codex' '--version'") return oneShotHandle(`${state.codexVersion}\n`, 0);
+    if (
+      line ===
+      "exec 'codex' '-c' 'features.multi_agent=false' '-c' 'features.plugins=false' '-c' 'features.remote_plugin=false' '-c' 'features.apps=false' '-c' 'check_for_update_on_startup=false' '-c' 'analytics.enabled=false' '--version'"
+    )
+      return oneShotHandle(`${state.codexVersion}\n`, 0);
     if (line === "exec 'claude' 'auth' 'status' '--json'")
       return oneShotHandle(
         JSON.stringify({

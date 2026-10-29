@@ -1,4 +1,5 @@
 import type { RemoteShell, SshCommand } from "@usine/agents/child-host";
+import { codexConfigArgs } from "@usine/agents/codex";
 import { supportedCodexVersions } from "@usine/agents/preflight";
 import { ClaudeLoginLock } from "@usine/agents/runtime";
 import {
@@ -189,7 +190,8 @@ const versionProbe =
   (brain) =>
     Effect.gen(function* () {
       const command = brain.harness === "codex" ? "codex" : "claude";
-      const result = yield* commands.inspect(operation, shell, command, ["--version"]);
+      const args = command === "codex" ? [...codexConfigArgs, "--version"] : ["--version"];
+      const result = yield* commands.inspect(operation, shell, command, args);
       if (result.exitCode === SHELL_FAILURE)
         return yield* new ExecutorOperationError({
           operation,
