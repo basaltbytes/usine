@@ -11,12 +11,12 @@ Until 2026-10-28 the operator API and the web UI had no authentication. `usine u
 - **Public exposure.** An instance can serve the API over public HTTPS, so this applies from the start: rate limits on the sign-in and token endpoints, security headers, and no route without a token except health, sign-in, and the signature-verified GitHub webhook endpoint ([ADR 0014](./0014-webhook-delivery-as-hints.md)).
 - **API contract.** The API has a versioned path and a published schema, so a client built against one version keeps working against a newer server.
 
-These choices are open in #632:
+Decided on 2026-10-29 ([#632](https://github.com/basaltbytes/usine/issues/632)):
 
-1. The source of role bindings: bindings managed in usine only, bindings derived from GitHub permissions on the project's repositories (read to viewer, write to operator, admin to maintainer), or both.
-2. Whether `usine up` on loopback still accepts requests without sign-in.
-3. TLS built into `usine up` (ACME), or a documented reverse proxy such as Caddy, `tailscale serve`, or Cloudflare Tunnel.
-4. The bundled UI's session: a bearer token in memory with a refresh flow, or an `HttpOnly` cookie with CSRF protection.
+- **Bindings are managed in usine.** An admin grants each role binding, and the member who completes the instance's setup with the GitHub App is its first admin. Bindings derived from GitHub permissions can be added later as defaults; on their own they can't grant less than GitHub does.
+- **Sign-in is always required, on loopback too.** `tailscale serve` and other local reverse proxies deliver every request from 127.0.0.1, so a loopback exemption would admit everyone who can reach the proxy. The CLI on the instance's machine uses an admin token from a file in the instance folder, with mode 0600, instead of a GitHub sign-in.
+- **TLS comes from a reverse proxy.** `usine up` keeps listening on loopback and refuses a non-loopback address without TLS. The deployment guide documents Caddy, `tailscale serve`, and Cloudflare Tunnel. Built-in ACME would make usine bind ports 80 and 443, store keys, and handle renewal failures.
+- **The bundled UI uses an `HttpOnly` cookie.** The session cookie is `SameSite=Strict`, and every write carries a CSRF token. A script can't read the cookie, so a cross-site scripting bug can't take the session. Other clients use bearer tokens.
 
 ## Considered options
 
@@ -26,11 +26,11 @@ These choices are open in #632:
 - **Tailscale identity headers** (`tailscale serve` passes the caller's Tailscale login): no sign-in code, but only clients on the tailnet can connect, and the identity is a Tailscale login, not a GitHub one.
 - **Instance-wide roles only**: simpler bindings, but a contractor on one project would see every project.
 - **An access entry on each loop, run, and worker**: finer control, but many entries to manage and no current need. A binding's scope can gain a resource level later.
-- **GitHub repository permissions as the only source of bindings**: no membership to manage in usine, but no way to grant less than GitHub does or to scope a token. Whether bindings are derived from them is open question 1.
+- **GitHub repository permissions as the only source of bindings**: no membership to manage in usine, but no way to grant less than GitHub does or to scope a token. Derived bindings remain possible as defaults on top of managed ones.
 
 ## Consequences
 
 - The GitHub App needs user authorization: the device flow turned on, and a callback URL at the instance's address for the web flow. An instance created before this change needs those App settings changed by hand.
 - `operator:` in `usine.yaml` identifies only the approvals and interventions recorded before sign-in exists.
-- Every client signs in, including the bundled UI. Scripts that call the API with `curl` need a token.
+- Every client signs in, including the bundled UI and a browser on the instance's own machine. Scripts that call the API with `curl` need a token; the CLI on the instance's machine reads the admin token file.
 - The API on a public address is an attack surface that the network used to hide. A deployment guide states what an instance needs before it's public: TLS, the allowed origins, and the rate limits.
