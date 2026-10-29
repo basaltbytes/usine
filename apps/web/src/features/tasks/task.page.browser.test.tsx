@@ -1,7 +1,13 @@
 import { ItemNumber } from "@usine/core/item";
+import { RepositoryName } from "@usine/core/repository";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { FactoryOverview, TaskView } from "@usine/orchestrator/operator";
+import {
+  FactoryOverview,
+  ProjectView,
+  ReadyOverview,
+  TaskView,
+} from "@usine/orchestrator/operator";
 import { Schema } from "effect";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
@@ -27,6 +33,7 @@ let tasks: Map<string, TaskView>;
 let taskUnavailable: boolean;
 let taskDelay: Promise<void> | undefined;
 let taskRequests: Array<string>;
+let overview: FactoryOverview;
 
 const json = (body: string, status = 200) =>
   new Response(body, { status, headers: { "content-type": "application/json" } });
@@ -39,7 +46,7 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   );
   const method = init?.method ?? (input instanceof Request ? input.method : "GET");
   if (url.pathname === "/api/overview")
-    return json(JSON.stringify(Schema.encodeSync(FactoryOverview)(taskOverview())));
+    return json(JSON.stringify(Schema.encodeSync(FactoryOverview)(overview)));
   if (url.pathname === "/api/agents") return json('["developer","reviewer"]');
   const number = /\/tasks\/(\d+)$/u.exec(url.pathname)?.[1];
   if (number !== undefined) {
@@ -65,12 +72,12 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   return json('{"ok":true}');
 };
 
-const mount = async (number: number | string, width = 1280) => {
+const mount = async (number: number | string, width = 1280, repository = taskRepository) => {
   await page.viewport(width, 900);
   router = createRouter({
     routeTree,
     history: createMemoryHistory({
-      initialEntries: [`/projects/${taskRepository}/tasks/${number}`],
+      initialEntries: [`/projects/${repository}/tasks/${number}`],
     }),
     context: { queryClient },
     defaultPendingMs: 0,
@@ -104,12 +111,13 @@ beforeEach(() => {
   taskUnavailable = false;
   taskDelay = undefined;
   taskRequests = [];
+  overview = taskOverview();
   tasks = new Map([
     ["40", fullTask()],
     ["12", quietTask()],
   ]);
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  queryClient.setQueryData(overviewQuery().queryKey, taskOverview());
+  queryClient.setQueryData(overviewQuery().queryKey, overview);
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -120,6 +128,34 @@ afterEach(() => {
   queryClient.clear();
   host.remove();
 });
+
+it.each(["basaltbytes/usine", "Basaltbytes/Usine"])(
+  "names the originating issue in the breadcrumb for secondary repository %s",
+  async (repository) => {
+    overview = new ReadyOverview({
+      ...taskOverview(),
+      projects: taskOverview().projects.map(
+        (project) =>
+          new ProjectView({
+            ...project,
+            repository: RepositoryName.make("basaltbytes/primary"),
+            repositories: [
+              RepositoryName.make("basaltbytes/primary"),
+              RepositoryName.make("Basaltbytes/Usine"),
+            ],
+          }),
+      ),
+    });
+    queryClient.setQueryData(overviewQuery().queryKey, overview);
+
+    await mount(40, 390, RepositoryName.make(repository));
+
+    await expect
+      .element(page.getByRole("navigation", { name: "breadcrumb" }))
+      .toMatchTextContent("Issue #40");
+    await expect.element(page.getByRole("heading", { level: 1 })).toBeVisible();
+  },
+);
 
 it("heads the page with the originating issue, its current pull request's state, lane, and labels", async () => {
   await mount(40);

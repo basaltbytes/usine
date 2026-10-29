@@ -12,7 +12,7 @@ import {
   useSearch,
   useRouter,
 } from "@tanstack/react-router";
-import { RepositoryName } from "@usine/core/repository";
+import { RepositoryName, canonicalRepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import type { FactoryOverview, ProjectView } from "@usine/orchestrator/operator";
 import { Schema } from "effect";
@@ -72,12 +72,11 @@ const Unreachable = ({ error }: UnreachableProps) => {
 
 /** Returns the name of the Task with the item `number`: its originating item, else the item. */
 const taskCrumb = (overview: FactoryOverview, repository: RepositoryName, number: string) => {
-  const card = overview.projects
-    .find((project) => [project.repository, ...project.repositories].includes(repository))
+  const card = projectForRepository(overview.projects, repository)
     ?.board.lanes.flatMap(({ items }) => items)
     .find(
       (card) =>
-        card.repository === repository &&
+        canonicalRepositoryName(card.repository) === canonicalRepositoryName(repository) &&
         card.items.some((member) => String(member.number) === number),
     );
   return card === undefined

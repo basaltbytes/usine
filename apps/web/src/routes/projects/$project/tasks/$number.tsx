@@ -7,6 +7,7 @@ import { RouteError, RoutePending } from "~/components/route-status";
 import { TaskPage } from "~/features/tasks/task.page";
 import { TaskNotFound } from "~/features/tasks/components/not-found";
 import { taskQuery } from "~/features/tasks/queries";
+import { taskNotFound } from "~/features/tasks/strings";
 import { overviewQuery, projectId, projectForRepository } from "~/lib/overview";
 
 const decodeNumber = Schema.decodeUnknownOption(
@@ -20,7 +21,7 @@ const MissingTask = () => {
   const { repository } = Route.useSearch();
   const { number } = Route.useParams();
   return repository === undefined ? (
-    <p>Task not found</p>
+    <p>{taskNotFound}</p>
   ) : (
     <TaskNotFound repository={repository} number={number} />
   );

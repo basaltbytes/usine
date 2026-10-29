@@ -103,3 +103,4 @@ export const signOutLabel = "Sign out";
 
 export const repositoryFilterLabel = "Repository";
 export const allRepositoriesLabel = "All repositories";
+export const repositoryCountLabel = (count: number): string => `${count} repositories`;

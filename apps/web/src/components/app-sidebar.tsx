@@ -24,6 +24,7 @@ import { UsineMark } from "~/components/usine-mark";
 import { cn } from "~/lib/utils";
 import { ConfigurationMenu } from "~/components/configuration/navigation";
 import { projectId, projectName } from "~/lib/overview";
+import { repositoryCountLabel } from "~/lib/strings";
 
 /** `tasks` covers the Tasks list and Task pages; `project` covers other Project pages, such as a
  * Run page. */
@@ -126,7 +127,7 @@ export const AppSidebar = ({
                     isActive={current && view === "project"}
                     title={
                       entry.repositories.length > 1
-                        ? `${entry.repositories.length} repositories`
+                        ? repositoryCountLabel(entry.repositories.length)
                         : undefined
                     }
                     className={cn(count > 0 && "pr-8")}
