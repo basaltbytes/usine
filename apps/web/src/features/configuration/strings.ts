@@ -352,7 +352,7 @@ export const settingsFormFields = [
 
 export const settingsExtraCopy = {
   publicUrl: "Public webhook URL",
-  publicUrlHint: "Where GitHub would deliver webhooks.",
+  publicUrlHint: "The full public webhook URL, including /webhooks/github.",
   tracing: "Export traces",
   otlp: "OTLP URL",
   otlpHint: "Collector endpoint that receives every span as OTLP/HTTP protobuf.",
@@ -465,7 +465,7 @@ export const webhookStatusCopy = {
     deliveries:
       "Checks delivery summaries every 10 seconds to refresh repositories sooner. A mode change requires a restart.",
     endpoint:
-      "Endpoint delivery is unavailable in this version. Polling and self-write hints remain active.",
+      "Receives signed webhook deliveries to refresh repositories sooner. A mode change requires a restart.",
   },
   lastHint: "Last hint received",
   never: "None since startup",

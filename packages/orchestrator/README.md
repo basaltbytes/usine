@@ -130,6 +130,8 @@ export const triggersLayer = PollingTriggers.layer.pipe(
 
 Call `poll` if another scheduler owns timing; `run` is the built-in endless loop.
 
+`WebhookHealth` from `@usine/orchestrator/webhooks` tracks verified endpoint deliveries separately from polling hints. The Node runtime shares one instance between the HTTP endpoint and operator observation. Endpoint mode adds a dismissible Needs attention entry after ten minutes without a verified delivery since startup. Any valid delivery, including `ping` or a repository outside the registry, clears it. Polling and self-write hints do not change endpoint health or consult it when scheduling work.
+
 ## Schedule triggers
 
 `ScheduleTriggers.tick(instance)` evaluates the latest due tick of every `on: schedule` loop and fans it out to the loop's selected repos. Each repo gets one event with the payload `item.tick = { scheduledAt, scheduledAtLocal, cron, tz }`: `scheduledAt` is the UTC due time, `scheduledAtLocal` the same instant in the loop's `tz:`, and the event's `receivedAt` is when the orchestrator saw it.

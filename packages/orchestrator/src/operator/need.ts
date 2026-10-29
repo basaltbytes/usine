@@ -173,8 +173,17 @@ export class PoolLimitNeed extends Schema.TaggedClass<PoolLimitNeed>(
   resetsAt: Schema.DateTimeUtcFromString,
 }) {}
 
+export class WebhookSilenceNeed extends Schema.TaggedClass<WebhookSilenceNeed>(
+  "@usine/orchestrator/WebhookSilenceNeed",
+)("WebhookSilenceNeed", {
+  id: Schema.String,
+  startedAt: Schema.String,
+  publicUrl: Schema.String,
+}) {}
+
 /** One reason the overview asks for operator attention. */
 export const NeedView = Schema.Union([
+  WebhookSilenceNeed,
   CycleBudgetNeed,
   ApprovalNeed,
   BoardProjectionNeed,

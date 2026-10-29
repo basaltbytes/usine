@@ -383,27 +383,35 @@ describe("Settings page", () => {
     assert.include(page, "tracing.otlp_url http://localhost:4318/v1/traces");
     assert.include(page, "tracing.service_name usine-eu");
   });
-  it("shows deliveries mode and the last received hint", async () => {
-    const configuration = configurationFixture();
-    const at = "2026-10-29T12:00:00.000Z";
-    const page = text(
-      await render(() => (
-        <SettingsPage
-          configuration={
-            new ConfigurationView({
-              ...configuration,
-              settings: new SettingsView({
-                ...configuration.settings,
-                webhooks: "deliveries",
-                lastHintAt: at,
-              }),
-            })
-          }
-        />
-      )),
-    );
-    assert.include(page, "webhooks.mode deliveries");
-    assert.include(page, "Checks delivery summaries every 10 seconds");
-    assert.include(page, `Last hint received ${at}`);
-  });
+  it.each(["deliveries", "endpoint"] as const)(
+    "shows %s mode and the last received hint",
+    async (mode) => {
+      const configuration = configurationFixture();
+      const at = "2026-10-29T12:00:00.000Z";
+      const page = text(
+        await render(() => (
+          <SettingsPage
+            configuration={
+              new ConfigurationView({
+                ...configuration,
+                settings: new SettingsView({
+                  ...configuration.settings,
+                  webhooks: mode,
+                  lastHintAt: at,
+                }),
+              })
+            }
+          />
+        )),
+      );
+      assert.include(page, `webhooks.mode ${mode}`);
+      assert.include(
+        page,
+        mode === "deliveries"
+          ? "Checks delivery summaries every 10 seconds"
+          : "Receives signed webhook deliveries",
+      );
+      assert.include(page, `Last hint received ${at}`);
+    },
+  );
 });
