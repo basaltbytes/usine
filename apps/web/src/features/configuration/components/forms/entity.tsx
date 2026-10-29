@@ -1,3 +1,4 @@
+import { LoopFields } from "~/features/configuration/components/forms/loop/fields";
 import type { ConfigurationEntityKey } from "@usine/config/configuration";
 import { RepositoryName } from "@usine/core/repository";
 import type { FormFieldsProps } from "~/features/configuration/lib/forms";
@@ -9,6 +10,8 @@ import { RepositoryFields } from "./repository";
 type EntityFieldsProps = FormFieldsProps & { readonly entity: ConfigurationEntityKey };
 export const EntityFields = ({ entity, ...fields }: EntityFieldsProps) => {
   switch (entity.kind) {
+    case "loop":
+      return <LoopFields {...fields} name={entity.identifier} />;
     case "agent":
       return <AgentFields {...fields} />;
     case "worker":

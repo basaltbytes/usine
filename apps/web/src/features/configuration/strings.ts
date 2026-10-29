@@ -402,3 +402,38 @@ export const workerFormCopy = {
   backoffMax: "Maximum creation backoff (seconds)",
   checkInterval: "Machine check interval (seconds)",
 };
+
+export const loopFormCopy = {
+  stream: "Stream",
+  condition: "Condition (CEL)",
+  prompt: "Prompt (Markdown)",
+  repositories: "Repositories",
+  tags: "Tags",
+  allRepositories: "Leave both selectors empty to include every repository.",
+  approval: "Require approval",
+  step: "Step name",
+  agent: "Agent",
+  cycles: "Cycle limit",
+  permissions: "Permissions",
+  cron: "Cron",
+  timeZone: "Time zone",
+  checking: "Checking…",
+  checked: "No problems found",
+  preview: "Preview",
+  previewing: "Loading preview…",
+  completions: "Payload fields",
+  completionHint: "Choose a field to insert at the cursor. Use Ctrl+Space to show fields.",
+  count: (total: number, shown: number) =>
+    `${total} matching ${total === 1 ? "item" : "items"}${total > shown ? ` · showing ${shown}` : ""}`,
+  sample: "Render prompt",
+  rendered: "Rendered prompt",
+  empty: "No stored items match this loop.",
+  noData: (repositories: readonly string[]) =>
+    `No stored items for this stream yet: ${repositories.join(", ")}.`,
+  schedule: "Schedule loops run on ticks. There are no polled items to preview.",
+  confirm: "Resume loop",
+  resume: "Resume",
+  cancel: "Cancel",
+  resumeHint: "Resuming allows this loop to open runs for matching items.",
+  paused: "New loops start paused. Resume the loop after reviewing its preview.",
+};

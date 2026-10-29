@@ -135,8 +135,8 @@ export const validateConfiguration = (
               onExcessProperty: "error",
             }).pipe(
               Effect.mapError((e) => ConfigFileError.fromSchema(file, e)),
-              Effect.flatMap((value) => parser.parseLoopFile(file, formatLoop(value))),
               Effect.tap((value) => Effect.sync(() => loops.push(value))),
+              Effect.flatMap((value) => parser.parseLoopFile(file, formatLoop(value))),
               Effect.asVoid,
             )
       ).pipe(Effect.result);

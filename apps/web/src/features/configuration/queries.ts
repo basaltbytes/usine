@@ -7,6 +7,8 @@ import {
 import { formatConfigurationEntity } from "@usine/config/folder-codec";
 import {
   type ConfigurationReplacement,
+  type LoopDraft,
+  LoopPreviewRequest,
   ConfigurationWrite,
 } from "@usine/orchestrator/operator/http";
 import { Effect } from "effect";
@@ -179,4 +181,19 @@ export const repositoryLabelsQuery = (repository: RepositoryName) =>
   queryOptions({
     queryKey: [...configurationEditorKeys, "labels", repository],
     queryFn: () => api((client) => client.configurationLabels({ params: { repository } })),
+  });
+
+export const loopCheckQuery = (draft: LoopDraft) =>
+  queryOptions({
+    queryKey: [...configurationEditorKeys, "loop-check", draft],
+    queryFn: () => api((client) => client.checkLoop({ payload: draft })),
+    retry: false,
+  });
+
+export const loopPreviewQuery = (draft: LoopPreviewRequest) =>
+  queryOptions({
+    queryKey: [...configurationEditorKeys, "loop-preview", draft],
+    queryFn: () => api((client) => client.previewLoop({ payload: draft })),
+    retry: false,
+    staleTime: 0,
   });

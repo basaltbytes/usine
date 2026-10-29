@@ -49,4 +49,5 @@ export const Trigger = Schema.Union([IssueTrigger, PullRequestTrigger, ScheduleT
 
 export type Trigger = typeof Trigger.Type;
 
-export type Stream = Trigger["on"];
+export const Stream = Schema.Literals(["issue", "pr", "schedule"]);
+export type Stream = typeof Stream.Type;

@@ -1,3 +1,5 @@
+import { ItemProjectionReader } from "@usine/engine/item-projection";
+import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { GitHubPolling } from "@usine/github/polling";
 import { ServerUpgrades } from "./upgrade/control.ts";
 import { systemUpgradePlatform } from "./upgrade/platform.ts";
@@ -292,6 +294,8 @@ export const up = (command: UpCommand) =>
       const instances = Context.get(current, CurrentInstance);
       const editorContext = yield* Layer.build(
         ConfigurationEditor.layer.pipe(
+          Layer.provide(ItemProjectionReader.layer.pipe(Layer.provide(database))),
+          Layer.provide(MarcbachmannCelLayer),
           Layer.provide(Layer.succeed(CurrentInstance, instances)),
           Layer.provide(Layer.succeedContext(configurationContext)),
         ),

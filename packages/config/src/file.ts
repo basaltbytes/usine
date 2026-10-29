@@ -17,6 +17,14 @@ export const FileStage = Schema.Literals([
 
 export type FileStage = typeof FileStage.Type;
 
+export const ConfigProblem = Schema.Struct({
+  path: Schema.Array(Schema.Union([Schema.String, Schema.Number])),
+  message: Schema.String,
+  expression: Schema.optionalKey(Source),
+  /** Zero-based offset in the expression. */
+  position: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+});
+
 /** An error in one file at one parse stage; only that file is quarantined. */
 export class ConfigFileError extends Schema.TaggedError<ConfigFileError>(
   "@usine/config/ConfigFileError",
@@ -25,14 +33,7 @@ export class ConfigFileError extends Schema.TaggedError<ConfigFileError>(
   stage: FileStage,
   expression: Schema.OptionFromOptionalKey(Source),
   message: Schema.NonEmptyString,
-  details: Schema.optionalKey(
-    Schema.Array(
-      Schema.Struct({
-        path: Schema.Array(Schema.Union([Schema.String, Schema.Number])),
-        message: Schema.String,
-      }),
-    ),
-  ),
+  details: Schema.optionalKey(Schema.Array(ConfigProblem)),
 }) {
   static fromSchema(file: InstancePath, error: Schema.SchemaError): ConfigFileError {
     const details = SchemaIssue.makeFormatterStandardSchemaV1()(error.issue).issues.map(

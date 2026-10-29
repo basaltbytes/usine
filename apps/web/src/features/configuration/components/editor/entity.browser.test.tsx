@@ -17,6 +17,7 @@ import "~/index.css";
 
 declare module "vitest/browser" {
   interface BrowserCommands {
+    loopEditorResponses: (configuration: string) => Promise<void>;
     delayConfigurationLookup: (identifier: string) => Promise<void>;
     releaseConfigurationLookup: (identifier: string) => Promise<void>;
     configurationEditorScreenshot: (name: string) => Promise<void>;
@@ -32,8 +33,11 @@ declare module "vitest/browser" {
 let host: HTMLDivElement;
 let root: Root;
 let client: QueryClient;
+let wasDark: boolean;
 
 beforeEach(() => {
+  wasDark = document.documentElement.classList.contains("dark");
+  document.documentElement.classList.add("dark");
   host = document.createElement("div");
   host.className = "dark text-foreground";
   document.body.append(host);
@@ -49,6 +53,7 @@ afterEach(() => {
   flushSync(() => root.unmount());
   client.clear();
   host.remove();
+  document.documentElement.classList.toggle("dark", wasDark);
 });
 
 const mount = async (
@@ -56,6 +61,7 @@ const mount = async (
   rejections: readonly { readonly status: number; readonly body: string }[] = [],
 ) => {
   await commands.configurationEditorResponses(rejections, JSON.stringify(configurationJson));
+  await commands.loopEditorResponses(JSON.stringify(configurationJson));
   await page.viewport(390, 844);
   const router = createRouter({
     routeTree,
@@ -739,4 +745,55 @@ it.each([
   expect((await commands.configurationEditorRequests())[0]?.payload).toMatchObject({
     value: scenario.expected,
   });
+});
+
+it("checks CEL while typing, completes payload fields, previews, saves paused, and confirms resume", async () => {
+  await mount("/configuration/loops");
+  await button("New").click();
+  await page.getByRole("textbox", { name: "Name", exact: true }).fill("draft-loop");
+  await button("Edit").click();
+  const condition = page.getByRole("textbox", { name: "Condition (CEL)", exact: true });
+  await condition.fill("item.unknown == 1");
+  await expect.element(page.getByText("Unknown field: unknown", { exact: true })).toBeVisible();
+  await condition.fill("item.tit");
+  await button("item.title").click();
+  await expect.element(condition).toHaveValue("item.title");
+  await condition.fill('item.state == "OPEN"');
+  await page.getByRole("checkbox", { name: "basaltbytes/usine", exact: true }).click();
+  await page.getByRole("switch", { name: "Require approval" }).click();
+  await page
+    .getByRole("textbox", { name: "Prompt (Markdown)", exact: true })
+    .fill("Implement {{ item.title }}.");
+  await button("Preview").click();
+  await expect.element(page.getByRole("heading", { name: "2 matching items" })).toBeVisible();
+  await expect
+    .element(page.getByRole("link", { name: "Issue #1, open Fix issue 1" }))
+    .toHaveAttribute("href", "/projects/basaltbytes/usine/tasks/1");
+  await page.getByRole("button", { name: "Render prompt", exact: true }).nth(1).click();
+  await expect.element(page.getByText("Implement Fix issue 2.", { exact: true })).toBeVisible();
+  page.getByRole("heading", { name: "New loop", exact: true }).element().scrollIntoView();
+  await commands.configurationEditorScreenshot("loop-mobile-final");
+  await page.viewport(1280, 900);
+  await commands.configurationEditorScreenshot("loop-desktop-final");
+  await condition.fill("true");
+  await expect
+    .element(page.getByRole("heading", { name: "2 matching items" }))
+    .not.toBeInTheDocument();
+  await button("Save").click();
+  await expect.poll(async () => (await commands.configurationEditorRequests()).length).toBe(1);
+  expect((await commands.configurationEditorRequests())[0]).toMatchObject({
+    method: "PUT",
+    payload: {
+      value: {
+        name: "draft-loop",
+        approval: "required",
+        selector: { _tag: "Some", value: { repos: ["basaltbytes/usine"] } },
+      },
+    },
+  });
+  await button("Resume").click();
+  const confirmation = page.getByRole("dialog", { name: "Resume loop: draft-loop" });
+  await expect.element(confirmation.getByText("2 matching items", { exact: true })).toBeVisible();
+  await confirmation.getByRole("button", { name: "Resume", exact: true }).click();
+  await expect.element(button("Pause")).toBeVisible();
 });

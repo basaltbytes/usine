@@ -1,15 +1,16 @@
 import { Effect, Option, Record, Schema } from "effect";
 import { ManagedRepo, UsineConfig, WorkerFromYaml } from "../factory.ts";
 import { ConfigFileError, InstancePath } from "../file.ts";
-import { parseAgentFile } from "../parser.ts";
+import { parseAgentFile, parseLoopDraft } from "../parser.ts";
 import { parseYamlDocument } from "../yaml/document.ts";
 import type { ConfigurationEntityKey } from "./model.ts";
-import { AgentJson } from "./entities.ts";
+import { AgentJson, LoopJson } from "./entities.ts";
 
 const { workers: _workers, repos: _repos, labels: _labels, ...settings } = UsineConfig.fields;
 const SettingsEntity = Schema.Struct(settings);
 const formSchemas = {
   agent: AgentJson,
+  loop: LoopJson,
   worker: WorkerFromYaml,
   repository: ManagedRepo,
   settings: SettingsEntity,
@@ -44,6 +45,14 @@ export const validateConfigurationForm = (
 /** Reads an entity's export format for the form editor. */
 export const parseConfigurationForm = (key: ConfigurationEntityKey, text: string) => {
   const file = InstancePath.make(key.key);
+  if (key.kind === "loop")
+    return parseLoopDraft(InstancePath.make(`loops/${key.identifier}.md`), text).pipe(
+      Effect.map(Schema.encodeSync(LoopJson)),
+      Effect.flatMap((value) => Schema.decodeUnknownEffect(Schema.JsonObject)(value)),
+      Effect.catchTag("SchemaError", (error) =>
+        Effect.fail(ConfigFileError.fromSchema(file, error)),
+      ),
+    );
   if (key.kind === "agent")
     return parseAgentFile(InstancePath.make(`agents/${key.identifier}.md`), text).pipe(
       Effect.map(Schema.encodeSync(AgentJson)),

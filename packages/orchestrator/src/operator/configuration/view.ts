@@ -33,7 +33,7 @@ import type { LoadedInstance } from "@usine/config/instance";
 import { DeclaredLabel, canonicalLabelName, GitHubLabelName } from "@usine/config/label";
 import { LoopPriority, PromptTemplate } from "@usine/config/loop";
 import { matchesSelector } from "@usine/config/selector";
-import { Cron, TimeZone } from "@usine/config/trigger";
+import { Cron, TimeZone, Stream } from "@usine/config/trigger";
 import type { EnginePersistenceError } from "@usine/engine/engine";
 import { LoopControl } from "@usine/engine/loop-control";
 import { RepositoryLabelProjectionReader } from "@usine/engine/repository-label-projection";
@@ -65,7 +65,7 @@ export class LoopFileView extends Schema.Class<LoopFileView>("@usine/orchestrato
   name: LoopName,
   file: InstancePath,
   /** The trigger's `on:` stream. */
-  stream: Schema.Literals(["issue", "pr", "schedule"]),
+  stream: Stream,
   /** The trigger's `if:` expression as written. */
   condition: Source,
   /** A schedule trigger's cron and time zone, or null for the other streams. */

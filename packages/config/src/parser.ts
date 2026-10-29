@@ -22,7 +22,7 @@ import {
 import { splitMarkdown } from "./frontmatter.ts";
 import { AgentFile } from "./agent.ts";
 import { canonicalLabelName, GitHubLabelName } from "./label.ts";
-import { ConfigFileError, InstancePath } from "./file.ts";
+import { ConfigFileError, ConfigProblem, InstancePath } from "./file.ts";
 import {
   type ConfigWarning,
   UndeclaredLaneLabelWarning,
@@ -131,14 +131,24 @@ const expressionError = (
   file: InstancePath,
   error: ExpressionError,
   path: ReadonlyArray<string>,
-): ConfigFileError =>
-  new ConfigFileError({
+): ConfigFileError => {
+  const detail: typeof ConfigProblem.Type = {
+    path,
+    message: error.message,
+    expression: error.source,
+  };
+  const positioned =
+    error._tag === "ExpressionCheckError" && Option.isSome(error.position)
+      ? { ...detail, position: error.position.value }
+      : detail;
+  return new ConfigFileError({
     file,
     stage: "expression",
     expression: Option.some(error.source),
     message: error.message,
-    details: [{ path, message: error.message }],
+    details: [positioned],
   });
+};
 
 const markdownName = (file: InstancePath): Effect.Effect<string, ConfigFileError> => {
   const basename = file.slice(file.lastIndexOf("/") + 1);
@@ -171,33 +181,55 @@ const agentName = (file: InstancePath): Effect.Effect<AgentName, ConfigFileError
     ),
   );
 
-const interpolations = (
-  file: InstancePath,
-  body: PromptTemplate,
-): Effect.Effect<ReadonlyArray<Interpolation>, ConfigFileError> =>
-  Effect.gen(function* () {
-    const found: Array<Interpolation> = [];
-    let cursor = 0;
-    while (cursor < body.length) {
-      const start = body.indexOf("{{", cursor);
-      if (start < 0) break;
-      const end = body.indexOf("}}", start + 2);
-      if (end < 0) {
-        return yield* new ConfigFileError({
+const interpolations = (file: InstancePath, body: PromptTemplate) => {
+  const expressions: Array<Interpolation> = [];
+  const problems: Array<ConfigFileError> = [];
+  let cursor = 0;
+  while (cursor < body.length) {
+    const start = body.indexOf("{{", cursor);
+    if (start < 0) break;
+    const end = body.indexOf("}}", start + 2);
+    if (end < 0) {
+      const message = `The prompt has an unclosed {{ at character ${start}. Close it with }}.`;
+      problems.push(
+        new ConfigFileError({
           file,
           stage: "expression",
           expression: Option.none(),
-          message: `The prompt has an unclosed {{ at character ${start}. Close it with }}.`,
-        });
-      }
-      const expression = body.slice(start + 2, end).trim();
-      const parsed = yield* Schema.decodeUnknownEffect(Source)(expression).pipe(
-        Effect.mapError((error) => schemaError(file, error)),
+          message,
+          details: [{ path: ["body"], message }],
+        }),
       );
-      found.push({ source: parsed, start, end: end + 2 });
-      cursor = end + 2;
+      break;
     }
-    return found;
+    const parsed = Schema.decodeUnknownResult(Source)(body.slice(start + 2, end).trim());
+    if (Result.isSuccess(parsed)) expressions.push({ source: parsed.success, start, end: end + 2 });
+    else {
+      const message = `The prompt has an empty expression at character ${start}. Add an expression between {{ and }}.`;
+      problems.push(
+        new ConfigFileError({
+          file,
+          stage: "expression",
+          expression: Option.none(),
+          message,
+          details: [{ path: ["body"], message }],
+        }),
+      );
+    }
+    cursor = end + 2;
+  }
+  return { expressions, problems };
+};
+
+const expressionFailures = (file: InstancePath, failures: Arr.NonEmptyArray<ConfigFileError>) =>
+  new ConfigFileError({
+    file,
+    stage: "expression",
+    expression: failures[0].expression,
+    message: failures.map(({ message }) => message).join("\n"),
+    details: failures.flatMap(
+      (failure) => failure.details ?? [{ path: ["body"], message: failure.message }],
+    ),
   });
 
 const render = (
@@ -208,7 +240,8 @@ const render = (
   const file = loopPath(loop.name);
   const environment = environmentFor(loop.trigger.on);
   return Effect.gen(function* () {
-    const expressions = yield* interpolations(file, loop.body);
+    const { expressions, problems } = interpolations(file, loop.body);
+    if (Arr.isArrayNonEmpty(problems)) return yield* expressionFailures(file, problems);
     const rendered = yield* Effect.forEach(expressions, (expression) =>
       engine.evaluateScalar(expression.source, environment, context).pipe(
         Effect.mapError((error) => expressionError(file, error, ["body"])),
@@ -262,60 +295,52 @@ export const parseAgentFile = Effect.fn("ConfigParser.parseAgentFile")(
     }),
 );
 
+/** Parses the export format without checking expressions, for form drafts. */
+export const parseLoopDraft = (file: InstancePath, source: string) =>
+  Effect.gen(function* () {
+    const name = yield* loopName(file);
+    const markdown = yield* splitMarkdown(file, source);
+    const yaml = yield* parseYaml(file, markdown.yaml);
+    const frontmatter = yield* Schema.decodeUnknownEffect(AuthoredLoopFrontmatter)(yaml, {
+      onExcessProperty: "error",
+      errors: "all",
+    }).pipe(Effect.mapError((error) => schemaError(file, error)));
+    const body = yield* Schema.decodeUnknownEffect(PromptTemplate)(markdown.body).pipe(
+      Effect.mapError((error) => {
+        const failure = schemaError(file, error);
+        return new ConfigFileError({
+          ...failure,
+          details: [{ path: ["body"], message: failure.message }],
+        });
+      }),
+    );
+    return new LoopFile({ name, ...frontmatter, body });
+  });
+
 const makeParseLoopFile = (engine: ExpressionEngine["Service"]) =>
   Effect.fn("ConfigParser.parseLoopFile")(
     (file: InstancePath, source: string): Effect.Effect<LoopFile, ConfigFileError> =>
       Effect.gen(function* () {
-        const name = yield* loopName(file);
-        const markdown = yield* splitMarkdown(file, source);
-        const yaml = yield* parseYaml(file, markdown.yaml);
-        const frontmatter = yield* Schema.decodeUnknownEffect(AuthoredLoopFrontmatter)(yaml, {
-          onExcessProperty: "error",
-          errors: "all",
-        }).pipe(Effect.mapError((error) => schemaError(file, error)));
-        const body = yield* Schema.decodeUnknownEffect(PromptTemplate)(markdown.body).pipe(
-          Effect.mapError((error) => schemaError(file, error)),
-        );
-        const environment: Environment = environmentFor(frontmatter.trigger.on);
+        const loop = yield* parseLoopDraft(file, source);
+        const { body } = loop;
+        const environment: Environment = environmentFor(loop.trigger.on);
         const failures: Array<ConfigFileError> = [];
-        const condition = yield* engine.checkBoolean(frontmatter.trigger.if, environment).pipe(
+        const condition = yield* engine.checkBoolean(loop.trigger.if, environment).pipe(
           Effect.mapError((error) => expressionError(file, error, ["trigger", "if"])),
           Effect.result,
         );
         if (Result.isFailure(condition)) failures.push(condition.failure);
-        const promptExpressions = yield* interpolations(file, body).pipe(Effect.result);
-        if (Result.isFailure(promptExpressions)) failures.push(promptExpressions.failure);
-        else {
-          const checked = yield* Effect.forEach(promptExpressions.success, ({ source }) =>
-            engine.checkScalar(source, environment).pipe(
-              Effect.mapError((error) => expressionError(file, error, ["body"])),
-              Effect.result,
-            ),
-          );
-          for (const result of checked) if (Result.isFailure(result)) failures.push(result.failure);
-        }
-        if (Arr.isArrayNonEmpty(failures))
-          return yield* new ConfigFileError({
-            file,
-            stage: "expression",
-            expression: failures[0].expression,
-            message: failures.map(({ message }) => message).join("\n"),
-            details: failures.flatMap(
-              (failure) => failure.details ?? [{ path: ["body"], message: failure.message }],
-            ),
-          });
-        return new LoopFile({
-          name,
-          trigger: frontmatter.trigger,
-          selector: frontmatter.selector,
-          approval: frontmatter.approval,
-          maxCycles: frontmatter.maxCycles,
-          permissions: frontmatter.permissions,
-          priority: frontmatter.priority,
-          step: frontmatter.step,
-          agent: frontmatter.agent,
-          body,
-        });
+        const prompt = interpolations(file, body);
+        failures.push(...prompt.problems);
+        const checked = yield* Effect.forEach(prompt.expressions, ({ source }) =>
+          engine.checkScalar(source, environment).pipe(
+            Effect.mapError((error) => expressionError(file, error, ["body"])),
+            Effect.result,
+          ),
+        );
+        for (const result of checked) if (Result.isFailure(result)) failures.push(result.failure);
+        if (Arr.isArrayNonEmpty(failures)) return yield* expressionFailures(file, failures);
+        return loop;
       }),
   );
 
