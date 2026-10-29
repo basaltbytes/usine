@@ -135,7 +135,7 @@ export const RunHeader = ({
             className="inline-flex items-center gap-2 font-medium text-foreground"
             style={shared ? { viewTransitionName: "run-state" } : undefined}
           >
-            <StateMark state={run.state} />
+            <StateMark state={run.state} className="ml-0.75" />
             {runStateLine(run, detail.unconfirmedStop, detail.machine)}
           </span>
           <PullRequestMarks pullRequests={Option.toArray(items.pullRequest)} />

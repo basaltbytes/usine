@@ -43,14 +43,14 @@ export const RunRow = ({ run, item, pullRequest, openRun }: RunRowProps) => {
       <TableRow className={cn(linkedRow, "[&>td]:align-top")}>
         <TableCell className="hidden py-3 sm:table-cell">
           <span className="inline-flex items-center gap-2 text-foreground">
-            <StateMark state={run.state} />
+            <StateMark state={run.state} className="ml-0.75" />
             {run.state}
           </span>
         </TableCell>
         <FillCell className="py-3 whitespace-normal">
           <div className="flex min-w-0 flex-col gap-1">
             <p className="flex min-w-0 items-baseline gap-2">
-              <StateMark state={run.state} className="self-center sm:hidden" />
+              <StateMark state={run.state} className="ml-0.75 self-center sm:hidden" />
               <Link
                 data-row-link
                 to="/projects/$owner/$name/runs/$run"

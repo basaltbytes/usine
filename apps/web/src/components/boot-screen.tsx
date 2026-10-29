@@ -8,7 +8,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "~/components/ui/empty";
-import { Spinner } from "~/components/ui/spinner";
+import { UsineMark } from "~/components/usine-mark";
 import { cn } from "~/lib/utils";
 
 type BootScreenProps = {
@@ -31,12 +31,15 @@ export const BootScreen = ({
     <Empty className="max-w-md p-0">
       <EmptyHeader className="gap-2">
         <EmptyMedia
-          className={cn(
-            "mb-1 [&_svg]:size-5",
-            tone === "error" ? "text-destructive" : "text-muted-foreground",
-          )}
+          className={cn("mb-1", tone === "error" ? "text-destructive" : "text-foreground")}
         >
-          {tone === "loading" ? <Spinner /> : <WarningCircleIcon weight="fill" />}
+          {tone === "loading" ? (
+            <span role="status" aria-label="Loading">
+              <UsineMark running className="block size-8" />
+            </span>
+          ) : (
+            <WarningCircleIcon weight="fill" className="size-5" />
+          )}
         </EmptyMedia>
         <EmptyTitle className="text-md font-semibold tracking-normal">{title}</EmptyTitle>
         <EmptyDescription className="text-sm text-muted-foreground wrap-anywhere">

@@ -503,7 +503,7 @@ describe("run transcript", () => {
     assert.strictEqual(tools(events)[0]?.state._tag, "Stopped");
     const markup = reader(events);
     assert.notInclude(markup, "Succeeded");
-    assert.notInclude(markup, "running");
+    assert.notInclude(markup.replace(/<[^>]+>/gu, ""), "running");
   });
 
   it("names the Attempt's models in its metadata line instead of a start row, and keeps every session's prose", () => {
@@ -528,7 +528,10 @@ describe("run transcript", () => {
     assert.include(markup, "Child reviewer on Codex,");
     assert.include(markup, brain.model);
     assert.notInclude(markup, "Attempt started");
-    assert.match(markup, /Read README\.md<span[^>]*>, (?:<!-- -->)?1(?:<!-- -->)? running/u);
+    assert.match(
+      markup,
+      /Read README\.md<span[^>]*>, <svg data-slot="usine-mark" data-running=""[^>]*>.*?<\/svg>1(?:<!-- -->)? running/u,
+    );
   });
 
   it("merges transcript tails by sequence without replaying an existing event", () => {

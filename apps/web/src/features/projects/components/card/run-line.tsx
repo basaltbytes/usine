@@ -12,7 +12,7 @@ export const RunLine = ({ run }: RunLineProps) => {
   const since = runLineSince(run);
   return (
     <p className="flex min-w-0 items-center gap-1.5 text-xs whitespace-nowrap text-muted-foreground">
-      <StateMark state={run.state} className="mr-0.5" />
+      <StateMark state={run.state} className="mr-0.5 ml-0.75" />
       <span className="truncate text-foreground">{run.loop}</span>
       <span className="shrink-0">{run.state}</span>
       {since !== null && (

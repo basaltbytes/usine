@@ -1,5 +1,5 @@
 import { Match, Option } from "effect";
-import { StateMark } from "~/components/status-badge";
+import { UsineMark } from "~/components/usine-mark";
 import { useNow } from "~/hooks/use-now";
 import { cn } from "~/lib/utils";
 import { clockLabel, timestampLabel } from "~/lib/strings";
@@ -101,7 +101,7 @@ export const CurrentActivity = ({ chapter }: CurrentActivityProps) => {
   return (
     <div role="status" aria-label="Current activity" className="min-w-0 space-y-0.5 text-xs">
       <p className="flex min-w-0 items-center gap-2">
-        <StateMark state="Running" />
+        <UsineMark running className="size-3 text-run-active" />
         {session !== undefined && (
           <span className="shrink-0 font-medium text-foreground">
             {session.session._tag === "ParentSession" ? "Parent" : session.session.agent}
@@ -122,14 +122,14 @@ export const CurrentActivity = ({ chapter }: CurrentActivityProps) => {
         })}
       </p>
       {activity.detail !== "" && (
-        <p className="truncate pl-3.5 font-mono text-muted-foreground" title={activity.detail}>
+        <p className="truncate pl-5 font-mono text-muted-foreground" title={activity.detail}>
           {activity.detail}
         </p>
       )}
       {Option.match(chapter.lastActivityAt, {
         onNone: () => null,
         onSome: (at) => (
-          <p aria-live="off" className="pl-3.5 text-muted-foreground">
+          <p aria-live="off" className="pl-5 text-muted-foreground">
             Last activity {elapsedActivity(at, now)} ago
           </p>
         ),
@@ -167,7 +167,7 @@ const ConnectivityLine = ({ warning, now }: ConnectivityLineProps) => {
   });
   return (
     <>
-      <p className="flex min-w-0 items-baseline gap-2 pl-3.5">
+      <p className="flex min-w-0 items-baseline gap-2 pl-5">
         <span className="min-w-0 text-warning">
           <span className="sr-only">Warning: </span>
           {line.text}
@@ -181,7 +181,7 @@ const ConnectivityLine = ({ warning, now }: ConnectivityLineProps) => {
         </span>
       </p>
       {line.detail !== null && (
-        <p className="truncate pl-3.5 text-muted-foreground" title={line.detail}>
+        <p className="truncate pl-5 text-muted-foreground" title={line.detail}>
           {line.detail}
         </p>
       )}

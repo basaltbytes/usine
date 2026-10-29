@@ -34,7 +34,7 @@ const Runs = ({ task }: RunsProps) => {
         {loops.map(({ loop, state }, index) => (
           <Fragment key={loop}>
             {index > 0 && <span className="text-muted-foreground"> · </span>}
-            <StateMark state={state} className="mr-1.5 align-middle" />
+            <StateMark state={state} className="mr-2 ml-0.75 align-middle" />
             {loop}
             <span className="sr-only"> {state}</span>
           </Fragment>
