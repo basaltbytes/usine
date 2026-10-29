@@ -1,3 +1,4 @@
+import { usePageCommands } from "~/components/command-palette/context";
 import { DotsThreeIcon } from "@phosphor-icons/react";
 import type { RunId } from "@usine/core/run";
 import type { RunView } from "@usine/orchestrator/operator";
@@ -59,18 +60,6 @@ export const RowActions = ({ run, onEdit, openRun, status }: RowActionsProps) =>
   const action = useRunAction();
   const again = useRunAgain();
   const [confirmingCancel, setConfirmingCancel] = useState(false);
-  if (action.isPending && action.variables !== undefined)
-    return (
-      <span role="status" className="text-xs text-muted-foreground">
-        {runActionProgress[action.variables.request.action]}
-      </span>
-    );
-  if (again.isPending)
-    return (
-      <span role="status" className="text-xs text-muted-foreground">
-        {runAgainProgress}
-      </span>
-    );
   const act = (request: RunActionRequest) =>
     action.mutate(
       { runId: run.id, request },
@@ -118,6 +107,31 @@ export const RowActions = ({ run, onEdit, openRun, status }: RowActionsProps) =>
       destructive: true,
       select: () => setConfirmingCancel(true),
     });
+  usePageCommands(
+    action.isPending || again.isPending || confirmingCancel
+      ? []
+      : [
+          ...(primary === null
+            ? []
+            : [{ label: runActionLabel[primary], select: () => act({ action: primary }) }]),
+          ...entries,
+        ].map(({ label, select }) => ({
+          label: `${label} · ${run.loop} · ${run.id.slice(0, 8)}`,
+          run: select,
+        })),
+  );
+  if (action.isPending && action.variables !== undefined)
+    return (
+      <span role="status" className="text-xs text-muted-foreground">
+        {runActionProgress[action.variables.request.action]}
+      </span>
+    );
+  if (again.isPending)
+    return (
+      <span role="status" className="text-xs text-muted-foreground">
+        {runAgainProgress}
+      </span>
+    );
   return (
     <div className="relative z-10 flex items-center justify-end gap-1">
       {primary !== null && (

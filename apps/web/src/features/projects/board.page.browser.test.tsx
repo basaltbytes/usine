@@ -172,6 +172,7 @@ it("scrolls a long lane on its own and fades the edges that hide cards", async (
     new ReadyOverview({ projects: [projectWith(manyTasks(30))], loops: [], needsYou: [] }),
   );
   await mountBoard(1024);
+  await expect.element(page.getByLabelText("Last updated", { exact: true })).toBeVisible();
   const cards = page.getByLabelText("Backlog cards").element();
   const otherLane = lane("Ready").getBoundingClientRect().top;
   expect(cards.scrollHeight).toBeGreaterThan(cards.clientHeight);

@@ -1,3 +1,4 @@
+import { usePageCommands } from "~/components/command-palette/context";
 import { DotsThreeIcon } from "@phosphor-icons/react";
 import type { RunId } from "@usine/core/run";
 import type { RunDetailView } from "@usine/orchestrator/operator";
@@ -63,6 +64,15 @@ export const ContextualActions = ({
       Cancel: () => setConfirmCancel(true),
     });
   const { primary, secondary, more } = actionPlan(run);
+  usePageCommands(
+    busy || confirmCancel
+      ? []
+      : [primary, secondary, ...more].flatMap((action) =>
+          action === null
+            ? []
+            : [{ label: `${actionLabel(action)} · ${run.id}`, run: () => select(action) }],
+        ),
+  );
   if (primary === null && secondary === null && more.length === 0) return null;
   return (
     <div className={cn("max-w-sm space-y-2", className)}>

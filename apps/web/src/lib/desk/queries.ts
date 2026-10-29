@@ -8,6 +8,7 @@ export const deskQuery = () =>
   queryOptions({
     queryKey: ["desk"] as const,
     queryFn: () => api((client) => client.desk()),
+    meta: { refreshLabel: "Activity" },
     refetchInterval: (query) => {
       const desk = query.state.data;
       const busy =

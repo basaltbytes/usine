@@ -1,3 +1,6 @@
+import { CommandPalette } from "~/components/command-palette/palette";
+import { PageCommandsProvider } from "~/components/command-palette/context";
+import { WithRouter } from "~/lib/testing/memory-router";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AgentName } from "@usine/core/agent";
@@ -17,7 +20,7 @@ import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { Claimed, CycleBlocked, RunAgainResult } from "@usine/engine/engine";
-import { RunView } from "@usine/orchestrator/operator";
+import { ReadyOverview, RunView } from "@usine/orchestrator/operator";
 import { Schema } from "effect";
 import type { ReactNode } from "react";
 import { flushSync } from "react-dom";
@@ -342,4 +345,48 @@ it("retains unsent guidance and displays a delivery failure", async () => {
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect.element(page.getByText("Worker is disconnected", { exact: true })).toBeVisible();
   await expect.element(page.getByLabelText("Message the parent")).toHaveValue("Keep this guidance");
+});
+
+it("offers the run's overflow actions in the palette and retains cancellation confirmation", async () => {
+  const run = new RunView({
+    ...failedRun,
+    state: "Waiting",
+    canApprove: true,
+    canCancel: true,
+    canRetry: false,
+    canResolveFailure: false,
+  });
+  mount(
+    <WithRouter>
+      <PageCommandsProvider>
+        <CommandPalette overview={new ReadyOverview({ projects: [], loops: [], needsYou: [] })} />
+        <ContextualActions
+          detail={{ run, agentDefinitionChanged: false }}
+          onEdit={() => {}}
+          openRun={() => {}}
+        />
+      </PageCommandsProvider>
+    </WithRouter>,
+  );
+  await page.getByRole("button", { name: "Open commands" }).click();
+  const dialog = page.getByRole("dialog", { name: "Commands", exact: true });
+  await expect
+    .element(dialog.getByRole("option", { name: "Overview", exact: true }))
+    .toHaveAttribute("aria-selected", "true");
+  await userEvent.keyboard("{Enter}");
+  await expect.element(dialog).not.toBeInTheDocument();
+  expect(await commands.recordedInterventions()).toEqual([]);
+  await page.getByRole("button", { name: "Open commands" }).click();
+  await expect
+    .element(dialog.getByRole("option", { name: `Approve · ${run.id}`, exact: true }))
+    .toBeVisible();
+  await expect
+    .element(dialog.getByRole("option", { name: "Retry", exact: true }))
+    .not.toBeInTheDocument();
+  await dialog.getByRole("combobox").fill("Cancel run");
+  await userEvent.keyboard("{Enter}");
+  await expect
+    .element(page.getByRole("button", { name: "Confirm cancel", exact: true }))
+    .toBeVisible();
+  expect(await commands.recordedInterventions()).toEqual([]);
 });

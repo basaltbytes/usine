@@ -9,7 +9,7 @@ import { OperatorHttpError } from "@usine/orchestrator/operator/http";
 import { Option, Schema } from "effect";
 import { useState } from "react";
 import { ErrorAlert } from "~/components/error-alert";
-import { Button } from "~/components/ui/button";
+import { CommandButton } from "~/components/command-palette/button";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { entityHref, entityKey, entityTemplate } from "~/features/configuration/lib/entities";
@@ -102,7 +102,8 @@ const CreationForm = ({ kind, cancel }: CreationFormProps) => {
           {error !== null && <ErrorAlert message={error} />}
           {current.isError && <ErrorAlert message={current.error.message} />}
           <div className="flex gap-2">
-            <Button
+            <CommandButton
+              command={editorCopy.edit}
               type="submit"
               disabled={
                 checking ||
@@ -112,10 +113,15 @@ const CreationForm = ({ kind, cancel }: CreationFormProps) => {
               }
             >
               {checking ? editorCopy.loading : editorCopy.edit}
-            </Button>
-            <Button type="button" variant="ghost" onClick={cancel}>
+            </CommandButton>
+            <CommandButton
+              command={editorCopy.cancel}
+              type="button"
+              variant="ghost"
+              onClick={cancel}
+            >
               {editorCopy.cancel}
-            </Button>
+            </CommandButton>
           </div>
         </form>
       ) : (
@@ -147,7 +153,9 @@ export const CreateEntity = ({ kind }: CreateEntityProps) => {
     <CreationForm kind={kind} cancel={() => setOpen(false)} />
   ) : (
     <div>
-      <Button onClick={() => setOpen(true)}>{editorCopy.new}</Button>
+      <CommandButton command={editorCopy.new} onClick={() => setOpen(true)}>
+        {editorCopy.new}
+      </CommandButton>
     </div>
   );
 };

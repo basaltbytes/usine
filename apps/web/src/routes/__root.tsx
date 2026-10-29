@@ -1,3 +1,6 @@
+import { CommandPalette } from "~/components/command-palette/palette";
+import { PageCommandsProvider, PageCommandsScope } from "~/components/command-palette/context";
+import { RefreshProvider } from "~/components/refresh/provider";
 import { membersLabel, tokensPageLabel } from "~/lib/strings";
 import { WarningIcon } from "@phosphor-icons/react";
 import { useSuspenseQuery, type QueryClient } from "@tanstack/react-query";
@@ -192,49 +195,70 @@ const Shell = () => {
         project={project === undefined ? undefined : projectId(project)}
         needsYou={needsYouByProject(data.needsYou, data.projects)}
         needsYouTotal={data.needsYou.length}
+        runningTotal={
+          new Set(
+            data.projects.flatMap(({ runs }) =>
+              runs.filter(({ state }) => state === "Running").map(({ id }) => id),
+            ),
+          ).size
+        }
         live={live}
       />
       <SidebarInset className="h-svh min-w-0 overflow-hidden">
-        <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3 md:px-4">
-          <SidebarTrigger className="text-muted-foreground hover:text-foreground" />
-          <Breadcrumb className="min-w-0 flex-1">
-            <BreadcrumbList>
-              <Crumbs
-                view={view}
-                project={project}
-                runId={params.run === undefined ? undefined : RunId.make(params.run)}
-                task={
-                  project === undefined || params.number === undefined
-                    ? undefined
-                    : taskCrumb(data, repository ?? project.repository, params.number)
-                }
-              />
-            </BreadcrumbList>
-          </Breadcrumb>
-          <NotificationTray needs={data.needsYou} />
-        </header>
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-          {data._tag === "NeedsSetup" && (
-            <Alert className="rounded-none border-x-0 border-t-0 bg-transparent px-4 py-4 md:px-5">
-              <WarningIcon weight="fill" className="text-needs-you" />
-              <AlertTitle className="text-md">GitHub App not set up</AlertTitle>
-              <AlertDescription className="max-w-prose">
-                <p>
-                  {data.errorTag}. Set <code>USINE_GITHUB_APP_ID</code> and{" "}
-                  <code>USINE_GITHUB_PRIVATE_KEY</code>, or create{" "}
-                  <code>.usine/github-app.json</code> with mode 0600, then restart{" "}
-                  <code>usine up</code>. Credentials are read at startup only.
-                </p>
-              </AlertDescription>
-            </Alert>
-          )}
-          <Outlet />
-        </div>
-        {shownRun !== undefined && (
-          <Suspense fallback={null}>
-            <RunDrawer key={shownRun} runId={shownRun} open={run !== undefined} close={closeRun} />
-          </Suspense>
-        )}
+        <PageCommandsProvider>
+          <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3 md:px-4">
+            <SidebarTrigger className="text-muted-foreground hover:text-foreground" />
+            <Breadcrumb className="min-w-0 flex-1">
+              <BreadcrumbList>
+                <Crumbs
+                  view={view}
+                  project={project}
+                  runId={params.run === undefined ? undefined : RunId.make(params.run)}
+                  task={
+                    project === undefined || params.number === undefined
+                      ? undefined
+                      : taskCrumb(data, repository ?? project.repository, params.number)
+                  }
+                />
+              </BreadcrumbList>
+            </Breadcrumb>
+            <CommandPalette overview={data} />
+            <NotificationTray needs={data.needsYou} />
+          </header>
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+            {data._tag === "NeedsSetup" && (
+              <Alert className="rounded-none border-x-0 border-t-0 bg-transparent px-4 py-4 md:px-5">
+                <WarningIcon weight="fill" className="text-needs-you" />
+                <AlertTitle className="text-md">GitHub App not set up</AlertTitle>
+                <AlertDescription className="max-w-prose">
+                  <p>
+                    {data.errorTag}. Set <code>USINE_GITHUB_APP_ID</code> and{" "}
+                    <code>USINE_GITHUB_PRIVATE_KEY</code>, or create{" "}
+                    <code>.usine/github-app.json</code> with mode 0600, then restart{" "}
+                    <code>usine up</code>. Credentials are read at startup only.
+                  </p>
+                </AlertDescription>
+              </Alert>
+            )}
+            <PageCommandsScope active={run === undefined}>
+              <RefreshProvider>
+                <Outlet />
+              </RefreshProvider>
+            </PageCommandsScope>
+          </div>
+          <PageCommandsScope active={run !== undefined}>
+            {shownRun !== undefined && (
+              <Suspense fallback={null}>
+                <RunDrawer
+                  key={shownRun}
+                  runId={shownRun}
+                  open={run !== undefined}
+                  close={closeRun}
+                />
+              </Suspense>
+            )}
+          </PageCommandsScope>
+        </PageCommandsProvider>
       </SidebarInset>
     </SidebarProvider>
   );

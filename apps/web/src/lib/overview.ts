@@ -46,6 +46,7 @@ export const overviewQuery = () =>
   queryOptions({
     queryKey: ["overview"] as const,
     queryFn: () => api((client) => client.overview()),
+    meta: { refreshLabel: "Overview" },
     refetchInterval: (query) => {
       const overview = query.state.data;
       if (overview?._tag === "NeedsSetup") return false;

@@ -8,7 +8,7 @@ import {
   StaleRevisionRefusal,
 } from "@usine/orchestrator/operator/http";
 import { Result, type Schema } from "effect";
-import { Button } from "~/components/ui/button";
+import { CommandButton } from "~/components/command-palette/button";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { EntityFields } from "~/features/configuration/components/forms/entity";
@@ -89,7 +89,8 @@ export const ConfigurationEditorForm = ({
       }}
     >
       {hasForm(entity) && (
-        <Button
+        <CommandButton
+          command={editor.mode === "form" ? formCopy.text : formCopy.form}
           type="button"
           variant="outline"
           className="self-start"
@@ -112,7 +113,7 @@ export const ConfigurationEditorForm = ({
           }}
         >
           {editor.mode === "form" ? formCopy.text : formCopy.form}
-        </Button>
+        </CommandButton>
       )}
       <fieldset disabled={write.isPending} className="min-w-0">
         {editor.mode === "text" ? (
@@ -166,15 +167,22 @@ export const ConfigurationEditorForm = ({
         />
       </Label>
       <div className="flex flex-wrap gap-2">
-        <Button
+        <CommandButton
+          command={editorCopy.save}
           type="submit"
           disabled={write.isPending || write.error instanceof StaleRevisionRefusal}
         >
           {write.isPending ? editorCopy.saving : editorCopy.save}
-        </Button>
-        <Button type="button" variant="ghost" onClick={cancel} disabled={write.isPending}>
+        </CommandButton>
+        <CommandButton
+          command={editorCopy.cancel}
+          type="button"
+          variant="ghost"
+          onClick={cancel}
+          disabled={write.isPending}
+        >
           {editorCopy.cancel}
-        </Button>
+        </CommandButton>
       </div>
       {draft !== null && <SourceEditor label={editorCopy.draft} value={draft} />}
     </form>

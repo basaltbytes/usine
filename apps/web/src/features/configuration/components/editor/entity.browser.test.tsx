@@ -8,7 +8,7 @@ import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/rea
 import { ConfigurationView, ProjectView, ReadyOverview } from "@usine/orchestrator/operator";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi, type MockInstance } from "vitest";
 import { commands, page, userEvent } from "vitest/browser";
 import { entityKey } from "~/features/configuration/lib/entities";
 import { entityQuery } from "~/features/configuration/queries";
@@ -40,8 +40,10 @@ let host: HTMLDivElement;
 let root: Root;
 let client: QueryClient;
 let wasDark: boolean;
+let consoleError: MockInstance<typeof console.error>;
 
 beforeEach(() => {
+  consoleError = vi.spyOn(console, "error");
   wasDark = document.documentElement.classList.contains("dark");
   document.documentElement.classList.add("dark");
   host = document.createElement("div");
@@ -60,6 +62,11 @@ afterEach(() => {
   client.clear();
   host.remove();
   document.documentElement.classList.toggle("dark", wasDark);
+  const renderWarnings = consoleError.mock.calls.filter(([message]) =>
+    String(message).includes("Cannot update a component"),
+  );
+  consoleError.mockRestore();
+  expect(renderWarnings).toEqual([]);
 });
 
 const mount = async (
@@ -1009,4 +1016,31 @@ it("creates a project with two ordered repositories and lanes without phone page
       },
     },
   });
+});
+
+it("opens the palette on both shortcuts and offers only the current editor's available actions", async () => {
+  await mount();
+  await expect.element(button("Edit")).toBeEnabled();
+  await userEvent.keyboard("{Control>}k{/Control}");
+  const dialog = page.getByRole("dialog", { name: "Commands", exact: true });
+  await expect.element(dialog).toBeVisible();
+  const input = dialog.getByRole("combobox");
+  await expect.element(input).toHaveFocus();
+  await input.fill("Edit");
+  await userEvent.keyboard("{Enter}");
+  await expect.element(dialog).not.toBeInTheDocument();
+  await expect.element(button("Save")).toBeVisible();
+  await userEvent.keyboard("{Meta>}k{/Meta}");
+  await expect.element(dialog).toBeVisible();
+  await expect
+    .element(dialog.getByRole("option", { name: "Edit", exact: true }))
+    .not.toBeInTheDocument();
+  await expect.element(dialog.getByRole("option", { name: "Save", exact: true })).toBeVisible();
+  await dialog.getByRole("combobox").fill("Cancel");
+  await userEvent.keyboard("{Enter}");
+  await expect.element(button("Edit")).toBeEnabled();
+  await expect.element(button("Save")).not.toBeInTheDocument();
+  await button("Open commands").click();
+  await userEvent.keyboard("{Escape}");
+  await expect.element(button("Open commands")).toHaveFocus();
 });

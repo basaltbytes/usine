@@ -104,3 +104,10 @@ export const signOutLabel = "Sign out";
 export const repositoryFilterLabel = "Repository";
 export const allRepositoriesLabel = "All repositories";
 export const repositoryCountLabel = (count: number): string => `${count} repositories`;
+
+export const refreshCopy = {
+  label: "Last updated",
+  waiting: "Waiting for the first refresh",
+  failed: (sources: string) =>
+    ` · Refresh failing for over a minute: ${sources}. Showing last available data.`,
+};

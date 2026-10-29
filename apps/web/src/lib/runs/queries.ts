@@ -35,6 +35,7 @@ export const runDetailQuery = (queryClient: QueryClient, runId: RunId) => {
     },
     staleTime: 1_000,
     structuralSharing: RUN_DETAIL_CACHE_STRUCTURAL_SHARING,
+    meta: { refreshLabel: "Run" },
     refetchInterval: (query) => (query.state.data?.run.canCancel === true ? 1_000 : false),
   });
 };

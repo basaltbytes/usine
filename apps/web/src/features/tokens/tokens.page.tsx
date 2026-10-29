@@ -1,3 +1,5 @@
+import { CommandButton } from "~/components/command-palette/button";
+import { PageHeading } from "~/components/page";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "~/components/ui/button";
@@ -40,7 +42,7 @@ export const TokensPage = () => {
   return (
     <section className="space-y-6 p-4 md:p-5">
       <div>
-        <h1 className="text-xl font-semibold">{title}</h1>
+        <PageHeading title={title} />
         <p className="mt-2 text-sm text-muted-foreground">{description}</p>
       </div>
       {error !== undefined && <ErrorAlert message={error} />}
@@ -72,9 +74,14 @@ export const TokensPage = () => {
                     </Button>
                   </>
                 ) : (
-                  <Button variant="ghost" disabled={pending} onClick={() => setSelected(token.id)}>
+                  <CommandButton
+                    command={`${revoke} · ${token.name} · ${token.id}`}
+                    variant="ghost"
+                    disabled={pending}
+                    onClick={() => setSelected(token.id)}
+                  >
                     {revoke}
-                  </Button>
+                  </CommandButton>
                 )}
               </div>
             </li>

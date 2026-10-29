@@ -7,6 +7,7 @@ export const configurationQuery = () =>
   queryOptions({
     queryKey: ["configuration"] as const,
     queryFn: () => api((client) => client.configuration()),
+    meta: { refreshLabel: "Configuration" },
     refetchInterval: CONFIGURATION_REFRESH_MS,
   });
 
