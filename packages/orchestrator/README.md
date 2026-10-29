@@ -14,6 +14,8 @@ The platform-free entry points are `PollingTriggers` (`/polling-triggers`), `Sch
 
 `Operator.overview(instance)` keeps the latest polling and schedule failures visible after sibling work continues. Concurrent reads at one durable revision share a computation.
 
+Approval needs include the item's number, title, and GitHub link even when the item is outside the board's 500-item window. The overview reads those details from the stored item using the run's item key. Schedule runs and items without a readable stored projection have no item link.
+
 `Operator.statistics(instance, window)` and `Operator.runStatistics(instance, window)` cache their computed views in memory for up to five minutes, separately for `7d`, `30d`, and `all`. Concurrent requests for the same view and window share a computation. Each request checks the store's projection revision: run closure, retry, failure resolution, and close-time changes invalidate cached views, as do item and budget changes. Reloading the instance also invalidates them. If the revision record is missing, requests bypass the cache. Debug logs report cache hits and misses with the window.
 
 `GET /api/statistics/runs` includes `needsAttention.failureWait`, the median time from failure to the first recorded operator answer. `retryWait` and `resolutionWait` report those answers separately. A resolution followed by a retry counts once, as a resolution. Unanswered failures and older resolutions without timestamps contribute no wait.
