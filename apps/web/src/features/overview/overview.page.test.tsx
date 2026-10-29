@@ -62,8 +62,11 @@ describe("Desk", () => {
     const html = text(
       render(<DeskNeedsYou needs={overview.needsYou} polls={desk.polls} now={now} />),
     );
-    assert.include(html, "start-dev: approval needed");
-    assert.include(html, "Question from start-dev");
+    assert.include(html, "Approval needed 1");
+    assert.include(html, "start-dev · basaltbytes/usine");
+    assert.include(html, "Approve");
+    assert.include(html, "Run failed 1");
+    assert.include(html, "Details");
     assert.include(html, "Cycle budget exhausted");
     assert.include(html, "Reset cycle budget");
     assert.notInclude(html, "Nothing needs attention");
@@ -76,7 +79,8 @@ describe("Desk", () => {
       message: "Gateway check failed",
     });
     const html = render(<DeskNeedsYou needs={[need]} polls={desk.polls} now={now} />);
-    assert.include(text(html), "boat-pool: preflight failed");
+    assert.include(text(html), "Worker preflight failed 1");
+    assert.include(text(html), "boat-pool · Gateway check failed");
     assert.include(text(html), "Gateway check failed");
     assert.include(text(html), "preflight retries automatically");
     assert.include(html, "/configuration/workers/boat-pool");

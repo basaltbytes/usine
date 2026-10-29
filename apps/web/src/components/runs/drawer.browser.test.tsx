@@ -33,7 +33,7 @@ import { Option, Schema } from "effect";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { expect, it } from "vitest";
-import { commands, page } from "vitest/browser";
+import { commands, page, userEvent } from "vitest/browser";
 import { overviewQuery } from "~/lib/overview";
 import { deskQuery } from "~/lib/desk/queries";
 import { runDetailQuery } from "~/lib/runs/queries";
@@ -182,7 +182,8 @@ it("resolves a failure from Needs attention while retaining unrelated attention,
       ),
     );
     await page
-      .getByRole("button", { name: /implement: agent failure.*Work was completed separately/ })
+      .getByRole("region", { name: "Run failed (1)" })
+      .getByRole("button", { name: "Details", exact: true })
       .click();
     await page.getByRole("button", { name: "More actions", exact: true }).click();
     await page.getByRole("menuitem", { name: "Mark resolved", exact: true }).click();
@@ -212,18 +213,20 @@ it("resolves a failure from Needs attention while retaining unrelated attention,
     await page.getByRole("button", { name: "Close", exact: true }).click();
     const needs = page.getByRole("region", { name: "Needs attention" });
     await expect
-      .element(needs.getByRole("button", { name: /implement: agent failure/ }))
+      .element(needs.getByRole("region", { name: "Run failed (1)", includeHidden: true }))
       .not.toBeInTheDocument();
     await expect
       .element(
-        needs.getByRole("button", {
-          name: /implement: approval needed.*Issue #7, open Write the release notes/,
+        needs.getByRole("link", {
+          name: /Write the release notes/,
+          exact: true,
         }),
       )
       .toBeVisible();
     await expect.element(needs.getByRole("button", { name: "Approve", exact: true })).toBeVisible();
+    await needs.getByRole("button", { name: /^Actions for/ }).click();
     await expect
-      .element(needs.getByRole("button", { name: "Cancel run", exact: true }))
+      .element(page.getByRole("menuitem", { name: "Cancel run", exact: true }))
       .toBeVisible();
     expect(
       queryClient.getQueryData<ReadyOverview>(overviewQuery().queryKey)?.projects[0]?.status,
@@ -304,14 +307,15 @@ it("leaves a closed issue's failed run out of Needs attention and marks the issu
     const needs = page.getByRole("region", { name: "Needs attention", includeHidden: true });
     await expect
       .element(
-        needs.getByRole("button", {
-          name: /implement: approval needed.*Issue #7, open Write the release notes/,
+        needs.getByRole("link", {
+          name: /Write the release notes/,
+          exact: true,
           includeHidden: true,
         }),
       )
       .toBeInTheDocument();
     await expect
-      .element(needs.getByRole("button", { name: /implement: agent failure/, includeHidden: true }))
+      .element(needs.getByRole("region", { name: "Run failed (1)", includeHidden: true }))
       .not.toBeInTheDocument();
   } finally {
     flushSync(() => root.unmount());
@@ -530,11 +534,13 @@ it("shows the push refusal on the run page and in Needs attention alongside reta
         </QueryClientProvider>,
       ),
     );
-    const needs = page.getByRole("region", { name: "Needs attention" });
+    await page.getByRole("button", { name: "Needs attention (1)", exact: true }).click();
+    const needs = page.getByRole("dialog", { name: "Needs attention 1" });
+    await expect.element(needs.getByRole("button", { name: "Details", exact: true })).toBeVisible();
     await expect
-      .element(needs.getByRole("button", { name: /implement: github refused push/ }))
-      .toBeVisible();
-    await expect.element(needs.getByText(message, { exact: true })).toBeVisible();
+      .element(needs.getByText("implement · resolution/project", { exact: false }))
+      .toHaveAttribute("title", message);
+    await userEvent.keyboard("{Escape}");
     await expect.element(page.getByText("GitHub refused push", { exact: true })).toBeVisible();
     await expect.element(page.getByText(message, { exact: true }).last()).toBeVisible();
     await expect.element(page.getByText("/worker/checkout", { exact: true })).toBeVisible();

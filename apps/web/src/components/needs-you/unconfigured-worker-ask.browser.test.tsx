@@ -38,7 +38,7 @@ const renderNeeds = (need: UnconfiguredWorkerNeed) =>
     ),
   );
 
-const needs = () => page.getByRole("region", { name: "Needs attention" });
+const needs = () => page.getByRole("region", { name: "Unconfigured worker (1)" });
 
 beforeEach(() => {
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -66,7 +66,10 @@ it("says how many attempts still run on a removed worker and offers no discard u
   await expect
     .element(needs().getByRole("button", { name: "Discard leftovers", exact: true }))
     .not.toBeInTheDocument();
-  await expect.element(needs().getByRole("button", { name: "Dismiss", exact: true })).toBeEnabled();
+  await needs()
+    .getByRole("button", { name: /^Actions for/ })
+    .click();
+  await expect.element(page.getByRole("menuitem", { name: "Dismiss", exact: true })).toBeEnabled();
 });
 
 it("offers Discard leftovers once no attempt runs on the worker, and shows why a discard is refused", async () => {

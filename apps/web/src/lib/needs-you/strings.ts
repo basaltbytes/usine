@@ -122,3 +122,28 @@ export const workerAttemptLabel = ({
   `${repository} · ${loop} · attempt ${attemptNumber}`;
 
 export const openWorkerLabel = "Open worker";
+
+export const attentionTitle = "Needs attention";
+export const attentionEmpty = "Nothing needs attention";
+export const attentionOverviewLink = "View all on Overview";
+export const attentionBellLabel = (count: number) => `Needs attention (${count})`;
+
+export const needKindLabel = {
+  ApprovalNeed: "Approval needed",
+  CycleBudgetNeed: "Cycle budget exhausted",
+  WorkerPreflightNeed: "Worker preflight failed",
+  UnconfiguredWorkerNeed: "Unconfigured worker",
+  UnresponsiveWorkerNeed: "Unresponsive worker",
+  RunFailureNeed: "Run failed",
+  BoardProjectionNeed: "Board item unavailable",
+  PollFailureNeed: "Poll failed",
+  PreflightFindingNeed: "Label preflight failed",
+  ScheduleFailureNeed: "Schedule failed",
+  ConfigFileNeed: "Configuration file not loaded",
+  UnconfirmedStopNeed: "Parent task not stopped",
+} satisfies Record<NeedView["_tag"], string>;
+
+export const needDetailsLabel = "Details";
+export const needOpenItemLabel = "Open item";
+export const needOpenRunLabel = "Open run";
+export const needActionsLabel = (title: string) => `Actions for ${title}`;

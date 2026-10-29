@@ -12,11 +12,16 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "~/components/ui/alert-dialog";
+import { DropdownMenuItem } from "~/components/ui/dropdown-menu";
 import { Button } from "~/components/ui/button";
 import { itemIdentity, useOverview } from "~/components/item/identity";
-import { cn } from "~/lib/utils";
 import { useOpenRun } from "~/hooks/use-open-run";
-import { needCopy, workerAttemptLabel, openWorkerLabel } from "~/lib/needs-you/strings";
+import {
+  needCopy,
+  needKindLabel,
+  workerAttemptLabel,
+  openWorkerLabel,
+} from "~/lib/needs-you/strings";
 import { runActionLabel, runActionProgress } from "~/lib/runs/strings";
 import { isRunOperationRejected, usePendingRunAction, useRunAction } from "~/hooks/runs/actions";
 import { CycleBudgetAsk } from "~/components/needs-you/cycle-budget-ask";
@@ -26,14 +31,13 @@ import { UnconfiguredWorkerAsk } from "~/components/needs-you/unconfigured-worke
 type ApprovalAskProps = {
   readonly need: ApprovalNeed;
   readonly dismiss: ReactNode;
-  readonly compact: boolean;
 };
 
 /**
  * Disables the buttons while any screen sends an action on the Run. If the server rejects the action
  * because the Run changed state, shows no error.
  */
-const ApprovalAsk = ({ need, compact, dismiss }: ApprovalAskProps) => {
+const ApprovalAsk = ({ need, dismiss }: ApprovalAskProps) => {
   const openRun = useOpenRun();
   const action = useRunAction();
   const [confirmingCancel, setConfirmingCancel] = useState(false);
@@ -44,9 +48,10 @@ const ApprovalAsk = ({ need, compact, dismiss }: ApprovalAskProps) => {
   return (
     <>
       <NeedItem
-        copy={origin === undefined ? copy : { ...copy, detail: origin.title }}
+        copy={copy}
+        loop={need.loop}
+        heading={need.loop}
         item={origin}
-        compact={compact}
         dismiss={dismiss}
         open={() => openRun(need.runId)}
         error={
@@ -55,21 +60,21 @@ const ApprovalAsk = ({ need, compact, dismiss }: ApprovalAskProps) => {
             : action.error.message
         }
         actions={
-          <>
-            <Button
-              disabled={sent !== undefined}
-              onClick={() => action.mutate({ runId: need.runId, request: { action: "approve" } })}
-            >
-              {sent === "approve" ? runActionProgress.approve : runActionLabel.approve}
-            </Button>
-            <Button
-              variant="ghost"
-              disabled={sent !== undefined}
-              onClick={() => setConfirmingCancel(true)}
-            >
-              {sent === "cancel" ? runActionProgress.cancel : runActionLabel.cancel}
-            </Button>
-          </>
+          <Button
+            disabled={sent !== undefined}
+            onClick={() => action.mutate({ runId: need.runId, request: { action: "approve" } })}
+          >
+            {sent === "approve" ? runActionProgress.approve : runActionLabel.approve}
+          </Button>
+        }
+        menu={
+          <DropdownMenuItem
+            variant="destructive"
+            disabled={sent !== undefined}
+            onClick={() => setConfirmingCancel(true)}
+          >
+            {sent === "cancel" ? runActionProgress.cancel : runActionLabel.cancel}
+          </DropdownMenuItem>
         }
       />
       <AlertDialog open={confirmingCancel} onOpenChange={setConfirmingCancel}>
@@ -100,27 +105,26 @@ const ApprovalAsk = ({ need, compact, dismiss }: ApprovalAskProps) => {
 
 type NeedEntryProps = {
   readonly need: NeedView;
-  readonly compact: boolean;
 };
 
-export const NeedEntry = ({ need, compact }: NeedEntryProps) => {
+const NeedEntry = ({ need }: NeedEntryProps) => {
   const openRun = useOpenRun();
   const dismiss = <DismissNeed need={need} action="dismissNeed" />;
   switch (need._tag) {
     case "ApprovalNeed":
-      return <ApprovalAsk need={need} compact={compact} dismiss={dismiss} />;
+      return <ApprovalAsk need={need} dismiss={dismiss} />;
     case "CycleBudgetNeed":
-      return <CycleBudgetAsk need={need} compact={compact} dismiss={dismiss} />;
+      return <CycleBudgetAsk need={need} dismiss={dismiss} />;
     case "WorkerPreflightNeed":
       return (
         <NeedItem
           copy={needCopy(need)}
-          compact={compact}
-          fullDetail
+          heading={`${need.worker} · ${need.message}`}
           dismiss={dismiss}
           actions={
             <Button
               variant="ghost"
+              nativeButton={false}
               render={<Link to="/configuration/workers/$worker" params={{ worker: need.worker }} />}
             >
               {openWorkerLabel}
@@ -129,23 +133,27 @@ export const NeedEntry = ({ need, compact }: NeedEntryProps) => {
         />
       );
     case "UnconfiguredWorkerNeed":
-      return <UnconfiguredWorkerAsk need={need} compact={compact} dismiss={dismiss} />;
+      return <UnconfiguredWorkerAsk need={need} dismiss={dismiss} />;
     case "UnresponsiveWorkerNeed":
       return (
         <NeedItem
+          since={need.lastAnsweredAt}
           copy={needCopy(need)}
-          compact={compact}
-          fullDetail
           dismiss={dismiss}
-          actions={need.attempts.map((attempt) => (
+          heading={need.worker}
+          actions={
             <Button
-              key={attempt.attemptId}
               variant="ghost"
-              className="h-auto min-h-7 max-w-full text-left whitespace-normal wrap-anywhere"
-              onClick={() => openRun(attempt.runId)}
+              nativeButton={false}
+              render={<Link to="/configuration/workers/$worker" params={{ worker: need.worker }} />}
             >
-              {workerAttemptLabel(attempt)}
+              {openWorkerLabel}
             </Button>
+          }
+          menu={need.attempts.map((attempt) => (
+            <DropdownMenuItem key={attempt.attemptId} onClick={() => openRun(attempt.runId)}>
+              {workerAttemptLabel(attempt)}
+            </DropdownMenuItem>
           ))}
         />
       );
@@ -155,8 +163,8 @@ export const NeedEntry = ({ need, compact }: NeedEntryProps) => {
       return (
         <NeedItem
           copy={copy}
+          loop={"loop" in need ? need.loop : undefined}
           dismiss={dismiss}
-          compact={compact}
           open={runId === null ? undefined : () => openRun(runId)}
         />
       );
@@ -166,22 +174,30 @@ export const NeedEntry = ({ need, compact }: NeedEntryProps) => {
 
 type NeedsYouProps = {
   readonly needs: ReadonlyArray<NeedView>;
-  readonly compact?: boolean;
 };
 
-/** If there are no entries, renders nothing. `compact` renders one line per entry. */
-export const NeedsYou = ({ needs, compact = false }: NeedsYouProps) =>
-  needs.length === 0 ? null : (
-    <section aria-label="Needs attention" className={cn("px-4 md:px-5", compact ? "pt-3" : "pt-4")}>
-      <ul
-        className={cn(
-          "grid max-w-7xl grid-cols-1 items-start",
-          compact ? "gap-1.5" : "gap-2.5 lg:grid-cols-2",
-        )}
-      >
-        {needs.map((need) => (
-          <NeedEntry key={need.id} need={need} compact={compact} />
-        ))}
-      </ul>
-    </section>
+export const NeedsYou = ({ needs }: NeedsYouProps) => {
+  const groups = new Map<NeedView["_tag"], Array<NeedView>>();
+  for (const need of needs) {
+    const entries = groups.get(need._tag);
+    if (entries === undefined) groups.set(need._tag, [need]);
+    else entries.push(need);
+  }
+  return (
+    <div className="space-y-4">
+      {[...groups].map(([kind, entries]) => (
+        <section key={kind} aria-label={`${needKindLabel[kind]} (${entries.length})`}>
+          <h3 className="flex items-baseline gap-2 px-3 py-2 text-xs font-medium text-foreground dark:text-needs-you">
+            {needKindLabel[kind]}
+            <span className="tabular-nums">{entries.length}</span>
+          </h3>
+          <ul className="divide-y divide-border">
+            {entries.map((need) => (
+              <NeedEntry key={need.id} need={need} />
+            ))}
+          </ul>
+        </section>
+      ))}
+    </div>
   );
+};

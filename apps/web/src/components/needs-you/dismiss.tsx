@@ -7,6 +7,7 @@ import {
   ReadyOverview,
   NeedsSetupOverview,
 } from "@usine/orchestrator/operator";
+import { DropdownMenuItem } from "~/components/ui/dropdown-menu";
 import { Button } from "~/components/ui/button";
 import { api } from "~/lib/api";
 import { attentionActionLabel, attentionActionProgress } from "~/lib/needs-you/strings";
@@ -48,9 +49,20 @@ export const DismissNeed = ({ need, action }: DismissNeedProps) => {
   });
   return (
     <span className="flex flex-col items-end gap-1">
-      <Button variant="ghost" disabled={mutation.isPending} onClick={() => mutation.mutate()}>
-        {mutation.isPending ? attentionActionProgress[action] : attentionActionLabel[action]}
-      </Button>
+      {action === "dismissNeed" ? (
+        <DropdownMenuItem
+          className="w-full"
+          closeOnClick={false}
+          disabled={mutation.isPending}
+          onClick={() => mutation.mutate()}
+        >
+          {mutation.isPending ? attentionActionProgress[action] : attentionActionLabel[action]}
+        </DropdownMenuItem>
+      ) : (
+        <Button variant="ghost" disabled={mutation.isPending} onClick={() => mutation.mutate()}>
+          {mutation.isPending ? attentionActionProgress[action] : attentionActionLabel[action]}
+        </Button>
+      )}
       {mutation.isError && (
         <span role="alert" className="max-w-64 text-xs text-destructive wrap-anywhere">
           {mutation.error.message}
